@@ -1,6 +1,6 @@
-"""DRAFT v3 schema declarations — for plan validation only.
+"""DRAFT v2 schema declarations — for plan validation only.
 
-This module exists for `code_graph.py` to statically check the v3 schema
+This module exists for `code_graph.py` to statically check the v2 schema
 designs against existing Spyglass FK targets BEFORE we commit to
 implementation. Every class has a `definition` string but the `make()`
 bodies all raise `NotImplementedError`.
@@ -8,7 +8,7 @@ bodies all raise `NotImplementedError`.
 Do NOT decorate with `@schema`. Do NOT import from production code.
 Will be git-rm'd or formalized into individual modules in Phase 0.
 
-See `.claude/docs/plans/spikesorting-v3/` for the design plan.
+See `.claude/docs/plans/spikesorting-v2/` for the design plan.
 """
 
 import datajoint as dj
@@ -33,7 +33,7 @@ from spyglass.utils import SpyglassMixin, SpyglassMixinPart
 # ============================================================================
 
 
-class SortGroupV3(SpyglassMixin, dj.Manual):
+class SortGroupV2(SpyglassMixin, dj.Manual):
     definition = """
     -> Session
     sort_group_id: int
@@ -62,7 +62,7 @@ class RecordingSelection(SpyglassMixin, dj.Manual):
     recording_id: uuid
     ---
     -> Raw
-    -> SortGroupV3
+    -> SortGroupV2
     -> IntervalList
     -> PreprocessingParameters
     -> LabTeam
@@ -153,7 +153,7 @@ class SessionGroup(SpyglassMixin, dj.Manual):
         member_index: int
         ---
         -> Session
-        -> SortGroupV3
+        -> SortGroupV2
         -> IntervalList
         -> LabTeam
         recording_date: date
@@ -245,7 +245,7 @@ class Sorting(SpyglassMixin, dj.Computed):
 # ============================================================================
 
 
-class CurationV3(SpyglassMixin, dj.Manual):
+class CurationV2(SpyglassMixin, dj.Manual):
     definition = """
     -> Sorting
     curation_id=0: int
@@ -270,7 +270,7 @@ class CurationV3(SpyglassMixin, dj.Manual):
 
     class UnitLabel(SpyglassMixinPart):
         definition = """
-        -> CurationV3.Unit
+        -> CurationV2.Unit
         curation_label: varchar(32)
         """
 
@@ -306,7 +306,7 @@ class AnalyzerCurationSelection(SpyglassMixin, dj.Manual):
     definition = """
     analyzer_curation_id: uuid
     ---
-    -> CurationV3
+    -> CurationV2
     -> QualityMetricParameters
     -> AutoCurationRules
     """
@@ -440,7 +440,7 @@ class UnitMatchSelection(SpyglassMixin, dj.Manual):
         -> master
         -> SessionGroup.Member
         ---
-        -> CurationV3
+        -> CurationV2
         """
 
 
@@ -484,7 +484,7 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
     class Member(SpyglassMixinPart):
         definition = """
         -> master
-        -> CurationV3
+        -> CurationV2
         unit_id: int
         """
 
@@ -498,7 +498,7 @@ class FigPackCurationSelection(SpyglassMixin, dj.Manual):
     definition = """
     figpack_curation_id: uuid
     ---
-    -> CurationV3
+    -> CurationV2
     """
 
 

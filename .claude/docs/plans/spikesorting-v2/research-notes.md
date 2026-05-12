@@ -1,6 +1,6 @@
-# Spike Sorting v3 — Research Notes & Hypothesis Tree
+# Spike Sorting v2 — Research Notes & Hypothesis Tree
 
-Working document accumulating evidence and design rationale for the v3 design.
+Working document accumulating evidence and design rationale for the v2 design.
 Date: 2026-05-11. Author: Eric Denovellis + Claude.
 
 ## Confidence Legend
@@ -40,7 +40,7 @@ Date: 2026-05-11. Author: Eric Denovellis + Claude.
 
 ### V1 SpikeInterface API usage (`spikeinterface>=0.99.1,<0.100`)
 
-🟢 V1 uses the **WaveformExtractor** API (`si.extract_waveforms`, `si.load_waveforms`) — removed in SI 0.101. This is the #1 forcing function for v3.
+🟢 V1 uses the **WaveformExtractor** API (`si.extract_waveforms`, `si.load_waveforms`) — removed in SI 0.101. This is the #1 forcing function for v2.
 🟢 V1 uses `si.preprocessing.bandpass_filter`, `common_reference`, `whiten` — all still available in 0.104.
 🟢 V1 uses `sis.run_sorter`, `sq.compute_*` quality metrics — all still available with renames.
 🟡 V1 mutates `sorter_params` in place at `sorting.py:402-408` (`sorter_params.pop(...)`) — fragility.
@@ -117,7 +117,7 @@ rec_processed = pipeline.apply(recording)
 
 🟢 **Sorters**: Kilosort 4, MountainSort 5 (replaces MS4), SpykingCircus2, Tridesclous2 are current-gen. MS4 deprecated. SC2/TDC2 are pure-Python (no MATLAB, no containers).
 
-🟡 **Zarr<3.0 still required** as of 0.104 (issue #4014 tracks v3 migration).
+🟡 **Zarr<3.0 still required** as of 0.104 (issue #4014 tracks v2 migration).
 
 ---
 
@@ -137,7 +137,7 @@ rec_processed = pipeline.apply(recording)
 🔴 **Tetrode UnitMatch validation needs empirical check** before production use on Frank lab data.
 
 🟢 **DECISION RULE**:
-- v3 supports BOTH paths via plugin matcher API.
+- v2 supports BOTH paths via plugin matcher API.
 - MVP is sort-then-UnitMatch (more general, incremental, introspectable).
 - Concat-and-sort is built on top: `ConcatenatedRecording` virtual table → existing sort path; the "match" is then identity-mapping from sort output.
 
@@ -164,7 +164,7 @@ rec_processed = pipeline.apply(recording)
 
 ## 7. Spyglass Conventions (from skill)
 
-🟢 **Schema naming**: v3 lives in shared `spikesorting` schema (lab-shared module in `SHARED_MODULES`).
+🟢 **Schema naming**: v2 lives in shared `spikesorting` schema (lab-shared module in `SHARED_MODULES`).
 
 🟢 **Tier discipline** for each new pipeline step:
 - Lookup (Parameters, contents-baked)
@@ -172,7 +172,7 @@ rec_processed = pipeline.apply(recording)
 - Computed (with `make()`, FK to Selection)
 - Merge ONLY for multi-source convergence.
 
-🟢 **Use existing `SpikeSortingOutput`** as the downstream entry point. Add new part `SpikeSortingOutput.CurationV3` rather than creating a new merge table. `SortedSpikesGroup` keeps working.
+🟢 **Use existing `SpikeSortingOutput`** as the downstream entry point. Add new part `SpikeSortingOutput.CurationV2` rather than creating a new merge table. `SortedSpikesGroup` keeps working.
 
 🟢 **AnalysisNwbfile `.build()` context manager** for all NWB writes:
 ```python
@@ -188,7 +188,7 @@ self.insert1({**key, "analysis_file_name": analysis_file_name, "result_object_id
 
 🟢 **`IntervalList.insert1(..., skip_duplicates=True)` is BANNED in custom `make()`** — bypasses orphan protection.
 
-🟢 **`set_group_by_shank()` issue (#11)** — overwrites existing sort groups silently, cascades downstream. v3 should be additive or warn loudly.
+🟢 **`set_group_by_shank()` issue (#11)** — overwrites existing sort groups silently, cascades downstream. v2 should be additive or warn loudly.
 
 ---
 
@@ -196,14 +196,14 @@ self.insert1({**key, "analysis_file_name": analysis_file_name, "result_object_id
 
 ### H1: Reuse `SpikeSortingOutput` merge table → 🟢 ADOPT
 - **Pro**: `SortedSpikesGroup`, decoding, MUA, ripple — all downstream pipelines keep working without changes.
-- **Pro**: Users with v1 sorts and v3 sorts in the same database can mix.
+- **Pro**: Users with v1 sorts and v2 sorts in the same database can mix.
 - **Con**: Couples us to the existing merge schema (`merge_id`-only PK).
-- **Verdict**: ADOPT. Add `SpikeSortingOutput.CurationV3` part table.
+- **Verdict**: ADOPT. Add `SpikeSortingOutput.CurationV2` part table.
 
 ### H2: SortingAnalyzer-first storage → 🟢 ADOPT
 - Single source of truth for waveforms, templates, metrics, locations.
 - Persisted as `binary_folder` (fast local) or Zarr (archival/cloud).
-- v3 `Sorting` table writes `SortingAnalyzer` folder + lightweight units NWB; downstream tables read from analyzer extensions.
+- v2 `Sorting` table writes `SortingAnalyzer` folder + lightweight units NWB; downstream tables read from analyzer extensions.
 
 ### H3: Parameters as Pydantic-validated schemas → 🟢 ADOPT
 - Lookup tables get `params: blob` typed via Pydantic models.
@@ -211,7 +211,7 @@ self.insert1({**key, "analysis_file_name": analysis_file_name, "result_object_id
 - Eliminates "typo at populate" failure mode.
 - Backward compatible: blob in DB stays a dict.
 
-### H4: Pipeline orchestration via `run_v3_pipeline()` convenience function → 🟢 ADOPT
+### H4: Pipeline orchestration via `run_v2_pipeline()` convenience function → 🟢 ADOPT
 - Single entry point: takes raw NWB + parameter names, returns final `merge_id`.
 - Internally: inserts selection rows, populates each stage, registers with `SpikeSortingOutput`.
 - Idempotent: re-run finds existing rows, doesn't duplicate.
@@ -238,14 +238,14 @@ self.insert1({**key, "analysis_file_name": analysis_file_name, "result_object_id
 ### H8: FigPack instead of (or alongside) FigURL → 🟡 PROPOSE
 - FigPack is positioned by SI 0.104 as the FigURL successor.
 - Maturity is the open question; need to confirm install/auth path works for our lab.
-- **Verdict**: ADOPT as new path. FigURL remains available for v1 data only; v3 does not extend FigURL.
+- **Verdict**: ADOPT as new path. FigURL remains available for v1 data only; v2 does not extend FigURL.
 
 ### H9: Don't break v0/v1 → 🟢 ADOPT
 - v0 and v1 remain in tree, populate-runnable for existing data.
-- v3 is additive. Existing v1 curations stay queryable through `SpikeSortingOutput.CurationV1`; no v1-to-v3 conversion helper is part of this plan.
+- v2 is additive. Existing v1 curations stay queryable through `SpikeSortingOutput.CurationV1`; no v1-to-v2 conversion helper is part of this plan.
 
 ### H10: Validation against v1 → 🟢 ADOPT
-- Smoke-test on `minirec` (existing v1 test fixture, 9–10 s) — run v3 with MS5, then with v3-wrapped MS4-compatible params, compare unit counts and rough spike-time distributions to v1 baseline.
+- Smoke-test on `minirec` (existing v1 test fixture, 9–10 s) — run v2 with MS5, then with v2-wrapped MS4-compatible params, compare unit counts and rough spike-time distributions to v1 baseline.
 - MountainSort is stochastic so exact spike-time match is not expected; tolerance is "same order of magnitude unit count, similar firing-rate distribution".
 - 🔴 **Need a non-stochastic sorter for tight equivalence**: clusterless thresholder (`detect_peaks`) is deterministic given seed → use that as the gold-standard reproducibility check.
 
@@ -259,7 +259,7 @@ self.insert1({**key, "analysis_file_name": analysis_file_name, "result_object_id
 **Risk 2**: Plugin matcher API may leak SpikeInterface object details into DataJoint blobs.
 - Mitigation: serialize matcher inputs/outputs to AnalysisNwbfile via `.build()`; DB stores only the analysis_file_name.
 
-**Risk 3**: `run_v3_pipeline()` convenience function hides reproducibility — what got inserted?
+**Risk 3**: `run_v2_pipeline()` convenience function hides reproducibility — what got inserted?
 - Mitigation: function returns a manifest dict with every `(selection_table, key)` it touched. Notebook can print it.
 
 **Risk 4**: Concat-and-sort across days breaks for KS4 (sorter assumes contiguous time). Mitigation:
@@ -279,11 +279,11 @@ self.insert1({**key, "analysis_file_name": analysis_file_name, "result_object_id
 
 ## 10. Open Questions for User
 
-1. **Sorter prioritization**: MS5 is the v1 successor for MountainSort users, KS4 is the field standard for Neuropixels. Should v3 ship with both or commit to MS5+KS4 only (deprecate MS4)?
-2. **Schema location**: live in `spyglass.spikesorting.v3` (parallel to v0/v1) ✅ confirmed by directory convention. Stays in shared `spikesorting` schema.
-3. **Migration policy**: resolved. Keep v0/v1 alive indefinitely in this plan; document v1-vs-v3 path selection, not a sunset.
+1. **Sorter prioritization**: MS5 is the v1 successor for MountainSort users, KS4 is the field standard for Neuropixels. Should v2 ship with both or commit to MS5+KS4 only (deprecate MS4)?
+2. **Schema location**: live in `spyglass.spikesorting.v2` (parallel to v0/v1) ✅ confirmed by directory convention. Stays in shared `spikesorting` schema.
+3. **Migration policy**: resolved. Keep v0/v1 alive indefinitely in this plan; document v1-vs-v2 path selection, not a sunset.
 4. **DeepUnitMatch in MVP?** Recommend "no" — Phase 4.1 enhancement after UnitMatch baseline.
-5. **FigPack vs FigURL**: resolved. v3 defaults to FigPack after a feasibility check; no silent FigURL fallback.
+5. **FigPack vs FigURL**: resolved. v2 defaults to FigPack after a feasibility check; no silent FigURL fallback.
 6. **Concat-and-sort across days**: support in MVP or punt? Recommendation: same-day only in Phase 3; multi-day with DREDge precorrection is Phase 6 future work.
 
 ---
@@ -297,6 +297,6 @@ self.insert1({**key, "analysis_file_name": analysis_file_name, "result_object_id
 - **Phase 2**: AnalyzerCuration (metrics + auto-merge + burst-pair consolidated) plus Recording/Sorting recompute verification for storage reclamation. 1-2 PRs.
 - **Phase 3**: SessionGroup + ConcatenatedRecording (same-day chronic). 1-2 PRs.
 - **Phase 4**: UnitMatch cross-session matching. 1-2 PRs (1 for matcher plugin scaffold + UnitMatch, 1 for tetrode validation).
-- **Phase 5**: UX overhaul — `run_v3_pipeline()`, FigPack, parameter Pydantic validation, notebook rewrite. 1-2 PRs.
+- **Phase 5**: UX overhaul — `run_v2_pipeline()`, FigPack, parameter Pydantic validation, notebook rewrite. 1-2 PRs.
 
-Total estimated: 7-10 PRs over the v3 lifetime.
+Total estimated: 7-10 PRs over the v2 lifetime.

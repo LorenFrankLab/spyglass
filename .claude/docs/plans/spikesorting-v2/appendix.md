@@ -21,11 +21,11 @@ Reference material for executors implementing against external code or formats. 
 
 ## SpikeInterface 0.99 → 0.104 migration cheat sheet
 
-Direct replacements when porting code from v1 to v3. Sources:
+Direct replacements when porting code from v1 to v2. Sources:
 - https://spikeinterface.readthedocs.io/en/stable/whatisnew.html
 - https://spikeinterface.readthedocs.io/en/stable/tutorials/waveform_extractor_to_sorting_analyzer.html
 
-| 0.99 (v1 uses) | 0.104 (v3 uses) | Notes |
+| 0.99 (v1 uses) | 0.104 (v2 uses) | Notes |
 | --- | --- | --- |
 | `si.extract_waveforms(sorting, recording, folder=...)` | `si.create_sorting_analyzer(sorting, recording, format="binary_folder", folder=..., sparse=True)` | WaveformExtractor REMOVED in 0.101. |
 | `si.load_waveforms(folder)` | `si.load_sorting_analyzer(folder)` | Legacy folders load via the same call (returns a MockWaveformExtractor wrapping a SortingAnalyzer). |
@@ -35,7 +35,7 @@ Direct replacements when porting code from v1 to v3. Sources:
 | `we.compute_quality_metrics(...)` | `from spikeinterface.qualitymetrics import compute_quality_metrics; compute_quality_metrics(analyzer, ...)` | Takes an analyzer, not a we. |
 | `return_scaled=True` | `return_in_uV=True` | Renamed across the API. |
 | `is_scaled` | `is_in_uV` | |
-| Manual chain: `bandpass → cmr → whiten` | `apply_preprocessing_pipeline(recording, {"bandpass_filter": {...}, "common_reference": {...}, "whiten": {...}})` | Declarative; serializable. New in 0.103. Import from `spikeinterface.preprocessing`. **Note**: v3 splits this into pre-motion (`bandpass + cmr`) and post-motion (`whiten`) stages — see `shared-contracts.md § Pydantic Parameter Schema Convention`. |
+| Manual chain: `bandpass → cmr → whiten` | `apply_preprocessing_pipeline(recording, {"bandpass_filter": {...}, "common_reference": {...}, "whiten": {...}})` | Declarative; serializable. New in 0.103. Import from `spikeinterface.preprocessing`. **Note**: v2 splits this into pre-motion (`bandpass + cmr`) and post-motion (`whiten`) stages — see `shared-contracts.md § Pydantic Parameter Schema Convention`. |
 | `sic.MergeUnitsSorting(sorting, merge_groups)` | `from spikeinterface.curation import apply_merges_to_sorting; apply_merges_to_sorting(sorting, merge_groups)` | Added 0.101. |
 | `sic.remove_excess_spikes(sorting, recording)` | Same name, same module. | Still present in 0.104. |
 | Auto-merge: `get_potential_auto_merge(we, ...)` | `compute_merge_unit_groups(analyzer, preset=...)` | Modern signature; preset-based. |
@@ -64,9 +64,9 @@ isi_histograms (needs nothing else)
 spike_locations (needs random_spikes)
 ```
 
-**For v3 `Sorting.make()`**: compute `random_spikes`, `noise_levels`, `templates`, `waveforms` at sort time (cheap and unblocks everything).
+**For v2 `Sorting.make()`**: compute `random_spikes`, `noise_levels`, `templates`, `waveforms` at sort time (cheap and unblocks everything).
 
-**For v3 `AnalyzerCuration.make()`**: add `correlograms`, `spike_amplitudes`, `unit_locations`, `template_metrics`, and `principal_components` (if metric params don't `skip_pc_metrics`).
+**For v2 `AnalyzerCuration.make()`**: add `correlograms`, `spike_amplitudes`, `unit_locations`, `template_metrics`, and `principal_components` (if metric params don't `skip_pc_metrics`).
 
 **Source**: https://spikeinterface.readthedocs.io/en/stable/modules/postprocessing.html
 
@@ -76,7 +76,7 @@ spike_locations (needs random_spikes)
 
 These break v1's `MetricParameters` blobs verbatim — Phase 2 introduces fresh `QualityMetricParameters` rows, does not migrate v1.
 
-| 0.99 / v1 name | 0.104 / v3 name | Notes |
+| 0.99 / v1 name | 0.104 / v2 name | Notes |
 | --- | --- | --- |
 | `peak_to_valley` | `peak_to_trough_duration` | Template metric. |
 | `peak_trough_ratio` | `peak_to_trough_ratio` | Now absolute-valued; magnitudes differ from 0.99. |
@@ -94,7 +94,7 @@ Source: SpikeInterface 0.104 release notes — https://spikeinterface.readthedoc
 
 **Repo**: https://github.com/flatironinstitute/mountainsort5
 
-**Differences from MS4** (relevant to v3 default params):
+**Differences from MS4** (relevant to v2 default params):
 
 - **No `tempdir` parameter** — MS5 doesn't require a tempdir; remove the v1 `sorter_params.pop("tempdir", None)` hack.
 - **Requires preprocessed input** — MS5 expects bandpass-filtered + whitened input. The recording stage must do this; the sorter wrapper does NOT do it for you.
@@ -129,7 +129,7 @@ Source: MS5 README + Phase 1 validation script outputs.
 
 **KS4 SI wrapper config**: `sis.run_sorter(sorter_name="kilosort4", recording=rec, **params)` — `use_binary_file=True` is the 0.102+ default; do not override unless necessary.
 
-**Key v3-relevant kwargs**:
+**Key v2-relevant kwargs**:
 
 - `Th_universal: float = 9` — universal templates threshold.
 - `Th_learned: float = 8` — learned templates threshold.
@@ -179,7 +179,7 @@ match_results = um.MakeMatchTable(um_config)
 
 **Tetrode caveat**: validated on Neuropixels (hundreds of channels per unit). On tetrodes (4 channels), spatial features have very low discriminative power. Phase 4 includes a validation gate before declaring tetrode support.
 
-**DeepUnitMatch** (v3 Phase 4.1 future hook) lives in the same `UnitMatchPy` repo under `DeepUnitMatch/`. Pretrained model for inference; CNN over multi-channel waveforms. Drop-in via the same `match()` API.
+**DeepUnitMatch** (v2 Phase 4.1 future hook) lives in the same `UnitMatchPy` repo under `DeepUnitMatch/`. Pretrained model for inference; CNN over multi-channel waveforms. Drop-in via the same `match()` API.
 
 Sources:
 - van Beest et al. 2024 Nature Methods: https://www.nature.com/articles/s41592-024-02440-1
@@ -194,9 +194,9 @@ Sources:
 **FigPack** (SI 0.104's curation UI successor) is positioned to supersede FigURL. Repo: https://github.com/flatironinstitute/figpack (verify URL at Phase 5 implementation time; package name may differ).
 
 **Migration policy** (per resolved decision #2 in `overview.md`):
-- Phase 1 ships v3 with NO curation UI table — users curate by editing `CurationV3` rows directly in Python.
-- Phase 5 introduces **FigPack** as v3's curation UI, gated by a Phase 5a feasibility check. If FigPack proves unusable at Phase 5 implementation time, Phase 5 stops and escalates to the project owner — there is no silent FigURL fallback for v3.
-- v1's FigURL stays usable for v1 data only; it is NOT extended to v3 curations.
+- Phase 1 ships v2 with NO curation UI table — users curate by editing `CurationV2` rows directly in Python.
+- Phase 5 introduces **FigPack** as v2's curation UI, gated by a Phase 5a feasibility check. If FigPack proves unusable at Phase 5 implementation time, Phase 5 stops and escalates to the project owner — there is no silent FigURL fallback for v2.
+- v1's FigURL stays usable for v1 data only; it is NOT extended to v2 curations.
 
 ---
 
@@ -222,7 +222,7 @@ Source: https://spikeinterface.readthedocs.io/en/stable/modules/motion_correctio
 
 ## MEArec integration notes
 
-MEArec ([SpikeInterface/MEArec](https://github.com/SpikeInterface/MEArec), Buccino & Einevoll 2020 Neuroinformatics) is a biophysical simulator for extracellular recordings with absolute ground-truth spike trains. v3 uses it as the primary validation oracle — `minirec` is too short to contain real spikes and is reduced to a plumbing-only fixture.
+MEArec ([SpikeInterface/MEArec](https://github.com/SpikeInterface/MEArec), Buccino & Einevoll 2020 Neuroinformatics) is a biophysical simulator for extracellular recordings with absolute ground-truth spike trains. v2 uses it as the primary validation oracle — `minirec` is too short to contain real spikes and is reduced to a plumbing-only fixture.
 
 ### What MEArec generates
 
@@ -255,7 +255,7 @@ MEArec has no native multi-session concept. For Phase 4 cross-session validation
 - `MEArecRecordingExtractor` exposes the recording side as a SpikeInterface `BaseRecording`.
 - `MEArecSortingExtractor` exposes the ground-truth spike times as a `BaseSorting` — directly usable by `spikeinterface.comparison.compare_sorter_to_ground_truth`.
 - `neuroconv.datainterfaces.MEArecRecordingInterface` writes the recording side to NWB (`ElectricalSeries` + electrodes table + probe). Install: `pip install "neuroconv[mearec]"`.
-- The Units ground-truth table is NOT written by NeuroConv's interface — v3's converter adds it manually from `RecordingGenerator.spiketrains` + `template_locations`. ~20 LOC.
+- The Units ground-truth table is NOT written by NeuroConv's interface — v2's converter adds it manually from `RecordingGenerator.spiketrains` + `template_locations`. ~20 LOC.
 
 ### Sources
 

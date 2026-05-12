@@ -2,31 +2,31 @@
 
 [← back to PLAN.md](PLAN.md)
 
-Schema designs for each v3 table. Phases reference these by anchor. Algorithms and code samples that don't fit in phase Tasks blocks live here.
+Schema designs for each v2 table. Phases reference these by anchor. Algorithms and code samples that don't fit in phase Tasks blocks live here.
 
 ## Index
 
-- [SortGroupV3](#sortgroupv3)
+- [SortGroupV2](#sortgroupv2)
 - [PreprocessingParameters + RecordingSelection + Recording](#preprocessingparameters--recordingselection--recording)
 - [ArtifactDetectionParameters + ArtifactDetection](#artifactdetectionparameters--artifactdetection)
 - [SorterParameters + SortingSelection + Sorting](#sorterparameters--sortingselection--sorting)
-- [CurationV3](#curationv3)
+- [CurationV2](#curationv2)
 - [AnalyzerCuration (replaces v1 MetricCuration + BurstPair)](#analyzercuration-replaces-v1-metriccuration--burstpair)
 - [SessionGroup + ConcatenatedRecording](#sessiongroup--concatenatedrecording)
 - [MatcherParameters + UnitMatch + TrackedUnit](#matcherparameters--unitmatch--trackedunit)
 - [FigPackCuration](#figpackcuration)
-- [`run_v3_pipeline()` Orchestrator](#run_v3_pipeline-orchestrator)
+- [`run_v2_pipeline()` Orchestrator](#run_v2_pipeline-orchestrator)
 
 ---
 
-## SortGroupV3
+## SortGroupV2
 
 Per-session grouping of electrodes to sort together. Mostly mirrors v1's `SortGroup` but fixes the silent-overwrite bug and supports multi-probe sessions cleanly.
 
 ```python
 @schema
-class SortGroupV3(SpyglassMixin, dj.Manual):
-    """Per-session electrode grouping for v3 spike sorting.
+class SortGroupV2(SpyglassMixin, dj.Manual):
+    """Per-session electrode grouping for v2 spike sorting.
 
     A 'sort group' is the set of channels handed to one sorter run. For
     tetrodes: one group per tetrode (4 channels). For polymer probes:
@@ -67,7 +67,7 @@ class SortGroupV3(SpyglassMixin, dj.Manual):
     #   returns a `DeletionPreview` namedtuple containing:
     #     - the SortGroup rows to be deleted,
     #     - per-row counts of downstream Recording / Sorting /
-    #       CurationV3 / SpikeSortingOutput rows that would cascade,
+    #       CurationV2 / SpikeSortingOutput rows that would cascade,
     #     - the total size on disk of analysis-NWB files and binary
     #       caches that would be reclaimed,
     #     - any rows owned by a different team (cautious_delete blocks
@@ -79,7 +79,7 @@ class SortGroupV3(SpyglassMixin, dj.Manual):
     #   `DeletionPreview` without deleting and raises with an explicit
     #   message: "Pass `confirm=True` after reviewing the preview".
     #
-    # This replaces the v1 silent-overwrite footgun AND the earlier v3
+    # This replaces the v1 silent-overwrite footgun AND the earlier v2
     # `force=True` design. The dry-run + explicit-confirm pattern
     # matches the spyglass-skill `destructive_operations.md` and
     # `feedback_loops.md § inspect-before-destroy` discipline; no
@@ -169,8 +169,8 @@ class SortGroupV3(SpyglassMixin, dj.Manual):
 The recording preprocessing stage. Materializes a binary cache that the sorter consumes.
 
 ```python
-from spyglass.spikesorting.v3._params.preprocessing import PreprocessingParamsSchema
-from spyglass.spikesorting.v3.utils import _validate_params, _resolved_job_kwargs, _binary_cache_path
+from spyglass.spikesorting.v2._params.preprocessing import PreprocessingParamsSchema
+from spyglass.spikesorting.v2.utils import _validate_params, _resolved_job_kwargs, _binary_cache_path
 
 @schema
 class PreprocessingParameters(SpyglassMixin, dj.Lookup):
@@ -198,7 +198,7 @@ class RecordingSelection(SpyglassMixin, dj.Manual):
     recording_id: uuid
     ---
     -> Raw
-    -> SortGroupV3
+    -> SortGroupV2
     -> IntervalList            # the sort interval — must be a populated row
     -> PreprocessingParameters
     -> LabTeam
@@ -245,7 +245,7 @@ class Recording(SpyglassMixin, dj.Computed):
         # 1. Fetch raw recording via SpikeInterface NWB extractor
         sel = (RecordingSelection & key).fetch1()
         sort_group_electrodes = (
-            SortGroupV3.SortGroupElectrode
+            SortGroupV2.SortGroupElectrode
             & {"nwb_file_name": sel["nwb_file_name"], "sort_group_id": sel["sort_group_id"]}
         ).fetch("electrode_id")
 
@@ -271,7 +271,7 @@ class Recording(SpyglassMixin, dj.Computed):
         )
 
         # 4. Materialize to binary cache
-        cache_path = _binary_cache_path(key)  # e.g. {tmp}/spikesorting_v3/binary/{recording_id}.bin
+        cache_path = _binary_cache_path(key)  # e.g. {tmp}/spikesorting_v2/binary/{recording_id}.bin
         job_kwargs = _resolved_job_kwargs(key)
         recording_processed.save(folder=cache_path, format="binary", overwrite=True, **job_kwargs)
 
@@ -300,7 +300,7 @@ class Recording(SpyglassMixin, dj.Computed):
 
         Binary cache is a regeneratable side artifact. If missing, we
         REBUILD THE CACHE FOLDER ONLY — we do NOT delete the Recording
-        row (which would cascade to Sorting, CurationV3, downstream
+        row (which would cascade to Sorting, CurationV2, downstream
         SpikeSortingOutput rows, etc.).
         """
         row = (self & key).fetch1()
@@ -333,14 +333,14 @@ The Phase 0 benchmark's decision-matrix output picks (A) or (B). If (B), the `bi
 
 - **Binary cache, not NWB-wrapped raw bytes.** Faster sort-time access at the cost of a parallel artifact universe.
 - **One cache per `recording_id`.** Subsequent sorting tries with different `SorterParameters` reuse the same cache. v1 re-materialized per sort.
-- **Hash for integrity.** `cache_hash` enables lightweight missing-cache detection in Phase 1 and feeds Phase 2's v3 `RecordingArtifactRecompute*` tables without changing the `Recording` schema.
+- **Hash for integrity.** `cache_hash` enables lightweight missing-cache detection in Phase 1 and feeds Phase 2's v2 `RecordingArtifactRecompute*` tables without changing the `Recording` schema.
 - **No SortingAnalyzer yet.** That comes after sorting, in `Sorting.make()`.
 
 ---
 
 ## ArtifactDetectionParameters + ArtifactDetection
 
-Mirrors v1's structure but consumes the v3 binary cache. Inserts artifact intervals into `IntervalList` *without* `skip_duplicates=True` (per Non-Negotiable #6 in `custom_pipeline_authoring.md`).
+Mirrors v1's structure but consumes the v2 binary cache. Inserts artifact intervals into `IntervalList` *without* `skip_duplicates=True` (per Non-Negotiable #6 in `custom_pipeline_authoring.md`).
 
 ```python
 @schema
@@ -443,7 +443,7 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         """
 ```
 
-**Design change from v1**: v1 inserts the artifact-removed interval directly into `IntervalList` with `artifact_id` (UUID) as the `interval_list_name`. This collides with user-named intervals and uses `skip_duplicates=True` (forbidden in custom `make()`). v3 stores artifact intervals on its own part table and exposes `ArtifactDetection.get_artifact_removed_intervals(key)` for consumers.
+**Design change from v1**: v1 inserts the artifact-removed interval directly into `IntervalList` with `artifact_id` (UUID) as the `interval_list_name`. This collides with user-named intervals and uses `skip_duplicates=True` (forbidden in custom `make()`). v2 stores artifact intervals on its own part table and exposes `ArtifactDetection.get_artifact_removed_intervals(key)` for consumers.
 
 ---
 
@@ -461,12 +461,12 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
     params: blob
     params_schema_version=1: int
     """
-    # Per-sorter Pydantic schemas in spyglass.spikesorting.v3._params.sorter.
-    # Dedicated schemas cover the default v3-supported sorters. A generic
+    # Per-sorter Pydantic schemas in spyglass.spikesorting.v2._params.sorter.
+    # Dedicated schemas cover the default v2-supported sorters. A generic
     # extra-allowing schema is used only for explicit custom rows whose sorter
     # is present in spikeinterface.sorters.available_sorters().
     # Contents (Phase 1 default rows):
-    #   ('mountainsort4', 'franklab_tetrode_hippocampus_30kHz_ms4', ...)  # MS4 stays in v3
+    #   ('mountainsort4', 'franklab_tetrode_hippocampus_30kHz_ms4', ...)  # MS4 stays in v2
     #   ('mountainsort5', 'franklab_tetrode_hippocampus_30kHz_ms5', ...)
     #   ('kilosort4',     'franklab_neuropixels_default', ...)
     #   ('spykingcircus2', 'default', ...)
@@ -562,17 +562,17 @@ class Sorting(SpyglassMixin, dj.Computed):
         Because `ElectrodeGroup` is keyed by Session plus
         `electrode_group_name` ([common_ephys.py:31](src/spyglass/common/common_ephys.py#L31)),
         implementers must carry the full `Electrode` FK from
-        `SortGroupV3.SortGroupElectrode`, not reconstruct by
+        `SortGroupV2.SortGroupElectrode`, not reconstruct by
         `electrode_id` alone. For SINGLE-recording sorts the Electrode
         FK is unambiguous. For CONCAT sorts, the unit's peak channel
         maps to one electrode_id within the probe, but that electrode_id
-        has N Electrode rows — one per SessionGroup.Member. v3 anchors
+        has N Electrode rows — one per SessionGroup.Member. v2 anchors
         `Sorting.Unit -> Electrode` to the FIRST member's Electrode row
         (deterministic; same rule as the AnalysisNwbfile parent anchor
         in Phase 3). Per-session
         brain regions for tracked units are derived not from
         `Sorting.Unit` but from `TrackedUnit.Member` walking back
-        through `CurationV3 -> SortingSelection ->
+        through `CurationV2 -> SortingSelection ->
         ConcatenatedRecording -> SessionGroup.Member`, joined to that
         member's Electrode + BrainRegion. This means **the probe's
         brain-region assignment may differ across members** — the
@@ -580,10 +580,10 @@ class Sorting(SpyglassMixin, dj.Computed):
 
         Helper `_resolve_unit_electrodes(sel, peak_channel_ids)` returns
         the Electrode FK keys for a Sorting.Unit insert:
-          - single-recording path: walks `SortGroupV3.SortGroupElectrode
+          - single-recording path: walks `SortGroupV2.SortGroupElectrode
             * Electrode` for the sort group's electrodes; returns one
             Electrode key per unit's peak channel.
-          - concat path: walks the FIRST `SessionGroup.Member.SortGroupV3
+          - concat path: walks the FIRST `SessionGroup.Member.SortGroupV2
             * Electrode` (anchor member); returns one Electrode key per
             unit's peak channel.
         `Sorting.make()` calls this helper rather than referencing
@@ -593,7 +593,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         definition = """
         -> master
         unit_id: int                       # SpikeInterface unit ID; SI allows
-                                            # int OR str unit IDs, but v3
+                                            # int OR str unit IDs, but v2
                                             # standardizes on int and
                                             # Sorting.make() validates that
                                             # every sorter-emitted unit_id
@@ -601,7 +601,7 @@ class Sorting(SpyglassMixin, dj.Computed):
                                             # — raises NonIntegerUnitIDError
                                             # otherwise. Document any sorter
                                             # that emits non-convertible str
-                                            # IDs (none in the v3 default set
+                                            # IDs (none in the v2 default set
                                             # — MS4/MS5/KS4/SC2/TDC2/clusterless
                                             # all emit int).
         ---
@@ -711,7 +711,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         # `_resolve_unit_electrodes` (see Sorting.Unit docstring) dispatches
         # on the SortingSelection row's recording_id vs concat_recording_id
         # to return the correct Electrode keys: single-recording uses the
-        # SortGroupV3 electrodes from RecordingSelection; concat uses the
+        # SortGroupV2 electrodes from RecordingSelection; concat uses the
         # FIRST SessionGroup.Member's electrodes (anchor rule).
         peak_channel_ids = _peak_channels_from_templates(analyzer)
         unit_rows = _compute_unit_part_rows(
@@ -727,7 +727,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             except (TypeError, ValueError) as e:
                 raise NonIntegerUnitIDError(
                     f"Sorter emitted non-integer unit_id {row['unit_id']!r}; "
-                    f"v3 standardizes on int unit IDs."
+                    f"v2 standardizes on int unit IDs."
                 ) from e
         self.Unit.insert(unit_rows)
 
@@ -752,7 +752,7 @@ class Sorting(SpyglassMixin, dj.Computed):
 
         The analyzer folder is a regeneratable side artifact. If it
         is missing, we REBUILD THE FOLDER ONLY — we do NOT delete the
-        Sorting row (which would cascade to CurationV3, AnalyzerCuration,
+        Sorting row (which would cascade to CurationV2, AnalyzerCuration,
         SpikeSortingOutput, etc. and destroy scientific provenance).
 
         Folder rebuild logic mirrors the analyzer-building portion of
@@ -780,15 +780,15 @@ class Sorting(SpyglassMixin, dj.Computed):
 
 ---
 
-## CurationV3
+## CurationV2
 
 Stores manual labels / merge groups for a sort. Multiple curations per sort allowed via `curation_id`. Each curation can have a parent for lineage.
 
-Same lineage shape as `CurationV1` *except*: (a) registers into `SpikeSortingOutput.CurationV3` automatically on insert; (b) labels validated against `CurationLabel` enum (see shared-contracts.md); (c) labels are normalized into `CurationV3.UnitLabel` so multi-label units are queryable; (d) `insert_curation()` returns a single dict (never a list).
+Same lineage shape as `CurationV1` *except*: (a) registers into `SpikeSortingOutput.CurationV2` automatically on insert; (b) labels validated against `CurationLabel` enum (see shared-contracts.md); (c) labels are normalized into `CurationV2.UnitLabel` so multi-label units are queryable; (d) `insert_curation()` returns a single dict (never a list).
 
 ```python
 @schema
-class CurationV3(SpyglassMixin, dj.Manual):
+class CurationV2(SpyglassMixin, dj.Manual):
     definition = """
     -> Sorting
     curation_id: int
@@ -839,7 +839,7 @@ class CurationV3(SpyglassMixin, dj.Manual):
         column. Unlabeled units have no UnitLabel rows.
         """
         definition = """
-        -> CurationV3.Unit
+        -> CurationV2.Unit
         curation_label: varchar(32)  # one of CurationLabel enum
         """
 
@@ -847,12 +847,12 @@ class CurationV3(SpyglassMixin, dj.Manual):
     # (see shared-contracts.md `SpikeSortingOutput.source_class_dict Registration`):
     #   get_recording(key) -> si.BaseRecording   (delegates to Sorting.get_recording)
     #   get_sorting(key, as_dataframe=False) -> si.BaseSorting | pd.DataFrame
-    #   get_sort_group_info(key) -> dj.Table     joins SortGroupV3.SortGroupElectrode *
+    #   get_sort_group_info(key) -> dj.Table     joins SortGroupV2.SortGroupElectrode *
     #                                            Electrode * BrainRegion across ALL
     #                                            electrodes in the sort group (NOT
     #                                            fetch(limit=1) as v1 does).
     #   get_unit_brain_regions(key, include_labels=None) -> pd.DataFrame
-    #       (reads CurationV3.Unit; optionally filters by UnitLabel)
+    #       (reads CurationV2.Unit; optionally filters by UnitLabel)
     #   get_matchable_unit_ids(key, exclude_labels=None) -> np.ndarray
     #       returns units without any excluded labels; unlabeled units are included.
 
@@ -866,17 +866,17 @@ class CurationV3(SpyglassMixin, dj.Manual):
         apply_merges: bool = False,
         description: str = "",
     ) -> dict:
-        """Insert a new curation; auto-register into SpikeSortingOutput.CurationV3."""
+        """Insert a new curation; auto-register into SpikeSortingOutput.CurationV2."""
         # Validate labels against enum
         for unit_id, label_list in labels.items():
             for label in label_list:
                 CurationLabel(label)  # raises ValueError on unknown
         ...
-        # Insert one CurationV3.UnitLabel row per (unit_id, label); units
+        # Insert one CurationV2.UnitLabel row per (unit_id, label); units
         # missing from `labels` or mapped to [] remain unlabeled.
         # After insert, also register in merge:
         from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
-        SpikeSortingOutput.insert([key_just_inserted], part_name="CurationV3")
+        SpikeSortingOutput.insert([key_just_inserted], part_name="CurationV2")
         return key_just_inserted
 ```
 
@@ -917,14 +917,14 @@ class AnalyzerCurationSelection(SpyglassMixin, dj.Manual):
     definition = """
     analyzer_curation_id: uuid
     ---
-    -> CurationV3
+    -> CurationV2
     -> QualityMetricParameters
     -> AutoCurationRules
     """
 
 @schema
 class AnalyzerCuration(SpyglassMixin, dj.Computed):
-    """Produces a new CurationV3 row via auto-curation rules.
+    """Produces a new CurationV2 row via auto-curation rules.
 
     Replaces v1's MetricCuration + BurstPair. Walks SortingAnalyzer
     extensions (templates, waveforms, correlograms, locations) to
@@ -942,7 +942,7 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
     def make(self, key):
         # Load analyzer
         sel = (AnalyzerCurationSelection & key).fetch1()
-        sorting_key = {"sorting_id": (CurationV3 & sel).fetch1("sorting_id")}
+        sorting_key = {"sorting_id": (CurationV2 & sel).fetch1("sorting_id")}
         analyzer = (Sorting & sorting_key).get_analyzer()
 
         # Compute additional extensions needed for metrics
@@ -996,7 +996,7 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
         })
 
     def materialize_curation(self, key, description: str = "auto-curation") -> dict:
-        """Take the proposed labels + merges and create a child CurationV3 row.
+        """Take the proposed labels + merges and create a child CurationV2 row.
 
         Equivalent to v1's CurationV1.insert_metric_curation but explicit.
         """
@@ -1007,13 +1007,13 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
 
 - **One table replaces two** (MetricCuration + BurstPair). BurstPair's cross-correlogram-asymmetry logic becomes one auto-merge preset.
 - **Visualization helpers** port from `burst_curation.py` to `AnalyzerCuration` methods: `plot_by_sort_group_ids`, `investigate_pair_xcorrel`, `investigate_pair_peaks`, and `plot_peak_over_time`.
-- **Explicit `materialize_curation()` step** — auto-curation never silently writes a new CurationV3 row; user must call to commit.
+- **Explicit `materialize_curation()` step** — auto-curation never silently writes a new CurationV2 row; user must call to commit.
 
 ---
 
 ## RecordingArtifactRecompute + SortingAnalyzerRecompute
 
-Phase 2. Verified regeneration and storage reclamation for large v3 artifacts.
+Phase 2. Verified regeneration and storage reclamation for large v2 artifacts.
 
 ```python
 @schema
@@ -1113,7 +1113,7 @@ class SortingAnalyzerRecompute(SpyglassMixin, dj.Computed):
 
 **Design points**:
 
-- `RecordingArtifactRecompute*` ports the v1 `RecordingRecompute` pattern to v3's `Recording` artifact with v3-specific table names. It verifies that a deleted or moved binary cache can be regenerated from the stored `RecordingSelection` lineage and current environment.
+- `RecordingArtifactRecompute*` ports the v1 `RecordingRecompute` pattern to v2's `Recording` artifact with v2-specific table names. It verifies that a deleted or moved binary cache can be regenerated from the stored `RecordingSelection` lineage and current environment.
 - `SortingAnalyzerRecompute*` applies the same lifecycle to the SortingAnalyzer folder: inventory extension metadata and content hashes, regenerate from `SortingSelection`, compare, then allow deletion only after `matched=1`.
 - `delete_files()` is never allowed to delete artifacts for `matched=0`. Storage reclamation is a verified workflow, not a cleanup shortcut.
 - These tables are Phase 2 pure additions in the zero-migration contract. Phase 1 provides opportunistic missing-artifact rebuild helpers; Phase 2 provides auditable recompute records and safe deletion.
@@ -1152,7 +1152,7 @@ class SessionGroup(SpyglassMixin, dj.Manual):
         member_index: int
         ---
         -> Session
-        -> SortGroupV3
+        -> SortGroupV2
         -> IntervalList
         -> LabTeam                          # per-member team (members may differ
                                             # across collaborations)
@@ -1380,7 +1380,7 @@ class UnitMatchSelection(SpyglassMixin, dj.Manual):
     via the `Member` part table. The plan deliberately rejects an implicit
     "latest curation" lookup — that would make UnitMatch outputs irreproducible
     when a user adds a new curation to one of the source sessions.
-    `insert_selection()` must also verify that each pinned CurationV3 row
+    `insert_selection()` must also verify that each pinned CurationV2 row
     belongs to the same SessionGroup.Member it is attached to; the independent
     FKs alone do not prove that relationship.
     """
@@ -1397,7 +1397,7 @@ class UnitMatchSelection(SpyglassMixin, dj.Manual):
         -> master
         -> SessionGroup.Member
         ---
-        -> CurationV3                 # explicit (sorting_id, curation_id) FK
+        -> CurationV2                 # explicit (sorting_id, curation_id) FK
         """
 
 
@@ -1408,7 +1408,7 @@ class UnitMatch(SpyglassMixin, dj.Computed):
     AnalysisNwbfile parent-anchor rule (same shape as concat Sorting):
     `AnalysisNwbfile` has a single `-> Nwbfile` parent
     ([common_nwbfile.py:630](src/spyglass/common/common_nwbfile.py#L630)),
-    but UnitMatch spans multiple sessions. v3 uses the **first
+    but UnitMatch spans multiple sessions. v2 uses the **first
     `SessionGroup.Member.nwb_file_name`** (ordered by `member_index`)
     as the deterministic anchor for the AnalysisNwbfile parent. The
     complete multi-session provenance remains queryable through
@@ -1456,7 +1456,7 @@ class UnitMatch(SpyglassMixin, dj.Computed):
     def make(self, key):
         sel = (UnitMatchSelection & key).fetch1()
 
-        # Resolve each member to its EXPLICITLY pinned CurationV3 row.
+        # Resolve each member to its EXPLICITLY pinned CurationV2 row.
         # UnitMatch operates on the CURATED unit set (after merges_applied
         # and excluding reject/noise labels), NOT on the raw Sorting.
         # The session_key carried into MatchPair tuples is
@@ -1468,19 +1468,19 @@ class UnitMatch(SpyglassMixin, dj.Computed):
         ).fetch(as_dict=True, order_by="member_index")
         session_analyzers = []
         for mc in member_curations:
-            sorting_id = (CurationV3 & mc).fetch1("sorting_id")
+            sorting_id = (CurationV2 & mc).fetch1("sorting_id")
             recording_date = (SessionGroup.Member & mc).fetch1("recording_date")
             # Load analyzer, then apply the curation's merges/labels
             # to produce a curated BaseSorting view.
             raw_analyzer = (Sorting & {"sorting_id": sorting_id}).get_analyzer(
                 {"sorting_id": sorting_id}
             )
-            curated_sorting = (CurationV3 & mc).get_merged_sorting()  # applies merges
+            curated_sorting = (CurationV2 & mc).get_merged_sorting()  # applies merges
             # Filter out units with any excluded curation label. This helper
             # includes unlabeled units and units labeled accept/mua, and
             # excludes any unit with reject/noise/artifact even if it also
             # carries another label.
-            matchable_unit_ids = CurationV3.get_matchable_unit_ids(
+            matchable_unit_ids = CurationV2.get_matchable_unit_ids(
                 mc, exclude_labels={"reject", "noise", "artifact"}
             )
             curated_sorting = curated_sorting.select_units(matchable_unit_ids)
@@ -1540,7 +1540,7 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
     class Member(SpyglassMixinPart):
         definition = """
         -> master
-        -> CurationV3                  # FK includes (sorting_id, curation_id)
+        -> CurationV2                  # FK includes (sorting_id, curation_id)
                                        # — pins which curation this member
                                        # was derived from
         unit_id: int                   # unit ID within that curation's units
@@ -1640,7 +1640,7 @@ class FigPackCurationSelection(SpyglassMixin, dj.Manual):
     definition = """
     figpack_curation_id: uuid
     ---
-    -> CurationV3
+    -> CurationV2
     """
 
 
@@ -1668,12 +1668,12 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
 
 ---
 
-## `run_v3_pipeline()` Orchestrator
+## `run_v2_pipeline()` Orchestrator
 
 **Phase 1 ships the minimal version** (recording → artifact → sorting → initial curation → merge registration, 3 presets — see Phase 1's task list). **Phase 5 extends it** with metrics, concat, UnitMatch, FigPack, and the broader preset set. The code below is the Phase 5 final shape; Phase 1's version is a subset of these stages with no `auto_curate`/`session_group_name`/`unit_match`/`figpack` parameters.
 
 ```python
-def run_v3_pipeline(
+def run_v2_pipeline(
     nwb_file_name: str | None = None,
     sort_group_id: int | None = None,
     interval_list_name: str | None = None,
@@ -1690,7 +1690,7 @@ def run_v3_pipeline(
                                                   # MemberCuration pins
     figpack: bool = False,                        # Phase 5
 ) -> dict:
-    """End-to-end v3 pipeline with optional auto-curation, cross-session
+    """End-to-end v2 pipeline with optional auto-curation, cross-session
     matching, and FigPack curation publishing. Returns a manifest dict.
 
     Exactly one of (single-session args, session_group_name) must be set.
@@ -1753,10 +1753,10 @@ def run_v3_pipeline(
     manifest["stages"].append({"stage": "sorting", "key": sort_key})
 
     # --- 4. Initial curation ---
-    curation_key = CurationV3.insert_curation(
+    curation_key = CurationV2.insert_curation(
         sorting_key=sort_key,
         labels={},  # explicit empty dict per Boundary Invariant 4
-        description=f"initial via run_v3_pipeline preset={preset}",
+        description=f"initial via run_v2_pipeline preset={preset}",
     )
     manifest["stages"].append({"stage": "initial_curation", "key": curation_key})
 
@@ -1782,7 +1782,7 @@ def run_v3_pipeline(
         if unit_match_curation_choices is None:
             raise ValueError(
                 "unit_match=True requires explicit unit_match_curation_choices "
-                "mapping each SessionGroup.member_index to a CurationV3 key; "
+                "mapping each SessionGroup.member_index to a CurationV2 key; "
                 "the pipeline never auto-pins the latest curation."
             )
         um_key = UnitMatchSelection.insert_selection({
@@ -1800,7 +1800,7 @@ def run_v3_pipeline(
         manifest["stages"].append({"stage": "figpack", "key": fp_key})
 
     # --- 8. Final merge_id ---
-    merge_query = SpikeSortingOutput.CurationV3 & final_curation_key
+    merge_query = SpikeSortingOutput.CurationV2 & final_curation_key
     manifest["merge_id"] = merge_query.fetch1("merge_id")
     return manifest
 ```

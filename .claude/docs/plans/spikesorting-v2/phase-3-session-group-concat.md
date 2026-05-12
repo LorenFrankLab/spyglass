@@ -6,10 +6,10 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
 
 **Inputs to read first:**
 
-- [src/spyglass/spikesorting/analysis/v1/group.py](src/spyglass/spikesorting/analysis/v1/group.py) — `SortedSpikesGroup` pattern; v3's `SessionGroup` mirrors its master+part shape.
-- [src/spyglass/spikesorting/v3/recording.py](src/spyglass/spikesorting/v3/recording.py) (Phase 1) — `Recording.make()` pattern; `ConcatenatedRecording.make()` mirrors but consumes a list of input recordings.
-- [src/spyglass/spikesorting/v3/sorting.py](src/spyglass/spikesorting/v3/sorting.py) (Phase 1) — `SortingSelection` needs polymorphic input FK (either `Recording` or `ConcatenatedRecording`).
-- [.claude/docs/plans/spikesorting-v3/appendix.md § Motion correction presets](appendix.md#motion-correction-presets) — drift correction preset table.
+- [src/spyglass/spikesorting/analysis/v1/group.py](src/spyglass/spikesorting/analysis/v1/group.py) — `SortedSpikesGroup` pattern; v2's `SessionGroup` mirrors its master+part shape.
+- [src/spyglass/spikesorting/v2/recording.py](src/spyglass/spikesorting/v2/recording.py) (Phase 1) — `Recording.make()` pattern; `ConcatenatedRecording.make()` mirrors but consumes a list of input recordings.
+- [src/spyglass/spikesorting/v2/sorting.py](src/spyglass/spikesorting/v2/sorting.py) (Phase 1) — `SortingSelection` needs polymorphic input FK (either `Recording` or `ConcatenatedRecording`).
+- [.claude/docs/plans/spikesorting-v2/appendix.md § Motion correction presets](appendix.md#motion-correction-presets) — drift correction preset table.
 
 **Contracts referenced:**
 
@@ -90,14 +90,14 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
 
 - **Memory/time smoke test on real chronic data** (slow integration, skipped on CI):
   - Test that runs only if `pytest --run-chronic` is passed.
-  - Uses a real lab dataset (path configurable via env var `SPIKESORTING_V3_CHRONIC_TEST_PATH`).
+  - Uses a real lab dataset (path configurable via env var `SPIKESORTING_V2_CHRONIC_TEST_PATH`).
   - 1-hour, 30 kHz, single sort group.
   - Asserts `Recording.populate()` peak RSS < 8 GB and runtime < 10 min on a 16-core machine.
   - Reports timing + memory to logs, even on pass.
 
 - **Documentation update**:
-  - New section in `docs/src/Pipelines/SpikeSorting/v3.md` titled "Chronic same-day recordings".
-  - CHANGELOG.md: "v3 `SessionGroup` and `ConcatenatedRecording` enable same-day chronic recording sorts. Multi-day requires explicit override (out-of-MVP)."
+  - New section in `docs/src/Pipelines/SpikeSorting/v2.md` titled "Chronic same-day recordings".
+  - CHANGELOG.md: "v2 `SessionGroup` and `ConcatenatedRecording` enable same-day chronic recording sorts. Multi-day requires explicit override (out-of-MVP)."
   - New API doc entry for `session_group.py`.
 
 ## Deliberately not in this phase
@@ -131,7 +131,7 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
 | `test_sorting_against_concatenated_recording` (slow) | Run `Sorting.populate()` on a SortingSelection FK'ing ConcatenatedRecording; analyzer folder created; `n_units > 0`; `Sorting.Unit` populated with brain regions from the per-session electrode metadata. |
 | `test_split_sorting_by_session` (slow) | After concat sort, `split_sorting_by_session(sorting, key)` returns dict with one entry per Member; each entry's spike times fall within that member's time range; unit IDs preserved across members. |
 | `test_multi_day_chronic_smoke` (slow, optional) | Two-session multi-day concat sort completes; memory + runtime within budget. Skipped if `--run-chronic` not passed. |
-| `test_motion_correction_recovers_units_under_drift` (slow, integration) | Run v3 on `mearec_polymer_drift_120s.nwb` (Phase 0 fixture with planted slow drift). Compare two pipelines: (a) `preset="none"` (no motion correction), (b) `preset="rigid_fast"`. Use `compare_sorter_to_ground_truth` against the planted Units table. **Assert (b) has strictly higher per-unit accuracy than (a)** for the units that drift through the recording. Directly validates that motion correction is doing scientifically-meaningful work, not just running. |
+| `test_motion_correction_recovers_units_under_drift` (slow, integration) | Run v2 on `mearec_polymer_drift_120s.nwb` (Phase 0 fixture with planted slow drift). Compare two pipelines: (a) `preset="none"` (no motion correction), (b) `preset="rigid_fast"`. Use `compare_sorter_to_ground_truth` against the planted Units table. **Assert (b) has strictly higher per-unit accuracy than (a)** for the units that drift through the recording. Directly validates that motion correction is doing scientifically-meaningful work, not just running. |
 
 ## Fixtures
 
@@ -143,7 +143,7 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
 Before opening the PR for this phase, dispatch `code-reviewer` (or equivalent independent reviewer) against the diff. Confirm:
 - Every task in this phase is implemented as specified.
 - The "Deliberately not in this phase" list is honored — no scope creep into Phase 4 (cross-session matching).
-- **No schema changes to `SortingSelection`.** Git diff against `src/spyglass/spikesorting/v3/sorting.py` shows changes ONLY inside method bodies — the `definition` string is byte-identical to Phase 1. The `test_sorting_selection_schema_unchanged_from_phase_1` test passes.
+- **No schema changes to `SortingSelection`.** Git diff against `src/spyglass/spikesorting/v2/sorting.py` shows changes ONLY inside method bodies — the `definition` string is byte-identical to Phase 1. The `test_sorting_selection_schema_unchanged_from_phase_1` test passes.
 - Multi-day support is gated behind `allow_multi_day=True` AND an explicit non-`auto` motion-correction preset (no silent DREDge dispatch). `test_session_group_create_multi_day_rejected_by_default` and `test_motion_correction_preset_auto_rejects_multi_day` pass.
 - Memory/runtime smoke test is a real measurement (not a mocked metric).
 - `code_graph.py describe` returns clean output for every new table; `path --up`/`path --down` chains match the design DAG; JSON warnings are empty or explicitly accounted for in `precondition-check.md`.
