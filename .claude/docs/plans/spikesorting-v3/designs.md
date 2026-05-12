@@ -28,9 +28,12 @@ Per-session grouping of electrodes to sort together. Mostly mirrors v1's `SortGr
 class SortGroupV3(SpyglassMixin, dj.Manual):
     """Per-session electrode grouping for v3 spike sorting.
 
-    A 'sort group' is the set of channels handed to one sorter run.
-    For tetrodes: one group per tetrode (4 channels). For Neuropixels:
-    typically one group per shank.
+    A 'sort group' is the set of channels handed to one sorter run. For
+    tetrodes: one group per tetrode (4 channels). For polymer probes:
+    one group per shank (per the Frank-lab pattern). For Berke Lab and
+    other labs whose electrode grouping is keyed off non-shank metadata,
+    set_group_by_electrode_table_column() lets the caller group by ANY
+    electrode-table column (e.g., "intan_channel_number").
     """
     definition = """
     -> Session
@@ -45,27 +48,82 @@ class SortGroupV3(SpyglassMixin, dj.Manual):
         -> Electrode
         """
 
+    # Existing-entry handling (shared by both classmethod constructors below):
+    # Per Spyglass PR #1438 (set_group_by_electrode_table_column pattern):
+    # - If no existing rows: insert cleanly.
+    # - If existing rows AND delete_existing_entries=True: cascade-delete
+    #   via cautious_delete (preserves Spyglass team-permission semantics)
+    #   and then reinsert.
+    # - If existing rows AND delete_existing_entries=False: require the
+    #   caller to provide explicit `sort_group_ids` that don't overlap
+    #   the existing IDs. Raise ValueError on overlap. No silent overwrite.
+    # This replaces the v1 silent-overwrite footgun AND the earlier v3
+    # `force=True` design — the PR #1438 pattern is richer because it
+    # supports "add more sort groups to this session without losing the
+    # existing ones."
+
     @classmethod
     def set_group_by_shank(
         cls,
         nwb_file_name: str,
         omit_ref_electrode_group: bool = False,
         omit_unitrode: bool = True,
-        force: bool = False,
+        sort_reference_electrode_id: int = -1,
+        sort_group_ids: list[int] | None = None,
+        delete_existing_entries: bool = False,
     ) -> None:
         """Auto-group electrodes by shank.
 
-        Differs from v1: raises if rows already exist for this session
-        unless force=True. v1 silently overwrote — see Risk #5 in
-        overview.md.
+        Uses the existing-entry-handling pattern from PR #1438; see the
+        class-level comment above. `sort_reference_electrode_id` is now
+        configurable per-call (Frank-lab default -1; Berke-lab default
+        -1 historically; other labs may set per-shank reference).
         """
-        existing = cls & {"nwb_file_name": nwb_file_name}
-        if len(existing) > 0 and not force:
-            raise ValueError(
-                f"SortGroupV3 already has {len(existing)} rows for {nwb_file_name}. "
-                f"Pass force=True to overwrite (deletes downstream sorts in cascade)."
-            )
-        # ... else delete existing and repopulate (use cautious_delete) ...
+        ...
+
+    @classmethod
+    def set_group_by_electrode_table_column(
+        cls,
+        nwb_file_name: str,
+        column: str,
+        groups: list[list],
+        sort_group_ids: list[int] | None = None,
+        sort_reference_electrode_id: int = -1,
+        remove_bad_channels: bool = True,
+        omit_unitrode: bool = True,
+        delete_existing_entries: bool = False,
+    ) -> None:
+        """Group electrodes by ANY column in the electrode table.
+
+        Direct port of [Spyglass PR #1438](https://github.com/LorenFrankLab/spyglass/pull/1438)
+        (Berke Lab use case: group by `intan_channel_number`).
+
+        Parameters
+        ----------
+        column : str
+            Column name in the electrode table to group by. Special
+            values "index" / "id" / "idx" / "electrode_id" group by
+            electrode_id directly.
+        groups : list[list]
+            Each sublist specifies values in `column` to include in one
+            sort group.
+        sort_group_ids : list[int] | None
+            Optional custom IDs per group. Must be same length as
+            `groups`. If None, auto-assigned 0..N-1.
+        remove_bad_channels : bool
+            Filter out electrodes with `bad_channel != 0`.
+        omit_unitrode : bool
+            Skip groups that reduce to a single electrode after
+            filtering.
+        delete_existing_entries : bool
+            See class-level comment above.
+
+        Validates `column` exists in the electrode table; raises with
+        the full list of valid columns on mismatch. Logs which
+        electrodes are dropped as bad, which groups are skipped
+        (unitrode/empty), and which groups are created.
+        """
+        ...
 ```
 
 ---

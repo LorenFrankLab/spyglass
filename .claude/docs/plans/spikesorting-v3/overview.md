@@ -140,6 +140,7 @@ Mining of [LorenFrankLab/spyglass GitHub issues](https://github.com/LorenFrankLa
 | [#1286](https://github.com/LorenFrankLab/spyglass/issues/1286) | UX redesign request | Phase 1 minimal `run_v3_pipeline()` + Phase 5 full presets/FigPack |
 | [#1530](https://github.com/LorenFrankLab/spyglass/issues/1530), [#1512](https://github.com/LorenFrankLab/spyglass/issues/1512), [#1504](https://github.com/LorenFrankLab/spyglass/issues/1504), [#1215](https://github.com/LorenFrankLab/spyglass/issues/1215) | `FigURLCuration` brittleness (opaque KeyError, sortingview API drift) | Phase 5 replaces FigURL with FigPack for v3 curations |
 | [#133](https://github.com/LorenFrankLab/spyglass/issues/133) | `SpikeSortingRecordingSelection` LabTeam in PK blocks shared sorts | v3 `RecordingSelection` does not include `team_name` in PK |
+| [PR #1438](https://github.com/LorenFrankLab/spyglass/pull/1438) (DRAFT) | v1 `SortGroup` only supports `set_group_by_shank`; Berke Lab and other labs need to group by arbitrary electrode-table columns (e.g., `intan_channel_number`) | v3 `SortGroupV3.set_group_by_electrode_table_column(column, groups, ...)` ports the PR's design directly. Both shank and column-based constructors share PR #1438's existing-entry collision-handling pattern (delete-and-replace OR non-overlapping `sort_group_ids`), replacing both v1's silent-overwrite footgun and the earlier-draft `force=True` design. |
 
 ## Explicitly NOT fixed by v3 (separate v1-side patches required)
 
