@@ -2,7 +2,15 @@
 
 [← back to PLAN.md](PLAN.md) · [overview](overview.md) · [designs](designs.md#preprocessingparameters--recordingselection--recording)
 
-The MVP. Builds the complete single-session sort pipeline: preprocessing → artifact detection → sorting → initial curation → merge-table registration. Uses SortingAnalyzer (SI 0.104), Pydantic-validated parameters, and `insert_selection()` helpers that return a single dict. Parity-tests against the v1 baseline captured in Phase 0.
+The MVP. Builds the complete single-session sort pipeline: preprocessing → artifact detection → sorting → initial curation → merge-table registration. Uses SortingAnalyzer (SI 0.104), Pydantic-validated parameters, and `insert_selection()` helpers that return a single dict. Includes a minimal `run_v3_pipeline()` orchestrator covering this phase's stages (Phase 5 extends with metrics, concat, UnitMatch, FigPack). Parity-tests against the v1 baseline captured in Phase 0.
+
+**PREREQUISITES — must be merged before Phase 1 lands** (see Phase 0's "SI 0.104 upgrade gating" tasks):
+
+1. v1's `extract_waveforms` / `load_waveforms` calls ported to `create_sorting_analyzer` / `load_sorting_analyzer`.
+2. v1 test suite green under SI 0.104.
+3. `pyproject.toml` SI pin bumped to `>=0.104,<0.105`; `mountainsort5>=0.5` added; optional `spikesorting-v3-matching` extra added.
+
+The first task of this phase (after prerequisites land) is to verify the new SI baseline by running the existing v1 test suite under 0.104 once more and capturing any newly-discovered regressions to fold into Phase 1 implementation notes.
 
 **Inputs to read first:**
 
@@ -60,6 +68,16 @@ The MVP. Builds the complete single-session sort pipeline: preprocessing → art
   - `get_sorting(key, as_dataframe=False)` and `get_merged_sorting(key)` methods analogous to v1's.
   - `get_unit_brain_regions(key, include_labels=None) -> pd.DataFrame` — constant-time `CurationV3.Unit * Electrode * BrainRegion` join; if `include_labels` is provided, filters by `curation_label IN include_labels`.
   - `get_sort_group_info(key) -> dj.Table` — returns ALL electrodes in the sort group joined to `Electrode * BrainRegion`, NOT `fetch(limit=1)`. This is the fix for the v1 multi-region under-reporting bug. Returns a DataJoint relation (not a DataFrame) so callers can chain restrictions.
+
+- **Implement a MINIMAL `run_v3_pipeline()` orchestrator** in `src/spyglass/spikesorting/v3/pipeline.py`. Phase 1 ships a usable single-call API so the MVP is actually usable without writing the orchestration boilerplate; Phase 5 extends it with metrics + concat + UnitMatch + FigPack. Phase 1 scope:
+  - Signature: `run_v3_pipeline(nwb_file_name, sort_group_id, interval_list_name, team_name, preset="franklab_tetrode_mountainsort5") -> dict`.
+  - Internally chains: `RecordingSelection.insert_selection` → `Recording.populate` → `ArtifactDetectionSelection.insert_selection` → `ArtifactDetection.populate` → `SortingSelection.insert_selection` → `Sorting.populate` → `CurationV3.insert_curation` → auto-registration in `SpikeSortingOutput.CurationV3`.
+  - NO metrics / auto-curation hookup (Phase 2 adds).
+  - NO concat support (Phase 3 extends).
+  - NO matcher / FigPack (Phases 4–5).
+  - Phase 1 ships **3 presets**: `franklab_tetrode_mountainsort4`, `franklab_tetrode_mountainsort5`, `clusterless_thresholder_default`. The preset is a Pydantic-validated bundle of Lookup-row names; the orchestrator looks them up at first call.
+  - Returns a manifest dict listing every `(stage, key)` tuple inserted/populated plus the final `merge_id`.
+  - Idempotent: re-running with the same inputs finds the same existing rows and returns the same manifest, no duplicates.
 
 - **Modify `spikesorting_merge.py`** — add new part [per shared-contracts.md § SpikeSortingOutput Part-Table Convention for v3](shared-contracts.md#spikesortingoutput-part-table-convention-for-v3). Specifically:
   - Add `class CurationV3(SpyglassMixinPart)` part to `SpikeSortingOutput`.
@@ -131,6 +149,9 @@ The MVP. Builds the complete single-session sort pipeline: preprocessing → art
 | `test_sorted_spikes_group_works_with_v3` (slow) | Insert a `SortedSpikesGroup` row using a v3-sourced merge_id; assert `SortedSpikesGroup.get_spike_times(key)` returns sane numpy arrays. |
 | `test_v3_clusterless_parity` (slow, integration) | Run v3 with `clusterless_thresholder` on `minirec`; fetched spike times exactly match Phase 0 baseline pickle. Deterministic — zero tolerance. |
 | `test_v3_mountainsort5_smoke` (slow, integration) | Run v3 with MountainSort 5 on `minirec`; `n_units` ±50%, median FR ±30%, total spikes ±30% vs v1 baseline. |
+| `test_run_v3_pipeline_minimal_minirec` (slow, integration) | Single call to `run_v3_pipeline(..., preset="clusterless_thresholder_default")` returns a manifest with stages: recording, artifact, sorting, initial_curation; final `merge_id` is a valid `SpikeSortingOutput.CurationV3` row. |
+| `test_run_v3_pipeline_idempotent` (slow) | Two consecutive calls with identical args return identical manifests; no new rows are inserted on the second call. |
+| `test_run_v3_pipeline_rejects_unknown_preset` | `run_v3_pipeline(..., preset="not_a_preset")` raises ValueError with the list of registered presets. |
 
 ## Fixtures
 

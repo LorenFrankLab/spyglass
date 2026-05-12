@@ -21,13 +21,16 @@ The capstone phase. Adds the `run_v3_pipeline()` convenience function (35-cell n
 
 ## Tasks
 
-- **Implement `pipeline.py`** per [designs.md § `run_v3_pipeline()` Orchestrator](designs.md#run_v3_pipeline-orchestrator). Specific:
-  - `run_v3_pipeline(nwb_file_name, sort_group_id, interval_list_name, team_name, preset, skip_artifact=False, auto_curate=True) -> dict` — the orchestrator. Returns a manifest dict containing every `(stage, key)` it inserted/populated plus final `merge_id`.
-  - `PRESETS: dict[str, PresetSchema]` — named bundles of parameter rows. Default presets:
-    - `franklab_tetrode_mountainsort5`
-    - `franklab_tetrode_clusterless`
-    - `franklab_probe_kilosort4`
-    - `clusterless_threshold_default`
+- **EXTEND `pipeline.py`** (Phase 1 shipped a minimal version with 3 presets covering recording → artifact → sorting → initial curation). Phase 5 adds the missing stages and broadens the preset set per [designs.md § `run_v3_pipeline()` Orchestrator](designs.md#run_v3_pipeline-orchestrator):
+  - **Add `auto_curate=True` parameter** — wires up Phase 2's `AnalyzerCuration` stage and the materialization step.
+  - **Add `session_group_name` parameter (optional)** — when set, the orchestrator routes through Phase 3's `ConcatenatedRecording` instead of `Recording`. Mutually exclusive with the single-session inputs (`sort_group_id` etc.).
+  - **Add `unit_match=False` parameter (optional, requires `session_group_name`)** — wires up Phase 4's UnitMatch path.
+  - **Add `figpack=False` parameter (optional)** — wires up the FigPack curation stage below.
+  - **Expand `PRESETS`** to include Phase 5's full set:
+    - `franklab_tetrode_mountainsort4`, `franklab_tetrode_mountainsort5`, `clusterless_thresholder_default` (carried over from Phase 1)
+    - `franklab_probe_kilosort4` (new)
+    - `franklab_tetrode_clusterless` (new — combines threshold detection + Phase 2 metrics)
+    - `franklab_chronic_single_day` (new — uses SessionGroup + ConcatenatedRecording for same-day chronic)
   - `register_preset(name, preset_dict)` — public API for labs to add custom presets without modifying v3 source.
   - Each preset must reference Lookup-table row names that ALREADY EXIST. Phase 5 inserts these baseline rows via `insert_default()` calls in `__init__.py`.
 

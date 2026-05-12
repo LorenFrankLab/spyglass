@@ -163,10 +163,18 @@ class Recording(SpyglassMixin, dj.Computed):
         valid_times = (IntervalList & sel).fetch1("valid_times")
         recording = _slice_recording_to_intervals(recording, valid_times)
 
-        # 3. Apply PreprocessingPipeline (validated dict)
-        params = (PreprocessingParameters & sel).fetch1("params")
-        pipeline = PreprocessingPipeline(PreprocessingParamsSchema.model_validate(params).to_si_dict())
-        recording_processed = pipeline.apply(recording)
+        # 3. Apply PRE-MOTION preprocessing only (bandpass + CMR). Whitening
+        # is deferred to Sorting.make() / ConcatenatedRecording.make() so
+        # motion correction (which runs in ConcatenatedRecording for chronic
+        # paths) sees un-whitened traces. See shared-contracts § Pydantic
+        # Parameter Schema Convention.
+        from spikeinterface.preprocessing import apply_preprocessing_pipeline
+        params = PreprocessingParamsSchema.model_validate(
+            (PreprocessingParameters & sel).fetch1("params")
+        )
+        recording_processed = apply_preprocessing_pipeline(
+            recording, params.to_pre_motion_dict()
+        )
 
         # 4. Materialize to binary cache
         cache_path = _binary_cache_path(key)  # e.g. {tmp}/spikesorting_v3/binary/{recording_id}.bin
@@ -194,16 +202,30 @@ class Recording(SpyglassMixin, dj.Computed):
         })
 
     def get_recording(self, key) -> si.BaseRecording:
-        """Load the cached preprocessed recording. Recomputes if cache missing.
+        """Load the cached preprocessed recording.
 
-        Mirrors v1 SpikeSortingRecording.get_recording recompute pattern.
+        Binary cache is a regeneratable side artifact. If missing, we
+        REBUILD THE CACHE FOLDER ONLY — we do NOT delete the Recording
+        row (which would cascade to Sorting, CurationV3, downstream
+        SpikeSortingOutput rows, etc.).
         """
         row = (self & key).fetch1()
         if not Path(row["binary_cache_path"]).exists():
-            (self & key).delete_quick()
-            self.populate(key)
-            row = (self & key).fetch1()
+            self._rebuild_binary_cache(key)
         return si.load(row["binary_cache_path"])
+
+    def _rebuild_binary_cache(self, key) -> None:
+        """Reconstruct the binary cache from upstream Raw + params.
+
+        Does NOT touch the DataJoint row. Reads RecordingSelection +
+        PreprocessingParameters, re-applies the pre_motion stage
+        of the preprocessing pipeline, materializes to the recorded
+        binary_cache_path. Verifies the resulting cache_hash matches
+        the stored hash; logs a warning if it differs (likely
+        SI / numerical drift; the analyzer & downstream curation
+        rows may need scrutiny).
+        """
+        ...
 ```
 
 **Key design points**:
@@ -316,53 +338,56 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
 
 
 @schema
-class RecordingSource(SpyglassMixin, dj.Lookup):
-    """Discriminator for SortingSelection's polymorphic recording input.
-
-    Phase 1 only accepts 'single'; Phase 3 enables 'concatenated' (the
-    table exists from Phase 1 so SortingSelection's FK to it works).
-    """
-    definition = """
-    recording_source: enum('single', 'concatenated')
-    """
-    contents = [("single",), ("concatenated",)]
-
-
-@schema
 class SortingSelection(SpyglassMixin, dj.Manual):
     """One row per (recording, sorter, artifact detection) tuple.
 
     PHASE 1 + PHASE 3 final schema. The forward-compatibility design
-    (per shared-contracts § Zero-Migration Schema Forward-Compatibility):
-    - `recording_source` discriminates 'single' vs 'concatenated'.
-    - `recording_id` is a "loose" UUID FK; the validator in
-      insert_selection() checks it against `Recording` or
-      `ConcatenatedRecording` depending on `recording_source`.
-    - `artifact_id` is nullable (NOT a PK component) — concat sorts may
-      skip artifact detection in Phase 3.
+    uses two NULLABLE typed FKs (not a loose polymorphic UUID — per
+    review feedback). Exactly one must be non-null; XOR is validated
+    in insert_selection().
 
-    Phase 1: only `recording_source='single'` is accepted by
-    insert_selection(); Phase 3 enables 'concatenated'. No alter() needed.
+    Phase 1: only `single_recording_id` is accepted by insert_selection().
+    Phase 3: `concat_recording_id` is also accepted. No alter() needed
+    because both FKs were declared (nullable) in Phase 1.
     """
     definition = """
     sorting_id: uuid
     ---
-    -> RecordingSource
-    recording_id: uuid          # loose FK; validated by insert_selection
+    -> [nullable] Recording                     # single-session path
+    -> [nullable] ConcatenatedRecording         # cross-session path (Phase 3)
     -> SorterParameters
-    artifact_id=NULL: uuid      # FK ArtifactDetection if applicable, else NULL
+    artifact_id=NULL: uuid                      # FK ArtifactDetection if applicable
     """
+    # Note: `-> [nullable] Recording` declares a nullable FK on this
+    # table's secondary attributes; DataJoint generates a `recording_id`
+    # column that may be NULL. `-> [nullable] ConcatenatedRecording`
+    # generates a `concat_recording_id` column (renamed if needed via
+    # `.proj(concat_recording_id='recording_id')` to avoid clash — see
+    # designs.md note below on the rename).
 
     @classmethod
     def insert_selection(cls, key: dict) -> dict:
-        """Validates recording_source vs recording_id matches an existing
-        Recording row (source='single') or ConcatenatedRecording row
-        (source='concatenated'). Raises ValueError on mismatch.
-        Also validates that 'concatenated' source is supported in the
-        current Phase (Phase 1 raises NotImplementedError; Phase 3
-        lifts that restriction).
+        """Validates XOR on the two recording FKs.
+
+        Exactly one of (recording_id, concat_recording_id) must be set;
+        the other must be NULL. Phase 1's helper rejects
+        concat_recording_id with NotImplementedError pointing at Phase 3.
+        Returns a single PK-only dict per shared-contracts.
         """
         ...
+
+# DataJoint FK column-name handling: `-> [nullable] Recording` produces
+# column `recording_id`; `-> [nullable] ConcatenatedRecording` ALSO
+# produces `recording_id` (it's the PK of that table). To disambiguate,
+# Phase 1's definition string uses the proj-rename pattern documented
+# in merge_methods.md:
+#
+#     -> [nullable] Recording.proj(recording_id='recording_id')
+#     -> [nullable] ConcatenatedRecording.proj(concat_recording_id='recording_id')
+#
+# Both FKs are real and enforced by DataJoint when their respective
+# discriminator column is non-NULL. No loose UUID validation needed
+# beyond the XOR check in insert_selection().
 
 
 @schema
@@ -398,12 +423,30 @@ class Sorting(SpyglassMixin, dj.Computed):
     def make(self, key):
         sel = (SortingSelection & key).fetch1()
 
-        # 1. Load preprocessed recording (cache or recompute)
-        recording = (Recording & {"recording_id": sel["recording_id"]}).get_recording(...)
+        # 1. Load the pre-motion preprocessed recording from the cache.
+        # For single-recording path: load from Recording (no motion correction).
+        # For concat path (Phase 3): load from ConcatenatedRecording (motion-corrected).
+        # Both expose .get_recording(key).
+        recording = _resolve_recording(sel)  # see Phase 3 task: dispatch by which FK is non-NULL
 
-        # 2. Get artifact-removed intervals
-        artifact_intervals = ArtifactDetection.get_artifact_removed_intervals(sel)
-        recording = _apply_artifact_zeroing(recording, artifact_intervals)
+        # 2. Apply POST-MOTION preprocessing (whitening, if configured).
+        # In the concat path, motion correction already ran inside
+        # ConcatenatedRecording.make() before whitening — both paths
+        # converge here with a whitened recording.
+        from spikeinterface.preprocessing import apply_preprocessing_pipeline
+        preproc_params = PreprocessingParamsSchema.model_validate(
+            _get_preproc_params_for_selection(sel)
+        )
+        post_motion_dict = preproc_params.to_post_motion_dict()
+        if post_motion_dict:
+            recording = apply_preprocessing_pipeline(recording, post_motion_dict)
+
+        # 3. Get artifact-removed intervals (single-recording path only;
+        # concat path passes None — artifact detection on the concat is
+        # out of scope for Phase 3).
+        if sel.get("artifact_id"):
+            artifact_intervals = ArtifactDetection.get_artifact_removed_intervals(sel)
+            recording = _apply_artifact_zeroing(recording, artifact_intervals)
 
         # 3. Fetch sorter params and run
         sorter_params = (SorterParameters & sel).fetch1("params").copy()  # copy to avoid mutation
@@ -489,16 +532,32 @@ class Sorting(SpyglassMixin, dj.Computed):
     def get_analyzer(self, key) -> si.SortingAnalyzer:
         """See shared-contracts.md SortingAnalyzer layout.
 
-        Recomputes if the analyzer folder is missing. Note the explicit
-        `(self & key).delete_quick()` — NEVER call `self.delete_quick()`
-        without the key restriction; it would delete every row.
+        The analyzer folder is a regeneratable side artifact. If it
+        is missing, we REBUILD THE FOLDER ONLY — we do NOT delete the
+        Sorting row (which would cascade to CurationV3, AnalyzerCuration,
+        SpikeSortingOutput, etc. and destroy scientific provenance).
+
+        Folder rebuild logic mirrors the analyzer-building portion of
+        `Sorting.make()` without touching the DataJoint row.
         """
         row = (self & key).fetch1()
-        if not Path(row["analyzer_folder"]).exists():
-            (self & key).delete_quick()  # restricted delete; do NOT drop the (self & key)
-            self.populate(key)
-            row = (self & key).fetch1()
+        analyzer_folder = Path(row["analyzer_folder"])
+        if not analyzer_folder.exists():
+            self._rebuild_analyzer_folder(key)
         return load_sorting_analyzer(row["analyzer_folder"])
+
+    def _rebuild_analyzer_folder(self, key) -> None:
+        """Reconstruct the analyzer folder from upstream inputs.
+
+        Does NOT touch the DataJoint row. Reads the SortingSelection,
+        loads the preprocessed recording (which may itself recompute
+        its binary cache via Recording.get_recording's same pattern),
+        loads the sorting from the units NWB stored on the row, then
+        builds a fresh SortingAnalyzer at the recorded analyzer_folder
+        path. Computes the same core extensions as Sorting.make()
+        (random_spikes, noise_levels, templates, waveforms).
+        """
+        ...
 ```
 
 ---
@@ -717,15 +776,16 @@ Phase 3. Cross-session bundling for same-day chronic recordings.
 class SessionGroup(SpyglassMixin, dj.Manual):
     """A named bundle of (session, sort_group, interval) tuples to analyze together.
 
-    Members may span multiple recording dates (multi-day chronic);
-    `recording_date` is stored as metadata, not gated. The downstream
-    `ConcatenatedRecording` table picks a motion-correction preset based
-    on whether members are single- or multi-day:
-      single-day → preset 'rigid_fast' (default)
-      multi-day  → preset 'dredge_fast' (default; user can override)
+    Per Phase 3 review: multi-day concat is supported by the SCHEMA but is
+    NOT the recommended default path for cross-day analyses — sort-then-match
+    (Phase 4 UnitMatch) is the validated path for days/weeks-apart sessions.
+    `SessionGroup.create_group()` accepts multi-day members only when the
+    caller passes `allow_multi_day=True` and supplies an explicit motion-
+    correction preset (no auto-DREDge dispatch, because cross-session drift
+    is recording-specific and the right preset is a scientific choice).
 
     Phase 4 reuses the same table for per-session sortings to be matched
-    across sessions.
+    across sessions (no concatenation needed).
     """
     definition = """
     session_group_name: varchar(64)
@@ -750,16 +810,32 @@ class SessionGroup(SpyglassMixin, dj.Manual):
         session_group_name: str,
         members: list[dict],
         description: str = "",
+        allow_multi_day: bool = False,
     ) -> None:
         """Atomic-style create.
 
         members: list of dicts with keys
             nwb_file_name, sort_group_id, interval_list_name, recording_date.
 
-        Multi-day is supported by default. The recording_date metadata
-        flows through to ConcatenatedRecording, which picks a stricter
-        motion-correction preset for multi-day groups.
+        Same-day groups are the recommended path; multi-day requires the
+        explicit `allow_multi_day=True` flag. The flag also forces the
+        caller to choose an explicit MotionCorrectionParameters row when
+        building the downstream ConcatenatedRecording (no `preset='auto'`
+        dispatch for multi-day — see ConcatenatedRecording.make()).
+
+        Raises ValueError if members span ≥2 dates without
+        allow_multi_day=True. For days/weeks-apart sessions, use the
+        Phase 4 sort-then-match path (UnitMatch) instead — it is the
+        validated cross-day workflow.
         """
+        dates = {m["recording_date"] for m in members}
+        if len(dates) > 1 and not allow_multi_day:
+            raise ValueError(
+                f"Members span {len(dates)} distinct dates "
+                f"({sorted(dates)}); multi-day groups require "
+                f"allow_multi_day=True. Recommended path for cross-day "
+                f"analyses is sort-then-match (Phase 4 UnitMatch)."
+            )
         cls.insert1({"session_group_name": session_group_name, "description": description})
         cls.Member.insert([
             {**m, "session_group_name": session_group_name, "member_index": i}
@@ -797,11 +873,10 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
     def make(self, key):
         members = (SessionGroup.Member & key).fetch(as_dict=True, order_by="member_index")
 
-        # Reuse cached preprocessed Recording binary caches when available.
-        # For each member, look up the matching Recording row (same nwb_file_name,
-        # sort_group_id, interval, preproc_params). If found, load the cached
-        # BaseRecording directly — no re-preprocessing. If absent, populate
-        # Recording first (via Recording.populate), then load.
+        # Reuse cached PRE-MOTION Recording binary caches per member.
+        # Recording.make() materializes filter + CMR only (no whitening) —
+        # safe input for motion correction. See shared-contracts §
+        # Pydantic Parameter Schema Convention.
         recordings = []
         for m in members:
             rec_sel_key = {
@@ -814,22 +889,44 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             rec_key = RecordingSelection.insert_selection(rec_sel_key)
             if not (Recording & rec_key):
                 Recording.populate(rec_key)
-            rec = (Recording & rec_key).get_recording(rec_key)
+            rec = (Recording & rec_key).get_recording(rec_key)  # pre-motion (un-whitened)
             recordings.append(rec)
 
         # Concatenate (mono-segment)
         concat_recording = concatenate_recordings(recordings)
 
-        # Motion correction. Default preset depends on whether the
-        # group is multi-day (dredge_fast handles inter-session jumps)
-        # or single-day (rigid_fast handles within-day mild drift).
+        # Motion correction runs on UN-WHITENED traces (per SI docs).
+        # The preset is ALWAYS explicit — no auto-dispatch by date.
+        # For single-day groups the recommended preset is `rigid_fast`;
+        # for multi-day groups the caller must explicitly choose a
+        # DREDge variant (and accept the validation caveat — multi-day
+        # concat is experimental, sort-then-match is the validated path).
         motion_params = (MotionCorrectionParameters & key).fetch1("params")
-        if motion_params["preset"] == "auto":
-            preset = "dredge_fast" if SessionGroup.is_multi_day(key) else "rigid_fast"
-        else:
-            preset = motion_params["preset"]
+        preset = motion_params["preset"]
+        if preset == "auto":
+            # `auto` is permitted only on single-day groups; explicit
+            # for multi-day per the gate above.
+            if SessionGroup.is_multi_day(key):
+                raise ValueError(
+                    "preset='auto' is not permitted for multi-day SessionGroups. "
+                    "Explicitly choose 'dredge_fast' / 'dredge' / etc., or use "
+                    "sort-then-match (Phase 4 UnitMatch) for cross-day analyses."
+                )
+            preset = "rigid_fast"
         if preset != "none":
             concat_recording = correct_motion(concat_recording, preset=preset)
+
+        # Whitening (post-motion stage) runs AFTER motion correction.
+        # Sorting.make() will apply this for the single-recording path;
+        # for the concat path, we apply here so the cached concat binary
+        # is sorter-ready.
+        preproc_params = PreprocessingParamsSchema.model_validate(
+            (PreprocessingParameters & key).fetch1("params")
+        )
+        post_motion_dict = preproc_params.to_post_motion_dict()
+        if post_motion_dict:
+            from spikeinterface.preprocessing import apply_preprocessing_pipeline
+            concat_recording = apply_preprocessing_pipeline(concat_recording, post_motion_dict)
 
         # Materialize
         cache_path = _binary_cache_path(key, prefix="concat")

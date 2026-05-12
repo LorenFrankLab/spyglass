@@ -25,13 +25,13 @@ Adds the cross-session bundling primitive (`SessionGroup`) and the concatenate-a
   - `MotionCorrectionParamsSchema` with `preset: Literal["auto", "rigid_fast", "kilosort_like", "dredge_fast", "dredge", "medicine", "nonrigid_accurate", "none"]` and `preset_kwargs: dict = {}`. The `"auto"` value triggers the multi-day-aware dispatch in `ConcatenatedRecording.make()`.
 
 - **Implement `session_group.py`** per [designs.md § SessionGroup + ConcatenatedRecording](designs.md#sessiongroup--concatenatedrecording). Specific:
-  - `SessionGroup` Manual with `Member` Part. `recording_date` on each Member is stored as metadata (no gating); `SessionGroup.is_multi_day(key) -> bool` classmethod inspects the members' dates.
-  - `create_group(session_group_name, members, description="")` — atomic insert + Member rows. **Multi-day groups are supported by default**; no `allow_multi_day` flag (per resolved decision #4).
+  - `SessionGroup` Manual with `Member` Part. `recording_date` on each Member is stored as metadata; `SessionGroup.is_multi_day(key) -> bool` classmethod inspects the members' dates.
+  - `create_group(session_group_name, members, description="", allow_multi_day=False)` — atomic insert + Member rows. **Same-day is the default**; multi-day requires `allow_multi_day=True` and an explicit motion-correction preset on the downstream `ConcatenatedRecording` (no auto-DREDge). The error message for multi-day-without-opt-in points users at Phase 4 sort-then-match as the recommended cross-day path.
   - `MotionCorrectionParameters` Lookup. Default rows:
-    - `("auto_default", {"preset": "auto"})` — picks `rigid_fast` for single-day, `dredge_fast` for multi-day; this is the recommended default
-    - `("rigid_fast_default", {"preset": "rigid_fast"})` — force single-day-style preset
-    - `("dredge_fast_default", {"preset": "dredge_fast"})` — force multi-day-style preset
-    - `("dredge_full", {"preset": "dredge"})` — slow but highest accuracy for severe drift
+    - `("auto_default", {"preset": "auto"})` — picks `rigid_fast` for single-day; raises on multi-day (the caller MUST pick a preset explicitly for multi-day)
+    - `("rigid_fast_default", {"preset": "rigid_fast"})` — single-day default
+    - `("dredge_fast_default", {"preset": "dredge_fast"})` — experimental for multi-day (must opt in)
+    - `("dredge_full", {"preset": "dredge"})` — slow, highest accuracy
     - `("none", {"preset": "none"})` — explicit opt-out
   - `ConcatenatedRecording` Computed with `make()` that:
     1. Fetches members in order.
@@ -100,6 +100,7 @@ Adds the cross-session bundling primitive (`SessionGroup`) and the concatenate-a
 ## Deliberately not in this phase
 
 - **Cross-session unit matching.** Phase 4. This phase produces the concatenated sort; matching across independent sortings is separate.
+- **Multi-day concat as a recommended default.** Phase 3 supports multi-day concat behind an `allow_multi_day=True` opt-in (schema-final from Phase 1), but the documented recommendation is sort-then-match (Phase 4 UnitMatch) for cross-day work. Multi-day concat is experimental; SI issue #2626 explicitly flags it as fragile under large inter-session drift.
 - **Multi-probe session groups** — out of scope. Phase 3 assumes one sort_group per member (one shank or tetrode).
 - **GPU motion correction** — uses CPU presets only. KS4-built-in drift handling fires only if user selects KS4 as the sorter (Phase 1 plumbing).
 - **No `Sorting.get_per_session_analyzer()` helper** — out of scope. If a user wants per-session analyzers from a concat sort, they back-map via `split_sorting_by_session` then `create_sorting_analyzer` manually.
@@ -109,11 +110,13 @@ Adds the cross-session bundling primitive (`SessionGroup`) and the concatenate-a
 
 | Test | Asserts |
 | --- | --- |
-| `test_session_group_create_single_day` | `create_group(name, [m1, m2])` with same `recording_date` inserts master + 2 part rows. |
-| `test_session_group_create_multi_day_succeeds` | `create_group(name, [m1, m2])` with different `recording_date`s succeeds with no error and no flag (multi-day is first-class per resolved decision #4). |
+| `test_session_group_create_single_day` | `create_group(name, [m1, m2])` with same `recording_date` inserts master + 2 part rows; `allow_multi_day=False` (default) accepts. |
+| `test_session_group_create_multi_day_rejected_by_default` | `create_group(name, multi_day_members)` without `allow_multi_day=True` raises ValueError mentioning Phase 4 sort-then-match. |
+| `test_session_group_create_multi_day_accepted_with_opt_in` | `create_group(name, multi_day_members, allow_multi_day=True)` succeeds. |
 | `test_session_group_is_multi_day_classmethod` | `SessionGroup.is_multi_day(key)` returns False for single-day, True for multi-day. |
 | `test_motion_correction_params_validation` | `MotionCorrectionParameters.insert1({"params": {"preset": "bogus"}})` raises. |
-| `test_motion_correction_preset_auto_dispatches_by_date` (slow) | With `preset="auto"`: single-day SessionGroup → traces match what `rigid_fast` would have produced; multi-day SessionGroup → traces match what `dredge_fast` would have produced. |
+| `test_motion_correction_preset_auto_on_single_day` (slow) | With `preset="auto"` on single-day group: traces match what `rigid_fast` produced. |
+| `test_motion_correction_preset_auto_rejects_multi_day` | With `preset="auto"` on multi-day group, `ConcatenatedRecording.populate()` raises (caller must pick an explicit preset for multi-day). |
 | `test_concatenated_recording_make_basic` (slow) | After populate, binary cache exists; `n_channels` matches all members; `total_duration_s` = sum(member durations); `member_segment_boundaries` length matches members. |
 | `test_concatenated_recording_reuses_recording_cache` (slow) | If `Recording` is already populated for each member, `ConcatenatedRecording.make()` does NOT re-read raw NWB (assert via mock of `se.read_nwb_recording` raising if called) — it consumes the cached binary. |
 | `test_concatenated_recording_motion_correct_applied` (slow) | Populate with `preset="rigid_fast"` vs `preset="none"`; binary cache hashes differ. |

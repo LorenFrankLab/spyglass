@@ -93,21 +93,35 @@ class WhitenParams(BaseModel):
 class PreprocessingParamsSchema(BaseModel):
     """Validated schema for `PreprocessingParameters.params` blob.
 
-    Maps directly to SpikeInterface's `PreprocessingPipeline` step dict.
+    SPLIT INTO TWO STAGES so motion correction never runs on whitened
+    data (SI docs warn that whitening destroys the spatial amplitude
+    structure DREDge / medicine need to estimate motion):
+
+    Stage 1 — pre_motion (filter + reference): materialized to the
+        `Recording` binary cache. This is what gets cached.
+    Stage 2 — post_motion (whitening): applied lazily AFTER motion
+        correction by `Sorting.make()` (single-rec path) or
+        `ConcatenatedRecording.make()` (concat path).
     """
     model_config = ConfigDict(extra="forbid")
     schema_version: int = 1
     bandpass_filter: BandpassFilterParams = Field(default_factory=BandpassFilterParams)
     common_reference: CommonReferenceParams = Field(default_factory=CommonReferenceParams)
-    whiten: WhitenParams = Field(default_factory=WhitenParams)
+    whiten: WhitenParams | None = Field(default_factory=WhitenParams)
+    # whiten=None for sorters that do their own whitening (Kilosort 4).
 
-    def to_si_dict(self) -> dict:
-        """Convert to SpikeInterface PreprocessingPipeline dict format."""
+    def to_pre_motion_dict(self) -> dict:
+        """Stage 1 dict for apply_preprocessing_pipeline(). Cached."""
         return {
             "bandpass_filter": self.bandpass_filter.model_dump(),
             "common_reference": self.common_reference.model_dump(),
-            "whiten": self.whiten.model_dump(),
         }
+
+    def to_post_motion_dict(self) -> dict:
+        """Stage 2 dict; empty if whitening disabled. Applied lazily."""
+        if self.whiten is None:
+            return {}
+        return {"whiten": self.whiten.model_dump()}
 ```
 
 **Validation entry point** — every Lookup table calls `_validate_params()` from a shared base in `spyglass.spikesorting.v3.utils`:

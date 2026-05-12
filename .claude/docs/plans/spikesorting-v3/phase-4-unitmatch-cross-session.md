@@ -4,6 +4,13 @@
 
 Adds **sort-then-match** cross-session unit tracking via UnitMatchPy. The design is pluggable: a `MatcherProtocol` interface accepts swappable backends (UnitMatch in this phase, DeepUnitMatch as future work). Includes an **explicit tetrode validation gate** before declaring tetrode support production-ready.
 
+**Phase 4 is split into two sub-phases** so the matcher's actual API and data flow are pinned BEFORE the v3 schema is finalized (per review feedback — UnitMatchPy's API surface is under-spiked for a zero-migration schema-final phase):
+
+- **Phase 4a (technical spike)**: install UnitMatchPy, run it end-to-end against an existing v3 `SortingAnalyzer`, document the actual API surface, the input data layout it expects, and the failure modes. No DataJoint tables. Writes findings into `appendix.md § UnitMatchPy integration notes` (replacing the current speculative content). Confirms or revises the `MatcherProtocol` contract in `shared-contracts.md`.
+- **Phase 4b (schema + implementation)**: locks in `MatcherParameters`, `UnitMatchSelection` (+ `MemberCuration` part), `UnitMatch` (+ `Pair` part), and `TrackedUnit` (+ `Member` part) based on what 4a discovered. Includes the tetrode validation gate.
+
+The matcher contract was overly strict in its earlier form. **Refined contract** (see updated `shared-contracts.md § MatcherProtocol`): a matcher consumes **pre-extracted per-unit waveform arrays + channel positions** that v3 derives from the `SortingAnalyzer` and writes into a matcher-specific on-disk layout (this is what UnitMatchPy's `KSDir`/`RawDataDir` style inputs actually want — pre-extracted artifacts, not raw recordings). The "must not depend on raw recording data" invariant becomes: the v3 wrapper extracts what the matcher needs from the analyzer and feeds the matcher a self-contained directory; the wrapper never hands raw NWB paths to the matcher.
+
 **Inputs to read first:**
 
 - [src/spyglass/spikesorting/v3/session_group.py](src/spyglass/spikesorting/v3/session_group.py) (Phase 3) — the `SessionGroup` table is reused for per-session-then-match (not just concat).
@@ -22,7 +29,27 @@ Adds **sort-then-match** cross-session unit tracking via UnitMatchPy. The design
 
 ## Tasks
 
-- **Implement `matcher_protocol.py`** — the protocol + registry per [shared-contracts.md § MatcherProtocol](shared-contracts.md#matcherprotocol--cross-session-unit-matching-plugin-interface). This is pure Python with no DataJoint dependency; tests should be importable standalone.
+### Phase 4a — Technical spike (no schema changes)
+
+Output of this sub-phase is documentation + a working notebook, NOT new tables. The DataJoint surface waits until 4a's findings are written down.
+
+- **Install UnitMatchPy in a v3 dev env**: `pip install UnitMatchPy>=3.3` (verify exact extras incantation). Document any install warts in `appendix.md § UnitMatchPy integration notes`.
+- **Build a v3 SortingAnalyzer fixture for at least one Frank-lab session** (or use the synthetic Neuropixels fixture from Phase 4b's `conftest.py`). Sort completes; analyzer has `templates`, `waveforms`, `unit_locations` extensions.
+- **Walk the actual UnitMatchPy API** end-to-end against that analyzer. Document:
+  - The exact entry-point function name and signature (the current placeholder `um.MakeMatchTable(um_config)` may be stale).
+  - The exact input data layout: file names, dtypes, shapes, where waveforms / channel positions / per-unit metadata live on disk.
+  - Whether UnitMatchPy accepts pre-extracted waveforms (the contract we want) or whether it insists on re-reading raw data (the contract we cannot meet without breaking the matcher invariant).
+  - The output format: pairwise probability matrix shape, FDR estimate column, drift-correction outputs.
+  - Compute cost on the fixture (wall time, peak RSS).
+- **Write the findings into `appendix.md § UnitMatchPy integration notes`**, REPLACING the current speculative content. Include the exact import statements and a minimal working code snippet (the v3 wrapper will be derived from this).
+- **Reconcile with `shared-contracts.md § MatcherProtocol`**. The current contract says "matcher MUST NOT depend on raw recording data". If 4a finds UnitMatchPy genuinely requires raw data, EITHER:
+  - revise the contract to say "the v3 wrapper preextracts waveforms from the analyzer and writes them in matcher-expected layout; raw paths are never handed to the matcher" (preferred), OR
+  - mark UnitMatchPy as not-usable and document an alternative.
+- **Output deliverables of 4a**: a notebook `notebooks/14a_UnitMatch_Spike.ipynb` that loads a v3 analyzer and runs UnitMatchPy end-to-end, plus the updated appendix and shared-contracts sections. NO new DataJoint tables. NO `unit_matching.py` written yet.
+
+### Phase 4b — Schema + implementation (after 4a lands)
+
+- **Implement `matcher_protocol.py`** — the protocol + registry per [shared-contracts.md § MatcherProtocol](shared-contracts.md#matcherprotocol--cross-session-unit-matching-plugin-interface) (revised by 4a). This is pure Python with no DataJoint dependency; tests should be importable standalone.
 
 - **Implement `_unitmatch_backend.py`** — the UnitMatch wrapper.
   - Subclass `MatcherProtocol`, `name = "unitmatch"`.
@@ -89,7 +116,8 @@ Adds **sort-then-match** cross-session unit tracking via UnitMatchPy. The design
 | `test_unitmatch_backend_two_sessions_synthetic` (slow) | Synthetic 2-session Neuropixels-shaped fixture (16-channel sort group, 5 units per session, half are "same neuron"): UnitMatch returns match probabilities high (>0.7) for true positives and low (<0.3) for random pairs. |
 | `test_unit_match_make_writes_part_rows` (slow) | After `UnitMatch.populate()`, `UnitMatch.Pair & key` has expected number of rows. |
 | `test_tracked_unit_connected_components` | Synthetic pair list with three sessions and known clusters; `TrackedUnit.make()` produces expected number of biological-unit components. |
-| `test_tracked_unit_handles_inconsistent_matches` | Pairs A↔B (high), B↔C (high), A↔C (low) — graph traversal gives one component (transitive); test verifies and notes the choice in a docstring. |
+| `test_tracked_unit_strict_default_rejects_transitive` | Pairs A↔B (high), B↔C (high), A↔C (low). Default `tracked_unit_policy="strict"` (maximal cliques) produces ≥2 components (NOT 1) — A and C cannot be lumped without a direct above-threshold edge. Test asserts >1 component and asserts no component contains both A and C. |
+| `test_tracked_unit_transitive_opt_in_unifies` | Same input as above; with `tracked_unit_policy="transitive"`, connected-components yields 1 component with `n_transitive_only_edges == 1` (the A↔C edge missing). |
 | `test_tetrode_warning_logged` | Running UnitMatch on a SessionGroup with ≤4 channels per unit logs a warning string containing "tetrode". |
 | `test_v3_unitmatch_neuropixels_smoke` (slow, optional) | Skipped unless `--run-neuropixels` is passed; uses a small Neuropixels fixture if available. |
 
