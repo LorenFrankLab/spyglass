@@ -14,7 +14,7 @@ class BaseMixin:
         and the restriction had no effect.
         """
         ret = super().restrict(restriction, *args, **kwargs)
-        if ret is self and restriction not in (True, False):
+        if ret is self and restriction is not True and restriction is not False:
             self._warn_msg(
                 "Restriction had no effect — no shared attributes found. "
                 "Please check your restrict() call."
