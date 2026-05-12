@@ -582,6 +582,17 @@ class CurationV3(SpyglassMixin, dj.Manual):
                                   # name MUST be `object_id` per shared-contracts
                                   # NWB Column-Name Convention (CurationV1 parity)
     merges_applied=0: bool
+    metrics_source: enum('manual', 'analyzer_curation', 'figpack', 'imported') = 'manual'
+                                  # provenance of any metrics blob attached to
+                                  # this curation. Addresses Spyglass GitHub
+                                  # issue #939 (CurationV1 does not track a
+                                  # metrics source). 'manual' = user-supplied
+                                  # via insert_curation(metrics=...);
+                                  # 'analyzer_curation' = materialized from
+                                  # AnalyzerCuration.materialize_curation();
+                                  # 'figpack' = round-tripped from FigPack UI;
+                                  # 'imported' = brought in from an external
+                                  # source (legacy v1 conversion).
     description: varchar(255)
     """
 

@@ -40,6 +40,10 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
   - `investigate_pair_peaks(key, unit_a, unit_b)`.
   - These read directly from the SortingAnalyzer's `correlograms` extension; no separate `BurstPair`-equivalent table.
 
+- **Label-list isolation invariant** (addresses the v0 auto-curation bug class [#1513](https://github.com/LorenFrankLab/spyglass/issues/1513)): when `_apply_label_rules` builds per-unit label lists, each unit MUST receive an independent list object — NOT a shared reference. v0's bug was three independent uses of a shared `[]` default that aliased label lists across units, silently corrupting `accepted_units` filters. v3's implementation creates a fresh list per unit and explicitly copies any input default. Test: `test_label_list_isolation` synthesizes two units that fail a rule; mutates one unit's label list; asserts the other unit's label list is unchanged.
+
+- **NaN sanitization for metric serialization** (addresses [#1556](https://github.com/LorenFrankLab/spyglass/issues/1556)): SI's `compute_quality_metrics` legitimately returns `nan` for low-spike units. `AnalyzerCuration.make()` writes metrics via three paths (DataJoint blob, NWB unit column, FigPack URI in Phase 5); ALL three must see NaN coerced to `None` BEFORE serialization. Add `_sanitize_for_json(df) -> df` helper that copies the DataFrame and replaces all non-finite values with `None`. The in-memory `metrics_df` retains NaN for downstream consumers that want to filter on it; only the JSON-bound path gets sanitized. Per the [Empty / NaN / Boundary Invariants contract](shared-contracts.md#empty--nan--boundary-invariants).
+
 - **Implement `_apply_label_rules(metrics_df, label_rules)` helper** in `metric_curation.py`:
   ```python
   def _apply_label_rules(metrics_df, label_rules):

@@ -120,6 +120,38 @@ These are smaller, mostly orthogonal decisions where the plan's default is docum
 3. **Curation label enum enforcement?** *Current best-answer*: v3 uses a `CurationLabel` Pydantic Enum (`accept`, `mua`, `noise`, `artifact`, `reject`). Inserts validate against the enum at the API surface but raw `dj.Manual` inserts that bypass the helper remain free-form (DataJoint doesn't support enums on blob columns).
 4. **Parity baseline SI version mismatch.** *Current best-answer*: v1 parity is no longer performed against minirec (minirec has no real spikes). v1 parity now runs only when `SPIKESORTING_V3_REAL_NWB_PATH` is set — `test_v3_real_data_v1_parity` runs v1 + v3 against the user-provided NWB and compares per-unit spike times. Tolerances: `clusterless_thresholder` exact within ±1 sample; stochastic sorters within ±50% unit count and ±30% median firing rate. If v1 cannot run under SI 0.104 (because the prerequisite port to `create_sorting_analyzer` is not yet complete), the test skips with an explicit message — it does not silently relax to a meaningless tolerance.
 
+## Issue Traceability — v1 GitHub issues v3 closes
+
+Mining of [LorenFrankLab/spyglass GitHub issues](https://github.com/LorenFrankLab/spyglass/issues?q=is%3Aissue+label%3A%22spike+sorting%22) surfaced concrete v1 bugs and friction points. The following are explicitly addressed by v3 design decisions:
+
+| v1 Issue | Problem | v3 fix |
+|---|---|---|
+| [#1394](https://github.com/LorenFrankLab/spyglass/issues/1394) | `get_sort_group_info` shows only one electrode → wrong region on multi-region polymer probes | `Sorting.Unit` + `CurationV3.Unit` persist per-unit peak channel; `get_sort_group_info` walks all electrodes |
+| [#1532](https://github.com/LorenFrankLab/spyglass/issues/1532), [#1154](https://github.com/LorenFrankLab/spyglass/issues/1154) | `CurationV1` fails on zero-unit sortings (`KeyError: 'spike_times'`) | Empty/NaN/Boundary Invariant 1 in shared-contracts; Phase 1 `test_v3_empty_sorting_end_to_end` |
+| [#1556](https://github.com/LorenFrankLab/spyglass/issues/1556) | `FigURLCuration` fails on NaN-bearing metrics (low-spike units) | Empty/NaN/Boundary Invariant 2; `_sanitize_for_json` in `AnalyzerCuration.make()`; Phase 2 `test_metric_nan_round_trip` |
+| [#1558](https://github.com/LorenFrankLab/spyglass/issues/1558) | Spike at recording boundary → "exceeds duration" error | Empty/NaN/Boundary Invariant 3; explicit boundary-tolerance test in Phase 1 |
+| [#1437](https://github.com/LorenFrankLab/spyglass/issues/1437) | `SpikeSorting.populate` fails when raw NWB has existing Units table | Phase 1 `Sorting.make()` uses whitelist construction (does NOT copy raw NWB) |
+| [#1133](https://github.com/LorenFrankLab/spyglass/issues/1133), [#1585](https://github.com/LorenFrankLab/spyglass/issues/1585) | Recording timestamps wrong / silent truncation | Phase 1 `Recording.make()` asserts saved time range covers requested interval; `RecordingTruncatedError` |
+| [#928](https://github.com/LorenFrankLab/spyglass/issues/928) | Artifact detection per sort group misses behavioral artifacts visible across groups | Phase 1 `SharedArtifactGroup` opt-in path |
+| [#1513](https://github.com/LorenFrankLab/spyglass/issues/1513) | v0 `AutomaticCuration.get_labels` label-list aliasing across units | Phase 2 label-list isolation invariant + `test_label_list_isolation` |
+| [#939](https://github.com/LorenFrankLab/spyglass/issues/939) | `CurationV1` doesn't track metric source | Phase 1 `CurationV3.metrics_source` enum column |
+| [#528](https://github.com/LorenFrankLab/spyglass/issues/528) | No cross-day sorting | Phase 3 `SessionGroup` + `ConcatenatedRecording`; Phase 4 UnitMatch sort-then-match for cross-day |
+| [#1436](https://github.com/LorenFrankLab/spyglass/issues/1436) | Need SI 0.103+ compatibility | Phase 0 prerequisite SI 0.104 upgrade; Phase 1 SortingAnalyzer |
+| [#1286](https://github.com/LorenFrankLab/spyglass/issues/1286) | UX redesign request | Phase 1 minimal `run_v3_pipeline()` + Phase 5 full presets/FigPack |
+| [#1530](https://github.com/LorenFrankLab/spyglass/issues/1530), [#1512](https://github.com/LorenFrankLab/spyglass/issues/1512), [#1504](https://github.com/LorenFrankLab/spyglass/issues/1504), [#1215](https://github.com/LorenFrankLab/spyglass/issues/1215) | `FigURLCuration` brittleness (opaque KeyError, sortingview API drift) | Phase 5 replaces FigURL with FigPack for v3 curations |
+| [#133](https://github.com/LorenFrankLab/spyglass/issues/133) | `SpikeSortingRecordingSelection` LabTeam in PK blocks shared sorts | v3 `RecordingSelection` does not include `team_name` in PK |
+
+## Explicitly NOT fixed by v3 (separate v1-side patches required)
+
+These bugs surfaced in the issue sweep but are NOT in v3's surface area. The plan should not absorb them; the implementer notes them here so an executor isn't tempted to scope-creep into them:
+
+- [#1581](https://github.com/LorenFrankLab/spyglass/issues/1581) — `ImportedSpikeSorting.fetch_nwb` `pd.concat` index collision. Fix in `imported.py` (not in `spikesorting/v3/`): use `ignore_index=True` and add `nwb_file_name` + `unit_id` as MultiIndex levels.
+- [#1273](https://github.com/LorenFrankLab/spyglass/issues/1273) — `UnitWaveformFeatures` assumes contiguous unit IDs. Fix in `decoding/v1/waveform_features.py`; one-line indexing change. v3's `Sorting.Unit` design preserves non-contiguous unit IDs, but the v1 `UnitWaveformFeatures` table is not rewritten.
+- [#638](https://github.com/LorenFrankLab/spyglass/issues/638), [#1282](https://github.com/LorenFrankLab/spyglass/issues/1282) — Opaque `1217 IntegrityError` on cascade-delete. Database-config / upstream DataJoint issue affecting all merge-bearing tables. v3 cannot fix from the schema side.
+- [#1159](https://github.com/LorenFrankLab/spyglass/issues/1159) — `get_spiking_v1_merge_ids` invalid restriction. Bug in `spikesorting_merge.py`'s v1 helper; v3's `get_restricted_merge_ids(sources=['v3'])` path is independent.
+
+The implementer of any v3 phase should resist scope-creeping into these. They are tracked separately.
+
 ## Estimated Effort
 
 LOC sanity check, not a time estimate:
