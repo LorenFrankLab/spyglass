@@ -327,6 +327,71 @@ class Model(SpyglassMixin, dj.Computed):
     checkpoint_params = NULL: longblob  # parameters of the model at each checkpoint
     """
 
+    class ModelCheckpoint(SpyglassMixinPart, dj.Manual):
+        definition = """
+        -> Model
+        checkpoint: int  # checkpoint number (e.g. epoch number)
+        ---
+        model_params: longblob  # state dict of the model at this checkpoint
+        -> AnalysisNwbfile  # NWB file containing the embedded latent states and context variables at this checkpoint
+        z_object_id: varchar(40)  # object ID for the embedded latent states at this checkpoint
+        c_object_id: varchar(40)  # object ID for the embedded context variables at this checkpoint
+        """
+
+    def insert_checkpoint(self, checkpoint: int):
+        model_key = self.fetch1("KEY")
+        if self.ModelCheckpoint & {**model_key, "checkpoint": checkpoint}:
+            logger.warning(
+                f"Checkpoint {checkpoint} already exists for model {model_key}. Skipping insertion."
+            )
+            return
+
+        analysis = self.fetch_c3po_analysis(
+            model_key, checkpoint=checkpoint, load_embeddings=False
+        )
+
+        marks, mark_times = MarksGroup().fetch_marks(model_key)
+        delta_t = np.diff(mark_times)
+        ind = np.where(delta_t > 0)[0]
+        delta_t = delta_t[ind]
+        marks = marks[1:][ind]
+        training_params = (TrainingParams & model_key).fetch1()
+        if training_params["delta_t_units"] == "ms":
+            delta_t *= 1e3
+        elif training_params["delta_t_units"] == "us":
+            delta_t *= 1e6
+
+        # embed the data with the model parameters at this checkpoint
+        analysis.embed_data(
+            marks[None, :],
+            delta_t[None, :],
+            delta_t_units=training_params["delta_t_units"],
+            first_mark_time=mark_times[0],
+        )
+
+        z_obj = TimeSeries(
+            timestamps=analysis.t, data=analysis.z, unit="none", name="z"
+        )
+        c_obj = TimeSeries(
+            timestamps=analysis.t, data=analysis.c, unit="none", name="c"
+        )
+
+        # Build an analysis file with the results
+        with AnalysisNwbfile().build(model_key["nwb_file_name"]) as builder:
+            analysis_file_name = builder.analysis_file_name
+            z_object_id = builder.add_nwb_object(z_obj)
+            c_object_id = builder.add_nwb_object(c_obj)
+
+        insert_key = {
+            **model_key,
+            "checkpoint": checkpoint,
+            "model_params": self.fetch1("checkpoint_params")[checkpoint],
+            "analysis_file_name": analysis_file_name,
+            "z_object_id": z_object_id,
+            "c_object_id": c_object_id,
+        }
+        self.ModelCheckpoint.insert1(insert_key)
+
     def _make_fetch(self, key):
         marks, mark_times = MarksGroup().fetch_marks(key)
         interval_key = {
@@ -371,8 +436,13 @@ class Model(SpyglassMixin, dj.Computed):
         # marks = marks[1:]
 
         ind = np.where(delta_t > 0)[0]
+        print(
+            "n_simultaneous_marks:", f"{len(marks) - 1 - len(ind)}/{len(marks)}"
+        )
         delta_t = delta_t[ind]
         marks = marks[1:][ind]
+        mark_times = mark_times[1:][ind]
+
         if training_params["delta_t_units"] == "ms":
             delta_t *= 1e3
         elif training_params["delta_t_units"] == "us":
@@ -513,10 +583,31 @@ class Model(SpyglassMixin, dj.Computed):
         )
         self._make_insert(key, *results)
 
-    def fetch_c3po_analysis(self, key):
-        model_args = ModelParams().fetch_model_args(key)
-        model = (ModelParams & key).get_model()
-        input_shape = self.fetch1("input_shape")
+    def fetch_c3po_analysis(
+        self, key, checkpoint: int = None, load_embeddings=True
+    ) -> C3poAnalysis:
+        """Fetch a C3POAnalysis object with the trained params and embedded results
+
+        Parameters
+        ----------
+        key : dict
+            Dictionary containing the primary key of the Model entry to fetch.
+        checkpoint : int, optional
+            Checkpoint number to fetch parameters and embeddings from. If None, fetches the final trained model parameters and embeddings. Default is None.
+        load_embeddings : bool, optional
+            Whether to load the embedded latent states and context variables from the NWB file and store them in the analysis object. If False, only loads the model parameters without loading the embeddings. Default is
+            True.
+
+        Returns
+        -------
+        analysis : C3poAnalysis
+            C3poAnalysis object containing the model, model parameters, and optionally the embedded latent states and context variables.
+
+        """
+        model_key = (self & key).fetch1("KEY")
+        model_args = ModelParams().fetch_model_args(model_key)
+        model = (ModelParams & model_key).get_model()
+        input_shape = (self & model_key).fetch1("input_shape")
 
         # create dummy input to initialize the model parameters
         x_ = np.zeros((1, 100, *input_shape))
@@ -531,20 +622,41 @@ class Model(SpyglassMixin, dj.Computed):
         rand_key = jax.random.PRNGKey(0)
         null_params = model.init(jax.random.PRNGKey(1), x_, delta_t_, rand_key)
         # load the trained model parameters  organized by the dummy input structure
-        params = serialization.from_bytes(
-            null_params, self.fetch1("model_params")
-        )
+        if checkpoint is None:
+            params = serialization.from_bytes(
+                null_params, (self & model_key).fetch1("model_params")
+            )
+        else:
+            checkpoint_params = (self & model_key).fetch1("checkpoint_params")[
+                checkpoint
+            ]
+            params = serialization.from_bytes(null_params, checkpoint_params)
 
         # build analysis object
         analysis = C3poAnalysis(
             model=model, model_args=model_args, params=params
         )
 
-        # fetch the embedded latent states and context variables from the NWB file
-        # store them in the analysis object and return it
-        nwb = (self.fetch_nwb())[0]
-        analysis.t = nwb["z"].timestamps
-        analysis.z = nwb["z"].data
-        analysis.c = nwb["c"].data
+        if load_embeddings:
+            # fetch the embedded latent states and context variables from the NWB file
+            # store them in the analysis object and return it
+            if checkpoint is None:
+                nwb = (self.fetch_nwb())[0]
+            else:
+                if (
+                    len(
+                        checkpoint_query := self.ModelCheckpoint()
+                        & {**model_key, "checkpoint": checkpoint}
+                    )
+                    == 0
+                ):
+                    raise ValueError(
+                        f"No checkpoint {checkpoint} found for model {model_key}."
+                        + "Please ensure the checkpoint exists before trying to load embeddings."
+                    )
+                nwb = (checkpoint_query.fetch_nwb())[0]
+            analysis.t = nwb["z"].timestamps
+            analysis.z = nwb["z"].data
+            analysis.c = nwb["c"].data
 
         return analysis
