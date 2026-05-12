@@ -62,7 +62,9 @@ What v3 touches in the existing tree and what is preserved.
 | `zarr` | (transitive) | `<3.0` | Phase 0 | SI #4014 not yet landed; v3 archival uses Zarr v2. |
 | `spikeinterface` | `>=0.99.1,<0.100` | `>=0.104,<0.105` | **Prerequisite PR before Phase 1** | SortingAnalyzer, PreprocessingPipeline, modern curation primitives. Bumping this breaks v1's `extract_waveforms` calls — the same prerequisite PR ports v1 to `create_sorting_analyzer` so the bump is non-breaking. |
 | `mountainsort5` | (absent) | `>=0.5` | Same prerequisite PR | Additional sorter; v3 keeps MS4 too. |
-| `unitmatchpy` | (absent) | `>=3.3` | Phase 4 (optional extra) | Cross-session matching. |
+| `unitmatchpy` | (absent) | `>=3.3` | Phase 4 (optional extra `spikesorting-v3-matching`) | Cross-session matching. |
+| `MEArec` | (absent) | `>=1.9` | Phase 0 (optional extra `spikesorting-v3-validation`) | Ground-truth fixture generation for v3 validation. |
+| `neuroconv[mearec]` | (absent) | (latest) | Phase 0 (same extra) | MEArec → NWB conversion via `MEArecRecordingInterface`. |
 | `mountainsort4` | present | unchanged | n/a | v1 + v3 both ship MS4 wrapper. |
 
 All v3 additions are made via the existing `pyproject.toml`. Optional deps (`unitmatchpy`, `mountainsort5` when not installed) gate at import time with a clear error pointing to the install command.

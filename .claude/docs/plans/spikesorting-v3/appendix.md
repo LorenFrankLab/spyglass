@@ -14,6 +14,8 @@ Reference material for executors implementing against external code or formats. 
 - [UnitMatchPy integration notes](#unitmatchpy-integration-notes)
 - [FigPack vs FigURL](#figpack-vs-figurl)
 - [Motion correction presets](#motion-correction-presets)
+- [MEArec integration notes](#mearec-integration-notes)
+- [Spyglass NWB ingestion requirements (trodes_to_nwb compatibility)](#spyglass-nwb-ingestion-requirements-trodes_to_nwb-compatibility)
 
 ---
 
@@ -215,3 +217,104 @@ For Phase 3 default: `rigid_fast` (same-day, fast).
 For multi-day chronic (Phase 6 future): `dredge_fast` or `dredge`.
 
 Source: https://spikeinterface.readthedocs.io/en/stable/modules/motion_correction.html
+
+---
+
+## MEArec integration notes
+
+MEArec ([SpikeInterface/MEArec](https://github.com/SpikeInterface/MEArec), Buccino & Einevoll 2020 Neuroinformatics) is a biophysical simulator for extracellular recordings with absolute ground-truth spike trains. v3 uses it as the primary validation oracle — `minirec` is too short to contain real spikes and is reduced to a plumbing-only fixture.
+
+### What MEArec generates
+
+- `RecordingGenerator.recordings`: shape `(n_samples, n_channels)` raw traces.
+- `RecordingGenerator.spiketrains`: list of Neo SpikeTrain objects, one per ground-truth unit.
+- `RecordingGenerator.templates`: jittered template tensor, shape `(n_units, n_jitters, n_electrodes, n_samples)`.
+- `RecordingGenerator.template_locations`: per-unit 3D soma positions.
+- `RecordingGenerator.channel_positions`: probe electrode layout.
+- `RecordingGenerator.cell_types`: per-unit cell-type label.
+
+### Probes (relevant subset)
+
+- **Linear tetrode probe** (4 channels) — primary fixture for Frank-lab tetrode validation.
+- **Neuropixels-128** (128 channels, ~100 templates per cell model) — for Phase 4 UnitMatch validation against published Neuropixels-only validation.
+- **Neuronexus-32** (32 channels, 30 drifting templates per cell) — used by the 2024 motion-correction benchmark paper.
+
+### Drift simulation
+
+Critical for Phase 3 motion-correction validation:
+- **Slow drift**: continuous, ~5 μm/min default.
+- **Fast drift**: discrete jumps, ~20 s interval by default.
+- **Rigid** (all neurons move together) or **non-rigid** (depth-gradient — neurons at probe bottom move at 50% the speed of those at top).
+
+### Multi-session workaround
+
+MEArec has no native multi-session concept. For Phase 4 cross-session validation, generate **two recordings using the same `templates` file** with different `seeds.spiketrain` and a small applied drift between them. The shared templates ARE the shared biological units; UnitMatch should recover the correspondence. This is the approach the 2024 drift-benchmark paper used.
+
+### Integration with SpikeInterface + NeuroConv
+
+- `MEArecRecordingExtractor` exposes the recording side as a SpikeInterface `BaseRecording`.
+- `MEArecSortingExtractor` exposes the ground-truth spike times as a `BaseSorting` — directly usable by `spikeinterface.comparison.compare_sorter_to_ground_truth`.
+- `neuroconv.datainterfaces.MEArecRecordingInterface` writes the recording side to NWB (`ElectricalSeries` + electrodes table + probe). Install: `pip install "neuroconv[mearec]"`.
+- The Units ground-truth table is NOT written by NeuroConv's interface — v3's converter adds it manually from `RecordingGenerator.spiketrains` + `template_locations`. ~20 LOC.
+
+### Sources
+
+- [MEArec docs — generate recordings](https://mearec.readthedocs.io/en/latest/generate_recordings.html)
+- [Buccino & Einevoll 2020, MEArec paper, Neuroinformatics](https://link.springer.com/article/10.1007/s12021-020-09467-7)
+- [Garcia et al. 2024, modular drift-correction benchmark, eNeuro / PMC10897502](https://pmc.ncbi.nlm.nih.gov/articles/PMC10897502/)
+- [SpikeInterface blog — ground-truth comparison and ensemble sorting](https://spikeinterface.github.io/blog/ground-truth-comparison-and-ensemble-sorting-of-a-synthetic-neuropixels-recording/)
+- [NeuroConv MEArec interface docs](https://neuroconv.readthedocs.io/en/main/conversion_examples_gallery/recording/mearec.html)
+
+---
+
+## Spyglass NWB ingestion requirements (trodes_to_nwb compatibility)
+
+The MEArec → NWB converter must produce files that Spyglass's `insert_sessions` ingests successfully. Reference: [LorenFrankLab/trodes_to_nwb](https://github.com/LorenFrankLab/trodes_to_nwb) — the canonical converter for Frank-lab raw data.
+
+### ElectricalSeries naming (required)
+
+Spyglass's `Raw` ingestion at [common_ephys.py:289-294](src/spyglass/common/common_ephys.py#L289-L294) looks for the first `ElectricalSeries` matching one of:
+
+```python
+_source_nwb_object_name = ["e-series", "electricalseries", "ephys", "electrophysiology"]
+```
+
+`trodes_to_nwb` writes to `"e-series"`. **Match that name** in the MEArec converter — NeuroConv's default may differ. Override via `metadata={"Ecephys": {"ElectricalSeries": {"name": "e-series"}}}`.
+
+### YAML metadata fields (from trodes_to_nwb 20230622_sample_metadata.yml)
+
+The converter must populate these NWB-level fields (synthetic but well-formed):
+- `experimenter_name` (list of "lastname, firstname")
+- `lab`, `institution`
+- `experiment_description`, `session_description`, `session_id`, `keywords`
+- `subject`: `description`, `genotype`, `sex`, `species`, `subject_id`, `date_of_birth`, `weight`
+- `data_acq_device`, `device`
+- `electrode_groups`: per group, `location`, `device_type`, coordinates `(x, y, z)`, `targeted_location`
+- `ntrode_electrode_group_channel_map` (one mapping per tetrode group)
+
+### Probe device types Spyglass recognizes
+
+- `tetrode_12.5` — Frank-lab default tetrode; recognized by Spyglass at [recording.py:630-643](src/spyglass/spikesorting/v1/recording.py#L630-L643) for probe-geometry handling.
+- Neuropixels device types via `probeinterface`.
+
+For MEArec fixtures, plant the device_type explicitly to match an existing Spyglass-recognized probe — otherwise the ingestion succeeds but downstream probe-geometry handling falls back to channel-position-only.
+
+### BrainRegion via targeted_location
+
+Spyglass's `BrainRegion` table is populated from each electrode group's `targeted_location` field. For Phase 1 brain-region-tracing validation, the MEArec fixture's `brain_region_map` (e.g., `{0: "CA1", 1: "CA3"}`) is materialized by setting `electrode_groups[i].targeted_location = brain_region_map[i]` in the metadata; Spyglass ingestion creates the corresponding `BrainRegion` rows.
+
+### Round-trip validation
+
+The Phase 0 fixture generator runs `Nwbfile.insert_from_relative_file_name(out_path)` immediately after writing each fixture and asserts:
+- `Session & {"nwb_file_name": fixture}` exists with one row.
+- `Raw & {"nwb_file_name": fixture}` exists with one row.
+- `Electrode & {"nwb_file_name": fixture}` has the expected count.
+- `BrainRegion & {"region_name": planted_region}` exists for each planted region.
+
+If round-trip fails on a freshly-generated fixture, the converter is broken — fail fast at fixture-generation time rather than at test-run time.
+
+### Sources
+
+- [LorenFrankLab/trodes_to_nwb GitHub](https://github.com/LorenFrankLab/trodes_to_nwb)
+- [trodes_to_nwb sample metadata YAML](https://github.com/LorenFrankLab/trodes_to_nwb/blob/main/src/trodes_to_nwb/tests/test_data/20230622_sample_metadata.yml)
+- Spyglass [common_ephys.py:276-330](src/spyglass/common/common_ephys.py#L276-L330) — Raw ingestion logic.

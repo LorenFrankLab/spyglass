@@ -77,19 +77,18 @@ Output of this sub-phase is documentation + a working notebook, NOT new tables. 
 
 - **Helper for building `UnitMatchSelection.MemberCuration` rows**: `UnitMatchSelection.insert_selection(session_group_name, matcher_params_name, curation_choices: dict[member_index, curation_key]) -> dict`. The `curation_choices` argument maps each member's `member_index` to an explicit `{"sorting_id": ..., "curation_id": ...}` key. Helper validates that every member has a choice and raises clearly if any are missing. Returns the unitmatch_id PK dict per the [shared-contracts insert_selection convention](shared-contracts.md#insert_selection-return-value-normalization).
 
-- **Tetrode validation gate.** A standalone validation script `tests/spikesorting/v3/validate_tetrode_unitmatch.py` (not a pytest test — invoked manually with a user-provided tetrode dataset):
-  - Input: path to a multi-day tetrode dataset with manually-curated cross-day unit correspondences (gold standard). Lab provides during Phase 4 implementation.
-  - Runs v3 sort + curation on each day independently.
-  - Runs UnitMatch via the Phase 4 backend.
-  - Computes ROC of match probability vs gold-standard correspondence:
-    - Self-matches (gold positive): within-day cross-validation positives.
-    - Random pairs (gold negative): pairs that gold annotates as different neurons.
-  - Reports AUC + suggested threshold.
-  - **Pass criterion**: AUC > 0.85 on the user's gold-standard dataset, OR documented otherwise as "tetrode matcher unreliable; route via concat for tetrode chronic".
+- **Tetrode validation gate — MEArec ground-truth path** (preferred; deterministic and reproducible). The Phase-0-generated MEArec fixtures, plus a new Phase 4b fixture-generation step, give us absolute ground-truth tetrode validation without depending on lab-provided gold-standard data:
+  - **New fixture in Phase 4b**: `mearec_tetrode_2sessions.nwb` pair — two synthetic NWB files generated from the SAME MEArec template set with different `seeds.spiketrain` and a small drift between sessions, producing ~6 shared "biological units" plus 2-3 session-unique units per session.
+  - **Validation test** `test_v3_unitmatch_tetrode_mearec_ground_truth` (slow, integration): run v3 sort + curation on both sessions, run UnitMatch, compute ROC of match probability vs ground-truth correspondence (planted in the Units table).
+    - Self-matches (gold positive): pairs of (session A unit, session B unit) that share the same MEArec template ID.
+    - Random pairs (gold negative): pairs that share no template.
+  - **Pass criterion**: AUC > 0.85 across the synthetic tetrode pair.
+  - If the test fails the pass criterion, Phase 4 STILL ships — but:
+    - `MatcherParameters` documentation marks `unitmatch` as "validated on Neuropixels; tetrode reliability documented at <link to MEArec AUC report>".
+    - The default preset bundle for tetrodes (in Phase 5 `PRESETS` dict) routes through Phase 3 concat (when same-day) or warns that cross-day tetrode matching is unreliable.
+  - Output is a deterministic AUC number — no lab dataset dependency, runs in CI, regressable.
 
-  If the script fails the pass criterion, Phase 4 STILL ships — but:
-  - `MatcherParameters` documentation marks `unitmatch` as "validated on Neuropixels; tetrode users should prefer `concat_identity` via Phase 3".
-  - The default preset bundle for tetrodes (in Phase 5 `PRESETS` dict) routes through Phase 3 concat, not UnitMatch.
+- **Optional supplementary check on real-lab data** (kept as a smoke test, not a gate): if `SPIKESORTING_V3_REAL_NWB_PATH` is set AND points to a multi-day tetrode dataset with manual cross-day correspondences, `validate_tetrode_unitmatch.py` (standalone CLI script, not a pytest test) reports AUC on the real data alongside the MEArec AUC. Provides empirical real-world confirmation but is NOT what gates Phase 4 shipping.
 
 - **Validation in code (`make()`)**: in `UnitMatch.make()`, log a warning if `session_analyzers[0].analyzer.get_extension("templates")` has fewer than 16 channels per unit (a heuristic that catches tetrode usage). The warning includes a pointer to the tetrode validation document.
 

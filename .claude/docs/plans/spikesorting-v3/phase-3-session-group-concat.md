@@ -130,6 +130,7 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
 | `test_sorting_against_concatenated_recording` (slow) | Run `Sorting.populate()` on a SortingSelection FK'ing ConcatenatedRecording; analyzer folder created; `n_units > 0`; `Sorting.Unit` populated with brain regions from the per-session electrode metadata. |
 | `test_split_sorting_by_session` (slow) | After concat sort, `split_sorting_by_session(sorting, key)` returns dict with one entry per Member; each entry's spike times fall within that member's time range; unit IDs preserved across members. |
 | `test_multi_day_chronic_smoke` (slow, optional) | Two-session multi-day concat sort completes; memory + runtime within budget. Skipped if `--run-chronic` not passed. |
+| `test_motion_correction_recovers_units_under_drift` (slow, integration) | Run v3 on `mearec_tetrode_drift_120s.nwb` (Phase 0 fixture with planted slow drift). Compare two pipelines: (a) `preset="none"` (no motion correction), (b) `preset="rigid_fast"`. Use `compare_sorter_to_ground_truth` against the planted Units table. **Assert (b) has strictly higher per-unit accuracy than (a)** for the units that drift through the recording. Directly validates that motion correction is doing scientifically-meaningful work, not just running. |
 
 ## Fixtures
 

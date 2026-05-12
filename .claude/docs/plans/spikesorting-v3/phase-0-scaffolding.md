@@ -61,11 +61,56 @@ This phase establishes the foundation: empty module structure, baseline-capture 
   - `_resolved_job_kwargs(key) -> dict` — merge from `(1) Lookup row's job_kwargs field` (if set), `(2) dj.config['custom']['spikesorting_v3_job_kwargs']`, `(3) si.get_global_job_kwargs()`. Returns the merged dict ready to splat into `analyzer.compute(**kwargs)`.
   - `_hash_binary_cache(path) -> str` — MD5 over the contents of the `traces_cached_seg*.raw` files. Skip the JSON manifest (changes with timestamps).
 
-- **Build the v1 baseline capture script.** New file: `tests/spikesorting/v3/baseline_capture.py`. This script is NOT a test (no `test_` prefix); it's invoked manually before running v1 to produce parity reference data. Functionality:
-  - Takes `--nwb-file`, `--sort-group-id`, `--interval-list-name`, `--output-dir` as CLI args.
-  - Runs the v1 pipeline end-to-end with `clusterless_thresholder` (deterministic, seed=0).
-  - Saves: `(a)` the resulting v1 `Sorting.fetch1("analysis_file_name")` units NWB as `baseline_v1_units.nwb`, `(b)` extracted spike times per unit as `baseline_v1_spike_times.pkl`, `(c)` recording metadata (n_channels, duration, sampling_freq) as `baseline_v1_recording_meta.json`.
-  - On successful capture, prints the `recording_id`, `sorting_id`, `curation_id` and the absolute paths of the saved artifacts.
+- **Add the MEArec ground-truth fixture generation infrastructure.** This is the primary validation oracle for v3 (minirec does not contain enough real spikes to be a useful sort-correctness baseline — see "fixture strategy" below). Components:
+  - **Optional dep**: add `MEArec>=1.9` and `neuroconv[mearec]` to a new optional extra in `pyproject.toml`:
+    ```toml
+    optional-dependencies.spikesorting-v3-validation = [
+        "MEArec>=1.9",
+        "neuroconv[mearec]",
+    ]
+    ```
+    Installed only when running ground-truth validation tests; not required for v3 runtime.
+  - **Fixture generator script**: new file `tests/spikesorting/v3/fixtures/generate_mearec.py` (NOT a test — no `test_` prefix; manually invoked once to populate cached fixtures). Functionality:
+    1. Generate three reference recordings via `mearec.gen_recordings(...)`:
+       - **`mearec_tetrode_60s.h5`**: linear tetrode probe, 60 s, 4 channels, 6 ground-truth units, no drift, deterministic seed.
+       - **`mearec_neuropixels_60s.h5`**: Neuropixels-128 probe, 60 s, 20 ground-truth units, no drift, deterministic seed.
+       - **`mearec_tetrode_drift_120s.h5`**: linear tetrode, 120 s, 6 ground-truth units, slow drift (5 μm/min), deterministic seed — used by Phase 3 motion-correction validation.
+    2. Convert each to NWB via the converter helper (next bullet).
+    3. Write the NWB files to `tests/spikesorting/v3/fixtures/`.
+    4. Print fixture metadata (`n_units`, `duration`, `n_channels`, MEArec version, deterministic seed) into `fixtures_manifest.json`.
+  - **MEArec → NWB converter** in `src/spyglass/spikesorting/v3/_fixtures/mearec_to_nwb.py`. The output must be **structurally identical to a `trodes_to_nwb`-produced NWB** so Spyglass's `insert_sessions` ingests it end-to-end. Use [LorenFrankLab/trodes_to_nwb](https://github.com/LorenFrankLab/trodes_to_nwb) as the reference; its YAML metadata schema (see [`20230622_sample_metadata.yml`](https://github.com/LorenFrankLab/trodes_to_nwb/blob/main/src/trodes_to_nwb/tests/test_data/20230622_sample_metadata.yml)) defines every required NWB field. Tasks:
+    1. **ElectricalSeries name MUST be `"e-series"`** (the first name in Spyglass's [`Raw._source_nwb_object_name` list at common_ephys.py:289-294](src/spyglass/common/common_ephys.py#L289-L294); `trodes_to_nwb`'s default). NeuroConv's default may differ — override via `interface.run_conversion(..., metadata={"Ecephys": {"ElectricalSeries": {"name": "e-series"}}})` or post-write rename if NeuroConv resists.
+    2. Use `neuroconv.datainterfaces.MEArecRecordingInterface` for the raw recording side: produces the `ElectricalSeries` + `electrodes` table + `Device` + `ElectrodeGroup` from MEArec's HDF5.
+    3. **Inject trodes_to_nwb-compatible metadata** mirroring the YAML schema, populated from synthetic values so the NWB looks like a normal Frank-lab session:
+       - `experimenter_name = ["Synthetic, MEArec"]`, `lab = "Loren Frank Lab"`, `institution = "UCSF"`, `experiment_description = "MEArec-simulated ground-truth recording for v3 validation"`, `session_description = "..."`, `session_id = "mearec_{fixture_name}"`, `keywords = ["spike sorting", "simulation", "ground truth"]`.
+       - `subject`: `description`, `genotype = "wt/wt"`, `sex = "U"`, `species = "Mus musculus"`, `subject_id = "synthetic_001"`, `date_of_birth`, `weight`.
+       - `electrode_groups`: one per MEArec template-group. For tetrode fixtures, `device_type = "tetrode_12.5"` (already registered with Spyglass — `probeinterface` recognizes it; see [recording.py:630-643](src/spyglass/spikesorting/v1/recording.py#L630-L643)). For Neuropixels fixtures, pick a registered Neuropixels probe device_type.
+       - `targeted_location` per electrode_group — this maps to `BrainRegion` in Spyglass's electrode table after ingestion. For ground-truth brain-region validation, plant known regions (e.g. tetrode group 0 → "CA1", group 1 → "CA3").
+       - `ntrode_electrode_group_channel_map` for tetrode fixtures: trivial identity map per tetrode.
+    4. **Add a Units ground-truth table** (this is NOT in trodes_to_nwb's normal output — trodes_to_nwb produces raw data only — but it's needed for the validation oracle). Read MEArec's `RecordingGenerator.spiketrains` (Neo SpikeTrain objects), `template_locations` (per-unit 3D soma positions), and `cell_types`. Write to `nwbfile.units` with columns: `id`, `spike_times`, `position_x`, `position_y`, `position_z`, `cell_type`, `is_ground_truth=True`. After Spyglass ingestion, these units land in `ImportedSpikeSorting` and can be compared against v3 `Sorting` output via SpikeInterface's `compare_sorter_to_ground_truth`.
+    5. Helper signature: `mearec_to_spyglass_nwb(mearec_h5_path: Path, out_nwb_path: Path, *, fixture_name: str, brain_region_map: dict[int, str] | None = None) -> None`.
+    6. **Validate the output** with NWBInspector before returning — the converter raises if the NWB has any blocking inspector findings. Catches malformed metadata that would fail Spyglass ingestion silently.
+    7. **Round-trip test in the same script**: after writing, call `Nwbfile.insert_from_relative_file_name(nwb_path)` (Spyglass's ingestion entry point) and verify a `Raw` row + non-empty `Electrode` table are produced. If the ingestion fails on a freshly-generated fixture, the converter is broken — better to find out at fixture-generation time than at test-run time.
+  - **Git infrastructure**: fixtures NOT checked in via Git LFS (per user direction — no LFS for lab data either). The fixture generation step is documented as a manual one-shot for v3 contributors; CI generates fixtures fresh inside its own job (cached between runs via the CI cache). Add `tests/spikesorting/v3/fixtures/*.h5` and `tests/spikesorting/v3/fixtures/*.nwb` to `.gitignore`.
+  - **Phase 0 task ends with the fixture-generation script existing and producing valid fixtures**. Subsequent phases assume the fixtures exist when running ground-truth tests.
+
+- **Fixture strategy for v3 testing** — to be documented in `tests/spikesorting/v3/fixtures/README.md`:
+
+  | Fixture | Source | Used by | Real spikes? |
+  |---|---|---|---|
+  | `minirec20230622.nwb` | Existing v0/v1 fixture | Phase 0 plumbing tests (module import, schema validation, populate-doesn't-crash). NOT used for sort-correctness. | Likely none — too short |
+  | `mearec_tetrode_60s.nwb` | MEArec → NWB (Phase 0) | Phase 1 ground-truth precision/recall; brain-region tracing | Yes (planted) |
+  | `mearec_neuropixels_60s.nwb` | MEArec → NWB (Phase 0) | Phase 1 Neuropixels parity; Phase 4 Neuropixels UnitMatch tests | Yes (planted) |
+  | `mearec_tetrode_drift_120s.nwb` | MEArec → NWB (Phase 0) | Phase 3 motion correction validation | Yes (planted, with drift) |
+  | MEArec 2-session pair | MEArec → NWB (Phase 4 generates) | Phase 4 UnitMatch ground-truth validation | Yes (planted; shared templates across sessions) |
+  | **Real lab dataset** | User-provided via env var `SPIKESORTING_V3_REAL_NWB_PATH` | v1-parity smoke test (Phase 1); memory/runtime budget (Phase 3); end-to-end "works on real data" smoke (Phase 5). Tests skip if env var unset. | Yes |
+
+- **Replace the prior v1-baseline-capture-script task** with a refined version that operates on the real-lab dataset (not minirec):
+  - New file `tests/spikesorting/v3/baseline_capture.py`, CLI args `--nwb-file`, `--sort-group-id`, `--interval-list-name`, `--output-dir`. Default `--nwb-file` reads from `SPIKESORTING_V3_REAL_NWB_PATH`.
+  - Runs the v1 pipeline end-to-end with `clusterless_thresholder` (deterministic, seed=0) on the real-data NWB.
+  - Saves `baseline_v1_units.nwb`, `baseline_v1_spike_times.pkl`, `baseline_v1_recording_meta.json`.
+  - On successful capture, prints all relevant IDs + paths.
+  - **NOT runnable in CI** (no real-data NWB in CI). Manually invoked by lab developers; output committed to `tests/spikesorting/v3/baselines/` as small pickle/json files (the units NWB stays on local disk, referenced by path).
 
 - **Add a sanity test for scaffolding** in `tests/spikesorting/v3/test_scaffold.py`:
   - `test_module_imports` — `from spyglass.spikesorting import v3` succeeds.
