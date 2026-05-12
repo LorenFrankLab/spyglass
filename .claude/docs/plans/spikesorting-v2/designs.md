@@ -973,10 +973,17 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
                 **rules["auto_merge_kwargs"],
             )
 
-        # Write three tables to NWB
+        # Write three tables to NWB. Coerce non-finite values (NaN, ±inf)
+        # to None on the JSON-bound copy ONLY — the in-memory metrics_df
+        # retains NaN for downstream consumers that filter on it. Per the
+        # [Empty/NaN/Boundary Invariants contract] and the three-path
+        # sanitization rule in Phase 2 (#1556).
+        metrics_df_json = _sanitize_for_json(metrics_df)
         nwb_file_name = (Sorting & sorting_key).fetch_parent("nwb_file_name")  # helper TBD
         with AnalysisNwbfile().build(nwb_file_name) as builder:
-            metrics_object_id = builder.add_nwb_object(metrics_df, table_name="quality_metrics")
+            metrics_object_id = builder.add_nwb_object(
+                metrics_df_json, table_name="quality_metrics",
+            )
             merge_object_id = builder.add_nwb_object(
                 pd.DataFrame({"unit_groups": [json.dumps(merge_groups)]}),
                 table_name="merge_suggestions",
@@ -1436,25 +1443,25 @@ class UnitMatch(SpyglassMixin, dj.Computed):
     class Pair(SpyglassMixinPart):
         """Per-pair match record.
 
-        Stores BOTH (sorting_id, curation_id) for each side of the pair
-        — UnitMatch operates on the curated unit set selected by
-        UnitMatchSelection.MemberCuration, NOT the raw Sorting units.
-        A pair references units that survive the curation's
-        merges_applied + reject-label filters, so downstream consumers
-        get a stable cross-session identity that already respects
-        curation decisions.
+        Each side is a *projected* FK into ``CurationV2.Unit`` so DataJoint
+        guarantees referential integrity: a pair cannot reference a unit
+        that does not exist in the pinned curation. UnitMatch operates on
+        the curated unit set selected by UnitMatchSelection.MemberCuration,
+        NOT the raw Sorting units, so any pair references units that
+        survive the curation's merges_applied + reject-label filters.
         """
         definition = """
         -> master
         pair_index: int
         ---
-        session_a_sorting_id: uuid
-        session_a_curation_id: int      # which curation of session A this unit
-                                        # came from (pinned by MemberCuration)
-        unit_a_id: int
-        session_b_sorting_id: uuid
-        session_b_curation_id: int
-        unit_b_id: int
+        -> CurationV2.Unit.proj(
+              session_a_sorting_id='sorting_id',
+              session_a_curation_id='curation_id',
+              unit_a_id='unit_id')
+        -> CurationV2.Unit.proj(
+              session_b_sorting_id='sorting_id',
+              session_b_curation_id='curation_id',
+              unit_b_id='unit_id')
         match_probability: float
         drift_estimate_um=0.0: float
         fdr_estimate=NULL: float
@@ -1473,7 +1480,15 @@ class UnitMatch(SpyglassMixin, dj.Computed):
         member_curations = (
             UnitMatchSelection.MemberCuration & key
         ).fetch(as_dict=True, order_by="member_index")
-        session_analyzers = []
+
+        # The wrapper pre-extracts what the matcher needs from each
+        # curated analyzer and writes it to a matcher-specific layout
+        # under a per-session bundle dir, per the SessionMatcherInput
+        # contract (shared-contracts.md § MatcherProtocol). The matcher
+        # never touches raw NWB paths or `si.SortingAnalyzer` objects
+        # directly; it consumes the bundle.
+        bundle_root = Path(tempfile.mkdtemp(prefix="unitmatch_bundle_"))
+        session_inputs: list[SessionMatcherInput] = []
         for mc in member_curations:
             sorting_id = (CurationV2 & mc).fetch1("sorting_id")
             recording_date = (SessionGroup.Member & mc).fetch1("recording_date")
@@ -1499,11 +1514,23 @@ class UnitMatch(SpyglassMixin, dj.Computed):
                 recording=raw_analyzer.recording,
                 sparse=True, format="memory", return_in_uV=True,
             )
-            curated_analyzer.compute(["random_spikes", "templates", "waveforms"],
-                                     **_resolved_job_kwargs(key))
-            session_analyzers.append(SessionAnalyzer(
-                session_key={"sorting_id": sorting_id, "curation_id": mc["curation_id"]},
-                analyzer=curated_analyzer,
+            curated_analyzer.compute(
+                ["random_spikes", "templates", "waveforms"],
+                **_resolved_job_kwargs(key),
+            )
+            # Wrapper-owned extraction: write waveforms + channel positions
+            # to the matcher-expected on-disk layout (exact files/dtypes
+            # pinned by Phase 4a) into a per-session bundle dir.
+            session_dir = bundle_root / f"session_{mc['member_index']:03d}"
+            session_dir.mkdir()
+            _write_matcher_bundle(curated_analyzer, session_dir)  # pinned by 4a
+            session_inputs.append(SessionMatcherInput(
+                session_key={
+                    "sorting_id": sorting_id,
+                    "curation_id": mc["curation_id"],
+                },
+                waveform_dir=session_dir,
+                channel_positions_path=session_dir / "channel_positions.npy",
                 recording_date=recording_date,
             ))
 
@@ -1513,7 +1540,7 @@ class UnitMatch(SpyglassMixin, dj.Computed):
         matcher = get_matcher(matcher_name)
 
         t0 = time.time()
-        pair_results = matcher.match(session_analyzers, params)
+        pair_results = matcher.match(session_inputs, params)
         runtime = time.time() - t0
 
         # Write to NWB + part rows
@@ -1545,25 +1572,35 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
     """
 
     class Member(SpyglassMixinPart):
+        """One row per (tracked unit, contributing curated unit).
+
+        The single ``-> CurationV2.Unit`` FK carries
+        ``(sorting_id, curation_id, unit_id)`` and DataJoint enforces
+        referential integrity: a TrackedUnit cannot reference a unit
+        that is missing from the pinned curation.
+        """
         definition = """
         -> master
-        -> CurationV2                  # FK includes (sorting_id, curation_id)
-                                       # — pins which curation this member
-                                       # was derived from
-        unit_id: int                   # unit ID within that curation's units
+        -> CurationV2.Unit
         """
 
     def make(self, key):
         """Derive tracked units from pairwise UnitMatch.Pair rows.
 
-        Algorithm: build a graph where nodes are (sorting_id, unit_id)
-        pairs and edges are matches with probability above threshold.
-        Dispatch by `tracked_unit_policy` on MatcherParameters:
+        Algorithm: build a graph whose **nodes are seeded from the
+        curated-unit universe** (every ``(sorting_id, curation_id,
+        unit_id)`` returned by ``CurationV2.get_matchable_unit_ids``
+        for each pinned ``UnitMatchSelection.MemberCuration`` row) so
+        that units the matcher chose to emit no pair record for still
+        surface as singleton tracked units. Edges are
+        ``UnitMatch.Pair`` rows with probability above threshold.
+
+        Dispatch by ``tracked_unit_policy`` on MatcherParameters:
           - "strict" (default): maximal cliques. A tracked unit requires
             every pairwise edge in its node set above threshold —
             rejects transitive-only matches.
           - "transitive" (opt-in): connected components, with
-            `n_transitive_only_edges` reported per component as a
+            ``n_transitive_only_edges`` reported per component as a
             secondary attribute.
         Threshold and policy come from the matcher's params (e.g. 0.5
         for unitmatch). See the policy explainer immediately below.
@@ -1583,25 +1620,43 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
 import networkx as nx
 from itertools import combinations
 
-def _derive_tracked_units_strict(pairs, threshold):
+def _derive_tracked_units_strict(pairs, threshold, all_units):
     """Maximal-clique-based tracked units. Default policy.
 
-    Returns: list of (component_nodes, transitive_only_count) tuples.
+    Parameters
+    ----------
+    pairs : iterable of MatchPair
+        Pairwise match records emitted by the matcher. Sparse: a matcher is
+        free to emit only above-threshold pairs (the MatcherProtocol does
+        NOT require dense pairs).
+    threshold : float
+        Edges with ``match_probability >= threshold`` are kept.
+    all_units : iterable of tuple[str, int, int]
+        Every curated ``(sorting_id, curation_id, unit_id)`` participating
+        in the SessionGroup's UnitMatch run. Pulled from
+        ``CurationV2.get_matchable_unit_ids`` for each pinned member
+        curation. **This is the universe that seeds the graph** — pair rows
+        only contribute edges, never the only path by which a node enters
+        the graph. Without this, a unit that the matcher chose not to emit
+        any pair record for would silently disappear from TrackedUnit
+        output instead of becoming a 1-session singleton.
+
+    Returns
+    -------
+    list of (component_nodes, transitive_only_count) tuples.
     A unit is in a component only if it has a direct above-threshold edge
     to EVERY other unit in the component. Units with NO above-threshold
-    edges still produce a singleton component (``n_sessions_observed = 1``)
-    so they appear in the TrackedUnit output rather than silently disappearing.
+    edges still produce a singleton component (``n_sessions_observed = 1``).
     """
     g = nx.Graph()
-    # Always register both endpoints as graph nodes so unmatched singletons
-    # survive the leftover-isolated-nodes loop below. Edges remain
-    # threshold-gated.
+    # Seed the graph with the curated-unit universe so singletons survive
+    # regardless of whether the matcher emitted pair records for them.
+    for u in all_units:
+        g.add_node(u)
     for p in pairs:
-        node_a = (p.session_a_sorting_id, p.unit_a_id)
-        node_b = (p.session_b_sorting_id, p.unit_b_id)
-        g.add_node(node_a)
-        g.add_node(node_b)
         if p.match_probability >= threshold:
+            node_a = (p.session_a_sorting_id, p.session_a_curation_id, p.unit_a_id)
+            node_b = (p.session_b_sorting_id, p.session_b_curation_id, p.unit_b_id)
             g.add_edge(node_a, node_b, weight=p.match_probability)
     # find_cliques on a thresholded graph returns maximal cliques —
     # every clique is a fully-connected subgraph (all pairwise edges present).
@@ -1614,10 +1669,10 @@ def _derive_tracked_units_strict(pairs, threshold):
             continue
         components.append((set(clique), 0))
         used.update(clique)
-    # Singleton fallback: any node with no above-threshold edge to anything
-    # it survived as a singleton (n_sessions_observed = 1). networkx
-    # ``find_cliques`` treats isolated nodes as size-1 cliques, but only when
-    # they're in the graph at all — hence the unconditional add_node above.
+    # Any node still unused is a true singleton — emit it explicitly.
+    # networkx ``find_cliques`` treats isolated nodes as size-1 cliques,
+    # but only for nodes that exist in the graph at all (handled by the
+    # all_units seeding loop above).
     for node in g.nodes():
         if node not in used:
             components.append(({node}, 0))
@@ -1625,19 +1680,20 @@ def _derive_tracked_units_strict(pairs, threshold):
     return components
 
 
-def _derive_tracked_units_transitive(pairs, threshold):
+def _derive_tracked_units_transitive(pairs, threshold, all_units):
     """Connected-component fallback (permissive). Opt-in via params.
 
     Same singleton invariant as the strict variant: a unit with no
-    above-threshold edge still produces a 1-node component.
+    above-threshold edge still produces a 1-node component. See
+    ``_derive_tracked_units_strict`` for the ``all_units`` contract.
     """
     g = nx.Graph()
+    for u in all_units:
+        g.add_node(u)
     for p in pairs:
-        node_a = (p.session_a_sorting_id, p.unit_a_id)
-        node_b = (p.session_b_sorting_id, p.unit_b_id)
-        g.add_node(node_a)
-        g.add_node(node_b)
         if p.match_probability >= threshold:
+            node_a = (p.session_a_sorting_id, p.session_a_curation_id, p.unit_a_id)
+            node_b = (p.session_b_sorting_id, p.session_b_curation_id, p.unit_b_id)
             g.add_edge(node_a, node_b, weight=p.match_probability)
     components = []
     # ``nx.connected_components`` already yields isolated nodes as

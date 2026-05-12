@@ -53,11 +53,11 @@ Output of this sub-phase is documentation + a working notebook, NOT new tables. 
 
 - **Implement `_unitmatch_backend.py`** — the UnitMatch wrapper. **Follow the API discovered in Phase 4a**; do not implement against speculative function names or input layouts. Reference: `appendix.md § UnitMatchPy integration notes` (rewritten at the end of Phase 4a to capture the actual API). Required behavior, independent of the specific API surface:
   - Subclass `MatcherProtocol`, `name = "unitmatch"`.
-  - `match(session_analyzers, params) -> list[MatchPair]`:
-    1. For each `SessionAnalyzer`, extract per-unit waveforms from `analyzer.get_extension("waveforms")` and the channel positions from `analyzer.get_channel_locations()` (or the equivalent surface 4a discovered).
-    2. Write the matcher's expected input layout to a temp directory (the exact files / dtypes / shapes are pinned by 4a).
+  - `match(session_inputs: list[SessionMatcherInput], params) -> list[MatchPair]`:
+    1. The wrapper (in `UnitMatch.make()`, NOT the matcher) has already pre-extracted per-unit waveforms + channel positions from each session's curated `SortingAnalyzer` and written them into `session_input.waveform_dir` / `session_input.channel_positions_path` in the matcher's expected layout. **The matcher does not touch raw NWB paths or `si.SortingAnalyzer` objects directly** (shared-contracts.md § MatcherProtocol invariant).
+    2. Read the bundle dirs (exact files / dtypes / shapes are pinned by 4a).
     3. Call the actual UnitMatchPy entry point (name + signature pinned by 4a).
-    4. Parse the result table into `MatchPair` objects, preserving session keys.
+    4. Parse the result table into `MatchPair` objects, preserving session keys (`(sorting_id, curation_id, unit_id)` on both sides).
   - Handle the **degenerate single-session case** — return `[]` immediately, no UnitMatch call.
 
 - **Implement `_concat_identity_backend.py`** — for SessionGroups whose sorting came from `ConcatenatedRecording` (Phase 3). The "matches" are identity-mappings: every unit ID in the concat sort corresponds to itself across sessions. This is a degenerate but legitimate matcher case so users on the Phase 3 chronic path get the same `TrackedUnit` downstream interface.
