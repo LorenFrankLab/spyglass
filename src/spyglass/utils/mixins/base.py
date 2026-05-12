@@ -6,6 +6,21 @@ from re import match as re_match
 
 class BaseMixin:
 
+    def restrict(self, restriction, *args, **kwargs):
+        """Intercept no-op restrict calls to throw warning.
+
+        DataJoint returns the same object (ret is self) only when make_condition
+        evaluates the restriction to True — i.e. no shared attributes were found
+        and the restriction had no effect.
+        """
+        ret = super().restrict(restriction, *args, **kwargs)
+        if ret is self and restriction is not True and restriction is not False:
+            self._warn_msg(
+                "Restriction had no effect — no shared attributes found. "
+                "Please check your restrict() call."
+            )
+        return ret
+
     @cached_property
     def _logger(self):
         """Lazy import of logger to avoid circular imports.
