@@ -41,22 +41,20 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
   - `plot_peak_over_time(key, unit_a, unit_b, overlap=True)`.
   - These read directly from the SortingAnalyzer's `correlograms` extension; no separate `BurstPair`-equivalent table.
 
-- **Three-bug-class invariant on `_apply_label_rules`** addressing [#1513](https://github.com/LorenFrankLab/spyglass/issues/1513). The v0 `AutomaticCuration.get_labels` had three distinct bugs (CBroz1's analysis); v2's `_apply_label_rules` must avoid all three patterns AND test each one:
-  1. **Loop completion (Bug A in #1513)**: every label rule must be processed; `return` must be outside the rule loop. Bug A was introduced by PR #1281's refactor (2025-04-22) when `return parent_labels` was indented inside the `for metric in label_params:` loop, silently dropping all rules after the first match. Test: `test_label_rules_loop_completes_all_rules` — synthesize 3 rules where rule 2 and rule 3 would add labels to a unit; assert all three apply.
-  2. **List-reference isolation (Bug B in #1513)**: per-unit label lists MUST be independent objects. Bug B (since 2022-03-25) shared the same list object across all units matching the same rule, so mutating one unit's labels propagated to all of them — and back into the rule definition itself. Test: `test_label_list_isolation` — two units match the same rule; append to unit A's labels; assert unit B's labels are unchanged.
-  3. **Element-level membership check (Bug C in #1513)**: when appending labels to a unit that already has labels, the check must be per-element (`for elem in new_labels: if elem not in existing:`), not list-in-list (`if new_labels not in existing:`). Bug C used the list-in-list form, which always evaluates `False` for a flat string list, so duplicate labels accumulated (e.g., `["noise", "reject", "noise", "reject"]`). Test: `test_label_dedupe_per_element` — apply two rules that both yield `["noise"]`; assert final labels = `["noise"]`, not `["noise", "noise"]`.
+- **Three-bug-class invariant on `_apply_label_rules`** addressing [#1513](https://github.com/LorenFrankLab/spyglass/issues/1513). The v0 `AutomaticCuration.get_labels` had three distinct bugs (CBroz1's analysis); v2's `_apply_label_rules` must avoid all three patterns AND test each one. Each rule emits a *scalar* label (matching `AutoCurationRulesSchema` above); the per-unit accumulator is `dict[unit_id, list[str]]`:
+  1. **Loop completion (Bug A in #1513)**: every label rule must be processed; `return` must be at function scope, outside the rule loop. Bug A was introduced by PR #1281's refactor (2025-04-22) when `return parent_labels` was indented inside the `for metric in label_params:` loop, silently dropping all rules after the first match. Test: `test_label_rules_loop_completes_all_rules` — synthesize 3 rules where rules 2 and 3 would each add a distinct label to the same unit; assert the unit ends with all three labels.
+  2. **Per-unit list isolation (Bug B in #1513)**: each unit's label list MUST be an independent object. Bug B (since 2022-03-25) aliased one list across all units flagged by a rule, so `labels[A].append(x)` mutated `labels[B]` (and the rule definition itself). v2 uses `defaultdict(list)`, which constructs a fresh list per new key — `.append(rule["label"])` mutates only that unit's list. Test: `test_label_list_isolation` — two units flagged by rule 1 (label `"noise"`); rule 2 flags only unit A (label `"mua"`). Assert `labels[A] == ["noise", "mua"]` AND `labels[B] == ["noise"]` (B is not contaminated by A's later append).
+  3. **Per-rule membership check (Bug C in #1513)**: before appending a rule's label to a unit's list, the check must be `if rule["label"] not in labels[unit_id]` — element-against-list. Bug C used list-against-list (`if [new_label] not in existing_labels`), which always evaluates `False` for a flat string list, so duplicate labels accumulated (e.g., `["noise", "noise"]` when two rules both yielded `"noise"`). Test: `test_label_dedupe_per_element` — two rules both yield `"noise"` for the same unit; assert final labels `== ["noise"]`, not `["noise", "noise"]`.
 
-  Implementation pattern (from sytseng's fix referenced in #1513):
+  Implementation pattern (matches the helper snippet below):
   ```python
-  for unit_id in flagged_units:
-      if unit_id not in labels:
-          labels[unit_id] = label_list.copy()  # Bug B fix: independent list
-      else:
-          for element in label_list:           # Bug C fix: per-element check
-              if element not in labels[unit_id]:
-                  labels[unit_id].append(element)
-  # `return labels` at function scope, outside the rule loop (Bug A fix)
-  return labels
+  labels = defaultdict(list)               # Bug B fix: fresh list per new unit_id
+  for metric_name, rule in label_rules.items():
+      ...
+      for unit_id in flagged.index:
+          if rule["label"] not in labels[unit_id]:  # Bug C fix: per-element check
+              labels[unit_id].append(rule["label"])
+  return dict(labels)                      # Bug A fix: return at function scope
   ```
 
 - **NaN sanitization for metric serialization** (addresses [#1556](https://github.com/LorenFrankLab/spyglass/issues/1556)): SI's `compute_quality_metrics` legitimately returns `nan` for low-spike units. `AnalyzerCuration.make()` writes metrics via three paths (DataJoint blob, NWB unit column, FigPack URI in Phase 5); ALL three must see NaN coerced to `None` BEFORE serialization. Add `_sanitize_for_json(df) -> df` helper that copies the DataFrame and replaces all non-finite values with `None`. The in-memory `metrics_df` retains NaN for downstream consumers that want to filter on it; only the JSON-bound path gets sanitized. Per the [Empty / NaN / Boundary Invariants contract](shared-contracts.md#empty--nan--boundary-invariants).

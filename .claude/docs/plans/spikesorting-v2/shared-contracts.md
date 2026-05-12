@@ -141,84 +141,69 @@ def _validate_params(model_cls: type[BaseModel], params: dict) -> dict:
 
 ## MatcherProtocol — cross-session unit matching plugin interface
 
-Phase 4 introduces this contract. Future matchers (DeepUnitMatch, custom Frank-lab matchers) plug in by implementing the protocol.
+**PROVISIONAL — finalized in Phase 4a.** The concrete signature below is a placeholder so Phase 4b's schema design has something to reference. **It will be rewritten by the Phase 4a technical spike** ([phase-4-unitmatch-cross-session.md § Phase 4a](phase-4-unitmatch-cross-session.md)) once the actual UnitMatchPy API has been walked end-to-end. Do NOT implement against the placeholder; wait for 4a's revision.
+
+What the contract IS committed to (these survive Phase 4a):
+
+- **Input is wrapper-owned, not analyzer-owned.** The v2 wrapper extracts per-unit waveform arrays + channel positions + per-unit metadata from each session's `SortingAnalyzer` and writes them into a matcher-specific on-disk layout (the layout is what Phase 4a pins). The matcher consumes that wrapper-prepared bundle; it does NOT consume `si.SortingAnalyzer` objects directly. This is the contract that makes the wrapper invariant ("matcher never touches raw NWB paths") implementable.
+- **Output is a list of pair records** keyed by (sorting_id, curation_id, unit_id) per side (curation_id is non-negotiable per the round-7 fix — UnitMatch operates on curated units).
+- **Degenerate single-session case returns zero pairs, no error.**
+- **Determinism**: given fixed params, output is identical run-to-run (matcher sets internal seeds).
+- **Sparsity-friendly**: wrapper passes sparse-template data when SI's `sparse=True` is set (v2 default).
+
+Placeholder shape (will be replaced by 4a):
 
 ```python
-# src/spyglass/spikesorting/v2/matcher_protocol.py
+# src/spyglass/spikesorting/v2/matcher_protocol.py — PROVISIONAL
 from typing import Protocol, runtime_checkable
 from dataclasses import dataclass
-import numpy as np
+from pathlib import Path
 import pandas as pd
-import spikeinterface as si
 
 
 @dataclass(frozen=True)
-class SessionAnalyzer:
-    """One per-session SortingAnalyzer + its session identifier."""
-    session_key: dict  # {"sorting_id": UUID} for that session's Sorting row
-    analyzer: si.SortingAnalyzer  # loaded via Sorting.get_analyzer(key)
-    recording_date: pd.Timestamp  # for inter-session ordering
+class SessionMatcherInput:
+    """One per-session bundle the wrapper prepares for the matcher.
+
+    Concrete fields (paths, file names, dtypes) pinned by Phase 4a.
+    """
+    session_key: dict  # {"sorting_id": UUID, "curation_id": int}
+    waveform_dir: Path  # wrapper-prepared dir with the matcher-expected layout
+    channel_positions_path: Path
+    recording_date: pd.Timestamp
 
 
 @dataclass(frozen=True)
 class MatchPair:
-    session_a_key: dict
+    session_a_sorting_id: str
+    session_a_curation_id: int
     unit_a_id: int
-    session_b_key: dict
+    session_b_sorting_id: str
+    session_b_curation_id: int
     unit_b_id: int
-    match_probability: float  # 0.0 - 1.0
+    match_probability: float
     drift_estimate_um: float = 0.0
     fdr_estimate: float | None = None
 
 
 @runtime_checkable
 class MatcherProtocol(Protocol):
-    """Plugin interface for cross-session unit matchers.
-
-    Implementations: `_unitmatch_backend.py` (Phase 4),
-    `_deepunitmatch_backend.py` (Phase 4.1+),
-    `_concat_identity_backend.py` (Phase 3).
-    """
-
     name: str
-    """Stable string used in `MatcherParameters.matcher` (e.g. 'unitmatch')."""
 
     def match(
         self,
-        session_analyzers: list[SessionAnalyzer],
+        session_inputs: list[SessionMatcherInput],
         params: dict,
     ) -> list[MatchPair]:
-        """Compute pairwise matches across the given session analyzers.
-
-        Implementations must:
-        - Be deterministic given fixed `params` (set seeds internally if relevant).
-        - Return ALL pair candidates with `match_probability >= 0`. Thresholding
-          to a discrete assignment happens downstream in `TrackedUnit.make()`.
-        - Not mutate `session_analyzers` or its contents.
-        """
         ...
 ```
 
-**Registry pattern** in `unit_matching.py`:
+**Invariants that survive Phase 4a — do not weaken**:
 
-```python
-_MATCHERS: dict[str, type[MatcherProtocol]] = {}
-
-def register_matcher(cls):
-    _MATCHERS[cls.name] = cls
-    return cls
-
-def get_matcher(name: str) -> MatcherProtocol:
-    if name not in _MATCHERS:
-        raise ValueError(f"Unknown matcher: {name}. Registered: {list(_MATCHERS)}")
-    return _MATCHERS[name]()
-```
-
-**Invariants — do not weaken**:
-
-- A matcher MUST NOT depend on raw recording data — only the `SortingAnalyzer`'s template, waveform, and location extensions. This is what makes the matcher reproducible from stored artifacts long after raw data is moved.
-- A matcher MUST handle the single-session degenerate case (return zero `MatchPair`s, no error).
-- A matcher MUST work on sparse analyzers (`sparse=True` is the v2 default).
+- A matcher MUST NOT touch raw NWB paths. The v2 wrapper pre-extracts whatever the matcher needs from the analyzer and writes it to the bundle directory; the matcher consumes the bundle.
+- A matcher MUST emit `(sorting_id, curation_id, unit_id)` for both sides of every pair.
+- A matcher MUST handle the single-session degenerate case (return zero pairs, no error).
+- A matcher MUST be deterministic given fixed params.
 
 ---
 

@@ -171,7 +171,7 @@ This phase establishes the foundation: empty module structure, baseline-capture 
 | `test_resolved_job_kwargs_lookup_override` | Per-row `job_kwargs` field wins over config. |
 | `test_analyzer_path_format` | `_analyzer_path({"sorting_id": UUID("...")})` returns a Path ending in `{uuid}.analyzer`. |
 | `test_hash_binary_cache_stable` (slow) | Synthesizing a 2-second SI binary recording, hashing it twice, asserts deterministic output. Mark `@pytest.mark.slow`. |
-| `test_v1_baseline_capture_runs` (slow, integration) | Run `baseline_capture.py` against the `minirec` fixture; assert all three output files are produced and non-empty. Mark `@pytest.mark.slow`. |
+| `test_v1_baseline_capture_runs_on_real_data` (slow, integration, env-var-gated) | If `SPIKESORTING_V2_REAL_NWB_PATH` is set, run `baseline_capture.py` against that dataset; assert all three output files are produced and non-empty. **Skipped with explicit message if the env var is unset** — minirec has no real spikes, so a baseline captured against it would be useless. Mark `@pytest.mark.slow`. |
 | `test_v1_test_suite_still_passes_under_current_si` (integration) | Phase 0 does NOT upgrade SI, so v1 tests should still pass cleanly. Regression guard: if any v1 test fails after this Phase 0 PR, something else broke. |
 
 ## Fixtures

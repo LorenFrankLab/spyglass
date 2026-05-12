@@ -1337,10 +1337,17 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
     def get_recording(self, key) -> si.BaseRecording:
         ...
 
-    def split_sorting_by_session(self, sorting, key) -> dict[dict, si.BaseSorting]:
+    def split_sorting_by_session(
+        self, sorting, key
+    ) -> dict[tuple[str, str], si.BaseSorting]:
         """Map a sorting (produced on the concatenated recording) back to per-session sortings.
 
-        Returns dict mapping each member's session_key to a per-session BaseSorting.
+        Returns dict keyed by the session identity tuple
+        ``(nwb_file_name, interval_list_name)`` — the natural session PK on
+        ``SessionGroup.Member``. The tuple is hashable; a plain dict (the
+        full member key) is not, so callers that need the full key should
+        look it up via ``SessionGroup.Member & {"session_group_name": ...,
+        "nwb_file_name": k[0], "interval_list_name": k[1]}``.
         """
         ...
 ```
@@ -1581,13 +1588,20 @@ def _derive_tracked_units_strict(pairs, threshold):
 
     Returns: list of (component_nodes, transitive_only_count) tuples.
     A unit is in a component only if it has a direct above-threshold edge
-    to EVERY other unit in the component.
+    to EVERY other unit in the component. Units with NO above-threshold
+    edges still produce a singleton component (``n_sessions_observed = 1``)
+    so they appear in the TrackedUnit output rather than silently disappearing.
     """
     g = nx.Graph()
+    # Always register both endpoints as graph nodes so unmatched singletons
+    # survive the leftover-isolated-nodes loop below. Edges remain
+    # threshold-gated.
     for p in pairs:
+        node_a = (p.session_a_sorting_id, p.unit_a_id)
+        node_b = (p.session_b_sorting_id, p.unit_b_id)
+        g.add_node(node_a)
+        g.add_node(node_b)
         if p.match_probability >= threshold:
-            node_a = (p.session_a_sorting_id, p.unit_a_id)
-            node_b = (p.session_b_sorting_id, p.unit_b_id)
             g.add_edge(node_a, node_b, weight=p.match_probability)
     # find_cliques on a thresholded graph returns maximal cliques —
     # every clique is a fully-connected subgraph (all pairwise edges present).
@@ -1600,23 +1614,34 @@ def _derive_tracked_units_strict(pairs, threshold):
             continue
         components.append((set(clique), 0))
         used.update(clique)
-    # Add any leftover isolated nodes from sessions that didn't match anyone
+    # Singleton fallback: any node with no above-threshold edge to anything
+    # it survived as a singleton (n_sessions_observed = 1). networkx
+    # ``find_cliques`` treats isolated nodes as size-1 cliques, but only when
+    # they're in the graph at all — hence the unconditional add_node above.
     for node in g.nodes():
         if node not in used:
             components.append(({node}, 0))
+            used.add(node)
     return components
 
 
 def _derive_tracked_units_transitive(pairs, threshold):
-    """Connected-component fallback (permissive). Opt-in via params."""
+    """Connected-component fallback (permissive). Opt-in via params.
+
+    Same singleton invariant as the strict variant: a unit with no
+    above-threshold edge still produces a 1-node component.
+    """
     g = nx.Graph()
-    n_transitive = 0
     for p in pairs:
+        node_a = (p.session_a_sorting_id, p.unit_a_id)
+        node_b = (p.session_b_sorting_id, p.unit_b_id)
+        g.add_node(node_a)
+        g.add_node(node_b)
         if p.match_probability >= threshold:
-            node_a = (p.session_a_sorting_id, p.unit_a_id)
-            node_b = (p.session_b_sorting_id, p.unit_b_id)
             g.add_edge(node_a, node_b, weight=p.match_probability)
     components = []
+    # ``nx.connected_components`` already yields isolated nodes as
+    # singleton components, so no separate leftover loop is needed here.
     for cc in nx.connected_components(g):
         # Count edges that are "transitive only" — pairs of nodes
         # in the component that don't have a direct edge.

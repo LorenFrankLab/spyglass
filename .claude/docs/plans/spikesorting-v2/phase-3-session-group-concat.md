@@ -43,7 +43,7 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
     5. Applies post-motion preprocessing (whitening, if configured) after motion correction, then materializes to binary cache via `recording.save(format="binary", **resolved_job_kwargs)`. This cache is sorter-ready; `Sorting.make()` must not apply post-motion preprocessing again for `concat_recording_id` rows.
     6. Records `member_segment_boundaries` (cumulative sample boundaries) for back-mapping spike times.
     7. `get_recording(key)` reads the cache.
-    8. `split_sorting_by_session(sorting, key) -> dict[session_key, BaseSorting]` — back-maps spike times.
+    8. `split_sorting_by_session(sorting, key) -> dict[tuple[str, str], BaseSorting]` — back-maps spike times; keys are `(nwb_file_name, interval_list_name)` (hashable; the full member dict is not).
 
 - **Lift the concat-FK restriction in `SortingSelection.insert_selection()`**. NO schema changes — Phase 1 declared both nullable typed FKs (`recording_id` → `Recording` and `concat_recording_id` → `ConcatenatedRecording`) in their final shape (see [shared-contracts.md § Zero-Migration Schema Forward-Compatibility](shared-contracts.md#zero-migration-schema-forward-compatibility)). Phase 3's only modification to `sorting.py`:
   - Remove the `raise NotImplementedError("Concat path requires Phase 3")` guard that Phase 1 installed for the `concat_recording_id`-non-NULL case.
@@ -63,20 +63,25 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
 
 - **Implement back-mapping helper** `ConcatenatedRecording.split_sorting_by_session(sorting, key)`:
   ```python
-  def split_sorting_by_session(self, sorting, key):
+  def split_sorting_by_session(
+      self, sorting, key
+  ) -> dict[tuple[str, str], si.BaseSorting]:
       """Split a Sorting (run on the concatenated recording) into per-member BaseSortings.
 
+      Returns ``dict[(nwb_file_name, interval_list_name), BaseSorting]``.
+      The tuple key is hashable; the full SessionGroup.Member key dict is not.
       Each member's BaseSorting has spike times reset to that session's local time,
       and unit IDs preserved (so the same biological unit across sessions has the same ID).
       """
       boundaries = (self & key).fetch1("member_segment_boundaries")
       members = (SessionGroup.Member & key).fetch(as_dict=True, order_by="member_index")
-      per_session = {}
+      per_session: dict[tuple[str, str], si.BaseSorting] = {}
       for i, member in enumerate(members):
           start_sample = 0 if i == 0 else boundaries[i - 1]
           end_sample = boundaries[i]
           local_sorting = _slice_sorting_by_sample_range(sorting, start_sample, end_sample)
-          per_session[_member_to_session_key(member)] = local_sorting
+          session_id = (member["nwb_file_name"], member["interval_list_name"])
+          per_session[session_id] = local_sorting
       return per_session
   ```
 

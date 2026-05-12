@@ -108,7 +108,7 @@ The first task of this phase (after prerequisites land) is to verify the new SI 
 
 - **Implement an `insert_default()` classmethod** on each new Lookup table that bulk-inserts the contents rows with `skip_duplicates=True` on the Lookup-level (allowed) — mirrors v1 pattern at [src/spyglass/spikesorting/v1/recording.py:127](src/spyglass/spikesorting/v1/recording.py#L127).
 
-- **Run the Phase 0 baseline capture script** against the `minirec` fixture (this is a one-shot prep step; not a code task) and check the artifacts into `tests/spikesorting/v2/baselines/` (small files only; lock down the file sizes before committing).
+- **Run the Phase 0 baseline capture script against the lab's real-data dataset** (NOT minirec — minirec has no real spikes, so a baseline captured against it would be useless for parity, contradicting Phase 0's revised baseline policy). One-shot prep step before Phase 1 ships: a lab developer sets `SPIKESORTING_V2_REAL_NWB_PATH` (or passes `--nwb-file` explicitly) and runs `python tests/spikesorting/v2/baseline_capture.py`. Small pickle/json baseline artifacts get checked into `tests/spikesorting/v2/baselines/`; the units NWB stays on local disk and is referenced by path. Lock down sizes before committing.
 
 - **Write integration tests** in `tests/spikesorting/v2/test_phase1_pipeline.py`. See Validation slice for the full table.
 
@@ -154,6 +154,8 @@ The first task of this phase (after prerequisites land) is to verify the new SI 
 | `test_spike_sorting_output_get_sorting_works_for_v2` (slow) | Same, for `get_sorting`. |
 | `test_spike_sorting_output_get_sort_group_info_works_for_v2` | Same, for `get_sort_group_info`. |
 | `test_spike_sorting_output_get_spike_times_works_for_v2` (slow) | `SpikeSortingOutput.get_spike_times(merge_key)` returns spike-time arrays for the v2 sort. Validates the `object_id` column-name convention end-to-end. |
+| `test_spike_sorting_output_get_spike_indicator_works_for_v2` (slow) | `SpikeSortingOutput.get_spike_indicator(merge_key, time=t)` returns a `(len(t), n_units)` integer indicator array for the v2 sort; column sums equal per-unit spike counts inside `t`'s range; row sums match the count of spikes in each time bin. Validates dispatch end-to-end (the method internally calls `get_spike_times`). |
+| `test_spike_sorting_output_get_firing_rate_works_for_v2` (slow) | `SpikeSortingOutput.get_firing_rate(merge_key, time=t, multiunit=False)` returns a `(len(t), n_units)` float array of smoothed rates (Hz); each column's mean firing rate matches the analytic `n_spikes / duration` within ±10% for a stationary fixture. `multiunit=True` returns a `(len(t),)` collapsed array equal to the per-unit sum. |
 | `test_curation_v2_object_id_column_name` | `"object_id" in CurationV2.heading.attributes` and `"units_object_id" not in CurationV2.heading.attributes` (regression test for the NWB column-name convention). |
 | `test_sorting_selection_concat_fk_declared_in_phase_1` | `"concat_recording_id" in SortingSelection.heading.attributes` and it is nullable (regression test for forward-compat schema; Phase 3 must NOT have to alter this). |
 | `test_sorting_selection_xor_enforced` | `SortingSelection.insert_selection({recording_id: r, concat_recording_id: c, ...})` (both set) raises ValueError; `{recording_id: None, concat_recording_id: None, ...}` (neither set) also raises. Exactly-one-non-null is valid. |
