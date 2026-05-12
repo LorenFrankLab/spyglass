@@ -238,7 +238,7 @@ for label, interval_data in results.groupby("interval_labels"):
         necessary #1588
     - Restrict `ImportedSpikeSorting.Annotations` to the current session in
         `make_df_from_annotations` so `fetch_nwb` works across multiple sessions
-        with overlapping unit ids #1581
+        with overlapping unit ids #1581, #1592
 
 ## [0.5.5] (Aug 6, 2025)
 
