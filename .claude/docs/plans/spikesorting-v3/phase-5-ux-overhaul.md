@@ -90,6 +90,7 @@ The capstone phase. Adds the `run_v3_pipeline()` convenience function (35-cell n
   - Update root README "Quick example" snippet to use `run_v3_pipeline()`.
   - Keep `docs/src/Pipelines/SpikeSorting/v1.md` accessible and live; do NOT mark v1 as deprecated. v0 and v1 remain populated paths for legacy data.
   - Add a new docs page: `docs/src/Pipelines/SpikeSorting/choosing-v1-vs-v3.md` — for users deciding which path to use. TL;DR: existing v1 sorts stay queryable through v1; new sorts go to v3 via `run_v3_pipeline`.
+  - In `choosing-v1-vs-v3.md`, include the import path explicitly: external or ground-truth NWB Units still use the existing `ImportedSpikeSorting` workflow and appear in `SpikeSortingOutput.ImportedSpikeSorting`; they are not reinserted as `CurationV3` rows.
   - CHANGELOG.md: "v3 spike sorting is the recommended path for new work. `run_v3_pipeline()` reduces typical sort setup to a single function call. FigPack is the v3 curation UI. v0 and v1 remain supported indefinitely."
 
 - **No v1 sunset criteria.** Per the resolved design decision in [overview.md](overview.md), v0 and v1 stay in-tree indefinitely. Phase 5 simply documents that v3 is the recommended path for new sorts; v1 docs stay live and unmarked-as-deprecated.

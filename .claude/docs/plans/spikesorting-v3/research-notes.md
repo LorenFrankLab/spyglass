@@ -232,17 +232,17 @@ self.insert1({**key, "analysis_file_name": analysis_file_name, "result_object_id
 ### H7: Replace `MetricCuration` + `BurstPair` with `AnalyzerCuration` → 🟡 PROPOSE
 - Single Computed table walks `SortingAnalyzer` extensions, applies auto-curation rules, optional auto-merge.
 - Consolidates `MetricCuration` + `BurstPair` (which currently both compute waveform similarity separately).
-- **Risk**: BurstPair has bespoke visualizations (`plot_by_sort_group_ids` etc.) — must preserve.
+- **Risk**: BurstPair has bespoke visualizations (`plot_by_sort_group_ids`, `investigate_pair_xcorrel`, `investigate_pair_peaks`, `plot_peak_over_time`) — must preserve.
 - **Verdict**: ADOPT but keep visualization helpers. The two tables compute similar things twice today.
 
 ### H8: FigPack instead of (or alongside) FigURL → 🟡 PROPOSE
 - FigPack is positioned by SI 0.104 as the FigURL successor.
 - Maturity is the open question; need to confirm install/auth path works for our lab.
-- **Verdict**: ADOPT as new path, keep FigURL parity for one release.
+- **Verdict**: ADOPT as new path. FigURL remains available for v1 data only; v3 does not extend FigURL.
 
 ### H9: Don't break v0/v1 → 🟢 ADOPT
 - v0 and v1 remain in tree, populate-runnable for existing data.
-- v3 is additive. Migration tool: `v3_from_v1_curation(curation_v1_key)` to register an existing v1 curation as a `v3` row for downstream uniformity. NOT a re-sort — just a structural conversion.
+- v3 is additive. Existing v1 curations stay queryable through `SpikeSortingOutput.CurationV1`; no v1-to-v3 conversion helper is part of this plan.
 
 ### H10: Validation against v1 → 🟢 ADOPT
 - Smoke-test on `minirec` (existing v1 test fixture, 9–10 s) — run v3 with MS5, then with v3-wrapped MS4-compatible params, compare unit counts and rough spike-time distributions to v1 baseline.
@@ -281,9 +281,9 @@ self.insert1({**key, "analysis_file_name": analysis_file_name, "result_object_id
 
 1. **Sorter prioritization**: MS5 is the v1 successor for MountainSort users, KS4 is the field standard for Neuropixels. Should v3 ship with both or commit to MS5+KS4 only (deprecate MS4)?
 2. **Schema location**: live in `spyglass.spikesorting.v3` (parallel to v0/v1) ✅ confirmed by directory convention. Stays in shared `spikesorting` schema.
-3. **Migration policy**: keep v1 alive indefinitely? Sunset after N releases?
+3. **Migration policy**: resolved. Keep v0/v1 alive indefinitely in this plan; document v1-vs-v3 path selection, not a sunset.
 4. **DeepUnitMatch in MVP?** Recommend "no" — Phase 4.1 enhancement after UnitMatch baseline.
-5. **FigPack vs FigURL**: should v3 default to FigPack or keep FigURL primary until FigPack proves?
+5. **FigPack vs FigURL**: resolved. v3 defaults to FigPack after a feasibility check; no silent FigURL fallback.
 6. **Concat-and-sort across days**: support in MVP or punt? Recommendation: same-day only in Phase 3; multi-day with DREDge precorrection is Phase 6 future work.
 
 ---

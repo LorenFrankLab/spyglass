@@ -461,7 +461,10 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
     params: blob
     params_schema_version=1: int
     """
-    # Per-sorter Pydantic schemas in spyglass.spikesorting.v3._params.sorter
+    # Per-sorter Pydantic schemas in spyglass.spikesorting.v3._params.sorter.
+    # Dedicated schemas cover the default v3-supported sorters. A generic
+    # extra-allowing schema is used only for explicit custom rows whose sorter
+    # is present in spikeinterface.sorters.available_sorters().
     # Contents (Phase 1 default rows):
     #   ('mountainsort4', 'franklab_tetrode_hippocampus_30kHz_ms4', ...)  # MS4 stays in v3
     #   ('mountainsort5', 'franklab_tetrode_hippocampus_30kHz_ms5', ...)
@@ -469,6 +472,7 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
     #   ('spykingcircus2', 'default', ...)
     #   ('tridesclous2',   'default', ...)
     #   ('clusterless_thresholder', 'default', ...)
+    # Do not auto-insert defaults for every installed SI sorter.
 
     @classmethod
     def insert1(cls, row: dict, **kwargs):
@@ -1002,7 +1006,7 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
 **Design points**:
 
 - **One table replaces two** (MetricCuration + BurstPair). BurstPair's cross-correlogram-asymmetry logic becomes one auto-merge preset.
-- **Visualization helpers** (`plot_by_sort_group_ids`, etc.) port from `burst_curation.py` to `AnalyzerCuration` methods.
+- **Visualization helpers** port from `burst_curation.py` to `AnalyzerCuration` methods: `plot_by_sort_group_ids`, `investigate_pair_xcorrel`, `investigate_pair_peaks`, and `plot_peak_over_time`.
 - **Explicit `materialize_curation()` step** — auto-curation never silently writes a new CurationV3 row; user must call to commit.
 
 ---

@@ -248,7 +248,21 @@ from spyglass.spikesorting.v3.curation import CurationV3 as CurationV3_table
 
 [`src/spyglass/spikesorting/spikesorting_merge.py:111`](src/spyglass/spikesorting/spikesorting_merge.py#L111) already accepts `sources` as a list. Phase 1 extends the helper to accept `'v3'` and route through the new part. Existing callers passing `sources=['v1']` keep working unchanged.
 
-**Invariant — do not weaken**: Adding `CurationV3` is the only modification v3 makes to `spikesorting_merge.py`. The default behavior of `merge_get_part`, `merge_restrict`, `merge_delete` must work uniformly across v0, v1, v3 parts.
+**Restriction semantics for v3**:
+
+Implement `_get_restricted_merge_ids_v3(key, as_dict=False)` as the v3 analog of `_get_restricted_merge_ids_v1`, but without v1's `IntervalList` artifact rewrite. The helper must accept ordinary user-facing restriction keys, not only UUID primary keys:
+
+- Phase 1 keys: `nwb_file_name`, `team_name`, `sort_group_id`, `interval_list_name`, `preproc_params_name`, `recording_id`, `artifact_id`, `sorter`, `sorter_params_name`, `sorting_id`, `curation_id`.
+- Phase 2 keys: `analyzer_curation_id`, `metric_params_name`, `auto_curation_rules_name`.
+- Phase 3+ keys when their tables exist: `session_group_name`, `concat_recording_id`.
+
+The implementation should join through the relevant v3 Selection tables, then restrict `SpikeSortingOutput.CurationV3`. Unknown restriction fields should fail clearly rather than silently returning unrelated merge IDs. `restrict_by_artifact` remains accepted by the public method for API compatibility, but the v3 path ignores the v1-specific `IntervalList` rewrite because artifact intervals live on `ArtifactDetection.Interval`.
+
+**Imported sorting parity**:
+
+Do not add a `CurationV3` part for imported NWB Units and do not duplicate `ImportedSpikeSorting` under `spyglass.spikesorting.v3`. The existing `spyglass.spikesorting.imported.ImportedSpikeSorting` table and `SpikeSortingOutput.ImportedSpikeSorting` part remain the canonical import path for external/ground-truth Units. v3 documentation and tests may compare v3 sorting output against imported ground-truth Units, but that comparison does not make the imported Units part of v3 lineage.
+
+**Invariant — do not weaken**: v3 modifies `spikesorting_merge.py` only to add the `CurationV3` part, register/route that part, add v3 restriction handling, and add the optional `get_unit_brain_regions` dispatch. It must not change v0/v1 merge semantics. The default behavior of `merge_get_part`, `merge_restrict`, `merge_delete` must work uniformly across v0, v1, v3 parts.
 
 ---
 

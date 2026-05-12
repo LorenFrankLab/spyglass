@@ -27,9 +27,9 @@ What v3 touches in the existing tree and what is preserved.
 **Existing files PRESERVED unchanged**:
 
 - [src/spyglass/spikesorting/v0/](src/spyglass/spikesorting/v0/) — entire directory left alone. v0 sorts and `CuratedSpikeSorting` part of `SpikeSortingOutput` remain queryable.
-- [src/spyglass/spikesorting/v1/](src/spyglass/spikesorting/v1/) — entire directory left alone. v1 remains the production path until v3 reaches parity (Phase 5 documents sunset trigger).
+- [src/spyglass/spikesorting/v1/](src/spyglass/spikesorting/v1/) — entire directory left alone. v1 remains the production path until v3 reaches parity; Phase 5 documents how users choose v1 vs v3, not a sunset trigger.
 - [src/spyglass/spikesorting/analysis/v1/group.py](src/spyglass/spikesorting/analysis/v1/group.py) — `SortedSpikesGroup` keys off `SpikeSortingOutput.merge_id`; adding `CurationV3` as a new part adds rows that this table will already see via the merge.
-- [src/spyglass/spikesorting/imported.py](src/spyglass/spikesorting/imported.py) — untouched.
+- [src/spyglass/spikesorting/imported.py](src/spyglass/spikesorting/imported.py) — untouched. Existing `ImportedSpikeSorting` remains the canonical import path for external/ground-truth Units and continues to register through `SpikeSortingOutput.ImportedSpikeSorting`; v3 does not duplicate it.
 - [src/spyglass/decoding/](src/spyglass/decoding/), [src/spyglass/ripple/](src/spyglass/ripple/), [src/spyglass/mua/](src/spyglass/mua/) — all consume `SpikeSortingOutput` or `SortedSpikesGroup`, unaffected by v3 addition.
 
 ## Scope and dependency policy
@@ -42,6 +42,7 @@ What v3 touches in the existing tree and what is preserved.
 - **First-class unit → brain region traceability**: every curated unit row carries (at minimum) the peak channel and the brain region(s) for that channel, persisted at sort time and resolvable via a single query on `CurationV3` or `SpikeSortingOutput`. v1's `CurationV1.get_sort_group_info` samples *one* electrode per sort group; that's wrong for multi-region polymer probes. v3 walks every electrode in the sort group, persists per-unit peak-channel and region, and exposes `Sorting.get_unit_brain_regions(key) -> pd.DataFrame` and the same accessor on `CurationV3`. Brain region tracing must work end-to-end through `SpikeSortingOutput.get_sort_group_info` and through `TrackedUnit` (per-session brain regions for matched units).
 - **Reduced UX friction**: `run_v3_pipeline(nwb_file, sort_group_id, interval, preset)` runs the standard sort-and-curate flow with one user call, returning the final `merge_id` plus a manifest. Pydantic models validate parameter dicts at insert time. Notebook walkthrough drops from 35 cells to ~8.
 - **Drop-in for existing downstream consumers**: New `SpikeSortingOutput.CurationV3` part. Decoding, ripple, MUA, `SortedSpikesGroup` work unchanged.
+- **Explicit v1 parity boundaries**: [feature-parity.md](feature-parity.md) is the contract for which v1 workflows are preserved, which are replaced by successor tables, and which departures are intentional.
 - **Team-based sorting preserved**. v3 retains v1's `LabTeam` FK structure: `RecordingSelection`, `SessionGroup.Member`, and `run_v3_pipeline(team_name=...)` all carry team ownership. `cautious_delete` continues to check team membership; per-team data partitioning, shared-team sorting, and team-based access control all work the same way they did in v1. Two teams running an identical sort get distinct `recording_id` UUIDs and distinct binary cache paths — preventing the v0 filesystem-overwrite bug ([#133](https://github.com/LorenFrankLab/spyglass/issues/133)).
 - **Zero-migration policy** (binding): all v3 tables must be designed in their final shape in the phase that introduces them. **No `alter()` calls** are permitted across phases. New tables added in later phases are fine; modifying any existing v3 table's primary key, foreign keys, or column types is not. This includes anticipated needs: Phase 1's `SortingSelection` already supports both single and concatenated input paths; Phase 1's `Sorting.Unit` already supports per-unit brain region; Phase 1's `CurationV3` already supports the columns that subsequent phases consume. The plan documents which schema decisions are forward-compatibility decisions vs. clean-slate decisions.
 - **v0/v1 coexistence**: Both legacy pipelines remain functional throughout the v3 lifetime. **No v1 sunset is planned in this work**.
@@ -50,6 +51,7 @@ What v3 touches in the existing tree and what is preserved.
 
 - **Re-sorting existing v1 data.** v3 adds the new pipeline; users may run it on new sessions but the plan never invalidates or migrates existing v1 sorts.
 - **A new merge table.** v3 plugs into the existing `SpikeSortingOutput`; adding `MergeV3Output` would force downstream code to choose between merges. Not in scope.
+- **A v3-specific imported-sorting table.** Imported external Units remain in the existing `ImportedSpikeSorting` table and merge part. v3 compares against or coexists with imported Units; it does not absorb them into `CurationV3` lineage.
 - **Removing v0 or v1 source.** Both stay in `src/spyglass/spikesorting/{v0,v1}/`. Documentation will mark them legacy but they remain populate-runnable. **No v1 sunset is planned here.**
 - **DeepUnitMatch.** Pluggable via the Phase 4 matcher protocol but not implemented; future work.
 - **Custom UI / web app.** All curation UI uses upstream FigPack; we do not build a Spyglass-specific viewer.
@@ -99,7 +101,7 @@ v3 is **strictly additive** for the lifetime of this plan. No feature flags, no 
 
 - v1 stays as the documented production path until v3 reaches parity (defined as: Phases 1–5 merged, parity tests green on lab production data for one cycle).
 - After parity is achieved, the documentation root (`docs/src/Pipelines/SpikeSorting/`) gets a banner pointing users to v3 for new work; v1 docs remain.
-- **v1 source code removal is explicitly out of scope** for this plan. Phase 5 documents the sunset trigger (e.g., "after 6 months without active v1 populate calls in production") but the deletion is a future planning effort, not part of this work.
+- **v1 source code removal is explicitly out of scope** for this plan. Phase 5 documents how users choose v1 vs v3; it does not define a deletion or sunset trigger.
 - Each phase ships as a stand-alone PR; users upgrading midway can use whatever phases are merged at the time. Phase 1 alone is usable in production.
 
 ## Resolved Design Decisions

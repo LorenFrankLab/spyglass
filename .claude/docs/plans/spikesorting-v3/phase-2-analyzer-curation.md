@@ -38,6 +38,7 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
   - `plot_correlograms_by_sort_group(key)` — adapts `BurstPair.plot_by_sort_group_ids` at [src/spyglass/spikesorting/v1/burst_curation.py](src/spyglass/spikesorting/v1/burst_curation.py).
   - `investigate_pair_xcorrel(key, unit_a, unit_b)`.
   - `investigate_pair_peaks(key, unit_a, unit_b)`.
+  - `plot_peak_over_time(key, unit_a, unit_b, overlap=True)`.
   - These read directly from the SortingAnalyzer's `correlograms` extension; no separate `BurstPair`-equivalent table.
 
 - **Three-bug-class invariant on `_apply_label_rules`** addressing [#1513](https://github.com/LorenFrankLab/spyglass/issues/1513). The v0 `AutomaticCuration.get_labels` had three distinct bugs (CBroz1's analysis); v3's `_apply_label_rules` must avoid all three patterns AND test each one:
@@ -125,6 +126,7 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
 | `test_metric_nan_round_trip` | Low-spike unit produces non-finite metrics; DataJoint blob and NWB serialized outputs contain `None` while the in-memory metrics DataFrame preserves NaN semantics. |
 | `test_analyzer_curation_zero_unit_sorting` | Zero-unit `Sorting` row populates `AnalyzerCuration` with empty metric/merge/label tables and no missing-column errors. |
 | `test_analyzer_curation_merge_suggestions_non_empty_on_obvious_split` (slow) | Synthetic sort with two units that are obvious duplicates (same spike times shifted by 1 ms); auto-merge with preset='similarity_correlograms' suggests their merge. |
+| `test_analyzer_curation_burstpair_visualization_helpers` (slow) | `plot_correlograms_by_sort_group`, `investigate_pair_xcorrel`, `investigate_pair_peaks`, and `plot_peak_over_time` all render against a SortingAnalyzer-backed sort without requiring the v1 `BurstPair` table. |
 | `test_materialize_curation_creates_child` | `AnalyzerCuration.materialize_curation(key)` creates a new `CurationV3` row with `parent_curation_id` pointing to the input curation; auto-registers in `SpikeSortingOutput.CurationV3`. |
 | `test_add_extensions_is_idempotent` (slow) | Call `Sorting.add_extensions(key, ["correlograms"])` twice; second call is a no-op (no recompute). |
 | `test_v3_analyzer_curation_vs_v1` (slow, integration) | Parity vs v1 `MetricCuration` per tolerances above. Reports per-unit diffs on failure. |
