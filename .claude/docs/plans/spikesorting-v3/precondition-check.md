@@ -2,7 +2,20 @@
 
 Static-analysis findings from `code_graph.py describe <table>` run against every Spyglass FK target the v3 schema relies on. Captured at plan time so the Phase 0 implementer can compare against the current state and catch upstream drift.
 
-Run command: `SPYGLASS_SRC=$(pwd)/src python /Users/edeno/.claude/skills/spyglass/scripts/code_graph.py describe <name> [--file <path>]`
+Run command: `python /Users/edeno/.claude/skills/spyglass/scripts/code_graph.py --src src describe <name> [--file <path-relative-to-src>]`
+
+For draft-schema walks, use paths relative to `--src src`, for example:
+
+```bash
+python /Users/edeno/.claude/skills/spyglass/scripts/code_graph.py \
+  --src src describe CurationV3 \
+  --file spyglass/spikesorting/v3/_draft.py --json
+python /Users/edeno/.claude/skills/spyglass/scripts/code_graph.py \
+  --src src path --up SortingSelection \
+  --file spyglass/spikesorting/v3/_draft.py --json
+```
+
+Review the JSON `warnings` block on every `path` run. Any unaccounted `heuristic_resolution` warning is a blocker. If the current code-graph tool cannot disambiguate a transitive target, record the exact warning and the source-verified intended target here.
 
 ## Common-layer tables (referenced by v3 schemas)
 
@@ -51,11 +64,14 @@ Run command: `SPYGLASS_SRC=$(pwd)/src python /Users/edeno/.claude/skills/spyglas
 
 ## v3 draft schemas validation result
 
-`code_graph.py describe` was run against the full v3 draft at `src/spyglass/spikesorting/v3/_draft.py` for every proposed table:
+`code_graph.py describe` was run against the full v3 draft at `spyglass/spikesorting/v3/_draft.py` for every proposed table:
 
 - **All FK targets resolve cleanly.** Nullable XOR FKs on SortingSelection (Recording / ConcatenatedRecording) and ArtifactDetectionSelection (Recording / SharedArtifactGroup) parse correctly.
 - **Full ancestor walks**: `SortingSelection`'s `--up` traversal reaches Raw, Session, Nwbfile, Electrode, BrainRegion, LabTeam, Probe — all upstream Spyglass tables resolve. `UnitMatch`'s `--up` walks back through CurationV3 → Sorting → SortingSelection → both Recording and ConcatenatedRecording paths.
-- **Descendant walks**: `CurationV3`'s `--down` shows the full Phase 2/4/5 dependency tree (AnalyzerCuration, UnitMatchSelection.MemberCuration, FigPackCurationSelection, TrackedUnit.Member).
-- **No unresolved imports, no name collisions with v0/v1, no FK cycles.**
+- **Descendant walks**: `CurationV3`'s `--down` shows the full Phase 2/4/5 dependency tree (CurationV3.UnitLabel, AnalyzerCuration, UnitMatchSelection.MemberCuration, FigPackCurationSelection, TrackedUnit.Member).
+- **No unresolved imports and no FK cycles.**
+- **Accounted code-graph ambiguities**:
+  - `AnalysisNwbfile` exists in both `spyglass/common/common_nwbfile.py:630` and `spyglass/common/custom_nwbfile.py:30`. The v3 production design imports and FK's the core common table (`spyglass.common.common_nwbfile.AnalysisNwbfile`); code-graph path walks may emit a `heuristic_resolution` warning and select the custom table. Treat that warning as expected only when this exact target pair appears.
+  - `ArtifactDetection`, `ArtifactDetectionSelection`, and `ArtifactDetectionParameters` exist in v0, v1, and the v3 draft. For draft walks rooted in `spyglass/spikesorting/v3/_draft.py`, same-package resolution to the v3 draft classes is expected. Treat any other same-name resolution as a blocker.
 
 The draft schemas are structurally implementable as written. Phase 0 splits this single file into the per-module Phase 1/2/3/4/5 files; the structural validation carries over.

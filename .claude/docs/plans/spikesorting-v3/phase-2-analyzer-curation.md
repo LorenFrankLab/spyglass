@@ -140,4 +140,5 @@ Before opening the PR for this phase, dispatch `code-reviewer` (or equivalent in
 - `Sorting.add_extensions()` works idempotently (SI's overwrite=False semantics respected).
 - `BurstPair` visualization helpers are ported into `AnalyzerCuration` (and verified to render against a SortingAnalyzer correlograms extension).
 - v1 `MetricCuration` and `BurstPair` are NOT touched (sanity check via `git diff src/spyglass/spikesorting/v1/`).
+- `code_graph.py describe` returns clean output for every new table; `path --up`/`path --down` chains match the design DAG; JSON warnings are empty or explicitly accounted for in `precondition-check.md`.
 - CHANGELOG.md updated.

@@ -146,4 +146,5 @@ Before opening the PR for this phase, dispatch `code-reviewer` (or equivalent in
 - **No schema changes to `SortingSelection`.** Git diff against `src/spyglass/spikesorting/v3/sorting.py` shows changes ONLY inside method bodies — the `definition` string is byte-identical to Phase 1. The `test_sorting_selection_schema_unchanged_from_phase_1` test passes.
 - Multi-day support is gated behind `allow_multi_day=True` AND an explicit non-`auto` motion-correction preset (no silent DREDge dispatch). `test_session_group_create_multi_day_rejected_by_default` and `test_motion_correction_preset_auto_rejects_multi_day` pass.
 - Memory/runtime smoke test is a real measurement (not a mocked metric).
+- `code_graph.py describe` returns clean output for every new table; `path --up`/`path --down` chains match the design DAG; JSON warnings are empty or explicitly accounted for in `precondition-check.md`.
 - Documentation tasks landed; CHANGELOG mentions multi-day as a feature.

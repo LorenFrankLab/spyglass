@@ -132,4 +132,5 @@ Before opening the PR for this phase, dispatch `code-reviewer` (or equivalent in
 - `MatcherProtocol` is implementable by external code without touching v3 internals (verify by writing a 10-line dummy matcher in the test suite).
 - `TrackedUnit` graph algorithm matches the binding policy in `designs.md` — strict (maximal cliques) by default, transitive only with opt-in via `MatcherParameters.params["tracked_unit_policy"]`. Tests `test_tracked_unit_strict_clique_basic`, `test_tracked_unit_strict_default_rejects_transitive`, and `test_tracked_unit_transitive_opt_in_unifies` exercise all three branches.
 - Docstrings, test names, and module names don't reference this plan, phase numbers, or files inside `.claude/docs/plans/`.
+- `code_graph.py describe` returns clean output for every new table; `path --up`/`path --down` chains match the design DAG; JSON warnings are empty or explicitly accounted for in `precondition-check.md`.
 - `unitmatchpy` is gated as an optional dependency (`pip install -e ".[spikesorting-v3-matching]"`). Import-time guard in `_unitmatch_backend.py` raises `ImportError` with the install command if missing.

@@ -289,9 +289,11 @@ class CurationLabel(str, Enum):
     reject = "reject"
 ```
 
-`CurationV3.insert_curation()` accepts `labels: dict[int, list[CurationLabel | str]]` and validates each value against the enum, raising on unknown labels. This matches the convention list at [`src/spyglass/spikesorting/v1/curation.py:26`](src/spyglass/spikesorting/v1/curation.py#L26) but enforces it instead of merely documenting it.
+`CurationV3.insert_curation()` requires `labels: dict[int, list[CurationLabel | str]]` and validates each value against the enum, raising on unknown labels. This matches the convention list at [`src/spyglass/spikesorting/v1/curation.py:26`](src/spyglass/spikesorting/v1/curation.py#L26) but enforces it instead of merely documenting it.
 
-Free-form `dj.Manual` inserts bypassing the helper remain permitted (DataJoint can't enforce enums on blob columns); downstream filters fall back to the v1 convention list for unrecognized labels.
+Labels are stored in `CurationV3.UnitLabel`, one row per `(unit_id, curation_label)`. Unlabeled units have no `UnitLabel` rows. This preserves v1's multi-label semantics without packing lists into a scalar column.
+
+Free-form `dj.Manual` inserts bypassing the helper remain permitted (DataJoint can't enforce enums on varchar columns); downstream filters fall back to the v1 convention list for unrecognized labels.
 
 ---
 
@@ -414,9 +416,13 @@ class Unit(SpyglassMixinPart):
 # On Sorting:
 Sorting.get_unit_brain_regions(key) -> pd.DataFrame  # cols: unit_id, electrode_id, region_name, peak_amplitude_uV
 
-# On CurationV3 — same signature, filters by curation_label if asked:
+# On CurationV3 — same signature, filters by CurationV3.UnitLabel if asked:
 CurationV3.get_unit_brain_regions(key, include_labels=None) -> pd.DataFrame
 # include_labels defaults to None (return all); pass a list to filter.
+CurationV3.get_matchable_unit_ids(
+    key, exclude_labels={"reject", "noise", "artifact"}
+) -> np.ndarray
+# returns units with no excluded labels; unlabeled units are included.
 
 # On SpikeSortingOutput — delegates through the source class dispatch:
 SpikeSortingOutput.get_unit_brain_regions(merge_key) -> pd.DataFrame
@@ -432,6 +438,7 @@ TrackedUnit.get_unit_brain_regions(tracked_unit_key) -> pd.DataFrame  # cols: so
 - `Sorting.get_unit_brain_regions` is a constant-time lookup against the part table (no template recomputation, no analyzer load).
 - Multi-region sort groups (polymer probes) are NOT collapsed; each unit's region reflects ITS peak channel, not the sort group's modal region.
 - Phase 1's `CurationV3` MUST also have a `Unit` part table mirroring `Sorting.Unit` so that curated unit removals (merges) are correctly reflected in the brain-region query without re-walking templates. `CurationV3.Unit` is populated by `CurationV3.insert_curation` from `Sorting.Unit` plus the merge_groups.
+- Phase 1's `CurationV3` MUST store curation labels in `CurationV3.UnitLabel`, not as a scalar column on `CurationV3.Unit`. A unit may have multiple labels, and units with no labels have no `UnitLabel` rows.
 
 **`SpikeSortingOutput.get_sort_group_info` extension**: per the [SpikeSortingOutput Part-Table Convention](#spikesortingoutput-part-table-convention-for-v3), `CurationV3` must implement `get_sort_group_info(key)`. The v3 version returns a DataFrame with **all** electrodes in the sort group joined to BrainRegion (NOT `fetch(limit=1)`), so callers using `get_sort_group_info` against a v3 merge_id get correct multi-region output. v1's `get_sort_group_info` remains as-is (existing behavior, existing users).
 
@@ -479,7 +486,7 @@ Derived from a sweep of Spyglass v1 spike-sorting GitHub issues — the same edg
 **Invariant 1 — Zero-unit sortings are valid.** A `Sorting` row with zero ground-truth units (e.g., a clusterless run on an entirely silent channel, or a sort that the user wants to record as "ran, produced nothing") must populate cleanly through every downstream stage:
 
 - `Sorting.populate()` succeeds with `n_units=0`; `Sorting.Unit` part table receives zero inserts.
-- `CurationV3.insert_curation(sorting_key)` succeeds; `CurationV3.Unit` is empty.
+- `CurationV3.insert_curation(sorting_key, labels={})` succeeds; `CurationV3.Unit` and `CurationV3.UnitLabel` are empty.
 - The analysis NWB units table is written with zero rows but the table object exists (column schema present).
 - `AnalyzerCuration.populate()` succeeds; metric/merge/label DataFrames have zero rows.
 - `FigPackCuration.populate()` either succeeds with an empty view or raises a clear `EmptySortingError` — NEVER a `KeyError` on a missing column.
@@ -496,6 +503,6 @@ Derived from a sweep of Spyglass v1 spike-sorting GitHub issues — the same edg
 
 - Phase 1 test: `test_v3_spike_at_recording_end` — plant a unit with a spike at the recording's final sample (via a custom synthetic SI recording, NOT MEArec — MEArec doesn't easily plant boundary spikes); assert `Sorting.populate()` succeeds and the spike is either kept (within tolerance) or dropped with a documented warning.
 
-**Invariant 4 — `CurationV3.insert_curation` requires explicit `labels` argument.** Per the v1 bug pattern where `labels=None` produced NWB files missing the `curation_label` column (which then broke FigURL/FigPack URI generation): v3's `insert_curation` makes `labels` required (no default `None`), and an empty dict `{}` is an explicit valid input that materializes the `curation_label` column with all-NULL values. Static analysis (mypy / runtime check) enforces this.
+**Invariant 4 — `CurationV3.insert_curation` requires explicit `labels` argument.** Per the v1 bug pattern where `labels=None` produced NWB files missing the `curation_label` column (which then broke FigURL/FigPack URI generation): v3's `insert_curation` makes `labels` required (no default `None`), and an empty dict `{}` is an explicit valid input. The NWB writer still materializes the `curation_label` column, using empty lists for unlabeled units; the DataJoint schema stores labels in `CurationV3.UnitLabel`, with zero rows when `labels={}`. Static analysis (mypy / runtime check) enforces this.
 
 **Invariant — do not weaken**: All four invariants are tested in Phase 1 or Phase 2 validation slices. Disabling these tests in CI requires a justified note in the PR.

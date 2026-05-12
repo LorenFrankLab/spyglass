@@ -8,15 +8,15 @@ Notes from building the v3 spike sorting pipeline plan (Spring 2026). Intended a
 
 Single biggest win of the v3 plan process. Concrete pattern:
 
-1. **Precondition check** — for every Spyglass table the new pipeline FKs into, run `code_graph.py describe <table>` and record the actual PK / FK / column types. Catches drift between the design assumption and the current state. Findings from the v3 pass are at [`.claude/docs/plans/spikesorting-v3/precondition-check.md`](spikesorting-v3/precondition-check.md).
+1. **Precondition check** — for every Spyglass table the new pipeline FKs into, run `code_graph.py describe <table>` and record the actual PK / FK / column types. Catches drift between the design assumption and the current state. Findings from the v3 pass are at [`.claude/docs/plans/spikesorting-v3/precondition-check.md`](plans/spikesorting-v3/precondition-check.md).
 
-2. **Draft schema validation** — materialize the proposed schemas as a single Python file at `src/<package>/v<N>/_draft.py` (or under a plan-artifact directory + symlinked into the src tree). NO `@schema` decoration; just class declarations with their `definition` strings and `make()` raising `NotImplementedError`. Then run:
-   - `code_graph.py describe <NewTable> --file v<N>/_draft.py` — verifies the `definition` parses, FKs resolve, PK structure matches the design.
-   - `code_graph.py path --up <NewTable>` — walks every ancestor through the upstream Spyglass tree. Unresolved FK names show up here.
-   - `code_graph.py path --down <NewTable>` — walks every descendant; useful for confirming the planned fan-out (e.g., "CurationV3 should have 4 downstream consumers across Phases 2/4/5").
-   - Cycles, name collisions with v0/v1, and missing parts all surface.
+2. **Draft schema validation** — materialize the proposed schemas as a single Python file at `src/<package>/v<N>/_draft.py` (or under a plan-artifact directory + symlinked into the src tree). NO `@schema` decoration; just class declarations with their `definition` strings and `make()` raising `NotImplementedError`. Then run with file paths relative to the code-graph source root:
+   - `python /path/to/spyglass-skill/scripts/code_graph.py --src src describe <NewTable> --file spyglass/<package>/v<N>/_draft.py --json` — verifies the `definition` parses, FKs resolve, PK structure matches the design.
+   - `python /path/to/spyglass-skill/scripts/code_graph.py --src src path --up <NewTable> --file spyglass/<package>/v<N>/_draft.py --json` — walks every ancestor through the upstream Spyglass tree. Unresolved FK names show up here.
+   - `python /path/to/spyglass-skill/scripts/code_graph.py --src src path --down <NewTable> --file spyglass/<package>/v<N>/_draft.py --json` — walks every descendant; useful for confirming the planned fan-out (e.g., "CurationV3 should have 4 downstream consumers across Phases 2/4/5").
+   - Cycles, name collisions with v0/v1, and missing parts all surface. Review the JSON `warnings` block; any unaccounted `heuristic_resolution` warning is a blocker. Some current warnings are expected only when explicitly documented, e.g. `AnalysisNwbfile` resolving between `common_nwbfile.py` and `custom_nwbfile.py`, or draft v3 class names colliding with v0/v1 names.
 
-3. **Recurring per-phase check** — every phase's "Review" section ends with: "`code_graph.py describe` returns clean output for every new table; `path --up/--down` chains match the design DAG."
+3. **Recurring per-phase check** — every phase's "Review" section ends with: "`code_graph.py describe` returns clean output for every new table; `path --up/--down` chains match the design DAG; JSON warnings are empty or explicitly accounted for."
 
 Concrete findings this caught for v3:
 - `BrainRegion.region_id` is `smallint auto_increment` PK, NOT `region_name` — plan text referred to "BrainRegion row named 'Unknown'" as if it were the key; corrected to "insert the row and use its auto-generated region_id".
@@ -24,6 +24,7 @@ Concrete findings this caught for v3:
 - `bad_channel` and `contact_side_numbering` are `enum("True", "False")` strings on Spyglass tables (not int/bool); v3 helpers filtering Spyglass `Electrode` must use string comparison.
 - v1 `CurationV1.object_id` is `varchar(72)` — wider than the plan's `varchar(40)` draft; widened for parity.
 - `SpikeSortingOutput.source_class_dict` exists in TWO places (module-level + inherited from `_Merge`); the dispatch test must verify which one is consulted at runtime.
+- `CurationV3.UnitLabel` had to become a separate part table after review caught that a scalar `curation_label: varchar(32)` could not represent the documented `labels: dict[int, list[str]]` API or v1's indexed multi-label NWB column.
 
 **Skill-level recommendation**: add a "Schema design validation" section to the spyglass skill router with this pattern. Currently the skill teaches `code_graph.py` mostly for DEBUGGING existing pipelines (one-off "where is X declared"); the new-pipeline use case is a different workflow but uses the same tool.
 
@@ -53,7 +54,7 @@ The "no `alter()` calls across phases" constraint forced anticipating later phas
 
 - Phase 1's `SortingSelection` had to declare **both** nullable FKs (`-> [nullable] Recording` and `-> [nullable] ConcatenatedRecording`) even though Phase 1 only used `Recording`. Phase 3 then just lifts the `NotImplementedError` guard in `insert_selection()`; the schema is unchanged.
 - Same pattern for `ArtifactDetectionSelection` (nullable Recording vs SharedArtifactGroup).
-- `Sorting.Unit` and `CurationV3.Unit` part tables for brain-region tracing had to land in Phase 1 even though Phase 2 / 4 consume them.
+- `Sorting.Unit`, `CurationV3.Unit`, and `CurationV3.UnitLabel` part tables had to land in Phase 1 even though Phase 2 / 4 consume them.
 
 Recording this as a contract (shared-contracts § Zero-Migration Schema Forward-Compatibility) — with a per-phase table of "Phase 1 decisions that anticipate Phase N" — made it reviewable.
 
@@ -71,7 +72,7 @@ The Selection / Computed pair (v1's pattern) factored out cleanly when both shar
 
 `AnalysisNwbfile` has a single non-null `-> Nwbfile` parent ([common_nwbfile.py:630](src/spyglass/common/common_nwbfile.py#L630)). A computed table that spans multiple sessions (v3's `ConcatenatedRecording`, `UnitMatch`) still needs ONE Nwbfile to anchor the analysis NWB. The rule v3 adopted: **always use the first SessionGroup.Member's nwb_file_name (ordered by member_index) as the deterministic anchor**. Cross-session provenance stays queryable through the explicit `SessionGroup.Member` part, not through the analysis NWB's session.
 
-Same rule applies to per-unit Electrode FKs on concat-source `Sorting.Unit` — Electrode is keyed by `(nwb_file_name, electrode_id)`, so N Electrode rows exist per channel for an N-member concat. v3 anchors `Sorting.Unit -> Electrode` to the first member; per-session brain regions for tracked units derived from `TrackedUnit.Member` walking each member separately.
+Same rule applies to per-unit Electrode FKs on concat-source `Sorting.Unit` — `Electrode` inherits `ElectrodeGroup`, so the effective key includes `nwb_file_name`, `electrode_group_name`, and `electrode_id`. A concat sort has one Electrode row per member for the same physical channel identity. v3 anchors `Sorting.Unit -> Electrode` to the first member; per-session brain regions for tracked units are derived from `TrackedUnit.Member` walking each member separately.
 
 ### Brain-region tracing wants a part table, not a join helper
 
@@ -80,6 +81,17 @@ v1's `CurationV1.get_sort_group_info()` does `fetch(limit=1)` on the SortGroup-E
 v3 fix: persist per-unit `(electrode_id, peak_amplitude_uV)` to a `Sorting.Unit` part table at sort time. Brain region is then a constant-time `Sorting.Unit * Electrode * BrainRegion` join. `CurationV3.Unit` mirrors through merges. Adding the part table costs ~5 columns and ~50 LOC; the UX improvement (one-call `get_unit_brain_regions(merge_key)` on `SpikeSortingOutput`) is large.
 
 Generalizable lesson: **whenever a "trace X back to Y" query is hard for users, ask whether the answer can be precomputed at compute-table-make time and stored on a part table.** Per-fetch joins are silently expensive AND silently wrong (limit=1, fetch_first, etc.).
+
+### Model list-valued user concepts as part tables, not scalar columns
+
+v1 curation labels are list-valued per unit: one unit can carry labels like `["noise", "reject"]`, and unlabeled units have an empty list. An early v3 draft documented `labels: dict[int, list[str]]` but stored `curation_label=NULL: varchar(32)` on `CurationV3.Unit`. That mismatch would have forced either lossy serialization, an undocumented scalar-only API, or a later schema migration.
+
+The corrected pattern is `CurationV3.UnitLabel`, one row per `(unit_id, label)`, with no rows for unlabeled units. Filtering helpers then get named semantics:
+
+- `get_unit_brain_regions(include_labels=[...])` includes units with any requested label.
+- `get_matchable_unit_ids(exclude_labels={"reject", "noise", "artifact"})` excludes any unit carrying an excluded label, even if it also has `accept`, and includes unlabeled / `accept` / `mua` units.
+
+Generalizable lesson: **when the Python API says `list[...]`, the DataJoint schema needs a part table or a real list-valued storage decision.** A nullable scalar column is a red flag under a zero-migration policy.
 
 ## Pydantic-validated parameters
 

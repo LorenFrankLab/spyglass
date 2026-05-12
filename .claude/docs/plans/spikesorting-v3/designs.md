@@ -775,7 +775,7 @@ class Sorting(SpyglassMixin, dj.Computed):
 
 Stores manual labels / merge groups for a sort. Multiple curations per sort allowed via `curation_id`. Each curation can have a parent for lineage.
 
-Identical shape to `CurationV1` *except*: (a) registers into `SpikeSortingOutput.CurationV3` automatically on insert; (b) labels validated against `CurationLabel` enum (see shared-contracts.md); (c) `insert_curation()` returns a single dict (never a list).
+Same lineage shape as `CurationV1` *except*: (a) registers into `SpikeSortingOutput.CurationV3` automatically on insert; (b) labels validated against `CurationLabel` enum (see shared-contracts.md); (c) labels are normalized into `CurationV3.UnitLabel` so multi-label units are queryable; (d) `insert_curation()` returns a single dict (never a list).
 
 ```python
 @schema
@@ -820,7 +820,18 @@ class CurationV3(SpyglassMixin, dj.Manual):
         -> Electrode
         peak_amplitude_uV: float
         n_spikes: int
-        curation_label=NULL: varchar(32)  # one of CurationLabel enum or NULL
+        """
+
+    class UnitLabel(SpyglassMixinPart):
+        """One label assigned to one curated unit.
+
+        A separate part table preserves v1's multi-label semantics
+        (`labels: dict[int, list[str]]`) without packing lists into a scalar
+        column. Unlabeled units have no UnitLabel rows.
+        """
+        definition = """
+        -> CurationV3.Unit
+        curation_label: varchar(32)  # one of CurationLabel enum
         """
 
     # Required methods to satisfy SpikeSortingOutput.source_class_dict dispatch
@@ -832,25 +843,28 @@ class CurationV3(SpyglassMixin, dj.Manual):
     #                                            electrodes in the sort group (NOT
     #                                            fetch(limit=1) as v1 does).
     #   get_unit_brain_regions(key, include_labels=None) -> pd.DataFrame
-    #       (reads CurationV3.Unit; optionally filters by curation_label)
+    #       (reads CurationV3.Unit; optionally filters by UnitLabel)
+    #   get_matchable_unit_ids(key, exclude_labels=None) -> np.ndarray
+    #       returns units without any excluded labels; unlabeled units are included.
 
     @classmethod
     def insert_curation(
         cls,
         sorting_key: dict,
+        labels: dict[int, list[CurationLabel | str]],
         parent_curation_id: int = -1,
-        labels: dict[int, list[CurationLabel | str]] | None = None,
         merge_groups: list[list[int]] | None = None,
         apply_merges: bool = False,
         description: str = "",
     ) -> dict:
         """Insert a new curation; auto-register into SpikeSortingOutput.CurationV3."""
         # Validate labels against enum
-        if labels:
-            for unit_id, label_list in labels.items():
-                for label in label_list:
-                    CurationLabel(label)  # raises ValueError on unknown
+        for unit_id, label_list in labels.items():
+            for label in label_list:
+                CurationLabel(label)  # raises ValueError on unknown
         ...
+        # Insert one CurationV3.UnitLabel row per (unit_id, label); units
+        # missing from `labels` or mapped to [] remain unlabeled.
         # After insert, also register in merge:
         from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
         SpikeSortingOutput.insert([key_just_inserted], part_name="CurationV3")
@@ -1341,11 +1355,14 @@ class UnitMatch(SpyglassMixin, dj.Computed):
                 {"sorting_id": sorting_id}
             )
             curated_sorting = (CurationV3 & mc).get_merged_sorting()  # applies merges
-            # Filter out reject/noise units per CurationV3.Unit labels
-            accept_unit_ids = (CurationV3.Unit & mc & {
-                "curation_label": None  # OR NOT IN ['reject', 'noise', 'artifact']
-            }).fetch("unit_id")
-            curated_sorting = curated_sorting.select_units(accept_unit_ids)
+            # Filter out units with any excluded curation label. This helper
+            # includes unlabeled units and units labeled accept/mua, and
+            # excludes any unit with reject/noise/artifact even if it also
+            # carries another label.
+            matchable_unit_ids = CurationV3.get_matchable_unit_ids(
+                mc, exclude_labels={"reject", "noise", "artifact"}
+            )
+            curated_sorting = curated_sorting.select_units(matchable_unit_ids)
             # Build a fresh analyzer over the curated sorting using the
             # same recording — needed because the matcher reads templates
             # for the curated unit set, not the raw set.

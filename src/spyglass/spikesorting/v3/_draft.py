@@ -265,7 +265,12 @@ class CurationV3(SpyglassMixin, dj.Manual):
         -> Electrode
         peak_amplitude_uV: float
         n_spikes: int
-        curation_label=NULL: varchar(32)
+        """
+
+    class UnitLabel(SpyglassMixinPart):
+        definition = """
+        -> CurationV3.Unit
+        curation_label: varchar(32)
         """
 
 
