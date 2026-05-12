@@ -236,6 +236,9 @@ for label, interval_data in results.groupby("interval_labels"):
         seconds-to-samples conversion #1564
     - Trigger recording recompute in `SpikeSortingRecording.populate` when
         necessary #1588
+    - Restrict `ImportedSpikeSorting.Annotations` to the current session in
+        `make_df_from_annotations` so `fetch_nwb` works across multiple sessions
+        with overlapping unit ids #1581
 
 ## [0.5.5] (Aug 6, 2025)
 
