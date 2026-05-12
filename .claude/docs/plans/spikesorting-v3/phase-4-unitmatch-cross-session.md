@@ -73,12 +73,14 @@ Output of this sub-phase is documentation + a working notebook, NOT new tables. 
 
 - **Helper for building `UnitMatchSelection.MemberCuration` rows**: `UnitMatchSelection.insert_selection(session_group_name, matcher_params_name, curation_choices: dict[member_index, curation_key]) -> dict`. The `curation_choices` argument maps each member's `member_index` to an explicit `{"sorting_id": ..., "curation_id": ...}` key. Helper validates that every member has a choice and raises clearly if any are missing. Returns the unitmatch_id PK dict per the [shared-contracts insert_selection convention](shared-contracts.md#insert_selection-return-value-normalization).
 
-- **Primary validation gate is Neuropixels**, not tetrode. The Frank lab does NOT currently do multi-day tetrode sorting — that workflow is theoretical for this lab — so a tetrode UnitMatch AUC isn't a meaningful gate on shipping Phase 4. The gating test is `test_v3_unitmatch_neuropixels_mearec_ground_truth`:
-  - Uses the Phase-0-generated `mearec_neuropixels_60s.nwb` together with a new Phase 4b fixture `mearec_neuropixels_2sessions.nwb` (generated from the same MEArec Neuropixels template set with different `seeds.spiketrain` and a small inter-session drift).
+- **Primary validation gate is polymer probes** (the Frank-lab standard, [Chung et al. 2019](https://pubmed.ncbi.nlm.nih.gov/30502044/)) — not tetrode and not Neuropixels. The gating test is `test_v3_unitmatch_polymer_mearec_ground_truth`:
+  - Uses a new Phase 4b fixture `mearec_polymer_2sessions.nwb` (4-shank polymer probe; same probe-interface JSON as `mearec_polymer_60s.nwb` from Phase 0; two sessions generated from the same MEArec template set with different `seeds.spiketrain` and a small inter-session drift).
   - Runs v3 sort + curation on both sessions, runs UnitMatch, computes ROC of match probability vs ground-truth template correspondence.
   - **Pass criterion**: AUC > 0.85.
 
-- **Tetrode validation is informational only** (not a gate). Generate `mearec_tetrode_2sessions.nwb` and run the same matcher as a documentation test (`test_v3_unitmatch_tetrode_mearec_ground_truth`), but the result feeds `docs/src/Pipelines/SpikeSorting/v3-tetrode-notes.md` rather than blocking the PR. Whatever AUC the test produces gets recorded in that doc; users reading the doc see the actual tetrode performance and can decide whether UnitMatch is appropriate for any future tetrode multi-day work.
+- **Neuropixels validation is supplementary** (not a gate). `test_v3_unitmatch_neuropixels_mearec_ground_truth` runs against `mearec_neuropixels_2sessions.nwb` and records AUC in `docs/src/Pipelines/SpikeSorting/v3-validation-notes.md`. Provides independent verification of UnitMatch's published Neuropixels validation against the v3 wrapper — useful confirmation, but not what gates Phase 4 shipping.
+
+- **Tetrode validation is informational only** (not a gate). Same shape as Neuropixels supplementary — `test_v3_unitmatch_tetrode_mearec_ground_truth` runs against `mearec_tetrode_2sessions.nwb` and records AUC in the same notes doc. Multi-day tetrode is not a current Frank-lab use case, so this is purely documentation for any future evaluation.
 
 - **Optional real-data supplementary check**: if `SPIKESORTING_V3_REAL_NWB_PATH` is set AND points to a multi-session dataset with manual cross-session correspondences, `validate_unitmatch.py` (standalone CLI script, not a pytest test) reports AUC on the real data alongside the MEArec AUC. Provides empirical real-world confirmation but is NOT what gates Phase 4 shipping.
 

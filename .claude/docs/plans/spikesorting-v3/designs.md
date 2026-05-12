@@ -356,7 +356,7 @@ class SortingSelection(SpyglassMixin, dj.Manual):
     -> [nullable] Recording                     # single-session path; FK PK 'recording_id'
     -> [nullable] ConcatenatedRecording         # cross-session path; FK PK 'concat_recording_id'
     -> SorterParameters
-    artifact_id=NULL: uuid                      # FK ArtifactDetection if applicable
+    -> [nullable] ArtifactDetection             # real DataJoint FK; NULL = no artifact detection
     """
     # FK column names: `-> [nullable] Recording` adds column `recording_id`
     # to this table (Recording's PK, inherited from RecordingSelection).
@@ -402,13 +402,21 @@ class Sorting(SpyglassMixin, dj.Computed):
         See shared-contracts § Unit-Level Brain Region Tracing for why
         this is a part table (not derived on-the-fly) and the accessor
         surface it powers.
+
+        Note on brain region: Spyglass's `Electrode` table has a NON-NULL
+        FK to `BrainRegion` (see `common_ephys.py:72`), so the brain
+        region is reachable via `Sorting.Unit * Electrode * BrainRegion`
+        — no `BrainRegion` FK is duplicated on this part table. The
+        accessor methods walk that join. To represent "unknown" regions,
+        the underlying Electrode rows use the synthetic `BrainRegion`
+        row named "Unknown" rather than NULL.
         """
         definition = """
         -> master
         unit_id: int                       # SpikeInterface unit ID
         ---
-        -> Electrode                       # peak-amplitude channel for this unit
-        -> [nullable] BrainRegion          # brain region of peak channel (NULL if not annotated)
+        -> Electrode                       # peak-amplitude channel; brain region
+                                            # is reachable via Electrode * BrainRegion
         peak_amplitude_uV: float
         n_spikes: int
         """
@@ -581,15 +589,15 @@ class CurationV3(SpyglassMixin, dj.Manual):
         """Per-curated-unit metadata mirroring Sorting.Unit.
 
         Populated by insert_curation() from Sorting.Unit after applying
-        merge_groups. See shared-contracts § Unit-Level Brain Region
-        Tracing.
+        merge_groups. Brain region is reachable via Electrode (non-null
+        FK to BrainRegion); not duplicated on this part table. See
+        shared-contracts § Unit-Level Brain Region Tracing.
         """
         definition = """
         -> master
         unit_id: int
         ---
         -> Electrode
-        -> [nullable] BrainRegion
         peak_amplitude_uV: float
         n_spikes: int
         curation_label=NULL: varchar(32)  # one of CurationLabel enum or NULL

@@ -391,7 +391,11 @@ class Unit(SpyglassMixinPart):
     unit_id: int                       # SpikeInterface unit ID
     ---
     -> Electrode                       # the unit's peak-amplitude channel
-    -> [nullable] BrainRegion          # brain region of the peak channel; nullable for channels without region info
+    # No BrainRegion FK here — Spyglass's Electrode table has a NON-NULL
+    # FK to BrainRegion (common_ephys.py:72), so brain region is reachable
+    # via `Sorting.Unit * Electrode * BrainRegion`. To represent "unknown",
+    # the upstream Electrode row uses a synthetic BrainRegion row named
+    # "Unknown" rather than NULL.
     peak_amplitude_uV: float           # of the unit's template on the peak channel
     n_spikes: int
     """
@@ -419,7 +423,7 @@ TrackedUnit.get_unit_brain_regions(tracked_unit_key) -> pd.DataFrame  # cols: so
 **Invariants — do not weaken**:
 
 - `Sorting.Unit` is populated in the SAME `make()` call that creates the `Sorting` row. No "compute brain region later" — the brain region is a fact about the sort, not a separate stage.
-- `Sorting.Unit.brain_region` is nullable: some Spyglass installs don't populate `BrainRegion` for every electrode. Downstream code MUST handle `None` brain region gracefully.
+- `Sorting.Unit` has no `BrainRegion` FK; brain region is reached via `Sorting.Unit * Electrode * BrainRegion`. The Spyglass `Electrode` table's FK to `BrainRegion` is non-null (see [common_ephys.py:72](src/spyglass/common/common_ephys.py#L72)), so every unit has a region. Installs that don't have annotated regions must use the synthetic `BrainRegion` row named `"Unknown"` on the upstream Electrode rather than leaving the FK NULL.
 - `Sorting.get_unit_brain_regions` is a constant-time lookup against the part table (no template recomputation, no analyzer load).
 - Multi-region sort groups (polymer probes) are NOT collapsed; each unit's region reflects ITS peak channel, not the sort group's modal region.
 - Phase 1's `CurationV3` MUST also have a `Unit` part table mirroring `Sorting.Unit` so that curated unit removals (merges) are correctly reflected in the brain-region query without re-walking templates. `CurationV3.Unit` is populated by `CurationV3.insert_curation` from `Sorting.Unit` plus the merge_groups.

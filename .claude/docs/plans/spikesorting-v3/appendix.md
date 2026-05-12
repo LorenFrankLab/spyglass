@@ -147,7 +147,7 @@ Source: https://kilosort.readthedocs.io/en/latest/parameters.html
 
 **Repo**: https://github.com/EnnyvanBeest/UnitMatch (Python port under `UnitMatch_python/`)
 
-**PyPI page**: https://pypi.org/project/UnitMatchPy/ (v3.3.1+ as of April 2026)
+**PyPI page**: https://pypi.org/project/UnitMatchPy/ (v3.3.0 released February 2026; the plan pins `unitmatchpy>=3.3` which covers any 3.3.x patch release).
 
 **Demo notebook**: `UMPy_spike_interface_demo.ipynb` in the repo — this is Phase 4's primary integration template.
 
