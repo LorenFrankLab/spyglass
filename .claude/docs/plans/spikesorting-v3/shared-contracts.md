@@ -282,23 +282,71 @@ Free-form `dj.Manual` inserts bypassing the helper remain permitted (DataJoint c
 
 v1's `insert_selection` helpers return `dict` on fresh insert but `list[dict]` on rerun (see [`src/spyglass/spikesorting/v1/recording.py:176-182`](src/spyglass/spikesorting/v1/recording.py#L176-L182)). This breaks downstream `**rec_key` splatting.
 
-**v3 convention**: every `insert_selection()` always returns a single `dict`. The helper internally normalizes:
+**v3 convention**: every `insert_selection()` always returns a single `dict` containing **only the primary-key fields** of the inserted/found row. The helper internally normalizes:
 
 ```python
 @classmethod
 def insert_selection(cls, key: dict) -> dict:
+    """Insert or find-existing selection row.
+
+    Returns: dict containing only the table's primary-key fields. The
+    caller splats this into downstream insert_selection() calls; all
+    upstream FK values are reachable by joining against the table.
+    """
     # Validate params via Pydantic (see Pydantic contract above)
     ...
-    # Check for matching row
-    existing = (cls & key_minus_uuid).fetch("KEY", as_dict=True)
+    # Check for matching row by all non-UUID fields
+    keys_minus_uuid = {k: v for k, v in key.items() if k != cls.primary_key[0]}
+    existing = (cls & keys_minus_uuid).fetch("KEY", as_dict=True)
     if len(existing) == 1:
-        return existing[0]
+        return existing[0]  # PK-only — fetch("KEY") returns PK fields only
     if len(existing) > 1:
         raise ValueError(f"Found {len(existing)} matching rows; ambiguous")
     # Insert new row with minted UUID
-    key["recording_id"] = uuid.uuid4()  # or sorting_id, etc.
+    key[cls.primary_key[0]] = uuid.uuid4()  # recording_id, sorting_id, etc.
     cls.insert1(key)
-    return key
+    return {k: key[k] for k in cls.primary_key}
 ```
 
-**Invariant — do not weaken**: A v3 `insert_selection` returns either one dict or raises. No list returns. This is the single biggest UX win over v1 and is enforced by tests.
+**Splatting behavior**: downstream `insert_selection()` callers splat the returned PK-only dict and provide any additional foreign-key fields explicitly. Example from `run_v3_pipeline()`:
+
+```python
+rec_key = RecordingSelection.insert_selection({...})  # returns {"recording_id": UUID}
+# When inserting the next stage, splat the PK plus add new FK fields:
+sort_key = SortingSelection.insert_selection({
+    **rec_key,                                # provides recording_id
+    "recording_source": "single",             # NEW field for SortingSelection
+    "sorter": "mountainsort5",
+    "sorter_params_name": "default",
+})
+```
+
+**Invariant — do not weaken**: A v3 `insert_selection` returns either one PK-only dict or raises. No list returns; no full-row returns. This is the single biggest UX win over v1 and is enforced by tests.
+
+---
+
+## NWB Column-Name Convention for `SpikeSortingOutput` Routing
+
+`SpikeSortingOutput.get_spike_times()` dispatches through `fetch_nwb()` and checks for the key `"object_id"` (see [`src/spyglass/spikesorting/spikesorting_merge.py:210-213`](src/spyglass/spikesorting/spikesorting_merge.py#L210-L213)).
+
+**v3 must follow this convention**: any v3 table whose row is fetched through the merge for spike-time access uses **`object_id: varchar(40)`** as the column name pointing to the NWB `/units` table — NOT `units_object_id` or any other variant. This explicitly aligns with `CurationV1` ([`src/spyglass/spikesorting/v1/curation.py:38`](src/spyglass/spikesorting/v1/curation.py#L38)).
+
+Specifically:
+- `CurationV3.object_id` — points to the curated units table inside its analysis NWB. **`object_id`, not `units_object_id`**.
+- `Sorting.object_id` — same convention; if `Sorting` rows are ever fetched directly (not just through CurationV3), they use `object_id` too.
+- Auxiliary heavy outputs (templates, waveforms, metrics dataframes) are stored as sibling NWB objects with descriptive names (`templates_object_id`, `metrics_object_id`); these are NOT consulted by the merge dispatch.
+
+**Invariant — do not weaken**: Any v3 table registered as a part of `SpikeSortingOutput` MUST expose `object_id` as the column pointing to the units NWB table. The `source_class_dict` registration (next contract) depends on this.
+
+---
+
+## `SpikeSortingOutput.source_class_dict` Registration for v3
+
+Per Critical Issue #1 in the plan self-review: `SpikeSortingOutput` keeps a `source_class_dict` mapping camel-cased part names to the part-source classes ([`spikesorting_merge.py:26-30`](src/spyglass/spikesorting/spikesorting_merge.py#L26-L30)). Dispatch methods `get_recording()`, `get_sorting()`, `get_sort_group_info()` key into this dict; missing entries raise `KeyError` at runtime.
+
+**v3 requirement (Phase 1)**: when adding the `CurationV3` part to `SpikeSortingOutput`, the same PR also:
+1. Adds `"CurationV3": CurationV3_table` to `source_class_dict` at module-load time (via `__init_subclass__` or a top-of-module update — match whichever pattern v1 uses).
+2. Implements on `spyglass.spikesorting.v3.curation.CurationV3` the same trio of methods that `CurationV1` exposes: `get_recording(key)`, `get_sorting(key, as_dataframe=False)`, `get_sort_group_info(key)`. These delegate appropriately to `Sorting.get_recording()`, `Sorting.get_analyzer().sorting`, and a sort-group/electrode/brain-region join.
+3. Extends `get_spike_times()` if and only if `CurationV3` uses a different units-object-name. Per the NWB-column convention above, it does NOT, so `get_spike_times()` requires no changes — but a test must verify this.
+
+**Invariant — do not weaken**: All five dispatch methods on `SpikeSortingOutput` (`get_recording`, `get_sorting`, `get_sort_group_info`, `get_spike_times`, `get_firing_rate`) must work on a v3-sourced `merge_id` without modification. Phase 1's validation slice includes a test for each.

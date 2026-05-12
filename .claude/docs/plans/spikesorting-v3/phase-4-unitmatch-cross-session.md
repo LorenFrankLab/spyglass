@@ -43,10 +43,12 @@ Adds **sort-then-match** cross-session unit tracking via UnitMatchPy. The design
   - Match probability = 1.0 by definition; FDR = 0.0; drift = 0.0.
 
 - **Implement `unit_matching.py`** per [designs.md § MatcherParameters + UnitMatch + TrackedUnit](designs.md#matcherparameters--unitmatch--trackedunit):
-  - `MatcherParameters` Lookup (Pydantic-validated per-matcher; default rows for `unitmatch_default`, `concat_identity_default`).
-  - `UnitMatchSelection` Manual.
-  - `UnitMatch` Computed with `Pair` part. `make()` dispatches via `get_matcher(matcher_name).match(...)`.
-  - `TrackedUnit` Computed with `Member` part. `make()` builds the connected-component graph per [designs.md § Algorithm for `TrackedUnit.make()`](designs.md#matcherparameters--unitmatch--trackedunit).
+  - `MatcherParameters` Lookup (Pydantic-validated per-matcher; default rows for `unitmatch_default`, `concat_identity_default`). The Pydantic model includes a `tracked_unit_policy: Literal["strict", "transitive"] = "strict"` field and a `tracked_unit_threshold: float = 0.5` field.
+  - `UnitMatchSelection` Manual **with a `MemberCuration` part table** that explicitly pins one `(sorting_id, curation_id)` per `SessionGroup.Member`. NO implicit "latest curation" lookup; this is a load-bearing reproducibility decision. The plan-level rationale: if matching silently picked the latest curation, adding a new curation to one source session would invalidate any prior `UnitMatch` row that referenced it without making the change visible.
+  - `UnitMatch` Computed with `Pair` part. `make()` dispatches via `get_matcher(matcher_name).match(...)` using the explicitly-pinned curations from `UnitMatchSelection.MemberCuration`.
+  - `TrackedUnit` Computed with `Member` part. `make()` reads `tracked_unit_policy` and `tracked_unit_threshold` from `MatcherParameters` and dispatches to either `_derive_tracked_units_strict` (default: maximal cliques) or `_derive_tracked_units_transitive` (connected components, with `n_transitive_only_edges` reported per component). See [designs.md § Algorithm for `TrackedUnit.make()`](designs.md#matcherparameters--unitmatch--trackedunit) for the algorithm.
+
+- **Helper for building `UnitMatchSelection.MemberCuration` rows**: `UnitMatchSelection.insert_selection(session_group_name, matcher_params_name, curation_choices: dict[member_index, curation_key]) -> dict`. The `curation_choices` argument maps each member's `member_index` to an explicit `{"sorting_id": ..., "curation_id": ...}` key. Helper validates that every member has a choice and raises clearly if any are missing. Returns the unitmatch_id PK dict per the [shared-contracts insert_selection convention](shared-contracts.md#insert_selection-return-value-normalization).
 
 - **Tetrode validation gate.** A standalone validation script `tests/spikesorting/v3/validate_tetrode_unitmatch.py` (not a pytest test — invoked manually with a user-provided tetrode dataset):
   - Input: path to a multi-day tetrode dataset with manually-curated cross-day unit correspondences (gold standard). Lab provides during Phase 4 implementation.

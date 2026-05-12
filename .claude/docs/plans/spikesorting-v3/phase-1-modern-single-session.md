@@ -39,7 +39,7 @@ The MVP. Builds the complete single-session sort pipeline: preprocessing → art
   - `RecordingSelection` Manual with `insert_selection(key) -> dict` per the [insert_selection contract](shared-contracts.md#insert_selection-return-value-normalization).
   - `Recording` Computed with `make()`, `get_recording(key)` that auto-recomputes on missing cache.
 
-- **Implement `artifact.py`** — `ArtifactDetectionParameters`, `ArtifactDetectionSelection`, `ArtifactDetection` per [designs.md § ArtifactDetectionParameters + ArtifactDetection](designs.md#artifactdetectionparameters--artifactdetection). Notably: artifact intervals live on `ArtifactDetection.Interval` part table (NOT `IntervalList`). Helper `ArtifactDetection.get_artifact_removed_intervals(key) -> np.ndarray` returns the valid-time intervals for use by `Sorting.make()`.
+- **Implement `artifact.py`** — `ArtifactDetectionParameters`, `ArtifactDetectionSelection`, `ArtifactDetection` per [designs.md § ArtifactDetectionParameters + ArtifactDetection](designs.md#artifactdetectionparameters--artifactdetection). Note the design has a real `ArtifactDetectionSelection` Manual table (UUID `artifact_id` PK; FKs Recording + ArtifactDetectionParameters). `ArtifactDetection` is Computed and keys off the Selection — required so DataJoint populate-restriction semantics work (`ArtifactDetection.populate({"recording_id": X})` resolves via the Selection table's join, not against a UUID-only PK). Artifact intervals live on `ArtifactDetection.Interval` part table (NOT `IntervalList`). Helper `ArtifactDetection.get_artifact_removed_intervals(key) -> np.ndarray` returns the valid-time intervals for use by `Sorting.make()`.
 
 - **Implement `sorting.py`** — `SorterParameters`, `SortingSelection`, `Sorting` per [designs.md § SorterParameters + SortingSelection + Sorting](designs.md#sorterparameters--sortingselection--sorting). Specific points:
   - `Sorting.make()` uses `sis.run_sorter()` then immediately `sic.remove_excess_spikes()` (still in SI 0.104).
@@ -54,7 +54,11 @@ The MVP. Builds the complete single-session sort pipeline: preprocessing → art
   - Auto-registers into `SpikeSortingOutput.CurationV3` after insert.
   - `get_sorting(key, as_dataframe=False)` and `get_merged_sorting(key)` methods analogous to v1's.
 
-- **Modify `spikesorting_merge.py`** — add new part [per shared-contracts.md § SpikeSortingOutput Part-Table Convention for v3](shared-contracts.md#spikesortingoutput-part-table-convention-for-v3). Specifically: add `class CurationV3(SpyglassMixinPart)` part to `SpikeSortingOutput`. Extend `get_restricted_merge_ids` to handle `sources=['v3']` (parallel to existing v1 branch at [src/spyglass/spikesorting/spikesorting_merge.py:111](src/spyglass/spikesorting/spikesorting_merge.py#L111)).
+- **Modify `spikesorting_merge.py`** — add new part [per shared-contracts.md § SpikeSortingOutput Part-Table Convention for v3](shared-contracts.md#spikesortingoutput-part-table-convention-for-v3). Specifically:
+  - Add `class CurationV3(SpyglassMixinPart)` part to `SpikeSortingOutput`.
+  - Extend `get_restricted_merge_ids` to handle `sources=['v3']` (parallel to existing v1 branch at [src/spyglass/spikesorting/spikesorting_merge.py:111](src/spyglass/spikesorting/spikesorting_merge.py#L111)).
+  - **Register `CurationV3` in `source_class_dict`** at [src/spyglass/spikesorting/spikesorting_merge.py:26-30](src/spyglass/spikesorting/spikesorting_merge.py#L26-L30). Without this, `SpikeSortingOutput.get_recording()`, `get_sorting()`, `get_sort_group_info()` all KeyError on v3-sourced merge_ids. Per [shared-contracts.md § SpikeSortingOutput.source_class_dict Registration for v3](shared-contracts.md#spikesortingoutputsource_class_dict-registration-for-v3).
+  - Verify `get_spike_times()` works without modification by confirming `CurationV3` exposes `object_id` (per [shared-contracts.md NWB Column-Name Convention](shared-contracts.md#nwb-column-name-convention-for-spikesortingoutput-routing)); add an explicit test (see Validation slice).
 
 - **Implement an `insert_default()` classmethod** on each new Lookup table that bulk-inserts the contents rows with `skip_duplicates=True` on the Lookup-level (allowed) — mirrors v1 pattern at [src/spyglass/spikesorting/v1/recording.py:127](src/spyglass/spikesorting/v1/recording.py#L127).
 
@@ -99,6 +103,12 @@ The MVP. Builds the complete single-session sort pipeline: preprocessing → art
 | `test_curation_v3_auto_registers_in_merge` | After `CurationV3.insert_curation(...)`, `SpikeSortingOutput.CurationV3 & key` has one row. |
 | `test_curation_v3_label_enum_enforced` | `CurationV3.insert_curation(labels={1: ["typo_label"]})` raises `ValueError`. `labels={1: ["accept"]}` succeeds. |
 | `test_spike_sorting_output_routes_v3_in_get_restricted_merge_ids` | `SpikeSortingOutput.get_restricted_merge_ids(key, sources=['v3'])` returns the v3-sourced merge_ids only; `sources=['v1', 'v3']` returns both. |
+| `test_spike_sorting_output_source_class_dict_has_curation_v3` | `SpikeSortingOutput.source_class_dict["CurationV3"]` is the v3 CurationV3 class (regression test for the dispatch dict). |
+| `test_spike_sorting_output_get_recording_works_for_v3` (slow) | After inserting a v3 sort into the merge, `SpikeSortingOutput.get_recording(merge_key)` returns a BaseRecording (does NOT KeyError on dispatch). |
+| `test_spike_sorting_output_get_sorting_works_for_v3` (slow) | Same, for `get_sorting`. |
+| `test_spike_sorting_output_get_sort_group_info_works_for_v3` | Same, for `get_sort_group_info`. |
+| `test_spike_sorting_output_get_spike_times_works_for_v3` (slow) | `SpikeSortingOutput.get_spike_times(merge_key)` returns spike-time arrays for the v3 sort. Validates the `object_id` column-name convention end-to-end. |
+| `test_curation_v3_object_id_column_name` | `"object_id" in CurationV3.heading.attributes` and `"units_object_id" not in CurationV3.heading.attributes` (regression test for the NWB column-name convention). |
 | `test_sorted_spikes_group_works_with_v3` (slow) | Insert a `SortedSpikesGroup` row using a v3-sourced merge_id; assert `SortedSpikesGroup.get_spike_times(key)` returns sane numpy arrays. |
 | `test_v3_clusterless_parity` (slow, integration) | Run v3 with `clusterless_thresholder` on `minirec`; fetched spike times exactly match Phase 0 baseline pickle. Deterministic — zero tolerance. |
 | `test_v3_mountainsort5_smoke` (slow, integration) | Run v3 with MountainSort 5 on `minirec`; `n_units` ±50%, median FR ±30%, total spikes ±30% vs v1 baseline. |

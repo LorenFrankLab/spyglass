@@ -45,13 +45,23 @@ The capstone phase. Adds the `run_v3_pipeline()` convenience function (35-cell n
   ```
   Validates at preset-registration time that every referenced Lookup row exists (raises a clear error if a parameter set is missing). This catches the typo-at-populate failure mode entirely.
 
-- **Implement `figpack_curation.py`** per [designs.md § FigPackCuration](designs.md#figpackcuration):
+- **FigPack feasibility check FIRST**, before implementing anything. Before writing `figpack_curation.py`, the Phase 5 implementer must:
+  1. Confirm `figpack` is installable from PyPI under the assumed name (check at https://pypi.org/project/figpack/ or the FlatironInstitute repo).
+  2. Verify the assumed `figpack.spike_sorting.build_curation_view(analyzer)` API exists OR document the actual current API (see [appendix.md § FigPack vs FigURL](appendix.md#figpack-vs-figurl)).
+  3. Test on a single example: build a curation view from a v3 SortingAnalyzer end-to-end and publish to FigPack. Round-trip a known labels dict back via `fetch_curation_from_uri`.
+
+  **Decision branches based on feasibility check:**
+  - **(a) FigPack works as expected** → proceed with the implementation tasks below.
+  - **(b) FigPack API differs but is usable** → implement against the actual API; update [appendix.md § FigPack vs FigURL](appendix.md#figpack-vs-figurl) with the discovered surface.
+  - **(c) FigPack is not usable in Phase 5 timeframe (e.g., API unstable, not yet released, install broken)** → SKIP the FigPack implementation in Phase 5. The plan's UX deliverables (orchestrator, notebook rewrite, presets) ship without it. Add `figpack_curation.py` to a future-work issue. Document the skip in the CHANGELOG entry. FigURL remains the v3 curation UI; it already works via `spyglass.spikesorting.v1.figurl_curation` for v3 curations as long as the v3 curation NWB has the required `curation_label` column (which Phase 1 enforces).
+
+- **If FigPack is usable**: implement `figpack_curation.py` per [designs.md § FigPackCuration](designs.md#figpackcuration):
   - `FigPackCurationSelection` Manual + `FigPackCuration` Computed.
-  - `make()` uses `figpack.spike_sorting.build_curation_view(analyzer)` (verify exact import path against current FigPack release before implementation). Publishes view, stores returned URI.
+  - `make()` uses the verified FigPack API. Publishes view, stores returned URI.
   - `FigPackCuration.fetch_curation_from_uri(uri) -> tuple[dict, list]` — round-trip labels + merge_groups from FigPack back into v3.
   - Optional dependency: gate `figpack` import with a clear install message if absent.
 
-- **Add `figpack` to `pyproject.toml`** as an optional dependency:
+- **Add `figpack` to `pyproject.toml`** as an optional dependency (only if FigPack is implemented):
   ```toml
   optional-dependencies.spikesorting-v3-curation = ["figpack>=X.Y"]
   ```

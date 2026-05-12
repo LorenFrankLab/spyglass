@@ -242,12 +242,24 @@ class ArtifactDetectionParameters(SpyglassMixin, dj.Lookup):
 
 
 @schema
-class ArtifactDetection(SpyglassMixin, dj.Computed):
+class ArtifactDetectionSelection(SpyglassMixin, dj.Manual):
+    """One row per (recording, artifact params) pair to detect.
+
+    UUID-keyed; populated via insert_selection() per shared-contracts.
+    Computed table ArtifactDetection is keyed off this selection.
+    """
     definition = """
     artifact_id: uuid
     ---
     -> Recording
     -> ArtifactDetectionParameters
+    """
+
+
+@schema
+class ArtifactDetection(SpyglassMixin, dj.Computed):
+    definition = """
+    -> ArtifactDetectionSelection
     """
 
     class Interval(SpyglassMixinPart):
@@ -322,7 +334,8 @@ class Sorting(SpyglassMixin, dj.Computed):
     -> SortingSelection
     ---
     -> AnalysisNwbfile
-    units_object_id: varchar(40)
+    object_id: varchar(40)          # of the units table in the analysis NWB (per
+                                    # shared-contracts NWB Column-Name Convention)
     analyzer_folder: varchar(255)   # path to the SortingAnalyzer binary folder
     n_units: int
     time_of_sort: datetime
@@ -356,6 +369,12 @@ class Sorting(SpyglassMixin, dj.Computed):
             )
             # Clean up boundary artifacts (SI 0.104 still ships remove_excess_spikes)
             sorting_obj = sic.remove_excess_spikes(sorting_obj, recording_for_sort)
+            # IMPORTANT: sorting_obj is held in memory; the tmpdir below
+            # only contained the sorter's raw output files which we don't
+            # need to keep. SortingAnalyzer construction happens OUTSIDE
+            # the `with` block — the BaseSorting object is independent
+            # of tmpdir contents at this point.
+            sorting_obj = sorting_obj.clone()  # materialize in-memory copy
 
         # 4. Create SortingAnalyzer (see shared-contracts.md SortingAnalyzer layout)
         analyzer_folder = _analyzer_path(key)
@@ -376,13 +395,13 @@ class Sorting(SpyglassMixin, dj.Computed):
         # 5. Write units to analysis NWB (downstream uses this for fetching spike times)
         nwb_file_name = (RecordingSelection & sel).fetch1("nwb_file_name")
         with AnalysisNwbfile().build(nwb_file_name) as builder:
-            units_object_id = builder.add_units(sorting_obj, table_name="units")
+            object_id = builder.add_units(sorting_obj, table_name="units")
             analysis_file_name = builder.analysis_file_name
 
         self.insert1({
             **key,
             "analysis_file_name": analysis_file_name,
-            "units_object_id": units_object_id,
+            "object_id": object_id,
             "analyzer_folder": analyzer_folder,
             "n_units": len(sorting_obj.unit_ids),
             "time_of_sort": datetime.now(),
@@ -392,11 +411,15 @@ class Sorting(SpyglassMixin, dj.Computed):
         ...
 
     def get_analyzer(self, key) -> si.SortingAnalyzer:
-        """See shared-contracts.md SortingAnalyzer layout."""
+        """See shared-contracts.md SortingAnalyzer layout.
+
+        Recomputes if the analyzer folder is missing. Note the explicit
+        `(self & key).delete_quick()` — NEVER call `self.delete_quick()`
+        without the key restriction; it would delete every row.
+        """
         row = (self & key).fetch1()
         if not Path(row["analyzer_folder"]).exists():
-            # Recompute
-            self.delete_quick()
+            (self & key).delete_quick()  # restricted delete; do NOT drop the (self & key)
             self.populate(key)
             row = (self & key).fetch1()
         return load_sorting_analyzer(row["analyzer_folder"])
@@ -419,10 +442,18 @@ class CurationV3(SpyglassMixin, dj.Manual):
     ---
     parent_curation_id=-1: int
     -> AnalysisNwbfile
-    units_object_id: varchar(40)
+    object_id: varchar(40)        # of the curated units table in the analysis NWB
+                                  # name MUST be `object_id` per shared-contracts
+                                  # NWB Column-Name Convention (CurationV1 parity)
     merges_applied=0: bool
     description: varchar(255)
     """
+
+    # Required methods to satisfy SpikeSortingOutput.source_class_dict dispatch
+    # (see shared-contracts.md `SpikeSortingOutput.source_class_dict Registration`):
+    #   get_recording(key) -> si.BaseRecording   (delegates to Sorting.get_recording)
+    #   get_sorting(key, as_dataframe=False) -> si.BaseSorting | pd.DataFrame
+    #   get_sort_group_info(key) -> dj.Table     (joins SortGroupV3 * Electrode * BrainRegion)
 
     @classmethod
     def insert_curation(
@@ -657,14 +688,24 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
     def make(self, key):
         members = (SessionGroup.Member & key).fetch(as_dict=True, order_by="member_index")
 
-        # Lazy load each member's preprocessed recording
+        # Reuse cached preprocessed Recording binary caches when available.
+        # For each member, look up the matching Recording row (same nwb_file_name,
+        # sort_group_id, interval, preproc_params). If found, load the cached
+        # BaseRecording directly — no re-preprocessing. If absent, populate
+        # Recording first (via Recording.populate), then load.
         recordings = []
         for m in members:
-            rec = se.read_nwb_recording(Nwbfile.get_abs_path(m["nwb_file_name"]))
-            rec = rec.channel_slice(channel_ids=_member_channel_ids(m))
-            rec = _slice_to_interval(rec, m)
-            pipeline = PreprocessingPipeline(...)  # from PreprocessingParameters
-            rec = pipeline.apply(rec)
+            rec_sel_key = {
+                "nwb_file_name": m["nwb_file_name"],
+                "sort_group_id": m["sort_group_id"],
+                "interval_list_name": m["interval_list_name"],
+                "preproc_params_name": (PreprocessingParameters & key).fetch1("preproc_params_name"),
+                "team_name": (SessionGroup.Member & m).fetch1("team_name"),
+            }
+            rec_key = RecordingSelection.insert_selection(rec_sel_key)
+            if not (Recording & rec_key):
+                Recording.populate(rec_key)
+            rec = (Recording & rec_key).get_recording(rec_key)
             recordings.append(rec)
 
         # Concatenate (mono-segment)
@@ -730,12 +771,28 @@ class MatcherParameters(SpyglassMixin, dj.Lookup):
 
 @schema
 class UnitMatchSelection(SpyglassMixin, dj.Manual):
+    """One row per (session-group, matcher-params, explicit per-member curation choices).
+
+    The user must pin a specific (sorting_id, curation_id) per group member
+    via the `Member` part table. The plan deliberately rejects an implicit
+    "latest curation" lookup — that would make UnitMatch outputs irreproducible
+    when a user adds a new curation to one of the source sessions.
+    """
     definition = """
     unitmatch_id: uuid
     ---
     -> SessionGroup
     -> MatcherParameters
     """
+
+    class MemberCuration(SpyglassMixinPart):
+        """For each member of the SessionGroup, pin the exact curation used."""
+        definition = """
+        -> master
+        -> SessionGroup.Member
+        ---
+        -> CurationV3                 # explicit (sorting_id, curation_id) FK
+        """
 
 
 @schema
@@ -772,17 +829,22 @@ class UnitMatch(SpyglassMixin, dj.Computed):
 
     def make(self, key):
         sel = (UnitMatchSelection & key).fetch1()
-        members = (SessionGroup.Member & sel).fetch(as_dict=True)
 
-        # Resolve each member to its Sorting + Analyzer
+        # Resolve each member to its EXPLICITLY pinned CurationV3 row + Analyzer
+        member_curations = (
+            UnitMatchSelection.MemberCuration & key
+        ).fetch(as_dict=True, order_by="member_index")
         session_analyzers = []
-        for m in members:
-            sorting_id = _resolve_sorting_for_member(m)  # lookup latest CurationV3 -> Sorting
-            analyzer = (Sorting & {"sorting_id": sorting_id}).get_analyzer()
+        for mc in member_curations:
+            sorting_id = (CurationV3 & mc).fetch1("sorting_id")
+            recording_date = (SessionGroup.Member & mc).fetch1("recording_date")
+            analyzer = (Sorting & {"sorting_id": sorting_id}).get_analyzer(
+                {"sorting_id": sorting_id}
+            )
             session_analyzers.append(SessionAnalyzer(
-                session_key={"sorting_id": sorting_id},
+                session_key={"sorting_id": sorting_id, "curation_id": mc["curation_id"]},
                 analyzer=analyzer,
-                recording_date=m["recording_date"],
+                recording_date=recording_date,
             ))
 
         # Dispatch to plugin matcher
@@ -832,21 +894,69 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
         ...
 ```
 
-**Algorithm for `TrackedUnit.make()`** (graph-connectivity over thresholded pairs):
+**Algorithm for `TrackedUnit.make()`** — transitive closure over thresholded matches, with explicit policy for handling weakly-connected triples.
+
+**Policy decision (binding — do not weaken)**: For three sessions A/B/C, if pairs (A↔B, B↔C) are above threshold but (A↔C) is below, the connected-component algorithm would lump all three units together transitively. This can be biologically wrong (drift may make session A and session C the same unit visually distinct, even though both look like session B). The plan adopts **stricter-than-transitive** as the default:
+
+- **Default mode**: a `TrackedUnit` component requires that **every pairwise edge in its node set** exceeds threshold. Equivalent to taking maximal cliques in the thresholded graph instead of connected components. This rejects transitive-only matches.
+- **Permissive mode**: fall back to connected components; users opt in via `MatcherParameters.params["tracked_unit_policy"] = "transitive"`. Logged with a warning at make time.
+- **Reporting**: in either mode, `TrackedUnit.make()` records `n_transitive_only_edges` per component as a secondary attribute — gives users visibility into how much transitivity was invoked.
 
 ```python
 import networkx as nx
+from itertools import combinations
 
-def _derive_tracked_units(pairs, threshold):
+def _derive_tracked_units_strict(pairs, threshold):
+    """Maximal-clique-based tracked units. Default policy.
+
+    Returns: list of (component_nodes, transitive_only_count) tuples.
+    A unit is in a component only if it has a direct above-threshold edge
+    to EVERY other unit in the component.
+    """
     g = nx.Graph()
     for p in pairs:
-        node_a = (p.session_a_sorting_id, p.unit_a_id)
-        node_b = (p.session_b_sorting_id, p.unit_b_id)
         if p.match_probability >= threshold:
+            node_a = (p.session_a_sorting_id, p.unit_a_id)
+            node_b = (p.session_b_sorting_id, p.unit_b_id)
             g.add_edge(node_a, node_b, weight=p.match_probability)
-    components = list(nx.connected_components(g))
-    return components  # each component is a tracked unit
+    # find_cliques on a thresholded graph returns maximal cliques —
+    # every clique is a fully-connected subgraph (all pairwise edges present).
+    cliques = list(nx.find_cliques(g))
+    # Same node may appear in multiple cliques; greedy-pick largest first.
+    used = set()
+    components = []
+    for clique in sorted(cliques, key=len, reverse=True):
+        if any(n in used for n in clique):
+            continue
+        components.append((set(clique), 0))
+        used.update(clique)
+    # Add any leftover isolated nodes from sessions that didn't match anyone
+    for node in g.nodes():
+        if node not in used:
+            components.append(({node}, 0))
+    return components
+
+
+def _derive_tracked_units_transitive(pairs, threshold):
+    """Connected-component fallback (permissive). Opt-in via params."""
+    g = nx.Graph()
+    n_transitive = 0
+    for p in pairs:
+        if p.match_probability >= threshold:
+            node_a = (p.session_a_sorting_id, p.unit_a_id)
+            node_b = (p.session_b_sorting_id, p.unit_b_id)
+            g.add_edge(node_a, node_b, weight=p.match_probability)
+    components = []
+    for cc in nx.connected_components(g):
+        # Count edges that are "transitive only" — pairs of nodes
+        # in the component that don't have a direct edge.
+        possible_edges = len(list(combinations(cc, 2)))
+        actual_edges = g.subgraph(cc).number_of_edges()
+        components.append((cc, possible_edges - actual_edges))
+    return components
 ```
+
+**Default threshold**: `0.5` for `unitmatch` matcher; `1.0` for `concat_identity` (identity matches are always 1.0 exactly). Configurable via `MatcherParameters`.
 
 ---
 

@@ -30,7 +30,7 @@ Adds the cross-session bundling primitive (`SessionGroup`) and the concatenate-a
   - `MotionCorrectionParameters` Lookup. Contents: `("rigid_fast_default", {"preset": "rigid_fast"})`, `("none", {"preset": "none"})`, `("dredge_fast_default", {"preset": "dredge_fast"})`.
   - `ConcatenatedRecording` Computed with `make()` that:
     1. Fetches members in order.
-    2. Lazy-loads each member's preprocessed recording (channel-sliced + interval-sliced + PreprocessingPipeline applied — same as `Recording.make()` per member, but lazy).
+    2. **Reuses cached `Recording` binary outputs per member** rather than re-preprocessing from raw NWB. For each member, look up the matching `RecordingSelection` row (via `insert_selection` idempotency); if `Recording` is not yet populated for that key, call `Recording.populate(rec_key)`; then load the BaseRecording via `Recording.get_recording(rec_key)`. This avoids the silent-divergence risk of preprocessing twice. See [designs.md § SessionGroup + ConcatenatedRecording](designs.md#sessiongroup--concatenatedrecording) make() body.
     3. `concatenate_recordings(rec_list)` → mono-segment virtual recording.
     4. Applies `correct_motion(rec, preset=...)` if preset != "none".
     5. Materializes to binary cache via `recording.save(format="binary", **resolved_job_kwargs)`.
@@ -71,9 +71,12 @@ Adds the cross-session bundling primitive (`SessionGroup`) and the concatenate-a
       """
   ```
 
-  This is a **breaking schema change for v3** that hasn't shipped yet — Phase 1 wasn't released to production at this point (v3 is built up across phases before its first production release). The Phase 3 PR includes a DataJoint `Table.alter()` migration step in its install script, with a `dj_run_migration.py` helper that lab admins run once.
+  This is a **breaking schema change**. The migration policy and required `dj_run_migration.py` helper are specified in **[overview.md § Open Questions #8](overview.md#open-questions)** — read that before implementing. Phase 3 cannot ship until the migration approach is confirmed with the project owner. Decision points:
+  - If Phase 1 production rows exist: implement the in-place `Table.alter()` migration script with backfill of `recording_source='single'` and `artifact_id` PK→nullable secondary, plus a dry-run mode that prints SQL without executing.
+  - If Phase 1 has not been adopted in production: simple `alter()` is acceptable (no backfill needed; just an empty table change).
+  - Fallback if migration is rejected: introduce `SortingSelectionV2` as a parallel table; Phase 3 sorts use V2; Phase 1 V1 stays for old data. Adds a one-release deprecation window.
 
-  **CAVEAT** — if Phase 1 has already been released externally before Phase 3 lands, this requires backwards-compatible handling: a deprecation phase with a new `SortingSelectionV2` table. This case is flagged in Open Question #8 (added below); confirm with user before Phase 3 ships.
+  All three paths are documented; the implementer picks one based on the project owner's decision and notes the choice in the CHANGELOG entry for Phase 3.
 
 - **Update `Sorting.make()`** to call `_resolve_recording(key)` which returns the correct upstream object (Recording or ConcatenatedRecording).
 
