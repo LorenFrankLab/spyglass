@@ -551,13 +551,55 @@ class Sorting(SpyglassMixin, dj.Computed):
         accessor methods walk that join. To represent "unknown" regions,
         the underlying Electrode rows use the synthetic `BrainRegion`
         row named "Unknown" rather than NULL.
+
+        Note on concat-sort `Electrode` anchoring: `Electrode` is keyed
+        by `(nwb_file_name, electrode_id)` ([common_ephys.py:72](src/spyglass/common/common_ephys.py#L72))
+        via the ElectrodeGroup → Session chain. For SINGLE-recording
+        sorts the Electrode FK is unambiguous. For CONCAT sorts, the
+        unit's peak channel maps to one electrode_id within the probe,
+        but that electrode_id has N Electrode rows — one per
+        SessionGroup.Member. v3 anchors `Sorting.Unit -> Electrode` to
+        the FIRST member's Electrode row (deterministic; same rule as
+        the AnalysisNwbfile parent anchor in Phase 3). Per-session
+        brain regions for tracked units are derived not from
+        `Sorting.Unit` but from `TrackedUnit.Member` walking back
+        through `CurationV3 -> SortingSelection ->
+        ConcatenatedRecording -> SessionGroup.Member`, joined to that
+        member's Electrode + BrainRegion. This means **the probe's
+        brain-region assignment may differ across members** — the
+        accessor handles this.
+
+        Helper `_resolve_unit_electrodes(sel, peak_channel_ids)` returns
+        the Electrode FK keys for a Sorting.Unit insert:
+          - single-recording path: walks `SortGroupV3.SortGroupElectrode
+            * Electrode` for the sort group's electrodes; returns one
+            Electrode key per unit's peak channel.
+          - concat path: walks the FIRST `SessionGroup.Member.SortGroupV3
+            * Electrode` (anchor member); returns one Electrode key per
+            unit's peak channel.
+        `Sorting.make()` calls this helper rather than referencing
+        `sort_group_electrodes` directly (which is undefined in scope
+        for the concat path).
         """
         definition = """
         -> master
-        unit_id: int                       # SpikeInterface unit ID
+        unit_id: int                       # SpikeInterface unit ID; SI allows
+                                            # int OR str unit IDs, but v3
+                                            # standardizes on int and
+                                            # Sorting.make() validates that
+                                            # every sorter-emitted unit_id
+                                            # converts cleanly via int(uid)
+                                            # — raises NonIntegerUnitIDError
+                                            # otherwise. Document any sorter
+                                            # that emits non-convertible str
+                                            # IDs (none in the v3 default set
+                                            # — MS4/MS5/KS4/SC2/TDC2/clusterless
+                                            # all emit int).
         ---
-        -> Electrode                       # peak-amplitude channel; brain region
-                                            # is reachable via Electrode * BrainRegion
+        -> Electrode                       # peak-amplitude channel (anchor-member
+                                            # for concat sorts; see class
+                                            # docstring); brain region
+                                            # reachable via Electrode * BrainRegion
         peak_amplitude_uV: float
         n_spikes: int
         """
@@ -657,11 +699,27 @@ class Sorting(SpyglassMixin, dj.Computed):
 
         # 6. Persist per-unit peak channel + brain region (Sorting.Unit part).
         # Templates extension was computed at step 4; this is constant-time.
+        # `_resolve_unit_electrodes` (see Sorting.Unit docstring) dispatches
+        # on the SortingSelection row's recording_id vs concat_recording_id
+        # to return the correct Electrode keys: single-recording uses the
+        # SortGroupV3 electrodes from RecordingSelection; concat uses the
+        # FIRST SessionGroup.Member's electrodes (anchor rule).
+        peak_channel_ids = _peak_channels_from_templates(analyzer)
         unit_rows = _compute_unit_part_rows(
             sorting_id=key["sorting_id"],
             analyzer=analyzer,
-            sort_group_electrodes=sort_group_electrodes,
+            electrode_resolver=lambda peak_ch: _resolve_unit_electrodes(sel, [peak_ch])[0],
         )
+        # Validate unit_id integer-convertibility (see Sorting.Unit
+        # docstring re: SI int/str unit IDs).
+        for row in unit_rows:
+            try:
+                row["unit_id"] = int(row["unit_id"])
+            except (TypeError, ValueError) as e:
+                raise NonIntegerUnitIDError(
+                    f"Sorter emitted non-integer unit_id {row['unit_id']!r}; "
+                    f"v3 standardizes on int unit IDs."
+                ) from e
         self.Unit.insert(unit_rows)
 
     def get_sorting(self, key) -> si.BaseSorting:
@@ -1209,11 +1267,24 @@ class UnitMatchSelection(SpyglassMixin, dj.Manual):
 
 @schema
 class UnitMatch(SpyglassMixin, dj.Computed):
-    """Pairwise unit matches across SessionGroup members."""
+    """Pairwise unit matches across SessionGroup members.
+
+    AnalysisNwbfile parent-anchor rule (same shape as concat Sorting):
+    `AnalysisNwbfile` has a single `-> Nwbfile` parent
+    ([common_nwbfile.py:630](src/spyglass/common/common_nwbfile.py#L630)),
+    but UnitMatch spans multiple sessions. v3 uses the **first
+    `SessionGroup.Member.nwb_file_name`** (ordered by `member_index`)
+    as the deterministic anchor for the AnalysisNwbfile parent. The
+    complete multi-session provenance remains queryable through
+    `UnitMatchSelection -> SessionGroup -> SessionGroup.Member`; do
+    not query the analysis NWB's session for cross-session info.
+    Implementation calls `_resolve_analysis_parent_nwb_file_name(sel)`
+    — same helper Phase 3 uses for concat Sorting.
+    """
     definition = """
     -> UnitMatchSelection
     ---
-    -> AnalysisNwbfile
+    -> AnalysisNwbfile           # parent = first SessionGroup.Member's NWB
     pairs_object_id: varchar(40)
     n_pairs: int
     matcher_runtime_s: float
@@ -1222,17 +1293,24 @@ class UnitMatch(SpyglassMixin, dj.Computed):
     class Pair(SpyglassMixinPart):
         """Per-pair match record.
 
-        Note: session keys are stored as serialized JSON for query
-        flexibility — the schema can't FK directly to two different
-        Sorting rows in one row.
+        Stores BOTH (sorting_id, curation_id) for each side of the pair
+        — UnitMatch operates on the curated unit set selected by
+        UnitMatchSelection.MemberCuration, NOT the raw Sorting units.
+        A pair references units that survive the curation's
+        merges_applied + reject-label filters, so downstream consumers
+        get a stable cross-session identity that already respects
+        curation decisions.
         """
         definition = """
         -> master
         pair_index: int
         ---
         session_a_sorting_id: uuid
+        session_a_curation_id: int      # which curation of session A this unit
+                                        # came from (pinned by MemberCuration)
         unit_a_id: int
         session_b_sorting_id: uuid
+        session_b_curation_id: int
         unit_b_id: int
         match_probability: float
         drift_estimate_um=0.0: float
@@ -1242,7 +1320,13 @@ class UnitMatch(SpyglassMixin, dj.Computed):
     def make(self, key):
         sel = (UnitMatchSelection & key).fetch1()
 
-        # Resolve each member to its EXPLICITLY pinned CurationV3 row + Analyzer
+        # Resolve each member to its EXPLICITLY pinned CurationV3 row.
+        # UnitMatch operates on the CURATED unit set (after merges_applied
+        # and excluding reject/noise labels), NOT on the raw Sorting.
+        # The session_key carried into MatchPair tuples is
+        # (sorting_id, curation_id) — both stored in UnitMatch.Pair so
+        # downstream consumers can resolve which curation produced the
+        # match.
         member_curations = (
             UnitMatchSelection.MemberCuration & key
         ).fetch(as_dict=True, order_by="member_index")
@@ -1250,12 +1334,30 @@ class UnitMatch(SpyglassMixin, dj.Computed):
         for mc in member_curations:
             sorting_id = (CurationV3 & mc).fetch1("sorting_id")
             recording_date = (SessionGroup.Member & mc).fetch1("recording_date")
-            analyzer = (Sorting & {"sorting_id": sorting_id}).get_analyzer(
+            # Load analyzer, then apply the curation's merges/labels
+            # to produce a curated BaseSorting view.
+            raw_analyzer = (Sorting & {"sorting_id": sorting_id}).get_analyzer(
                 {"sorting_id": sorting_id}
             )
+            curated_sorting = (CurationV3 & mc).get_merged_sorting()  # applies merges
+            # Filter out reject/noise units per CurationV3.Unit labels
+            accept_unit_ids = (CurationV3.Unit & mc & {
+                "curation_label": None  # OR NOT IN ['reject', 'noise', 'artifact']
+            }).fetch("unit_id")
+            curated_sorting = curated_sorting.select_units(accept_unit_ids)
+            # Build a fresh analyzer over the curated sorting using the
+            # same recording — needed because the matcher reads templates
+            # for the curated unit set, not the raw set.
+            curated_analyzer = si.create_sorting_analyzer(
+                sorting=curated_sorting,
+                recording=raw_analyzer.recording,
+                sparse=True, format="memory", return_in_uV=True,
+            )
+            curated_analyzer.compute(["random_spikes", "templates", "waveforms"],
+                                     **_resolved_job_kwargs(key))
             session_analyzers.append(SessionAnalyzer(
                 session_key={"sorting_id": sorting_id, "curation_id": mc["curation_id"]},
-                analyzer=analyzer,
+                analyzer=curated_analyzer,
                 recording_date=recording_date,
             ))
 
@@ -1278,7 +1380,10 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
     """Biological-unit-level identity across sessions.
 
     One row per inferred biological unit; the Part table lists the
-    per-session (sorting_id, unit_id) tuples that compose it.
+    per-session (sorting_id, curation_id, unit_id) tuples that compose
+    it. Each Member references the SAME curation pinned by
+    UnitMatchSelection.MemberCuration — never a different curation of
+    the same Sorting (which would make the tracked unit ambiguous).
     """
     definition = """
     -> UnitMatch
@@ -1286,13 +1391,20 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
     ---
     n_sessions_observed: int
     median_match_probability: float
+    n_transitive_only_edges=0: int     # 0 for strict-policy components
+                                       # (every pairwise edge exists);
+                                       # >0 when policy='transitive' and
+                                       # some inferred edges were missing
+                                       # in the underlying pair set.
     """
 
     class Member(SpyglassMixinPart):
         definition = """
         -> master
-        -> Sorting
-        unit_id: int
+        -> CurationV3                  # FK includes (sorting_id, curation_id)
+                                       # — pins which curation this member
+                                       # was derived from
+        unit_id: int                   # unit ID within that curation's units
         """
 
     def make(self, key):
