@@ -22,7 +22,7 @@ What v2 touches in the existing tree and what is preserved.
 **Existing files MODIFIED**:
 
 - [src/spyglass/spikesorting/spikesorting_merge.py:34-150](src/spyglass/spikesorting/spikesorting_merge.py#L34-L150) — `SpikeSortingOutput`: add new part `class CurationV2(SpyglassMixinPart)` FK'ing `spyglass.spikesorting.v2.curation.CurationV2`. Update `_get_restricted_merge_ids_v1` analog `_get_restricted_merge_ids_v2` and route through `get_restricted_merge_ids(sources=[...])` so `'v2'` is a valid source string. Modification happens in Phase 1.
-- [pyproject.toml](pyproject.toml) — **Phase 0** adds only `pydantic>=2.0` and `zarr<3.0` to `dependencies`. **The `spikeinterface` pin bump (>=0.104,<0.105) is a separate prerequisite work item** (see Phase 0's "SI 0.104 upgrade gating" tasks), NOT done in Phase 0. The bump happens immediately before Phase 1 lands, alongside the v1 port that makes the bump non-breaking. `mountainsort5>=0.5` and the optional `spikesorting-v2-matching = ["unitmatchpy>=3.3"]` extra ship in the same prerequisite PR.
+- [pyproject.toml](pyproject.toml) — **Phase 0 does not add direct `pydantic` or `zarr` pins.** Pydantic is required by v2 code, but SpikeInterface 0.104 already depends on `pydantic`; Zarr is a SpikeInterface runtime dependency (`zarr>=2.18,<3`) rather than a v2 design dependency because v2 uses `SortingAnalyzer(format="binary_folder")`. **The `spikeinterface` pin bump (>=0.104,<0.105) is a separate prerequisite work item** (see Phase 0's "SI 0.104 upgrade gating" tasks), NOT done in Phase 0. The bump happens immediately before Phase 1 lands, alongside the v1 port that makes the bump non-breaking. `mountainsort5>=0.5` and the optional `spikesorting-v2-matching = ["unitmatchpy>=3.3"]` extra ship in the same prerequisite PR.
 
 **Existing files PRESERVED unchanged**:
 
@@ -61,14 +61,14 @@ What v2 touches in the existing tree and what is preserved.
 
 | Dependency | From | To | When | Reason |
 | --- | --- | --- | --- | --- |
-| `pydantic` | (not pinned) | `>=2.0` | Phase 0 | Parameter schema validation. |
-| `zarr` | (transitive) | `<3.0` | Phase 0 | SI #4014 not yet landed; v2 archival uses Zarr v2. |
 | `spikeinterface` | `>=0.99.1,<0.100` | `>=0.104,<0.105` | **Prerequisite PR before Phase 1** | SortingAnalyzer, PreprocessingPipeline, modern curation primitives. Bumping this breaks v1's `extract_waveforms` calls — the same prerequisite PR ports v1 to `create_sorting_analyzer` so the bump is non-breaking. |
 | `mountainsort5` | (absent) | `>=0.5` | Same prerequisite PR | Additional sorter; v2 keeps MS4 too. |
 | `unitmatchpy` | (absent) | `>=3.3` | Phase 4 (optional extra `spikesorting-v2-matching`) | Cross-session matching. |
 | `MEArec` | (absent) | `>=1.9` | Phase 0 (optional extra `spikesorting-v2-validation`) | Ground-truth fixture generation for v2 validation. |
 | `neuroconv[mearec]` | (absent) | (latest) | Phase 0 (same extra) | MEArec → NWB conversion via `MEArecRecordingInterface`. |
 | `mountainsort4` | present | unchanged | n/a | v1 + v2 both ship MS4 wrapper. |
+
+SpikeInterface 0.104's own dependency set provides `pydantic`, `zarr>=2.18,<3`, and `numcodecs<0.16.0`. Spyglass should not duplicate those pins unless the SI upgrade PR exposes a resolver/runtime issue that needs an explicit temporary constraint.
 
 All v2 additions are made via the existing `pyproject.toml`. Optional deps (`unitmatchpy`, `mountainsort5` when not installed) gate at import time with a clear error pointing to the install command.
 

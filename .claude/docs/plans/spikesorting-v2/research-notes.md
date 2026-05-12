@@ -117,7 +117,7 @@ rec_processed = pipeline.apply(recording)
 
 🟢 **Sorters**: Kilosort 4, MountainSort 5 (replaces MS4), SpykingCircus2, Tridesclous2 are current-gen. MS4 deprecated. SC2/TDC2 are pure-Python (no MATLAB, no containers).
 
-🟡 **Zarr<3.0 still required** as of 0.104 (issue #4014 tracks v2 migration).
+🟡 **Zarr<3.0 remains a SpikeInterface dependency** as of 0.104 (`zarr>=2.18,<3`, with `numcodecs<0.16.0` for Zarr v2 support). v2 should not add a separate Zarr pin unless the SI upgrade exposes a concrete resolver/runtime issue.
 
 ---
 
@@ -202,7 +202,7 @@ self.insert1({**key, "analysis_file_name": analysis_file_name, "result_object_id
 
 ### H2: SortingAnalyzer-first storage → 🟢 ADOPT
 - Single source of truth for waveforms, templates, metrics, locations.
-- Persisted as `binary_folder` (fast local) or Zarr (archival/cloud).
+- Persisted as `binary_folder` for the v2 pipeline plan. Zarr remains an SI-supported format, but it is not a v2 design dependency.
 - v2 `Sorting` table writes `SortingAnalyzer` folder + lightweight units NWB; downstream tables read from analyzer extensions.
 
 ### H3: Parameters as Pydantic-validated schemas → 🟢 ADOPT
