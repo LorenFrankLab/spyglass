@@ -197,6 +197,8 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         model: Optional[dict] = None,
         epochs_trained: Optional[int] = None,
     ):
+        _require_keypoint_moseq()
+
         # set up the project and config
         project_dir, video_dir = moseq_project_dir, moseq_video_dir
         project_dir = os.path.join(project_dir, model_name)
@@ -328,6 +330,8 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         tuple
             model, model_name
         """
+        _require_keypoint_moseq()
+
         # fit pca of data
         pca = kpms.fit_pca(**data, **config)
         kpms.save_pca(pca, project_dir)
@@ -368,6 +372,7 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         explained_variance : float, optional
             minimum explained variance to print, by default 0.9
         """
+        _require_keypoint_moseq()
         project_dir = (self & key).fetch1("project_dir")
         pca = kpms.load_pca(project_dir)
         config = kpms.load_config(project_dir)
@@ -388,6 +393,7 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         dict
             model dictionary
         """
+        _require_keypoint_moseq()
         if key is None:
             key = {}
         return kpms.load_checkpoint(
@@ -430,6 +436,7 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         -------
         None
         """
+        _require_keypoint_moseq()
         self.ensure_single_entry(key)
         query = self & key
         project_dir, model_name = (query).fetch1("project_dir", "model_name")
@@ -471,6 +478,7 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         None
         """
 
+        _require_keypoint_moseq()
         self.ensure_single_entry(key)
         query = self & key
         project_dir, model_name = (query).fetch1("project_dir", "model_name")
@@ -534,6 +542,7 @@ class MoseqSyllable(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        _require_keypoint_moseq()
         model = MoseqModel().fetch_model(key)
         project_dir, model_name = (MoseqModel & key).fetch1(
             "project_dir", "model_name"

@@ -218,7 +218,9 @@ def _normalize_1_pose_dataset(
 
 
 def normalize_pose_dataset(
-    datasets, anterior_bodyparts, posterior_bodyparts
+    datasets: dict[str, pd.DataFrame],
+    anterior_bodyparts: List[str],
+    posterior_bodyparts: List[str],
 ) -> dict[str, pd.DataFrame]:
     """
     Normalize pose datasets by centering and scaling based on the mean position and length
