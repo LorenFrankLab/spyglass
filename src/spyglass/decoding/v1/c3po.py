@@ -338,8 +338,12 @@ class Model(SpyglassMixin, dj.Computed):
         c_object_id: varchar(40)  # object ID for the embedded context variables at this checkpoint
         """
 
-    def insert_checkpoint(self, checkpoint: int):
-        model_key = self.fetch1("KEY")
+    def insert_checkpoint(self, key: dict = dict(), checkpoint: int = None):
+        model_key = (self & key).fetch1("KEY")
+        if checkpoint is None:
+            raise ValueError(
+                "Checkpoint number must be provided for inserting a checkpoint."
+            )
         if self.ModelCheckpoint & {**model_key, "checkpoint": checkpoint}:
             logger.warning(
                 f"Checkpoint {checkpoint} already exists for model {model_key}. Skipping insertion."
@@ -650,10 +654,15 @@ class Model(SpyglassMixin, dj.Computed):
                     )
                     == 0
                 ):
-                    raise ValueError(
+                    logger.warning(
                         f"No checkpoint {checkpoint} found for model {model_key}."
-                        + "Please ensure the checkpoint exists before trying to load embeddings."
+                        + "Inserting a new checkpoint."
                     )
+                    self.insert_checkpoint(checkpoint)
+                    checkpoint_query = self.ModelCheckpoint() & {
+                        **model_key,
+                        "checkpoint": checkpoint,
+                    }
                 nwb = (checkpoint_query.fetch_nwb())[0]
             analysis.t = nwb["z"].timestamps
             analysis.z = nwb["z"].data
