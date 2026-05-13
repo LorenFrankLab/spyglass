@@ -24,12 +24,12 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
 - `_params/motion_correction.py` ships in Phase 1 (NOT this phase, to satisfy the Pydantic-on-insert contract for `MotionCorrectionParameters`). Phase 3 implements the CONSUMER (motion-correction dispatch inside `ConcatenatedRecording.make()`) but does NOT modify the schema. The `preset: Literal[...]` enum and `preset_kwargs: dict` are already defined in Phase 1.
 
 - **Implement `ConcatenatedRecording.make()`** and lift the `NotImplementedError` guard that Phase 1 installed. The table's `definition` is unchanged from Phase 1 (zero-migration policy).
-- **Lift the `concat_recording_id` rejection in `SortingSelection.insert_selection()`** so users can now register a sort against a `ConcatenatedRecording`. Method body change only; no schema change.
+- **Lift the `concat_recording_id` rejection in `SortingSelection.insert_selection()`** so users can now register a sort against a `ConcatenatedRecording`. Method body change only; no schema change. Keep artifact detection disabled for concat sorts in this phase: if `concat_recording_id` is non-NULL, `artifact_id` must be NULL because `ArtifactDetection` is still recording-keyed and concat artifact masking is out of scope.
 - **Extend `SessionGroup.create_group` to enforce `allow_multi_day=True`** for multi-date members. The `SessionGroup` Manual + `Member` Part schemas were declared in Phase 1; this phase adds the `create_group` classmethod logic on top.
 - **Existing `session_group.py` tasks** (these were Phase 3's original scope and now describe extending the Phase-1-declared schema rather than introducing it):
   - `SessionGroup` Manual with `Member` Part. `recording_date` on each Member is stored as metadata; `SessionGroup.is_multi_day(key) -> bool` classmethod inspects the members' dates.
   - `create_group(session_group_name, members, description="", allow_multi_day=False)` — atomic insert + Member rows. **Same-day is the default**; multi-day requires `allow_multi_day=True` and an explicit motion-correction preset on the downstream `ConcatenatedRecording` (no auto-DREDge). The error message for multi-day-without-opt-in points users at Phase 4 sort-then-match as the recommended cross-day path.
-  - `MotionCorrectionParameters` Lookup. Default rows:
+  - `MotionCorrectionParameters` Lookup. Default rows are declared in Phase 1 and consumed here:
     - `("auto_default", {"preset": "auto"})` — picks `rigid_fast` for single-day; raises on multi-day (the caller MUST pick a preset explicitly for multi-day)
     - `("rigid_fast_default", {"preset": "rigid_fast"})` — single-day default
     - `("dredge_fast_default", {"preset": "dredge_fast"})` — experimental for multi-day (must opt in)
@@ -37,9 +37,9 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
     - `("none", {"preset": "none"})` — explicit opt-out
   - `ConcatenatedRecording` Computed with `make()` that:
     1. Fetches members in order.
-    2. **Reuses cached `Recording` binary outputs per member** rather than re-preprocessing from raw NWB. For each member, look up the matching `RecordingSelection` row (via `insert_selection` idempotency); if `Recording` is not yet populated for that key, call `Recording.populate(rec_key)`; then load the BaseRecording via `Recording.get_recording(rec_key)`. This avoids the silent-divergence risk of preprocessing twice. See [designs.md § SessionGroup + ConcatenatedRecording](designs.md#sessiongroup--concatenatedrecording) make() body.
+    2. **Reuses cached NWB-resident `Recording` artifacts per member** rather than re-preprocessing from raw NWB. For each member, look up the matching `RecordingSelection` row (via `insert_selection` idempotency); if `Recording` is not yet populated for that key, call `Recording.populate(rec_key)`; then load the BaseRecording via `Recording.get_recording(rec_key)`. This avoids the silent-divergence risk of preprocessing twice. See [designs.md § SessionGroup + ConcatenatedRecording](designs.md#sessiongroup--concatenatedrecording) make() body.
     3. `concatenate_recordings(rec_list)` → mono-segment virtual recording.
-    4. Applies `correct_motion(rec, preset=...)` if preset != "none".
+    4. Applies `correct_motion(rec, preset=..., **preset_kwargs)` if preset != "none"; `preset_kwargs` comes from the Phase-1-declared `MotionCorrectionParameters.params` blob and may contain SI kwargs such as `detect_kwargs`, `estimate_motion_kwargs`, `interpolate_motion_kwargs`, and job kwargs. The Phase 1 Pydantic schema rejects `folder`, `output_motion`, and `output_motion_info` because Phase 3 has no schema field for untracked motion side artifacts or tuple-valued returns.
     5. Applies post-motion preprocessing (whitening, if configured) after motion correction, then writes the resulting recording as an `ElectricalSeries` inside an `AnalysisNwbfile` (NWB-resident — same backend as Phase 0 picked for `Recording`; see [shared-contracts.md § Recording Cache Format](shared-contracts.md#recording-cache-format)). The persisted artifact is sorter-ready; `Sorting.make()` must not apply post-motion preprocessing again for `concat_recording_id` rows.
     6. Records `member_segment_boundaries` (cumulative sample boundaries) for back-mapping spike times.
     7. `get_recording(key)` reads the cache.
@@ -48,6 +48,7 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
 - **Lift the concat-FK restriction in `SortingSelection.insert_selection()`**. NO schema changes — Phase 1 declared both nullable typed FKs (`recording_id` → `Recording` and `concat_recording_id` → `ConcatenatedRecording`) in their final shape (see [shared-contracts.md § Zero-Migration Schema Forward-Compatibility](shared-contracts.md#zero-migration-schema-forward-compatibility)). Phase 3's only modification to `sorting.py`:
   - Remove the `raise NotImplementedError("Concat path requires Phase 3")` guard that Phase 1 installed for the `concat_recording_id`-non-NULL case.
   - The XOR validation (exactly one of `recording_id` / `concat_recording_id` must be non-NULL) stays unchanged from Phase 1.
+  - Add a method-body guard that rejects `concat_recording_id` together with non-NULL `artifact_id`. Artifact detection for concat recordings is a later feature because Phase 3 reuses per-member `Recording` artifacts and does not define concat-wide artifact intervals.
 
 - **Update `Sorting.make()`** to dispatch via `_resolve_recording(key)`:
   ```python
@@ -91,13 +92,13 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
   3. Populate `ConcatenatedRecording` with preset `rigid_fast`; assert duration is sum of members.
   4. Populate `Sorting` with `clusterless_thresholder` against the concatenated recording.
   5. Assert `Sorting.populate()` succeeds, `n_units > 0`, analyzer folder created.
-  6. Call `ConcatenatedRecording.split_sorting_by_session(sorting, key)` — assert returns 2 sortings with non-overlapping spike-time ranges.
+  6. Call `ConcatenatedRecording.split_sorting_by_session(sorting, key)` — assert returns 2 local sortings whose spike trains are reset to each member's local sample frame and bounded by that member's sample count.
 
 - **Memory/time smoke test on real chronic data** (slow integration, skipped on CI):
   - Test that runs only if `pytest --run-chronic` is passed.
   - Uses a real lab dataset (path configurable via env var `SPIKESORTING_V2_CHRONIC_TEST_PATH`).
   - 1-hour, 30 kHz, single sort group.
-  - Asserts `Recording.populate()` peak RSS < 8 GB and runtime < 10 min on a 16-core machine.
+  - Asserts the Phase 3 end-to-end path (`ConcatenatedRecording.populate()` followed by `Sorting.populate()` on that concat recording) peak RSS < 8 GB and runtime < 10 min on a 16-core machine. Also log the concat-materialization and sorting timings separately so motion correction vs sorter cost is visible.
   - Reports timing + memory to logs, even on pass.
 
 - **Documentation update**:
@@ -112,6 +113,7 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
 - **Multi-probe session groups** — out of scope. Phase 3 assumes one sort_group per member (one shank or tetrode).
 - **GPU motion correction** — uses CPU presets only. KS4-built-in drift handling fires only if user selects KS4 as the sorter (Phase 1 plumbing).
 - **No `Sorting.get_per_session_analyzer()` helper** — out of scope. If a user wants per-session analyzers from a concat sort, they back-map via `split_sorting_by_session` then `create_sorting_analyzer` manually.
+- **No concat-wide artifact detection.** `SortingSelection.insert_selection()` rejects `concat_recording_id` with non-NULL `artifact_id`; artifact intervals remain single-recording or shared-recording-group inputs until a later phase defines concat artifact semantics.
 - **No schema changes to `SortingSelection`.** Per the zero-migration policy, this phase only modifies `Sorting.make()` and `SortingSelection.insert_selection()` method bodies; the `definition` string is untouched.
 
 ## Validation slice
@@ -122,15 +124,18 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
 | `test_session_group_create_multi_day_rejected_by_default` | `create_group(name, multi_day_members)` without `allow_multi_day=True` raises ValueError mentioning Phase 4 sort-then-match. |
 | `test_session_group_create_multi_day_accepted_with_opt_in` | `create_group(name, multi_day_members, allow_multi_day=True)` succeeds. |
 | `test_session_group_is_multi_day_classmethod` | `SessionGroup.is_multi_day(key)` returns False for single-day, True for multi-day. |
-| `test_motion_correction_params_validation` | `MotionCorrectionParameters.insert1({"params": {"preset": "bogus"}})` raises. |
+| `test_session_group_create_group_atomic` | Force the second Member insert to fail; assert neither the `SessionGroup` master row nor partial Member rows remain. |
+| `test_motion_correction_params_validation` | `MotionCorrectionParameters().insert1({"params": {"preset": "bogus"}})` raises. |
 | `test_motion_correction_preset_auto_on_single_day` (slow) | With `preset="auto"` on single-day group: traces match what `rigid_fast` produced. |
 | `test_motion_correction_preset_auto_rejects_multi_day` | With `preset="auto"` on multi-day group, `ConcatenatedRecording.populate()` raises (caller must pick an explicit preset for multi-day). |
-| `test_concatenated_recording_make_basic` (slow) | After populate, the row has `analysis_file_name` + `object_id` referencing a populated `ElectricalSeries`; `n_channels` matches all members; `total_duration_s` = sum(member durations); `member_segment_boundaries` length matches members. |
-| `test_concatenated_recording_reuses_recording_cache` (slow) | If `Recording` is already populated for each member, `ConcatenatedRecording.make()` does NOT re-read raw NWB (assert via mock of `se.read_nwb_recording` raising if called) — it consumes the cached binary. |
-| `test_concatenated_recording_motion_correct_applied` (slow) | Populate with `preset="rigid_fast"` vs `preset="none"`; resulting `cache_hash` values differ. |
-| `test_concatenated_recording_multi_day_with_explicit_preset` (slow) | With `preset="dredge_fast"` and an `allow_multi_day=True` group, `ConcatenatedRecording.populate()` succeeds and the materialized recording differs from a `preset="rigid_fast"` run (motion correction was applied). |
+| `test_motion_correction_preset_kwargs_forwarded` | Insert a custom MotionCorrectionParameters row with a harmless SI kwarg override or mocked `correct_motion`; assert `ConcatenatedRecording.make()` forwards `preset_kwargs` instead of dropping them. |
+| `test_concatenated_recording_make_basic` (slow) | After populate, the row has `analysis_file_name`, `electrical_series_path`, and `object_id` referencing a populated `ElectricalSeries`; `n_channels` matches all members; `total_duration_s` = sum(member durations); `member_segment_boundaries` length matches members and equals cumulative integer sample counts from the member recordings. |
+| `test_concatenated_recording_reuses_recording_cache` (slow) | If `Recording` is already populated for each member, `ConcatenatedRecording.make()` does NOT re-read raw NWB (assert via mock of raw `se.read_nwb_recording` raising if called) — it consumes the cached NWB-resident `Recording` artifacts. |
+| `test_concatenated_recording_motion_correct_applied` (slow) | On the planted-drift fixture, populate with `preset="rigid_fast"` vs `preset="none"` and assert sampled traces differ. Do not rely on hash differences for no-drift synthetic data, where a rigid correction may be identity. |
+| `test_concatenated_recording_multi_day_with_explicit_preset` (slow) | With `preset="dredge_fast"` and an `allow_multi_day=True` group, `ConcatenatedRecording.populate()` succeeds and records the explicit preset used. Scientific benefit is validated by the planted-drift ground-truth test, not by a brittle hash comparison. |
 | `test_sorting_selection_phase_3_accepts_concatenated` | After Phase 3 module import, `SortingSelection.insert_selection({"concat_recording_id": concat_uuid, "recording_id": None, ...})` succeeds (regression vs Phase 1's NotImplementedError). |
 | `test_sorting_selection_xor_still_enforced` | After Phase 3, the XOR validator still rejects both-NULL and both-non-NULL combinations of `recording_id` / `concat_recording_id`. |
+| `test_sorting_selection_concat_rejects_artifact_detection` | `SortingSelection.insert_selection()` rejects rows with non-NULL `concat_recording_id` and non-NULL `artifact_id`, because concat artifact masking is out of scope for Phase 3. |
 | `test_sorting_selection_schema_unchanged_from_phase_1` | `SortingSelection.heading.attributes` is unchanged across Phase 1 and Phase 3 (no migration). |
 | `test_concat_sorting_analysis_parent_anchor` | A concat-backed `Sorting.populate()` builds its analysis NWB using the first `SessionGroup.Member.nwb_file_name` as parent and does not query `RecordingSelection` with a concat-only key. |
 | `test_sorting_against_concatenated_recording` (slow) | Run `Sorting.populate()` on a SortingSelection FK'ing ConcatenatedRecording; analyzer folder created; `n_units > 0`; `Sorting.Unit` populated with brain regions from the per-session electrode metadata. |

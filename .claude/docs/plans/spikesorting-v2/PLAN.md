@@ -22,7 +22,7 @@ For agent invocation, **load only the slice you need**:
 - [designs.md](designs.md) — schema designs for each v2 table (Recording, Sorting, Curation, AnalyzerCuration, Recompute, SessionGroup, UnitMatch).
 - [feature-parity.md](feature-parity.md) — explicit v1 parity matrix, including intentional departures.
 - Phases (each ships as a separable PR):
-  - [phase-0-scaffolding.md](phase-0-scaffolding.md) — module layout, SI ≥0.104 dep migration, baseline-capture fixtures for v1 parity.
+  - [phase-0-scaffolding.md](phase-0-scaffolding.md) — foundation work split into Phase 0a (module/CI/code-graph scaffolding) and Phase 0b (fixtures, storage benchmark, v1 baseline capture); no v2 pipeline tables.
   - [phase-1-modern-single-session.md](phase-1-modern-single-session.md) — SortingAnalyzer-based single-session sort end-to-end; new `SpikeSortingOutput.CurationV2` part.
   - [phase-2-analyzer-curation.md](phase-2-analyzer-curation.md) — metrics + auto-merge + burst-pair consolidated into `AnalyzerCuration`, plus recompute verification tables for storage reclamation.
   - [phase-3-session-group-concat.md](phase-3-session-group-concat.md) — `SessionGroup` table + `ConcatenatedRecording` for same-day chronic recordings.

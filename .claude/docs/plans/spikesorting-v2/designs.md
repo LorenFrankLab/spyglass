@@ -61,10 +61,13 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
     #   sort groups without touching the existing ones.
     #
     # - If existing rows AND delete_existing_entries=True: INSPECT
-    #   BEFORE DESTROY. The classmethod first runs a dry-run query
-    #   (using the SpyglassMixin `delete(dry_run=True)` surface) that
-    #   walks downstream rows for each row that would be deleted. It
-    #   returns a `DeletionPreview` namedtuple containing:
+    #   BEFORE DESTROY. The classmethod first builds an explicit
+    #   `DeletionPreview` by restricting the v2 tables that can depend on
+    #   the candidate SortGroupV2 rows. Do NOT rely on
+    #   `delete(dry_run=True)` to provide this report: Spyglass
+    #   cautious_delete dry-runs are useful permission/external-file guards,
+    #   but they do not return per-table row counts or ownership summaries.
+    #   The preview namedtuple contains:
     #     - the SortGroup rows to be deleted,
     #     - per-row counts of downstream Recording / Sorting /
     #       CurationV2 / SpikeSortingOutput rows that would cascade,
@@ -73,8 +76,9 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
     #     - any rows owned by a different team (cautious_delete blocks
     #       these regardless — surfaced eagerly to fail fast).
     #   If `confirm=True` (additional required kwarg whenever
-    #   `delete_existing_entries=True`), the destroy proceeds via
-    #   `cautious_delete` (preserving team-permission semantics).
+    #   `delete_existing_entries=True`), the destroy proceeds via the
+    #   restricted table's `.delete()` / cautious_delete path (preserving
+    #   team-permission semantics).
     #   If `confirm=False` (default), the method returns the
     #   `DeletionPreview` without deleting and raises with an explicit
     #   message: "Pass `confirm=True` after reviewing the preview".
@@ -107,6 +111,7 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         sort_reference_electrode_id: int = -1,
         sort_group_ids: list[int] | None = None,
         delete_existing_entries: bool = False,
+        confirm: bool = False,
     ) -> None:
         """Auto-group electrodes by shank.
 
@@ -128,6 +133,7 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         remove_bad_channels: bool = True,
         omit_unitrode: bool = True,
         delete_existing_entries: bool = False,
+        confirm: bool = False,
     ) -> None:
         """Group electrodes by ANY column in the electrode table.
 
@@ -153,6 +159,9 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
             filtering.
         delete_existing_entries : bool
             See class-level comment above.
+        confirm : bool
+            Required with `delete_existing_entries=True` to perform the
+            cautious-delete + reinsert path after reviewing the preview.
 
         Validates `column` exists in the electrode table; raises with
         the full list of valid columns on mismatch. Logs which
@@ -185,8 +194,7 @@ class PreprocessingParameters(SpyglassMixin, dj.Lookup):
         # Additional presets inserted via Phase 1 task.
     ]
 
-    @classmethod
-    def insert1(cls, row: dict, **kwargs):
+    def insert1(self, row: dict, **kwargs):
         row["params"] = _validate_params(PreprocessingParamsSchema, row["params"])
         super().insert1(row, **kwargs)
 
@@ -236,7 +244,8 @@ class Recording(SpyglassMixin, dj.Computed):
     -> RecordingSelection
     ---
     -> AnalysisNwbfile
-    object_id: varchar(40)              # of the ProcessedElectricalSeries inside the analysis NWB
+    electrical_series_path: varchar(255) # NWB path used by se.read_nwb_recording
+    object_id: varchar(40)              # object_id of the ElectricalSeries inside the analysis NWB
     n_channels: int
     sampling_frequency: float
     duration_s: float
@@ -278,11 +287,20 @@ class Recording(SpyglassMixin, dj.Computed):
         # Recording's schema is identical in both cases.
         nwb_file_name = sel["nwb_file_name"]
         with AnalysisNwbfile().build(nwb_file_name) as builder:
-            object_id = builder.add_processed_electrical_series(
-                recording_processed,
-                series_name="preprocessed_electrical_series",
-                **_resolved_job_kwargs(key),  # chunked writes for large recordings
-            )
+            # AnalysisFileBuilder does not expose a recording-specific helper.
+            # Use direct PyNWB I/O inside the builder lifecycle and return both
+            # the stable NWB path (for SpikeInterface reads) and object_id (for
+            # identity/hash checks).
+            with builder.open_for_write() as io:
+                nwbfile = io.read()
+                electrical_series_path, object_id = _write_recording_electrical_series(
+                    nwbfile,
+                    recording_processed,
+                    series_name="preprocessed_electrical_series",
+                    module_name="ecephys",
+                    **_resolved_job_kwargs(key),  # chunked writes for large recordings
+                )
+                io.write(nwbfile)
             analysis_file_name = builder.analysis_file_name
 
         # 5. Hash + insert. cache_hash is over the ElectricalSeries data
@@ -291,6 +309,7 @@ class Recording(SpyglassMixin, dj.Computed):
         self.insert1({
             **key,
             "analysis_file_name": analysis_file_name,
+            "electrical_series_path": electrical_series_path,
             "object_id": object_id,
             "n_channels": recording_processed.get_num_channels(),
             "sampling_frequency": float(recording_processed.get_sampling_frequency()),
@@ -310,12 +329,12 @@ class Recording(SpyglassMixin, dj.Computed):
         row = (self & key).fetch1()
         nwb_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
         if not Path(nwb_path).exists() or not _electrical_series_present(
-            nwb_path, row["object_id"]
+            nwb_path, row["electrical_series_path"], row["object_id"]
         ):
             self._rebuild_nwb_artifact(key)
         return se.read_nwb_recording(
             nwb_path,
-            electrical_series_path=f"processing/ecephys/{row['object_id']}",
+            electrical_series_path=row["electrical_series_path"],
         )
 
     def _rebuild_nwb_artifact(self, key) -> None:
@@ -324,8 +343,8 @@ class Recording(SpyglassMixin, dj.Computed):
         Does NOT touch the DataJoint row. Reads RecordingSelection +
         PreprocessingParameters, re-applies the pre_motion stage of the
         preprocessing pipeline, writes a fresh ElectricalSeries into the
-        same `analysis_file_name`. Verifies the regenerated `cache_hash`
-        matches the stored hash; logs a warning if it differs (likely
+        same `analysis_file_name` and `electrical_series_path`. Verifies the
+        regenerated `cache_hash` matches the stored hash; logs a warning if it differs (likely
         SI / numerical drift — the analyzer and downstream curation rows
         may need scrutiny). Phase 2's `RecordingArtifactRecompute` table
         is the canonical recompute surface; this helper is the in-place
@@ -389,6 +408,7 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
     """
     definition = """
     shared_artifact_group_name: varchar(64)
+    ---
     -> Session                          # all members must belong to one session
     """
 
@@ -481,8 +501,7 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
     #   ('clusterless_thresholder', 'default', ...)
     # Do not auto-insert defaults for every installed SI sorter.
 
-    @classmethod
-    def insert1(cls, row: dict, **kwargs):
+    def insert1(self, row: dict, **kwargs):
         # Dispatch to per-sorter Pydantic model
         schema_cls = _get_sorter_schema(row["sorter"])
         row["params"] = _validate_params(schema_cls, row["params"])
@@ -529,7 +548,9 @@ class SortingSelection(SpyglassMixin, dj.Manual):
 
         Exactly one of (recording_id, concat_recording_id) must be set;
         the other must be NULL. Phase 1's helper rejects
-        concat_recording_id with NotImplementedError pointing at Phase 3.
+        concat_recording_id with NotImplementedError pointing at Phase 3;
+        Phase 3 lifts that gate but still rejects concat rows with
+        artifact_id because concat-wide artifact masking is out of scope.
         Returns a single PK-only dict per shared-contracts.
         """
         ...
@@ -644,9 +665,9 @@ class Sorting(SpyglassMixin, dj.Computed):
             if post_motion_dict:
                 recording = apply_preprocessing_pipeline(recording, post_motion_dict)
 
-        # 3. Get artifact-removed intervals (single-recording path only;
-        # concat path passes None — artifact detection on the concat is
-        # out of scope for Phase 3).
+        # 3. Get artifact-removed intervals (single-recording path only).
+        # SortingSelection.insert_selection rejects concat + artifact_id in
+        # Phase 3 because concat-wide artifact masking is out of scope.
         if sel.get("artifact_id"):
             artifact_intervals = ArtifactDetection.get_artifact_removed_intervals(sel)
             recording = _apply_artifact_zeroing(recording, artifact_intervals)
@@ -701,7 +722,15 @@ class Sorting(SpyglassMixin, dj.Computed):
         # query RecordingSelection with a concat-only selection row.
         nwb_file_name = _resolve_analysis_parent_nwb_file_name(sel)
         with AnalysisNwbfile().build(nwb_file_name) as builder:
-            object_id = builder.add_units(sorting_obj, table_name="units")
+            units, units_valid_times, units_sort_interval = _sorting_to_units_dicts(
+                sorting_obj,
+                valid_times=_sorting_valid_times(sel),
+            )
+            object_id, _ = builder.add_units(
+                units,
+                units_valid_times,
+                units_sort_interval,
+            )
             analysis_file_name = builder.analysis_file_name
 
         self.insert1({
@@ -954,7 +983,13 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
 
         # Compute additional extensions needed for metrics
         metric_params = (QualityMetricParameters & sel).fetch1()
-        ext_needed = ["correlograms", "spike_amplitudes", "unit_locations", "template_metrics"]
+        ext_needed = [
+            "correlograms",
+            "spike_amplitudes",
+            "template_similarity",
+            "unit_locations",
+            "template_metrics",
+        ]
         if not metric_params["skip_pc_metrics"]:
             ext_needed.append("principal_components")
         analyzer.compute(ext_needed, **_resolved_job_kwargs(key))
@@ -963,7 +998,7 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
         metrics_df = compute_quality_metrics(
             analyzer,
             metric_names=metric_params["metric_names"],
-            qm_params=metric_params["metric_kwargs"],
+            metric_params=metric_params["metric_kwargs"],
             skip_pc_metrics=metric_params["skip_pc_metrics"],
         )
 
@@ -977,16 +1012,23 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
             merge_groups = compute_merge_unit_groups(
                 analyzer,
                 preset=rules["auto_merge_preset"],
+                compute_needed_extensions=False,
                 **rules["auto_merge_kwargs"],
             )
 
         # Write three tables to NWB. Coerce non-finite values (NaN, ±inf)
         # to None on the JSON-bound copy ONLY — the in-memory metrics_df
         # retains NaN for downstream consumers that filter on it. Per the
-        # [Empty/NaN/Boundary Invariants contract] and the three-path
+        # [Empty/NaN/Boundary Invariants contract] and the serialized-path
         # sanitization rule in Phase 2 (#1556).
         metrics_df_json = _sanitize_for_json(metrics_df)
-        nwb_file_name = (Sorting & sorting_key).fetch_parent("nwb_file_name")  # helper TBD
+        # Parent the AnalyzerCuration analysis file to the same source NWB as
+        # the upstream Sorting analysis file. This is a real join path through
+        # the AnalysisNwbfile row, not a placeholder DataJoint helper.
+        sorting_analysis_file = (Sorting & sorting_key).fetch1("analysis_file_name")
+        nwb_file_name = (
+            AnalysisNwbfile & {"analysis_file_name": sorting_analysis_file}
+        ).fetch1("nwb_file_name")
         with AnalysisNwbfile().build(nwb_file_name) as builder:
             metrics_object_id = builder.add_nwb_object(
                 metrics_df_json, table_name="quality_metrics",
@@ -1145,7 +1187,8 @@ class SessionGroup(SpyglassMixin, dj.Manual):
 
     Per Phase 3 review: multi-day concat is supported by the SCHEMA but is
     NOT the recommended default path for cross-day analyses — sort-then-match
-    (Phase 4 UnitMatch) is the validated path for days/weeks-apart sessions.
+    (Phase 4 UnitMatch) is the recommended workflow for days/weeks-apart
+    sessions, gated on the Frank-lab polymer-probe validation fixture.
     `SessionGroup.create_group()` accepts multi-day members only when the
     caller passes `allow_multi_day=True` and supplies an explicit motion-
     correction preset (no auto-DREDge dispatch, because cross-session drift
@@ -1206,11 +1249,16 @@ class SessionGroup(SpyglassMixin, dj.Manual):
                 f"allow_multi_day=True. Recommended path for cross-day "
                 f"analyses is sort-then-match (Phase 4 UnitMatch)."
             )
-        cls.insert1({"session_group_name": session_group_name, "description": description})
-        cls.Member.insert([
+        rows = [
             {**m, "session_group_name": session_group_name, "member_index": i}
             for i, m in enumerate(members)
-        ])
+        ]
+        with cls.connection.transaction:
+            cls.insert1({
+                "session_group_name": session_group_name,
+                "description": description,
+            })
+            cls.Member.insert(rows)
 
     @classmethod
     def is_multi_day(cls, key: dict) -> bool:
@@ -1263,11 +1311,12 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
     -> ConcatenatedRecordingSelection
     ---
     -> AnalysisNwbfile
+    electrical_series_path: varchar(255)
     object_id: varchar(40)
     n_channels: int
     sampling_frequency: float
     total_duration_s: float
-    member_segment_boundaries: blob   # list[float], cumulative member end times
+    member_segment_boundaries: blob   # list[int], cumulative member end samples
     cache_hash: char(64)
     """
 
@@ -1301,7 +1350,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         # For single-day groups the recommended preset is `rigid_fast`;
         # for multi-day groups the caller must explicitly choose a
         # DREDge variant (and accept the validation caveat — multi-day
-        # concat is experimental, sort-then-match is the validated path).
+        # concat is experimental, sort-then-match is the recommended path).
         motion_params = (MotionCorrectionParameters & key).fetch1("params")
         preset = motion_params["preset"]
         if preset == "auto":
@@ -1315,11 +1364,24 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
                 )
             preset = "rigid_fast"
         if preset != "none":
-            concat_recording = correct_motion(concat_recording, preset=preset)
+            motion_kwargs = motion_params.get("preset_kwargs", {})
+            forbidden_kwargs = {"folder", "output_motion", "output_motion_info"}
+            if forbidden := forbidden_kwargs.intersection(motion_kwargs):
+                raise ValueError(
+                    "MotionCorrectionParameters.preset_kwargs cannot include "
+                    f"{sorted(forbidden)} because Phase 3 stores only the "
+                    "corrected recording in AnalysisNwbfile; motion side "
+                    "artifacts need a separately tracked schema."
+                )
+            concat_recording = correct_motion(
+                concat_recording,
+                preset=preset,
+                **motion_kwargs,
+            )
 
         # Whitening (post-motion stage) runs AFTER motion correction.
         # Sorting.make() will apply this for the single-recording path;
-        # for the concat path, we apply here so the cached concat binary
+        # for the concat path, we apply here so the cached concat artifact
         # is sorter-ready.
         preproc_params = PreprocessingParamsSchema.model_validate(
             (PreprocessingParameters & key).fetch1("params")
@@ -1333,15 +1395,24 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         # nwb_file_name (deterministic; see _resolve_analysis_parent_nwb_file_name).
         parent_nwb = members[0]["nwb_file_name"]
         with AnalysisNwbfile().build(parent_nwb) as builder:
-            object_id = builder.add_processed_electrical_series(
-                concat_recording,
-                series_name="concatenated_electrical_series",
-                **_resolved_job_kwargs(key),
-            )
+            with builder.open_for_write() as io:
+                nwbfile = io.read()
+                electrical_series_path, object_id = _write_recording_electrical_series(
+                    nwbfile,
+                    concat_recording,
+                    series_name="concatenated_electrical_series",
+                    module_name="ecephys",
+                    **_resolved_job_kwargs(key),
+                )
+                io.write(nwbfile)
             analysis_file_name = builder.analysis_file_name
 
-        # Track segment boundaries for back-mapping spike times to sessions
-        cumulative = np.cumsum([r.get_total_duration() for r in recordings])
+        # Track sample boundaries for back-mapping spike times to sessions.
+        # SpikeInterface sortings return spike trains in sample indices, so
+        # these must be integer sample counts, not durations in seconds.
+        cumulative = np.cumsum([
+            r.get_num_samples(segment_index=0) for r in recordings
+        ])
 
         # `key` already carries `concat_recording_id` inherited from
         # the upstream ConcatenatedRecordingSelection row (declared in
@@ -1351,6 +1422,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         self.insert1({
             **key,
             "analysis_file_name": analysis_file_name,
+            "electrical_series_path": electrical_series_path,
             "object_id": object_id,
             "n_channels": concat_recording.get_num_channels(),
             "sampling_frequency": float(concat_recording.get_sampling_frequency()),
@@ -1395,7 +1467,7 @@ class MatcherParameters(SpyglassMixin, dj.Lookup):
     definition = """
     matcher_params_name: varchar(64)
     ---
-    matcher: varchar(32)         # 'unitmatch' | 'deepunitmatch' | 'concat_identity' (Phase 3 hookup)
+    matcher: varchar(32)         # 'unitmatch' now; 'deepunitmatch' future plugin
     params: blob                 # validated against per-matcher Pydantic model
     params_schema_version=1: int
     """
@@ -1414,13 +1486,16 @@ class UnitMatchSelection(SpyglassMixin, dj.Manual):
     when a user adds a new curation to one of the source sessions.
     `insert_selection()` must also verify that each pinned CurationV2 row
     belongs to the same SessionGroup.Member it is attached to; the independent
-    FKs alone do not prove that relationship.
+    FKs alone do not prove that relationship. The master row stores a
+    deterministic hash of the part-row choices so `insert_selection()` remains
+    idempotent under the shared insert-selection contract.
     """
     definition = """
     unitmatch_id: uuid
     ---
     -> SessionGroup
     -> MatcherParameters
+    curation_set_hash: char(64)  # sha256 over ordered member->curation choices
     """
 
     class MemberCuration(SpyglassMixinPart):
@@ -1536,9 +1611,14 @@ class UnitMatch(SpyglassMixin, dj.Computed):
                 ["random_spikes", "templates", "waveforms"],
                 **_resolved_job_kwargs(key),
             )
-            # Wrapper-owned extraction: write waveforms + channel positions
-            # to the matcher-expected on-disk layout (exact files/dtypes
-            # pinned by Phase 4a) into a per-session bundle dir.
+            # Wrapper-owned extraction: write UnitMatch-compatible split-half
+            # waveforms + channel positions to the matcher-expected on-disk
+            # layout (exact files/dtypes pinned by Phase 4a) into a
+            # per-session bundle dir. Phase 4a decides whether existing
+            # SortingAnalyzer extensions are enough, or whether this helper
+            # must read `raw_analyzer.recording` to produce the two
+            # cross-validation waveform halves. The matcher itself never sees
+            # raw NWB paths, Spyglass table keys, or SortingAnalyzer objects.
             session_dir = bundle_root / f"session_{mc['member_index']:03d}"
             session_dir.mkdir()
             _write_matcher_bundle(curated_analyzer, session_dir)  # pinned by 4a
@@ -1581,7 +1661,7 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
     tracked_unit_id: int
     ---
     n_sessions_observed: int
-    median_match_probability: float
+    median_match_probability=NULL: float # NULL for singleton tracked units
     n_transitive_only_edges=0: int     # 0 for strict-policy components
                                        # (every pairwise edge exists);
                                        # >0 when policy='transitive' and
@@ -1621,7 +1701,9 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
             ``n_transitive_only_edges`` reported per component as a
             secondary attribute.
         Threshold and policy come from the matcher's params (e.g. 0.5
-        for unitmatch). See the policy explainer immediately below.
+        for unitmatch). Singleton components have no supporting edges, so
+        their median_match_probability is stored as NULL. See the policy
+        explainer immediately below.
         """
         ...
 ```
@@ -1680,9 +1762,14 @@ def _derive_tracked_units_strict(pairs, threshold, all_units):
     # every clique is a fully-connected subgraph (all pairwise edges present).
     cliques = list(nx.find_cliques(g))
     # Same node may appear in multiple cliques; greedy-pick largest first.
+    # Tie-break by canonical node tuple so equal-size overlapping cliques are
+    # deterministic across Python/networkx traversal order.
     used = set()
     components = []
-    for clique in sorted(cliques, key=len, reverse=True):
+    def _clique_sort_key(clique):
+        return (-len(clique), tuple(sorted(clique)))
+
+    for clique in sorted(cliques, key=_clique_sort_key):
         if any(n in used for n in clique):
             continue
         components.append((set(clique), 0))
@@ -1725,7 +1812,7 @@ def _derive_tracked_units_transitive(pairs, threshold, all_units):
     return components
 ```
 
-**Default threshold**: `0.5` for `unitmatch` matcher; `1.0` for `concat_identity` (identity matches are always 1.0 exactly). Configurable via `MatcherParameters`.
+**Default threshold**: `0.5` for the `unitmatch` matcher. Configurable via `MatcherParameters`.
 
 ---
 

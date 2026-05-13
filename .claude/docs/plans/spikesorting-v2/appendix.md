@@ -53,7 +53,8 @@ Extensions form a DAG. Phase 1 / 2 must compute parents before children.
 ```
 random_spikes  ───┐
                   ├─→ waveforms ──┬─→ templates ──┬─→ template_metrics
-                  │               │               └─→ unit_locations
+                  │               │               ├─→ unit_locations
+                  │               │               └─→ template_similarity
                   │               └─→ principal_components ──→ (PCA-based metrics)
                   │
 noise_levels  ────┘
@@ -66,7 +67,7 @@ spike_locations (needs random_spikes)
 
 **For v2 `Sorting.make()`**: compute `random_spikes`, `noise_levels`, `templates`, `waveforms` at sort time (cheap and unblocks everything).
 
-**For v2 `AnalyzerCuration.make()`**: add `correlograms`, `spike_amplitudes`, `unit_locations`, `template_metrics`, and `principal_components` (if metric params don't `skip_pc_metrics`).
+**For v2 `AnalyzerCuration.make()`**: add `correlograms`, `spike_amplitudes`, `template_similarity`, `unit_locations`, `template_metrics`, and `principal_components` (if metric params don't `skip_pc_metrics`). `template_similarity` is required before auto-merge presets such as `similarity_correlograms`; compute it explicitly so `compute_merge_unit_groups(..., compute_needed_extensions=False)` does not hide missing-extension drift.
 
 **Source**: https://spikeinterface.readthedocs.io/en/stable/modules/postprocessing.html
 
@@ -147,7 +148,7 @@ Source: https://kilosort.readthedocs.io/en/latest/parameters.html
 
 **Repo**: https://github.com/EnnyvanBeest/UnitMatch (Python port under `UnitMatch_python/`)
 
-**PyPI page**: https://pypi.org/project/UnitMatchPy/ (v3.3.0 released February 2026; the plan pins `unitmatchpy>=3.3` which covers any 3.3.x patch release).
+**PyPI page**: https://pypi.org/project/UnitMatchPy/ (current checked version during planning: 3.3.1, released April 2026; the plan pins `unitmatchpy>=3.3,<4` which covers 3.3.x patch releases). PyPI metadata currently declares `python>=3.9,<3.13` and `numpy<2.0`, so Phase 4a must run a resolver check against the v2 SpikeInterface environment before adding the optional extra.
 
 **Demo notebook**: `UMPy_spike_interface_demo.ipynb` in the repo — this is Phase 4's primary integration template.
 
@@ -157,15 +158,21 @@ Source: https://kilosort.readthedocs.io/en/latest/parameters.html
 import UnitMatchPy as um
 
 # Inputs:
-# - waveforms: shape (n_units, n_channels, n_samples, 2) — the 2 is the half-recording split
-# - channel_positions: shape (n_channels, 2 or 3)
-# - one set per session
+# - RawWaveforms/Unit*_RawSpikes.npy files, one directory per session.
+# - Per-unit waveform shape is (n_samples, n_channels, 2); the last axis is
+#   the two half-recording / cross-validation waveform estimates.
+# - channel_positions.npy: shape (n_channels, 2 or 3)
+# - cluster_group.tsv or equivalent good-unit metadata per session
 
-um_config = um.GetDefaultParam()
-um_config["KSDir"] = [path1, path2, ...]  # one per session
-um_config["RawDataDir"] = [...]
-match_results = um.MakeMatchTable(um_config)
-# match_results has: match probability matrix, drift estimates, FDR
+param = default_params.get_default_param()
+param["KS_dirs"] = [session_dir_1, session_dir_2, ...]
+wave_paths, unit_label_paths, channel_pos = util.paths_from_KS(param["KS_dirs"])
+waveform, session_id, session_switch, within_session, good_units, param = (
+    util.load_good_waveforms(wave_paths, unit_label_paths, param, good_units_only=True)
+)
+# The current demo then calls UnitMatchPy.overlord.extract_parameters(),
+# UnitMatchPy.overlord.extract_metric_scores(), and the Bayes helpers.
+# Phase 4a must replace this sketch with the exact wrapper code and outputs.
 ```
 
 **Key features extracted** (from the paper):
@@ -177,7 +184,7 @@ match_results = um.MakeMatchTable(um_config)
 
 **Memory**: documented to need >32 GB RAM for "large datasets" (likely >1000 units across sessions). For Frank-lab tetrode setups (typically <500 units total), fits in <8 GB.
 
-**Tetrode caveat**: validated on Neuropixels (hundreds of channels per unit). On tetrodes (4 channels), spatial features have very low discriminative power. Phase 4 includes a validation gate before declaring tetrode support.
+**Tetrode caveat**: UnitMatch's published validation is Neuropixels-heavy (hundreds of channels per unit). On tetrodes (4 channels), spatial features have very low discriminative power. Phase 4 gates on the Frank-lab polymer-probe fixture; tetrode validation is informational and does not declare production tetrode matching unless the measured AUC supports it.
 
 **DeepUnitMatch** (v2 Phase 4.1 future hook) lives in the same `UnitMatchPy` repo under `DeepUnitMatch/`. Pretrained model for inference; CNN over multi-channel waveforms. Drop-in via the same `match()` API.
 

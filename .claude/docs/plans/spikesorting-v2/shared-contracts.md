@@ -75,12 +75,13 @@ The canonical preprocessed recording produced by `Recording.make()` and `Concate
 **Persistence on the DataJoint row** (final shape — see [overview.md § Zero-migration policy](overview.md#scope-and-dependency-policy)):
 
 - `-> AnalysisNwbfile` — Spyglass's existing analysis-NWB tracking table; cleanup / export / kachery / recompute all key off this FK.
+- `electrical_series_path: varchar(255)` — the deterministic NWB path used by `se.read_nwb_recording(...)`, for example `processing/ecephys/preprocessed_electrical_series`. This is not interchangeable with `object_id`.
 - `object_id: varchar(40)` — the `ElectricalSeries` HDF5/Zarr object identifier inside the NWB.
 - `cache_hash: char(64)` — SHA-256 over the `ElectricalSeries.data` bytes, backend-agnostic. Anchors missing-artifact detection (Phase 1) and feeds `RecordingArtifactRecompute*` (Phase 2).
 
 No `binary_cache_path` column. Binary sidecar storage is **explicitly out of MVP** — see [phase-0-scaffolding.md § Storage benchmark](phase-0-scaffolding.md). If a future maintainer measures a large win and scopes the full sidecar lifecycle, that work adds a separate opt-in table; it does NOT modify `Recording`'s columns.
 
-**Backend (HDF5 vs Zarr)** is a property of `AnalysisNwbfile.build()`, not of `Recording`'s schema. Phase 0's three-format benchmark picks the default (HDF5 by default; Zarr only if it shows a clear measured win AND the `AnalysisNwbfile.build()` Zarr-backend change is in scope as a Phase 1 prereq).
+**Backend (HDF5 vs Zarr)** is a property of the `AnalysisNwbfile` lifecycle, not of `Recording`'s schema. The current Spyglass builder path is HDF5-only (`NWBHDF5IO`), so HDF5 is the Phase 1 default unless Phase 0's three-format benchmark shows a clear Zarr win AND a concrete `AnalysisNwbfile.build()` / cleanup Zarr-backend change lands as a Phase 1 prerequisite. Without that prerequisite, the Zarr column in the benchmark is evidence for future work, not a config value `Recording.make()` may use.
 
 **Sort-time materialization of binary**: sorters that internally consume `recording.save(format="binary", folder=tmpdir)` keep doing so — that is per-sort scratch managed inside `Sorting.make()`, unrelated to the canonical recording artifact.
 
@@ -168,7 +169,7 @@ def _validate_params(model_cls: type[BaseModel], params: dict) -> dict:
 
 What the contract IS committed to (these survive Phase 4a):
 
-- **Input is wrapper-owned, not analyzer-owned.** The v2 wrapper extracts per-unit waveform arrays + channel positions + per-unit metadata from each session's `SortingAnalyzer` and writes them into a matcher-specific on-disk layout (the layout is what Phase 4a pins). The matcher consumes that wrapper-prepared bundle; it does NOT consume `si.SortingAnalyzer` objects directly. This is the contract that makes the wrapper invariant ("matcher never touches raw NWB paths") implementable.
+- **Input is wrapper-owned, not analyzer-owned.** The v2 wrapper extracts per-unit waveform arrays + channel positions + per-unit metadata from each session's curated sorting/analyzer, and may read the associated v2 recording artifact when a matcher needs split-half waveform estimates that are not already present in the analyzer. It writes those inputs into a matcher-specific on-disk layout (the layout is what Phase 4a pins). The matcher consumes that wrapper-prepared bundle; it does NOT consume `si.SortingAnalyzer` objects, Spyglass table keys, or raw NWB paths directly. This is the contract that makes the wrapper invariant ("matcher never touches raw NWB paths") implementable.
 - **Output is a list of pair records** keyed by (sorting_id, curation_id, unit_id) per side (curation_id is non-negotiable per the round-7 fix — UnitMatch operates on curated units).
 - **Degenerate single-session case returns zero pairs, no error.**
 - **Determinism**: given fixed params, output is identical run-to-run (matcher sets internal seeds).
@@ -223,7 +224,7 @@ class MatcherProtocol(Protocol):
 
 **Invariants that survive Phase 4a — do not weaken**:
 
-- A matcher MUST NOT touch raw NWB paths. The v2 wrapper pre-extracts whatever the matcher needs from the analyzer and writes it to the bundle directory; the matcher consumes the bundle.
+- A matcher MUST NOT touch raw NWB paths or Spyglass table keys. The v2 wrapper pre-extracts whatever the matcher needs from the curated sorting/analyzer/recording and writes it to the bundle directory; the matcher consumes the bundle.
 - A matcher MUST emit `(sorting_id, curation_id, unit_id)` for both sides of every pair.
 - A matcher MUST handle the single-session degenerate case (return zero pairs, no error).
 - A matcher MUST be deterministic given fixed params.
@@ -517,10 +518,10 @@ Derived from a sweep of Spyglass v1 spike-sorting GitHub issues — the same edg
 
 **Invariant 2 — NaN-bearing quality metrics MUST be sanitized before serialization.** SI's `compute_quality_metrics` legitimately returns `nan` for units with insufficient spikes (e.g., `nn_isolation`, `nn_noise_overlap` require ≥10 spikes). `AnalyzerCuration.make()` must:
 
-- Coerce non-finite values (`nan`, `inf`, `-inf`) to `None` before writing to any JSON-serializing target (DataJoint blob, NWB `add_unit_column`, FigPack URI).
+- Coerce non-finite values (`nan`, `inf`, `-inf`) to `None` before writing to any serialized target. In Phase 2 this means the AnalysisNWB table objects written by `AnalyzerCuration`; in Phase 5 this also includes the FigPack URI payload.
 - Preserve `NaN` semantics in the in-memory metrics DataFrame (downstream consumers may want to filter on it).
 - Use a single helper `_sanitize_for_json(df: pd.DataFrame) -> pd.DataFrame` that returns the JSON-safe version; never let raw `compute_quality_metrics` output reach a JSON-serializing call.
-- Phase 2 test: `test_metric_nan_round_trip` — synthesize a 2-spike unit, run `AnalyzerCuration`, fetch the metrics blob via DataJoint and the units NWB, assert all paths show `None` (not `nan`, not error).
+- Phase 2 test: `test_metric_nan_round_trip` — synthesize a 2-spike unit, run `AnalyzerCuration`, fetch the serialized metrics table from the AnalysisNWB object, and assert it shows `None` (not `nan`, not error) while the in-memory metrics DataFrame preserves NaN semantics.
 
 **Invariant 3 — Spike at recording boundary is valid.** A unit with a spike at the last recording sample (within ±1 sample tolerance) must not raise "spikes exceeding recording duration" from `compute_quality_metrics` or `create_sorting_analyzer`. `Sorting.make()` runs `sic.remove_excess_spikes(sorting, recording)` per the v1 fix, but v2 also adds a positive test:
 

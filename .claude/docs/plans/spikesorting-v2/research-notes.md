@@ -129,7 +129,7 @@ rec_processed = pipeline.apply(recording)
 | Drift handling | `correct_motion` on concat | UnitMatch rigid-shift estimate |
 | Output identity | Sorter assigns same unit ID across span | Match probability + FDR per pair |
 | Re-running on new session | Re-sort full concat | Incremental match |
-| Tetrode compatibility | OK (drift correction ≈ no-op) | 🔴 Open question — UnitMatch validated on Neuropixels only |
+| Tetrode compatibility | OK (drift correction ≈ no-op) | 🔴 Open question — published UnitMatch validation is Neuropixels-heavy; v2 gates on polymer and records tetrode AUC as informational |
 | Maturity | KS4/MS5 + DREDge | UnitMatchPy 3.3.1 active |
 
 🟢 **UnitMatchPy** (https://pypi.org/project/UnitMatchPy/) is the maintained Python port. Includes `UMPy_spike_interface_demo.ipynb`.
@@ -202,7 +202,7 @@ self.insert1({**key, "analysis_file_name": analysis_file_name, "result_object_id
 
 ### H2: SortingAnalyzer-first storage → 🟢 ADOPT
 - Single source of truth for waveforms, templates, metrics, locations.
-- Persisted as `binary_folder` for the v2 pipeline plan. Zarr remains an SI-supported format, but it is not a v2 design dependency.
+- Persisted as `binary_folder` for the v2 SortingAnalyzer plan. Zarr remains an SI-supported format and may be selected by the Phase 0 benchmark as the `AnalysisNwbfile` backend for Recording artifacts, but it is not a SortingAnalyzer storage dependency.
 - v2 `Sorting` table writes `SortingAnalyzer` folder + lightweight units NWB; downstream tables read from analyzer extensions.
 
 ### H3: Parameters as Pydantic-validated schemas → 🟢 ADOPT
@@ -218,7 +218,7 @@ self.insert1({**key, "analysis_file_name": analysis_file_name, "result_object_id
 - Notebook becomes ~5 cells instead of 35.
 
 ### H5: Cross-session as plugin matcher → 🟢 ADOPT
-- `MatcherParameters` Lookup has `matcher: enum('unitmatch', 'deepunitmatch', 'concat_identity')`.
+- `MatcherParameters` Lookup starts with `matcher='unitmatch'`. `deepunitmatch` remains a future plugin. `concat_identity` is deferred because concat-backed sorting has one curation for the concatenated recording, while Phase 4 intentionally models one pinned curation per `SessionGroup.Member`.
 - `UnitMatch` Computed dispatches to matcher backend.
 - Per-session sortings remain valid; matching is additive.
 - Concat path: `ConcatenatedRecording` builds virtual recording → existing `Sorting` table → emits identity-mapping matches.

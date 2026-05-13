@@ -74,6 +74,7 @@ class Recording(SpyglassMixin, dj.Computed):
     -> RecordingSelection
     ---
     -> AnalysisNwbfile
+    electrical_series_path: varchar(255)
     object_id: varchar(40)
     n_channels: int
     sampling_frequency: float
@@ -90,6 +91,7 @@ class Recording(SpyglassMixin, dj.Computed):
 class SharedArtifactGroup(SpyglassMixin, dj.Manual):
     definition = """
     shared_artifact_group_name: varchar(64)
+    ---
     -> Session
     """
 
@@ -183,6 +185,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
     -> ConcatenatedRecordingSelection
     ---
     -> AnalysisNwbfile
+    electrical_series_path: varchar(255)
     object_id: varchar(40)
     n_channels: int
     sampling_frequency: float
@@ -433,6 +436,7 @@ class UnitMatchSelection(SpyglassMixin, dj.Manual):
     ---
     -> SessionGroup
     -> MatcherParameters
+    curation_set_hash: char(64)
     """
 
     class MemberCuration(SpyglassMixinPart):
@@ -459,12 +463,14 @@ class UnitMatch(SpyglassMixin, dj.Computed):
         -> master
         pair_index: int
         ---
-        session_a_sorting_id: uuid
-        session_a_curation_id: int
-        unit_a_id: int
-        session_b_sorting_id: uuid
-        session_b_curation_id: int
-        unit_b_id: int
+        -> CurationV2.Unit.proj(
+            session_a_sorting_id='sorting_id',
+            session_a_curation_id='curation_id',
+            unit_a_id='unit_id')
+        -> CurationV2.Unit.proj(
+            session_b_sorting_id='sorting_id',
+            session_b_curation_id='curation_id',
+            unit_b_id='unit_id')
         match_probability: float
         drift_estimate_um=0.0: float
         fdr_estimate=NULL: float
@@ -477,15 +483,14 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
     tracked_unit_id: int
     ---
     n_sessions_observed: int
-    median_match_probability: float
+    median_match_probability=NULL: float
     n_transitive_only_edges=0: int
     """
 
     class Member(SpyglassMixinPart):
         definition = """
         -> master
-        -> CurationV2
-        unit_id: int
+        -> CurationV2.Unit
         """
 
 

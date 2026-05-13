@@ -24,14 +24,15 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
 ## Tasks
 
 - **Implement `_params/metric_curation.py`** with Pydantic models:
-  - `QualityMetricParamsSchema` — `metric_names: list[str]`, `metric_kwargs: dict[str, dict]`, `skip_pc_metrics: bool = True`. Validates each metric name against SI 0.104's exported list (import `from spikeinterface.qualitymetrics import quality_metric_list` if available; otherwise hardcode the v2-supported set).
+  - `QualityMetricParamsSchema` — `metric_names: list[str]`, `metric_kwargs: dict[str, dict]`, `skip_pc_metrics: bool = True`. The stored `metric_kwargs` dict is passed to SpikeInterface as the `metric_params=` argument. Validate each metric name against SI 0.104's exported list using `from spikeinterface.qualitymetrics import get_quality_metric_list` when available; otherwise hardcode the v2-supported set with a comment naming the SI version used to generate it.
   - `AutoCurationRulesSchema` — `label_rules: dict[str, dict]` where each value is `{"operator": ">", "threshold": 0.5, "label": "noise"}`; `auto_merge_preset: Literal["similarity_correlograms", "temporal_splits", "x_contaminations", "feature_neighbors", "none"]`; `auto_merge_kwargs: dict`.
 
 - **Implement `metric_curation.py`** per [designs.md § AnalyzerCuration](designs.md#analyzercuration-replaces-v1-metriccuration--burstpair). Specific:
   - `QualityMetricParameters` Lookup with three default rows: `("franklab_default", ...)`, `("neuropixels_default", ...)`, `("minimal", {"metric_names": ["snr", "isi_violation", "firing_rate"], ...})`.
   - `AutoCurationRules` Lookup with default rows including a `("franklab_default_thresholds", ...)` that mirrors v1's auto-label conventions (snr < 2 → noise, isi_violation > 0.05 → mua, etc.; pull thresholds from `MetricCurationParameters` defaults at [src/spyglass/spikesorting/v1/metric_curation.py:161-191](src/spyglass/spikesorting/v1/metric_curation.py#L161-L191)).
   - `AnalyzerCurationSelection` Manual.
-  - `AnalyzerCuration` Computed with `make()` that computes additional extensions, runs `compute_quality_metrics`, applies label rules, runs `compute_merge_unit_groups`, writes three NWB tables (`quality_metrics`, `merge_suggestions`, `proposed_labels`) via `AnalysisNwbfile().build()`.
+  - `AnalyzerCuration` Computed with `make()` that computes additional extensions, runs `compute_quality_metrics(..., metric_params=...)`, applies label rules, runs `compute_merge_unit_groups`, writes three NWB tables (`quality_metrics`, `merge_suggestions`, `proposed_labels`) via `AnalysisNwbfile().build()`.
+  - Auto-merge extension dependency is explicit: before calling `compute_merge_unit_groups`, ensure `template_similarity` is computed in addition to `correlograms` and the Phase 1 core extensions. Pass `compute_needed_extensions=False` when supported so the Spyglass-computed extension set is the audited one rather than an implicit SI default.
   - `materialize_curation(key, description="auto-curation") -> dict` — creates a child `CurationV2` row with the proposed labels + merge groups; returns the new curation_key. Auto-registers via the Phase 1 `CurationV2.insert_curation` flow.
 
 - **Port `BurstPair` visualization helpers** into `AnalyzerCuration` methods:
@@ -57,7 +58,7 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
   return dict(labels)                      # Bug A fix: return at function scope
   ```
 
-- **NaN sanitization for metric serialization** (addresses [#1556](https://github.com/LorenFrankLab/spyglass/issues/1556)): SI's `compute_quality_metrics` legitimately returns `nan` for low-spike units. `AnalyzerCuration.make()` writes metrics via three paths (DataJoint blob, NWB unit column, FigPack URI in Phase 5); ALL three must see NaN coerced to `None` BEFORE serialization. Add `_sanitize_for_json(df) -> df` helper that copies the DataFrame and replaces all non-finite values with `None`. The in-memory `metrics_df` retains NaN for downstream consumers that want to filter on it; only the JSON-bound path gets sanitized. Per the [Empty / NaN / Boundary Invariants contract](shared-contracts.md#empty--nan--boundary-invariants).
+- **NaN sanitization for metric serialization** (addresses [#1556](https://github.com/LorenFrankLab/spyglass/issues/1556)): SI's `compute_quality_metrics` legitimately returns `nan` for low-spike units. `AnalyzerCuration.make()` writes metrics to AnalysisNWB table objects (`quality_metrics`, `merge_suggestions`, `proposed_labels`); Phase 5 later serializes the same metric table into the FigPack URI. Every serialized path must see non-finite values coerced to `None` BEFORE serialization. Add `_sanitize_for_json(df) -> df` helper that copies the DataFrame and replaces all non-finite values with `None`. The in-memory `metrics_df` retains NaN for downstream consumers that want to filter on it; only the serialized copies get sanitized. Per the [Empty / NaN / Boundary Invariants contract](shared-contracts.md#empty--nan--boundary-invariants).
 
 - **Implement `_apply_label_rules(metrics_df, label_rules)` helper** in `metric_curation.py`:
   ```python
@@ -65,8 +66,9 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
       """Apply threshold rules to a metrics DataFrame.
       Returns dict[unit_id, list[CurationLabel]].
 
-      Rule order matters — earlier rules win on ties (e.g., 'noise' label
-      from low SNR overrides 'mua' label from high ISI).
+      Rule order matters only for output label order. This helper is
+      multi-label: all matching labels are retained unless a later explicit
+      conflict-resolution layer is added.
       """
       labels = defaultdict(list)
       for metric_name, rule in label_rules.items():
@@ -112,16 +114,16 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
 
 | Test | Asserts |
 | --- | --- |
-| `test_quality_metric_params_validation` | `QualityMetricParameters.insert1({"params": {"metric_names": ["bogus_metric"]}})` raises validation error; valid metric list inserts. |
-| `test_auto_curation_rules_validation` | `AutoCurationRules.insert1({...auto_merge_preset: "bogus_preset"...})` raises. Valid preset inserts. |
+| `test_quality_metric_params_validation` | `QualityMetricParameters().insert1({"params": {"metric_names": ["bogus_metric"]}})` raises validation error; valid metric list inserts. |
+| `test_auto_curation_rules_validation` | `AutoCurationRules().insert1({...auto_merge_preset: "bogus_preset"...})` raises. Valid preset inserts. |
 | `test_apply_label_rules_basic` | Synthetic metrics DataFrame with two rules ("snr<2 → noise", "isi_violation>0.05 → mua"); asserts correct labels per unit. |
-| `test_apply_label_rules_order_matters` | Rules in order produce expected labels when a unit matches multiple thresholds; reordering rules changes outcomes for ties. |
+| `test_apply_label_rules_order_preserved` | Rules in order produce expected multi-label lists when a unit matches multiple thresholds; reordering rules changes label order only, not label membership. |
 | `test_label_rules_loop_completes_all_rules` | Three rules where rules 2 and 3 both apply to a unit; asserts all matching rules are processed and `return` is outside the rule loop. |
 | `test_label_list_isolation` | Two units match the same multi-label rule; mutating unit A's labels after helper return does not change unit B's labels or the rule definition. |
 | `test_label_dedupe_per_element` | Two rules emit the same label for one unit; final label list contains one copy, not duplicates from list-in-list membership checks. |
 | `test_analyzer_curation_make_writes_three_tables` (slow) | After populate, `AnalyzerCuration & key` row has all three object_ids populated; `fetch_nwb()` returns three pandas DataFrames. |
 | `test_analyzer_curation_metrics_match_si_compute` (slow) | Independently call `compute_quality_metrics(analyzer, ...)` and compare to the fetched `quality_metrics` DataFrame — exact match. |
-| `test_metric_nan_round_trip` | Low-spike unit produces non-finite metrics; DataJoint blob and NWB serialized outputs contain `None` while the in-memory metrics DataFrame preserves NaN semantics. |
+| `test_metric_nan_round_trip` | Low-spike unit produces non-finite metrics; the serialized AnalysisNWB metric table contains `None` while the in-memory metrics DataFrame preserves NaN semantics. |
 | `test_analyzer_curation_zero_unit_sorting` | Zero-unit `Sorting` row populates `AnalyzerCuration` with empty metric/merge/label tables and no missing-column errors. |
 | `test_analyzer_curation_merge_suggestions_non_empty_on_obvious_split` (slow) | Synthetic sort with two units that are obvious duplicates (same spike times shifted by 1 ms); auto-merge with preset='similarity_correlograms' suggests their merge. |
 | `test_analyzer_curation_burstpair_visualization_helpers` (slow) | `plot_correlograms_by_sort_group`, `investigate_pair_xcorrel`, `investigate_pair_peaks`, and `plot_peak_over_time` all render against a SortingAnalyzer-backed sort without requiring the v1 `BurstPair` table. |
