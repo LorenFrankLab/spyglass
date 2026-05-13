@@ -540,25 +540,29 @@ class VideoFile(SpyglassMixin, dj.Imported):
         Returns
         -------
         tuple
-            (entries_list, failure_reason_or_None)
-            - If validation passes: ([entry_dicts], None)
-            - If validation fails: ([], "failure reason string")
+            (entries_list, failure_reason_or_None, overlap_percent)
+            - If validation passes: ([entry_dicts], None, overlap_percent)
+            - If validation fails: ([], "failure reason string", overlap_percent)
         """
         timestamps = video_obj.timestamps
         starting_frame = getattr(video_obj, "starting_frame", None)
 
         # Multi-file ImageSeries
         if starting_frame is not None and len(starting_frame) > 1:
-            entries = self._validate_multifile_timestamps(
+            entries, overlap_pct = self._validate_multifile_timestamps(
                 video_obj, timestamps, starting_frame, valid_times, key
             )
             if not entries:
                 threshold_pct = self._timestamp_overlap_threshold * 100
-                return [], (
-                    f"No file segments have ≥{threshold_pct:.0f}% "
-                    "timestamp overlap with epoch"
+                return (
+                    [],
+                    (
+                        f"No file segments have ≥{threshold_pct:.0f}% "
+                        "timestamp overlap with epoch"
+                    ),
+                    overlap_pct,
                 )
-            return entries, None
+            return entries, None, overlap_pct
 
         # Single-file ImageSeries: valid if >= threshold% of timestamps
         # overlap with epoch intervals (epoch covers the video).
@@ -586,14 +590,18 @@ class VideoFile(SpyglassMixin, dj.Imported):
             and max_interval_overlap_pct < self._timestamp_overlap_threshold
         ):
             threshold_pct = self._timestamp_overlap_threshold * 100
-            return [], (
-                f"Only {overlap_pct:.1%} of timestamps overlap with epoch, "
-                f"and the best-covered epoch interval has only "
-                f"{max_interval_overlap_pct:.1%} of its duration covered "
-                f"by the timestamps (need ≥{threshold_pct:.0f}%)"
+            return (
+                [],
+                (
+                    f"Only {overlap_pct:.1%} of timestamps overlap with epoch, "
+                    f"and the best-covered epoch interval has only "
+                    f"{max_interval_overlap_pct:.1%} of its duration covered "
+                    f"by the timestamps (need ≥{threshold_pct:.0f}%)"
+                ),
+                overlap_pct,
             )
 
-        return [self._prepare_video_entry(key, video_obj)], None
+        return [self._prepare_video_entry(key, video_obj)], None, overlap_pct
 
     def _validate_multifile_timestamps(
         self,
@@ -620,11 +628,13 @@ class VideoFile(SpyglassMixin, dj.Imported):
 
         Returns
         -------
-        list
+        tuple(list, float)
             List of entry dicts for segments with valid timestamps. May be empty
+            Maximum overlap percentage across all file segments
         """
         entries = []
 
+        max_overlap_pct = 0
         for file_idx in range(len(starting_frame)):
             # Determine timestamp range for this file segment
             start_idx = starting_frame[file_idx]
@@ -639,6 +649,9 @@ class VideoFile(SpyglassMixin, dj.Imported):
 
             # Check if threshold % of this file's timestamps overlap with epoch
             these_times = valid_times.contains(file_timestamps)
+            overlap_pct = len(these_times) / len(file_timestamps)
+            max_overlap_pct = max(max_overlap_pct, overlap_pct)
+
             if len(these_times) < (
                 self._timestamp_overlap_threshold * len(file_timestamps)
             ):
@@ -648,7 +661,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
             entry = self._prepare_video_entry(key.copy(), video_obj)
             entries.append(entry)
 
-        return entries
+        return entries, max_overlap_pct
 
     def make(self, key, verbose=True, skip_duplicates=False):
         """Make without optional transaction"""
@@ -696,12 +709,18 @@ class VideoFile(SpyglassMixin, dj.Imported):
             )
             for video_obj in video_list:
                 try:
-                    entries, failure_reason = self._validate_video_timestamps(
-                        video_obj, valid_times, key.copy()
+                    entries, failure_reason, overlap_percent = (
+                        self._validate_video_timestamps(
+                            video_obj, valid_times, key.copy()
+                        )
                     )
                     if failure_reason:
                         failed_videos["timestamp_mismatch"].append(
-                            {"name": video_name, "reason": failure_reason}
+                            {
+                                "name": video_name,
+                                "reason": failure_reason,
+                                "overlap_percent": overlap_percent,
+                            }
                         )
                     else:
                         video_inserts.extend(entries)
@@ -771,6 +790,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
         imported_count : int
             Number of ImageSeries successfully imported
         """
+
         msg_parts = [
             f"{nwb_file_name}: VideoFile Partial Import",
             f"Imported {imported_count}/{total_videos} ImageSeries",
@@ -779,8 +799,8 @@ class VideoFile(SpyglassMixin, dj.Imported):
         if failed_videos["timestamp_mismatch"]:
             msg_parts.append("\nTimestamp mismatches:")
             for item in failed_videos["timestamp_mismatch"]:
-                if " 0.0% " in item["reason"]:
-                    continue  # Don't report vidoes for other epochs as errors
+                if item["overlap_percent"] == 0:
+                    continue  # Don't report videos for other epochs as errors
                 msg_parts.append(f"  - {item['name']}: {item['reason']}")
 
         if failed_videos["missing_camera"]:
