@@ -2,15 +2,15 @@
 
 Static-analysis findings from `code_graph.py describe <table>` run against every Spyglass FK target the v2 schema relies on. Captured at plan time so the Phase 0 implementer can compare against the current state and catch upstream drift.
 
-Run command: `python /Users/edeno/.claude/skills/spyglass/scripts/code_graph.py --src src describe <name> [--file <path-relative-to-src>]`
+Run command: `python /Users/edeno/Documents/GitHub/spyglass-skill/skills/spyglass/scripts/code_graph.py --src src describe <name> [--file <path-relative-to-src>]` (or the equivalent installed Spyglass-skill `scripts/code_graph.py` path).
 
 For draft-schema walks, use paths relative to `--src src`, for example:
 
 ```bash
-python /Users/edeno/.claude/skills/spyglass/scripts/code_graph.py \
+python /Users/edeno/Documents/GitHub/spyglass-skill/skills/spyglass/scripts/code_graph.py \
   --src src describe CurationV2 \
   --file spyglass/spikesorting/v2/_draft.py --json
-python /Users/edeno/.claude/skills/spyglass/scripts/code_graph.py \
+python /Users/edeno/Documents/GitHub/spyglass-skill/skills/spyglass/scripts/code_graph.py \
   --src src path --up SortingSelection \
   --file spyglass/spikesorting/v2/_draft.py --json
 ```
@@ -31,7 +31,7 @@ Review the JSON `warnings` block on every `path` run. Any unaccounted `heuristic
 | `ProbeType` (common_device.py:335, Manual) | `probe_type: varchar(80)` | `num_shanks: int`, `manufacturer` | Need to insert one for polymer fixture: `("polymer_chung2019", "LLNL polymer", "Lawrence Livermore National Lab", 4)`. |
 | `Probe.Electrode` (common_device.py:428, Part) | `-> Probe.Shank`, `probe_electrode: int` | `rel_x`, `rel_y`, `rel_z` (all nullable) | Per-shank electrode positions. |
 | `BrainRegion` (common_region.py:9, Lookup) | `region_id: smallint auto_increment` | `region_name: varchar(200)`, `subregion_name`, `subsubregion_name` | **PK is auto-increment region_id, NOT region_name.** v2 "Unknown" region is inserted in Phase 0 with `region_name="Unknown"`; the auto-generated `region_id` is what FKs target. |
-| `LabTeam` (common_lab.py:160, Manual) | `team_name: varchar(80)` | `team_description` | Carried as a secondary FK on RecordingSelection + SessionGroup.Member (v2 preserves v1's team structure). |
+| `LabTeam` (common_lab.py:160, Manual) | `team_name: varchar(80)` | `team_description` | Carried as a secondary FK on RecordingSelection + SessionGroup.Member, and projected as `SessionGroup.session_group_owner` in the SessionGroup master PK to namespace user-facing group names. |
 | `LabMember` (common_lab.py:16, Manual) | `lab_member_name: varchar(80)` | `first_name`, `last_name` | `LabMember.LabMemberInfo` part holds `datajoint_user_name` (per spyglass-skill note). |
 | `Subject` (common_subject.py:10, Manual) | `subject_id: varchar(80)` | `age`, `description`, `genotype`, `sex enum("M","F","U")`, `species` | Synthetic for MEArec fixtures: `subject_id="synthetic_001", sex="U", species="Mus musculus"`. |
 | `AnalysisNwbfile` (common_nwbfile.py:630, Manual) | `analysis_file_name: varchar(64)` | `-> Nwbfile` (non-null), `analysis_file_abs_path: filepath@analysis` | Single parent FK to Nwbfile — drives concat/UnitMatch anchor-rule. |
@@ -76,3 +76,16 @@ Review the JSON `warnings` block on every `path` run. Any unaccounted `heuristic
   - v0/v1 define `RecordingRecompute*`, but v2 intentionally uses `RecordingArtifactRecompute*` names to avoid class-name collisions. `SortingAnalyzerRecompute*` is v2-only. Any code-graph warning that resolves a v2 `RecordingArtifact*` / `SortingAnalyzer*` FK to a v0/v1 recompute class is a blocker.
 
 The draft schemas are structurally implementable as written. Phase 0 splits this single file into the per-module Phase 1/2/3/4/5 files; the structural validation carries over.
+
+## 2026-05-14 targeted re-check after SessionGroup owner namespace
+
+The Spyglass-skill `code_graph.py` was re-run after adding `session_group_owner` to the draft schema:
+
+- `describe SessionGroup --file spyglass/spikesorting/v2/_draft.py` reports primary key `fk: -> LabTeam [proj] session_group_owner='team_name'` plus `session_group_name: varchar(64)`.
+- `describe CurationV2 --file spyglass/spikesorting/v2/_draft.py` reports primary key `-> Sorting` plus `curation_id: int default=0`, matching v1 parity and the design text.
+- `path --up ConcatenatedRecordingSelection --file spyglass/spikesorting/v2/_draft.py --fail-on-heuristic` exits cleanly and reaches `SessionGroup -> LabTeam [proj]`.
+- `path --to LabTeam ConcatenatedRecordingSelection --from-file spyglass/common/common_lab.py --to-file spyglass/spikesorting/v2/_draft.py --fail-on-heuristic` confirms the directed dependency chain `LabTeam -> SessionGroup [proj] -> ConcatenatedRecordingSelection`.
+- `path --to SessionGroup UnitMatchSelection --from-file spyglass/spikesorting/v2/_draft.py --to-file spyglass/spikesorting/v2/_draft.py --fail-on-heuristic` confirms `SessionGroup -> UnitMatchSelection`.
+- `path --to CurationV2 UnitMatchSelection --from-file spyglass/spikesorting/v2/_draft.py --to-file spyglass/spikesorting/v2/_draft.py --fail-on-heuristic` confirms `CurationV2 -> UnitMatchSelection.MemberCuration -> UnitMatchSelection`.
+
+The broad `path --up UnitMatchSelection --json` traversal still emits only the accounted warnings above: `AnalysisNwbfile` ambiguity between common/custom tables, and v0/v1/v2 `ArtifactDetection*` same-name resolution. The selected `ArtifactDetection*` targets are the v2 draft classes; any different selection remains a blocker.
