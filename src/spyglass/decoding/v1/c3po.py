@@ -395,7 +395,9 @@ class Model(SpyglassMixin, dj.Computed):
         insert_key = {
             **model_key,
             "checkpoint": checkpoint,
-            "model_params": self.fetch1("checkpoint_params")[checkpoint],
+            "model_params": (self & model_key).fetch1("checkpoint_params")[
+                checkpoint
+            ],
             "analysis_file_name": analysis_file_name,
             "z_object_id": z_object_id,
             "c_object_id": c_object_id,
@@ -664,7 +666,7 @@ class Model(SpyglassMixin, dj.Computed):
                         f"No checkpoint {checkpoint} found for model {model_key}."
                         + "Inserting a new checkpoint."
                     )
-                    self.insert_checkpoint(checkpoint)
+                    self.insert_checkpoint(checkpoint=checkpoint)
                     checkpoint_query = self.ModelCheckpoint() & {
                         **model_key,
                         "checkpoint": checkpoint,
