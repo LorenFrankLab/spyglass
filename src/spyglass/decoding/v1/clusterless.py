@@ -33,6 +33,7 @@ from spyglass.decoding.v1.utils import (
 from spyglass.decoding.v1.waveform_features import (
     UnitWaveformFeatures,
 )  # noqa: F401
+from spyglass.decoding.v1.c3po import Model as C3POModel
 from spyglass.position.position_merge import PositionOutput  # noqa: F401
 from spyglass.settings import config
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
@@ -54,10 +55,47 @@ class UnitWaveformFeaturesGroup(SpyglassMixin, dj.Manual):
         -> UnitWaveformFeatures
         """
 
+        def fetch_data(self, key=dict()):
+            if not (self & key):
+                return [], []
+            return (UnitWaveformFeatures & (self & key)).fetch_data()
+
+    class C3poFeatures(SpyglassMixinPart):
+        definition = """
+        -> UnitWaveformFeaturesGroup
+        -> C3POModel
+        """
+
+        def fetch_data(self, key=dict()):
+            """Fetch the C3PO features for the group"""
+            if not (self & key):
+                return [], []
+            nwb_list = (C3POModel & (self & key)).fetch_nwb()
+            z_obj_list = [nwb["z"] for nwb in nwb_list]
+            mark_times = []
+            marks = []
+            for z_obj in z_obj_list:
+                z = z_obj.data
+                ind_valid = ~np.isnan(z).any(axis=1)
+                mark_times.append(z_obj.timestamps[ind_valid])
+                marks.append(z[ind_valid])
+
+            return mark_times, marks
+
     def create_group(
         self, nwb_file_name: str, group_name: str, keys: list[dict]
     ):
-        """Create a group of waveform features for a given session"""
+        """Create a group of waveform features for a given session
+
+        Parameters
+        ----------
+        nwb_file_name : str
+            The name of the NWB file for the session
+        group_name : str
+            The name of the group to create
+        keys : list[dict]
+            A list of keys to insert into the UnitFeatures part table from the UnitWaveformFeatures table.
+        """
         group_key = {
             "nwb_file_name": nwb_file_name,
             "waveform_features_group_name": group_name,
@@ -68,15 +106,37 @@ class UnitWaveformFeaturesGroup(SpyglassMixin, dj.Manual):
                 + "please delete the group before creating a new one",
             )
             return
-        self.insert1(
-            group_key,
-            skip_duplicates=True,
-        )
-        for key in keys:
-            self.UnitFeatures.insert1(
-                {**key, **group_key},
+        with self.connection.transaction:
+            self.insert1(
+                group_key,
                 skip_duplicates=True,
             )
+            for key in keys:
+                if len(UnitWaveformFeatures & key) == 1:
+                    self.UnitFeatures.insert1(
+                        {**key, **group_key},
+                        skip_duplicates=True,
+                    )
+                elif len(C3POModel & key) == 1:
+                    self.C3poFeatures.insert1(
+                        {**key, **group_key},
+                        skip_duplicates=True,
+                    )
+                else:
+                    raise ValueError(
+                        f"Key {key} not found in UnitWaveformFeatures or C3POModel tables"
+                    )
+
+    def fetch_data(self, key=dict()):
+        """Fetch the waveform features for the group"""
+        self.ensure_single_entry(key)
+        key = (self & key).fetch1("KEY")
+        waveforms_query = self.UnitFeatures & key
+        c3po_query = self.C3poFeatures & key
+        waveform_times, waveform_features = waveforms_query.fetch_data()
+        c3po_times, c3po_features = c3po_query.fetch_data()
+
+        return waveform_times + c3po_times, waveform_features + c3po_features
 
 
 @schema
@@ -625,20 +685,23 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             ],
         )
 
-        waveform_keys = (
-            (
-                UnitWaveformFeaturesGroup.UnitFeatures
-                & {
-                    "nwb_file_name": key["nwb_file_name"],
-                    "waveform_features_group_name": key[
-                        "waveform_features_group_name"
-                    ],
-                }
-            )
-        ).fetch("KEY")
+        # waveform_keys = (
+        #     (
+        #         UnitWaveformFeaturesGroup.UnitFeatures
+        #         & {
+        #             "nwb_file_name": key["nwb_file_name"],
+        #             "waveform_features_group_name": key[
+        #                 "waveform_features_group_name"
+        #             ],
+        #         }
+        #     )
+        # ).fetch("KEY")
+        # spike_times, spike_waveform_features = (
+        #     UnitWaveformFeatures & waveform_keys
+        # ).fetch_data()
         spike_times, spike_waveform_features = (
-            UnitWaveformFeatures & waveform_keys
-        ).fetch_data()
+            UnitWaveformFeaturesGroup().fetch_data(key)
+        )
 
         if not filter_by_interval:
             return spike_times, spike_waveform_features
