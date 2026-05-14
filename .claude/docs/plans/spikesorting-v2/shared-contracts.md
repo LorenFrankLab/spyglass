@@ -32,7 +32,7 @@ Every v2 stage that produces a `SortingAnalyzer` writes it to disk in this layou
 {config["SPYGLASS_TEMP_DIR"]}/spikesorting_v2/analyzers/{sorting_id}.analyzer/
 ```
 
-**Format**: `"binary_folder"` — SI's first-class folder layout for SortingAnalyzer extensions. This choice is **independent** of the Recording cache format (Phase 0 picks NWB-HDF5 or NWB-Zarr for that); the analyzer stays in `binary_folder` because (i) it is regeneratable scratch, (ii) it has its own Phase 2 recompute machinery (`SortingAnalyzerRecompute*`), and (iii) SI's analyzer API is built around the folder layout.
+**Format**: `"binary_folder"` — SI's first-class folder layout for SortingAnalyzer extensions. This choice is **independent** of the Recording cache format; the analyzer stays in `binary_folder` because (i) it is regeneratable scratch, (ii) it has its own Phase 2 recompute machinery (`SortingAnalyzerRecompute*`), and (iii) SI's analyzer API is built around the folder layout.
 
 **Sparsity**: `sparse=True` (the SI 0.101+ default; recompute storage saves 5-10× on dense probes).
 

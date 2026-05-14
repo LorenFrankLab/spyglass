@@ -1,13 +1,13 @@
-# Phase 0 — Foundation: scaffolding, validation fixtures, and storage decision
+# Phase 0 — Foundation: scaffolding, validation fixtures, and baseline
 
 [← back to PLAN.md](PLAN.md) · [overview](overview.md) · [appendix](appendix.md#spikeinterface-099--0104-migration-cheat-sheet)
 
-This phase establishes the foundation: empty module structure, dual-environment CI, code-graph validation, fixture generation, storage-format benchmarking, v1 baseline capture, and shared utilities. **No new pipeline functionality lands in this phase. The SpikeInterface package-wide upgrade does NOT happen in Phase 0** — see "SI 0.104 upgrade gating" below.
+This phase establishes the foundation: empty module structure, dual-environment CI, code-graph validation, fixture generation, v1 baseline capture, and shared utilities. **No new pipeline functionality lands in this phase. The SpikeInterface package-wide upgrade does NOT happen in Phase 0** — see "SI 0.104 upgrade gating" below.
 
 Phase 0 is intentionally split into two mergeable PR slices to control scope:
 
 - **Phase 0a — scaffolding / dependency gate / code graph**: module skeleton, dual-env CI, SI 0.104 prerequisite documentation, draft schema validation artifact, `PreprocessingParamsSchema`, and lightweight shared helpers/tests.
-- **Phase 0b — validation and storage evidence**: MEArec fixture generation, MEArec→NWB converter, storage benchmark, and real-data v1 baseline capture.
+- **Phase 0b — validation evidence and baseline**: MEArec fixture generation, MEArec→NWB converter, and real-data v1 baseline capture.
 
 Phase 0b depends on Phase 0a. Phase 1 depends on both 0a and 0b plus [Phase 0c](phase-0c-si-0104-prerequisite.md), the separate SI 0.104 prerequisite PR.
 
@@ -22,8 +22,8 @@ Phase 0a PR:
 
 Phase 0b PR:
 
-- Add MEArec/minirec fixture generation and the storage benchmark.
-- Decide the `AnalysisNwbfile` cache backend for Phase 1 from benchmark evidence.
+- Add MEArec/minirec fixture generation.
+- Record HDF5 as the Phase 1 `AnalysisNwbfile` cache backend default.
 - Capture the v1 baseline outputs that Phase 1 parity tests will compare against.
 - Run the Phase 0 validation slice and record any expected `code_graph.py` heuristic warnings.
 
@@ -40,20 +40,20 @@ Phase 0b PR:
 
 - [Pydantic Parameter Schema Convention](shared-contracts.md#pydantic-parameter-schema-convention) — Phase 0 sets up the `_params/` package shell with one example model (`PreprocessingParamsSchema`) so subsequent phases extend rather than invent.
 - [SortingAnalyzer Storage Layout](shared-contracts.md#sortinganalyzer-storage-layout) — Phase 0 introduces the `_analyzer_path()` helper.
-- [Recording Cache Format](shared-contracts.md#recording-cache-format) — Phase 0 introduces the `_hash_nwb_recording()` helper and decides the AnalysisNwbfile backend (HDF5 / Zarr) via the storage benchmark.
+- [Recording Cache Format](shared-contracts.md#recording-cache-format) — Phase 0 introduces the `_hash_nwb_recording()` helper. Phase 1 uses the existing NWB-HDF5 `AnalysisNwbfile` path; any Zarr or binary-cache experiment is a separate follow-up that cannot change the Phase 1 schema.
 - [Job-Kwargs Resolution](shared-contracts.md#job-kwargs-resolution) — Phase 0 introduces `_resolved_job_kwargs()`.
 
 **Designs referenced:** none — this phase is foundation work only. No production v2 table is declared.
 
 ## Phase 0a Tasks — Scaffolding And Gates
 
-- **Do not add direct Pydantic or Zarr pins in Phase 0.** Pydantic is required by the v2 `_params/` models, but Phase 0 imports those models only in the SI 0.104 `pytest-v2` job; the default SI 0.99/v1 CI job excludes `tests/spikesorting/v2/` until the prerequisite SI bump lands. Pydantic enters the normal Spyglass runtime transitively through the SpikeInterface 0.104 prerequisite PR. Zarr is also a SpikeInterface runtime dependency (`zarr>=2.18,<3` with `numcodecs<0.16.0`) and is a possible `AnalysisNwbfile` backend evaluated by the storage benchmark, but it is not a separate Spyglass pin unless the SI upgrade PR exposes a concrete resolver/runtime issue that cannot be handled by SpikeInterface's own dependency metadata.
+- **Do not add direct Pydantic or Zarr pins in Phase 0.** Pydantic is required by the v2 `_params/` models, but Phase 0 imports those models only in the SI 0.104 `pytest-v2` job; the default SI 0.99/v1 CI job excludes `tests/spikesorting/v2/` until the prerequisite SI bump lands. Pydantic enters the normal Spyglass runtime transitively through the SpikeInterface 0.104 prerequisite PR. Zarr remains a SpikeInterface runtime dependency, but v2 does not introduce a Spyglass Zarr storage default in Phase 0. A future storage-benchmark PR may evaluate Zarr through `AnalysisNwbfile`, without changing the Phase 1 table schema.
 
 - **Document Phase 0c as a prerequisite work item, not a Phase 0a/0b task.** Phase 0a/0b cannot upgrade SI to 0.104 because v1's `metric_curation.py` calls the removed `extract_waveforms` / `load_waveforms` APIs; bumping the pin breaks v1. The plan defers the global SI upgrade until v1 is compatible. [Phase 0c](phase-0c-si-0104-prerequisite.md) owns the v1 port, resolver checks, dependency bump, and v1 validation slice. Until Phase 0c completes, **Phase 1 cannot ship**. Phase 0a documents the gating but does not perform it.
 
 - **Set up a dual-environment development convention** documented in the v2-migration-prereqs page: v2 development happens in a virtualenv with SI 0.104 pre-installed (overriding the pyproject pin); v1 work continues in the default env. This lets v2 scaffolding land without breaking v1 users. CI gains a new job `pytest-v2` that runs only `tests/spikesorting/v2/` under SI 0.104; the existing `pytest` job stays on the current pin and explicitly excludes `tests/spikesorting/v2/` until the prerequisite port lands. The v2 package `__init__.py` must not import `_params` or any other Pydantic-dependent module in Phase 0, so `import spyglass.spikesorting.v2` remains harmless in the default environment.
 
-- **`code_graph.py` precondition check on existing FK targets** (run BEFORE writing any v2 schemas). For every Spyglass table v2 plans to FK into — `Session`, `Nwbfile`, `IntervalList`, `Raw`, `Electrode`, `ElectrodeGroup`, `Probe`, `ProbeType`, `BrainRegion`, `LabTeam`, `LabMember`, `Subject`, `AnalysisNwbfile`, `SpikeSortingOutput`, plus v1 ancestors (`SortGroup`, `SpikeSortingRecording`, `SpikeSorting`, `CurationV1`, etc. for parity reference) — run `python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe <name>`, using `--file <path-relative-to-src>` for ambiguous names (for example, `--file spyglass/common/common_nwbfile.py` for the production `AnalysisNwbfile`, not `src/spyglass/...`). Record the precise PK/FK structure of each in `docs/src/Pipelines/SpikeSorting/v2-precondition-check.md`. Failure mode caught: upstream schema drift between when the plan was written and when v2 is implemented (e.g., if `Electrode -> BrainRegion` became nullable, v2's brain-region-tracing design would silently break). The implementer re-runs the check and updates the recorded output if anything has drifted.
+- **`code_graph.py` precondition check on existing FK targets** (run BEFORE writing any v2 schemas). For every Spyglass table v2 plans to FK into — `Session`, `Nwbfile`, `IntervalList`, `Raw`, `Electrode`, `ElectrodeGroup`, `Probe`, `ProbeType`, `BrainRegion`, `LabTeam`, `LabMember`, `Subject`, `AnalysisNwbfile`, `SpikeSortingOutput`, plus v1 ancestors (`SortGroup`, `SpikeSortingRecording`, `SpikeSorting`, `CurationV1`, etc. for parity reference) — run `python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe <name>`, using `--file <path-relative-to-src>` for ambiguous names (for example, `--file spyglass/common/common_nwbfile.py` for the production `AnalysisNwbfile`, not `src/spyglass/...`). Record the precise PK/FK structure of each in `precondition-check.md`. Failure mode caught: upstream schema drift between when the plan was written and when v2 is implemented (e.g., if `Electrode -> BrainRegion` became nullable, v2's brain-region-tracing design would silently break). The implementer re-runs the check and updates the recorded output if anything has drifted.
 
 - **`code_graph.py` validation of v2 schemas** (run as each new schema lands). After implementing any v2 table, run `code_graph.py describe <NewTable>` to confirm:
   - the `definition` string parses cleanly,
@@ -63,7 +63,7 @@ Phase 0b PR:
 
   Also run `code_graph.py path --up <NewTable> --file <path-relative-to-src> --json` to walk the full ancestor chain and confirm no unexpected upstream FK is being pulled in. For Computed tables, run `code_graph.py path --down <NewTable> --file <path-relative-to-src> --json` to see what already depends on it. Review the JSON `warnings` block; any unaccounted `heuristic_resolution` warning is a blocker. `--fail-on-heuristic` is allowed when the current tool can disambiguate every transitive target; otherwise record the specific expected warning and source-verified target in the precondition check.
 
-  This check applies to **every phase**, not just Phase 0. Each phase's "Review" section ends with: "`code_graph.py describe` returns clean output for every new table; `path --up`/`path --down` chains match the design DAG; JSON warnings are empty or explicitly accounted for." See the Phase 0b storage benchmark below for the broader pre-Phase-1 gate.
+  This check applies to **every phase**, not just Phase 0. Each phase's "Review" section ends with: "`code_graph.py describe` returns clean output for every new table; `path --up`/`path --down` chains match the design DAG; JSON warnings are empty or explicitly accounted for."
 
 - **Draft schema validation artifact** at `.claude/docs/plans/spikesorting-v2/draft_schemas/` (and the working draft at `src/spyglass/spikesorting/v2/_draft.py` for the validation pass). Phase 0 produces this draft as a single Python file declaring every v2 table's `definition` string (with `make()` bodies raising `NotImplementedError`). It is NOT decorated with `@schema` — it exists for `code_graph.py` static analysis only, not for DataJoint runtime. The draft is git-rm'd or split into the per-module Phase 1 / 2 / 3 / 4 / 5 files once those phases implement the real tables. **Until the file is removed, NO automated process should import it** — comment headers and the `_draft.py` filename signal "scaffolding, not production."
 
@@ -101,7 +101,7 @@ Phase 0b PR:
 
 - **Documentation update for 0a.** Add a short section to [CHANGELOG.md](CHANGELOG.md) under an "Unreleased" heading: "v2 spike sorting scaffolding (#PR-NUMBER): new `spyglass.spikesorting.v2` module tree with empty stubs; no runtime dependency pins changed; v1 remains the production path. The SpikeInterface 0.104 upgrade is a separate prerequisite PR (see Phase 0's gating tasks)." No CLAUDE.md changes in this slice.
 
-## Phase 0b Tasks — Fixtures, Benchmark, And Baseline
+## Phase 0b Tasks — Fixtures And Baseline
 
 - **Add the MEArec ground-truth fixture generation infrastructure.** This is the primary validation oracle for v2 (minirec does not contain enough real spikes to be a useful sort-correctness baseline — see "fixture strategy" below). Components:
   - **Optional dep**: add `MEArec>=1.9` and `neuroconv[mearec]` to a new optional extra in `pyproject.toml`:
@@ -115,7 +115,7 @@ Phase 0b PR:
   - **Fixture generator script**: new file `tests/spikesorting/v2/fixtures/generate_mearec.py` (NOT a test — no `test_` prefix; manually invoked once to populate cached fixtures). Functionality:
     1. Generate three reference recordings via `mearec.gen_recordings(...)`:
        - **`mearec_polymer_60s.h5`**: 4-shank polymer probe modeled on Chung et al. 2019 ([Neuron 30502044](https://pubmed.ncbi.nlm.nih.gov/30502044/) — 16 channels per shank, 4 shanks per probe, 20 μm site diameter, 20 μm edge-to-edge spacing within shank, 250 μm shank spacing; 64 ch total). 60 s, 12 ground-truth units distributed across all 4 shanks, no drift, deterministic seed. **This is the primary Frank-lab probe and the primary v2 validation fixture.** The probe geometry is supplied as a custom probeinterface JSON written into the fixture-generation script; this same JSON is reused by the MEArec → NWB converter to populate `electrode_groups` (one group per shank).
-       - **`mearec_neuropixels_60s.h5`**: Neuropixels-128 probe, 60 s, 20 ground-truth units, no drift, deterministic seed. Kept for independent verification of UnitMatch's published Neuropixels validation, but secondary to polymer for lab-internal use.
+       - **`mearec_neuropixels_60s.h5`**: Neuropixels-128 probe, 60 s, 20 ground-truth units, no drift, deterministic seed. Used for Phase 1 sorter smoke/correctness coverage on dense-probe geometry, but secondary to polymer for lab-internal use.
        - **`mearec_polymer_drift_120s.h5`**: 4-shank polymer probe (same geometry as above), 120 s, 12 ground-truth units, slow drift (5 μm/min), deterministic seed — used by Phase 3 motion-correction validation.
     2. Convert each to NWB via the converter helper (next bullet).
     3. Write the NWB files to `tests/spikesorting/v2/fixtures/`.
@@ -154,31 +154,9 @@ Phase 0b PR:
   - On successful capture, prints all relevant IDs + paths.
   - **NOT runnable in CI** (no real-data NWB in CI). Manually invoked by lab developers; output committed to `tests/spikesorting/v2/baselines/` as small pickle/json files (the units NWB stays on local disk, referenced by path).
 
-- **Storage benchmark + integration check** (decision gate for Phase 1's `Recording` design — picks the *AnalysisNwbfile backend*, not the schema). The MVP commits to **NWB-resident** storage: the canonical preprocessed-recording artifact lives inside an `AnalysisNwbfile`, reusing Spyglass's existing cleanup, export, kachery, FigPack, and recompute machinery. This bias holds unless a third path is measured to be a *large* win AND its sidecar lifecycle is explicitly implemented. The benchmark answers a narrower question: **HDF5 or Zarr for the AnalysisNwbfile backend, and would a binary sidecar be worth scoping as a future optimization?**
+- **Optional storage benchmark follow-up (not a Phase 0b blocker).** Phase 1 uses NWB-resident storage through the existing HDF5 `AnalysisNwbfile.build()` lifecycle. A later PR may add `tests/spikesorting/v2/benchmark_storage.py` and `docs/src/Features/SpikeSortingV2StorageBenchmark.md` to compare HDF5, Zarr, and SI binary-folder performance. Any Zarr default or binary-cache opt-in requires its own lifecycle/scoping PR; it must not alter the Phase 1 `Recording` schema (`analysis_file_name`, `electrical_series_path`, `object_id`, `cache_hash`).
 
-  1. **Three formats measured** against the Phase-0-generated `mearec_polymer_60s.nwb` fixture (or a real-data slice via `SPIKESORTING_V2_REAL_NWB_PATH` if available). For each sorter × format combination, record wall-time, peak RSS, and total bytes read from disk. Report as a table in `docs/src/Pipelines/SpikeSorting/v2-storage-benchmark.md`:
-     - (a) **NWB-HDF5** — Spyglass's current `AnalysisNwbfile` backend (PyNWB → `NWBHDF5IO`), consumed at sort time via `SpikeInterfaceRecordingDataChunkIterator` (v1's path). **Default candidate**; zero new infrastructure.
-     - (b) **NWB-Zarr** — same `AnalysisNwbfile` row plumbing, but the file is written/read via `NWBZarrIO` (`hdmf-zarr`). Requires a small Phase 0 spike to confirm `AnalysisNwbfile.build()` can be taught to write Zarr; if not tractable in Phase 0 scope, (b) is ruled out with a note and the benchmark falls back to (a) vs (c).
-     - (c) **SI binary folder** — `recording.save(folder=..., format="binary")` outside `AnalysisNwbfile`. **Informational only — not a candidate for v2 MVP.** Measured so we know whether a future sidecar-storage opt-in would be worth the lifecycle cost.
-     Run KS4 + MS5 + clusterless_thresholder against each format in the same SI 0.104 benchmark environment used by `pytest-v2`, with exact sorter-package versions recorded in the emitted benchmark doc. If KS4 or MS5 cannot be installed reproducibly in Phase 0b, mark that sorter column as "not measured" with the install failure and do not treat the benchmark as complete for Phase 1. Sorters that internally prefer binary materialize a per-sort tmpdir via `recording.save(format="binary", folder=tmpdir)` regardless of which canonical format wins — that path is unconditional and unrelated to canonical storage.
-
-  2. **Integration check — NWB-resident reuses existing Spyglass machinery**. Because the canonical artifact stays inside `AnalysisNwbfile`, cleanup, `export.py`, kachery, FigPack, and the v2 recompute tables (Phase 2) all reuse the v1 path. The only outstanding integration question is per backend:
-     - **(a) HDF5**: no integration work; reuses v1's exact lifecycle.
-     - **(b) Zarr**: scope the `AnalysisNwbfile.build()` + `AnalysisNwbfile.cleanup` changes needed to support a Zarr backend. If the scope exceeds ~1 day of focused work, defer Zarr to a separate follow-up project and pick HDF5.
-     - **(c) Binary sidecar**: **explicitly out of MVP**. If a future maintainer wants to land binary as an optimization, they own the sidecar lifecycle in full (a `BinaryCache` opt-in table outside `Recording`, parallel cleanup, parallel export, kachery push, FigPack adapter, recompute hash). Do not partially implement.
-
-  3. **Decision matrix recorded in `v2-storage-benchmark.md`**:
-     | Measured outcome | Phase 1 default |
-     |---|---|
-     | NWB-Zarr clearly wins (>1.5× faster than HDF5) AND Zarr-backend `AnalysisNwbfile` work is in scope | Zarr; ship the `AnalysisNwbfile` Zarr change as a Phase 1 prereq |
-     | Zarr work out of scope, OR HDF5 within ~20% of Zarr | **HDF5 (default)** — zero new infra, minimal risk |
-     | Binary sidecar shows >2× win over best NWB option | Record the data point in `v2-storage-benchmark.md`; do NOT change the Phase 1 default. Binary stays out-of-MVP unless a follow-up project scopes the full sidecar lifecycle |
-
-  4. **Phase 1 schema is invariant under this decision.** The `Recording` row's storage columns are `analysis_file_name` + `electrical_series_path` + `object_id` + `cache_hash` regardless of HDF5 vs Zarr — both backends write through `AnalysisNwbfile` and surface the same path/object identifiers. The benchmark outcome flips a default constant (`SPYGLASS_ANALYSIS_NWB_FORMAT`-style config), not the schema. Zero-migration policy is preserved.
-
-  5. **Phase 1 cannot ship until this benchmark is run in a modern-SI sorter environment.** Phase 0b's task list includes the script `tests/spikesorting/v2/benchmark_storage.py` that runs the three-format measurements and emits the markdown table. The environment may be the same isolated SI 0.104 development environment used for `pytest-v2` before the global prerequisite PR lands, but the report must record `spikeinterface`, KS4, MS5, PyNWB, hdmf-zarr, and platform versions so the decision is reproducible.
-
-- **Documentation update for 0b.** Add `docs/src/Pipelines/SpikeSorting/v2-storage-benchmark.md`, `tests/spikesorting/v2/fixtures/README.md`, and baseline-capture usage notes. The CHANGELOG entry for this slice should mention that the validation fixtures and storage benchmark are available, but no v2 pipeline tables or user-facing sorting path have landed.
+- **Documentation update for 0b.** Add `tests/spikesorting/v2/fixtures/README.md` and baseline-capture usage notes. The CHANGELOG entry for this slice should mention that the validation fixtures and baseline-capture tooling are available, but no v2 pipeline tables or user-facing sorting path have landed.
 
 ## Deliberately not in this phase
 
@@ -206,9 +184,8 @@ Phase 0b PR:
 
 | Test | Asserts |
 | --- | --- |
-| `test_hash_nwb_recording_stable` (slow) | Synthesize a 2-second SI recording, write it as an ElectricalSeries inside a temporary `AnalysisNwbfile` (HDF5; also Zarr if installed), call `_hash_nwb_recording(analysis_file_name, object_id)` twice, assert deterministic output. Mark `@pytest.mark.slow`. |
+| `test_hash_nwb_recording_stable` (slow) | Synthesize a 2-second SI recording, write it as an ElectricalSeries inside a temporary HDF5 `AnalysisNwbfile`, call `_hash_nwb_recording(analysis_file_name, object_id)` twice, assert deterministic output. Mark `@pytest.mark.slow`. |
 | `test_mearec_fixture_round_trips_through_spyglass` (slow) | A generated MEArec NWB fixture runs through the real Spyglass ingestion path (`insert_sessions(...)` or equivalent common-table population after `Nwbfile` registration); `Session`, `Raw`, non-empty `Electrode`, and expected `IntervalList` rows exist afterward. Ground-truth `Units` are imported explicitly via `ImportedSpikeSorting().insert_from_nwbfile(...)` and appear in `ImportedSpikeSorting` / `SpikeSortingOutput`. |
-| `test_storage_benchmark_writes_decision_doc` (slow) | `tests/spikesorting/v2/benchmark_storage.py` emits `docs/src/Pipelines/SpikeSorting/v2-storage-benchmark.md` with HDF5/Zarr/binary measurements and a selected Phase 1 default. |
 | `test_v1_baseline_capture_runs_on_real_data` (slow, integration, env-var-gated) | If `SPIKESORTING_V2_REAL_NWB_PATH` is set, run `baseline_capture.py` against that dataset; assert all three output files are produced and non-empty. **Skipped with explicit message if the env var is unset** — minirec has no real spikes, so a baseline captured against it would be useless. Mark `@pytest.mark.slow`. |
 | `test_v1_test_suite_still_passes_under_current_si` (integration) | Phase 0 does NOT upgrade SI, so v1 tests should still pass cleanly. Regression guard: if any v1 test fails after this Phase 0 PR, something else broke. |
 
@@ -250,7 +227,6 @@ test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
 pytest tests/spikesorting/v2/ -q
 
 python tests/spikesorting/v2/fixtures/generate_mearec.py
-python tests/spikesorting/v2/benchmark_storage.py
 if [[ -n "${SPIKESORTING_V2_REAL_NWB_PATH:-}" ]]; then
   python tests/spikesorting/v2/baseline_capture.py --output-dir tests/spikesorting/v2/baselines
 fi
@@ -269,7 +245,7 @@ git diff --check -- src/spyglass/spikesorting/v2 tests/spikesorting/v2 .claude/d
 
 Before opening the PR for this phase, dispatch `code-reviewer` (or equivalent independent reviewer) against the diff. Confirm:
 - Every task in this phase is implemented as specified.
-- If reviewing 0a, fixture generation, storage benchmarking, and real-data baseline capture are not partially implemented.
+- If reviewing 0a, fixture generation and real-data baseline capture are not partially implemented.
 - If reviewing 0b, 0a is already merged and its `pytest-v2` / code-graph gates still pass.
 - The "Deliberately not in this phase" list is honored — no scope creep into adjacent phases.
 - Validation slice tests pass; slow / integration tests are marked.

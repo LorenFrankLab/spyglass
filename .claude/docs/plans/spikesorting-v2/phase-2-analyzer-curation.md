@@ -82,7 +82,7 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
   - **`RecordingArtifactRecomputeSelection`** (Manual, FK `RecordingArtifactVersions` + `UserEnvironment`) — plans a recompute attempt under a labeled `env_id` with a `rounding` precision and optional `xfail_reason`.
   - **`RecordingArtifactRecompute`** (Computed, FK `RecordingArtifactRecomputeSelection`) — reruns the recording reconstruction, compares hashes/object names, and records `matched`, `err_msg`, `created_at`, and `deleted`. `delete_files()` is gated on `matched=1` rows **whose `env_id` matches the CURRENT `UserEnvironment`** — stale-env matched rows (e.g. a SI-0.103-era recompute) do NOT authorize deletion. The default raises `StaleEnvMatchedError` naming the stale envs; pass `force_stale_env=True` to override (audit-logged). See [designs.md § RecordingArtifactRecompute + SortingAnalyzerRecompute](designs.md#recordingartifactrecompute--sortinganalyzerrecompute). Same rule applies to `SortingAnalyzerRecompute.delete_files()`.
   - **`SortingAnalyzerVersions` / `SortingAnalyzerRecomputeSelection` / `SortingAnalyzerRecompute`** — parallel trio for the SortingAnalyzer folder. The comparison inventories analyzer extension metadata and content hashes rather than NWB ElectricalSeries objects.
-  - **Storage-reclamation workflow** documented in `docs/src/Pipelines/SpikeSorting/v2-storage-management.md`: recompute-verify (`matched=1`) → `delete_files()` reclaims disk → later `Recording.get_recording()` or `Sorting.get_analyzer()` rebuilds from the stored selection/parameter lineage.
+  - **Storage-reclamation workflow** documented in `docs/src/Features/SpikeSortingV2StorageManagement.md`: recompute-verify (`matched=1`) → `delete_files()` reclaims disk → later `Recording.get_recording()` or `Sorting.get_analyzer()` rebuilds from the stored selection/parameter lineage.
   - This is Phase 2 schema, not a later migration. The zero-migration contract lists these tables as Phase 2 pure additions.
 
 - **Preserve the v1 recompute admin surface unless explicitly rejected in code review.** The Phase 2 implementation must name the v2 equivalents for the following v1 operations:
@@ -96,8 +96,8 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
   If any method is intentionally dropped, add it to `feature-parity.md` explicit non-parity with the reason and update the storage-management docs.
 
 - **Documentation update**:
-  - Update [docs/src/Pipelines/SpikeSorting/v2.md](../../../../docs/src/Pipelines/SpikeSorting/v2.md) (created Phase 1) with a Quality Metrics section.
-  - Add `docs/src/Pipelines/SpikeSorting/v2-storage-management.md` documenting recompute verification and safe deletion.
+  - Update [docs/src/Features/SpikeSortingV2.md](../../../../docs/src/Features/SpikeSortingV2.md) (created Phase 1) with a Quality Metrics section.
+  - Add `docs/src/Features/SpikeSortingV2StorageManagement.md` documenting recompute verification and safe deletion.
   - CHANGELOG.md "Unreleased": "v2 `AnalyzerCuration` consolidates v1's `MetricCuration` + `BurstPair`. Auto-curation rules driven by Pydantic-validated thresholds; auto-merge via SI 0.104 presets. v2 recompute tables support safe storage reclamation for Recording and SortingAnalyzer artifacts."
 
 ## Deliberately not in this phase
@@ -158,7 +158,7 @@ python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe SortingAna
 python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src path --up AnalyzerCuration --file spyglass/spikesorting/v2/metric_curation.py --json
 python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src path --down AnalyzerCuration --file spyglass/spikesorting/v2/metric_curation.py --json
 
-git diff --check -- src/spyglass/spikesorting/v2 tests/spikesorting/v2 docs/src/Pipelines/SpikeSorting CHANGELOG.md
+git diff --check -- src/spyglass/spikesorting/v2 tests/spikesorting/v2 docs/src/Features CHANGELOG.md
 git diff --exit-code -- src/spyglass/spikesorting/v1
 ```
 

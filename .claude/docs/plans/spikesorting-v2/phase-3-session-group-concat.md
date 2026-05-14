@@ -79,7 +79,7 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
   - Reports timing + memory to logs, even on pass.
 
 - **Documentation update**:
-  - New section in `docs/src/Pipelines/SpikeSorting/v2.md` titled "Chronic same-day recordings".
+  - New section in `docs/src/Features/SpikeSortingV2.md` titled "Chronic same-day recordings".
   - CHANGELOG.md: "v2 `SessionGroup` and `ConcatenatedRecording` enable same-day chronic recording sorts. Multi-day requires explicit override (out-of-MVP)."
   - New API doc entry for `session_group.py`.
 
@@ -143,7 +143,7 @@ python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe Concatenat
 python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src path --up ConcatenatedRecording --file spyglass/spikesorting/v2/session_group.py --json
 python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src path --down ConcatenatedRecording --file spyglass/spikesorting/v2/session_group.py --json
 
-git diff --check -- src/spyglass/spikesorting/v2 tests/spikesorting/v2 docs/src/Pipelines/SpikeSorting CHANGELOG.md
+git diff --check -- src/spyglass/spikesorting/v2 tests/spikesorting/v2 docs/src/Features CHANGELOG.md
 ```
 
 ## Fixtures

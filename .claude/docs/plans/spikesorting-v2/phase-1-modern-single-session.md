@@ -12,7 +12,7 @@ The MVP. Builds the complete single-session sort pipeline: preprocessing → art
 
 The first task of this phase (after prerequisites land) is to verify the new SI baseline by running the existing v1 test suite under 0.104 once more and capturing any newly-discovered regressions to fold into Phase 1 implementation notes.
 
-Phase 1 may land as four smaller PR slices, but all schemas introduced by a slice must already be in their final zero-migration shape:
+Phase 1 MUST land as four PR slices, and all schemas introduced by a slice must already be in their final zero-migration shape:
 
 - **Phase 1a — params + schema shells**: `_params/artifact_detection.py`, `_params/sorter.py`, `_params/motion_correction.py`, final table definitions for Phase 1 tables, and forward-compatible Phase 3 table definitions with gated `make()` bodies.
 - **Phase 1b — recording + artifact path**: `SortGroupV2`, `PreprocessingParameters`, `RecordingSelection`, `Recording`, `ArtifactDetection*`, shared-artifact groups, and their tests.
@@ -22,7 +22,7 @@ Phase 1 may land as four smaller PR slices, but all schemas introduced by a slic
 ## Executor Checklist
 
 - Re-run the SI 0.104 v1 baseline from Phase 0c before coding.
-- Implement Phase 1 `_params/`, `recording.py`, `artifact.py`, `sorting.py`, `curation.py`, and the minimal `pipeline.py` in the slice order above unless the PR owner explicitly keeps Phase 1 as one larger PR.
+- Implement Phase 1 `_params/`, `recording.py`, `artifact.py`, `sorting.py`, `curation.py`, and the minimal `pipeline.py` in the slice order above.
 - Declare forward-compatible Phase 3 tables exactly as designed, with `ConcatenatedRecording.make()` still gated by `NotImplementedError`.
 - Add `SpikeSortingOutput.CurationV2` registration and v1-compatible merge-table accessors.
 - Preserve the nullable-XOR, NWB-resident cache, `insert_selection()` return, and unit-brain-region contracts from `shared-contracts.md`.
@@ -66,7 +66,7 @@ Phase 1 may land as four smaller PR slices, but all schemas introduced by a slic
     - Phase 1 validation slice adds: `test_set_group_by_shank_rejects_overlap` (overlapping `sort_group_ids` raises), `test_set_group_by_electrode_table_column_intan` (synthesizes an NWB with an `intan_channel_number` column and asserts the new classmethod groups correctly), `test_set_group_invalid_column_lists_valid` (asserting the error message lists valid columns).
   - `PreprocessingParameters` Lookup, Pydantic-validated, three contents rows: `("default_franklab", ...)`, `("default_neuropixels", {"freq_min": 300, "freq_max": 6000, ...})`, and `("no_filter", {"bandpass_filter": {"freq_min": 1, "freq_max": 14999, "filter_order": 1}, "whitening": None, ...})`. `bandpass_filter` is mandatory in the Pydantic schema, so the "no-op" preset uses a wide-open band rather than `None`; whitening is disabled.
   - `RecordingSelection` Manual with `insert_selection(key) -> dict` per the [insert_selection contract](shared-contracts.md#insert_selection-return-value-normalization).
-  - `Recording` Computed with `make()` and `get_recording(key)` that auto-recomputes on missing NWB artifact. The preprocessed recording is materialized **NWB-resident** inside an `AnalysisNwbfile` (`electrical_series_path` + `object_id` on the row). HDF5 is the Phase 1 default because the current `AnalysisNwbfile.build()` path writes via `NWBHDF5IO`. If Phase 0's benchmark chooses Zarr, a concrete `AnalysisNwbfile` Zarr-backend prerequisite must land before this `Recording.make()` implementation uses `dj.config['custom']['spyglass_analysis_nwb_format'] = "zarr"`. The schema is invariant either way. No binary sidecar. See [shared-contracts.md § Recording Cache Format](shared-contracts.md#recording-cache-format).
+  - `Recording` Computed with `make()` and `get_recording(key)` that auto-recomputes on missing NWB artifact. The preprocessed recording is materialized **NWB-resident** inside an `AnalysisNwbfile` (`electrical_series_path` + `object_id` on the row). HDF5 is the Phase 1 default because the current `AnalysisNwbfile.build()` path writes via `NWBHDF5IO`. No binary sidecar. Any future Zarr or binary-cache optimization must land as a separate lifecycle/scoping PR without changing this schema. See [shared-contracts.md § Recording Cache Format](shared-contracts.md#recording-cache-format).
 
 - **Implement `artifact.py`** — `ArtifactDetectionParameters`, `ArtifactDetectionSelection`, `ArtifactDetection` per [designs.md § ArtifactDetectionParameters + ArtifactDetection](designs.md#artifactdetectionparameters--artifactdetection). Note the design has a real `ArtifactDetectionSelection` Manual table (UUID `artifact_id` PK; FKs Recording + ArtifactDetectionParameters). `ArtifactDetection` is Computed and keys off the Selection — required so DataJoint populate-restriction semantics work (`ArtifactDetection.populate({"recording_id": X})` resolves via the Selection table's join, not against a UUID-only PK). Artifact intervals live on `ArtifactDetection.Interval` part table (NOT `IntervalList`). Helper `ArtifactDetection.get_artifact_removed_intervals(key) -> np.ndarray` returns the valid-time intervals for use by `Sorting.make()`.
   - **Cross-sort-group artifact detection** — addresses [GitHub issue #928](https://github.com/LorenFrankLab/spyglass/issues/928). Add a `SharedArtifactGroup` Manual table with PK `shared_artifact_group_name` and secondary FK `Session`, plus a `Member` part FK'ing `Recording`. `ArtifactDetectionSelection` is a single table with **nullable XOR FKs** to `Recording` and `SharedArtifactGroup`: exactly one of `recording_id` / `shared_artifact_group_name` must be non-NULL. **XOR enforced via the three-layer defense from [shared-contracts.md § Nullable XOR Foreign-Key Pattern](shared-contracts.md#nullable-xor-foreign-key-pattern)**: Layer 1 in `insert_selection()`; Layer 2 re-run at the start of `ArtifactDetection.make()`; Layer 3 = `test_no_xor_violations_in_production` integrity test (shared with `SortingSelection`). `SharedArtifactGroup.insert_group()` validates all member recordings belong to the group's session. The single-recording path is the v1 default; the shared-group path is opt-in and runs once over the union of channels, producing a single `ArtifactDetection.Interval` set that applies to all member recordings (behavioral chewing / licking artifacts visible on every probe). Schema details at [designs.md § ArtifactDetectionParameters + ArtifactDetection](designs.md#artifactdetectionparameters--artifactdetection).
@@ -131,7 +131,7 @@ Phase 1 may land as four smaller PR slices, but all schemas introduced by a slic
 - **Sort-correctness validation uses MEArec ground-truth fixtures, not minirec.** Per the revised fixture strategy in Phase 0, minirec is reduced to a plumbing-only regression guard (test rows `test_v2_minirec_plumbing` below). Real sort-correctness lives in `test_v2_mearec_polymer_ground_truth` and `test_v2_mearec_neuropixels_ground_truth` (Phase 1 validation slice below) which compute precision/recall against planted MEArec units. The v1-comparison parity test moves to `test_v2_real_data_v1_parity` — runs only when `SPIKESORTING_V2_REAL_NWB_PATH` is set (a real dataset with real spikes), with tolerances `±1 sample` for `clusterless_thresholder` and `±30-50%` for stochastic sorters. **No minirec-based parity test is shipped.**
 
 - **Documentation update** (Phase 1 ships user-visible changes, so docs go with it):
-  - New `docs/src/Pipelines/SpikeSorting/v2.md` — overview, single-session walkthrough, link to the new notebook (Phase 5 will write the full notebook; Phase 1 ships a minimal end-to-end Python script as the example).
+  - New `docs/src/Features/SpikeSortingV2.md` — overview, single-session walkthrough, link to the new notebook (Phase 5 will write the full notebook; Phase 1 ships a minimal end-to-end Python script as the example).
   - Update CHANGELOG.md "Unreleased" section: "v2 spike sorting pipeline single-session path lands. New `spyglass.spikesorting.v2` module with `RecordingSelection`, `SortingSelection`, `CurationV2`, plus `SpikeSortingOutput.CurationV2` part. SortingAnalyzer-based; SI 0.104 required."
   - Add v2 module to `docs/src/api/spikesorting.md` (mkdocs API page).
 
@@ -155,7 +155,7 @@ Phase 1 may land as four smaller PR slices, but all schemas introduced by a slic
 | `test_recording_selection_returns_single_dict` | `RecordingSelection.insert_selection(key)` returns dict on fresh insert; calling again with same key returns the SAME dict, not a list (the v1 footgun). |
 | `test_recording_make_writes_nwb_artifact` (slow) | After `Recording.populate(key)`, the row has `analysis_file_name`, `electrical_series_path`, and `object_id`; `AnalysisNwbfile.get_abs_path(analysis_file_name)` exists; the `ElectricalSeries` at `electrical_series_path` is present inside the NWB and has the stored `object_id`; `cache_hash` on the row equals `_hash_nwb_recording(analysis_file_name, object_id)` recomputed fresh. |
 | `test_recording_get_recording_recomputes_on_missing_artifact` (slow) | Move/rename the AnalysisNwbfile content file on disk (simulating a manual cleanup). Call `Recording.get_recording(key)` — asserts the artifact is rebuilt in place via `_rebuild_nwb_artifact`, the regenerated `cache_hash` matches the stored value, and the returned `BaseRecording` reads the same trace bytes as the original. No DataJoint row is deleted. |
-| `test_recording_schema_invariant_under_backend_switch` | If the Phase 0 benchmark keeps HDF5, assert the `Recording` schema has the final NWB-resident columns and does not expose backend-specific fields. If Phase 0 selected Zarr and the `AnalysisNwbfile` Zarr prerequisite landed, repeat the same heading assertion under both `"hdf5"` and `"zarr"` config values. |
+| `test_recording_schema_has_backend_independent_columns` | Assert the `Recording` schema has the final NWB-resident columns (`analysis_file_name`, `electrical_series_path`, `object_id`, `cache_hash`) and does not expose backend-specific fields. |
 | `test_artifact_detection_writes_intervals_to_part_table` | After `ArtifactDetection.populate(key)`, `ArtifactDetection.Interval & key` is non-empty (or empty if `detect=False`); does NOT insert into `IntervalList` (regression vs v1). |
 | `test_artifact_get_removed_intervals_returns_complement` | Synthesized recording with 2 known artifacts; `get_artifact_removed_intervals(key)` returns 3 valid-time intervals (start-to-art1, art1-to-art2, art2-to-end). |
 | `test_sorter_params_dispatched_pydantic_schemas` | `SorterParameters().insert1({"sorter": "mountainsort5", "params": {"scheme": "5"}})` raises (invalid scheme); valid `scheme="2"` inserts cleanly. |
@@ -238,7 +238,7 @@ python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe Recording 
 python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe ArtifactDetectionSelection --file spyglass/spikesorting/v2/artifact.py
 python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src path --up Recording --file spyglass/spikesorting/v2/recording.py --json
 
-git diff --check -- src/spyglass/spikesorting/v2 tests/spikesorting/v2 docs/src/Pipelines/SpikeSorting CHANGELOG.md
+git diff --check -- src/spyglass/spikesorting/v2 tests/spikesorting/v2 docs/src/Features CHANGELOG.md
 ```
 
 ### Phase 1c commands
@@ -268,7 +268,7 @@ pytest tests/decoding tests/spikesorting/v1/test_merge.py -q
 python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe CurationV2 --file spyglass/spikesorting/v2/curation.py
 python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src path --down CurationV2 --file spyglass/spikesorting/v2/curation.py --json
 
-git diff --check -- src/spyglass/spikesorting/v2 src/spyglass/spikesorting/spikesorting_merge.py tests/spikesorting/v2 docs/src/Pipelines/SpikeSorting CHANGELOG.md
+git diff --check -- src/spyglass/spikesorting/v2 src/spyglass/spikesorting/spikesorting_merge.py tests/spikesorting/v2 docs/src/Features CHANGELOG.md
 ```
 
 ### Final Phase 1 gate
@@ -289,7 +289,7 @@ python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe CurationV2
 python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src path --up Sorting --file spyglass/spikesorting/v2/sorting.py --json
 python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src path --down CurationV2 --file spyglass/spikesorting/v2/curation.py --json
 
-git diff --check -- src/spyglass/spikesorting/v2 src/spyglass/spikesorting/spikesorting_merge.py tests/spikesorting/v2 docs/src/Pipelines/SpikeSorting CHANGELOG.md
+git diff --check -- src/spyglass/spikesorting/v2 src/spyglass/spikesorting/spikesorting_merge.py tests/spikesorting/v2 docs/src/Features CHANGELOG.md
 ```
 
 ## Fixtures
@@ -310,4 +310,4 @@ Before opening the PR for this phase, dispatch `code-reviewer` (or equivalent in
 - `SpikeSortingOutput.CurationV2` part addition does NOT break existing v0/v1 merge queries — confirm by running the existing v1 test suite and downstream consumer tests (`tests/decoding`, `tests/ripple`).
 - `set_group_by_shank()` overwrite-guard is honored (regression vs v1 silent overwrite).
 - `code_graph.py describe` returns clean output for every new table; `path --up`/`path --down` chains match the design DAG. Run with paths relative to `--src src`, review the JSON `warnings` block, and treat any unaccounted heuristic resolution as a blocker.
-- Documentation tasks (CHANGELOG, `docs/src/Pipelines/SpikeSorting/v2.md`, API stub) are landed.
+- Documentation tasks (CHANGELOG, `docs/src/Features/SpikeSortingV2.md`, API stub) are landed.

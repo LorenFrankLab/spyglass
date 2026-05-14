@@ -90,11 +90,11 @@ The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell n
   5. Decoding with `TrackedUnit`-indexed spikes (link to downstream notebook).
 
 - **Documentation overhaul**:
-  - Promote `docs/src/Pipelines/SpikeSorting/v2.md` from "new pipeline" to "recommended for new work". Add a top banner.
+  - Promote `docs/src/Features/SpikeSortingV2.md` from "new pipeline" to "recommended for new work". Add a top banner.
   - Update root README "Quick example" snippet to use `run_v2_pipeline()`.
-  - Keep `docs/src/Pipelines/SpikeSorting/v1.md` accessible and live; do NOT mark v1 as deprecated. v0 and v1 remain populated paths for legacy data.
-  - Add a new docs page: `docs/src/Pipelines/SpikeSorting/choosing-v1-vs-v2.md` — for users deciding which path to use. TL;DR: existing v1 sorts stay queryable through v1; new sorts go to v2 via `run_v2_pipeline`.
-  - In `choosing-v1-vs-v2.md`, include the import path explicitly: external or ground-truth NWB Units still use the existing `ImportedSpikeSorting` workflow and appear in `SpikeSortingOutput.ImportedSpikeSorting`; they are not reinserted as `CurationV2` rows.
+  - Keep existing v0/v1 docs, API references, and notebooks accessible and live; do NOT mark v1 as deprecated. v0 and v1 remain populated paths for legacy data.
+  - Add a new docs page: `docs/src/Features/ChoosingSpikeSortingV1VsV2.md` — for users deciding which path to use. TL;DR: existing v1 sorts stay queryable through v1; new sorts go to v2 via `run_v2_pipeline`.
+  - In `docs/src/Features/ChoosingSpikeSortingV1VsV2.md`, include the import path explicitly: external or ground-truth NWB Units still use the existing `ImportedSpikeSorting` workflow and appear in `SpikeSortingOutput.ImportedSpikeSorting`; they are not reinserted as `CurationV2` rows.
   - CHANGELOG.md: "v2 spike sorting is the recommended path for new work. `run_v2_pipeline()` reduces typical sort setup to a single function call. FigPack is the v2 curation UI. v0 and v1 remain supported indefinitely."
 
 - **No v1 sunset criteria.** Per the resolved design decision in [overview.md](overview.md), v0 and v1 stay in-tree indefinitely. Phase 5 simply documents that v2 is the recommended path for new sorts; v1 docs stay live and unmarked-as-deprecated.
@@ -107,7 +107,7 @@ The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell n
   - `test_run_v2_unit_match_requires_explicit_curations` — `run_v2_unit_match(..., curation_choices=None)` raises and never auto-pins latest curations.
   - `test_preset_validation_catches_missing_lookup_rows` — define a preset referencing a nonexistent param name; `register_preset` raises with a clear "row 'foo' not found in PreprocessingParameters" message.
 
-- **Notebook smoke test**: `tests/notebooks/test_spike_sorting_v2_notebook.py` — uses `jupytext` (already a docs optional dep at [pyproject.toml](../../../../pyproject.toml)) to execute `notebooks/13_Spike_SortingV2.ipynb` cell-by-cell against the `minirec` fixture. Marked slow.
+- **Notebook smoke test**: `tests/spikesorting/v2/test_notebooks.py` — uses `jupytext` (already a docs optional dep at [pyproject.toml](../../../../pyproject.toml)) to execute `notebooks/13_Spike_SortingV2.ipynb` cell-by-cell against the `minirec` fixture. Marked slow.
 
 ## Deliberately not in this phase
 
@@ -148,7 +148,7 @@ assert importlib.util.find_spec("figpack_spike_sorting") is not None
 PY
 
 pytest tests/spikesorting/v2/test_run_pipeline.py -q
-pytest tests/notebooks/test_spike_sorting_v2_notebook.py -q
+pytest tests/spikesorting/v2/test_notebooks.py -q
 test "$(jq '.cells | map(select(.cell_type == "code")) | length' notebooks/13_Spike_SortingV2.ipynb)" -le 10
 
 python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe FigPackCurationSelection --file spyglass/spikesorting/v2/figpack_curation.py
@@ -156,7 +156,7 @@ python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe FigPackCur
 python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src path --up FigPackCuration --file spyglass/spikesorting/v2/figpack_curation.py --json
 python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src path --down FigPackCuration --file spyglass/spikesorting/v2/figpack_curation.py --json
 
-git diff --check -- src/spyglass/spikesorting/v2 tests/spikesorting/v2 tests/notebooks docs notebooks README.md CHANGELOG.md
+git diff --check -- src/spyglass/spikesorting/v2 tests/spikesorting/v2 docs notebooks README.md CHANGELOG.md
 git diff --exit-code -- src/spyglass/spikesorting/v0 src/spyglass/spikesorting/v1
 ```
 
@@ -176,7 +176,7 @@ Before opening the PR for this phase, dispatch `code-reviewer` (or equivalent in
 - `run_v2_pipeline()` is idempotent (the manifest comparison test passes).
 - `run_v2_unit_match()` is idempotent by `(session_group_owner, session_group_name, matcher_params_name, curation_set_hash)` and does not conflate UnitMatch with concatenated sorting.
 - FigPack feasibility was verified before implementation began (or the project owner was escalated if FigPack proved unusable — no silent fallback).
-- All docs tasks landed: v2.md banner, README snippet, `choosing-v1-vs-v2.md` decision page.
+- All docs tasks landed: `docs/src/Features/SpikeSortingV2.md` banner, README snippet, `docs/src/Features/ChoosingSpikeSortingV1VsV2.md` decision page.
 - CHANGELOG.md mentions Phase 5 deliverables (orchestrator, FigPack, notebook rewrite).
 - Sanity: `git diff src/spyglass/spikesorting/v0/ src/spyglass/spikesorting/v1/` is empty — no v0/v1 source touched.
 - Sanity: `git diff` against any Phase 1–4 table `definition` strings is empty — zero-migration policy honored.
