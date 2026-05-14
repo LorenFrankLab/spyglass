@@ -158,6 +158,7 @@ for label, interval_data in results.groupby("interval_labels"):
     `HDF5_USE_FILE_LOCKING` so the HDF5 library actually sees the intended
     `FALSE` default #1575
 - Warn on no-operation restrictions #1586
+- Allow `RestrGraph` to inspect tables outside of Spyglass #1XXX
 
 ### Pipelines
 
