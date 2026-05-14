@@ -19,6 +19,7 @@ This page is the parity contract. It distinguishes behavior v2 must preserve fro
 | `ImportedSpikeSorting` | Existing shared `ImportedSpikeSorting` remains canonical | Do not duplicate this as a v2 table. Imported NWB Units continue to enter `SpikeSortingOutput.ImportedSpikeSorting` and can be used beside v2 rows by downstream consumers and validation fixtures. |
 | `SpikeSortingOutput` merge dispatch | Existing merge table plus `CurationV2` part | `get_recording`, `get_sorting`, `get_sort_group_info`, `get_spike_times`, `get_spike_indicator`, and `get_firing_rate` must work for v2 merge IDs. |
 | `get_restricted_merge_ids` and `get_spiking_sorting_v1_merge_ids` convenience lookup | `SpikeSortingOutput.get_restricted_merge_ids(..., sources=['v2'])` | v2 must support interpretable restrictions across recording, artifact, sorting, curation, and analyzer-curation stages. No v2-specific duplicate of the v1 utility is required. |
+| `MetricParameters.show_available_metrics()` | `QualityMetricParameters.show_available_metrics()` or documented `available_quality_metrics()` helper | Preserve a discoverable notebook helper for the metric names v2 supports. It may report SortingAnalyzer/SpikeInterface metric names rather than v1's exact custom metric set. |
 
 ## Explicit non-parity
 
@@ -27,4 +28,5 @@ This page is the parity contract. It distinguishes behavior v2 must preserve fro
 - v2 does not write artifact-derived intervals into `IntervalList`.
 - v2 does not auto-create default rows for every installed SpikeInterface sorter.
 - v2 does not migrate existing v1 curation rows into `CurationV2`.
+- v2 does not implement `SpikeSortingRecording.update_ids()`. That v1 helper was a transition/backfill tool for recompute-era NWB files; v2's zero-migration policy requires final row fields when each table is introduced.
 - v2 does not remove, deprecate, or rewrite v0/v1.

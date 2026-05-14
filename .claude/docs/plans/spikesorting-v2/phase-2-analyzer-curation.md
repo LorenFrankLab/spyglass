@@ -29,6 +29,7 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
 
 - **Implement `metric_curation.py`** per [designs.md § AnalyzerCuration](designs.md#analyzercuration-replaces-v1-metriccuration--burstpair). Specific:
   - `QualityMetricParameters` Lookup with three default rows: `("franklab_default", ...)`, `("neuropixels_default", ...)`, `("minimal", {"metric_names": ["snr", "isi_violation", "firing_rate"], ...})`.
+  - `QualityMetricParameters.show_available_metrics()` or a documented `available_quality_metrics()` helper that lists the supported SortingAnalyzer/SpikeInterface metric names. This preserves the v1 notebook-discovery workflow from `MetricParameters.show_available_metrics()` without requiring v1's exact custom metric set.
   - `AutoCurationRules` Lookup with default rows including a `("franklab_default_thresholds", ...)` that mirrors v1's auto-label conventions (snr < 2 → noise, isi_violation > 0.05 → mua, etc.; pull thresholds from `MetricCurationParameters` defaults at [src/spyglass/spikesorting/v1/metric_curation.py:161-191](src/spyglass/spikesorting/v1/metric_curation.py#L161-L191)).
   - `AnalyzerCurationSelection` Manual.
   - `AnalyzerCuration` Computed with `make()` that computes additional extensions, runs `compute_quality_metrics(..., metric_params=...)`, applies label rules, runs `compute_merge_unit_groups`, writes three NWB tables (`quality_metrics`, `merge_suggestions`, `proposed_labels`) via `AnalysisNwbfile().build()`.
@@ -132,6 +133,7 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
 | Test | Asserts |
 | --- | --- |
 | `test_quality_metric_params_validation` | `QualityMetricParameters().insert1({"params": {"metric_names": ["bogus_metric"]}})` raises validation error; valid metric list inserts. |
+| `test_quality_metric_available_metrics_helper` | Metric-discovery helper returns or logs all metric names accepted by the validator, including the default `minimal` metrics. |
 | `test_auto_curation_rules_validation` | `AutoCurationRules().insert1({...auto_merge_preset: "bogus_preset"...})` raises. Valid preset inserts. |
 | `test_apply_label_rules_basic` | Synthetic metrics DataFrame with two rules ("snr<2 → noise", "isi_violation>0.05 → mua"); asserts correct labels per unit. |
 | `test_apply_label_rules_order_preserved` | Rules in order produce expected multi-label lists when a unit matches multiple thresholds; reordering rules changes label order only, not label membership. |

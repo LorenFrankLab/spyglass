@@ -15,6 +15,17 @@ For agent invocation, **load only the slice you need**:
 5. **Need broader scope / risks / dependency policy?** [overview.md](overview.md).
 6. **Need upstream-repo line refs / on-disk format details?** [appendix.md](appendix.md).
 
+## Executor Quickstart
+
+Before opening a phase PR:
+
+1. Read this `PLAN.md`, [shared-contracts.md](shared-contracts.md), [feature-parity.md](feature-parity.md), and only the phase file you are implementing.
+2. Run the phase's listed preflight/source-verification commands and update stale line references before coding.
+3. Preserve every "do not weaken" invariant in shared contracts; if a contract no longer fits the source, stop and revise the plan first.
+4. Treat [phase-0c-si-0104-prerequisite.md](phase-0c-si-0104-prerequisite.md) as a hard prerequisite for runtime v2 work, not as optional cleanup.
+5. Keep each PR to the phase boundary. Anything intentionally dropped from v1 must be named in [feature-parity.md](feature-parity.md), not left implicit.
+6. Finish with the phase validation slice plus `code_graph.py describe/path` checks for any new DataJoint table.
+
 ## Files
 
 - [overview.md](overview.md) — goals, non-goals, integration points, risks, rollout strategy, open questions.
