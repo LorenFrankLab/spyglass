@@ -59,48 +59,9 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
   - The XOR validation (exactly one of `recording_id` / `concat_recording_id` must be non-NULL) stays unchanged from Phase 1.
   - Add a method-body guard that rejects `concat_recording_id` together with non-NULL `artifact_id`. Artifact detection for concat recordings is a later feature because Phase 3 reuses per-member `Recording` artifacts and does not define concat-wide artifact intervals.
 
-- **Update `Sorting.make()`** to dispatch via `_resolve_recording(key)`:
-  ```python
-  def _resolve_recording(sel: dict) -> si.BaseRecording:
-      if sel["recording_id"] is not None:
-          return (Recording & {"recording_id": sel["recording_id"]}).get_recording({"recording_id": sel["recording_id"]})
-      elif sel["concat_recording_id"] is not None:
-          return (ConcatenatedRecording & {"concat_recording_id": sel["concat_recording_id"]}).get_recording({"concat_recording_id": sel["concat_recording_id"]})
-      raise ValueError("Neither recording_id nor concat_recording_id is set on SortingSelection row — XOR validator was bypassed")
-  ```
-  This is a Phase 3 *method-body* change to existing `Sorting.make()`; not a schema change.
-  Also add `_resolve_analysis_parent_nwb_file_name(sel)`: for single-recording rows it returns the `RecordingSelection.nwb_file_name`; for concat rows it returns the first `SessionGroup.Member.nwb_file_name` as the deterministic `AnalysisNwbfile` parent anchor. The complete multi-session provenance remains queryable through `SortingSelection -> ConcatenatedRecordingSelection -> SessionGroup.Member`; do not query `RecordingSelection` with a concat-only selection row.
+- **Update `Sorting.make()`** to dispatch through a small recording-resolution helper. Binding behavior: a row with `recording_id` loads `Recording.get_recording()`, a row with `concat_recording_id` loads `ConcatenatedRecording.get_recording()`, and a row with neither raises the same XOR-bypass error as Phase 1. This is a Phase 3 *method-body* change to existing `Sorting.make()`; not a schema change. Also add deterministic parent anchoring for analysis NWB writes: single-recording rows anchor to `RecordingSelection.nwb_file_name`; concat rows anchor to the first `SessionGroup.Member.nwb_file_name`. The complete multi-session provenance remains queryable through `SortingSelection -> ConcatenatedRecordingSelection -> SessionGroup.Member`; do not query `RecordingSelection` with a concat-only selection row.
 
-- **Implement back-mapping helper** `ConcatenatedRecording.split_sorting_by_session(sorting, key)`:
-  ```python
-  def split_sorting_by_session(
-      self, sorting, key
-  ) -> dict[tuple[str, str], si.BaseSorting]:
-      """Split a Sorting (run on the concatenated recording) into per-member BaseSortings.
-
-      Returns ``dict[(nwb_file_name, interval_list_name), BaseSorting]``.
-      The tuple key is hashable; the full SessionGroup.Member key dict is not.
-      Each member's BaseSorting has spike times reset to that session's local time,
-      and unit IDs preserved (so the same biological unit across sessions has the same ID).
-      """
-      sel = (ConcatenatedRecordingSelection & key).fetch1()
-      session_group_key = {
-          "session_group_owner": sel["session_group_owner"],
-          "session_group_name": sel["session_group_name"],
-      }
-      boundaries = (self & key).fetch1("member_segment_boundaries")
-      members = (
-          SessionGroup.Member & session_group_key
-      ).fetch(as_dict=True, order_by="member_index")
-      per_session: dict[tuple[str, str], si.BaseSorting] = {}
-      for i, member in enumerate(members):
-          start_sample = 0 if i == 0 else boundaries[i - 1]
-          end_sample = boundaries[i]
-          local_sorting = _slice_sorting_by_sample_range(sorting, start_sample, end_sample)
-          session_id = (member["nwb_file_name"], member["interval_list_name"])
-          per_session[session_id] = local_sorting
-      return per_session
-  ```
+- **Implement back-mapping helper** `ConcatenatedRecording.split_sorting_by_session(sorting, key) -> dict[tuple[str, str], si.BaseSorting]`. Binding behavior: fetch the `ConcatenatedRecordingSelection` row first; load members ordered by `member_index`; use `member_segment_boundaries` to slice spike trains into each member's local sample frame; return hashable keys `(nwb_file_name, interval_list_name)`; preserve unit IDs across members.
 
 - **Smoke test on representative chronic recording slice**.
   1. Fixture: prepare a `chronic_2_session_minirec` — synthesize two ~5-second SI recordings (or use two slices of `minirec`) representing two same-day sessions on the same probe with identical channel positions.
@@ -166,6 +127,24 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
 | `test_split_sorting_by_session` (slow) | After concat sort, `split_sorting_by_session(sorting, key)` returns dict with one entry per Member; each entry's spike times fall within that member's time range; unit IDs preserved across members. |
 | `test_multi_day_chronic_smoke` (slow, optional) | Two-session multi-day concat sort completes; memory + runtime within budget. Skipped if `--run-chronic` not passed. |
 | `test_motion_correction_recovers_units_under_drift` (slow, integration) | Run v2 on `mearec_polymer_drift_120s.nwb` (Phase 0 fixture with planted slow drift). Compare two pipelines: (a) `preset="none"` (no motion correction), (b) `preset="rigid_fast"`. Use `compare_sorter_to_ground_truth` against the planted Units table. **Assert (b) has strictly higher per-unit accuracy than (a)** for the units that drift through the recording. Directly validates that motion correction is doing scientifically-meaningful work, not just running. |
+
+## Commands to run
+
+```bash
+export SPYGLASS_SKILL_DIR="${SPYGLASS_SKILL_DIR:-../spyglass-skill/skills/spyglass}"
+test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
+
+pytest tests/spikesorting/v2/test_phase3_session_group_concat.py -q
+pytest tests/spikesorting/v2/test_phase1_pipeline.py::test_sorting_selection_schema_unchanged_from_phase_1 -q
+
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe SessionGroup --file spyglass/spikesorting/v2/session_group.py
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe ConcatenatedRecordingSelection --file spyglass/spikesorting/v2/session_group.py
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe ConcatenatedRecording --file spyglass/spikesorting/v2/session_group.py
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src path --up ConcatenatedRecording --file spyglass/spikesorting/v2/session_group.py --json
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src path --down ConcatenatedRecording --file spyglass/spikesorting/v2/session_group.py --json
+
+git diff --check -- src/spyglass/spikesorting/v2 tests/spikesorting/v2 docs/src/Pipelines/SpikeSorting CHANGELOG.md
+```
 
 ## Fixtures
 

@@ -55,6 +55,20 @@ Move Spyglass from `spikeinterface>=0.99.1,<0.100` to `spikeinterface>=0.104,<0.
 | `test_no_v1_schema_changes` | v1 DataJoint `definition` strings for recording, sorting, curation, metric curation, burst curation, and recompute tables are byte-identical before/after the port. |
 | `test_pyproject_si_pin` | `pyproject.toml` requires `spikeinterface>=0.104,<0.105`. |
 
+## Commands to run
+
+```bash
+pytest tests/spikesorting/v0/ tests/spikesorting/v1/ -q
+pytest tests/spikesorting/v1/test_metric_curation.py tests/spikesorting/v1/test_burst.py -q
+python -m pip check
+python - <<'PY'
+import spikeinterface as si
+from packaging.version import Version
+assert Version(si.__version__) >= Version("0.104")
+PY
+git diff --check -- pyproject.toml src/spyglass/spikesorting/v1 tests/spikesorting/v1
+```
+
 ## Deliberately not in this phase
 
 - No v2 production tables.

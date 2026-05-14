@@ -64,38 +64,9 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
   2. **Per-unit list isolation (Bug B in #1513)**: each unit's label list MUST be an independent object. Shared list objects would let one unit's later labels contaminate another unit and the rule definition. v2 uses `defaultdict(list)`, which constructs a fresh list per new key — `.append(rule["label"])` mutates only that unit's list. Test: `test_label_list_isolation` — two units flagged by rule 1 (label `"noise"`); rule 2 flags only unit A (label `"mua"`). Assert `labels[A] == ["noise", "mua"]` AND `labels[B] == ["noise"]` (B is not contaminated by A's later append).
   3. **Per-rule membership check (Bug C in #1513)**: before appending a rule's label to a unit's list, the check must be `if rule["label"] not in labels[unit_id]` — element-against-list. A list-against-list membership check would allow duplicate labels. Test: `test_label_dedupe_per_element` — two rules both yield `"noise"` for the same unit; assert final labels `== ["noise"]`, not `["noise", "noise"]`.
 
-  Implementation pattern (matches the helper snippet below):
-  ```python
-  labels = defaultdict(list)               # Bug B fix: fresh list per new unit_id
-  for metric_name, rule in label_rules.items():
-      ...
-      for unit_id in flagged.index:
-          if rule["label"] not in labels[unit_id]:  # Bug C fix: per-element check
-              labels[unit_id].append(rule["label"])
-  return dict(labels)                      # Bug A fix: return at function scope
-  ```
-
 - **NaN sanitization for metric serialization** (addresses [#1556](https://github.com/LorenFrankLab/spyglass/issues/1556)): SI's `compute_quality_metrics` legitimately returns `nan` for low-spike units. `AnalyzerCuration.make()` writes metrics to AnalysisNWB table objects (`quality_metrics`, `merge_suggestions`, `proposed_labels`); Phase 5 later serializes the same metric table into the FigPack URI. Every serialized path must see non-finite values coerced to `None` BEFORE serialization. Add `_sanitize_for_json(df) -> df` helper that copies the DataFrame and replaces all non-finite values with `None`. The in-memory `metrics_df` retains NaN for downstream consumers that want to filter on it; only the serialized copies get sanitized. Per the [Empty / NaN / Boundary Invariants contract](shared-contracts.md#empty--nan--boundary-invariants).
 
-- **Implement `_apply_label_rules(metrics_df, label_rules)` helper** in `metric_curation.py`:
-  ```python
-  def _apply_label_rules(metrics_df, label_rules):
-      """Apply threshold rules to a metrics DataFrame.
-      Returns dict[unit_id, list[CurationLabel]].
-
-      Rule order matters only for output label order. This helper is
-      multi-label: all matching labels are retained unless a later explicit
-      conflict-resolution layer is added.
-      """
-      labels = defaultdict(list)
-      for metric_name, rule in label_rules.items():
-          op = OPS[rule["operator"]]  # {"<": operator.lt, ">": operator.gt, ...}
-          flagged = metrics_df[op(metrics_df[metric_name], rule["threshold"])]
-          for unit_id in flagged.index:
-              if rule["label"] not in labels[unit_id]:
-                  labels[unit_id].append(rule["label"])
-      return dict(labels)
-  ```
+- **Implement `_apply_label_rules(metrics_df, label_rules)` helper** in `metric_curation.py`. Binding behavior: rule order is preserved in output label order; all matching labels are retained; duplicate labels for the same unit are suppressed; missing metric names raise a clear validation error before serialization. Keep the method body simple and covered by the three invariant tests above.
 
 - **Add a `Sorting`-side method** (in [src/spyglass/spikesorting/v2/sorting.py](../../../../src/spyglass/spikesorting/v2/sorting.py) from Phase 1, extended here): `Sorting.add_extensions(key, extensions: list[str], **kwargs)`. This is a convenience for callers (including `AnalyzerCuration.make()`) to add extensions to an already-built analyzer in place. Internally: `analyzer = self.get_analyzer(key); analyzer.compute(extensions, **_resolved_job_kwargs(key) | kwargs)`. Documented as idempotent — SI's `compute()` skips already-computed extensions unless `overwrite=True`.
 
@@ -170,6 +141,26 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
 | `test_delete_files_accepts_current_env_matched` | Same setup but the `matched=1` row's `env_id` equals `UserEnvironment.current()`. `delete_files(keys)` succeeds and removes the artifact. Regression guard: confirms the stale-env gate is not over-eager. |
 | `test_delete_files_force_stale_env_audit` | Stale-env `matched=1` row, but caller passes `force_stale_env=True`. Deletion proceeds; an audit log entry (file or table — implementer's call, but it MUST exist and include caller identity + reason) records the override. |
 | `test_recompute_admin_surface_parity` | v2 recompute tables expose equivalents of `attempt_all`, `remove_matched`, `with_names`, `get_parent_key`, `recheck`, `get_disk_space`, and `update_secondary`, or the dropped method is listed in `feature-parity.md` explicit non-parity. |
+
+## Commands to run
+
+```bash
+export SPYGLASS_SKILL_DIR="${SPYGLASS_SKILL_DIR:-../spyglass-skill/skills/spyglass}"
+test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
+
+pytest tests/spikesorting/v2/test_phase2_analyzer_curation.py -q
+pytest tests/spikesorting/v2/test_recompute.py -q
+
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe AnalyzerCurationSelection --file spyglass/spikesorting/v2/metric_curation.py
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe AnalyzerCuration --file spyglass/spikesorting/v2/metric_curation.py
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe RecordingArtifactRecompute --file spyglass/spikesorting/v2/recompute.py
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe SortingAnalyzerRecompute --file spyglass/spikesorting/v2/recompute.py
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src path --up AnalyzerCuration --file spyglass/spikesorting/v2/metric_curation.py --json
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src path --down AnalyzerCuration --file spyglass/spikesorting/v2/metric_curation.py --json
+
+git diff --check -- src/spyglass/spikesorting/v2 tests/spikesorting/v2 docs/src/Pipelines/SpikeSorting CHANGELOG.md
+git diff --exit-code -- src/spyglass/spikesorting/v1
+```
 
 ## Fixtures
 

@@ -12,10 +12,17 @@ The MVP. Builds the complete single-session sort pipeline: preprocessing → art
 
 The first task of this phase (after prerequisites land) is to verify the new SI baseline by running the existing v1 test suite under 0.104 once more and capturing any newly-discovered regressions to fold into Phase 1 implementation notes.
 
+Phase 1 may land as four smaller PR slices, but all schemas introduced by a slice must already be in their final zero-migration shape:
+
+- **Phase 1a — params + schema shells**: `_params/artifact_detection.py`, `_params/sorter.py`, `_params/motion_correction.py`, final table definitions for Phase 1 tables, and forward-compatible Phase 3 table definitions with gated `make()` bodies.
+- **Phase 1b — recording + artifact path**: `SortGroupV2`, `PreprocessingParameters`, `RecordingSelection`, `Recording`, `ArtifactDetection*`, shared-artifact groups, and their tests.
+- **Phase 1c — sorting + analyzer path**: `SorterParameters`, `SortingSelection`, `Sorting`, analyzer-folder lifecycle, `Sorting.Unit`, unit-brain-region accessors, and XOR bypass guards.
+- **Phase 1d — curation + merge dispatch + minimal pipeline**: `CurationV2`, `SpikeSortingOutput.CurationV2`, merge-table accessors, minimal `run_v2_pipeline()`, docs, and end-to-end validation.
+
 ## Executor Checklist
 
 - Re-run the SI 0.104 v1 baseline from Phase 0c before coding.
-- Implement Phase 1 `_params/`, `recording.py`, `artifact.py`, `sorting.py`, `curation.py`, and the minimal `pipeline.py`.
+- Implement Phase 1 `_params/`, `recording.py`, `artifact.py`, `sorting.py`, `curation.py`, and the minimal `pipeline.py` in the slice order above unless the PR owner explicitly keeps Phase 1 as one larger PR.
 - Declare forward-compatible Phase 3 tables exactly as designed, with `ConcatenatedRecording.make()` still gated by `NotImplementedError`.
 - Add `SpikeSortingOutput.CurationV2` registration and v1-compatible merge-table accessors.
 - Preserve the nullable-XOR, NWB-resident cache, `insert_selection()` return, and unit-brain-region contracts from `shared-contracts.md`.
@@ -198,6 +205,92 @@ The first task of this phase (after prerequisites land) is to verify the new SI 
 | `test_run_v2_pipeline_minimal_minirec` (slow, integration) | Single call to `run_v2_pipeline(..., preset="clusterless_thresholder_default")` returns a manifest with stages: recording, artifact, sorting, initial_curation; final `merge_id` is a valid `SpikeSortingOutput.CurationV2` row. |
 | `test_run_v2_pipeline_idempotent` (slow) | Two consecutive calls with identical args return identical manifests; no new rows are inserted on the second call. |
 | `test_run_v2_pipeline_rejects_unknown_preset` | `run_v2_pipeline(..., preset="not_a_preset")` raises ValueError with the list of registered presets. |
+
+## Commands to run
+
+Run each slice's commands when that slice lands. Run the final full-phase gate before considering Phase 1 complete.
+
+### Phase 1a commands
+
+```bash
+export SPYGLASS_SKILL_DIR="${SPYGLASS_SKILL_DIR:-../spyglass-skill/skills/spyglass}"
+test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
+
+pytest tests/spikesorting/v1/ -q
+pytest tests/spikesorting/v2/test_phase1_pipeline.py -q -k "params or schema or concatenated_recording_make_raises or concat_fk_declared"
+
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe RecordingSelection --file spyglass/spikesorting/v2/recording.py
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe ConcatenatedRecording --file spyglass/spikesorting/v2/session_group.py
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe SortingSelection --file spyglass/spikesorting/v2/sorting.py
+
+git diff --check -- src/spyglass/spikesorting/v2 tests/spikesorting/v2 CHANGELOG.md
+```
+
+### Phase 1b commands
+
+```bash
+export SPYGLASS_SKILL_DIR="${SPYGLASS_SKILL_DIR:-../spyglass-skill/skills/spyglass}"
+test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
+
+pytest tests/spikesorting/v2/test_phase1_pipeline.py -q -k "sort_group or recording or artifact"
+
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe Recording --file spyglass/spikesorting/v2/recording.py
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe ArtifactDetectionSelection --file spyglass/spikesorting/v2/artifact.py
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src path --up Recording --file spyglass/spikesorting/v2/recording.py --json
+
+git diff --check -- src/spyglass/spikesorting/v2 tests/spikesorting/v2 docs/src/Pipelines/SpikeSorting CHANGELOG.md
+```
+
+### Phase 1c commands
+
+```bash
+export SPYGLASS_SKILL_DIR="${SPYGLASS_SKILL_DIR:-../spyglass-skill/skills/spyglass}"
+test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
+
+pytest tests/spikesorting/v2/test_phase1_pipeline.py -q -k "sorting or xor or brain_region or analyzer"
+pytest tests/spikesorting/v2/test_integrity.py -q
+
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe SortingSelection --file spyglass/spikesorting/v2/sorting.py
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src path --up Sorting --file spyglass/spikesorting/v2/sorting.py --json
+
+git diff --check -- src/spyglass/spikesorting/v2 tests/spikesorting/v2 CHANGELOG.md
+```
+
+### Phase 1d commands
+
+```bash
+export SPYGLASS_SKILL_DIR="${SPYGLASS_SKILL_DIR:-../spyglass-skill/skills/spyglass}"
+test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
+
+pytest tests/spikesorting/v2/test_phase1_pipeline.py -q -k "curation or spike_sorting_output or run_v2_pipeline or sorted_spikes_group"
+pytest tests/decoding tests/spikesorting/v1/test_merge.py -q
+
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe CurationV2 --file spyglass/spikesorting/v2/curation.py
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src path --down CurationV2 --file spyglass/spikesorting/v2/curation.py --json
+
+git diff --check -- src/spyglass/spikesorting/v2 src/spyglass/spikesorting/spikesorting_merge.py tests/spikesorting/v2 docs/src/Pipelines/SpikeSorting CHANGELOG.md
+```
+
+### Final Phase 1 gate
+
+```bash
+export SPYGLASS_SKILL_DIR="${SPYGLASS_SKILL_DIR:-../spyglass-skill/skills/spyglass}"
+test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
+
+pytest tests/spikesorting/v1/ -q
+pytest tests/spikesorting/v2/test_phase1_pipeline.py -q
+pytest tests/spikesorting/v2/test_integrity.py -q
+pytest tests/decoding tests/spikesorting/v1/test_merge.py -q
+
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe Recording --file spyglass/spikesorting/v2/recording.py
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe ArtifactDetectionSelection --file spyglass/spikesorting/v2/artifact.py
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe SortingSelection --file spyglass/spikesorting/v2/sorting.py
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe CurationV2 --file spyglass/spikesorting/v2/curation.py
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src path --up Sorting --file spyglass/spikesorting/v2/sorting.py --json
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src path --down CurationV2 --file spyglass/spikesorting/v2/curation.py --json
+
+git diff --check -- src/spyglass/spikesorting/v2 src/spyglass/spikesorting/spikesorting_merge.py tests/spikesorting/v2 docs/src/Pipelines/SpikeSorting CHANGELOG.md
+```
 
 ## Fixtures
 

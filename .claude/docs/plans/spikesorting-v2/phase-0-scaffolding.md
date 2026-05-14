@@ -53,7 +53,7 @@ Phase 0b PR:
 
 - **Set up a dual-environment development convention** documented in the v2-migration-prereqs page: v2 development happens in a virtualenv with SI 0.104 pre-installed (overriding the pyproject pin); v1 work continues in the default env. This lets v2 scaffolding land without breaking v1 users. CI gains a new job `pytest-v2` that runs only `tests/spikesorting/v2/` under SI 0.104; the existing `pytest` job stays on the current pin and explicitly excludes `tests/spikesorting/v2/` until the prerequisite port lands. The v2 package `__init__.py` must not import `_params` or any other Pydantic-dependent module in Phase 0, so `import spyglass.spikesorting.v2` remains harmless in the default environment.
 
-- **`code_graph.py` precondition check on existing FK targets** (run BEFORE writing any v2 schemas). For every Spyglass table v2 plans to FK into — `Session`, `Nwbfile`, `IntervalList`, `Raw`, `Electrode`, `ElectrodeGroup`, `Probe`, `ProbeType`, `BrainRegion`, `LabTeam`, `LabMember`, `Subject`, `AnalysisNwbfile`, `SpikeSortingOutput`, plus v1 ancestors (`SortGroup`, `SpikeSortingRecording`, `SpikeSorting`, `CurationV1`, etc. for parity reference) — run `python /path/to/spyglass-skill/scripts/code_graph.py --src src describe <name>`, using `--file <path-relative-to-src>` for ambiguous names (for example, `--file spyglass/common/common_nwbfile.py` for the production `AnalysisNwbfile`, not `src/spyglass/...`). Record the precise PK/FK structure of each in `docs/src/Pipelines/SpikeSorting/v2-precondition-check.md`. Failure mode caught: upstream schema drift between when the plan was written and when v2 is implemented (e.g., if `Electrode -> BrainRegion` became nullable, v2's brain-region-tracing design would silently break). The implementer re-runs the check and updates the recorded output if anything has drifted.
+- **`code_graph.py` precondition check on existing FK targets** (run BEFORE writing any v2 schemas). For every Spyglass table v2 plans to FK into — `Session`, `Nwbfile`, `IntervalList`, `Raw`, `Electrode`, `ElectrodeGroup`, `Probe`, `ProbeType`, `BrainRegion`, `LabTeam`, `LabMember`, `Subject`, `AnalysisNwbfile`, `SpikeSortingOutput`, plus v1 ancestors (`SortGroup`, `SpikeSortingRecording`, `SpikeSorting`, `CurationV1`, etc. for parity reference) — run `python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe <name>`, using `--file <path-relative-to-src>` for ambiguous names (for example, `--file spyglass/common/common_nwbfile.py` for the production `AnalysisNwbfile`, not `src/spyglass/...`). Record the precise PK/FK structure of each in `docs/src/Pipelines/SpikeSorting/v2-precondition-check.md`. Failure mode caught: upstream schema drift between when the plan was written and when v2 is implemented (e.g., if `Electrode -> BrainRegion` became nullable, v2's brain-region-tracing design would silently break). The implementer re-runs the check and updates the recorded output if anything has drifted.
 
 - **`code_graph.py` validation of v2 schemas** (run as each new schema lands). After implementing any v2 table, run `code_graph.py describe <NewTable>` to confirm:
   - the `definition` string parses cleanly,
@@ -211,6 +211,52 @@ Phase 0b PR:
 | `test_storage_benchmark_writes_decision_doc` (slow) | `tests/spikesorting/v2/benchmark_storage.py` emits `docs/src/Pipelines/SpikeSorting/v2-storage-benchmark.md` with HDF5/Zarr/binary measurements and a selected Phase 1 default. |
 | `test_v1_baseline_capture_runs_on_real_data` (slow, integration, env-var-gated) | If `SPIKESORTING_V2_REAL_NWB_PATH` is set, run `baseline_capture.py` against that dataset; assert all three output files are produced and non-empty. **Skipped with explicit message if the env var is unset** — minirec has no real spikes, so a baseline captured against it would be useless. Mark `@pytest.mark.slow`. |
 | `test_v1_test_suite_still_passes_under_current_si` (integration) | Phase 0 does NOT upgrade SI, so v1 tests should still pass cleanly. Regression guard: if any v1 test fails after this Phase 0 PR, something else broke. |
+
+## Commands to run
+
+### Phase 0a commands
+
+Run the v2 scaffold test and code-graph checks in the isolated SI 0.104 environment used by the new `pytest-v2` job:
+
+```bash
+export SPYGLASS_SKILL_DIR="${SPYGLASS_SKILL_DIR:-../spyglass-skill/skills/spyglass}"
+test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
+
+pytest tests/spikesorting/v2/test_scaffold.py -q
+
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe Session
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe AnalysisNwbfile --file spyglass/common/common_nwbfile.py
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe SpikeSortingOutput --file spyglass/spikesorting/spikesorting_merge.py
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe SortingSelection --file spyglass/spikesorting/v2/_draft.py
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src path --up SortingSelection --file spyglass/spikesorting/v2/_draft.py --json
+
+git diff --check -- src/spyglass/spikesorting/v2 tests/spikesorting/v2 .claude/docs/plans/spikesorting-v2
+```
+
+Run the v1 regression check in the default current-pin environment:
+
+```bash
+pytest tests/spikesorting/v1/ -q
+```
+
+### Phase 0b commands
+
+Run these in the isolated SI 0.104 validation environment after Phase 0a has landed.
+
+```bash
+export SPYGLASS_SKILL_DIR="${SPYGLASS_SKILL_DIR:-../spyglass-skill/skills/spyglass}"
+test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
+
+pytest tests/spikesorting/v2/ -q
+
+python tests/spikesorting/v2/fixtures/generate_mearec.py
+python tests/spikesorting/v2/benchmark_storage.py
+if [[ -n "${SPIKESORTING_V2_REAL_NWB_PATH:-}" ]]; then
+  python tests/spikesorting/v2/baseline_capture.py --output-dir tests/spikesorting/v2/baselines
+fi
+
+git diff --check -- src/spyglass/spikesorting/v2 tests/spikesorting/v2 .claude/docs/plans/spikesorting-v2
+```
 
 ## Fixtures
 

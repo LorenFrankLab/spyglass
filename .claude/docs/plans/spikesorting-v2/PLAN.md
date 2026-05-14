@@ -33,6 +33,17 @@ Before opening a phase PR:
 5. Keep each PR to the phase boundary. Anything intentionally dropped from v1 must be named in [feature-parity.md](feature-parity.md), not left implicit.
 6. Finish with the phase validation slice plus `code_graph.py describe/path` checks for any new DataJoint table.
 
+### Shared command convention
+
+Run commands from the Spyglass repo root. `code_graph.py` comes from the local `spyglass-skill` checkout:
+
+```bash
+export SPYGLASS_SKILL_DIR="${SPYGLASS_SKILL_DIR:-../spyglass-skill/skills/spyglass}"
+test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
+```
+
+All phase command blocks below assume that variable is set. If the checkout is elsewhere, set `SPYGLASS_SKILL_DIR` to the absolute path before running the phase commands.
+
 ## Files
 
 - [overview.md](overview.md) — goals, non-goals, integration points, risks, rollout strategy, open questions.

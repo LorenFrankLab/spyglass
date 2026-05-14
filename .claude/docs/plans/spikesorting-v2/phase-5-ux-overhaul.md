@@ -43,20 +43,7 @@ The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell n
   - `register_preset(name, preset_dict)` — public API for labs to add custom presets without modifying v2 source.
   - Each preset must reference Lookup-table row names that ALREADY EXIST. Phase 5 inserts these baseline rows via `insert_default()` calls in `__init__.py`.
 
-- **Implement `_params/preset.py`** Pydantic model:
-  ```python
-  class PresetSchema(BaseModel):
-      model_config = ConfigDict(extra="forbid")
-      preproc_params_name: str
-      artifact_params_name: str
-      sorter: str  # validated against SI's available_sorters
-      sorter_params_name: str
-      metric_params_name: str
-      auto_curation_rules_name: str
-      motion_correction_params_name: str | None = None
-      description: str = ""
-  ```
-  Validates at preset-registration time that every referenced Lookup row exists (raises a clear error if a parameter set is missing). `motion_correction_params_name` is optional for ordinary single-session presets and required only for presets intended for concat session groups. This catches the typo-at-populate failure mode entirely.
+- **Implement `_params/preset.py`** Pydantic model. Required fields: `preproc_params_name`, `artifact_params_name`, `sorter`, `sorter_params_name`, `metric_params_name`, and `auto_curation_rules_name`. Optional fields: `motion_correction_params_name` and `description`. Binding behavior: extra fields are forbidden; `sorter` is validated against SI's available sorters; preset registration validates that every referenced Lookup row exists and raises clearly if a parameter set is missing. `motion_correction_params_name` is optional for ordinary single-session presets and required only for presets intended for concat session groups. This catches the typo-at-populate failure mode entirely.
 
 - **FigPack feasibility check FIRST**, before implementing anything. FigPack is the v2 curation UI, but the implementer must verify the upstream package is usable before writing the table. Tasks:
   1. Confirm the actual installable package set. Current upstream uses the core `figpack` package plus a spike-sorting extension package (`figpack-spike-sorting` on PyPI, imported as `figpack_spike_sorting` in the upstream repository); do not assume `figpack` alone provides spike-sorting views.
@@ -147,6 +134,31 @@ The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell n
 | `test_figpack_round_trip_labels` (slow, integration; optional) | Publish a FigPack view with known labels; `fetch_curation_from_uri()` recovers them. |
 | `test_v2_notebook_executes` (slow, integration) | `jupytext` executes `notebooks/13_Spike_SortingV2.ipynb` against `minirec` with no errors. Cell count ≤10 verified programmatically. |
 | `test_cross_session_notebook_executes` (slow, integration, optional) | Executes `notebooks/14_Spike_Sorting_CrossSession.ipynb` if a multi-session fixture is available. |
+
+## Commands to run
+
+```bash
+export SPYGLASS_SKILL_DIR="${SPYGLASS_SKILL_DIR:-../spyglass-skill/skills/spyglass}"
+test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
+
+python - <<'PY'
+import importlib.util
+assert importlib.util.find_spec("figpack") is not None
+assert importlib.util.find_spec("figpack_spike_sorting") is not None
+PY
+
+pytest tests/spikesorting/v2/test_run_pipeline.py -q
+pytest tests/notebooks/test_spike_sorting_v2_notebook.py -q
+test "$(jq '.cells | map(select(.cell_type == "code")) | length' notebooks/13_Spike_SortingV2.ipynb)" -le 10
+
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe FigPackCurationSelection --file spyglass/spikesorting/v2/figpack_curation.py
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe FigPackCuration --file spyglass/spikesorting/v2/figpack_curation.py
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src path --up FigPackCuration --file spyglass/spikesorting/v2/figpack_curation.py --json
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src path --down FigPackCuration --file spyglass/spikesorting/v2/figpack_curation.py --json
+
+git diff --check -- src/spyglass/spikesorting/v2 tests/spikesorting/v2 tests/notebooks docs notebooks README.md CHANGELOG.md
+git diff --exit-code -- src/spyglass/spikesorting/v0 src/spyglass/spikesorting/v1
+```
 
 ## Fixtures
 
