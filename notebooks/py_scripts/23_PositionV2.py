@@ -318,7 +318,10 @@ _demo_config = (
     _demo_dlc_dir / "tutorial_dlc-tutorial_dlc-2025-01-01" / "config.yaml"
 )
 
+print("_demo_config:", _demo_config)
+
 if not _demo_config.exists():
+    print("Demo config not exist")
     _demo_config = make_dlc_project(_demo_dlc_dir)
     print(f"Created example DLC project: {_demo_config}")
 else:
@@ -342,6 +345,7 @@ print(f"  inf_vid_path   : {inf_vid_path}")
 
 # Use the registered videos as our training list
 training_video_list = [{"nwb_file_name": nwb_file_name, "epoch": 1}]
+
 
 # %% [markdown]
 # Now call `Model.create_project()`.  This:
@@ -367,6 +371,14 @@ print(f"DLC project created : {config_path}")
 print(f"Skeleton ID         : {skeleton_id}")
 print()
 print("Next: label the extracted frames, then return to train below.")
+
+# ── Tutorial shortcut: seed synthetic labels so training can run ──────────────
+# In a real workflow you would label frames with the DLC GUI or napari.
+# Here we write dummy x/y annotations so Model.populate() does not error.
+from make_example_dlc_project import seed_labeled_data  # noqa: E402
+
+seed_labeled_data(config_path)
+print("Synthetic labels written (tutorial only — replace with real labels).")
 
 # %% [markdown]
 # <details>
@@ -407,7 +419,9 @@ print("Next: label the extracted frames, then return to train below.")
 # `Model.populate()`:
 
 # %%
-# Training parameters — use low maxiters for a quick demo
+# Training parameters — use epochs=1/save_epochs=1 for the fastest possible demo.
+# DLC 3.x PyTorch backend: `epochs` overrides `maxiters` and controls epochs
+# directly; `save_epochs` controls checkpoint frequency.
 train_params = {
     "trainingsetindex": 0,
     "shuffle": 1,
@@ -415,12 +429,11 @@ train_params = {
     "TFGPUinference": False,
     "net_type": "resnet_50",
     "augmenter_type": "imgaug",
-    "maxiters": 10,
-    "displayiters": 1,
-    "saveiters": 2,
+    "epochs": 1,
+    "save_epochs": 1,
     "project_path": str(config_path.parent),
 }
-TRAIN_PARAMS_ID = "path_a_demo_10iter"
+TRAIN_PARAMS_ID = "path_a_demo_1epoch"
 
 ModelParams.insert1(
     {
@@ -440,6 +453,7 @@ _sel_key = {
     "model_params_id": TRAIN_PARAMS_ID,
     "tool": "DLC",
     "vid_group_id": training_vid_group_id,
+    "model_selection_id": TRAIN_PARAMS_ID,  # reuse params id as selection id
     "parent_id": None,
 }
 ModelSelection.insert1(_sel_key, skip_duplicates=True)
@@ -1360,7 +1374,7 @@ if model_key is None:
     raise ValueError("No model key available - cannot check evaluation support")
 
 model_params = (ModelParams() & model_key).fetch1()
-model_tool = model_params.get("params", {}).get("tool", "Unknown")
+model_tool = model_params.get("tool", "Unknown")
 training_history = Model().get_training_history(model_key)
 has_training_history = training_history is not None
 evaluation_supported = model_tool.upper() == "DLC"
@@ -1373,97 +1387,17 @@ evaluation_supported = model_tool.upper() == "DLC"
 # %%
 # Enhanced training curves visualization
 if not (has_training_history and evaluation_supported):
-    raise ValueError("⚠️ Model evaluation unavailable. Train a model first.")
-
-# Get training history for the trained model
-training_history = Model().get_training_history(model_key)
+    raise ValueError("⚠️ Model evaluation unavailable.")
 
 if len(training_history) < 1:
-    raise ValueError("❌ No training history data available for this model")
+    raise ValueError("❌ Not enough training history data available.")
 
-# Use built-in plotting method for comprehensive visualization
-fig = Model().plot_training_history(model_key, save_path=None, figsize=(12, 8))
-
-# Additional custom plotting for detailed analysis
-import matplotlib.pyplot as plt
-
-fig2, axes = plt.subplots(2, 2, figsize=(14, 10))
-fig2.suptitle("Detailed Training Analysis", fontsize=16, fontweight="bold")
-
-# Loss curve with enhanced styling
-axes[0, 0].plot(
-    training_history.index,
-    training_history["loss"],
-    linewidth=2,
-    alpha=0.8,
-    color="blue",
+# Use built-in plotting method with detailed diagnostics enabled
+fig = Model().plot_training_history(
+    model_key,
+    save_path=None,
+    detailed=True,
 )
-axes[0, 0].set_title("Training Loss", fontsize=12, fontweight="bold")
-axes[0, 0].set_xlabel("Iteration")
-axes[0, 0].set_ylabel("Loss")
-axes[0, 0].grid(True, alpha=0.3)
-
-# Learning rate schedule with log scale
-if "learning_rate" in training_history.columns:
-    axes[0, 1].plot(
-        training_history.index,
-        training_history["learning_rate"],
-        linewidth=2,
-        alpha=0.8,
-        color="red",
-    )
-    axes[0, 1].set_title(
-        "Learning Rate Schedule", fontsize=12, fontweight="bold"
-    )
-    axes[0, 1].set_xlabel("Iteration")
-    axes[0, 1].set_ylabel("Learning Rate")
-    axes[0, 1].set_yscale("log")
-    axes[0, 1].grid(True, alpha=0.3)
-
-# Validation metrics (if available)
-if "val_loss" in training_history.columns:
-    axes[1, 0].plot(
-        training_history.index,
-        training_history["val_loss"],
-        linewidth=2,
-        alpha=0.8,
-        color="orange",
-    )
-    axes[1, 0].set_title("Validation Loss", fontsize=12, fontweight="bold")
-    axes[1, 0].set_xlabel("Iteration")
-    axes[1, 0].set_ylabel("Validation Loss")
-    axes[1, 0].grid(True, alpha=0.3)
-else:
-    axes[1, 0].text(
-        0.5,
-        0.5,
-        "Validation data\nnot available",
-        ha="center",
-        va="center",
-        transform=axes[1, 0].transAxes,
-    )
-    axes[1, 0].set_title("Validation Loss", fontsize=12, fontweight="bold")
-
-# Loss improvement over time
-if len(training_history) > 10:
-    window = max(10, len(training_history) // 20)
-    smoothed_loss = training_history["loss"].rolling(window=window).mean()
-    axes[1, 1].plot(
-        training_history.index,
-        smoothed_loss,
-        linewidth=2,
-        alpha=0.8,
-        color="green",
-    )
-    axes[1, 1].set_title(
-        f"Smoothed Loss (window={window})", fontsize=12, fontweight="bold"
-    )
-    axes[1, 1].set_xlabel("Iteration")
-    axes[1, 1].set_ylabel("Smoothed Loss")
-    axes[1, 1].grid(True, alpha=0.3)
-
-plt.tight_layout()
-plt.show()
 
 # %% [markdown]
 # ## Video Generation <a id="VideoGeneration"></a>

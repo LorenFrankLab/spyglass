@@ -754,13 +754,15 @@ class DLCStrategy(PoseToolStrategy):
         if not self._fs.exists(project_path):
             raise FileNotFoundError(f"DLC project not found: {project_path}")
 
-        # Look for dlc-models directory
-        dlc_models_dir = project_path / "dlc-models"
-        if not self._fs.exists(dlc_models_dir):
-            return {}
-
-        # Find all iteration directories (iteration-0, iteration-1, etc.)
-        iteration_dirs = sorted(dlc_models_dir.glob("iteration-*"))
+        # DLC 3.x PyTorch saves to dlc-models-pytorch/; TF saves to dlc-models/.
+        # Search both; prefer PyTorch if found.
+        iteration_dirs = []
+        for models_subdir in ("dlc-models-pytorch", "dlc-models"):
+            dlc_models_dir = project_path / models_subdir
+            if self._fs.exists(dlc_models_dir):
+                iteration_dirs = sorted(dlc_models_dir.glob("iteration-*"))
+                if iteration_dirs:
+                    break
         if not iteration_dirs:
             return {}
 
@@ -868,6 +870,10 @@ class DLCStrategy(PoseToolStrategy):
                 training_dataset_kwargs["engine"]
             )
 
+        # Always suppress interactive prompts; DLC's default userfeedback=True
+        # blocks on input() when the model folder already exists.
+        training_dataset_kwargs.setdefault("userfeedback", False)
+
         model_instance._info_msg("Creating DLC training dataset...")
 
         with test_mode_suppress():
@@ -961,24 +967,39 @@ class DLCStrategy(PoseToolStrategy):
         # Read the DLC config to get the correct structure
         dlc_config = read_config(str(config_path))
 
-        # Get the model directory from DLC
-        model_dir = project_path / get_model_folder(
-            trainFraction=dlc_config.get("TrainingFraction", [0.95])[
-                0
-            ],  # Get first training fraction with default
-            shuffle=dlc_config.get("shuffle", 1),  # Default shuffle number
-            cfg=dlc_config,
-            modelprefix=dlc_config.get("modelprefix", ""),
-        )
+        # Try PyTorch engine first (DLC 3.x), fall back to TF.
+        try:
+            from deeplabcut.core.engine import Engine as _Engine
 
-        train_dir = model_dir / "train"
-        if not train_dir.exists():
+            _engines = [_Engine.PYTORCH, _Engine.TF]
+        except ImportError:
+            _engines = [None]  # older DLC — get_model_folder ignores engine
+
+        train_dir = None
+        for _engine in _engines:
+            _kwargs = dict(
+                trainFraction=dlc_config.get("TrainingFraction", [0.95])[0],
+                shuffle=dlc_config.get("shuffle", 1),
+                cfg=dlc_config,
+                modelprefix=dlc_config.get("modelprefix", ""),
+            )
+            if _engine is not None:
+                _kwargs["engine"] = _engine
+            _model_dir = project_path / get_model_folder(**_kwargs)
+            _train_dir = _model_dir / "train"
+            if _train_dir.exists():
+                train_dir = _train_dir
+                break
+
+        if train_dir is None:
             raise FileNotFoundError(
-                f"Training directory not found: {train_dir}"
+                f"Training directory not found under: {project_path}"
             )
 
-        # Find latest snapshot file
-        snapshots = list(train_dir.glob("*index*"))
+        # Find latest snapshot: PyTorch uses *.pt, TF uses *index*.
+        snapshots = list(train_dir.glob("snapshot-*.pt")) or list(
+            train_dir.glob("*index*")
+        )
 
         if not snapshots:
             # In test mode or if training failed, there may be no snapshots
@@ -991,8 +1012,11 @@ class DLCStrategy(PoseToolStrategy):
             for snapshot in snapshots:
                 modified_time = self._fs.getmtime(snapshot)
                 if modified_time > max_modified_time:
-                    # Extract snapshot number from filename (skip "snapshot-" prefix)
-                    latest_snapshot = int(snapshot.stem[9:])
+                    # Extract snapshot number from filename (e.g. "snapshot-010")
+                    import re as _re
+
+                    _m = _re.search(r"(\d+)", snapshot.stem)
+                    latest_snapshot = int(_m.group(1)) if _m else 0
                     max_modified_time = modified_time
 
         # Generate model ID
