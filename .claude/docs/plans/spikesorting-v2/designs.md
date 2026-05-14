@@ -259,105 +259,20 @@ class Recording(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
-        # 1. Fetch raw recording via SpikeInterface NWB extractor
-        sel = (RecordingSelection & key).fetch1()
-        sort_group_electrodes = (
-            SortGroupV2.SortGroupElectrode
-            & {"nwb_file_name": sel["nwb_file_name"], "sort_group_id": sel["sort_group_id"]}
-        ).fetch("electrode_id")
-
-        nwb_path = Nwbfile.get_abs_path(sel["nwb_file_name"])
-        recording = se.read_nwb_recording(nwb_path, electrical_series_path="acquisition/e-series")
-        recording = recording.channel_slice(channel_ids=sort_group_electrodes)
-
-        # 2. Slice to sort interval
-        valid_times = (IntervalList & sel).fetch1("valid_times")
-        recording = _slice_recording_to_intervals(recording, valid_times)
-
-        # 3. Apply PRE-MOTION preprocessing only (bandpass + CMR). Whitening
-        # is deferred to Sorting.make() / ConcatenatedRecording.make() so
-        # motion correction (which runs in ConcatenatedRecording for chronic
-        # paths) sees un-whitened traces. See shared-contracts § Pydantic
-        # Parameter Schema Convention.
-        from spikeinterface.preprocessing import apply_preprocessing_pipeline
-        params = PreprocessingParamsSchema.model_validate(
-            (PreprocessingParameters & sel).fetch1("params")
-        )
-        recording_processed = apply_preprocessing_pipeline(
-            recording, params.to_pre_motion_dict()
-        )
-
-        # 4. Materialize NWB-resident: write the preprocessed recording
-        # as an ElectricalSeries inside an AnalysisNwbfile. Backend
-        # (HDF5 / Zarr) is determined by AnalysisNwbfile's configuration;
-        # Recording's schema is identical in both cases.
-        nwb_file_name = sel["nwb_file_name"]
-        with AnalysisNwbfile().build(nwb_file_name) as builder:
-            # AnalysisFileBuilder does not expose a recording-specific helper.
-            # Use direct PyNWB I/O inside the builder lifecycle and return both
-            # the stable NWB path (for SpikeInterface reads) and object_id (for
-            # identity/hash checks).
-            with builder.open_for_write() as io:
-                nwbfile = io.read()
-                electrical_series_path, object_id = _write_recording_electrical_series(
-                    nwbfile,
-                    recording_processed,
-                    series_name="preprocessed_electrical_series",
-                    module_name="ecephys",
-                    **_resolved_job_kwargs(key),  # chunked writes for large recordings
-                )
-                io.write(nwbfile)
-            analysis_file_name = builder.analysis_file_name
-
-        # 5. Hash + insert. cache_hash is over the ElectricalSeries data
-        # bytes (not the NWB file as a whole), so it is stable across
-        # backend rewrites and across irrelevant metadata changes.
-        self.insert1({
-            **key,
-            "analysis_file_name": analysis_file_name,
-            "electrical_series_path": electrical_series_path,
-            "object_id": object_id,
-            "n_channels": recording_processed.get_num_channels(),
-            "sampling_frequency": float(recording_processed.get_sampling_frequency()),
-            "duration_s": float(recording_processed.get_total_duration()),
-            "cache_hash": _hash_nwb_recording(analysis_file_name, object_id),
-        })
+        ...
 
     def get_recording(self, key) -> si.BaseRecording:
-        """Load the preprocessed recording from the AnalysisNwbfile.
-
-        Wraps `se.read_nwb_recording(analysis_nwb_path,
-        electrical_series_path=...)`. If the AnalysisNwbfile content is
-        missing on disk, REBUILD VIA AnalysisNwbfile's existing recompute
-        path (Phase 2's `RecordingArtifactRecompute*` tables) — we do NOT
-        delete the Recording row.
-        """
-        row = (self & key).fetch1()
-        nwb_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
-        if not Path(nwb_path).exists() or not _electrical_series_present(
-            nwb_path, row["electrical_series_path"], row["object_id"]
-        ):
-            self._rebuild_nwb_artifact(key)
-        return se.read_nwb_recording(
-            nwb_path,
-            electrical_series_path=row["electrical_series_path"],
-        )
+        ...
 
     def _rebuild_nwb_artifact(self, key) -> None:
-        """Reconstruct the NWB ElectricalSeries from upstream Raw + params.
-
-        Does NOT touch the DataJoint row. Reads RecordingSelection +
-        PreprocessingParameters, re-applies the pre_motion stage of the
-        preprocessing pipeline, writes a fresh ElectricalSeries into the
-        same `analysis_file_name` and `electrical_series_path`. Verifies the
-        regenerated `cache_hash` matches the stored hash; logs a warning if it differs (likely
-        SI / numerical drift — the analyzer and downstream curation rows
-        may need scrutiny). Phase 2's `RecordingArtifactRecompute` table
-        is the canonical recompute surface; this helper is the in-place
-        fallback used when downstream populate() hits a missing artifact.
-        """
         ...
 ```
+
+**Binding behavior**:
+
+- `Recording.make()` loads the raw NWB, restricts to the selected sort group and interval, applies PRE-MOTION preprocessing only, writes one `ElectricalSeries` into `AnalysisNwbfile`, validates timestamp coverage, stores metadata, and records a SHA-256 `cache_hash`.
+- `Recording.get_recording(key)` loads that NWB-resident artifact; if the artifact is missing, it rebuilds the artifact without deleting the DataJoint row.
+- `_rebuild_nwb_artifact(key)` regenerates only the file payload and verifies the regenerated hash against the stored row.
 
 **Storage decision is settled — see [shared-contracts.md § Recording Cache Format](shared-contracts.md#recording-cache-format)**. The canonical artifact lives in `AnalysisNwbfile`; Phase 0's benchmark picks the AnalysisNwbfile backend (HDF5 / Zarr), not the schema. Binary sidecar storage is explicitly out of MVP. The schema above is final-shape under the zero-migration policy.
 
@@ -681,140 +596,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         """
 
     def make(self, key):
-        sel = (SortingSelection & key).fetch1()
-
-        # 0. Re-validate XOR — defends against direct dj.Manual inserts
-        # that bypassed insert_selection(). See shared-contracts.md §
-        # Nullable XOR Foreign-Key Pattern. Layer 2 of three-layer defense.
-        from spyglass.spikesorting.v2.utils import _validate_xor
-        _validate_xor(
-            "SortingSelection",
-            "recording_id", sel.get("recording_id"),
-            "concat_recording_id", sel.get("concat_recording_id"),
-        )
-
-        # 1. Load the pre-motion preprocessed recording from the cache.
-        # For single-recording path: load from Recording (no motion correction).
-        # For concat path (Phase 3): load from ConcatenatedRecording (motion-corrected).
-        # Both expose .get_recording(key).
-        recording = _resolve_recording(sel)  # see Phase 3 task: dispatch by which FK is non-NULL
-
-        # 2. Apply POST-MOTION preprocessing (whitening, if configured).
-        # Single-recording path: Recording cache is pre-motion only, so
-        # Sorting.make() applies post-motion preprocessing here.
-        # Concat path: ConcatenatedRecording.make() already applies the
-        # post-motion stage before materializing its sorter-ready cache.
-        # Do NOT whiten concat recordings a second time.
-        if sel.get("recording_id") is not None:
-            from spikeinterface.preprocessing import apply_preprocessing_pipeline
-            preproc_params = PreprocessingParamsSchema.model_validate(
-                _get_preproc_params_for_selection(sel)
-            )
-            post_motion_dict = preproc_params.to_post_motion_dict()
-            if post_motion_dict:
-                recording = apply_preprocessing_pipeline(recording, post_motion_dict)
-
-        # 3. Get artifact-removed intervals (single-recording path only).
-        # SortingSelection.insert_selection rejects concat + artifact_id in
-        # Phase 3 because concat-wide artifact masking is out of scope.
-        if sel.get("artifact_id"):
-            artifact_intervals = ArtifactDetection.get_artifact_removed_intervals(sel)
-            recording = _apply_artifact_zeroing(recording, artifact_intervals)
-
-        # 3. Fetch sorter params and run
-        sorter_params = (SorterParameters & sel).fetch1("params").copy()  # copy to avoid mutation
-        sorter_name = sel["sorter"]
-        # Per-sorter dispatch (some need extra preprocessing)
-        recording_for_sort = _sorter_specific_pre(sorter_name, recording, sorter_params)
-        job_kwargs = _resolved_job_kwargs(key)
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            sorting_obj = sis.run_sorter(
-                sorter_name=sorter_name,
-                recording=recording_for_sort,
-                folder=tmpdir,
-                remove_existing_folder=False,
-                verbose=False,
-                **sorter_params,
-            )
-            # Clean up boundary artifacts (SI 0.104 still ships remove_excess_spikes)
-            sorting_obj = sic.remove_excess_spikes(sorting_obj, recording_for_sort)
-            # IMPORTANT: sorting_obj is held in memory; the tmpdir below
-            # only contained the sorter's raw output files which we don't
-            # need to keep. SortingAnalyzer construction happens OUTSIDE
-            # the `with` block — the BaseSorting object is independent
-            # of tmpdir contents at this point.
-            sorting_obj = sorting_obj.clone()  # materialize in-memory copy
-
-        # 4. Create SortingAnalyzer (see shared-contracts.md SortingAnalyzer layout)
-        analyzer_folder = _analyzer_path(key)
-        analyzer = create_sorting_analyzer(
-            sorting=sorting_obj,
-            recording=recording,
-            sparse=True,
-            format="binary_folder",
-            folder=analyzer_folder,
-            return_in_uV=True,
-            overwrite=True,
-        )
-        analyzer.compute(
-            ["random_spikes", "noise_levels", "templates", "waveforms"],
-            **job_kwargs,
-        )
-
-        # 5. Write units to analysis NWB (downstream uses this for fetching spike times).
-        # AnalysisNwbfile has one required parent Nwbfile FK. For single-recording
-        # sorts this is the RecordingSelection parent. For concat sorts, use the
-        # first SessionGroup.Member as the deterministic parent anchor and store
-        # the full multi-session provenance in the SortingSelection ->
-        # ConcatenatedRecordingSelection -> SessionGroup.Member chain. Do NOT
-        # query RecordingSelection with a concat-only selection row.
-        nwb_file_name = _resolve_analysis_parent_nwb_file_name(sel)
-        with AnalysisNwbfile().build(nwb_file_name) as builder:
-            units, units_valid_times, units_sort_interval = _sorting_to_units_dicts(
-                sorting_obj,
-                valid_times=_sorting_valid_times(sel),
-            )
-            object_id, _ = builder.add_units(
-                units,
-                units_valid_times,
-                units_sort_interval,
-            )
-            analysis_file_name = builder.analysis_file_name
-
-        self.insert1({
-            **key,
-            "analysis_file_name": analysis_file_name,
-            "object_id": object_id,
-            "analyzer_folder": analyzer_folder,
-            "n_units": len(sorting_obj.unit_ids),
-            "time_of_sort": datetime.now(),
-        })
-
-        # 6. Persist per-unit peak channel + brain region (Sorting.Unit part).
-        # Templates extension was computed at step 4; this is constant-time.
-        # `_resolve_unit_electrodes` (see Sorting.Unit docstring) dispatches
-        # on the SortingSelection row's recording_id vs concat_recording_id
-        # to return the correct Electrode keys: single-recording uses the
-        # SortGroupV2 electrodes from RecordingSelection; concat uses the
-        # FIRST SessionGroup.Member's electrodes (anchor rule).
-        peak_channel_ids = _peak_channels_from_templates(analyzer)
-        unit_rows = _compute_unit_part_rows(
-            sorting_id=key["sorting_id"],
-            analyzer=analyzer,
-            electrode_resolver=lambda peak_ch: _resolve_unit_electrodes(sel, [peak_ch])[0],
-        )
-        # Validate unit_id integer-convertibility (see Sorting.Unit
-        # docstring re: SI int/str unit IDs).
-        for row in unit_rows:
-            try:
-                row["unit_id"] = int(row["unit_id"])
-            except (TypeError, ValueError) as e:
-                raise NonIntegerUnitIDError(
-                    f"Sorter emitted non-integer unit_id {row['unit_id']!r}; "
-                    f"v2 standardizes on int unit IDs."
-                ) from e
-        self.Unit.insert(unit_rows)
+        ...
 
     def get_sorting(self, key) -> si.BaseSorting:
         ...
@@ -822,71 +604,21 @@ class Sorting(SpyglassMixin, dj.Computed):
     def get_unit_brain_regions(
         self, key, *, allow_anchor_member: bool = False
     ) -> pd.DataFrame:
-        """Returns per-unit brain region (constant-time, reads Sorting.Unit).
-
-        For concat-backed sorts, the Sorting.Unit -> Electrode FK is anchored
-        to the first SessionGroup.Member. Returning that silently would mask
-        cross-session probe re-anatomization. Default behavior raises
-        ConcatBrainRegionAmbiguousError pointing the caller at
-        TrackedUnit.get_unit_brain_regions; pass allow_anchor_member=True to
-        opt into anchor-only resolution (returned with region_resolution
-        column = 'anchor_member' so downstream code can detect and warn).
-
-        See shared-contracts § Unit-Level Brain Region Tracing.
-        """
-        sel = (SortingSelection & key).fetch1()
-        is_concat = sel.get("concat_recording_id") is not None
-        if is_concat and not allow_anchor_member:
-            raise ConcatBrainRegionAmbiguousError(
-                f"Sorting {key} is concat-backed (concat_recording_id="
-                f"{sel['concat_recording_id']}); the Sorting.Unit -> Electrode "
-                "FK is anchored to the first SessionGroup.Member and may not "
-                "reflect later members' regions. Use "
-                "TrackedUnit.get_unit_brain_regions for per-session resolution, "
-                "or pass allow_anchor_member=True to accept anchor-only output."
-            )
-        rows = (
-            (self.Unit & key) * Electrode * BrainRegion
-        ).fetch(
-            "unit_id", "electrode_id", "region_name", "peak_amplitude_uV",
-            "n_spikes",
-            as_dict=True,
-        )
-        resolution = "anchor_member" if is_concat else "single_session"
-        for r in rows:
-            r["region_resolution"] = resolution
-        return rows
+        ...
 
     def get_analyzer(self, key) -> si.SortingAnalyzer:
-        """See shared-contracts.md SortingAnalyzer layout.
-
-        The analyzer folder is a regeneratable side artifact. If it
-        is missing, we REBUILD THE FOLDER ONLY — we do NOT delete the
-        Sorting row (which would cascade to CurationV2, AnalyzerCuration,
-        SpikeSortingOutput, etc. and destroy scientific provenance).
-
-        Folder rebuild logic mirrors the analyzer-building portion of
-        `Sorting.make()` without touching the DataJoint row.
-        """
-        row = (self & key).fetch1()
-        analyzer_folder = Path(row["analyzer_folder"])
-        if not analyzer_folder.exists():
-            self._rebuild_analyzer_folder(key)
-        return load_sorting_analyzer(row["analyzer_folder"])
+        ...
 
     def _rebuild_analyzer_folder(self, key) -> None:
-        """Reconstruct the analyzer folder from upstream inputs.
-
-        Does NOT touch the DataJoint row. Reads the SortingSelection,
-        loads the preprocessed recording (which may itself recompute
-        its NWB artifact via Recording.get_recording's same pattern),
-        loads the sorting from the units NWB stored on the row, then
-        builds a fresh SortingAnalyzer at the recorded analyzer_folder
-        path. Computes the same core extensions as Sorting.make()
-        (random_spikes, noise_levels, templates, waveforms).
-        """
         ...
 ```
+
+**Binding behavior**:
+
+- `Sorting.make()` re-validates the nullable-XOR source FKs, resolves either a single `Recording` or a `ConcatenatedRecording`, applies post-motion preprocessing exactly once, applies artifact masking only on the single-recording path, runs the sorter, removes excess spikes, builds the SortingAnalyzer, writes `/units` to `AnalysisNwbfile`, and populates `Sorting.Unit`.
+- `Sorting.Unit` rows must use integer-convertible unit IDs and the full `Electrode` FK from the selected sort group. Concat sorts use the first member as the deterministic Electrode anchor.
+- `get_unit_brain_regions()` raises on concat sorts unless `allow_anchor_member=True`; anchor-only output must be labeled with `region_resolution='anchor_member'`.
+- `get_analyzer()` rebuilds a missing analyzer folder without deleting or replacing the `Sorting` row.
 
 ---
 
@@ -982,55 +714,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         apply_merges: bool = False,
         description: str = "",
     ) -> dict:
-        """Insert a new curation; auto-register into SpikeSortingOutput.CurationV2.
-
-        DB-TRANSACTIONAL — the DataJoint inserts below run inside a
-        single transaction. File writes are not DataJoint-transactional,
-        so the implementation stages the curated-units NWB first and
-        deletes that staged file on any later failure. No partial
-        CurationV2 row, no orphan merge-part row, no orphan Unit /
-        UnitLabel rows, and no orphan curated-units analysis file may
-        remain. Tested by
-        `test_curation_v2_insert_atomic_on_merge_register_failure`.
-        """
-        # Validate labels against enum BEFORE opening the transaction so we
-        # don't waste a transaction on an obviously bad input.
-        for unit_id, label_list in labels.items():
-            for label in label_list:
-                CurationLabel(label)  # raises ValueError on unknown
-
-        from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
-
-        staged_file = None
-        try:
-            # 1. Materialize the curated units NWB into a staged analysis file.
-            #    This is outside the DB guarantee: if a later DB insert fails,
-            #    the except block MUST remove this file because DataJoint cannot
-            #    roll back filesystem side effects.
-            staged_file, analysis_file_name, object_id = _stage_curation_units_nwb(...)
-
-            with cls.connection.transaction:
-                # 2. Insert the master CurationV2 row.
-                cls.insert1(key_just_inserted)
-
-                # 3. Insert CurationV2.Unit rows (peak channels + amplitudes,
-                #    materialized from Sorting.Unit with merge_groups applied).
-                cls.Unit.insert(unit_rows)
-
-                # 4. Insert CurationV2.UnitLabel rows (one per (unit_id, label)).
-                cls.UnitLabel.insert(unit_label_rows)
-
-                # 5. Auto-register into SpikeSortingOutput. If this raises
-                #    (dup merge_id race, foreign-key violation, etc.) the
-                #    transaction aborts and steps 2-4 are rolled back.
-                SpikeSortingOutput.insert(
-                    [key_just_inserted], part_name="CurationV2"
-                )
-        except Exception:
-            _remove_staged_analysis_file_if_unreferenced(staged_file)
-            raise
-
-        return key_just_inserted
+        ...
 ```
 
 **Design choice**: auto-register into `SpikeSortingOutput`. v1 forces users to do this manually; users frequently forget, leaving curations orphaned from downstream consumers. Auto-register costs nothing and eliminates the failure mode.
@@ -1130,107 +814,32 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
-        # Load analyzer
-        sel = (AnalyzerCurationSelection & key).fetch1()
-        sorting_key = {"sorting_id": (CurationV2 & sel).fetch1("sorting_id")}
-        analyzer = (Sorting & sorting_key).get_analyzer(sorting_key)
-
-        # Compute additional extensions needed for metrics
-        metric_params = (QualityMetricParameters & sel).fetch1()
-        ext_needed = [
-            "correlograms",
-            "spike_amplitudes",
-            "template_similarity",
-            "unit_locations",
-            "template_metrics",
-        ]
-        if not metric_params["skip_pc_metrics"]:
-            ext_needed.append("principal_components")
-        analyzer.compute(ext_needed, **_resolved_job_kwargs(key))
-
-        # Compute quality metrics (SI 0.104 API)
-        metrics_df = compute_quality_metrics(
-            analyzer,
-            metric_names=metric_params["metric_names"],
-            metric_params=metric_params["metric_kwargs"],
-            skip_pc_metrics=metric_params["skip_pc_metrics"],
-        )
-
-        # Apply label rules
-        rules = (AutoCurationRules & sel).fetch1()
-        proposed_labels = _apply_label_rules(metrics_df, rules["label_rules"])
-
-        # Auto-merge suggestions
-        merge_groups = []
-        if rules["auto_merge_preset"] != "none":
-            merge_groups = compute_merge_unit_groups(
-                analyzer,
-                preset=rules["auto_merge_preset"],
-                compute_needed_extensions=False,
-                **rules["auto_merge_kwargs"],
-            )
-
-        # Write three tables to NWB. Coerce non-finite values (NaN, ±inf)
-        # to None on the JSON-bound copy ONLY — the in-memory metrics_df
-        # retains NaN for downstream consumers that filter on it. Per the
-        # [Empty/NaN/Boundary Invariants contract] and the serialized-path
-        # sanitization rule in Phase 2 (#1556).
-        metrics_df_json = _sanitize_for_json(metrics_df)
-        # Parent the AnalyzerCuration analysis file to the same source NWB as
-        # the upstream Sorting analysis file. This is a real join path through
-        # the AnalysisNwbfile row, not a placeholder DataJoint helper.
-        sorting_analysis_file = (Sorting & sorting_key).fetch1("analysis_file_name")
-        nwb_file_name = (
-            AnalysisNwbfile & {"analysis_file_name": sorting_analysis_file}
-        ).fetch1("nwb_file_name")
-        with AnalysisNwbfile().build(nwb_file_name) as builder:
-            metrics_object_id = builder.add_nwb_object(
-                metrics_df_json, table_name="quality_metrics",
-            )
-            merge_object_id = builder.add_nwb_object(
-                pd.DataFrame({"unit_groups": [json.dumps(merge_groups)]}),
-                table_name="merge_suggestions",
-            )
-            labels_object_id = builder.add_nwb_object(
-                pd.DataFrame.from_dict(proposed_labels, orient="index", columns=["label"]),
-                table_name="proposed_labels",
-            )
-            analysis_file_name = builder.analysis_file_name
-
-        self.insert1({
-            **key,
-            "analysis_file_name": analysis_file_name,
-            "metrics_object_id": metrics_object_id,
-            "merge_suggestions_object_id": merge_object_id,
-            "proposed_labels_object_id": labels_object_id,
-        })
+        ...
 
     def materialize_curation(self, key, description: str = "auto-curation") -> dict:
-        """Take the proposed labels + merges and create a child CurationV2 row.
-
-        Equivalent to v1's CurationV1.insert_metric_curation but explicit.
-        """
         ...
 
     def get_waveforms(self, key, fetch_all: bool = False):
-        """Return analyzer-backed waveforms for notebook/helper parity with v1."""
         ...
 
     @classmethod
     def get_metrics(cls, key):
-        """Fetch quality metrics written by AnalyzerCuration.make()."""
         ...
 
     @classmethod
     def get_labels(cls, key):
-        """Fetch proposed labels written by AnalyzerCuration.make()."""
         ...
 
     @classmethod
     def get_merge_groups(cls, key):
-        """Fetch proposed merge groups written by AnalyzerCuration.make()."""
         ...
 ```
+
+**Binding behavior**:
+
+- `AnalyzerCuration.make()` loads the upstream analyzer via `Sorting.get_analyzer(sorting_key)`, computes only the audited metric/merge extensions, writes sanitized serialized metric outputs, and keeps in-memory metric NaN semantics intact.
+- `materialize_curation()` is the explicit v2 analog of v1 `insert_metric_curation`.
+- The fetch helpers preserve notebook-facing parity for waveforms, metrics, proposed labels, and merge groups.
 
 **Design points**:
 
@@ -1591,149 +1200,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
-        # DataJoint passes only ConcatenatedRecordingSelection's PK here:
-        # {"concat_recording_id": ...}. Always fetch the selection row first;
-        # do not restrict SessionGroup/parameter tables with the UUID-only key.
-        sel = (ConcatenatedRecordingSelection & key).fetch1()
-        session_group_key = {
-            "session_group_owner": sel["session_group_owner"],
-            "session_group_name": sel["session_group_name"],
-        }
-        members = (
-            SessionGroup.Member & session_group_key
-        ).fetch(as_dict=True, order_by="member_index")
-
-        # Reuse cached PRE-MOTION Recording NWB artifacts per member.
-        # Recording.make() materializes filter + CMR only (no whitening) —
-        # safe input for motion correction. See shared-contracts §
-        # Pydantic Parameter Schema Convention.
-        #
-        # IMPORTANT: ConcatenatedRecording.make() does NOT call
-        # Recording.populate() inline. Nested populate is a DataJoint
-        # anti-pattern (confusing error messages, transaction boundaries
-        # that surprise users, populate-progress reporting out of order).
-        # Instead we REQUIRE that every member's Recording row is already
-        # populated BEFORE this make() runs. The selection-time check in
-        # ConcatenatedRecordingSelection.insert_selection() (below)
-        # enforces this so the user gets a clear "populate Recording for
-        # member X first" error at insert time rather than a confusing
-        # nested-populate failure during the concat populate.
-        recordings = []
-        for m in members:
-            rec_sel_key = {
-                "nwb_file_name": m["nwb_file_name"],
-                "sort_group_id": m["sort_group_id"],
-                "interval_list_name": m["interval_list_name"],
-                "preproc_params_name": sel["preproc_params_name"],
-                "team_name": m["team_name"],  # carried on the Member part row
-            }
-            # Match the existing RecordingSelection row (insert_selection
-            # already enforced existence at concat-selection insert time).
-            rec_key = (RecordingSelection & rec_sel_key).fetch1("KEY")
-            # Defensive re-check: if the Recording row is missing here,
-            # raise a clear error rather than nested-populate.
-            if not (Recording & rec_key):
-                raise MissingRecordingForConcatError(
-                    f"Member {m['nwb_file_name']} (sort_group_id="
-                    f"{m['sort_group_id']}, interval={m['interval_list_name']}) "
-                    "has no populated Recording row. Run "
-                    "Recording.populate(rec_key) for each member before "
-                    "ConcatenatedRecording.populate(). The selection-time "
-                    "check in ConcatenatedRecordingSelection.insert_selection "
-                    "should have caught this — file a bug if you reach this "
-                    "branch via the helper."
-                )
-            rec = (Recording & rec_key).get_recording(rec_key)  # pre-motion (un-whitened)
-            recordings.append(rec)
-
-        # Concatenate (mono-segment)
-        concat_recording = concatenate_recordings(recordings)
-
-        # Motion correction runs on UN-WHITENED traces (per SI docs).
-        # The preset is ALWAYS explicit — no auto-dispatch by date.
-        # For single-day groups the recommended preset is `rigid_fast`;
-        # for multi-day groups the caller must explicitly choose a
-        # DREDge variant (and accept the validation caveat — multi-day
-        # concat is experimental, sort-then-match is the recommended path).
-        motion_params = (MotionCorrectionParameters & sel).fetch1("params")
-        preset = motion_params["preset"]
-        if preset == "auto":
-            # `auto` is permitted only on single-day groups; explicit
-            # for multi-day per the gate above.
-            if SessionGroup.is_multi_day(session_group_key):
-                raise ValueError(
-                    "preset='auto' is not permitted for multi-day SessionGroups. "
-                    "Explicitly choose 'dredge_fast' / 'dredge' / etc., or use "
-                    "sort-then-match (Phase 4 UnitMatch) for cross-day analyses."
-                )
-            preset = "rigid_fast"
-        if preset != "none":
-            motion_kwargs = motion_params.get("preset_kwargs", {})
-            forbidden_kwargs = {"folder", "output_motion", "output_motion_info"}
-            if forbidden := forbidden_kwargs.intersection(motion_kwargs):
-                raise ValueError(
-                    "MotionCorrectionParameters.preset_kwargs cannot include "
-                    f"{sorted(forbidden)} because Phase 3 stores only the "
-                    "corrected recording in AnalysisNwbfile; motion side "
-                    "artifacts need a separately tracked schema."
-                )
-            concat_recording = correct_motion(
-                concat_recording,
-                preset=preset,
-                **motion_kwargs,
-            )
-
-        # Whitening (post-motion stage) runs AFTER motion correction.
-        # Sorting.make() will apply this for the single-recording path;
-        # for the concat path, we apply here so the cached concat artifact
-        # is sorter-ready.
-        preproc_params = PreprocessingParamsSchema.model_validate(
-            (PreprocessingParameters & sel).fetch1("params")
-        )
-        post_motion_dict = preproc_params.to_post_motion_dict()
-        if post_motion_dict:
-            from spikeinterface.preprocessing import apply_preprocessing_pipeline
-            concat_recording = apply_preprocessing_pipeline(concat_recording, post_motion_dict)
-
-        # Materialize NWB-resident. Anchor parent NWB = first member's
-        # nwb_file_name (deterministic; see _resolve_analysis_parent_nwb_file_name).
-        parent_nwb = members[0]["nwb_file_name"]
-        with AnalysisNwbfile().build(parent_nwb) as builder:
-            with builder.open_for_write() as io:
-                nwbfile = io.read()
-                electrical_series_path, object_id = _write_recording_electrical_series(
-                    nwbfile,
-                    concat_recording,
-                    series_name="concatenated_electrical_series",
-                    module_name="ecephys",
-                    **_resolved_job_kwargs(sel),
-                )
-                io.write(nwbfile)
-            analysis_file_name = builder.analysis_file_name
-
-        # Track sample boundaries for back-mapping spike times to sessions.
-        # SpikeInterface sortings return spike trains in sample indices, so
-        # these must be integer sample counts, not durations in seconds.
-        cumulative = np.cumsum([
-            r.get_num_samples(segment_index=0) for r in recordings
-        ])
-
-        # `key` already carries `concat_recording_id` inherited from
-        # the upstream ConcatenatedRecordingSelection row (declared in
-        # Phase 1) — do NOT mint a new UUID here. The Selection table
-        # is what mints `concat_recording_id`; this Computed table
-        # inherits it via `-> ConcatenatedRecordingSelection`.
-        self.insert1({
-            **key,
-            "analysis_file_name": analysis_file_name,
-            "electrical_series_path": electrical_series_path,
-            "object_id": object_id,
-            "n_channels": concat_recording.get_num_channels(),
-            "sampling_frequency": float(concat_recording.get_sampling_frequency()),
-            "total_duration_s": float(concat_recording.get_total_duration()),
-            "member_segment_boundaries": cumulative.tolist(),
-            "cache_hash": _hash_nwb_recording(analysis_file_name, object_id),
-        })
+        ...
 
     def get_recording(self, key) -> si.BaseRecording:
         ...
@@ -1741,18 +1208,15 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
     def split_sorting_by_session(
         self, sorting, key
     ) -> dict[tuple[str, str], si.BaseSorting]:
-        """Map a sorting (produced on the concatenated recording) back to per-session sortings.
-
-        Returns dict keyed by the session identity tuple
-        ``(nwb_file_name, interval_list_name)`` — the natural session PK on
-        ``SessionGroup.Member``. The tuple is hashable; a plain dict (the
-        full member key) is not, so callers that need the full key should
-        look it up via ``SessionGroup.Member & {"session_group_owner": ...,
-        "session_group_name": ..., "nwb_file_name": k[0],
-        "interval_list_name": k[1]}``.
-        """
         ...
 ```
+
+**Binding behavior**:
+
+- `ConcatenatedRecording.make()` must fetch `sel = (ConcatenatedRecordingSelection & key).fetch1()` first because the populate key contains only `concat_recording_id`; all member and parameter queries use that selection row.
+- It never calls `Recording.populate()` internally. Missing per-member `Recording` rows raise `MissingRecordingForConcatError`.
+- Motion correction runs before whitening, `preset='auto'` is single-day only, forbidden SI side-artifact kwargs are rejected, and the output is one sorter-ready NWB-resident `ElectricalSeries` with integer sample boundaries.
+- `split_sorting_by_session()` maps concat spike trains back to local session sample frames and returns keys `(nwb_file_name, interval_list_name)`.
 
 **Key design points**:
 
@@ -1896,111 +1360,19 @@ class UnitMatch(SpyglassMixin, dj.Computed):
         """
 
     def make(self, key):
-        sel = (UnitMatchSelection & key).fetch1()
-
-        # Resolve each member to its EXPLICITLY pinned CurationV2 row.
-        # UnitMatch operates on the CURATED unit set (after merges_applied
-        # and excluding reject/noise labels), NOT on the raw Sorting.
-        # The session_key carried into MatchPair tuples is
-        # (sorting_id, curation_id) — both stored in UnitMatch.Pair so
-        # downstream consumers can resolve which curation produced the
-        # match.
-        member_curations = (
-            UnitMatchSelection.MemberCuration & key
-        ).fetch(as_dict=True, order_by="member_index")
-        expected_member_keys = (
-            SessionGroup.Member
-            & {
-                "session_group_owner": sel["session_group_owner"],
-                "session_group_name": sel["session_group_name"],
-            }
-        ).fetch("KEY", order_by="member_index")
-        if _member_key_set(member_curations) != _member_key_set(expected_member_keys):
-            raise UnitMatchSelectionIntegrityError(
-                "UnitMatchSelection.MemberCuration rows do not exactly match "
-                "the parent SessionGroup members. This usually means rows were "
-                "inserted directly with dj.Manual.insert1 instead of "
-                "UnitMatchSelection.insert_selection()."
-            )
-        for mc in member_curations:
-            # Re-check the load-bearing provenance invariant at populate time:
-            # independent FKs prove the member and curation exist, but not that
-            # the curation belongs to this member. Direct part-table insertions
-            # can bypass the helper's ownership validation.
-            _assert_curation_belongs_to_member(mc)
-
-        # The wrapper pre-extracts what the matcher needs from each
-        # curated analyzer and writes it to a matcher-specific layout
-        # under a per-session bundle dir, per the SessionMatcherInput
-        # contract (shared-contracts.md § MatcherProtocol). The matcher
-        # never touches raw NWB paths or `si.SortingAnalyzer` objects
-        # directly; it consumes the bundle.
-        bundle_root = Path(tempfile.mkdtemp(prefix="unitmatch_bundle_"))
-        session_inputs: list[SessionMatcherInput] = []
-        for mc in member_curations:
-            sorting_id = (CurationV2 & mc).fetch1("sorting_id")
-            recording_date = (SessionGroup.Member & mc).fetch1("recording_date")
-            # Load analyzer, then apply the curation's merges/labels
-            # to produce a curated BaseSorting view.
-            raw_analyzer = (Sorting & {"sorting_id": sorting_id}).get_analyzer(
-                {"sorting_id": sorting_id}
-            )
-            curated_sorting = (CurationV2 & mc).get_merged_sorting()  # applies merges
-            # Filter out units with any excluded curation label. This helper
-            # includes unlabeled units and units labeled accept/mua, and
-            # excludes any unit with reject/noise/artifact even if it also
-            # carries another label.
-            matchable_unit_ids = CurationV2.get_matchable_unit_ids(
-                mc, exclude_labels={"reject", "noise", "artifact"}
-            )
-            curated_sorting = curated_sorting.select_units(matchable_unit_ids)
-            # Build a fresh analyzer over the curated sorting using the
-            # same recording — needed because the matcher reads templates
-            # for the curated unit set, not the raw set.
-            curated_analyzer = si.create_sorting_analyzer(
-                sorting=curated_sorting,
-                recording=raw_analyzer.recording,
-                sparse=True, format="memory", return_in_uV=True,
-            )
-            curated_analyzer.compute(
-                ["random_spikes", "templates", "waveforms"],
-                **_resolved_job_kwargs(key),
-            )
-            # Wrapper-owned extraction: write UnitMatch-compatible split-half
-            # waveforms + channel positions to the matcher-expected on-disk
-            # layout (exact files/dtypes pinned by Phase 4a) into a
-            # per-session bundle dir. Phase 4a decides whether existing
-            # SortingAnalyzer extensions are enough, or whether this helper
-            # must read `raw_analyzer.recording` to produce the two
-            # cross-validation waveform halves. The matcher itself never sees
-            # raw NWB paths, Spyglass table keys, or SortingAnalyzer objects.
-            session_dir = bundle_root / f"session_{mc['member_index']:03d}"
-            session_dir.mkdir()
-            _write_matcher_bundle(curated_analyzer, session_dir)  # pinned by 4a
-            session_inputs.append(SessionMatcherInput(
-                session_key={
-                    "sorting_id": sorting_id,
-                    "curation_id": mc["curation_id"],
-                },
-                waveform_dir=session_dir,
-                channel_positions_path=session_dir / "channel_positions.npy",
-                recording_date=recording_date,
-            ))
-
-        # Dispatch to plugin matcher
-        matcher_name = (MatcherParameters & sel).fetch1("matcher")
-        params = (MatcherParameters & sel).fetch1("params")
-        matcher = get_matcher(matcher_name)
-
-        t0 = time.time()
-        pair_results = matcher.match(session_inputs, params)
-        runtime = time.time() - t0
-
-        # Write to NWB + part rows
-        pairs_df = pd.DataFrame([asdict(p) for p in pair_results])
         ...
+```
 
 
+**Binding behavior**:
+
+- `UnitMatch.make()` re-validates that `MemberCuration` rows exactly match the parent `SessionGroup.Member` set and that every pinned `CurationV2` belongs to its member.
+- Matcher inputs are wrapper-owned bundles derived from curated analyzers/recordings; the matcher never receives raw NWB paths, Spyglass keys, or `SortingAnalyzer` objects.
+- Pair rows reference only units present in the explicitly pinned curated unit set.
+- The analysis NWB parent is the first `SessionGroup.Member.nwb_file_name`; complete provenance remains queryable through the selection/member tables.
+
+
+```python
 @schema
 class TrackedUnit(SpyglassMixin, dj.Computed):
     """Biological-unit-level identity across sessions.
@@ -2093,157 +1465,12 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
 
 The actual policy used is persisted on every `TrackedUnit` row via the `policy_used` enum column (`'strict'` / `'transitive'` / `'transitive_fallback'`), so fallback is visible later without log-spelunking.
 
-Implementation:
+Implementation contract:
 
-```python
-import time
-
-def _derive_tracked_units(pairs, threshold, all_units, params):
-    policy = params.get("tracked_unit_policy", "strict")
-    if policy == "transitive":
-        return _derive_tracked_units_transitive(pairs, threshold, all_units), "transitive"
-
-    # strict mode — apply node bound first (cheap check)
-    n_nodes = len(list(all_units))
-    if n_nodes > params.get("max_strict_nodes", 2000):
-        if params.get("allow_strict_fallback", False):
-            return (
-                _derive_tracked_units_transitive(pairs, threshold, all_units),
-                "transitive_fallback",
-            )
-        raise TrackedUnitBudgetExceededError(
-            f"Strict policy: {n_nodes} nodes exceeds max_strict_nodes="
-            f"{params.get('max_strict_nodes', 2000)}. Pass "
-            "allow_strict_fallback=True or set tracked_unit_policy='transitive'."
-        )
-
-    # strict mode — run with wall-clock budget
-    t0 = time.monotonic()
-    budget_s = params.get("max_clique_search_seconds", 120)
-    try:
-        result = _derive_tracked_units_strict(
-            pairs, threshold, all_units,
-            deadline=t0 + budget_s,
-        )
-        return result, "strict"
-    except StrictSearchTimeout:
-        if params.get("allow_strict_fallback", False):
-            return (
-                _derive_tracked_units_transitive(pairs, threshold, all_units),
-                "transitive_fallback",
-            )
-        raise TrackedUnitBudgetExceededError(
-            f"Strict clique search exceeded {budget_s}s budget. "
-            "Pass allow_strict_fallback=True or set "
-            "tracked_unit_policy='transitive'."
-        )
-```
-
-`_derive_tracked_units_strict` iterates over the `nx.find_cliques` generator and checks `time.monotonic() < deadline` between yielded cliques. It must NOT materialize `list(nx.find_cliques(g))` before checking the deadline, because that would reintroduce the unbounded exponential search.
-
-```python
-import networkx as nx
-from itertools import combinations
-
-def _derive_tracked_units_strict(pairs, threshold, all_units, deadline):
-    """Maximal-clique-based tracked units. Default policy.
-
-    Parameters
-    ----------
-    pairs : iterable of MatchPair
-        Pairwise match records emitted by the matcher. Sparse: a matcher is
-        free to emit only above-threshold pairs (the MatcherProtocol does
-        NOT require dense pairs).
-    threshold : float
-        Edges with ``match_probability >= threshold`` are kept.
-    all_units : iterable of tuple[str, int, int]
-        Every curated ``(sorting_id, curation_id, unit_id)`` participating
-        in the SessionGroup's UnitMatch run. Pulled from
-        ``CurationV2.get_matchable_unit_ids`` for each pinned member
-        curation. **This is the universe that seeds the graph** — pair rows
-        only contribute edges, never the only path by which a node enters
-        the graph. Without this, a unit that the matcher chose not to emit
-        any pair record for would silently disappear from TrackedUnit
-        output instead of becoming a 1-session singleton.
-
-    Returns
-    -------
-    list of (component_nodes, transitive_only_count) tuples.
-    A unit is in a component only if it has a direct above-threshold edge
-    to EVERY other unit in the component. Units with NO above-threshold
-    edges still produce a singleton component (``n_sessions_observed = 1``).
-    """
-    g = nx.Graph()
-    # Seed the graph with the curated-unit universe so singletons survive
-    # regardless of whether the matcher emitted pair records for them.
-    for u in all_units:
-        g.add_node(u)
-    for p in pairs:
-        if p.match_probability >= threshold:
-            node_a = (p.session_a_sorting_id, p.session_a_curation_id, p.unit_a_id)
-            node_b = (p.session_b_sorting_id, p.session_b_curation_id, p.unit_b_id)
-            g.add_edge(node_a, node_b, weight=p.match_probability)
-    # find_cliques on a thresholded graph returns maximal cliques. Iterate
-    # the generator directly so the wall-clock budget can interrupt
-    # pathological enumeration before all cliques are materialized.
-    cliques = []
-    for clique in nx.find_cliques(g):
-        if time.monotonic() > deadline:
-            raise StrictSearchTimeout(
-                "Strict clique search exceeded max_clique_search_seconds"
-            )
-        cliques.append(tuple(sorted(clique)))
-
-    # Same node may appear in multiple cliques; greedy-pick largest first.
-    # Tie-break by canonical node tuple so equal-size overlapping cliques are
-    # deterministic across Python/networkx traversal order.
-    used = set()
-    components = []
-    def _clique_sort_key(clique):
-        return (-len(clique), clique)
-
-    for clique in sorted(cliques, key=_clique_sort_key):
-        if any(n in used for n in clique):
-            continue
-        components.append((set(clique), 0))
-        used.update(clique)
-    # Any node still unused is a true singleton — emit it explicitly.
-    # networkx ``find_cliques`` treats isolated nodes as size-1 cliques,
-    # but only for nodes that exist in the graph at all (handled by the
-    # all_units seeding loop above).
-    for node in g.nodes():
-        if node not in used:
-            components.append(({node}, 0))
-            used.add(node)
-    return components
-
-
-def _derive_tracked_units_transitive(pairs, threshold, all_units):
-    """Connected-component fallback (permissive). Opt-in via params.
-
-    Same singleton invariant as the strict variant: a unit with no
-    above-threshold edge still produces a 1-node component. See
-    ``_derive_tracked_units_strict`` for the ``all_units`` contract.
-    """
-    g = nx.Graph()
-    for u in all_units:
-        g.add_node(u)
-    for p in pairs:
-        if p.match_probability >= threshold:
-            node_a = (p.session_a_sorting_id, p.session_a_curation_id, p.unit_a_id)
-            node_b = (p.session_b_sorting_id, p.session_b_curation_id, p.unit_b_id)
-            g.add_edge(node_a, node_b, weight=p.match_probability)
-    components = []
-    # ``nx.connected_components`` already yields isolated nodes as
-    # singleton components, so no separate leftover loop is needed here.
-    for cc in nx.connected_components(g):
-        # Count edges that are "transitive only" — pairs of nodes
-        # in the component that don't have a direct edge.
-        possible_edges = len(list(combinations(cc, 2)))
-        actual_edges = g.subgraph(cc).number_of_edges()
-        components.append((cc, possible_edges - actual_edges))
-    return components
-```
+- `_derive_tracked_units()` dispatches by `tracked_unit_policy` and always seeds the graph from the complete curated-unit universe so unmatched units become singleton tracked units.
+- Strict mode applies the `max_strict_nodes` check before clique search, iterates `networkx.find_cliques` lazily, and checks a wall-clock deadline between yielded cliques. It must never call `list(nx.find_cliques(...))` before enforcing the deadline.
+- If strict search exceeds the node or time budget, `allow_strict_fallback=False` raises `TrackedUnitBudgetExceededError`; `allow_strict_fallback=True` degrades to connected components and records `policy_used='transitive_fallback'`.
+- Transitive mode uses connected components and records `n_transitive_only_edges` for missing direct edges inside a component.
 
 **Default threshold**: `0.5` for the `unitmatch` matcher. Configurable via `MatcherParameters`.
 
@@ -2279,34 +1506,7 @@ class FigPackCurationSelection(SpyglassMixin, dj.Manual):
         upload: bool = True,
         ephemeral: bool = False,
     ) -> dict:
-        label_options = label_options or ["mua", "accept", "noise"]
-        metrics = metrics or []
-        config = {
-            "label_options": label_options,
-            "metrics": metrics,
-            "upload": upload,
-            "ephemeral": ephemeral,
-        }
-        figpack_config_hash = hashlib.sha256(
-            json.dumps(config, sort_keys=True).encode()
-        ).hexdigest()
-        lookup_key = {
-            **curation_key,
-            "figpack_config_hash": figpack_config_hash,
-        }
-        row = {
-            **lookup_key,
-            "label_options": label_options,
-            "metrics": metrics,
-            "upload": upload,
-            "ephemeral": ephemeral,
-        }
-        existing = cls & lookup_key
-        if existing:
-            return existing.fetch1("KEY")
-        key = {**row, "figpack_curation_id": uuid.uuid4()}
-        cls.insert1(key)
-        return {"figpack_curation_id": key["figpack_curation_id"]}
+        ...
 
 
 @schema
@@ -2318,30 +1518,17 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
-        # Build FigPack curation view from SortingAnalyzer via Spyglass-owned
-        # adapter helpers that wrap the verified upstream API.
-        analyzer = Sorting.get_analyzer_from_curation(key)
-        label_options, metrics, upload, ephemeral = (
-            FigPackCurationSelection & key
-        ).fetch1("label_options", "metrics", "upload", "ephemeral")
-        view = _build_figpack_curation_view(
-            analyzer,
-            curation_key=key,
-            label_options=label_options,
-            metrics=metrics,
-        )
-        uri = _show_or_upload_figpack_view(
-            view,
-            upload=upload,
-            ephemeral=ephemeral,
-        )
-        self.insert1({**key, "figpack_uri": uri})
+        ...
 
     @staticmethod
     def fetch_curation_from_uri(uri: str) -> tuple[dict, list]:
-        """Pull labels + merge_groups back from verified FigPack state path."""
         ...
 ```
+
+**Binding behavior**:
+
+- `FigPackCurationSelection` identity includes `figpack_config_hash` over label options, requested metrics, upload mode, and ephemeral mode, not only `CurationV2`.
+- `FigPackCuration.make()` may only call the FigPack API verified in Phase 5; if edited curation state cannot be fetched, Phase 5 stops instead of shipping a degraded UI.
 
 ---
 
@@ -2355,137 +1542,14 @@ def run_v2_pipeline(
     sort_group_id: int | None = None,
     interval_list_name: str | None = None,
     team_name: str | None = None,
-    concat_session_group_owner: str | None = None,  # Phase 3 concat sorting only
-    concat_session_group_name: str | None = None,   # Phase 3 concat sorting only
+    concat_session_group_owner: str | None = None,
+    concat_session_group_name: str | None = None,
     preset: str = "franklab_tetrode_mountainsort5",
     skip_artifact: bool = False,
-    auto_curate: bool = True,                     # Phase 2
-    figpack: bool = False,                        # Phase 5
+    auto_curate: bool = True,
+    figpack: bool = False,
 ) -> dict:
-    """End-to-end v2 sorting pipeline with optional auto-curation,
-    concatenated sorting, and FigPack curation publishing.
-
-    Exactly one of (single-session args, concat session-group args) must be set.
-    Re-runnable safely — find-existing logic in each insert_selection
-    means a second call with the same args returns the same manifest.
-    """
-    single_args = [nwb_file_name, sort_group_id, interval_list_name]
-    has_single = all(x is not None for x in single_args)
-    has_partial_single = any(x is not None for x in single_args) and not has_single
-    has_concat = (
-        concat_session_group_owner is not None
-        or concat_session_group_name is not None
-    )
-    if has_partial_single:
-        raise ValueError(
-            "single-session mode requires nwb_file_name, sort_group_id, "
-            "and interval_list_name"
-        )
-    if has_single == has_concat:
-        raise ValueError(
-            "Provide exactly one input mode: either all single-session inputs "
-            "or concat_session_group_owner + concat_session_group_name"
-        )
-    if has_concat and (concat_session_group_owner is None or concat_session_group_name is None):
-        raise ValueError(
-            "concat mode requires both concat_session_group_owner and "
-            "concat_session_group_name so SessionGroup names are team-namespaced"
-        )
-
-    preset_dict = PRESETS[preset]
-    manifest = {"preset": preset, "stages": []}
-
-    # --- 1. Recording (single OR concatenated, dispatched by inputs) ---
-    if has_concat:
-        if preset_dict.get("motion_correction_params_name") is None:
-            raise ValueError(
-                f"preset={preset!r} cannot be used with concat session groups "
-                "because it has no motion_correction_params_name"
-            )
-        # Phase 3 concat path
-        concat_key = ConcatenatedRecordingSelection.insert_selection({
-            "session_group_owner": concat_session_group_owner,
-            "session_group_name": concat_session_group_name,
-            "preproc_params_name": preset_dict["preproc_params_name"],
-            "motion_correction_params_name": preset_dict["motion_correction_params_name"],
-        })
-        ConcatenatedRecording.populate(concat_key)
-        manifest["stages"].append({"stage": "concat_recording", "key": concat_key})
-        recording_fk = {
-            "recording_id": None,
-            "concat_recording_id": concat_key["concat_recording_id"],
-        }
-    else:
-        rec_key = RecordingSelection.insert_selection({
-            "nwb_file_name": nwb_file_name,
-            "sort_group_id": sort_group_id,
-            "interval_list_name": interval_list_name,
-            "preproc_params_name": preset_dict["preproc_params_name"],
-            "team_name": team_name,
-        })
-        Recording.populate(rec_key)
-        manifest["stages"].append({"stage": "recording", "key": rec_key})
-        recording_fk = {
-            "recording_id": rec_key["recording_id"],
-            "concat_recording_id": None,
-        }
-
-    # --- 2. Artifact detection (single-recording path only in Phase 1; concat
-    #        path uses skip_artifact=True until cross-recording artifact lands) ---
-    if not skip_artifact and recording_fk["recording_id"] is not None:
-        artifact_key = ArtifactDetectionSelection.insert_selection({
-            **recording_fk,
-            "artifact_params_name": preset_dict["artifact_params_name"],
-        })
-        ArtifactDetection.populate(artifact_key)
-        manifest["stages"].append({"stage": "artifact_detection", "key": artifact_key})
-        artifact_fk = {"artifact_id": artifact_key["artifact_id"]}
-    else:
-        artifact_fk = {"artifact_id": None}
-
-    # --- 3. Sorting ---
-    sort_key = SortingSelection.insert_selection({
-        **recording_fk,
-        **artifact_fk,
-        "sorter": preset_dict["sorter"],
-        "sorter_params_name": preset_dict["sorter_params_name"],
-    })
-    Sorting.populate(sort_key)
-    manifest["stages"].append({"stage": "sorting", "key": sort_key})
-
-    # --- 4. Initial curation ---
-    curation_key = CurationV2.insert_curation(
-        sorting_key=sort_key,
-        labels={},  # explicit empty dict per Boundary Invariant 4
-        description=f"initial via run_v2_pipeline preset={preset}",
-    )
-    manifest["stages"].append({"stage": "initial_curation", "key": curation_key})
-
-    # --- 5. Auto-curation (Phase 2) ---
-    if auto_curate:
-        ac_key = AnalyzerCurationSelection.insert_selection({
-            **curation_key,
-            "metric_params_name": preset_dict["metric_params_name"],
-            "auto_curation_rules_name": preset_dict["auto_curation_rules_name"],
-        })
-        AnalyzerCuration.populate(ac_key)
-        final_curation_key = AnalyzerCuration.materialize_curation(
-            ac_key, description=f"auto-curated via preset={preset}"
-        )
-        manifest["stages"].append({"stage": "auto_curation", "key": final_curation_key})
-    else:
-        final_curation_key = curation_key
-
-    # --- 6. FigPack curation (Phase 5) ---
-    if figpack:
-        fp_key = FigPackCurationSelection.insert_selection(final_curation_key)
-        FigPackCuration.populate(fp_key)
-        manifest["stages"].append({"stage": "figpack", "key": fp_key})
-
-    # --- 7. Final merge_id ---
-    merge_query = SpikeSortingOutput.CurationV2 & final_curation_key
-    manifest["merge_id"] = merge_query.fetch1("merge_id")
-    return manifest
+    ...
 
 
 def run_v2_unit_match(
@@ -2495,36 +1559,14 @@ def run_v2_unit_match(
     matcher_params_name: str = "unitmatch_default",
     curation_choices: dict[int, dict] | None = None,
 ) -> dict:
-    """Convenience wrapper for Phase 4 sort-then-match cross-session tracking.
-
-    ``curation_choices`` maps each SessionGroup.member_index to an explicit
-    CurationV2 key. The helper never queries for "latest" curation rows.
-    """
-    if curation_choices is None:
-        raise ValueError(
-            "run_v2_unit_match requires explicit curation_choices mapping "
-            "each SessionGroup.member_index to a CurationV2 key"
-        )
-    manifest = {
-        "session_group_owner": session_group_owner,
-        "session_group_name": session_group_name,
-        "matcher_params_name": matcher_params_name,
-        "stages": [],
-    }
-    um_key = UnitMatchSelection.insert_selection(
-        {
-            "session_group_owner": session_group_owner,
-            "session_group_name": session_group_name,
-            "matcher_params_name": matcher_params_name,
-        },
-        curation_choices=curation_choices,
-    )
-    UnitMatch.populate(um_key)
-    TrackedUnit.populate(um_key)
-    manifest["stages"].append({"stage": "unit_match", "key": um_key})
-    manifest["unitmatch_id"] = um_key["unitmatch_id"]
-    return manifest
+    ...
 ```
+
+**Binding behavior**:
+
+- `run_v2_pipeline()` accepts exactly one input mode: single-session inputs or concat session-group inputs. It returns a manifest of every DataJoint row touched.
+- The helper is idempotent through each table's `insert_selection()` contract; rerunning the same call reuses existing rows.
+- `run_v2_unit_match()` is separate from concat sorting and always requires explicit `curation_choices`; it never selects latest curations implicitly.
 
 **Design points**:
 
