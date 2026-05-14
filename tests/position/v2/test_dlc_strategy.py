@@ -53,7 +53,9 @@ def test_prepare_training_dataset(skip_if_no_dlc):
             )
 
             # Verify DLC function called correctly
-            mock_create.assert_called_once_with(str(config_path), batch_size=8)
+            mock_create.assert_called_once_with(
+                str(config_path), batch_size=8, userfeedback=False
+            )
             # Verify info message was logged
             model_instance._info_msg.assert_called_once()
 

@@ -78,6 +78,26 @@ def make_dlc_project(output_dir, overwrite=False):
     config_path = project_dir / "config.yaml"
 
     if config_path.exists() and not overwrite:
+        # Ensure video is non-empty — stale 0-byte placeholder from older runs
+        video_path = project_dir / "videos" / f"{_NWB_STEM}.avi"
+        if not video_path.exists() or video_path.stat().st_size == 0:
+            import subprocess
+
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=black:size=4x4:rate=5",
+                    "-t",
+                    "10",
+                    str(video_path),
+                ],
+                check=True,
+                capture_output=True,
+            )
         return config_path
 
     if project_dir.exists() and overwrite:
@@ -358,11 +378,12 @@ def bootstrap_from_video_paths(
     src_video = Path(video_paths[0])
     inf_vid_name = f"example_inference{src_video.suffix}"
     inf_vid_path = src_video.parent / inf_vid_name
-    if not inf_vid_path.exists():
+    if not inf_vid_path.exists() or inf_vid_path.stat().st_size == 0:
         if src_video.exists() and src_video.stat().st_size > 0:
             subprocess.run(
                 [
                     "ffmpeg",
+                    "-y",
                     "-i",
                     str(src_video),
                     "-t",
@@ -375,7 +396,22 @@ def bootstrap_from_video_paths(
                 capture_output=True,
             )
         else:
-            inf_vid_path.touch()  # placeholder for non-real/test videos
+            # Source is a placeholder — create a minimal synthetic clip
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=black:size=4x4:rate=5",
+                    "-t",
+                    "1",
+                    str(inf_vid_path),
+                ],
+                check=True,
+                capture_output=True,
+            )
 
     all_video_paths = video_paths + [str(inf_vid_path)]
 
@@ -430,6 +466,94 @@ def bootstrap_from_video_paths(
         f" ({len(all_video_paths)} video(s))"
     )
     return nwb_file_name, inf_vid_path
+
+
+def seed_labeled_data(config_path):
+    """Write synthetic labeled-data H5/CSV files into a DLC project.
+
+    Creates ``CollectedData_{scorer}.h5`` and ``.csv`` in each
+    ``labeled-data/{video_stem}/`` folder of the project.  Existing annotation
+    files are left unchanged.
+
+    The generated annotations are random x/y values within the video
+    dimensions read from ``config.yaml``.  This is intentionally unrealistic
+    data — it is only useful for testing that DLC's training pipeline runs
+    end-to-end without raising errors about missing annotations.
+
+    Parameters
+    ----------
+    config_path : str or Path
+        Path to the DLC ``config.yaml``.
+    """
+    import pandas as pd
+
+    config_path = Path(config_path)
+    with open(config_path, encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+
+    scorer = cfg.get("scorer", "scorer")
+    bodyparts = cfg.get("bodyparts", [])
+    project_dir = Path(cfg.get("project_path", str(config_path.parent)))
+
+    # Build MultiIndex columns: (scorer, bodypart, x/y)
+    columns = pd.MultiIndex.from_tuples(
+        [(scorer, bp, c) for bp in bodyparts for c in ("x", "y")],
+        names=["scorer", "bodyparts", "coords"],
+    )
+
+    for video_path in cfg.get("video_sets", {}).keys():
+        video_stem = Path(video_path).stem
+        label_dir = project_dir / "labeled-data" / video_stem
+        if not label_dir.exists():
+            continue
+
+        h5_path = label_dir / f"CollectedData_{scorer}.h5"
+        csv_path = label_dir / f"CollectedData_{scorer}.csv"
+        if h5_path.exists():
+            continue  # don't overwrite existing annotations
+
+        # Collect extracted frame file names
+        frame_files = sorted(label_dir.glob("img*.png"))
+        if not frame_files:
+            continue
+
+        # DLC expects a MultiIndex with (labeled-data, video_stem, img_name)
+        idx = pd.MultiIndex.from_tuples(
+            [("labeled-data", video_stem, p.name) for p in frame_files],
+            names=["", "", ""],
+        )
+
+        # Read actual image dimensions so generated coords satisfy DLC's
+        # strict bounds check: 0 < x < width  and  0 < y < height.
+        # format_training_data skips any frame whose joints all land outside
+        # those bounds, which would produce an empty training dataset.
+        try:
+            from PIL import Image as _PILImage
+
+            with _PILImage.open(frame_files[0]) as _im:
+                _w, _h = _im.size
+        except Exception:
+            _w, _h = 64, 64  # fallback — large enough for any real frame
+        _x_max = max(_w - 1, 1)
+        _y_max = max(_h - 1, 1)
+
+        rng = np.random.default_rng(seed=42)
+        # Alternate x/y columns: (bp0_x, bp0_y, bp1_x, bp1_y, ...)
+        _ncols = len(columns)
+        _xy = np.empty((len(frame_files), _ncols), dtype=float)
+        _xy[:, 0::2] = rng.integers(
+            1, _x_max + 1, size=(len(frame_files), _ncols // 2)
+        )
+        _xy[:, 1::2] = rng.integers(
+            1, _y_max + 1, size=(len(frame_files), _ncols // 2)
+        )
+        data = _xy
+        df = pd.DataFrame(data.astype(float), index=idx, columns=columns)
+
+        df.to_hdf(str(h5_path), key="df_with_missing", mode="w")
+        df.to_csv(str(csv_path))
+
+    return config_path
 
 
 if __name__ == "__main__":

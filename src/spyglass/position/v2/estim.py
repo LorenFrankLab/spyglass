@@ -74,7 +74,7 @@ try:
 except ImportError:  # pragma: no cover
     ndx_pose = None  # pragma: no cover
 
-schema = dj.schema("cbroz_position_v2_estim")
+schema = dj.schema("cbroz_position_v2_estim")  # Couldn't drop previous
 
 
 @schema
@@ -977,17 +977,33 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         try:
             nwb_data = (VideoFile & vf_keys[0]).fetch_nwb()[0]
             ts = np.asarray(nwb_data["video_file"].timestamps)
-        except (OSError, KeyError, TypeError, AttributeError) as exc:
-            raise ValueError(
-                f"Could not fetch timestamps from VideoFile for "
-                f"vid_group_id='{key['vid_group_id']}': {exc}"
-            ) from exc
-        if ts is None or len(ts) == 0:
-            raise ValueError(
-                f"VideoFile for vid_group_id='{key['vid_group_id']}' has "
-                "empty or null timestamps."
-            )
-        return ts
+        except (OSError, KeyError, TypeError, AttributeError):
+            ts = None  # fall through to video-file fallback below
+
+        if ts is not None and len(ts) > 0:
+            return ts
+
+        # Fallback: derive timestamps from the actual video file (e.g. for
+        # tutorial/bootstrap sessions whose NWB object IDs are synthetic).
+        video_path = (VideoFile & vf_keys[0]).fetch1("path")
+        if video_path:
+            try:
+                import cv2
+
+                cap = cv2.VideoCapture(str(video_path))
+                fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+                n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                cap.release()
+                if n_frames > 0:
+                    return np.arange(n_frames) / fps
+            except Exception:
+                pass
+
+        raise ValueError(
+            f"Could not fetch timestamps for vid_group_id="
+            f"'{key['vid_group_id']}': NWB object lookup failed and "
+            "video file fallback also failed."
+        )
 
     def _store_estimation_nwb(
         self,
@@ -1527,8 +1543,7 @@ class PoseSelection(SpyglassMixin, dj.Manual):
         skeleton_entry = Skeleton & {"skeleton_id": skeleton_id}
         if len(skeleton_entry) == 0:
             self._warn_msg(
-                "Skeleton '%s' not found. Skipping validation.",
-                skeleton_id,
+                f"Skeleton '{skeleton_id}' not found. Skipping validation."
             )
             return
 
@@ -1537,29 +1552,24 @@ class PoseSelection(SpyglassMixin, dj.Manual):
 
         if actual_method is None:
             self._warn_msg(
-                "No centroid method specified in '%s'. Skeleton '%s' use: '%s'",
-                pose_params_key["pose_params_id"],
-                skeleton_id,
-                suggested_method,
+                f"No centroid method specified in "
+                f"'{pose_params_key['pose_params_id']}'. "
+                f"Skeleton '{skeleton_id}' suggests: '{suggested_method}'"
             )
         elif actual_method != suggested_method:
             bodyparts = skeleton_entry.get_bodyparts()
             self._warn_msg(
-                "Centroid method '%s' in '%s' may not be optimal for "
-                + "skeleton '%s' (bodyparts: %s). Suggested method: '%s'",
-                actual_method,
-                pose_params_key["pose_params_id"],
-                skeleton_id,
-                bodyparts,
-                suggested_method,
+                f"Centroid method '{actual_method}' in "
+                f"'{pose_params_key['pose_params_id']}' may not be optimal "
+                f"for skeleton '{skeleton_id}' (bodyparts: {bodyparts}). "
+                f"Suggested method: '{suggested_method}'"
             )
-
-        self._info_msg(
-            "Centroid method '%s' in '%s' matches skeleton '%s' suggestion",
-            actual_method,
-            pose_params_key["pose_params_id"],
-            skeleton_id,
-        )
+        else:
+            self._info_msg(
+                f"Centroid method '{actual_method}' in "
+                f"'{pose_params_key['pose_params_id']}' matches skeleton "
+                f"'{skeleton_id}' suggestion"
+            )
 
 
 @schema
@@ -1898,11 +1908,17 @@ class PoseV2(SpyglassMixin, dj.Computed):
 
         from spyglass.position.position_merge import PositionOutput
 
-        PositionOutput._merge_insert(
-            [key],
-            part_name="PoseV2",
-            skip_duplicates=True,
-        )
+        pose_v2_parts = [
+            p
+            for p in PositionOutput.parts(as_objects=True)
+            if "pose_v2" in p.full_table_name
+        ]
+        if pose_v2_parts:
+            PositionOutput._merge_insert(
+                [key],
+                part_name="PoseV2",
+                skip_duplicates=True,
+            )
         self._info_msg("Pose processing complete!")
 
     def _apply_likelihood_threshold(

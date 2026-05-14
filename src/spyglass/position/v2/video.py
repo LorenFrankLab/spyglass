@@ -286,7 +286,7 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
             existing_vids = (self.File() & vid_group_key).fetch("nwb_file_name")
             self._warn_msg(
                 f"Video group with ID '{vid_group_key['vid_group_id']}' already "
-                f"exists with {len(existing_vids)} files: {existing_vids}. "
+                f"exists with {len(existing_vids)} files:\n\t{existing_vids}\n"
                 "Skipping insert."
             )
             return vid_group_key
@@ -567,6 +567,10 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
         from spyglass.common import Nwbfile
 
         matched_nwb = None
+
+        # Pass 1: NWB stem is a substring of the video path (standard).
+        # Only accept matches that have VideoFile entries — avoids short stems
+        # (e.g. "test_") spuriously matching unrelated video filenames.
         for nwb_name in Nwbfile().fetch("nwb_file_name"):
             if nwb_name.endswith("_.nwb"):
                 nwb_stem = nwb_name[:-5]  # strip "_.nwb"
@@ -575,9 +579,25 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
             else:
                 nwb_stem = nwb_name
             if any(nwb_stem in str(vp) for vp in video_paths):
-                matched_nwb = nwb_name
-                cls()._info_msg(f"DLC config matched Nwbfile: {matched_nwb}")
-                break
+                if VideoFile() & {"nwb_file_name": nwb_name}:
+                    matched_nwb = nwb_name
+                    cls()._info_msg(
+                        f"DLC config matched Nwbfile: {matched_nwb}"
+                    )
+                    break
+
+        # Pass 2: video basename match — handles copy_videos=True projects
+        # where DLC copies videos into a new directory, breaking path matching.
+        if not matched_nwb:
+            dlc_basenames = {Path(vp).name for vp in video_paths}
+            for row in VideoFile().fetch("nwb_file_name", "path", as_dict=True):
+                if row["path"] and Path(row["path"]).name in dlc_basenames:
+                    matched_nwb = row["nwb_file_name"]
+                    cls()._info_msg(
+                        "DLC config matched Nwbfile via video basename: "
+                        f"{matched_nwb}"
+                    )
+                    break
 
         if not matched_nwb:
             raise ValueError(

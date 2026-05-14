@@ -18,6 +18,7 @@ NWBHDF
 Nevers
 Nwbfile
 ONEDNN
+Reclassed
 SLEAP
 Savitzky
 TFGPU
@@ -37,10 +38,13 @@ bodypart
 bodyparts
 boxstyle
 cbroz
+cmap
 codespell
 colorbar
 comparisonbodyparts
+comparisonbodyparts
 connectionstyle
+converth
 coveragerc
 cuda
 dask
@@ -153,6 +157,7 @@ scoremap
 sdist
 seaborn
 setdefault
+sharex
 sleap
 snapshotindex
 sortingview
@@ -163,7 +168,9 @@ storer
 suptitle
 tensorpack
 testpaths
+testscript
 textcoords
+timepoints
 timespec
 topdown
 trainingsetindex
@@ -173,6 +180,7 @@ unsmoothed
 userfeedback
 verticalalignment
 videotype
+viridis
 vsync
 weisfeiler
 wtrack

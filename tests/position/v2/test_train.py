@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pandas as pd
 import pytest
 
 
@@ -965,3 +966,29 @@ class TestTrainingHistory:
         tmp_path / "training_plot.png"
         # Test that file is created
         assert hasattr(model, "plot_training_history")
+
+    def test_plot_training_history_detailed(
+        self,
+        model,
+    ):
+        """Test detailed training history plot includes diagnostics panels."""
+        history = pd.DataFrame(
+            {
+                "iteration": list(range(20)),
+                "loss": [1.0 - i * 0.03 for i in range(20)],
+                "learning_rate": [0.001 for _ in range(20)],
+                "val_loss": [1.1 - i * 0.025 for i in range(20)],
+            }
+        )
+
+        with (
+            patch.object(model, "get_training_history", return_value=history),
+            patch("matplotlib.pyplot.show"),
+        ):
+            fig = model.plot_training_history(
+                {"model_id": "test_model"}, detailed=True
+            )
+
+        assert len(fig.axes) == 3
+        assert fig.axes[1].get_ylabel() == "Validation Loss"
+        assert fig.axes[2].get_ylabel() == "Learning Rate"

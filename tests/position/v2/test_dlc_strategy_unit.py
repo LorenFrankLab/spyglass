@@ -40,9 +40,12 @@ def test_dlc_strategy_prepare_dataset(pv2_train, tmp_path, skip_if_no_dlc):
             config_path, params, config, model_instance
         )
 
-        # Verify only filtered parameters were passed
+        # Verify only filtered parameters were passed (userfeedback=False always added)
         mock_create.assert_called_once_with(
-            str(config_path), batch_size=8, TrainingFraction=0.95
+            str(config_path),
+            batch_size=8,
+            TrainingFraction=0.95,
+            userfeedback=False,
         )
         model_instance._info_msg.assert_called()
 

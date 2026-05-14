@@ -22,7 +22,12 @@ class TestCreateProjectUnit:
         self.model = model  # pylint: disable=attribute-defined-outside-init
 
     def _make_fake_config(self, tmp_path):
-        """Write a minimal config.yaml for save_yaml round-trip."""
+        """Write a minimal config.yaml for save_yaml round-trip.
+
+        Also creates ``vid.avi`` inside *tmp_path* so that the
+        file-existence pre-flight check in ``create_project`` passes when
+        tests mock ``VideoFile.get_abs_paths`` to return that path.
+        """
         import yaml
 
         cfg = {
@@ -34,6 +39,7 @@ class TestCreateProjectUnit:
         }
         cfg_path = tmp_path / "config.yaml"
         cfg_path.write_text(yaml.safe_dump(cfg))
+        (tmp_path / "vid.avi").touch()  # satisfy Path.exists() check
         return cfg_path
 
     def test_raises_import_error_without_dlc(self, tmp_path):

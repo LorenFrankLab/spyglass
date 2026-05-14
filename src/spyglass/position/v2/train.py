@@ -31,8 +31,8 @@ from spyglass.position.utils.yaml_io import load_yaml
 from spyglass.position.v2.utils.skeleton import (
     build_labeled_graph,
     is_duplicate_skeleton,
-    normalize_label,
     norm_edges,
+    normalize_label,
     shape_hash_from_edges,
     validate_skeleton_graph,
 )
@@ -43,6 +43,35 @@ from spyglass.position.v2.utils.training_io import (
 )
 from spyglass.position.v2.video import VidFileGroup
 from spyglass.utils import SpyglassMixin
+
+
+def prompt_default(key: str, default, abort_value: str = "n") -> str:
+    """Prompt the user for a value, returning the default on empty input.
+
+    Parameters
+    ----------
+    key : str
+        Label shown in the prompt.
+    default : any
+        Default value returned when the user presses Enter without input.
+    abort_value : str, optional
+        Input that triggers a RuntimeError ("Aborted by user"), by default "n".
+
+    Returns
+    -------
+    str
+        The user's response, or *default* cast to str when input is blank.
+
+    Raises
+    ------
+    RuntimeError
+        If the user enters *abort_value*.
+    """
+    response = input(f"{key} [{default}]: ").strip()
+    if response == abort_value:
+        raise RuntimeError("Aborted by user")
+    return response if response else default
+
 
 # ------------------------------ Optional imports ------------------------------
 with suppress_print_from_package():
@@ -58,9 +87,7 @@ with suppress_print_from_package():
 # -------------------------------- Module setup --------------------------------
 warnings.filterwarnings("ignore", category=UserWarning, module="networkx")
 
-schema = dj.schema(
-    "cbroz_position_v2_train"
-)  # TODO: remove cbroz prefix  # pylint: disable=fixme
+schema = dj.schema("cbroz_position_v2_train")  # TODO: remove cbroz prefix
 
 
 # ----------------------------------- Helpers ----------------------------------
@@ -268,6 +295,7 @@ class Skeleton(SpyglassMixin, dj.Lookup):
         key: dict,
         name_similarity: float = 0.85,
         check_duplicates: bool = True,
+        accept_default: bool = False,
         **kwargs,
     ):
         """Insert the skeleton if no duplicate exists.
@@ -304,7 +332,8 @@ class Skeleton(SpyglassMixin, dj.Lookup):
 
         shape_hash = shape_hash_from_edges(bodyparts, edges)
 
-        if check_duplicates:
+        explicit_id = key.get("skeleton_id")
+        if check_duplicates and not explicit_id:
             for row in self & dict(hash=shape_hash):
                 row_bodyparts = self.get_bodyparts(row["skeleton_id"])
                 if is_duplicate_skeleton(
@@ -323,7 +352,7 @@ class Skeleton(SpyglassMixin, dj.Lookup):
                         )
                     return dict(skeleton_id=row["skeleton_id"])
 
-        skeleton_id = default_pk_name("skel", key)
+        skeleton_id = key.get("skeleton_id") or default_pk_name("skel", key)
         insert_pk = dict(skeleton_id=skeleton_id)
         super().insert1(
             dict(insert_pk, bodyparts=bodyparts, edges=edges, hash=shape_hash),
@@ -705,8 +734,8 @@ class ModelParams(SpyglassMixin, dj.Lookup):
         strategy = ToolStrategyFactory.create_strategy(tool)
         return strategy.append_aliases(params)
 
-    def insert1(self, key, **kwargs):
-        """Insert model parameters with auto-generated name.
+    def insert1(self, key, accept_default: bool = False, **kwargs):
+        """Insert model parameters after validation and duplicate check.
 
         1. Check if key is a dictionary
         2. Check if tool is supported
@@ -904,6 +933,9 @@ class Model(SpyglassMixin, dj.Computed):
         # Store training metadata as JSON string (NWB-compatible)
         import json
 
+        lm = (
+            metadata.latest_model
+        )  # may be {} if get_latest_model_info missed dir
         training_metadata = {
             "model_id": metadata.model_id,
             "tool": "DLC",
@@ -912,10 +944,12 @@ class Model(SpyglassMixin, dj.Computed):
             "model_path": _to_stored_path(metadata.model_path),
             "shuffle": metadata.params.get("shuffle", 1),
             "trainingsetindex": metadata.params.get("trainingsetindex", 0),
-            "iteration": metadata.latest_model["iteration"],
-            "trainFraction": metadata.latest_model["trainFraction"],
-            "snapshot": metadata.latest_model.get("snapshot", ""),
-            "trained_date": metadata.latest_model["date_trained"].isoformat(),
+            "iteration": lm.get("iteration", 0),
+            "trainFraction": lm.get("trainFraction", 0.0),
+            "snapshot": lm.get("snapshot", ""),
+            "trained_date": (
+                lm["date_trained"].isoformat() if lm.get("date_trained") else ""
+            ),
             "parent_id": metadata.parent_id or "",
             "skeleton_id": metadata.skeleton_id,
         }
@@ -1456,7 +1490,10 @@ class Model(SpyglassMixin, dj.Computed):
         return combined
 
     def plot_training_history(
-        self, model_key: dict, save_path: Union[Path, str, None] = None
+        self,
+        model_key: dict,
+        save_path: Union[Path, str, None] = None,
+        detailed: bool = False,
     ):
         """Plot training loss curves for a model with enhanced visualization.
 
@@ -1470,6 +1507,9 @@ class Model(SpyglassMixin, dj.Computed):
             Primary key for Model entry
         save_path : Union[Path, str, None], optional
             Path to save plot. If None, displays plot, by default None
+        detailed : bool, optional
+            If True, renders additional diagnostics including a smoothed
+            loss trend and optional validation loss panel, by default False
 
         Returns
         -------
@@ -1502,93 +1542,52 @@ class Model(SpyglassMixin, dj.Computed):
         if not has_loss:
             raise ValueError("No loss data found to plot")
 
-        # Setup plot with subplots if learning rate available
-        n_plots = 2 if has_lr else 1
-        fig, axes = plt.subplots(
-            n_plots, 1, figsize=(10, 8 if n_plots == 2 else 6)
-        )
-        if n_plots == 1:
-            axes = [axes]  # Make it consistent
-
         # X-axis: iteration if available, otherwise index
         x_data = df["iteration"] if has_iteration else range(len(df))
         x_label = "Training Iteration" if has_iteration else "Step"
 
-        # Plot 1: Loss curve
-        axes[0].plot(x_data, df["loss"], "b-", linewidth=2, alpha=0.8)
-        axes[0].set_xlabel(x_label, fontsize=12)
-        axes[0].set_ylabel("Loss", fontsize=12)
-        axes[0].set_title(
-            f"Training Loss Curve: {model_key['model_id']}",
-            fontsize=14,
-            fontweight="bold",
+        fig, axes = self._setup_training_history_figure(
+            plt=plt, detailed=detailed, has_lr=has_lr
         )
-        axes[0].grid(True, alpha=0.3)
 
-        # Add improvement statistics to loss plot
-        if len(df) > 1 and has_loss:
-            initial_loss = df["loss"].iloc[0]
-            final_loss = df["loss"].iloc[-1]
-            min_loss = df["loss"].min()
-            improvement = (
-                ((initial_loss - final_loss) / initial_loss) * 100
-                if initial_loss > 0
-                else 0
-            )
+        self._plot_training_loss_panel(
+            ax=axes[0],
+            df=df,
+            x_data=x_data,
+            x_label=x_label,
+            model_id=model_key["model_id"],
+            has_iteration=has_iteration,
+            detailed=detailed,
+        )
 
-            # Add text box with statistics
-            stats_text = (
-                f"Initial: {initial_loss:.6f}\n"
-                f"Final: {final_loss:.6f}\n"
-                f"Best: {min_loss:.6f}\n"
-                f"Improvement: {improvement:.1f}%"
+        if detailed:
+            self._plot_validation_panel(
+                ax=axes[1],
+                df=df,
+                x_data=x_data,
             )
-            axes[0].text(
-                0.02,
-                0.98,
-                stats_text,
-                transform=axes[0].transAxes,
-                verticalalignment="top",
-                bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8),
-                fontsize=9,
-            )
-
-            # Add final loss annotation (original behavior)
-            if has_iteration:
-                final_iter = df["iteration"].iloc[-1]
-                axes[0].annotate(
-                    f"Final: {final_loss:.4f}",
-                    xy=(final_iter, final_loss),
-                    xytext=(10, 10),
-                    textcoords="offset points",
-                    bbox=dict(boxstyle="round,pad=0.5", fc="yellow", alpha=0.7),
-                    arrowprops=dict(
-                        arrowstyle="->", connectionstyle="arc3,rad=0"
-                    ),
+            if has_lr:
+                self._plot_learning_rate_panel(
+                    ax=axes[2],
+                    x_data=x_data,
+                    learning_rate=df["learning_rate"],
+                    x_label=x_label,
+                    title_fontsize=13,
                 )
-
-        # Plot 2: Learning rate (if available)
-        if has_lr and n_plots == 2:
-            axes[1].plot(
-                x_data, df["learning_rate"], "r-", linewidth=2, alpha=0.8
+            else:
+                axes[1].set_xlabel(x_label, fontsize=12)
+        elif has_lr:
+            self._plot_learning_rate_panel(
+                ax=axes[1],
+                x_data=x_data,
+                learning_rate=df["learning_rate"],
+                x_label=x_label,
+                title_fontsize=14,
             )
-            axes[1].set_xlabel(x_label, fontsize=12)
-            axes[1].set_ylabel("Learning Rate", fontsize=12)
-            axes[1].set_title(
-                "Learning Rate Schedule", fontsize=14, fontweight="bold"
-            )
-            axes[1].grid(True, alpha=0.3)
-            axes[1].set_yscale("log")  # Learning rate often better on log scale
 
         # Add source file information if available
         if has_source:
-            unique_sources = df["source_file"].nunique()
-            if unique_sources > 1:
-                source_text = (
-                    f"Data from {unique_sources} files: "
-                    + f"{', '.join(df['source_file'].unique())}"
-                )
-                fig.suptitle(source_text, fontsize=10, y=0.02)
+            self._add_training_source_summary(fig=fig, df=df)
 
         plt.tight_layout()
 
@@ -1604,6 +1603,162 @@ class Model(SpyglassMixin, dj.Computed):
             plt.show()
 
         return fig
+
+    def _setup_training_history_figure(self, plt, detailed: bool, has_lr: bool):
+        """Create figure and axes layout for training-history plots."""
+        if detailed:
+            n_plots = 3 if has_lr else 2
+            fig, axes = plt.subplots(
+                n_plots,
+                1,
+                figsize=(11, 10 if has_lr else 8),
+                sharex=True,
+            )
+        else:
+            n_plots = 2 if has_lr else 1
+            fig, axes = plt.subplots(
+                n_plots,
+                1,
+                figsize=(10, 8 if n_plots == 2 else 6),
+            )
+
+        if n_plots == 1:
+            return fig, [axes]
+
+        return fig, list(axes)
+
+    def _plot_training_loss_panel(
+        self,
+        ax,
+        df: pd.DataFrame,
+        x_data,
+        x_label: str,
+        model_id: str,
+        has_iteration: bool,
+        detailed: bool,
+    ):
+        """Plot primary loss panel and overlay summary diagnostics."""
+        ax.plot(x_data, df["loss"], "b-", linewidth=2, alpha=0.8)
+        ax.set_xlabel(x_label, fontsize=12)
+        ax.set_ylabel("Loss", fontsize=12)
+        ax.set_title(
+            f"Training Loss Curve: {model_id}",
+            fontsize=14,
+            fontweight="bold",
+        )
+        ax.grid(True, alpha=0.3)
+
+        if detailed and len(df) > 10:
+            # Show trend independently of noisy step-to-step changes.
+            window = max(10, len(df) // 20)
+            smoothed_loss = df["loss"].rolling(window=window).mean()
+            ax.plot(
+                x_data,
+                smoothed_loss,
+                "g-",
+                linewidth=2,
+                alpha=0.8,
+                label=f"Smoothed Loss (window={window})",
+            )
+            ax.legend(loc="upper right", fontsize=9)
+
+        if len(df) > 1:
+            self._annotate_training_loss_stats(
+                ax=ax,
+                df=df,
+                has_iteration=has_iteration,
+            )
+
+    def _annotate_training_loss_stats(
+        self,
+        ax,
+        df: pd.DataFrame,
+        has_iteration: bool,
+    ):
+        """Add summary statistics and final-point annotation to loss panel."""
+        initial_loss = df["loss"].iloc[0]
+        final_loss = df["loss"].iloc[-1]
+        min_loss = df["loss"].min()
+        improvement = (
+            ((initial_loss - final_loss) / initial_loss) * 100
+            if initial_loss > 0
+            else 0
+        )
+
+        stats_text = (
+            f"Initial: {initial_loss:.6f}\n"
+            f"Final: {final_loss:.6f}\n"
+            f"Best: {min_loss:.6f}\n"
+            f"Improvement: {improvement:.1f}%"
+        )
+        ax.text(
+            0.02,
+            0.98,
+            stats_text,
+            transform=ax.transAxes,
+            verticalalignment="top",
+            bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8),
+            fontsize=9,
+        )
+
+        if has_iteration:
+            final_iter = df["iteration"].iloc[-1]
+            ax.annotate(
+                f"Final: {final_loss:.4f}",
+                xy=(final_iter, final_loss),
+                xytext=(10, 10),
+                textcoords="offset points",
+                bbox=dict(boxstyle="round,pad=0.5", fc="yellow", alpha=0.7),
+                arrowprops=dict(arrowstyle="->", connectionstyle="arc3,rad=0"),
+            )
+
+    def _plot_validation_panel(self, ax, df: pd.DataFrame, x_data):
+        """Plot validation loss panel or fallback message."""
+        if "val_loss" in df.columns:
+            ax.plot(x_data, df["val_loss"], "m-", linewidth=2, alpha=0.85)
+        else:
+            ax.text(
+                0.5,
+                0.5,
+                "Validation data not available",
+                ha="center",
+                va="center",
+                transform=ax.transAxes,
+            )
+
+        ax.set_ylabel("Validation Loss", fontsize=12)
+        ax.set_title("Validation Loss", fontsize=13, fontweight="bold")
+        ax.grid(True, alpha=0.3)
+
+    def _plot_learning_rate_panel(
+        self,
+        ax,
+        x_data,
+        learning_rate,
+        x_label: str,
+        title_fontsize: int,
+    ):
+        """Plot learning-rate schedule panel with log-scaled y-axis."""
+        ax.plot(x_data, learning_rate, "r-", linewidth=2, alpha=0.8)
+        ax.set_xlabel(x_label, fontsize=12)
+        ax.set_ylabel("Learning Rate", fontsize=12)
+        ax.set_title(
+            "Learning Rate Schedule",
+            fontsize=title_fontsize,
+            fontweight="bold",
+        )
+        ax.grid(True, alpha=0.3)
+        ax.set_yscale("log")
+
+    def _add_training_source_summary(self, fig, df: pd.DataFrame):
+        """Add data-source summary subtitle when multiple CSV sources exist."""
+        unique_sources = df["source_file"].nunique()
+        if unique_sources > 1:
+            source_text = (
+                f"Data from {unique_sources} files: "
+                + f"{', '.join(df['source_file'].unique())}"
+            )
+            fig.suptitle(source_text, fontsize=10, y=0.02)
 
     def create_project(
         self,
@@ -1645,7 +1800,9 @@ class Model(SpyglassMixin, dj.Computed):
             DLC). Default 20.
         project_directory : str, optional
             Directory in which to create the project folder. Defaults to
-            ``spyglass.settings.pose_project_dir``.
+            ``spyglass.settings.pose_project_dir`` (set via ``pose_dirs.project``
+            in ``dj_local_conf.json``).  Falls back to ``~/dlc_projects`` if
+            that setting is not configured.
         **kwargs
             Passed through to ``deeplabcut.create_new_project()`` and/or
             ``deeplabcut.extract_frames()`` based on each function's
@@ -1667,8 +1824,8 @@ class Model(SpyglassMixin, dj.Computed):
             admins; this error is raised by ``Skeleton().insert1()`` (which
             delegates to ``BodyPart.insert1()``), not by this method.
         FileNotFoundError
-            If a video path cannot be resolved from ``VideoFile`` or does not
-            exist on disk.
+            If a video path cannot be resolved from ``VideoFile``, does not
+            exist on disk, or is on an inaccessible network mount.
         ValueError
             If *video_list* is empty or no valid videos are found.
 
@@ -1731,45 +1888,95 @@ class Model(SpyglassMixin, dj.Computed):
                 "No valid training videos found. Check video_list entries."
             )
 
+        missing = [p for p in resolved_videos if not Path(p).exists()]
+        if missing:
+            raise FileNotFoundError(
+                "The following training videos could not be found on disk "
+                "(check that the relevant network mounts are accessible):\n"
+                + "\n".join(f"  {p}" for p in missing)
+            )
+
         vid_group_key = VidFileGroup.create_from_files(
             video_files=resolved_videos,
             description=f"Training videos: {project_name}",
         )
 
-        # ── 2. Create the DLC project folder ─────────────────────────────────
+        # ── 2. Create or reuse the DLC project folder ─────────────────────────
+        # Idempotency: search for an existing project under project_directory
+        # whose config.yaml lists the same video basenames.  If found, skip
+        # creation and frame extraction and return the existing config.
         project_directory = str(
             project_directory
             or pose_project_dir
             or Path.home() / "dlc_projects"
         )
 
-        config_path = Path(
-            create_new_project(
-                project=project_name,
-                experimenter=sanitize_filename(project_name),
-                videos=resolved_videos,
-                working_directory=project_directory,
-                copy_videos=True,
-                multianimal=False,
-                **create_kwargs,
-            )
-        )
-        self._info_msg(f"DLC project created: {config_path}")
+        resolved_video_basenames = {Path(v).name for v in resolved_videos}
+        config_path = None
+        for candidate in sorted(
+            Path(project_directory).glob(f"{project_name}-*-*/config.yaml")
+        ):
+            try:
+                _, existing_cfg = read_yaml(candidate.parent)
+            except Exception:
+                continue
+            existing_videos = {
+                Path(v).name for v in existing_cfg.get("video_sets", {}).keys()
+            }
+            # Match if existing config's videos are a non-empty subset of
+            # resolved_videos — DLC may silently drop some invalid files from
+            # video_sets even though it copies them, so strict equality would
+            # produce false negatives.
+            if existing_videos and existing_videos.issubset(
+                resolved_video_basenames
+            ):
+                config_path = candidate.resolve()
+                self._info_msg(f"Reusing existing DLC project: {config_path}")
+                break
+
+        if config_path is None:
+            config_path = Path(
+                create_new_project(
+                    project=project_name,
+                    experimenter=sanitize_filename(project_name),
+                    videos=resolved_videos,
+                    working_directory=project_directory,
+                    copy_videos=True,
+                    multianimal=False,
+                    **create_kwargs,
+                )
+            ).resolve()
+            self._info_msg(f"DLC project created: {config_path}")
 
         # ── 3. Patch numframes2pick via dlc_io utilities ──────────────────────
         _, cfg = read_yaml(config_path.parent)
         cfg["numframes2pick"] = frames_per_video
+        cfg["bodyparts"] = bodyparts
         config_path = Path(
             save_yaml(config_path.parent, cfg, filename="config")
         )
 
-        # ── 4. Extract frames ─────────────────────────────────────────────────
-        algo = extract_kwargs["algo"]
-        self._info_msg(
-            f"Extracting {frames_per_video} frames/video (algo='{algo}')…"
+        # ── 4. Extract frames (skip if frames already exist) ──────────────────
+        labeled_data_dir = config_path.parent / "labeled-data"
+        already_extracted = (
+            any(
+                list(d.glob("img*.png"))
+                for d in labeled_data_dir.iterdir()
+                if d.is_dir()
+            )
+            if labeled_data_dir.exists()
+            else False
         )
-        extract_frames(str(config_path), **extract_kwargs)
-        self._info_msg("Frame extraction complete.")
+
+        if already_extracted:
+            self._info_msg("Frames already extracted — skipping.")
+        else:
+            algo = extract_kwargs["algo"]
+            self._info_msg(
+                f"Extracting {frames_per_video} frames/video (algo='{algo}')…"
+            )
+            extract_frames(str(config_path), **extract_kwargs)
+            self._info_msg("Frame extraction complete.")
 
         # ── 5. Insert (or retrieve) Skeleton ──────────────────────────────────
         # BodyPart validation is deferred to Skeleton().insert1(): unknown

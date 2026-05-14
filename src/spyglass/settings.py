@@ -670,6 +670,9 @@ if sg_config.load_failed:  # Failed to load
     pose_project_dir = None
     pose_video_dir = None
     pose_output_dir = None
+    pose_project_dir = None
+    pose_video_dir = None
+    pose_output_dir = None
     dlc_project_dir = None
     dlc_video_dir = None
     dlc_output_dir = None

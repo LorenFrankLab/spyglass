@@ -40,12 +40,13 @@
 # while simplifying the number of tables. The V2 pipeline:
 #
 # - **Reduces complexity**: just a few main tables
-# - **Multi-tool support**: Works with DLC with planned expansion to include SLEAP
+# - **Multi-tool support**: Works with DLC with planned expansion for SLEAP
 # - **Flexible workflows**: Train models in Spyglass or import pre-trained ones
 # - **NWB-native storage**: Uses ndx-pose extension for standardized data
 # - **Simplified processing**: Single PoseV2 table handles all post-processing
 #
-# This tutorial assumes you have already ingested an NWB session file. It covers:
+# This tutorial assumes you have already ingested an NWB session file.
+# It covers:
 #
 # - **Primary path**: Training a model from scratch within Spyglass
 # - **Alternative path**: Importing a pre-trained model (DLC, SLEAP, or NWB)
@@ -64,12 +65,12 @@
 #     - Load packages & configure environment
 #     - Connect to database
 # - [Which path?](#DecisionTree) - Decision tree
-# - [Path A: Train a New Model](#PathA) - Create a DLC project & train *(start here if no model yet)*
+# - [Path A: Train a New Model](#PathA) - Create a DLC project & train
 #     - Choose training videos from `VideoFile`
 #     - Define body parts and skeleton
 #     - `Model.create_project()` → label frames → train
 #     - Training loss curve visualization
-# - [Path B: Import a Pre-Trained Model](#PathB) - Import existing model *(skip if you did Path A)*
+# - [Path B: Import a Pre-Trained Model](#PathB) - Import existing model
 #     - Find or download a pretrained model (DLC Model Zoo, DANDI)
 #     - Import from a V1 Spyglass model (`Model.import_from_v1()`)
 #     - Import any DLC project directly (`config.yaml`)
@@ -83,7 +84,7 @@
 #     - Set centroid method
 #     - Configure smoothing parameters
 # - [Data Processing](#PoseV2) - Calculate final pose data
-#     - Run pose processing pipeline (velocity, orientation, centroid, smoothing)
+#     - Run pose processing (velocity, orientation, centroid, smoothing)
 #     - Validate results
 # - [Analysis](#FetchData) - Retrieve and visualize results
 #     - Fetch processed data
@@ -92,7 +93,7 @@
 #
 # #### Advanced Features
 #
-# - [Model Evaluation](#ModelEvaluation) - Training curves and performance metrics
+# - [Model Evaluation](#ModelEvaluation) - Training curves & performance metrics
 # - [Video Generation](#VideoGeneration) - Create annotated outputs
 #
 # #### Reference
@@ -183,11 +184,12 @@ print("All imports successful!")
 # ### Diagram
 
 # %%
-# Full V2 pipeline diagram: video groups → training → estimation → pose processing
+# Full V2 pipeline: video groups → training → estimation → pose processing
 dj.Diagram(video) + dj.Diagram(train) + dj.Diagram(estim) + dj.Diagram(PoseV2)
 
 # %% [markdown]
-# For a refresher on reading diagrams, see [this doc](https://docs.datajoint.com/how-to/read-diagrams/)
+# For a refresher on reading diagrams, see
+# [this doc](https://docs.datajoint.com/how-to/read-diagrams/)
 #
 # A few key points before diving in:
 #
@@ -302,11 +304,11 @@ from make_example_dlc_project import (  # noqa: E402
     make_dlc_project,
 )
 
-# Shared state initialised here; both paths (A and B) update these variables.
+# Shared state initialized here; both paths (A and B) update these variables.
+DEMO_OUTPUT_DIR = None
 model_key = None
 nwb_file_name = None
 inf_vid_path = None
-_demo_output_dir = None
 training_vid_group_id = None
 config_path = None
 
@@ -406,7 +408,7 @@ print("Next: label the extracted frames, then return to train below.")
 
 # %%
 # Training parameters — use low maxiters for a quick demo
-_train_params = {
+train_params = {
     "trainingsetindex": 0,
     "shuffle": 1,
     "gputouse": None,
@@ -418,12 +420,12 @@ _train_params = {
     "saveiters": 2,
     "project_path": str(config_path.parent),
 }
-_train_params_id = "path_a_demo_10iter"
+TRAIN_PARAMS_ID = "path_a_demo_10iter"
 
 ModelParams.insert1(
     {
-        "model_params_id": _train_params_id,
-        "params": _train_params,
+        "model_params_id": TRAIN_PARAMS_ID,
+        "params": train_params,
         "tool": "DLC",
         "skeleton_id": skeleton_id,
     },
@@ -435,7 +437,7 @@ training_vid_group_key = VidFileGroup.create_from_dlc_config(config_path)
 training_vid_group_id = training_vid_group_key["vid_group_id"]
 
 _sel_key = {
-    "model_params_id": _train_params_id,
+    "model_params_id": TRAIN_PARAMS_ID,
     "tool": "DLC",
     "vid_group_id": training_vid_group_id,
     "parent_id": None,
@@ -443,11 +445,11 @@ _sel_key = {
 ModelSelection.insert1(_sel_key, skip_duplicates=True)
 
 if len(Model & _sel_key) > 0:
-    print(f"Model '{_train_params_id}' already exists — skipping training")
+    print(f"Model '{TRAIN_PARAMS_ID }' already exists — skipping training")
 else:
     print("Starting training (10 iterations) ...")
     Model.populate(_sel_key, display_progress=True)
-    print(f"Model '{_train_params_id}' trained and saved")
+    print(f"Model '{TRAIN_PARAMS_ID }' trained and saved")
 
 model_key = (Model & _sel_key).fetch1()
 print(f"model_key: {model_key['model_id']}")
@@ -469,7 +471,7 @@ if model_key:
 # **Goal**: Load an existing DLC, SLEAP, or ndx-pose model into Spyglass.
 #
 # **What you'll accomplish**:
-# - Import a DeepLabCut project (`config.yaml`), SLEAP NWB file, or DLC h5 output
+# - Import a DeepLabCut project (`config.yaml`), SLEAP file, or DLC h5 output
 # - Understand skeleton and bodypart organization
 # - Create video file groups for analysis
 #
@@ -576,19 +578,19 @@ if model_key is None:
 # #### Validate model (Path B)
 
 # %%
-if model_key and not (Model() & model_key):
+if model_key and not Model() & model_key:
     raise ValueError(f"❌ Model entry not found : {model_key}")
 
 if model_key:
-    _mp = (
+    model_params = (
         ModelParams() & {"model_params_id": model_key["model_params_id"]}
     ).fetch1()
-    skeleton_id = _mp.get("skeleton_id")
+    skeleton_id = model_params.get("skeleton_id")
     if not (Skeleton() & {"skeleton_id": skeleton_id}).fetch1("KEY"):
         raise ValueError(f"❌ Skeleton not found for model: {model_key}")
-    if _vgid := model_key.get("vid_group_id"):
-        if not (VidFileGroup() & {"vid_group_id": _vgid}):
-            raise ValueError(f"❌ Video group not found: {_vgid}")
+    if vid_group_id := model_key.get("vid_group_id"):
+        if not VidFileGroup() & {"vid_group_id": vid_group_id}:
+            raise ValueError(f"❌ Video group not found: {vid_group_id}")
     training_vid_group_id = model_key["vid_group_id"]
     print("✅ Path B model import validated")
 
@@ -784,21 +786,24 @@ if model_key is None:
 # %% [markdown]
 # Inference in V2 follows a three-step Spyglass pattern:
 #
-# 1. **`PoseEstimParams`** — name a set of inference parameters (device, batch size, etc.)
-# 2. **`PoseEstimSelection`** — pair a model with a video group and choose `task_mode='trigger'` (run inference) or `'load'` (read existing output files on disk)
-# 3. **`PoseEstim.populate()`** — executes inference and stores results in an NWB file via ndx-pose
+# 1. **`PoseEstimParams`** — name a set of inference parameters
+#     (device, batch size, etc.)
+# 2. **`PoseEstimSelection`** — pair a model with a video group and choose
+#     `task_mode='trigger'` (run inference) or `'load'` (read existing output)
+# 3. **`PoseEstim.populate()`** — executes inference and stores results in an
+#     NWB file via ndx-pose
 #
-# > **`task_mode='load'` vs `ImportedPose`**: Use `task_mode='load'` when DLC/SLEAP
-# > has already written output files on disk and you want to read them into Spyglass.
-# > Use `ImportedPose` when your results already exist in NWB format from another
-# > pipeline.
+# > **`task_mode='load'` vs `ImportedPose`**: Use `task_mode='load'` when
+# > DLC/SLEAP has already written output files on disk and you want to read them
+# > into Spyglass. Use `ImportedPose` when your results already exist in NWB
+# > format from another pipeline.
 
 # %% [markdown]
 # ##### Step 1 — Inference parameters (`PoseEstimParams`)
 #
-# In this table, `params_hash` is a unique identifier for the set of params used.
-# This will raise an error if you attempt to insert a new entry with `params`
-# matching an existing row.
+# In this table, `params_hash` is a unique identifier for the set of params
+# used.  # This will raise an error if you attempt to insert a new entry with
+# `params` matching an existing row.
 
 # %%
 # Define custom params for your hardware:
@@ -833,10 +838,10 @@ if not (inf_vid_path and model_key):
     raise ValueError("⚠️ Missing video or model - skipping PoseEstimSelection")
 
 # Check/create required params entry
-params_id = "cpu_batch8"  # or "gpu_batch8" depending on your hardware
+PARAMS_ID = "cpu_batch8"  # or "gpu_batch8" depending on your hardware
 PoseEstimParams.insert_params(
     params={"device": "cpu", "batch_size": 8},
-    params_id=params_id,
+    params_id=PARAMS_ID,
     skip_duplicates=True,
 )
 
@@ -853,9 +858,9 @@ inf_vid_group_key = VidFileGroup().insert1(
 estim_selection_key = {
     "model_id": model_key["model_id"],
     "vid_group_id": inf_vid_group_key["vid_group_id"],
-    "pose_estim_params_id": params_id,
-    "task_mode": "load" if _demo_output_dir else "trigger",
-    "output_dir": str(_demo_output_dir) if _demo_output_dir else "",
+    "pose_estim_params_id": PARAMS_ID,
+    "task_mode": "load" if DEMO_OUTPUT_DIR else "trigger",
+    "output_dir": str(DEMO_OUTPUT_DIR) if DEMO_OUTPUT_DIR else "",
 }
 
 PoseEstimSelection().insert1(estim_selection_key, skip_duplicates=True)
@@ -906,7 +911,7 @@ print(pose_df.head())
 
 # %% [markdown]
 # <details>
-# <summary>🚨 <b>Troubleshooting Pose Estimation</b> (Click if you encountered errors)</summary>
+# <summary>🚨 <b>Troubleshooting Pose Estimation</b></summary>
 #
 # ### Common Issues & Solutions
 #
@@ -952,7 +957,8 @@ print(pose_df.head())
 #
 # # Inspect your specific entries
 # print("\nYour model:", Model() & model_key)
-# print("Your video group:", VidFileGroup() & inf_vid_group_key if inf_vid_group_key else "None")
+# vid_group = VidFileGroup() & inf_vid_group_key if inf_vid_group_key else None
+# print(f"Your video group: {vid_group}")
 # print("Your estimation:", PoseEstim() & estim_key if estim_key else "None")
 # ```
 #
@@ -1001,7 +1007,7 @@ print(pose_df.head())
 #
 # **Smoothing methods at a glance**:
 #
-# - `moving_avg` — causal boxcar; good general-purpose choice, minimal distortion
+# - `moving_avg` — causal boxcar; good general-purpose choice, little distortion
 # - `savgol` — Savitzky-Golay polynomial fit; preserves peak velocities better
 # - `gaussian` — symmetric Gaussian; best for display / offline analysis
 #
@@ -1024,10 +1030,10 @@ PoseParams()
 # Change the name to any entry shown in the table above.
 import json
 
-_params_to_inspect = "default"
+PARAMS_TO_INSPECT = "default"
 
-if PoseParams() & {"pose_params_id": _params_to_inspect}:
-    _row = (PoseParams() & {"pose_params_id": _params_to_inspect}).fetch1()
+if PoseParams() & {"pose_params_id": PARAMS_TO_INSPECT}:
+    _row = (PoseParams() & {"pose_params_id": PARAMS_TO_INSPECT}).fetch1()
     print("--- orient ---")
     print(json.dumps(_row["orient"], indent=2))
     print("\n--- centroid ---")
@@ -1036,12 +1042,12 @@ if PoseParams() & {"pose_params_id": _params_to_inspect}:
     print(json.dumps(_row["smoothing"], indent=2))
 else:
     print(
-        f"No entry named '{_params_to_inspect}'. "
+        f"No entry named '{PARAMS_TO_INSPECT}'. "
         "Run PoseParams.insert_default() first, or change _params_to_inspect."
     )
 
 # %% [markdown]
-# Search all entries that match a specific sub-field value (DataJoint JSON dot-notation):
+# Search all entries that match a specific sub-field value (DataJoint JSON):
 
 # %%
 # Example: find entries where likelihood_thresh > 0.5 (adjust as needed)
@@ -1165,7 +1171,7 @@ if not estim_key:
 
 # Use custom params if available, otherwise default
 params_name = "tutorial_custom"
-if not (PoseParams() & {"pose_params_id": params_name}):
+if not PoseParams() & {"pose_params_id": params_name}:
     PoseParams.insert_default(skip_duplicates=True)
     params_name = "default"
 
@@ -1603,7 +1609,8 @@ plt.show()
 # #### **Parameter Configuration Issues**
 #
 # **"Bodypart not found"**
-# - Check available bodyparts: `(Skeleton.BodyPart() & {"skeleton_id": your_id}).fetch()`
+# - Check available bodyparts:
+#   `(Skeleton.BodyPart() & {"skeleton_id": your_id}).fetch()`
 # - Verify bodypart names match exactly (case-sensitive)
 # - Use `PoseParams.insert_default()` as fallback
 #
@@ -1645,8 +1652,8 @@ plt.show()
 #
 # #### Table and Naming Changes
 #
-# Position V2 significantly streamlines the table structure compared to V1. Here's
-# a comprehensive migration mapping:
+# Position V2 significantly streamlines the table structure compared to V1. i
+# Here's a comprehensive migration mapping:
 #
 #
 # | V1 | V2 | Notes |
@@ -1691,9 +1698,11 @@ plt.show()
 #
 # #### Key consolidations in V2
 #
-# - `DLCCentroidParams` + `DLCOrientationParams` + `DLCSmoothInterpParams` → single `PoseParams` with three sub-dicts
+# - `DLCCentroidParams` + `DLCOrientationParams` + `DLCSmoothInterpParams`
+#     → single `PoseParams` with three sub-dicts
 # - `DLCModelInput` + `DLCModelSource` + `DLCModelParams` → single `ModelParams`
-# - Cohort pattern (`DLCSmoothInterpCohort*`) eliminated; `PoseV2` handles multi-part poses directly
+# - Cohort pattern (`DLCSmoothInterpCohort*`) eliminated; `PoseV2`
+#     handles multi-part poses directly
 # - Trodes position and video output tables have no V2 counterparts as V2 is
 #     focused on pose estimation from video, not direct position data
 #
@@ -1757,7 +1766,8 @@ plt.show()
 #
 # ### JSON Parameters
 #
-# Position V2 supports **native JSON columns** for enhanced parameter querying capabilities:
+# Position V2 supports **native JSON columns** for enhanced parameter querying
+# capabilities:
 #
 # ```python
 # # Example: ModelParams with JSON column (DataJoint v0.14+)
@@ -1781,7 +1791,8 @@ plt.show()
 # - 🛠️ **Built-in DataJoint support** - Automatic dot notation translation
 # - 🌐 **Cross-language compatibility** - JSON is universally supported
 #
-# **Migration Note:** Existing blob parameter tables continue to work unchanged. Consider JSON columns for new parameter tables requiring complex querying.
+# **Migration Note:** Existing blob parameter tables continue to work unchanged. i
+# Consider JSON columns for new parameter tables requiring complex querying.
 #
 # </details>
 #
@@ -1790,17 +1801,22 @@ plt.show()
 #
 # ### SLEAP Integration Roadmap
 #
-# Position V2 includes preliminary SLEAP support architecture but **SLEAP training is not yet functional**. Here's the current status:
+# Position V2 includes preliminary SLEAP support architecture but **SLEAP
+# training is not yet functional**. Here's the current status:
 #
 # #### ✅ **Available Now**
 #
-# - **Import Support**: Can import pre-trained SLEAP models via `Model.load()`, but not yet run inference.
-# - **Data Loading**: Can load existing SLEAP NWB files using `PoseEstim.load_from_nwb()`
+# - **Import Support**: Can import pre-trained SLEAP models via `Model.load()`,
+#     but not yet run inference.
+# - **Data Loading**: Can load existing SLEAP NWB files using
+#     `PoseEstim.load_from_nwb()`
 #
 # #### 🔄 **In Development**
 #
-# - **Training Pipeline**: The `train_model()` method raises `NotImplementedError`
-# - **Inference Integration**: SLEAP analysis integration with Position V2 workflows
+# - **Training Pipeline**: The `train_model()` method raises
+#    `NotImplementedError`
+# - **Inference Integration**: SLEAP analysis integration with Position V2
+#     workflows
 #
 # **Timeline**: Native SLEAP training support is planned for a future release.
 #
@@ -1817,16 +1833,20 @@ plt.show()
 # - [DataJoint Documentation](https://docs.datajoint.com/)
 #
 # ### Getting Help
-# - [GitHub Issues](https://github.com/LorenFrankLab/spyglass/issues) - Bug reports and feature requests
-# - [GitHub Discussions](https://github.com/LorenFrankLab/spyglass/discussions) - Questions and community support
-# - [Frank Lab Website](https://franklab.ucsf.edu/) - Lab resources and contact information
+# - [GitHub Issues](https://github.com/LorenFrankLab/spyglass/issues) \-
+#     Bug reports and feature requests
+# - [GitHub Discussions](https://github.com/LorenFrankLab/spyglass/discussions)
+#     \- Questions and community support
+# - [Frank Lab Website](https://franklab.ucsf.edu/) - Lab resources and contact
+#     information
 #
 # ### Related Notebooks
 # - [00_Setup.ipynb](./00_Setup.ipynb) - Initial Spyglass configuration
 # - [02_Insert_Data.ipynb](./02_Insert_Data.ipynb) - DataJoint basics
 # - [21_DLC.ipynb](./21_DLC.ipynb) - Legacy Position V1 pipeline
 # - [24_Linearization.ipynb](./24_Linearization.ipynb) - Convert 2D → 1D position
-# - [41_Decoding_Clusterless.ipynb](./41_Decoding_Clusterless.ipynb) - Use position for decoding
+# - [41_Decoding_Clusterless.ipynb](./41_Decoding_Clusterless.ipynb) \- Use
+#     position for decoding
 #
 
 # %% [markdown]
