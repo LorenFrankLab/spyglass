@@ -485,6 +485,7 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
     n_sessions_observed: int
     median_match_probability=NULL: float
     n_transitive_only_edges=0: int
+    policy_used: enum('strict', 'transitive', 'transitive_fallback')
     """
 
     class Member(SpyglassMixinPart):

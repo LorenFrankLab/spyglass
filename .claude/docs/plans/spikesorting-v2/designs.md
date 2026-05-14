@@ -441,8 +441,18 @@ class ArtifactDetectionSelection(SpyglassMixin, dj.Manual):
 
     @classmethod
     def insert_selection(cls, key: dict) -> dict:
-        """XOR-validates the two FKs; exactly one must be non-null.
-        Returns PK-only dict per shared-contracts."""
+        """XOR-validates the two FKs via the shared helper; exactly one
+        must be non-null. Returns PK-only dict per shared-contracts.
+
+        See shared-contracts.md § Nullable XOR Foreign-Key Pattern for
+        the full three-layer defense (insert + populate-time re-check + CI).
+        """
+        from spyglass.spikesorting.v2.utils import _validate_xor
+        _validate_xor(
+            "ArtifactDetectionSelection",
+            "recording_id", key.get("recording_id"),
+            "shared_artifact_group_name", key.get("shared_artifact_group_name"),
+        )
         ...
 
 
@@ -471,6 +481,20 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
 ```
 
 **Design change from v1**: v1 inserts the artifact-removed interval directly into `IntervalList` with `artifact_id` (UUID) as the `interval_list_name`. This collides with user-named intervals and uses `skip_duplicates=True` (forbidden in custom `make()`). v2 stores artifact intervals on its own part table and exposes `ArtifactDetection.get_artifact_removed_intervals(key)` for consumers.
+
+**XOR re-validation (Layer 2 of three-layer defense)**: `ArtifactDetection.make()` MUST re-run `_validate_xor` against the upstream `ArtifactDetectionSelection` row at the start of `make()`, mirroring `Sorting.make()`'s pattern. This catches rows inserted via `dj.Manual.insert1()` that bypassed `insert_selection()`. See shared-contracts.md § Nullable XOR Foreign-Key Pattern.
+
+```python
+def make(self, key):
+    sel = (ArtifactDetectionSelection & key).fetch1()
+    from spyglass.spikesorting.v2.utils import _validate_xor
+    _validate_xor(
+        "ArtifactDetectionSelection",
+        "recording_id", sel.get("recording_id"),
+        "shared_artifact_group_name", sel.get("shared_artifact_group_name"),
+    )
+    # ... rest of make() body
+```
 
 ---
 
@@ -544,7 +568,7 @@ class SortingSelection(SpyglassMixin, dj.Manual):
 
     @classmethod
     def insert_selection(cls, key: dict) -> dict:
-        """Validates XOR on the two recording FKs.
+        """Validates XOR on the two recording FKs via the shared helper.
 
         Exactly one of (recording_id, concat_recording_id) must be set;
         the other must be NULL. Phase 1's helper rejects
@@ -552,7 +576,16 @@ class SortingSelection(SpyglassMixin, dj.Manual):
         Phase 3 lifts that gate but still rejects concat rows with
         artifact_id because concat-wide artifact masking is out of scope.
         Returns a single PK-only dict per shared-contracts.
+
+        See shared-contracts.md § Nullable XOR Foreign-Key Pattern for
+        the three-layer defense.
         """
+        from spyglass.spikesorting.v2.utils import _validate_xor
+        _validate_xor(
+            "SortingSelection",
+            "recording_id", key.get("recording_id"),
+            "concat_recording_id", key.get("concat_recording_id"),
+        )
         ...
 
 
@@ -643,6 +676,16 @@ class Sorting(SpyglassMixin, dj.Computed):
 
     def make(self, key):
         sel = (SortingSelection & key).fetch1()
+
+        # 0. Re-validate XOR — defends against direct dj.Manual inserts
+        # that bypassed insert_selection(). See shared-contracts.md §
+        # Nullable XOR Foreign-Key Pattern. Layer 2 of three-layer defense.
+        from spyglass.spikesorting.v2.utils import _validate_xor
+        _validate_xor(
+            "SortingSelection",
+            "recording_id", sel.get("recording_id"),
+            "concat_recording_id", sel.get("concat_recording_id"),
+        )
 
         # 1. Load the pre-motion preprocessed recording from the cache.
         # For single-recording path: load from Recording (no motion correction).
@@ -770,18 +813,43 @@ class Sorting(SpyglassMixin, dj.Computed):
     def get_sorting(self, key) -> si.BaseSorting:
         ...
 
-    def get_unit_brain_regions(self, key) -> pd.DataFrame:
+    def get_unit_brain_regions(
+        self, key, *, allow_anchor_member: bool = False
+    ) -> pd.DataFrame:
         """Returns per-unit brain region (constant-time, reads Sorting.Unit).
+
+        For concat-backed sorts, the Sorting.Unit -> Electrode FK is anchored
+        to the first SessionGroup.Member. Returning that silently would mask
+        cross-session probe re-anatomization. Default behavior raises
+        ConcatBrainRegionAmbiguousError pointing the caller at
+        TrackedUnit.get_unit_brain_regions; pass allow_anchor_member=True to
+        opt into anchor-only resolution (returned with region_resolution
+        column = 'anchor_member' so downstream code can detect and warn).
 
         See shared-contracts § Unit-Level Brain Region Tracing.
         """
-        return (
+        sel = (SortingSelection & key).fetch1()
+        is_concat = sel.get("concat_recording_id") is not None
+        if is_concat and not allow_anchor_member:
+            raise ConcatBrainRegionAmbiguousError(
+                f"Sorting {key} is concat-backed (concat_recording_id="
+                f"{sel['concat_recording_id']}); the Sorting.Unit -> Electrode "
+                "FK is anchored to the first SessionGroup.Member and may not "
+                "reflect later members' regions. Use "
+                "TrackedUnit.get_unit_brain_regions for per-session resolution, "
+                "or pass allow_anchor_member=True to accept anchor-only output."
+            )
+        rows = (
             (self.Unit & key) * Electrode * BrainRegion
         ).fetch(
             "unit_id", "electrode_id", "region_name", "peak_amplitude_uV",
             "n_spikes",
             as_dict=True,
         )
+        resolution = "anchor_member" if is_concat else "single_session"
+        for r in rows:
+            r["region_resolution"] = resolution
+        return rows
 
     def get_analyzer(self, key) -> si.SortingAnalyzer:
         """See shared-contracts.md SortingAnalyzer layout.
@@ -887,8 +955,14 @@ class CurationV2(SpyglassMixin, dj.Manual):
     #                                            Electrode * BrainRegion across ALL
     #                                            electrodes in the sort group (NOT
     #                                            fetch(limit=1) as v1 does).
-    #   get_unit_brain_regions(key, include_labels=None) -> pd.DataFrame
-    #       (reads CurationV2.Unit; optionally filters by UnitLabel)
+    #   get_unit_brain_regions(key, *, include_labels=None,
+    #                          allow_anchor_member=False) -> pd.DataFrame
+    #       (reads CurationV2.Unit; optionally filters by UnitLabel.
+    #       For concat-backed sorts, raises ConcatBrainRegionAmbiguousError
+    #       unless allow_anchor_member=True, per shared-contracts §
+    #       Unit-Level Brain Region Tracing concat-sort guard. When
+    #       allow_anchor_member=True, returned rows carry a
+    #       region_resolution='anchor_member' column.)
     #   get_matchable_unit_ids(key, exclude_labels=None) -> np.ndarray
     #       returns units without any excluded labels; unlabeled units are included.
 
@@ -902,21 +976,52 @@ class CurationV2(SpyglassMixin, dj.Manual):
         apply_merges: bool = False,
         description: str = "",
     ) -> dict:
-        """Insert a new curation; auto-register into SpikeSortingOutput.CurationV2."""
-        # Validate labels against enum
+        """Insert a new curation; auto-register into SpikeSortingOutput.CurationV2.
+
+        TRANSACTIONAL — the entire sequence below runs inside a single
+        DataJoint transaction. If ANY step fails (NWB write, Unit
+        materialization, UnitLabel write, merge-part registration), the
+        whole insert is rolled back. No partial CurationV2 row, no orphan
+        merge-part row, no orphan Unit / UnitLabel rows. Tested by
+        `test_curation_v2_insert_atomic_on_merge_register_failure`.
+        """
+        # Validate labels against enum BEFORE opening the transaction so we
+        # don't waste a transaction on an obviously bad input.
         for unit_id, label_list in labels.items():
             for label in label_list:
                 CurationLabel(label)  # raises ValueError on unknown
-        ...
-        # Insert one CurationV2.UnitLabel row per (unit_id, label); units
-        # missing from `labels` or mapped to [] remain unlabeled.
-        # After insert, also register in merge:
+
         from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
-        SpikeSortingOutput.insert([key_just_inserted], part_name="CurationV2")
+
+        with cls.connection.transaction:
+            # 1. Materialize the curated units NWB and stage AnalysisNwbfile
+            #    metadata. If the NWB write fails (disk full, permissions),
+            #    the transaction aborts before any DataJoint row is touched.
+            analysis_file_name, object_id = _write_curation_units_nwb(...)
+
+            # 2. Insert the master CurationV2 row.
+            cls.insert1(key_just_inserted)
+
+            # 3. Insert CurationV2.Unit rows (peak channels + amplitudes,
+            #    materialized from Sorting.Unit with merge_groups applied).
+            cls.Unit.insert(unit_rows)
+
+            # 4. Insert CurationV2.UnitLabel rows (one per (unit_id, label)).
+            cls.UnitLabel.insert(unit_label_rows)
+
+            # 5. Auto-register into SpikeSortingOutput. If this raises
+            #    (dup merge_id race, foreign-key violation, etc.) the
+            #    transaction aborts and steps 2-4 are rolled back.
+            SpikeSortingOutput.insert(
+                [key_just_inserted], part_name="CurationV2"
+            )
+
         return key_just_inserted
 ```
 
 **Design choice**: auto-register into `SpikeSortingOutput`. v1 forces users to do this manually; users frequently forget, leaving curations orphaned from downstream consumers. Auto-register costs nothing and eliminates the failure mode.
+
+**Atomicity invariant — do not weaken**: `insert_curation()` is a single transaction across (a) AnalysisNwbfile staging, (b) master row insert, (c) `CurationV2.Unit` insert, (d) `CurationV2.UnitLabel` insert, (e) `SpikeSortingOutput.CurationV2` merge-part insert. Partial states are observable only between transactions; any failure rolls back all five. The validation slice covers this with a fault-injection test.
 
 ---
 
@@ -957,6 +1062,41 @@ class AnalyzerCurationSelection(SpyglassMixin, dj.Manual):
     -> QualityMetricParameters
     -> AutoCurationRules
     """
+
+    @classmethod
+    def insert_selection(
+        cls,
+        key: dict,
+        *,
+        allow_recursive: bool = False,
+    ) -> dict:
+        """Insert/find AnalyzerCurationSelection row; rejects recursion.
+
+        Default behavior REJECTS upstream curations whose
+        `metrics_source == 'analyzer_curation'` — i.e., curations that
+        were themselves produced by AnalyzerCuration.materialize_curation().
+        Running auto-curation on an already-auto-curated row computes
+        metrics over post-merge templates, which is rarely what the user
+        wants and silently masks lineage depth.
+
+        Pass `allow_recursive=True` to override (intentional re-run after
+        manual review of the materialized child). The CurationV2 row's
+        existing `metrics_source` is preserved; lineage_depth is
+        derivable via the `parent_curation_id` chain.
+
+        Returns single PK-only dict per shared-contracts.
+        """
+        upstream_metrics_source = (CurationV2 & key).fetch1("metrics_source")
+        if upstream_metrics_source == "analyzer_curation" and not allow_recursive:
+            raise RecursiveAutoCurationError(
+                f"CurationV2 {key} has metrics_source='analyzer_curation' "
+                "(already an auto-curation child). Running AnalyzerCuration "
+                "on it would compute metrics over post-merge templates. "
+                "Pass allow_recursive=True to override after manual review."
+            )
+        # ... validate params, find-or-mint UUID, return PK
+        ...
+
 
 @schema
 class AnalyzerCuration(SpyglassMixin, dj.Computed):
@@ -1192,6 +1332,29 @@ class SortingAnalyzerRecompute(SpyglassMixin, dj.Computed):
 - `RecordingArtifactRecompute*` ports the v1 `RecordingRecompute` pattern to v2's `Recording` artifact with v2-specific table names. It verifies that a deleted, corrupted, or backend-rewritten NWB `ElectricalSeries` can be regenerated from the stored `RecordingSelection` lineage and current environment, and that the regenerated content hash matches the stored `cache_hash`.
 - `SortingAnalyzerRecompute*` applies the same lifecycle to the SortingAnalyzer folder: inventory extension metadata and content hashes, regenerate from `SortingSelection`, compare, then allow deletion only after `matched=1`.
 - `delete_files()` is never allowed to delete artifacts for `matched=0`. Storage reclamation is a verified workflow, not a cleanup shortcut.
+- **`delete_files()` is current-environment-aware (binding — do not weaken)**. A `matched=1` row from a different `UserEnvironment.env_id` (e.g., a recompute that succeeded six months ago under a SI 0.103 pinned environment) is NOT evidence that the *current* environment can regenerate the artifact. The deletion gate requires a `matched=1` row whose `env_id` equals `UserEnvironment.current()` (or its accepted equivalent — see helper below). Historic-matched-but-stale-env rows are queryable for audit but do not authorize deletion unless the caller passes `force_stale_env=True` and supplies a written justification stored in a separate audit table or PR-tracked log. The default refuses with `StaleEnvMatchedError` naming the stale `env_id`(s) and the missing current-env recompute.
+
+```python
+# Inside RecordingArtifactRecompute.delete_files(self, keys, *, force_stale_env=False):
+current_env = UserEnvironment.current()
+for key in keys:
+    matches_current_env = (
+        type(self) & key & {"env_id": current_env["env_id"], "matched": 1}
+    )
+    if not matches_current_env:
+        if force_stale_env:
+            # log to audit table; require justification
+            ...
+        else:
+            stale_matched = (type(self) & key & {"matched": 1}).fetch("env_id")
+            raise StaleEnvMatchedError(
+                f"No matched recompute in current env {current_env['env_id']!r} "
+                f"for {key}. Stale-env matches: {sorted(set(stale_matched))}. "
+                "Run RecordingArtifactRecompute.populate under the current "
+                "environment, or pass force_stale_env=True (audit-logged)."
+            )
+    # ... proceed with deletion
+```
 - These tables are Phase 2 pure additions in the zero-migration contract. Phase 1 provides opportunistic missing-artifact rebuild helpers; Phase 2 provides auditable recompute records and safe deletion.
 
 ---
@@ -1248,7 +1411,15 @@ class SessionGroup(SpyglassMixin, dj.Manual):
         """Atomic-style create.
 
         members: list of dicts with keys
-            nwb_file_name, sort_group_id, interval_list_name, recording_date.
+            nwb_file_name, sort_group_id, interval_list_name.
+        recording_date is DERIVED from each member's
+        `Session.session_start_time` (cast to date), not accepted from
+        the caller. If the caller passes a `recording_date` value, it
+        MUST match the derived date or `create_group` raises
+        `RecordingDateMismatchError`. Reason: user-supplied dates drift
+        from canonical session metadata and silently flip multi-day
+        gates; deriving makes the same-day vs multi-day decision
+        ground-truth-anchored.
 
         Same-day groups are the recommended path; multi-day requires the
         explicit `allow_multi_day=True` flag. The flag also forces the
@@ -1261,7 +1432,31 @@ class SessionGroup(SpyglassMixin, dj.Manual):
         Phase 4 sort-then-match path (UnitMatch) instead — it is the
         validated cross-day workflow.
         """
-        dates = {m["recording_date"] for m in members}
+        from spyglass.common import Session
+
+        # Derive recording_date from Session.session_start_time and verify
+        # any caller-supplied value matches.
+        rows: list[dict] = []
+        for i, m in enumerate(members):
+            derived_date = (
+                Session & {"nwb_file_name": m["nwb_file_name"]}
+            ).fetch1("session_start_time").date()
+            supplied = m.get("recording_date")
+            if supplied is not None and supplied != derived_date:
+                raise RecordingDateMismatchError(
+                    f"Member {i} ({m['nwb_file_name']}): supplied "
+                    f"recording_date={supplied} disagrees with derived "
+                    f"date={derived_date} from Session.session_start_time. "
+                    "Omit recording_date or supply the canonical date."
+                )
+            rows.append({
+                **{k: v for k, v in m.items() if k != "recording_date"},
+                "recording_date": derived_date,
+                "session_group_name": session_group_name,
+                "member_index": i,
+            })
+
+        dates = {r["recording_date"] for r in rows}
         if len(dates) > 1 and not allow_multi_day:
             raise ValueError(
                 f"Members span {len(dates)} distinct dates "
@@ -1269,10 +1464,6 @@ class SessionGroup(SpyglassMixin, dj.Manual):
                 f"allow_multi_day=True. Recommended path for cross-day "
                 f"analyses is sort-then-match (Phase 4 UnitMatch)."
             )
-        rows = [
-            {**m, "session_group_name": session_group_name, "member_index": i}
-            for i, m in enumerate(members)
-        ]
         with cls.connection.transaction:
             cls.insert1({
                 "session_group_name": session_group_name,
@@ -1310,7 +1501,44 @@ class ConcatenatedRecordingSelection(SpyglassMixin, dj.Manual):
     @classmethod
     def insert_selection(cls, key: dict) -> dict:
         """Find-existing-or-insert; returns single PK-only dict per the
-        shared-contracts insert_selection convention."""
+        shared-contracts insert_selection convention.
+
+        Enforces that every SessionGroup.Member has a populated
+        Recording row matching the requested PreprocessingParameters
+        BEFORE the concat selection is inserted. Raises
+        MissingRecordingForConcatError with the full list of missing
+        member keys so the user can populate them up-front rather than
+        debugging a nested-populate failure inside
+        ConcatenatedRecording.make().
+
+        This selection-time check is the load-bearing layer that lets
+        ConcatenatedRecording.make() omit the inline
+        Recording.populate() call (DataJoint anti-pattern).
+        """
+        members = (SessionGroup.Member & key).fetch(as_dict=True)
+        preproc_params_name = key["preproc_params_name"]
+        missing: list[dict] = []
+        for m in members:
+            rec_sel_key = {
+                "nwb_file_name": m["nwb_file_name"],
+                "sort_group_id": m["sort_group_id"],
+                "interval_list_name": m["interval_list_name"],
+                "preproc_params_name": preproc_params_name,
+                "team_name": m["team_name"],
+            }
+            # Recording row exists iff RecordingSelection row exists AND
+            # Recording (Computed) has populated for that key.
+            rs = RecordingSelection & rec_sel_key
+            if not rs or not (Recording & rs.fetch1("KEY")):
+                missing.append(rec_sel_key)
+        if missing:
+            raise MissingRecordingForConcatError(
+                f"ConcatenatedRecordingSelection requires every member's "
+                f"Recording row to be populated first. Missing "
+                f"{len(missing)} member(s): {missing}. Run "
+                "Recording.populate(...) for each missing key, then retry."
+            )
+        # ... validate params, find-or-mint UUID, return PK
         ...
 
 
@@ -1347,6 +1575,17 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         # Recording.make() materializes filter + CMR only (no whitening) —
         # safe input for motion correction. See shared-contracts §
         # Pydantic Parameter Schema Convention.
+        #
+        # IMPORTANT: ConcatenatedRecording.make() does NOT call
+        # Recording.populate() inline. Nested populate is a DataJoint
+        # anti-pattern (confusing error messages, transaction boundaries
+        # that surprise users, populate-progress reporting out of order).
+        # Instead we REQUIRE that every member's Recording row is already
+        # populated BEFORE this make() runs. The selection-time check in
+        # ConcatenatedRecordingSelection.insert_selection() (below)
+        # enforces this so the user gets a clear "populate Recording for
+        # member X first" error at insert time rather than a confusing
+        # nested-populate failure during the concat populate.
         recordings = []
         for m in members:
             rec_sel_key = {
@@ -1356,9 +1595,22 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
                 "preproc_params_name": (PreprocessingParameters & key).fetch1("preproc_params_name"),
                 "team_name": m["team_name"],  # carried on the Member part row
             }
-            rec_key = RecordingSelection.insert_selection(rec_sel_key)
+            # Match the existing RecordingSelection row (insert_selection
+            # already enforced existence at concat-selection insert time).
+            rec_key = (RecordingSelection & rec_sel_key).fetch1("KEY")
+            # Defensive re-check: if the Recording row is missing here,
+            # raise a clear error rather than nested-populate.
             if not (Recording & rec_key):
-                Recording.populate(rec_key)
+                raise MissingRecordingForConcatError(
+                    f"Member {m['nwb_file_name']} (sort_group_id="
+                    f"{m['sort_group_id']}, interval={m['interval_list_name']}) "
+                    "has no populated Recording row. Run "
+                    "Recording.populate(rec_key) for each member before "
+                    "ConcatenatedRecording.populate(). The selection-time "
+                    "check in ConcatenatedRecordingSelection.insert_selection "
+                    "should have caught this — file a bug if you reach this "
+                    "branch via the helper."
+                )
             rec = (Recording & rec_key).get_recording(rec_key)  # pre-motion (un-whitened)
             recordings.append(rec)
 
@@ -1494,6 +1746,31 @@ class MatcherParameters(SpyglassMixin, dj.Lookup):
     contents = [
         ("unitmatch_default", "unitmatch", {...}, 1),
     ]
+
+    def insert1(self, row: dict, **kwargs):
+        """Validate the matcher name against the registry before insert.
+
+        Layer 1 defense against matcher-name typos: an unknown matcher
+        string can otherwise sit in the database for hours/days before
+        UnitMatch.populate() fails. Looking up the per-matcher Pydantic
+        schema via the same registry doubles as the typo check —
+        `_get_matcher_schema(row['matcher'])` raises clearly if the
+        matcher is not registered.
+        """
+        from spyglass.spikesorting.v2.matcher_protocol import (
+            _registered_matchers,
+            _get_matcher_schema,
+        )
+        if row["matcher"] not in _registered_matchers():
+            raise UnknownMatcherError(
+                f"Unknown matcher {row['matcher']!r}. Registered matchers: "
+                f"{sorted(_registered_matchers())}. To add a new matcher, "
+                "implement MatcherProtocol and register it via "
+                "register_matcher() before inserting parameters."
+            )
+        schema_cls = _get_matcher_schema(row["matcher"])
+        row["params"] = _validate_params(schema_cls, row["params"])
+        super().insert1(row, **kwargs)
 
 
 @schema
@@ -1687,6 +1964,18 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
                                        # >0 when policy='transitive' and
                                        # some inferred edges were missing
                                        # in the underlying pair set.
+    policy_used: enum('strict', 'transitive', 'transitive_fallback')
+                                       # actual policy used to derive this
+                                       # row. 'strict' = maximal cliques
+                                       # completed within the budget;
+                                       # 'transitive' = user opted into
+                                       # connected components via
+                                       # MatcherParameters; 'transitive_fallback' =
+                                       # strict search exceeded budget AND
+                                       # MatcherParameters.params
+                                       # ['allow_strict_fallback']==True, so
+                                       # we degraded to connected components.
+                                       # See bounded-search policy below.
     """
 
     class Member(SpyglassMixinPart):
@@ -1736,11 +2025,69 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
 - **Permissive mode**: fall back to connected components; users opt in via `MatcherParameters.params["tracked_unit_policy"] = "transitive"`. Logged with a warning at make time.
 - **Reporting**: in either mode, `TrackedUnit.make()` records `n_transitive_only_edges` per component as a secondary attribute — gives users visibility into how much transitivity was invoked.
 
+**Bounded strict search (binding — do not weaken)**: maximal-clique enumeration is exponential in pathological cases. Two parameters on `MatcherParameters.params` bound the strict search:
+
+| Param | Default | Semantics |
+| --- | --- | --- |
+| `max_clique_search_seconds` | `120` | Wall-clock budget for `networkx.find_cliques` in strict mode. |
+| `max_strict_nodes` | `2000` | Hard upper bound on the graph size submitted to strict search. |
+| `allow_strict_fallback` | `False` | When True, exceeding either bound degrades to connected-component (transitive) mode and the row records `policy_used='transitive_fallback'`. When False (default), exceeding either bound raises `TrackedUnitBudgetExceededError` so the user can decide explicitly. |
+
+The actual policy used is persisted on every `TrackedUnit` row via the `policy_used` enum column (`'strict'` / `'transitive'` / `'transitive_fallback'`), so fallback is visible later without log-spelunking.
+
+Implementation:
+
+```python
+import time
+
+def _derive_tracked_units(pairs, threshold, all_units, params):
+    policy = params.get("tracked_unit_policy", "strict")
+    if policy == "transitive":
+        return _derive_tracked_units_transitive(pairs, threshold, all_units), "transitive"
+
+    # strict mode — apply node bound first (cheap check)
+    n_nodes = len(list(all_units))
+    if n_nodes > params.get("max_strict_nodes", 2000):
+        if params.get("allow_strict_fallback", False):
+            return (
+                _derive_tracked_units_transitive(pairs, threshold, all_units),
+                "transitive_fallback",
+            )
+        raise TrackedUnitBudgetExceededError(
+            f"Strict policy: {n_nodes} nodes exceeds max_strict_nodes="
+            f"{params.get('max_strict_nodes', 2000)}. Pass "
+            "allow_strict_fallback=True or set tracked_unit_policy='transitive'."
+        )
+
+    # strict mode — run with wall-clock budget
+    t0 = time.monotonic()
+    budget_s = params.get("max_clique_search_seconds", 120)
+    try:
+        result = _derive_tracked_units_strict(
+            pairs, threshold, all_units,
+            deadline=t0 + budget_s,
+        )
+        return result, "strict"
+    except StrictSearchTimeout:
+        if params.get("allow_strict_fallback", False):
+            return (
+                _derive_tracked_units_transitive(pairs, threshold, all_units),
+                "transitive_fallback",
+            )
+        raise TrackedUnitBudgetExceededError(
+            f"Strict clique search exceeded {budget_s}s budget. "
+            "Pass allow_strict_fallback=True or set "
+            "tracked_unit_policy='transitive'."
+        )
+```
+
+`_derive_tracked_units_strict` iterates over the `nx.find_cliques` generator and checks `time.monotonic() < deadline` between yielded cliques. It must NOT materialize `list(nx.find_cliques(g))` before checking the deadline, because that would reintroduce the unbounded exponential search.
+
 ```python
 import networkx as nx
 from itertools import combinations
 
-def _derive_tracked_units_strict(pairs, threshold, all_units):
+def _derive_tracked_units_strict(pairs, threshold, all_units, deadline):
     """Maximal-clique-based tracked units. Default policy.
 
     Parameters
@@ -1778,16 +2125,24 @@ def _derive_tracked_units_strict(pairs, threshold, all_units):
             node_a = (p.session_a_sorting_id, p.session_a_curation_id, p.unit_a_id)
             node_b = (p.session_b_sorting_id, p.session_b_curation_id, p.unit_b_id)
             g.add_edge(node_a, node_b, weight=p.match_probability)
-    # find_cliques on a thresholded graph returns maximal cliques —
-    # every clique is a fully-connected subgraph (all pairwise edges present).
-    cliques = list(nx.find_cliques(g))
+    # find_cliques on a thresholded graph returns maximal cliques. Iterate
+    # the generator directly so the wall-clock budget can interrupt
+    # pathological enumeration before all cliques are materialized.
+    cliques = []
+    for clique in nx.find_cliques(g):
+        if time.monotonic() > deadline:
+            raise StrictSearchTimeout(
+                "Strict clique search exceeded max_clique_search_seconds"
+            )
+        cliques.append(tuple(sorted(clique)))
+
     # Same node may appear in multiple cliques; greedy-pick largest first.
     # Tie-break by canonical node tuple so equal-size overlapping cliques are
     # deterministic across Python/networkx traversal order.
     used = set()
     components = []
     def _clique_sort_key(clique):
-        return (-len(clique), tuple(sorted(clique)))
+        return (-len(clique), clique)
 
     for clique in sorted(cliques, key=_clique_sort_key):
         if any(n in used for n in clique):

@@ -271,8 +271,8 @@ flowchart LR
 
 ## Critical design points
 
-- **XOR FK on `SortingSelection`**: exactly one of `recording_id` / `concat_recording_id` is non-NULL. Enforced in `insert_selection()`. The schema is final today; Phase 3 only relaxes the runtime guard that rejects `concat_recording_id`.
-- **XOR FK on `ArtifactDetectionSelection`**: exactly one of `recording_id` / `shared_artifact_group_name` is non-NULL. Enforced in `insert_selection()`.
+- **XOR FK on `SortingSelection`**: exactly one of `recording_id` / `concat_recording_id` is non-NULL. Enforced in `insert_selection()`, re-checked at the start of `Sorting.make()`, and covered by the v2 integrity test. The schema is final today; Phase 3 only relaxes the runtime guard that rejects `concat_recording_id`.
+- **XOR FK on `ArtifactDetectionSelection`**: exactly one of `recording_id` / `shared_artifact_group_name` is non-NULL. Enforced in `insert_selection()`, re-checked at the start of `ArtifactDetection.make()`, and covered by the v2 integrity test.
 - **`SortingSelection.artifact_id` is a real FK, not a loose UUID column.** Concat sorts leave it NULL.
 - **`Recording` is a single canonical NWB artifact per `recording_id`.** Subsequent sorts with different `SorterParameters` read the same `ElectricalSeries`. No per-stage re-materialization.
 - **`Sorting.Unit.electrode_id`** is the unit's peak-amplitude channel; brain region is reached via `Sorting.Unit * Electrode * BrainRegion`. Constant-time lookup, no template re-walking.

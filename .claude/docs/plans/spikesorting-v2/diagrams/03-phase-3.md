@@ -91,7 +91,7 @@ flowchart LR
     F --> G[SpikeSortingOutput.CurationV2 part]
 
     subgraph "Inside ConcatenatedRecording.make"
-        C1[For each Member: Recording.populate if missing] --> C2[Load pre-motion recordings]
+        C1[Verify every member Recording already exists] --> C2[Load pre-motion recordings]
         C2 --> C3[concatenate_recordings]
         C3 --> C4[correct_motion preset=rigid_fast or DREDge]
         C4 --> C5[apply post-motion preprocessing whiten]
@@ -118,4 +118,4 @@ flowchart LR
 ## What downstream consumers see
 
 - `SortedSpikesGroup`, decoding, ripple, MUA continue to consume `SpikeSortingOutput.merge_id` — concat sorts are indistinguishable at that surface.
-- `CurationV2.get_unit_brain_regions()` on a concat sort returns the anchor-member region for each unit. Multi-member region tracing requires the Phase 4 cross-session accessor.
+- `CurationV2.get_unit_brain_regions()` on a concat sort raises `ConcatBrainRegionAmbiguousError` by default. Callers can opt into anchor-member output with `allow_anchor_member=True`, which marks rows with `region_resolution="anchor_member"`. Multi-member region tracing requires the Phase 4 cross-session accessor.

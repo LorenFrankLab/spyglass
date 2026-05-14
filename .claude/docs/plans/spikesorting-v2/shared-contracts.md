@@ -13,6 +13,7 @@ Cross-phase contracts. Any phase that references one of these MUST follow the sp
 - [Job-Kwargs Resolution](#job-kwargs-resolution)
 - [Curation Label Enum](#curation-label-enum)
 - [`insert_selection()` Return-Value Normalization](#insert_selection-return-value-normalization)
+- [Nullable XOR Foreign-Key Pattern](#nullable-xor-foreign-key-pattern)
 - [Unit-Level Brain Region Tracing](#unit-level-brain-region-tracing)
 - [Zero-Migration Schema Forward-Compatibility](#zero-migration-schema-forward-compatibility)
 - [Empty / NaN / Boundary Invariants](#empty--nan--boundary-invariants)
@@ -367,11 +368,85 @@ sort_key = SortingSelection.insert_selection({
 
 ---
 
+## Nullable XOR Foreign-Key Pattern
+
+Two v2 tables declare two nullable typed FKs where exactly one must be non-NULL:
+
+| Table | XOR FKs |
+| --- | --- |
+| `SortingSelection` | `recording_id` (Recording) XOR `concat_recording_id` (ConcatenatedRecording) |
+| `ArtifactDetectionSelection` | `recording_id` (Recording) XOR `shared_artifact_group_name` (SharedArtifactGroup) |
+
+DataJoint does not support DB-level CHECK constraints, so XOR cannot be schema-enforced. The plan compensates with **three layers of defense**, all required:
+
+### Layer 1: shared validator at insert time
+
+A single helper lives in `spyglass.spikesorting.v2.utils`:
+
+```python
+def _validate_xor(
+    table_name: str,
+    name_a: str, value_a,
+    name_b: str, value_b,
+) -> None:
+    """Raise if both XOR slots are NULL or both are set.
+
+    Used by both SortingSelection.insert_selection() and
+    ArtifactDetectionSelection.insert_selection().
+    """
+    a_set = value_a is not None
+    b_set = value_b is not None
+    if a_set == b_set:
+        state = "both NULL" if not a_set else "both set"
+        raise ValueError(
+            f"{table_name} XOR violation: exactly one of "
+            f"{name_a!r}, {name_b!r} must be non-NULL ({state})."
+        )
+```
+
+Every `insert_selection()` on the affected tables MUST call this before inserting.
+
+### Layer 2: re-check at populate time
+
+`Sorting.make()` and `ArtifactDetection.make()` MUST re-run `_validate_xor` against the upstream Selection row at the start of `make()`. This catches rows that were inserted via `dj.Manual.insert1()` directly, bypassing the helper. The re-check raises `SchemaBypassError` with a message naming the offending PK and pointing at the helper.
+
+```python
+# Inside Sorting.make(self, key):
+sel = (SortingSelection & key).fetch1()
+_validate_xor(
+    "SortingSelection",
+    "recording_id", sel.get("recording_id"),
+    "concat_recording_id", sel.get("concat_recording_id"),
+)
+```
+
+### Layer 3: CI integrity test
+
+A nightly test queries each XOR table for both-NULL and both-set rows and asserts the result is empty:
+
+```python
+def test_no_xor_violations_in_production():
+    for tbl, fk_a, fk_b in [
+        (SortingSelection, "recording_id", "concat_recording_id"),
+        (ArtifactDetectionSelection, "recording_id", "shared_artifact_group_name"),
+    ]:
+        both_null = tbl & f"{fk_a} IS NULL AND {fk_b} IS NULL"
+        both_set = tbl & f"{fk_a} IS NOT NULL AND {fk_b} IS NOT NULL"
+        assert len(both_null) == 0, f"{tbl.__name__} has both-NULL rows: {both_null.fetch('KEY')}"
+        assert len(both_set) == 0, f"{tbl.__name__} has both-set rows: {both_set.fetch('KEY')}"
+```
+
+This test lives in `tests/spikesorting/v2/test_integrity.py` and runs in the v2 CI job.
+
+**Invariant — do not weaken**: All three layers are mandatory. Removing Layer 2 (the populate-time re-check) is the most tempting weakening; it must be resisted because Layer 1 alone is bypassable by any `dj.Manual` user.
+
+---
+
 ## NWB Column-Name Convention for `SpikeSortingOutput` Routing
 
 `SpikeSortingOutput.get_spike_times()` dispatches through `fetch_nwb()` and checks for the key `"object_id"` (see [`src/spyglass/spikesorting/spikesorting_merge.py:210-213`](src/spyglass/spikesorting/spikesorting_merge.py#L210-L213)).
 
-**v2 must follow this convention**: any v2 table whose row is fetched through the merge for spike-time access uses **`object_id: varchar(40)`** as the column name pointing to the NWB `/units` table — NOT `units_object_id` or any other variant. This explicitly aligns with `CurationV1` ([`src/spyglass/spikesorting/v1/curation.py:38`](src/spyglass/spikesorting/v1/curation.py#L38)).
+**v2 must follow this convention**: any v2 table whose row is fetched through the merge for spike-time access uses the column name **`object_id`** pointing to the NWB `/units` table — NOT `units_object_id` or any other variant. The width follows the table-specific schema (`CurationV2.object_id` is `varchar(72)` for CurationV1 parity; `Sorting.object_id` is `varchar(40)`). The naming convention explicitly aligns with `CurationV1` ([`src/spyglass/spikesorting/v1/curation.py:38`](src/spyglass/spikesorting/v1/curation.py#L38)).
 
 Specifically:
 - `CurationV2.object_id` — points to the curated units table inside its analysis NWB. **`object_id`, not `units_object_id`**.
@@ -437,10 +512,14 @@ class Unit(SpyglassMixinPart):
 
 ```python
 # On Sorting:
-Sorting.get_unit_brain_regions(key) -> pd.DataFrame  # cols: unit_id, electrode_id, region_name, peak_amplitude_uV
+Sorting.get_unit_brain_regions(
+    key, *, allow_anchor_member: bool = False
+) -> pd.DataFrame  # cols: unit_id, electrode_id, region_name, peak_amplitude_uV
 
-# On CurationV2 — same signature, filters by CurationV2.UnitLabel if asked:
-CurationV2.get_unit_brain_regions(key, include_labels=None) -> pd.DataFrame
+# On CurationV2 — same signature plus label filtering:
+CurationV2.get_unit_brain_regions(
+    key, *, include_labels=None, allow_anchor_member: bool = False
+) -> pd.DataFrame
 # include_labels defaults to None (return all); pass a list to filter.
 CurationV2.get_matchable_unit_ids(
     key, exclude_labels={"reject", "noise", "artifact"}
@@ -448,11 +527,24 @@ CurationV2.get_matchable_unit_ids(
 # returns units with no excluded labels; unlabeled units are included.
 
 # On SpikeSortingOutput — delegates through the source class dispatch:
-SpikeSortingOutput.get_unit_brain_regions(merge_key) -> pd.DataFrame
+SpikeSortingOutput.get_unit_brain_regions(
+    merge_key, *, allow_anchor_member: bool = False
+) -> pd.DataFrame
 
 # On TrackedUnit — per-session brain regions for the matched units:
 TrackedUnit.get_unit_brain_regions(tracked_unit_key) -> pd.DataFrame  # cols: sorting_id, unit_id, region_name
 ```
+
+**Concat-sort guard (binding — do not weaken)**: For concat-backed sorts (where the upstream `SortingSelection.recording_id` is NULL and `concat_recording_id` is set), the `Sorting.Unit -> Electrode` FK is anchored to the FIRST `SessionGroup.Member`'s `Electrode` row by deterministic rule. The resulting brain region is the anchor member's region for that channel, which may differ from later members if the probe re-anatomized across days.
+
+Returning the anchor region silently would be a wrong-answer footgun. Therefore:
+
+- `Sorting.get_unit_brain_regions(key)` and `CurationV2.get_unit_brain_regions(key)` MUST detect concat-backed sorts (`SortingSelection & key` has non-NULL `concat_recording_id`) and **raise `ConcatBrainRegionAmbiguousError`** by default, with a message pointing the caller at `TrackedUnit.get_unit_brain_regions` for per-session resolution.
+- Callers who explicitly want anchor-member resolution pass `allow_anchor_member=True`. The returned DataFrame in that case carries a `region_resolution` column whose value is `"anchor_member"` (vs `"single_session"` for non-concat sorts), so downstream code can detect and warn.
+- `SpikeSortingOutput.get_unit_brain_regions(merge_key)` passes `allow_anchor_member` through to the dispatched source class.
+- `TrackedUnit.get_unit_brain_regions` is the canonical per-session accessor for cross-session workflows and is not subject to the guard — it walks each pinned `CurationV2.Unit -> Electrode -> BrainRegion` and labels rows by `member_index`.
+
+Single-session sorts return the same shape as before (no `region_resolution` column required unless the caller asked for it via a future kwarg).
 
 **Invariants — do not weaken**:
 

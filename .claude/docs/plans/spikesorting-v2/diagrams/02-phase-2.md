@@ -174,7 +174,7 @@ flowchart LR
         REC[Recording row] --> V[RecordingArtifactVersions.populate]
         V --> RS[RecordingArtifactRecomputeSelection.insert]
         RS --> RR[RecordingArtifactRecompute.populate]
-        RR --> DEL[delete_files only if matched=1]
+        RR --> DEL[delete_files only if matched=1 in current env]
     end
 ```
 
@@ -185,5 +185,5 @@ flowchart LR
 - **Fetch-helper parity**: `AnalyzerCuration` exposes `get_waveforms`, `get_metrics`, `get_labels`, `get_merge_groups` to match v1's `MetricCuration` notebook surface.
 - **NaN sanitization**: serialized metric tables coerce non-finite values to `None` in the JSON-bound path; in-memory DataFrames preserve NaN semantics (issue #1556).
 - **Two distinct recompute families**: `RecordingArtifactRecompute*` verifies the NWB `ElectricalSeries` byte-hash; `SortingAnalyzerRecompute*` verifies the analyzer folder contents. Same lifecycle, different artifacts.
-- **`delete_files()` gates on `matched=1`** — storage reclamation requires a verified recompute round-trip. `matched=0` cannot delete.
+- **`delete_files()` gates on `matched=1` in the current `UserEnvironment`** — storage reclamation requires a verified recompute round-trip in the environment doing the deletion. Historic matches from stale environments are audit evidence only unless explicitly force-overridden with justification. `matched=0` cannot delete.
 - **Admin surface**: `attempt_all`, `remove_matched`, `with_names`, `get_parent_key`, `recheck`, `get_disk_space`, `update_secondary` are preserved from v1's `RecordingRecompute` family, or explicitly listed as non-parity in [feature-parity.md](../feature-parity.md).
