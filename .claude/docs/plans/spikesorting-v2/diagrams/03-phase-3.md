@@ -1,0 +1,121 @@
+# Phase 3 — Same-day chronic concatenation
+
+[← Phase 2](02-phase-2.md) · [README](README.md) · [next: Phase 4 →](04-phase-4.md)
+
+**No new tables in Phase 3.** The schema declared in Phase 1 (`SessionGroup`, `MotionCorrectionParameters`, `ConcatenatedRecordingSelection`, `ConcatenatedRecording`) becomes populate-runnable. Phase 3 is method-body-only edits, per the zero-migration policy.
+
+## What activates in Phase 3
+
+| Phase 1 declaration | Phase 3 change |
+| --- | --- |
+| `ConcatenatedRecording.make()` raised `NotImplementedError` | Body fills in: reuses cached pre-motion `Recording` per member, concatenates, applies motion correction (`rigid_fast` default; DREDge opt-in), applies post-motion preprocessing (whiten), materializes one NWB-resident concatenated `ElectricalSeries`. |
+| `SessionGroup.create_group()` accepted multi-day members silently | Now raises `ValueError` unless `allow_multi_day=True`. Multi-day requires an explicit (non-`auto`) motion-correction preset. |
+| `SortingSelection.insert_selection()` rejected `concat_recording_id` with `NotImplementedError` | Now accepts. Still rejects concat + `artifact_id` (concat-wide artifact masking is out of scope). |
+
+## ER diagram — same as Phase 1 forward-compat, now active
+
+```mermaid
+erDiagram
+    %% ===== From Phase 1 =====
+
+    %% ===== Schema declared Phase 1, ACTIVATED Phase 3 =====
+    SessionGroup {
+        varchar session_group_name PK
+        varchar description
+    }
+    SessionGroup_Member {
+        varchar session_group_name PK
+        int member_index PK
+        varchar nwb_file_name FK
+        int sort_group_id FK
+        varchar interval_list_name FK
+        varchar team_name FK
+        date recording_date
+    }
+    MotionCorrectionParameters {
+        varchar motion_correction_params_name PK
+        blob params
+    }
+    ConcatenatedRecordingSelection {
+        uuid concat_recording_id PK
+        varchar session_group_name FK
+        varchar preproc_params_name FK
+        varchar motion_correction_params_name FK
+    }
+    ConcatenatedRecording {
+        uuid concat_recording_id PK
+        varchar analysis_file_name FK
+        varchar electrical_series_path
+        varchar object_id
+        float total_duration_s
+        blob member_segment_boundaries
+        char cache_hash
+    }
+    SortingSelection {
+        uuid sorting_id PK
+        uuid recording_id "nullable FK"
+        uuid concat_recording_id "nullable FK"
+        varchar sorter FK
+        varchar sorter_params_name FK
+        uuid artifact_id "nullable FK"
+    }
+
+    SessionGroup ||--o{ SessionGroup_Member : "part"
+    Session ||--o{ SessionGroup_Member : "FK"
+    SortGroupV2 ||--o{ SessionGroup_Member : "FK"
+    IntervalList ||--o{ SessionGroup_Member : "FK"
+    LabTeam ||--o{ SessionGroup_Member : "FK"
+    SessionGroup ||--o{ ConcatenatedRecordingSelection : "FK"
+    PreprocessingParameters ||--o{ ConcatenatedRecordingSelection : "FK"
+    MotionCorrectionParameters ||--o{ ConcatenatedRecordingSelection : "FK"
+    ConcatenatedRecordingSelection ||--|| ConcatenatedRecording : "Computed (active)"
+    AnalysisNwbfile ||--o{ ConcatenatedRecording : "NWB artifact"
+
+    %% ===== The XOR FK on SortingSelection now permits concat_recording_id =====
+    Recording ||--o{ SortingSelection : "FK (single-session path)"
+    ConcatenatedRecording ||--o{ SortingSelection : "FK (concat path, NEW in Phase 3)"
+    SorterParameters ||--o{ SortingSelection : "FK"
+    ArtifactDetection ||--o{ SortingSelection : "FK (NULL for concat sorts)"
+    SortingSelection ||--|| Sorting : "Computed"
+```
+
+## Populate flow
+
+```mermaid
+flowchart LR
+    A[SessionGroup.create_group with members + allow_multi_day flag] --> B[ConcatenatedRecordingSelection.insert_selection]
+    B --> C[ConcatenatedRecording.populate]
+    C --> D[SortingSelection.insert_selection with concat_recording_id]
+    D --> E[Sorting.populate via concat path]
+    E --> F[CurationV2.insert_curation, same as Phase 1]
+    F --> G[SpikeSortingOutput.CurationV2 part]
+
+    subgraph "Inside ConcatenatedRecording.make"
+        C1[For each Member: Recording.populate if missing] --> C2[Load pre-motion recordings]
+        C2 --> C3[concatenate_recordings]
+        C3 --> C4[correct_motion preset=rigid_fast or DREDge]
+        C4 --> C5[apply post-motion preprocessing whiten]
+        C5 --> C6[Write concatenated ElectricalSeries to AnalysisNwbfile]
+    end
+
+    C --> C1
+```
+
+## Critical design points
+
+- **Multi-day is opt-in, not the recommended default.** `create_group(..., allow_multi_day=True)` is required when members span ≥2 distinct `recording_date` values. Default rejects with a pointer to Phase 4 sort-then-match (UnitMatch).
+- **No auto-DREDge dispatch.** `MotionCorrectionParameters.preset='auto'` resolves to `rigid_fast` for single-day groups and **raises** on multi-day groups — the caller must pick an explicit `dredge_fast` / `dredge` / etc.
+- **Recording cache reuse.** `ConcatenatedRecording.make()` reads from already-populated per-member `Recording` rows, not from raw NWB. Preprocessing runs once per member.
+- **Pre-motion vs post-motion split.** `Recording.make()` materializes filter + CMR only. Whitening (the post-motion stage of `PreprocessingParamsSchema`) is applied:
+  - Single-session path: lazily by `Sorting.make()`.
+  - Concat path: by `ConcatenatedRecording.make()` AFTER motion correction.
+  This guarantees motion estimators see un-whitened traces (per SI docs).
+- **Anchor NWB rule.** `ConcatenatedRecording`'s `AnalysisNwbfile` parent is the **first** `SessionGroup.Member.nwb_file_name` (ordered by `member_index`). Same rule applies to concat-sort `Sorting` rows.
+- **Concat sorts skip artifact masking.** `SortingSelection.insert_selection()` rejects `(concat_recording_id, artifact_id)` together. Cross-recording artifact masking is out of scope.
+- **Segment boundaries persisted.** `ConcatenatedRecording.member_segment_boundaries` (cumulative end-sample counts) lets downstream code back-map spike times to per-session sortings via `ConcatenatedRecording.split_sorting_by_session()`.
+- **`Sorting.Unit` anchor rule for concat.** A unit's peak `electrode_id` maps to N `Electrode` rows (one per `SessionGroup.Member`). v2 anchors concat `Sorting.Unit` and `CurationV2.Unit` rows to the FIRST member's `Electrode`. Phase 4 sort-then-match brain-region tracing uses each pinned `CurationV2.Unit -> Electrode -> BrainRegion` path directly; if a future workflow matches concat curations, the concat anchor rule still applies unless a per-member accessor explicitly expands through `ConcatenatedRecording -> SessionGroup.Member`.
+
+## What downstream consumers see
+
+- `SortedSpikesGroup`, decoding, ripple, MUA continue to consume `SpikeSortingOutput.merge_id` — concat sorts are indistinguishable at that surface.
+- `CurationV2.get_unit_brain_regions()` on a concat sort returns the anchor-member region for each unit. Multi-member region tracing requires the Phase 4 cross-session accessor.
