@@ -35,7 +35,8 @@ Phase 1 MUST land as four PR slices, and all schemas introduced by a slice must 
 - [src/spyglass/spikesorting/v1/artifact.py](../../../../src/spyglass/spikesorting/v1/artifact.py) — artifact detection logic.
 - [src/spyglass/spikesorting/v1/curation.py](../../../../src/spyglass/spikesorting/v1/curation.py) — `CurationV1` patterns (lineage, label conventions).
 - [src/spyglass/spikesorting/spikesorting_merge.py:34-166](../../../../src/spyglass/spikesorting/spikesorting_merge.py#L34-L166) — `SpikeSortingOutput` merge master; v2 adds a new part here.
-- [src/spyglass/common/common_nwbfile.py:431](../../../../src/spyglass/common/common_nwbfile.py#L431) — `AnalysisNwbfile.build()` context manager API.
+- [src/spyglass/common/common_nwbfile.py:630](../../../../src/spyglass/common/common_nwbfile.py#L630) — `AnalysisNwbfile` table class used by v2 recording/sorting artifacts.
+- [src/spyglass/utils/mixins/analysis.py:475](../../../../src/spyglass/utils/mixins/analysis.py#L475) — inherited `AnalysisNwbfile.build()` context manager API.
 - [.claude/docs/plans/spikesorting-v2/appendix.md § SpikeInterface 0.99 → 0.104 migration cheat sheet](appendix.md#spikeinterface-099--0104-migration-cheat-sheet) — API rename table.
 - [.claude/docs/plans/spikesorting-v2/appendix.md § SortingAnalyzer extension dependencies](appendix.md#sortinganalyzer-extension-dependencies) — what to compute at sort time.
 - [.claude/docs/plans/spikesorting-v2/appendix.md § MountainSort 5 install + params](appendix.md#mountainsort-5-install--params) — default params.

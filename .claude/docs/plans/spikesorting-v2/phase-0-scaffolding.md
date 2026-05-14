@@ -29,7 +29,7 @@ Phase 0b PR:
 
 **Inputs to read first:**
 
-- [pyproject.toml:62](../../../../pyproject.toml#L62) — current `spikeinterface` pin.
+- [pyproject.toml:69](../../../../pyproject.toml#L69) — current `spikeinterface` pin.
 - [src/spyglass/spikesorting/v1/__init__.py](../../../../src/spyglass/spikesorting/v1/__init__.py) — module export style to mirror.
 - [src/spyglass/spikesorting/v1/recording.py:407-427](../../../../src/spyglass/spikesorting/v1/recording.py#L407-L427) — current `get_recording()` missing-file rebuild pattern.
 - [src/spyglass/spikesorting/v1/recording.py:475-645](../../../../src/spyglass/spikesorting/v1/recording.py#L475-L645) — current preprocessing pattern used by v1 recording materialization.
