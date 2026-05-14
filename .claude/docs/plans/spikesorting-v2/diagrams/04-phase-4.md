@@ -27,12 +27,14 @@ erDiagram
     }
     UnitMatchSelection {
         uuid unitmatch_id PK
+        varchar session_group_owner FK
         varchar session_group_name FK
         varchar matcher_params_name FK
         char curation_set_hash
     }
     UnitMatchSelection_MemberCuration {
         uuid unitmatch_id PK
+        varchar session_group_owner PK
         varchar session_group_name PK
         int member_index PK
         uuid sorting_id FK
@@ -105,6 +107,7 @@ flowchart LR
 ## Critical design points
 
 - **No implicit "latest curation" lookup.** `UnitMatchSelection.MemberCuration` requires the caller to pin one `(sorting_id, curation_id)` per `SessionGroup.Member`. Adding a new curation to one of the source sessions does NOT invalidate or auto-update an existing `UnitMatch` row.
+- **SessionGroup owner is part of identity.** `UnitMatchSelection` and its `MemberCuration` part carry `session_group_owner` through the `SessionGroup` FK, so a match run against `team_a/day1` cannot collide with `team_b/day1`.
 - **`curation_set_hash` on the master row** is a sha256 over the ordered member→curation choices. Makes `insert_selection()` idempotent under the shared contract; two calls with the same pinning return the same `unitmatch_id`.
 - **Wrapper-owned matcher input.** The v2 wrapper extracts per-unit waveforms + channel positions from each curated SortingAnalyzer and writes them to a matcher-specific on-disk layout in a per-session bundle dir. The matcher consumes the bundle; it never touches raw NWB paths, Spyglass table keys, or `si.SortingAnalyzer` objects directly.
 - **Matchable unit filtering.** `CurationV2.get_matchable_unit_ids(key, exclude_labels={"reject","noise","artifact"})` returns curated units with no excluded labels. Unlabeled units and units labeled only `accept` / `mua` are included.

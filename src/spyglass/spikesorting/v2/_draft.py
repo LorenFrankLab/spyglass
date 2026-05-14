@@ -143,6 +143,7 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
 
 class SessionGroup(SpyglassMixin, dj.Manual):
     definition = """
+    -> LabTeam.proj(session_group_owner='team_name')
     session_group_name: varchar(64)
     ---
     description: varchar(255)

@@ -63,7 +63,7 @@ analyzer.compute(
 
 **Persistence on the DataJoint row**: the `Sorting` table stores `sorting_id` (UUID) + `analyzer_folder` (`varchar(255)` — the relative path under `SPYGLASS_TEMP_DIR`). The folder itself is a side artifact, not stored in DataJoint. Heavy outputs (templates, waveforms) are reachable via `analyzer = load_sorting_analyzer(_analyzer_path(key))`.
 
-**Loading convention**: every consumer uses the `Sorting.get_analyzer(key)` method, which checks for folder existence, recomputes if missing (delegating to `Sorting.make()` rerun), then returns the analyzer object. Do not load analyzer folders directly — go through the helper. This mirrors v1's `SpikeSortingRecording.get_recording` missing-file rebuild pattern at [`src/spyglass/spikesorting/v1/recording.py:407-427`](src/spyglass/spikesorting/v1/recording.py#L407-L427).
+**Loading convention**: every consumer uses the `Sorting.get_analyzer(key)` method, which checks for folder existence, recomputes if missing (delegating to `Sorting.make()` rerun), then returns the analyzer object. Do not load analyzer folders directly — go through the helper. This mirrors v1's `SpikeSortingRecording.get_recording` missing-file rebuild pattern at [`src/spyglass/spikesorting/v1/recording.py:407-427`](../../../../src/spyglass/spikesorting/v1/recording.py#L407-L427).
 
 **Invariant — do not weaken**: The analyzer folder is regeneratable from `Sorting` row's source recording + sort. Do not store user-edited content inside the folder. Curation edits live in `CurationV2` rows (NWB-backed), not in the analyzer.
 
@@ -256,7 +256,7 @@ from spyglass.spikesorting.v2.curation import CurationV2 as CurationV2_table
 
 **Registration in `get_restricted_merge_ids`**:
 
-[`src/spyglass/spikesorting/spikesorting_merge.py:111`](src/spyglass/spikesorting/spikesorting_merge.py#L111) already accepts `sources` as a list. Phase 1 extends the helper to accept `'v2'` and route through the new part. Existing callers passing `sources=['v1']` keep working unchanged.
+[`src/spyglass/spikesorting/spikesorting_merge.py:111`](../../../../src/spyglass/spikesorting/spikesorting_merge.py#L111) already accepts `sources` as a list. Phase 1 extends the helper to accept `'v2'` and route through the new part. Existing callers passing `sources=['v1']` keep working unchanged.
 
 **Restriction semantics for v2**:
 
@@ -264,7 +264,7 @@ Implement `_get_restricted_merge_ids_v2(key, as_dict=False)` as the v2 analog of
 
 - Phase 1 keys: `nwb_file_name`, `team_name`, `sort_group_id`, `interval_list_name`, `preproc_params_name`, `recording_id`, `artifact_id`, `sorter`, `sorter_params_name`, `sorting_id`, `curation_id`.
 - Phase 2 keys: `analyzer_curation_id`, `metric_params_name`, `auto_curation_rules_name`.
-- Phase 3+ keys when their tables exist: `session_group_name`, `concat_recording_id`.
+- Phase 3+ keys when their tables exist: `session_group_owner`, `session_group_name`, `concat_recording_id`.
 
 The implementation should join through the relevant v2 Selection tables, then restrict `SpikeSortingOutput.CurationV2`. Unknown restriction fields should fail clearly rather than silently returning unrelated merge IDs. `restrict_by_artifact` remains accepted by the public method for API compatibility, but the v2 path ignores the v1-specific `IntervalList` rewrite because artifact intervals live on `ArtifactDetection.Interval`.
 
@@ -313,7 +313,7 @@ class CurationLabel(str, Enum):
     reject = "reject"
 ```
 
-`CurationV2.insert_curation()` requires `labels: dict[int, list[CurationLabel | str]]` and validates each value against the enum, raising on unknown labels. This matches the convention list at [`src/spyglass/spikesorting/v1/curation.py:26`](src/spyglass/spikesorting/v1/curation.py#L26) but enforces it instead of merely documenting it.
+`CurationV2.insert_curation()` requires `labels: dict[int, list[CurationLabel | str]]` and validates each value against the enum, raising on unknown labels. This matches the convention list at [`src/spyglass/spikesorting/v1/curation.py:26`](../../../../src/spyglass/spikesorting/v1/curation.py#L26) but enforces it instead of merely documenting it.
 
 Labels are stored in `CurationV2.UnitLabel`, one row per `(unit_id, curation_label)`. Unlabeled units have no `UnitLabel` rows. This preserves v1's multi-label semantics without packing lists into a scalar column.
 
@@ -323,7 +323,7 @@ Free-form `dj.Manual` inserts bypassing the helper remain permitted (DataJoint c
 
 ## `insert_selection()` Return-Value Normalization
 
-v1's `insert_selection` helpers return `dict` on fresh insert but `list[dict]` on rerun (see [`src/spyglass/spikesorting/v1/recording.py:176-182`](src/spyglass/spikesorting/v1/recording.py#L176-L182)). This breaks downstream `**rec_key` splatting.
+v1's `insert_selection` helpers return `dict` on fresh insert but `list[dict]` on rerun (see [`src/spyglass/spikesorting/v1/recording.py:176-182`](../../../../src/spyglass/spikesorting/v1/recording.py#L176-L182)). This breaks downstream `**rec_key` splatting.
 
 **v2 convention**: every `insert_selection()` always returns a single `dict` containing **only the primary-key fields** of the inserted/found row. The helper internally normalizes:
 
@@ -444,9 +444,9 @@ This test lives in `tests/spikesorting/v2/test_integrity.py` and runs in the v2 
 
 ## NWB Column-Name Convention for `SpikeSortingOutput` Routing
 
-`SpikeSortingOutput.get_spike_times()` dispatches through `fetch_nwb()` and checks for the key `"object_id"` (see [`src/spyglass/spikesorting/spikesorting_merge.py:210-213`](src/spyglass/spikesorting/spikesorting_merge.py#L210-L213)).
+`SpikeSortingOutput.get_spike_times()` dispatches through `fetch_nwb()` and checks for the key `"object_id"` (see [`src/spyglass/spikesorting/spikesorting_merge.py:210-213`](../../../../src/spyglass/spikesorting/spikesorting_merge.py#L210-L213)).
 
-**v2 must follow this convention**: any v2 table whose row is fetched through the merge for spike-time access uses the column name **`object_id`** pointing to the NWB `/units` table — NOT `units_object_id` or any other variant. The width follows the table-specific schema (`CurationV2.object_id` is `varchar(72)` for CurationV1 parity; `Sorting.object_id` is `varchar(40)`). The naming convention explicitly aligns with `CurationV1` ([`src/spyglass/spikesorting/v1/curation.py:38`](src/spyglass/spikesorting/v1/curation.py#L38)).
+**v2 must follow this convention**: any v2 table whose row is fetched through the merge for spike-time access uses the column name **`object_id`** pointing to the NWB `/units` table — NOT `units_object_id` or any other variant. The width follows the table-specific schema (`CurationV2.object_id` is `varchar(72)` for CurationV1 parity; `Sorting.object_id` is `varchar(40)`). The naming convention explicitly aligns with `CurationV1` ([`src/spyglass/spikesorting/v1/curation.py:38`](../../../../src/spyglass/spikesorting/v1/curation.py#L38)).
 
 Specifically:
 - `CurationV2.object_id` — points to the curated units table inside its analysis NWB. **`object_id`, not `units_object_id`**.
@@ -459,7 +459,7 @@ Specifically:
 
 ## `SpikeSortingOutput.source_class_dict` Registration for v2
 
-Per Critical Issue #1 in the plan self-review: `SpikeSortingOutput` keeps a `source_class_dict` mapping camel-cased part names to the part-source classes ([`spikesorting_merge.py:26-30`](src/spyglass/spikesorting/spikesorting_merge.py#L26-L30)). Dispatch methods `get_recording()`, `get_sorting()`, `get_sort_group_info()` key into this dict; missing entries raise `KeyError` at runtime.
+Per Critical Issue #1 in the plan self-review: `SpikeSortingOutput` keeps a `source_class_dict` mapping camel-cased part names to the part-source classes ([`spikesorting_merge.py:26-30`](../../../../src/spyglass/spikesorting/spikesorting_merge.py#L26-L30)). Dispatch methods `get_recording()`, `get_sorting()`, `get_sort_group_info()` key into this dict; missing entries raise `KeyError` at runtime.
 
 **v2 requirement (Phase 1)**: when adding the `CurationV2` part to `SpikeSortingOutput`, the same PR also:
 1. Adds `"CurationV2": CurationV2_table` to `source_class_dict` at module-load time (via `__init_subclass__` or a top-of-module update — match whichever pattern v1 uses).
@@ -472,7 +472,7 @@ Per Critical Issue #1 in the plan self-review: `SpikeSortingOutput` keeps a `sou
 
 ## Unit-Level Brain Region Tracing
 
-**Why this contract exists**: v1's `CurationV1.get_sort_group_info` joins via `SortGroup.SortGroupElectrode * Electrode * BrainRegion` and samples ONE electrode per sort group (`fetch(limit=1)` at [src/spyglass/spikesorting/v1/curation.py:283-302](src/spyglass/spikesorting/v1/curation.py#L283-L302)). For Frank-lab tetrodes (4 channels, almost always one region) this usually works; for polymer probes spanning CA1+CA3 within one shank it under-reports. Tracing a curated unit back to a brain region is, per the user, "incredibly hard" in v1. v2 fixes this by **persisting per-unit peak channel and brain region at sort time**.
+**Why this contract exists**: v1's `CurationV1.get_sort_group_info` joins via `SortGroup.SortGroupElectrode * Electrode * BrainRegion` and samples ONE electrode per sort group (`fetch(limit=1)` at [src/spyglass/spikesorting/v1/curation.py:283-302](../../../../src/spyglass/spikesorting/v1/curation.py#L283-L302)). For Frank-lab tetrodes (4 channels, almost always one region) this usually works; for polymer probes spanning CA1+CA3 within one shank it under-reports. Tracing a curated unit back to a brain region is, per the user, "incredibly hard" in v1. v2 fixes this by **persisting per-unit peak channel and brain region at sort time**.
 
 **The mechanism**:
 
@@ -549,7 +549,7 @@ Single-session sorts return the same shape as before (no `region_resolution` col
 **Invariants — do not weaken**:
 
 - `Sorting.Unit` is populated in the SAME `make()` call that creates the `Sorting` row. No "compute brain region later" — the brain region is a fact about the sort, not a separate stage.
-- `Sorting.Unit` has no `BrainRegion` FK; brain region is reached via `Sorting.Unit * Electrode * BrainRegion`. The Spyglass `Electrode` table's FK to `BrainRegion` is non-null (see [common_ephys.py:79](src/spyglass/common/common_ephys.py#L79)). Note that `BrainRegion`'s PK is `region_id: smallint auto_increment` (see [common_region.py:9](src/spyglass/common/common_region.py#L9)), NOT `region_name`. To represent unknown regions, Phase 0 fixture setup inserts a single `BrainRegion` row with `region_name="Unknown"` and uses the auto-generated `region_id` as the FK target — installs that already have an "Unknown" row reuse it. `ElectrodeGroup` also has a non-null `-> BrainRegion` FK ([common_ephys.py:31](src/spyglass/common/common_ephys.py#L31)) — for sort groups whose probe spans multiple regions, the per-electrode region (`Sorting.Unit * Electrode * BrainRegion`) is finer-grained than the per-group region.
+- `Sorting.Unit` has no `BrainRegion` FK; brain region is reached via `Sorting.Unit * Electrode * BrainRegion`. The Spyglass `Electrode` table's FK to `BrainRegion` is non-null (see [common_ephys.py:79](../../../../src/spyglass/common/common_ephys.py#L79)). Note that `BrainRegion`'s PK is `region_id: smallint auto_increment` (see [common_region.py:9](../../../../src/spyglass/common/common_region.py#L9)), NOT `region_name`. To represent unknown regions, Phase 0 fixture setup inserts a single `BrainRegion` row with `region_name="Unknown"` and uses the auto-generated `region_id` as the FK target — installs that already have an "Unknown" row reuse it. `ElectrodeGroup` also has a non-null `-> BrainRegion` FK ([common_ephys.py:31](../../../../src/spyglass/common/common_ephys.py#L31)) — for sort groups whose probe spans multiple regions, the per-electrode region (`Sorting.Unit * Electrode * BrainRegion`) is finer-grained than the per-group region.
 - `Sorting.get_unit_brain_regions` is a constant-time lookup against the part table (no template recomputation, no analyzer load).
 - Multi-region sort groups (polymer probes) are NOT collapsed; each unit's region reflects ITS peak channel, not the sort group's modal region.
 - Phase 1's `CurationV2` MUST also have a `Unit` part table mirroring `Sorting.Unit` so that curated unit removals (merges) are correctly reflected in the brain-region query without re-walking templates. `CurationV2.Unit` is populated by `CurationV2.insert_curation` from `Sorting.Unit` plus the merge_groups.

@@ -9,7 +9,7 @@ The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell n
 - All files implemented in Phases 1–4. Phase 5 adds only its own FigPack tables (`FigPackCurationSelection`, `FigPackCuration`) and preset registrations; it must not alter any Phase 1–4 table definitions.
 - [notebooks/10_Spike_SortingV1.ipynb](notebooks/10_Spike_SortingV1.ipynb) — the v1 notebook v2 replaces.
 - [notebooks/11_Spike_Sorting_Analysis.ipynb](notebooks/11_Spike_Sorting_Analysis.ipynb) — downstream consumer notebook; should work unchanged with v2 outputs.
-- [src/spyglass/spikesorting/v1/figurl_curation.py](src/spyglass/spikesorting/v1/figurl_curation.py) — FigURL pattern to mirror in FigPack.
+- [src/spyglass/spikesorting/v1/figurl_curation.py](../../../../src/spyglass/spikesorting/v1/figurl_curation.py) — FigURL pattern to mirror in FigPack.
 - [.claude/docs/plans/spikesorting-v2/appendix.md § FigPack vs FigURL](appendix.md#figpack-vs-figurl) — migration policy.
 
 **Contracts referenced:**
@@ -23,8 +23,8 @@ The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell n
 
 - **EXTEND `pipeline.py`** (Phase 1 shipped a minimal version with 3 presets covering recording → artifact → sorting → initial curation). Phase 5 adds the missing stages and broadens the preset set per [designs.md § `run_v2_pipeline()` Orchestrator](designs.md#run_v2_pipeline-orchestrator):
   - **Add `auto_curate=True` parameter** — wires up Phase 2's `AnalyzerCuration` stage and the materialization step.
-  - **Add `concat_session_group_name` parameter (optional)** — when set, the orchestrator routes through Phase 3's `ConcatenatedRecording` instead of `Recording`. It is mutually exclusive with the single-session inputs (`nwb_file_name`, `sort_group_id`, `interval_list_name`) and is only for same-day / explicit-opt-in concatenated sorting. This parameter is deliberately NOT reused for UnitMatch.
-  - **Add `run_v2_unit_match()` helper** — a separate convenience function for Phase 4's sort-then-match path. Signature: `run_v2_unit_match(session_group_name, matcher_params_name="unitmatch_default", curation_choices=None) -> dict`. It requires explicit `curation_choices` keyed by `SessionGroup.member_index`, calls `UnitMatchSelection.insert_selection(..., curation_choices=...)`, populates `UnitMatch` and `TrackedUnit`, and returns a manifest with `unitmatch_id`. It never auto-selects "latest" curations. Keeping this separate prevents the concat-sorting workflow from being confused with the per-member curation workflow required by UnitMatch.
+  - **Add `concat_session_group_owner` + `concat_session_group_name` parameters (optional pair)** — when set together, the orchestrator routes through Phase 3's `ConcatenatedRecording` instead of `Recording`. They are mutually exclusive with the single-session inputs (`nwb_file_name`, `sort_group_id`, `interval_list_name`) and are only for same-day / explicit-opt-in concatenated sorting. The owner field is required because `SessionGroup` names are team-namespaced. These parameters are deliberately NOT reused for UnitMatch.
+  - **Add `run_v2_unit_match()` helper** — a separate convenience function for Phase 4's sort-then-match path. Signature: `run_v2_unit_match(session_group_owner, session_group_name, matcher_params_name="unitmatch_default", curation_choices=None) -> dict`. It requires explicit `curation_choices` keyed by `SessionGroup.member_index`, calls `UnitMatchSelection.insert_selection(..., curation_choices=...)`, populates `UnitMatch` and `TrackedUnit`, and returns a manifest with `unitmatch_id`. It never auto-selects "latest" curations. Keeping this separate prevents the concat-sorting workflow from being confused with the per-member curation workflow required by UnitMatch.
   - **Add `figpack=False` parameter (optional)** — wires up the FigPack curation stage below.
   - **Expand `PRESETS`** to include Phase 5's full set:
     - `franklab_tetrode_mountainsort4`, `franklab_tetrode_mountainsort5`, `clusterless_thresholder_default` (carried over from Phase 1)
@@ -47,7 +47,7 @@ The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell n
       motion_correction_params_name: str | None = None
       description: str = ""
   ```
-  Validates at preset-registration time that every referenced Lookup row exists (raises a clear error if a parameter set is missing). `motion_correction_params_name` is optional for ordinary single-session presets and required only for presets intended for `concat_session_group_name`. This catches the typo-at-populate failure mode entirely.
+  Validates at preset-registration time that every referenced Lookup row exists (raises a clear error if a parameter set is missing). `motion_correction_params_name` is optional for ordinary single-session presets and required only for presets intended for concat session groups. This catches the typo-at-populate failure mode entirely.
 
 - **FigPack feasibility check FIRST**, before implementing anything. Phase 5 declares FigPack as the v2 curation UI per resolved decision #2 — but the implementer must verify the upstream package is usable before writing the table. Tasks:
   1. Confirm the actual installable package set. Current upstream uses the core `figpack` package plus a spike-sorting extension package (`figpack-spike-sorting` on PyPI, imported as `figpack_spike_sorting` in the upstream repository); do not assume `figpack` alone provides spike-sorting views.
@@ -89,7 +89,7 @@ The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell n
 - **Cross-session notebook**: new file `notebooks/14_Spike_Sorting_CrossSession.ipynb`. Walks through:
   1. Build a `SessionGroup` for 3 same-day sessions.
   2. Run `run_v2_pipeline()` for each session individually.
-  3. Run `run_v2_unit_match(session_group_name, curation_choices=...)` across the group.
+  3. Run `run_v2_unit_match(session_group_owner, session_group_name, curation_choices=...)` across the group.
   4. Inspect `TrackedUnit` membership.
   5. Decoding with `TrackedUnit`-indexed spikes (link to downstream notebook).
 
@@ -106,11 +106,12 @@ The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell n
 - **End-to-end integration test** `tests/spikesorting/v2/test_run_pipeline.py`:
   - `test_run_v2_pipeline_minirec_clusterless` — calls `run_v2_pipeline(...)`, asserts manifest has the expected single-session stages (`recording`, `artifact_detection`, `sorting`, `initial_curation`, `auto_curation`) plus valid `merge_id`; downstream `SpikeSortingOutput.get_spike_times(...)` returns sane arrays. This is a plumbing/integration guard only; minirec is not a sort-correctness or parity oracle.
   - `test_run_v2_pipeline_idempotent` — call `run_v2_pipeline(...)` twice with identical args; second call returns the same manifest (no duplicate inserts).
-  - `test_run_v2_pipeline_rejects_mixed_single_and_concat_inputs` — passing both single-session inputs and `concat_session_group_name` raises a clear error before any insert.
+  - `test_run_v2_pipeline_rejects_mixed_single_and_concat_inputs` — passing both single-session inputs and `concat_session_group_owner` / `concat_session_group_name` raises a clear error before any insert.
+  - `test_run_v2_pipeline_requires_concat_owner_and_name` — passing only one concat session-group field raises before insert.
   - `test_run_v2_unit_match_requires_explicit_curations` — `run_v2_unit_match(..., curation_choices=None)` raises and never auto-pins latest curations.
   - `test_preset_validation_catches_missing_lookup_rows` — define a preset referencing a nonexistent param name; `register_preset` raises with a clear "row 'foo' not found in PreprocessingParameters" message.
 
-- **Notebook smoke test**: `tests/notebooks/test_spike_sorting_v2_notebook.py` — uses `jupytext` (already a docs optional dep at [pyproject.toml](pyproject.toml)) to execute `notebooks/13_Spike_SortingV2.ipynb` cell-by-cell against the `minirec` fixture. Marked slow.
+- **Notebook smoke test**: `tests/notebooks/test_spike_sorting_v2_notebook.py` — uses `jupytext` (already a docs optional dep at [pyproject.toml](../../../../pyproject.toml)) to execute `notebooks/13_Spike_SortingV2.ipynb` cell-by-cell against the `minirec` fixture. Marked slow.
 
 ## Deliberately not in this phase
 
@@ -128,9 +129,10 @@ The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell n
 | `test_run_v2_pipeline_idempotent` | Two calls with identical args return identical manifests. No duplicate rows inserted (count check on every Selection table before/after second call). |
 | `test_run_v2_pipeline_manifest_complete` | Single-session manifest contains `recording`, `artifact_detection`, `sorting`, `initial_curation`, `auto_curation`, and final `merge_id`. Concat-mode manifest contains `concat_recording` instead of `recording` and may omit `artifact_detection` until cross-recording artifact detection lands. |
 | `test_register_preset_catches_typos` | Registering a preset with `preproc_params_name="defaut"` (typo) raises clearly. |
-| `test_run_v2_pipeline_rejects_mixed_single_and_concat_inputs` | Passing `nwb_file_name`/`sort_group_id` together with `concat_session_group_name` raises before selection rows are inserted. |
+| `test_run_v2_pipeline_rejects_mixed_single_and_concat_inputs` | Passing `nwb_file_name`/`sort_group_id` together with concat session-group fields raises before selection rows are inserted. |
+| `test_run_v2_pipeline_requires_concat_owner_and_name` | Passing only `concat_session_group_owner` or only `concat_session_group_name` raises before selection rows are inserted. |
 | `test_run_v2_unit_match_requires_explicit_curations` | Calling `run_v2_unit_match()` without `curation_choices` raises clearly and does not query "latest" curation rows. |
-| `test_run_v2_unit_match_idempotent` | Two calls with the same `session_group_name`, `matcher_params_name`, and `curation_choices` return the same `unitmatch_id`. |
+| `test_run_v2_unit_match_idempotent` | Two calls with the same `session_group_owner`, `session_group_name`, `matcher_params_name`, and `curation_choices` return the same `unitmatch_id`. |
 | `test_figpack_curation_make_publishes_uri` (slow, integration; optional) | Skipped if the `spikesorting-v2-curation` extra is not installed; otherwise asserts `FigPackCuration.populate(key)` returns a non-empty URI. |
 | `test_figpack_zero_unit_sorting` (slow, optional) | A zero-unit `CurationV2` either publishes an empty FigPack view or raises a clear `EmptySortingError`; it never fails with missing-column `KeyError`. |
 | `test_figpack_round_trip_labels` (slow, integration; optional) | Publish a FigPack view with known labels; `fetch_curation_from_uri()` recovers them. |
@@ -151,7 +153,7 @@ Before opening the PR for this phase, dispatch `code-reviewer` (or equivalent in
 - Validation slice tests pass; slow / integration tests are marked.
 - `notebooks/13_Spike_SortingV2.ipynb` is ≤10 code cells (verify by running `jq '.cells | map(select(.cell_type == "code")) | length' notebooks/13_Spike_SortingV2.ipynb`).
 - `run_v2_pipeline()` is idempotent (the manifest comparison test passes).
-- `run_v2_unit_match()` is idempotent by `(session_group_name, matcher_params_name, curation_set_hash)` and does not conflate UnitMatch with concatenated sorting.
+- `run_v2_unit_match()` is idempotent by `(session_group_owner, session_group_name, matcher_params_name, curation_set_hash)` and does not conflate UnitMatch with concatenated sorting.
 - FigPack feasibility was verified before implementation began (or the project owner was escalated if FigPack proved unusable — no silent fallback).
 - All docs tasks landed: v2.md banner, README snippet, `choosing-v1-vs-v2.md` decision page.
 - CHANGELOG.md mentions Phase 5 deliverables (orchestrator, FigPack, notebook rewrite).

@@ -122,7 +122,7 @@ flowchart TB
     subgraph "Single-session OR same-day concat"
         P[run_v2_pipeline]
         P -- "if nwb_file_name / sort_group_id / interval_list_name set" --> S[Single-session path]
-        P -- "if concat_session_group_name set" --> C[Concat path]
+        P -- "if concat_session_group_owner + name set" --> C[Concat path]
         S --> R1[Recording.populate]
         C --> R2[ConcatenatedRecording.populate]
         R1 --> A[ArtifactDetection if not skip_artifact]
@@ -150,7 +150,7 @@ flowchart TB
 - **Selection-row identity includes the UI config.** `FigPackCurationSelection.figpack_config_hash` is a sha256 over `label_options + metrics + upload + ephemeral`. Two different UI configs for the same curation produce two distinct selection rows. v1's `FigURLCurationSelection` lacked this — repeat calls with different options collided.
 - **Default `label_options` use v2 enum labels** (`["mua", "accept", "noise"]`), not FigURL-era `"good"`.
 - **Spyglass-owned adapter helpers** wrap the verified FigPack API. `_build_figpack_curation_view()` and `_show_or_upload_figpack_view()` are private adapters; the upstream API is pinned only after the feasibility check.
-- **Workflow separation.** `run_v2_pipeline(concat_session_group_name=...)` runs a concatenated sort. `run_v2_unit_match(session_group_name=..., curation_choices=...)` is a separate function for sort-then-match. The two cannot be confused via overlapping parameters.
+- **Workflow separation.** `run_v2_pipeline(concat_session_group_owner=..., concat_session_group_name=...)` runs a concatenated sort. `run_v2_unit_match(session_group_owner=..., session_group_name=..., curation_choices=...)` is a separate function for sort-then-match. The two cannot be confused via overlapping parameters.
 - **`run_v2_unit_match` requires explicit curation choices.** Calling without `curation_choices` raises; the function never auto-pins "latest" curations.
 - **Idempotent orchestrators.** Both helpers return manifest dicts of every `(stage, key)` they touched. Repeat calls with identical args find the same selection rows and return the same manifest — no duplicate inserts.
 - **No v1/v0 schema changes.** `git diff src/spyglass/spikesorting/{v0,v1}/` is empty after the Phase 5 PR.

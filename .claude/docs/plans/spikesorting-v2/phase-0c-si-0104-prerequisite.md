@@ -10,9 +10,9 @@ Move Spyglass from `spikeinterface>=0.99.1,<0.100` to `spikeinterface>=0.104,<0.
 
 ## Inputs to read first
 
-- [pyproject.toml](pyproject.toml) — current SpikeInterface pin.
-- [src/spyglass/spikesorting/v1/metric_curation.py](src/spyglass/spikesorting/v1/metric_curation.py) — WaveformExtractor usage and metric curation surface.
-- [src/spyglass/spikesorting/v1/burst_curation.py](src/spyglass/spikesorting/v1/burst_curation.py) — depends on `MetricCuration.get_waveforms`.
+- [pyproject.toml](../../../../pyproject.toml) — current SpikeInterface pin.
+- [src/spyglass/spikesorting/v1/metric_curation.py](../../../../src/spyglass/spikesorting/v1/metric_curation.py) — WaveformExtractor usage and metric curation surface.
+- [src/spyglass/spikesorting/v1/burst_curation.py](../../../../src/spyglass/spikesorting/v1/burst_curation.py) — depends on `MetricCuration.get_waveforms`.
 - [.claude/docs/plans/spikesorting-v2/appendix.md § SpikeInterface 0.99 → 0.104 migration cheat sheet](appendix.md#spikeinterface-099--0104-migration-cheat-sheet).
 
 ## Tasks

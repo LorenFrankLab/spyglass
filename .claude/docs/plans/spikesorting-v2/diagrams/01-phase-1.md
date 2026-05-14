@@ -213,10 +213,12 @@ erDiagram
     %% Forward-compat (declared in Phase 1, populated in Phase 3)
     %% =========================================================
     SessionGroup {
+        varchar session_group_owner PK
         varchar session_group_name PK
         varchar description
     }
     SessionGroup_Member {
+        varchar session_group_owner PK
         varchar session_group_name PK
         int member_index PK
         varchar nwb_file_name FK
@@ -231,6 +233,7 @@ erDiagram
     }
     ConcatenatedRecordingSelection {
         uuid concat_recording_id PK
+        varchar session_group_owner FK
         varchar session_group_name FK
         varchar preproc_params_name FK
         varchar motion_correction_params_name FK

@@ -196,7 +196,7 @@ Sources:
 
 ## FigPack vs FigURL
 
-**FigURL** (v1's curation UI) is the SortingView-backed web app. Requires `kachery-cloud` for state persistence. v1's `FigURLCuration` lives at [src/spyglass/spikesorting/v1/figurl_curation.py](src/spyglass/spikesorting/v1/figurl_curation.py).
+**FigURL** (v1's curation UI) is the SortingView-backed web app. Requires `kachery-cloud` for state persistence. v1's `FigURLCuration` lives at [src/spyglass/spikesorting/v1/figurl_curation.py](../../../../src/spyglass/spikesorting/v1/figurl_curation.py).
 
 **FigPack** is the intended FigURL successor UI path. Repo: https://github.com/flatironinstitute/figpack. Current packaging during plan review is a core `figpack` package plus a spike-sorting extension package named `figpack-spike-sorting` on PyPI and imported as `figpack_spike_sorting`. Phase 5 must still verify the exact view-construction API, upload/show method, and edited-curation state round trip before implementing the DataJoint table.
 
@@ -280,7 +280,7 @@ The MEArec → NWB converter must produce files that Spyglass's `insert_sessions
 
 ### ElectricalSeries naming (required)
 
-Spyglass's `Raw` ingestion at [common_ephys.py:289-294](src/spyglass/common/common_ephys.py#L289-L294) looks for the first `ElectricalSeries` matching one of:
+Spyglass's `Raw` ingestion at [common_ephys.py:289-294](../../../../src/spyglass/common/common_ephys.py#L289-L294) looks for the first `ElectricalSeries` matching one of:
 
 ```python
 _source_nwb_object_name = ["e-series", "electricalseries", "ephys", "electrophysiology"]
@@ -301,7 +301,7 @@ The converter must populate these NWB-level fields (synthetic but well-formed):
 
 ### Probe device types Spyglass recognizes
 
-- `tetrode_12.5` — Frank-lab default tetrode; recognized by Spyglass at [recording.py:630-643](src/spyglass/spikesorting/v1/recording.py#L630-L643) for probe-geometry handling.
+- `tetrode_12.5` — Frank-lab default tetrode; recognized by Spyglass at [recording.py:630-643](../../../../src/spyglass/spikesorting/v1/recording.py#L630-L643) for probe-geometry handling.
 - Neuropixels device types via `probeinterface`.
 
 For MEArec fixtures, plant the device_type explicitly to match an existing Spyglass-recognized probe — otherwise the ingestion succeeds but downstream probe-geometry handling falls back to channel-position-only.
@@ -324,4 +324,4 @@ If round-trip fails on a freshly-generated fixture, the converter is broken — 
 
 - [LorenFrankLab/trodes_to_nwb GitHub](https://github.com/LorenFrankLab/trodes_to_nwb)
 - [trodes_to_nwb sample metadata YAML](https://github.com/LorenFrankLab/trodes_to_nwb/blob/main/src/trodes_to_nwb/tests/test_data/20230622_sample_metadata.yml)
-- Spyglass [common_ephys.py:276-330](src/spyglass/common/common_ephys.py#L276-L330) — Raw ingestion logic.
+- Spyglass [common_ephys.py:276-330](../../../../src/spyglass/common/common_ephys.py#L276-L330) — Raw ingestion logic.

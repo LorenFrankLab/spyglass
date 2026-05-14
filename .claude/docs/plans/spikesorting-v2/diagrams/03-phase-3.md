@@ -20,10 +20,12 @@ erDiagram
 
     %% ===== Schema declared Phase 1, ACTIVATED Phase 3 =====
     SessionGroup {
+        varchar session_group_owner PK
         varchar session_group_name PK
         varchar description
     }
     SessionGroup_Member {
+        varchar session_group_owner PK
         varchar session_group_name PK
         int member_index PK
         varchar nwb_file_name FK
@@ -38,6 +40,7 @@ erDiagram
     }
     ConcatenatedRecordingSelection {
         uuid concat_recording_id PK
+        varchar session_group_owner FK
         varchar session_group_name FK
         varchar preproc_params_name FK
         varchar motion_correction_params_name FK
@@ -111,6 +114,7 @@ flowchart LR
   - Concat path: by `ConcatenatedRecording.make()` AFTER motion correction.
   This guarantees motion estimators see un-whitened traces (per SI docs).
 - **Anchor NWB rule.** `ConcatenatedRecording`'s `AnalysisNwbfile` parent is the **first** `SessionGroup.Member.nwb_file_name` (ordered by `member_index`). Same rule applies to concat-sort `Sorting` rows.
+- **SessionGroup names are owner-scoped.** The `session_group_owner` projected `LabTeam` FK is part of the master PK, so two teams can both create `session_group_name="day1"` without colliding. Per-member `team_name` remains on `SessionGroup.Member` for collaborations that mix teams.
 - **Concat sorts skip artifact masking.** `SortingSelection.insert_selection()` rejects `(concat_recording_id, artifact_id)` together. Cross-recording artifact masking is out of scope.
 - **Segment boundaries persisted.** `ConcatenatedRecording.member_segment_boundaries` (cumulative end-sample counts) lets downstream code back-map spike times to per-session sortings via `ConcatenatedRecording.split_sorting_by_session()`.
 - **`Sorting.Unit` anchor rule for concat.** A unit's peak `electrode_id` maps to N `Electrode` rows (one per `SessionGroup.Member`). v2 anchors concat `Sorting.Unit` and `CurationV2.Unit` rows to the FIRST member's `Electrode`. Phase 4 sort-then-match brain-region tracing uses each pinned `CurationV2.Unit -> Electrode -> BrainRegion` path directly; if a future workflow matches concat curations, the concat anchor rule still applies unless a per-member accessor explicitly expands through `ConcatenatedRecording -> SessionGroup.Member`.

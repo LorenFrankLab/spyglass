@@ -13,11 +13,11 @@ Phase 0b depends on Phase 0a. Phase 1 depends on both 0a and 0b plus [Phase 0c](
 
 **Inputs to read first:**
 
-- [pyproject.toml:62](pyproject.toml#L62) — current `spikeinterface` pin.
-- [src/spyglass/spikesorting/v1/__init__.py](src/spyglass/spikesorting/v1/__init__.py) — module export style to mirror.
-- [src/spyglass/spikesorting/v1/recording.py:407-427](src/spyglass/spikesorting/v1/recording.py#L407-L427) — current `get_recording()` missing-file rebuild pattern.
-- [src/spyglass/spikesorting/v1/recording.py:475-645](src/spyglass/spikesorting/v1/recording.py#L475-L645) — current preprocessing pattern used by v1 recording materialization.
-- [tests/spikesorting/v1/test_sorting.py](tests/spikesorting/v1/test_sorting.py) — existing v1 test patterns to mirror.
+- [pyproject.toml:62](../../../../pyproject.toml#L62) — current `spikeinterface` pin.
+- [src/spyglass/spikesorting/v1/__init__.py](../../../../src/spyglass/spikesorting/v1/__init__.py) — module export style to mirror.
+- [src/spyglass/spikesorting/v1/recording.py:407-427](../../../../src/spyglass/spikesorting/v1/recording.py#L407-L427) — current `get_recording()` missing-file rebuild pattern.
+- [src/spyglass/spikesorting/v1/recording.py:475-645](../../../../src/spyglass/spikesorting/v1/recording.py#L475-L645) — current preprocessing pattern used by v1 recording materialization.
+- [tests/spikesorting/v1/test_sorting.py](../../../../tests/spikesorting/v1/test_sorting.py) — existing v1 test patterns to mirror.
 - [.claude/docs/plans/spikesorting-v2/appendix.md § SpikeInterface 0.99 → 0.104 migration cheat sheet](appendix.md#spikeinterface-099--0104-migration-cheat-sheet) — full API rename list.
 
 **Contracts referenced:**
@@ -105,12 +105,12 @@ Phase 0b depends on Phase 0a. Phase 1 depends on both 0a and 0b plus [Phase 0c](
     3. Write the NWB files to `tests/spikesorting/v2/fixtures/`.
     4. Print fixture metadata (`n_units`, `duration`, `n_channels`, MEArec version, deterministic seed) into `fixtures_manifest.json`.
   - **MEArec → NWB converter** in `src/spyglass/spikesorting/v2/_fixtures/mearec_to_nwb.py`. The output must be **structurally identical to a `trodes_to_nwb`-produced NWB** so Spyglass's `insert_sessions` ingests it end-to-end. Use [LorenFrankLab/trodes_to_nwb](https://github.com/LorenFrankLab/trodes_to_nwb) as the reference; its YAML metadata schema (see [`20230622_sample_metadata.yml`](https://github.com/LorenFrankLab/trodes_to_nwb/blob/main/src/trodes_to_nwb/tests/test_data/20230622_sample_metadata.yml)) defines every required NWB field. Tasks:
-    1. **ElectricalSeries name MUST be `"e-series"`** (the first name in Spyglass's [`Raw._source_nwb_object_name` list at common_ephys.py:289-294](src/spyglass/common/common_ephys.py#L289-L294); `trodes_to_nwb`'s default). NeuroConv's default may differ — override via `interface.run_conversion(..., metadata={"Ecephys": {"ElectricalSeries": {"name": "e-series"}}})` or post-write rename if NeuroConv resists.
+    1. **ElectricalSeries name MUST be `"e-series"`** (the first name in Spyglass's [`Raw._source_nwb_object_name` list at common_ephys.py:289-294](../../../../src/spyglass/common/common_ephys.py#L289-L294); `trodes_to_nwb`'s default). NeuroConv's default may differ — override via `interface.run_conversion(..., metadata={"Ecephys": {"ElectricalSeries": {"name": "e-series"}}})` or post-write rename if NeuroConv resists.
     2. Use `neuroconv.datainterfaces.MEArecRecordingInterface` for the raw recording side: produces the `ElectricalSeries` + `electrodes` table + `Device` + `ElectrodeGroup` from MEArec's HDF5.
     3. **Inject trodes_to_nwb-compatible metadata** mirroring the YAML schema, populated from synthetic values so the NWB looks like a normal Frank-lab session:
        - `experimenter_name = ["Synthetic, MEArec"]`, `lab = "Loren Frank Lab"`, `institution = "UCSF"`, `experiment_description = "MEArec-simulated ground-truth recording for v2 validation"`, `session_description = "..."`, `session_id = "mearec_{fixture_name}"`, `keywords = ["spike sorting", "simulation", "ground truth"]`.
        - `subject`: `description`, `genotype = "wt/wt"`, `sex = "U"`, `species = "Mus musculus"`, `subject_id = "synthetic_001"`, `date_of_birth`, `weight`.
-       - `electrode_groups`: one per MEArec template-group. For tetrode fixtures, `device_type = "tetrode_12.5"` (already registered with Spyglass — `probeinterface` recognizes it; see [recording.py:630-643](src/spyglass/spikesorting/v1/recording.py#L630-L643)). For Neuropixels fixtures, pick a registered Neuropixels probe device_type.
+       - `electrode_groups`: one per MEArec template-group. For tetrode fixtures, `device_type = "tetrode_12.5"` (already registered with Spyglass — `probeinterface` recognizes it; see [recording.py:630-643](../../../../src/spyglass/spikesorting/v1/recording.py#L630-L643)). For Neuropixels fixtures, pick a registered Neuropixels probe device_type.
        - `targeted_location` per electrode_group — this maps to `BrainRegion` in Spyglass's electrode table after ingestion. For ground-truth brain-region validation, plant known regions (e.g. tetrode group 0 → "CA1", group 1 → "CA3").
        - `ntrode_electrode_group_channel_map` for tetrode fixtures: trivial identity map per tetrode.
     4. **Add a Units ground-truth table** (this is NOT in trodes_to_nwb's normal output — trodes_to_nwb produces raw data only — but it's needed for the validation oracle). Read MEArec's `RecordingGenerator.spiketrains` (Neo SpikeTrain objects), `template_locations` (per-unit 3D soma positions), and `cell_types`. Write to `nwbfile.units` with columns: `id`, `spike_times`, `position_x`, `position_y`, `position_z`, `cell_type`, `is_ground_truth=True`. After common-table ingestion succeeds, explicitly import the units with `ImportedSpikeSorting().insert_from_nwbfile(nwb_file_name)` (or the current production equivalent) before comparing against v2 `Sorting` output via SpikeInterface's `compare_sorter_to_ground_truth`. `Nwbfile.insert_from_relative_file_name(...)` alone only registers the NWB file row; it does not populate common tables or import units.

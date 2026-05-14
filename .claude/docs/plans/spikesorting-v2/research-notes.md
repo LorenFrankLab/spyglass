@@ -212,8 +212,8 @@ self.insert1({**key, "analysis_file_name": analysis_file_name, "result_object_id
 - Backward compatible: blob in DB stays a dict.
 
 ### H4: Pipeline orchestration via convenience helpers → 🟢 ADOPT
-- `run_v2_pipeline()` is the sort-and-curate entry point: takes either single-session inputs or `concat_session_group_name`, returns final `merge_id`.
-- `run_v2_unit_match()` is the separate sort-then-match entry point: takes `session_group_name` plus explicit per-member `curation_choices`, returns `unitmatch_id`.
+- `run_v2_pipeline()` is the sort-and-curate entry point: takes either single-session inputs or `concat_session_group_owner` + `concat_session_group_name`, returns final `merge_id`.
+- `run_v2_unit_match()` is the separate sort-then-match entry point: takes `session_group_owner` + `session_group_name` plus explicit per-member `curation_choices`, returns `unitmatch_id`.
 - Internally: helpers insert selection rows, populate each stage, and return manifest dictionaries.
 - Idempotent: re-run finds existing rows, doesn't duplicate.
 - Notebook becomes ~5 cells instead of 35.

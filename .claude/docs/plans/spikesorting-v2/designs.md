@@ -619,9 +619,9 @@ class Sorting(SpyglassMixin, dj.Computed):
 
         Note on concat-sort `Electrode` anchoring: `Electrode` inherits
         the full `ElectrodeGroup` key plus `electrode_id`
-        ([common_ephys.py:79](src/spyglass/common/common_ephys.py#L79)).
+        ([common_ephys.py:79](../../../../src/spyglass/common/common_ephys.py#L79)).
         Because `ElectrodeGroup` is keyed by Session plus
-        `electrode_group_name` ([common_ephys.py:31](src/spyglass/common/common_ephys.py#L31)),
+        `electrode_group_name` ([common_ephys.py:31](../../../../src/spyglass/common/common_ephys.py#L31)),
         implementers must carry the full `Electrode` FK from
         `SortGroupV2.SortGroupElectrode`, not reconstruct by
         `electrode_id` alone. For SINGLE-recording sorts the Electrode
@@ -895,7 +895,7 @@ Same lineage shape as `CurationV1` *except*: (a) registers into `SpikeSortingOut
 class CurationV2(SpyglassMixin, dj.Manual):
     definition = """
     -> Sorting
-    curation_id: int
+    curation_id=0: int
     ---
     parent_curation_id=-1: int
     -> AnalysisNwbfile
@@ -978,11 +978,13 @@ class CurationV2(SpyglassMixin, dj.Manual):
     ) -> dict:
         """Insert a new curation; auto-register into SpikeSortingOutput.CurationV2.
 
-        TRANSACTIONAL — the entire sequence below runs inside a single
-        DataJoint transaction. If ANY step fails (NWB write, Unit
-        materialization, UnitLabel write, merge-part registration), the
-        whole insert is rolled back. No partial CurationV2 row, no orphan
-        merge-part row, no orphan Unit / UnitLabel rows. Tested by
+        DB-TRANSACTIONAL — the DataJoint inserts below run inside a
+        single transaction. File writes are not DataJoint-transactional,
+        so the implementation stages the curated-units NWB first and
+        deletes that staged file on any later failure. No partial
+        CurationV2 row, no orphan merge-part row, no orphan Unit /
+        UnitLabel rows, and no orphan curated-units analysis file may
+        remain. Tested by
         `test_curation_v2_insert_atomic_on_merge_register_failure`.
         """
         # Validate labels against enum BEFORE opening the transaction so we
@@ -993,35 +995,41 @@ class CurationV2(SpyglassMixin, dj.Manual):
 
         from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 
-        with cls.connection.transaction:
-            # 1. Materialize the curated units NWB and stage AnalysisNwbfile
-            #    metadata. If the NWB write fails (disk full, permissions),
-            #    the transaction aborts before any DataJoint row is touched.
-            analysis_file_name, object_id = _write_curation_units_nwb(...)
+        staged_file = None
+        try:
+            # 1. Materialize the curated units NWB into a staged analysis file.
+            #    This is outside the DB guarantee: if a later DB insert fails,
+            #    the except block MUST remove this file because DataJoint cannot
+            #    roll back filesystem side effects.
+            staged_file, analysis_file_name, object_id = _stage_curation_units_nwb(...)
 
-            # 2. Insert the master CurationV2 row.
-            cls.insert1(key_just_inserted)
+            with cls.connection.transaction:
+                # 2. Insert the master CurationV2 row.
+                cls.insert1(key_just_inserted)
 
-            # 3. Insert CurationV2.Unit rows (peak channels + amplitudes,
-            #    materialized from Sorting.Unit with merge_groups applied).
-            cls.Unit.insert(unit_rows)
+                # 3. Insert CurationV2.Unit rows (peak channels + amplitudes,
+                #    materialized from Sorting.Unit with merge_groups applied).
+                cls.Unit.insert(unit_rows)
 
-            # 4. Insert CurationV2.UnitLabel rows (one per (unit_id, label)).
-            cls.UnitLabel.insert(unit_label_rows)
+                # 4. Insert CurationV2.UnitLabel rows (one per (unit_id, label)).
+                cls.UnitLabel.insert(unit_label_rows)
 
-            # 5. Auto-register into SpikeSortingOutput. If this raises
-            #    (dup merge_id race, foreign-key violation, etc.) the
-            #    transaction aborts and steps 2-4 are rolled back.
-            SpikeSortingOutput.insert(
-                [key_just_inserted], part_name="CurationV2"
-            )
+                # 5. Auto-register into SpikeSortingOutput. If this raises
+                #    (dup merge_id race, foreign-key violation, etc.) the
+                #    transaction aborts and steps 2-4 are rolled back.
+                SpikeSortingOutput.insert(
+                    [key_just_inserted], part_name="CurationV2"
+                )
+        except Exception:
+            _remove_staged_analysis_file_if_unreferenced(staged_file)
+            raise
 
         return key_just_inserted
 ```
 
 **Design choice**: auto-register into `SpikeSortingOutput`. v1 forces users to do this manually; users frequently forget, leaving curations orphaned from downstream consumers. Auto-register costs nothing and eliminates the failure mode.
 
-**Atomicity invariant — do not weaken**: `insert_curation()` is a single transaction across (a) AnalysisNwbfile staging, (b) master row insert, (c) `CurationV2.Unit` insert, (d) `CurationV2.UnitLabel` insert, (e) `SpikeSortingOutput.CurationV2` merge-part insert. Partial states are observable only between transactions; any failure rolls back all five. The validation slice covers this with a fault-injection test.
+**Atomicity invariant — do not weaken**: `insert_curation()` has two coordinated guarantees. Database state is a single DataJoint transaction across (a) AnalysisNwbfile row registration / reference, (b) master row insert, (c) `CurationV2.Unit` insert, (d) `CurationV2.UnitLabel` insert, (e) `SpikeSortingOutput.CurationV2` merge-part insert. Filesystem state is explicitly cleaned up on any failure after the curated-units NWB has been staged, because DataJoint cannot roll back files. The validation slice covers both pieces with a fault-injection test: no partial DB rows and no unreferenced analysis file.
 
 ---
 
@@ -1381,6 +1389,7 @@ class SessionGroup(SpyglassMixin, dj.Manual):
     across sessions (no concatenation needed).
     """
     definition = """
+    -> LabTeam.proj(session_group_owner='team_name')
     session_group_name: varchar(64)
     ---
     description: varchar(255)
@@ -1403,12 +1412,17 @@ class SessionGroup(SpyglassMixin, dj.Manual):
     @classmethod
     def create_group(
         cls,
+        session_group_owner: str,
         session_group_name: str,
         members: list[dict],
         description: str = "",
         allow_multi_day: bool = False,
     ) -> None:
         """Atomic-style create.
+
+        session_group_owner namespaces user-facing group names in shared
+        databases. Two teams may both create "day1"; they become distinct
+        rows because the master PK is (session_group_owner, session_group_name).
 
         members: list of dicts with keys
             nwb_file_name, sort_group_id, interval_list_name.
@@ -1452,6 +1466,7 @@ class SessionGroup(SpyglassMixin, dj.Manual):
             rows.append({
                 **{k: v for k, v in m.items() if k != "recording_date"},
                 "recording_date": derived_date,
+                "session_group_owner": session_group_owner,
                 "session_group_name": session_group_name,
                 "member_index": i,
             })
@@ -1466,6 +1481,7 @@ class SessionGroup(SpyglassMixin, dj.Manual):
             )
         with cls.connection.transaction:
             cls.insert1({
+                "session_group_owner": session_group_owner,
                 "session_group_name": session_group_name,
                 "description": description,
             })
@@ -1715,8 +1731,9 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         ``(nwb_file_name, interval_list_name)`` — the natural session PK on
         ``SessionGroup.Member``. The tuple is hashable; a plain dict (the
         full member key) is not, so callers that need the full key should
-        look it up via ``SessionGroup.Member & {"session_group_name": ...,
-        "nwb_file_name": k[0], "interval_list_name": k[1]}``.
+        look it up via ``SessionGroup.Member & {"session_group_owner": ...,
+        "session_group_name": ..., "nwb_file_name": k[0],
+        "interval_list_name": k[1]}``.
         """
         ...
 ```
@@ -1811,7 +1828,7 @@ class UnitMatch(SpyglassMixin, dj.Computed):
 
     AnalysisNwbfile parent-anchor rule (same shape as concat Sorting):
     `AnalysisNwbfile` has a single `-> Nwbfile` parent
-    ([common_nwbfile.py:630](src/spyglass/common/common_nwbfile.py#L630)),
+    ([common_nwbfile.py:630](../../../../src/spyglass/common/common_nwbfile.py#L630)),
     but UnitMatch spans multiple sessions. v2 uses the **first
     `SessionGroup.Member.nwb_file_name`** (ordered by `member_index`)
     as the deterministic anchor for the AnalysisNwbfile parent. The
@@ -2289,7 +2306,7 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
 
 ## `run_v2_pipeline()` Orchestrator
 
-**Phase 1 ships the minimal version** (recording → artifact → sorting → initial curation → merge registration, 3 presets — see Phase 1's task list). **Phase 5 extends it** with metrics, concatenated sorting, FigPack, and the broader preset set. UnitMatch is exposed through the separate `run_v2_unit_match()` helper below so the sort-then-match workflow cannot be confused with concatenated sorting. The code below is the Phase 5 final shape; Phase 1's version is a subset of these stages with no `auto_curate`/`concat_session_group_name`/`figpack` parameters.
+**Phase 1 ships the minimal version** (recording → artifact → sorting → initial curation → merge registration, 3 presets — see Phase 1's task list). **Phase 5 extends it** with metrics, concatenated sorting, FigPack, and the broader preset set. UnitMatch is exposed through the separate `run_v2_unit_match()` helper below so the sort-then-match workflow cannot be confused with concatenated sorting. The code below is the Phase 5 final shape; Phase 1's version is a subset of these stages with no `auto_curate` / concat session-group / `figpack` parameters.
 
 ```python
 def run_v2_pipeline(
@@ -2297,7 +2314,8 @@ def run_v2_pipeline(
     sort_group_id: int | None = None,
     interval_list_name: str | None = None,
     team_name: str | None = None,
-    concat_session_group_name: str | None = None,  # Phase 3 concat sorting only
+    concat_session_group_owner: str | None = None,  # Phase 3 concat sorting only
+    concat_session_group_name: str | None = None,   # Phase 3 concat sorting only
     preset: str = "franklab_tetrode_mountainsort5",
     skip_artifact: bool = False,
     auto_curate: bool = True,                     # Phase 2
@@ -2306,14 +2324,17 @@ def run_v2_pipeline(
     """End-to-end v2 sorting pipeline with optional auto-curation,
     concatenated sorting, and FigPack curation publishing.
 
-    Exactly one of (single-session args, concat_session_group_name) must be set.
+    Exactly one of (single-session args, concat session-group args) must be set.
     Re-runnable safely — find-existing logic in each insert_selection
     means a second call with the same args returns the same manifest.
     """
     single_args = [nwb_file_name, sort_group_id, interval_list_name]
     has_single = all(x is not None for x in single_args)
     has_partial_single = any(x is not None for x in single_args) and not has_single
-    has_concat = concat_session_group_name is not None
+    has_concat = (
+        concat_session_group_owner is not None
+        or concat_session_group_name is not None
+    )
     if has_partial_single:
         raise ValueError(
             "single-session mode requires nwb_file_name, sort_group_id, "
@@ -2322,7 +2343,12 @@ def run_v2_pipeline(
     if has_single == has_concat:
         raise ValueError(
             "Provide exactly one input mode: either all single-session inputs "
-            "or concat_session_group_name"
+            "or concat_session_group_owner + concat_session_group_name"
+        )
+    if has_concat and (concat_session_group_owner is None or concat_session_group_name is None):
+        raise ValueError(
+            "concat mode requires both concat_session_group_owner and "
+            "concat_session_group_name so SessionGroup names are team-namespaced"
         )
 
     preset_dict = PRESETS[preset]
@@ -2332,11 +2358,12 @@ def run_v2_pipeline(
     if has_concat:
         if preset_dict.get("motion_correction_params_name") is None:
             raise ValueError(
-                f"preset={preset!r} cannot be used with concat_session_group_name "
+                f"preset={preset!r} cannot be used with concat session groups "
                 "because it has no motion_correction_params_name"
             )
         # Phase 3 concat path
         concat_key = ConcatenatedRecordingSelection.insert_selection({
+            "session_group_owner": concat_session_group_owner,
             "session_group_name": concat_session_group_name,
             "preproc_params_name": preset_dict["preproc_params_name"],
             "motion_correction_params_name": preset_dict["motion_correction_params_name"],
@@ -2421,6 +2448,7 @@ def run_v2_pipeline(
 
 
 def run_v2_unit_match(
+    session_group_owner: str,
     session_group_name: str,
     *,
     matcher_params_name: str = "unitmatch_default",
@@ -2437,12 +2465,14 @@ def run_v2_unit_match(
             "each SessionGroup.member_index to a CurationV2 key"
         )
     manifest = {
+        "session_group_owner": session_group_owner,
         "session_group_name": session_group_name,
         "matcher_params_name": matcher_params_name,
         "stages": [],
     }
     um_key = UnitMatchSelection.insert_selection(
         {
+            "session_group_owner": session_group_owner,
             "session_group_name": session_group_name,
             "matcher_params_name": matcher_params_name,
         },
@@ -2461,7 +2491,7 @@ def run_v2_unit_match(
 - **Idempotent.** Re-running with same inputs finds existing rows, no duplicates.
 - **Manifest return.** Every touchpoint logged. Notebook prints it after running.
 - **Presets are named bundles** — no inline parameter editing. Custom presets are inserted by adding rows to each Lookup table once.
-- **Workflow separation.** `concat_session_group_name` means "sort this concatenated recording"; `run_v2_unit_match()` means "match these explicitly pinned per-member curations." The public API does not overload one `session_group_name` argument for both.
+- **Workflow separation.** `concat_session_group_owner` + `concat_session_group_name` means "sort this concatenated recording"; `run_v2_unit_match()` means "match these explicitly pinned per-member curations." The public API does not overload one `session_group_name` argument for both.
 
 ```python
 PRESETS = {
