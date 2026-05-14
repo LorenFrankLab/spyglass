@@ -1127,7 +1127,7 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
         # Load analyzer
         sel = (AnalyzerCurationSelection & key).fetch1()
         sorting_key = {"sorting_id": (CurationV2 & sel).fetch1("sorting_id")}
-        analyzer = (Sorting & sorting_key).get_analyzer()
+        analyzer = (Sorting & sorting_key).get_analyzer(sorting_key)
 
         # Compute additional extensions needed for metrics
         metric_params = (QualityMetricParameters & sel).fetch1()
@@ -1585,7 +1585,17 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
-        members = (SessionGroup.Member & key).fetch(as_dict=True, order_by="member_index")
+        # DataJoint passes only ConcatenatedRecordingSelection's PK here:
+        # {"concat_recording_id": ...}. Always fetch the selection row first;
+        # do not restrict SessionGroup/parameter tables with the UUID-only key.
+        sel = (ConcatenatedRecordingSelection & key).fetch1()
+        session_group_key = {
+            "session_group_owner": sel["session_group_owner"],
+            "session_group_name": sel["session_group_name"],
+        }
+        members = (
+            SessionGroup.Member & session_group_key
+        ).fetch(as_dict=True, order_by="member_index")
 
         # Reuse cached PRE-MOTION Recording NWB artifacts per member.
         # Recording.make() materializes filter + CMR only (no whitening) —
@@ -1608,7 +1618,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
                 "nwb_file_name": m["nwb_file_name"],
                 "sort_group_id": m["sort_group_id"],
                 "interval_list_name": m["interval_list_name"],
-                "preproc_params_name": (PreprocessingParameters & key).fetch1("preproc_params_name"),
+                "preproc_params_name": sel["preproc_params_name"],
                 "team_name": m["team_name"],  # carried on the Member part row
             }
             # Match the existing RecordingSelection row (insert_selection
@@ -1639,12 +1649,12 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         # for multi-day groups the caller must explicitly choose a
         # DREDge variant (and accept the validation caveat — multi-day
         # concat is experimental, sort-then-match is the recommended path).
-        motion_params = (MotionCorrectionParameters & key).fetch1("params")
+        motion_params = (MotionCorrectionParameters & sel).fetch1("params")
         preset = motion_params["preset"]
         if preset == "auto":
             # `auto` is permitted only on single-day groups; explicit
             # for multi-day per the gate above.
-            if SessionGroup.is_multi_day(key):
+            if SessionGroup.is_multi_day(session_group_key):
                 raise ValueError(
                     "preset='auto' is not permitted for multi-day SessionGroups. "
                     "Explicitly choose 'dredge_fast' / 'dredge' / etc., or use "
@@ -1672,7 +1682,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         # for the concat path, we apply here so the cached concat artifact
         # is sorter-ready.
         preproc_params = PreprocessingParamsSchema.model_validate(
-            (PreprocessingParameters & key).fetch1("params")
+            (PreprocessingParameters & sel).fetch1("params")
         )
         post_motion_dict = preproc_params.to_post_motion_dict()
         if post_motion_dict:
@@ -1690,7 +1700,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
                     concat_recording,
                     series_name="concatenated_electrical_series",
                     module_name="ecephys",
-                    **_resolved_job_kwargs(key),
+                    **_resolved_job_kwargs(sel),
                 )
                 io.write(nwbfile)
             analysis_file_name = builder.analysis_file_name
@@ -1749,6 +1759,11 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
 ## MatcherParameters + UnitMatch + TrackedUnit
 
 Phase 4. Cross-session matching via the plugin protocol from shared-contracts.md.
+**Provisional until Phase 4a lands.** The table shapes below are the intended
+schema direction, but Phase 4a is an explicit technical spike that must update
+this section after walking the real UnitMatchPy API and on-disk input layout.
+Phase 4b must not implement these tables until the appendix, shared contracts,
+and this design section have been reconciled with the 4a findings.
 
 ```python
 @schema
@@ -1887,6 +1902,26 @@ class UnitMatch(SpyglassMixin, dj.Computed):
         member_curations = (
             UnitMatchSelection.MemberCuration & key
         ).fetch(as_dict=True, order_by="member_index")
+        expected_member_keys = (
+            SessionGroup.Member
+            & {
+                "session_group_owner": sel["session_group_owner"],
+                "session_group_name": sel["session_group_name"],
+            }
+        ).fetch("KEY", order_by="member_index")
+        if _member_key_set(member_curations) != _member_key_set(expected_member_keys):
+            raise UnitMatchSelectionIntegrityError(
+                "UnitMatchSelection.MemberCuration rows do not exactly match "
+                "the parent SessionGroup members. This usually means rows were "
+                "inserted directly with dj.Manual.insert1 instead of "
+                "UnitMatchSelection.insert_selection()."
+            )
+        for mc in member_curations:
+            # Re-check the load-bearing provenance invariant at populate time:
+            # independent FKs prove the member and curation exist, but not that
+            # the curation belongs to this member. Direct part-table insertions
+            # can bypass the helper's ownership validation.
+            _assert_curation_belongs_to_member(mc)
 
         # The wrapper pre-extracts what the matcher needs from each
         # curated analyzer and writes it to a matcher-specific layout

@@ -36,7 +36,7 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
     - `("dredge_full", {"preset": "dredge"})` — slow, highest accuracy
     - `("none", {"preset": "none"})` — explicit opt-out
   - `ConcatenatedRecording` Computed with `make()` that:
-    1. Fetches members in order.
+    1. Fetches `sel = (ConcatenatedRecordingSelection & key).fetch1()` first, because the DataJoint populate key contains only `concat_recording_id`; all member and parameter queries must be restricted with that selection row, not the UUID-only key. Then fetches the selected group's members in `member_index` order.
     2. **Reuses cached NWB-resident `Recording` artifacts per member** rather than re-preprocessing from raw NWB. For each member, fetch the matching `RecordingSelection` PK; load the BaseRecording via `Recording.get_recording(rec_key)`. **No nested `Recording.populate()` — that is a DataJoint anti-pattern.** The selection-time precondition check in `ConcatenatedRecordingSelection.insert_selection()` (below) enforces that every member's `Recording` row is already populated; `make()` defensively re-checks and raises `MissingRecordingForConcatError` with the offending member key if the precondition was bypassed. This avoids the silent-divergence risk of preprocessing twice AND keeps populate behavior easy to reason about. See [designs.md § SessionGroup + ConcatenatedRecording](designs.md#sessiongroup--concatenatedrecording) make() body.
     3. `concatenate_recordings(rec_list)` → mono-segment virtual recording.
     4. Applies `correct_motion(rec, preset=..., **preset_kwargs)` if preset != "none"; `preset_kwargs` comes from the Phase-1-declared `MotionCorrectionParameters.params` blob and may contain SI kwargs such as `detect_kwargs`, `estimate_motion_kwargs`, `interpolate_motion_kwargs`, and job kwargs. The Phase 1 Pydantic schema rejects `folder`, `output_motion`, and `output_motion_info` because Phase 3 has no schema field for untracked motion side artifacts or tuple-valued returns.
@@ -74,8 +74,15 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
       Each member's BaseSorting has spike times reset to that session's local time,
       and unit IDs preserved (so the same biological unit across sessions has the same ID).
       """
+      sel = (ConcatenatedRecordingSelection & key).fetch1()
+      session_group_key = {
+          "session_group_owner": sel["session_group_owner"],
+          "session_group_name": sel["session_group_name"],
+      }
       boundaries = (self & key).fetch1("member_segment_boundaries")
-      members = (SessionGroup.Member & key).fetch(as_dict=True, order_by="member_index")
+      members = (
+          SessionGroup.Member & session_group_key
+      ).fetch(as_dict=True, order_by="member_index")
       per_session: dict[tuple[str, str], si.BaseSorting] = {}
       for i, member in enumerate(members):
           start_sample = 0 if i == 0 else boundaries[i - 1]
@@ -137,6 +144,7 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
 | `test_concat_selection_requires_member_recording_populated` | Build a `SessionGroup` whose member NWBs exist but whose per-member `Recording` rows have NOT been populated. Call `ConcatenatedRecordingSelection.insert_selection(key)` — raises `MissingRecordingForConcatError`; the message names the offending member key(s) and points at `Recording.populate(rec_key)`. No `ConcatenatedRecordingSelection` row inserted. |
 | `test_concat_make_no_nested_populate` (slow) | Monkey-patch `Recording.populate` to raise if called. Run a normal happy-path concat flow (populate per-member Recording first, then `ConcatenatedRecordingSelection.insert_selection`, then `ConcatenatedRecording.populate`). The monkey-patched `populate` MUST NOT be called — proves the no-nested-populate invariant holds end-to-end. |
 | `test_concat_make_raises_clear_error_if_recording_missing_at_make_time` | Bypass `insert_selection` (use `dj.Manual.insert1` directly), then run `ConcatenatedRecording.populate`. Raises `MissingRecordingForConcatError` from `make()`'s defensive re-check, not a nested-populate failure. |
+| `test_concat_make_uses_selection_row_not_uuid_key` | Create two `SessionGroup` rows with different members and different preprocessing/motion parameter names, then insert two `ConcatenatedRecordingSelection` rows. Populate one `concat_recording_id`; assert `make()` fetches only that selection's members and parameters. Regression guard for accidentally restricting `SessionGroup.Member`, `PreprocessingParameters`, or `MotionCorrectionParameters` with the UUID-only populate key. |
 | `test_concatenated_recording_motion_correct_applied` (slow) | On the planted-drift fixture, populate with `preset="rigid_fast"` vs `preset="none"` and assert sampled traces differ. Do not rely on hash differences for no-drift synthetic data, where a rigid correction may be identity. |
 | `test_concatenated_recording_multi_day_with_explicit_preset` (slow) | With `preset="dredge_fast"` and an `allow_multi_day=True` group, `ConcatenatedRecording.populate()` succeeds and records the explicit preset used. Scientific benefit is validated by the planted-drift ground-truth test, not by a brittle hash comparison. |
 | `test_session_group_owner_namespaces_names` | Two different `session_group_owner` values can each create `session_group_name="day1"` without colliding; reusing the same owner/name pair is idempotent or raises the documented duplicate-group error. |

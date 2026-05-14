@@ -463,7 +463,7 @@ Per Critical Issue #1 in the plan self-review: `SpikeSortingOutput` keeps a `sou
 
 **v2 requirement (Phase 1)**: when adding the `CurationV2` part to `SpikeSortingOutput`, the same PR also:
 1. Adds `"CurationV2": CurationV2_table` to `source_class_dict` at module-load time (via `__init_subclass__` or a top-of-module update — match whichever pattern v1 uses).
-2. Implements on `spyglass.spikesorting.v2.curation.CurationV2` the same trio of methods that `CurationV1` exposes: `get_recording(key)`, `get_sorting(key, as_dataframe=False)`, `get_sort_group_info(key)`. These delegate appropriately to `Sorting.get_recording()`, `Sorting.get_analyzer().sorting`, and a sort-group/electrode/brain-region join.
+2. Implements on `spyglass.spikesorting.v2.curation.CurationV2` the same trio of methods that `CurationV1` exposes: `get_recording(key)`, `get_sorting(key, as_dataframe=False)`, `get_sort_group_info(key)`. These delegate appropriately to `Sorting.get_recording(sorting_key)`, `Sorting.get_analyzer(sorting_key).sorting`, and a sort-group/electrode/brain-region join.
 3. Extends `get_spike_times()` if and only if `CurationV2` uses a different units-object-name. Per the NWB-column convention above, it does NOT, so `get_spike_times()` requires no changes — but a test must verify this.
 
 **Invariant — do not weaken**: All five dispatch methods on `SpikeSortingOutput` (`get_recording`, `get_sorting`, `get_sort_group_info`, `get_spike_times`, `get_firing_rate`) must work on a v2-sourced `merge_id` without modification. Phase 1's validation slice includes a test for each.

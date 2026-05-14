@@ -57,8 +57,11 @@ Phase 1 single-session v2 MVP
   -> Phase 3 SessionGroup + ConcatenatedRecording
 
 Phase 3 SessionGroup + ConcatenatedRecording
-  -> Phase 4 UnitMatch cross-session tracking
-      -> Phase 5 UX/FigPack/notebooks
+  -> Phase 4a UnitMatchPy technical spike
+      -> Update appendix + shared-contracts + designs from 4a findings
+          -> Re-run code_graph on the revised draft schema
+              -> Phase 4b UnitMatch cross-session tracking implementation
+                  -> Phase 5 UX/FigPack/notebooks
 ```
 
 Phase 1 is the first runtime v2 pipeline PR and requires Phase 0a, Phase 0b, and Phase 0c. Phase 0c is a hard gate because Phase 1 imports and runs SpikeInterface 0.104 APIs while v1 must remain working under the global project pin.
