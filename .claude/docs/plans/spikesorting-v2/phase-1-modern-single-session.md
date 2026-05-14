@@ -12,6 +12,15 @@ The MVP. Builds the complete single-session sort pipeline: preprocessing → art
 
 The first task of this phase (after prerequisites land) is to verify the new SI baseline by running the existing v1 test suite under 0.104 once more and capturing any newly-discovered regressions to fold into Phase 1 implementation notes.
 
+## Executor Checklist
+
+- Re-run the SI 0.104 v1 baseline from Phase 0c before coding.
+- Implement Phase 1 `_params/`, `recording.py`, `artifact.py`, `sorting.py`, `curation.py`, and the minimal `pipeline.py`.
+- Declare forward-compatible Phase 3 tables exactly as designed, with `ConcatenatedRecording.make()` still gated by `NotImplementedError`.
+- Add `SpikeSortingOutput.CurationV2` registration and v1-compatible merge-table accessors.
+- Preserve the nullable-XOR, NWB-resident cache, `insert_selection()` return, and unit-brain-region contracts from `shared-contracts.md`.
+- Run the Phase 1 validation slice plus `code_graph.py describe/path` for every new table.
+
 **Inputs to read first:**
 
 - [src/spyglass/spikesorting/v1/recording.py](../../../../src/spyglass/spikesorting/v1/recording.py) — entire file; v2's `recording.py` replaces this with modern SI APIs and the Pydantic params pattern.

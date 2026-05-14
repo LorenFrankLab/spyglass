@@ -4,6 +4,15 @@
 
 Implements the concatenate-and-sort workflow on top of the SessionGroup / ConcatenatedRecording schema that Phase 1 already declared. Phase 3 is method-body-only: fills in `ConcatenatedRecording.make()`, lifts `SortingSelection.insert_selection`'s `concat_recording_id` rejection, and adds `SessionGroup.create_group`'s `allow_multi_day` validation logic. **Default scope is same-day**; multi-day requires `allow_multi_day=True` and an explicit (non-`auto`) motion-correction preset. For cross-day analyses the recommended path is Phase 4 sort-then-match (UnitMatch), not concat — concat-across-days is experimental.
 
+## Executor Checklist
+
+- Keep schemas unchanged from Phase 1; this PR is method-body-only.
+- Implement `SessionGroup.create_group()` validation and date derivation.
+- Implement `ConcatenatedRecording.make()` by fetching the selection row first, then using it for member and parameter restrictions.
+- Lift the concat gate in `SortingSelection.insert_selection()` while keeping XOR and concat-artifact rejection guards.
+- Add concat recording loading, sorting dispatch, parent-anchor resolution, and `split_sorting_by_session()`.
+- Run the Phase 3 validation slice plus `code_graph.py describe/path` to prove schema shape is unchanged.
+
 **Inputs to read first:**
 
 - [src/spyglass/spikesorting/analysis/v1/group.py](../../../../src/spyglass/spikesorting/analysis/v1/group.py) — `SortedSpikesGroup` pattern; v2's `SessionGroup` mirrors its master+part shape.

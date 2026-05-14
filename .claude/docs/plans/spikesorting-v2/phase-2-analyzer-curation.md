@@ -4,6 +4,15 @@
 
 Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` table that walks SortingAnalyzer extensions to compute metrics, suggest merges, and produce auto-curation labels. Materializing the suggested labels/merges into a new `CurationV2` row is an explicit user action. This phase also ports v1's recompute verification pattern to v2 `Recording` and `Sorting` artifacts so large caches can be deleted only after a successful round-trip check.
 
+## Executor Checklist
+
+- Implement metric/auto-curation parameter schemas and default rows.
+- Implement `AnalyzerCurationSelection`, `AnalyzerCuration`, `materialize_curation()`, and the v1 notebook-facing fetch/promote helpers.
+- Port the BurstPair visualization workflow into `AnalyzerCuration` methods without adding a separate BurstPair table.
+- Implement recording/analyzer recompute verification tables and safe deletion gates.
+- Preserve NaN sanitization, empty-unit, recursive-auto-curation, and label-rule invariants from `shared-contracts.md`.
+- Run the Phase 2 validation slice plus `code_graph.py describe/path` for new tables.
+
 **Inputs to read first:**
 
 - [src/spyglass/spikesorting/v1/metric_curation.py](../../../../src/spyglass/spikesorting/v1/metric_curation.py) — entire file; v2 consolidates this.

@@ -11,6 +11,22 @@ Adds **sort-then-match** cross-session unit tracking via UnitMatchPy. The design
 
 The matcher contract was overly strict in its earlier form. **Refined contract** (see updated `shared-contracts.md § MatcherProtocol`): a matcher consumes **pre-extracted per-unit waveform arrays + channel positions** that v2 derives from the `SortingAnalyzer` and, if needed, wrapper-owned reads of the v2 `Recording` artifact. It writes those arrays into a matcher-specific on-disk layout (the exact layout is pinned by the Phase 4a spike — do not encode UnitMatchPy-specific directory or file names in shared-contracts before 4a runs). The "must not depend on raw recording data" invariant becomes: the v2 wrapper extracts what the matcher needs and feeds the matcher a self-contained directory; the matcher never receives raw NWB paths, `si.SortingAnalyzer` objects, or Spyglass table keys.
 
+## Executor Checklist
+
+Phase 4a PR:
+
+- Run UnitMatchPy end-to-end outside DataJoint and replace speculative appendix notes with observed API details.
+- Reconcile `shared-contracts.md` and `designs.md` with the actual matcher input/output layout.
+- Do not add DataJoint tables or `unit_matching.py` in 4a.
+
+Phase 4b PR:
+
+- Implement `matcher_protocol.py`, `_unitmatch_backend.py`, `unit_matching.py`, and Phase 4 parameter schemas from the 4a findings.
+- Enforce explicit per-member curation choices and make-time provenance guards against schema-bypassing inserts.
+- Implement bounded tracked-unit derivation with recorded policy/fallback behavior.
+- Gate shipping on the polymer MEArec AUC test; record tetrode/Neuropixels results as informational.
+- Run the Phase 4 validation slice plus `code_graph.py describe/path` for new tables.
+
 **Inputs to read first:**
 
 - [src/spyglass/spikesorting/v2/session_group.py](../../../../src/spyglass/spikesorting/v2/session_group.py) (Phase 3) — the `SessionGroup` table is reused for per-session-then-match (not just concat).

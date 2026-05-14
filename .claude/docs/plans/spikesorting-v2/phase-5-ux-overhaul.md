@@ -4,6 +4,15 @@
 
 The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell notebook → 8-cell notebook), Pydantic-validated parameter presets, FigPack as the v2 curation UI, and the full v2 notebook walkthrough. **v1 is NOT sunset by this plan**; v0 and v1 continue to coexist with v2 indefinitely (per resolved decision in overview).
 
+## Executor Checklist
+
+- Verify the current FigPack spike-sorting API first; stop and escalate if edited curation state cannot be persisted and fetched.
+- Extend `pipeline.py` with full presets, auto-curation, concat routing, FigPack routing, and separate `run_v2_unit_match()`.
+- Implement preset validation and optional FigPack dependency gates.
+- Implement `FigPackCurationSelection`, `FigPackCuration`, URI generation, and curation round-trip only against the verified FigPack API.
+- Rewrite notebooks/docs so v2 is easier to use while v0/v1 remain available.
+- Run the Phase 5 validation slice plus `code_graph.py describe/path` for FigPack tables.
+
 **Inputs to read first:**
 
 - All files implemented in Phases 1–4. Phase 5 adds only its own FigPack tables (`FigPackCurationSelection`, `FigPackCuration`) and preset registrations; it must not alter any Phase 1–4 table definitions.

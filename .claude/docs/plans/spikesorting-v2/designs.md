@@ -4,6 +4,12 @@
 
 Schema designs for each v2 table. Phases reference these by anchor. Algorithms and code samples that don't fit in phase Tasks blocks live here.
 
+## Binding Status
+
+- **Binding:** DataJoint `definition` blocks, explicit schema fields, FK direction, primary-key shape, named invariants, and exception/guard requirements.
+- **Illustrative unless labeled `BINDING`:** routine method-body sketches, helper-local variable names, and pseudocode ordering that is not tied to a named invariant.
+- **Executor rule:** start from the phase file's `Executor Checklist`; come here only for table definitions, tricky guard logic, or component-level rationale.
+
 ## Index
 
 - [SortGroupV2](#sortgroupv2)

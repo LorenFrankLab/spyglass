@@ -11,6 +11,22 @@ Phase 0 is intentionally split into two mergeable PR slices to control scope:
 
 Phase 0b depends on Phase 0a. Phase 1 depends on both 0a and 0b plus [Phase 0c](phase-0c-si-0104-prerequisite.md), the separate SI 0.104 prerequisite PR.
 
+## Executor Checklist
+
+Phase 0a PR:
+
+- Create the v2 module/test skeleton and keep production v2 tables unimplemented.
+- Add the v2-only SI 0.104 test job without changing the global Spyglass SI pin.
+- Add `_params/preprocessing.py`, `utils.py`, and lightweight scaffold tests.
+- Run `code_graph.py` precondition checks for upstream FK targets and update `precondition-check.md`.
+
+Phase 0b PR:
+
+- Add MEArec/minirec fixture generation and the storage benchmark.
+- Decide the `AnalysisNwbfile` cache backend for Phase 1 from benchmark evidence.
+- Capture the v1 baseline outputs that Phase 1 parity tests will compare against.
+- Run the Phase 0 validation slice and record any expected `code_graph.py` heuristic warnings.
+
 **Inputs to read first:**
 
 - [pyproject.toml:62](../../../../pyproject.toml#L62) — current `spikeinterface` pin.

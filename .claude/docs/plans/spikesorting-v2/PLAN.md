@@ -8,12 +8,19 @@ A next-generation spike sorting pipeline for Spyglass that (1) targets SpikeInte
 
 For agent invocation, **load only the slice you need**:
 
-1. **Working a specific phase?** Open the matching phase file. Each phase file is self-contained: it lists upstream files to read, contracts/designs it depends on, tasks, validation slice, and fixtures.
+1. **Working a specific phase?** Open the matching phase file and start with its `Executor Checklist`. Treat the checklist as the PR contract; use the longer Tasks / Validation sections as reference.
 2. **Need shared semantics?** [shared-contracts.md](shared-contracts.md).
 3. **Need a per-component design?** [designs.md](designs.md).
 4. **Need v1 feature parity boundaries?** [feature-parity.md](feature-parity.md).
 5. **Need broader scope / risks / dependency policy?** [overview.md](overview.md).
 6. **Need upstream-repo line refs / on-disk format details?** [appendix.md](appendix.md).
+
+## Plan-Doc Contract
+
+- **Phase files are executable.** The `Executor Checklist`, `Deliberately not in this phase`, and `Validation slice` sections define what belongs in a PR.
+- **`shared-contracts.md` is binding.** Do not weaken an invariant there without explicitly revising every phase that depends on it.
+- **`designs.md` is reference material.** DataJoint `definition` blocks and named invariants are binding; routine method-body sketches are illustrative unless labeled `BINDING`.
+- **`appendix.md` and `research-notes.md` are evidence stores.** Use them to verify claims, not as task lists.
 
 ## Executor Quickstart
 
