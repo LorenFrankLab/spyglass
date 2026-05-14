@@ -11,6 +11,52 @@ Date: 2026-05-11. Author: Eric Denovellis + Claude.
 
 ---
 
+## Historical Rationale Moved Out Of Phase Files
+
+These notes preserve prior-draft and prior-review context that informs the
+current phase docs but should not distract from execution.
+
+- Phase 0 baseline capture was revised from a minirec-oriented v1 baseline
+  script to a real-lab dataset path because minirec is useful for plumbing
+  checks but not sort-correctness parity.
+- Phase 1 real-data v1 parity replaced an earlier minirec parity idea for the
+  same reason: minirec is too short to make spike-time parity meaningful.
+- Phase 2's `_apply_label_rules` test contract comes from issue #1513. The
+  historical failure modes were: a return accidentally indented inside the rule
+  loop after PR #1281 on 2025-04-22; shared-list aliasing present since
+  2022-03-25; and a list-against-list membership check that allowed duplicate
+  labels.
+- Phase 3 session-group work was originally scoped as a standalone schema task.
+  After the zero-migration decision, Phase 1 declares the forward-compatible
+  schema and Phase 3 implements the method bodies on top of it.
+- Phase 4 was split into a UnitMatchPy technical spike and a later schema PR
+  after review identified the matcher API surface as too uncertain for a
+  zero-migration schema-final phase.
+- The Phase 4 matcher contract was loosened from "matchers must not depend on
+  raw recording data" to the current wrapper-owned extraction rule: v2 may read
+  its own `Recording` and `SortingAnalyzer` artifacts, then pass a
+  self-contained matcher-specific directory to the backend.
+- Phase 5's "no v1 sunset" policy is a resolved design decision: v0 and v1
+  continue to coexist with v2 indefinitely.
+- MountainSort 4 remains in the Phase 1 default sorter rows for continuity
+  with existing v1 users, even though MS5 and KS4 are the main modern targets.
+- FigPack is the selected v2 curation UI. If the upstream packages cannot
+  persist and fetch edited curation state, Phase 5 should escalate rather than
+  silently fall back to FigURL.
+- `UnitMatchSelection` stores `curation_set_hash` and explicit
+  `MemberCuration` rows so matching never depends on "latest curation" lookup.
+  Otherwise, adding a new curation to one source session could change the
+  meaning of a prior matching run without making that change visible in the
+  row identity.
+- Phase 0's `code_graph.py` precondition task was added after schema-drift
+  reviews showed that FK assumptions can go stale between plan writing and
+  implementation.
+- Test fixtures are not checked in through Git LFS. The plan relies on manual
+  one-shot lab fixture generation and CI-side generation/cache instead.
+- `_params/motion_correction.py` moved to Phase 1, rather than Phase 3, because
+  the zero-migration policy requires `MotionCorrectionParameters` to validate
+  inserts as soon as the forward-compatible Lookup table exists.
+
 ## 1. Goals (from user prompt)
 
 1. Support SpikeInterface ≥0.104 (currently pinned `>=0.99.1,<0.100`).

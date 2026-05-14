@@ -2,7 +2,7 @@
 
 [← back to PLAN.md](PLAN.md) · [overview](overview.md) · [designs](designs.md#run_v2_pipeline-orchestrator)
 
-The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell notebook → 8-cell notebook), Pydantic-validated parameter presets, FigPack as the v2 curation UI, and the full v2 notebook walkthrough. **v1 is NOT sunset by this plan**; v0 and v1 continue to coexist with v2 indefinitely (per resolved decision in overview).
+The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell notebook → 8-cell notebook), Pydantic-validated parameter presets, FigPack as the v2 curation UI, and the full v2 notebook walkthrough. **v1 is NOT sunset by this plan**; v0 and v1 continue to coexist with v2 indefinitely.
 
 ## Executor Checklist
 
@@ -58,13 +58,13 @@ The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell n
   ```
   Validates at preset-registration time that every referenced Lookup row exists (raises a clear error if a parameter set is missing). `motion_correction_params_name` is optional for ordinary single-session presets and required only for presets intended for concat session groups. This catches the typo-at-populate failure mode entirely.
 
-- **FigPack feasibility check FIRST**, before implementing anything. Phase 5 declares FigPack as the v2 curation UI per resolved decision #2 — but the implementer must verify the upstream package is usable before writing the table. Tasks:
+- **FigPack feasibility check FIRST**, before implementing anything. FigPack is the v2 curation UI, but the implementer must verify the upstream package is usable before writing the table. Tasks:
   1. Confirm the actual installable package set. Current upstream uses the core `figpack` package plus a spike-sorting extension package (`figpack-spike-sorting` on PyPI, imported as `figpack_spike_sorting` in the upstream repository); do not assume `figpack` alone provides spike-sorting views.
   2. Verify the current spike-sorting extension API. Do not assume the stale placeholder `figpack.spike_sorting.build_curation_view(analyzer)` or `view.publish()` exists; pin the real import path, view-construction API, and upload method in this plan before writing the DataJoint table.
   3. Test on a single example: build a curation view from a v2 SortingAnalyzer end-to-end and publish/upload to FigPack. Round-trip a known labels dict and merge-groups representation back via the verified API or documented state file. If FigPack can display a curation view but cannot persist edited curation state in a retrievable form, stop and escalate before schema finalization.
   4. Record the verified FigPack and `figpack-spike-sorting` versions in this phase's PR description and in the optional dependency lower bounds.
 
-  **If FigPack is not usable at implementation time**: STOP Phase 5 and escalate to the project owner. Per resolved decision #2, FigPack is the v2 curation UI; the plan does not silently fall back to FigURL. Surface the blocker rather than ship a degraded UI. Possible resolutions (decided by project owner, not the implementer): wait for FigPack release; pin to a specific FigPack commit; add a contribution to upstream FigPack.
+  **If FigPack is not usable at implementation time**: STOP Phase 5 and escalate to the project owner. The plan does not silently fall back to FigURL. Surface the blocker rather than ship a degraded UI. Possible resolutions (decided by project owner, not the implementer): wait for FigPack release; pin to a specific FigPack commit; add a contribution to upstream FigPack.
 
 - **Implement `figpack_curation.py`** per [designs.md § FigPackCuration](designs.md#figpackcuration):
   - `FigPackCurationSelection` Manual + `FigPackCuration` Computed.
@@ -124,7 +124,7 @@ The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell n
 
 ## Deliberately not in this phase
 
-- **No v0/v1 source removal.** Per resolved decision in overview, v0 and v1 stay in-tree indefinitely; this plan never sunsets them. v2 does not back-port to v1's FigURL flow either.
+- **No v0/v1 source removal.** v0 and v1 stay in-tree indefinitely; this plan never sunsets them. v2 does not back-port to v1's FigURL flow either.
 - **No DeepUnitMatch.** Phase 4 ships only UnitMatch; DeepUnitMatch is future work via the same `MatcherProtocol` plugin.
 - **No v1-to-v2 data migration tooling.** Users keep using v1 for their existing v1 sorts; new sorts go through v2. Whether to write a one-shot "convert v1 CurationV1 row to a v2 CurationV2 row" helper is decided separately.
 - **No schema changes to existing v2 tables.** Per the zero-migration policy, Phase 5 only ADDS new tables (`FigPackCurationSelection`, `FigPackCuration`, and the `_params/preset.py` registrations). Any change to Phase 1–4 table definitions is forbidden.
