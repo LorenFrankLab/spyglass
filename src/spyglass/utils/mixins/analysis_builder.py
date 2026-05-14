@@ -5,6 +5,7 @@ the CREATE → POPULATE → REGISTER lifecycle for analysis NWB files, preventin
 common user errors like forgetting registration or modifying registered files.
 """
 
+from functools import cached_property
 from typing import Optional, Tuple
 
 import pynwb
@@ -83,6 +84,8 @@ class AnalysisFileBuilder:
         self._state = "INIT"
         self._exception_occurred = False
         self._exception_log = dict()
+        self._open_io = None
+        self._open_nwb = None
 
     def __enter__(self):
         """Create analysis file (CREATE phase).
@@ -184,6 +187,17 @@ class AnalysisFileBuilder:
             )
         # CREATED state is valid, no error
 
+    @property
+    def open_nwb(self):
+        if self._open_nwb is None:
+            self._open_io = pynwb.NWBHDF5IO(
+                path=self.get_path(),
+                mode="a",
+                load_namespaces=True,
+            )
+            self._open_nwb = self._open_io.read()
+        return self._open_io, self._open_nwb
+
     def register(self):
         """Register the analysis file in the database.
 
@@ -204,12 +218,32 @@ class AnalysisFileBuilder:
                 f"File must be created first (use context manager)."
             )
 
+        self.close_and_write()
         self._table.add(self.nwb_file_name, self.analysis_file_name)
         self._state = "REGISTERED"
         logger.debug(
             f"Registered analysis file: {self.analysis_file_name} "
             f"(parent: {self.nwb_file_name})"
         )
+
+    def close_and_write(self):
+        """Close open NWB file and write changes to disk.
+
+        This is used internally to ensure that any open NWB file is properly
+        closed and written before registration. It can also be called manually
+        if needed (e.g. to finalize changes before registration).
+
+        Raises
+        ------
+        ValueError
+            If no NWB file is currently open
+        """
+        if self._open_io is None or self._open_nwb is None:
+            return
+        self._open_io.write(self._open_nwb)
+        self._open_io.close()
+        self._open_io = None
+        self._open_nwb = None
 
     def add_nwb_object(
         self, nwb_object, table_name: str = "pandas_table"
@@ -234,8 +268,9 @@ class AnalysisFileBuilder:
             If called before create or after registration
         """
         self._ensure_created("add_nwb_object")
-        return self._table.add_nwb_object(
-            self.analysis_file_name, nwb_object, table_name
+        nwbf = self.open_nwb[1]
+        return self._table._add_nwb_object_to_open_nwb(
+            nwbf, nwb_object, table_name
         )
 
     def add_units(
@@ -271,8 +306,9 @@ class AnalysisFileBuilder:
             If called before create or after registration
         """
         self._ensure_created("add_units")
-        return self._table.add_units(
-            self.analysis_file_name,
+        nwbf = self.open_nwb[1]
+        return self._table._add_units_to_open_nwb(
+            nwbf,
             units,
             units_valid_times,
             units_sort_interval,
@@ -298,7 +334,8 @@ class AnalysisFileBuilder:
             If called before create or after registration
         """
         self._ensure_created("add_units_metrics")
-        return self._table.add_units_metrics(self.analysis_file_name, metrics)
+        nwbf = self.open_nwb[1]
+        return self._table._add_units_metrics_to_open_nwb(nwbf, metrics)
 
     def add_units_waveforms(self, waveform_extractor) -> str:
         """Add unit waveforms to analysis file (POPULATE phase).
@@ -319,8 +356,9 @@ class AnalysisFileBuilder:
             If called before create or after registration
         """
         self._ensure_created("add_units_waveforms")
-        return self._table.add_units_waveforms(
-            self.analysis_file_name, waveform_extractor
+        nwbf = self.open_nwb[1]
+        return self._table._add_units_waveforms_to_open_nwb(
+            nwbf, waveform_extractor
         )
 
     def open_for_write(self):
