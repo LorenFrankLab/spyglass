@@ -27,6 +27,7 @@ except ImportError:
     print(
         "c3po package not found. Please install c3po to use the c3po decoding functionality."
     )
+    C3poAnalysis = None
 
 schema = dj.schema("decoding_c3po_v1")
 
@@ -155,9 +156,14 @@ class MarksGroup(SpyglassMixin, dj.Manual):
             ):
                 mark_times.extend(t)
                 mark = np.zeros((len(t), max_shank_features + 1))
-                mark[:, : m.shape[1]] = m / np.mean(
-                    np.abs(m)
-                )  # normalize features by mean absolute value across all marks on shank
+                # mark[:, : m.shape[1]] = m / np.mean(
+                #     np.abs(m)
+                # )  # normalize features by mean absolute value across all marks on shank
+
+                m = m / np.max(np.abs(m), axis=0)
+                m = m - np.mean(m, axis=1)[:, None]  # zero-center features
+                mark[:, : m.shape[1]] = m
+
                 mark[:, -1] = shank
                 marks.extend(mark)
             ind = np.argsort(mark_times)
