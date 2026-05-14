@@ -198,7 +198,7 @@ Sources:
 
 **FigURL** (v1's curation UI) is the SortingView-backed web app. Requires `kachery-cloud` for state persistence. v1's `FigURLCuration` lives at [src/spyglass/spikesorting/v1/figurl_curation.py](src/spyglass/spikesorting/v1/figurl_curation.py).
 
-**FigPack** (SI 0.104's curation UI successor) is positioned to supersede FigURL. Repo: https://github.com/flatironinstitute/figpack (verify URL at Phase 5 implementation time; package name may differ).
+**FigPack** is the intended FigURL successor UI path. Repo: https://github.com/flatironinstitute/figpack. Current packaging during plan review is a core `figpack` package plus a spike-sorting extension package named `figpack-spike-sorting` on PyPI and imported as `figpack_spike_sorting`. Phase 5 must still verify the exact view-construction API, upload/show method, and edited-curation state round trip before implementing the DataJoint table.
 
 **Migration policy** (per resolved decision #2 in `overview.md`):
 - Phase 1 ships v2 with NO curation UI table — users curate by editing `CurationV2` rows directly in Python.
@@ -221,7 +221,7 @@ Available in `spikeinterface.preprocessing.correct_motion()` as of 0.104:
 | `nonrigid_accurate` | Nonrigid with monopolar localization | High-density probes, severe drift | Very slow |
 
 For Phase 3 default: `rigid_fast` (same-day, fast).
-For multi-day chronic (Phase 6 future): `dredge_fast` or `dredge`.
+For opt-in multi-day concat: caller must choose an explicit non-`auto` preset; `dredge_fast` or `dredge` are candidate presets, but sort-then-match remains the recommended cross-day workflow.
 
 Source: https://spikeinterface.readthedocs.io/en/stable/modules/motion_correction.html
 

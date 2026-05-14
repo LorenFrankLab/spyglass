@@ -577,7 +577,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         surface it powers.
 
         Note on brain region: Spyglass's `Electrode` table has a NON-NULL
-        FK to `BrainRegion` (see `common_ephys.py:72`), so the brain
+        FK to `BrainRegion` (see `common_ephys.py:79`), so the brain
         region is reachable via `Sorting.Unit * Electrode * BrainRegion`
         — no `BrainRegion` FK is duplicated on this part table. The
         accessor methods walk that join. To represent "unknown" regions,
@@ -586,7 +586,7 @@ class Sorting(SpyglassMixin, dj.Computed):
 
         Note on concat-sort `Electrode` anchoring: `Electrode` inherits
         the full `ElectrodeGroup` key plus `electrode_id`
-        ([common_ephys.py:72](src/spyglass/common/common_ephys.py#L72)).
+        ([common_ephys.py:79](src/spyglass/common/common_ephys.py#L79)).
         Because `ElectrodeGroup` is keyed by Session plus
         `electrode_group_name` ([common_ephys.py:31](src/spyglass/common/common_ephys.py#L31)),
         implementers must carry the full `Electrode` FK from
@@ -1057,6 +1057,25 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
         Equivalent to v1's CurationV1.insert_metric_curation but explicit.
         """
         ...
+
+    def get_waveforms(self, key, fetch_all: bool = False):
+        """Return analyzer-backed waveforms for notebook/helper parity with v1."""
+        ...
+
+    @classmethod
+    def get_metrics(cls, key):
+        """Fetch quality metrics written by AnalyzerCuration.make()."""
+        ...
+
+    @classmethod
+    def get_labels(cls, key):
+        """Fetch proposed labels written by AnalyzerCuration.make()."""
+        ...
+
+    @classmethod
+    def get_merge_groups(cls, key):
+        """Fetch proposed merge groups written by AnalyzerCuration.make()."""
+        ...
 ```
 
 **Design points**:
@@ -1064,6 +1083,7 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
 - **One table replaces two** (MetricCuration + BurstPair). BurstPair's cross-correlogram-asymmetry logic becomes one auto-merge preset.
 - **Visualization helpers** port from `burst_curation.py` to `AnalyzerCuration` methods: `plot_by_sort_group_ids`, `investigate_pair_xcorrel`, `investigate_pair_peaks`, and `plot_peak_over_time`.
 - **Explicit `materialize_curation()` step** — auto-curation never silently writes a new CurationV2 row; user must call to commit.
+- **Fetch helper parity** — `AnalyzerCuration` keeps v1's notebook-facing `get_waveforms`, `get_metrics`, `get_labels`, and `get_merge_groups` surface even though the backing store changes from WaveformExtractor/NWB columns to SortingAnalyzer extensions + AnalysisNWB objects.
 
 ---
 
@@ -1818,7 +1838,9 @@ def _derive_tracked_units_transitive(pairs, threshold, all_units):
 
 ## FigPackCuration
 
-Phase 5. FigPack is FigURL's successor (SI 0.104+). Same shape as v1's FigURLCuration but uses the new backend.
+Phase 5. FigPack is FigURL's successor UI path. The v2 table mirrors the important v1 FigURL lesson: the selection row must include the UI configuration, not only the curation FK, so repeated calls are idempotent and multiple display configurations for the same curation are possible.
+
+Implementation precondition: Phase 5 must first verify the current FigPack spike-sorting extension API. Current upstream packaging is core `figpack` plus `figpack-spike-sorting` (imported as `figpack_spike_sorting`); do not assume `figpack.spike_sorting.build_curation_view()` or `view.publish()` exists. The private helper names below are Spyglass-owned adapter functions that wrap the verified upstream API after the feasibility spike.
 
 ```python
 @schema
@@ -1827,7 +1849,51 @@ class FigPackCurationSelection(SpyglassMixin, dj.Manual):
     figpack_curation_id: uuid
     ---
     -> CurationV2
+    figpack_config_hash: char(64)
+    label_options: blob       # e.g. ["mua", "accept", "noise"]
+    metrics: blob             # metric names to include in the UI
+    upload: bool              # True returns a hosted FigPack URI
+    ephemeral: bool           # forwarded only if the verified API supports it
     """
+
+    @classmethod
+    def insert_selection(
+        cls,
+        curation_key: dict,
+        *,
+        label_options: list[str] | None = None,
+        metrics: list[str] | None = None,
+        upload: bool = True,
+        ephemeral: bool = False,
+    ) -> dict:
+        label_options = label_options or ["mua", "accept", "noise"]
+        metrics = metrics or []
+        config = {
+            "label_options": label_options,
+            "metrics": metrics,
+            "upload": upload,
+            "ephemeral": ephemeral,
+        }
+        figpack_config_hash = hashlib.sha256(
+            json.dumps(config, sort_keys=True).encode()
+        ).hexdigest()
+        lookup_key = {
+            **curation_key,
+            "figpack_config_hash": figpack_config_hash,
+        }
+        row = {
+            **lookup_key,
+            "label_options": label_options,
+            "metrics": metrics,
+            "upload": upload,
+            "ephemeral": ephemeral,
+        }
+        existing = cls & lookup_key
+        if existing:
+            return existing.fetch1("KEY")
+        key = {**row, "figpack_curation_id": uuid.uuid4()}
+        cls.insert1(key)
+        return {"figpack_curation_id": key["figpack_curation_id"]}
 
 
 @schema
@@ -1839,16 +1905,28 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
-        # Build FigPack curation view from SortingAnalyzer
-        analyzer = ...
-        from figpack.spike_sorting import build_curation_view
-        view = build_curation_view(analyzer)
-        uri = view.publish()  # uploads to kachery/cloud
+        # Build FigPack curation view from SortingAnalyzer via Spyglass-owned
+        # adapter helpers that wrap the verified upstream API.
+        analyzer = Sorting.get_analyzer_from_curation(key)
+        label_options, metrics, upload, ephemeral = (
+            FigPackCurationSelection & key
+        ).fetch1("label_options", "metrics", "upload", "ephemeral")
+        view = _build_figpack_curation_view(
+            analyzer,
+            curation_key=key,
+            label_options=label_options,
+            metrics=metrics,
+        )
+        uri = _show_or_upload_figpack_view(
+            view,
+            upload=upload,
+            ephemeral=ephemeral,
+        )
         self.insert1({**key, "figpack_uri": uri})
 
     @staticmethod
     def fetch_curation_from_uri(uri: str) -> tuple[dict, list]:
-        """Pull labels + merge_groups back from FigPack."""
+        """Pull labels + merge_groups back from verified FigPack state path."""
         ...
 ```
 
@@ -1856,7 +1934,7 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
 
 ## `run_v2_pipeline()` Orchestrator
 
-**Phase 1 ships the minimal version** (recording → artifact → sorting → initial curation → merge registration, 3 presets — see Phase 1's task list). **Phase 5 extends it** with metrics, concat, UnitMatch, FigPack, and the broader preset set. The code below is the Phase 5 final shape; Phase 1's version is a subset of these stages with no `auto_curate`/`session_group_name`/`unit_match`/`figpack` parameters.
+**Phase 1 ships the minimal version** (recording → artifact → sorting → initial curation → merge registration, 3 presets — see Phase 1's task list). **Phase 5 extends it** with metrics, concatenated sorting, FigPack, and the broader preset set. UnitMatch is exposed through the separate `run_v2_unit_match()` helper below so the sort-then-match workflow cannot be confused with concatenated sorting. The code below is the Phase 5 final shape; Phase 1's version is a subset of these stages with no `auto_curate`/`concat_session_group_name`/`figpack` parameters.
 
 ```python
 def run_v2_pipeline(
@@ -1864,35 +1942,49 @@ def run_v2_pipeline(
     sort_group_id: int | None = None,
     interval_list_name: str | None = None,
     team_name: str | None = None,
-    session_group_name: str | None = None,        # Phase 3 — mutually exclusive
-                                                  # with the single-session args
-    preset: str = "franklab_polymer_mountainsort5",
+    concat_session_group_name: str | None = None,  # Phase 3 concat sorting only
+    preset: str = "franklab_tetrode_mountainsort5",
     skip_artifact: bool = False,
     auto_curate: bool = True,                     # Phase 2
-    unit_match: bool = False,                     # Phase 4 — requires
-                                                  # session_group_name
-    unit_match_curation_choices: dict[int, dict] | None = None,
-                                                  # Phase 4 — explicit
-                                                  # MemberCuration pins
     figpack: bool = False,                        # Phase 5
 ) -> dict:
-    """End-to-end v2 pipeline with optional auto-curation, cross-session
-    matching, and FigPack curation publishing. Returns a manifest dict.
+    """End-to-end v2 sorting pipeline with optional auto-curation,
+    concatenated sorting, and FigPack curation publishing.
 
-    Exactly one of (single-session args, session_group_name) must be set.
+    Exactly one of (single-session args, concat_session_group_name) must be set.
     Re-runnable safely — find-existing logic in each insert_selection
     means a second call with the same args returns the same manifest.
     """
+    single_args = [nwb_file_name, sort_group_id, interval_list_name]
+    has_single = all(x is not None for x in single_args)
+    has_partial_single = any(x is not None for x in single_args) and not has_single
+    has_concat = concat_session_group_name is not None
+    if has_partial_single:
+        raise ValueError(
+            "single-session mode requires nwb_file_name, sort_group_id, "
+            "and interval_list_name"
+        )
+    if has_single == has_concat:
+        raise ValueError(
+            "Provide exactly one input mode: either all single-session inputs "
+            "or concat_session_group_name"
+        )
+
     preset_dict = PRESETS[preset]
     manifest = {"preset": preset, "stages": []}
 
     # --- 1. Recording (single OR concatenated, dispatched by inputs) ---
-    if session_group_name is not None:
+    if has_concat:
+        if preset_dict.get("motion_correction_params_name") is None:
+            raise ValueError(
+                f"preset={preset!r} cannot be used with concat_session_group_name "
+                "because it has no motion_correction_params_name"
+            )
         # Phase 3 concat path
         concat_key = ConcatenatedRecordingSelection.insert_selection({
-            "session_group_name": session_group_name,
-            "preproc_params_name": preset_dict["preproc"],
-            "motion_correction_params_name": preset_dict["motion_correction"],
+            "session_group_name": concat_session_group_name,
+            "preproc_params_name": preset_dict["preproc_params_name"],
+            "motion_correction_params_name": preset_dict["motion_correction_params_name"],
         })
         ConcatenatedRecording.populate(concat_key)
         manifest["stages"].append({"stage": "concat_recording", "key": concat_key})
@@ -1905,7 +1997,7 @@ def run_v2_pipeline(
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": interval_list_name,
-            "preproc_params_name": preset_dict["preproc"],
+            "preproc_params_name": preset_dict["preproc_params_name"],
             "team_name": team_name,
         })
         Recording.populate(rec_key)
@@ -1920,7 +2012,7 @@ def run_v2_pipeline(
     if not skip_artifact and recording_fk["recording_id"] is not None:
         artifact_key = ArtifactDetectionSelection.insert_selection({
             **recording_fk,
-            "artifact_params_name": preset_dict["artifact"],
+            "artifact_params_name": preset_dict["artifact_params_name"],
         })
         ArtifactDetection.populate(artifact_key)
         manifest["stages"].append({"stage": "artifact_detection", "key": artifact_key})
@@ -1933,7 +2025,7 @@ def run_v2_pipeline(
         **recording_fk,
         **artifact_fk,
         "sorter": preset_dict["sorter"],
-        "sorter_params_name": preset_dict["sorter_params"],
+        "sorter_params_name": preset_dict["sorter_params_name"],
     })
     Sorting.populate(sort_key)
     manifest["stages"].append({"stage": "sorting", "key": sort_key})
@@ -1950,8 +2042,8 @@ def run_v2_pipeline(
     if auto_curate:
         ac_key = AnalyzerCurationSelection.insert_selection({
             **curation_key,
-            "metric_params_name": preset_dict["metrics"],
-            "auto_curation_rules_name": preset_dict["auto_rules"],
+            "metric_params_name": preset_dict["metric_params_name"],
+            "auto_curation_rules_name": preset_dict["auto_curation_rules_name"],
         })
         AnalyzerCuration.populate(ac_key)
         final_curation_key = AnalyzerCuration.materialize_curation(
@@ -1961,33 +2053,50 @@ def run_v2_pipeline(
     else:
         final_curation_key = curation_key
 
-    # --- 6. UnitMatch cross-session (Phase 4) ---
-    if unit_match:
-        if session_group_name is None:
-            raise ValueError("unit_match=True requires session_group_name")
-        if unit_match_curation_choices is None:
-            raise ValueError(
-                "unit_match=True requires explicit unit_match_curation_choices "
-                "mapping each SessionGroup.member_index to a CurationV2 key; "
-                "the pipeline never auto-pins the latest curation."
-            )
-        um_key = UnitMatchSelection.insert_selection({
-            "session_group_name": session_group_name,
-            "matcher_params_name": preset_dict["matcher"],
-        }, curation_choices=unit_match_curation_choices)
-        UnitMatch.populate(um_key)
-        TrackedUnit.populate(um_key)
-        manifest["stages"].append({"stage": "unit_match", "key": um_key})
-
-    # --- 7. FigPack curation (Phase 5) ---
+    # --- 6. FigPack curation (Phase 5) ---
     if figpack:
         fp_key = FigPackCurationSelection.insert_selection(final_curation_key)
         FigPackCuration.populate(fp_key)
         manifest["stages"].append({"stage": "figpack", "key": fp_key})
 
-    # --- 8. Final merge_id ---
+    # --- 7. Final merge_id ---
     merge_query = SpikeSortingOutput.CurationV2 & final_curation_key
     manifest["merge_id"] = merge_query.fetch1("merge_id")
+    return manifest
+
+
+def run_v2_unit_match(
+    session_group_name: str,
+    *,
+    matcher_params_name: str = "unitmatch_default",
+    curation_choices: dict[int, dict] | None = None,
+) -> dict:
+    """Convenience wrapper for Phase 4 sort-then-match cross-session tracking.
+
+    ``curation_choices`` maps each SessionGroup.member_index to an explicit
+    CurationV2 key. The helper never queries for "latest" curation rows.
+    """
+    if curation_choices is None:
+        raise ValueError(
+            "run_v2_unit_match requires explicit curation_choices mapping "
+            "each SessionGroup.member_index to a CurationV2 key"
+        )
+    manifest = {
+        "session_group_name": session_group_name,
+        "matcher_params_name": matcher_params_name,
+        "stages": [],
+    }
+    um_key = UnitMatchSelection.insert_selection(
+        {
+            "session_group_name": session_group_name,
+            "matcher_params_name": matcher_params_name,
+        },
+        curation_choices=curation_choices,
+    )
+    UnitMatch.populate(um_key)
+    TrackedUnit.populate(um_key)
+    manifest["stages"].append({"stage": "unit_match", "key": um_key})
+    manifest["unitmatch_id"] = um_key["unitmatch_id"]
     return manifest
 ```
 
@@ -1997,18 +2106,29 @@ def run_v2_pipeline(
 - **Idempotent.** Re-running with same inputs finds existing rows, no duplicates.
 - **Manifest return.** Every touchpoint logged. Notebook prints it after running.
 - **Presets are named bundles** — no inline parameter editing. Custom presets are inserted by adding rows to each Lookup table once.
+- **Workflow separation.** `concat_session_group_name` means "sort this concatenated recording"; `run_v2_unit_match()` means "match these explicitly pinned per-member curations." The public API does not overload one `session_group_name` argument for both.
 
 ```python
 PRESETS = {
     "franklab_tetrode_mountainsort5": {
-        "preproc": "default_franklab",
-        "artifact": "default",
+        "preproc_params_name": "default_franklab",
+        "artifact_params_name": "default",
         "sorter": "mountainsort5",
-        "sorter_params": "franklab_tetrode_hippocampus_30kHz_ms5",
-        "metrics": "franklab_default",
-        "auto_rules": "franklab_default_thresholds",
+        "sorter_params_name": "franklab_tetrode_hippocampus_30kHz_ms5",
+        "metric_params_name": "franklab_default",
+        "auto_curation_rules_name": "franklab_default_thresholds",
+        "motion_correction_params_name": None,
     },
     "franklab_probe_kilosort4": {...},
-    "clusterless_threshold_default": {...},
+    "clusterless_thresholder_default": {...},
+    "franklab_chronic_single_day": {
+        "preproc_params_name": "default_franklab",
+        "artifact_params_name": "default",
+        "sorter": "mountainsort5",
+        "sorter_params_name": "franklab_tetrode_hippocampus_30kHz_ms5",
+        "metric_params_name": "franklab_default",
+        "auto_curation_rules_name": "franklab_default_thresholds",
+        "motion_correction_params_name": "auto",
+    },
 }
 ```

@@ -62,7 +62,7 @@ analyzer.compute(
 
 **Persistence on the DataJoint row**: the `Sorting` table stores `sorting_id` (UUID) + `analyzer_folder` (`varchar(255)` — the relative path under `SPYGLASS_TEMP_DIR`). The folder itself is a side artifact, not stored in DataJoint. Heavy outputs (templates, waveforms) are reachable via `analyzer = load_sorting_analyzer(_analyzer_path(key))`.
 
-**Loading convention**: every consumer uses the `Sorting.get_analyzer(key)` method, which checks for folder existence, recomputes if missing (delegating to `Sorting.make()` rerun), then returns the analyzer object. Do not load analyzer folders directly — go through the helper. This mirrors v1's `SpikeSortingRecording.get_recording` recompute pattern at [`src/spyglass/spikesorting/v1/recording.py:475-645`](src/spyglass/spikesorting/v1/recording.py#L475-L645).
+**Loading convention**: every consumer uses the `Sorting.get_analyzer(key)` method, which checks for folder existence, recomputes if missing (delegating to `Sorting.make()` rerun), then returns the analyzer object. Do not load analyzer folders directly — go through the helper. This mirrors v1's `SpikeSortingRecording.get_recording` missing-file rebuild pattern at [`src/spyglass/spikesorting/v1/recording.py:407-427`](src/spyglass/spikesorting/v1/recording.py#L407-L427).
 
 **Invariant — do not weaken**: The analyzer folder is regeneratable from `Sorting` row's source recording + sort. Do not store user-edited content inside the folder. Curation edits live in `CurationV2` rows (NWB-backed), not in the analyzer.
 
@@ -422,7 +422,7 @@ class Unit(SpyglassMixinPart):
     ---
     -> Electrode                       # the unit's peak-amplitude channel
     # No BrainRegion FK here — Spyglass's Electrode table has a NON-NULL
-    # FK to BrainRegion (common_ephys.py:72), so brain region is reachable
+    # FK to BrainRegion (common_ephys.py:79), so brain region is reachable
     # via `Sorting.Unit * Electrode * BrainRegion`. To represent "unknown",
     # the upstream Electrode row uses a synthetic BrainRegion row named
     # "Unknown" rather than NULL.
@@ -457,7 +457,7 @@ TrackedUnit.get_unit_brain_regions(tracked_unit_key) -> pd.DataFrame  # cols: so
 **Invariants — do not weaken**:
 
 - `Sorting.Unit` is populated in the SAME `make()` call that creates the `Sorting` row. No "compute brain region later" — the brain region is a fact about the sort, not a separate stage.
-- `Sorting.Unit` has no `BrainRegion` FK; brain region is reached via `Sorting.Unit * Electrode * BrainRegion`. The Spyglass `Electrode` table's FK to `BrainRegion` is non-null (see [common_ephys.py:73](src/spyglass/common/common_ephys.py#L73)). Note that `BrainRegion`'s PK is `region_id: smallint auto_increment` (see [common_region.py:9](src/spyglass/common/common_region.py#L9)), NOT `region_name`. To represent unknown regions, Phase 0 fixture setup inserts a single `BrainRegion` row with `region_name="Unknown"` and uses the auto-generated `region_id` as the FK target — installs that already have an "Unknown" row reuse it. `ElectrodeGroup` also has a non-null `-> BrainRegion` FK ([common_ephys.py:31](src/spyglass/common/common_ephys.py#L31)) — for sort groups whose probe spans multiple regions, the per-electrode region (`Sorting.Unit * Electrode * BrainRegion`) is finer-grained than the per-group region.
+- `Sorting.Unit` has no `BrainRegion` FK; brain region is reached via `Sorting.Unit * Electrode * BrainRegion`. The Spyglass `Electrode` table's FK to `BrainRegion` is non-null (see [common_ephys.py:79](src/spyglass/common/common_ephys.py#L79)). Note that `BrainRegion`'s PK is `region_id: smallint auto_increment` (see [common_region.py:9](src/spyglass/common/common_region.py#L9)), NOT `region_name`. To represent unknown regions, Phase 0 fixture setup inserts a single `BrainRegion` row with `region_name="Unknown"` and uses the auto-generated `region_id` as the FK target — installs that already have an "Unknown" row reuse it. `ElectrodeGroup` also has a non-null `-> BrainRegion` FK ([common_ephys.py:31](src/spyglass/common/common_ephys.py#L31)) — for sort groups whose probe spans multiple regions, the per-electrode region (`Sorting.Unit * Electrode * BrainRegion`) is finer-grained than the per-group region.
 - `Sorting.get_unit_brain_regions` is a constant-time lookup against the part table (no template recomputation, no analyzer load).
 - Multi-region sort groups (polymer probes) are NOT collapsed; each unit's region reflects ITS peak channel, not the sort group's modal region.
 - Phase 1's `CurationV2` MUST also have a `Unit` part table mirroring `Sorting.Unit` so that curated unit removals (merges) are correctly reflected in the brain-region query without re-walking templates. `CurationV2.Unit` is populated by `CurationV2.insert_curation` from `Sorting.Unit` plus the merge_groups.

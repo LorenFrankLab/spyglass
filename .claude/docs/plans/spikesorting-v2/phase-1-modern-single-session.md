@@ -2,9 +2,9 @@
 
 [← back to PLAN.md](PLAN.md) · [overview](overview.md) · [designs](designs.md#preprocessingparameters--recordingselection--recording)
 
-The MVP. Builds the complete single-session sort pipeline: preprocessing → artifact detection → sorting → initial curation → merge-table registration. Uses SortingAnalyzer (SI 0.104), Pydantic-validated parameters, and `insert_selection()` helpers that return a single dict. Includes a minimal `run_v2_pipeline()` orchestrator covering this phase's stages (Phase 5 extends with metrics, concat, UnitMatch, FigPack). Parity-tests against the v1 baseline captured in Phase 0.
+The MVP. Builds the complete single-session sort pipeline: preprocessing → artifact detection → sorting → initial curation → merge-table registration. Uses SortingAnalyzer (SI 0.104), Pydantic-validated parameters, and `insert_selection()` helpers that return a single dict. Includes a minimal `run_v2_pipeline()` orchestrator covering this phase's stages (Phase 5 extends with metrics, concat, FigPack, and a separate UnitMatch convenience helper). Parity-tests against the v1 baseline captured in Phase 0.
 
-**PREREQUISITES — must be merged before Phase 1 lands** (see Phase 0's "SI 0.104 upgrade gating" tasks):
+**PREREQUISITES — must be merged before Phase 1 lands** (see [Phase 0c — SpikeInterface 0.104 prerequisite](phase-0c-si-0104-prerequisite.md)):
 
 1. v1's `extract_waveforms` / `load_waveforms` calls ported to `create_sorting_analyzer` / `load_sorting_analyzer`.
 2. v1 test suite green under SI 0.104.
@@ -18,7 +18,7 @@ The first task of this phase (after prerequisites land) is to verify the new SI 
 - [src/spyglass/spikesorting/v1/sorting.py](src/spyglass/spikesorting/v1/sorting.py) — entire file.
 - [src/spyglass/spikesorting/v1/artifact.py](src/spyglass/spikesorting/v1/artifact.py) — artifact detection logic.
 - [src/spyglass/spikesorting/v1/curation.py](src/spyglass/spikesorting/v1/curation.py) — `CurationV1` patterns (lineage, label conventions).
-- [src/spyglass/spikesorting/spikesorting_merge.py:34-150](src/spyglass/spikesorting/spikesorting_merge.py#L34-L150) — `SpikeSortingOutput` merge master; v2 adds a new part here.
+- [src/spyglass/spikesorting/spikesorting_merge.py:34-166](src/spyglass/spikesorting/spikesorting_merge.py#L34-L166) — `SpikeSortingOutput` merge master; v2 adds a new part here.
 - [src/spyglass/common/common_nwbfile.py:431](src/spyglass/common/common_nwbfile.py#L431) — `AnalysisNwbfile.build()` context manager API.
 - [.claude/docs/plans/spikesorting-v2/appendix.md § SpikeInterface 0.99 → 0.104 migration cheat sheet](appendix.md#spikeinterface-099--0104-migration-cheat-sheet) — API rename table.
 - [.claude/docs/plans/spikesorting-v2/appendix.md § SortingAnalyzer extension dependencies](appendix.md#sortinganalyzer-extension-dependencies) — what to compute at sort time.
@@ -88,7 +88,7 @@ The first task of this phase (after prerequisites land) is to verify the new SI 
   - `get_matchable_unit_ids(key, exclude_labels={"reject", "noise", "artifact"}) -> np.ndarray` — returns curated units with no excluded labels. Unlabeled units and units labeled only `accept` / `mua` are included; a unit with any excluded label is excluded even if it also has another label.
   - `get_sort_group_info(key) -> dj.Table` — returns ALL electrodes in the sort group joined to `Electrode * BrainRegion`, NOT `fetch(limit=1)`. This is the fix for the v1 multi-region under-reporting bug. Returns a DataJoint relation (not a DataFrame) so callers can chain restrictions.
 
-- **Implement a MINIMAL `run_v2_pipeline()` orchestrator** in `src/spyglass/spikesorting/v2/pipeline.py`. Phase 1 ships a usable single-call API so the MVP is actually usable without writing the orchestration boilerplate; Phase 5 extends it with metrics + concat + UnitMatch + FigPack. Phase 1 scope:
+- **Implement a MINIMAL `run_v2_pipeline()` orchestrator** in `src/spyglass/spikesorting/v2/pipeline.py`. Phase 1 ships a usable single-call API so the MVP is actually usable without writing the orchestration boilerplate; Phase 5 extends it with metrics + concat + FigPack and adds `run_v2_unit_match()` for the sort-then-match workflow. Phase 1 scope:
   - Signature: `run_v2_pipeline(nwb_file_name, sort_group_id, interval_list_name, team_name, preset="franklab_tetrode_mountainsort5") -> dict`.
   - Internally chains: `RecordingSelection.insert_selection` → `Recording.populate` → `ArtifactDetectionSelection.insert_selection` → `ArtifactDetection.populate` → `SortingSelection.insert_selection` → `Sorting.populate` → `CurationV2.insert_curation` → auto-registration in `SpikeSortingOutput.CurationV2`.
   - NO metrics / auto-curation hookup (Phase 2 adds).
@@ -102,7 +102,7 @@ The first task of this phase (after prerequisites land) is to verify the new SI 
   - Add `class CurationV2(SpyglassMixinPart)` part to `SpikeSortingOutput`.
   - Extend `get_restricted_merge_ids` to handle `sources=['v2']` (parallel to existing v1 branch at [src/spyglass/spikesorting/spikesorting_merge.py:111](src/spyglass/spikesorting/spikesorting_merge.py#L111)). Implement the Phase 1 subset of [shared-contracts.md § SpikeSortingOutput Part-Table Convention for v2](shared-contracts.md#spikesortingoutput-part-table-convention-for-v2): restrictions by `nwb_file_name`, `team_name`, `sort_group_id`, `interval_list_name`, `preproc_params_name`, `recording_id`, `artifact_id`, `sorter`, `sorter_params_name`, `sorting_id`, and `curation_id` must all resolve through v2 Selection tables to `SpikeSortingOutput.CurationV2` rows.
   - **Register `CurationV2` in `source_class_dict`** at [src/spyglass/spikesorting/spikesorting_merge.py:26-30](src/spyglass/spikesorting/spikesorting_merge.py#L26-L30). Without this, `SpikeSortingOutput.get_recording()`, `get_sorting()`, `get_sort_group_info()` all KeyError on v2-sourced merge_ids. Per [shared-contracts.md § SpikeSortingOutput.source_class_dict Registration for v2](shared-contracts.md#spikesortingoutputsource_class_dict-registration-for-v2).
-  - **Add `SpikeSortingOutput.get_unit_brain_regions(merge_key)`** as a new dispatch method on the merge master (current merge surface has `get_recording`, `get_sorting`, `get_sort_group_info`, `get_spike_times`, `get_firing_rate` but no per-unit brain-region accessor — see [spikesorting_merge.py:168-220](src/spyglass/spikesorting/spikesorting_merge.py#L168-L220)). Implementation: resolves the merge_key's source via `source_class_dict[part_camel_name]`, then delegates to that source's `get_unit_brain_regions(key)` if defined. `CurationV2` defines it (Phase 1 task above); `CurationV1` and `CuratedSpikeSorting` (v0) do not, so the dispatch raises `AttributeError` with a clear message for v0/v1 merge_ids. The plan does NOT backfill v0/v1.
+  - **Add `SpikeSortingOutput.get_unit_brain_regions(merge_key)`** as a new dispatch method on the merge master (current merge surface has `get_recording`, `get_sorting`, `get_sort_group_info`, `get_spike_times`, `get_firing_rate` but no per-unit brain-region accessor — see [spikesorting_merge.py:168-214](src/spyglass/spikesorting/spikesorting_merge.py#L168-L214)). Implementation: resolves the merge_key's source via `source_class_dict[part_camel_name]`, then delegates to that source's `get_unit_brain_regions(key)` if defined. `CurationV2` defines it (Phase 1 task above); `CurationV1` and `CuratedSpikeSorting` (v0) do not, so the dispatch raises `AttributeError` with a clear message for v0/v1 merge_ids. The plan does NOT backfill v0/v1.
   - Verify `get_spike_times()` works without modification by confirming `CurationV2` exposes `object_id` (per [shared-contracts.md NWB Column-Name Convention](shared-contracts.md#nwb-column-name-convention-for-spikesortingoutput-routing)); add an explicit test (see Validation slice).
   - Leave `ImportedSpikeSorting` unchanged. External/ground-truth NWB Units continue to register through the existing `SpikeSortingOutput.ImportedSpikeSorting` part; Phase 1 only adds `CurationV2`.
 
@@ -124,7 +124,7 @@ The first task of this phase (after prerequisites land) is to verify the new SI 
 - **No metric-based curation.** `AnalyzerCuration` is Phase 2.
 - **No session groups / concatenation.** Phase 3.
 - **No cross-session matching.** Phase 4.
-- **No FULL orchestrator with metrics / concat / UnitMatch / FigPack.** Phase 1's minimal `run_v2_pipeline()` covers only recording → artifact → sorting → initial curation → merge. Phase 5 extends it with the additional stages.
+- **No FULL orchestrator with metrics / concat / FigPack and no UnitMatch helper.** Phase 1's minimal `run_v2_pipeline()` covers only recording → artifact → sorting → initial curation → merge. Phase 5 extends it with the additional sorting stages and adds `run_v2_unit_match()`.
 - **No FigPack / FigURL curation table for v2.** Phase 5 ships FigPack; if a user needs UI curation in Phase 1, they edit a `CurationV2` row in Python.
 - **No removal of v1 source.** v1 stays in tree.
 - **No recompute table implementation in Phase 1.** Phase 1 exposes `Recording.get_recording()` and `Sorting.get_analyzer()` missing-artifact rebuild helpers. Phase 2 adds the explicit `RecordingArtifactRecompute*` / `SortingAnalyzerRecompute*` verification and safe-deletion tables, so this is a sequencing boundary, not a deferral out of the v2 plan.

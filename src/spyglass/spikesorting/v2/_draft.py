@@ -504,6 +504,11 @@ class FigPackCurationSelection(SpyglassMixin, dj.Manual):
     figpack_curation_id: uuid
     ---
     -> CurationV2
+    figpack_config_hash: char(64)
+    label_options: blob
+    metrics: blob
+    upload: tinyint
+    ephemeral: tinyint
     """
 
 

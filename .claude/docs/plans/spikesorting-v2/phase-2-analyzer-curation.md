@@ -34,8 +34,15 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
   - `AnalyzerCuration` Computed with `make()` that computes additional extensions, runs `compute_quality_metrics(..., metric_params=...)`, applies label rules, runs `compute_merge_unit_groups`, writes three NWB tables (`quality_metrics`, `merge_suggestions`, `proposed_labels`) via `AnalysisNwbfile().build()`.
   - Auto-merge extension dependency is explicit: before calling `compute_merge_unit_groups`, ensure `template_similarity` is computed in addition to `correlograms` and the Phase 1 core extensions. Pass `compute_needed_extensions=False` when supported so the Spyglass-computed extension set is the audited one rather than an implicit SI default.
   - `materialize_curation(key, description="auto-curation") -> dict` — creates a child `CurationV2` row with the proposed labels + merge groups; returns the new curation_key. Auto-registers via the Phase 1 `CurationV2.insert_curation` flow.
+  - **Fetch/promote parity with v1 MetricCuration** — implement the v1 notebook-facing helpers on `AnalyzerCuration`:
+    - `get_waveforms(key, fetch_all=False)` — returns the SortingAnalyzer waveforms extension or a narrow compatibility object with `get_unit_waveforms(unit_id)` / `get_waveforms(unit_id)` behavior needed by downstream helpers. This replaces v1 `MetricCuration.get_waveforms`.
+    - `get_metrics(key) -> dict | pd.DataFrame` — fetches the serialized `quality_metrics` NWB object and returns metrics keyed by unit, matching v1's practical notebook usage.
+    - `get_labels(key) -> dict[int, list[str]]` — fetches proposed labels from the `proposed_labels` object.
+    - `get_merge_groups(key) -> list[list[int]]` — fetches proposed merge groups from the `merge_suggestions` object.
+    - `materialize_curation(...)` remains the explicit v2 analog of `CurationV1.insert_metric_curation`; document this name in user docs and examples so users do not have to discover it in `designs.md`.
 
 - **Port `BurstPair` visualization helpers** into `AnalyzerCuration` methods:
+  - `insert_by_curation_id(curation_id_or_key, auto_curation_rules_name="...", metric_params_name="...")` or a clearly named equivalent — convenience helper that inserts the `AnalyzerCurationSelection` row for an existing `CurationV2` row. This preserves the v1 `BurstPairSelection.insert_by_curation_id` workflow even though there is no separate `BurstPairSelection` table.
   - `plot_correlograms_by_sort_group(key)` — adapts `BurstPair.plot_by_sort_group_ids` at [src/spyglass/spikesorting/v1/burst_curation.py](src/spyglass/spikesorting/v1/burst_curation.py).
   - `investigate_pair_xcorrel(key, unit_a, unit_b)`.
   - `investigate_pair_peaks(key, unit_a, unit_b)`.
@@ -97,6 +104,16 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
   - **Storage-reclamation workflow** documented in `docs/src/Pipelines/SpikeSorting/v2-storage-management.md`: recompute-verify (`matched=1`) → `delete_files()` reclaims disk → later `Recording.get_recording()` or `Sorting.get_analyzer()` rebuilds from the stored selection/parameter lineage.
   - This is Phase 2 schema, not a later migration. The zero-migration contract lists these tables as Phase 2 pure additions.
 
+- **Preserve the v1 recompute admin surface unless explicitly rejected in code review.** The Phase 2 implementation must name the v2 equivalents for the following v1 operations:
+  - `RecordingRecomputeSelection.attempt_all(...)` → bulk-create recompute attempts for eligible rows.
+  - `RecordingRecomputeSelection.remove_matched(...)` → remove or mark matched attempts after verified cleanup.
+  - `RecordingRecompute.with_names` → relation joining comparison rows to missing/different object names for review.
+  - `RecordingRecompute.get_parent_key(...)` → recover the upstream `Recording` / `Sorting` key from a recompute row.
+  - `RecordingRecompute.recheck(...)` → rerun comparison for a specific row after environment or file changes.
+  - `RecordingRecompute.get_disk_space(...)` → report reclaimable disk usage before deletion.
+  - `RecordingRecompute.update_secondary(...)` → backfill secondary summary fields when comparison details change.
+  If any method is intentionally dropped, add it to `feature-parity.md` explicit non-parity with the reason and update the storage-management docs.
+
 - **Documentation update**:
   - Update [docs/src/Pipelines/SpikeSorting/v2.md](docs/src/Pipelines/SpikeSorting/v2.md) (created Phase 1) with a Quality Metrics section.
   - Add `docs/src/Pipelines/SpikeSorting/v2-storage-management.md` documenting recompute verification and safe deletion.
@@ -126,7 +143,9 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
 | `test_metric_nan_round_trip` | Low-spike unit produces non-finite metrics; the serialized AnalysisNWB metric table contains `None` while the in-memory metrics DataFrame preserves NaN semantics. |
 | `test_analyzer_curation_zero_unit_sorting` | Zero-unit `Sorting` row populates `AnalyzerCuration` with empty metric/merge/label tables and no missing-column errors. |
 | `test_analyzer_curation_merge_suggestions_non_empty_on_obvious_split` (slow) | Synthetic sort with two units that are obvious duplicates (same spike times shifted by 1 ms); auto-merge with preset='similarity_correlograms' suggests their merge. |
+| `test_analyzer_curation_fetch_helpers` | `get_waveforms`, `get_metrics`, `get_labels`, and `get_merge_groups` return the data written by `AnalyzerCuration.make()` and match v1 notebook-facing shapes where practical. |
 | `test_analyzer_curation_burstpair_visualization_helpers` (slow) | `plot_correlograms_by_sort_group`, `investigate_pair_xcorrel`, `investigate_pair_peaks`, and `plot_peak_over_time` all render against a SortingAnalyzer-backed sort without requiring the v1 `BurstPair` table. |
+| `test_analyzer_curation_insert_by_curation_id_helper` | Helper inserts an `AnalyzerCurationSelection` row from an existing curation key and returns the selection key; repeated calls are idempotent. |
 | `test_materialize_curation_creates_child` | `AnalyzerCuration.materialize_curation(key)` creates a new `CurationV2` row with `parent_curation_id` pointing to the input curation; auto-registers in `SpikeSortingOutput.CurationV2`. |
 | `test_add_extensions_is_idempotent` (slow) | Call `Sorting.add_extensions(key, ["correlograms"])` twice; second call is a no-op (no recompute). |
 | `test_v2_analyzer_curation_vs_v1` (slow, integration) | Parity vs v1 `MetricCuration` per tolerances above. Reports per-unit diffs on failure. |
@@ -134,6 +153,7 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
 | `test_recompute_matches_under_same_env` (slow) | Recompute under the current `UserEnvironment`; `RecordingArtifactRecompute.matched == 1` and `SortingAnalyzerRecompute.matched == 1`. |
 | `test_recompute_detects_mismatch_under_different_rounding` (slow) | Force a rounding/hash mismatch; recompute rows record `matched == 0` plus `Name` or `Hash` part rows describing the difference. |
 | `test_delete_files_only_for_matched` | `delete_files()` refuses to delete artifacts for `matched=0` and deletes only after a successful round-trip (`matched=1`). |
+| `test_recompute_admin_surface_parity` | v2 recompute tables expose equivalents of `attempt_all`, `remove_matched`, `with_names`, `get_parent_key`, `recheck`, `get_disk_space`, and `update_secondary`, or the dropped method is listed in `feature-parity.md` explicit non-parity. |
 
 ## Fixtures
 
@@ -150,6 +170,8 @@ Before opening the PR for this phase, dispatch `code-reviewer` (or equivalent in
 - Docstrings, test names, and module names don't reference this plan, phase numbers, or files inside `.claude/docs/plans/`.
 - `Sorting.add_extensions()` works idempotently (SI's overwrite=False semantics respected).
 - `BurstPair` visualization helpers are ported into `AnalyzerCuration` (and verified to render against a SortingAnalyzer correlograms extension).
+- `AnalyzerCuration` fetch helpers (`get_waveforms`, `get_metrics`, `get_labels`, `get_merge_groups`) and `materialize_curation()` are documented and tested.
+- v2 recompute admin methods are present or explicitly listed as non-parity with rationale.
 - v1 `MetricCuration` and `BurstPair` are NOT touched (sanity check via `git diff src/spyglass/spikesorting/v1/`).
 - `code_graph.py describe` returns clean output for every new table; `path --up`/`path --down` chains match the design DAG; JSON warnings are empty or explicitly accounted for in `precondition-check.md`.
 - CHANGELOG.md updated.

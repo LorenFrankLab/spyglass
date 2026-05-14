@@ -137,9 +137,9 @@ rec_processed = pipeline.apply(recording)
 🔴 **Tetrode UnitMatch validation needs empirical check** before production use on Frank lab data.
 
 🟢 **DECISION RULE**:
-- v2 supports BOTH paths via plugin matcher API.
+- v2 supports BOTH paths, but they stay separate: concat-and-sort uses `ConcatenatedRecording` + `Sorting`; sort-then-match uses the matcher plugin API.
 - MVP is sort-then-UnitMatch (more general, incremental, introspectable).
-- Concat-and-sort is built on top: `ConcatenatedRecording` virtual table → existing sort path; the "match" is then identity-mapping from sort output.
+- Concat-and-sort is built on top: `ConcatenatedRecording` virtual table → existing sort path. It does not emit UnitMatch rows or identity-mapping matches in this plan.
 
 ---
 
@@ -211,9 +211,10 @@ self.insert1({**key, "analysis_file_name": analysis_file_name, "result_object_id
 - Eliminates "typo at populate" failure mode.
 - Backward compatible: blob in DB stays a dict.
 
-### H4: Pipeline orchestration via `run_v2_pipeline()` convenience function → 🟢 ADOPT
-- Single entry point: takes raw NWB + parameter names, returns final `merge_id`.
-- Internally: inserts selection rows, populates each stage, registers with `SpikeSortingOutput`.
+### H4: Pipeline orchestration via convenience helpers → 🟢 ADOPT
+- `run_v2_pipeline()` is the sort-and-curate entry point: takes either single-session inputs or `concat_session_group_name`, returns final `merge_id`.
+- `run_v2_unit_match()` is the separate sort-then-match entry point: takes `session_group_name` plus explicit per-member `curation_choices`, returns `unitmatch_id`.
+- Internally: helpers insert selection rows, populate each stage, and return manifest dictionaries.
 - Idempotent: re-run finds existing rows, doesn't duplicate.
 - Notebook becomes ~5 cells instead of 35.
 
@@ -221,7 +222,7 @@ self.insert1({**key, "analysis_file_name": analysis_file_name, "result_object_id
 - `MatcherParameters` Lookup starts with `matcher='unitmatch'`. `deepunitmatch` remains a future plugin. `concat_identity` is deferred because concat-backed sorting has one curation for the concatenated recording, while Phase 4 intentionally models one pinned curation per `SessionGroup.Member`.
 - `UnitMatch` Computed dispatches to matcher backend.
 - Per-session sortings remain valid; matching is additive.
-- Concat path: `ConcatenatedRecording` builds virtual recording → existing `Sorting` table → emits identity-mapping matches.
+- Concat path: `ConcatenatedRecording` builds virtual recording → existing `Sorting` table. It does not emit identity-mapping matches in this plan; concat-backed sorting and sort-then-match remain separate workflows.
 
 ### H6: Session group table for chronic recordings → 🟢 ADOPT
 - `SessionGroup` (Manual, master) + `SessionGroup.Member` (Part).
@@ -236,8 +237,8 @@ self.insert1({**key, "analysis_file_name": analysis_file_name, "result_object_id
 - **Verdict**: ADOPT but keep visualization helpers. The two tables compute similar things twice today.
 
 ### H8: FigPack instead of (or alongside) FigURL → 🟡 PROPOSE
-- FigPack is positioned by SI 0.104 as the FigURL successor.
-- Maturity is the open question; need to confirm install/auth path works for our lab.
+- FigPack is the intended FigURL successor path, but its spike-sorting extension API and edited-curation state round trip must be verified at Phase 5 implementation time.
+- Maturity is the open question; need to confirm install/auth/upload path works for our lab.
 - **Verdict**: ADOPT as new path. FigURL remains available for v1 data only; v2 does not extend FigURL.
 
 ### H9: Don't break v0/v1 → 🟢 ADOPT
@@ -245,9 +246,9 @@ self.insert1({**key, "analysis_file_name": analysis_file_name, "result_object_id
 - v2 is additive. Existing v1 curations stay queryable through `SpikeSortingOutput.CurationV1`; no v1-to-v2 conversion helper is part of this plan.
 
 ### H10: Validation against v1 → 🟢 ADOPT
-- Smoke-test on `minirec` (existing v1 test fixture, 9–10 s) — run v2 with MS5, then with v2-wrapped MS4-compatible params, compare unit counts and rough spike-time distributions to v1 baseline.
-- MountainSort is stochastic so exact spike-time match is not expected; tolerance is "same order of magnitude unit count, similar firing-rate distribution".
-- 🔴 **Need a non-stochastic sorter for tight equivalence**: clusterless thresholder (`detect_peaks`) is deterministic given seed → use that as the gold-standard reproducibility check.
+- `minirec` is only a plumbing fixture; it is too short to contain real spikes and must not be used as a sort-correctness or v1-parity oracle.
+- Sort correctness uses MEArec ground-truth fixtures and `spikeinterface.comparison.compare_sorter_to_ground_truth`.
+- v1 parity runs only when `SPIKESORTING_V2_REAL_NWB_PATH` is set. `clusterless_thresholder` is the deterministic tight-equivalence path; stochastic sorters use bounded qualitative tolerances.
 
 ---
 
@@ -259,12 +260,12 @@ self.insert1({**key, "analysis_file_name": analysis_file_name, "result_object_id
 **Risk 2**: Plugin matcher API may leak SpikeInterface object details into DataJoint blobs.
 - Mitigation: serialize matcher inputs/outputs to AnalysisNwbfile via `.build()`; DB stores only the analysis_file_name.
 
-**Risk 3**: `run_v2_pipeline()` convenience function hides reproducibility — what got inserted?
-- Mitigation: function returns a manifest dict with every `(selection_table, key)` it touched. Notebook can print it.
+**Risk 3**: Convenience helpers hide reproducibility — what got inserted?
+- Mitigation: `run_v2_pipeline()` and `run_v2_unit_match()` return manifest dicts with every `(selection_table, key)` they touched. Notebooks can print them.
 
-**Risk 4**: Concat-and-sort across days breaks for KS4 (sorter assumes contiguous time). Mitigation:
-- Default DREDge preset before concat; gate concat to single-day groups in MVP.
-- Add `concat_safe: bool` flag on SessionGroup that requires explicit user override for multi-day.
+**Risk 4**: Concat-and-sort across days breaks for sorters that assume contiguous time. Mitigation:
+- Same-day is the default path.
+- `SessionGroup.create_group(..., allow_multi_day=True)` is required for multi-day groups, and downstream concatenation requires an explicit non-`auto` motion-correction preset. The error points users to sort-then-match as the recommended cross-day workflow.
 
 **Risk 5**: 5 phases is a lot. Phasing failure cascades.
 - Mitigation: Phase 1 (Modern Single-Session) is independently shippable and replaces v1's biggest pain (WaveformExtractor → SortingAnalyzer migration). Phases 2-5 are optional additions.
@@ -284,7 +285,7 @@ self.insert1({**key, "analysis_file_name": analysis_file_name, "result_object_id
 3. **Migration policy**: resolved. Keep v0/v1 alive indefinitely in this plan; document v1-vs-v2 path selection, not a sunset.
 4. **DeepUnitMatch in MVP?** Recommend "no" — Phase 4.1 enhancement after UnitMatch baseline.
 5. **FigPack vs FigURL**: resolved. v2 defaults to FigPack after a feasibility check; no silent FigURL fallback.
-6. **Concat-and-sort across days**: support in MVP or punt? Recommendation: same-day only in Phase 3; multi-day with DREDge precorrection is Phase 6 future work.
+6. **Concat-and-sort across days**: resolved. Schema supports multi-day via `allow_multi_day=True`, but same-day remains the default and sort-then-match is the recommended cross-day workflow.
 
 ---
 
@@ -297,6 +298,6 @@ self.insert1({**key, "analysis_file_name": analysis_file_name, "result_object_id
 - **Phase 2**: AnalyzerCuration (metrics + auto-merge + burst-pair consolidated) plus Recording/Sorting recompute verification for storage reclamation. 1-2 PRs.
 - **Phase 3**: SessionGroup + ConcatenatedRecording (same-day chronic). 1-2 PRs.
 - **Phase 4**: UnitMatch cross-session matching. 1-2 PRs (1 for matcher plugin scaffold + UnitMatch, 1 for tetrode validation).
-- **Phase 5**: UX overhaul — `run_v2_pipeline()`, FigPack, parameter Pydantic validation, notebook rewrite. 1-2 PRs.
+- **Phase 5**: UX overhaul — `run_v2_pipeline()`, `run_v2_unit_match()`, FigPack, parameter Pydantic validation, notebook rewrite. 1-2 PRs.
 
 Total estimated: 7-10 PRs over the v2 lifetime.

@@ -19,13 +19,35 @@ For agent invocation, **load only the slice you need**:
 
 - [overview.md](overview.md) — goals, non-goals, integration points, risks, rollout strategy, open questions.
 - [shared-contracts.md](shared-contracts.md) — SortingAnalyzer layout convention, Pydantic parameter schema, MatcherProtocol plugin interface.
-- [designs.md](designs.md) — schema designs for each v2 table (Recording, Sorting, Curation, AnalyzerCuration, Recompute, SessionGroup, UnitMatch).
+- [designs.md](designs.md) — schema designs for each v2 table (Recording, Sorting, Curation, AnalyzerCuration, Recompute, SessionGroup, UnitMatch, FigPack curation, and pipeline helpers).
 - [feature-parity.md](feature-parity.md) — explicit v1 parity matrix, including intentional departures.
 - Phases (each ships as a separable PR):
   - [phase-0-scaffolding.md](phase-0-scaffolding.md) — foundation work split into Phase 0a (module/CI/code-graph scaffolding) and Phase 0b (fixtures, storage benchmark, v1 baseline capture); no v2 pipeline tables.
+  - [phase-0c-si-0104-prerequisite.md](phase-0c-si-0104-prerequisite.md) — required prerequisite PR that ports v1 to SpikeInterface 0.104 and bumps the global pin before Phase 1 can land.
   - [phase-1-modern-single-session.md](phase-1-modern-single-session.md) — SortingAnalyzer-based single-session sort end-to-end; new `SpikeSortingOutput.CurationV2` part.
   - [phase-2-analyzer-curation.md](phase-2-analyzer-curation.md) — metrics + auto-merge + burst-pair consolidated into `AnalyzerCuration`, plus recompute verification tables for storage reclamation.
   - [phase-3-session-group-concat.md](phase-3-session-group-concat.md) — `SessionGroup` table + `ConcatenatedRecording` for same-day chronic recordings.
   - [phase-4-unitmatch-cross-session.md](phase-4-unitmatch-cross-session.md) — pluggable matcher backend with UnitMatchPy; polymer validation gate, with Neuropixels/tetrode informational checks.
-  - [phase-5-ux-overhaul.md](phase-5-ux-overhaul.md) — `run_v2_pipeline()` API, FigPack curation, notebook rewrite, v1/v2 path-selection docs.
+  - [phase-5-ux-overhaul.md](phase-5-ux-overhaul.md) — `run_v2_pipeline()` sorting API, `run_v2_unit_match()` helper, FigPack curation, notebook rewrite, v1/v2 path-selection docs.
 - [appendix.md](appendix.md) — SpikeInterface 0.99→0.104 migration cheat sheet, UnitMatchPy integration notes, MountainSort 5 install + sorter param table.
+
+## Dependency DAG
+
+```text
+Phase 0a scaffolding/code graph
+  -> Phase 0b fixtures/storage/baseline
+  -> Phase 1 single-session v2 MVP
+
+Phase 0c SI 0.104 v1 port + dependency bump
+  -> Phase 1 single-session v2 MVP
+
+Phase 1 single-session v2 MVP
+  -> Phase 2 AnalyzerCuration + recompute verification
+  -> Phase 3 SessionGroup + ConcatenatedRecording
+
+Phase 3 SessionGroup + ConcatenatedRecording
+  -> Phase 4 UnitMatch cross-session tracking
+      -> Phase 5 UX/FigPack/notebooks
+```
+
+Phase 1 is the first runtime v2 pipeline PR and requires Phase 0a, Phase 0b, and Phase 0c. Phase 0c is a hard gate because Phase 1 imports and runs SpikeInterface 0.104 APIs while v1 must remain working under the global project pin.
