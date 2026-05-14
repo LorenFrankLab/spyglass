@@ -1205,7 +1205,7 @@ class PoseParams(SpyglassMixin, dj.Lookup):
         """Insert default parameter set for 2-LED tracking (green + red).
 
         This is the standard Frank Lab configuration with:
-        - Two-point orientation (redLED_C → greenLED, matching V1 convention)
+        - Two-point orientation (redLED_C → greenLED)
         - Two-point centroid (average of red and green)
         - Moving average smoothing with interpolation
 
@@ -1232,7 +1232,7 @@ class PoseParams(SpyglassMixin, dj.Lookup):
                     "point1": "redLED_C",
                     "point2": "greenLED",
                 },
-                "max_LED_separation": 15.0,  # cm
+                "max_LED_separation": 12.0,  # cm
             },
             "smoothing": {
                 "interpolate": True,
@@ -1246,7 +1246,7 @@ class PoseParams(SpyglassMixin, dj.Lookup):
                     "smoothing_duration": 0.05,  # 50ms window
                 },
                 "likelihood_thresh": 0.95,
-                "velocity_smoothing_std_dev": 0.1,  # 100ms, matching V1
+                "velocity_smoothing_std_dev": 0.1,  # 100ms
             },
         }
         cls.insert1(default_params, **kwargs)
@@ -1281,7 +1281,7 @@ class PoseParams(SpyglassMixin, dj.Lookup):
                     "redLED_L": "redLED_L",
                     "redLED_R": "redLED_R",
                 },
-                "max_LED_separation": 15.0,  # cm
+                "max_LED_separation": 12.0,  # cm, matching V1
             },
             "smoothing": {
                 "interpolate": True,
@@ -1360,7 +1360,7 @@ class PoseParams(SpyglassMixin, dj.Lookup):
                     "point1": "redLED_C",
                     "point2": "greenLED",
                 },
-                "max_LED_separation": 15.0,
+                "max_LED_separation": 12.0,  # cm, matching V1
             },
             "smoothing": {
                 "interpolate": False,

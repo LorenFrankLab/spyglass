@@ -190,7 +190,7 @@ def get_2pt_centroid(
     points : Dict[str, str]
         Dictionary: {"point1": "name1", "point2": "name2"}
     max_LED_separation : float
-        Maximum allowed distance between points (pixels)
+        Maximum allowed distance between points (cm when coordinates are in cm)
 
     Returns
     -------
