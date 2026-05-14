@@ -273,3 +273,65 @@ class TestComputePoseOutputs:
         smooth_params = {**_NO_SMOOTH, "velocity_smoothing_std_dev": 0.1}
         result = self.fn(df, _ORIENT_NONE, _CENTROID_1PT, smooth_params)
         assert np.isnan(result["velocity"][0])
+
+
+# ── convert_to_cm ─────────────────────────────────────────────────────────────
+
+
+class TestConvertToCm:
+    @pytest.fixture(autouse=True)
+    def fn(self):
+        from spyglass.position.utils.pose_processing import convert_to_cm
+
+        self.fn = convert_to_cm
+
+    def _make_dlc_df(self, n_frames=10, x_val=100.0, y_val=200.0):
+        """3-level MultiIndex df matching DLC output format."""
+        scorer = "DLC_scorer"
+        bodyparts = ["greenLED", "redLED"]
+        columns = pd.MultiIndex.from_product(
+            [[scorer], bodyparts, ["x", "y", "likelihood"]],
+            names=["scorer", "bodyparts", "coords"],
+        )
+        data = np.ones((n_frames, len(columns)))
+        df = pd.DataFrame(data, columns=columns)
+        for bp in bodyparts:
+            df[(scorer, bp, "x")] = x_val
+            df[(scorer, bp, "y")] = y_val
+            df[(scorer, bp, "likelihood")] = 0.99
+        return df, scorer
+
+    def test_scales_xy_by_meters_per_pixel(self):
+        df, scorer = self._make_dlc_df(x_val=100.0, y_val=200.0)
+        mpp = 0.00224  # 0.224 cm/pixel
+        result = self.fn(df, mpp)
+        expected_x = 100.0 * mpp * 100
+        expected_y = 200.0 * mpp * 100
+        np.testing.assert_allclose(
+            result[(scorer, "greenLED", "x")].values, expected_x
+        )
+        np.testing.assert_allclose(
+            result[(scorer, "greenLED", "y")].values, expected_y
+        )
+
+    def test_likelihood_unchanged(self):
+        df, scorer = self._make_dlc_df()
+        result = self.fn(df, 0.00224)
+        np.testing.assert_array_equal(
+            result[(scorer, "greenLED", "likelihood")].values,
+            df[(scorer, "greenLED", "likelihood")].values,
+        )
+
+    def test_returns_copy(self):
+        df, scorer = self._make_dlc_df(x_val=50.0)
+        original_x = df[(scorer, "greenLED", "x")].values.copy()
+        _ = self.fn(df, 0.01)
+        np.testing.assert_array_equal(
+            df[(scorer, "greenLED", "x")].values, original_x
+        )
+
+    def test_all_bodyparts_scaled(self):
+        df, scorer = self._make_dlc_df(x_val=10.0)
+        result = self.fn(df, 0.01)  # 1 cm/pixel
+        for bp in ["greenLED", "redLED"]:
+            np.testing.assert_allclose(result[(scorer, bp, "x")].values, 10.0)

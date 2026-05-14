@@ -619,7 +619,9 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         -------
         pd.DataFrame
             Pose data with MultiIndex columns [bodypart, coords] where coords
-            are [x, y, likelihood]
+            are [x, y, likelihood].  x and y units are **centimetres**
+            (converted from pixels using the camera's meters_per_pixel
+            calibration during ``make()``).  Likelihood is dimensionless.
 
         Raises
         ------
@@ -819,9 +821,18 @@ class PoseEstim(SpyglassMixin, dj.Computed):
             f"scorer: {scorer}"
         )
 
+        # Convert pixel coordinates to centimetres using camera calibration
+        from spyglass.position.utils.pose_processing import convert_to_cm
+
+        meters_per_pixel = self._fetch_meters_per_pixel(key)
+        self._info_msg(
+            f"Converting coordinates to cm (meters_per_pixel={meters_per_pixel})"
+        )
+        pose_df = convert_to_cm(pose_df, meters_per_pixel)
+
         # Step 5: Store data in AnalysisNwbfile
         analysis_file_name = self._store_estimation_nwb(
-            key, pose_df, bodyparts, scorer, nwb_file_name
+            key, pose_df, bodyparts, scorer, nwb_file_name, meters_per_pixel
         )
         self.insert1({**key, "analysis_file_name": analysis_file_name})
         self._info_msg("PoseEstim entry inserted.")
@@ -950,6 +961,29 @@ class PoseEstim(SpyglassMixin, dj.Computed):
             )
 
     @staticmethod
+    def _fetch_meters_per_pixel(key: dict) -> float:
+        """Fetch meters_per_pixel from the camera device for this video group.
+
+        Parameters
+        ----------
+        key : dict
+            Must include vid_group_id.
+
+        Returns
+        -------
+        float
+            Metres represented by one pixel, from the camera device record.
+        """
+        vf_keys = (VidFileGroup.File & key).fetch("KEY", as_dict=True)
+        if not vf_keys:
+            raise ValueError(
+                f"No VideoFile entries found for vid_group_id="
+                f"'{key['vid_group_id']}'. Cannot fetch meters_per_pixel."
+            )
+        nwb_data = (VideoFile & vf_keys[0]).fetch_nwb()[0]
+        return float(nwb_data["video_file"].device.meters_per_pixel)
+
+    @staticmethod
     def _fetch_video_timestamps(key: dict) -> np.ndarray:
         """Fetch per-frame timestamps from the first VideoFile in the group.
 
@@ -1012,6 +1046,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         bodyparts: list,
         scorer: str,
         nwb_file_name: str,
+        meters_per_pixel: float = None,
     ) -> str:
         """Store pose estimation data in AnalysisNwbfile using helper classes.
 
@@ -1020,13 +1055,17 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         key : dict
             Primary key
         pose_df : pd.DataFrame
-            DLC output DataFrame with MultiIndex columns
+            DLC output DataFrame with MultiIndex columns.  Coordinates must
+            already be in centimetres when meters_per_pixel is provided.
         bodyparts : list
             List of bodypart names
         scorer : str
             Scorer/model name from DLC output
         nwb_file_name : str
             Name of the source NWB file
+        meters_per_pixel : float, optional
+            Camera calibration factor encoded into the NWB description so
+            the conversion can be recovered without re-querying VideoFile.
 
         Returns
         -------
@@ -1065,16 +1104,27 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         except (ValueError, KeyError):
             source_sw = model_info.get("tool", "unknown")
 
+        if meters_per_pixel is not None:
+            coord_unit = "cm"
+            description = (
+                f"Pose estimation from model {key['model_id']}. "
+                f"Coordinates in cm (meters_per_pixel={meters_per_pixel:.8f})."
+            )
+        else:
+            coord_unit = "pixels"
+            description = f"Pose estimation from model {key['model_id']}"
+
         pose_estimation, nwb_skeleton = builder.build_pose_estimation(
             pose_df=pose_df,
             bodyparts=bodyparts,
             scorer=scorer,
             model_id=key["model_id"],
             skeleton_edges=skeleton_edges,
-            description=f"Pose estimation from model {key['model_id']}",
+            description=description,
             original_videos=video_keys,
             timestamps=vid_timestamps,
             source_software=source_sw,
+            unit=coord_unit,
         )
 
         # original_videos now set in builder, no need to set again here

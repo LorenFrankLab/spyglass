@@ -8,6 +8,32 @@ import numpy as np
 import pandas as pd
 
 
+def convert_to_cm(
+    pose_df: pd.DataFrame,
+    meters_per_pixel: float,
+) -> pd.DataFrame:
+    """Convert x, y pose coordinates from pixels to centimetres.
+
+    Parameters
+    ----------
+    pose_df : pd.DataFrame
+        Pose DataFrame with MultiIndex columns. The innermost level must
+        contain coordinate names ``'x'`` and ``'y'``.  Likelihood columns
+        are not modified.
+    meters_per_pixel : float
+        Camera calibration factor: metres represented by one pixel.
+
+    Returns
+    -------
+    pd.DataFrame
+        Copy of pose_df with x and y columns scaled to centimetres.
+    """
+    pose_df = pose_df.copy()
+    xy_mask = pose_df.columns.get_level_values(-1).isin(["x", "y"])
+    pose_df.loc[:, xy_mask] = pose_df.loc[:, xy_mask] * (meters_per_pixel * 100)
+    return pose_df
+
+
 def apply_likelihood_threshold(
     pose_df: pd.DataFrame,
     likelihood_thresh: float,

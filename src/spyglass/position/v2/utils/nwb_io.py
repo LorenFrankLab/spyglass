@@ -147,6 +147,7 @@ class NDXPoseBuilder(BaseMixin):
         original_videos: list = None,
         timestamps: np.ndarray = None,
         source_software: str = "DeepLabCut",
+        unit: str = "cm",
     ) -> tuple:
         """Build ndx-pose PoseEstimation and Skeleton from DLC DataFrame.
 
@@ -171,6 +172,9 @@ class NDXPoseBuilder(BaseMixin):
         source_software : str, optional
             Source software name for ndx-pose metadata, by default
             "DeepLabCut".
+        unit : str, optional
+            Coordinate unit stored in each PoseEstimationSeries, by default
+            "cm".  Use "pixels" when coordinates have not been converted.
 
         Returns
         -------
@@ -227,7 +231,7 @@ class NDXPoseBuilder(BaseMixin):
                 name=f"{bodypart}_pose",
                 description=f"Pose estimation for {bodypart}",
                 data=pose_data,
-                unit="pixels",
+                unit=unit,
                 reference_frame="(0,0) is top-left corner",
                 timestamps=timestamps,
                 confidence=likelihood,
