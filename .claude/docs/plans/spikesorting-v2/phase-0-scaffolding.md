@@ -126,9 +126,8 @@ Phase 0b PR:
     3. **Inject trodes_to_nwb-compatible metadata** mirroring the YAML schema, populated from synthetic values so the NWB looks like a normal Frank-lab session:
        - `experimenter_name = ["Synthetic, MEArec"]`, `lab = "Loren Frank Lab"`, `institution = "UCSF"`, `experiment_description = "MEArec-simulated ground-truth recording for v2 validation"`, `session_description = "..."`, `session_id = "mearec_{fixture_name}"`, `keywords = ["spike sorting", "simulation", "ground truth"]`.
        - `subject`: `description`, `genotype = "wt/wt"`, `sex = "U"`, `species = "Mus musculus"`, `subject_id = "synthetic_001"`, `date_of_birth`, `weight`.
-       - `electrode_groups`: one per MEArec template-group. For tetrode fixtures, `device_type = "tetrode_12.5"` (already registered with Spyglass — `probeinterface` recognizes it; see [recording.py:630-643](../../../../src/spyglass/spikesorting/v1/recording.py#L630-L643)). For Neuropixels fixtures, pick a registered Neuropixels probe device_type.
-       - `targeted_location` per electrode_group — this maps to `BrainRegion` in Spyglass's electrode table after ingestion. For ground-truth brain-region validation, plant known regions (e.g. tetrode group 0 → "CA1", group 1 → "CA3").
-       - `ntrode_electrode_group_channel_map` for tetrode fixtures: trivial identity map per tetrode.
+       - `electrode_groups`: one per MEArec template-group. For the polymer fixture, insert the custom Phase 0 polymer `ProbeType` / `Probe` rows named in `precondition-check.md`; for the Neuropixels fixture, pick a registered Neuropixels probe device type.
+       - `targeted_location` per electrode_group — this maps to `BrainRegion` in Spyglass's electrode table after ingestion. For ground-truth brain-region validation, plant known regions (for example, polymer shank 0 → "CA1", shank 1 → "CA3").
     4. **Add a Units ground-truth table** (this is NOT in trodes_to_nwb's normal output — trodes_to_nwb produces raw data only — but it's needed for the validation oracle). Read MEArec's `RecordingGenerator.spiketrains` (Neo SpikeTrain objects), `template_locations` (per-unit 3D soma positions), and `cell_types`. Write to `nwbfile.units` with columns: `id`, `spike_times`, `position_x`, `position_y`, `position_z`, `cell_type`, `is_ground_truth=True`. After common-table ingestion succeeds, explicitly import the units with `ImportedSpikeSorting().insert_from_nwbfile(nwb_file_name)` (or the current production equivalent) before comparing against v2 `Sorting` output via SpikeInterface's `compare_sorter_to_ground_truth`. `Nwbfile.insert_from_relative_file_name(...)` alone only registers the NWB file row; it does not populate common tables or import units.
     5. Helper signature: `mearec_to_spyglass_nwb(mearec_h5_path: Path, out_nwb_path: Path, *, fixture_name: str, brain_region_map: dict[int, str] | None = None) -> None`.
     6. **Validate the output** with NWBInspector before returning — the converter raises if the NWB has any blocking inspector findings. Catches malformed metadata that would fail Spyglass ingestion silently.
@@ -142,9 +141,9 @@ Phase 0b PR:
   |---|---|---|---|
   | `minirec20230622.nwb` | Existing v0/v1 fixture | Phase 0 plumbing tests (module import, schema validation, populate-doesn't-crash). NOT used for sort-correctness. | Likely none — too short |
   | `mearec_polymer_60s.nwb` | MEArec → NWB (Phase 0) | Phase 1 ground-truth precision/recall; brain-region tracing (primary fixture — modeled on Chung et al. 2019 polymer probes, the Frank-lab standard) | Yes (planted) |
-  | `mearec_neuropixels_60s.nwb` | MEArec → NWB (Phase 0) | Phase 1 Neuropixels parity; Phase 4 Neuropixels UnitMatch tests | Yes (planted) |
+  | `mearec_neuropixels_60s.nwb` | MEArec → NWB (Phase 0) | Phase 1 dense-probe sorter smoke/correctness coverage | Yes (planted) |
   | `mearec_polymer_drift_120s.nwb` | MEArec → NWB (Phase 0) | Phase 3 motion correction validation | Yes (planted, with drift) |
-  | MEArec 2-session pair | MEArec → NWB (Phase 4 generates) | Phase 4 UnitMatch ground-truth validation | Yes (planted; shared templates across sessions) |
+  | `mearec_polymer_2sessions.nwb` pair | MEArec → NWB (Phase 4 generates) | Phase 4 UnitMatch ground-truth validation gate | Yes (planted; shared templates across sessions) |
   | **Real lab dataset** | User-provided via env var `SPIKESORTING_V2_REAL_NWB_PATH` | v1-parity smoke test (Phase 1); memory/runtime budget (Phase 3); end-to-end "works on real data" smoke (Phase 5). Tests skip if env var unset. | Yes |
 
 - **Add v1 baseline capture on the real-lab dataset (not minirec):**

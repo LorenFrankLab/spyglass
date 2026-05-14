@@ -248,7 +248,7 @@ self.insert1({**key, "analysis_file_name": analysis_file_name, "result_object_id
 
 ### H2: SortingAnalyzer-first storage → 🟢 ADOPT
 - Single source of truth for waveforms, templates, metrics, locations.
-- Persisted as `binary_folder` for the v2 SortingAnalyzer plan. Zarr remains an SI-supported format and may be selected by the Phase 0 benchmark as the `AnalysisNwbfile` backend for Recording artifacts, but it is not a SortingAnalyzer storage dependency.
+- Persisted as `binary_folder` for the v2 SortingAnalyzer plan. Recording artifacts use the existing HDF5 `AnalysisNwbfile` path; any future Zarr evaluation is follow-up work and is not a SortingAnalyzer storage dependency.
 - v2 `Sorting` table writes `SortingAnalyzer` folder + lightweight units NWB; downstream tables read from analyzer extensions.
 
 ### H3: Parameters as Pydantic-validated schemas → 🟢 ADOPT

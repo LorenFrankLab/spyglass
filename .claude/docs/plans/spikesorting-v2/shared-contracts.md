@@ -80,9 +80,9 @@ The canonical preprocessed recording produced by `Recording.make()` and `Concate
 - `object_id: varchar(40)` — the `ElectricalSeries` HDF5/Zarr object identifier inside the NWB.
 - `cache_hash: char(64)` — SHA-256 over the `ElectricalSeries.data` bytes, backend-agnostic. Anchors missing-artifact detection (Phase 1) and feeds `RecordingArtifactRecompute*` (Phase 2).
 
-No `binary_cache_path` column. Binary sidecar storage is **explicitly out of MVP** — see [phase-0-scaffolding.md § Storage benchmark](phase-0-scaffolding.md). If a future maintainer measures a large win and scopes the full sidecar lifecycle, that work adds a separate opt-in table; it does NOT modify `Recording`'s columns.
+No `binary_cache_path` column. Binary sidecar storage is **explicitly out of MVP**. If a future maintainer measures a large win and scopes the full sidecar lifecycle, that work adds a separate opt-in table; it does NOT modify `Recording`'s columns.
 
-**Backend (HDF5 vs Zarr)** is a property of the `AnalysisNwbfile` lifecycle, not of `Recording`'s schema. The current Spyglass builder path is HDF5-only (`NWBHDF5IO`), so HDF5 is the Phase 1 default unless Phase 0's three-format benchmark shows a clear Zarr win AND a concrete `AnalysisNwbfile.build()` / cleanup Zarr-backend change lands as a Phase 1 prerequisite. Without that prerequisite, the Zarr column in the benchmark is evidence for future work, not a config value `Recording.make()` may use.
+**Backend** is a property of the `AnalysisNwbfile` lifecycle, not of `Recording`'s schema. The current Spyglass builder path is HDF5-only (`NWBHDF5IO`), so HDF5 is the Phase 1 default. Any future Zarr or binary-cache optimization is follow-up work and must not alter the `Recording` schema above.
 
 **Sort-time materialization of binary**: sorters that internally consume `recording.save(format="binary", folder=tmpdir)` keep doing so — that is per-sort scratch managed inside `Sorting.make()`, unrelated to the canonical recording artifact.
 

@@ -241,7 +241,7 @@ class Recording(SpyglassMixin, dj.Computed):
     """Preprocessed recording, materialized NWB-resident inside an AnalysisNwbfile.
 
     Heavy data: an `ElectricalSeries` written to the analysis NWB
-    (HDF5 by default; Zarr opt-in per Phase 0 benchmark). All cleanup,
+    through the existing HDF5 `AnalysisNwbfile` builder path. All cleanup,
     export, kachery, FigPack, and recompute machinery keys off the
     `AnalysisNwbfile` row. There is NO parallel binary sidecar — see
     [shared-contracts.md § Recording Cache Format].
@@ -274,13 +274,13 @@ class Recording(SpyglassMixin, dj.Computed):
 - `Recording.get_recording(key)` loads that NWB-resident artifact; if the artifact is missing, it rebuilds the artifact without deleting the DataJoint row.
 - `_rebuild_nwb_artifact(key)` regenerates only the file payload and verifies the regenerated hash against the stored row.
 
-**Storage decision is settled — see [shared-contracts.md § Recording Cache Format](shared-contracts.md#recording-cache-format)**. The canonical artifact lives in `AnalysisNwbfile`; Phase 0's benchmark picks the AnalysisNwbfile backend (HDF5 / Zarr), not the schema. Binary sidecar storage is explicitly out of MVP. The schema above is final-shape under the zero-migration policy.
+**Storage decision is settled — see [shared-contracts.md § Recording Cache Format](shared-contracts.md#recording-cache-format)**. The canonical artifact lives in `AnalysisNwbfile` using the existing HDF5 builder path. Binary sidecar storage is explicitly out of MVP. Any future Zarr or binary-cache optimization must not change the schema above, which is final-shape under the zero-migration policy.
 
 **Key design points**:
 
 - **One canonical NWB-resident artifact per `recording_id`.** Subsequent sorting tries with different `SorterParameters` read the same `ElectricalSeries` via `se.read_nwb_recording`. v1 re-materialized per sort.
 - **Hash for integrity.** `cache_hash` (SHA-256 over `ElectricalSeries.data`) enables lightweight missing-artifact detection in Phase 1 and feeds Phase 2's `RecordingArtifactRecompute*` tables without changing the `Recording` schema.
-- **Backend transparency.** HDF5 and Zarr produce the same row shape; flipping the default is a config change, not a migration.
+- **Backend transparency.** Future storage-backend experiments must preserve the same row shape; backend changes are not schema migrations.
 - **No SortingAnalyzer yet.** That comes after sorting, in `Sorting.make()`.
 
 ---
