@@ -228,3 +228,48 @@ class TestComputePoseOutputs:
     def test_no_database_access(self):
         """Runs without any live DataJoint connection."""
         self.fn(_make_2level_df(), _ORIENT_NONE, _CENTROID_1PT, _NO_SMOOTH)
+
+    def test_velocity_smoothing_reduces_variance(self):
+        """velocity_smoothing_std_dev Gaussian smoothing reduces velocity noise."""
+        pytest.importorskip("position_tools")
+
+        rng = np.random.default_rng(7)
+        n = 200
+        sr = 30.0
+        t = np.arange(n) / sr
+        # Smooth underlying trajectory + high-frequency jitter
+        x = np.cumsum(rng.normal(0, 1, n)) + rng.normal(0, 5, n)
+        y = np.cumsum(rng.normal(0, 1, n)) + rng.normal(0, 5, n)
+        columns = pd.MultiIndex.from_tuples(
+            [("nose", "x"), ("nose", "y"), ("nose", "likelihood")],
+            names=["bodypart", "coords"],
+        )
+        data = np.column_stack([x, y, np.ones(n)])
+        df = pd.DataFrame(data, columns=columns, index=t)
+
+        raw = self.fn(df, _ORIENT_NONE, _CENTROID_1PT, _NO_SMOOTH)
+        smooth_params = {**_NO_SMOOTH, "velocity_smoothing_std_dev": 0.1}
+        smoothed = self.fn(df, _ORIENT_NONE, _CENTROID_1PT, smooth_params)
+
+        v_raw = raw["velocity"][1:]  # skip leading NaN
+        v_smooth = smoothed["velocity"][1:]
+
+        # Smoothed velocity should have lower frame-to-frame variation
+        assert np.std(np.diff(v_smooth)) < np.std(np.diff(v_raw))
+
+    def test_velocity_smoothing_preserves_length(self):
+        """Velocity array length unchanged by smoothing."""
+        pytest.importorskip("position_tools")
+        n = 50
+        df = _make_2level_df(n_frames=n)
+        smooth_params = {**_NO_SMOOTH, "velocity_smoothing_std_dev": 0.1}
+        result = self.fn(df, _ORIENT_NONE, _CENTROID_1PT, smooth_params)
+        assert len(result["velocity"]) == n
+
+    def test_velocity_smoothing_first_element_nan(self):
+        """First velocity element remains NaN after smoothing."""
+        pytest.importorskip("position_tools")
+        df = _make_2level_df()
+        smooth_params = {**_NO_SMOOTH, "velocity_smoothing_std_dev": 0.1}
+        result = self.fn(df, _ORIENT_NONE, _CENTROID_1PT, smooth_params)
+        assert np.isnan(result["velocity"][0])

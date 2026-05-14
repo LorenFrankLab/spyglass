@@ -194,6 +194,15 @@ def compute_pose_outputs(
     # --- velocity -------------------------------------------------------------
     velocity = calculate_velocity(centroid_smooth, timestamps, sampling_rate)
 
+    vel_std = smooth_params.get("velocity_smoothing_std_dev")
+    if vel_std:
+        from position_tools.core import gaussian_smooth as _gs
+
+        smoothed_v = _gs(
+            velocity[1:], vel_std, sampling_rate, axis=0, truncate=8
+        )
+        velocity = np.concatenate([[np.nan], smoothed_v])
+
     return {
         "orientation": orientation,
         "centroid": centroid_smooth,

@@ -6,6 +6,8 @@ Spyglass database dependencies while testing the core DLCStrategy methods.
 
 from unittest.mock import Mock, patch
 
+import numpy as np
+import pandas as pd
 import pytest
 
 
@@ -394,3 +396,109 @@ class TestDLCStrategyWithFilesystemInjection:
 
         # Should return same value for multiple calls (stub behavior)
         assert strategy._fs.getmtime("/another/path") == mtime
+
+
+# ---------------------------------------------------------------------------
+# T01 — Orientation direction convention
+# ---------------------------------------------------------------------------
+
+
+def _make_two_pt_df(n=20, seed=42):
+    """Build a minimal (bodypart, coord) MultiIndex DataFrame for orientation tests."""
+    rng = np.random.default_rng(seed)
+    x = rng.uniform(100, 500, n)
+    y = rng.uniform(100, 400, n)
+    arrays = [
+        ["rear", "rear", "rear", "front", "front", "front"],
+        ["x", "y", "likelihood", "x", "y", "likelihood"],
+    ]
+    cols = pd.MultiIndex.from_arrays(arrays, names=["bodyparts", "coords"])
+    data = np.column_stack([x, y, np.ones(n), x + 20, y + 10, np.ones(n)])
+    return pd.DataFrame(data, columns=cols)
+
+
+def test_two_pt_orientation_antiparallel():
+    """Swapping point1/point2 should flip orientation by exactly π radians."""
+    from spyglass.position.utils.orientation import two_pt_orientation
+
+    df = _make_two_pt_df()
+    orient_fwd = two_pt_orientation(df, point1="rear", point2="front")
+    orient_rev = two_pt_orientation(df, point1="front", point2="rear")
+
+    diff = np.abs(np.angle(np.exp(1j * (orient_fwd - orient_rev))))
+    assert np.allclose(
+        diff, np.pi, atol=1e-10
+    ), f"Expected π-radian difference between swapped orientations; got {diff}"
+
+
+def test_pose_params_default_orientation_convention():
+    """PoseParams.insert_default should use rear marker as bodypart1 (V1 convention)."""
+    from spyglass.position.v2.estim import PoseParams
+
+    # Call insert_default and capture the dict it would validate.
+    # We patch dj.Table.insert1 to avoid needing a live DB.
+    captured = {}
+
+    def fake_insert1(self, key, **kwargs):
+        captured.update(key)
+
+    with patch("datajoint.Table.insert1", fake_insert1):
+        PoseParams().insert_default(skip_duplicates=True)
+
+    orient = captured.get("orient", {})
+    bp1 = orient.get("bodypart1", "")
+    bp2 = orient.get("bodypart2", "")
+
+    # V1 convention: bodypart1 is the rear/red marker, bodypart2 is the front/green marker.
+    assert (
+        "red" in bp1.lower()
+    ), f"PoseParams default bodypart1 should be the rear (red) marker; got '{bp1}'"
+    assert (
+        "green" in bp2.lower()
+    ), f"PoseParams default bodypart2 should be the front (green) marker; got '{bp2}'"
+
+
+def test_pose_params_no_smoothing_orientation_convention():
+    """PoseParams.insert_no_smoothing should also use rear-first (V1) convention."""
+    from spyglass.position.v2.estim import PoseParams
+
+    captured = {}
+
+    def fake_insert1(self, key, **kwargs):
+        captured.update(key)
+
+    with patch("datajoint.Table.insert1", fake_insert1):
+        PoseParams().insert_no_smoothing(skip_duplicates=True)
+
+    orient = captured.get("orient", {})
+    bp1 = orient.get("bodypart1", "")
+    bp2 = orient.get("bodypart2", "")
+
+    assert (
+        "red" in bp1.lower()
+    ), f"no_smoothing bodypart1 should be the rear (red) marker; got '{bp1}'"
+    assert (
+        "green" in bp2.lower()
+    ), f"no_smoothing bodypart2 should be the front (green) marker; got '{bp2}'"
+
+
+def test_pose_params_default_has_velocity_smoothing():
+    """PoseParams.insert_default should include velocity_smoothing_std_dev=0.1."""
+    from spyglass.position.v2.estim import PoseParams
+
+    captured = {}
+
+    def fake_insert1(self, key, **kwargs):
+        captured.update(key)
+
+    with patch("datajoint.Table.insert1", fake_insert1):
+        PoseParams().insert_default(skip_duplicates=True)
+
+    smoothing = captured.get("smoothing", {})
+    vel_std = smoothing.get("velocity_smoothing_std_dev")
+    assert (
+        vel_std is not None
+    ), "PoseParams default smoothing should include 'velocity_smoothing_std_dev'"
+    assert (
+        abs(vel_std - 0.1) < 1e-9
+    ), f"velocity_smoothing_std_dev should be 0.1 (matching V1); got {vel_std}"

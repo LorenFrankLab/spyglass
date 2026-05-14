@@ -87,7 +87,7 @@ with suppress_print_from_package():
 # -------------------------------- Module setup --------------------------------
 warnings.filterwarnings("ignore", category=UserWarning, module="networkx")
 
-schema = dj.schema("cbroz_position_v2_train")  # TODO: remove cbroz prefix
+schema = dj.schema("cbroz_position_v3_train")  # TODO: remove cbroz prefix
 
 
 # ----------------------------------- Helpers ----------------------------------

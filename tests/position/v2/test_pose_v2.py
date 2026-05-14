@@ -638,6 +638,13 @@ class TestFetchMethods:
 class TestPositionOutputInsert:
     """Test that PoseV2.make() inserts into PositionOutput (T11)."""
 
+    @pytest.mark.xfail(
+        strict=False,
+        reason=(
+            "PositionOutput.PoseV2 part table is commented out pending merge; "
+            "see position_merge.py:91-100"
+        ),
+    )
     def test_make_calls_merge_insert(self, pose_v2_instance):
         """make() calls PositionOutput._merge_insert after self.insert1()."""
         key = {

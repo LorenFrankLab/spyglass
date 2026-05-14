@@ -74,7 +74,7 @@ try:
 except ImportError:  # pragma: no cover
     ndx_pose = None  # pragma: no cover
 
-schema = dj.schema("cbroz_position_v2_estim")  # Couldn't drop previous
+schema = dj.schema("cbroz_position_v3_estim")  # Couldn't drop previous
 
 
 @schema
@@ -1155,16 +1155,21 @@ class PoseParams(SpyglassMixin, dj.Lookup):
         """Insert default parameter set for 2-LED tracking (green + red).
 
         This is the standard Frank Lab configuration with:
-        - Two-point orientation (green → red)
-        - Two-point centroid (average of green and red)
+        - Two-point orientation (redLED_C → greenLED, matching V1 convention)
+        - Two-point centroid (average of red and green)
         - Moving average smoothing with interpolation
+
+        bodypart1 is the rear (red) marker; bodypart2 is the front (green)
+        marker.  ``two_pt_orientation`` returns the angle of the vector from
+        point2 toward point1, so the resulting orientation points
+        front→back — identical to V1's ``red_green_LED`` parameter set.
         """
         default_params = {
             "pose_params_id": "default",
             "orient": {
                 "method": "two_pt",
-                "bodypart1": "greenLED",
-                "bodypart2": "redLED_C",
+                "bodypart1": "redLED_C",
+                "bodypart2": "greenLED",
                 "interpolate": True,
                 "smooth": True,
                 "smoothing_params": {
@@ -1174,8 +1179,8 @@ class PoseParams(SpyglassMixin, dj.Lookup):
             "centroid": {
                 "method": "2pt",
                 "points": {
-                    "point1": "greenLED",
-                    "point2": "redLED_C",
+                    "point1": "redLED_C",
+                    "point2": "greenLED",
                 },
                 "max_LED_separation": 15.0,  # cm
             },
@@ -1191,6 +1196,7 @@ class PoseParams(SpyglassMixin, dj.Lookup):
                     "smoothing_duration": 0.05,  # 50ms window
                 },
                 "likelihood_thresh": 0.95,
+                "velocity_smoothing_std_dev": 0.1,  # 100ms, matching V1
             },
         }
         cls.insert1(default_params, **kwargs)
@@ -1293,16 +1299,16 @@ class PoseParams(SpyglassMixin, dj.Lookup):
             "pose_params_id": "no_smoothing",
             "orient": {
                 "method": "two_pt",
-                "bodypart1": "greenLED",
-                "bodypart2": "redLED_C",
+                "bodypart1": "redLED_C",
+                "bodypart2": "greenLED",
                 "interpolate": False,
                 "smooth": False,
             },
             "centroid": {
                 "method": "2pt",
                 "points": {
-                    "point1": "greenLED",
-                    "point2": "redLED_C",
+                    "point1": "redLED_C",
+                    "point2": "greenLED",
                 },
                 "max_LED_separation": 15.0,
             },
