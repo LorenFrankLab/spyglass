@@ -151,7 +151,7 @@ Phase 0b checkpoint:
 
 - **Add v1 baseline capture on the real-lab dataset (not minirec):**
   - New file `tests/spikesorting/v2/baseline_capture.py`, CLI args `--nwb-file`, `--sort-group-id`, `--interval-list-name`, `--output-dir`. Default `--nwb-file` reads from `SPIKESORTING_V2_REAL_NWB_PATH`.
-  - Runs the v1 pipeline end-to-end with `clusterless_thresholder` (deterministic, seed=0) on the real-data NWB inside the isolated integration database. If the developer must query production to locate the source NWB or metadata, the query is read-only and requires `SPYGLASS_ALLOW_PRODUCTION_SMOKE=1`; all inserts/populates/write paths still target the test prefix and temporary analysis directories.
+  - Runs the v1 pipeline end-to-end with `clusterless_thresholder` (deterministic peak-detection path; v1's clusterless sorter parameters do not include a seed) on the real-data NWB inside the isolated integration database. If the developer must query production to locate the source NWB or metadata, the query is read-only and requires `SPYGLASS_ALLOW_PRODUCTION_SMOKE=1`; all inserts/populates/write paths still target the test prefix and temporary analysis directories.
   - Saves small committed artifacts `baseline_v1_spike_times.pkl` and `baseline_v1_recording_meta.json`. If a units NWB export is needed for local debugging, write it outside git and record only its local path in the metadata JSON.
   - On successful capture, prints all relevant IDs + paths.
   - **NOT runnable in CI** (no real-data NWB in CI). Manually invoked by lab developers; output committed to `tests/spikesorting/v2/baselines/` as small pickle/json files (the units NWB stays on local disk, referenced by path).

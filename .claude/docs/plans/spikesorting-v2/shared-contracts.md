@@ -259,13 +259,15 @@ What the contract IS committed to (these survive Phase 4a):
 - **Input is wrapper-owned, not analyzer-owned.** The v2 wrapper extracts per-unit waveform arrays + channel positions + per-unit metadata from each session's curated sorting/analyzer, and may read the associated v2 recording artifact when a matcher needs split-half waveform estimates that are not already present in the analyzer. It writes those inputs into a matcher-specific on-disk layout (the layout is what Phase 4a pins). The matcher consumes that wrapper-prepared bundle; it does NOT consume `si.SortingAnalyzer` objects, Spyglass table keys, or raw NWB paths directly. This is the contract that makes the wrapper invariant ("matcher never touches raw NWB paths") implementable.
 - **Output is a list of pair records** keyed by (sorting_id, curation_id, unit_id) per side (curation_id is non-negotiable per the round-7 fix — UnitMatch operates on curated units).
 - **Degenerate single-session case returns zero pairs, no error.**
-- **Determinism**: given fixed params, output is identical run-to-run (matcher sets internal seeds).
+- **Reproducibility policy pinned by Phase 4a**: the wrapper uses fixed matcher params and records any matcher seed/config fields it controls. Phase 4a must empirically verify whether UnitMatchPy is exact run-to-run in the target environment. If exact reproducibility is not proven, Phase 4b validation uses bounded agreement against fixed synthetic / MEArec inputs and records the observed variance; it must not assert exact rerun equality.
 - **Sparsity-friendly**: wrapper passes sparse-template data when SI's `sparse=True` is set (v2 default).
 
 Contract-stub shape (replaced by 4a):
+The `PHASE4A_CONTRACT_STUB` marker is plan-document vocabulary only; do not
+copy it into runtime files, tests, docstrings, comments, notebooks, or
+user-facing docs.
 
 ```python
-# src/spyglass/spikesorting/v2/matcher_protocol.py — PHASE4A_CONTRACT_STUB
 from typing import Protocol, runtime_checkable
 from dataclasses import dataclass
 from pathlib import Path
@@ -315,7 +317,7 @@ class MatcherProtocol(Protocol):
 - A matcher MUST emit `(sorting_id, curation_id, unit_id)` for both sides of every pair.
 - `UnitMatch.make()` MUST validate matcher output before inserting `UnitMatch.Pair`: both side curations appear in `UnitMatchSelection.MemberCuration`, the sides belong to different `SessionGroup.Member.member_index` values, no self-pairs are inserted, and pair orientation is canonicalized by ascending `member_index` so reversed duplicates cannot coexist.
 - A matcher MUST handle the single-session degenerate case (return zero pairs, no error).
-- A matcher MUST be deterministic given fixed params.
+- A matcher MUST run with fixed, recorded params. If Phase 4a proves exact reproducibility for the backend, validation may assert exact rerun equality; otherwise validation asserts bounded agreement against fixed inputs using the variance recorded by Phase 4a.
 
 ---
 
