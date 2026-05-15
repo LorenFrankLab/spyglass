@@ -1659,24 +1659,25 @@ class PoseV2(SpyglassMixin, dj.Computed):
             - position_x: centroid x-coordinate (cm)
             - position_y: centroid y-coordinate (cm)
             - orientation: head orientation (radians)
-            - velocity: speed (cm/s)
+            - velocity_x: x-component of velocity (cm/s)
+            - velocity_y: y-component of velocity (cm/s)
+            - speed: Euclidean speed (cm/s)
 
         Examples
         --------
         >>> df = (PoseV2 & key).fetch1_dataframe()
         >>> print(df.head())
-                position_x  position_y  orientation  velocity
+                position_x  position_y  orientation  velocity_x  velocity_y  speed
         time
-        0.0          10.5        12.3         1.57       0.0
-        0.033        10.6        12.4         1.58       1.2
+        0.0          10.5        12.3         1.57         0.0         0.0    0.0
+        0.033        10.6        12.4         1.58         3.0         0.0    3.0
         ...
 
         Notes
         -----
         - Returns smoothed centroid position (not raw)
         - Orientation is in radians, range [-π, π]
-        - Velocity is Euclidean speed in cm/s
-        - First velocity value is typically NaN
+        - speed is Euclidean magnitude of (velocity_x, velocity_y)
         """
         _ = self.ensure_single_entry()
 
@@ -1696,7 +1697,7 @@ class PoseV2(SpyglassMixin, dj.Computed):
         # Extract data arrays
         centroid_data = centroid_series.data[:]  # (n_frames, 2)
         orientation_data = orient_series.data[:]  # (n_frames,)
-        velocity_data = velocity_series.data[:]  # (n_frames,)
+        velocity_data = velocity_series.data[:]  # (n_frames, 3): vx, vy, speed
 
         # Build DataFrame
         df = pd.DataFrame(
@@ -1704,7 +1705,9 @@ class PoseV2(SpyglassMixin, dj.Computed):
                 "position_x": centroid_data[:, 0],
                 "position_y": centroid_data[:, 1],
                 "orientation": orientation_data,
-                "velocity": velocity_data,
+                "velocity_x": velocity_data[:, 0],
+                "velocity_y": velocity_data[:, 1],
+                "speed": velocity_data[:, 2],
             },
             index=pd.Index(timestamps, name="time"),
         )
@@ -1953,7 +1956,8 @@ class PoseV2(SpyglassMixin, dj.Computed):
             {**key, "nwb_file_name": nwb_file_name},
             outputs["orientation"],
             outputs["centroid"],
-            outputs["velocity"],
+            outputs["velocity_2d"],
+            outputs["speed"],
             outputs["timestamps"],
             outputs["sampling_rate"],
         )
@@ -2202,11 +2206,15 @@ class PoseV2(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def _calculate_velocity(
-        position: np.ndarray, timestamps: np.ndarray, sampling_rate: float
-    ) -> np.ndarray:
-        from spyglass.position.utils.pose_processing import calculate_velocity
+        position: np.ndarray,
+        timestamps: np.ndarray,
+        smooth_std_dev: float = None,
+    ) -> tuple:
+        from spyglass.position.utils.velocity import compute_velocity
 
-        return calculate_velocity(position, timestamps, sampling_rate)
+        return compute_velocity(
+            position, timestamps, smooth_std_dev=smooth_std_dev
+        )
 
     @staticmethod
     def _flatten_multiindex(pose_df: pd.DataFrame) -> pd.DataFrame:
@@ -2219,7 +2227,8 @@ class PoseV2(SpyglassMixin, dj.Computed):
         key: dict,
         orientation: np.ndarray,
         centroid: np.ndarray,
-        velocity: np.ndarray,
+        velocity_2d: np.ndarray,
+        speed: np.ndarray,
         timestamps: np.ndarray,
         sampling_rate: float,
     ) -> tuple:
@@ -2233,8 +2242,10 @@ class PoseV2(SpyglassMixin, dj.Computed):
             Orientation in radians
         centroid : np.ndarray
             Centroid positions (n_frames, 2)
-        velocity : np.ndarray
-            Velocity in cm/s
+        velocity_2d : np.ndarray
+            2D velocity vector (n_frames, 2) — x_vel, y_vel in cm/s
+        speed : np.ndarray
+            Scalar speed (n_frames,) in cm/s
         timestamps : np.ndarray
             Timestamps
         sampling_rate : float
@@ -2280,15 +2291,16 @@ class PoseV2(SpyglassMixin, dj.Computed):
             # reference_frame=??,
         )
 
-        # Create BehavioralTimeSeries for velocity
+        # Create BehavioralTimeSeries for velocity — columns: vx, vy, speed
+        velocity_data = np.column_stack([velocity_2d, speed])
         velocity_ts = pynwb.behavior.BehavioralTimeSeries(name="velocity")
         velocity_ts.create_timeseries(
             name="velocity",
             timestamps=timestamps,
-            data=velocity,
+            data=velocity_data,
             unit="cm/s",
-            description="Speed in cm/s",
-            comments="Euclidean distance traveled per unit time",
+            description="x_velocity, y_velocity, speed",
+            comments="2D velocity vector and scalar Euclidean speed in cm/s",
         )
 
         # Create Position object for smoothed pose (centroid with metadata)

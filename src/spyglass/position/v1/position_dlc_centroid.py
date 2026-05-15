@@ -4,7 +4,9 @@ import datajoint as dj
 import numpy as np
 import pandas as pd
 import pynwb
-from position_tools import get_distance, get_velocity
+from position_tools import get_distance
+
+from spyglass.position.utils.velocity import compute_velocity
 
 from spyglass.common.common_behav import RawPosition
 from spyglass.common.common_nwbfile import AnalysisNwbfile
@@ -330,13 +332,12 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
             final_df = interp_df.copy()
 
         self._info_msg("getting velocity")
-        velocity = get_velocity(
+        velocity, speed = compute_velocity(
             final_df.loc[:, idx[("x", "y")]].to_numpy(),
-            time=pos_df.index.to_numpy(),
-            sigma=params.pop("speed_smoothing_std_dev"),
-            sampling_frequency=sampling_rate,
+            timestamps=pos_df.index.to_numpy(),
+            smooth_std_dev=params.pop("speed_smoothing_std_dev"),
+            sampling_rate=sampling_rate,
         )
-        speed = np.sqrt(np.sum(velocity**2, axis=1))  # cm/s
         velocity_df = pd.DataFrame(
             np.concatenate((velocity, speed[:, np.newaxis]), axis=1),
             columns=["velocity_x", "velocity_y", "speed"],

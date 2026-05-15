@@ -218,21 +218,18 @@ def compute_pose_outputs(
     centroid_smooth = pos_df[["x", "y"]].values
 
     # --- velocity -------------------------------------------------------------
-    velocity = calculate_velocity(centroid_smooth, timestamps, sampling_rate)
+    from spyglass.position.utils.velocity import compute_velocity
 
-    vel_std = smooth_params.get("velocity_smoothing_std_dev")
-    if vel_std:
-        from position_tools.core import gaussian_smooth as _gs
-
-        smoothed_v = _gs(
-            velocity[1:], vel_std, sampling_rate, axis=0, truncate=8
-        )
-        velocity = np.concatenate([[np.nan], smoothed_v])
+    vel_std = smooth_params.get("velocity_smoothing_std_dev") or None
+    velocity_2d, speed = compute_velocity(
+        centroid_smooth, timestamps, smooth_std_dev=vel_std
+    )
 
     return {
         "orientation": orientation,
         "centroid": centroid_smooth,
-        "velocity": velocity,
+        "velocity_2d": velocity_2d,
+        "speed": speed,
         "timestamps": timestamps,
         "sampling_rate": sampling_rate,
     }

@@ -168,7 +168,8 @@ class TestComputePoseOutputs:
         for k in (
             "orientation",
             "centroid",
-            "velocity",
+            "velocity_2d",
+            "speed",
             "timestamps",
             "sampling_rate",
         ):
@@ -188,18 +189,19 @@ class TestComputePoseOutputs:
         )
         assert result["centroid"].shape == (n, 2)
 
-    def test_velocity_first_nan(self):
+    def test_velocity_2d_shape(self):
+        n = 20
         result = self.fn(
-            _make_2level_df(), _ORIENT_NONE, _CENTROID_1PT, _NO_SMOOTH
+            _make_2level_df(n_frames=n), _ORIENT_NONE, _CENTROID_1PT, _NO_SMOOTH
         )
-        assert np.isnan(result["velocity"][0])
+        assert result["velocity_2d"].shape == (n, 2)
 
     def test_velocity_length(self):
         n = 12
         result = self.fn(
             _make_2level_df(n_frames=n), _ORIENT_NONE, _CENTROID_1PT, _NO_SMOOTH
         )
-        assert len(result["velocity"]) == n
+        assert len(result["speed"]) == n
 
     def test_timestamps_preserved(self):
         df = _make_2level_df(n_frames=10, sampling_rate=5.0)
@@ -251,8 +253,8 @@ class TestComputePoseOutputs:
         smooth_params = {**_NO_SMOOTH, "velocity_smoothing_std_dev": 0.1}
         smoothed = self.fn(df, _ORIENT_NONE, _CENTROID_1PT, smooth_params)
 
-        v_raw = raw["velocity"][1:]  # skip leading NaN
-        v_smooth = smoothed["velocity"][1:]
+        v_raw = raw["speed"]
+        v_smooth = smoothed["speed"]
 
         # Smoothed velocity should have lower frame-to-frame variation
         assert np.std(np.diff(v_smooth)) < np.std(np.diff(v_raw))
@@ -264,15 +266,7 @@ class TestComputePoseOutputs:
         df = _make_2level_df(n_frames=n)
         smooth_params = {**_NO_SMOOTH, "velocity_smoothing_std_dev": 0.1}
         result = self.fn(df, _ORIENT_NONE, _CENTROID_1PT, smooth_params)
-        assert len(result["velocity"]) == n
-
-    def test_velocity_smoothing_first_element_nan(self):
-        """First velocity element remains NaN after smoothing."""
-        pytest.importorskip("position_tools")
-        df = _make_2level_df()
-        smooth_params = {**_NO_SMOOTH, "velocity_smoothing_std_dev": 0.1}
-        result = self.fn(df, _ORIENT_NONE, _CENTROID_1PT, smooth_params)
-        assert np.isnan(result["velocity"][0])
+        assert len(result["speed"]) == n
 
 
 # ── convert_to_cm ─────────────────────────────────────────────────────────────

@@ -382,52 +382,50 @@ class TestCalculateVelocity:
     """Test velocity calculation."""
 
     def test_velocity_basic(self, pose_v2_instance):
-        """Test basic velocity calculation."""
-
-        # Constant velocity motion
+        """Constant motion: speed == 1 cm/s at all frames (np.gradient)."""
         position = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]])
         timestamps = np.array([0.0, 1.0, 2.0, 3.0])
 
-        velocity = pose_v2_instance._calculate_velocity(
-            position, timestamps, sampling_rate=1.0
+        vel_2d, speed = pose_v2_instance._calculate_velocity(
+            position, timestamps
         )
 
-        # First frame is NaN, rest should be 1.0 cm/s
-        assert np.isnan(velocity[0])
-        assert np.allclose(velocity[1:], 1.0, atol=0.01)
+        # np.gradient gives 1.0 everywhere for uniform motion
+        assert vel_2d.shape == (4, 2)
+        assert speed.shape == (4,)
+        assert np.allclose(speed, 1.0, atol=0.01)
 
     def test_velocity_diagonal(self, pose_v2_instance):
-        """Test velocity with diagonal motion."""
-
-        # Diagonal motion at 45 degrees
+        """Diagonal motion: speed == sqrt(2) at interior frames."""
         position = np.array([[0.0, 0.0], [1.0, 1.0], [2.0, 2.0]])
         timestamps = np.array([0.0, 1.0, 2.0])
 
-        velocity = pose_v2_instance._calculate_velocity(
-            position, timestamps, sampling_rate=1.0
+        vel_2d, speed = pose_v2_instance._calculate_velocity(
+            position, timestamps
         )
 
-        # Velocity should be sqrt(2) ≈ 1.414
-        assert np.isnan(velocity[0])
-        expected_velocity = np.sqrt(2.0)
-        assert np.allclose(velocity[1:], expected_velocity, atol=0.01)
+        assert np.allclose(speed, np.sqrt(2.0), atol=0.01)
 
     def test_velocity_with_nans(self, pose_v2_instance):
-        """Test velocity calculation with NaN positions."""
+        """NaN positions propagate through np.gradient central differences.
 
+        With NaN at frame 2: np.gradient central diff at frame 1 reads frame 2
+        (NaN) → frame 1 speed becomes NaN.  Frame 2's central diff reads frames
+        1 and 3 (both valid) → frame 2 speed is NOT NaN.
+        """
         position = np.array(
             [[0.0, 0.0], [1.0, 1.0], [np.nan, np.nan], [3.0, 3.0]]
         )
         timestamps = np.array([0.0, 1.0, 2.0, 3.0])
 
-        velocity = pose_v2_instance._calculate_velocity(
-            position, timestamps, sampling_rate=1.0
+        vel_2d, speed = pose_v2_instance._calculate_velocity(
+            position, timestamps
         )
 
-        # Velocity at frame 2 and 3 should be NaN
-        assert np.isnan(velocity[0])
-        assert ~np.isnan(velocity[1])
-        assert np.isnan(velocity[2])
+        assert ~np.isnan(speed[0])  # forward diff: frames 0,1 — both valid
+        assert np.isnan(speed[1])  # central diff: frames 0,2 — frame 2 is NaN
+        assert ~np.isnan(speed[2])  # central diff: frames 1,3 — both valid
+        assert np.isnan(speed[3])  # backward diff: frames 2,3 — frame 2 is NaN
 
 
 class TestStorePoseNWB:
@@ -557,16 +555,14 @@ class TestPoseV2Integration:
         )
 
         # Calculate velocity
-        velocity = pv2._calculate_velocity(
-            centroid_smooth, time, sampling_rate=30.0
-        )
+        vel_2d, speed = pv2._calculate_velocity(centroid_smooth, time)
 
         # Verify outputs
         assert orientation.shape == (10,)
         assert centroid.shape == (10, 2)
         assert centroid_smooth.shape == (10, 2)
-        assert velocity.shape == (10,)
-        assert np.isnan(velocity[0])  # First frame always NaN
+        assert vel_2d.shape == (10, 2)
+        assert speed.shape == (10,)
 
 
 class TestFetchMethods:
@@ -667,7 +663,8 @@ class TestPositionOutputInsert:
         mock_outputs = {
             "orientation": np.array([0.0, 0.1]),
             "centroid": np.array([[1.0, 1.0], [2.0, 2.0]]),
-            "velocity": np.array([0.0, 1.0]),
+            "velocity_2d": np.array([[0.0, 0.0], [1.0, 0.0]]),
+            "speed": np.array([0.0, 1.0]),
             "timestamps": np.array([0.0, 1.0]),
             "sampling_rate": 1.0,
         }
