@@ -258,7 +258,7 @@ class Recording(SpyglassMixin, dj.Computed):
 
 ## ArtifactDetectionParameters + ArtifactDetection
 
-Mirrors v1's structure but consumes the v2 NWB-resident `Recording` artifact (via `Recording.get_recording(key)`). Inserts artifact intervals into `IntervalList` *without* `skip_duplicates=True` (per Non-Negotiable #6 in `custom_pipeline_authoring.md`).
+Mirrors v1's structure but consumes the v2 NWB-resident `Recording` artifact (via `Recording.get_recording(key)`). v2 stores detected artifact intervals on `ArtifactDetection.Interval`, not in `IntervalList`.
 
 ```python
 @schema

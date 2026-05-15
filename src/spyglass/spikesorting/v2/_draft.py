@@ -6,7 +6,8 @@ implementation. Every class has a `definition` string but the `make()`
 bodies all raise `NotImplementedError`.
 
 Do NOT decorate with `@schema`. Do NOT import from production code.
-Will be git-rm'd or formalized into individual modules in Phase 0.
+After Phase 0 validation, this file is git-rm'd or split into the real
+per-phase modules as those modules land.
 
 See `.claude/docs/plans/spikesorting-v2/` for the design plan.
 """
@@ -485,8 +486,7 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
     ---
     n_sessions_observed: int
     median_match_probability=NULL: float
-    n_transitive_only_edges=0: int
-    policy_used: enum('strict', 'transitive', 'transitive_fallback')
+    policy_used: varchar(32)
     """
 
     class Member(SpyglassMixinPart):
