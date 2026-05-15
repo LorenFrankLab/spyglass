@@ -222,7 +222,7 @@ class Recording(SpyglassMixin, dj.Computed):
     ---
     -> AnalysisNwbfile
     electrical_series_path: varchar(255) # NWB path used by se.read_nwb_recording
-    object_id: varchar(40)              # object_id of the ElectricalSeries inside the analysis NWB
+    object_id: varchar(72)              # object_id of the ElectricalSeries inside the analysis NWB
     n_channels: int
     sampling_frequency: float
     duration_s: float
@@ -431,14 +431,9 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
 class SortingSelection(SpyglassMixin, dj.Manual):
     """One row per (recording, sorter, artifact detection) tuple.
 
-    PHASE 1 + PHASE 3 final schema. The forward-compatibility design
-    uses two NULLABLE typed FKs (one per recording source) with XOR
-    enforced in insert_selection(). Both FK targets are real Manual
-    tables whose UUID is their PK (mirrors Recording's PK shape).
-
-    Phase 1 declares ConcatenatedRecordingSelection so this FK is valid
-    from day one; Phase 1's insert_selection() rejects concat_recording_id
-    with NotImplementedError. Phase 3 lifts the guard. No alter() needed.
+    The final schema supports either a single-session recording source or
+    a concatenated recording source. Runtime helpers enforce that exactly
+    one recording-source FK is set.
     """
     definition = """
     sorting_id: uuid
@@ -465,11 +460,10 @@ class SortingSelection(SpyglassMixin, dj.Manual):
     def insert_selection(cls, key: dict) -> dict:
         """Validates XOR on the two recording FKs via the shared helper.
 
-        Exactly one of (recording_id, concat_recording_id) must be set;
-        the other must be NULL. Phase 1's helper rejects
-        concat_recording_id with NotImplementedError pointing at Phase 3;
-        Phase 3 lifts that gate but still rejects concat rows with
-        artifact_id because concat-wide artifact masking is out of scope.
+        Exactly one of (recording_id, concat_recording_id) must be set.
+        Single-session rows may reference artifact detection. Concatenated
+        rows reject artifact_id until concat-wide artifact masking has an
+        implemented semantic model.
         Returns a single PK-only dict per shared-contracts.
 
         See shared-contracts.md § Nullable XOR Foreign-Key Pattern for
@@ -491,7 +485,7 @@ class Sorting(SpyglassMixin, dj.Computed):
     -> SortingSelection
     ---
     -> AnalysisNwbfile
-    object_id: varchar(40)          # of the units table in the analysis NWB (per
+    object_id: varchar(72)          # of the units table in the analysis NWB (per
                                     # shared-contracts NWB Column-Name Convention)
     analyzer_folder: varchar(255)   # path to the SortingAnalyzer binary folder
     n_units: int
@@ -716,15 +710,30 @@ class QualityMetricParameters(SpyglassMixin, dj.Lookup):
 
 @schema
 class AutoCurationRules(SpyglassMixin, dj.Lookup):
-    """Threshold rules + auto-merge config."""
+    """Threshold rules + auto-merge config.
+
+    Label rules are rows, not a blob, so rule order is explicit and users
+    can query which parameter sets use a metric or label.
+    """
     definition = """
     auto_curation_rules_name: varchar(64)
     ---
-    label_rules: blob        # dict[rule_name -> {metric_name, operator, threshold, label}]
     auto_merge_preset: varchar(32)  # one of SI's compute_merge_unit_groups presets, or 'none'
     auto_merge_kwargs: blob
     params_schema_version=1: int
     """
+
+    class Rule(SpyglassMixinPart):
+        definition = """
+        -> master
+        rule_index: int
+        ---
+        rule_name: varchar(64)
+        metric_name: varchar(64)
+        operator: enum('<', '<=', '>', '>=', '==', '!=')
+        threshold: float
+        label: varchar(32)
+        """
 
 @schema
 class AnalyzerCurationSelection(SpyglassMixin, dj.Manual):
@@ -771,9 +780,9 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
     -> AnalyzerCurationSelection
     ---
     -> AnalysisNwbfile
-    metrics_object_id: varchar(40)
-    merge_suggestions_object_id: varchar(40)
-    proposed_labels_object_id: varchar(40)
+    metrics_object_id: varchar(72)
+    merge_suggestions_object_id: varchar(72)
+    proposed_labels_object_id: varchar(72)
     """
 
     def make(self, key):
@@ -947,24 +956,17 @@ for key in keys:
 
 ## SessionGroup + ConcatenatedRecording
 
-Phase 3. Cross-session bundling for same-day chronic recordings.
+Cross-session bundling for same-day chronic recordings.
 
 ```python
 @schema
 class SessionGroup(SpyglassMixin, dj.Manual):
     """A named bundle of (session, sort_group, interval) tuples to analyze together.
 
-    Per Phase 3 review: multi-day concat is supported by the SCHEMA but is
-    NOT the recommended default path for cross-day analyses — sort-then-match
-    (Phase 4 UnitMatch) is the recommended workflow for days/weeks-apart
-    sessions, gated on the Frank-lab polymer-probe validation fixture.
-    `SessionGroup.create_group()` accepts multi-day members only when the
-    caller passes `allow_multi_day=True` and supplies an explicit motion-
-    correction preset (no auto-DREDge dispatch, because cross-session drift
-    is recording-specific and the right preset is a scientific choice).
-
-    Phase 4 reuses the same table for per-session sortings to be matched
-    across sessions (no concatenation needed).
+    Multi-day concatenation is supported by the schema but is not the
+    recommended default path for days/weeks-apart analyses. The same table is
+    also used to name per-session sortings that will be matched across
+    sessions without concatenation.
     """
     definition = """
     -> LabTeam.proj(session_group_owner='team_name')
@@ -983,8 +985,6 @@ class SessionGroup(SpyglassMixin, dj.Manual):
         -> IntervalList
         -> LabTeam                          # per-member team (members may differ
                                             # across collaborations)
-        recording_date: date                # metadata; used by ConcatenatedRecording
-                                            # to detect multi-day groups
         """
 
     @classmethod
@@ -1003,43 +1003,47 @@ class SessionGroup(SpyglassMixin, dj.Manual):
         rows because the master PK is (session_group_owner, session_group_name).
 
         members: list of dicts with keys
-            nwb_file_name, sort_group_id, interval_list_name.
+            nwb_file_name, sort_group_id, interval_list_name, team_name.
 
-        recording_date is derived from each member's
-        `Session.session_start_time` (cast to date). The caller does
-        not supply it (closes the drift loophole that would silently
-        flip multi-day gates).
+        Recording dates are derived from each member's Session row when
+        validating multi-day gates. They are not persisted on Member rows.
 
         Same-day groups are the default; multi-day requires
         `allow_multi_day=True` AND forces an explicit
         MotionCorrectionParameters row (no `preset='auto'` dispatch
         for multi-day — see ConcatenatedRecording.make()).
 
-        For days/weeks-apart sessions, use Phase 4 sort-then-match
-        (UnitMatch) instead — the validated cross-day workflow.
+        For days/weeks-apart sessions, use sort-then-match (UnitMatch)
+        instead of concatenation.
         """
         from spyglass.common import Session
 
         rows: list[dict] = []
+        dates: list = []
         for i, m in enumerate(members):
+            if "recording_date" in m:
+                raise ValueError(
+                    "recording_date is derived from Session.session_start_time; "
+                    "do not pass it in member dictionaries"
+                )
             derived_date = (
                 Session & {"nwb_file_name": m["nwb_file_name"]}
             ).fetch1("session_start_time").date()
+            dates.append(derived_date)
             rows.append({
-                **{k: v for k, v in m.items() if k != "recording_date"},
-                "recording_date": derived_date,
+                **m,
                 "session_group_owner": session_group_owner,
                 "session_group_name": session_group_name,
                 "member_index": i,
             })
 
-        dates = {r["recording_date"] for r in rows}
-        if len(dates) > 1 and not allow_multi_day:
+        unique_dates = set(dates)
+        if len(unique_dates) > 1 and not allow_multi_day:
             raise ValueError(
-                f"Members span {len(dates)} distinct dates "
-                f"({sorted(dates)}); multi-day groups require "
+                f"Members span {len(unique_dates)} distinct dates "
+                f"({sorted(unique_dates)}); multi-day groups require "
                 f"allow_multi_day=True. Recommended path for cross-day "
-                f"analyses is sort-then-match (Phase 4 UnitMatch)."
+                f"analyses is sort-then-match (UnitMatch)."
             )
         with cls.connection.transaction:
             cls.insert1({
@@ -1051,8 +1055,15 @@ class SessionGroup(SpyglassMixin, dj.Manual):
 
     @classmethod
     def is_multi_day(cls, key: dict) -> bool:
-        """True if the group's members span ≥2 distinct recording_dates."""
-        dates = (cls.Member & key).fetch("recording_date")
+        """True if the group's members span two or more session dates."""
+        from spyglass.common import Session
+
+        dates = [
+            (Session & {"nwb_file_name": nwb_file_name})
+            .fetch1("session_start_time")
+            .date()
+            for nwb_file_name in (cls.Member & key).fetch("nwb_file_name")
+        ]
         return len(set(dates)) > 1
 
 
@@ -1060,10 +1071,8 @@ class SessionGroup(SpyglassMixin, dj.Manual):
 class ConcatenatedRecordingSelection(SpyglassMixin, dj.Manual):
     """One row per (SessionGroup, PreprocessingParameters, MotionCorrectionParameters) tuple.
 
-    PHASE 1 declares this table so SortingSelection can FK it from Phase 1.
-    Phase 3 fills in ConcatenatedRecording.make() behind it; until then,
-    ConcatenatedRecording.populate() raises NotImplementedError but the
-    schema is final (zero-migration policy).
+    The schema exists before concatenated recording materialization is
+    available so downstream selection rows can reference a stable UUID.
 
     UUID PK exists so downstream FKs are single-column (mirrors
     RecordingSelection / Recording from Phase 1).
@@ -1124,9 +1133,6 @@ class ConcatenatedRecordingSelection(SpyglassMixin, dj.Manual):
 class ConcatenatedRecording(SpyglassMixin, dj.Computed):
     """Virtual concatenated recording across SessionGroup members.
 
-    Phase 1: declared but make() raises NotImplementedError("Phase 3").
-    Phase 3: make() implements the artifact materialization.
-
     Materializes one NWB-resident artifact (the post-motion-corrected,
     post-whitening concatenated `ElectricalSeries`) per concat group.
     Downstream `SortingSelection` FKs the Selection table
@@ -1138,13 +1144,21 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
     ---
     -> AnalysisNwbfile
     electrical_series_path: varchar(255)
-    object_id: varchar(40)
+    object_id: varchar(72)
     n_channels: int
     sampling_frequency: float
     total_duration_s: float
-    member_segment_boundaries: blob   # list[int], cumulative member end samples
     cache_hash: char(64)
     """
+
+    class MemberBoundary(SpyglassMixinPart):
+        """Cumulative segment boundaries for spike-time back-mapping."""
+        definition = """
+        -> master
+        member_index: int
+        ---
+        end_sample: bigint
+        """
 
     def make(self, key):
         ...
@@ -1162,7 +1176,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
 
 - `ConcatenatedRecording.make()` must fetch `sel = (ConcatenatedRecordingSelection & key).fetch1()` first because the populate key contains only `concat_recording_id`; all member and parameter queries use that selection row.
 - It never calls `Recording.populate()` internally. Missing per-member `Recording` rows raise `MissingRecordingForConcatError`.
-- Motion correction runs before whitening, `preset='auto'` is single-day only, forbidden SI side-artifact kwargs are rejected, and the output is one sorter-ready NWB-resident `ElectricalSeries` with integer sample boundaries.
+- Motion correction runs before whitening, `preset='auto'` is single-day only, forbidden SI side-artifact kwargs are rejected, and the output is one sorter-ready NWB-resident `ElectricalSeries` with integer sample boundaries persisted in `ConcatenatedRecording.MemberBoundary`.
 - `split_sorting_by_session()` maps concat spike trains back to local session sample frames and returns keys `(nwb_file_name, interval_list_name)`.
 
 **Key design points**:
@@ -1274,7 +1288,7 @@ class UnitMatch(SpyglassMixin, dj.Computed):
     -> UnitMatchSelection
     ---
     -> AnalysisNwbfile           # parent = first SessionGroup.Member's NWB
-    pairs_object_id: varchar(40)
+    pairs_object_id: varchar(72)
     n_pairs: int
     matcher_runtime_s: float
     """
@@ -1315,7 +1329,8 @@ class UnitMatch(SpyglassMixin, dj.Computed):
 
 - `UnitMatch.make()` re-validates that `MemberCuration` rows exactly match the parent `SessionGroup.Member` set and that every pinned `CurationV2` belongs to its member.
 - Matcher inputs are wrapper-owned bundles derived from curated analyzers/recordings; the matcher never receives raw NWB paths, Spyglass keys, or `SortingAnalyzer` objects.
-- Pair rows reference only units present in the explicitly pinned curated unit set.
+- Pair rows reference only units present in the explicitly pinned curated unit set. For every pair, both `(sorting_id, curation_id)` sides must appear in `UnitMatchSelection.MemberCuration`, the two sides must come from different `SessionGroup.Member.member_index` values, and the stored orientation must follow ascending `member_index` so `(A, B)` and `(B, A)` duplicates cannot both be inserted.
+- `UnitMatch.make()` rejects self-pairs, reversed duplicates, and pairs whose curation is not one of the pinned member curations before inserting `UnitMatch.Pair`.
 - The analysis NWB parent is the first `SessionGroup.Member.nwb_file_name`; complete provenance remains queryable through the selection/member tables.
 
 

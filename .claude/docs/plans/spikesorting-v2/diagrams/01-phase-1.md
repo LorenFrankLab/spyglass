@@ -225,7 +225,6 @@ erDiagram
         int sort_group_id FK
         varchar interval_list_name FK
         varchar team_name FK
-        date recording_date
     }
     MotionCorrectionParameters {
         varchar motion_correction_params_name PK
@@ -241,7 +240,17 @@ erDiagram
     ConcatenatedRecording {
         uuid concat_recording_id PK
         varchar analysis_file_name FK
+        varchar electrical_series_path
+        varchar object_id
+        int n_channels
+        float sampling_frequency
+        float total_duration_s
         char cache_hash
+    }
+    ConcatenatedRecording_MemberBoundary {
+        uuid concat_recording_id PK
+        int member_index PK
+        bigint end_sample
     }
 
     SessionGroup ||--o{ SessionGroup_Member : "part"
@@ -253,6 +262,7 @@ erDiagram
     PreprocessingParameters ||--o{ ConcatenatedRecordingSelection : "FK"
     MotionCorrectionParameters ||--o{ ConcatenatedRecordingSelection : "FK"
     ConcatenatedRecordingSelection ||--|| ConcatenatedRecording : "Computed (Phase 3 only)"
+    ConcatenatedRecording ||--o{ ConcatenatedRecording_MemberBoundary : "part"
     AnalysisNwbfile ||--o{ ConcatenatedRecording : ""
     ConcatenatedRecording ||--o{ SortingSelection : "FK (nullable, XOR with recording_id)"
 ```

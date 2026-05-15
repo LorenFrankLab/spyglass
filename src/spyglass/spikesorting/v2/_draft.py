@@ -6,8 +6,8 @@ implementation. Every class has a `definition` string but the `make()`
 bodies all raise `NotImplementedError`.
 
 Do NOT decorate with `@schema`. Do NOT import from production code.
-After Phase 0 validation, this file is git-rm'd or split into the real
-per-phase modules as those modules land.
+After static validation, this file is git-rm'd or split into the real
+runtime modules as those modules land.
 
 See `.claude/docs/plans/spikesorting-v2/` for the design plan.
 """
@@ -30,7 +30,7 @@ from spyglass.utils import SpyglassMixin, SpyglassMixinPart
 
 
 # ============================================================================
-# Phase 1: Recording side
+# Recording side
 # ============================================================================
 
 
@@ -76,7 +76,7 @@ class Recording(SpyglassMixin, dj.Computed):
     ---
     -> AnalysisNwbfile
     electrical_series_path: varchar(255)
-    object_id: varchar(40)
+    object_id: varchar(72)
     n_channels: int
     sampling_frequency: float
     duration_s: float
@@ -85,7 +85,7 @@ class Recording(SpyglassMixin, dj.Computed):
 
 
 # ============================================================================
-# Phase 1: Artifact detection
+# Artifact detection
 # ============================================================================
 
 
@@ -138,7 +138,7 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
 
 
 # ============================================================================
-# Phase 1: Concat scaffolding (declared in Phase 1; make() raises until Phase 3)
+# Session groups and concatenated recordings
 # ============================================================================
 
 
@@ -159,7 +159,6 @@ class SessionGroup(SpyglassMixin, dj.Manual):
         -> SortGroupV2
         -> IntervalList
         -> LabTeam
-        recording_date: date
         """
 
 
@@ -188,17 +187,24 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
     ---
     -> AnalysisNwbfile
     electrical_series_path: varchar(255)
-    object_id: varchar(40)
+    object_id: varchar(72)
     n_channels: int
     sampling_frequency: float
     total_duration_s: float
-    member_segment_boundaries: blob
     cache_hash: char(64)
     """
 
+    class MemberBoundary(SpyglassMixinPart):
+        definition = """
+        -> master
+        member_index: int
+        ---
+        end_sample: bigint
+        """
+
 
 # ============================================================================
-# Phase 1: Sorting
+# Sorting
 # ============================================================================
 
 
@@ -228,7 +234,7 @@ class Sorting(SpyglassMixin, dj.Computed):
     -> SortingSelection
     ---
     -> AnalysisNwbfile
-    object_id: varchar(40)
+    object_id: varchar(72)
     analyzer_folder: varchar(255)
     n_units: int
     time_of_sort: datetime
@@ -246,7 +252,7 @@ class Sorting(SpyglassMixin, dj.Computed):
 
 
 # ============================================================================
-# Phase 1: Curation
+# Curation
 # ============================================================================
 
 
@@ -258,7 +264,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
     parent_curation_id=-1: int
     -> AnalysisNwbfile
     object_id: varchar(72)
-    merges_applied=0: tinyint
+    merges_applied=0: bool
     metrics_source = 'manual': enum('manual', 'analyzer_curation', 'figpack', 'imported')
     description: varchar(255)
     """
@@ -281,7 +287,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
 
 
 # ============================================================================
-# Phase 2: Analyzer curation
+# Analyzer curation
 # ============================================================================
 
 
@@ -291,7 +297,7 @@ class QualityMetricParameters(SpyglassMixin, dj.Lookup):
     ---
     metric_names: blob
     metric_kwargs: blob
-    skip_pc_metrics=1: tinyint
+    skip_pc_metrics=1: bool
     params_schema_version=1: int
     """
 
@@ -300,11 +306,22 @@ class AutoCurationRules(SpyglassMixin, dj.Lookup):
     definition = """
     auto_curation_rules_name: varchar(64)
     ---
-    label_rules: blob
     auto_merge_preset: varchar(32)
     auto_merge_kwargs: blob
     params_schema_version=1: int
     """
+
+    class Rule(SpyglassMixinPart):
+        definition = """
+        -> master
+        rule_index: int
+        ---
+        rule_name: varchar(64)
+        metric_name: varchar(64)
+        operator: enum('<', '<=', '>', '>=', '==', '!=')
+        threshold: float
+        label: varchar(32)
+        """
 
 
 class AnalyzerCurationSelection(SpyglassMixin, dj.Manual):
@@ -322,9 +339,9 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
     -> AnalyzerCurationSelection
     ---
     -> AnalysisNwbfile
-    metrics_object_id: varchar(40)
-    merge_suggestions_object_id: varchar(40)
-    proposed_labels_object_id: varchar(40)
+    metrics_object_id: varchar(72)
+    merge_suggestions_object_id: varchar(72)
+    proposed_labels_object_id: varchar(72)
     """
 
 
@@ -343,7 +360,7 @@ class RecordingArtifactRecomputeSelection(SpyglassMixin, dj.Manual):
     -> UserEnvironment
     rounding=4: int
     ---
-    logged_at_creation=0: tinyint
+    logged_at_creation=0: bool
     xfail_reason=NULL: varchar(127)
     """
 
@@ -352,10 +369,10 @@ class RecordingArtifactRecompute(SpyglassMixin, dj.Computed):
     definition = """
     -> RecordingArtifactRecomputeSelection
     ---
-    matched: tinyint
+    matched: bool
     err_msg=NULL: varchar(255)
     created_at=NULL: datetime
-    deleted=0: tinyint
+    deleted=0: bool
     """
 
     class Name(SpyglassMixinPart):
@@ -388,7 +405,7 @@ class SortingAnalyzerRecomputeSelection(SpyglassMixin, dj.Manual):
     -> UserEnvironment
     rounding=4: int
     ---
-    logged_at_creation=0: tinyint
+    logged_at_creation=0: bool
     xfail_reason=NULL: varchar(127)
     """
 
@@ -397,10 +414,10 @@ class SortingAnalyzerRecompute(SpyglassMixin, dj.Computed):
     definition = """
     -> SortingAnalyzerRecomputeSelection
     ---
-    matched: tinyint
+    matched: bool
     err_msg=NULL: varchar(255)
     created_at=NULL: datetime
-    deleted=0: tinyint
+    deleted=0: bool
     """
 
     class Name(SpyglassMixinPart):
@@ -418,7 +435,7 @@ class SortingAnalyzerRecompute(SpyglassMixin, dj.Computed):
 
 
 # ============================================================================
-# Phase 4: Cross-session matching
+# Cross-session matching
 # ============================================================================
 
 
@@ -455,7 +472,7 @@ class UnitMatch(SpyglassMixin, dj.Computed):
     -> UnitMatchSelection
     ---
     -> AnalysisNwbfile
-    pairs_object_id: varchar(40)
+    pairs_object_id: varchar(72)
     n_pairs: int
     matcher_runtime_s: float
     """
@@ -497,7 +514,7 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
 
 
 # ============================================================================
-# Phase 5: FigPack curation
+# FigPack curation
 # ============================================================================
 
 
@@ -509,8 +526,8 @@ class FigPackCurationSelection(SpyglassMixin, dj.Manual):
     figpack_config_hash: char(64)
     label_options: blob
     metrics: blob
-    upload: tinyint
-    ephemeral: tinyint
+    upload: bool
+    ephemeral: bool
     """
 
 

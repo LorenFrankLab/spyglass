@@ -368,7 +368,7 @@ The original spec raised `RecursiveAutoCurationError` when `insert_selection` wa
 
 ### SessionGroup recording_date: derive only
 
-The original spec accepted a caller-supplied `recording_date` and raised `RecordingDateMismatchError` if it disagreed with `Session.session_start_time.date()`. Phase 3 and `designs.md` now simply derive the date and ignore any caller-supplied value. Reason: there is no legitimate use case for caller-supplied dates that differ from the canonical session time; the dedicated exception added ceremony without buying anything.
+The original spec accepted a caller-supplied `recording_date` and raised `RecordingDateMismatchError` if it disagreed with `Session.session_start_time.date()`. The current design derives the date from `Session.session_start_time` and rejects caller-supplied dates instead of persisting them. Reason: there is no legitimate use case for caller-supplied dates that differ from the canonical session time; the dedicated exception added ceremony without buying anything.
 
 ### SortGroupV2 inspect-before-destroy: comment block trimmed
 

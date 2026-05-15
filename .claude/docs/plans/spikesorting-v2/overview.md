@@ -96,7 +96,7 @@ How we'll know v2 is working:
 | Adding a 4th part to `SpikeSortingOutput` may surface latent merge bugs. | Phase 1 includes integration tests against `SortedSpikesGroup`, decoding, ripple, MUA with a v2-sourced merge_id. |
 | `set_group_by_shank()` from v1 silently overwrites sort groups — v2 must not perpetuate this. | `SortGroupV2.set_group_by_shank()` raises if rows already exist for the session; destructive replacement requires `delete_existing_entries=True, confirm=True` after reviewing a `DeletionPreview`. Phase 1 task. |
 | Pydantic schema migration risk: existing parameter blobs may not validate. | All Pydantic models are introduced fresh in v2 Lookup tables; v1 Lookup blobs remain unvalidated. No migration of v1 params. |
-| Concatenation across days (out of scope but tempting). | `SessionGroup.Member` carries a `recording_date` field; `ConcatenatedRecording.populate()` raises if members span multiple dates without an explicit `allow_multi_day=True` parameter row. |
+| Concatenation across days (out of scope but tempting). | `SessionGroup` derives member dates from `Session.session_start_time`; `ConcatenatedRecording.populate()` raises if members span multiple dates without an explicit `allow_multi_day=True` parameter row. |
 | Pipeline helpers may hide reproducibility. | `run_v2_pipeline()` and `run_v2_unit_match()` return manifest dicts of every `(table, key)` they touched. Notebooks print them. Phase 5 task. |
 
 ## Rollout Strategy

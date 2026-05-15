@@ -119,7 +119,7 @@ The canonical preprocessed recording produced by `Recording.make()` and `Concate
 
 - `-> AnalysisNwbfile` — Spyglass's existing analysis-NWB tracking table; cleanup / export / kachery / recompute all key off this FK.
 - `electrical_series_path: varchar(255)` — the deterministic NWB path used by `se.read_nwb_recording(...)`, for example `processing/ecephys/preprocessed_electrical_series`. This is not interchangeable with `object_id`.
-- `object_id: varchar(40)` — the `ElectricalSeries` HDF5/Zarr object identifier inside the NWB.
+- `object_id: varchar(72)` — the `ElectricalSeries` HDF5/Zarr object identifier inside the NWB.
 - `cache_hash: char(64)` — SHA-256 over the `ElectricalSeries.data` bytes, backend-agnostic. Anchors missing-artifact detection (Phase 1) and feeds `RecordingArtifactRecompute*` (Phase 2).
 
 No `binary_cache_path` column. Binary sidecar storage is **explicitly out of MVP**. If a future maintainer measures a large win and scopes the full sidecar lifecycle, that work adds a separate opt-in table; it does NOT modify `Recording`'s columns.
@@ -237,7 +237,7 @@ class SessionMatcherInput:
     session_key: dict  # {"sorting_id": UUID, "curation_id": int}
     waveform_dir: Path  # wrapper-prepared dir with the matcher-expected layout
     channel_positions_path: Path
-    recording_date: pd.Timestamp
+    recording_date: pd.Timestamp  # derived from Session.session_start_time
 
 
 @dataclass(frozen=True)
@@ -269,6 +269,7 @@ class MatcherProtocol(Protocol):
 
 - A matcher MUST NOT touch raw NWB paths or Spyglass table keys. The v2 wrapper pre-extracts whatever the matcher needs from the curated sorting/analyzer/recording and writes it to the bundle directory; the matcher consumes the bundle.
 - A matcher MUST emit `(sorting_id, curation_id, unit_id)` for both sides of every pair.
+- `UnitMatch.make()` MUST validate matcher output before inserting `UnitMatch.Pair`: both side curations appear in `UnitMatchSelection.MemberCuration`, the sides belong to different `SessionGroup.Member.member_index` values, no self-pairs are inserted, and pair orientation is canonicalized by ascending `member_index` so reversed duplicates cannot coexist.
 - A matcher MUST handle the single-session degenerate case (return zero pairs, no error).
 - A matcher MUST be deterministic given fixed params.
 
@@ -474,7 +475,7 @@ One parametrized test queries each XOR table for both-NULL and both-set rows and
 
 `SpikeSortingOutput.get_spike_times()` dispatches through `fetch_nwb()` and checks for the key `"object_id"` (see [`src/spyglass/spikesorting/spikesorting_merge.py:210-213`](../../../../src/spyglass/spikesorting/spikesorting_merge.py#L210-L213)).
 
-**v2 must follow this convention**: any v2 table whose row is fetched through the merge for spike-time access uses the column name **`object_id`** pointing to the NWB `/units` table — NOT `units_object_id` or any other variant. The width follows the table-specific schema (`CurationV2.object_id` is `varchar(72)` for CurationV1 parity; `Sorting.object_id` is `varchar(40)`). The naming convention explicitly aligns with `CurationV1` ([`src/spyglass/spikesorting/v1/curation.py:38`](../../../../src/spyglass/spikesorting/v1/curation.py#L38)).
+**v2 must follow this convention**: any v2 table whose row is fetched through the merge for spike-time access uses the column name **`object_id`** pointing to the NWB `/units` table — NOT `units_object_id` or any other variant. `Sorting.object_id` and `CurationV2.object_id` are both `varchar(72)`, matching the v1 curation width and leaving room for non-bare-UUID object identifiers. The naming convention explicitly aligns with `CurationV1` ([`src/spyglass/spikesorting/v1/curation.py:38`](../../../../src/spyglass/spikesorting/v1/curation.py#L38)).
 
 Specifically:
 - `CurationV2.object_id` — points to the curated units table inside its analysis NWB. **`object_id`, not `units_object_id`**.
@@ -598,7 +599,7 @@ This contract enforces the user's binding constraint: every v2 table is designed
 | `SessionGroup` + `SessionGroup.Member` | Declared in Phase 1; Manual tables, no `make()` | Phase 3 / Phase 4 reuse. Phase 1 ships the schema so Phase 3's `ConcatenatedRecording` FK target exists from day one. |
 | `MotionCorrectionParameters` | Declared in Phase 1 with `contents` rows | Phase 3 reads from this Lookup; declaring it now lets `ConcatenatedRecordingSelection` FK it from Phase 1. |
 | `ConcatenatedRecordingSelection` | Declared in Phase 1 (Manual, UUID PK) | Provides the UUID PK that `ConcatenatedRecording` (Computed) inherits. Needed so `SortingSelection` can FK `ConcatenatedRecording` from Phase 1. |
-| `ConcatenatedRecording` | Declared in Phase 1; `make()` body raises `NotImplementedError("Phase 3")` | Final schema; Phase 3 only fills in the `make()` body. Test in Phase 1 asserts `populate()` raises. |
+| `ConcatenatedRecording` + `ConcatenatedRecording.MemberBoundary` | Declared in Phase 1; `make()` body raises `NotImplementedError("ConcatenatedRecording.make() is not implemented yet")` | Final schema; Phase 3 only fills in the `make()` body and writes member boundary rows. Test in Phase 1 asserts `populate()` raises. |
 | `SortingSelection` | Two NULLABLE typed FKs declared in Phase 1: `-> [nullable] Recording`, `-> [nullable] ConcatenatedRecording`. XOR enforced in `insert_selection()`. | Both FK targets exist from Phase 1, so the schema is final. Phase 1's `insert_selection` rejects `concat_recording_id` with `NotImplementedError`; Phase 3 lifts that runtime gate without touching the schema. |
 | `SortingSelection` | Nullable `-> ArtifactDetection` FK (the inherited `artifact_id` is NOT a PK component) | Concat sorts skip artifact detection. |
 | `Sorting.Unit` | Part table present in Phase 1 | Phase 2 `AnalyzerCuration` reads brain regions from here; Phase 4 `TrackedUnit` per-session region lookup reads from here. |
@@ -615,7 +616,7 @@ This contract enforces the user's binding constraint: every v2 table is designed
 
 **Tables that are pure ADD (new tables in later phases, no migration needed)**:
 
-- Phase 2: `QualityMetricParameters`, `AutoCurationRules`, `AnalyzerCurationSelection`, `AnalyzerCuration`, `RecordingArtifactVersions`, `RecordingArtifactRecomputeSelection`, `RecordingArtifactRecompute`, `RecordingArtifactRecompute.Name`, `RecordingArtifactRecompute.Hash`, `SortingAnalyzerVersions`, `SortingAnalyzerRecomputeSelection`, `SortingAnalyzerRecompute`, `SortingAnalyzerRecompute.Name`, `SortingAnalyzerRecompute.Hash`.
+- Phase 2: `QualityMetricParameters`, `AutoCurationRules`, `AutoCurationRules.Rule`, `AnalyzerCurationSelection`, `AnalyzerCuration`, `RecordingArtifactVersions`, `RecordingArtifactRecomputeSelection`, `RecordingArtifactRecompute`, `RecordingArtifactRecompute.Name`, `RecordingArtifactRecompute.Hash`, `SortingAnalyzerVersions`, `SortingAnalyzerRecomputeSelection`, `SortingAnalyzerRecompute`, `SortingAnalyzerRecompute.Name`, `SortingAnalyzerRecompute.Hash`.
 - Phase 4: `MatcherParameters`, `UnitMatchSelection`, `UnitMatchSelection.MemberCuration`, `UnitMatch`, `UnitMatch.Pair`, `TrackedUnit`, `TrackedUnit.Member`.
 - Phase 5: `FigPackCurationSelection`, `FigPackCuration`, plus all `_params/preset.py` registrations.
 

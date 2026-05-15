@@ -32,7 +32,6 @@ erDiagram
         int sort_group_id FK
         varchar interval_list_name FK
         varchar team_name FK
-        date recording_date
     }
     MotionCorrectionParameters {
         varchar motion_correction_params_name PK
@@ -50,9 +49,15 @@ erDiagram
         varchar analysis_file_name FK
         varchar electrical_series_path
         varchar object_id
+        int n_channels
+        float sampling_frequency
         float total_duration_s
-        blob member_segment_boundaries
         char cache_hash
+    }
+    ConcatenatedRecording_MemberBoundary {
+        uuid concat_recording_id PK
+        int member_index PK
+        bigint end_sample
     }
     SortingSelection {
         uuid sorting_id PK
@@ -72,6 +77,7 @@ erDiagram
     PreprocessingParameters ||--o{ ConcatenatedRecordingSelection : "FK"
     MotionCorrectionParameters ||--o{ ConcatenatedRecordingSelection : "FK"
     ConcatenatedRecordingSelection ||--|| ConcatenatedRecording : "Computed (active)"
+    ConcatenatedRecording ||--o{ ConcatenatedRecording_MemberBoundary : "part"
     AnalysisNwbfile ||--o{ ConcatenatedRecording : "NWB artifact"
 
     %% ===== The XOR FK on SortingSelection now permits concat_recording_id =====
@@ -106,7 +112,7 @@ flowchart LR
 
 ## Critical design points
 
-- **Multi-day is opt-in, not the recommended default.** `create_group(..., allow_multi_day=True)` is required when members span ≥2 distinct `recording_date` values. Default rejects with a pointer to Phase 4 sort-then-match (UnitMatch).
+- **Multi-day is opt-in, not the recommended default.** `create_group(..., allow_multi_day=True)` is required when members span two or more dates derived from `Session.session_start_time`. Default rejects with a pointer to Phase 4 sort-then-match (UnitMatch).
 - **No auto-DREDge dispatch.** `MotionCorrectionParameters.preset='auto'` resolves to `rigid_fast` for single-day groups and **raises** on multi-day groups — the caller must pick an explicit `dredge_fast` / `dredge` / etc.
 - **Recording cache reuse.** `ConcatenatedRecording.make()` reads from already-populated per-member `Recording` rows, not from raw NWB. Preprocessing runs once per member.
 - **Pre-motion vs post-motion split.** `Recording.make()` materializes filter + CMR only. Whitening (the post-motion stage of `PreprocessingParamsSchema`) is applied:
@@ -116,7 +122,7 @@ flowchart LR
 - **Anchor NWB rule.** `ConcatenatedRecording`'s `AnalysisNwbfile` parent is the **first** `SessionGroup.Member.nwb_file_name` (ordered by `member_index`). Same rule applies to concat-sort `Sorting` rows.
 - **SessionGroup names are owner-scoped.** The `session_group_owner` projected `LabTeam` FK is part of the master PK, so two teams can both create `session_group_name="day1"` without colliding. Per-member `team_name` remains on `SessionGroup.Member` for collaborations that mix teams.
 - **Concat sorts skip artifact masking.** `SortingSelection.insert_selection()` rejects `(concat_recording_id, artifact_id)` together. Cross-recording artifact masking is out of scope.
-- **Segment boundaries persisted.** `ConcatenatedRecording.member_segment_boundaries` (cumulative end-sample counts) lets downstream code back-map spike times to per-session sortings via `ConcatenatedRecording.split_sorting_by_session()`.
+- **Segment boundaries persisted.** `ConcatenatedRecording.MemberBoundary` rows hold cumulative end-sample counts so downstream code can back-map spike times to per-session sortings via `ConcatenatedRecording.split_sorting_by_session()`.
 - **`Sorting.Unit` anchor rule for concat.** A unit's peak `electrode_id` maps to N `Electrode` rows (one per `SessionGroup.Member`). v2 anchors concat `Sorting.Unit` and `CurationV2.Unit` rows to the FIRST member's `Electrode`. Phase 4 sort-then-match brain-region tracing uses each pinned `CurationV2.Unit -> Electrode -> BrainRegion` path directly; if a future workflow matches concat curations, the concat anchor rule still applies unless a per-member accessor explicitly expands through `ConcatenatedRecording -> SessionGroup.Member`.
 
 ## What downstream consumers see
