@@ -105,3 +105,49 @@ def test_compute_velocity_no_smoothing():
     np.testing.assert_allclose(
         speed, np.sqrt(np.sum(expected**2, axis=1)), rtol=1e-12
     )
+
+
+def test_compute_velocity_nan_positions_no_inf():
+    """NaN positions produce NaN velocity — never inf or divide-by-zero.
+
+    Regression guard for high-NaN sleep epochs: long NaN gaps in position
+    should propagate as NaN into velocity, not produce inf values from
+    dividing large displacement by zero dt.
+    """
+    from spyglass.position.utils.velocity import compute_velocity
+
+    n = 100
+    fps = 20.0
+    timestamps = np.arange(n) / fps
+    rng = np.random.default_rng(13)
+    position = rng.standard_normal((n, 2)).cumsum(axis=0)
+
+    # Scatter NaN across 40 % of frames, including a contiguous 20-frame gap
+    position[20:40] = np.nan
+    nan_idx = rng.choice(n, 10, replace=False)
+    position[nan_idx] = np.nan
+
+    vel_2d, speed = compute_velocity(position, timestamps)
+
+    assert not np.any(np.isinf(vel_2d)), "velocity_2d must not contain inf"
+    assert not np.any(np.isinf(speed)), "speed must not contain inf"
+    # Every finite value must be a valid number
+    assert np.all(np.isfinite(vel_2d) | np.isnan(vel_2d))
+    assert np.all(np.isfinite(speed) | np.isnan(speed))
+
+
+def test_compute_velocity_all_nan_no_error():
+    """All-NaN position (e.g. fully occluded animal) returns all-NaN cleanly."""
+    from spyglass.position.utils.velocity import compute_velocity
+
+    n = 50
+    fps = 16.0
+    timestamps = np.arange(n) / fps
+    position = np.full((n, 2), np.nan)
+
+    vel_2d, speed = compute_velocity(position, timestamps)
+
+    assert vel_2d.shape == (n, 2)
+    assert speed.shape == (n,)
+    assert np.all(np.isnan(vel_2d))
+    assert np.all(np.isnan(speed))

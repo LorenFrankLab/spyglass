@@ -269,6 +269,279 @@ class TestComputePoseOutputs:
         assert len(result["speed"]) == n
 
 
+# ── high-NaN / sleep-epoch robustness (T10) ───────────────────────────────────
+
+
+def _make_2led_df(n=200, sr=20.0, nan_rate=0.0, gap_start=None, gap_len=0):
+    """2-bodypart (redLED, greenLED) df for pipeline robustness tests.
+
+    Parameters
+    ----------
+    n : int
+        Number of frames.
+    sr : float
+        Sampling rate in Hz.
+    nan_rate : float
+        Fraction of frames to set likelihood=0 (random scatter).
+    gap_start : int or None
+        If set, a contiguous NaN gap begins at this frame index.
+    gap_len : int
+        Length of the contiguous gap.
+    """
+    rng = np.random.default_rng(77)
+    t = np.arange(n) / sr
+
+    red_x = np.cumsum(rng.normal(0, 0.2, n))
+    red_y = np.cumsum(rng.normal(0, 0.2, n)) + 5.0
+    grn_x = red_x + 3.0 + rng.normal(0, 0.05, n)
+    grn_y = red_y + rng.normal(0, 0.05, n)
+    likelihood = np.ones(n)
+
+    if nan_rate > 0:
+        nan_idx = rng.choice(n, int(n * nan_rate), replace=False)
+        likelihood[nan_idx] = 0.0
+
+    if gap_start is not None and gap_len > 0:
+        likelihood[gap_start : gap_start + gap_len] = 0.0
+
+    cols = pd.MultiIndex.from_tuples(
+        [
+            ("redLED", "x"),
+            ("redLED", "y"),
+            ("redLED", "likelihood"),
+            ("greenLED", "x"),
+            ("greenLED", "y"),
+            ("greenLED", "likelihood"),
+        ],
+        names=["bodypart", "coords"],
+    )
+    data = np.column_stack([red_x, red_y, likelihood, grn_x, grn_y, likelihood])
+    return pd.DataFrame(data, columns=cols, index=t)
+
+
+_ORIENT_2PT = {
+    "method": "two_pt",
+    "bodypart1": "redLED",
+    "bodypart2": "greenLED",
+    "smooth": False,
+}
+_CENTROID_2PT = {
+    "points": {"point1": "redLED", "point2": "greenLED"},
+    "max_LED_separation": 15.0,
+}
+_SMOOTH_INTERP = {
+    "likelihood_thresh": 0.95,
+    "interpolate": True,
+    "smooth": True,
+    "interp_params": {"max_pts_to_interp": 10, "max_cm_to_interp": 50},
+    "smoothing_params": {"method": "moving_avg", "smoothing_duration": 0.05},
+}
+
+
+class TestComputePoseOutputsHighNaN:
+    """Robustness tests for high-NaN inputs (sleep / occlusion epochs).
+
+    Guards against regressions found in T10: inf velocity at gap boundaries,
+    crashes on all-NaN input, and NaN spreading beyond its source span.
+    """
+
+    @pytest.fixture(autouse=True)
+    def fn(self):
+        from spyglass.position.utils.pose_processing import compute_pose_outputs
+
+        self.fn = compute_pose_outputs
+
+    def _assert_no_inf(self, result):
+        for key in ("velocity_2d", "speed", "centroid", "orientation"):
+            arr = result[key]
+            assert not np.any(np.isinf(arr)), f"{key} must not contain inf"
+
+    def test_high_nan_rate_no_inf(self):
+        """90 % NaN likelihood → pipeline completes; no inf in any output."""
+        pytest.importorskip("bottleneck")
+        df = _make_2led_df(n=200, sr=20.0, nan_rate=0.9)
+        result = self.fn(df, _ORIENT_2PT, _CENTROID_2PT, _SMOOTH_INTERP)
+        self._assert_no_inf(result)
+
+    def test_high_nan_rate_output_shape(self):
+        """Output arrays have correct length for high-NaN input."""
+        pytest.importorskip("bottleneck")
+        n = 200
+        df = _make_2led_df(n=n, sr=20.0, nan_rate=0.9)
+        result = self.fn(df, _ORIENT_2PT, _CENTROID_2PT, _SMOOTH_INTERP)
+        assert result["centroid"].shape == (n, 2)
+        assert result["velocity_2d"].shape == (n, 2)
+        assert len(result["speed"]) == n
+        assert len(result["orientation"]) == n
+
+    def test_all_nan_input_no_error(self):
+        """All-NaN positions (fully occluded animal) produces all-NaN outputs."""
+        df = _make_2led_df(n=100, sr=16.0, nan_rate=1.0)
+        smooth = {**_SMOOTH_INTERP, "interpolate": False, "smooth": False}
+        result = self.fn(df, _ORIENT_2PT, _CENTROID_2PT, smooth)
+        self._assert_no_inf(result)
+        assert np.all(np.isnan(result["centroid"]))
+        assert np.all(np.isnan(result["speed"]))
+
+    def test_long_gap_beyond_max_interp_stays_nan(self):
+        """NaN gap longer than max_pts_to_interp stays NaN — not interpolated."""
+        pytest.importorskip("bottleneck")
+        n, gap_start, gap_len = 200, 50, 80  # gap much longer than limit=10
+        df = _make_2led_df(n=n, sr=20.0, gap_start=gap_start, gap_len=gap_len)
+        result = self.fn(df, _ORIENT_2PT, _CENTROID_2PT, _SMOOTH_INTERP)
+
+        # Most of the gap should remain NaN in centroid after interpolation
+        gap_centroid = result["centroid"][gap_start : gap_start + gap_len, 0]
+        nan_in_gap = np.sum(np.isnan(gap_centroid))
+        assert (
+            nan_in_gap > gap_len // 2
+        ), f"Expected most gap frames to stay NaN; got {nan_in_gap}/{gap_len}"
+
+    def test_long_gap_velocity_no_inf(self):
+        """Velocity at gap boundary is NaN, never inf."""
+        pytest.importorskip("bottleneck")
+        df = _make_2led_df(n=200, sr=20.0, gap_start=50, gap_len=80)
+        result = self.fn(df, _ORIENT_2PT, _CENTROID_2PT, _SMOOTH_INTERP)
+        self._assert_no_inf(result)
+
+    def test_stationary_animal_orientation_finite(self):
+        """Stationary bodyparts (sleep) → orientation is finite where computable."""
+        n, sr = 100, 20.0
+        t = np.arange(n) / sr
+        rng = np.random.default_rng(5)
+        # Tiny random jitter around fixed position — simulates motionless animal
+        jitter = rng.normal(0, 1e-3, (n, 2))
+        cols = pd.MultiIndex.from_tuples(
+            [
+                ("redLED", "x"),
+                ("redLED", "y"),
+                ("redLED", "likelihood"),
+                ("greenLED", "x"),
+                ("greenLED", "y"),
+                ("greenLED", "likelihood"),
+            ],
+            names=["bodypart", "coords"],
+        )
+        data = np.column_stack(
+            [
+                jitter[:, 0],
+                jitter[:, 1],
+                np.ones(n),
+                jitter[:, 0] + 3.0,
+                jitter[:, 1],
+                np.ones(n),
+            ]
+        )
+        df = pd.DataFrame(data, columns=cols, index=t)
+        smooth = {**_SMOOTH_INTERP, "smooth": False}
+        result = self.fn(df, _ORIENT_2PT, _CENTROID_2PT, smooth)
+        self._assert_no_inf(result)
+        valid_orient = result["orientation"][~np.isnan(result["orientation"])]
+        assert len(valid_orient) > 0
+        assert np.all(np.abs(valid_orient) <= np.pi + 1e-9)
+
+
+# ── frame alignment / timestamp continuity (T11) ─────────────────────────────
+
+
+class TestPipelineFrameAlignment:
+    """Verify frame-count and timestamp alignment through compute_pose_outputs.
+
+    Guards against off-by-one bugs (e.g. np.diff returning n-1 values) and
+    timestamp inversion / duplication that would corrupt velocity and position
+    for linear-track / multi-epoch sessions.
+    """
+
+    @pytest.fixture(autouse=True)
+    def fn(self):
+        from spyglass.position.utils.pose_processing import compute_pose_outputs
+
+        self.fn = compute_pose_outputs
+
+    def _run(self, df, **kwargs):
+        return self.fn(df, _ORIENT_2PT, _CENTROID_2PT, _SMOOTH_INTERP, **kwargs)
+
+    def test_output_length_equals_input_frames(self):
+        """Every output array must have the same length as the input DataFrame."""
+        pytest.importorskip("bottleneck")
+        n = 300
+        df = _make_2led_df(n=n, sr=20.0)
+        result = self._run(df)
+        assert result["centroid"].shape == (n, 2)
+        assert result["velocity_2d"].shape == (n, 2)
+        assert len(result["speed"]) == n
+        assert len(result["orientation"]) == n
+        assert len(result["timestamps"]) == n
+
+    def test_output_timestamps_match_input_index(self):
+        """Timestamps in result must exactly match the input DataFrame index."""
+        pytest.importorskip("bottleneck")
+        df = _make_2led_df(n=100, sr=16.7)
+        result = self._run(df)
+        np.testing.assert_array_equal(result["timestamps"], df.index.values)
+
+    def test_output_timestamps_monotonically_increasing(self):
+        """Output timestamps must be strictly increasing — no inversions."""
+        pytest.importorskip("bottleneck")
+        df = _make_2led_df(n=200, sr=20.0)
+        result = self._run(df)
+        diffs = np.diff(result["timestamps"])
+        assert np.all(diffs > 0), "timestamps must be strictly increasing"
+
+    def test_non_uniform_sampling_rate(self):
+        """Slightly jittered inter-frame intervals (realistic camera) must work."""
+        pytest.importorskip("bottleneck")
+        rng = np.random.default_rng(3)
+        n = 200
+        nominal_dt = 1.0 / 20.0
+        # Add ±5 % jitter to inter-frame intervals — typical camera behaviour
+        dt = nominal_dt + rng.uniform(-0.05 * nominal_dt, 0.05 * nominal_dt, n)
+        timestamps = np.cumsum(dt)
+
+        red_x = np.cumsum(rng.normal(0, 0.2, n))
+        red_y = np.cumsum(rng.normal(0, 0.2, n)) + 5.0
+        cols = pd.MultiIndex.from_tuples(
+            [
+                ("redLED", "x"),
+                ("redLED", "y"),
+                ("redLED", "likelihood"),
+                ("greenLED", "x"),
+                ("greenLED", "y"),
+                ("greenLED", "likelihood"),
+            ],
+            names=["bodypart", "coords"],
+        )
+        data = np.column_stack(
+            [red_x, red_y, np.ones(n), red_x + 3, red_y, np.ones(n)]
+        )
+        df = pd.DataFrame(data, columns=cols, index=timestamps)
+
+        result = self._run(df)
+
+        assert len(result["speed"]) == n
+        assert not np.any(np.isinf(result["speed"]))
+        # sampling_rate should be close to 20 Hz despite jitter
+        assert abs(result["sampling_rate"] - 20.0) < 2.0
+
+    def test_large_session_no_error(self):
+        """1000-frame session (linear track) completes without error or inf."""
+        pytest.importorskip("bottleneck")
+        df = _make_2led_df(n=1000, sr=20.0)
+        result = self._run(df)
+        assert len(result["speed"]) == 1000
+        assert not np.any(np.isinf(result["speed"]))
+        assert not np.any(np.isinf(result["velocity_2d"]))
+
+    def test_high_nan_rate_frame_count_preserved(self):
+        """Frame count is preserved even when 70 % of frames are NaN."""
+        pytest.importorskip("bottleneck")
+        n = 300
+        df = _make_2led_df(n=n, sr=20.0, nan_rate=0.7)
+        result = self._run(df)
+        assert len(result["speed"]) == n
+        assert result["centroid"].shape[0] == n
+
+
 # ── convert_to_cm ─────────────────────────────────────────────────────────────
 
 
