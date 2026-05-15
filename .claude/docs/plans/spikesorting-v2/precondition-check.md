@@ -66,7 +66,7 @@ Review the JSON `warnings` block on every `path` run. Any unaccounted `heuristic
 
 `code_graph.py describe` was run against the full v2 draft at `spyglass/spikesorting/v2/_draft.py` for every proposed table:
 
-- **Draft FK structure parses, with the accounted ambiguities below.** Nullable XOR FKs on SortingSelection (Recording / ConcatenatedRecording) and ArtifactDetectionSelection (Recording / SharedArtifactGroup) parse correctly.
+- **Draft FK structure parses, with the accounted ambiguities below.** Source part tables on SortingSelection (RecordingSource / ConcatenatedRecordingSource) and ArtifactDetectionSelection (RecordingSource / SharedArtifactGroupSource) parse correctly.
 - **Full ancestor walks**: `SortingSelection`'s `--up` traversal reaches Raw, Session, Nwbfile, Electrode, BrainRegion, LabTeam, Probe — all upstream Spyglass tables resolve. `UnitMatch`'s `--up` walks back through CurationV2 → Sorting → SortingSelection → both Recording and ConcatenatedRecording paths.
 - **Descendant walks**: `CurationV2`'s `--down` shows the curation-dependent Phase 2/4/5 dependency tree (CurationV2.UnitLabel, AnalyzerCuration, UnitMatchSelection.MemberCuration, FigPackCurationSelection, TrackedUnit.Member). `Recording` / `Sorting` down-walks additionally show the Phase 2 recompute tables (`RecordingArtifactRecompute*`, `SortingAnalyzerRecompute*`).
 - **No unresolved imports and no FK cycles.**

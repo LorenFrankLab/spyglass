@@ -116,10 +116,22 @@ class ArtifactDetectionSelection(SpyglassMixin, dj.Manual):
     definition = """
     artifact_id: uuid
     ---
-    -> [nullable] Recording
-    -> [nullable] SharedArtifactGroup
     -> ArtifactDetectionParameters
     """
+
+    class RecordingSource(SpyglassMixinPart):
+        definition = """
+        -> master
+        ---
+        -> Recording
+        """
+
+    class SharedArtifactGroupSource(SpyglassMixinPart):
+        definition = """
+        -> master
+        ---
+        -> SharedArtifactGroup
+        """
 
 
 class ArtifactDetection(SpyglassMixin, dj.Computed):
@@ -222,11 +234,23 @@ class SortingSelection(SpyglassMixin, dj.Manual):
     definition = """
     sorting_id: uuid
     ---
-    -> [nullable] Recording
-    -> [nullable] ConcatenatedRecording
     -> [nullable] ArtifactDetection
     -> SorterParameters
     """
+
+    class RecordingSource(SpyglassMixinPart):
+        definition = """
+        -> master
+        ---
+        -> Recording
+        """
+
+    class ConcatenatedRecordingSource(SpyglassMixinPart):
+        definition = """
+        -> master
+        ---
+        -> ConcatenatedRecording
+        """
 
 
 class Sorting(SpyglassMixin, dj.Computed):

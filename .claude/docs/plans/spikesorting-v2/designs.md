@@ -319,33 +319,37 @@ class ArtifactDetectionSelection(SpyglassMixin, dj.Manual):
     UUID-keyed; populated via insert_selection() per shared-contracts.
     Computed table ArtifactDetection is keyed off this selection.
 
-    Two-source FK pattern (mirrors SortingSelection's recording vs concat
-    split): exactly one of `recording_id` or `shared_artifact_group_name`
-    must be non-null. XOR enforced in insert_selection().
+    Source part rows make the input explicit: exactly one of
+    RecordingSource or SharedArtifactGroupSource must exist for each
+    selection row.
     """
     definition = """
     artifact_id: uuid
     ---
-    -> [nullable] Recording                       # single-recording path (default)
-    -> [nullable] SharedArtifactGroup             # cross-recording path (#928)
     -> ArtifactDetectionParameters
     """
 
+    class RecordingSource(SpyglassMixinPart):
+        definition = """
+        -> master
+        ---
+        -> Recording                              # single-recording path (default)
+        """
+
+    class SharedArtifactGroupSource(SpyglassMixinPart):
+        definition = """
+        -> master
+        ---
+        -> SharedArtifactGroup                    # cross-recording path (#928)
+        """
+
     @classmethod
     def insert_selection(cls, key: dict) -> dict:
-        """XOR-validates the two FKs via the shared helper; exactly one
-        must be non-null. Returns PK-only dict per shared-contracts.
+        """Inserts the master row plus exactly one source part row.
 
-        See shared-contracts.md § Nullable XOR Foreign-Key Pattern for
-        the insert helper, populate-time re-check, and parametrized
-        integrity test.
+        See shared-contracts.md § Source Part Pattern for the insert
+        helper, populate-time re-check, and parametrized integrity test.
         """
-        from spyglass.spikesorting.v2.utils import _validate_xor
-        _validate_xor(
-            "ArtifactDetectionSelection",
-            "recording_id", key.get("recording_id"),
-            "shared_artifact_group_name", key.get("shared_artifact_group_name"),
-        )
         ...
 
 
@@ -375,17 +379,11 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
 
 **Design change from v1**: v1 inserts the artifact-removed interval directly into `IntervalList` with `artifact_id` (UUID) as the `interval_list_name`. This collides with user-named intervals and uses `skip_duplicates=True` (forbidden in custom `make()`). v2 stores artifact intervals on its own part table and exposes `ArtifactDetection.get_artifact_removed_intervals(key)` for consumers.
 
-**XOR re-validation at populate time**: `ArtifactDetection.make()` MUST re-run `_validate_xor` against the upstream `ArtifactDetectionSelection` row at the start of `make()`, mirroring `Sorting.make()`'s pattern. This catches rows inserted via `dj.Manual.insert1()` that bypassed `insert_selection()`. See shared-contracts.md § Nullable XOR Foreign-Key Pattern.
+**Source re-validation at populate time**: `ArtifactDetection.make()` MUST re-check that the upstream `ArtifactDetectionSelection` row has exactly one source part row at the start of `make()`, mirroring `Sorting.make()`'s pattern. This catches rows inserted via `dj.Manual.insert1()` that bypassed `insert_selection()`. See shared-contracts.md § Source Part Pattern.
 
 ```python
 def make(self, key):
-    sel = (ArtifactDetectionSelection & key).fetch1()
-    from spyglass.spikesorting.v2.utils import _validate_xor
-    _validate_xor(
-        "ArtifactDetectionSelection",
-        "recording_id", sel.get("recording_id"),
-        "shared_artifact_group_name", sel.get("shared_artifact_group_name"),
-    )
+    source = ArtifactDetectionSelection.resolve_source(key)
     # ... rest of make() body
 ```
 
@@ -432,50 +430,42 @@ class SortingSelection(SpyglassMixin, dj.Manual):
     """One row per (recording, sorter, artifact detection) tuple.
 
     The final schema supports either a single-session recording source or
-    a concatenated recording source. Runtime helpers enforce that exactly
-    one recording-source FK is set.
+    a concatenated recording source. Source part rows make that input
+    explicit, and runtime helpers enforce exactly one source.
     """
     definition = """
     sorting_id: uuid
     ---
-    -> [nullable] Recording                     # single-session path; FK PK 'recording_id'
-    -> [nullable] ConcatenatedRecording         # cross-session path; FK PK 'concat_recording_id'
     -> SorterParameters
     -> [nullable] ArtifactDetection             # real DataJoint FK; NULL = no artifact detection
     """
-    # FK column names: `-> [nullable] Recording` adds column `recording_id`
-    # to this table (Recording's PK, inherited from RecordingSelection).
-    # `-> [nullable] ConcatenatedRecording` adds column `concat_recording_id`
-    # (ConcatenatedRecording's PK, inherited from ConcatenatedRecordingSelection).
-    # Both PKs are UUIDs in their respective parent tables; column names
-    # are already distinct, so no .proj rename is needed.
-    #
-    # FK targets the COMPUTED table (not the Selection table) so a
-    # SortingSelection row can only be inserted after the upstream
-    # recording has been populated — matches v1's pattern (v1
-    # SpikeSortingSelection FKs SpikeSortingRecording, not
-    # SpikeSortingRecordingSelection).
+
+    class RecordingSource(SpyglassMixinPart):
+        definition = """
+        -> master
+        ---
+        -> Recording                            # single-session path
+        """
+
+    class ConcatenatedRecordingSource(SpyglassMixinPart):
+        definition = """
+        -> master
+        ---
+        -> ConcatenatedRecording                # concat path
+        """
 
     @classmethod
     def insert_selection(cls, key: dict) -> dict:
-        """Validates XOR on the two recording FKs via the shared helper.
+        """Inserts the master row plus exactly one source part row.
 
-        Exactly one of (recording_id, concat_recording_id) must be set.
         Single-session rows may reference artifact detection. Concatenated
         rows reject artifact_id until concat-wide artifact masking has an
         implemented semantic model.
         Returns a single PK-only dict per shared-contracts.
 
-        See shared-contracts.md § Nullable XOR Foreign-Key Pattern for
-        the insert helper, populate-time re-check, and parametrized
-        integrity test.
+        See shared-contracts.md § Source Part Pattern for the insert
+        helper, populate-time re-check, and parametrized integrity test.
         """
-        from spyglass.spikesorting.v2.utils import _validate_xor
-        _validate_xor(
-            "SortingSelection",
-            "recording_id", key.get("recording_id"),
-            "concat_recording_id", key.get("concat_recording_id"),
-        )
         ...
 
 
@@ -584,7 +574,7 @@ class Sorting(SpyglassMixin, dj.Computed):
 
 **Binding behavior**:
 
-- `Sorting.make()` re-validates the nullable-XOR source FKs, resolves either a single `Recording` or a `ConcatenatedRecording`, applies post-motion preprocessing exactly once, applies artifact masking only on the single-recording path, runs the sorter, removes excess spikes, builds the SortingAnalyzer, writes `/units` to `AnalysisNwbfile`, and populates `Sorting.Unit`.
+- `Sorting.make()` re-validates the source part rows, resolves either a single `Recording` or a `ConcatenatedRecording`, applies post-motion preprocessing exactly once, applies artifact masking only on the single-recording path, runs the sorter, removes excess spikes, builds the SortingAnalyzer, writes `/units` to `AnalysisNwbfile`, and populates `Sorting.Unit`.
 - `Sorting.Unit` rows must use integer-convertible unit IDs and the full `Electrode` FK from the selected sort group. Concat sorts use the first member as the deterministic Electrode anchor.
 - `get_unit_brain_regions()` raises on concat sorts unless `allow_anchor_member=True`; anchor-only output must be labeled with `region_resolution='anchor_member'`.
 - `get_analyzer()` rebuilds a missing analyzer folder without deleting or replacing the `Sorting` row.

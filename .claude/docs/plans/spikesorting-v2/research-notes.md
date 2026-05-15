@@ -354,9 +354,9 @@ Total estimated: 7-10 PRs over the v2 lifetime.
 
 Rationale moved out of phase files during the 2026-05-14 plan cleanup. Phase files now state the binding behavior; this section preserves the historical "why" for future readers.
 
-### XOR three-layer defense → two-layer + integrity test
+### Source-part integrity: two-layer + integrity test
 
-The original spec described an XOR defense in three layers: (1) helper validator at insert; (2) populate-time re-check; (3) a "nightly" CI integrity test. Phase files now describe layers 1 and 2 as mandatory and layer 3 as one small parametrized test in the v2 suite. Reason: layer 2 is the load-bearing defense (it catches `dj.Manual.insert1` bypasses); a dedicated nightly job was unnecessary process overhead. The integrity test still exists; it just runs with the rest of the suite.
+The original spec described nullable XOR source FKs with three defense layers: (1) helper validator at insert; (2) populate-time re-check; (3) a "nightly" CI integrity test. The current design uses explicit source part tables instead of nullable source FKs. Phase files still describe layers 1 and 2 as mandatory and layer 3 as one small parametrized test in the v2 suite. Reason: source parts make source-specific queries explicit, while the populate-time re-check remains the load-bearing defense against `dj.Manual.insert1` bypasses; a dedicated nightly job was unnecessary process overhead. The integrity test still exists; it just runs with the rest of the suite.
 
 ### TrackedUnit policy machinery → strict + hard cap
 

@@ -15,7 +15,7 @@ Cross-phase contracts. Any phase that references one of these MUST follow the sp
 - [Job-Kwargs Resolution](#job-kwargs-resolution)
 - [Curation Label Enum](#curation-label-enum)
 - [`insert_selection()` Return-Value Normalization](#insert_selection-return-value-normalization)
-- [Nullable XOR Foreign-Key Pattern](#nullable-xor-foreign-key-pattern)
+- [Source Part Pattern](#source-part-pattern)
 - [Unit-Level Brain Region Tracing](#unit-level-brain-region-tracing)
 - [Zero-Migration Schema Forward-Compatibility](#zero-migration-schema-forward-compatibility)
 - [Empty / NaN / Boundary Invariants](#empty--nan--boundary-invariants)
@@ -309,7 +309,7 @@ Implement `_get_restricted_merge_ids_v2(key, as_dict=False)` as the v2 analog of
 - Phase 2 keys: `analyzer_curation_id`, `metric_params_name`, `auto_curation_rules_name`.
 - Phase 3+ keys when their tables exist: `session_group_owner`, `session_group_name`, `concat_recording_id`.
 
-The implementation should join through the relevant v2 Selection tables, then restrict `SpikeSortingOutput.CurationV2`. Unknown restriction fields should fail clearly rather than silently returning unrelated merge IDs. `restrict_by_artifact` remains accepted by the public method for API compatibility, but the v2 path ignores the v1-specific `IntervalList` rewrite because artifact intervals live on `ArtifactDetection.Interval`.
+The implementation should join through the relevant v2 Selection tables and source parts, then restrict `SpikeSortingOutput.CurationV2`. Unknown restriction fields should fail clearly rather than silently returning unrelated merge IDs. `restrict_by_artifact` remains accepted by the public method for API compatibility, but the v2 path ignores the v1-specific `IntervalList` rewrite because artifact intervals live on `ArtifactDetection.Interval`.
 
 **Imported sorting parity**:
 
@@ -394,14 +394,18 @@ def insert_selection(cls, key: dict) -> dict:
     return {k: key[k] for k in cls.primary_key}
 ```
 
+Selections that use source parts follow the same return-value rule, but their
+find-existing query joins the selected source part as specified in
+[Source Part Pattern](#source-part-pattern) instead of restricting only master
+fields.
+
 **Splatting behavior**: downstream `insert_selection()` callers splat the returned PK-only dict and provide any additional foreign-key fields explicitly. Example from `run_v2_pipeline()`:
 
 ```python
 rec_key = RecordingSelection.insert_selection({...})  # returns {"recording_id": UUID}
 # When inserting the next stage, splat the PK plus add new FK fields:
 sort_key = SortingSelection.insert_selection({
-    **rec_key,                                # provides recording_id
-    "concat_recording_id": None,              # XOR: this is the single-recording path; concat FK left NULL
+    **rec_key,                                # selects RecordingSource
     "sorter": "mountainsort5",
     "sorter_params_name": "default",
 })
@@ -411,63 +415,81 @@ sort_key = SortingSelection.insert_selection({
 
 ---
 
-## Nullable XOR Foreign-Key Pattern
+## Source Part Pattern
 
-Two v2 tables declare two nullable typed FKs where exactly one must be non-NULL:
+Two v2 Selection tables have polymorphic input sources. They use explicit
+source part tables instead of nullable source FKs on the master row:
 
-| Table | XOR FKs |
-| --- | --- |
-| `SortingSelection` | `recording_id` (Recording) XOR `concat_recording_id` (ConcatenatedRecording) |
-| `ArtifactDetectionSelection` | `recording_id` (Recording) XOR `shared_artifact_group_name` (SharedArtifactGroup) |
+| Master table | Source parts | Meaning |
+| --- | --- | --- |
+| `SortingSelection` | `RecordingSource`, `ConcatenatedRecordingSource` | exactly one sort input source |
+| `ArtifactDetectionSelection` | `RecordingSource`, `SharedArtifactGroupSource` | exactly one artifact-detection input source |
 
-DataJoint does not support DB-level CHECK constraints, so XOR cannot be schema-enforced. The plan compensates with two mandatory runtime checks plus a small integrity test:
+This is the selected design because source-specific queries remain explicit:
+users join the source part they mean (`SortingSelection.RecordingSource` or
+`SortingSelection.ConcatenatedRecordingSource`) instead of relying on nullable
+FK columns whose joins silently drop the other source type.
 
-### Layer 1: shared validator at insert time
+DataJoint does not enforce "exactly one part row across two part tables", so
+the invariant still needs two runtime checks plus a small integrity test.
 
-A single helper lives in `spyglass.spikesorting.v2.utils`:
+### Layer 1: transaction-wrapped insert helper
 
-```python
-def _validate_xor(
-    table_name: str,
-    name_a: str, value_a,
-    name_b: str, value_b,
-) -> None:
-    """Raise if both XOR slots are NULL or both are set.
+`insert_selection()` on the affected tables MUST:
 
-    Used by both SortingSelection.insert_selection() and
-    ArtifactDetectionSelection.insert_selection().
-    """
-    a_set = value_a is not None
-    b_set = value_b is not None
-    if a_set == b_set:
-        state = "both NULL" if not a_set else "both set"
-        raise ValueError(
-            f"{table_name} XOR violation: exactly one of "
-            f"{name_a!r}, {name_b!r} must be non-NULL ({state})."
-        )
-```
+1. Read exactly one source from the user key (`recording_id` OR
+   `concat_recording_id`; `recording_id` OR `shared_artifact_group_name`).
+2. Find an existing row by joining the master table to the selected source
+   part and restricting by both master fields and source fields.
+3. Insert exactly one source part row in the same transaction.
+4. Return a single PK-only dict.
 
-Every `insert_selection()` on the affected tables MUST call this before inserting.
+If zero or two source keys are supplied, raise before inserting anything. If no
+joined master+source row matches, mint a new master UUID; do not reuse a master
+row that matches only master fields but has a different source.
 
 ### Layer 2: re-check at populate time
 
-`Sorting.make()` and `ArtifactDetection.make()` MUST re-run `_validate_xor` against the upstream Selection row at the start of `make()`. This catches rows that were inserted via `dj.Manual.insert1()` directly, bypassing the helper. The re-check raises `SchemaBypassError` with a message naming the offending PK and pointing at the helper.
+`Sorting.make()` and `ArtifactDetection.make()` MUST call a source-resolution
+helper at the start of `make()`. The helper fetches source part rows and raises
+`SchemaBypassError` if zero or multiple sources exist. This catches rows that
+were inserted via `dj.Manual.insert1()` directly, bypassing `insert_selection()`.
 
 ```python
 # Inside Sorting.make(self, key):
-sel = (SortingSelection & key).fetch1()
-_validate_xor(
-    "SortingSelection",
-    "recording_id", sel.get("recording_id"),
-    "concat_recording_id", sel.get("concat_recording_id"),
+source = SortingSelection.resolve_source(key)
+if source.kind == "recording":
+    recording = Recording.get_recording(source.key)
+elif source.kind == "concatenated_recording":
+    recording = ConcatenatedRecording.get_recording(source.key)
+```
+
+### Query ergonomics
+
+The master selection rows no longer carry `recording_id`,
+`concat_recording_id`, or `shared_artifact_group_name` columns. Source-specific
+queries must join the relevant source part:
+
+```python
+Sorting.populate(SortingSelection.RecordingSource & {"recording_id": rec_id})
+Sorting.populate(
+    SortingSelection.ConcatenatedRecordingSource
+    & {"concat_recording_id": concat_id}
 )
 ```
 
+`SpikeSortingOutput.get_restricted_merge_ids()` and `run_v2_pipeline()` hide
+this join from notebook users, but implementation code should be explicit.
+
 ### Supporting integrity test
 
-One parametrized test queries each XOR table for both-NULL and both-set rows and asserts the result is empty. It runs with the rest of the v2 suite; not a separate nightly job or operational integrity system.
+One parametrized test queries each source-part family and asserts every master
+row has exactly one source part. It runs with the rest of the v2 suite; not a
+separate nightly job or operational integrity system.
 
-**Invariant — do not weaken**: Layer 1 and Layer 2 are mandatory. Layer 2 (the populate-time re-check) is the most tempting to weaken and must be kept because Layer 1 alone is bypassable by any `dj.Manual` user.
+**Invariant — do not weaken**: Layer 1 and Layer 2 are mandatory. Layer 2 (the
+populate-time source re-check) is the most tempting to weaken and must be kept
+because Layer 1 alone is bypassable by any `dj.Manual` user.
 
 ---
 
@@ -564,11 +586,11 @@ SpikeSortingOutput.get_unit_brain_regions(
 TrackedUnit.get_unit_brain_regions(tracked_unit_key) -> pd.DataFrame  # cols: sorting_id, unit_id, region_name
 ```
 
-**Concat-sort guard (binding — do not weaken)**: For concat-backed sorts (where the upstream `SortingSelection.recording_id` is NULL and `concat_recording_id` is set), the `Sorting.Unit -> Electrode` FK is anchored to the FIRST `SessionGroup.Member`'s `Electrode` row by deterministic rule. The resulting brain region is the anchor member's region for that channel, which may differ from later members if the probe re-anatomized across days.
+**Concat-sort guard (binding — do not weaken)**: For concat-backed sorts (where the upstream `SortingSelection` has a `ConcatenatedRecordingSource` part row), the `Sorting.Unit -> Electrode` FK is anchored to the FIRST `SessionGroup.Member`'s `Electrode` row by deterministic rule. The resulting brain region is the anchor member's region for that channel, which may differ from later members if the probe re-anatomized across days.
 
 Returning the anchor region silently would be a wrong-answer footgun. Therefore:
 
-- `Sorting.get_unit_brain_regions(key)` and `CurationV2.get_unit_brain_regions(key)` MUST detect concat-backed sorts (`SortingSelection & key` has non-NULL `concat_recording_id`) and **raise `ConcatBrainRegionAmbiguousError`** by default, with a message pointing the caller at `TrackedUnit.get_unit_brain_regions` for per-session resolution.
+- `Sorting.get_unit_brain_regions(key)` and `CurationV2.get_unit_brain_regions(key)` MUST detect concat-backed sorts via `SortingSelection.ConcatenatedRecordingSource` and **raise `ConcatBrainRegionAmbiguousError`** by default, with a message pointing the caller at `TrackedUnit.get_unit_brain_regions` for per-session resolution.
 - Callers who explicitly want anchor-member resolution pass `allow_anchor_member=True`. The returned DataFrame in that case carries a `region_resolution` column whose value is `"anchor_member"` (vs `"single_session"` for non-concat sorts), so downstream code can detect and warn.
 - `SpikeSortingOutput.get_unit_brain_regions(merge_key)` passes `allow_anchor_member` through to the dispatched source class.
 - `TrackedUnit.get_unit_brain_regions` is the canonical per-session accessor for cross-session workflows and is not subject to the guard — it walks each pinned `CurationV2.Unit -> Electrode -> BrainRegion` and labels rows by `member_index`.
@@ -600,7 +622,7 @@ This contract enforces the user's binding constraint: every v2 table is designed
 | `MotionCorrectionParameters` | Declared in Phase 1 with `contents` rows | Phase 3 reads from this Lookup; declaring it now lets `ConcatenatedRecordingSelection` FK it from Phase 1. |
 | `ConcatenatedRecordingSelection` | Declared in Phase 1 (Manual, UUID PK) | Provides the UUID PK that `ConcatenatedRecording` (Computed) inherits. Needed so `SortingSelection` can FK `ConcatenatedRecording` from Phase 1. |
 | `ConcatenatedRecording` + `ConcatenatedRecording.MemberBoundary` | Declared in Phase 1; `make()` body raises `NotImplementedError("ConcatenatedRecording.make() is not implemented yet")` | Final schema; Phase 3 only fills in the `make()` body and writes member boundary rows. Test in Phase 1 asserts `populate()` raises. |
-| `SortingSelection` | Two NULLABLE typed FKs declared in Phase 1: `-> [nullable] Recording`, `-> [nullable] ConcatenatedRecording`. XOR enforced in `insert_selection()`. | Both FK targets exist from Phase 1, so the schema is final. Phase 1's `insert_selection` rejects `concat_recording_id` with `NotImplementedError`; Phase 3 lifts that runtime gate without touching the schema. |
+| `SortingSelection` + source parts | `RecordingSource` and `ConcatenatedRecordingSource` part tables declared in Phase 1. Exactly one source part is enforced by `insert_selection()` and re-checked in `make()`. | Both source FK targets exist from Phase 1, so the schema is final. Phase 1's `insert_selection` rejects `ConcatenatedRecordingSource`; Phase 3 lifts that runtime gate without touching the schema. |
 | `SortingSelection` | Nullable `-> ArtifactDetection` FK (the inherited `artifact_id` is NOT a PK component) | Concat sorts skip artifact detection. |
 | `Sorting.Unit` | Part table present in Phase 1 | Phase 2 `AnalyzerCuration` reads brain regions from here; Phase 4 `TrackedUnit` per-session region lookup reads from here. |
 | `CurationV2.Unit` | Part table present in Phase 1 | Same downstream consumers; merges shrink `CurationV2.Unit` from `Sorting.Unit` row count. |
@@ -610,7 +632,7 @@ This contract enforces the user's binding constraint: every v2 table is designed
 **Phase 3 is method-body-only changes** (no `definition`-string edits):
 
 - `ConcatenatedRecording.make()` body filled in (Phase 1 raised `NotImplementedError`; Phase 3 lifts that).
-- `SortingSelection.insert_selection()` body: drops the `concat_recording_id` rejection.
+- `SortingSelection.insert_selection()` body: drops the `ConcatenatedRecordingSource` rejection.
 - `SessionGroup.create_group` body: enforces `allow_multi_day=True` gate (the schema was declared in Phase 1; the validation is added in Phase 3).
 - No new tables are introduced in Phase 3.
 
