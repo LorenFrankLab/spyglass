@@ -531,16 +531,26 @@ def pytest_configure(config):
 
 
 def pytest_unconfigure(config):
+    server = globals().get("SERVER")
+    tmp_base_dir = globals().get("TMP_BASE_DIR")
+    base_dir = globals().get("BASE_DIR")
+    teardown = globals().get("TEARDOWN", False)
+
+    if server is None:
+        if tmp_base_dir is not None:
+            shutil_rmtree(tmp_base_dir, ignore_errors=True)
+        return
+
     from spyglass.utils.nwb_helper_fn import close_nwb_files
 
     close_nwb_files()
-    if TEARDOWN:
-        SERVER.stop()
-        if TMP_BASE_DIR is None:
-            _require_test_root_sentinel(BASE_DIR, "resolved test base_dir")
+    if teardown:
+        server.stop()
+        if tmp_base_dir is None and base_dir is not None:
+            _require_test_root_sentinel(base_dir, "resolved test base_dir")
             # Selective cleanup only for user-supplied base_dirs; a temp dir
             # gets removed wholesale below, making per-subdir rmtree redundant.
-            analysis_dir = BASE_DIR / "analysis"
+            analysis_dir = base_dir / "analysis"
             for file in analysis_dir.glob("*.nwb"):
                 file.unlink()
             for subdir in [
@@ -550,12 +560,12 @@ def pytest_unconfigure(config):
                 "spikesorting",
                 "tmp",
             ]:
-                shutil_rmtree(str(BASE_DIR / subdir), ignore_errors=True)
+                shutil_rmtree(str(base_dir / subdir), ignore_errors=True)
 
     # Always remove a temp base_dir we allocated, even with --no-teardown.
     # It's under $TMPDIR, was created by this run, and has no reuse value.
-    if TMP_BASE_DIR is not None:
-        shutil_rmtree(TMP_BASE_DIR, ignore_errors=True)
+    if tmp_base_dir is not None:
+        shutil_rmtree(tmp_base_dir, ignore_errors=True)
 
 
 # ---------------------------- FIXTURES, TEST ENV ----------------------------

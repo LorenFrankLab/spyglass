@@ -20,7 +20,7 @@ pytest tests/position/v1/test_trodes.py
 pytest --cov=spyglass --cov-report term-missing
 
 # Debug mode (preserve database, verbose output)
-pytest --no-teardown -v
+pytest --no-teardown --base-dir ./tests/_data/ -v
 ```
 
 ______________________________________________________________________
