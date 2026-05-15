@@ -347,6 +347,9 @@ class ArtifactDetectionSelection(SpyglassMixin, dj.Manual):
     def insert_selection(cls, key: dict) -> dict:
         """Inserts the master row plus exactly one source part row.
 
+        Finding existing rows joins the selected source part, so the
+        logical identity includes both artifact params and source.
+
         See shared-contracts.md § Source Part Pattern for the insert
         helper, populate-time re-check, and parametrized integrity test.
         """
@@ -457,6 +460,9 @@ class SortingSelection(SpyglassMixin, dj.Manual):
     @classmethod
     def insert_selection(cls, key: dict) -> dict:
         """Inserts the master row plus exactly one source part row.
+
+        Finding existing rows joins the selected source part, so the
+        logical identity includes sorter params, optional artifact, and source.
 
         Single-session rows may reference artifact detection. Concatenated
         rows reject artifact_id until concat-wide artifact masking has an

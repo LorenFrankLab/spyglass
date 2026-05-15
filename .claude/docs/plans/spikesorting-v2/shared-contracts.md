@@ -446,7 +446,9 @@ the invariant still needs two runtime checks plus a small integrity test.
 
 If zero or two source keys are supplied, raise before inserting anything. If no
 joined master+source row matches, mint a new master UUID; do not reuse a master
-row that matches only master fields but has a different source.
+row that matches only master fields but has a different source. If more than
+one joined row matches the same logical identity, raise `DuplicateSelectionError`
+instead of picking one arbitrarily.
 
 ### Layer 2: re-check at populate time
 
@@ -484,8 +486,20 @@ this join from notebook users, but implementation code should be explicit.
 ### Supporting integrity test
 
 One parametrized test queries each source-part family and asserts every master
-row has exactly one source part. It runs with the rest of the v2 suite; not a
-separate nightly job or operational integrity system.
+row has exactly one source part. The same test also asserts logical identities
+are unique within each source family:
+
+- `SortingSelection.RecordingSource`: source `recording_id` + sorter fields +
+  `artifact_id`.
+- `SortingSelection.ConcatenatedRecordingSource`: source `concat_recording_id`
+  + sorter fields + `artifact_id` (which must remain NULL for concat).
+- `ArtifactDetectionSelection.RecordingSource`: source `recording_id` +
+  `artifact_params_name`.
+- `ArtifactDetectionSelection.SharedArtifactGroupSource`: source
+  `shared_artifact_group_name` + `artifact_params_name`.
+
+It runs with the rest of the v2 suite; not a separate nightly job or operational
+integrity system.
 
 **Invariant — do not weaken**: Layer 1 and Layer 2 are mandatory. Layer 2 (the
 populate-time source re-check) is the most tempting to weaken and must be kept
