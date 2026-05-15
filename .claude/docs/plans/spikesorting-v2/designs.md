@@ -615,7 +615,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
                                   # NWB Column-Name Convention (CurationV1 parity).
                                   # v1 CurationV1 uses varchar(72) — match for parity.
     merges_applied=0: bool
-    metrics_source = 'manual': enum('manual', 'analyzer_curation', 'figpack', 'imported')
+    metrics_source = 'manual': enum('manual', 'analyzer_curation', 'figpack')
                                   # provenance of any metrics blob attached to
                                   # this curation. Addresses Spyglass GitHub
                                   # issue #939 (CurationV1 does not track a
@@ -623,12 +623,10 @@ class CurationV2(SpyglassMixin, dj.Manual):
                                   # via insert_curation(metrics=...);
                                   # 'analyzer_curation' = materialized from
                                   # AnalyzerCuration.materialize_curation();
-                                  # 'figpack' = round-tripped from FigPack UI;
-                                  # 'imported' = future legacy-conversion
-                                  # metadata only. External/ground-truth NWB
-                                  # Units remain in ImportedSpikeSorting and
-                                  # must not be duplicated into CurationV2 in
-                                  # this plan.
+                                  # 'figpack' = round-tripped from FigPack UI.
+                                  # External/ground-truth NWB Units remain in
+                                  # ImportedSpikeSorting and must not be
+                                  # duplicated into CurationV2 in this plan.
     description: varchar(255)
     """
 
