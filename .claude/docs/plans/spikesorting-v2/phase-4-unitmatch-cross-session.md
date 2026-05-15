@@ -6,7 +6,7 @@ Adds **sort-then-match** cross-session unit tracking via UnitMatchPy. The design
 
 **Phase 4 is split into two sub-phases** so the matcher's actual API and data flow are pinned BEFORE the v2 schema is finalized:
 
-- **Phase 4a (technical spike)**: install UnitMatchPy, run it end-to-end against an existing v2 `SortingAnalyzer` plus the associated v2 recording when split-half waveform extraction requires traces, document the actual API surface, the input data layout it expects, and the failure modes. No DataJoint tables. Writes findings into `appendix.md § UnitMatchPy integration notes` (replacing the current speculative content). Confirms or revises the `MatcherProtocol` contract in `shared-contracts.md`.
+- **Phase 4a (technical spike)**: install UnitMatchPy, run it end-to-end against an existing v2 `SortingAnalyzer` plus the associated v2 recording when split-half waveform extraction requires traces, document the actual API surface, the input data layout it expects, and the failure modes. No DataJoint tables. Writes findings into `appendix.md § UnitMatchPy integration notes` and replaces the `PHASE4A_CONTRACT_STUB` markers in `shared-contracts.md` and `designs.md`.
 - **Phase 4b (schema + implementation)**: locks in `MatcherParameters`, `UnitMatchSelection` (+ `MemberCuration` part), `UnitMatch` (+ `Pair` part), and `TrackedUnit` (+ `Member` part) based on what 4a discovered. Includes the polymer validation gate.
 
 **Matcher contract** (see updated `shared-contracts.md § MatcherProtocol`): a matcher consumes **pre-extracted per-unit waveform arrays + channel positions** that v2 derives from the `SortingAnalyzer` and, if needed, wrapper-owned reads of the v2 `Recording` artifact. It writes those arrays into a matcher-specific on-disk layout (the exact layout is pinned by the Phase 4a spike — do not encode UnitMatchPy-specific directory or file names in shared-contracts before 4a runs). The v2 wrapper extracts what the matcher needs and feeds the matcher a self-contained directory; the matcher never receives raw NWB paths, `si.SortingAnalyzer` objects, or Spyglass table keys.
@@ -15,16 +15,16 @@ Adds **sort-then-match** cross-session unit tracking via UnitMatchPy. The design
 
 Phase 4a PR:
 
-- Run UnitMatchPy end-to-end outside DataJoint and replace speculative appendix notes with observed API details.
+- Run UnitMatchPy end-to-end outside DataJoint and replace the appendix / shared-contracts / designs contract stubs with observed API details.
 - Reconcile `shared-contracts.md` and `designs.md` with the actual matcher input/output layout.
 - Do not add DataJoint tables or `unit_matching.py` in 4a.
 
 Phase 4b PR:
 
-- Do not start 4b while any Phase 4 contract text is still provisional; run the grep gate in "Commands to run" first.
+- Do not start 4b while `PHASE4A_CONTRACT_STUB` remains; run the grep gate in "Commands to run" first.
 - Implement `matcher_protocol.py`, `_unitmatch_backend.py`, `unit_matching.py`, and Phase 4 parameter schemas from the 4a findings.
 - Enforce explicit per-member curation choices and make-time provenance guards against schema-bypassing inserts.
-- Implement bounded tracked-unit derivation with recorded policy/fallback behavior.
+- Implement strict tracked-unit derivation with a bounded graph-size cap.
 - Gate shipping on the polymer MEArec AUC test.
 - Run the Phase 4 validation slice plus `code_graph.py describe/path` for new tables.
 
@@ -53,12 +53,12 @@ Output of this sub-phase is documentation + a working notebook, NOT new tables. 
 - **Install UnitMatchPy in a v2 dev env**: `pip install UnitMatchPy>=3.3,<4` (verify exact extras incantation). Document resolver warts in `appendix.md § UnitMatchPy integration notes`, including the current PyPI constraints (`python>=3.9,<3.13`, `numpy<2.0`) against the v2 SpikeInterface environment.
 - **Build a v2 SortingAnalyzer fixture for at least one Frank-lab session** (or use the synthetic Neuropixels fixture from Phase 4b's `conftest.py`). Sort completes; analyzer has `templates`, `waveforms`, `unit_locations` extensions.
 - **Walk the actual UnitMatchPy API** end-to-end against that analyzer. Document:
-  - The exact entry-point function name and signature (the current placeholder `um.MakeMatchTable(um_config)` may be stale).
+  - The exact entry-point function name and signature (the current example `um.MakeMatchTable(um_config)` may be stale).
   - The exact input data layout: file names, dtypes, shapes, where `RawWaveforms`, channel positions, and per-unit metadata live on disk.
   - Whether v2 can produce UnitMatchPy's required split-half average waveforms from existing `SortingAnalyzer` extensions alone. If not, document the wrapper-owned trace extraction from `Sorting.get_recording()` / `ConcatenatedRecording.get_recording()` needed to create the two cross-validation halves. This is acceptable only if the matcher still consumes the prepared bundle and never receives raw NWB paths or Spyglass table keys.
   - The output format: pairwise probability matrix shape, FDR estimate column, drift-correction outputs.
   - Compute cost on the fixture (wall time, peak RSS).
-- **Write the findings into `appendix.md § UnitMatchPy integration notes`**, REPLACING the current speculative content. Include the exact import statements and a minimal working code snippet (the v2 wrapper will be derived from this).
+- **Write the findings into `appendix.md § UnitMatchPy integration notes`** and replace the `PHASE4A_CONTRACT_STUB` markers in `shared-contracts.md` and `designs.md`. Include the exact import statements and a minimal working code snippet (the v2 wrapper will be derived from this).
 - **Reconcile with `shared-contracts.md § MatcherProtocol`**. The current contract says "matcher MUST NOT depend on raw recording data". If 4a finds UnitMatchPy genuinely requires raw data, EITHER:
   - revise the contract to say "the v2 wrapper preextracts waveforms from the analyzer and writes them in matcher-expected layout; raw paths are never handed to the matcher" (preferred), OR
   - mark UnitMatchPy as not-usable and document an alternative.
@@ -68,7 +68,7 @@ Output of this sub-phase is documentation + a working notebook, NOT new tables. 
 
 - **Implement `matcher_protocol.py`** — the protocol + registry per [shared-contracts.md § MatcherProtocol](shared-contracts.md#matcherprotocol--cross-session-unit-matching-plugin-interface) (revised by 4a). This is pure Python with no DataJoint dependency; tests should be importable standalone.
 
-- **Implement `_unitmatch_backend.py`** — the UnitMatch wrapper. **Follow the API discovered in Phase 4a**; do not implement against speculative function names or input layouts. Reference: `appendix.md § UnitMatchPy integration notes` (rewritten at the end of Phase 4a to capture the actual API). Required behavior, independent of the specific API surface:
+- **Implement `_unitmatch_backend.py`** — the UnitMatch wrapper. **Follow the API discovered in Phase 4a**; do not implement against pre-4a example function names or input layouts. Reference: `appendix.md § UnitMatchPy integration notes` (rewritten at the end of Phase 4a to capture the actual API). Required behavior, independent of the specific API surface:
   - Subclass `MatcherProtocol`, `name = "unitmatch"`.
   - `match(session_inputs: list[SessionMatcherInput], params) -> list[MatchPair]`:
     1. The wrapper (in `UnitMatch.make()`, NOT the matcher) has already pre-extracted UnitMatch-compatible split-half waveforms + channel positions from each session's curated sorting/analyzer/recording and written them into `session_input.waveform_dir` / `session_input.channel_positions_path` in the matcher's expected layout. **The matcher does not touch raw NWB paths, Spyglass table keys, or `si.SortingAnalyzer` objects directly** (shared-contracts.md § MatcherProtocol invariant).
@@ -84,7 +84,7 @@ Output of this sub-phase is documentation + a working notebook, NOT new tables. 
     - **`MatcherParameters.insert1()` validates the `matcher` string against the registered matcher registry before inserting.** Unknown names raise `UnknownMatcherError`. The same registry dispatches the per-matcher Pydantic schema for `params` validation, so a typo is caught at insert time. See [designs.md § MatcherParameters](designs.md#matcherparameters--unitmatch--trackedunit).
   - `UnitMatchSelection` Manual **with a `MemberCuration` part table** that explicitly pins one `(sorting_id, curation_id)` per `SessionGroup.Member`. The master row stores `curation_set_hash`, a SHA-256 hash over the canonical ordered list of `(member_index, sorting_id, curation_id)` choices, so `insert_selection()` can be idempotent under the shared insert-selection contract. NO implicit "latest curation" lookup.
   - `UnitMatch` Computed with `Pair` part. `make()` dispatches via `get_matcher(matcher_name).match(...)` using the explicitly-pinned curations from `UnitMatchSelection.MemberCuration`. Before extracting matcher inputs, `make()` re-validates the direct-insert bypass invariant: the part rows must exactly cover the parent `SessionGroup.Member` set, and each pinned `CurationV2` row must belong to that member's session/recording path. A schema-valid but provenance-invalid row raises `UnitMatchSelectionIntegrityError` with a message pointing users back to `UnitMatchSelection.insert_selection()`.
-  - `TrackedUnit` Computed with `Member` part. `make()` reads `tracked_unit_policy` and `tracked_unit_threshold` from `MatcherParameters` and dispatches to either `_derive_tracked_units_strict` (default: maximal cliques) or `_derive_tracked_units_transitive` (connected components, with `n_transitive_only_edges` reported per component). See [designs.md § Algorithm for `TrackedUnit.make()`](designs.md#matcherparameters--unitmatch--trackedunit) for the algorithm.
+  - `TrackedUnit` Computed with `Member` part. `make()` reads `tracked_unit_threshold` and `max_strict_nodes` from `MatcherParameters`, seeds the graph with the complete curated-unit universe, derives maximal cliques in strict mode only, and raises `TrackedUnitBudgetExceededError` if the graph exceeds the node cap. See [designs.md § Algorithm for `TrackedUnit.make()`](designs.md#matcherparameters--unitmatch--trackedunit) for the algorithm.
 
 - **Helper for building `UnitMatchSelection.MemberCuration` rows**: `UnitMatchSelection.insert_selection(session_group_owner, session_group_name, matcher_params_name, curation_choices: dict[member_index, curation_key]) -> dict`. The `curation_choices` argument maps each member's `member_index` to an explicit `{"sorting_id": ..., "curation_id": ...}` key. Helper validates that every member has exactly one choice, raises clearly if any are missing or extra, and verifies each chosen `CurationV2` belongs to that member's session/recording path. A curation from member B must never be accepted for member A just because it satisfies the independent `CurationV2` FK. It computes `curation_set_hash = sha256(json.dumps(sorted_choices, sort_keys=True))`, finds or inserts the master row by `(session_group_owner, session_group_name, matcher_params_name, curation_set_hash)`, inserts the part rows inside the same transaction for new selections, and returns the `unitmatch_id` PK dict per the [shared-contracts insert_selection convention](shared-contracts.md#insert_selection-return-value-normalization).
 
@@ -119,7 +119,7 @@ Behaviors the Phase 4b validation slice must cover. Name and split tests as the 
 6. **`UnitMatch.make()` integrity recheck**: direct-inserted Selection rows with member coverage gaps or wrong-member CurationV2 raise `UnitMatchSelectionIntegrityError` before matcher inputs are extracted; no `UnitMatch` or `Pair` rows are created.
 7. **Pair FK integrity**: `UnitMatch.Pair` rows that reference a unit absent from the pinned `CurationV2.Unit` are rejected by DataJoint.
 8. **TrackedUnit strict-clique basic**: a 3-session clique with all pairwise edges above threshold yields exactly 1 component containing all three; pairwise A↔B / B↔C high but A↔C low yields ≥2 components, and no component contains both A and C.
-9. **TrackedUnit unmatched singleton**: a unit with only below-threshold pairs surfaces as a singleton row (`n_sessions_observed == 1`, `median_match_probability IS NULL`, `n_transitive_only_edges == 0`).
+9. **TrackedUnit unmatched singleton**: a unit with only below-threshold pairs surfaces as a singleton row (`n_sessions_observed == 1`, `median_match_probability IS NULL`, `policy_used == "strict"`).
 10. **TrackedUnit bounded-search cap**: a synthetic graph with `max_strict_nodes` smaller than the graph raises `TrackedUnitBudgetExceededError`; under-cap input succeeds and every row carries `policy_used = 'strict'`.
 
 Polymer gating fixture: `test_v2_unitmatch_polymer_mearec_ground_truth` (described above) is the gate — AUC > 0.85 on `mearec_polymer_2sessions.nwb`.
@@ -143,13 +143,13 @@ git diff --check -- .claude/docs/plans/spikesorting-v2/appendix.md .claude/docs/
 
 ### Phase 4b commands
 
-Phase 4b is blocked until the 4a grep gate finds no remaining provisional matcher contract text.
+Phase 4b is blocked until the 4a grep gate finds no remaining contract-stub marker.
 
 ```bash
 export SPYGLASS_SKILL_DIR="${SPYGLASS_SKILL_DIR:-../spyglass-skill/skills/spyglass}"
 test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
 
-! rg -n "PROVISIONAL|placeholder|speculative|Do NOT implement against" \
+! rg -n "PHASE4A_CONTRACT_STUB" \
   .claude/docs/plans/spikesorting-v2/shared-contracts.md \
   .claude/docs/plans/spikesorting-v2/appendix.md \
   .claude/docs/plans/spikesorting-v2/designs.md
@@ -181,7 +181,7 @@ Before opening the PR for this phase, dispatch `code-reviewer` (or equivalent in
 - The synthetic two-session test produces real UnitMatch output (not a mock).
 - The MEArec-based **polymer** validation test (`test_v2_unitmatch_polymer_mearec_ground_truth`) runs in CI and passes its AUC > 0.85 criterion — this is the gate. If it fails, Phase 4 does not ship; the implementer escalates rather than relaxing the threshold.
 - `MatcherProtocol` is implementable by external code without touching v2 internals (verify by writing a 10-line dummy matcher in the test suite).
-- `TrackedUnit` graph algorithm matches the binding policy in `designs.md` — strict (maximal cliques) by default, transitive only with opt-in via `MatcherParameters.params["tracked_unit_policy"]`. Tests `test_tracked_unit_strict_clique_basic`, `test_tracked_unit_strict_default_rejects_transitive`, and `test_tracked_unit_transitive_opt_in_unifies` exercise all three branches.
+- `TrackedUnit` graph algorithm matches the binding policy in `designs.md` — strict maximal cliques only, singleton units preserved, and `TrackedUnitBudgetExceededError` raised when the graph exceeds `max_strict_nodes`.
 - `UnitMatchSelection.insert_selection()` is idempotent by `curation_set_hash`, validates member/curation ownership before insertion, and inserts master + part rows atomically.
 - Docstrings, test names, and module names don't reference this plan, phase numbers, or files inside `.claude/docs/plans/`.
 - `code_graph.py describe` returns clean output for every new table; `path --up`/`path --down` chains match the design DAG; JSON warnings are empty or explicitly accounted for in `precondition-check.md`.

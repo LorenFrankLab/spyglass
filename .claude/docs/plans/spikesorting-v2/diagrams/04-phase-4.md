@@ -11,7 +11,7 @@ Sort-then-match workflow: independently sort each session, then identify the sam
 | `MatcherParameters` | Lookup | Per-matcher params (`unitmatch_default`, etc.). Validated against per-matcher Pydantic schema. |
 | `UnitMatchSelection` (+ `MemberCuration` part) | Manual | One row per (SessionGroup, MatcherParameters, **explicit per-member curation pin**) tuple. Refuses implicit "latest curation" lookups. |
 | `UnitMatch` (+ `Pair` part) | Computed | Runs the matcher; writes pairwise match probabilities to NWB. Pair part has projected FKs to both sides as `CurationV2.Unit`. |
-| `TrackedUnit` (+ `Member` part) | Computed | Derives biological-unit identity across sessions via maximal cliques (strict mode) or connected components (transitive mode) over thresholded match pairs. |
+| `TrackedUnit` (+ `Member` part) | Computed | Derives biological-unit identity across sessions via strict maximal cliques over thresholded match pairs; singleton units are preserved. |
 
 ## ER diagram
 
@@ -65,7 +65,7 @@ erDiagram
         int tracked_unit_id PK
         int n_sessions_observed
         float median_match_probability
-        int n_transitive_only_edges
+        varchar policy_used
     }
     TrackedUnit_Member {
         uuid unitmatch_id PK
@@ -100,7 +100,7 @@ flowchart LR
     B --> C[UnitMatchSelection.insert_selection]
     C --> D[UnitMatch.populate<br/>Wrapper extracts waveforms + positions per session]
     D --> E[Matcher emits pairs above threshold]
-    E --> F[TrackedUnit.populate<br/>Strict: maximal cliques<br/>Transitive: connected components]
+    E --> F[TrackedUnit.populate<br/>Strict maximal cliques<br/>Singletons preserved]
     F --> G[Tracked unit IDs queryable across sessions]
 ```
 
@@ -113,7 +113,7 @@ flowchart LR
 - **Matchable unit filtering.** `CurationV2.get_matchable_unit_ids(key, exclude_labels={"reject","noise","artifact"})` returns curated units with no excluded labels. Unlabeled units and units labeled only `accept` / `mua` are included.
 - **Projected FK on `UnitMatch.Pair`**: each side projects `CurationV2.Unit` → `(session_X_sorting_id, session_X_curation_id, unit_X_id)`. DataJoint enforces referential integrity — a pair cannot reference a unit that doesn't exist in the pinned curation.
 - **Singletons survive.** `TrackedUnit.make()` seeds the graph with the **full curated-unit universe** (every pinned curation's matchable units), not just nodes that appear in pair records. A unit the matcher emitted no pair for becomes a singleton `TrackedUnit` with `n_sessions_observed=1` and `median_match_probability=NULL`.
-- **Strict-by-default policy with bounded search.** A tracked unit requires **every pairwise edge in its node set** to exceed threshold (maximal cliques). Strict mode is bounded by `max_clique_search_seconds` and `max_strict_nodes`; exceeding either bound raises unless `allow_strict_fallback=True`, in which case the row records `policy_used="transitive_fallback"`. Fully transitive mode remains opt-in via `MatcherParameters.params["tracked_unit_policy"]="transitive"`, and the count of transitive-only edges per component is reported.
+- **Strict-only v1 policy with bounded graph size.** A tracked unit requires **every pairwise edge in its node set** to exceed threshold (maximal cliques). `max_strict_nodes` caps graph size; exceeding it raises `TrackedUnitBudgetExceededError`. No alternate tracked-unit policy or time budget ships in v1. `policy_used` is `varchar(32)` so future policies can be added without migration.
 - **Anchor NWB rule.** `UnitMatch.AnalysisNwbfile` parent is the first `SessionGroup.Member.nwb_file_name`. Cross-session provenance lives in `UnitMatchSelection.MemberCuration`, not the anchor NWB's metadata.
 
 ## Brain-region tracing for tracked units

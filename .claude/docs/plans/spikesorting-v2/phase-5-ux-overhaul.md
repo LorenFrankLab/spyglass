@@ -47,7 +47,7 @@ The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell n
 
 - **FigPack feasibility check FIRST**, before implementing anything. FigPack is the v2 curation UI, but the implementer must verify the upstream package is usable before writing the table. Tasks:
   1. Confirm the actual installable package set. Current upstream uses the core `figpack` package plus a spike-sorting extension package (`figpack-spike-sorting` on PyPI, imported as `figpack_spike_sorting` in the upstream repository); do not assume `figpack` alone provides spike-sorting views.
-  2. Verify the current spike-sorting extension API. Do not assume the stale placeholder `figpack.spike_sorting.build_curation_view(analyzer)` or `view.publish()` exists; pin the real import path, view-construction API, and upload method in this plan before writing the DataJoint table.
+  2. Verify the current spike-sorting extension API. Do not assume the stale example `figpack.spike_sorting.build_curation_view(analyzer)` or `view.publish()` exists; pin the real import path, view-construction API, and upload method in this plan before writing the DataJoint table.
   3. Test on a single example: build a curation view from a v2 SortingAnalyzer end-to-end and publish/upload to FigPack. Round-trip a known labels dict and merge-groups representation back via the verified API or documented state file. If FigPack can display a curation view but cannot persist edited curation state in a retrievable form, stop and escalate before schema finalization.
   4. Record the verified FigPack and `figpack-spike-sorting` versions in this phase's PR description and in the optional dependency lower bounds.
 

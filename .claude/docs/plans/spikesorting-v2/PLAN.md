@@ -15,18 +15,6 @@ For agent invocation, **load only the slice you need**:
 5. **Need broader scope / risks / dependency policy?** [overview.md](overview.md).
 6. **Need upstream-repo line refs / on-disk format details?** [appendix.md](appendix.md).
 
-## Executor notes
-
-- **Per-PR scope is the phase file.** Read PLAN.md, [shared-contracts.md](shared-contracts.md), and the matching phase file. `designs.md` definitions are binding; method-body sketches are illustrative unless labeled `BINDING`. `appendix.md` and `research-notes.md` are reference, not task lists.
-- **Shared contracts are binding.** Do not weaken a "do not weaken" invariant without revising every phase that depends on it.
-- **Phase 0c is a hard prerequisite.** No runtime v2 work lands until v1 runs under SI 0.104.
-- **`code_graph.py` lives in the spyglass-skill checkout.** Set once before running phase commands:
-
-```bash
-export SPYGLASS_SKILL_DIR="${SPYGLASS_SKILL_DIR:-../spyglass-skill/skills/spyglass}"
-test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
-```
-
 ## Files
 
 - [overview.md](overview.md) — goals, non-goals, integration points, risks, rollout strategy, open questions.

@@ -337,7 +337,8 @@ class ArtifactDetectionSelection(SpyglassMixin, dj.Manual):
         must be non-null. Returns PK-only dict per shared-contracts.
 
         See shared-contracts.md § Nullable XOR Foreign-Key Pattern for
-        the full three-layer defense (insert + populate-time re-check + CI).
+        the insert helper, populate-time re-check, and parametrized
+        integrity test.
         """
         from spyglass.spikesorting.v2.utils import _validate_xor
         _validate_xor(
@@ -374,7 +375,7 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
 
 **Design change from v1**: v1 inserts the artifact-removed interval directly into `IntervalList` with `artifact_id` (UUID) as the `interval_list_name`. This collides with user-named intervals and uses `skip_duplicates=True` (forbidden in custom `make()`). v2 stores artifact intervals on its own part table and exposes `ArtifactDetection.get_artifact_removed_intervals(key)` for consumers.
 
-**XOR re-validation (Layer 2 of three-layer defense)**: `ArtifactDetection.make()` MUST re-run `_validate_xor` against the upstream `ArtifactDetectionSelection` row at the start of `make()`, mirroring `Sorting.make()`'s pattern. This catches rows inserted via `dj.Manual.insert1()` that bypassed `insert_selection()`. See shared-contracts.md § Nullable XOR Foreign-Key Pattern.
+**XOR re-validation at populate time**: `ArtifactDetection.make()` MUST re-run `_validate_xor` against the upstream `ArtifactDetectionSelection` row at the start of `make()`, mirroring `Sorting.make()`'s pattern. This catches rows inserted via `dj.Manual.insert1()` that bypassed `insert_selection()`. See shared-contracts.md § Nullable XOR Foreign-Key Pattern.
 
 ```python
 def make(self, key):
@@ -470,7 +471,8 @@ class SortingSelection(SpyglassMixin, dj.Manual):
         Returns a single PK-only dict per shared-contracts.
 
         See shared-contracts.md § Nullable XOR Foreign-Key Pattern for
-        the three-layer defense.
+        the insert helper, populate-time re-check, and parametrized
+        integrity test.
         """
         from spyglass.spikesorting.v2.utils import _validate_xor
         _validate_xor(
@@ -505,9 +507,9 @@ class Sorting(SpyglassMixin, dj.Computed):
         FK to `BrainRegion` (see `common_ephys.py:79`), so the brain
         region is reachable via `Sorting.Unit * Electrode * BrainRegion`
         — no `BrainRegion` FK is duplicated on this part table. The
-        accessor methods walk that join. To represent "unknown" regions,
-        the underlying Electrode rows use the synthetic `BrainRegion`
-        row named "Unknown" rather than NULL.
+        accessor methods walk that join. Installs that need an unknown-region
+        sentinel should use a real `BrainRegion` row named "Unknown" rather
+        than NULL.
 
         Note on concat-sort `Electrode` anchoring: `Electrode` inherits
         the full `ElectrodeGroup` key plus `electrode_id`
@@ -1172,11 +1174,11 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
 ## MatcherParameters + UnitMatch + TrackedUnit
 
 Phase 4. Cross-session matching via the plugin protocol from shared-contracts.md.
-**Provisional until Phase 4a lands.** The table shapes below are the intended
-schema direction, but Phase 4a is an explicit technical spike that must update
-this section after walking the real UnitMatchPy API and on-disk input layout.
-Phase 4b must not implement these tables until the appendix, shared contracts,
-and this design section have been reconciled with the 4a findings.
+**PHASE4A_CONTRACT_STUB — finalized in Phase 4a.** The table shapes below are
+the intended schema direction, but Phase 4a is an explicit technical spike that
+must update this section after walking the real UnitMatchPy API and on-disk input
+layout. Phase 4b must not implement these tables until the appendix, shared
+contracts, and this design section have been reconciled with the 4a findings.
 
 ```python
 @schema
@@ -1332,10 +1334,6 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
     ---
     n_sessions_observed: int
     median_match_probability=NULL: float # NULL for singleton tracked units
-    n_transitive_only_edges=0: int       # 0 for strict-policy components
-                                          # (every pairwise edge exists);
-                                          # reserved for future transitive
-                                          # policy values.
     policy_used: varchar(32)              # algorithm path persisted on the row.
                                           # v1 ships only 'strict'; future
                                           # policy values can be inserted
@@ -1374,9 +1372,9 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
 
 **Algorithm — strict (maximal cliques) only for v1**: for three sessions A/B/C, if (A↔B, B↔C) are above threshold but (A↔C) is below, strict mode emits ≥2 components rather than lumping all three. A tracked unit requires every pairwise edge in its node set above threshold.
 
-**Bounded search**: `MatcherParameters.params["max_strict_nodes"]` (default `2000`) caps the graph size submitted to `networkx.find_cliques`. Exceeding the cap raises `TrackedUnitBudgetExceededError`; the user shrinks the session group or raises the cap. Strict mode iterates `find_cliques` lazily so the cap fires before exponential blowup. No fallback policy; no time budget; no `transitive` opt-in in v1.
+**Bounded search**: `MatcherParameters.params["max_strict_nodes"]` (default `2000`) caps the graph size submitted to `networkx.find_cliques`. Exceeding the cap raises `TrackedUnitBudgetExceededError`; the user shrinks the session group or raises the cap. Strict mode iterates `find_cliques` lazily so the cap fires before exponential blowup. No alternate tracked-unit policy or time budget ships in v1.
 
-Future policy values (transitive, transitive_fallback) are pure inserts into the `policy_used: varchar(32)` column — no migration required when they ship.
+Future policy values are pure inserts into the `policy_used: varchar(32)` column — no migration required when they ship.
 
 **Default threshold**: `0.5` for the `unitmatch` matcher. Configurable via `MatcherParameters.params["tracked_unit_threshold"]`.
 

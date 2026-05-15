@@ -166,7 +166,7 @@ def _validate_params(model_cls: type[BaseModel], params: dict) -> dict:
 
 ## MatcherProtocol — cross-session unit matching plugin interface
 
-**PROVISIONAL — finalized in Phase 4a.** The concrete signature below is a placeholder so Phase 4b's schema design has something to reference. **It will be rewritten by the Phase 4a technical spike** ([phase-4-unitmatch-cross-session.md § Phase 4a](phase-4-unitmatch-cross-session.md)) once the actual UnitMatchPy API has been walked end-to-end. Do NOT implement against the placeholder; wait for 4a's revision.
+**PHASE4A_CONTRACT_STUB — finalized in Phase 4a.** The concrete signature below is a temporary contract stub so Phase 4b's schema design has something to reference. **It must be rewritten by the Phase 4a technical spike** ([phase-4-unitmatch-cross-session.md § Phase 4a](phase-4-unitmatch-cross-session.md)) once the actual UnitMatchPy API has been walked end-to-end. Phase 4b must not start while this marker remains.
 
 What the contract IS committed to (these survive Phase 4a):
 
@@ -176,10 +176,10 @@ What the contract IS committed to (these survive Phase 4a):
 - **Determinism**: given fixed params, output is identical run-to-run (matcher sets internal seeds).
 - **Sparsity-friendly**: wrapper passes sparse-template data when SI's `sparse=True` is set (v2 default).
 
-Placeholder shape (will be replaced by 4a):
+Contract-stub shape (replaced by 4a):
 
 ```python
-# src/spyglass/spikesorting/v2/matcher_protocol.py — PROVISIONAL
+# src/spyglass/spikesorting/v2/matcher_protocol.py — PHASE4A_CONTRACT_STUB
 from typing import Protocol, runtime_checkable
 from dataclasses import dataclass
 from pathlib import Path
@@ -377,7 +377,7 @@ Two v2 tables declare two nullable typed FKs where exactly one must be non-NULL:
 | `SortingSelection` | `recording_id` (Recording) XOR `concat_recording_id` (ConcatenatedRecording) |
 | `ArtifactDetectionSelection` | `recording_id` (Recording) XOR `shared_artifact_group_name` (SharedArtifactGroup) |
 
-DataJoint does not support DB-level CHECK constraints, so XOR cannot be schema-enforced. The plan compensates with **three layers of defense**, all required:
+DataJoint does not support DB-level CHECK constraints, so XOR cannot be schema-enforced. The plan compensates with two mandatory runtime checks plus a small integrity test:
 
 ### Layer 1: shared validator at insert time
 
@@ -420,11 +420,11 @@ _validate_xor(
 )
 ```
 
-### Layer 3: small parametrized integrity test
+### Supporting integrity test
 
-One parametrized test in `tests/spikesorting/v2/test_integrity.py` queries each XOR table for both-NULL and both-set rows and asserts the result is empty. It runs with the rest of the v2 suite; not a separate nightly job.
+One parametrized test queries each XOR table for both-NULL and both-set rows and asserts the result is empty. It runs with the rest of the v2 suite; not a separate nightly job or operational integrity system.
 
-**Invariant — do not weaken**: Layers 1 and 2 are mandatory; Layer 2 (the populate-time re-check) is the most tempting to weaken and must be kept because Layer 1 alone is bypassable by any `dj.Manual` user.
+**Invariant — do not weaken**: Layer 1 and Layer 2 are mandatory. Layer 2 (the populate-time re-check) is the most tempting to weaken and must be kept because Layer 1 alone is bypassable by any `dj.Manual` user.
 
 ---
 
@@ -484,8 +484,8 @@ class Unit(SpyglassMixinPart):
     -> Electrode                       # the unit's peak-amplitude channel
     # No BrainRegion FK here — Spyglass's Electrode table has a NON-NULL
     # FK to BrainRegion (common_ephys.py:79), so brain region is reachable
-    # via `Sorting.Unit * Electrode * BrainRegion`. To represent "unknown",
-    # the upstream Electrode row uses a synthetic BrainRegion row named
+    # via `Sorting.Unit * Electrode * BrainRegion`. Installs that need an
+    # unknown-region sentinel should use a real BrainRegion row named
     # "Unknown" rather than NULL.
     peak_amplitude_uV: float           # of the unit's template on the peak channel
     n_spikes: int
@@ -535,7 +535,7 @@ Single-session sorts return the same shape as before (no `region_resolution` col
 **Invariants — do not weaken**:
 
 - `Sorting.Unit` is populated in the SAME `make()` call that creates the `Sorting` row. No "compute brain region later" — the brain region is a fact about the sort, not a separate stage.
-- `Sorting.Unit` has no `BrainRegion` FK; brain region is reached via `Sorting.Unit * Electrode * BrainRegion`. The Spyglass `Electrode` table's FK to `BrainRegion` is non-null (see [common_ephys.py:79](../../../../src/spyglass/common/common_ephys.py#L79)). Note that `BrainRegion`'s PK is `region_id: smallint auto_increment` (see [common_region.py:9](../../../../src/spyglass/common/common_region.py#L9)), NOT `region_name`. To represent unknown regions, Phase 0 fixture setup inserts a single `BrainRegion` row with `region_name="Unknown"` and uses the auto-generated `region_id` as the FK target — installs that already have an "Unknown" row reuse it. `ElectrodeGroup` also has a non-null `-> BrainRegion` FK ([common_ephys.py:31](../../../../src/spyglass/common/common_ephys.py#L31)) — for sort groups whose probe spans multiple regions, the per-electrode region (`Sorting.Unit * Electrode * BrainRegion`) is finer-grained than the per-group region.
+- `Sorting.Unit` has no `BrainRegion` FK; brain region is reached via `Sorting.Unit * Electrode * BrainRegion`. The Spyglass `Electrode` table's FK to `BrainRegion` is non-null (see [common_ephys.py:79](../../../../src/spyglass/common/common_ephys.py#L79)). Note that `BrainRegion`'s PK is `region_id: smallint auto_increment` (see [common_region.py:9](../../../../src/spyglass/common/common_region.py#L9)), NOT `region_name`. Installs that need an unknown-region sentinel should use a real `BrainRegion` row with `region_name="Unknown"` and use the auto-generated `region_id` as the FK target; the v2 plan does not add a Phase 0 database-seeding task for this. `ElectrodeGroup` also has a non-null `-> BrainRegion` FK ([common_ephys.py:31](../../../../src/spyglass/common/common_ephys.py#L31)) — for sort groups whose probe spans multiple regions, the per-electrode region (`Sorting.Unit * Electrode * BrainRegion`) is finer-grained than the per-group region.
 - `Sorting.get_unit_brain_regions` is a constant-time lookup against the part table (no template recomputation, no analyzer load).
 - Multi-region sort groups (polymer probes) are NOT collapsed; each unit's region reflects ITS peak channel, not the sort group's modal region.
 - Phase 1's `CurationV2` MUST also have a `Unit` part table mirroring `Sorting.Unit` so that curated unit removals (merges) are correctly reflected in the brain-region query without re-walking templates. `CurationV2.Unit` is populated by `CurationV2.insert_curation` from `Sorting.Unit` plus the merge_groups.
