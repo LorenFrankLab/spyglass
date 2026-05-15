@@ -48,13 +48,77 @@ Phase 0b checkpoint:
 
 **Designs referenced:** none — this phase is foundation work only. No production v2 table is declared.
 
+## Environment Setup (do this first)
+
+Consolidated setup recipe so an executor does not reconstruct it from
+`shared-contracts.md` + this file + `phase-0c`. This is the canonical procedure;
+the [Environment And Database Safety](shared-contracts.md#environment-and-database-safety)
+contract is the binding rationale.
+
+**Where to run**: a dev/CI machine, **not** a production-connected host. Phases
+0a/0b/0c need zero production access. Linux is preferred (MS4 / `mountainsort5`
+install cleanly there; macOS needs the platform guard from Phase 0c). Docker must
+be installed and runnable.
+
+1. **Isolated `uv` virtualenv, Python 3.11.** Do not install v2 dependencies into
+   a shared/base/conda environment.
+
+   ```bash
+   uv venv --python 3.11 .venv-spikesorting-v2
+   source .venv-spikesorting-v2/bin/activate
+   uv pip install -e ".[test]"
+   uv pip install "spikeinterface>=0.104,<0.105"
+   ```
+
+   Phase 0a keeps the project-wide `pyproject.toml` SI pin unchanged; the v2 venv
+   overrides it locally. This env is a temporary v2 scaffold smoke environment,
+   not a resolved project environment, because `pyproject.toml` still declares
+   the SI 0.99 pin. Do not use `uv pip check` as a Phase 0a pass criterion; the
+   resolver-clean package boundary is Phase 0c, in its own `.venv-spikesorting-v2-si0104` venv
+   (Phase 0c resolver-checks Python 3.10/3.11/3.12 — 3.11 is the development
+   default). v1 active-runtime work stays in the default current-pin environment.
+
+2. **Isolated DataJoint database — never production.** Runtime/integration tests
+   use the existing pytest Docker MySQL path: `tests/conftest.py` starts a
+   Docker-backed `datajoint/mysql:8.0` server, writes a local `dj_local_conf*.json`,
+   and sets `database.prefix = "pytests"`. Confirm Docker is up and that this path
+   still works before Phase 0b. Standalone Phase 0b scripts do **not** inherit
+   pytest's fixture setup automatically, so they must call the shared v2 test-env
+   bootstrap described below or accept explicit `--dj-config`, `--database-prefix`,
+   and `--base-dir` arguments before connecting. For manual fixture/baseline runs,
+   the repo's `docker-compose.yml` is the fallback — only with a dedicated test
+   prefix.
+
+3. **Temporary `SPYGLASS_BASE_DIR`.** Point Spyglass directories at a temp path
+   under the test temp dir, never shared lab storage. Any test reaching a
+   filesystem-destructive path must assert this first and fail fast if the
+   resolved base dir looks like shared storage (e.g. contains `stelmo`) — see the
+   destructive-test guardrail in the safety contract.
+
+   ```bash
+   export SPYGLASS_BASE_DIR="${SPYGLASS_BASE_DIR:-$PWD/tests/_data/spikesorting_v2}"
+   mkdir -p "$SPYGLASS_BASE_DIR"
+   ```
+
+4. **Production access is optional and read-only.** Only the v1 real-data
+   baseline (Phase 0b) and parity tests touch production, gated by
+   `SPYGLASS_ALLOW_PRODUCTION_SMOKE=1`, for read-only metadata lookup; all writes
+   still target the test prefix and temp directories. Prefer copying a real NWB
+   to the dev machine over connecting development work to production.
+
+5. **`SPYGLASS_SKILL_DIR`** must point at the spyglass skill so `code_graph.py`
+   is available: `export SPYGLASS_SKILL_DIR="${SPYGLASS_SKILL_DIR:-../spyglass-skill/skills/spyglass}"`.
+
+The `pytest-v2` CI job (added below) is the automated counterpart of step 1: it
+runs only `tests/spikesorting/v2/` under SI 0.104.
+
 ## Phase 0a Tasks — Scaffolding And Gates
 
 - **Do not add direct Pydantic or Zarr pins in Phase 0.** Pydantic is required by the v2 `_params/` models, but Phase 0 imports those models only in the SI 0.104 `pytest-v2` job; the default SI 0.99/v1 CI job excludes `tests/spikesorting/v2/` until the prerequisite SI bump lands. Pydantic enters the normal Spyglass runtime transitively through the SpikeInterface 0.104 prerequisite checkpoint. Zarr remains a SpikeInterface runtime dependency, but v2 does not introduce a Spyglass Zarr storage default in Phase 0. A future storage-benchmark PR may evaluate Zarr through `AnalysisNwbfile`, without changing the Phase 1 table schema.
 
 - **Document Phase 0c as a prerequisite work item, not a Phase 0a/0b task.** Phase 0a/0b cannot upgrade SI to 0.104 because v0/v1 active-runtime code still uses WaveformExtractor-era APIs (`extract_waveforms`, `load_waveforms`, `WaveformExtractor`). [Phase 0c](phase-0c-si-0104-prerequisite.md) owns the resolver checks, dependency bump, legacy runtime audit, and clear guard/docs for v0/v1 workflows that remain legacy-environment-only. Until Phase 0c completes, **Phase 1 cannot ship**. Phase 0a documents the gating but does not perform it.
 
-- **Set up the isolated environment and database convention.** v2 development happens in a dedicated `uv` virtualenv with SI 0.104 pre-installed (overriding the pyproject pin); v1 active-runtime work continues in the default current-pin env until Phase 0c defines the legacy boundary. Do not install v2 resolver-test dependencies into base/conda. CI gains a new job `pytest-v2` that runs only `tests/spikesorting/v2/` under SI 0.104; the existing `pytest` job stays on the current pin and explicitly excludes `tests/spikesorting/v2/` until the compatibility-boundary checkpoint lands. Runtime DataJoint tests use the isolated pytest Docker MySQL path by default (`tests/conftest.py` starts the server and sets `database.prefix = "pytests"`); manual fixture/baseline runs may use `docker-compose.yml` only with a dedicated test prefix and temporary `SPYGLASS_BASE_DIR`. The v2 package `__init__.py` must not import `_params` or any other Pydantic-dependent module in Phase 0, so `import spyglass.spikesorting.v2` remains harmless in the default environment.
+- **Set up the isolated environment and database convention.** v2 development happens in a dedicated `uv` virtualenv with SI 0.104 pre-installed (overriding the pyproject pin); v1 active-runtime work continues in the default current-pin env until Phase 0c defines the legacy boundary. This override env is allowed to be metadata-inconsistent with the still-pinned project dependency; Phase 0a proves only that the v2 scaffold tests run under SI 0.104, not that the whole project resolves under SI 0.104. Do not install v2 resolver-test dependencies into base/conda. CI gains a new job `pytest-v2` that runs only `tests/spikesorting/v2/` under SI 0.104; the existing `pytest` job stays on the current pin and explicitly excludes `tests/spikesorting/v2/` until the compatibility-boundary checkpoint lands. Runtime DataJoint tests use the isolated pytest Docker MySQL path by default (`tests/conftest.py` starts the server and sets `database.prefix = "pytests"`); standalone fixture/baseline scripts must explicitly bootstrap the same test database prefix and temporary `SPYGLASS_BASE_DIR` before any Spyglass import that reads config. Manual runs may use `docker-compose.yml` only with a dedicated test prefix and temporary `SPYGLASS_BASE_DIR`. The v2 package `__init__.py` must not import `_params` or any other Pydantic-dependent module in Phase 0, so `import spyglass.spikesorting.v2` remains harmless in the default environment.
 
 - **`code_graph.py` precondition check on existing FK targets** (run BEFORE writing any v2 schemas). For every Spyglass table v2 plans to FK into — `Session`, `Nwbfile`, `IntervalList`, `Raw`, `Electrode`, `ElectrodeGroup`, `Probe`, `ProbeType`, `BrainRegion`, `LabTeam`, `LabMember`, `Subject`, `AnalysisNwbfile`, `SpikeSortingOutput`, plus v1 ancestors (`SortGroup`, `SpikeSortingRecording`, `SpikeSorting`, `CurationV1`, etc. for parity reference) — run `python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe <name>`, using `--file <path-relative-to-src>` for ambiguous names (for example, `--file spyglass/common/common_nwbfile.py` for the production `AnalysisNwbfile`, not `src/spyglass/...`). Record the precise PK/FK structure of each in `precondition-check.md`. Failure mode caught: upstream schema drift between when the plan was written and when v2 is implemented (e.g., if `Electrode -> BrainRegion` became nullable, v2's brain-region-tracing design would silently break). The implementer re-runs the check and updates the recorded output if anything has drifted.
 
@@ -99,7 +163,7 @@ Phase 0b checkpoint:
 - **Add a sanity test for scaffolding** in `tests/spikesorting/v2/test_scaffold.py` (run only in the SI 0.104 `pytest-v2` job until the prerequisite SI bump lands):
   - `test_module_imports` — `from spyglass.spikesorting import v2` succeeds.
   - `test_si_version_min` — in the `pytest-v2` job only, `import spikeinterface as si; from packaging.version import Version; assert Version(si.__version__) >= Version("0.104")`. The default v1 CI job still uses the current project pin and excludes `tests/spikesorting/v2/`; this test proves the dedicated v2 job is actually running in the modern-SI environment that Phase 1 requires.
-  - `test_preprocessing_params_schema_default` — `PreprocessingParamsSchema().model_dump()` returns the expected dict shape; `model_validate({"bandpass_filter": {"freq_min": -1}})` raises `ValidationError`.
+  - `test_preprocessing_params_schema_default` — `PreprocessingParamsSchema().model_dump()` returns the v1-shaped default (`frequency_min=300`, `frequency_max=6000`, `margin_ms=5`, `seed=0`, `min_segment_length=1`); `model_validate({"frequency_min": -1})` raises `ValidationError`.
   - `test_resolved_job_kwargs_merge` — set `dj.config['custom']['spikesorting_v2_job_kwargs'] = {"n_jobs": 4}`; assert `_resolved_job_kwargs() == {"n_jobs": 4, "chunk_duration": "1s", "progress_bar": True}` (config over SI global defaults); assert a per-row blob wins over config (`_resolved_job_kwargs({"n_jobs": 8})["n_jobs"] == 8`); assert later args win over earlier (`_resolved_job_kwargs({"n_jobs": 8}, {"n_jobs": 2})["n_jobs"] == 2`); assert a `None` arg is skipped (`_resolved_job_kwargs(None)["n_jobs"] == 4`).
 
 - **Documentation update for 0a.** Add a short section to [CHANGELOG.md](CHANGELOG.md) under an "Unreleased" heading: "v2 spike sorting scaffolding: new `spyglass.spikesorting.v2` module tree with empty stubs; no runtime dependency pins changed; v1 remains the production path. The SpikeInterface 0.104 upgrade is a prerequisite checkpoint before runtime v2 work." No CLAUDE.md changes in this slice.
@@ -115,7 +179,8 @@ Phase 0b checkpoint:
     ]
     ```
     Installed only when running ground-truth validation tests; not required for v2 runtime.
-  - **Fixture generator script**: new file `tests/spikesorting/v2/fixtures/generate_mearec.py` (NOT a test — no `test_` prefix; manually invoked once to populate cached fixtures). Functionality:
+  - **Standalone script environment bootstrap**: add `tests/spikesorting/v2/test_env.py` with `bootstrap_v2_test_environment(base_dir: Path, database_prefix: str = "pytests", *, allow_production_smoke: bool = False) -> None`. Both `generate_mearec.py` and `baseline_capture.py` must call it before inserting/querying Spyglass tables. The bootstrap sets/validates `SPYGLASS_BASE_DIR`, loads the local Docker/test DataJoint config or the explicit `--dj-config`, sets `dj.config["database.prefix"]`, and refuses to run if the prefix is empty/production-like or the base dir resolves outside `tests/_data/`, `/tmp`, or another explicitly supplied temp directory. This is required because pytest's `tests/conftest.py` isolation does not apply to standalone scripts.
+  - **Fixture generator script**: new file `tests/spikesorting/v2/fixtures/generate_mearec.py` (NOT a test — no `test_` prefix; manually invoked once to populate cached fixtures). CLI args: `--base-dir`, `--database-prefix`, and optional `--dj-config`; defaults match the shared bootstrap (`tests/_data/spikesorting_v2`, `pytests`). Functionality:
     1. Generate three reference recordings via `mearec.gen_recordings(...)`:
        - **`mearec_polymer_128ch_60s.h5`**: 128-channel LLNL polymer probe — current Frank-lab implant configuration ([PMC11463554](https://pmc.ncbi.nlm.nih.gov/articles/PMC11463554/); [Neuron 2026 S0896-6273(26)00048-6](https://www.cell.com/neuron/fulltext/S0896-6273(26)00048-6)). Geometry follows the local `trodes_to_nwb` reference probe metadata `src/trodes_to_nwb/device_metadata/probe_metadata/128c-4s6mm6cm-15um-26um-sl.yml`: 4 shanks, 32 contacts per shank, 15 μm contact diameter, 26 μm contact pitch within shank, 128 channels total. Fixture parameters: 60 s, ~24 ground-truth units distributed across the four shanks, no drift, deterministic seed. **This is the primary v2 validation fixture.** Geometry is supplied as a custom probeinterface JSON derived from that probe metadata; the MEArec → NWB converter writes one `ElectrodeGroup` for the whole probe, matching `trodes_to_nwb`, and stores shank membership in the Novela `Probe.Shank` objects plus the electrode-table `probe_shank` column.
        - **`mearec_neuropixels_60s.h5`**: Neuropixels-128 probe, 60 s, 20 ground-truth units, no drift, deterministic seed. Used for Phase 1 sorter smoke/correctness coverage on dense-probe geometry, but secondary to polymer for lab-internal use.
@@ -150,7 +215,7 @@ Phase 0b checkpoint:
   | **Real lab dataset** | User-provided via env var `SPIKESORTING_V2_REAL_NWB_PATH` | v1-parity smoke test (Phase 1); memory/runtime budget (Phase 3); end-to-end "works on real data" smoke (Phase 5). Tests skip if env var unset. | Yes |
 
 - **Add v1 baseline capture on the real-lab dataset (not minirec):**
-  - New file `tests/spikesorting/v2/baseline_capture.py`, CLI args `--nwb-file`, `--sort-group-id`, `--interval-list-name`, `--output-dir`. Default `--nwb-file` reads from `SPIKESORTING_V2_REAL_NWB_PATH`.
+  - New file `tests/spikesorting/v2/baseline_capture.py`, CLI args `--nwb-file`, `--sort-group-id`, `--interval-list-name`, `--output-dir`, `--base-dir`, `--database-prefix`, and optional `--dj-config`. Default `--nwb-file` reads from `SPIKESORTING_V2_REAL_NWB_PATH`; default `--database-prefix` is `pytests`; default `--base-dir` is `$SPYGLASS_BASE_DIR` or `tests/_data/spikesorting_v2`.
   - Runs the v1 pipeline end-to-end with `clusterless_thresholder` (deterministic peak-detection path; v1's clusterless sorter parameters do not include a seed) on the real-data NWB inside the isolated integration database. If the developer must query production to locate the source NWB or metadata, the query is read-only and requires `SPYGLASS_ALLOW_PRODUCTION_SMOKE=1`; all inserts/populates/write paths still target the test prefix and temporary analysis directories.
   - Saves small committed artifacts `baseline_v1_spike_times.pkl` and `baseline_v1_recording_meta.json`. If a units NWB export is needed for local debugging, write it outside git and record only its local path in the metadata JSON.
   - On successful capture, prints all relevant IDs + paths.
@@ -182,7 +247,8 @@ Phase 0b checkpoint:
 1. **`_hash_nwb_recording` is deterministic** (slow): same backend, same `ElectricalSeries` bytes produce the same hash on repeated calls.
 2. **MEArec fixture round-trips Spyglass ingestion in the isolated test database** (slow): a generated fixture runs through `insert_sessions(...)` (or equivalent common-table population); `Session`, `Raw`, non-empty `Electrode`, and expected `IntervalList` rows exist; `ImportedSpikeSorting().insert_from_nwbfile(...)` puts ground-truth Units into `SpikeSortingOutput.ImportedSpikeSorting`.
 3. **v1 baseline capture works on real data without production writes** (slow, integration, env-var-gated): when `SPIKESORTING_V2_REAL_NWB_PATH` is set, `baseline_capture.py` produces the expected small committed artifacts (`baseline_v1_spike_times.pkl`, `baseline_v1_recording_meta.json`) while connected to the isolated integration database. Skipped with an explicit message if the env var is unset. Production-connected metadata lookup requires `SPYGLASS_ALLOW_PRODUCTION_SMOKE=1` and remains read-only. Real NWB/unit files stay outside git; if a local units NWB export is produced, only its path is recorded in metadata.
-4. **v1 regression guard**: full v1 test suite passes under the current SI pin (no SI bump in Phase 0).
+4. **Standalone scripts enforce test isolation**: `generate_mearec.py` and `baseline_capture.py` call the shared v2 test-env bootstrap before any DB write/query, set `database.prefix="pytests"` by default, write under the temporary `SPYGLASS_BASE_DIR`, and fail fast if pointed at production-like config or shared storage without the explicit production-smoke gate.
+5. **v1 regression guard**: full v1 test suite passes under the current SI pin (no SI bump in Phase 0).
 
 ## Commands to run
 
@@ -191,10 +257,12 @@ Phase 0b checkpoint:
 Run the v2 scaffold test and code-graph checks in the isolated SI 0.104 environment used by the new `pytest-v2` job:
 
 ```bash
-uv venv .venv-spikesorting-v2
+uv venv --python 3.11 .venv-spikesorting-v2
 source .venv-spikesorting-v2/bin/activate
 uv pip install -e ".[test]"
 uv pip install "spikeinterface>=0.104,<0.105"
+export SPYGLASS_BASE_DIR="${SPYGLASS_BASE_DIR:-$PWD/tests/_data/spikesorting_v2}"
+mkdir -p "$SPYGLASS_BASE_DIR"
 
 export SPYGLASS_SKILL_DIR="${SPYGLASS_SKILL_DIR:-../spyglass-skill/skills/spyglass}"
 test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
@@ -218,19 +286,29 @@ pytest tests/spikesorting/v1/ -q
 
 ### Phase 0b commands
 
-Run these in the isolated SI 0.104 validation environment after Phase 0a has landed.
+Run these in the isolated SI 0.104 validation environment after Phase 0a has landed
+and after the `spikesorting-v2-validation` extra has been added to `pyproject.toml`.
+Generate/cache fixtures before running fixture-dependent tests.
 
 ```bash
 source .venv-spikesorting-v2/bin/activate
+uv pip install -e ".[test,spikesorting-v2-validation]"
+uv pip install "spikeinterface>=0.104,<0.105"
+export SPYGLASS_BASE_DIR="${SPYGLASS_BASE_DIR:-$PWD/tests/_data/spikesorting_v2}"
+mkdir -p "$SPYGLASS_BASE_DIR"
 export SPYGLASS_SKILL_DIR="${SPYGLASS_SKILL_DIR:-../spyglass-skill/skills/spyglass}"
 test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
 
+python tests/spikesorting/v2/fixtures/generate_mearec.py \
+  --base-dir "$SPYGLASS_BASE_DIR" \
+  --database-prefix pytests
 pytest tests/spikesorting/v2/ -q
-
-python tests/spikesorting/v2/fixtures/generate_mearec.py
 if [[ -n "${SPIKESORTING_V2_REAL_NWB_PATH:-}" ]]; then
   test "${SPYGLASS_ALLOW_PRODUCTION_SMOKE:-0}" != "1" || echo "Production smoke gate enabled: keep writes on test prefix/temp dirs."
-  python tests/spikesorting/v2/baseline_capture.py --output-dir tests/spikesorting/v2/baselines
+  python tests/spikesorting/v2/baseline_capture.py \
+    --output-dir tests/spikesorting/v2/baselines \
+    --base-dir "$SPYGLASS_BASE_DIR" \
+    --database-prefix pytests
 fi
 
 git diff --check -- src/spyglass/spikesorting/v2 tests/spikesorting/v2 .claude/docs/plans/spikesorting-v2
