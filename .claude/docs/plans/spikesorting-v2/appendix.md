@@ -158,7 +158,12 @@ Source: https://kilosort.readthedocs.io/en/latest/parameters.html
 
 **Core API**:
 
-**PHASE4A_CONTRACT_STUB — finalized in Phase 4a.** The sketch below captures partial planning-time observations only. Phase 4a must replace it with the exact UnitMatchPy import path, entry-point calls, input bundle layout, output schema, and measured runtime/memory behavior before Phase 4b starts.
+**PHASE4A_CONTRACT_STUB — finalized in Phase 4a.** If this marker is still
+present, the UnitMatchPy API has not been verified and Phase 4b has not started.
+The sketch below captures partial planning-time observations only. Phase 4a
+must replace it with the exact UnitMatchPy import path, entry-point calls, input
+bundle layout, output schema, and measured runtime/memory behavior before Phase
+4b starts.
 
 ```python
 # Phase 4a must replace this sketch with imports verified in the target env.

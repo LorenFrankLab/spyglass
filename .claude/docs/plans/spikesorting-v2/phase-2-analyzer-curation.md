@@ -26,13 +26,14 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
 - [.claude/docs/plans/spikesorting-v2/appendix.md § Quality metric renames in 0.104](appendix.md#quality-metric-renames-in-0104) — what metric names changed.
 - [.claude/docs/plans/spikesorting-v2/appendix.md § SortingAnalyzer extension dependencies](appendix.md#sortinganalyzer-extension-dependencies) — what to compute before metrics.
 
-**Contracts referenced:**
+**Global invariants apply:** [Environment And Database Safety](shared-contracts.md#environment-and-database-safety) and [Code Artifact Naming](shared-contracts.md#code-artifact-naming).
+
+**Phase-specific contracts referenced:**
 
 - [SortingAnalyzer Storage Layout](shared-contracts.md#sortinganalyzer-storage-layout) — adds extensions to an existing analyzer in place (the on-disk folder grows; this is supported by SI binary_folder format).
-- [Environment And Database Safety](shared-contracts.md#environment-and-database-safety) — recompute/delete validation must run in an isolated database and temporary storage paths.
-- [Code Artifact Naming](shared-contracts.md#code-artifact-naming) — tests/helpers use behavior names, not phase-number names.
 - [Pydantic Parameter Schema Convention](shared-contracts.md#pydantic-parameter-schema-convention) — `QualityMetricParameters`, `AutoCurationRules`, and `AutoCurationRules.Rule` inserts get Pydantic-backed validation.
 - [Job-Kwargs Resolution](shared-contracts.md#job-kwargs-resolution) — extension compute uses resolved kwargs.
+- [Custom Exception Classes](shared-contracts.md#custom-exception-classes) — recompute and empty-sort errors use the shared exception module.
 
 **Designs referenced:** [AnalyzerCuration (replaces v1 MetricCuration + BurstPair)](designs.md#analyzercuration-replaces-v1-metriccuration--burstpair).
 

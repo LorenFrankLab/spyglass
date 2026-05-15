@@ -40,7 +40,9 @@ Phase 1 is large. The implementer may land it as one PR or as the following reco
 - [.claude/docs/plans/spikesorting-v2/appendix.md § SpikeInterface 0.99 → 0.104 migration cheat sheet](appendix.md#spikeinterface-099--0104-migration-cheat-sheet) — API rename table.
 - [.claude/docs/plans/spikesorting-v2/appendix.md § MountainSort 5 install + params](appendix.md#mountainsort-5-install--params) — default params.
 
-**Contracts referenced:** [Environment And Database Safety](shared-contracts.md#environment-and-database-safety), [Code Artifact Naming](shared-contracts.md#code-artifact-naming), [SortingAnalyzer Storage Layout](shared-contracts.md#sortinganalyzer-storage-layout), [Pydantic Parameter Schema Convention](shared-contracts.md#pydantic-parameter-schema-convention), [SpikeSortingOutput Part-Table Convention for v2](shared-contracts.md#spikesortingoutput-part-table-convention-for-v2), [Job-Kwargs Resolution](shared-contracts.md#job-kwargs-resolution), [Curation Label Enum](shared-contracts.md#curation-label-enum), [`insert_selection()` Return-Value Normalization](shared-contracts.md#insert_selection-return-value-normalization), [Source Part Pattern](shared-contracts.md#source-part-pattern).
+**Global invariants apply:** [Environment And Database Safety](shared-contracts.md#environment-and-database-safety) and [Code Artifact Naming](shared-contracts.md#code-artifact-naming).
+
+**Phase-specific contracts referenced:** [SortingAnalyzer Storage Layout](shared-contracts.md#sortinganalyzer-storage-layout), [Pydantic Parameter Schema Convention](shared-contracts.md#pydantic-parameter-schema-convention), [SpikeSortingOutput Part-Table Convention for v2](shared-contracts.md#spikesortingoutput-part-table-convention-for-v2), [Job-Kwargs Resolution](shared-contracts.md#job-kwargs-resolution), [Curation Label Enum](shared-contracts.md#curation-label-enum), [`insert_selection()` Return-Value Normalization](shared-contracts.md#insert_selection-return-value-normalization), [Source Part Pattern](shared-contracts.md#source-part-pattern), [Custom Exception Classes](shared-contracts.md#custom-exception-classes).
 
 **Designs referenced:** [SortGroupV2](designs.md#sortgroupv2), [PreprocessingParameters + RecordingSelection + Recording](designs.md#preprocessingparameters--recordingselection--recording), [ArtifactDetectionParameters + ArtifactDetection](designs.md#artifactdetectionparameters--artifactdetection), [SorterParameters + SortingSelection + Sorting](designs.md#sorterparameters--sortingselection--sorting), [CurationV2](designs.md#curationv2).
 
@@ -103,7 +105,7 @@ Phase 1 is large. The implementer may land it as one PR or as the following reco
   - NO metrics / auto-curation hookup (Phase 2 adds).
   - NO concat support (Phase 3 extends).
   - NO matcher / FigPack (Phases 4–5).
-  - Phase 1 ships **3 presets**: `franklab_tetrode_mountainsort4`, `franklab_tetrode_mountainsort5`, `clusterless_thresholder_default`. The preset is a Pydantic-validated bundle of Lookup-row names; the orchestrator looks them up at first call.
+  - Phase 1 ships **3 presets**: `franklab_tetrode_mountainsort4`, `franklab_tetrode_mountainsort5`, `franklab_tetrode_clusterless_thresholder`. The preset is a Pydantic-validated bundle of Lookup-row names; the orchestrator looks them up at first call.
   - Returns a manifest dict listing every `(stage, key)` tuple inserted/populated plus the final `merge_id`.
   - Idempotent: re-running with the same inputs finds the same existing rows and returns the same manifest, no duplicates.
 
@@ -161,7 +163,7 @@ Behaviors the Phase 1 validation goals must cover. Implementer chooses test name
 - `mearec_polymer_128ch_60s.nwb` with planted brain regions: `Sorting.get_unit_brain_regions(key)` matches the planted soma → peak-channel → group mapping (directly tests unit→region tracing).
 - `minirec` plumbing-only: pipeline chain produces a merge_id; **no correctness claim**.
 - `SPIKESORTING_V2_REAL_NWB_PATH` env-var gated: v1↔v2 parity per tolerances (`clusterless_thresholder` ±1 sample; MS4/MS5 ±50% unit count + ±30% median FR). Skipped if env var unset. The test uses the isolated database/write directories; `SPYGLASS_ALLOW_PRODUCTION_SMOKE=1` permits read-only production metadata lookup only.
-- `run_v2_pipeline(..., preset="clusterless_thresholder_default")` returns a complete manifest; second call returns identical manifest with no duplicate inserts; unknown preset raises `ValueError`.
+- `run_v2_pipeline(..., preset="franklab_tetrode_clusterless_thresholder")` returns a complete manifest; second call returns identical manifest with no duplicate inserts; unknown preset raises `PipelineInputError`.
 
 ## Commands to run
 

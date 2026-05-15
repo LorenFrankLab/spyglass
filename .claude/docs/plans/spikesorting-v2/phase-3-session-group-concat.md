@@ -21,13 +21,14 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
 - [src/spyglass/spikesorting/v2/sorting.py](../../../../src/spyglass/spikesorting/v2/sorting.py) (Phase 1) — `SortingSelection` needs polymorphic input FK (either `Recording` or `ConcatenatedRecording`).
 - [.claude/docs/plans/spikesorting-v2/appendix.md § Motion correction presets](appendix.md#motion-correction-presets) — drift correction preset table.
 
-**Contracts referenced:**
+**Global invariants apply:** [Environment And Database Safety](shared-contracts.md#environment-and-database-safety) and [Code Artifact Naming](shared-contracts.md#code-artifact-naming).
+
+**Phase-specific contracts referenced:**
 
 - [SortingAnalyzer Storage Layout](shared-contracts.md#sortinganalyzer-storage-layout) — the concatenated sort produces one analyzer per concat, same layout.
-- [Environment And Database Safety](shared-contracts.md#environment-and-database-safety) — chronic concat writes large AnalysisNwbfile artifacts and must be validated away from production storage.
-- [Code Artifact Naming](shared-contracts.md#code-artifact-naming) — tests/helpers use behavior names, not phase-number names.
 - [Pydantic Parameter Schema Convention](shared-contracts.md#pydantic-parameter-schema-convention) — `MotionCorrectionParameters` was declared in Phase 1 and is consumed here.
 - [Job-Kwargs Resolution](shared-contracts.md#job-kwargs-resolution) — concat materialization is the heaviest write; uses resolved kwargs.
+- [Custom Exception Classes](shared-contracts.md#custom-exception-classes) — concat precondition and brain-region errors must use the shared messages.
 
 **Designs referenced:** [SessionGroup + ConcatenatedRecording](designs.md#sessiongroup--concatenatedrecording).
 
@@ -35,7 +36,7 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
 
 - **Method-body changes only.** Phase 3 modifies Phase-1-declared code in `session_group.py` and `sorting.py`: implement `ConcatenatedRecording.make()`, lift `SortingSelection.insert_selection()`'s concat rejection, add `Sorting.make()` recording-resolution dispatch, and add `SessionGroup.create_group()` multi-day validation. Definition strings stay unchanged.
 - **Implement Phase-3 method bodies on the Phase-1-declared `session_group.py` schema:**
-  - `SessionGroup` Manual with `Member` Part. The master PK is `(session_group_owner, session_group_name)`, where `session_group_owner` is a projected `LabTeam.team_name`; per-member `team_name` remains on `Member` because collaborations may mix teams and concat selection must find each member's intended `RecordingSelection`. Recording dates are derived from `Session.session_start_time` when validating or reading the group, not stored on Member rows.
+  - `SessionGroup` Manual with `Member` Part. The master PK is `(session_group_owner, session_group_name)`, where `session_group_owner` is a projected `LabTeam.team_name`; per-member `team_name` remains on `Member` because collaborations may mix teams and concat selection must find each member's intended `RecordingSelection`. If a member dict omits `team_name`, `create_group()` defaults it to `session_group_owner`; mixed-team groups override it per member. Recording dates are derived from `Session.session_start_time` when validating or reading the group, not stored on Member rows.
   - `create_group(session_group_owner, session_group_name, members, description="", allow_multi_day=False)` — atomic insert + Member rows. **Same-day is the default**; multi-day requires `allow_multi_day=True` and an explicit motion-correction preset on the downstream `ConcatenatedRecording` (no auto-DREDge). The error message for multi-day-without-opt-in points users at sort-then-match as the recommended cross-day path. See [designs.md § SessionGroup + ConcatenatedRecording](designs.md#sessiongroup--concatenatedrecording).
   - `MotionCorrectionParameters` default rows are declared in Phase 1 and consumed here. `preset="auto"` is a Spyglass alias resolved inside `ConcatenatedRecording.make()` before calling SI: it maps to `rigid_fast` for same-day groups and raises for multi-day groups. It is not passed through to `spikeinterface.preprocessing.correct_motion`.
   - `ConcatenatedRecording` Computed with `make()` that:
@@ -85,8 +86,8 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
 
 Behaviors the Phase 3 validation goals must cover. Implementer chooses test names and splits.
 
-1. **SessionGroup multi-day gate**: same-day groups insert cleanly with default `allow_multi_day=False`; multi-day groups raise without the flag (message points at sort-then-match); multi-day with `allow_multi_day=True` succeeds; `SessionGroup.is_multi_day(key)` agrees.
-2. **Member dates are derived, not stored**: `create_group` and `is_multi_day` derive dates from `Session.session_start_time`; Member rows have no `recording_date` column and callers cannot override dates.
+1. **SessionGroup multi-day gate**: same-day groups insert cleanly with default `allow_multi_day=False`; multi-day groups raise `SessionGroupDateError` without the flag (message points at sort-then-match); multi-day with `allow_multi_day=True` succeeds; `SessionGroup.is_multi_day(key)` agrees.
+2. **Member dates are derived, not stored**: `create_group` and `is_multi_day` derive dates from `Session.session_start_time`; Member rows have no `recording_date` column and callers cannot override dates (`recording_date` input raises `SessionGroupDateError`).
 3. **`create_group` atomicity**: forced second-Member insert failure leaves no master row and no partial Member rows.
 4. **SessionGroup owner namespaces names**: two `session_group_owner` values can both use `session_group_name="day1"` without collision.
 5. **MotionCorrectionParameters validation**: bogus presets raise at insert; `preset="auto"` succeeds on single-day groups and raises on multi-day populate.

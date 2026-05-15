@@ -201,7 +201,10 @@ class RecordingSelection(SpyglassMixin, dj.Manual):
         if len(existing) == 1:
             return existing[0]
         if len(existing) > 1:
-            raise ValueError(f"Ambiguous existing selection: {len(existing)} matches")
+            raise DuplicateSelectionError(
+                f"RecordingSelection has {len(existing)} duplicate selection rows "
+                f"for {keys_minus_uuid}"
+            )
         key["recording_id"] = uuid.uuid4()
         cls.insert1(key)
         return {k: key[k] for k in cls.primary_key}
@@ -1004,7 +1007,9 @@ class SessionGroup(SpyglassMixin, dj.Manual):
         rows because the master PK is (session_group_owner, session_group_name).
 
         members: list of dicts with keys
-            nwb_file_name, sort_group_id, interval_list_name, team_name.
+            nwb_file_name, sort_group_id, interval_list_name, optional team_name.
+            Missing team_name defaults to session_group_owner for single-team
+            groups; mixed-team groups override it per member.
 
         Recording dates are derived from each member's Session row when
         validating multi-day gates. They are not persisted on Member rows.
@@ -1023,7 +1028,7 @@ class SessionGroup(SpyglassMixin, dj.Manual):
         dates: list = []
         for i, m in enumerate(members):
             if "recording_date" in m:
-                raise ValueError(
+                raise SessionGroupDateError(
                     "recording_date is derived from Session.session_start_time; "
                     "do not pass it in member dictionaries"
                 )
@@ -1033,6 +1038,7 @@ class SessionGroup(SpyglassMixin, dj.Manual):
             dates.append(derived_date)
             rows.append({
                 **m,
+                "team_name": m.get("team_name", session_group_owner),
                 "session_group_owner": session_group_owner,
                 "session_group_name": session_group_name,
                 "member_index": i,
@@ -1040,7 +1046,7 @@ class SessionGroup(SpyglassMixin, dj.Manual):
 
         unique_dates = set(dates)
         if len(unique_dates) > 1 and not allow_multi_day:
-            raise ValueError(
+            raise SessionGroupDateError(
                 f"Members span {len(unique_dates)} distinct dates "
                 f"({sorted(unique_dates)}); multi-day groups require "
                 f"allow_multi_day=True. Recommended path for cross-day "
@@ -1191,11 +1197,13 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
 ## MatcherParameters + UnitMatch + TrackedUnit
 
 Phase 4. Cross-session matching via the plugin protocol from shared-contracts.md.
-**PHASE4A_CONTRACT_STUB — finalized in Phase 4a.** The table shapes below are
-the intended schema direction, but Phase 4a is an explicit technical spike that
-must update this section after walking the real UnitMatchPy API and on-disk input
-layout. Phase 4b must not implement these tables until the appendix, shared
-contracts, and this design section have been reconciled with the 4a findings.
+**PHASE4A_CONTRACT_STUB — finalized in Phase 4a.** If this marker is still
+present, the UnitMatchPy API has not been verified and Phase 4b has not started.
+The table shapes below are the intended schema direction, but Phase 4a is an
+explicit technical spike that must update this section after walking the real
+UnitMatchPy API and on-disk input layout. Phase 4b must not implement these
+tables until the appendix, shared contracts, and this design section have been
+reconciled with the 4a findings.
 
 ```python
 @schema
@@ -1468,9 +1476,57 @@ def run_v2_pipeline(
     concat_session_group_name: str | None = None,
     preset: str = "franklab_tetrode_mountainsort5",
     skip_artifact: bool = False,
-    auto_curate: bool = True,
+    auto_curate: bool = False,
     figpack: bool = False,
 ) -> dict:
+    """Run the v2 spike-sorting pipeline and return a manifest.
+
+    Exactly one input mode must be provided.
+
+    Parameters
+    ----------
+    nwb_file_name, sort_group_id, interval_list_name, team_name
+        Required together for single-session mode.
+    concat_session_group_owner, concat_session_group_name
+        Required together for concat mode. Mutually exclusive with all
+        single-session fields, including team_name.
+    preset
+        Registered preset name.
+    skip_artifact
+        Skip single-session artifact detection.
+    auto_curate
+        When True, run AnalyzerCuration and materialize the proposed curation.
+    figpack
+        When True, publish a FigPack view and return its URI without blocking
+        for interactive edits.
+
+    Single-session mode requires `nwb_file_name`, `sort_group_id`,
+    `interval_list_name`, and `team_name`; it runs recording, optional artifact
+    detection, sorting, initial curation, and optional auto-curation.
+
+    Concat mode requires `concat_session_group_owner` and
+    `concat_session_group_name`; it routes through `ConcatenatedRecording`,
+    omits artifact detection until concat-wide artifact semantics land, and
+    rejects `team_name` if supplied because member teams come from
+    `SessionGroup.Member`. Supplying both modes, neither mode, or only
+    part of a mode raises `PipelineInputError`.
+
+    `auto_curate=False` is the default so the convenience API does not silently
+    materialize suggested labels/merges. If `auto_curate=True`, the helper runs
+    `AnalyzerCuration` and materializes the proposed curation explicitly into
+    the returned manifest.
+
+    Returns
+    -------
+    dict
+        Manifest containing each stage name and DataJoint key, plus the final
+        `merge_id`.
+
+    Raises
+    ------
+    PipelineInputError
+        If the input mode is missing, partial, mixed, or a preset is unknown.
+    """
     ...
 
 
@@ -1486,7 +1542,7 @@ def run_v2_unit_match(
 
 **Binding behavior**:
 
-- `run_v2_pipeline()` accepts exactly one input mode: single-session inputs or concat session-group inputs. It returns a manifest of every DataJoint row touched.
+- `run_v2_pipeline()` accepts exactly one input mode: single-session inputs or concat session-group inputs. It returns a manifest of every DataJoint row touched. Mixed, missing, or partial input modes raise `PipelineInputError("run_v2_pipeline requires exactly one input mode: either single-session fields (nwb_file_name, sort_group_id, interval_list_name, team_name) or concat fields (concat_session_group_owner, concat_session_group_name)")`.
 - The helper is idempotent through each table's `insert_selection()` contract; rerunning the same call reuses existing rows.
 - `run_v2_unit_match()` is separate from concat sorting and always requires explicit `curation_choices`; it never selects latest curations implicitly.
 
@@ -1496,6 +1552,7 @@ def run_v2_unit_match(
 - **Idempotent.** Re-running with same inputs finds existing rows, no duplicates.
 - **Manifest return.** Every touchpoint logged. Notebook prints it after running.
 - **Presets are named bundles** — no inline parameter editing. Custom presets are inserted by adding rows to each Lookup table once.
+- **Preset naming convention**: built-in presets use `{lab}_{probe_or_modality}_{sorter_or_workflow}` plus an optional topology suffix, e.g. `franklab_tetrode_mountainsort5`, `franklab_probe_kilosort4`, `franklab_tetrode_clusterless_thresholder`, `franklab_tetrode_mountainsort5_sameday_concat`.
 - **Workflow separation.** `concat_session_group_owner` + `concat_session_group_name` means "sort this concatenated recording"; `run_v2_unit_match()` means "match these explicitly pinned per-member curations." The public API does not overload one `session_group_name` argument for both.
 
 ```python
@@ -1510,8 +1567,8 @@ PRESETS = {
         "motion_correction_params_name": None,
     },
     "franklab_probe_kilosort4": {...},
-    "clusterless_thresholder_default": {...},
-    "franklab_chronic_single_day": {
+    "franklab_tetrode_clusterless_thresholder": {...},
+    "franklab_tetrode_mountainsort5_sameday_concat": {
         "preproc_params_name": "default_franklab",
         "artifact_params_name": "default",
         "sorter": "mountainsort5",

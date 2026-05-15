@@ -37,10 +37,10 @@ Phase 0b PR:
 - [tests/spikesorting/v1/test_sorting.py](../../../../tests/spikesorting/v1/test_sorting.py) — existing v1 test patterns to mirror.
 - [.claude/docs/plans/spikesorting-v2/appendix.md § SpikeInterface 0.99 → 0.104 migration cheat sheet](appendix.md#spikeinterface-099--0104-migration-cheat-sheet) — full API rename list.
 
-**Contracts referenced:**
+**Global invariants apply:** [Environment And Database Safety](shared-contracts.md#environment-and-database-safety) and [Code Artifact Naming](shared-contracts.md#code-artifact-naming).
 
-- [Environment And Database Safety](shared-contracts.md#environment-and-database-safety) — Phase 0 establishes the isolated `uv` env and isolated database convention that all runtime phases inherit.
-- [Code Artifact Naming](shared-contracts.md#code-artifact-naming) — scaffold files must not carry plan-phase labels in docstrings or comments.
+**Phase-specific contracts referenced:**
+
 - [Pydantic Parameter Schema Convention](shared-contracts.md#pydantic-parameter-schema-convention) — Phase 0 sets up the `_params/` package shell with one example model (`PreprocessingParamsSchema`) so subsequent phases extend rather than invent.
 - [SortingAnalyzer Storage Layout](shared-contracts.md#sortinganalyzer-storage-layout) — Phase 0 introduces the `_analyzer_path()` helper.
 - [Recording Cache Format](shared-contracts.md#recording-cache-format) — Phase 0 introduces the `_hash_nwb_recording()` helper. Phase 1 uses the existing NWB-HDF5 `AnalysisNwbfile` path; any Zarr or binary-cache experiment is a separate follow-up that cannot change the Phase 1 schema.

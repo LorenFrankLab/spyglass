@@ -22,29 +22,32 @@ The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell n
 - [src/spyglass/spikesorting/v1/figurl_curation.py](../../../../src/spyglass/spikesorting/v1/figurl_curation.py) — FigURL pattern to mirror in FigPack.
 - [.claude/docs/plans/spikesorting-v2/appendix.md § FigPack vs FigURL](appendix.md#figpack-vs-figurl) — migration policy.
 
-**Contracts referenced:**
+**Global invariants apply:** [Environment And Database Safety](shared-contracts.md#environment-and-database-safety) and [Code Artifact Naming](shared-contracts.md#code-artifact-naming).
+
+**Phase-specific contracts referenced:**
 
 - [`insert_selection()` Return-Value Normalization](shared-contracts.md#insert_selection-return-value-normalization) — `run_v2_pipeline()` relies on this contract to be idempotent.
-- [Environment And Database Safety](shared-contracts.md#environment-and-database-safety) — end-to-end orchestrator and notebook tests must not write to production schemas or production analysis storage.
-- [Code Artifact Naming](shared-contracts.md#code-artifact-naming) — notebooks/docs/tests use behavior names, not plan-phase labels.
 - [Pydantic Parameter Schema Convention](shared-contracts.md#pydantic-parameter-schema-convention) — Phase 5 introduces a `Preset` Pydantic schema that bundles parameter names.
+- [Custom Exception Classes](shared-contracts.md#custom-exception-classes) — pipeline input-mode errors and FigPack empty-sort errors use the shared exception module.
 
 **Designs referenced:** [`run_v2_pipeline()` Orchestrator](designs.md#run_v2_pipeline-orchestrator), [FigPackCuration](designs.md#figpackcuration).
 
 ## Tasks
 
 - **EXTEND `pipeline.py`** (Phase 1 shipped a minimal version with 3 presets covering recording → artifact → sorting → initial curation). Phase 5 adds the missing stages and broadens the preset set per [designs.md § `run_v2_pipeline()` Orchestrator](designs.md#run_v2_pipeline-orchestrator):
-  - **Add `auto_curate=True` parameter** — wires up Phase 2's `AnalyzerCuration` stage and the materialization step. This intentionally extends Phase 1's minimal-orchestrator behavior; users can pass `auto_curate=False` to stop at initial curation, and the CHANGELOG must call out the new default.
-  - **Add `concat_session_group_owner` + `concat_session_group_name` parameters (optional pair)** — when set together, the orchestrator routes through Phase 3's `ConcatenatedRecording` instead of `Recording`. They are mutually exclusive with the single-session inputs (`nwb_file_name`, `sort_group_id`, `interval_list_name`) and are only for same-day / explicit-opt-in concatenated sorting. The owner field is required because `SessionGroup` names are team-namespaced. Concat-mode manifests contain `concat_recording` in place of `recording` and omit `artifact_detection` until concat-wide artifact semantics land. These parameters are deliberately NOT reused for UnitMatch.
+  - **Add `auto_curate=False` parameter** — wires up Phase 2's `AnalyzerCuration` stage and materialization only when the caller opts in. The default remains initial-curation-only so a convenience call does not silently commit suggested labels/merges into a new `CurationV2`. If `auto_curate=True`, the returned manifest must include both the `AnalyzerCuration` suggestion row and the materialized child `CurationV2` row.
+  - **Add `concat_session_group_owner` + `concat_session_group_name` parameters (optional pair)** — when set together, the orchestrator routes through Phase 3's `ConcatenatedRecording` instead of `Recording`. They are mutually exclusive with the single-session inputs (`nwb_file_name`, `sort_group_id`, `interval_list_name`, `team_name`) and are only for same-day / explicit-opt-in concatenated sorting. The owner field is required because `SessionGroup` names are team-namespaced. In concat mode, `team_name` is invalid; member teams come from `SessionGroup.Member.team_name`. Concat-mode manifests contain `concat_recording` in place of `recording` and omit `artifact_detection` until concat-wide artifact semantics land. These parameters are deliberately NOT reused for UnitMatch.
   - **Add `run_v2_unit_match()` helper** — a separate convenience function for Phase 4's sort-then-match path. Signature: `run_v2_unit_match(session_group_owner, session_group_name, matcher_params_name="unitmatch_default", curation_choices=None) -> dict`. It requires explicit `curation_choices` keyed by `SessionGroup.member_index`, calls `UnitMatchSelection.insert_selection(..., curation_choices=...)`, populates `UnitMatch` and `TrackedUnit`, and returns a manifest with `unitmatch_id`. It never auto-selects "latest" curations. Keeping this separate prevents the concat-sorting workflow from being confused with the per-member curation workflow required by UnitMatch.
   - **Add `figpack=False` parameter (optional)** — wires up the FigPack curation stage below. `figpack=True` publishes/builds the curation view, returns the URI in the manifest, and exits; it does not block waiting for interactive edits. Users call `FigPackCuration.fetch_curation_from_uri()` after labeling.
   - **Expand `PRESETS`** to include Phase 5's full set:
-    - `franklab_tetrode_mountainsort4`, `franklab_tetrode_mountainsort5`, `clusterless_thresholder_default` (carried over from Phase 1)
+    - `franklab_tetrode_mountainsort4`, `franklab_tetrode_mountainsort5`, `franklab_tetrode_clusterless_thresholder` (carried over from Phase 1)
     - `franklab_probe_kilosort4` (new)
-    - `franklab_tetrode_clusterless` (new — combines threshold detection + Phase 2 metrics)
-    - `franklab_chronic_single_day` (new — uses SessionGroup + ConcatenatedRecording for same-day chronic; sets `motion_correction_params_name="auto_default"`)
+    - `franklab_tetrode_mountainsort5_sameday_concat` (new — uses SessionGroup + ConcatenatedRecording for same-day chronic; sets `motion_correction_params_name="auto_default"`)
+  - Built-in preset names follow `{lab}_{probe_or_modality}_{sorter_or_workflow}` plus an optional topology suffix. External labs should use the same pattern, e.g. `berke_intan_mountainsort5` or `franklab_tetrode_mountainsort5_sameday_concat`.
   - `register_preset(name, preset_dict)` — public API for labs to add custom presets without modifying v2 source.
   - Each preset must reference Lookup-table row names that ALREADY EXIST. Phase 5 inserts these baseline rows via `insert_default()` calls in `__init__.py`.
+
+- **Add the final `run_v2_pipeline()` docstring** from [designs.md § `run_v2_pipeline()` Orchestrator](designs.md#run_v2_pipeline-orchestrator). The docstring must include `Parameters`, `Returns`, and `Raises` sections; state that exactly one input mode is required; list the single-session fields and concat fields; say concat mode rejects `team_name`; and quote the `PipelineInputError` message for mixed/missing/partial modes.
 
 - **Implement `_params/preset.py`** Pydantic model. Required fields: `preproc_params_name`, `artifact_params_name`, `sorter`, `sorter_params_name`, `metric_params_name`, and `auto_curation_rules_name`. Optional fields: `motion_correction_params_name` and `description`. Binding behavior: extra fields are forbidden; `sorter` is validated against SI's available sorters; preset registration validates that every referenced Lookup row exists and raises clearly if a parameter set is missing. `motion_correction_params_name` is optional for ordinary single-session presets and required only for presets intended for concat session groups. This catches the typo-at-populate failure mode entirely.
 
@@ -98,12 +101,13 @@ The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell n
   - Keep existing v0/v1 docs, API references, and notebooks accessible and live; do NOT mark v1 as deprecated. v0 and v1 remain populated paths for legacy data.
   - Add a new docs page: `docs/src/Features/ChoosingSpikeSortingV1VsV2.md` — for users deciding which path to use. TL;DR: v2 is recommended for new work; v1 remains supported and available. Existing v1 sorts stay queryable through v1.
   - In `docs/src/Features/ChoosingSpikeSortingV1VsV2.md`, include the import path explicitly: external or ground-truth NWB Units still use the existing `ImportedSpikeSorting` workflow and appear in `SpikeSortingOutput.ImportedSpikeSorting`; they are not reinserted as `CurationV2` rows.
-  - Add CHANGELOG entry noting the full v2 orchestrator, FigPack curation, notebook rewrite, v2's recommended-for-new-work designation, v0/v1 continued support, and the `auto_curate=True` default added to the full orchestrator.
+  - Add CHANGELOG entry noting the full v2 orchestrator, FigPack curation, notebook rewrite, v2's recommended-for-new-work designation, v0/v1 continued support, and the opt-in `auto_curate=True` path.
 
 - **No v1 sunset criteria.** Per the resolved design decision in [overview.md](overview.md), v0 and v1 stay in-tree indefinitely. Phase 5 simply documents that v2 is the recommended path for new sorts; v1 docs stay live and unmarked-as-deprecated.
 
 - **End-to-end integration test** `tests/spikesorting/v2/test_run_pipeline.py`:
-  - `test_run_v2_pipeline_minirec_clusterless` — calls `run_v2_pipeline(...)`, asserts manifest has the expected single-session stages (`recording`, `artifact_detection`, `sorting`, `initial_curation`, `auto_curation`) plus valid `merge_id`; downstream `SpikeSortingOutput.get_spike_times(...)` returns sane arrays. This is a plumbing/integration guard only; minirec is not a sort-correctness or parity oracle.
+  - `test_run_v2_pipeline_minirec_clusterless` — calls `run_v2_pipeline(...)` with default `auto_curate=False`, asserts manifest has the expected single-session stages (`recording`, `artifact_detection`, `sorting`, `initial_curation`) plus valid `merge_id`; downstream `SpikeSortingOutput.get_spike_times(...)` returns sane arrays. This is a plumbing/integration guard only; minirec is not a sort-correctness or parity oracle.
+  - `test_run_v2_pipeline_auto_curate_opt_in` — calls `run_v2_pipeline(..., auto_curate=True)` and asserts the manifest adds `auto_curation` plus a materialized child curation row.
   - `test_run_v2_pipeline_concat_manifest` — calls concat mode on a small same-day `SessionGroup`; asserts the manifest contains `concat_recording`, `sorting`, `initial_curation`, and optional `auto_curation`, and does not contain `artifact_detection`.
   - `test_run_v2_pipeline_idempotent` — call `run_v2_pipeline(...)` twice with identical args; second call returns the same manifest (no duplicate inserts).
   - `test_run_v2_pipeline_rejects_mixed_single_and_concat_inputs` — passing both single-session inputs and `concat_session_group_owner` / `concat_session_group_name` raises a clear error before any insert.
@@ -125,7 +129,7 @@ The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell n
 Behaviors the Phase 5 validation goals must cover. Implementer chooses test names and splits.
 
 1. **Preset validation**: `register_preset` raises clearly on a typo or missing Lookup row before the preset is usable.
-2. **`run_v2_pipeline` single-session end-to-end** (slow, integration): one call produces a valid merge_id; downstream `get_spike_times` returns sane arrays; the manifest contains `recording`, `artifact_detection`, `sorting`, `initial_curation`, `auto_curation`, and final `merge_id`.
+2. **`run_v2_pipeline` single-session end-to-end** (slow, integration): one call produces a valid merge_id; downstream `get_spike_times` returns sane arrays; the default manifest contains `recording`, `artifact_detection`, `sorting`, `initial_curation`, and final `merge_id`. A separate opt-in call with `auto_curate=True` adds `auto_curation` and the materialized child curation.
 3. **`run_v2_pipeline` idempotency**: two identical calls return the same manifest; no duplicate rows inserted (count check on every Selection table).
 4. **Single-session vs concat input mode**: mixing single-session inputs with concat session-group inputs raises before any insert; supplying only one of `concat_session_group_owner` / `concat_session_group_name` raises before any insert; concat happy path returns a manifest with `concat_recording` and no `artifact_detection`.
 5. **`run_v2_unit_match`**: requires explicit `curation_choices` (raises if missing — never auto-picks "latest"); two calls with identical args return the same `unitmatch_id`.
@@ -175,7 +179,7 @@ Before opening the PR for this phase, dispatch `code-reviewer` (or equivalent in
 - `run_v2_unit_match()` is idempotent by `(session_group_owner, session_group_name, matcher_params_name, curation_set_hash)` and does not conflate UnitMatch with concatenated sorting.
 - FigPack feasibility was verified before implementation began (or the project owner was escalated if FigPack proved unusable — no silent fallback).
 - All docs tasks landed: `docs/src/Features/SpikeSortingV2.md` banner, README snippet, `docs/src/Features/ChoosingSpikeSortingV1VsV2.md` decision page.
-- CHANGELOG.md mentions the delivered user-facing capabilities (orchestrator, FigPack, notebook rewrite), the `auto_curate=True` full-orchestrator default, and v0/v1 continued support without referencing plan phases.
+- CHANGELOG.md mentions the delivered user-facing capabilities (orchestrator, FigPack, notebook rewrite), the opt-in `auto_curate=True` path, and v0/v1 continued support without referencing plan phases.
 - Sanity: `git diff src/spyglass/spikesorting/v0/ src/spyglass/spikesorting/v1/` is empty — no v0/v1 source touched.
 - Sanity: `git diff` against any Phase 1–4 table `definition` strings is empty — zero-migration policy honored.
 - `code_graph.py describe` returns clean output for every new table; `path --up`/`path --down` chains match the design DAG; JSON warnings are empty or explicitly accounted for in `precondition-check.md`.

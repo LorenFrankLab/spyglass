@@ -15,6 +15,12 @@ For agent invocation, **load only the slice you need**:
 5. **Need broader scope / risks / dependency policy?** [overview.md](overview.md).
 6. **Need upstream-repo line refs / on-disk format details?** [appendix.md](appendix.md).
 
+For lab users deciding whether to use v2, start with the Phase 5 user-facing
+surface ([phase-5-ux-overhaul.md](phase-5-ux-overhaul.md)), then the
+`run_v2_pipeline()` design in [designs.md](designs.md#run_v2_pipeline-orchestrator),
+then the notebook/docs produced by that phase. The phase files are implementation
+plans, not the final user guide.
+
 ## Execution safety
 
 All v2 implementation work uses the [Environment And Database Safety](shared-contracts.md#environment-and-database-safety) contract:

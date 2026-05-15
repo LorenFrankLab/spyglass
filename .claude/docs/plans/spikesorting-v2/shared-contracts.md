@@ -8,6 +8,7 @@ Cross-phase contracts. Any phase that references one of these MUST follow the sp
 
 - [Environment And Database Safety](#environment-and-database-safety)
 - [Code Artifact Naming](#code-artifact-naming)
+- [Custom Exception Classes](#custom-exception-classes)
 - [SortingAnalyzer Storage Layout](#sortinganalyzer-storage-layout)
 - [Pydantic Parameter Schema Convention](#pydantic-parameter-schema-convention)
 - [MatcherProtocol — cross-session unit matching plugin interface](#matcherprotocol--cross-session-unit-matching-plugin-interface)
@@ -59,6 +60,35 @@ Avoid names/comments that encode the plan slice or milestone number instead of t
 Exceptions: plan documents may keep phase labels for sequencing, PR review, and cross-reference. External package parameter names that contain words like `phase1` are preserved if they are the upstream API.
 
 **Invariant — do not weaken**: code, tests, notebooks, and docs committed outside `.claude/docs/plans/spikesorting-v2/` must describe the behavior or component, not the implementation-plan phase that introduced it.
+
+---
+
+## Custom Exception Classes
+
+All v2-specific exceptions live in `spyglass.spikesorting.v2.exceptions`.
+User-facing messages must name the failed invariant and the next action. Avoid
+bare `ValueError` / `RuntimeError` for these cases once runtime code lands.
+
+| Exception | Trigger | Required message content |
+| --- | --- | --- |
+| `DuplicateSelectionError` | `insert_selection()` finds more than one row for the same logical identity. | Table name, logical identity fields, and "duplicate selection rows". |
+| `SchemaBypassError` | A source-part master row has zero or multiple source part rows at populate time. | Table name, PK, expected exactly one source, and "use insert_selection()". |
+| `RecordingTruncatedError` | Saved `Recording` timestamp range does not cover requested `IntervalList.valid_times`. | Requested interval, saved interval, missing seconds, and source NWB. |
+| `NonIntegerUnitIDError` | SpikeInterface sorting returns non-integer unit IDs that cannot be written to `Sorting.Unit.unit_id`. | Offending unit IDs and instruction to remap before insertion. |
+| `SessionGroupDateError` | `SessionGroup.create_group()` receives caller-supplied `recording_date`, or members span multiple dates without `allow_multi_day=True`. | State that dates are derived from `Session.session_start_time`; for multi-day groups, list dates and point to sort-then-match as the recommended cross-day workflow. |
+| `ConcatBrainRegionAmbiguousError` | `Sorting.get_unit_brain_regions()` or `CurationV2.get_unit_brain_regions()` is called on concat-backed data without `allow_anchor_member=True`. | Explain anchor-member ambiguity; say to pass `allow_anchor_member=True` for anchor-only regions or use `TrackedUnit.get_unit_brain_regions()` for per-session regions. |
+| `MissingRecordingForConcatError` | `ConcatenatedRecordingSelection.insert_selection()` or `ConcatenatedRecording.make()` cannot find a populated per-member `Recording` row with the shared `preproc_params_name`. | Missing member keys and instruction to populate `Recording` for those members first. |
+| `StaleEnvMatchedError` | Recompute deletion sees `matched=1` only in non-current `UserEnvironment` rows. | Current env ID, stale env IDs, and instruction to rerun recompute or pass `force_stale_env=True` with audit justification. |
+| `UnknownMatcherError` | `MatcherParameters.insert1()` receives an unregistered matcher name. | Unknown matcher, registered matcher names, and `register_matcher()`. |
+| `UnitMatchSelectionIntegrityError` | Direct-inserted `UnitMatchSelection.MemberCuration` rows do not exactly match the parent `SessionGroup.Member` set or point to the wrong member provenance. | Missing/extra/wrong member indexes and instruction to use `UnitMatchSelection.insert_selection()`. |
+| `TrackedUnitBudgetExceededError` | Strict tracked-unit graph exceeds `max_strict_nodes`. | Node count, configured cap, and instruction to shrink the group or raise the cap intentionally. |
+| `EmptySortingError` | Optional FigPack view construction cannot represent a zero-unit curation. | State that the curation has zero units and no FigPack view was produced. |
+| `PipelineInputError` | `run_v2_pipeline()` receives zero, partial, or mixed input modes. | Say exactly one input mode is required and list the required fields for each mode. |
+
+`NotImplementedError` is allowed only for forward-compatible table bodies that
+are intentionally declared before their runtime implementation. Its message
+must name the component, not a plan phase, for example
+`"ConcatenatedRecording.make() is not implemented yet"`.
 
 ---
 
@@ -208,7 +238,13 @@ def _validate_params(model_cls: type[BaseModel], params: dict) -> dict:
 
 ## MatcherProtocol — cross-session unit matching plugin interface
 
-**PHASE4A_CONTRACT_STUB — finalized in Phase 4a.** The concrete signature below is a temporary contract stub so Phase 4b's schema design has something to reference. **It must be rewritten by the Phase 4a technical spike** ([phase-4-unitmatch-cross-session.md § Phase 4a](phase-4-unitmatch-cross-session.md)) once the actual UnitMatchPy API has been walked end-to-end. Phase 4b must not start while this marker remains.
+**PHASE4A_CONTRACT_STUB — finalized in Phase 4a.** If this marker is still
+present, the UnitMatchPy API has not been verified and Phase 4b has not started.
+The concrete signature below is a temporary contract stub so Phase 4b's schema
+design has something to reference. **It must be rewritten by the Phase 4a
+technical spike** ([phase-4-unitmatch-cross-session.md § Phase 4a](phase-4-unitmatch-cross-session.md))
+once the actual UnitMatchPy API has been walked end-to-end. Phase 4b must not
+start while this marker remains.
 
 What the contract IS committed to (these survive Phase 4a):
 
@@ -387,7 +423,7 @@ def insert_selection(cls, key: dict) -> dict:
     if len(existing) == 1:
         return existing[0]  # PK-only — fetch("KEY") returns PK fields only
     if len(existing) > 1:
-        raise ValueError(f"Found {len(existing)} matching rows; ambiguous")
+        raise DuplicateSelectionError(...)
     # Insert new row with minted UUID
     key[cls.primary_key[0]] = uuid.uuid4()  # recording_id, sorting_id, etc.
     cls.insert1(key)

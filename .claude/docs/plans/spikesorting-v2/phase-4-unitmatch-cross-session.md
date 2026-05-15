@@ -38,13 +38,14 @@ Phase 4b PR:
 - [.claude/docs/plans/spikesorting-v2/appendix.md § UnitMatchPy integration notes](appendix.md#unitmatchpy-integration-notes) — API surface; the demo notebook in the upstream repo is the template.
 - UnitMatchPy upstream demo (record commit hash at integration time): https://github.com/EnnyvanBeest/UnitMatch/blob/main/UnitMatchPy/Demo%20Notebooks/UMPy_spike_interface_demo.ipynb
 
-**Contracts referenced:**
+**Global invariants apply:** [Environment And Database Safety](shared-contracts.md#environment-and-database-safety) and [Code Artifact Naming](shared-contracts.md#code-artifact-naming).
+
+**Phase-specific contracts referenced:**
 
 - [MatcherProtocol — cross-session unit matching plugin interface](shared-contracts.md#matcherprotocol--cross-session-unit-matching-plugin-interface) — Phase 4 implements both the registry and the first concrete backend.
-- [Environment And Database Safety](shared-contracts.md#environment-and-database-safety) — UnitMatchPy resolver/API probes run in the isolated matching environment; DataJoint-backed matcher tests use the isolated database.
-- [Code Artifact Naming](shared-contracts.md#code-artifact-naming) — notebook, test, and helper names use behavior labels, not phase-number labels.
 - [Pydantic Parameter Schema Convention](shared-contracts.md#pydantic-parameter-schema-convention) — `MatcherParameters` gets a per-matcher Pydantic dispatch.
 - [SortingAnalyzer Storage Layout](shared-contracts.md#sortinganalyzer-storage-layout) — matcher reads `templates`, `waveforms`, `unit_locations` extensions.
+- [Custom Exception Classes](shared-contracts.md#custom-exception-classes) — matcher typo, selection integrity, and tracked-unit budget errors use the shared exception module.
 
 **Designs referenced:** [MatcherParameters + UnitMatch + TrackedUnit](designs.md#matcherparameters--unitmatch--trackedunit).
 
