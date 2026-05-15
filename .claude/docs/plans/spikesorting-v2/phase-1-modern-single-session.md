@@ -9,7 +9,7 @@ The MVP. Builds the complete single-session sort pipeline: preprocessing → art
 1. v1's `extract_waveforms` / `load_waveforms` calls ported to `create_sorting_analyzer` / `load_sorting_analyzer`.
 2. v1 test suite green under SI 0.104.
 3. `pyproject.toml` SI pin bumped to `>=0.104,<0.105`; `mountainsort5>=0.5` added; MS4 runtime status resolved; optional `spikesorting-v2-matching` extra includes `UnitMatchPy>=3.3,<4` and `mat73`.
-4. Phase 0b MEArec fixtures generated; real-data v1 baseline captured when `SPIKESORTING_V2_REAL_NWB_PATH` is available, or explicitly documented as skipped for that environment.
+4. Phase 0b MEArec fixtures generated; real-data v1 baseline captured when `SPIKESORTING_V2_REAL_NWB_PATH` is available, or explicitly documented as skipped for that environment. Any real-data capture uses the isolated integration database unless `SPYGLASS_ALLOW_PRODUCTION_SMOKE=1` is explicitly set for read-only production metadata lookup.
 
 The first task of this phase (after prerequisites land) is to verify the new SI baseline by running the existing v1 test suite under 0.104 once more and capturing any newly-discovered regressions to fold into Phase 1 implementation notes.
 
@@ -23,6 +23,7 @@ Phase 1 is large. The implementer may land it as one PR or as the following reco
 ## Executor Checklist
 
 - Re-run the SI 0.104 v1 baseline from Phase 0c before coding.
+- Use the isolated `uv` environment and isolated DataJoint integration database from Phase 0; do not run Phase 1 populate/recompute tests against production.
 - Implement Phase 1 `_params/`, `recording.py`, `artifact.py`, `sorting.py`, `curation.py`, and the minimal `pipeline.py` in the slice order above.
 - Declare forward-compatible Phase 3 tables exactly as designed, with `ConcatenatedRecording.make()` still gated by `NotImplementedError`.
 - Add `SpikeSortingOutput.CurationV2` registration and v1-compatible merge-table accessors.
@@ -39,7 +40,7 @@ Phase 1 is large. The implementer may land it as one PR or as the following reco
 - [.claude/docs/plans/spikesorting-v2/appendix.md § SpikeInterface 0.99 → 0.104 migration cheat sheet](appendix.md#spikeinterface-099--0104-migration-cheat-sheet) — API rename table.
 - [.claude/docs/plans/spikesorting-v2/appendix.md § MountainSort 5 install + params](appendix.md#mountainsort-5-install--params) — default params.
 
-**Contracts referenced:** [SortingAnalyzer Storage Layout](shared-contracts.md#sortinganalyzer-storage-layout), [Pydantic Parameter Schema Convention](shared-contracts.md#pydantic-parameter-schema-convention), [SpikeSortingOutput Part-Table Convention for v2](shared-contracts.md#spikesortingoutput-part-table-convention-for-v2), [Job-Kwargs Resolution](shared-contracts.md#job-kwargs-resolution), [Curation Label Enum](shared-contracts.md#curation-label-enum), [`insert_selection()` Return-Value Normalization](shared-contracts.md#insert_selection-return-value-normalization).
+**Contracts referenced:** [Environment And Database Safety](shared-contracts.md#environment-and-database-safety), [SortingAnalyzer Storage Layout](shared-contracts.md#sortinganalyzer-storage-layout), [Pydantic Parameter Schema Convention](shared-contracts.md#pydantic-parameter-schema-convention), [SpikeSortingOutput Part-Table Convention for v2](shared-contracts.md#spikesortingoutput-part-table-convention-for-v2), [Job-Kwargs Resolution](shared-contracts.md#job-kwargs-resolution), [Curation Label Enum](shared-contracts.md#curation-label-enum), [`insert_selection()` Return-Value Normalization](shared-contracts.md#insert_selection-return-value-normalization).
 
 **Designs referenced:** [SortGroupV2](designs.md#sortgroupv2), [PreprocessingParameters + RecordingSelection + Recording](designs.md#preprocessingparameters--recordingselection--recording), [ArtifactDetectionParameters + ArtifactDetection](designs.md#artifactdetectionparameters--artifactdetection), [SorterParameters + SortingSelection + Sorting](designs.md#sorterparameters--sortingselection--sorting), [CurationV2](designs.md#curationv2).
 
@@ -159,7 +160,7 @@ Behaviors the Phase 1 validation goals must cover. Implementer chooses test name
 - `mearec_neuropixels_60s.nwb` with MS5: per-unit `accuracy ≥ 0.7` for ≥15 of 20 planted units.
 - `mearec_polymer_128ch_60s.nwb` with planted brain regions: `Sorting.get_unit_brain_regions(key)` matches the planted soma → peak-channel → group mapping (directly tests unit→region tracing).
 - `minirec` plumbing-only: pipeline chain produces a merge_id; **no correctness claim**.
-- `SPIKESORTING_V2_REAL_NWB_PATH` env-var gated: v1↔v2 parity per tolerances (`clusterless_thresholder` ±1 sample; MS4/MS5 ±50% unit count + ±30% median FR). Skipped if env var unset.
+- `SPIKESORTING_V2_REAL_NWB_PATH` env-var gated: v1↔v2 parity per tolerances (`clusterless_thresholder` ±1 sample; MS4/MS5 ±50% unit count + ±30% median FR). Skipped if env var unset. The test uses the isolated database/write directories; `SPYGLASS_ALLOW_PRODUCTION_SMOKE=1` permits read-only production metadata lookup only.
 - `run_v2_pipeline(..., preset="clusterless_thresholder_default")` returns a complete manifest; second call returns identical manifest with no duplicate inserts; unknown preset raises `ValueError`.
 
 ## Commands to run
@@ -167,6 +168,7 @@ Behaviors the Phase 1 validation goals must cover. Implementer chooses test name
 If landing slices, run the relevant subset of `tests/spikesorting/v2/test_phase1_pipeline.py` and `code_graph.py describe` for each table touched in that slice. Before considering Phase 1 complete, run the full gate:
 
 ```bash
+source .venv-spikesorting-v2/bin/activate
 export SPYGLASS_SKILL_DIR="${SPYGLASS_SKILL_DIR:-../spyglass-skill/skills/spyglass}"
 test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
 

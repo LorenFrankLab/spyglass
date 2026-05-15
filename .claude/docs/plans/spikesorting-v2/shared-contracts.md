@@ -6,6 +6,7 @@ Cross-phase contracts. Any phase that references one of these MUST follow the sp
 
 ## Index
 
+- [Environment And Database Safety](#environment-and-database-safety)
 - [SortingAnalyzer Storage Layout](#sortinganalyzer-storage-layout)
 - [Pydantic Parameter Schema Convention](#pydantic-parameter-schema-convention)
 - [MatcherProtocol — cross-session unit matching plugin interface](#matcherprotocol--cross-session-unit-matching-plugin-interface)
@@ -17,6 +18,28 @@ Cross-phase contracts. Any phase that references one of these MUST follow the sp
 - [Unit-Level Brain Region Tracing](#unit-level-brain-region-tracing)
 - [Zero-Migration Schema Forward-Compatibility](#zero-migration-schema-forward-compatibility)
 - [Empty / NaN / Boundary Invariants](#empty--nan--boundary-invariants)
+
+---
+
+## Environment And Database Safety
+
+Every phase uses an isolated Python environment and an isolated database for implementation validation.
+
+**Python environment**:
+
+- Use a dedicated `uv` virtualenv for v2 development, for example `.venv-spikesorting-v2`. Do not install SpikeInterface 0.104, UnitMatchPy, MEArec, FigPack, or resolver-test dependencies into a shared conda/base environment.
+- Phase 0a may keep the project-wide pin unchanged while the v2-only test job overrides SpikeInterface inside the isolated environment. Phase 0c owns the real project pin bump.
+- Phase 0c and any phase that verifies third-party APIs records the exact versions used (`python --version`, `spikeinterface.__version__`, `uv pip freeze`, and relevant import/installed-sorter probes) in the PR description or a small artifact under `tests/spikesorting/v2/`.
+
+**Database tiers**:
+
+1. **Static/unit tier**: no DataJoint connection. Use this for Pydantic models, pure helpers, `code_graph.py`, and synthetic SpikeInterface objects.
+2. **Isolated integration tier**: default for schema declaration, inserts, populates, recompute/delete gates, and fixture ingestion. Use the existing pytest Docker MySQL path in `tests/conftest.py` whenever possible; it starts a Docker-backed test server, writes a local `dj_local_conf*.json`, and sets `database.prefix = "pytests"`. For manual runs, the repo's `docker-compose.yml` (`datajoint/mysql:8.0`) is acceptable if the DataJoint config points at a dedicated test prefix and a temporary `SPYGLASS_BASE_DIR`.
+3. **Production-connected smoke tier**: optional, env-var gated, and read-mostly. The real-data env vars (`SPIKESORTING_V2_REAL_NWB_PATH`, etc.) identify data; they do **not** authorize production writes by themselves. A production-connected smoke test also requires `SPYGLASS_ALLOW_PRODUCTION_SMOKE=1`, must write only to a test schema/prefix and temporary analysis/output directories, and must not call destructive cleanup against production rows or production analysis storage.
+
+**Real-data baseline rule**: v1/v2 real-data parity captures should ingest or reference the real NWB inside the isolated integration database. If a lab developer must query the production database to locate metadata, that query is read-only and the PR notes which schemas were accessed. The captured baseline artifacts are small pickle/json files; real NWB/unit files stay outside git.
+
+**Invariant — do not weaken**: production is never the first place a v2 table, populate path, recompute delete, or AnalysisNwbfile write path is tested.
 
 ---
 

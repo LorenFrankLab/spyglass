@@ -11,6 +11,7 @@ The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell n
 - Implement preset validation and optional FigPack dependency gates.
 - Implement `FigPackCurationSelection`, `FigPackCuration`, URI generation, and curation round-trip only against the verified FigPack API.
 - Rewrite notebooks/docs so v2 is easier to use while v0/v1 remain available.
+- Run end-to-end notebook/orchestrator tests in the isolated database. Production-connected real-data smoke is optional and must use the explicit production-smoke gate with test schemas/temp output directories.
 - Run the Phase 5 validation goals plus `code_graph.py describe/path` for FigPack tables.
 
 **Inputs to read first:**
@@ -24,6 +25,7 @@ The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell n
 **Contracts referenced:**
 
 - [`insert_selection()` Return-Value Normalization](shared-contracts.md#insert_selection-return-value-normalization) — `run_v2_pipeline()` relies on this contract to be idempotent.
+- [Environment And Database Safety](shared-contracts.md#environment-and-database-safety) — end-to-end orchestrator and notebook tests must not write to production schemas or production analysis storage.
 - [Pydantic Parameter Schema Convention](shared-contracts.md#pydantic-parameter-schema-convention) — Phase 5 introduces a `Preset` Pydantic schema that bundles parameter names.
 
 **Designs referenced:** [`run_v2_pipeline()` Orchestrator](designs.md#run_v2_pipeline-orchestrator), [FigPackCuration](designs.md#figpackcuration).
@@ -132,6 +134,7 @@ Behaviors the Phase 5 validation goals must cover. Implementer chooses test name
 ## Commands to run
 
 ```bash
+source .venv-spikesorting-v2/bin/activate
 export SPYGLASS_SKILL_DIR="${SPYGLASS_SKILL_DIR:-../spyglass-skill/skills/spyglass}"
 test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
 

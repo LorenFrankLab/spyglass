@@ -15,6 +15,14 @@ For agent invocation, **load only the slice you need**:
 5. **Need broader scope / risks / dependency policy?** [overview.md](overview.md).
 6. **Need upstream-repo line refs / on-disk format details?** [appendix.md](appendix.md).
 
+## Execution safety
+
+All v2 implementation work uses the [Environment And Database Safety](shared-contracts.md#environment-and-database-safety) contract:
+
+- Develop and validate in an isolated `uv` virtualenv. Do not install SpikeInterface 0.104, UnitMatchPy, MEArec, or FigPack into a shared/base environment.
+- Run DataJoint integration tests against an isolated database by default. Prefer the existing pytest Docker MySQL path (`tests/conftest.py` starts a Docker-backed test server and uses `database.prefix = "pytests"`); the repo's `docker-compose.yml` is the manual local fallback.
+- Treat production-connected real-data checks as optional smoke tests, not the main validation target. They require an explicit env-var gate, must write only to test schemas/temp analysis directories, and must not delete or mutate production rows.
+
 ## Files
 
 - [overview.md](overview.md) — goals, non-goals, integration points, risks, rollout strategy, open questions.

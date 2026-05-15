@@ -9,13 +9,13 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
 - Implement metric/auto-curation parameter schemas and default rows.
 - Implement `AnalyzerCurationSelection`, `AnalyzerCuration`, `materialize_curation()`, and the v1 notebook-facing fetch/promote helpers.
 - Port the BurstPair visualization workflow into `AnalyzerCuration` methods without adding a separate BurstPair table.
-- Implement recording/analyzer recompute verification tables and safe deletion gates.
+- Implement recording/analyzer recompute verification tables and safe deletion gates in the isolated integration database; do not test delete paths against production storage.
 - Preserve NaN sanitization, empty-unit, recursive-auto-curation, and label-rule invariants from `shared-contracts.md`.
 - Run the Phase 2 validation goals plus `code_graph.py describe/path` for new tables.
 
 **Prerequisites for parity validation:**
 
-- Before running the v1↔v2 metric parity test, extend and run `tests/spikesorting/v2/baseline_capture.py` against the Phase 0 real-data baseline sort to produce `baseline_metric_curation`. This capture runs v1 `MetricCuration.populate` and pickles the resulting metrics DataFrame. If `SPIKESORTING_V2_REAL_NWB_PATH` is unavailable, mark only the parity test skipped with an explicit message; the rest of Phase 2 still runs.
+- Before running the v1↔v2 metric parity test, extend and run `tests/spikesorting/v2/baseline_capture.py` against the Phase 0 real-data baseline sort to produce `baseline_metric_curation`. This capture runs v1 `MetricCuration.populate` and pickles the resulting metrics DataFrame. It uses the isolated integration database; `SPYGLASS_ALLOW_PRODUCTION_SMOKE=1` permits read-only production metadata lookup only. If `SPIKESORTING_V2_REAL_NWB_PATH` is unavailable, mark only the parity test skipped with an explicit message; the rest of Phase 2 still runs.
 
 **Inputs to read first:**
 
@@ -29,6 +29,7 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
 **Contracts referenced:**
 
 - [SortingAnalyzer Storage Layout](shared-contracts.md#sortinganalyzer-storage-layout) — adds extensions to an existing analyzer in place (the on-disk folder grows; this is supported by SI binary_folder format).
+- [Environment And Database Safety](shared-contracts.md#environment-and-database-safety) — recompute/delete validation must run in an isolated database and temporary storage paths.
 - [Pydantic Parameter Schema Convention](shared-contracts.md#pydantic-parameter-schema-convention) — `QualityMetricParameters`, `AutoCurationRules` get Pydantic models.
 - [Job-Kwargs Resolution](shared-contracts.md#job-kwargs-resolution) — extension compute uses resolved kwargs.
 
@@ -126,6 +127,7 @@ Behaviors the Phase 2 validation goals must cover. Each goal must have at least 
 ## Commands to run
 
 ```bash
+source .venv-spikesorting-v2/bin/activate
 export SPYGLASS_SKILL_DIR="${SPYGLASS_SKILL_DIR:-../spyglass-skill/skills/spyglass}"
 test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
 

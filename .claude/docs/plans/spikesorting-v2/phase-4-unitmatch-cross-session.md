@@ -16,6 +16,7 @@ Adds **sort-then-match** cross-session unit tracking via UnitMatchPy. The design
 Phase 4a PR:
 
 - Run UnitMatchPy end-to-end outside DataJoint and replace the appendix / shared-contracts / designs contract stubs with observed API details.
+- Use the isolated v2 matching `uv` environment; record UnitMatchPy, mat73, SpikeInterface, NumPy, and any GUI/import caveats from that environment.
 - Reconcile `shared-contracts.md` and `designs.md` with the actual matcher input/output layout.
 - Do not add DataJoint tables or `unit_matching.py` in 4a.
 
@@ -26,6 +27,7 @@ Phase 4b PR:
 - Enforce explicit per-member curation choices and make-time provenance guards against schema-bypassing inserts.
 - Implement strict tracked-unit derivation with a bounded graph-size cap.
 - Gate shipping on the polymer MEArec AUC test.
+- Run matcher integration tests in the isolated database; production-connected real-data matcher checks are follow-up smoke tests only.
 - Run the Phase 4 validation goals plus `code_graph.py describe/path` for new tables.
 
 **Inputs to read first:**
@@ -39,6 +41,7 @@ Phase 4b PR:
 **Contracts referenced:**
 
 - [MatcherProtocol — cross-session unit matching plugin interface](shared-contracts.md#matcherprotocol--cross-session-unit-matching-plugin-interface) — Phase 4 implements both the registry and the first concrete backend.
+- [Environment And Database Safety](shared-contracts.md#environment-and-database-safety) — UnitMatchPy resolver/API probes run in the isolated matching environment; DataJoint-backed matcher tests use the isolated database.
 - [Pydantic Parameter Schema Convention](shared-contracts.md#pydantic-parameter-schema-convention) — `MatcherParameters` gets a per-matcher Pydantic dispatch.
 - [SortingAnalyzer Storage Layout](shared-contracts.md#sortinganalyzer-storage-layout) — matcher reads `templates`, `waveforms`, `unit_locations` extensions.
 
@@ -130,11 +133,12 @@ Polymer gating fixture: `test_v2_unitmatch_polymer_mearec_ground_truth` (describ
 Run these in the v2 matching environment. Phase 4a is documentation plus a working notebook; it does not run `code_graph.py` on new tables because no tables are added.
 
 ```bash
+source .venv-spikesorting-v2/bin/activate
 export SPYGLASS_SKILL_DIR="${SPYGLASS_SKILL_DIR:-../spyglass-skill/skills/spyglass}"
 test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
 
-python -m pip check
-python -m pip show UnitMatchPy
+uv pip check
+uv pip show UnitMatchPy
 
 jupyter nbconvert --to notebook --execute notebooks/14a_UnitMatch_Spike.ipynb --output /tmp/14a_UnitMatch_Spike.executed.ipynb
 git diff --check -- .claude/docs/plans/spikesorting-v2/appendix.md .claude/docs/plans/spikesorting-v2/shared-contracts.md .claude/docs/plans/spikesorting-v2/designs.md notebooks/14a_UnitMatch_Spike.ipynb
@@ -145,6 +149,7 @@ git diff --check -- .claude/docs/plans/spikesorting-v2/appendix.md .claude/docs/
 Phase 4b is blocked until the 4a grep gate finds no remaining contract-stub marker.
 
 ```bash
+source .venv-spikesorting-v2/bin/activate
 export SPYGLASS_SKILL_DIR="${SPYGLASS_SKILL_DIR:-../spyglass-skill/skills/spyglass}"
 test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
 

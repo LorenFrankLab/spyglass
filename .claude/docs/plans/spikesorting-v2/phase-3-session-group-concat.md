@@ -11,6 +11,7 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
 - Implement `ConcatenatedRecording.make()` by fetching the selection row first, then using it for member and parameter restrictions.
 - Lift the concat gate in `SortingSelection.insert_selection()` while keeping XOR and concat-artifact rejection guards.
 - Add concat recording loading, sorting dispatch, parent-anchor resolution, and `split_sorting_by_session()`.
+- Run concat/motion-correction populates in the isolated integration database with temporary analysis directories; production-connected checks are optional smoke only.
 - Run the Phase 3 validation goals plus `code_graph.py describe/path` to prove schema shape is unchanged.
 
 **Inputs to read first:**
@@ -23,6 +24,7 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
 **Contracts referenced:**
 
 - [SortingAnalyzer Storage Layout](shared-contracts.md#sortinganalyzer-storage-layout) — the concatenated sort produces one analyzer per concat, same layout.
+- [Environment And Database Safety](shared-contracts.md#environment-and-database-safety) — chronic concat writes large AnalysisNwbfile artifacts and must be validated away from production storage.
 - [Pydantic Parameter Schema Convention](shared-contracts.md#pydantic-parameter-schema-convention) — `MotionCorrectionParameters` was declared in Phase 1 and is consumed here.
 - [Job-Kwargs Resolution](shared-contracts.md#job-kwargs-resolution) — concat materialization is the heaviest write; uses resolved kwargs.
 
@@ -98,6 +100,7 @@ Behaviors the Phase 3 validation goals must cover. Implementer chooses test name
 ## Commands to run
 
 ```bash
+source .venv-spikesorting-v2/bin/activate
 export SPYGLASS_SKILL_DIR="${SPYGLASS_SKILL_DIR:-../spyglass-skill/skills/spyglass}"
 test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
 

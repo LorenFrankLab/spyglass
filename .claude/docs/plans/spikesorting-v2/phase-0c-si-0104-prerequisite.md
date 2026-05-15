@@ -10,11 +10,13 @@ Move Spyglass from `spikeinterface>=0.99.1,<0.100` to `spikeinterface>=0.104,<0.
 
 ## Executor Checklist
 
+- Work in a dedicated `uv` virtualenv; do not test the SI 0.104 resolver or UnitMatchPy extra in a shared/base environment.
 - Port v1 WaveformExtractor calls to SortingAnalyzer-compatible internals while preserving v1 public methods.
 - Update v1 metric/burst helpers or adapters so existing notebook-facing behavior still works.
 - Bump the SI dependency and resolver-check Python 3.10, 3.11, and 3.12.
 - Prove v1 schemas are byte-identical before/after the port.
 - Run the v0/v1 validation slice; Phase 1 remains blocked until this passes.
+- Record exact resolved package versions and sorter availability in the PR description.
 
 ## Inputs to read first
 
@@ -24,6 +26,11 @@ Move Spyglass from `spikeinterface>=0.99.1,<0.100` to `spikeinterface>=0.104,<0.
 - [.claude/docs/plans/spikesorting-v2/appendix.md § SpikeInterface 0.99 → 0.104 migration cheat sheet](appendix.md#spikeinterface-099--0104-migration-cheat-sheet).
 
 ## Tasks
+
+- **Create and use an isolated resolver/test environment.**
+  - Use a dedicated `uv` virtualenv for the dependency bump and validation commands.
+  - Capture `python --version`, `uv pip freeze`, `spikeinterface.__version__`, `numpy.__version__`, `zarr.__version__`, `numcodecs.__version__`, `spikeinterface.sorters.installed_sorters()`, and UnitMatchPy import status in the PR description or a small resolver artifact.
+  - Do not run resolver probes from base/conda; a passing base-env import is not evidence that the project dependencies resolve.
 
 - **Port v1 WaveformExtractor usage to SortingAnalyzer-compatible code.**
   - Replace `si.extract_waveforms(...)` with `si.create_sorting_analyzer(..., format="binary_folder", sparse=True, ...)`.
@@ -61,18 +68,33 @@ Move Spyglass from `spikeinterface>=0.99.1,<0.100` to `spikeinterface>=0.104,<0.
 ## Commands to run
 
 ```bash
+uv venv .venv-spikesorting-v2-si0104
+source .venv-spikesorting-v2-si0104/bin/activate
+uv pip install -e ".[test]"
+python --version
+
 pytest tests/spikesorting/v0/ tests/spikesorting/v1/ -q
 pytest tests/spikesorting/v1/test_metric_curation.py tests/spikesorting/v1/test_burst.py -q
-python -m pip check
+uv pip check
 python - <<'PY'
 import spikeinterface as si
 import spikeinterface.sorters as sis
+import numpy as np
+import zarr
+import numcodecs
 from packaging.version import Version
 assert Version(si.__version__) >= Version("0.104")
 installed = set(sis.installed_sorters())
 assert "mountainsort5" in installed
+print("python resolver env ok")
+print("spikeinterface", si.__version__)
+print("numpy", np.__version__)
+print("zarr", zarr.__version__)
+print("numcodecs", numcodecs.__version__)
 print("installed_sorters", sorted(installed))
 PY
+mkdir -p tests/spikesorting/v2
+uv pip freeze > tests/spikesorting/v2/si0104-freeze.txt
 git diff --check -- pyproject.toml src/spyglass/spikesorting/v1 tests/spikesorting/v1
 ```
 
