@@ -269,12 +269,11 @@ class TestGet4ptCentroid:
         assert np.isclose(centroid[0, 1], 2.0)
 
     def test_4pt_centroid_green_sides(self):
-        """Test 4-point centroid: green and left/right valid."""
+        """Test 4-point centroid: green and left/right valid (equal 3-pt avg)."""
         from spyglass.position.utils.centroid import get_4pt_centroid
 
         # Green at (5, 5), left at (0, 0), right at (2, 0), center NaN
-        # Midpoint of left/right: (1, 0)
-        # Centroid: average of (5, 5) and (1, 0) = (3, 2.5)
+        # Equal 3-pt average: x=(5+0+2)/3≈2.333, y=(5+0+0)/3≈1.667
         pos_df = pd.DataFrame(
             {
                 ("green", "x"): [5.0],
@@ -300,10 +299,9 @@ class TestGet4ptCentroid:
             max_LED_separation=10.0,
         )
 
-        # Midpoint of left/right: (1, 0)
-        # Average with green (5, 5): (3, 2.5)
-        assert np.isclose(centroid[0, 0], 3.0)
-        assert np.isclose(centroid[0, 1], 2.5)
+        # Equal 3-pt average (matches V1 Centroid class): x=7/3, y=5/3
+        assert np.isclose(centroid[0, 0], 7.0 / 3.0)
+        assert np.isclose(centroid[0, 1], 5.0 / 3.0)
 
     def test_4pt_centroid_only_sides(self):
         """Test 4-point centroid: only left/right valid."""
@@ -439,3 +437,168 @@ class TestGet4ptCentroid:
         # Should be average of green and left: (1, 1)
         assert np.isclose(centroid[0, 0], 1.0)
         assert np.isclose(centroid[0, 1], 1.0)
+
+    def test_4pt_centroid_all_valid(self):
+        """Test 4-point centroid: all LEDs valid → priority 1 (green+center)."""
+        from spyglass.position.utils.centroid import get_4pt_centroid
+
+        # All 4 LEDs within max_LED_separation → priority 1 (green + center)
+        pos_df = pd.DataFrame(
+            {
+                ("green", "x"): [0.0],
+                ("green", "y"): [0.0],
+                ("center", "x"): [2.0],
+                ("center", "y"): [0.0],
+                ("left", "x"): [1.0],
+                ("left", "y"): [1.0],
+                ("right", "x"): [1.0],
+                ("right", "y"): [-1.0],
+            }
+        )
+        pos_df.columns = pd.MultiIndex.from_tuples(pos_df.columns)
+
+        centroid = get_4pt_centroid(
+            pos_df,
+            points={
+                "greenLED": "green",
+                "redLED_C": "center",
+                "redLED_L": "left",
+                "redLED_R": "right",
+            },
+            max_LED_separation=5.0,
+        )
+
+        # Priority 1 fires: average of green(0,0) and center(2,0) = (1, 0)
+        assert np.isclose(centroid[0, 0], 1.0)
+        assert np.isclose(centroid[0, 1], 0.0)
+
+    def test_4pt_centroid_only_green(self):
+        """Test 4-point centroid: only green valid → use green position."""
+        from spyglass.position.utils.centroid import get_4pt_centroid
+
+        pos_df = pd.DataFrame(
+            {
+                ("green", "x"): [3.0],
+                ("green", "y"): [4.0],
+                ("center", "x"): [np.nan],
+                ("center", "y"): [np.nan],
+                ("left", "x"): [np.nan],
+                ("left", "y"): [np.nan],
+                ("right", "x"): [np.nan],
+                ("right", "y"): [np.nan],
+            }
+        )
+        pos_df.columns = pd.MultiIndex.from_tuples(pos_df.columns)
+
+        centroid = get_4pt_centroid(
+            pos_df,
+            points={
+                "greenLED": "green",
+                "redLED_C": "center",
+                "redLED_L": "left",
+                "redLED_R": "right",
+            },
+            max_LED_separation=10.0,
+        )
+
+        # Should fall back to green position
+        assert np.isclose(centroid[0, 0], 3.0)
+        assert np.isclose(centroid[0, 1], 4.0)
+
+    def test_4pt_centroid_only_left(self):
+        """Test 4-point centroid: only left valid → use left position."""
+        from spyglass.position.utils.centroid import get_4pt_centroid
+
+        pos_df = pd.DataFrame(
+            {
+                ("green", "x"): [np.nan],
+                ("green", "y"): [np.nan],
+                ("center", "x"): [np.nan],
+                ("center", "y"): [np.nan],
+                ("left", "x"): [1.0],
+                ("left", "y"): [2.0],
+                ("right", "x"): [np.nan],
+                ("right", "y"): [np.nan],
+            }
+        )
+        pos_df.columns = pd.MultiIndex.from_tuples(pos_df.columns)
+
+        centroid = get_4pt_centroid(
+            pos_df,
+            points={
+                "greenLED": "green",
+                "redLED_C": "center",
+                "redLED_L": "left",
+                "redLED_R": "right",
+            },
+            max_LED_separation=10.0,
+        )
+
+        assert np.isclose(centroid[0, 0], 1.0)
+        assert np.isclose(centroid[0, 1], 2.0)
+
+    def test_4pt_centroid_only_right(self):
+        """Test 4-point centroid: only right valid → use right position."""
+        from spyglass.position.utils.centroid import get_4pt_centroid
+
+        pos_df = pd.DataFrame(
+            {
+                ("green", "x"): [np.nan],
+                ("green", "y"): [np.nan],
+                ("center", "x"): [np.nan],
+                ("center", "y"): [np.nan],
+                ("left", "x"): [np.nan],
+                ("left", "y"): [np.nan],
+                ("right", "x"): [5.0],
+                ("right", "y"): [6.0],
+            }
+        )
+        pos_df.columns = pd.MultiIndex.from_tuples(pos_df.columns)
+
+        centroid = get_4pt_centroid(
+            pos_df,
+            points={
+                "greenLED": "green",
+                "redLED_C": "center",
+                "redLED_L": "left",
+                "redLED_R": "right",
+            },
+            max_LED_separation=10.0,
+        )
+
+        assert np.isclose(centroid[0, 0], 5.0)
+        assert np.isclose(centroid[0, 1], 6.0)
+
+    def test_4pt_centroid_green_sides_vs_v1_class(self):
+        """Verify functional get_4pt_centroid matches V1 Centroid class."""
+        from spyglass.position.utils.centroid import Centroid, get_4pt_centroid
+
+        # Multi-frame test: green+sides valid → both methods should agree
+        rng = np.random.default_rng(42)
+        n = 20
+        pos_df = pd.DataFrame(
+            {
+                ("green", "x"): rng.uniform(0, 5, n),
+                ("green", "y"): rng.uniform(0, 5, n),
+                ("center", "x"): [np.nan] * n,
+                ("center", "y"): [np.nan] * n,
+                ("left", "x"): rng.uniform(0, 5, n),
+                ("left", "y"): rng.uniform(0, 5, n),
+                ("right", "x"): rng.uniform(0, 5, n),
+                ("right", "y"): rng.uniform(0, 5, n),
+            }
+        )
+        pos_df.columns = pd.MultiIndex.from_tuples(pos_df.columns)
+
+        points = {
+            "greenLED": "green",
+            "redLED_C": "center",
+            "redLED_L": "left",
+            "redLED_R": "right",
+        }
+        max_sep = 10.0
+
+        functional = get_4pt_centroid(pos_df, points, max_sep)
+        v1_class = Centroid(pos_df, points, max_sep).centroid
+
+        np.testing.assert_allclose(functional, v1_class, atol=1e-10)

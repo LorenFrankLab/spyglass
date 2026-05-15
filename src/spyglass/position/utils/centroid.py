@@ -98,10 +98,11 @@ def calculate_centroid(
     -----
     The 4-point configuration uses a priority-based averaging strategy:
     1. If green and center are valid → average them
-    2. If green and left/right are valid → average left, right, green
+    2. If green and left/right are valid → equal 3-pt average (green, left, right)
     3. If only left/right are valid → average left and right
     4. If only center is valid → use center
-    5. Otherwise → NaN
+    5. If only one LED is valid → use that single point
+    6. Otherwise → NaN
     """
     # Validate inputs
     n_points = len(points)
@@ -269,11 +270,12 @@ def get_4pt_centroid(
 
     Priority (in order):
     1. If green and center valid → average them
-    2. If green and left/right valid → average midpoint(left, right) and green
+    2. If green and left/right valid → equal 3-pt average (green, left, right)
     3. If only left/right valid → average left and right
     4. If green and one side valid → average them
     5. If only center valid → use center
-    6. Otherwise → NaN
+    6. If only green/left/right valid → use that single point
+    7. Otherwise → NaN
 
     Parameters
     ----------
@@ -376,11 +378,10 @@ def get_4pt_centroid(
         ~nans[green] & ~nans[red_C],
     )
 
-    # Priority 2: Green and left/right valid (use midpoint of left/right)
+    # Priority 2: Green and left/right valid — equal 3-pt average (matches V1)
     _set_centroid(
         [green, red_L, red_R],
         ~nans[green] & nans[red_C] & ~nans[red_L] & ~nans[red_R],
-        use_midpoint=(red_L, red_R),
     )
 
     # Priority 3: Only left/right valid
@@ -399,6 +400,16 @@ def get_4pt_centroid(
     # Priority 5: Only center valid
     only_center = nans[green] & ~nans[red_C]
     centroid[only_center] = coords[red_C][only_center]
+
+    # Priority 6: Single-LED fallbacks — match V1 Centroid class behaviour
+    only_green = ~nans[green] & nans[red_C] & nans[red_L] & nans[red_R]
+    centroid[only_green] = coords[green][only_green]
+
+    only_left = nans[green] & nans[red_C] & ~nans[red_L] & nans[red_R]
+    centroid[only_left] = coords[red_L][only_left]
+
+    only_right = nans[green] & nans[red_C] & nans[red_L] & ~nans[red_R]
+    centroid[only_right] = coords[red_R][only_right]
 
     return centroid
 
