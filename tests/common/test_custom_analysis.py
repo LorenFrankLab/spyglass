@@ -408,10 +408,60 @@ class TestCleanupAndRegistry:
         downstream.insert_by_name(export_file)
         custom_table._copy_to_common(export_file)
 
+        analysis_dir = base_dir / "analysis"
+        created_paths = {
+            "null": Path(null_fp).resolve(),
+            "orphan": Path(orph_fp).resolve(),
+            "valid": Path(valid_fp).resolve(),
+            "export": Path(export_fp).resolve(),
+        }
+        expected_deleted_paths = {
+            created_paths["null"],
+            created_paths["orphan"],
+        }
+        expected_preserved_paths = {
+            created_paths["valid"],
+            created_paths["export"],
+        }
+
+        def _relative_paths(paths):
+            return [
+                str(path.relative_to(base_dir))
+                if path.is_relative_to(base_dir)
+                else str(path)
+                for path in sorted(paths)
+            ]
+
+        before_cleanup = {
+            path.resolve() for path in analysis_dir.rglob("*.nwb")
+        }
+        print(
+            "AnalysisNwbfile.cleanup test plan: "
+            f"{len(before_cleanup)} analysis .nwb files before cleanup; "
+            "expected delete="
+            f"{_relative_paths(expected_deleted_paths)}; "
+            "expected preserve="
+            f"{_relative_paths(expected_preserved_paths)}"
+        )
+
         # TODO: use `cleanup()` logic to find orphans
         # Simulate orphan detection across all registered tables
         # insert table entries without downstream fk-references
         master_table.cleanup()
+
+        after_cleanup = {path.resolve() for path in analysis_dir.rglob("*.nwb")}
+        deleted_paths = before_cleanup - after_cleanup
+        unexpected_deleted_paths = deleted_paths - expected_deleted_paths
+        print(
+            "AnalysisNwbfile.cleanup test result: "
+            f"deleted {len(deleted_paths)} analysis .nwb files; "
+            f"deleted={_relative_paths(deleted_paths)}"
+        )
+        assert not unexpected_deleted_paths, (
+            "AnalysisNwbfile.cleanup deleted .nwb files not created as "
+            "expected cleanup targets by this test: "
+            f"{_relative_paths(unexpected_deleted_paths)}"
+        )
 
         assert not Path(null_fp).exists(), "Null file should be deleted"
 
