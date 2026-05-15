@@ -696,6 +696,12 @@ class PoseEstim(SpyglassMixin, dj.Computed):
             df.columns, names=["scorer", "bodyparts", "coords"]
         )
 
+        # Use real per-frame timestamps (seconds) as the index so that
+        # compute_pose_outputs derives the correct sampling_rate and computes
+        # velocity in cm/s rather than cm/frame.
+        first_series = list(pose_estimation.pose_estimation_series.values())[0]
+        df.index = pd.Index(first_series.timestamps[:], name="time")
+
         self._logger.debug(f"Fetched {len(df)} frames of pose data")
 
         return df

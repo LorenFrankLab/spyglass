@@ -502,3 +502,87 @@ def test_pose_params_default_has_velocity_smoothing():
     assert (
         abs(vel_std - 0.1) < 1e-9
     ), f"velocity_smoothing_std_dev should be 0.1 (matching V1); got {vel_std}"
+
+
+def test_pose_params_default_max_led_separation_cm():
+    """PoseParams.insert_default should use max_LED_separation=12.0 cm (V1 default)."""
+    from spyglass.position.v2.estim import PoseParams
+
+    captured = {}
+
+    def fake_insert1(self, key, **kwargs):
+        captured.update(key)
+
+    with patch("datajoint.Table.insert1", fake_insert1):
+        PoseParams().insert_default(skip_duplicates=True)
+
+    sep = captured.get("centroid", {}).get("max_LED_separation")
+    assert sep is not None, "centroid should include 'max_LED_separation'"
+    assert (
+        abs(sep - 12.0) < 1e-9
+    ), f"max_LED_separation should be 12.0 cm (matching V1); got {sep}"
+
+
+def test_pose_estim_fetch1_dataframe_uses_real_timestamps():
+    """PoseEstim.fetch1_dataframe() index must be real timestamps, not frame ints.
+
+    When the index is RangeIndex (0, 1, 2, ...) the downstream
+    compute_pose_outputs derives sampling_rate=1 Hz and velocity in cm/frame
+    instead of cm/s.  The fix reads timestamps from PoseEstimationSeries.
+    """
+    import numpy as np
+    import pandas as pd
+    from unittest.mock import MagicMock, patch
+
+    import ndx_pose
+
+    from spyglass.position.v2.estim import PoseEstim
+
+    n_frames = 10
+    fps = 20.0
+    real_timestamps = np.arange(n_frames) / fps  # 0.00, 0.05, ..., 0.45 s
+
+    # Build a minimal mock PoseEstimationSeries
+    mock_series = MagicMock()
+    mock_series.name = "greenLED_pose"
+    mock_series.data.__getitem__ = lambda _, s: np.zeros((n_frames, 2))
+    mock_series.confidence.__getitem__ = lambda _, s: np.ones(n_frames)
+    mock_series.timestamps.__getitem__ = lambda _, s: real_timestamps
+
+    # Use spec= so isinstance(obj, ndx_pose.PoseEstimation) passes
+    mock_pose_estim = MagicMock(spec=ndx_pose.PoseEstimation)
+    mock_pose_estim.scorer = "DLC_scorer"
+    mock_pose_estim.pose_estimation_series = {"greenLED": mock_series}
+
+    mock_behavior = MagicMock()
+    mock_behavior.data_interfaces = {"pose": mock_pose_estim}
+
+    mock_nwbfile = MagicMock()
+    mock_nwbfile.processing = {"behavior": mock_behavior}
+
+    mock_nwb_data = [{"nwb2load_filepath": "/fake/path.nwb"}]
+
+    instance = PoseEstim()
+
+    with (
+        patch.object(instance, "fetch1", return_value="fake_file.nwb"),
+        patch.object(instance, "fetch_nwb", return_value=mock_nwb_data),
+        patch(
+            "spyglass.position.v2.estim.get_nwb_file",
+            return_value=mock_nwbfile,
+        ),
+    ):
+        df = instance.fetch1_dataframe()
+
+    # Index must be real timestamps (floats), not integer frame numbers
+    assert (
+        df.index.name == "time"
+    ), f"index name should be 'time', got {df.index.name!r}"
+    assert df.index.dtype != np.dtype(
+        "int64"
+    ), "index must not be integer frame numbers"
+    np.testing.assert_allclose(
+        df.index.values,
+        real_timestamps,
+        err_msg="DataFrame index must match the PoseEstimationSeries timestamps",
+    )
