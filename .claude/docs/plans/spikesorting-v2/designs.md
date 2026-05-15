@@ -983,6 +983,11 @@ class SessionGroup(SpyglassMixin, dj.Manual):
                                             # across collaborations)
         """
 
+        # Rationale: session_group_owner namespaces the group itself, while
+        # Member.team_name identifies the data-owner team used to resolve that
+        # member's RecordingSelection. Mixed-team collaborations can therefore
+        # group sessions without guessing which team's recording artifact to use.
+
     @classmethod
     def create_group(
         cls,

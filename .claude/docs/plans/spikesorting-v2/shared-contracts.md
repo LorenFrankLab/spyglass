@@ -309,7 +309,7 @@ Implement `_get_restricted_merge_ids_v2(key, as_dict=False)` as the v2 analog of
 - Phase 2 keys: `analyzer_curation_id`, `metric_params_name`, `auto_curation_rules_name`.
 - Phase 3+ keys when their tables exist: `session_group_owner`, `session_group_name`, `concat_recording_id`.
 
-The implementation should join through the relevant v2 Selection tables and source parts, then restrict `SpikeSortingOutput.CurationV2`. Unknown restriction fields should fail clearly rather than silently returning unrelated merge IDs. `restrict_by_artifact` remains accepted by the public method for API compatibility, but the v2 path ignores the v1-specific `IntervalList` rewrite because artifact intervals live on `ArtifactDetection.Interval`.
+The implementation should join through the relevant v2 Selection tables and source parts, then restrict `SpikeSortingOutput.CurationV2`. Restrictions by `recording_id` route through `SortingSelection.RecordingSource`; restrictions by `concat_recording_id` route through `SortingSelection.ConcatenatedRecordingSource` once concat support lands. Unknown restriction fields should fail clearly rather than silently returning unrelated merge IDs. `restrict_by_artifact` remains accepted by the public method for API compatibility, but the v2 path ignores the v1-specific `IntervalList` rewrite because artifact intervals live on `ArtifactDetection.Interval`.
 
 **Imported sorting parity**:
 
@@ -450,6 +450,25 @@ row that matches only master fields but has a different source. If more than
 one joined row matches the same logical identity, raise `DuplicateSelectionError`
 instead of picking one arbitrarily.
 
+Minimal code shape:
+
+```python
+@classmethod
+def insert_selection(cls, key: dict) -> dict:
+    source_kind, source_key = cls._pop_source_key(key)
+    existing = cls._find_by_master_and_source(key, source_kind, source_key)
+    if len(existing) == 1:
+        return existing[0]
+    if len(existing) > 1:
+        raise DuplicateSelectionError(...)
+
+    key[cls.primary_key[0]] = uuid.uuid4()
+    with cls.connection.transaction:
+        cls.insert1(key)
+        cls._source_part(source_kind).insert1({**key, **source_key})
+    return {k: key[k] for k in cls.primary_key}
+```
+
 ### Layer 2: re-check at populate time
 
 `Sorting.make()` and `ArtifactDetection.make()` MUST call a source-resolution
@@ -458,6 +477,15 @@ helper at the start of `make()`. The helper fetches source part rows and raises
 were inserted via `dj.Manual.insert1()` directly, bypassing `insert_selection()`.
 
 ```python
+@dataclass(frozen=True)
+class SourceResolution:
+    kind: Literal[
+        "recording",
+        "concatenated_recording",
+        "shared_artifact_group",
+    ]
+    key: dict
+
 # Inside Sorting.make(self, key):
 source = SortingSelection.resolve_source(key)
 if source.kind == "recording":
@@ -465,6 +493,11 @@ if source.kind == "recording":
 elif source.kind == "concatenated_recording":
     recording = ConcatenatedRecording.get_recording(source.key)
 ```
+
+`SortingSelection.resolve_source(key)` returns kind `"recording"` or
+`"concatenated_recording"`. `ArtifactDetectionSelection.resolve_source(key)`
+returns kind `"recording"` or `"shared_artifact_group"`. These are per-table
+classmethods, not a single shared resolver with table-specific branching.
 
 ### Query ergonomics
 
