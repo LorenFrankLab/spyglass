@@ -39,9 +39,17 @@ Every phase uses an isolated Python environment and an isolated database for imp
 2. **Isolated integration tier**: default for schema declaration, inserts, populates, recompute/delete gates, and fixture ingestion. Use the existing pytest Docker MySQL path in `tests/conftest.py` whenever possible; it starts a Docker-backed test server, writes a local `dj_local_conf*.json`, and sets `database.prefix = "pytests"`. For manual runs, the repo's `docker-compose.yml` (`datajoint/mysql:8.0`) is acceptable if the DataJoint config points at a dedicated test prefix and a temporary `SPYGLASS_BASE_DIR`.
 3. **Production-connected smoke tier**: optional, env-var gated, and read-mostly. The real-data env vars (`SPIKESORTING_V2_REAL_NWB_PATH`, etc.) identify data; they do **not** authorize production writes by themselves. A production-connected smoke test also requires `SPYGLASS_ALLOW_PRODUCTION_SMOKE=1`, must write only to a test schema/prefix and temporary analysis/output directories, and must not call destructive cleanup against production rows or production analysis storage.
 
+**Destructive-test guardrail** (addresses [GitHub issue #1573](https://github.com/LorenFrankLab/spyglass/issues/1573)): tests must not inherit a shared production `SPYGLASS_BASE_DIR` and then exercise cleanup/delete code. Any test that reaches `AnalysisNwbfile.cleanup()`, recompute `delete_files()`, or another filesystem-destructive path must:
+
+- create and assert a temporary `SPYGLASS_BASE_DIR` under the test temp directory before the destructive path is imported or configured;
+- prefer `dry_run=True` / preview modes whenever the behavior under test does not require actual deletion;
+- fail fast if the resolved base directory appears to be shared lab storage, including paths containing `stelmo`;
+- sanity-check unusually broad deletion scans before deleting, for example scanned analysis files greatly outnumbering rows in the test-prefix `AnalysisNwbfile` table;
+- never run destructive cleanup in the production-connected smoke tier.
+
 **Real-data baseline rule**: v1/v2 real-data parity captures should ingest or reference the real NWB inside the isolated integration database. If a lab developer must query the production database to locate metadata, that query is read-only and the PR notes which schemas were accessed. The captured baseline artifacts are small pickle/json files; real NWB/unit files stay outside git.
 
-**Invariant — do not weaken**: production is never the first place a v2 table, populate path, recompute delete, or AnalysisNwbfile write path is tested.
+**Invariant — do not weaken**: production is never the first place a v2 table, populate path, recompute delete, AnalysisNwbfile write path, or filesystem cleanup path is tested.
 
 ---
 

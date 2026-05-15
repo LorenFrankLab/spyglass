@@ -69,4 +69,4 @@ Phase 3 SessionGroup + ConcatenatedRecording
                   -> Phase 5 UX/FigPack/notebooks
 ```
 
-Phase 1 is the first runtime v2 pipeline checkpoint and requires Phase 0a, Phase 0b, and Phase 0c. Phase 0c is a hard gate because Phase 1 imports and runs SpikeInterface 0.104 APIs while legacy v0/v1 active-runtime workflows must either be guarded with clear legacy-environment messages or explicitly proven compatible. These checkpoints may be grouped into larger PRs if the gating order and validation evidence remain clear.
+Execution happens on one long-lived integration branch with checkpoint commits. Phase 1 is the first runtime v2 pipeline checkpoint and requires Phase 0a, Phase 0b, and Phase 0c. Phase 0c is a hard gate because Phase 1 imports and runs SpikeInterface 0.104 APIs while legacy v0/v1 active-runtime workflows must either be guarded with clear legacy-environment messages or explicitly proven compatible. Checkpoint commits may be grouped into larger review PRs if the gating order and validation evidence remain clear.
