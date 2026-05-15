@@ -720,7 +720,7 @@ class AutoCurationRules(SpyglassMixin, dj.Lookup):
     definition = """
     auto_curation_rules_name: varchar(64)
     ---
-    label_rules: blob        # dict[metric_name -> (operator, threshold, label)]
+    label_rules: blob        # dict[rule_name -> {metric_name, operator, threshold, label}]
     auto_merge_preset: varchar(32)  # one of SI's compute_merge_unit_groups presets, or 'none'
     auto_merge_kwargs: blob
     params_schema_version=1: int
@@ -807,7 +807,7 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
 **Design points**:
 
 - **One table replaces two** (MetricCuration + BurstPair). BurstPair's cross-correlogram-asymmetry logic becomes one auto-merge preset.
-- **Visualization helpers** port from `burst_curation.py` to `AnalyzerCuration` methods: `plot_by_sort_group_ids`, `investigate_pair_xcorrel`, `investigate_pair_peaks`, and `plot_peak_over_time`.
+- **Visualization helpers** port the v1 `burst_curation.py` notebook workflows to `AnalyzerCuration` methods without adding a separate table.
 - **Explicit `materialize_curation()` step** — auto-curation never silently writes a new CurationV2 row; user must call to commit.
 - **Fetch helper parity** — `AnalyzerCuration` keeps v1's notebook-facing `get_waveforms`, `get_metrics`, `get_labels`, and `get_merge_groups` surface even though the backing store changes from WaveformExtractor/NWB columns to SortingAnalyzer extensions + AnalysisNWB objects.
 
@@ -1490,7 +1490,7 @@ PRESETS = {
         "sorter": "mountainsort5",
         "sorter_params_name": "franklab_tetrode_hippocampus_30kHz_ms5",
         "metric_params_name": "franklab_default",
-        "auto_curation_rules_name": "franklab_default_thresholds",
+        "auto_curation_rules_name": "v1_default_nn_noise",
         "motion_correction_params_name": None,
     },
     "franklab_probe_kilosort4": {...},
@@ -1501,7 +1501,7 @@ PRESETS = {
         "sorter": "mountainsort5",
         "sorter_params_name": "franklab_tetrode_hippocampus_30kHz_ms5",
         "metric_params_name": "franklab_default",
-        "auto_curation_rules_name": "franklab_default_thresholds",
+        "auto_curation_rules_name": "v1_default_nn_noise",
         "motion_correction_params_name": "auto",
     },
 }

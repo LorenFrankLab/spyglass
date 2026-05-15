@@ -13,6 +13,10 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
 - Preserve NaN sanitization, empty-unit, recursive-auto-curation, and label-rule invariants from `shared-contracts.md`.
 - Run the Phase 2 validation goals plus `code_graph.py describe/path` for new tables.
 
+**Prerequisites for parity validation:**
+
+- Before running the v1↔v2 metric parity test, extend and run `tests/spikesorting/v2/baseline_capture.py` against the Phase 0 real-data baseline sort to produce `baseline_metric_curation`. This capture runs v1 `MetricCuration.populate` and pickles the resulting metrics DataFrame. If `SPIKESORTING_V2_REAL_NWB_PATH` is unavailable, mark only the parity test skipped with an explicit message; the rest of Phase 2 still runs.
+
 **Inputs to read first:**
 
 - [src/spyglass/spikesorting/v1/metric_curation.py](../../../../src/spyglass/spikesorting/v1/metric_curation.py) — entire file; v2 consolidates this.
@@ -34,15 +38,15 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
 
 - **Implement `_params/metric_curation.py`** with Pydantic models:
   - `QualityMetricParamsSchema` — `metric_names: list[str]`, `metric_kwargs: dict[str, dict]`, `skip_pc_metrics: bool = True`. The stored `metric_kwargs` dict is passed to SpikeInterface as the `metric_params=` argument. Validate each metric name against SI 0.104's exported list using `from spikeinterface.metrics.quality import get_quality_metric_list`; fall back to `spikeinterface.qualitymetrics` only if resolver testing proves that namespace is still needed for the pinned 0.104 patch range.
-  - `AutoCurationRulesSchema` — `label_rules: dict[str, dict]` where each value is `{"operator": ">", "threshold": 0.5, "label": "noise"}`; `auto_merge_preset: Literal["similarity_correlograms", "temporal_splits", "x_contaminations", "feature_neighbors", "slay", "none"]`; `auto_merge_kwargs: dict`.
+  - `AutoCurationRulesSchema` — `label_rules: dict[str, dict]` where each value is `{"metric_name": "snr", "operator": "<", "threshold": 2.0, "label": "noise"}`; `auto_merge_preset: Literal["similarity_correlograms", "temporal_splits", "x_contaminations", "feature_neighbors", "slay", "none"]`; `auto_merge_kwargs: dict`. `slay` is included because SI 0.104.3 exposes it in `compute_merge_unit_groups` docs; re-verify if the pinned patch release changes.
 
 - **Implement `metric_curation.py`** per [designs.md § AnalyzerCuration](designs.md#analyzercuration-replaces-v1-metriccuration--burstpair). Specific:
   - `QualityMetricParameters` Lookup with three default rows: `("franklab_default", ...)`, `("neuropixels_default", ...)`, `("minimal", {"metric_names": ["snr", "isi_violation", "firing_rate"], ...})`.
   - `QualityMetricParameters.show_available_metrics()` or a documented `available_quality_metrics()` helper that lists the supported SortingAnalyzer/SpikeInterface metric names. This preserves the v1 notebook-discovery workflow from `MetricParameters.show_available_metrics()` without requiring v1's exact custom metric set.
-  - `AutoCurationRules` Lookup with default rows including a `("franklab_default_thresholds", ...)` that mirrors v1's auto-label conventions (snr < 2 → noise, isi_violation > 0.05 → mua, etc.; pull thresholds from `MetricCurationParameters` defaults at [src/spyglass/spikesorting/v1/metric_curation.py:161-191](../../../../src/spyglass/spikesorting/v1/metric_curation.py#L161-L191)).
+  - `AutoCurationRules` Lookup with default rows including `("v1_default_nn_noise", {"nn_noise_overlap_noise": {"metric_name": "nn_noise_overlap", "operator": ">", "threshold": 0.1, "label": "noise"}, "nn_noise_overlap_reject": {"metric_name": "nn_noise_overlap", "operator": ">", "threshold": 0.1, "label": "reject"}}, ...)`, matching the actual v1 `MetricCurationParameters.contents` default at [src/spyglass/spikesorting/v1/metric_curation.py:183-185](../../../../src/spyglass/spikesorting/v1/metric_curation.py#L183-L185). Any richer Frank-lab SNR/ISI/firing-rate thresholds are new v2 convention rows; include them only if their source is documented during implementation, and do not describe them as v1 parity.
   - `AnalyzerCurationSelection` Manual. `insert_selection()` emits a `logger.warning` (not a raise) when upstream `CurationV2.metrics_source == 'analyzer_curation'` — running auto-curation on a materialized child computes metrics over post-merge templates, which is usually not what the user wants but is occasionally intentional. Lineage depth is recoverable from the `parent_curation_id` chain. See [designs.md § AnalyzerCuration](designs.md#analyzercuration-replaces-v1-metriccuration--burstpair).
   - `AnalyzerCuration` Computed with `make()` that computes additional extensions, runs `compute_quality_metrics(..., metric_params=...)`, applies label rules, runs `compute_merge_unit_groups`, writes three NWB tables (`quality_metrics`, `merge_suggestions`, `proposed_labels`) via `AnalysisNwbfile().build()`.
-  - Auto-merge extension dependency is explicit: before calling `compute_merge_unit_groups`, ensure `correlograms`, `template_similarity`, `unit_locations`, `template_metrics`, `spike_amplitudes`, and `principal_components` (unless `skip_pc_metrics=True`) are computed as specified in `appendix.md § SortingAnalyzer extension dependencies`. Pass `compute_needed_extensions=False` so the Spyglass-computed extension set is the audited one rather than an implicit SI default.
+  - Auto-merge extension dependency is explicit: before calling `compute_merge_unit_groups`, ensure `correlograms`, `template_similarity`, `unit_locations`, `template_metrics`, `spike_amplitudes`, and `principal_components` (unless `skip_pc_metrics=True`) are computed as specified in `appendix.md § SortingAnalyzer extension dependencies`. Pass `compute_needed_extensions=False` so the Spyglass-computed extension set is the audited one rather than an implicit SI default. This kwarg exists in SI 0.104.3; re-verify in Phase 0c if the pinned patch release changes.
   - `materialize_curation(key, description="auto-curation") -> dict` — creates a child `CurationV2` row with the proposed labels + merge groups; returns the new curation_key. Auto-registers via the Phase 1 `CurationV2.insert_curation` flow.
   - **Fetch/promote parity with v1 MetricCuration** — implement the v1 notebook-facing helpers on `AnalyzerCuration`:
     - `get_waveforms(key, fetch_all=False)` — returns the SortingAnalyzer waveforms extension or a narrow compatibility object with SI's `get_waveforms_one_unit(unit_id)` plus v1-style `get_waveforms(unit_id)` behavior needed by downstream helpers. This replaces v1 `MetricCuration.get_waveforms`.
@@ -51,13 +55,7 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
     - `get_merge_groups(key) -> list[list[int]]` — fetches proposed merge groups from the `merge_suggestions` object.
     - `materialize_curation(...)` remains the explicit v2 analog of `CurationV1.insert_metric_curation`; document this name in user docs and examples so users do not have to discover it in `designs.md`.
 
-- **Port `BurstPair` visualization helpers** into `AnalyzerCuration` methods:
-  - `insert_by_curation_id(curation_id_or_key, auto_curation_rules_name="...", metric_params_name="...")` or a clearly named equivalent — convenience helper that inserts the `AnalyzerCurationSelection` row for an existing `CurationV2` row. This preserves the v1 `BurstPairSelection.insert_by_curation_id` workflow even though there is no separate `BurstPairSelection` table.
-  - `plot_correlograms_by_sort_group(key)` — adapts `BurstPair.plot_by_sort_group_ids` at [src/spyglass/spikesorting/v1/burst_curation.py](../../../../src/spyglass/spikesorting/v1/burst_curation.py).
-  - `investigate_pair_xcorrel(key, unit_a, unit_b)`.
-  - `investigate_pair_peaks(key, unit_a, unit_b)`.
-  - `plot_peak_over_time(key, unit_a, unit_b, overlap=True)`.
-  - These read directly from the SortingAnalyzer's `correlograms` extension; no separate `BurstPair`-equivalent table.
+- **Port the v1 `BurstPair` notebook helpers** into `AnalyzerCuration` methods: selection insertion by curation, correlogram plots, pair cross-correlation, pair peak inspection, and peak-over-time plots. These read directly from the SortingAnalyzer's `correlograms` extension; no separate `BurstPair`-equivalent table.
 
 - **Three-bug-class invariant on `_apply_label_rules`** addressing [#1513](https://github.com/LorenFrankLab/spyglass/issues/1513). v2's `_apply_label_rules` must avoid all three patterns AND test each one. Each rule emits a *scalar* label (matching `AutoCurationRulesSchema` above); the per-unit accumulator is `dict[unit_id, list[str]]`:
   1. **Loop completion (Bug A in #1513)**: every label rule must be processed; `return` must be at function scope, outside the rule loop. A return inside the rule loop would silently drop later rules. Test: `test_label_rules_loop_completes_all_rules` — synthesize 3 rules where rules 2 and 3 would each add a distinct label to the same unit; assert the unit ends with all three labels.
@@ -98,7 +96,7 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
 - **Documentation update**:
   - Update [docs/src/Features/SpikeSortingV2.md](../../../../docs/src/Features/SpikeSortingV2.md) (created Phase 1) with a Quality Metrics section.
   - Add `docs/src/Features/SpikeSortingV2StorageManagement.md` documenting recompute verification and safe deletion.
-  - CHANGELOG.md "Unreleased": "v2 `AnalyzerCuration` consolidates v1's `MetricCuration` + `BurstPair`. Auto-curation rules driven by Pydantic-validated thresholds; auto-merge via SI 0.104 presets. v2 recompute tables support safe storage reclamation for Recording and SortingAnalyzer artifacts."
+  - Add CHANGELOG entry noting `AnalyzerCuration` consolidation and the v2 recompute tables.
 
 ## Deliberately not in this phase
 
@@ -114,12 +112,12 @@ Behaviors the Phase 2 validation goals must cover. Each goal must have at least 
 
 1. **Pydantic params validation**: `QualityMetricParameters` and `AutoCurationRules` reject bogus metric names / preset names at insert.
 2. **Label-rule correctness — three bug-class invariants (#1513)**: every rule is processed (loop-completion); per-unit label lists are independent objects (no shared-list aliasing); duplicate labels within a unit are suppressed via element-in-list dedupe. One test per invariant.
-3. **AnalyzerCuration end-to-end** (slow): `make()` writes the three NWB tables; `get_waveforms`, `get_metrics`, `get_labels`, `get_merge_groups` round-trip the written content.
+3. **AnalyzerCuration end-to-end** (slow): `make()` writes the three NWB tables; `get_waveforms`, `get_metrics`, `get_labels`, `get_merge_groups` round-trip the written content; populate on the Phase 0 polymer fixture completes within a documented loose smoke budget for the target machine class.
 4. **NaN sanitization**: a low-spike unit produces non-finite metrics; the serialized AnalysisNWB metric table shows `None`; the in-memory metrics DataFrame keeps NaN.
 5. **Zero-unit Sorting**: `AnalyzerCuration` populates cleanly with empty metric/merge/label tables and no missing-column errors.
 6. **Auto-merge suggestion sanity** (slow): a planted duplicate-unit fixture (~1 ms offset) yields a merge suggestion under `similarity_correlograms`.
 7. **`materialize_curation()` produces a child**: child `CurationV2` has `parent_curation_id` set, `metrics_source == 'analyzer_curation'`, auto-registers in `SpikeSortingOutput.CurationV2`. Recursive auto-curation logs a warning but does not raise.
-8. **BurstPair visualization helpers** (slow): `plot_correlograms_by_sort_group`, `investigate_pair_xcorrel`, `investigate_pair_peaks`, `plot_peak_over_time` all render against a SortingAnalyzer-backed sort.
+8. **BurstPair visualization helpers** (slow): the ported correlogram, pair-inspection, and peak-over-time helpers render against a SortingAnalyzer-backed sort.
 9. **`Sorting.add_extensions` is idempotent** (slow): second call is a no-op.
 10. **v1 parity** (slow, integration): metrics from `AnalyzerCuration` match v1 `MetricCuration` per documented tolerances (snr ±30%, isi_violation/firing_rate/num_spikes exact).
 
@@ -147,7 +145,7 @@ git diff --exit-code -- src/spyglass/spikesorting/v1
 
 ## Fixtures
 
-- **`baseline_metric_curation`** — pickle of the v1 `MetricCuration` output (fetched from `AnalysisNwbfile` columns), captured by extending `tests/spikesorting/v2/baseline_capture.py` from Phase 0. This phase's baseline-capture extension runs v1 `MetricCuration.populate` on top of the Phase 0 sort and pickles the resulting metrics DataFrame.
+- **`baseline_metric_curation`** — pickle of the v1 `MetricCuration` output captured by the prerequisite baseline step above.
 - **`synthetic_duplicate_units_sort`** (new in conftest) — a synthetic SI sort with two units that have ~95% overlapping spike times (offset by 1 ms). Used by the auto-merge suggestion test.
 
 ## Review
