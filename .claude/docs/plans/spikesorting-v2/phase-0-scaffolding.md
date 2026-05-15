@@ -114,9 +114,9 @@ Phase 0b PR:
     Installed only when running ground-truth validation tests; not required for v2 runtime.
   - **Fixture generator script**: new file `tests/spikesorting/v2/fixtures/generate_mearec.py` (NOT a test — no `test_` prefix; manually invoked once to populate cached fixtures). Functionality:
     1. Generate three reference recordings via `mearec.gen_recordings(...)`:
-       - **`mearec_polymer_60s.h5`**: 4-shank polymer probe modeled on Chung et al. 2019 ([Neuron 30502044](https://pubmed.ncbi.nlm.nih.gov/30502044/) — 16 channels per shank, 4 shanks per probe, 20 μm site diameter, 20 μm edge-to-edge spacing within shank, 250 μm shank spacing; 64 ch total). 60 s, 12 ground-truth units distributed across all 4 shanks, no drift, deterministic seed. **This is the primary Frank-lab probe and the primary v2 validation fixture.** The probe geometry is supplied as a custom probeinterface JSON written into the fixture-generation script; this same JSON is reused by the MEArec → NWB converter to populate `electrode_groups` (one group per shank).
+       - **`mearec_polymer_128ch_60s.h5`**: 128-channel LLNL polymer probe — current Frank-lab implant configuration ([PMC11463554](https://pmc.ncbi.nlm.nih.gov/articles/PMC11463554/); [Neuron 2026 S0896-6273(26)00048-6](https://www.cell.com/neuron/fulltext/S0896-6273(26)00048-6)). Geometry: **4 shanks, 250 μm shank pitch; 32 linearly arranged contacts per shank, 15 μm contact diameter, 26 μm contact pitch within shank; 128 channels total**. Manufactured by Lawrence Livermore National Laboratory. Fixture parameters: 60 s, ~24 ground-truth units distributed across the four shanks, no drift, deterministic seed. **This is the primary v2 validation fixture.** Geometry is supplied as a custom probeinterface JSON written into the fixture-generation script; this same JSON is reused by the MEArec → NWB converter to populate `electrode_groups` (one group per shank).
        - **`mearec_neuropixels_60s.h5`**: Neuropixels-128 probe, 60 s, 20 ground-truth units, no drift, deterministic seed. Used for Phase 1 sorter smoke/correctness coverage on dense-probe geometry, but secondary to polymer for lab-internal use.
-       - **`mearec_polymer_drift_120s.h5`**: 4-shank polymer probe (same geometry as above), 120 s, 12 ground-truth units, slow drift (5 μm/min), deterministic seed — used by Phase 3 motion-correction validation.
+       - **`mearec_polymer_128ch_drift_120s.h5`**: 128-channel LLNL polymer probe (same probeinterface JSON as the static fixture above), 120 s, ~24 ground-truth units, slow drift (5 μm/min), deterministic seed — used by Phase 3 motion-correction validation.
     2. Convert each to NWB via the converter helper (next bullet).
     3. Write the NWB files to `tests/spikesorting/v2/fixtures/`.
     4. Print fixture metadata (`n_units`, `duration`, `n_channels`, MEArec version, deterministic seed) into `fixtures_manifest.json`.
@@ -140,10 +140,10 @@ Phase 0b PR:
   | Fixture | Source | Used by | Real spikes? |
   |---|---|---|---|
   | `minirec20230622.nwb` | Existing v0/v1 fixture | Phase 0 plumbing tests (module import, schema validation, populate-doesn't-crash). NOT used for sort-correctness. | Likely none — too short |
-  | `mearec_polymer_60s.nwb` | MEArec → NWB (Phase 0) | Phase 1 ground-truth precision/recall; brain-region tracing (primary fixture — modeled on Chung et al. 2019 polymer probes, the Frank-lab standard) | Yes (planted) |
+  | `mearec_polymer_128ch_60s.nwb` | MEArec → NWB (Phase 0) | Phase 1 ground-truth precision/recall; brain-region tracing (primary fixture — 128-channel LLNL polymer probe, current Frank-lab configuration per PMC11463554) | Yes (planted) |
   | `mearec_neuropixels_60s.nwb` | MEArec → NWB (Phase 0) | Phase 1 dense-probe sorter smoke/correctness coverage | Yes (planted) |
-  | `mearec_polymer_drift_120s.nwb` | MEArec → NWB (Phase 0) | Phase 3 motion correction validation | Yes (planted, with drift) |
-  | `mearec_polymer_2sessions.nwb` pair | MEArec → NWB (Phase 4 generates) | Phase 4 UnitMatch ground-truth validation gate | Yes (planted; shared templates across sessions) |
+  | `mearec_polymer_128ch_drift_120s.nwb` | MEArec → NWB (Phase 0) | Phase 3 motion correction validation | Yes (planted, with drift) |
+  | `mearec_polymer_128ch_2sessions.nwb` pair | MEArec → NWB (Phase 4 generates) | Phase 4 UnitMatch ground-truth validation gate | Yes (planted; shared templates across sessions) |
   | **Real lab dataset** | User-provided via env var `SPIKESORTING_V2_REAL_NWB_PATH` | v1-parity smoke test (Phase 1); memory/runtime budget (Phase 3); end-to-end "works on real data" smoke (Phase 5). Tests skip if env var unset. | Yes |
 
 - **Add v1 baseline capture on the real-lab dataset (not minirec):**

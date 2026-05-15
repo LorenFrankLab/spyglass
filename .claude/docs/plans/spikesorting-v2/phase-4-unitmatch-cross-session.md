@@ -2,7 +2,7 @@
 
 [← back to PLAN.md](PLAN.md) · [overview](overview.md) · [designs](designs.md#matcherparameters--unitmatch--trackedunit)
 
-Adds **sort-then-match** cross-session unit tracking via UnitMatchPy. The design is pluggable: a `MatcherProtocol` interface accepts swappable backends (UnitMatch in this phase, DeepUnitMatch as future work). **Validation gate is the polymer probe** (Frank-lab standard, Chung et al. 2019).
+Adds **sort-then-match** cross-session unit tracking via UnitMatchPy. The design is pluggable: a `MatcherProtocol` interface accepts swappable backends (UnitMatch in this phase, DeepUnitMatch as future work). **Validation gate is the 128-channel LLNL polymer probe** (current Frank-lab implant configuration — [PMC11463554](https://pmc.ncbi.nlm.nih.gov/articles/PMC11463554/); [Neuron 2026 S0896-6273(26)00048-6](https://www.cell.com/neuron/fulltext/S0896-6273(26)00048-6)).
 
 **Phase 4 is split into two sub-phases** so the matcher's actual API and data flow are pinned BEFORE the v2 schema is finalized:
 
@@ -50,7 +50,7 @@ Phase 4b PR:
 
 Output of this sub-phase is documentation + a working notebook, NOT new tables. The DataJoint surface waits until 4a's findings are written down.
 
-- **Install UnitMatchPy in a v2 dev env**: `pip install UnitMatchPy>=3.3,<4` (verify exact extras incantation). Document resolver warts in `appendix.md § UnitMatchPy integration notes`, including the current PyPI constraints (`python>=3.9,<3.13`, `numpy<2.0`) against the v2 SpikeInterface environment.
+- **Install UnitMatchPy in a v2 dev env**: `pip install "UnitMatchPy>=3.3,<4" mat73` (verify exact extras/incantation). Document resolver/import warts in `appendix.md § UnitMatchPy integration notes`, including the current PyPI constraints (`python>=3.9,<3.13`, `numpy<2.0`), the undeclared `mat73` dependency, and the `_tkinter` requirement triggered by top-level `import UnitMatchPy` in environments without Tk.
 - **Build a v2 SortingAnalyzer fixture for at least one Frank-lab session** (or use the synthetic Neuropixels fixture from Phase 4b's `conftest.py`). Sort completes; analyzer has `templates`, `waveforms`, `unit_locations` extensions.
 - **Walk the actual UnitMatchPy API** end-to-end against that analyzer. Document:
   - The exact entry-point function name and signature (the current example `um.MakeMatchTable(um_config)` may be stale).
@@ -88,8 +88,8 @@ Output of this sub-phase is documentation + a working notebook, NOT new tables. 
 
 - **Helper for building `UnitMatchSelection.MemberCuration` rows**: `UnitMatchSelection.insert_selection(session_group_owner, session_group_name, matcher_params_name, curation_choices: dict[member_index, curation_key]) -> dict`. The `curation_choices` argument maps each member's `member_index` to an explicit `{"sorting_id": ..., "curation_id": ...}` key. Helper validates that every member has exactly one choice, raises clearly if any are missing or extra, and verifies each chosen `CurationV2` belongs to that member's session/recording path. A curation from member B must never be accepted for member A just because it satisfies the independent `CurationV2` FK. It computes `curation_set_hash = sha256(json.dumps(sorted_choices, sort_keys=True))`, finds or inserts the master row by `(session_group_owner, session_group_name, matcher_params_name, curation_set_hash)`, inserts the part rows inside the same transaction for new selections, and returns the `unitmatch_id` PK dict per the [shared-contracts insert_selection convention](shared-contracts.md#insert_selection-return-value-normalization).
 
-- **Primary validation gate is polymer probes** (the Frank-lab standard, [Chung et al. 2019](https://pubmed.ncbi.nlm.nih.gov/30502044/)) — not tetrode and not Neuropixels. The gating test is `test_v2_unitmatch_polymer_mearec_ground_truth`:
-  - Uses a new Phase 4b fixture `mearec_polymer_2sessions.nwb` (4-shank polymer probe; same probe-interface JSON as `mearec_polymer_60s.nwb` from Phase 0; two sessions generated from the same MEArec template set with different `seeds.spiketrain` and a small inter-session drift).
+- **Primary validation gate is the 128-channel LLNL polymer probe** (current Frank-lab implant configuration — [PMC11463554](https://pmc.ncbi.nlm.nih.gov/articles/PMC11463554/); [Neuron 2026 S0896-6273(26)00048-6](https://www.cell.com/neuron/fulltext/S0896-6273(26)00048-6)). Not tetrode and not Neuropixels. The gating test is `test_v2_unitmatch_polymer_mearec_ground_truth`:
+  - Uses a new Phase 4b fixture `mearec_polymer_128ch_2sessions.nwb` (same probeinterface JSON as `mearec_polymer_128ch_60s.nwb` from Phase 0 — 4 shanks × 32 ch, 250 μm shank pitch, 26 μm contact pitch within shank; two sessions generated from the same MEArec template set with different `seeds.spiketrain` and a small inter-session drift).
   - Runs v2 sort + curation on both sessions, runs UnitMatch, computes ROC of match probability vs ground-truth template correspondence.
   - **Pass criterion**: AUC > 0.85.
 
@@ -168,7 +168,7 @@ git diff --check -- src/spyglass/spikesorting/v2 tests/spikesorting/v2 docs/src/
 
 ## Fixtures
 
-- **`mearec_polymer_2sessions.nwb` pair** (gating fixture) — 4-shank polymer probe (same geometry as `mearec_polymer_60s.nwb` from Phase 0); two sessions generated from the same MEArec template set with different `seeds.spiketrain` and a small inter-session drift. Planted shared templates → known cross-session correspondences. Generated by extending `tests/spikesorting/v2/fixtures/generate_mearec.py` in Phase 4b.
+- **`mearec_polymer_128ch_2sessions.nwb` pair** (gating fixture) — 128-channel LLNL polymer probe (same probeinterface JSON as `mearec_polymer_128ch_60s.nwb` from Phase 0); two sessions generated from the same MEArec template set with different `seeds.spiketrain` and a small inter-session drift. Planted shared templates → known cross-session correspondences. Generated by extending `tests/spikesorting/v2/fixtures/generate_mearec.py` in Phase 4b.
 - No user-provided gold-standard dataset is required to land Phase 4.
 
 ## Review
@@ -185,4 +185,4 @@ Before opening the PR for this phase, dispatch `code-reviewer` (or equivalent in
 - `UnitMatchSelection.insert_selection()` is idempotent by `curation_set_hash`, validates member/curation ownership before insertion, and inserts master + part rows atomically.
 - Docstrings, test names, and module names don't reference this plan, phase numbers, or files inside `.claude/docs/plans/`.
 - `code_graph.py describe` returns clean output for every new table; `path --up`/`path --down` chains match the design DAG; JSON warnings are empty or explicitly accounted for in `precondition-check.md`.
-- `unitmatchpy` is gated as an optional dependency (`pip install -e ".[spikesorting-v2-matching]"`). Import-time guard in `_unitmatch_backend.py` raises `ImportError` with the install command if missing.
+- `UnitMatchPy` / `mat73` are gated as optional dependencies (`pip install -e ".[spikesorting-v2-matching]"`). Import-time guard in `_unitmatch_backend.py` raises `ImportError` with the install command if missing or if top-level UnitMatchPy import hits the `_tkinter` issue documented in the appendix.

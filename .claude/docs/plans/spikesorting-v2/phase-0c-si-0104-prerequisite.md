@@ -6,7 +6,7 @@ This is a required prerequisite PR before Phase 1. It is separated from Phase 0 
 
 ## Purpose
 
-Move Spyglass from `spikeinterface>=0.99.1,<0.100` to `spikeinterface>=0.104,<0.105` without breaking v1. The hard blocker is v1's WaveformExtractor usage (`extract_waveforms` / `load_waveforms`), which was removed from modern SpikeInterface. The port changes v1 implementation internals only; it must not alter v1 schemas, v1 public table names, or v1 user workflows.
+Move Spyglass from `spikeinterface>=0.99.1,<0.100` to `spikeinterface>=0.104,<0.105` without breaking v1. The hard blocker is v1's WaveformExtractor usage (`extract_waveforms` / `load_waveforms`): modern SpikeInterface keeps these as back-compat shims over `SortingAnalyzer`, but v2 should implement against the native `SortingAnalyzer` API rather than the shim. The port changes v1 implementation internals only; it must not alter v1 schemas, v1 public table names, or v1 user workflows.
 
 ## Executor Checklist
 

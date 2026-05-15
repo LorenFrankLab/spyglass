@@ -27,16 +27,16 @@ Direct replacements when porting code from v1 to v2. Sources:
 
 | 0.99 (v1 uses) | 0.104 (v2 uses) | Notes |
 | --- | --- | --- |
-| `si.extract_waveforms(sorting, recording, folder=...)` | `si.create_sorting_analyzer(sorting, recording, format="binary_folder", folder=..., sparse=True)` | WaveformExtractor REMOVED in 0.101. |
+| `si.extract_waveforms(recording, sorting, folder=...)` | `si.create_sorting_analyzer(sorting=sorting, recording=recording, format="binary_folder", folder=..., sparse=True)` | Modern SI keeps `extract_waveforms` as a back-compat shim over SortingAnalyzer; v2 uses the native SortingAnalyzer API. |
 | `si.load_waveforms(folder)` | `si.load_sorting_analyzer(folder)` | Legacy folders load via the same call (returns a MockWaveformExtractor wrapping a SortingAnalyzer). |
-| `we.get_template(unit_id)` | `analyzer.get_extension("templates").get_unit_template(unit_id)` | Through extension API. |
-| `we.get_waveforms(unit_id)` | `analyzer.get_extension("waveforms").get_unit_waveforms(unit_id)` | |
+| `we.get_template(unit_id)` | `analyzer.get_extension("templates").get_data(operator="average" or "median")` or SI's `get_template_extremum_*` helpers for peak-channel/amplitude queries | Use documented SortingAnalyzer APIs rather than v1 WaveformExtractor methods. |
+| `we.get_waveforms(unit_id)` | `analyzer.get_extension("waveforms").get_waveforms_one_unit(unit_id)` | v2 compatibility wrappers may expose `get_waveforms(unit_id)` for v1 callers. |
 | `we.run_extract_waveforms(...)` | `analyzer.compute(["waveforms"], **kwargs)` | |
-| `we.compute_quality_metrics(...)` | `from spikeinterface.qualitymetrics import compute_quality_metrics; compute_quality_metrics(analyzer, ...)` | Takes an analyzer, not a we. |
+| `we.compute_quality_metrics(...)` | `from spikeinterface.metrics.quality import compute_quality_metrics; compute_quality_metrics(analyzer, ...)` | Takes an analyzer, not a we. |
 | `return_scaled=True` | `return_in_uV=True` | Renamed across the API. |
 | `is_scaled` | `is_in_uV` | |
 | Manual chain: `bandpass → cmr → whiten` | `apply_preprocessing_pipeline(recording, {"bandpass_filter": {...}, "common_reference": {...}, "whiten": {...}})` | Declarative; serializable. New in 0.103. Import from `spikeinterface.preprocessing`. **Note**: v2 splits this into pre-motion (`bandpass + cmr`) and post-motion (`whiten`) stages — see `shared-contracts.md § Pydantic Parameter Schema Convention`. |
-| `sic.MergeUnitsSorting(sorting, merge_groups)` | `from spikeinterface.curation import apply_merges_to_sorting; apply_merges_to_sorting(sorting, merge_groups)` | Added 0.101. |
+| `sic.MergeUnitsSorting(sorting, merge_groups)` | Same class still exists in SI 0.104. For analyzer-backed curation, prefer `spikeinterface.curation.apply_curation(...)` when applying a full curation model. | `apply_merges_to_sorting` is not present in SI 0.104.3. |
 | `sic.remove_excess_spikes(sorting, recording)` | Same name, same module. | Still present in 0.104. |
 | Auto-merge: `get_potential_auto_merge(we, ...)` | `compute_merge_unit_groups(analyzer, preset=...)` | Modern signature; preset-based. |
 | `set_global_job_kwargs(n_jobs=N)` | Same. | |
@@ -82,7 +82,7 @@ These break v1's `MetricParameters` blobs verbatim — Phase 2 introduces fresh 
 | `peak_to_valley` | `peak_to_trough_duration` | Template metric. |
 | `peak_trough_ratio` | `peak_to_trough_ratio` | Now absolute-valued; magnitudes differ from 0.99. |
 | `snr` (mean-based) | `snr` (median-based) | Same name, different formula. Numeric thresholds shift; recalibrate. |
-| `from spikeinterface.qualitymetrics import compute_snr` | `from spikeinterface.qualitymetrics.misc_metrics import compute_snr` | Reorganized into submodules. |
+| `from spikeinterface.qualitymetrics import compute_snr` | Use `spikeinterface.metrics.quality.compute_quality_metrics(...)` for table-level v2 metrics; only import individual metric helpers from SI's documented metric submodules after checking the pinned 0.104 API. | Metrics were refactored in 0.104. |
 | `auto_label_units` | `unitrefine_label_units` | UnitRefine rebranded. |
 
 Source: SpikeInterface 0.104 release notes — https://spikeinterface.readthedocs.io/en/stable/releases/0.104.0.html
@@ -144,18 +144,23 @@ Source: https://kilosort.readthedocs.io/en/latest/parameters.html
 
 ## UnitMatchPy integration notes
 
-**Install**: `pip install UnitMatchPy` (note: capitalization matters; `unitmatchpy` works as the import path).
+**Install**: `pip install UnitMatchPy mat73` (UnitMatchPy 3.3.1 imports `mat73` from `UnitMatchPy.utils` but does not declare it in the wheel metadata).
 
 **Repo**: https://github.com/EnnyvanBeest/UnitMatch (Python port under `UnitMatch_python/`)
 
-**PyPI page**: https://pypi.org/project/UnitMatchPy/ (current checked version during planning: 3.3.1, released April 2026; the plan pins `unitmatchpy>=3.3,<4` which covers 3.3.x patch releases). PyPI metadata currently declares `python>=3.9,<3.13` and `numpy<2.0`, so Phase 4a must run a resolver check against the v2 SpikeInterface environment before adding the optional extra.
+**PyPI page**: https://pypi.org/project/UnitMatchPy/ (current checked version during planning: 3.3.1, released April 2026; the plan pins `UnitMatchPy>=3.3,<4` which covers 3.3.x patch releases). PyPI metadata currently declares `python>=3.9,<3.13` and `numpy<2.0`, so Phase 4a must run a resolver check against the v2 SpikeInterface environment before adding the optional extra.
+
+**Import caveat verified against UnitMatchPy 3.3.1**: the package import name is capitalized (`UnitMatchPy`), not `unitmatchpy`. `import UnitMatchPy` imports `UnitMatchPy.GUI`, which requires `_tkinter`; Python builds without Tk support fail at top-level import. Normal submodule imports also execute package `__init__.py`, so they can hit the same GUI failure. Phase 4a must either run in a Tk-enabled env or load the non-GUI modules by file path / upstream patch before schema work starts.
 
 **Demo notebook**: `UMPy_spike_interface_demo.ipynb` in the repo — this is Phase 4's primary integration template.
 
 **Core API**:
 
 ```python
-import UnitMatchPy as um
+# Phase 4a must replace this sketch with imports verified in the target env.
+# In a Tk-enabled env this may be:
+# from UnitMatchPy import default_params, overlord, utils as util
+# In a no-Tk env, top-level UnitMatchPy imports fail because __init__.py imports GUI.
 
 # Inputs:
 # - RawWaveforms/Unit*_RawSpikes.npy files, one directory per session.
@@ -219,6 +224,7 @@ Available in `spikeinterface.preprocessing.correct_motion()` as of 0.104:
 | `dredge` | Full DREDge | Best accuracy, large drift / long records | Slow |
 | `medicine` | MEDiCINe | Alternative to DREDge | Medium |
 | `nonrigid_accurate` | Nonrigid with monopolar localization | High-density probes, severe drift | Very slow |
+| `nonrigid_fast_and_accurate` | Nonrigid DREDge/KS-like hybrid | High-density probes, severe drift | Medium/slow |
 
 For Phase 3 default: `rigid_fast` (same-day, fast).
 For opt-in multi-day concat: caller must choose an explicit non-`auto` preset; `dredge_fast` or `dredge` are candidate presets, but sort-then-match remains the recommended cross-day workflow.

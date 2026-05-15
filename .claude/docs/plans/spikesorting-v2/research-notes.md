@@ -86,7 +86,7 @@ current phase docs but should not distract from execution.
 
 ### V1 SpikeInterface API usage (`spikeinterface>=0.99.1,<0.100`)
 
-🟢 V1 uses the **WaveformExtractor** API (`si.extract_waveforms`, `si.load_waveforms`) — removed in SI 0.101. This is the #1 forcing function for v2.
+🟢 V1 uses the **WaveformExtractor** API (`si.extract_waveforms`, `si.load_waveforms`) — retained in modern SI as back-compat shims over SortingAnalyzer rather than the native API. This is the #1 forcing function for v2.
 🟢 V1 uses `si.preprocessing.bandpass_filter`, `common_reference`, `whiten` — all still available in 0.104.
 🟢 V1 uses `sis.run_sorter`, `sq.compute_*` quality metrics — all still available with renames.
 🟡 V1 mutates `sorter_params` in place at `sorting.py:402-408` (`sorter_params.pop(...)`) — fragility.
@@ -120,7 +120,7 @@ current phase docs but should not distract from execution.
 
 ## 4. SpikeInterface 0.99 → 0.104 — Critical Migration Points
 
-🟢 **WaveformExtractor REMOVED in 0.101.** `SortingAnalyzer` replaces it:
+🟢 **WaveformExtractor replaced by SortingAnalyzer as the native API in 0.101+.** Back-compat shims still exist, but v2 should use `SortingAnalyzer` directly:
 
 ```python
 from spikeinterface import create_sorting_analyzer
@@ -146,7 +146,7 @@ rec_processed = pipeline.apply(recording)
 
 🟢 **`concatenate_recordings([rec1, rec2])` → mono-segment virtual recording**; sorter sees one long timeline. Required for concat-and-sort.
 
-🟢 **`correct_motion(...)` presets**: `dredge_fast`, `medicine`, `kilosort_like`, `rigid_fast`, `nonrigid_accurate`. DREDge (0.101+) handles cross-day drift best.
+🟢 **`correct_motion(...)` presets**: `dredge`, `dredge_fast`, `medicine`, `kilosort_like`, `rigid_fast`, `nonrigid_accurate`, `nonrigid_fast_and_accurate`. DREDge (0.101+) handles cross-day drift best.
 
 🟢 **Quality metric renames in 0.104**:
 - `peak_to_valley` → `peak_to_trough_duration`
@@ -157,7 +157,7 @@ rec_processed = pipeline.apply(recording)
 
 🟢 **`spikeinterface.curation` modern primitives**:
 - `apply_curation(analyzer, curation_dict)` — apply JSON curation
-- `apply_merges_to_sorting(sorting, merge_groups)`
+- `MergeUnitsSorting(sorting, merge_groups)` remains available; use `apply_curation(...)` for full analyzer-backed curation models.
 - `compute_merge_unit_groups(analyzer, preset=...)` — auto-merge candidates
 - `remove_redundant_units(...)`, `remove_duplicated_spikes(...)`
 
@@ -191,7 +191,7 @@ rec_processed = pipeline.apply(recording)
 
 ## 6. Chronic Recording / Large Data
 
-🟢 **Memory model**: SI is lazy by default. 30 kHz × 64 ch × 24 h ≈ 138 GB never holds in memory. Workflow:
+🟢 **Memory model**: SI is lazy by default. 30 kHz × 128 ch × 24 h ≈ 275 GB never holds in memory (Frank-lab polymer-probe scale). Workflow:
 1. Lazy `read_*` extractor (metadata only)
 2. Lazy preprocessing chain (no I/O)
 3. `recording.save(format="binary", chunk_duration="2s", n_jobs=8)` materializes preprocessed to NVMe ONCE

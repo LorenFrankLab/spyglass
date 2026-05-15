@@ -109,7 +109,7 @@ class BandpassFilterParams(BaseModel):
 class CommonReferenceParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
     reference: Literal["global", "single", "local"] = "global"
-    operator: Literal["median", "mean"] = "median"
+    operator: Literal["median", "average"] = "median"
 
 class WhitenParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -462,7 +462,7 @@ Per Critical Issue #1 in the plan self-review: `SpikeSortingOutput` keeps a `sou
 
 **The mechanism**:
 
-Phase 1's `Sorting` table has a part table `Sorting.Unit` with one row per sorted unit, populated at the end of `Sorting.make()`. The peak channel is computed from the `SortingAnalyzer`'s `templates` extension (the channel with maximum absolute template amplitude per unit). The brain region is then looked up from `Electrode * BrainRegion` for that channel within the sort group.
+Phase 1's `Sorting` table has a part table `Sorting.Unit` with one row per sorted unit, populated at the end of `Sorting.make()`. The peak channel is computed from the `SortingAnalyzer`'s `templates` extension using SI's documented template-extremum helpers (the channel with maximum absolute template amplitude per unit). The brain region is then looked up from `Electrode * BrainRegion` for that channel within the sort group.
 
 ```python
 class Unit(SpyglassMixinPart):

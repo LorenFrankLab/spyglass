@@ -409,6 +409,8 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
     # Dedicated schemas cover the default v2-supported sorters. A generic
     # extra-allowing schema is used only for explicit custom rows whose sorter
     # is present in spikeinterface.sorters.available_sorters().
+    # Exception: clusterless_thresholder is a Spyglass special-case path built
+    # on SI peak detection, not an SI registered sorter.
     # Contents (Phase 1 default rows):
     #   ('mountainsort4', 'franklab_tetrode_hippocampus_30kHz_ms4', ...)  # MS4 stays in v2
     #   ('mountainsort5', 'franklab_tetrode_hippocampus_30kHz_ms5', ...)
