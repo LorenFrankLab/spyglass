@@ -214,11 +214,18 @@ Sources:
 
 **FigURL** (v1's curation UI) is the SortingView-backed web app. Requires `kachery-cloud` for state persistence. v1's `FigURLCuration` lives at [src/spyglass/spikesorting/v1/figurl_curation.py](../../../../src/spyglass/spikesorting/v1/figurl_curation.py).
 
-**FigPack** is the intended FigURL successor UI path. Repo: https://github.com/flatironinstitute/figpack. Current packaging during plan review is a core `figpack` package plus a spike-sorting extension package named `figpack-spike-sorting` on PyPI and imported as `figpack_spike_sorting`. Phase 5 must still verify the exact view-construction API, upload/show method, and edited-curation state round trip before implementing the DataJoint table.
+**FigPack** is the intended FigURL successor UI path. Repo: https://github.com/flatironinstitute/figpack. Current packaging during plan review is a core `figpack` package plus a spike-sorting extension package named `figpack-spike-sorting` on PyPI and imported as `figpack_spike_sorting`.
+
+**PHASE5A_CONTRACT_STUB — finalized in Phase 5a.** If this marker is still
+present, the exact view-construction API, upload/show method, and
+edited-curation state round trip have not been verified. Phase 5b must not
+implement the DataJoint FigPack tables until this section records the observed
+package versions, import paths, minimal working code snippet, publish/upload
+behavior, and curation-state retrieval path.
 
 **Migration policy** (per resolved decision #2 in `overview.md`):
 - Phase 1 ships v2 with NO curation UI table — users curate by editing `CurationV2` rows directly in Python.
-- Phase 5 introduces **FigPack** as v2's curation UI, gated by a Phase 5a feasibility check. If FigPack proves unusable at Phase 5 implementation time, Phase 5 stops and escalates to the project owner — there is no silent FigURL fallback for v2.
+- Phase 5 introduces **FigPack** as v2's curation UI, gated by a Phase 5a feasibility spike. If FigPack proves unusable at implementation time, Phase 5 stops and escalates to the project owner — there is no silent FigURL fallback for v2.
 - v1's FigURL stays usable for v1 data only; it is NOT extended to v2 curations.
 
 ---

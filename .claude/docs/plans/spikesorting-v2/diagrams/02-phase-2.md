@@ -129,7 +129,7 @@ erDiagram
         uuid sorting_id PK
         blob si_deps
         blob analyzer_manifest
-        char analyzer_hash
+        char_64 analyzer_hash
     }
     SortingAnalyzerRecomputeSelection {
         uuid sorting_id PK

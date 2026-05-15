@@ -384,7 +384,7 @@ The implementation should join through the relevant v2 Selection tables and sour
 
 **Imported sorting parity**:
 
-Do not add a `CurationV2` part for imported NWB Units and do not duplicate `ImportedSpikeSorting` under `spyglass.spikesorting.v2`. The existing `spyglass.spikesorting.imported.ImportedSpikeSorting` table and `SpikeSortingOutput.ImportedSpikeSorting` part remain the canonical import path for external/ground-truth Units. v2 documentation and tests may compare v2 sorting output against imported ground-truth Units, but that comparison does not make the imported Units part of v2 lineage.
+Do not add a `CurationV2` part for imported NWB Units and do not duplicate `ImportedSpikeSorting` under `spyglass.spikesorting.v2`. The existing `spyglass.spikesorting.imported.ImportedSpikeSorting` table and `SpikeSortingOutput.ImportedSpikeSorting` part remain the canonical import path for external/ground-truth Units. v2 documentation and tests may compare v2 sorting output against imported ground-truth Units, but that comparison does not make the imported Units part of v2 lineage. The `CurationV2.metrics_source='imported'` enum value is reserved for a future explicit legacy-conversion helper only; it is not Phase 1 behavior and must not be used as a shortcut around `ImportedSpikeSorting`.
 
 **Invariant — do not weaken**: v2 modifies `spikesorting_merge.py` only to add the `CurationV2` part, register/route that part, add v2 restriction handling, and add the optional `get_unit_brain_regions` dispatch. It must not change v0/v1 merge semantics. The default behavior of `merge_get_part`, `merge_restrict`, `merge_delete` must work uniformly across v0, v1, v2 parts.
 

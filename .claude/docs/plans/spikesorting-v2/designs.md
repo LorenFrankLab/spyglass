@@ -167,9 +167,10 @@ class PreprocessingParameters(SpyglassMixin, dj.Lookup):
     ---
     params: blob                # SI PreprocessingPipeline dict, validated by PreprocessingParamsSchema
     params_schema_version=1: int
+    job_kwargs=null: blob       # optional per-row SI job kwargs override
     """
     contents = [
-        ("default_franklab", PreprocessingParamsSchema().model_dump(), 1),
+        ("default_franklab", PreprocessingParamsSchema().model_dump(), 1, None),
         # Additional presets inserted via Phase 1 task.
     ]
 
@@ -273,9 +274,10 @@ class ArtifactDetectionParameters(SpyglassMixin, dj.Lookup):
     ---
     params: blob   # validated by ArtifactDetectionParamsSchema (Pydantic)
     params_schema_version=1: int
+    job_kwargs=null: blob
     """
     contents = [
-        ("none", {"detect": False}, 1),
+        ("none", {"detect": False}, 1, None),
         ("default", {
             "detect": True,
             "amplitude_thresh_uV": 500.0,
@@ -283,7 +285,7 @@ class ArtifactDetectionParameters(SpyglassMixin, dj.Lookup):
             "proportion_above_thresh": 0.5,
             "removal_window_ms": 1.0,
             "join_window_ms": 1.0,
-        }, 1),
+        }, 1, None),
     ]
 
 
@@ -410,6 +412,7 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
     ---
     params: blob
     params_schema_version=1: int
+    job_kwargs=null: blob
     """
     # Per-sorter Pydantic schemas in spyglass.spikesorting.v2._params.sorter.
     # Dedicated schemas cover the default v2-supported sorters. A generic
@@ -621,8 +624,11 @@ class CurationV2(SpyglassMixin, dj.Manual):
                                   # 'analyzer_curation' = materialized from
                                   # AnalyzerCuration.materialize_curation();
                                   # 'figpack' = round-tripped from FigPack UI;
-                                  # 'imported' = brought in from an external
-                                  # source (legacy v1 conversion).
+                                  # 'imported' = future legacy-conversion
+                                  # metadata only. External/ground-truth NWB
+                                  # Units remain in ImportedSpikeSorting and
+                                  # must not be duplicated into CurationV2 in
+                                  # this plan.
     description: varchar(255)
     """
 
@@ -707,6 +713,7 @@ class QualityMetricParameters(SpyglassMixin, dj.Lookup):
     metric_kwargs: blob      # per-metric kwargs dict
     skip_pc_metrics=1: bool
     params_schema_version=1: int
+    job_kwargs=null: blob
     """
 
 @schema
@@ -722,6 +729,7 @@ class AutoCurationRules(SpyglassMixin, dj.Lookup):
     auto_merge_preset: varchar(32)  # one of SI's compute_merge_unit_groups presets, or 'none'
     auto_merge_kwargs: blob
     params_schema_version=1: int
+    job_kwargs=null: blob
     """
 
     class Rule(SpyglassMixinPart):
@@ -901,7 +909,7 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
     ---
     si_deps=null: blob
     analyzer_manifest=null: blob
-    analyzer_hash: char(32)
+    analyzer_hash: char(64)
     """
 
 
@@ -1241,9 +1249,10 @@ class MatcherParameters(SpyglassMixin, dj.Lookup):
     matcher: varchar(32)         # 'unitmatch' now; 'deepunitmatch' future plugin
     params: blob                 # validated against per-matcher Pydantic model
     params_schema_version=1: int
+    job_kwargs=null: blob
     """
     contents = [
-        ("unitmatch_default", "unitmatch", {...}, 1),
+        ("unitmatch_default", "unitmatch", {...}, 1, None),
     ]
 
     def insert1(self, row: dict, **kwargs):
@@ -1436,6 +1445,14 @@ Future policy values are pure inserts into the `policy_used: varchar(32)` column
 ## FigPackCuration
 
 Phase 5. FigPack is FigURL's successor UI path. The v2 table mirrors the important v1 FigURL lesson: the selection row must include the UI configuration, not only the curation FK, so repeated calls are idempotent and multiple display configurations for the same curation are possible.
+
+**PHASE5A_CONTRACT_STUB — finalized in Phase 5a.** If this marker is still
+present, the FigPack spike-sorting API and edited-curation round trip have not
+been verified. The table shapes below are the intended schema direction, but
+Phase 5b must not implement `figpack_curation.py` until Phase 5a replaces this
+marker in `designs.md`, `appendix.md`, and `phase-5-ux-overhaul.md` with the
+observed package names, import paths, view-construction call, upload/publish
+call, and curation-state retrieval path.
 
 Implementation precondition: Phase 5 must first verify the current FigPack spike-sorting extension API. Current upstream packaging is core `figpack` plus `figpack-spike-sorting` (imported as `figpack_spike_sorting`); do not assume `figpack.spike_sorting.build_curation_view()` or `view.publish()` exists. The private helper names below are Spyglass-owned adapter functions that wrap the verified upstream API after the feasibility spike.
 

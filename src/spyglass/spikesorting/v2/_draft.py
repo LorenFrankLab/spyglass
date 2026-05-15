@@ -55,6 +55,7 @@ class PreprocessingParameters(SpyglassMixin, dj.Lookup):
     ---
     params: blob
     params_schema_version=1: int
+    job_kwargs=null: blob
     """
 
 
@@ -109,6 +110,7 @@ class ArtifactDetectionParameters(SpyglassMixin, dj.Lookup):
     ---
     params: blob
     params_schema_version=1: int
+    job_kwargs=null: blob
     """
 
 
@@ -180,6 +182,7 @@ class MotionCorrectionParameters(SpyglassMixin, dj.Lookup):
     ---
     params: blob
     params_schema_version=1: int
+    job_kwargs=null: blob
     """
 
 
@@ -227,6 +230,7 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
     ---
     params: blob
     params_schema_version=1: int
+    job_kwargs=null: blob
     """
 
 
@@ -323,6 +327,7 @@ class QualityMetricParameters(SpyglassMixin, dj.Lookup):
     metric_kwargs: blob
     skip_pc_metrics=1: bool
     params_schema_version=1: int
+    job_kwargs=null: blob
     """
 
 
@@ -333,6 +338,7 @@ class AutoCurationRules(SpyglassMixin, dj.Lookup):
     auto_merge_preset: varchar(32)
     auto_merge_kwargs: blob
     params_schema_version=1: int
+    job_kwargs=null: blob
     """
 
     class Rule(SpyglassMixinPart):
@@ -419,7 +425,7 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
     ---
     si_deps=null: blob
     analyzer_manifest=null: blob
-    analyzer_hash: char(32)
+    analyzer_hash: char(64)
     """
 
 
@@ -470,6 +476,7 @@ class MatcherParameters(SpyglassMixin, dj.Lookup):
     matcher: varchar(32)
     params: blob
     params_schema_version=1: int
+    job_kwargs=null: blob
     """
 
 
