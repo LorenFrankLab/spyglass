@@ -260,11 +260,15 @@ All tests run with default parameters from `pyproject.toml`. To customize:
 # (e.g. AnalysisNwbfile.cleanup) scan and delete real data.
 # Local developers who want reuse across runs should pass an explicit
 # --base-dir (e.g. --base-dir ./tests/_data/).
+# Persistent test roots must contain a .spyglass-test-root sentinel file.
+# This is a generic sandbox marker; pytest-created temp roots add it
+# automatically, and ./tests/_data/ includes one for local/CI reuse.
 
 --use-env-base-dir  # Opt back in to the SPYGLASS_BASE_DIR env var
 # when --base-dir is not supplied. Off by default. If the flag is
 # passed but SPYGLASS_BASE_DIR is unset, a warning is printed and the
-# default temp-dir fallback is used.
+# default temp-dir fallback is used. If SPYGLASS_BASE_DIR is set, that
+# directory must contain .spyglass-test-root.
 
 --no-teardown       # Preserve Docker database on exit (default: False)
 # Useful for: inspecting database state, faster reruns.

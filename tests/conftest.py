@@ -207,6 +207,8 @@ _sklearn_parallel.warnings = _ModuleWarningsProxy(
 #     BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS,
 #     NO_DLC, TMP_BASE_DIR
 
+TEST_ROOT_SENTINEL = ".spyglass-test-root"
+
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.simplefilter("ignore", category=ResourceWarning)
 warnings.simplefilter("ignore", category=DeprecationWarning)
@@ -376,6 +378,38 @@ def _derive_dir_env_vars():
     ]
 
 
+def _resolved_path(path: str | Path) -> Path:
+    """Return the resolved absolute form of a filesystem path."""
+    return Path(path).expanduser().resolve()
+
+
+def _sentinel_path(base_dir: str | Path) -> Path:
+    """Return the sandbox sentinel path for a test base directory."""
+    return _resolved_path(base_dir) / TEST_ROOT_SENTINEL
+
+
+def _write_test_root_sentinel(base_dir: str | Path) -> None:
+    """Mark a pytest-created temp base directory as safe for test cleanup."""
+    _sentinel_path(base_dir).write_text(
+        "Spyglass pytest sandbox. Files here may be deleted by tests.\n"
+    )
+
+
+def _require_test_root_sentinel(base_dir: str | Path, source: str) -> None:
+    """Require a sentinel before using a persistent test base directory."""
+    sentinel = _sentinel_path(base_dir)
+    if sentinel.is_file():
+        return
+
+    raise pytest.UsageError(
+        f"{source} resolved to {sentinel.parent}, but that directory is not "
+        "marked as a Spyglass test sandbox. To use a persistent --base-dir, "
+        f"create {sentinel} first. Omit --base-dir to let pytest create a "
+        "fresh temp sandbox automatically. This prevents destructive tests "
+        "from operating on shared or production storage (issue #1573)."
+    )
+
+
 def pytest_configure(config):
     global BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS
     global NO_DLC, TMP_BASE_DIR
@@ -399,8 +433,10 @@ def pytest_configure(config):
     env_base = os.environ.get("SPYGLASS_BASE_DIR")
     if config.option.base_dir:
         _base_dir = config.option.base_dir
+        _require_test_root_sentinel(_base_dir, "--base-dir")
     elif config.option.use_env_base_dir and env_base:
         _base_dir = env_base
+        _require_test_root_sentinel(_base_dir, "SPYGLASS_BASE_DIR")
     else:
         # --no-teardown is meaningless with the temp-dir default: a fresh
         # mkdtemp() is allocated each session, so DB rows from a previous
@@ -431,12 +467,13 @@ def pytest_configure(config):
             )
         TMP_BASE_DIR = tempfile.mkdtemp(prefix="spyglass_test_")
         _base_dir = TMP_BASE_DIR
+        _write_test_root_sentinel(_base_dir)
         print(
             f"[conftest] Using temp base_dir for tests: {TMP_BASE_DIR}",
             file=sys.stderr,
         )
 
-    BASE_DIR = Path(_base_dir).expanduser().absolute()
+    BASE_DIR = _resolved_path(_base_dir)
     BASE_DIR.mkdir(parents=True, exist_ok=True)
     RAW_DIR = BASE_DIR / "raw"
 
@@ -500,6 +537,7 @@ def pytest_unconfigure(config):
     if TEARDOWN:
         SERVER.stop()
         if TMP_BASE_DIR is None:
+            _require_test_root_sentinel(BASE_DIR, "resolved test base_dir")
             # Selective cleanup only for user-supplied base_dirs; a temp dir
             # gets removed wholesale below, making per-subdir rmtree redundant.
             analysis_dir = BASE_DIR / "analysis"
