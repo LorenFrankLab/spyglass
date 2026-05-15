@@ -426,9 +426,11 @@ class TestCleanupAndRegistry:
 
         def _relative_paths(paths):
             return [
-                str(path.relative_to(base_dir))
-                if path.is_relative_to(base_dir)
-                else str(path)
+                (
+                    str(path.relative_to(base_dir))
+                    if path.is_relative_to(base_dir)
+                    else str(path)
+                )
                 for path in sorted(paths)
             ]
 
