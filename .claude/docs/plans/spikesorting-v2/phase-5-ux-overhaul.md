@@ -26,6 +26,7 @@ The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell n
 
 - [`insert_selection()` Return-Value Normalization](shared-contracts.md#insert_selection-return-value-normalization) — `run_v2_pipeline()` relies on this contract to be idempotent.
 - [Environment And Database Safety](shared-contracts.md#environment-and-database-safety) — end-to-end orchestrator and notebook tests must not write to production schemas or production analysis storage.
+- [Code Artifact Naming](shared-contracts.md#code-artifact-naming) — notebooks/docs/tests use behavior names, not plan-phase labels.
 - [Pydantic Parameter Schema Convention](shared-contracts.md#pydantic-parameter-schema-convention) — Phase 5 introduces a `Preset` Pydantic schema that bundles parameter names.
 
 **Designs referenced:** [`run_v2_pipeline()` Orchestrator](designs.md#run_v2_pipeline-orchestrator), [FigPackCuration](designs.md#figpackcuration).
@@ -97,7 +98,7 @@ The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell n
   - Keep existing v0/v1 docs, API references, and notebooks accessible and live; do NOT mark v1 as deprecated. v0 and v1 remain populated paths for legacy data.
   - Add a new docs page: `docs/src/Features/ChoosingSpikeSortingV1VsV2.md` — for users deciding which path to use. TL;DR: v2 is recommended for new work; v1 remains supported and available. Existing v1 sorts stay queryable through v1.
   - In `docs/src/Features/ChoosingSpikeSortingV1VsV2.md`, include the import path explicitly: external or ground-truth NWB Units still use the existing `ImportedSpikeSorting` workflow and appear in `SpikeSortingOutput.ImportedSpikeSorting`; they are not reinserted as `CurationV2` rows.
-  - Add CHANGELOG entry noting the Phase 5 orchestrator, FigPack curation, notebook rewrite, v2's recommended-for-new-work designation, v0/v1 continued support, and the `auto_curate=True` default added to the full orchestrator.
+  - Add CHANGELOG entry noting the full v2 orchestrator, FigPack curation, notebook rewrite, v2's recommended-for-new-work designation, v0/v1 continued support, and the `auto_curate=True` default added to the full orchestrator.
 
 - **No v1 sunset criteria.** Per the resolved design decision in [overview.md](overview.md), v0 and v1 stay in-tree indefinitely. Phase 5 simply documents that v2 is the recommended path for new sorts; v1 docs stay live and unmarked-as-deprecated.
 
@@ -174,7 +175,7 @@ Before opening the PR for this phase, dispatch `code-reviewer` (or equivalent in
 - `run_v2_unit_match()` is idempotent by `(session_group_owner, session_group_name, matcher_params_name, curation_set_hash)` and does not conflate UnitMatch with concatenated sorting.
 - FigPack feasibility was verified before implementation began (or the project owner was escalated if FigPack proved unusable — no silent fallback).
 - All docs tasks landed: `docs/src/Features/SpikeSortingV2.md` banner, README snippet, `docs/src/Features/ChoosingSpikeSortingV1VsV2.md` decision page.
-- CHANGELOG.md mentions Phase 5 deliverables (orchestrator, FigPack, notebook rewrite), the `auto_curate=True` full-orchestrator default, and v0/v1 continued support.
+- CHANGELOG.md mentions the delivered user-facing capabilities (orchestrator, FigPack, notebook rewrite), the `auto_curate=True` full-orchestrator default, and v0/v1 continued support without referencing plan phases.
 - Sanity: `git diff src/spyglass/spikesorting/v0/ src/spyglass/spikesorting/v1/` is empty — no v0/v1 source touched.
 - Sanity: `git diff` against any Phase 1–4 table `definition` strings is empty — zero-migration policy honored.
 - `code_graph.py describe` returns clean output for every new table; `path --up`/`path --down` chains match the design DAG; JSON warnings are empty or explicitly accounted for in `precondition-check.md`.

@@ -42,6 +42,7 @@ Phase 4b PR:
 
 - [MatcherProtocol — cross-session unit matching plugin interface](shared-contracts.md#matcherprotocol--cross-session-unit-matching-plugin-interface) — Phase 4 implements both the registry and the first concrete backend.
 - [Environment And Database Safety](shared-contracts.md#environment-and-database-safety) — UnitMatchPy resolver/API probes run in the isolated matching environment; DataJoint-backed matcher tests use the isolated database.
+- [Code Artifact Naming](shared-contracts.md#code-artifact-naming) — notebook, test, and helper names use behavior labels, not phase-number labels.
 - [Pydantic Parameter Schema Convention](shared-contracts.md#pydantic-parameter-schema-convention) — `MatcherParameters` gets a per-matcher Pydantic dispatch.
 - [SortingAnalyzer Storage Layout](shared-contracts.md#sortinganalyzer-storage-layout) — matcher reads `templates`, `waveforms`, `unit_locations` extensions.
 
@@ -63,7 +64,7 @@ Output of this sub-phase is documentation + a working notebook, NOT new tables. 
   - Compute cost on the fixture (wall time, peak RSS).
 - **Write the findings into `appendix.md § UnitMatchPy integration notes`** and replace the `PHASE4A_CONTRACT_STUB` markers in `appendix.md`, `shared-contracts.md`, and `designs.md`. Include the exact import statements and a minimal working code snippet (the v2 wrapper will be derived from this).
 - **Reconcile with `shared-contracts.md § MatcherProtocol`**. The current contract says "matcher MUST NOT depend on raw recording data". If 4a finds UnitMatchPy requires data not already present in the analyzer, the v2 wrapper must preextract those inputs into a matcher-owned bundle while still keeping raw NWB paths, Spyglass table keys, and `SortingAnalyzer` objects out of the matcher API. If that wrapper-owned bundle approach cannot be made to run end-to-end on a Frank-lab fixture, stop before Phase 4b and escalate to the project owner; do not quietly scope a DataJoint implementation around an unproven matcher path.
-- **Output deliverables of 4a**: a notebook `notebooks/14a_UnitMatch_Spike.ipynb` that loads a v2 analyzer and runs UnitMatchPy end-to-end, plus the updated appendix and shared-contracts sections. NO new DataJoint tables. NO `unit_matching.py` written yet.
+- **Output deliverables of 4a**: a notebook `notebooks/14_UnitMatch_Spike_Sorting.ipynb` that loads a v2 analyzer and runs UnitMatchPy end-to-end, plus the updated appendix and shared-contracts sections. NO new DataJoint tables. NO `unit_matching.py` written yet.
 
 ### Phase 4b — Schema + implementation (after 4a lands)
 
@@ -140,8 +141,8 @@ test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
 uv pip check
 uv pip show UnitMatchPy
 
-jupyter nbconvert --to notebook --execute notebooks/14a_UnitMatch_Spike.ipynb --output /tmp/14a_UnitMatch_Spike.executed.ipynb
-git diff --check -- .claude/docs/plans/spikesorting-v2/appendix.md .claude/docs/plans/spikesorting-v2/shared-contracts.md .claude/docs/plans/spikesorting-v2/designs.md notebooks/14a_UnitMatch_Spike.ipynb
+jupyter nbconvert --to notebook --execute notebooks/14_UnitMatch_Spike_Sorting.ipynb --output /tmp/14_UnitMatch_Spike_Sorting.executed.ipynb
+git diff --check -- .claude/docs/plans/spikesorting-v2/appendix.md .claude/docs/plans/spikesorting-v2/shared-contracts.md .claude/docs/plans/spikesorting-v2/designs.md notebooks/14_UnitMatch_Spike_Sorting.ipynb
 ```
 
 ### Phase 4b commands
@@ -158,7 +159,7 @@ test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
   .claude/docs/plans/spikesorting-v2/appendix.md \
   .claude/docs/plans/spikesorting-v2/designs.md
 
-pytest tests/spikesorting/v2/test_phase4_unitmatch.py -q
+pytest tests/spikesorting/v2/test_unitmatch.py -q
 
 python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe MatcherParameters --file spyglass/spikesorting/v2/unit_matching.py
 python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe UnitMatchSelection --file spyglass/spikesorting/v2/unit_matching.py

@@ -7,6 +7,7 @@ Cross-phase contracts. Any phase that references one of these MUST follow the sp
 ## Index
 
 - [Environment And Database Safety](#environment-and-database-safety)
+- [Code Artifact Naming](#code-artifact-naming)
 - [SortingAnalyzer Storage Layout](#sortinganalyzer-storage-layout)
 - [Pydantic Parameter Schema Convention](#pydantic-parameter-schema-convention)
 - [MatcherProtocol — cross-session unit matching plugin interface](#matcherprotocol--cross-session-unit-matching-plugin-interface)
@@ -40,6 +41,24 @@ Every phase uses an isolated Python environment and an isolated database for imp
 **Real-data baseline rule**: v1/v2 real-data parity captures should ingest or reference the real NWB inside the isolated integration database. If a lab developer must query the production database to locate metadata, that query is read-only and the PR notes which schemas were accessed. The captured baseline artifacts are small pickle/json files; real NWB/unit files stay outside git.
 
 **Invariant — do not weaken**: production is never the first place a v2 table, populate path, recompute delete, or AnalysisNwbfile write path is tested.
+
+---
+
+## Code Artifact Naming
+
+Implementation artifacts must be readable without this plan. Phase numbers, plan filenames, and `.claude/docs/plans/...` paths are planning vocabulary only; do not put them in runtime code, test names, module names, fixture names, docstrings, comments, exception messages, notebook titles, or user-facing docs.
+
+Use behavior names instead:
+
+- Good test module names: `test_single_session_pipeline.py`, `test_analyzer_curation.py`, `test_session_group_concat.py`, `test_unitmatch.py`.
+- Good test function names: `test_sorting_selection_schema_is_stable`, `test_empty_sorting_supported`, `test_concatenated_recording_make_not_enabled_yet`.
+- Good scaffold comments: `# Runtime implementation added by the matching spike-sorting v2 PR.`
+
+Avoid names/comments that encode the plan slice or milestone number instead of the behavior under test.
+
+Exceptions: plan documents may keep phase labels for sequencing, PR review, and cross-reference. External package parameter names that contain words like `phase1` are preserved if they are the upstream API.
+
+**Invariant — do not weaken**: code, tests, notebooks, and docs committed outside `.claude/docs/plans/spikesorting-v2/` must describe the behavior or component, not the implementation-plan phase that introduced it.
 
 ---
 

@@ -30,6 +30,7 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
 
 - [SortingAnalyzer Storage Layout](shared-contracts.md#sortinganalyzer-storage-layout) — adds extensions to an existing analyzer in place (the on-disk folder grows; this is supported by SI binary_folder format).
 - [Environment And Database Safety](shared-contracts.md#environment-and-database-safety) — recompute/delete validation must run in an isolated database and temporary storage paths.
+- [Code Artifact Naming](shared-contracts.md#code-artifact-naming) — tests/helpers use behavior names, not phase-number names.
 - [Pydantic Parameter Schema Convention](shared-contracts.md#pydantic-parameter-schema-convention) — `QualityMetricParameters`, `AutoCurationRules` get Pydantic models.
 - [Job-Kwargs Resolution](shared-contracts.md#job-kwargs-resolution) — extension compute uses resolved kwargs.
 
@@ -131,7 +132,7 @@ source .venv-spikesorting-v2/bin/activate
 export SPYGLASS_SKILL_DIR="${SPYGLASS_SKILL_DIR:-../spyglass-skill/skills/spyglass}"
 test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
 
-pytest tests/spikesorting/v2/test_phase2_analyzer_curation.py -q
+pytest tests/spikesorting/v2/test_analyzer_curation.py -q
 pytest tests/spikesorting/v2/test_recompute.py -q
 
 python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe AnalyzerCurationSelection --file spyglass/spikesorting/v2/metric_curation.py

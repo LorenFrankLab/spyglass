@@ -25,6 +25,7 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
 
 - [SortingAnalyzer Storage Layout](shared-contracts.md#sortinganalyzer-storage-layout) — the concatenated sort produces one analyzer per concat, same layout.
 - [Environment And Database Safety](shared-contracts.md#environment-and-database-safety) — chronic concat writes large AnalysisNwbfile artifacts and must be validated away from production storage.
+- [Code Artifact Naming](shared-contracts.md#code-artifact-naming) — tests/helpers use behavior names, not phase-number names.
 - [Pydantic Parameter Schema Convention](shared-contracts.md#pydantic-parameter-schema-convention) — `MotionCorrectionParameters` was declared in Phase 1 and is consumed here.
 - [Job-Kwargs Resolution](shared-contracts.md#job-kwargs-resolution) — concat materialization is the heaviest write; uses resolved kwargs.
 
@@ -104,8 +105,8 @@ source .venv-spikesorting-v2/bin/activate
 export SPYGLASS_SKILL_DIR="${SPYGLASS_SKILL_DIR:-../spyglass-skill/skills/spyglass}"
 test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
 
-pytest tests/spikesorting/v2/test_phase3_session_group_concat.py -q
-pytest tests/spikesorting/v2/test_phase1_pipeline.py::test_sorting_selection_schema_unchanged_from_phase_1 -q
+pytest tests/spikesorting/v2/test_session_group_concat.py -q
+pytest tests/spikesorting/v2/test_single_session_pipeline.py::test_sorting_selection_schema_is_stable -q
 
 python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe SessionGroup --file spyglass/spikesorting/v2/session_group.py
 python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe ConcatenatedRecordingSelection --file spyglass/spikesorting/v2/session_group.py
@@ -126,7 +127,7 @@ git diff --check -- src/spyglass/spikesorting/v2 tests/spikesorting/v2 docs/src/
 Before opening the PR for this phase, dispatch `code-reviewer` (or equivalent independent reviewer) against the diff. Confirm:
 - Every task in this phase is implemented as specified.
 - The "Deliberately not in this phase" list is honored — no scope creep into Phase 4 (cross-session matching).
-- **No schema changes to `SortingSelection`.** Git diff against `src/spyglass/spikesorting/v2/sorting.py` shows changes ONLY inside method bodies — the `definition` string is byte-identical to Phase 1. The `test_sorting_selection_schema_unchanged_from_phase_1` test passes.
+- **No schema changes to `SortingSelection`.** Git diff against `src/spyglass/spikesorting/v2/sorting.py` shows changes ONLY inside method bodies — the `definition` string is byte-identical to the already-merged schema. The schema-stability test passes.
 - Multi-day support is gated behind `allow_multi_day=True` AND an explicit non-`auto` motion-correction preset (no silent DREDge dispatch). `test_session_group_create_multi_day_rejected_by_default` and `test_motion_correction_preset_auto_rejects_multi_day` pass.
 - Memory/runtime smoke test is a real measurement (not a mocked metric).
 - `code_graph.py describe` returns clean output for every new table; `path --up`/`path --down` chains match the design DAG; JSON warnings are empty or explicitly accounted for in `precondition-check.md`.

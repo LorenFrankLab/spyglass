@@ -23,6 +23,8 @@ All v2 implementation work uses the [Environment And Database Safety](shared-con
 - Run DataJoint integration tests against an isolated database by default. Prefer the existing pytest Docker MySQL path (`tests/conftest.py` starts a Docker-backed test server and uses `database.prefix = "pytests"`); the repo's `docker-compose.yml` is the manual local fallback.
 - Treat production-connected real-data checks as optional smoke tests, not the main validation target. They require an explicit env-var gate, must write only to test schemas/temp analysis directories, and must not delete or mutate production rows.
 
+All implementation artifacts also use the [Code Artifact Naming](shared-contracts.md#code-artifact-naming) contract: code, tests, notebooks, docstrings, comments, and user-facing docs must describe behavior/components, not the plan phase that introduced them.
+
 ## Files
 
 - [overview.md](overview.md) — goals, non-goals, integration points, risks, rollout strategy, open questions.

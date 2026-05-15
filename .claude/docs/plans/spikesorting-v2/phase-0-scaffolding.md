@@ -40,6 +40,7 @@ Phase 0b PR:
 **Contracts referenced:**
 
 - [Environment And Database Safety](shared-contracts.md#environment-and-database-safety) — Phase 0 establishes the isolated `uv` env and isolated database convention that all runtime phases inherit.
+- [Code Artifact Naming](shared-contracts.md#code-artifact-naming) — scaffold files must not carry plan-phase labels in docstrings or comments.
 - [Pydantic Parameter Schema Convention](shared-contracts.md#pydantic-parameter-schema-convention) — Phase 0 sets up the `_params/` package shell with one example model (`PreprocessingParamsSchema`) so subsequent phases extend rather than invent.
 - [SortingAnalyzer Storage Layout](shared-contracts.md#sortinganalyzer-storage-layout) — Phase 0 introduces the `_analyzer_path()` helper.
 - [Recording Cache Format](shared-contracts.md#recording-cache-format) — Phase 0 introduces the `_hash_nwb_recording()` helper. Phase 1 uses the existing NWB-HDF5 `AnalysisNwbfile` path; any Zarr or binary-cache experiment is a separate follow-up that cannot change the Phase 1 schema.
@@ -69,7 +70,7 @@ Phase 0b PR:
 
 - **Draft schema validation artifact** at `src/spyglass/spikesorting/v2/_draft.py`. Phase 0 maintains this single Python file declaring every v2 table's `definition` string (with `make()` bodies raising `NotImplementedError`) so `code_graph.py` can validate the proposed schema before runtime implementation. It is NOT decorated with `@schema` — it exists for static analysis only, not for DataJoint runtime. After Phase 0 validation, the draft is git-rm'd or split into the per-module Phase 1 / 2 / 3 / 4 / 5 files as those phases implement the real tables. **Until the file is removed, NO automated process should import it** — comment headers and the `_draft.py` filename signal "scaffolding, not production."
 
-- **Create the v2 module skeleton.** Make the following empty/stub files; each has a one-line docstring and an empty `# Implemented in Phase N` comment:
+- **Create the v2 module skeleton.** Make the following empty/stub files; each has a one-line behavior-oriented docstring and, if needed, a neutral comment such as `# Runtime implementation added by the matching spike-sorting v2 PR.` Do not mention plan phases in code comments or docstrings.
   - `src/spyglass/spikesorting/v2/__init__.py`
   - `src/spyglass/spikesorting/v2/recording.py` (Phase 1)
   - `src/spyglass/spikesorting/v2/sorting.py` (Phase 1)
@@ -101,7 +102,7 @@ Phase 0b PR:
   - `test_preprocessing_params_schema_default` — `PreprocessingParamsSchema().model_dump()` returns the expected dict shape; `model_validate({"bandpass_filter": {"freq_min": -1}})` raises `ValidationError`.
   - `test_resolved_job_kwargs_merge` — set `dj.config['custom']['spikesorting_v2_job_kwargs'] = {"n_jobs": 4}`; assert `_resolved_job_kwargs({}) == {"n_jobs": 4, "chunk_duration": "1s", "progress_bar": True}` (the defaults filled in from SI's global).
 
-- **Documentation update for 0a.** Add a short section to [CHANGELOG.md](CHANGELOG.md) under an "Unreleased" heading: "v2 spike sorting scaffolding (#PR-NUMBER): new `spyglass.spikesorting.v2` module tree with empty stubs; no runtime dependency pins changed; v1 remains the production path. The SpikeInterface 0.104 upgrade is a separate prerequisite PR (see Phase 0's gating tasks)." No CLAUDE.md changes in this slice.
+- **Documentation update for 0a.** Add a short section to [CHANGELOG.md](CHANGELOG.md) under an "Unreleased" heading: "v2 spike sorting scaffolding (#PR-NUMBER): new `spyglass.spikesorting.v2` module tree with empty stubs; no runtime dependency pins changed; v1 remains the production path. The SpikeInterface 0.104 upgrade is a separate prerequisite PR." No CLAUDE.md changes in this slice.
 
 ## Phase 0b Tasks — Fixtures And Baseline
 
@@ -252,6 +253,6 @@ Before opening the PR for this phase, dispatch `code-reviewer` (or equivalent in
 - Validation goals are covered; slow / integration tests are marked.
 - Tests aren't trivial — they exercise the asserted behavior, not tautologies (no `assert True`; no assertions that only verify the mock the test just configured). Shared setup is in fixtures, not copy-pasted across tests.
 - `code_graph.py describe` returns clean output for every draft table; `path --up`/`path --down` chains match the design DAG; JSON warnings are empty or explicitly accounted for in `precondition-check.md`.
-- Docstrings, test names, and module names don't reference this plan or its milestones.
+- Docstrings, test names, module names, and user-facing docs don't reference this plan, phase numbers, milestones, or files inside `.claude/docs/plans/`.
 - v1's existing tests' failures (if any) are captured in a follow-up issue, not silently absorbed.
-- CHANGELOG.md mentions the SI 0.104 prerequisite, not an in-Phase-0 SI upgrade.
+- CHANGELOG.md mentions the SI 0.104 prerequisite, not a plan phase.

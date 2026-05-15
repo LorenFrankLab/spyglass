@@ -40,7 +40,7 @@ Phase 1 is large. The implementer may land it as one PR or as the following reco
 - [.claude/docs/plans/spikesorting-v2/appendix.md § SpikeInterface 0.99 → 0.104 migration cheat sheet](appendix.md#spikeinterface-099--0104-migration-cheat-sheet) — API rename table.
 - [.claude/docs/plans/spikesorting-v2/appendix.md § MountainSort 5 install + params](appendix.md#mountainsort-5-install--params) — default params.
 
-**Contracts referenced:** [Environment And Database Safety](shared-contracts.md#environment-and-database-safety), [SortingAnalyzer Storage Layout](shared-contracts.md#sortinganalyzer-storage-layout), [Pydantic Parameter Schema Convention](shared-contracts.md#pydantic-parameter-schema-convention), [SpikeSortingOutput Part-Table Convention for v2](shared-contracts.md#spikesortingoutput-part-table-convention-for-v2), [Job-Kwargs Resolution](shared-contracts.md#job-kwargs-resolution), [Curation Label Enum](shared-contracts.md#curation-label-enum), [`insert_selection()` Return-Value Normalization](shared-contracts.md#insert_selection-return-value-normalization).
+**Contracts referenced:** [Environment And Database Safety](shared-contracts.md#environment-and-database-safety), [Code Artifact Naming](shared-contracts.md#code-artifact-naming), [SortingAnalyzer Storage Layout](shared-contracts.md#sortinganalyzer-storage-layout), [Pydantic Parameter Schema Convention](shared-contracts.md#pydantic-parameter-schema-convention), [SpikeSortingOutput Part-Table Convention for v2](shared-contracts.md#spikesortingoutput-part-table-convention-for-v2), [Job-Kwargs Resolution](shared-contracts.md#job-kwargs-resolution), [Curation Label Enum](shared-contracts.md#curation-label-enum), [`insert_selection()` Return-Value Normalization](shared-contracts.md#insert_selection-return-value-normalization).
 
 **Designs referenced:** [SortGroupV2](designs.md#sortgroupv2), [PreprocessingParameters + RecordingSelection + Recording](designs.md#preprocessingparameters--recordingselection--recording), [ArtifactDetectionParameters + ArtifactDetection](designs.md#artifactdetectionparameters--artifactdetection), [SorterParameters + SortingSelection + Sorting](designs.md#sorterparameters--sortingselection--sorting), [CurationV2](designs.md#curationv2).
 
@@ -117,13 +117,13 @@ Phase 1 is large. The implementer may land it as one PR or as the following reco
 
 - **Implement an `insert_default()` classmethod** on each new Lookup table that bulk-inserts the contents rows with `skip_duplicates=True` on the Lookup-level (allowed) — mirrors v1 pattern at [src/spyglass/spikesorting/v1/recording.py:127](../../../../src/spyglass/spikesorting/v1/recording.py#L127).
 
-- **Write integration tests** in `tests/spikesorting/v2/test_phase1_pipeline.py`. See Validation goals for the full table.
+- **Write integration tests** in behavior-named modules such as `tests/spikesorting/v2/test_single_session_pipeline.py`. See Validation goals for the full table. Do not encode plan phases in test module or test function names.
 
 - **Sort-correctness validation uses MEArec ground-truth fixtures, not minirec.** Per the revised fixture strategy in Phase 0, minirec is reduced to a plumbing-only regression guard (test rows `test_v2_minirec_plumbing` below). Real sort-correctness lives in `test_v2_mearec_polymer_ground_truth` and `test_v2_mearec_neuropixels_ground_truth` (Phase 1 validation goals below) which compute precision/recall against planted MEArec units. The v1-comparison parity test moves to `test_v2_real_data_v1_parity` — runs only when `SPIKESORTING_V2_REAL_NWB_PATH` is set (a real dataset with real spikes), with tolerances `±1 sample` for `clusterless_thresholder` and `±30-50%` for stochastic sorters. **No minirec-based parity test is shipped.**
 
 - **Documentation update** (Phase 1 ships user-visible changes, so docs go with it):
   - New `docs/src/Features/SpikeSortingV2.md` — overview, single-session walkthrough, link to the new notebook (Phase 5 will write the full notebook; Phase 1 ships a minimal end-to-end Python script as the example).
-  - Add CHANGELOG entry noting the Phase 1 surface (`Recording`, `Sorting`, `CurationV2`, `SpikeSortingOutput.CurationV2`) and the SI 0.104 requirement.
+  - Add CHANGELOG entry noting the new v2 single-session surface (`Recording`, `Sorting`, `CurationV2`, `SpikeSortingOutput.CurationV2`) and the SI 0.104 requirement.
   - Add v2 module to `docs/src/api/spikesorting.md` (mkdocs API page).
 
 ## Deliberately not in this phase
@@ -165,7 +165,7 @@ Behaviors the Phase 1 validation goals must cover. Implementer chooses test name
 
 ## Commands to run
 
-If landing slices, run the relevant subset of `tests/spikesorting/v2/test_phase1_pipeline.py` and `code_graph.py describe` for each table touched in that slice. Before considering Phase 1 complete, run the full gate:
+If landing slices, run the relevant subset of `tests/spikesorting/v2/test_single_session_pipeline.py` and `code_graph.py describe` for each table touched in that slice. Before considering Phase 1 complete, run the full gate:
 
 ```bash
 source .venv-spikesorting-v2/bin/activate
@@ -173,7 +173,7 @@ export SPYGLASS_SKILL_DIR="${SPYGLASS_SKILL_DIR:-../spyglass-skill/skills/spygla
 test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
 
 pytest tests/spikesorting/v1/ -q
-pytest tests/spikesorting/v2/test_phase1_pipeline.py -q
+pytest tests/spikesorting/v2/test_single_session_pipeline.py -q
 pytest tests/spikesorting/v2/test_integrity.py -q
 pytest tests/decoding tests/spikesorting/v1/test_merge.py -q
 
