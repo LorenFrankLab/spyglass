@@ -713,7 +713,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
     def _validate_cleanup_plan(
         plan: CleanupPlan,
         *,
-        max_delete_fraction: float = 0.25,
+        max_delete_fraction: float = 0.9,
         max_delete_to_tracked_ratio: float = 10.0,
     ) -> None:
         """Refuse suspicious destructive filesystem cleanup plans."""
@@ -853,7 +853,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
     def cleanup(
         self,
         dry_run: bool = False,
-        max_delete_fraction: float = 0.25,
+        max_delete_fraction: float = 0.9,
         max_delete_to_tracked_ratio: float = 10.0,
     ) -> None:
         """Clean up common and all custom AnalysisNwbfile tables.
@@ -895,7 +895,10 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             entries and associated files.
         max_delete_fraction : float
             Maximum fraction of scanned analysis NWB files that may be deleted
-            by filesystem cleanup. Defaults to 0.25.
+            by filesystem cleanup. Set high by default (0.9) so it only
+            catches a catastrophically misconfigured analysis directory (one
+            where the sweep would wipe nearly everything), not routine large
+            cleanups. Defaults to 0.9.
         max_delete_to_tracked_ratio : float
             Maximum ratio of filesystem cleanup deletions to tracked analysis
             files. This limit applies only to filesystem deletion of untracked

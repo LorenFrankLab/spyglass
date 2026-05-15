@@ -128,7 +128,11 @@ def test_analysis_cleanup_plan_rejects_high_delete_fraction(common_nwbfile):
     plan = _cleanup_plan(common_nwbfile, scanned=4, tracked=3, delete=2)
 
     with pytest.raises(RuntimeError, match="above the safety limit"):
-        common_nwbfile.AnalysisNwbfile._validate_cleanup_plan(plan)
+        common_nwbfile.AnalysisNwbfile._validate_cleanup_plan(
+            plan,
+            max_delete_fraction=0.25,
+            max_delete_to_tracked_ratio=10.0,
+        )
 
 
 def test_analysis_cleanup_plan_rejects_high_delete_to_tracked_ratio(
@@ -189,7 +193,9 @@ def test_analysis_cleanup_revalidates_post_cleanup_plan(
 
     table = object.__new__(common_nwbfile.AnalysisNwbfile)
     with pytest.raises(RuntimeError, match="above the safety limit"):
-        common_nwbfile.AnalysisNwbfile.cleanup(table, dry_run=False)
+        common_nwbfile.AnalysisNwbfile.cleanup(
+            table, dry_run=False, max_delete_fraction=0.25
+        )
 
     assert registry.blocked
     assert registry.unblocked

@@ -464,10 +464,7 @@ class TestCleanupAndRegistry:
         # TODO: use `cleanup()` logic to find orphans
         # Simulate orphan detection across all registered tables
         # insert table entries without downstream fk-references
-        # max_delete_fraction=1.0 disables the filesystem-sweep safety limit:
-        # this small fixture legitimately deletes a third of its files, and
-        # the assertions below verify exactly which files cleanup removed.
-        master_table.cleanup(max_delete_fraction=1.0)
+        master_table.cleanup()
 
         after_cleanup = {
             path for path in created_paths.values() if path.exists()
