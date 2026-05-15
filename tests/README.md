@@ -276,6 +276,8 @@ All tests run with default parameters from `pyproject.toml`. To customize:
 # Useful for: inspecting database state, faster reruns.
 # Must be combined with --base-dir (or --use-env-base-dir) so the
 # preserved DB points at a stable filesystem path.
+# pytest only removes its own per-session temp base_dir automatically.
+# It does not clean persistent user-supplied base_dirs at teardown.
 
 --no-docker         # Don't launch Docker, connect to existing container
 # Useful for: GitHub Actions, manual Docker management

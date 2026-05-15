@@ -1,7 +1,8 @@
 """Tests for pytest base-dir safety helpers."""
 
+import sys
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -111,3 +112,42 @@ def test_resolve_base_dir_warns_when_env_flag_has_no_env(monkeypatch, tmp_path):
 def test_resolve_base_dir_rejects_no_teardown_without_persistent_base():
     with pytest.raises(pytest.UsageError, match="--no-teardown requires"):
         root_conftest._resolve_base_dir(_config(no_teardown=True))
+
+
+class _FakeServer:
+    def __init__(self):
+        self.stopped = False
+
+    def stop(self):
+        self.stopped = True
+
+
+def test_unconfigure_does_not_clean_user_supplied_base_dir(
+    monkeypatch, tmp_path
+):
+    base_dir = tmp_path / "persistent-base"
+    analysis_file = base_dir / "analysis" / "old-result.nwb"
+    tmp_subdir_file = base_dir / "tmp" / "old-artifact.txt"
+    analysis_file.parent.mkdir(parents=True)
+    tmp_subdir_file.parent.mkdir(parents=True)
+    analysis_file.write_text("analysis")
+    tmp_subdir_file.write_text("artifact")
+    _sentinel(base_dir).write_text("test sandbox\n")
+
+    fake_server = _FakeServer()
+    fake_nwb_helper = ModuleType("spyglass.utils.nwb_helper_fn")
+    fake_nwb_helper.close_nwb_files = lambda: None
+
+    monkeypatch.setitem(root_conftest.__dict__, "SERVER", fake_server)
+    monkeypatch.setitem(root_conftest.__dict__, "TMP_BASE_DIR", None)
+    monkeypatch.setitem(root_conftest.__dict__, "BASE_DIR", base_dir)
+    monkeypatch.setitem(root_conftest.__dict__, "TEARDOWN", True)
+    monkeypatch.setitem(
+        sys.modules, "spyglass.utils.nwb_helper_fn", fake_nwb_helper
+    )
+
+    root_conftest.pytest_unconfigure(_config())
+
+    assert fake_server.stopped
+    assert analysis_file.exists()
+    assert tmp_subdir_file.exists()

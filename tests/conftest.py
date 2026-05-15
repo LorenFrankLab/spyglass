@@ -574,7 +574,6 @@ def pytest_configure(config):
 def pytest_unconfigure(config):
     server = globals().get("SERVER")
     tmp_base_dir = globals().get("TMP_BASE_DIR")
-    base_dir = globals().get("BASE_DIR")
     teardown = globals().get("TEARDOWN", False)
 
     if server is None:
@@ -587,35 +586,12 @@ def pytest_unconfigure(config):
     close_nwb_files()
     if teardown:
         server.stop()
-        if tmp_base_dir is None and base_dir is not None:
-            try:
-                _require_test_root_sentinel(base_dir, "resolved test base_dir")
-            except pytest.UsageError as exc:
-                warnings.warn(
-                    f"Skipping pytest filesystem cleanup: {exc}",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
-                return
-            # Selective cleanup only for user-supplied base_dirs; a temp dir
-            # gets removed wholesale below, making per-subdir rmtree redundant.
-            analysis_dir = base_dir / "analysis"
-            for file in analysis_dir.glob("*.nwb"):
-                try:
-                    file.unlink()
-                except Exception as exc:
-                    _warn_cleanup_failure("remove analysis file", file, exc)
-            for subdir in [
-                "export",
-                "moseq",
-                "recording",
-                "spikesorting",
-                "tmp",
-            ]:
-                _rmtree_warn(base_dir / subdir)
 
     # Remove any temp base_dir we allocated. It's under $TMPDIR, was created by
-    # this run, and has no reuse value.
+    # this run, and has no reuse value. User-supplied persistent base_dirs are
+    # intentionally not cleaned here: the durable sentinel is enough to opt into
+    # running tests there, but not enough to prove pytest may delete old files in
+    # that directory.
     if tmp_base_dir is not None:
         _rmtree_warn(tmp_base_dir)
 
