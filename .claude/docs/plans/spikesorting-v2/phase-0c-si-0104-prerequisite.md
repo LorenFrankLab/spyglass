@@ -93,9 +93,9 @@ Policy for this plan:
 
 | Test | Asserts |
 | --- | --- |
-| Legacy import smoke | v0/v1 modules imported by existing downstream query paths import under SI 0.104, or unsupported active-runtime imports raise the explicit legacy-env guard. |
-| Legacy merge query smoke | Existing v0/v1 `SpikeSortingOutput` merge rows remain queryable for spike times / firing rates where the path does not invoke WaveformExtractor-era recomputation. |
-| Legacy runtime guard tests | v0/v1 active runtime paths classified as legacy-only raise the clear SI 0.99 environment message under SI 0.104. |
+| Legacy import smoke | `tests/spikesorting/v2/test_legacy_runtime_boundary.py` imports v0/v1 modules used by existing downstream query paths under SI 0.104, or verifies unsupported active-runtime imports raise the explicit legacy-env guard. |
+| Legacy merge query smoke | `tests/spikesorting/v2/test_legacy_runtime_boundary.py` verifies existing v0/v1 `SpikeSortingOutput` merge rows remain queryable for spike times / firing rates where the path does not invoke WaveformExtractor-era recomputation. It must use narrow fixtures or stubs that do not call active v0/v1 populate paths. |
+| Legacy runtime guard tests | `tests/spikesorting/v2/test_legacy_runtime_boundary.py` verifies v0/v1 active runtime paths classified as legacy-only raise the clear SI 0.99 environment message under SI 0.104. |
 | Optional v1 shim tests | Only if this implementation ports a narrow v1 shim: `MetricCuration.get_waveforms`, relevant metric helpers, and BurstPair callers still satisfy documented behavior. |
 | `test_no_legacy_schema_changes` | v0/v1 DataJoint `definition` strings for recording, sorting, curation, metric curation, burst curation, and recompute tables are byte-identical before/after this implementation. |
 | `test_pyproject_si_pin` | `pyproject.toml` requires `spikeinterface>=0.104,<0.105`. |
@@ -110,7 +110,6 @@ source .venv-spikesorting-v2-si0104/bin/activate
 uv pip install -e ".[test]"
 python --version
 
-pytest tests/spikesorting/v0/ tests/spikesorting/v1/ -q -k "import or merge or query or legacy_guard"
 pytest tests/spikesorting/v2/test_legacy_runtime_boundary.py -q
 uv pip check
 mkdir -p tests/spikesorting/v2/resolver
