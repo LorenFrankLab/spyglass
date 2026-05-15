@@ -11,7 +11,7 @@ The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell n
 - Implement preset validation and optional FigPack dependency gates.
 - Implement `FigPackCurationSelection`, `FigPackCuration`, URI generation, and curation round-trip only against the verified FigPack API.
 - Rewrite notebooks/docs so v2 is easier to use while v0/v1 remain available.
-- Run the Phase 5 validation slice plus `code_graph.py describe/path` for FigPack tables.
+- Run the Phase 5 validation goals plus `code_graph.py describe/path` for FigPack tables.
 
 **Inputs to read first:**
 
@@ -118,7 +118,7 @@ The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell n
 
 ## Validation goals
 
-Behaviors the Phase 5 validation slice must cover. Implementer chooses test names and splits.
+Behaviors the Phase 5 validation goals must cover. Implementer chooses test names and splits.
 
 1. **Preset validation**: `register_preset` raises clearly on a typo or missing Lookup row before the preset is usable.
 2. **`run_v2_pipeline` single-session end-to-end** (slow, integration): one call produces a valid merge_id; downstream `get_spike_times` returns sane arrays; the manifest contains `recording`, `artifact_detection`, `sorting`, `initial_curation`, `auto_curation`, and final `merge_id`.
@@ -164,7 +164,7 @@ git diff --exit-code -- src/spyglass/spikesorting/v0 src/spyglass/spikesorting/v
 Before opening the PR for this phase, dispatch `code-reviewer` (or equivalent independent reviewer) against the diff. Confirm:
 - Every task in this phase is implemented as specified.
 - The "Deliberately not in this phase" list is honored — v1 is NOT removed, no v0/v1 schema touched, no existing v2 table altered.
-- Validation slice tests pass; slow / integration tests are marked.
+- Validation goals are covered; slow / integration tests are marked.
 - `notebooks/13_Spike_SortingV2.ipynb` is ≤10 code cells (verify by running `jq '.cells | map(select(.cell_type == "code")) | length' notebooks/13_Spike_SortingV2.ipynb`).
 - `run_v2_pipeline()` is idempotent (the manifest comparison test passes).
 - `run_v2_unit_match()` is idempotent by `(session_group_owner, session_group_name, matcher_params_name, curation_set_hash)` and does not conflate UnitMatch with concatenated sorting.

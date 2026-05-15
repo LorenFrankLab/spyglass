@@ -11,7 +11,7 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
 - Port the BurstPair visualization workflow into `AnalyzerCuration` methods without adding a separate BurstPair table.
 - Implement recording/analyzer recompute verification tables and safe deletion gates.
 - Preserve NaN sanitization, empty-unit, recursive-auto-curation, and label-rule invariants from `shared-contracts.md`.
-- Run the Phase 2 validation slice plus `code_graph.py describe/path` for new tables.
+- Run the Phase 2 validation goals plus `code_graph.py describe/path` for new tables.
 
 **Inputs to read first:**
 
@@ -110,7 +110,7 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
 
 ## Validation goals
 
-Behaviors the Phase 2 validation slice must cover. Each goal must have at least one assertion exercising it; the implementer chooses test names and splits.
+Behaviors the Phase 2 validation goals must cover. Each goal must have at least one assertion exercising it; the implementer chooses test names and splits.
 
 1. **Pydantic params validation**: `QualityMetricParameters` and `AutoCurationRules` reject bogus metric names / preset names at insert.
 2. **Label-rule correctness — three bug-class invariants (#1513)**: every rule is processed (loop-completion); per-unit label lists are independent objects (no shared-list aliasing); duplicate labels within a unit are suppressed via element-in-list dedupe. One test per invariant.
@@ -155,7 +155,7 @@ git diff --exit-code -- src/spyglass/spikesorting/v1
 Before opening the PR for this phase, dispatch `code-reviewer` (or equivalent independent reviewer) against the diff. Confirm:
 - Every task in this phase is implemented as specified.
 - The "Deliberately not in this phase" list is honored — no scope creep into adjacent phases.
-- Validation slice tests pass; slow / integration tests are marked.
+- Validation goals are covered; slow / integration tests are marked.
 - Tests aren't trivial — the parity test loads the v1 baseline pickle and asserts per-metric tolerances rather than wrapping `compute_quality_metrics` and asserting it equals itself.
 - Docstrings, test names, and module names don't reference this plan, phase numbers, or files inside `.claude/docs/plans/`.
 - `Sorting.add_extensions()` works idempotently (SI's overwrite=False semantics respected).

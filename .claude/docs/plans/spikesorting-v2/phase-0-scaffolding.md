@@ -25,7 +25,7 @@ Phase 0b PR:
 - Add MEArec/minirec fixture generation.
 - Record HDF5 as the Phase 1 `AnalysisNwbfile` cache backend default.
 - Capture the v1 baseline outputs that Phase 1 parity tests will compare against.
-- Run the Phase 0 validation slice and record any expected `code_graph.py` heuristic warnings.
+- Run the Phase 0 validation goals and record any expected `code_graph.py` heuristic warnings.
 
 **Inputs to read first:**
 
@@ -164,7 +164,7 @@ Phase 0b PR:
 - **No `run_v2_pipeline()` orchestrator body** — `pipeline.py` is created as an empty stub in Phase 0. Phase 1 ships the minimal orchestrator (recording → artifact → sorting → initial curation → merge); Phase 5 extends with metrics / concat / FigPack and adds the separate `run_v2_unit_match()` helper.
 - **No matcher protocol implementation.** Phase 0 doesn't even create `matcher_protocol.py`'s contents — just an empty stub file.
 
-## Validation slice
+## Validation goals
 
 ### Phase 0a goals
 
@@ -240,7 +240,7 @@ Before opening the PR for this phase, dispatch `code-reviewer` (or equivalent in
 - If reviewing 0a, fixture generation and real-data baseline capture are not partially implemented.
 - If reviewing 0b, 0a is already merged and its `pytest-v2` / code-graph gates still pass.
 - The "Deliberately not in this phase" list is honored — no scope creep into adjacent phases.
-- Validation slice tests pass; slow / integration tests are marked.
+- Validation goals are covered; slow / integration tests are marked.
 - Tests aren't trivial — they exercise the asserted behavior, not tautologies (no `assert True`; no assertions that only verify the mock the test just configured). Shared setup is in fixtures, not copy-pasted across tests.
 - `code_graph.py describe` returns clean output for every draft table; `path --up`/`path --down` chains match the design DAG; JSON warnings are empty or explicitly accounted for in `precondition-check.md`.
 - Docstrings, test names, and module names don't reference this plan or its milestones.

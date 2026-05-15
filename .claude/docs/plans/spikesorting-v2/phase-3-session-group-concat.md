@@ -11,7 +11,7 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
 - Implement `ConcatenatedRecording.make()` by fetching the selection row first, then using it for member and parameter restrictions.
 - Lift the concat gate in `SortingSelection.insert_selection()` while keeping XOR and concat-artifact rejection guards.
 - Add concat recording loading, sorting dispatch, parent-anchor resolution, and `split_sorting_by_session()`.
-- Run the Phase 3 validation slice plus `code_graph.py describe/path` to prove schema shape is unchanged.
+- Run the Phase 3 validation goals plus `code_graph.py describe/path` to prove schema shape is unchanged.
 
 **Inputs to read first:**
 
@@ -95,7 +95,7 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
 
 ## Validation goals
 
-Behaviors the Phase 3 validation slice must cover. Implementer chooses test names and splits.
+Behaviors the Phase 3 validation goals must cover. Implementer chooses test names and splits.
 
 1. **SessionGroup multi-day gate**: same-day groups insert cleanly with default `allow_multi_day=False`; multi-day groups raise without the flag (message points at Phase 4 sort-then-match); multi-day with `allow_multi_day=True` succeeds; `SessionGroup.is_multi_day(key)` agrees.
 2. **Member `recording_date` is derived**: inserted rows carry `recording_date == Session.session_start_time.date()`; caller cannot override.

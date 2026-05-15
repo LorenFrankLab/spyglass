@@ -26,7 +26,7 @@ Phase 4b PR:
 - Enforce explicit per-member curation choices and make-time provenance guards against schema-bypassing inserts.
 - Implement strict tracked-unit derivation with a bounded graph-size cap.
 - Gate shipping on the polymer MEArec AUC test.
-- Run the Phase 4 validation slice plus `code_graph.py describe/path` for new tables.
+- Run the Phase 4 validation goals plus `code_graph.py describe/path` for new tables.
 
 **Inputs to read first:**
 
@@ -109,7 +109,7 @@ Output of this sub-phase is documentation + a working notebook, NOT new tables. 
 
 ## Validation goals
 
-Behaviors the Phase 4b validation slice must cover. Name and split tests as the implementer sees fit; each goal must have at least one assertion exercising it.
+Behaviors the Phase 4b validation goals must cover. Name and split tests as the implementer sees fit; each goal must have at least one assertion exercising it.
 
 1. **Matcher registry typo-at-insert**: unknown matcher names raise `UnknownMatcherError` at `MatcherParameters.insert1`, before the row commits; the message names registered matchers and `register_matcher()`. Per-matcher Pydantic dispatch validates `params` against the registered model.
 2. **Degenerate single-session matcher**: a `SessionGroup` with one Member produces zero `MatchPair`s; no UnitMatch backend call attempted.
@@ -177,7 +177,7 @@ Before opening the PR for this phase, dispatch `code-reviewer` (or equivalent in
 - Every task in this phase is implemented as specified.
 - The "Deliberately not in this phase" list is honored — DeepUnitMatch is not in this PR.
 - The "Deliberately not in this phase" list is honored — concat identity matching is not in this PR.
-- Validation slice tests pass; slow / integration tests are marked.
+- Validation goals are covered; slow / integration tests are marked.
 - The synthetic two-session test produces real UnitMatch output (not a mock).
 - The MEArec-based **polymer** validation test (`test_v2_unitmatch_polymer_mearec_ground_truth`) runs in CI and passes its AUC > 0.85 criterion — this is the gate. If it fails, Phase 4 does not ship; the implementer escalates rather than relaxing the threshold.
 - `MatcherProtocol` is implementable by external code without touching v2 internals (verify by writing a 10-line dummy matcher in the test suite).
