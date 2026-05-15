@@ -717,3 +717,287 @@ class TestPositionOutputInsert:
             call_args = mock_merge.call_args
             assert call_args.kwargs.get("part_name") == "PoseV2"
             assert call_args.kwargs.get("skip_duplicates") is True
+
+
+def _make_two_led_pose_df(n=300, sampling_rate=30.0, seed=42):
+    """Return a 2-LED (greenLED + redLED) MultiIndex pose DataFrame.
+
+    Both bodyparts follow a correlated random walk with realistic likelihood
+    values and a few low-confidence gaps, matching the kind of data V1's
+    DLCPoseEstimation would produce for a circular-track session.
+    """
+    rng = np.random.default_rng(seed)
+    t = np.arange(n) / sampling_rate
+
+    green_x = np.cumsum(rng.normal(0, 0.5, n)) + 50.0
+    green_y = np.cumsum(rng.normal(0, 0.5, n)) + 50.0
+    red_x = green_x + rng.normal(10.0, 0.1, n)
+    red_y = green_y + rng.normal(0.0, 0.1, n)
+
+    # likelihood: mostly high, ~12 % below 0.6 threshold
+    like_g = rng.uniform(0.3, 1.0, n)
+    like_r = rng.uniform(0.3, 1.0, n)
+
+    data = {
+        ("scorer", "greenLED", "x"): green_x,
+        ("scorer", "greenLED", "y"): green_y,
+        ("scorer", "greenLED", "likelihood"): like_g,
+        ("scorer", "redLED", "x"): red_x,
+        ("scorer", "redLED", "y"): red_y,
+        ("scorer", "redLED", "likelihood"): like_r,
+    }
+    df = pd.DataFrame(data, index=t)
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
+    return df
+
+
+class TestParityV1Pipeline:
+    """compute_pose_outputs must be numerically identical to calling the
+    shared V1 utility functions step by step.
+
+    V1's DLC pipeline calls the same shared utils (centroid.py, orientation.py,
+    interpolation.py, velocity.py) as V2's compute_pose_outputs — just via
+    DataJoint table methods.  These tests verify that compute_pose_outputs
+    orchestrates those utils in the exact same order and with the same
+    parameters, so any future code change that breaks parity is caught
+    immediately without needing a production database.
+    """
+
+    # params that match V1's default DLC pipeline configuration
+    _SMOOTH = {
+        "likelihood_thresh": 0.6,
+        "interpolate": True,
+        "interp_params": {
+            "max_pts_to_interp": 15,
+            "max_cm_to_interp": 20.0,
+        },
+        "smooth": True,
+        "smoothing_params": {
+            "method": "moving_avg",
+            "smoothing_duration": 0.05,
+        },
+    }
+    _ORIENT_2PT = {
+        "method": "two_pt",
+        "bodypart1": "greenLED",
+        "bodypart2": "redLED",
+        "smooth": False,
+    }
+    _CENTROID_2PT = {
+        "method": "2pt",
+        "points": {"point1": "greenLED", "point2": "redLED"},
+        "max_LED_separation": 50.0,
+    }
+    _CENTROID_1PT = {
+        "method": "1pt",
+        "points": {"point1": "greenLED"},
+    }
+
+    def _v1_pipeline(
+        self, pose_df, orient_params, centroid_params, smooth_params
+    ):
+        """Run V1's shared utility functions step by step.
+
+        Mirrors what DLCSmoothInterp → DLCCentroid → DLCOrientation tables do
+        internally, using only the shared utils that both V1 and V2 import.
+        """
+        from spyglass.position.utils.centroid import calculate_centroid
+        from spyglass.position.utils.general import flatten_multiindex
+        from spyglass.position.utils.interpolation import (
+            get_smoothing_function,
+            interp_position,
+        )
+        from spyglass.position.utils.orientation import (
+            get_span_start_stop,
+            no_orientation,
+            two_pt_orientation,
+        )
+        from spyglass.position.utils.pose_processing import (
+            _smooth_bodypart_positions,
+            apply_likelihood_threshold,
+        )
+        from spyglass.position.utils.velocity import compute_velocity
+
+        timestamps = pose_df.index.values
+        sr = float(1 / np.median(np.diff(timestamps)))
+
+        # 1. likelihood threshold
+        thresh = smooth_params.get("likelihood_thresh", 0.95)
+        pose_threshed = apply_likelihood_threshold(pose_df, thresh)
+
+        # 2. flatten to (bodypart, coord)
+        pose_flat = flatten_multiindex(pose_threshed)
+
+        # 3. per-bodypart smooth (DLCSmoothInterp)
+        if smooth_params.get("interpolate", False) or smooth_params.get(
+            "smooth", False
+        ):
+            pose_flat = _smooth_bodypart_positions(pose_flat, smooth_params, sr)
+
+        # 4. orientation (DLCOrientation)
+        method = orient_params["method"]
+        if method == "two_pt":
+            orientation = two_pt_orientation(
+                pose_flat,
+                point1=orient_params["bodypart1"],
+                point2=orient_params["bodypart2"],
+            )
+        else:
+            orientation = no_orientation(pose_flat)
+
+        # 5. centroid (DLCCentroid)
+        max_sep = centroid_params.get("max_LED_separation")
+        centroid_raw = calculate_centroid(
+            pose_flat, centroid_params["points"], max_sep
+        )
+
+        # 6. centroid post-smooth / interpolation (DLCCentroid params)
+        pos_df = pd.DataFrame(
+            centroid_raw, columns=["x", "y"], index=timestamps
+        )
+        if smooth_params.get("interpolate", False):
+            is_nan = np.isnan(pos_df["x"]) | np.isnan(pos_df["y"])
+            if np.any(is_nan):
+                nan_spans = get_span_start_stop(np.where(is_nan)[0])
+                interp_p = smooth_params.get("interp_params", {})
+                pos_df = interp_position(
+                    pos_df,
+                    nan_spans,
+                    max_pts_to_interp=interp_p.get("max_pts_to_interp"),
+                    max_cm_to_interp=interp_p.get("max_cm_to_interp"),
+                )
+        if smooth_params.get("smooth", False):
+            sp = smooth_params["smoothing_params"]
+            sm = sp["method"]
+            smooth_func = get_smoothing_function(sm)
+            if sm == "moving_avg":
+                pos_df = smooth_func(
+                    pos_df,
+                    smoothing_duration=sp["smoothing_duration"],
+                    sampling_rate=sr,
+                )
+
+        centroid_smooth = pos_df[["x", "y"]].values
+
+        # 7. velocity (shared compute_velocity)
+        vel_std = smooth_params.get("velocity_smoothing_std_dev") or None
+        velocity_2d, speed = compute_velocity(
+            centroid_smooth, timestamps, smooth_std_dev=vel_std
+        )
+
+        return {
+            "orientation": orientation,
+            "centroid": centroid_smooth,
+            "velocity_2d": velocity_2d,
+            "speed": speed,
+        }
+
+    def test_parity_two_pt_centroid_and_orientation(self):
+        """2-LED session: compute_pose_outputs matches V1 step-by-step."""
+        from spyglass.position.utils.pose_processing import compute_pose_outputs
+
+        pose_df = _make_two_led_pose_df()
+
+        v1 = self._v1_pipeline(
+            pose_df, self._ORIENT_2PT, self._CENTROID_2PT, self._SMOOTH
+        )
+        v2 = compute_pose_outputs(
+            pose_df, self._ORIENT_2PT, self._CENTROID_2PT, self._SMOOTH
+        )
+
+        assert np.allclose(
+            v2["orientation"], v1["orientation"], atol=1e-10, equal_nan=True
+        ), "orientation diverged from V1 step-by-step"
+        assert np.allclose(
+            v2["centroid"], v1["centroid"], atol=1e-10, equal_nan=True
+        ), "centroid diverged from V1 step-by-step"
+        assert np.allclose(
+            v2["velocity_2d"], v1["velocity_2d"], atol=1e-10, equal_nan=True
+        ), "velocity_2d diverged from V1 step-by-step"
+        assert np.allclose(
+            v2["speed"], v1["speed"], atol=1e-10, equal_nan=True
+        ), "speed diverged from V1 step-by-step"
+
+    def test_parity_one_pt_centroid_no_orientation(self):
+        """1-LED session (whiteLED-style): matches V1 step-by-step."""
+        from spyglass.position.utils.pose_processing import compute_pose_outputs
+
+        # 1-bodypart data (matches V1 mini session: whiteLED only)
+        n, sr = 300, 30.0
+        rng = np.random.default_rng(7)
+        t = np.arange(n) / sr
+        x = np.cumsum(rng.normal(0, 0.5, n)) + 50.0
+        y = np.cumsum(rng.normal(0, 0.5, n)) + 50.0
+        like = rng.uniform(0.4, 1.0, n)
+        data = {
+            ("scorer", "greenLED", "x"): x,
+            ("scorer", "greenLED", "y"): y,
+            ("scorer", "greenLED", "likelihood"): like,
+        }
+        pose_df = pd.DataFrame(data, index=t)
+        pose_df.columns = pd.MultiIndex.from_tuples(pose_df.columns)
+
+        orient_none = {"method": "none"}
+
+        v1 = self._v1_pipeline(
+            pose_df, orient_none, self._CENTROID_1PT, self._SMOOTH
+        )
+        v2 = compute_pose_outputs(
+            pose_df, orient_none, self._CENTROID_1PT, self._SMOOTH
+        )
+
+        assert np.all(
+            np.isnan(v2["orientation"])
+        ), "1-pt orientation must be NaN"
+        assert np.allclose(
+            v2["centroid"], v1["centroid"], atol=1e-10, equal_nan=True
+        ), "1-pt centroid diverged from V1 step-by-step"
+        assert np.allclose(
+            v2["speed"], v1["speed"], atol=1e-10, equal_nan=True
+        ), "1-pt speed diverged from V1 step-by-step"
+
+    def test_parity_no_smoothing(self):
+        """No-smooth path: compute_pose_outputs matches V1 with raw output."""
+        from spyglass.position.utils.pose_processing import compute_pose_outputs
+
+        smooth_raw = {
+            "likelihood_thresh": 0.5,
+            "interpolate": False,
+            "smooth": False,
+        }
+        pose_df = _make_two_led_pose_df(n=100, seed=99)
+
+        v1 = self._v1_pipeline(
+            pose_df, self._ORIENT_2PT, self._CENTROID_2PT, smooth_raw
+        )
+        v2 = compute_pose_outputs(
+            pose_df, self._ORIENT_2PT, self._CENTROID_2PT, smooth_raw
+        )
+
+        assert np.allclose(
+            v2["centroid"], v1["centroid"], atol=1e-10, equal_nan=True
+        ), "no-smooth centroid diverged from V1 step-by-step"
+        assert np.allclose(
+            v2["speed"], v1["speed"], atol=1e-10, equal_nan=True
+        ), "no-smooth speed diverged from V1 step-by-step"
+
+    def test_parity_velocity_smoothing(self):
+        """Velocity Gaussian smoothing path matches V1."""
+        from spyglass.position.utils.pose_processing import compute_pose_outputs
+
+        smooth_with_vel = {
+            **self._SMOOTH,
+            "velocity_smoothing_std_dev": 0.1,
+        }
+        pose_df = _make_two_led_pose_df(n=200, seed=13)
+
+        v1 = self._v1_pipeline(
+            pose_df, self._ORIENT_2PT, self._CENTROID_2PT, smooth_with_vel
+        )
+        v2 = compute_pose_outputs(
+            pose_df, self._ORIENT_2PT, self._CENTROID_2PT, smooth_with_vel
+        )
+
+        assert np.allclose(
+            v2["speed"], v1["speed"], atol=1e-10, equal_nan=True
+        ), "velocity-smoothed speed diverged from V1 step-by-step"
