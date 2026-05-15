@@ -97,6 +97,8 @@ Source: SpikeInterface 0.104 release notes — https://spikeinterface.readthedoc
 
 **MS4 runtime caveat**: SpikeInterface 0.104.3 lists a `mountainsort4` wrapper even in a clean env where the runtime is not installed. In the Python 3.12 uv verification env, `pip install mountainsort4` failed while compiling `isosplit5` (`cstdint` header not found). Phase 0c must resolve this before Phase 1 treats MS4 as runnable; do not confuse `available_sorters()` with `installed_sorters()`. MS4 is also not deterministic, so availability checks must not become exact-output reproducibility checks.
 
+**KS4 reproducibility caveat**: Kilosort4 seeds NumPy/PyTorch internally during sorting, but it runs through PyTorch on CPU/GPU and defaults to GPU when available. Treat KS4 as a scientific correctness candidate, especially for dense probes, not as a deterministic fallback for exact rerun or v1-v2 spike-time parity checks.
+
 **Differences from MS4** (relevant to v2 default params):
 
 - **No `tempdir` parameter** — MS5 doesn't require a tempdir; remove the v1 `sorter_params.pop("tempdir", None)` hack.
