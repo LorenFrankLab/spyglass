@@ -44,7 +44,21 @@ schema = dj.schema("common_nwbfile")
 
 @dataclass(frozen=True)
 class CleanupPlan:
-    """Filesystem cleanup plan for analysis NWB files."""
+    """Filesystem cleanup plan for analysis NWB files.
+
+    Attributes
+    ----------
+    scanned_files : set of pathlib.Path
+        Analysis ``*.nwb`` paths found under the configured analysis directory.
+    tracked_files : set of pathlib.Path
+        Analysis paths currently referenced by DataJoint external stores.
+    files_to_delete : set of pathlib.Path
+        Files selected for filesystem deletion.
+    empty_files : set of pathlib.Path
+        Empty files or directories selected for deletion.
+    untracked_files : set of pathlib.Path
+        Non-empty files selected because no external store references them.
+    """
 
     scanned_files: Set[Path]
     tracked_files: Set[Path]
@@ -659,7 +673,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
     def _build_untracked_file_plan(
         self, custom_tables: List[SpyglassAnalysis]
     ) -> CleanupPlan:
-        """Build a dry-run plan for untracked or empty analysis NWB files."""
+        """Build a cleanup plan for untracked or empty analysis NWB files."""
 
         def paths_from_external(tbl) -> Set[Path]:
             return {
@@ -700,7 +714,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         plan: CleanupPlan,
         *,
         max_delete_fraction: float = 0.25,
-        max_untracked_to_tracked_ratio: float = 10.0,
+        max_delete_to_tracked_ratio: float = 10.0,
     ) -> None:
         """Refuse suspicious destructive filesystem cleanup plans."""
         scanned_count = len(plan.scanned_files)
@@ -729,13 +743,13 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                 "run with dry_run=True and verify the cleanup plan."
             )
 
-        untracked_ratio = delete_count / tracked_count
-        if untracked_ratio > max_untracked_to_tracked_ratio:
+        delete_ratio = delete_count / tracked_count
+        if delete_ratio > max_delete_to_tracked_ratio:
             raise RuntimeError(
                 "Analysis cleanup would delete "
                 f"{delete_count} files with only {tracked_count} tracked "
-                f"analysis files ({untracked_ratio:.1f}x), above the safety "
-                f"limit {max_untracked_to_tracked_ratio:.1f}x. Refusing "
+                f"analysis files ({delete_ratio:.1f}x), above the safety "
+                f"limit {max_delete_to_tracked_ratio:.1f}x. Refusing "
                 "destructive cleanup; run with dry_run=True and verify the "
                 "configured analysis directory."
             )
@@ -782,7 +796,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         for path in plan.files_to_delete:
             try:
                 path.unlink()
-            except Exception as e:
+            except OSError as e:
                 self._logger.error(f"Error deleting file {path}: {e}")
 
         return plan.files_to_delete, plan.tracked_files
@@ -840,7 +854,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         self,
         dry_run: bool = False,
         max_delete_fraction: float = 0.25,
-        max_untracked_to_tracked_ratio: float = 10.0,
+        max_delete_to_tracked_ratio: float = 10.0,
     ) -> None:
         """Clean up common and all custom AnalysisNwbfile tables.
 
@@ -882,9 +896,11 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         max_delete_fraction : float
             Maximum fraction of scanned analysis NWB files that may be deleted
             by filesystem cleanup. Defaults to 0.25.
-        max_untracked_to_tracked_ratio : float
+        max_delete_to_tracked_ratio : float
             Maximum ratio of filesystem cleanup deletions to tracked analysis
-            files. Defaults to 10.0.
+            files. This limit applies only to filesystem deletion of untracked
+            or empty analysis NWB files, not to orphan row deletion. Defaults
+            to 10.0.
         """
         heading = "============== Analysis Cleanup "
         suffix = "(Dry Run) ==============" if dry_run else "=============="
@@ -905,7 +921,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                 self._validate_cleanup_plan(
                     untracked_file_plan,
                     max_delete_fraction=max_delete_fraction,
-                    max_untracked_to_tracked_ratio=max_untracked_to_tracked_ratio,
+                    max_delete_to_tracked_ratio=max_delete_to_tracked_ratio,
                 )
 
             # Process each custom analysis table.
@@ -931,7 +947,18 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                 f"orphans, {len(unused)} unused externals"
             )
 
-            # Remove untracked files
+            # Remove untracked files. For destructive cleanup, rescan after
+            # orphan/external cleanup so newly untracked common analysis files
+            # are included, and validate the final deletion plan before unlink.
+            if not dry_run:
+                untracked_file_plan = self._build_untracked_file_plan(
+                    custom_tables
+                )
+                self._validate_cleanup_plan(
+                    untracked_file_plan,
+                    max_delete_fraction=max_delete_fraction,
+                    max_delete_to_tracked_ratio=max_delete_to_tracked_ratio,
+                )
             _ = self._remove_untracked_files(
                 custom_tables, dry_run=dry_run, plan=untracked_file_plan
             )

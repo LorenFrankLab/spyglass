@@ -453,6 +453,7 @@ class TestCleanupAndRegistry:
 
         after_cleanup = {path.resolve() for path in analysis_dir.rglob("*.nwb")}
         deleted_paths = before_cleanup - after_cleanup
+        missing_deleted_paths = expected_deleted_paths - deleted_paths
         unexpected_deleted_paths = deleted_paths - expected_deleted_paths
         print(
             "AnalysisNwbfile.cleanup test result: "
@@ -463,6 +464,10 @@ class TestCleanupAndRegistry:
             "AnalysisNwbfile.cleanup deleted .nwb files not created as "
             "expected cleanup targets by this test: "
             f"{_relative_paths(unexpected_deleted_paths)}"
+        )
+        assert not missing_deleted_paths, (
+            "AnalysisNwbfile.cleanup did not delete expected cleanup targets: "
+            f"{_relative_paths(missing_deleted_paths)}"
         )
 
         assert not Path(null_fp).exists(), "Null file should be deleted"

@@ -387,7 +387,9 @@ The cleanup process checks:
     cleanup
 - **Filesystem deletion limits**: Refuses destructive cleanup when the directory
     scan would delete too large a fraction of analysis NWB files, or too many
-    files relative to the number of tracked analysis files.
+    files relative to the number of tracked analysis files. These limits apply
+    to the broad filesystem sweep for untracked or empty analysis NWB files;
+    orphan row deletion remains governed by DataJoint table dependencies.
 
 ### Custom Tables
 
