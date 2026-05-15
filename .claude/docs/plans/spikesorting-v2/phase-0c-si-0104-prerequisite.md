@@ -36,7 +36,7 @@ Policy for this plan:
 - Bump the SI dependency for the v2 runtime environment and resolver-check Python 3.10, 3.11, and 3.12.
 - Prove legacy DataJoint schemas are unchanged.
 - Run query/import smoke tests for v0/v1 under SI 0.104; do not require active legacy populate/metric workflows to pass unless this implementation explicitly ports them.
-- Record exact resolved package versions, sorter availability, and legacy-runtime boundary decisions in the PR description or a checked-in resolver artifact.
+- Record exact resolved package versions, sorter availability, and legacy-runtime boundary decisions in a checked-in resolver artifact under `tests/spikesorting/v2/resolver/`.
 
 ## Inputs to read first
 
@@ -52,7 +52,7 @@ Policy for this plan:
 
 - **Create and use an isolated resolver/test environment.**
   - Use a dedicated `uv` virtualenv for the dependency bump and validation commands.
-  - Capture `python --version`, `uv pip freeze`, `spikeinterface.__version__`, `numpy.__version__`, `zarr.__version__`, `numcodecs.__version__`, `spikeinterface.sorters.installed_sorters()`, and optional extra import status in the PR description or a small resolver artifact.
+  - Capture `python --version`, `uv pip freeze`, `spikeinterface.__version__`, `numpy.__version__`, `zarr.__version__`, `numcodecs.__version__`, `spikeinterface.sorters.installed_sorters()`, and optional extra import status in a checked-in resolver artifact.
   - Do not run resolver probes from base/conda; a passing base-env import is not evidence that the project dependencies resolve.
 
 - **Audit legacy runtime compatibility.**
@@ -87,7 +87,7 @@ Policy for this plan:
 
 - **Run resolver checks.**
   - Verify Python 3.10, 3.11, and 3.12 environments resolve.
-  - Record SpikeInterface, NumPy, Zarr, numcodecs, `mountainsort5`, MS4 Linux runtime status, any non-Linux MS4 limitations, and `spikeinterface.sorters.installed_sorters()` output in the PR description.
+  - Record SpikeInterface, NumPy, Zarr, numcodecs, `mountainsort5`, MS4 Linux runtime status, any non-Linux MS4 limitations, and `spikeinterface.sorters.installed_sorters()` output in `tests/spikesorting/v2/resolver/si0104-runtime.md`.
 
 ## Validation slice
 
@@ -113,6 +113,7 @@ python --version
 pytest tests/spikesorting/v0/ tests/spikesorting/v1/ -q -k "import or merge or query or legacy_guard"
 pytest tests/spikesorting/v2/test_legacy_runtime_boundary.py -q
 uv pip check
+mkdir -p tests/spikesorting/v2/resolver
 python - <<'PY'
 import spikeinterface as si
 import spikeinterface.sorters as sis
@@ -130,8 +131,25 @@ print("zarr", zarr.__version__)
 print("numcodecs", numcodecs.__version__)
 print("installed_sorters", sorted(installed))
 PY
-mkdir -p tests/spikesorting/v2
-uv pip freeze > tests/spikesorting/v2/si0104-freeze.txt
+python - <<'PY' > tests/spikesorting/v2/resolver/si0104-runtime.md
+import platform
+import spikeinterface as si
+import spikeinterface.sorters as sis
+import numpy as np
+import zarr
+import numcodecs
+
+print("# SpikeInterface 0.104 runtime resolver")
+print()
+print(f"- Python: {platform.python_version()}")
+print(f"- Platform: {platform.platform()}")
+print(f"- SpikeInterface: {si.__version__}")
+print(f"- NumPy: {np.__version__}")
+print(f"- Zarr: {zarr.__version__}")
+print(f"- numcodecs: {numcodecs.__version__}")
+print(f"- installed_sorters: {sorted(sis.installed_sorters())}")
+PY
+uv pip freeze > tests/spikesorting/v2/resolver/si0104-freeze.txt
 git diff --check -- pyproject.toml src/spyglass/spikesorting/v0 src/spyglass/spikesorting/v1 tests/spikesorting
 ```
 

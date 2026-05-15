@@ -107,7 +107,7 @@ v2 is **strictly additive** for the lifetime of this plan. No feature flags, no 
 - Under the SI 0.104 environment, v2 is the documented runtime path for new spike sorting from Phase 1 onward; docs keep legacy-env instructions for active v0/v1 processing.
 - After parity is achieved, the documentation root (`docs/src/Features/`) gets a banner pointing users to v2 for new work; v1 docs remain with legacy-environment guidance.
 - **v1 source code removal is explicitly out of scope** for this plan. Phase 5 documents how users choose v1 vs v2; it does not define a deletion or sunset trigger.
-- Execution uses one long-lived integration branch with checkpoint commits. Phases are implementation checkpoints, not required standalone PRs. The project owner chooses PR boundaries; a PR may group multiple checkpoints if their order, gating evidence, and review surface remain clear. Phase 1 alone is usable for opt-in SI 0.104 v2 single-session processing, but the lab-wide recommended production default remains v1 until the parity criterion above is met.
+- Execution uses the long-lived `spikesorting-v2` integration branch with checkpoint commits. Phases are implementation checkpoints, not required standalone PRs. The project owner chooses PR boundaries; a PR may group multiple checkpoints if their order, gating evidence, and review surface remain clear. Phase 1 alone is usable for opt-in SI 0.104 v2 single-session processing, but the lab-wide recommended production default remains v1 until the parity criterion above is met.
 
 ## Resolved Design Decisions
 
