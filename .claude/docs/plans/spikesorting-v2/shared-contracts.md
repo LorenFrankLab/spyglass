@@ -570,6 +570,46 @@ are unique within each source family:
 It runs with the rest of the v2 suite; not a separate nightly job or operational
 integrity system.
 
+### Cascade-delete tradeoff and orphan cleanup
+
+The source FK lives on the source part, not on the selection master. This is the
+DataJoint-native way to model polymorphic sources, but it changes delete
+semantics: deleting a source row (`Recording`, `ConcatenatedRecording`, or
+`SharedArtifactGroup`) cascades to the matching source part row and **does not**
+automatically cascade to the `SortingSelection` or `ArtifactDetectionSelection`
+master row. A source-polymorphic master with zero source parts is invalid and
+must not be treated as a usable selection.
+
+Implement each affected selection class with a maintenance helper:
+
+```python
+@classmethod
+def prune_orphaned_selections(cls, *, dry_run: bool = True) -> list[dict]:
+    """Find selection masters with zero source parts.
+
+    With dry_run=True, return the orphaned master keys only. With dry_run=False,
+    delete the orphaned masters through Spyglass cautious_delete so downstream
+    `Sorting`, `CurationV2`, merge rows, and related artifacts are reviewed by
+    the normal cascade-preview path instead of being left broken.
+    """
+```
+
+`SortingSelection.prune_orphaned_selections()` checks
+`RecordingSource` + `ConcatenatedRecordingSource`.
+`ArtifactDetectionSelection.prune_orphaned_selections()` checks
+`RecordingSource` + `SharedArtifactGroupSource`.
+
+Deletion guidance for maintainers: delete through the selection master or run
+`prune_orphaned_selections(dry_run=False)` after deleting source rows. Do not
+assume that deleting `Recording`, `ConcatenatedRecording`, or
+`SharedArtifactGroup` fully removes dependent source-polymorphic selections.
+
+The source-part integrity test MUST include the cascade orphan case: create or
+simulate a master with zero source parts, assert `resolve_source()` raises
+`SchemaBypassError`, assert `prune_orphaned_selections(dry_run=True)` returns
+the master key, and assert the non-dry-run path invokes the cautious-delete
+workflow.
+
 **Invariant — do not weaken**: Layer 1 and Layer 2 are mandatory. Layer 2 (the
 populate-time source re-check) is the most tempting to weaken and must be kept
 because Layer 1 alone is bypassable by any `dj.Manual` user.
