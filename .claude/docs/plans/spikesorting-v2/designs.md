@@ -1502,7 +1502,7 @@ PRESETS = {
         "sorter_params_name": "franklab_tetrode_hippocampus_30kHz_ms5",
         "metric_params_name": "franklab_default",
         "auto_curation_rules_name": "v1_default_nn_noise",
-        "motion_correction_params_name": "auto",
+        "motion_correction_params_name": "auto_default",
     },
 }
 ```
