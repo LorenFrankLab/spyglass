@@ -148,7 +148,7 @@ class TestSchemaConsistency:
 
     def test_conftest_env_scrub_vars_match_directory_schema(self):
         """Test that pytest scrubs every directory env var from the schema."""
-        import conftest as root_conftest
+        from tests import base_dir_safety
 
         schema = load_directory_schema()
         expected = {
@@ -157,7 +157,7 @@ class TestSchemaConsistency:
             for key in dirs
         }
 
-        assert set(root_conftest._derive_dir_env_vars()) == expected
+        assert set(base_dir_safety._derive_dir_env_vars()) == expected
 
 
 class TestInstallerConfig:
