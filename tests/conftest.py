@@ -403,10 +403,12 @@ def _require_test_root_sentinel(base_dir: str | Path, source: str) -> None:
 
     raise pytest.UsageError(
         f"{source} resolved to {sentinel.parent}, but that directory is not "
-        "marked as a Spyglass test sandbox. To use a persistent --base-dir, "
-        f"create {sentinel} first. Omit --base-dir to let pytest create a "
-        "fresh temp sandbox automatically. This prevents destructive tests "
-        "from operating on shared or production storage (issue #1573)."
+        "marked as a Spyglass test sandbox. Omit --base-dir to let pytest "
+        "create a fresh temp sandbox automatically, or choose a dedicated "
+        "test-only directory that already contains the sentinel file. Never "
+        "place this sentinel in a shared or production data root; it is a "
+        "durable opt-in that allows destructive tests to use the directory "
+        "(issue #1573)."
     )
 
 

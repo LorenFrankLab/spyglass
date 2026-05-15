@@ -263,6 +263,8 @@ All tests run with default parameters from `pyproject.toml`. To customize:
 # Persistent test roots must contain a .spyglass-test-root sentinel file.
 # This is a generic sandbox marker; pytest-created temp roots add it
 # automatically, and ./tests/_data/ includes one for local/CI reuse.
+# The sentinel is a durable opt-in, not a freshness check. Never add it
+# to shared or production data roots; use a dedicated test-only directory.
 
 --use-env-base-dir  # Opt back in to the SPYGLASS_BASE_DIR env var
 # when --base-dir is not supplied. Off by default. If the flag is
