@@ -9,6 +9,7 @@ The MVP. Builds the complete single-session sort pipeline: preprocessing → art
 1. v1's `extract_waveforms` / `load_waveforms` calls ported to `create_sorting_analyzer` / `load_sorting_analyzer`.
 2. v1 test suite green under SI 0.104.
 3. `pyproject.toml` SI pin bumped to `>=0.104,<0.105`; `mountainsort5>=0.5` added; MS4 runtime status resolved; optional `spikesorting-v2-matching` extra includes `UnitMatchPy>=3.3,<4` and `mat73`.
+4. Phase 0b MEArec fixtures generated; real-data v1 baseline captured when `SPIKESORTING_V2_REAL_NWB_PATH` is available, or explicitly documented as skipped for that environment.
 
 The first task of this phase (after prerequisites land) is to verify the new SI baseline by running the existing v1 test suite under 0.104 once more and capturing any newly-discovered regressions to fold into Phase 1 implementation notes.
 
@@ -35,20 +36,10 @@ Phase 1 is large. The implementer may land it as one PR or as the following reco
 - [src/spyglass/spikesorting/v1/artifact.py](../../../../src/spyglass/spikesorting/v1/artifact.py) — artifact detection logic.
 - [src/spyglass/spikesorting/v1/curation.py](../../../../src/spyglass/spikesorting/v1/curation.py) — `CurationV1` patterns (lineage, label conventions).
 - [src/spyglass/spikesorting/spikesorting_merge.py:34-166](../../../../src/spyglass/spikesorting/spikesorting_merge.py#L34-L166) — `SpikeSortingOutput` merge master; v2 adds a new part here.
-- [src/spyglass/common/common_nwbfile.py:630](../../../../src/spyglass/common/common_nwbfile.py#L630) — `AnalysisNwbfile` table class used by v2 recording/sorting artifacts.
-- [src/spyglass/utils/mixins/analysis.py:475](../../../../src/spyglass/utils/mixins/analysis.py#L475) — inherited `AnalysisNwbfile.build()` context manager API.
 - [.claude/docs/plans/spikesorting-v2/appendix.md § SpikeInterface 0.99 → 0.104 migration cheat sheet](appendix.md#spikeinterface-099--0104-migration-cheat-sheet) — API rename table.
-- [.claude/docs/plans/spikesorting-v2/appendix.md § SortingAnalyzer extension dependencies](appendix.md#sortinganalyzer-extension-dependencies) — what to compute at sort time.
 - [.claude/docs/plans/spikesorting-v2/appendix.md § MountainSort 5 install + params](appendix.md#mountainsort-5-install--params) — default params.
 
-**Contracts referenced:**
-
-- [SortingAnalyzer Storage Layout](shared-contracts.md#sortinganalyzer-storage-layout) — `Sorting.make()` writes analyzer per this convention; `Sorting.get_analyzer()` reads.
-- [Pydantic Parameter Schema Convention](shared-contracts.md#pydantic-parameter-schema-convention) — every Lookup table validates on insert.
-- [SpikeSortingOutput Part-Table Convention for v2](shared-contracts.md#spikesortingoutput-part-table-convention-for-v2) — adds `CurationV2` part.
-- [Job-Kwargs Resolution](shared-contracts.md#job-kwargs-resolution) — all compute stages use `_resolved_job_kwargs()`.
-- [Curation Label Enum](shared-contracts.md#curation-label-enum) — `CurationV2.insert_curation()` validates labels.
-- [`insert_selection()` Return-Value Normalization](shared-contracts.md#insert_selection-return-value-normalization) — every helper returns a single dict.
+**Contracts referenced:** [SortingAnalyzer Storage Layout](shared-contracts.md#sortinganalyzer-storage-layout), [Pydantic Parameter Schema Convention](shared-contracts.md#pydantic-parameter-schema-convention), [SpikeSortingOutput Part-Table Convention for v2](shared-contracts.md#spikesortingoutput-part-table-convention-for-v2), [Job-Kwargs Resolution](shared-contracts.md#job-kwargs-resolution), [Curation Label Enum](shared-contracts.md#curation-label-enum), [`insert_selection()` Return-Value Normalization](shared-contracts.md#insert_selection-return-value-normalization).
 
 **Designs referenced:** [SortGroupV2](designs.md#sortgroupv2), [PreprocessingParameters + RecordingSelection + Recording](designs.md#preprocessingparameters--recordingselection--recording), [ArtifactDetectionParameters + ArtifactDetection](designs.md#artifactdetectionparameters--artifactdetection), [SorterParameters + SortingSelection + Sorting](designs.md#sorterparameters--sortingselection--sorting), [CurationV2](designs.md#curationv2).
 
@@ -60,11 +51,11 @@ Phase 1 is large. The implementer may land it as one PR or as the following reco
 
 - **Implement `recording.py`** — full content per [designs.md § PreprocessingParameters + RecordingSelection + Recording](designs.md#preprocessingparameters--recordingselection--recording). Specific tasks:
   - `SortGroupV2` Manual table per [designs.md § SortGroupV2](designs.md#sortgroupv2). Ship TWO classmethod constructors:
-    - `set_group_by_shank(...)` — Frank-lab pattern (one group per shank).
-    - `set_group_by_electrode_table_column(column, groups, ...)` — generalized pattern adapted from [Spyglass PR #1438](https://github.com/LorenFrankLab/spyglass/pull/1438) (still DRAFT upstream as of this plan; v2 ships the design). Lets labs whose grouping is keyed off non-shank metadata (e.g., Berke Lab's `intan_channel_number`) configure sort groups without modifying v2 internals.
-    - Both share the existing-entry collision-handling pattern: either `delete_existing_entries=True` + `confirm=True` (after reviewing a `DeletionPreview` of cascading impact) OR caller-provided `sort_group_ids` that don't overlap existing IDs. **No silent overwrite, no unconfirmed cascade-delete.** Implementation follows the spyglass-skill inspect-before-destroy discipline: `delete_existing_entries=True` without `confirm=True` builds an explicit `DeletionPreview` (candidate rows + downstream-cascade row counts + reclaimable disk + cross-team-owned rows) by restricting the v2 tables that can depend on those sort groups, then raises with "Pass `confirm=True` after reviewing the preview". Do not assume `cautious_delete(dry_run=True)` supplies this full report; it is still used as the permission/external-file guard before the confirmed delete. The standalone `SortGroupV2.preview_existing_entries(nwb_file_name)` exposes the same preview without any destructive intent.
-    - `sort_reference_electrode_id` is a parameter on both methods (default -1; per-call configurable so labs that want different reference behavior aren't blocked).
-    - Phase 1 validation goals adds: `test_set_group_by_shank_rejects_overlap` (overlapping `sort_group_ids` raises), `test_set_group_by_electrode_table_column_intan` (synthesizes an NWB with an `intan_channel_number` column and asserts the new classmethod groups correctly), `test_set_group_invalid_column_lists_valid` (asserting the error message lists valid columns).
+  - `set_group_by_shank(...)` — Frank-lab pattern (one group per shank).
+  - `set_group_by_electrode_table_column(column, groups, ...)` — generalized pattern adapted from [Spyglass PR #1438](https://github.com/LorenFrankLab/spyglass/pull/1438) (still DRAFT upstream as of this plan; v2 ships the design). Lets labs whose grouping is keyed off non-shank metadata (e.g., Berke Lab's `intan_channel_number`) configure sort groups without modifying v2 internals.
+  - Both use the existing-entry handling pattern in [designs.md § SortGroupV2](designs.md#sortgroupv2): additive insert by default; `delete_existing_entries=True, confirm=True` only after reviewing `DeletionPreview`; no silent overwrite.
+  - `sort_reference_electrode_id` is a parameter on both methods (default -1; per-call configurable so labs that want different reference behavior aren't blocked).
+  - Validation covers overlap rejection, column grouping with an `intan_channel_number`-style column, and invalid-column errors that list valid columns.
   - `PreprocessingParameters` Lookup, Pydantic-validated, three contents rows: `("default_franklab", ...)`, `("default_neuropixels", {"freq_min": 300, "freq_max": 6000, ...})`, and `("no_filter", {"bandpass_filter": {"freq_min": 1, "freq_max": 14999, "filter_order": 1}, "whitening": None, ...})`. `bandpass_filter` is mandatory in the Pydantic schema, so the "no-op" preset uses a wide-open band rather than `None`; whitening is disabled.
   - `RecordingSelection` Manual with `insert_selection(key) -> dict` per the [insert_selection contract](shared-contracts.md#insert_selection-return-value-normalization).
   - `Recording` Computed with `make()` and `get_recording(key)` that auto-recomputes on missing NWB artifact. The preprocessed recording is materialized **NWB-resident** inside an `AnalysisNwbfile` (`electrical_series_path` + `object_id` on the row). HDF5 is the Phase 1 default because the current `AnalysisNwbfile.build()` path writes via `NWBHDF5IO`. No binary sidecar. Any future Zarr or binary-cache optimization must land as a separate lifecycle/scoping PR without changing this schema. See [shared-contracts.md § Recording Cache Format](shared-contracts.md#recording-cache-format).
@@ -81,14 +72,14 @@ Phase 1 is large. The implementer may land it as one PR or as the following reco
   - `ConcatenatedRecording` (Computed) — DECLARED with full `definition`, but `make()` raises `NotImplementedError("ConcatenatedRecording.make() is implemented in Phase 3")`. The schema is final from Phase 1 so `SortingSelection` can FK it; the populate is deferred.
   - **`_params/motion_correction.py` ships in Phase 1**. Per the Pydantic Parameter Schema Convention, every Lookup `insert1` validates its `params` blob — so `MotionCorrectionParameters.insert_default()` in Phase 1 needs `MotionCorrectionParamsSchema` available at module-import time. The schema is small (Literal preset enum + optional `preset_kwargs` dict). The schema rejects SI `correct_motion` kwargs that would change the return type or write untracked side artifacts (`output_motion`, `output_motion_info`, `folder`). Phase 3 makes no changes to the schema, only fills in the consumer (`ConcatenatedRecording.make()`).
 
-  Test added to validation goals: `test_concatenated_recording_make_raises_in_phase_1` asserts `.populate()` raises `NotImplementedError` until Phase 3 ships.
+  Validation goal #9 covers the Phase 1 `.populate()` `NotImplementedError` gate.
 
 - **Implement `sorting.py`** — `SorterParameters`, `SortingSelection`, `Sorting` per [designs.md § SorterParameters + SortingSelection + Sorting](designs.md#sorterparameters--sortingselection--sorting). Specific points:
   - **`SortingSelection` schema is FINAL in Phase 1** per the zero-migration policy. Columns: `sorting_id` PK; `-> [nullable] Recording` (adds `recording_id`); `-> [nullable] ConcatenatedRecording` (adds `concat_recording_id`); `-> SorterParameters`; `-> [nullable] ArtifactDetection` (real FK, NOT a loose `artifact_id=NULL: uuid` — see designs.md and the round-5 #1437 fix). **XOR enforcement follows [shared-contracts.md § Nullable XOR Foreign-Key Pattern](shared-contracts.md#nullable-xor-foreign-key-pattern)**: `_validate_xor` is called inside `insert_selection()`, re-run at the start of `Sorting.make()` to catch direct `dj.Manual.insert1()` bypasses, and covered by one small parametrized integrity test. Phase 1's `insert_selection` rejects `concat_recording_id` with `NotImplementedError("Concat path requires Phase 3")`; the validator gate is what changes in Phase 3, not the schema.
   - `Sorting.make()` uses `sis.run_sorter()` then immediately `sic.remove_excess_spikes()` (still in SI 0.104).
   - After sort, builds a `SortingAnalyzer(format="binary_folder", sparse=True)` per the shared contract.
   - Computes `random_spikes`, `noise_levels`, `templates`, `waveforms` at sort time. Other extensions deferred to `AnalyzerCuration` (Phase 2).
-  - Writes the units NWB via the `AnalysisNwbfile().build(...)` lifecycle. Stores `analysis_file_name`, `object_id`, `analyzer_folder` on the row. **Do not use v1's raw-NWB-copy-then-mutate-Units pattern.** v1's `_write_sorting_to_nwb` copies the raw NWB and then tries to add a `curation_label` column to the existing units table, which fails when the raw NWB already had a Units table of a different length (see [GitHub issue #1437](https://github.com/LorenFrankLab/spyglass/issues/1437)). v2 must either use the current builder path only after verifying the parent Units table has been removed before writing, or add a minimal/whitelist builder mode before using it. The invariant is that the analysis NWB written by v2 contains only the v2 sorting Units table, not raw/imported Units copied from the parent NWB.
+  - Writes the units NWB via fresh/whitelisted `AnalysisNwbfile` construction. Stores `analysis_file_name`, `object_id`, `analyzer_folder` on the row. **Do not use v1's raw-NWB-copy-then-mutate-Units pattern.** If the current `AnalysisNwbfile().build(...)` path would copy a parent `/units` table, add the minimal whitelist builder mode needed for this write. The invariant is that the analysis NWB written by v2 contains only the v2 sorting Units table, not raw/imported Units copied from the parent NWB (fixes [GitHub issue #1437](https://github.com/LorenFrankLab/spyglass/issues/1437)).
   - `Sorting.get_analyzer(key)` recomputes if folder missing.
   - **Populate `Sorting.Unit` part table** at the end of `make()`. For each unit: peak channel and peak amplitude from SI's documented template helpers (`get_template_extremum_channel(..., outputs="id")` and `get_template_extremum_amplitude(...)`, using the computed `templates` extension); insert the full `Electrode` FK for that peak channel by restricting through the sort group's `SortGroupV2.SortGroupElectrode` rows (not by `electrode_id` alone). Brain region is reached through `Sorting.Unit * Electrode * BrainRegion`; it is non-null in the Spyglass schema. Installs without annotated regions should use a real `BrainRegion` row named `"Unknown"` upstream rather than storing NULL. Per-unit `peak_amplitude_uV` recorded. See [shared-contracts.md § Unit-Level Brain Region Tracing](shared-contracts.md#unit-level-brain-region-tracing).
   - `Sorting.get_unit_brain_regions(key, *, allow_anchor_member=False) -> pd.DataFrame` method as a constant-time `Sorting.Unit * Electrode * BrainRegion` join. **Concat-sort guard (binding)**: when the upstream `SortingSelection` has `concat_recording_id` set, raise `ConcatBrainRegionAmbiguousError` by default; callers opt into anchor-only resolution with `allow_anchor_member=True` (returned rows carry `region_resolution='anchor_member'`). Single-session sorts return `region_resolution='single_session'`. See [shared-contracts.md § Unit-Level Brain Region Tracing](shared-contracts.md#unit-level-brain-region-tracing).
@@ -125,15 +116,13 @@ Phase 1 is large. The implementer may land it as one PR or as the following reco
 
 - **Implement an `insert_default()` classmethod** on each new Lookup table that bulk-inserts the contents rows with `skip_duplicates=True` on the Lookup-level (allowed) — mirrors v1 pattern at [src/spyglass/spikesorting/v1/recording.py:127](../../../../src/spyglass/spikesorting/v1/recording.py#L127).
 
-- **Run the Phase 0 baseline capture script against the lab's real-data dataset** (NOT minirec — minirec has no real spikes, so a baseline captured against it would be useless for parity, contradicting Phase 0's revised baseline policy). One-shot prep step before Phase 1 ships: a lab developer sets `SPIKESORTING_V2_REAL_NWB_PATH` (or passes `--nwb-file` explicitly) and runs `python tests/spikesorting/v2/baseline_capture.py`. Small pickle/json baseline artifacts get checked into `tests/spikesorting/v2/baselines/`; the units NWB stays on local disk and is referenced by path. Lock down sizes before committing.
-
 - **Write integration tests** in `tests/spikesorting/v2/test_phase1_pipeline.py`. See Validation goals for the full table.
 
 - **Sort-correctness validation uses MEArec ground-truth fixtures, not minirec.** Per the revised fixture strategy in Phase 0, minirec is reduced to a plumbing-only regression guard (test rows `test_v2_minirec_plumbing` below). Real sort-correctness lives in `test_v2_mearec_polymer_ground_truth` and `test_v2_mearec_neuropixels_ground_truth` (Phase 1 validation goals below) which compute precision/recall against planted MEArec units. The v1-comparison parity test moves to `test_v2_real_data_v1_parity` — runs only when `SPIKESORTING_V2_REAL_NWB_PATH` is set (a real dataset with real spikes), with tolerances `±1 sample` for `clusterless_thresholder` and `±30-50%` for stochastic sorters. **No minirec-based parity test is shipped.**
 
 - **Documentation update** (Phase 1 ships user-visible changes, so docs go with it):
   - New `docs/src/Features/SpikeSortingV2.md` — overview, single-session walkthrough, link to the new notebook (Phase 5 will write the full notebook; Phase 1 ships a minimal end-to-end Python script as the example).
-  - Update CHANGELOG.md "Unreleased" section: "v2 spike sorting pipeline single-session path lands. New `spyglass.spikesorting.v2` module with `RecordingSelection`, `SortingSelection`, `CurationV2`, plus `SpikeSortingOutput.CurationV2` part. SortingAnalyzer-based; SI 0.104 required."
+  - Add CHANGELOG entry noting the Phase 1 surface (`Recording`, `Sorting`, `CurationV2`, `SpikeSortingOutput.CurationV2`) and the SI 0.104 requirement.
   - Add v2 module to `docs/src/api/spikesorting.md` (mkdocs API page).
 
 ## Deliberately not in this phase
@@ -157,7 +146,7 @@ Behaviors the Phase 1 validation goals must cover. Implementer chooses test name
 4. **`Recording` NWB-resident round-trip** (slow): row has `analysis_file_name`, `electrical_series_path`, `object_id`, `cache_hash`; on missing artifact, `get_recording(key)` rebuilds in place without deleting the DataJoint row; rebuilt hash matches stored.
 5. **Recording timestamp coverage check**: a synthetically truncated NWB raises `RecordingTruncatedError` at populate, not downstream.
 6. **`ArtifactDetection.Interval` part table** (not `IntervalList`): populate fills the part rows; `get_artifact_removed_intervals` returns the complement intervals.
-7. **`Sorting` + analyzer lifecycle** (slow): populate produces the analyzer folder; `get_analyzer(key)` recomputes if folder missing; `Sorting.Unit` has one row per unit with peak `electrode_id` from the sort group and `peak_amplitude_uV > 0`.
+7. **`Sorting` + analyzer lifecycle** (slow): populate produces the analyzer folder; `get_analyzer(key)` recomputes if folder missing; `sic.remove_excess_spikes()` handles boundary spikes without duration errors; `Sorting.Unit` has one row per unit with peak `electrode_id` from the sort group and `peak_amplitude_uV > 0`.
 8. **XOR enforcement (two-layer + integrity test)**: `insert_selection` rejects both-NULL and both-set on `SortingSelection` and `ArtifactDetectionSelection`; bypass-inserted rows raise at `make()` start; one parametrized integrity test asserts no XOR violations exist in the production DB.
 9. **Forward-compat schema (zero-migration)**: `SortingSelection.heading.attributes` includes nullable `concat_recording_id` from Phase 1; `concat_recording_id`-non-NULL `insert_selection` raises `NotImplementedError` (Phase 3 lifts this without schema change); `ConcatenatedRecording.populate()` raises `NotImplementedError` in Phase 1; `CurationV2.object_id` (not `units_object_id`) is the column name per the merge convention.
 10. **CurationV2 integration**: `insert_curation(labels={})` succeeds (zero-unit invariant); labels validated against `CurationLabel` enum; auto-registers in `SpikeSortingOutput.CurationV2`; transaction is atomic — forced part-insert failure leaves no DB rows AND no orphan staged analysis file. Brain-region accessors return per-unit regions (single-session = `region_resolution='single_session'`; concat-backed raises `ConcatBrainRegionAmbiguousError` unless `allow_anchor_member=True`); `get_sort_group_info` returns ALL electrodes (regression vs v1 `fetch(limit=1)`); `get_matchable_unit_ids` excludes any unit with `reject`/`noise`/`artifact`.
@@ -166,79 +155,16 @@ Behaviors the Phase 1 validation goals must cover. Implementer chooses test name
 
 **Sort-correctness goals** (slow, integration):
 
-- `mearec_polymer_60s.nwb` with `clusterless_thresholder`: per-unit `accuracy ≥ 0.8` for ≥4 of 6 planted units (primary correctness gate).
+- `mearec_polymer_128ch_60s.nwb` with `clusterless_thresholder`: per-unit `accuracy ≥ 0.8` for at least two-thirds of planted units (primary correctness gate; Phase 0 fixture targets ~24 planted units).
 - `mearec_neuropixels_60s.nwb` with MS5: per-unit `accuracy ≥ 0.7` for ≥15 of 20 planted units.
-- `mearec_polymer_60s.nwb` with planted brain regions: `Sorting.get_unit_brain_regions(key)` matches the planted soma → peak-channel → group mapping (directly tests unit→region tracing).
+- `mearec_polymer_128ch_60s.nwb` with planted brain regions: `Sorting.get_unit_brain_regions(key)` matches the planted soma → peak-channel → group mapping (directly tests unit→region tracing).
 - `minirec` plumbing-only: pipeline chain produces a merge_id; **no correctness claim**.
 - `SPIKESORTING_V2_REAL_NWB_PATH` env-var gated: v1↔v2 parity per tolerances (`clusterless_thresholder` ±1 sample; MS4/MS5 ±50% unit count + ±30% median FR). Skipped if env var unset.
 - `run_v2_pipeline(..., preset="clusterless_thresholder_default")` returns a complete manifest; second call returns identical manifest with no duplicate inserts; unknown preset raises `ValueError`.
 
 ## Commands to run
 
-Run each slice's commands when that slice lands. Run the final full-phase gate before considering Phase 1 complete.
-
-### Phase 1a commands
-
-```bash
-export SPYGLASS_SKILL_DIR="${SPYGLASS_SKILL_DIR:-../spyglass-skill/skills/spyglass}"
-test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
-
-pytest tests/spikesorting/v1/ -q
-pytest tests/spikesorting/v2/test_phase1_pipeline.py -q -k "params or schema or concatenated_recording_make_raises or concat_fk_declared"
-
-python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe RecordingSelection --file spyglass/spikesorting/v2/recording.py
-python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe ConcatenatedRecording --file spyglass/spikesorting/v2/session_group.py
-python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe SortingSelection --file spyglass/spikesorting/v2/sorting.py
-
-git diff --check -- src/spyglass/spikesorting/v2 tests/spikesorting/v2 CHANGELOG.md
-```
-
-### Phase 1b commands
-
-```bash
-export SPYGLASS_SKILL_DIR="${SPYGLASS_SKILL_DIR:-../spyglass-skill/skills/spyglass}"
-test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
-
-pytest tests/spikesorting/v2/test_phase1_pipeline.py -q -k "sort_group or recording or artifact"
-
-python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe Recording --file spyglass/spikesorting/v2/recording.py
-python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe ArtifactDetectionSelection --file spyglass/spikesorting/v2/artifact.py
-python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src path --up Recording --file spyglass/spikesorting/v2/recording.py --json
-
-git diff --check -- src/spyglass/spikesorting/v2 tests/spikesorting/v2 docs/src/Features CHANGELOG.md
-```
-
-### Phase 1c commands
-
-```bash
-export SPYGLASS_SKILL_DIR="${SPYGLASS_SKILL_DIR:-../spyglass-skill/skills/spyglass}"
-test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
-
-pytest tests/spikesorting/v2/test_phase1_pipeline.py -q -k "sorting or xor or brain_region or analyzer"
-pytest tests/spikesorting/v2/test_integrity.py -q
-
-python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe SortingSelection --file spyglass/spikesorting/v2/sorting.py
-python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src path --up Sorting --file spyglass/spikesorting/v2/sorting.py --json
-
-git diff --check -- src/spyglass/spikesorting/v2 tests/spikesorting/v2 CHANGELOG.md
-```
-
-### Phase 1d commands
-
-```bash
-export SPYGLASS_SKILL_DIR="${SPYGLASS_SKILL_DIR:-../spyglass-skill/skills/spyglass}"
-test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
-
-pytest tests/spikesorting/v2/test_phase1_pipeline.py -q -k "curation or spike_sorting_output or run_v2_pipeline or sorted_spikes_group"
-pytest tests/decoding tests/spikesorting/v1/test_merge.py -q
-
-python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe CurationV2 --file spyglass/spikesorting/v2/curation.py
-python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src path --down CurationV2 --file spyglass/spikesorting/v2/curation.py --json
-
-git diff --check -- src/spyglass/spikesorting/v2 src/spyglass/spikesorting/spikesorting_merge.py tests/spikesorting/v2 docs/src/Features CHANGELOG.md
-```
-
-### Final Phase 1 gate
+If landing slices, run the relevant subset of `tests/spikesorting/v2/test_phase1_pipeline.py` and `code_graph.py describe` for each table touched in that slice. Before considering Phase 1 complete, run the full gate:
 
 ```bash
 export SPYGLASS_SKILL_DIR="${SPYGLASS_SKILL_DIR:-../spyglass-skill/skills/spyglass}"
@@ -249,10 +175,14 @@ pytest tests/spikesorting/v2/test_phase1_pipeline.py -q
 pytest tests/spikesorting/v2/test_integrity.py -q
 pytest tests/decoding tests/spikesorting/v1/test_merge.py -q
 
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe RecordingSelection --file spyglass/spikesorting/v2/recording.py
 python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe Recording --file spyglass/spikesorting/v2/recording.py
 python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe ArtifactDetectionSelection --file spyglass/spikesorting/v2/artifact.py
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe ConcatenatedRecording --file spyglass/spikesorting/v2/session_group.py
 python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe SortingSelection --file spyglass/spikesorting/v2/sorting.py
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe Sorting --file spyglass/spikesorting/v2/sorting.py
 python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe CurationV2 --file spyglass/spikesorting/v2/curation.py
+python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src path --up Recording --file spyglass/spikesorting/v2/recording.py --json
 python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src path --up Sorting --file spyglass/spikesorting/v2/sorting.py --json
 python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src path --down CurationV2 --file spyglass/spikesorting/v2/curation.py --json
 
