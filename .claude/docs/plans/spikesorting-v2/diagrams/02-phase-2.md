@@ -34,9 +34,17 @@ erDiagram
     }
     AutoCurationRules {
         varchar auto_curation_rules_name PK
-        blob label_rules
         varchar auto_merge_preset
         blob auto_merge_kwargs
+    }
+    AutoCurationRules_Rule {
+        varchar auto_curation_rules_name PK
+        int rule_index PK
+        varchar rule_name
+        varchar metric_name
+        enum operator
+        float threshold
+        varchar label
     }
     AnalyzerCurationSelection {
         uuid analyzer_curation_id PK
@@ -56,6 +64,7 @@ erDiagram
     CurationV2 ||--o{ AnalyzerCurationSelection : "FK"
     QualityMetricParameters ||--o{ AnalyzerCurationSelection : "FK"
     AutoCurationRules ||--o{ AnalyzerCurationSelection : "FK"
+    AutoCurationRules ||--o{ AutoCurationRules_Rule : "part"
     AnalyzerCurationSelection ||--|| AnalyzerCuration : "Computed"
     AnalysisNwbfile ||--o{ AnalyzerCuration : "metrics + labels + merges NWB"
 
