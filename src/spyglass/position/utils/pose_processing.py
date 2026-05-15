@@ -4,6 +4,8 @@ Extracted from PoseV2 so they can be tested and reused without a live
 DataJoint connection.
 """
 
+from typing import Tuple
+
 import numpy as np
 import pandas as pd
 
@@ -88,14 +90,57 @@ def apply_likelihood_threshold(
     return pose_df
 
 
+def _mask_large_jumps(
+    x: np.ndarray,
+    y: np.ndarray,
+    max_cm: float,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Mask frames where position jumps more than max_cm from the last valid frame.
+
+    Performs a single forward pass.  When a frame is masked, the reference
+    point is *not* updated, so subsequent frames are compared against the
+    same anchor.  Frames that were already NaN are skipped without updating
+    the anchor.
+
+    Parameters
+    ----------
+    x, y : np.ndarray
+        Coordinate arrays of equal length.  May contain NaN.
+    max_cm : float
+        Maximum allowed Euclidean distance (same units as x/y, typically cm)
+        from the previous valid position.  Frames that exceed this distance
+        are set to NaN.
+
+    Returns
+    -------
+    Tuple[np.ndarray, np.ndarray]
+        Copies of x and y with large-jump frames set to NaN.
+    """
+    x, y = x.copy(), y.copy()
+    max_sq = max_cm**2
+    prev_x, prev_y = np.nan, np.nan
+    for i in range(len(x)):
+        if np.isnan(x[i]) or np.isnan(y[i]):
+            continue
+        if not np.isnan(prev_x):
+            dx = x[i] - prev_x
+            dy = y[i] - prev_y
+            if dx * dx + dy * dy > max_sq:
+                x[i] = np.nan
+                y[i] = np.nan
+                continue  # keep prev_x/y unchanged — compare next frame to same anchor
+        prev_x, prev_y = x[i], y[i]
+    return x, y
+
+
 def _smooth_bodypart_positions(
     pose_flat: pd.DataFrame,
     smooth_params: dict,
     sampling_rate: float,
 ) -> pd.DataFrame:
-    """Apply interpolation + moving-average to each bodypart independently.
+    """Apply per-bodypart cleaning: jump masking, island masking, interp, smooth.
 
-    Replicates V1's ``DLCSmoothInterp`` step: per-bodypart smoothing applied
+    Replicates V1's ``DLCSmoothInterp`` step: per-bodypart cleaning applied
     before orientation and centroid are computed, so that orientation benefits
     from pre-cleaned trajectories rather than raw (noisy) bodypart positions.
 
@@ -108,6 +153,10 @@ def _smooth_bodypart_positions(
     smooth_params : dict
         Smoothing configuration dict.  Relevant keys:
 
+        - ``max_cm_between_pts`` – float or None.  Frames further than this
+          distance from the previous valid frame are set to NaN (T14).
+        - ``num_inds_to_span`` – int.  Valid islands shorter than this that
+          are surrounded by NaN are also set to NaN (T15).
         - ``interpolate`` – bool, whether to interpolate NaN spans.
         - ``interp_params`` – dict with ``max_pts_to_interp`` and
           ``max_cm_to_interp`` (passed straight to ``interp_position``).
@@ -121,18 +170,23 @@ def _smooth_bodypart_positions(
     Returns
     -------
     pd.DataFrame
-        Copy of ``pose_flat`` with ``x``/``y`` smoothed per bodypart.
+        Copy of ``pose_flat`` with ``x``/``y`` cleaned per bodypart.
         ``likelihood`` columns and all other columns are left untouched.
     """
     from spyglass.position.utils.interpolation import (
         interp_position,
+        mask_short_valid_islands,
         smooth_moving_avg,
     )
     from spyglass.position.utils.orientation import get_span_start_stop
 
+    max_cm = smooth_params.get("max_cm_between_pts")
+    num_inds_to_span = smooth_params.get("num_inds_to_span", 0)
+    do_jump = max_cm is not None
+    do_island = num_inds_to_span > 0
     do_interp = smooth_params.get("interpolate", False)
     do_smooth = smooth_params.get("smooth", False)
-    if not do_interp and not do_smooth:
+    if not do_jump and not do_island and not do_interp and not do_smooth:
         return pose_flat.copy()
 
     interp_p = smooth_params.get("interp_params", {})
@@ -151,8 +205,20 @@ def _smooth_bodypart_positions(
             index=pose_flat.index,
         )
 
+        if do_jump:
+            x_m, y_m = _mask_large_jumps(
+                bp_df["x"].values, bp_df["y"].values, max_cm
+            )
+            bp_df["x"] = x_m
+            bp_df["y"] = y_m
+
+        if do_island:
+            is_nan = np.isnan(bp_df["x"].values) | np.isnan(bp_df["y"].values)
+            is_nan = mask_short_valid_islands(is_nan, num_inds_to_span)
+            bp_df.loc[is_nan, ["x", "y"]] = np.nan
+
         if do_interp:
-            is_nan = np.isnan(bp_df["x"]) | np.isnan(bp_df["y"])
+            is_nan = np.isnan(bp_df["x"].values) | np.isnan(bp_df["y"].values)
             if np.any(is_nan):
                 nan_spans = get_span_start_stop(np.where(is_nan)[0])
                 bp_df = interp_position(
@@ -235,9 +301,13 @@ def compute_pose_outputs(
     # --- bodypart pre-smoothing (matches V1 DLCSmoothInterp) -----------------
     # Smooth each bodypart independently before orientation / centroid so that
     # orientation benefits from cleaned trajectories, not raw detections.
-    if smooth_params.get("interpolate", False) or smooth_params.get(
-        "smooth", False
-    ):
+    _needs_bp_clean = (
+        smooth_params.get("interpolate", False)
+        or smooth_params.get("smooth", False)
+        or smooth_params.get("max_cm_between_pts") is not None
+        or smooth_params.get("num_inds_to_span", 0) > 0
+    )
+    if _needs_bp_clean:
         pose_flat = _smooth_bodypart_positions(
             pose_flat, smooth_params, sampling_rate
         )

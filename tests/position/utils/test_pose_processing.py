@@ -205,3 +205,167 @@ class TestApplyLikelihoodThreshold:
         df = _make_df(likelihood=0.95, n=3)
         result = self.fn(df, 0.95)
         assert not np.any(np.isnan(result[("bp", "x")]))
+
+
+class TestMaskLargeJumps:
+    @pytest.fixture(autouse=True)
+    def _import(self):
+        from spyglass.position.utils.pose_processing import _mask_large_jumps
+
+        self.fn = _mask_large_jumps
+
+    def test_large_jump_is_masked(self):
+        """A frame that jumps further than max_cm becomes NaN."""
+        x = np.array([0.0, 1.0, 100.0, 2.0])
+        y = np.array([0.0, 0.0, 0.0, 0.0])
+        xm, ym = self.fn(x, y, max_cm=5.0)
+        assert np.isnan(xm[2])
+        assert np.isnan(ym[2])
+
+    def test_small_movement_preserved(self):
+        """Frames within max_cm of the previous valid frame are unchanged."""
+        x = np.array([0.0, 1.0, 2.0, 3.0])
+        y = np.zeros(4)
+        xm, ym = self.fn(x, y, max_cm=5.0)
+        assert not np.any(np.isnan(xm))
+        assert not np.any(np.isnan(ym))
+
+    def test_anchor_unchanged_after_jump(self):
+        """After masking a jump, the anchor stays at the pre-jump position."""
+        # Frame 2 jumps far; frame 3 returns close to frame 1.
+        x = np.array([0.0, 0.0, 100.0, 1.0])
+        y = np.zeros(4)
+        xm, _ = self.fn(x, y, max_cm=5.0)
+        # Frame 2 masked; frame 3 is close to frame 1 (distance=1) — kept.
+        assert np.isnan(xm[2])
+        assert not np.isnan(xm[3])
+
+    def test_existing_nans_skipped(self):
+        """NaN frames are skipped; they do not reset the anchor."""
+        x = np.array([0.0, np.nan, 1.0, 100.0])
+        y = np.zeros(4)
+        xm, _ = self.fn(x, y, max_cm=5.0)
+        assert np.isnan(xm[1])
+        assert not np.isnan(xm[2])
+        assert np.isnan(xm[3])
+
+    def test_does_not_mutate_input(self):
+        """Input arrays are not modified in place."""
+        x = np.array([0.0, 100.0, 1.0])
+        y = np.zeros(3)
+        x_orig = x.copy()
+        y_orig = y.copy()
+        self.fn(x, y, max_cm=5.0)
+        np.testing.assert_array_equal(x, x_orig)
+        np.testing.assert_array_equal(y, y_orig)
+
+
+class TestMaskShortValidIslands:
+    @pytest.fixture(autouse=True)
+    def _import(self):
+        from spyglass.position.utils.interpolation import (
+            mask_short_valid_islands,
+        )
+
+        self.fn = mask_short_valid_islands
+
+    def test_short_island_surrounded_by_nan_is_masked(self):
+        """A 2-frame island surrounded by NaN is masked when min_island_len=3."""
+        is_nan = np.array(
+            [True, True, False, False, True, True, False, False, False, True]
+        )
+        result = self.fn(is_nan, min_island_len=3)
+        # Island at [2,3] (length 2) should be masked.
+        assert result[2] and result[3]
+        # Island at [6,7,8] (length 3) should be kept.
+        assert not result[6] and not result[7] and not result[8]
+
+    def test_long_island_preserved(self):
+        """An island >= min_island_len is not masked."""
+        is_nan = np.array([True, False, False, False, True])
+        result = self.fn(is_nan, min_island_len=3)
+        assert not np.any(result[1:4])
+
+    def test_edge_island_not_masked(self):
+        """An island at the start or end of the array is not masked (not surrounded)."""
+        # Island at beginning — not surrounded on left.
+        is_nan = np.array([False, True, True])
+        result = self.fn(is_nan, min_island_len=5)
+        assert not result[0]
+        # Island at end — not surrounded on right.
+        is_nan2 = np.array([True, True, False])
+        result2 = self.fn(is_nan2, min_island_len=5)
+        assert not result2[2]
+
+    def test_disabled_when_zero(self):
+        """min_island_len=0 is a no-op."""
+        is_nan = np.array([True, False, True])
+        result = self.fn(is_nan, min_island_len=0)
+        np.testing.assert_array_equal(result, is_nan)
+
+    def test_does_not_mutate_input(self):
+        """Input array is not modified in place."""
+        is_nan = np.array([True, False, True])
+        original = is_nan.copy()
+        self.fn(is_nan, min_island_len=5)
+        np.testing.assert_array_equal(is_nan, original)
+
+
+class TestSmoothBodypartPositionsJumpIsland:
+    """T14/T15: _smooth_bodypart_positions uses jump masking and island masking."""
+
+    @pytest.fixture(autouse=True)
+    def _import(self):
+        from spyglass.position.utils.pose_processing import (
+            _smooth_bodypart_positions,
+        )
+
+        self.fn = _smooth_bodypart_positions
+
+    def test_jump_detection_masks_outliers(self):
+        """Frames with large position jumps are set to NaN."""
+        n, sr = 20, 10.0
+        t = np.arange(n) / sr
+        x = np.zeros(n)
+        y = np.zeros(n)
+        x[10] = 999.0  # huge jump
+        y[10] = 999.0
+        cols = pd.MultiIndex.from_tuples(
+            [("bp", "x"), ("bp", "y"), ("bp", "likelihood")]
+        )
+        df = pd.DataFrame(
+            np.column_stack([x, y, np.ones(n)]),
+            columns=cols,
+            index=t,
+        )
+        params = {"max_cm_between_pts": 5.0}
+        result = self.fn(df, params, sr)
+        assert np.isnan(result[("bp", "x")].iloc[10])
+        assert np.isnan(result[("bp", "y")].iloc[10])
+        # Surrounding frames unchanged.
+        assert not np.isnan(result[("bp", "x")].iloc[9])
+        assert not np.isnan(result[("bp", "x")].iloc[11])
+
+    def test_island_masking_removes_short_valid_segments(self):
+        """Short valid islands between NaN regions are also set to NaN."""
+        n, sr = 20, 10.0
+        t = np.arange(n) / sr
+        x = np.ones(n)
+        y = np.ones(n)
+        # Create NaN around a 2-frame island at indices 5,6.
+        x[:5] = np.nan
+        y[:5] = np.nan
+        x[7:] = np.nan
+        y[7:] = np.nan
+        cols = pd.MultiIndex.from_tuples(
+            [("bp", "x"), ("bp", "y"), ("bp", "likelihood")]
+        )
+        df = pd.DataFrame(
+            np.column_stack([x, y, np.ones(n)]),
+            columns=cols,
+            index=t,
+        )
+        params = {"num_inds_to_span": 5}
+        result = self.fn(df, params, sr)
+        assert np.isnan(result[("bp", "x")].iloc[5])
+        assert np.isnan(result[("bp", "x")].iloc[6])

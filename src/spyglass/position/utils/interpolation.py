@@ -13,6 +13,12 @@ smooth_savgol
     Savitzky-Golay filter smoothing
 get_smoothing_function
     Retrieve smoothing function by name
+span_length
+    Length of an inclusive (start, stop) span
+get_good_spans
+    Merge nearby good spans for V1-compatible span detection
+mask_short_valid_islands
+    Mark short valid islands surrounded by NaN as missing
 """
 
 from typing import Dict, List, Optional, Tuple, Callable
@@ -537,6 +543,133 @@ def get_smoothing_function(method: str) -> Callable:
         )
 
     return SMOOTHING_METHODS[method]
+
+
+def span_length(span: Tuple[int, int]) -> int:
+    """Return the number of frames spanned by an inclusive (start, stop) tuple.
+
+    Parameters
+    ----------
+    span : Tuple[int, int]
+        Inclusive ``(start, stop)`` positional-index pair.
+
+    Returns
+    -------
+    int
+        ``stop - start``.  Zero for a single-frame span.
+    """
+    return span[-1] - span[0]
+
+
+def get_good_spans(
+    bad_inds_mask: np.ndarray,
+    inds_to_span: int = 50,
+) -> Tuple[Optional[List[Tuple[int, int]]], List[Tuple[int, int]]]:
+    """Find and optionally merge spans of valid (non-bad) indices.
+
+    Two good spans separated by ≤ ``inds_to_span`` bad frames are merged into
+    a single span in ``modified_spans``.  This matches V1's behaviour in
+    ``position_dlc_position``, where the merged span determines the region
+    used for bidirectional jump detection.
+
+    Parameters
+    ----------
+    bad_inds_mask : np.ndarray
+        Boolean mask, length n.  ``True`` = bad/missing index.
+    inds_to_span : int, optional
+        Maximum gap (frames) between two good spans before they are
+        merged.  Default 50.
+
+    Returns
+    -------
+    good : list of (int, int) or None
+        Unmodified spans of consecutive valid indices.
+        ``None`` when no valid indices exist.
+    modified_spans : list of (int, int)
+        Good spans after merging neighbours separated by ≤ ``inds_to_span``
+        bad frames.
+
+    Notes
+    -----
+    Moved from V1 ``position_dlc_position`` so V2 can share the implementation.
+    """
+    from spyglass.position.utils.orientation import get_span_start_stop
+
+    good = get_span_start_stop(np.arange(len(bad_inds_mask))[~bad_inds_mask])
+
+    if len(good) < 1:
+        return None, good
+    if len(good) == 1:
+        return good, good
+
+    modified_spans: List[Tuple[int, int]] = []
+    for (start1, stop1), (start2, stop2) in zip(good[:-1], good[1:]):
+        check_existing = [
+            entry
+            for entry in modified_spans
+            if start1 in range(entry[0] - inds_to_span, entry[1] + inds_to_span)
+        ]
+        if check_existing:
+            modify_ind = modified_spans.index(check_existing[0])
+            if (start2 - stop1) <= inds_to_span:
+                modified_spans[modify_ind] = (check_existing[0][0], stop2)
+            else:
+                modified_spans[modify_ind] = (check_existing[0][0], stop1)
+                modified_spans.append((start2, stop2))
+            continue
+        if (start2 - stop1) <= inds_to_span:
+            modified_spans.append((start1, stop2))
+        else:
+            modified_spans.append((start1, stop1))
+            modified_spans.append((start2, stop2))
+    return good, modified_spans
+
+
+def mask_short_valid_islands(
+    is_nan: np.ndarray,
+    min_island_len: int,
+) -> np.ndarray:
+    """Mark short valid islands surrounded by NaN as missing.
+
+    A *valid island* is a consecutive run of non-NaN frames flanked by NaN on
+    both sides.  Very short islands make poor interpolation anchors — linear
+    interpolation across a long bad stretch that happens to contain a 1–2 frame
+    valid island can produce unrealistic trajectories.  Masking them first lets
+    ``interp_position`` treat the whole region as a single uninterpolatable gap.
+
+    Parameters
+    ----------
+    is_nan : np.ndarray
+        Boolean array of length n.  ``True`` = NaN / missing data.
+    min_island_len : int
+        Minimum island length (frames, inclusive) to retain as valid.
+        Islands strictly shorter than this that are surrounded by NaN on
+        both sides are set to ``True`` (masked).  Pass 0 or negative to
+        disable.
+
+    Returns
+    -------
+    np.ndarray
+        Copy of ``is_nan`` with short surrounded islands also set to ``True``.
+    """
+    from spyglass.position.utils.orientation import get_span_start_stop
+
+    if min_island_len <= 0:
+        return is_nan.copy()
+    is_nan = is_nan.copy()
+    valid_indices = np.where(~is_nan)[0]
+    if len(valid_indices) == 0:
+        return is_nan
+    n = len(is_nan)
+    for start, stop in get_span_start_stop(valid_indices):
+        if (stop - start + 1) >= min_island_len:
+            continue
+        surrounded = (start > 0 and is_nan[start - 1]) and (
+            stop < n - 1 and is_nan[stop + 1]
+        )
+        if surrounded:
+            is_nan[start : stop + 1] = True
+    return is_nan
 
 
 # V1 Compatibility alias
