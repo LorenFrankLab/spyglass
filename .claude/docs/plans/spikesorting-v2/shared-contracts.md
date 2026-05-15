@@ -92,6 +92,7 @@ bare `ValueError` / `RuntimeError` for these cases once runtime code lands.
 | `TrackedUnitBudgetExceededError` | Strict tracked-unit graph exceeds `max_strict_nodes`. | Node count, configured cap, and instruction to shrink the group or raise the cap intentionally. |
 | `EmptySortingError` | Optional FigPack view construction cannot represent a zero-unit curation. | State that the curation has zero units and no FigPack view was produced. |
 | `PipelineInputError` | `run_v2_pipeline()` receives zero, partial, or mixed input modes. | Say exactly one input mode is required and list the required fields for each mode. |
+| `UnsupportedDirectInsertError` | A structured Lookup with required part rows is inserted through an unsupported direct master or part insert path. | Table name, unsupported insert path, and the supported helper name. |
 
 `NotImplementedError` is allowed only for forward-compatible table bodies that
 are intentionally declared before their runtime implementation. Its message
@@ -172,7 +173,10 @@ No `binary_cache_path` column. Binary sidecar storage is **explicitly out of MVP
 
 ## Pydantic Parameter Schema Convention
 
-Every Parameters Lookup table in v2 stores a `params` blob whose shape is validated by a Pydantic model. The model lives in `src/spyglass/spikesorting/v2/_params/<table_name>.py` and is invoked at `insert_selection()` time.
+Every v2 parameter Lookup is validated by a Pydantic model. Most parameter
+Lookups store a `params` blob; structured Lookups store typed columns and, when
+needed, part rows. Models live in `src/spyglass/spikesorting/v2/_params/` and
+are invoked by the table's public insert helper before any row is written.
 
 **Layout**:
 
@@ -230,15 +234,35 @@ class PreprocessingParamsSchema(BaseModel):
         return {"whiten": self.whiten.model_dump()}
 ```
 
-**Validation entry point** — every Lookup table calls `_validate_params()` from a shared base in `spyglass.spikesorting.v2.utils`:
+**Validation entry point** — every Lookup table validates through a shared
+Pydantic helper before insert. Blob-backed parameter tables pass their `params`
+blob. Structured parameter tables pass the full row or the master row plus part
+rows:
 
 ```python
-def _validate_params(model_cls: type[BaseModel], params: dict) -> dict:
-    """Validate a params dict against a Pydantic model. Raises ValidationError on mismatch."""
-    return model_cls.model_validate(params).model_dump()
+def _validate_params(model_cls: type[BaseModel], payload: dict) -> dict:
+    """Validate a parameter payload. Raises ValidationError on mismatch."""
+    return model_cls.model_validate(payload).model_dump()
 ```
 
-**Invariant — do not weaken**: Every Lookup table's `insert1()`, `insert_default()`, and any insert helper MUST call `_validate_params(SchemaClass, key["params"])` before inserting. Bypassing validation is allowed only on the `LegacyImport` path (Phase 5 future work).
+For blob-backed tables such as `PreprocessingParameters`, `SorterParameters`,
+`ArtifactDetectionParameters`, `MotionCorrectionParameters`, and
+`MatcherParameters`, the payload is `key["params"]`. For structured Lookup
+tables such as `QualityMetricParameters` and `AutoCurationRules`, the payload is
+the row itself. `AutoCurationRules` also validates its ordered `Rule` part rows
+in the same transaction as the master insert. Its canonical insert path is
+`AutoCurationRules.insert_rules(row, rule_rows)`; direct inserts into
+`AutoCurationRules.Rule` are unsupported because they bypass whole-payload
+validation.
+
+**Invariant — do not weaken**: Every Lookup table's `insert1()`,
+`insert_default()`, and any insert helper MUST call `_validate_params(...)`
+before inserting. Structured Lookup helpers that insert part rows MUST validate
+the complete master-plus-part payload before inserting either table. Bypassing
+validation is allowed only on the `LegacyImport` path (Phase 5 future work).
+If a structured Lookup has a part table, direct part insertion is not a public
+API; the validation suite must include an integrity check that flags malformed
+or missing part rows inserted outside the helper.
 
 **Schema versioning**: each Pydantic model has a `schema_version: int = N` field. When the model evolves in a breaking way (renamed/removed fields), bump the version and add a `LegacyParams` shim that translates older versions. Lookup table contents always insert with the current version.
 
@@ -278,7 +302,8 @@ import pandas as pd
 class SessionMatcherInput:
     """One per-session bundle the wrapper prepares for the matcher.
 
-    Concrete fields (paths, file names, dtypes) pinned by Phase 4a.
+    Concrete fields (paths, file names, dtypes) pinned by the matcher API
+    verification checkpoint.
     """
     session_key: dict  # {"sorting_id": UUID, "curation_id": int}
     waveform_dir: Path  # wrapper-prepared dir with the matcher-expected layout

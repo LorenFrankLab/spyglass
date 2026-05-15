@@ -521,7 +521,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         has N Electrode rows — one per SessionGroup.Member. v2 anchors
         `Sorting.Unit -> Electrode` to the FIRST member's Electrode row
         (deterministic; same rule as the AnalysisNwbfile parent anchor
-        in Phase 3). Per-session
+        for concatenated recordings). Per-session
         brain regions for tracked units are derived not from
         `Sorting.Unit` but from `TrackedUnit.Member` walking back
         through `CurationV2 -> SortingSelection ->
@@ -735,6 +735,25 @@ class AutoCurationRules(SpyglassMixin, dj.Lookup):
         threshold: float
         label: varchar(32)
         """
+
+    @classmethod
+    def insert_rules(cls, row: dict, rule_rows: list[dict], **kwargs):
+        """Public insert helper for AutoCurationRules.
+
+        Required behavior:
+        - validate the complete {"master": row, "rules": rule_rows} payload
+          with AutoCurationRulesSchema before writing anything;
+        - insert the master row and Rule rows in one transaction;
+        - return a PK-only dict for the master row;
+        - leave no master row behind if rule insertion fails.
+        """
+        ...
+
+    def insert1(self, row: dict, **kwargs):
+        raise UnsupportedDirectInsertError(
+            "Use AutoCurationRules.insert_rules(row, rule_rows) so rule rows "
+            "are validated with the master row."
+        )
 
 @schema
 class AnalyzerCurationSelection(SpyglassMixin, dj.Manual):
