@@ -54,7 +54,7 @@ Phase 1 is large. The implementer may land it as one change set or as the follow
 
 - **Implement `recording.py`** — full content per [designs.md § PreprocessingParameters + RecordingSelection + Recording](designs.md#preprocessingparameters--recordingselection--recording). Specific tasks:
   - `SortGroupV2` Manual table per [designs.md § SortGroupV2](designs.md#sortgroupv2). Ship TWO classmethod constructors:
-  - `set_group_by_shank(...)` — Frank-lab pattern (one group per shank).
+  - `set_group_by_shank(...)` — Frank-lab sort-group pattern (one sort group per `probe_shank`, independent of whether the NWB has one `ElectrodeGroup` for the whole probe).
   - `set_group_by_electrode_table_column(column, groups, ...)` — generalized pattern adapted from [Spyglass PR #1438](https://github.com/LorenFrankLab/spyglass/pull/1438) (still DRAFT upstream as of this plan; v2 ships the design). Lets labs whose grouping is keyed off non-shank metadata (e.g., Berke Lab's `intan_channel_number`) configure sort groups without modifying v2 internals.
   - Both use the existing-entry handling pattern in [designs.md § SortGroupV2](designs.md#sortgroupv2): additive insert by default; `delete_existing_entries=True, confirm=True` only after reviewing `DeletionPreview`; no silent overwrite.
   - `sort_reference_electrode_id` is a parameter on both methods (default -1; per-call configurable so labs that want different reference behavior aren't blocked).
@@ -158,10 +158,10 @@ Behaviors the Phase 1 validation goals must cover. Implementer chooses test name
 
 **Sort-correctness goals** (slow, integration):
 
-- `mearec_polymer_128ch_60s.nwb` with `clusterless_thresholder`: per-unit `accuracy ≥ 0.8` for at least two-thirds of planted units (primary correctness gate; Phase 0 fixture targets ~24 planted units).
+- `mearec_polymer_128ch_60s.nwb` with a real SpikeInterface sorter, not `clusterless_thresholder`: primary correctness gate. Default target is MS5 (`mountainsort5`) because it exercises the modern SI sorter path without requiring a GPU; if Phase 0b calibration shows MS5 is unsuitable on the 128-channel polymer fixture, record the observed result in `fixtures_manifest.json` and switch the gate to KS4 only if the CI/developer environment can provide the required runtime. Pass criterion starts at per-unit `accuracy ≥ 0.7` for at least half of planted units and may be tightened after the Phase 0b calibration run records observed performance.
 - `mearec_neuropixels_60s.nwb` with MS5: per-unit `accuracy ≥ 0.7` for ≥15 of 20 planted units.
 - `mearec_polymer_128ch_60s.nwb` with planted brain regions: `Sorting.get_unit_brain_regions(key)` matches the planted soma → peak-channel → group mapping (directly tests unit→region tracing).
-- `minirec` plumbing-only: pipeline chain produces a merge_id; **no correctness claim**.
+- `clusterless_thresholder` and `minirec` plumbing-only: pipeline chain produces a merge_id and deterministic baseline/parity artifacts where applicable; **no synthetic sort-correctness claim**. `clusterless_thresholder` is a Spyglass peak-detection special case and does not exercise the same SpikeInterface sorter path as MS5/KS4.
 - `SPIKESORTING_V2_REAL_NWB_PATH` env-var gated: v1↔v2 parity per tolerances (`clusterless_thresholder` ±1 sample; MS4/MS5 ±50% unit count + ±30% median FR). Skipped if env var unset. The test uses the isolated database/write directories; `SPYGLASS_ALLOW_PRODUCTION_SMOKE=1` permits read-only production metadata lookup only.
 - `run_v2_pipeline(..., preset="franklab_tetrode_clusterless_thresholder")` returns a complete manifest; second call returns identical manifest with no duplicate inserts; unknown preset raises `PipelineInputError`.
 

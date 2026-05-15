@@ -35,8 +35,10 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
     """Per-session electrode grouping for v2 spike sorting.
 
     A 'sort group' is the set of channels handed to one sorter run. For
-    tetrodes: one group per tetrode (4 channels). For polymer probes:
-    one group per shank (per the Frank-lab pattern). For Berke Lab and
+    tetrodes: one sort group per tetrode (4 channels). For polymer probes:
+    one sort group per shank (derived from the electrode-table
+    `probe_shank` column; this is distinct from NWB `ElectrodeGroup`,
+    which may represent the whole probe). For Berke Lab and
     other labs whose electrode grouping is keyed off non-shank metadata,
     set_group_by_electrode_table_column() lets the caller group by ANY
     electrode-table column (e.g., "intan_channel_number").

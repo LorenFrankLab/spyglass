@@ -301,7 +301,7 @@ Spyglass's `Raw` ingestion at [common_ephys.py:289-294](../../../../src/spyglass
 _source_nwb_object_name = ["e-series", "electricalseries", "ephys", "electrophysiology"]
 ```
 
-`trodes_to_nwb` writes to `"e-series"`. **Match that name** in the MEArec converter — NeuroConv's default may differ. Override via `metadata={"Ecephys": {"ElectricalSeries": {"name": "e-series"}}}`.
+`trodes_to_nwb` writes to `"e-series"` (`convert_ephys.py` builds the raw acquisition with `ElectricalSeries(name="e-series", ...)`). **Match that name** in the MEArec converter — NeuroConv's default may differ. Override via `metadata={"Ecephys": {"ElectricalSeries": {"name": "e-series"}}}`.
 
 ### YAML metadata fields (from trodes_to_nwb 20230622_sample_metadata.yml)
 
@@ -311,19 +311,38 @@ The converter must populate these NWB-level fields (synthetic but well-formed):
 - `experiment_description`, `session_description`, `session_id`, `keywords`
 - `subject`: `description`, `genotype`, `sex`, `species`, `subject_id`, `date_of_birth`, `weight`
 - `data_acq_device`, `device`
-- `electrode_groups`: per group, `location`, `device_type`, coordinates `(x, y, z)`, `targeted_location`
-- `ntrode_electrode_group_channel_map` (one mapping per tetrode group)
+- `electrode_groups`: per physical probe/electrode group, `location`, `device_type`, coordinates `(x, y, z)`, `targeted_location`
+- `ntrode_electrode_group_channel_map` (one mapping per ntrode/shank map; the polymer probe-reconfiguration sample uses one electrode group for the 128-channel probe and four ntrode maps pointing at that same group)
 
 ### Probe device types Spyglass recognizes
 
 - `tetrode_12.5` — Frank-lab default tetrode; recognized by Spyglass at [recording.py:630-643](../../../../src/spyglass/spikesorting/v1/recording.py#L630-L643) for probe-geometry handling.
 - Neuropixels device types via `probeinterface`.
 
-For MEArec fixtures, plant the device_type explicitly to match an existing Spyglass-recognized probe — otherwise the ingestion succeeds but downstream probe-geometry handling falls back to channel-position-only.
+For MEArec fixtures, plant the device_type explicitly to match a Spyglass-recognized probe — otherwise the ingestion succeeds but downstream probe-geometry handling falls back to channel-position-only.
 
-### BrainRegion via targeted_location
+### Frank-lab / Novela electrode format for polymer fixtures
 
-Spyglass's `BrainRegion` table is populated from each electrode group's `targeted_location` field. For Phase 1 brain-region-tracing validation, the MEArec fixture's `brain_region_map` (e.g., `{0: "CA1", 1: "CA3"}`) is materialized by setting `electrode_groups[i].targeted_location = brain_region_map[i]` in the metadata; Spyglass ingestion creates the corresponding `BrainRegion` rows.
+Spyglass ephys ingestion has a stronger path when the NWB uses `ndx_franklab_novela.Probe`, `Shank`, and `ShanksElectrode` objects. `ProbeType`, `Probe`, `Probe.Shank`, and `Probe.Electrode` ingest from those objects ([common_device.py:335-504](../../../../src/spyglass/common/common_device.py#L335-L504)). `Electrode.make()` then links each electrode row to `Probe.Electrode` only if the NWB electrode table carries the rec_to_nwb / novela-style columns `probe_shank`, `probe_electrode`, `bad_channel`, and `ref_elect_id` ([common_ephys.py:157-181](../../../../src/spyglass/common/common_ephys.py#L157-L181)).
+
+Therefore the polymer MEArec converter must not stop at generic NeuroConv electrode metadata. It must create the Frank-lab/Novela probe object and add those electrode-table columns. Use the local `trodes_to_nwb` reference files as the source of truth: `convert_yaml.py::add_electrode_groups`, `tests/test_data/20230622_sample_metadataProbeReconfig.yml`, and `device_metadata/probe_metadata/128c-4s6mm6cm-15um-26um-sl.yml`.
+
+- `probe_type = "128c-4s6mm6cm-15um-26um-sl"`
+- One NWB `ElectrodeGroup` for the whole 128-channel probe, not one group per shank.
+- 4 Novela `Shank` objects, 32 contacts per shank.
+- `probe_shank` values `0..3`.
+- `probe_electrode` values `0..127` globally within the probe, matching `ShanksElectrode.name` and `convert_yaml.py`'s `electrode_counter_probe`.
+- `bad_channel = False` for generated fixtures unless a test intentionally marks channels bad.
+- `ref_elect_id = -1` unless the fixture intentionally tests a reference electrode.
+- `rel_x`, `rel_y`, `rel_z` copied from the same probe metadata used by MEArec generation.
+
+Round-trip validation must assert `Electrode * Probe.Electrode` has 128 rows for the polymer fixture and that no `"Electrode did not match expected novela format"` warning was emitted.
+
+### BrainRegion validation with trodes-compatible electrodes
+
+Spyglass's `BrainRegion` table is populated from each electrode's NWB `group.location` during `Electrode.make()` ([common_ephys.py:128-140](../../../../src/spyglass/common/common_ephys.py#L128-L140)). `trodes_to_nwb` also stores `targeted_location` on the NWB `ElectrodeGroup`, but current Spyglass `Electrode.make()` does not use that field for per-electrode regions.
+
+For the polymer fixture, keep the NWB trodes-compatible: one electrode group for the physical probe. That means NWB ingestion gives all electrodes the group-level default region. For the v2 brain-region tracing regression, plant multi-region ground truth after ingestion using an isolated-test config/update path such as `Electrode.create_from_config(...)`, assigning `Electrode.region_id` by `probe_shank` (for example shank 0 -> CA1, shank 1 -> CA3). This tests the v2 unit-to-region joins without falsifying the Frank-lab NWB structure.
 
 ### Round-trip validation
 
@@ -332,6 +351,8 @@ The Phase 0 fixture generator runs `Nwbfile.insert_from_relative_file_name(out_p
 - `Raw & {"nwb_file_name": fixture}` exists with one row.
 - `Electrode & {"nwb_file_name": fixture}` has the expected count.
 - `BrainRegion & {"region_name": planted_region}` exists for each planted region.
+- For polymer fixtures, `ProbeType`, `Probe`, `Probe.Shank`, and `Probe.Electrode` rows exist and `Electrode * Probe.Electrode` has 128 rows.
+- Imported ground-truth Units match MEArec's `MEArecSortingExtractor` spike trains by unit id within one sample.
 
 If round-trip fails on a freshly-generated fixture, the converter is broken — fail fast at fixture-generation time rather than at test-run time.
 
