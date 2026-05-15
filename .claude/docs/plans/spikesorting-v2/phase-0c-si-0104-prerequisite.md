@@ -38,11 +38,12 @@ Move Spyglass from `spikeinterface>=0.99.1,<0.100` to `spikeinterface>=0.104,<0.
 - **Bump dependencies in `pyproject.toml`.**
   - Change `spikeinterface>=0.99.1,<0.100` to `spikeinterface>=0.104,<0.105`.
   - Add `mountainsort5>=0.5`.
-  - Add optional dependency group `spikesorting-v2-matching = ["UnitMatchPy>=3.3,<4"]` only after resolver testing confirms it does not force an incompatible NumPy downgrade in the supported Python range.
+  - Verify the MS4 runtime package in the same resolver matrix. A clean SI 0.104.3 Python 3.12 env exposes the `mountainsort4` wrapper but does not install the runtime; `pip install mountainsort4` can fail while building `isosplit5`. Phase 1 cannot ship an MS4 default row unless this phase proves `spikeinterface.sorters.installed_sorters()` includes `mountainsort4` on supported CI/dev envs, or documents the blocker and removes MS4 from the executable default set.
+  - Add optional dependency group `spikesorting-v2-matching = ["UnitMatchPy>=3.3,<4", "mat73"]` only after resolver testing confirms it does not force an incompatible NumPy downgrade in the supported Python range and the UnitMatchPy import path is usable or clearly guarded.
 
 - **Run resolver checks.**
   - Verify Python 3.10, 3.11, and 3.12 environments resolve.
-  - Record SpikeInterface, NumPy, Zarr, numcodecs, and mountainsort package versions in the PR description.
+  - Record SpikeInterface, NumPy, Zarr, numcodecs, `mountainsort5`, MS4 runtime status, and `spikeinterface.sorters.installed_sorters()` output in the PR description.
 
 ## Validation slice
 
@@ -54,6 +55,8 @@ Move Spyglass from `spikeinterface>=0.99.1,<0.100` to `spikeinterface>=0.104,<0.
 | `test_burstpair_helpers_after_si0104_port` | `BurstPair` plotting / investigation helpers still execute against a metric-curation row. |
 | `test_no_v1_schema_changes` | v1 DataJoint `definition` strings for recording, sorting, curation, metric curation, burst curation, and recompute tables are byte-identical before/after the port. |
 | `test_pyproject_si_pin` | `pyproject.toml` requires `spikeinterface>=0.104,<0.105`. |
+| `test_sorter_runtime_resolution` | `mountainsort5` imports, `sis.installed_sorters()` includes `mountainsort5`, and MS4 runtime status is explicit: either `sis.installed_sorters()` includes `mountainsort4` or the PR blocks Phase 1's MS4 default row with a documented resolver issue. |
+| `test_optional_matching_extra_resolution` | The `spikesorting-v2-matching` extra includes both `UnitMatchPy>=3.3,<4` and `mat73`, resolves without NumPy incompatibility, and import guards produce a clear message if UnitMatchPy hits the `_tkinter` import path. |
 
 ## Commands to run
 
@@ -63,8 +66,12 @@ pytest tests/spikesorting/v1/test_metric_curation.py tests/spikesorting/v1/test_
 python -m pip check
 python - <<'PY'
 import spikeinterface as si
+import spikeinterface.sorters as sis
 from packaging.version import Version
 assert Version(si.__version__) >= Version("0.104")
+installed = set(sis.installed_sorters())
+assert "mountainsort5" in installed
+print("installed_sorters", sorted(installed))
 PY
 git diff --check -- pyproject.toml src/spyglass/spikesorting/v1 tests/spikesorting/v1
 ```
