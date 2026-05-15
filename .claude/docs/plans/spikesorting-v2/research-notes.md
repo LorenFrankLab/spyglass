@@ -347,3 +347,41 @@ self.insert1({**key, "analysis_file_name": analysis_file_name, "result_object_id
 - **Phase 5**: UX overhaul — `run_v2_pipeline()`, `run_v2_unit_match()`, FigPack, parameter Pydantic validation, notebook rewrite. 1-2 PRs.
 
 Total estimated: 7-10 PRs over the v2 lifetime.
+
+---
+
+## Cleanup Notes — Trimmed Rationale (2026-05-14)
+
+Rationale moved out of phase files during the 2026-05-14 plan cleanup. Phase files now state the binding behavior; this section preserves the historical "why" for future readers.
+
+### XOR three-layer defense → two-layer + integrity test
+
+The original spec described an XOR defense in three layers: (1) helper validator at insert; (2) populate-time re-check; (3) a "nightly" CI integrity test. Phase files now describe layers 1 and 2 as mandatory and layer 3 as one small parametrized test in the v2 suite. Reason: layer 2 is the load-bearing defense (it catches `dj.Manual.insert1` bypasses); a dedicated nightly job was unnecessary process overhead. The integrity test still exists; it just runs with the rest of the suite.
+
+### TrackedUnit policy machinery → strict + hard cap
+
+The original spec shipped three policy values (`strict`, `transitive`, `transitive_fallback`) backed by a DataJoint `enum` column, plus `tracked_unit_policy`, `max_clique_search_seconds`, `max_strict_nodes`, and `allow_strict_fallback` Pydantic params, plus dedicated test rows for each fallback path. Phase 4 and `designs.md` now ship strict (maximal cliques) only with `max_strict_nodes` raising on overflow. `TrackedUnit.policy_used` is `varchar(32)` so future policy values (`transitive`, `transitive_fallback`, others) are pure inserts — no schema migration when they ship. Reason: nobody on Frank-lab data has hit a case requiring transitive matching; ship the simplest correct policy and add complexity when a real use case appears.
+
+### AnalyzerCuration recursive-auto-curation: raise → warn
+
+The original spec raised `RecursiveAutoCurationError` when `insert_selection` was called on a curation whose upstream `metrics_source == 'analyzer_curation'`, with `allow_recursive=True` as the bypass. Phase 2 and `designs.md` now emit a `logger.warning` and proceed. Lineage depth is still recoverable from `parent_curation_id`. Reason: recursive auto-curation is unusual but not wrong; a warning is friendlier than blocking the workflow with a dedicated exception class.
+
+### SessionGroup recording_date: derive only
+
+The original spec accepted a caller-supplied `recording_date` and raised `RecordingDateMismatchError` if it disagreed with `Session.session_start_time.date()`. Phase 3 and `designs.md` now simply derive the date and ignore any caller-supplied value. Reason: there is no legitimate use case for caller-supplied dates that differ from the canonical session time; the dedicated exception added ceremony without buying anything.
+
+### SortGroupV2 inspect-before-destroy: comment block trimmed
+
+The original `SortGroupV2` class-level comment was ~40 lines of rationale recapping the spyglass-skill `destructive_operations.md` discipline. The trimmed version is ~10 lines and points at the same outcome (DeletionPreview + confirm=True). Reason: phase files and code reviews catch silent-overwrite regressions; the rationale belongs in the spyglass-skill, not duplicated in every consuming plan.
+
+### Validation slices: named tests → goals
+
+Every phase file's validation slice was a 20–60 row markdown table of `test_*` names plus assertion text. Phase files now list ≤10 numbered "validation goals" — the implementer chooses test names and splits. Reason: prescribing test names locks the implementer into specific file layouts and makes the plan a brittle dependency for later refactors. The goals capture intent without dictating mechanics.
+
+### Phase 1 sub-slice PRs: mandatory → recommended
+
+The original Phase 1 wording said it "MUST land as four PR slices" (1a/1b/1c/1d). Phase 1 now says four slices are a "recommended implementation order" and the implementer can land as one PR or split as needed. Reason: schema-finality (zero migration) is what matters; whether the implementer chunks across four PRs or one is a process choice they should make at execution time.
+
+### Plan-Doc Contract + Executor Quickstart: dropped
+
+PLAN.md previously had a `Plan-Doc Contract` block listing what each plan file is and an `Executor Quickstart` block enumerating six steps. Both were dropped; their content now lives in a single short `Executor notes` block. Reason: the routing in the `Files` section already tells executors what each file is; the quickstart steps were boilerplate that executors would skip.

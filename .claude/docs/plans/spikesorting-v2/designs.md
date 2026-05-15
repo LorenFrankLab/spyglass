@@ -55,46 +55,17 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         """
 
     # Existing-entry handling (shared by both classmethod constructors below):
-    # Per Spyglass PR #1438 (set_group_by_electrode_table_column pattern)
-    # AND the spyglass-skill's inspect-before-destroy discipline:
-    #
-    # - If no existing rows: insert cleanly.
-    #
-    # - If existing rows AND delete_existing_entries=False (default):
-    #   require the caller to provide explicit `sort_group_ids` that
-    #   don't overlap the existing IDs. Raise ValueError on overlap.
-    #   No silent overwrite. This is the "additive" path — adds new
-    #   sort groups without touching the existing ones.
-    #
-    # - If existing rows AND delete_existing_entries=True: INSPECT
-    #   BEFORE DESTROY. The classmethod first builds an explicit
-    #   `DeletionPreview` by restricting the v2 tables that can depend on
-    #   the candidate SortGroupV2 rows. Do NOT rely on
-    #   `delete(dry_run=True)` to provide this report: Spyglass
-    #   cautious_delete dry-runs are useful permission/external-file guards,
-    #   but they do not return per-table row counts or ownership summaries.
-    #   The preview namedtuple contains:
-    #     - the SortGroup rows to be deleted,
-    #     - per-row counts of downstream Recording / Sorting /
-    #       CurationV2 / SpikeSortingOutput rows that would cascade,
-    #     - the total size on disk of analysis-NWB files and binary
-    #       caches that would be reclaimed,
-    #     - any rows owned by a different team (cautious_delete blocks
-    #       these regardless — surfaced eagerly to fail fast).
-    #   If `confirm=True` (additional required kwarg whenever
-    #   `delete_existing_entries=True`), the destroy proceeds via the
-    #   restricted table's `.delete()` / cautious_delete path (preserving
-    #   team-permission semantics).
-    #   If `confirm=False` (default), the method returns the
-    #   `DeletionPreview` without deleting and raises with an explicit
-    #   message: "Pass `confirm=True` after reviewing the preview".
-    #
-    # This replaces the v1 silent-overwrite footgun AND the earlier v2
-    # `force=True` design. The dry-run + explicit-confirm pattern
-    # matches the spyglass-skill `destructive_operations.md` and
-    # `feedback_loops.md § inspect-before-destroy` discipline; no
-    # cascade-delete of another lab member's downstream data can happen
-    # by accident.
+    # - No existing rows: insert cleanly.
+    # - Existing rows + delete_existing_entries=False (default): caller must
+    #   supply non-overlapping `sort_group_ids`; otherwise ValueError. No
+    #   silent overwrite (regression fix vs v1).
+    # - Existing rows + delete_existing_entries=True: build a DeletionPreview
+    #   (rows to delete, downstream cascade row counts, reclaimable disk,
+    #   cross-team-owned rows). With confirm=False (default), return the
+    #   preview and raise pointing at confirm=True. With confirm=True, run
+    #   cautious_delete + reinsert.
+    # `preview_existing_entries(nwb_file_name)` exposes the same preview
+    # without destructive intent.
 
     @classmethod
     def preview_existing_entries(
@@ -762,35 +733,23 @@ class AnalyzerCurationSelection(SpyglassMixin, dj.Manual):
     """
 
     @classmethod
-    def insert_selection(
-        cls,
-        key: dict,
-        *,
-        allow_recursive: bool = False,
-    ) -> dict:
-        """Insert/find AnalyzerCurationSelection row; rejects recursion.
+    def insert_selection(cls, key: dict) -> dict:
+        """Insert/find AnalyzerCurationSelection row.
 
-        Default behavior REJECTS upstream curations whose
-        `metrics_source == 'analyzer_curation'` — i.e., curations that
-        were themselves produced by AnalyzerCuration.materialize_curation().
-        Running auto-curation on an already-auto-curated row computes
-        metrics over post-merge templates, which is rarely what the user
-        wants and silently masks lineage depth.
-
-        Pass `allow_recursive=True` to override (intentional re-run after
-        manual review of the materialized child). The CurationV2 row's
-        existing `metrics_source` is preserved; lineage_depth is
-        derivable via the `parent_curation_id` chain.
+        Emits a `logger.warning` when the upstream CurationV2 has
+        `metrics_source == 'analyzer_curation'` (running auto-curation on an
+        already-auto-curated child computes metrics over post-merge
+        templates — usually not what the user wants, but not a hard error).
+        Lineage depth is recoverable via the `parent_curation_id` chain.
 
         Returns single PK-only dict per shared-contracts.
         """
         upstream_metrics_source = (CurationV2 & key).fetch1("metrics_source")
-        if upstream_metrics_source == "analyzer_curation" and not allow_recursive:
-            raise RecursiveAutoCurationError(
-                f"CurationV2 {key} has metrics_source='analyzer_curation' "
-                "(already an auto-curation child). Running AnalyzerCuration "
-                "on it would compute metrics over post-merge templates. "
-                "Pass allow_recursive=True to override after manual review."
+        if upstream_metrics_source == "analyzer_curation":
+            logger.warning(
+                "AnalyzerCuration is being inserted on a CurationV2 row with "
+                "metrics_source='analyzer_curation' (already auto-curated). "
+                "Metrics will be computed over post-merge templates."
             )
         # ... validate params, find-or-mint UUID, return PK
         ...
@@ -1041,43 +1000,27 @@ class SessionGroup(SpyglassMixin, dj.Manual):
 
         members: list of dicts with keys
             nwb_file_name, sort_group_id, interval_list_name.
-        recording_date is DERIVED from each member's
-        `Session.session_start_time` (cast to date), not accepted from
-        the caller. If the caller passes a `recording_date` value, it
-        MUST match the derived date or `create_group` raises
-        `RecordingDateMismatchError`. Reason: user-supplied dates drift
-        from canonical session metadata and silently flip multi-day
-        gates; deriving makes the same-day vs multi-day decision
-        ground-truth-anchored.
 
-        Same-day groups are the recommended path; multi-day requires the
-        explicit `allow_multi_day=True` flag. The flag also forces the
-        caller to choose an explicit MotionCorrectionParameters row when
-        building the downstream ConcatenatedRecording (no `preset='auto'`
-        dispatch for multi-day — see ConcatenatedRecording.make()).
+        recording_date is derived from each member's
+        `Session.session_start_time` (cast to date). The caller does
+        not supply it (closes the drift loophole that would silently
+        flip multi-day gates).
 
-        Raises ValueError if members span ≥2 dates without
-        allow_multi_day=True. For days/weeks-apart sessions, use the
-        Phase 4 sort-then-match path (UnitMatch) instead — it is the
-        validated cross-day workflow.
+        Same-day groups are the default; multi-day requires
+        `allow_multi_day=True` AND forces an explicit
+        MotionCorrectionParameters row (no `preset='auto'` dispatch
+        for multi-day — see ConcatenatedRecording.make()).
+
+        For days/weeks-apart sessions, use Phase 4 sort-then-match
+        (UnitMatch) instead — the validated cross-day workflow.
         """
         from spyglass.common import Session
 
-        # Derive recording_date from Session.session_start_time and verify
-        # any caller-supplied value matches.
         rows: list[dict] = []
         for i, m in enumerate(members):
             derived_date = (
                 Session & {"nwb_file_name": m["nwb_file_name"]}
             ).fetch1("session_start_time").date()
-            supplied = m.get("recording_date")
-            if supplied is not None and supplied != derived_date:
-                raise RecordingDateMismatchError(
-                    f"Member {i} ({m['nwb_file_name']}): supplied "
-                    f"recording_date={supplied} disagrees with derived "
-                    f"date={derived_date} from Session.session_start_time. "
-                    "Omit recording_date or supply the canonical date."
-                )
             rows.append({
                 **{k: v for k, v in m.items() if k != "recording_date"},
                 "recording_date": derived_date,
@@ -1389,23 +1332,14 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
     ---
     n_sessions_observed: int
     median_match_probability=NULL: float # NULL for singleton tracked units
-    n_transitive_only_edges=0: int     # 0 for strict-policy components
-                                       # (every pairwise edge exists);
-                                       # >0 when policy='transitive' and
-                                       # some inferred edges were missing
-                                       # in the underlying pair set.
-    policy_used: enum('strict', 'transitive', 'transitive_fallback')
-                                       # actual policy used to derive this
-                                       # row. 'strict' = maximal cliques
-                                       # completed within the budget;
-                                       # 'transitive' = user opted into
-                                       # connected components via
-                                       # MatcherParameters; 'transitive_fallback' =
-                                       # strict search exceeded budget AND
-                                       # MatcherParameters.params
-                                       # ['allow_strict_fallback']==True, so
-                                       # we degraded to connected components.
-                                       # See bounded-search policy below.
+    n_transitive_only_edges=0: int       # 0 for strict-policy components
+                                          # (every pairwise edge exists);
+                                          # reserved for future transitive
+                                          # policy values.
+    policy_used: varchar(32)              # algorithm path persisted on the row.
+                                          # v1 ships only 'strict'; future
+                                          # policy values can be inserted
+                                          # without a schema migration.
     """
 
     class Member(SpyglassMixinPart):
@@ -1424,55 +1358,27 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
     def make(self, key):
         """Derive tracked units from pairwise UnitMatch.Pair rows.
 
-        Algorithm: build a graph whose **nodes are seeded from the
-        curated-unit universe** (every ``(sorting_id, curation_id,
-        unit_id)`` returned by ``CurationV2.get_matchable_unit_ids``
-        for each pinned ``UnitMatchSelection.MemberCuration`` row) so
-        that units the matcher chose to emit no pair record for still
-        surface as singleton tracked units. Edges are
-        ``UnitMatch.Pair`` rows with probability above threshold.
+        Builds a graph whose nodes are seeded from the curated-unit universe
+        (every (sorting_id, curation_id, unit_id) returned by
+        CurationV2.get_matchable_unit_ids for each pinned MemberCuration row)
+        so that units the matcher chose to emit no pair record for still
+        surface as singleton tracked units. Edges are UnitMatch.Pair rows
+        with probability above threshold (default 0.5 for unitmatch).
 
-        Dispatch by ``tracked_unit_policy`` on MatcherParameters:
-          - "strict" (default): maximal cliques. A tracked unit requires
-            every pairwise edge in its node set above threshold —
-            rejects transitive-only matches.
-          - "transitive" (opt-in): connected components, with
-            ``n_transitive_only_edges`` reported per component as a
-            secondary attribute.
-        Threshold and policy come from the matcher's params (e.g. 0.5
-        for unitmatch). Singleton components have no supporting edges, so
-        their median_match_probability is stored as NULL. See the policy
-        explainer immediately below.
+        v1 ships strict mode (maximal cliques) only. Singleton components
+        store NULL for median_match_probability. policy_used='strict' on
+        every row.
         """
         ...
 ```
 
-**Algorithm for `TrackedUnit.make()`** — transitive closure over thresholded matches, with explicit policy for handling weakly-connected triples.
+**Algorithm — strict (maximal cliques) only for v1**: for three sessions A/B/C, if (A↔B, B↔C) are above threshold but (A↔C) is below, strict mode emits ≥2 components rather than lumping all three. A tracked unit requires every pairwise edge in its node set above threshold.
 
-**Policy decision (binding — do not weaken)**: For three sessions A/B/C, if pairs (A↔B, B↔C) are above threshold but (A↔C) is below, the connected-component algorithm would lump all three units together transitively. This can be biologically wrong (drift may make session A and session C the same unit visually distinct, even though both look like session B). The plan adopts **stricter-than-transitive** as the default:
+**Bounded search**: `MatcherParameters.params["max_strict_nodes"]` (default `2000`) caps the graph size submitted to `networkx.find_cliques`. Exceeding the cap raises `TrackedUnitBudgetExceededError`; the user shrinks the session group or raises the cap. Strict mode iterates `find_cliques` lazily so the cap fires before exponential blowup. No fallback policy; no time budget; no `transitive` opt-in in v1.
 
-- **Default mode**: a `TrackedUnit` component requires that **every pairwise edge in its node set** exceeds threshold. Equivalent to taking maximal cliques in the thresholded graph instead of connected components. This rejects transitive-only matches.
-- **Permissive mode**: fall back to connected components; users opt in via `MatcherParameters.params["tracked_unit_policy"] = "transitive"`. Logged with a warning at make time.
-- **Reporting**: in either mode, `TrackedUnit.make()` records `n_transitive_only_edges` per component as a secondary attribute — gives users visibility into how much transitivity was invoked.
+Future policy values (transitive, transitive_fallback) are pure inserts into the `policy_used: varchar(32)` column — no migration required when they ship.
 
-**Bounded strict search (binding — do not weaken)**: maximal-clique enumeration is exponential in pathological cases. Two parameters on `MatcherParameters.params` bound the strict search:
-
-| Param | Default | Semantics |
-| --- | --- | --- |
-| `max_clique_search_seconds` | `120` | Wall-clock budget for `networkx.find_cliques` in strict mode. |
-| `max_strict_nodes` | `2000` | Hard upper bound on the graph size submitted to strict search. |
-| `allow_strict_fallback` | `False` | When True, exceeding either bound degrades to connected-component (transitive) mode and the row records `policy_used='transitive_fallback'`. When False (default), exceeding either bound raises `TrackedUnitBudgetExceededError` so the user can decide explicitly. |
-
-The actual policy used is persisted on every `TrackedUnit` row via the `policy_used` enum column (`'strict'` / `'transitive'` / `'transitive_fallback'`), so fallback is visible later without log-spelunking.
-
-Implementation contract:
-
-- `_derive_tracked_units()` dispatches by `tracked_unit_policy` and always seeds the graph from the complete curated-unit universe so unmatched units become singleton tracked units.
-- Strict mode applies the `max_strict_nodes` check before clique search, iterates `networkx.find_cliques` lazily, and checks a wall-clock deadline between yielded cliques. It must never call `list(nx.find_cliques(...))` before enforcing the deadline.
-- If strict search exceeds the node or time budget, `allow_strict_fallback=False` raises `TrackedUnitBudgetExceededError`; `allow_strict_fallback=True` degrades to connected components and records `policy_used='transitive_fallback'`.
-- Transitive mode uses connected components and records `n_transitive_only_edges` for missing direct edges inside a component.
-
-**Default threshold**: `0.5` for the `unitmatch` matcher. Configurable via `MatcherParameters`.
+**Default threshold**: `0.5` for the `unitmatch` matcher. Configurable via `MatcherParameters.params["tracked_unit_threshold"]`.
 
 ---
 

@@ -40,7 +40,7 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
   - `QualityMetricParameters` Lookup with three default rows: `("franklab_default", ...)`, `("neuropixels_default", ...)`, `("minimal", {"metric_names": ["snr", "isi_violation", "firing_rate"], ...})`.
   - `QualityMetricParameters.show_available_metrics()` or a documented `available_quality_metrics()` helper that lists the supported SortingAnalyzer/SpikeInterface metric names. This preserves the v1 notebook-discovery workflow from `MetricParameters.show_available_metrics()` without requiring v1's exact custom metric set.
   - `AutoCurationRules` Lookup with default rows including a `("franklab_default_thresholds", ...)` that mirrors v1's auto-label conventions (snr < 2 → noise, isi_violation > 0.05 → mua, etc.; pull thresholds from `MetricCurationParameters` defaults at [src/spyglass/spikesorting/v1/metric_curation.py:161-191](../../../../src/spyglass/spikesorting/v1/metric_curation.py#L161-L191)).
-  - `AnalyzerCurationSelection` Manual. **`insert_selection()` rejects recursive auto-curation by default**: if the upstream `CurationV2.metrics_source == 'analyzer_curation'`, raise `RecursiveAutoCurationError` pointing at `allow_recursive=True`. Computing quality metrics over post-merge templates from a materialized child is rarely what the user wants; explicit opt-in keeps the failure mode visible. See [designs.md § AnalyzerCuration](designs.md#analyzercuration-replaces-v1-metriccuration--burstpair) for the helper signature.
+  - `AnalyzerCurationSelection` Manual. `insert_selection()` emits a `logger.warning` (not a raise) when upstream `CurationV2.metrics_source == 'analyzer_curation'` — running auto-curation on a materialized child computes metrics over post-merge templates, which is usually not what the user wants but is occasionally intentional. Lineage depth is recoverable from the `parent_curation_id` chain. See [designs.md § AnalyzerCuration](designs.md#analyzercuration-replaces-v1-metriccuration--burstpair).
   - `AnalyzerCuration` Computed with `make()` that computes additional extensions, runs `compute_quality_metrics(..., metric_params=...)`, applies label rules, runs `compute_merge_unit_groups`, writes three NWB tables (`quality_metrics`, `merge_suggestions`, `proposed_labels`) via `AnalysisNwbfile().build()`.
   - Auto-merge extension dependency is explicit: before calling `compute_merge_unit_groups`, ensure `template_similarity` is computed in addition to `correlograms` and the Phase 1 core extensions. Pass `compute_needed_extensions=False` when supported so the Spyglass-computed extension set is the audited one rather than an implicit SI default.
   - `materialize_curation(key, description="auto-curation") -> dict` — creates a child `CurationV2` row with the proposed labels + merge groups; returns the new curation_key. Auto-registers via the Phase 1 `CurationV2.insert_curation` flow.
@@ -108,39 +108,22 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
 - **No web-based curation UI.** Phase 5 (FigPack).
 - **No automatic materialization.** `AnalyzerCuration.populate()` produces suggestions; user must call `materialize_curation()` to create the next CurationV2 row.
 
-## Validation slice
+## Validation goals
 
-| Test | Asserts |
-| --- | --- |
-| `test_quality_metric_params_validation` | `QualityMetricParameters().insert1({"params": {"metric_names": ["bogus_metric"]}})` raises validation error; valid metric list inserts. |
-| `test_quality_metric_available_metrics_helper` | Metric-discovery helper returns or logs all metric names accepted by the validator, including the default `minimal` metrics. |
-| `test_auto_curation_rules_validation` | `AutoCurationRules().insert1({...auto_merge_preset: "bogus_preset"...})` raises. Valid preset inserts. |
-| `test_apply_label_rules_basic` | Synthetic metrics DataFrame with two rules ("snr<2 → noise", "isi_violation>0.05 → mua"); asserts correct labels per unit. |
-| `test_apply_label_rules_order_preserved` | Rules in order produce expected multi-label lists when a unit matches multiple thresholds; reordering rules changes label order only, not label membership. |
-| `test_label_rules_loop_completes_all_rules` | Three rules where rules 2 and 3 both apply to a unit; asserts all matching rules are processed and `return` is outside the rule loop. |
-| `test_label_list_isolation` | Two units match the same multi-label rule; mutating unit A's labels after helper return does not change unit B's labels or the rule definition. |
-| `test_label_dedupe_per_element` | Two rules emit the same label for one unit; final label list contains one copy, not duplicates from list-in-list membership checks. |
-| `test_analyzer_curation_make_writes_three_tables` (slow) | After populate, `AnalyzerCuration & key` row has all three object_ids populated; `fetch_nwb()` returns three pandas DataFrames. |
-| `test_analyzer_curation_metrics_match_si_compute` (slow) | Independently call `compute_quality_metrics(analyzer, ...)` and compare to the fetched `quality_metrics` DataFrame — exact match. |
-| `test_metric_nan_round_trip` | Low-spike unit produces non-finite metrics; the serialized AnalysisNWB metric table contains `None` while the in-memory metrics DataFrame preserves NaN semantics. |
-| `test_analyzer_curation_zero_unit_sorting` | Zero-unit `Sorting` row populates `AnalyzerCuration` with empty metric/merge/label tables and no missing-column errors. |
-| `test_analyzer_curation_merge_suggestions_non_empty_on_obvious_split` (slow) | Synthetic sort with two units that are obvious duplicates (same spike times shifted by 1 ms); auto-merge with preset='similarity_correlograms' suggests their merge. |
-| `test_analyzer_curation_fetch_helpers` | `get_waveforms`, `get_metrics`, `get_labels`, and `get_merge_groups` return the data written by `AnalyzerCuration.make()` and match v1 notebook-facing shapes where practical. |
-| `test_analyzer_curation_burstpair_visualization_helpers` (slow) | `plot_correlograms_by_sort_group`, `investigate_pair_xcorrel`, `investigate_pair_peaks`, and `plot_peak_over_time` all render against a SortingAnalyzer-backed sort without requiring the v1 `BurstPair` table. |
-| `test_analyzer_curation_insert_by_curation_id_helper` | Helper inserts an `AnalyzerCurationSelection` row from an existing curation key and returns the selection key; repeated calls are idempotent. |
-| `test_materialize_curation_creates_child` | `AnalyzerCuration.materialize_curation(key)` creates a new `CurationV2` row with `parent_curation_id` pointing to the input curation; auto-registers in `SpikeSortingOutput.CurationV2`. The child's `metrics_source == 'analyzer_curation'`. |
-| `test_analyzer_curation_rejects_recursive_by_default` | After `materialize_curation()` produces a child CurationV2 (with `metrics_source='analyzer_curation'`), call `AnalyzerCurationSelection.insert_selection({sorting_id, curation_id: <child>})`. Raises `RecursiveAutoCurationError`; message names `allow_recursive=True`. |
-| `test_analyzer_curation_allow_recursive_override` | Same fixture with `allow_recursive=True`. Insert succeeds and `AnalyzerCuration.populate()` produces a new analyzer-curation row keyed off the child. Regression guard for the explicit-opt-in path. |
-| `test_add_extensions_is_idempotent` (slow) | Call `Sorting.add_extensions(key, ["correlograms"])` twice; second call is a no-op (no recompute). |
-| `test_v2_analyzer_curation_vs_v1` (slow, integration) | Parity vs v1 `MetricCuration` per tolerances above. Reports per-unit diffs on failure. |
-| `test_recompute_versions_inventories_correctly` | `RecordingArtifactVersions` and `SortingAnalyzerVersions` populate for existing v2 `Recording` / `Sorting` rows and record dependency/hash manifests. |
-| `test_recompute_matches_under_same_env` (slow) | Recompute under the current `UserEnvironment`; `RecordingArtifactRecompute.matched == 1` and `SortingAnalyzerRecompute.matched == 1`. |
-| `test_recompute_detects_mismatch_under_different_rounding` (slow) | Force a rounding/hash mismatch; recompute rows record `matched == 0` plus `Name` or `Hash` part rows describing the difference. |
-| `test_delete_files_only_for_matched` | `delete_files()` refuses to delete artifacts for `matched=0` and deletes only after a successful round-trip (`matched=1`). |
-| `test_delete_files_refuses_stale_env_matched` | Insert a `RecordingArtifactRecompute` row with `matched=1` under a synthetic stale `env_id` distinct from `UserEnvironment.current()`. `delete_files(keys)` raises `StaleEnvMatchedError`; message names the stale `env_id` and points at `force_stale_env=True`. The artifact on disk is NOT deleted. Same test for `SortingAnalyzerRecompute.delete_files()`. |
-| `test_delete_files_accepts_current_env_matched` | Same setup but the `matched=1` row's `env_id` equals `UserEnvironment.current()`. `delete_files(keys)` succeeds and removes the artifact. Regression guard: confirms the stale-env gate is not over-eager. |
-| `test_delete_files_force_stale_env_audit` | Stale-env `matched=1` row, but caller passes `force_stale_env=True`. Deletion proceeds; an audit log entry (file or table — implementer's call, but it MUST exist and include caller identity + reason) records the override. |
-| `test_recompute_admin_surface_parity` | v2 recompute tables expose equivalents of `attempt_all`, `remove_matched`, `with_names`, `get_parent_key`, `recheck`, `get_disk_space`, and `update_secondary`, or the dropped method is listed in `feature-parity.md` explicit non-parity. |
+Behaviors the Phase 2 validation slice must cover. Each goal must have at least one assertion exercising it; the implementer chooses test names and splits.
+
+1. **Pydantic params validation**: `QualityMetricParameters` and `AutoCurationRules` reject bogus metric names / preset names at insert.
+2. **Label-rule correctness — three bug-class invariants (#1513)**: every rule is processed (loop-completion); per-unit label lists are independent objects (no shared-list aliasing); duplicate labels within a unit are suppressed via element-in-list dedupe. One test per invariant.
+3. **AnalyzerCuration end-to-end** (slow): `make()` writes the three NWB tables; `get_waveforms`, `get_metrics`, `get_labels`, `get_merge_groups` round-trip the written content.
+4. **NaN sanitization**: a low-spike unit produces non-finite metrics; the serialized AnalysisNWB metric table shows `None`; the in-memory metrics DataFrame keeps NaN.
+5. **Zero-unit Sorting**: `AnalyzerCuration` populates cleanly with empty metric/merge/label tables and no missing-column errors.
+6. **Auto-merge suggestion sanity** (slow): a planted duplicate-unit fixture (~1 ms offset) yields a merge suggestion under `similarity_correlograms`.
+7. **`materialize_curation()` produces a child**: child `CurationV2` has `parent_curation_id` set, `metrics_source == 'analyzer_curation'`, auto-registers in `SpikeSortingOutput.CurationV2`. Recursive auto-curation logs a warning but does not raise.
+8. **BurstPair visualization helpers** (slow): `plot_correlograms_by_sort_group`, `investigate_pair_xcorrel`, `investigate_pair_peaks`, `plot_peak_over_time` all render against a SortingAnalyzer-backed sort.
+9. **`Sorting.add_extensions` is idempotent** (slow): second call is a no-op.
+10. **v1 parity** (slow, integration): metrics from `AnalyzerCuration` match v1 `MetricCuration` per documented tolerances (snr ±30%, isi_violation/firing_rate/num_spikes exact).
+
+**Recompute validation (separate slice, same phase)**: version inventory populates correctly; recompute under current env yields `matched=1`; rounding/hash mismatch yields `matched=0` plus `Name`/`Hash` part rows; `delete_files()` refuses `matched=0`; stale-env `matched=1` raises `StaleEnvMatchedError`; current-env `matched=1` proceeds; `force_stale_env=True` succeeds and writes an audit log entry. v1 admin-surface parity (`attempt_all`, `remove_matched`, `with_names`, `get_parent_key`, `recheck`, `get_disk_space`, `update_secondary`) is preserved or explicitly listed in `feature-parity.md`.
 
 ## Commands to run
 

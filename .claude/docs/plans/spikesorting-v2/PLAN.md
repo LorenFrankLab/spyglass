@@ -15,34 +15,17 @@ For agent invocation, **load only the slice you need**:
 5. **Need broader scope / risks / dependency policy?** [overview.md](overview.md).
 6. **Need upstream-repo line refs / on-disk format details?** [appendix.md](appendix.md).
 
-## Plan-Doc Contract
+## Executor notes
 
-- **Phase files are executable.** The `Executor Checklist`, `Deliberately not in this phase`, and `Validation slice` sections define what belongs in a PR.
-- **`shared-contracts.md` is binding.** Do not weaken an invariant there without explicitly revising every phase that depends on it.
-- **`designs.md` is reference material.** DataJoint `definition` blocks and named invariants are binding; routine method-body sketches are illustrative unless labeled `BINDING`.
-- **`appendix.md` and `research-notes.md` are evidence stores.** Use them to verify claims, not as task lists.
-
-## Executor Quickstart
-
-Before opening a phase PR:
-
-1. Read this `PLAN.md`, [shared-contracts.md](shared-contracts.md), [feature-parity.md](feature-parity.md), and only the phase file you are implementing.
-2. Run the phase's listed preflight/source-verification commands and update stale line references before coding.
-3. Preserve every "do not weaken" invariant in shared contracts; if a contract no longer fits the source, stop and revise the plan first.
-4. Treat [phase-0c-si-0104-prerequisite.md](phase-0c-si-0104-prerequisite.md) as a hard prerequisite for runtime v2 work, not as optional cleanup.
-5. Keep each PR to the phase boundary. Anything intentionally dropped from v1 must be named in [feature-parity.md](feature-parity.md), not left implicit.
-6. Finish with the phase validation slice plus `code_graph.py describe/path` checks for any new DataJoint table.
-
-### Shared command convention
-
-Run commands from the Spyglass repo root. `code_graph.py` comes from the local `spyglass-skill` checkout:
+- **Per-PR scope is the phase file.** Read PLAN.md, [shared-contracts.md](shared-contracts.md), and the matching phase file. `designs.md` definitions are binding; method-body sketches are illustrative unless labeled `BINDING`. `appendix.md` and `research-notes.md` are reference, not task lists.
+- **Shared contracts are binding.** Do not weaken a "do not weaken" invariant without revising every phase that depends on it.
+- **Phase 0c is a hard prerequisite.** No runtime v2 work lands until v1 runs under SI 0.104.
+- **`code_graph.py` lives in the spyglass-skill checkout.** Set once before running phase commands:
 
 ```bash
 export SPYGLASS_SKILL_DIR="${SPYGLASS_SKILL_DIR:-../spyglass-skill/skills/spyglass}"
 test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
 ```
-
-All phase command blocks below assume that variable is set. If the checkout is elsewhere, set `SPYGLASS_SKILL_DIR` to the absolute path before running the phase commands.
 
 ## Files
 

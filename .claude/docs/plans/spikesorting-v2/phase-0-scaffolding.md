@@ -166,27 +166,20 @@ Phase 0b PR:
 
 ## Validation slice
 
-### Phase 0a validation
+### Phase 0a goals
 
-| Test | Asserts |
-| --- | --- |
-| `test_module_imports` | `spyglass.spikesorting.v2` package imports without error. |
-| `test_si_version_min` | In the `pytest-v2` job, installed SpikeInterface is ≥0.104; default v1 CI excludes this test until the global SI prerequisite PR lands. |
-| `test_preprocessing_params_schema_default` | `PreprocessingParamsSchema().model_dump()` matches expected dict; bad values raise `pydantic.ValidationError`. |
-| `test_preprocessing_params_extra_forbid` | Passing `{"bandpass_filter": {"foo": 1}}` raises ValidationError (extra="forbid" enforced). |
-| `test_resolved_job_kwargs_merge` | DataJoint config override is respected; defaults fill in from SI global. |
-| `test_resolved_job_kwargs_lookup_override` | Per-row `job_kwargs` field wins over config. |
-| `test_analyzer_path_format` | `_analyzer_path({"sorting_id": UUID("...")})` returns a Path ending in `{uuid}.analyzer`. |
-| `test_draft_schema_code_graph_describe` | `code_graph.py describe` succeeds for every table in the draft schema artifact; FK warnings are either absent or explicitly recorded in `precondition-check.md`. |
+1. **Module imports cleanly**: `spyglass.spikesorting.v2` package import does not error.
+2. **`pytest-v2` job uses SI ≥0.104**: version check inside the dedicated job; default v1 CI excludes the v2 tests until the global SI prerequisite PR lands.
+3. **`PreprocessingParamsSchema`**: default dump matches expected shape; bad values raise `pydantic.ValidationError`; `extra="forbid"` is enforced.
+4. **Helpers behave correctly**: `_resolved_job_kwargs` merges DataJoint config + SI global (per-row override wins); `_analyzer_path` returns the expected `{uuid}.analyzer` path format.
+5. **Draft schema validation**: `code_graph.py describe` succeeds for every table in the draft schema artifact; any FK warnings are explicitly recorded in `precondition-check.md`.
 
-### Phase 0b validation
+### Phase 0b goals
 
-| Test | Asserts |
-| --- | --- |
-| `test_hash_nwb_recording_stable` (slow) | Synthesize a 2-second SI recording, write it as an ElectricalSeries inside a temporary HDF5 `AnalysisNwbfile`, call `_hash_nwb_recording(analysis_file_name, object_id)` twice, assert deterministic output. Mark `@pytest.mark.slow`. |
-| `test_mearec_fixture_round_trips_through_spyglass` (slow) | A generated MEArec NWB fixture runs through the real Spyglass ingestion path (`insert_sessions(...)` or equivalent common-table population after `Nwbfile` registration); `Session`, `Raw`, non-empty `Electrode`, and expected `IntervalList` rows exist afterward. Ground-truth `Units` are imported explicitly via `ImportedSpikeSorting().insert_from_nwbfile(...)` and appear in `ImportedSpikeSorting` / `SpikeSortingOutput`. |
-| `test_v1_baseline_capture_runs_on_real_data` (slow, integration, env-var-gated) | If `SPIKESORTING_V2_REAL_NWB_PATH` is set, run `baseline_capture.py` against that dataset; assert all three output files are produced and non-empty. **Skipped with explicit message if the env var is unset** — minirec has no real spikes, so a baseline captured against it would be useless. Mark `@pytest.mark.slow`. |
-| `test_v1_test_suite_still_passes_under_current_si` (integration) | Phase 0 does NOT upgrade SI, so v1 tests should still pass cleanly. Regression guard: if any v1 test fails after this Phase 0 PR, something else broke. |
+1. **`_hash_nwb_recording` is deterministic** (slow): same backend, same `ElectricalSeries` bytes produce the same hash on repeated calls.
+2. **MEArec fixture round-trips Spyglass ingestion** (slow): a generated fixture runs through `insert_sessions(...)` (or equivalent common-table population); `Session`, `Raw`, non-empty `Electrode`, and expected `IntervalList` rows exist; `ImportedSpikeSorting().insert_from_nwbfile(...)` puts ground-truth Units into `SpikeSortingOutput.ImportedSpikeSorting`.
+3. **v1 baseline capture works on real data** (slow, integration, env-var-gated): when `SPIKESORTING_V2_REAL_NWB_PATH` is set, `baseline_capture.py` produces three non-empty output files. Skipped with an explicit message if the env var is unset.
+4. **v1 regression guard**: full v1 test suite passes under the current SI pin (no SI bump in Phase 0).
 
 ## Commands to run
 

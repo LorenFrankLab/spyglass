@@ -420,25 +420,11 @@ _validate_xor(
 )
 ```
 
-### Layer 3: CI integrity test
+### Layer 3: small parametrized integrity test
 
-A nightly test queries each XOR table for both-NULL and both-set rows and asserts the result is empty:
+One parametrized test in `tests/spikesorting/v2/test_integrity.py` queries each XOR table for both-NULL and both-set rows and asserts the result is empty. It runs with the rest of the v2 suite; not a separate nightly job.
 
-```python
-def test_no_xor_violations_in_production():
-    for tbl, fk_a, fk_b in [
-        (SortingSelection, "recording_id", "concat_recording_id"),
-        (ArtifactDetectionSelection, "recording_id", "shared_artifact_group_name"),
-    ]:
-        both_null = tbl & f"{fk_a} IS NULL AND {fk_b} IS NULL"
-        both_set = tbl & f"{fk_a} IS NOT NULL AND {fk_b} IS NOT NULL"
-        assert len(both_null) == 0, f"{tbl.__name__} has both-NULL rows: {both_null.fetch('KEY')}"
-        assert len(both_set) == 0, f"{tbl.__name__} has both-set rows: {both_set.fetch('KEY')}"
-```
-
-This test lives in `tests/spikesorting/v2/test_integrity.py` and runs in the v2 CI job.
-
-**Invariant — do not weaken**: All three layers are mandatory. Removing Layer 2 (the populate-time re-check) is the most tempting weakening; it must be resisted because Layer 1 alone is bypassable by any `dj.Manual` user.
+**Invariant — do not weaken**: Layers 1 and 2 are mandatory; Layer 2 (the populate-time re-check) is the most tempting to weaken and must be kept because Layer 1 alone is bypassable by any `dj.Manual` user.
 
 ---
 
@@ -597,28 +583,11 @@ This contract enforces the user's binding constraint: every v2 table is designed
 
 ## Empty / NaN / Boundary Invariants
 
-Derived from a sweep of Spyglass v1 spike-sorting GitHub issues — the same edge-case bug pattern recurred across several `CurationV1` / `MetricCuration` / `FigURLCuration` issues (#1532, #1154, #1558, #1556, #1500, #1530, #1512). v2 must handle these cases as ordinary input, not as exception paths.
+Derived from a sweep of v1 spike-sorting issues (#1532, #1154, #1558, #1556, #1500, #1530, #1512). v2 handles these as ordinary input, not exception paths.
 
-**Invariant 1 — Zero-unit sortings are valid.** A `Sorting` row with zero ground-truth units (e.g., a clusterless run on an entirely silent channel, or a sort that the user wants to record as "ran, produced nothing") must populate cleanly through every downstream stage:
+1. **Zero-unit sortings are valid.** `Sorting.populate()` succeeds with `n_units=0`; `Sorting.Unit`, `CurationV2.Unit`, `CurationV2.UnitLabel` are empty; the analysis NWB units table exists with zero rows; `AnalyzerCuration` and `FigPackCuration` succeed (or `FigPackCuration` raises a clear `EmptySortingError` — never a missing-column `KeyError`).
+2. **NaN-bearing quality metrics are sanitized before serialization.** A single helper `_sanitize_for_json(df) -> df` coerces non-finite values to `None` for every serialized target (AnalysisNWB tables in Phase 2, FigPack URI payload in Phase 5). The in-memory metrics DataFrame keeps NaN semantics.
+3. **Spike at recording boundary is valid.** `Sorting.make()` runs `sic.remove_excess_spikes(sorting, recording)`; a boundary spike is either kept (within ±1 sample) or dropped with a logged warning — never a "spikes exceeding recording duration" raise.
+4. **`CurationV2.insert_curation` requires an explicit `labels` argument.** No default `None`; pass `{}` for unlabeled. The NWB writer still materializes the `curation_label` column (empty list per unlabeled unit); `CurationV2.UnitLabel` has zero rows when `labels={}`.
 
-- `Sorting.populate()` succeeds with `n_units=0`; `Sorting.Unit` part table receives zero inserts.
-- `CurationV2.insert_curation(sorting_key, labels={})` succeeds; `CurationV2.Unit` and `CurationV2.UnitLabel` are empty.
-- The analysis NWB units table is written with zero rows but the table object exists (column schema present).
-- `AnalyzerCuration.populate()` succeeds; metric/merge/label DataFrames have zero rows.
-- `FigPackCuration.populate()` either succeeds with an empty view or raises a clear `EmptySortingError` — NEVER a `KeyError` on a missing column.
-- Phase-specific tests cover this invariant: Phase 1 `test_v2_empty_sorting_phase1` for Sorting/Curation, Phase 2 `test_analyzer_curation_zero_unit_sorting`, and Phase 5 `test_figpack_zero_unit_sorting`.
-
-**Invariant 2 — NaN-bearing quality metrics MUST be sanitized before serialization.** SI's `compute_quality_metrics` legitimately returns `nan` for units with insufficient spikes (e.g., `nn_isolation`, `nn_noise_overlap` require ≥10 spikes). `AnalyzerCuration.make()` must:
-
-- Coerce non-finite values (`nan`, `inf`, `-inf`) to `None` before writing to any serialized target. In Phase 2 this means the AnalysisNWB table objects written by `AnalyzerCuration`; in Phase 5 this also includes the FigPack URI payload.
-- Preserve `NaN` semantics in the in-memory metrics DataFrame (downstream consumers may want to filter on it).
-- Use a single helper `_sanitize_for_json(df: pd.DataFrame) -> pd.DataFrame` that returns the JSON-safe version; never let raw `compute_quality_metrics` output reach a JSON-serializing call.
-- Phase 2 test: `test_metric_nan_round_trip` — synthesize a 2-spike unit, run `AnalyzerCuration`, fetch the serialized metrics table from the AnalysisNWB object, and assert it shows `None` (not `nan`, not error) while the in-memory metrics DataFrame preserves NaN semantics.
-
-**Invariant 3 — Spike at recording boundary is valid.** A unit with a spike at the last recording sample (within ±1 sample tolerance) must not raise "spikes exceeding recording duration" from `compute_quality_metrics` or `create_sorting_analyzer`. `Sorting.make()` runs `sic.remove_excess_spikes(sorting, recording)` per the v1 fix, but v2 also adds a positive test:
-
-- Phase 1 test: `test_v2_spike_at_recording_end` — plant a unit with a spike at the recording's final sample (via a custom synthetic SI recording, NOT MEArec — MEArec doesn't easily plant boundary spikes); assert `Sorting.populate()` succeeds and the spike is either kept (within tolerance) or dropped with a documented warning.
-
-**Invariant 4 — `CurationV2.insert_curation` requires explicit `labels` argument.** Per the v1 bug pattern where `labels=None` produced NWB files missing the `curation_label` column (which then broke FigURL/FigPack URI generation): v2's `insert_curation` makes `labels` required (no default `None`), and an empty dict `{}` is an explicit valid input. The NWB writer still materializes the `curation_label` column, using empty lists for unlabeled units; the DataJoint schema stores labels in `CurationV2.UnitLabel`, with zero rows when `labels={}`. Static analysis (mypy / runtime check) enforces this.
-
-**Invariant — do not weaken**: All four invariants are tested in the relevant Phase 1, Phase 2, or Phase 5 validation slices. Disabling these tests in CI requires a justified note in the PR.
+**Invariant — do not weaken**: each invariant is exercised by at least one validation goal in the relevant phase.

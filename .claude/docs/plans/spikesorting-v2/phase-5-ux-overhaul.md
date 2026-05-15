@@ -116,24 +116,17 @@ The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell n
 - **No v1-to-v2 data migration tooling.** Users keep using v1 for their existing v1 sorts; new sorts go through v2. Whether to write a one-shot "convert v1 CurationV1 row to a v2 CurationV2 row" helper is decided separately.
 - **No schema changes to existing v2 tables.** Per the zero-migration policy, Phase 5 only ADDS new tables (`FigPackCurationSelection`, `FigPackCuration`, and the `_params/preset.py` registrations). Any change to Phase 1–4 table definitions is forbidden.
 
-## Validation slice
+## Validation goals
 
-| Test | Asserts |
-| --- | --- |
-| `test_preset_schema_validation` | `PresetSchema(preproc_params_name="bogus", ...)` succeeds at construction but `register_preset(name, dict)` raises because the Lookup row doesn't exist. Valid preset registers cleanly. |
-| `test_run_v2_pipeline_minirec_clusterless` (slow, integration) | Single call produces a valid merge_id; downstream spike-time fetch works. Does NOT assert sort correctness or parity against minirec. |
-| `test_run_v2_pipeline_idempotent` | Two calls with identical args return identical manifests. No duplicate rows inserted (count check on every Selection table before/after second call). |
-| `test_run_v2_pipeline_manifest_complete` | Single-session manifest contains `recording`, `artifact_detection`, `sorting`, `initial_curation`, `auto_curation`, and final `merge_id`. Concat-mode manifest contains `concat_recording` instead of `recording` and may omit `artifact_detection` until cross-recording artifact detection lands. |
-| `test_register_preset_catches_typos` | Registering a preset with `preproc_params_name="defaut"` (typo) raises clearly. |
-| `test_run_v2_pipeline_rejects_mixed_single_and_concat_inputs` | Passing `nwb_file_name`/`sort_group_id` together with concat session-group fields raises before selection rows are inserted. |
-| `test_run_v2_pipeline_requires_concat_owner_and_name` | Passing only `concat_session_group_owner` or only `concat_session_group_name` raises before selection rows are inserted. |
-| `test_run_v2_unit_match_requires_explicit_curations` | Calling `run_v2_unit_match()` without `curation_choices` raises clearly and does not query "latest" curation rows. |
-| `test_run_v2_unit_match_idempotent` | Two calls with the same `session_group_owner`, `session_group_name`, `matcher_params_name`, and `curation_choices` return the same `unitmatch_id`. |
-| `test_figpack_curation_make_publishes_uri` (slow, integration; optional) | Skipped if the `spikesorting-v2-curation` extra is not installed; otherwise asserts `FigPackCuration.populate(key)` returns a non-empty URI. |
-| `test_figpack_zero_unit_sorting` (slow, optional) | A zero-unit `CurationV2` either publishes an empty FigPack view or raises a clear `EmptySortingError`; it never fails with missing-column `KeyError`. |
-| `test_figpack_round_trip_labels` (slow, integration; optional) | Publish a FigPack view with known labels; `fetch_curation_from_uri()` recovers them. |
-| `test_v2_notebook_executes` (slow, integration) | `jupytext` executes `notebooks/13_Spike_SortingV2.ipynb` against `minirec` with no errors. Cell count ≤10 verified programmatically. |
-| `test_cross_session_notebook_executes` (slow, integration, optional) | Executes `notebooks/14_Spike_Sorting_CrossSession.ipynb` if a multi-session fixture is available. |
+Behaviors the Phase 5 validation slice must cover. Implementer chooses test names and splits.
+
+1. **Preset validation**: `register_preset` raises clearly on a typo or missing Lookup row before the preset is usable.
+2. **`run_v2_pipeline` single-session end-to-end** (slow, integration): one call produces a valid merge_id; downstream `get_spike_times` returns sane arrays; the manifest contains `recording`, `artifact_detection`, `sorting`, `initial_curation`, `auto_curation`, and final `merge_id`.
+3. **`run_v2_pipeline` idempotency**: two identical calls return the same manifest; no duplicate rows inserted (count check on every Selection table).
+4. **Single-session vs concat input mode**: mixing single-session inputs with concat session-group inputs raises before any insert; supplying only one of `concat_session_group_owner` / `concat_session_group_name` raises before any insert.
+5. **`run_v2_unit_match`**: requires explicit `curation_choices` (raises if missing — never auto-picks "latest"); two calls with identical args return the same `unitmatch_id`.
+6. **FigPack feasibility-gated** (slow, integration, optional): with the `spikesorting-v2-curation` extra installed, `FigPackCuration.populate(key)` returns a non-empty URI; zero-unit curation publishes an empty view or raises a clear `EmptySortingError` (never missing-column `KeyError`); published labels round-trip via `fetch_curation_from_uri`.
+7. **Notebook smoke** (slow, integration): `jupytext` executes `notebooks/13_Spike_SortingV2.ipynb` against `minirec` with no errors; programmatic check confirms code-cell count ≤10. Cross-session notebook executes when a multi-session fixture is available (optional).
 
 ## Commands to run
 

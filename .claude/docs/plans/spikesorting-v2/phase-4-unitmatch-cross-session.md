@@ -78,13 +78,10 @@ Output of this sub-phase is documentation + a working notebook, NOT new tables. 
   - Handle the **degenerate single-session case** — return `[]` immediately, no UnitMatch call.
 
 - **Implement `unit_matching.py`** per [designs.md § MatcherParameters + UnitMatch + TrackedUnit](designs.md#matcherparameters--unitmatch--trackedunit):
-  - `MatcherParameters` Lookup (Pydantic-validated per-matcher; default row for `unitmatch_default`). The Pydantic model includes:
-    - `tracked_unit_policy: Literal["strict", "transitive"] = "strict"` — graph-policy mode.
+  - `MatcherParameters` Lookup (Pydantic-validated per-matcher; default row `unitmatch_default`). The Pydantic model includes:
     - `tracked_unit_threshold: float = 0.5` — pair-probability cutoff.
-    - `max_clique_search_seconds: int = 120` — wall-clock budget for strict-mode `find_cliques`. See [designs.md § Algorithm for `TrackedUnit.make()`](designs.md#matcherparameters--unitmatch--trackedunit) for the bounded-search policy.
-    - `max_strict_nodes: int = 2000` — hard upper bound on graph size submitted to strict search.
-    - `allow_strict_fallback: bool = False` — when True, exceeding either bound degrades to connected-component mode and the row records `policy_used='transitive_fallback'`. When False (default), exceeding either bound raises `TrackedUnitBudgetExceededError`.
-    - **`MatcherParameters.insert1()` validates the `matcher` string against the registered matcher registry before inserting.** Unknown matcher names raise `UnknownMatcherError` naming the registered matchers and the `register_matcher()` entry point. The same registry dispatches the per-matcher Pydantic schema for `params` validation, so a typo is caught at insert time rather than at `UnitMatch.populate()` hours later. See [designs.md § MatcherParameters](designs.md#matcherparameters--unitmatch--trackedunit).
+    - `max_strict_nodes: int = 2000` — hard upper bound on graph size submitted to strict `networkx.find_cliques`. Exceeding raises `TrackedUnitBudgetExceededError`. No fallback policy and no time budget in v1; future policy values are pure inserts into `TrackedUnit.policy_used: varchar(32)`.
+    - **`MatcherParameters.insert1()` validates the `matcher` string against the registered matcher registry before inserting.** Unknown names raise `UnknownMatcherError`. The same registry dispatches the per-matcher Pydantic schema for `params` validation, so a typo is caught at insert time. See [designs.md § MatcherParameters](designs.md#matcherparameters--unitmatch--trackedunit).
   - `UnitMatchSelection` Manual **with a `MemberCuration` part table** that explicitly pins one `(sorting_id, curation_id)` per `SessionGroup.Member`. The master row stores `curation_set_hash`, a SHA-256 hash over the canonical ordered list of `(member_index, sorting_id, curation_id)` choices, so `insert_selection()` can be idempotent under the shared insert-selection contract. NO implicit "latest curation" lookup.
   - `UnitMatch` Computed with `Pair` part. `make()` dispatches via `get_matcher(matcher_name).match(...)` using the explicitly-pinned curations from `UnitMatchSelection.MemberCuration`. Before extracting matcher inputs, `make()` re-validates the direct-insert bypass invariant: the part rows must exactly cover the parent `SessionGroup.Member` set, and each pinned `CurationV2` row must belong to that member's session/recording path. A schema-valid but provenance-invalid row raises `UnitMatchSelectionIntegrityError` with a message pointing users back to `UnitMatchSelection.insert_selection()`.
   - `TrackedUnit` Computed with `Member` part. `make()` reads `tracked_unit_policy` and `tracked_unit_threshold` from `MatcherParameters` and dispatches to either `_derive_tracked_units_strict` (default: maximal cliques) or `_derive_tracked_units_transitive` (connected components, with `n_transitive_only_edges` reported per component). See [designs.md § Algorithm for `TrackedUnit.make()`](designs.md#matcherparameters--unitmatch--trackedunit) for the algorithm.
@@ -110,30 +107,22 @@ Output of this sub-phase is documentation + a working notebook, NOT new tables. 
 - **Curation propagation across sessions**. Phase 4 produces match pairs; if a user manually curates session A's unit 5 as `noise`, that label does NOT propagate to session B's matched unit. Curation-propagation tooling is a future feature.
 - **Supplementary Neuropixels, tetrode, and real-data validation.** These are useful follow-up PRs after the polymer-gated implementation lands. They should add their own fixtures, validation notes, and opt-in test markers without blocking the first UnitMatch implementation.
 
-## Validation slice
+## Validation goals
 
-| Test | Asserts |
-| --- | --- |
-| `test_matcher_protocol_registry` | `register_matcher`-decorated class is findable via `get_matcher(name)`; unknown name raises. |
-| `test_matcher_parameters_rejects_unknown_matcher_at_insert` | `MatcherParameters.insert1({"matcher": "unimatch", ...})` (typo of `unitmatch`) raises `UnknownMatcherError` BEFORE the row is committed. Message lists `_registered_matchers()` and names `register_matcher()`. Regression guard for the typo-at-populate failure mode. |
-| `test_matcher_parameters_accepts_registered_matcher` | After `register_matcher("fakematch", FakeMatcher)` in a fixture, `MatcherParameters.insert1({"matcher": "fakematch", ...})` succeeds and `params` are validated against the fake matcher's Pydantic schema. |
-| `test_unitmatch_backend_single_session_degenerate` | A `SessionGroup` with 1 Member produces 0 `MatchPair`s; no UnitMatch call attempted. |
-| `test_unitmatch_backend_two_sessions_synthetic` (slow) | Synthetic 2-session fixture (16-channel sort group, 5 units per session, half are "same neuron"): UnitMatch returns match probabilities high (>0.7) for true positives and low (<0.3) for random pairs. |
-| `test_unitmatch_selection_idempotent_by_curation_hash` | Two calls with the same `session_group_owner`, `session_group_name`, `matcher_params_name`, and ordered curation choices return the same `unitmatch_id`; changing one member's curation produces a different `curation_set_hash` and a different `unitmatch_id`. |
-| `test_unitmatch_selection_rejects_wrong_member_curation` | Build a two-member `SessionGroup`, then pass member A a valid `CurationV2` key from member B. `UnitMatchSelection.insert_selection(...)` raises before inserting any `MemberCuration` rows. |
-| `test_unitmatch_selection_insert_atomic` | Force one `MemberCuration` insert to fail; assert no orphan `UnitMatchSelection` master row remains. |
-| `test_unitmatch_make_rejects_schema_bypassing_member_rows` | Bypass `UnitMatchSelection.insert_selection()` by direct-inserting a master row and `MemberCuration` rows that are individually FK-valid but belong to the wrong `SessionGroup` or omit/duplicate a member. `UnitMatch.populate()` raises `UnitMatchSelectionIntegrityError` before matcher input extraction and leaves no `UnitMatch` / `Pair` rows. |
-| `test_unit_match_make_writes_part_rows` (slow) | After `UnitMatch.populate()`, `UnitMatch.Pair & key` has expected number of rows. |
-| `test_unit_match_pair_references_curated_units` | Attempt to insert or mock a pair for a unit absent from `CurationV2.Unit`; DataJoint FK validation rejects it. |
-| `test_tracked_unit_strict_clique_basic` | Synthetic pair list with three sessions where ALL pairwise edges between three units exceed threshold (true clique); `TrackedUnit.make()` in default strict mode produces exactly 1 component containing all three. |
-| `test_tracked_unit_strict_tie_breaker_deterministic` | Equal-size overlapping cliques resolve identically across repeated runs because strict mode sorts cliques by deterministic node IDs after size. |
-| `test_tracked_unit_strict_default_rejects_transitive` | Pairs A↔B (high), B↔C (high), A↔C (low). Default `tracked_unit_policy="strict"` (maximal cliques) produces ≥2 components (NOT 1) — A and C cannot be lumped without a direct above-threshold edge. Test asserts >1 component and asserts no component contains both A and C. |
-| `test_tracked_unit_transitive_opt_in_unifies` | Same input as above; with `tracked_unit_policy="transitive"`, connected-components yields 1 component with `n_transitive_only_edges == 1` (the A↔C edge missing). |
-| `test_tracked_unit_unmatched_singleton_survives` | Pair list where unit X (session 1) is paired with several units in session 2 but every pair is below threshold; assert both `strict` and `transitive` policies emit X as a singleton `TrackedUnit` with `n_sessions_observed == 1`, `median_match_probability IS NULL`, and `n_transitive_only_edges == 0`. Regression guard for the silent-drop bug where only above-threshold edges were registered in the graph. |
-| `test_tracked_unit_policy_used_recorded` | After `TrackedUnit.populate()`, every row carries `policy_used` ∈ {`'strict'`, `'transitive'`, `'transitive_fallback'`} matching the actual algorithm path taken (not just `MatcherParameters.params['tracked_unit_policy']` echo). |
-| `test_tracked_unit_strict_node_bound_raises_without_fallback` | Construct a synthetic graph with `max_strict_nodes=10` and 50 nodes (or use a matcher params row with `max_strict_nodes=10`); `allow_strict_fallback=False` (default). `TrackedUnit.populate()` raises `TrackedUnitBudgetExceededError`; message names both `allow_strict_fallback=True` and the `tracked_unit_policy='transitive'` alternative. |
-| `test_tracked_unit_strict_node_bound_fallback` | Same fixture but `allow_strict_fallback=True`. Populate succeeds; every row has `policy_used == 'transitive_fallback'`. |
-| `test_tracked_unit_strict_time_budget_fallback` | Use a small `max_clique_search_seconds` (e.g. `1`) on a graph whose `find_cliques` enumeration provably exceeds it (use a dense Erdős–Rényi graph with ~500 nodes as the fixture). With `allow_strict_fallback=False`, asserts `TrackedUnitBudgetExceededError` raised; with `allow_strict_fallback=True`, asserts all rows have `policy_used == 'transitive_fallback'`. |
+Behaviors the Phase 4b validation slice must cover. Name and split tests as the implementer sees fit; each goal must have at least one assertion exercising it.
+
+1. **Matcher registry typo-at-insert**: unknown matcher names raise `UnknownMatcherError` at `MatcherParameters.insert1`, before the row commits; the message names registered matchers and `register_matcher()`. Per-matcher Pydantic dispatch validates `params` against the registered model.
+2. **Degenerate single-session matcher**: a `SessionGroup` with one Member produces zero `MatchPair`s; no UnitMatch backend call attempted.
+3. **Synthetic two-session correctness** (slow): on a planted-correspondence fixture, true positives score above threshold; random pairs score below.
+4. **`UnitMatchSelection.insert_selection` idempotency**: identical inputs return the same `unitmatch_id`; changing any member's curation produces a different `curation_set_hash` and `unitmatch_id`.
+5. **MemberCuration ownership**: a curation belonging to a different SessionGroup.Member is rejected by `insert_selection` before any part row is inserted; the master + part inserts are atomic on failure.
+6. **`UnitMatch.make()` integrity recheck**: direct-inserted Selection rows with member coverage gaps or wrong-member CurationV2 raise `UnitMatchSelectionIntegrityError` before matcher inputs are extracted; no `UnitMatch` or `Pair` rows are created.
+7. **Pair FK integrity**: `UnitMatch.Pair` rows that reference a unit absent from the pinned `CurationV2.Unit` are rejected by DataJoint.
+8. **TrackedUnit strict-clique basic**: a 3-session clique with all pairwise edges above threshold yields exactly 1 component containing all three; pairwise A↔B / B↔C high but A↔C low yields ≥2 components, and no component contains both A and C.
+9. **TrackedUnit unmatched singleton**: a unit with only below-threshold pairs surfaces as a singleton row (`n_sessions_observed == 1`, `median_match_probability IS NULL`, `n_transitive_only_edges == 0`).
+10. **TrackedUnit bounded-search cap**: a synthetic graph with `max_strict_nodes` smaller than the graph raises `TrackedUnitBudgetExceededError`; under-cap input succeeds and every row carries `policy_used = 'strict'`.
+
+Polymer gating fixture: `test_v2_unitmatch_polymer_mearec_ground_truth` (described above) is the gate — AUC > 0.85 on `mearec_polymer_2sessions.nwb`.
 
 ## Commands to run
 
