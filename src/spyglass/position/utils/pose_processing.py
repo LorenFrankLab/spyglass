@@ -88,6 +88,93 @@ def apply_likelihood_threshold(
     return pose_df
 
 
+def _smooth_bodypart_positions(
+    pose_flat: pd.DataFrame,
+    smooth_params: dict,
+    sampling_rate: float,
+) -> pd.DataFrame:
+    """Apply interpolation + moving-average to each bodypart independently.
+
+    Replicates V1's ``DLCSmoothInterp`` step: per-bodypart smoothing applied
+    before orientation and centroid are computed, so that orientation benefits
+    from pre-cleaned trajectories rather than raw (noisy) bodypart positions.
+
+    Parameters
+    ----------
+    pose_flat : pd.DataFrame
+        2-level MultiIndex ``(bodypart, coord)`` DataFrame.  Must have ``x``
+        and ``y`` columns per bodypart; ``likelihood`` columns are unchanged.
+        Index must be timestamps in seconds.
+    smooth_params : dict
+        Smoothing configuration dict.  Relevant keys:
+
+        - ``interpolate`` – bool, whether to interpolate NaN spans.
+        - ``interp_params`` – dict with ``max_pts_to_interp`` and
+          ``max_cm_to_interp`` (passed straight to ``interp_position``).
+        - ``smooth`` – bool, whether to apply moving-average.
+        - ``smoothing_params`` – dict with at least ``smoothing_duration``
+          in seconds.
+    sampling_rate : float
+        Frames per second; used to convert ``smoothing_duration`` to a window
+        size.
+
+    Returns
+    -------
+    pd.DataFrame
+        Copy of ``pose_flat`` with ``x``/``y`` smoothed per bodypart.
+        ``likelihood`` columns and all other columns are left untouched.
+    """
+    from spyglass.position.utils.interpolation import (
+        interp_position,
+        smooth_moving_avg,
+    )
+    from spyglass.position.utils.orientation import get_span_start_stop
+
+    do_interp = smooth_params.get("interpolate", False)
+    do_smooth = smooth_params.get("smooth", False)
+    if not do_interp and not do_smooth:
+        return pose_flat.copy()
+
+    interp_p = smooth_params.get("interp_params", {})
+    sp = smooth_params.get("smoothing_params", {})
+    smoothing_duration = sp.get("smoothing_duration", 0.05)
+
+    result = pose_flat.copy()
+    bodyparts = pose_flat.columns.get_level_values(0).unique()
+
+    for bp in bodyparts:
+        bp_df = pd.DataFrame(
+            {
+                "x": pose_flat[(bp, "x")].values,
+                "y": pose_flat[(bp, "y")].values,
+            },
+            index=pose_flat.index,
+        )
+
+        if do_interp:
+            is_nan = np.isnan(bp_df["x"]) | np.isnan(bp_df["y"])
+            if np.any(is_nan):
+                nan_spans = get_span_start_stop(np.where(is_nan)[0])
+                bp_df = interp_position(
+                    bp_df,
+                    nan_spans,
+                    max_pts_to_interp=interp_p.get("max_pts_to_interp"),
+                    max_cm_to_interp=interp_p.get("max_cm_to_interp"),
+                )
+
+        if do_smooth:
+            bp_df = smooth_moving_avg(
+                bp_df,
+                smoothing_duration=smoothing_duration,
+                sampling_rate=sampling_rate,
+            )
+
+        result.loc[:, (bp, "x")] = bp_df["x"].values
+        result.loc[:, (bp, "y")] = bp_df["y"].values
+
+    return result
+
+
 def compute_pose_outputs(
     pose_df: pd.DataFrame,
     orient_params: dict,
@@ -116,8 +203,9 @@ def compute_pose_outputs(
     -------
     dict
         Keys: ``orientation`` (ndarray, shape n), ``centroid`` (ndarray,
-        shape n×2), ``velocity`` (ndarray, shape n), ``timestamps``
-        (ndarray, shape n), ``sampling_rate`` (float).
+        shape n×2), ``velocity_2d`` (ndarray, shape n×2), ``speed``
+        (ndarray, shape n), ``timestamps`` (ndarray, shape n),
+        ``sampling_rate`` (float).
     """
     from spyglass.position.utils.centroid import calculate_centroid
     from spyglass.position.utils.general import flatten_multiindex
@@ -143,6 +231,16 @@ def compute_pose_outputs(
 
     # flatten to (bodypart, coord) for utility functions
     pose_flat = flatten_multiindex(pose_df)
+
+    # --- bodypart pre-smoothing (matches V1 DLCSmoothInterp) -----------------
+    # Smooth each bodypart independently before orientation / centroid so that
+    # orientation benefits from cleaned trajectories, not raw detections.
+    if smooth_params.get("interpolate", False) or smooth_params.get(
+        "smooth", False
+    ):
+        pose_flat = _smooth_bodypart_positions(
+            pose_flat, smooth_params, sampling_rate
+        )
 
     # --- orientation ----------------------------------------------------------
     method = orient_params["method"]
