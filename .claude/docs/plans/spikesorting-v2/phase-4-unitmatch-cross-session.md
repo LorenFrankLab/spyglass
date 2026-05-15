@@ -155,10 +155,13 @@ source .venv-spikesorting-v2/bin/activate
 export SPYGLASS_SKILL_DIR="${SPYGLASS_SKILL_DIR:-../spyglass-skill/skills/spyglass}"
 test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
 
-! rg -n "PHASE4A_CONTRACT_STUB" \
+if rg -n "PHASE4A_CONTRACT_STUB" \
   .claude/docs/plans/spikesorting-v2/shared-contracts.md \
   .claude/docs/plans/spikesorting-v2/appendix.md \
-  .claude/docs/plans/spikesorting-v2/designs.md
+  .claude/docs/plans/spikesorting-v2/designs.md; then
+  echo "PHASE4A_CONTRACT_STUB remains; complete Phase 4a before Phase 4b." >&2
+  exit 1
+fi
 
 pytest tests/spikesorting/v2/test_unitmatch.py -q
 

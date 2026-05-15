@@ -533,11 +533,13 @@ def insert_selection(cls, key: dict) -> dict:
     if len(existing) > 1:
         raise DuplicateSelectionError(...)
 
-    key[cls.primary_key[0]] = uuid.uuid4()
+    master_key = {**key, cls.primary_key[0]: uuid.uuid4()}
+    part_key = {k: master_key[k] for k in cls.primary_key}
+    part_key.update(source_key)
     with cls.connection.transaction:
-        cls.insert1(key)
-        cls._source_part(source_kind).insert1({**key, **source_key})
-    return {k: key[k] for k in cls.primary_key}
+        cls.insert1(master_key)
+        cls._source_part(source_kind).insert1(part_key)
+    return {k: master_key[k] for k in cls.primary_key}
 ```
 
 ### Layer 2: re-check at populate time

@@ -174,10 +174,12 @@ source .venv-spikesorting-v2/bin/activate
 export SPYGLASS_SKILL_DIR="${SPYGLASS_SKILL_DIR:-../spyglass-skill/skills/spyglass}"
 test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
 
-pytest tests/spikesorting/v1/ -q
 pytest tests/spikesorting/v2/test_single_session_pipeline.py -q
 pytest tests/spikesorting/v2/test_integrity.py -q
-pytest tests/decoding tests/spikesorting/v1/test_merge.py -q
+# Under SI 0.104, run only Phase-0c-classified legacy query/merge smoke
+# tests. Active v1 populate / metric workflows stay in the legacy SI 0.99
+# environment unless Phase 0c explicitly ported them.
+pytest tests/spikesorting/v1/test_merge.py tests/decoding -q
 
 python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe RecordingSelection --file spyglass/spikesorting/v2/recording.py
 python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe Recording --file spyglass/spikesorting/v2/recording.py
@@ -208,7 +210,7 @@ Before opening or reviewing the implementation PR that contains this checkpoint,
 - Tests aren't trivial — they exercise the asserted behavior, not tautologies. Shared setup is in fixtures, not copy-pasted across tests.
 - Docstrings, test names, and module names don't reference this plan, phase numbers, or files inside `.claude/docs/plans/`.
 - The ground-truth tests (`test_v2_mearec_polymer_ground_truth`, `test_v2_mearec_neuropixels_ground_truth`) genuinely call `spikeinterface.comparison.compare_sorter_to_ground_truth` against the planted Units table and assert real per-unit accuracy thresholds — not mocked tautologies. The `test_v2_real_data_v1_parity` test (env-var gated) loads the v1-baseline pickle and asserts tolerance against the real-data sort; skipped with explicit message if the env var is unset. **No minirec-based parity test ships.**
-- `SpikeSortingOutput.CurationV2` part addition does NOT break existing v0/v1 merge queries — confirm by running the existing v1 test suite and downstream consumer tests (`tests/decoding`, `tests/ripple`).
+- `SpikeSortingOutput.CurationV2` part addition does NOT break existing v0/v1 merge queries — confirm by running the Phase-0c-classified legacy query/merge smoke tests plus downstream consumer tests (`tests/decoding`, `tests/ripple`). Do not require active v0/v1 populate or metric workflows under SI 0.104 unless Phase 0c explicitly ported them.
 - `set_group_by_shank()` overwrite-guard is honored (regression vs v1 silent overwrite).
 - `code_graph.py describe` returns clean output for every new table; `path --up`/`path --down` chains match the design DAG. Run with paths relative to `--src src`, review the JSON `warnings` block, and treat any unaccounted heuristic resolution as a blocker.
 - Documentation tasks (CHANGELOG, `docs/src/Features/SpikeSortingV2.md`, API stub) are landed.
