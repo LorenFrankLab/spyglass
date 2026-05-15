@@ -44,7 +44,21 @@ class ImportedPose(SpyglassMixin, dj.Manual):
     def make(self, key):
         self.insert_from_nwbfile(key["nwb_file_name"])  # pragma: no cover
 
-    def insert_from_nwbfile(self, nwb_file_name, **kwargs):
+    def insert_from_nwbfile(self, nwb_file_name, import_to_v2=False, **kwargs):
+        """Ingest all ndx-pose PoseEstimation objects from a registered NWB.
+
+        Parameters
+        ----------
+        nwb_file_name : str
+            Spyglass-registered NWB filename (must exist in Nwbfile table).
+        import_to_v2 : bool, optional
+            When True, also register skeleton graph(s) from the NWB in the V2
+            ``Skeleton`` table.  ndx-pose files hold pose *results*, not
+            trained model weights, so only the skeleton metadata belongs in V2.
+            By default False.
+        **kwargs
+            Forwarded to ``dj.Table.insert`` (e.g. ``skip_duplicates``).
+        """
         file_path = Nwbfile().get_abs_path(nwb_file_name)
         interval_keys = []
         master_keys = []
@@ -106,6 +120,74 @@ class ImportedPose(SpyglassMixin, dj.Manual):
             IntervalList().insert(interval_keys, **kwargs)
             self.insert(master_keys, **kwargs)
             self.BodyPart().insert(part_keys, **kwargs)
+
+        if import_to_v2:
+            self._import_to_v2_pipeline(file_path, nwb_file_name)
+
+    def _import_to_v2_pipeline(self, file_path, nwb_file_name):
+        """Register skeleton from an ndx-pose NWB in the V2 Skeleton table.
+
+        ndx-pose NWBs contain skeleton graphs that are tool-agnostic and belong
+        in ``Skeleton``.  This is the only V2 table populated by
+        ``import_to_v2=True``; model/inference metadata is not created because
+        ndx-pose files hold pose *results*, not trained model weights.
+
+        Errors are logged as warnings so that the primary ``ImportedPose``
+        ingestion is never rolled back by a V2 failure.
+
+        Parameters
+        ----------
+        file_path : str or Path
+            Absolute path to the ndx-pose NWB file.
+        nwb_file_name : str
+            Spyglass-registered NWB filename (used only for logging).
+        """
+        import warnings
+
+        import ndx_pose
+        import pynwb
+        from pynwb import NWBHDF5IO
+
+        from spyglass.position.v2.train import Skeleton
+
+        try:
+            with NWBHDF5IO(str(file_path), mode="r") as io:
+                nwbf = io.read()
+                behavior = nwbf.processing.get("behavior")
+                if behavior is None:
+                    return
+                for obj in nwbf.objects.values():
+                    if not isinstance(obj, ndx_pose.Skeleton):
+                        continue
+                    bodyparts = list(obj.nodes)
+                    edges_arr = obj.edges
+                    edges = []
+                    if edges_arr is not None:
+                        for edge in edges_arr:
+                            edges.append(
+                                (
+                                    bodyparts[int(edge[0])],
+                                    bodyparts[int(edge[1])],
+                                )
+                            )
+                    try:
+                        Skeleton().insert1(
+                            {"bodyparts": bodyparts, "edges": edges},
+                            accept_default=True,
+                            skip_duplicates=True,
+                        )
+                    except Exception as sk_exc:  # noqa: BLE001
+                        warnings.warn(
+                            f"V2 Skeleton insert failed for '{obj.name}' "
+                            f"in '{nwb_file_name}': {sk_exc}",
+                            stacklevel=4,
+                        )
+        except Exception as exc:  # noqa: BLE001
+            warnings.warn(
+                f"V2 skeleton registration failed for '{nwb_file_name}': "
+                f"{exc}. ImportedPose entries were inserted successfully.",
+                stacklevel=3,
+            )
 
     def fetch_pose_dataframe(self, key=None):
         """Fetch pose data as a pandas DataFrame

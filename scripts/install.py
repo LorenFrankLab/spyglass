@@ -1116,7 +1116,7 @@ def validate_schema(schema: Dict[str, Any]) -> None:
         raise ValueError("Schema 'directory_schema' is empty")
 
     # Check for required prefixes
-    required_prefixes = {"spyglass", "kachery", "dlc", "moseq"}
+    required_prefixes = {"spyglass", "kachery", "pose", "moseq"}
     actual_prefixes = set(dir_schema.keys())
     missing_prefixes = required_prefixes - actual_prefixes
     if missing_prefixes:
@@ -1390,11 +1390,11 @@ def create_database_config(
                 "storage": str(dirs["kachery_storage"]),
                 "temp": str(dirs["kachery_temp"]),
             },
-            "dlc_dirs": {
+            "pose_dirs": {
                 "base": str(base_dir / "deeplabcut"),
-                "project": str(dirs["dlc_project"]),
-                "video": str(dirs["dlc_video"]),
-                "output": str(dirs["dlc_output"]),
+                "project": str(dirs["pose_project"]),
+                "video": str(dirs["pose_video"]),
+                "output": str(dirs["pose_output"]),
             },
             "moseq_dirs": {
                 "base": str(base_dir / "moseq"),

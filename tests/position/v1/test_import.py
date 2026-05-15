@@ -37,6 +37,27 @@ def import_pose_nwb(verbose_context, imported_pose_tbl):
     subject = Subject(subject_id="test_subject", species="Mus musculus")
     nwbfile.subject = subject
 
+    # --- Add minimal electrode setup to make this look like a session file, not a model artifact
+    device = nwbfile.create_device(
+        name="test_device", description="test recording device"
+    )
+    electrode_group = nwbfile.create_electrode_group(
+        name="test_group",
+        description="test electrode group",
+        location="test",
+        device=device,
+    )
+    # Add one electrode to satisfy the validation
+    nwbfile.add_electrode(
+        x=0.0,
+        y=0.0,
+        z=0.0,
+        imp=float("nan"),
+        location="test",
+        filtering="none",
+        group=electrode_group,
+    )
+
     # --- PoseEstimationSeries for two body parts
     series_nose = PoseEstimationSeries(
         name="nose",
