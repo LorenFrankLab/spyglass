@@ -4,16 +4,16 @@
 
 This phase establishes the foundation: empty module structure, dual-environment CI, code-graph validation, fixture generation, v1 baseline capture, and shared utilities. **No new pipeline functionality lands in this phase. The SpikeInterface package-wide upgrade does NOT happen in Phase 0** — see "SI 0.104 upgrade gating" below.
 
-Phase 0 is intentionally split into two mergeable PR slices to control scope:
+Phase 0 is intentionally split into two execution slices to control scope. They are checkpoints, not required PR boundaries:
 
 - **Phase 0a — scaffolding / dependency gate / code graph**: module skeleton, dual-env CI, SI 0.104 prerequisite documentation, draft schema validation artifact, `PreprocessingParamsSchema`, and lightweight shared helpers/tests.
 - **Phase 0b — validation evidence and baseline**: MEArec fixture generation, MEArec→NWB converter, and real-data v1 baseline capture.
 
-Phase 0b depends on Phase 0a. Phase 1 depends on both 0a and 0b plus [Phase 0c](phase-0c-si-0104-prerequisite.md), the separate SI 0.104 compatibility-boundary prerequisite PR.
+Phase 0b depends on Phase 0a. Phase 1 depends on both 0a and 0b plus [Phase 0c](phase-0c-si-0104-prerequisite.md), the SI 0.104 compatibility-boundary prerequisite checkpoint.
 
 ## Executor Checklist
 
-Phase 0a PR:
+Phase 0a checkpoint:
 
 - Create the v2 module/test skeleton and keep production v2 tables unimplemented.
 - Establish the isolated `uv` virtualenv + isolated DataJoint test-database convention for all later phases.
@@ -21,7 +21,7 @@ Phase 0a PR:
 - Add `_params/preprocessing.py`, `utils.py`, and lightweight scaffold tests.
 - Run `code_graph.py` precondition checks for upstream FK targets and update `precondition-check.md`.
 
-Phase 0b PR:
+Phase 0b checkpoint:
 
 - Add MEArec/minirec fixture generation.
 - Record HDF5 as the Phase 1 `AnalysisNwbfile` cache backend default.
@@ -50,11 +50,11 @@ Phase 0b PR:
 
 ## Phase 0a Tasks — Scaffolding And Gates
 
-- **Do not add direct Pydantic or Zarr pins in Phase 0.** Pydantic is required by the v2 `_params/` models, but Phase 0 imports those models only in the SI 0.104 `pytest-v2` job; the default SI 0.99/v1 CI job excludes `tests/spikesorting/v2/` until the prerequisite SI bump lands. Pydantic enters the normal Spyglass runtime transitively through the SpikeInterface 0.104 prerequisite PR. Zarr remains a SpikeInterface runtime dependency, but v2 does not introduce a Spyglass Zarr storage default in Phase 0. A future storage-benchmark PR may evaluate Zarr through `AnalysisNwbfile`, without changing the Phase 1 table schema.
+- **Do not add direct Pydantic or Zarr pins in Phase 0.** Pydantic is required by the v2 `_params/` models, but Phase 0 imports those models only in the SI 0.104 `pytest-v2` job; the default SI 0.99/v1 CI job excludes `tests/spikesorting/v2/` until the prerequisite SI bump lands. Pydantic enters the normal Spyglass runtime transitively through the SpikeInterface 0.104 prerequisite checkpoint. Zarr remains a SpikeInterface runtime dependency, but v2 does not introduce a Spyglass Zarr storage default in Phase 0. A future storage-benchmark PR may evaluate Zarr through `AnalysisNwbfile`, without changing the Phase 1 table schema.
 
 - **Document Phase 0c as a prerequisite work item, not a Phase 0a/0b task.** Phase 0a/0b cannot upgrade SI to 0.104 because v0/v1 active-runtime code still uses WaveformExtractor-era APIs (`extract_waveforms`, `load_waveforms`, `WaveformExtractor`). [Phase 0c](phase-0c-si-0104-prerequisite.md) owns the resolver checks, dependency bump, legacy runtime audit, and clear guard/docs for v0/v1 workflows that remain legacy-environment-only. Until Phase 0c completes, **Phase 1 cannot ship**. Phase 0a documents the gating but does not perform it.
 
-- **Set up the isolated environment and database convention.** v2 development happens in a dedicated `uv` virtualenv with SI 0.104 pre-installed (overriding the pyproject pin); v1 active-runtime work continues in the default current-pin env until Phase 0c defines the legacy boundary. Do not install v2 resolver-test dependencies into base/conda. CI gains a new job `pytest-v2` that runs only `tests/spikesorting/v2/` under SI 0.104; the existing `pytest` job stays on the current pin and explicitly excludes `tests/spikesorting/v2/` until the compatibility-boundary PR lands. Runtime DataJoint tests use the isolated pytest Docker MySQL path by default (`tests/conftest.py` starts the server and sets `database.prefix = "pytests"`); manual fixture/baseline runs may use `docker-compose.yml` only with a dedicated test prefix and temporary `SPYGLASS_BASE_DIR`. The v2 package `__init__.py` must not import `_params` or any other Pydantic-dependent module in Phase 0, so `import spyglass.spikesorting.v2` remains harmless in the default environment.
+- **Set up the isolated environment and database convention.** v2 development happens in a dedicated `uv` virtualenv with SI 0.104 pre-installed (overriding the pyproject pin); v1 active-runtime work continues in the default current-pin env until Phase 0c defines the legacy boundary. Do not install v2 resolver-test dependencies into base/conda. CI gains a new job `pytest-v2` that runs only `tests/spikesorting/v2/` under SI 0.104; the existing `pytest` job stays on the current pin and explicitly excludes `tests/spikesorting/v2/` until the compatibility-boundary checkpoint lands. Runtime DataJoint tests use the isolated pytest Docker MySQL path by default (`tests/conftest.py` starts the server and sets `database.prefix = "pytests"`); manual fixture/baseline runs may use `docker-compose.yml` only with a dedicated test prefix and temporary `SPYGLASS_BASE_DIR`. The v2 package `__init__.py` must not import `_params` or any other Pydantic-dependent module in Phase 0, so `import spyglass.spikesorting.v2` remains harmless in the default environment.
 
 - **`code_graph.py` precondition check on existing FK targets** (run BEFORE writing any v2 schemas). For every Spyglass table v2 plans to FK into — `Session`, `Nwbfile`, `IntervalList`, `Raw`, `Electrode`, `ElectrodeGroup`, `Probe`, `ProbeType`, `BrainRegion`, `LabTeam`, `LabMember`, `Subject`, `AnalysisNwbfile`, `SpikeSortingOutput`, plus v1 ancestors (`SortGroup`, `SpikeSortingRecording`, `SpikeSorting`, `CurationV1`, etc. for parity reference) — run `python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe <name>`, using `--file <path-relative-to-src>` for ambiguous names (for example, `--file spyglass/common/common_nwbfile.py` for the production `AnalysisNwbfile`, not `src/spyglass/...`). Record the precise PK/FK structure of each in `precondition-check.md`. Failure mode caught: upstream schema drift between when the plan was written and when v2 is implemented (e.g., if `Electrode -> BrainRegion` became nullable, v2's brain-region-tracing design would silently break). The implementer re-runs the check and updates the recorded output if anything has drifted.
 
@@ -70,7 +70,7 @@ Phase 0b PR:
 
 - **Draft schema validation artifact** at `src/spyglass/spikesorting/v2/_draft.py`. Phase 0 maintains this single Python file declaring every v2 table's `definition` string (with `make()` bodies raising `NotImplementedError`) so `code_graph.py` can validate the proposed schema before runtime implementation. It is NOT decorated with `@schema` — it exists for static analysis only, not for DataJoint runtime. After Phase 0 validation, the draft is git-rm'd or split into the per-module Phase 1 / 2 / 3 / 4 / 5 files as those phases implement the real tables. **Until the file is removed, NO automated process should import it** — comment headers and the `_draft.py` filename signal "scaffolding, not production."
 
-- **Create the v2 module skeleton.** Make the following empty/stub files; each has a one-line behavior-oriented docstring and, if needed, a neutral comment such as `# Runtime implementation added by the matching spike-sorting v2 PR.` Do not mention plan phases in code comments or docstrings.
+- **Create the v2 module skeleton.** Make the following empty/stub files; each has a one-line behavior-oriented docstring and, if needed, a neutral comment such as `# Runtime implementation added by the matching spike-sorting v2 change.` Do not mention plan phases in code comments or docstrings.
   - `src/spyglass/spikesorting/v2/__init__.py`
   - `src/spyglass/spikesorting/v2/recording.py` (Phase 1)
   - `src/spyglass/spikesorting/v2/sorting.py` (Phase 1)
@@ -102,7 +102,7 @@ Phase 0b PR:
   - `test_preprocessing_params_schema_default` — `PreprocessingParamsSchema().model_dump()` returns the expected dict shape; `model_validate({"bandpass_filter": {"freq_min": -1}})` raises `ValidationError`.
   - `test_resolved_job_kwargs_merge` — set `dj.config['custom']['spikesorting_v2_job_kwargs'] = {"n_jobs": 4}`; assert `_resolved_job_kwargs({}) == {"n_jobs": 4, "chunk_duration": "1s", "progress_bar": True}` (the defaults filled in from SI's global).
 
-- **Documentation update for 0a.** Add a short section to [CHANGELOG.md](CHANGELOG.md) under an "Unreleased" heading: "v2 spike sorting scaffolding (#PR-NUMBER): new `spyglass.spikesorting.v2` module tree with empty stubs; no runtime dependency pins changed; v1 remains the production path. The SpikeInterface 0.104 upgrade is a separate prerequisite PR." No CLAUDE.md changes in this slice.
+- **Documentation update for 0a.** Add a short section to [CHANGELOG.md](CHANGELOG.md) under an "Unreleased" heading: "v2 spike sorting scaffolding: new `spyglass.spikesorting.v2` module tree with empty stubs; no runtime dependency pins changed; v1 remains the production path. The SpikeInterface 0.104 upgrade is a prerequisite checkpoint before runtime v2 work." No CLAUDE.md changes in this slice.
 
 ## Phase 0b Tasks — Fixtures And Baseline
 
@@ -156,14 +156,14 @@ Phase 0b PR:
   - On successful capture, prints all relevant IDs + paths.
   - **NOT runnable in CI** (no real-data NWB in CI). Manually invoked by lab developers; output committed to `tests/spikesorting/v2/baselines/` as small pickle/json files (the units NWB stays on local disk, referenced by path).
 
-- **Optional storage benchmark follow-up (not a Phase 0b blocker).** Phase 1 uses NWB-resident storage through the existing HDF5 `AnalysisNwbfile.build()` lifecycle. A later PR may add `tests/spikesorting/v2/benchmark_storage.py` and `docs/src/Features/SpikeSortingV2StorageBenchmark.md` to compare HDF5, Zarr, and SI binary-folder performance. Any Zarr default or binary-cache opt-in requires its own lifecycle/scoping PR; it must not alter the Phase 1 `Recording` schema (`analysis_file_name`, `electrical_series_path`, `object_id`, `cache_hash`).
+- **Optional storage benchmark follow-up (not a Phase 0b blocker).** Phase 1 uses NWB-resident storage through the existing HDF5 `AnalysisNwbfile.build()` lifecycle. A later change may add `tests/spikesorting/v2/benchmark_storage.py` and `docs/src/Features/SpikeSortingV2StorageBenchmark.md` to compare HDF5, Zarr, and SI binary-folder performance. Any Zarr default or binary-cache opt-in requires its own lifecycle/scoping change; it must not alter the Phase 1 `Recording` schema (`analysis_file_name`, `electrical_series_path`, `object_id`, `cache_hash`).
 
 - **Documentation update for 0b.** Add `tests/spikesorting/v2/fixtures/README.md` and baseline-capture usage notes. The CHANGELOG entry for this slice should mention that the validation fixtures and baseline-capture tooling are available, but no v2 pipeline tables or user-facing sorting path have landed.
 
 ## Deliberately not in this phase
 
 - **No new DataJoint tables.** Tables ship in Phases 1–5.
-- **No removal of v1 source and no legacy SI-compatibility boundary in Phase 0.** v1 remains the production path under the current SI 0.99 pin. The separate SI 0.104 prerequisite PR defines whether any legacy runtime paths are safely ported or guarded as legacy-environment-only before Phase 1 can ship.
+- **No removal of v1 source and no legacy SI-compatibility boundary in Phase 0.** v1 remains the production path under the current SI 0.99 pin. The SI 0.104 prerequisite checkpoint defines whether any legacy runtime paths are safely ported or guarded as legacy-environment-only before Phase 1 can ship.
 - **No `run_v2_pipeline()` orchestrator body** — `pipeline.py` is created as an empty stub in Phase 0. Phase 1 ships the minimal orchestrator (recording → artifact → sorting → initial curation → merge); Phase 5 extends with metrics / concat / FigPack and adds the separate `run_v2_unit_match()` helper.
 - **No matcher protocol implementation.** Phase 0 doesn't even create `matcher_protocol.py`'s contents — just an empty stub file.
 
@@ -172,7 +172,7 @@ Phase 0b PR:
 ### Phase 0a goals
 
 1. **Module imports cleanly**: `spyglass.spikesorting.v2` package import does not error.
-2. **`pytest-v2` job uses isolated SI ≥0.104**: version check inside the dedicated `uv` job; default v1 CI excludes the v2 tests until the global SI prerequisite PR lands. The job must not rely on a shared/base environment.
+2. **`pytest-v2` job uses isolated SI ≥0.104**: version check inside the dedicated `uv` job; default v1 CI excludes the v2 tests until the global SI prerequisite checkpoint lands. The job must not rely on a shared/base environment.
 3. **`PreprocessingParamsSchema`**: default dump matches expected shape; bad values raise `pydantic.ValidationError`; `extra="forbid"` is enforced.
 4. **Helpers behave correctly**: `_resolved_job_kwargs` merges DataJoint config + SI global (per-row override wins); `_analyzer_path` returns the expected `{uuid}.analyzer` path format.
 5. **Draft schema validation**: `code_graph.py describe` succeeds for every table in the draft schema artifact; any FK warnings are explicitly recorded in `precondition-check.md`.
@@ -245,7 +245,7 @@ git diff --check -- src/spyglass/spikesorting/v2 tests/spikesorting/v2 .claude/d
 
 ## Review
 
-Before opening the PR for this phase, dispatch `code-reviewer` (or equivalent independent reviewer) against the diff. Confirm:
+Before opening or reviewing the implementation PR that contains this checkpoint, dispatch `code-reviewer` (or equivalent independent reviewer) against the diff. Confirm:
 - Every task in this phase is implemented as specified.
 - If reviewing 0a, fixture generation and real-data baseline capture are not partially implemented.
 - If reviewing 0b, 0a is already merged and its `pytest-v2` / code-graph gates still pass.

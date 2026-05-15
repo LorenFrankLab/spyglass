@@ -31,7 +31,7 @@ Every phase uses an isolated Python environment and an isolated database for imp
 
 - Use a dedicated `uv` virtualenv for v2 development, for example `.venv-spikesorting-v2`. Do not install SpikeInterface 0.104, UnitMatchPy, MEArec, FigPack, or resolver-test dependencies into a shared conda/base environment.
 - Phase 0a may keep the project-wide pin unchanged while the v2-only test job overrides SpikeInterface inside the isolated environment. Phase 0c owns the real project pin bump and the explicit v0/v1 legacy-runtime boundary.
-- Phase 0c and any phase that verifies third-party APIs records the exact versions used (`python --version`, `spikeinterface.__version__`, `uv pip freeze`, and relevant import/installed-sorter probes) in the PR description or a small artifact under `tests/spikesorting/v2/`.
+- Phase 0c and any checkpoint that verifies third-party APIs records the exact versions used (`python --version`, `spikeinterface.__version__`, `uv pip freeze`, and relevant import/installed-sorter probes) in the PR description or a small artifact under `tests/spikesorting/v2/`.
 
 **Database tiers**:
 
@@ -53,11 +53,11 @@ Use behavior names instead:
 
 - Good test module names: `test_single_session_pipeline.py`, `test_analyzer_curation.py`, `test_session_group_concat.py`, `test_unitmatch.py`.
 - Good test function names: `test_sorting_selection_schema_is_stable`, `test_empty_sorting_supported`, `test_concatenated_recording_make_not_enabled_yet`.
-- Good scaffold comments: `# Runtime implementation added by the matching spike-sorting v2 PR.`
+- Good scaffold comments: `# Runtime implementation added by the matching spike-sorting v2 change.`
 
 Avoid names/comments that encode the plan slice or milestone number instead of the behavior under test.
 
-Exceptions: plan documents may keep phase labels for sequencing, PR review, and cross-reference. External package parameter names that contain words like `phase1` are preserved if they are the upstream API.
+Exceptions: plan documents may keep phase labels for sequencing, implementation review, and cross-reference. External package parameter names that contain words like `phase1` are preserved if they are the upstream API.
 
 **Invariant — do not weaken**: code, tests, notebooks, and docs committed outside `.claude/docs/plans/spikesorting-v2/` must describe the behavior or component, not the implementation-plan phase that introduced it.
 
@@ -635,7 +635,7 @@ Specifically:
 
 Per Critical Issue #1 in the plan self-review: `SpikeSortingOutput` keeps a `source_class_dict` mapping camel-cased part names to the part-source classes ([`spikesorting_merge.py:26-30`](../../../../src/spyglass/spikesorting/spikesorting_merge.py#L26-L30)). Dispatch methods `get_recording()`, `get_sorting()`, `get_sort_group_info()` key into this dict; missing entries raise `KeyError` at runtime.
 
-**v2 requirement (Phase 1)**: when adding the `CurationV2` part to `SpikeSortingOutput`, the same PR also:
+**v2 requirement (Phase 1)**: when adding the `CurationV2` part to `SpikeSortingOutput`, the same implementation change also:
 1. Adds `"CurationV2": CurationV2_table` to `source_class_dict` at module-load time (via `__init_subclass__` or a top-of-module update — match whichever pattern v1 uses).
 2. Implements on `spyglass.spikesorting.v2.curation.CurationV2` the same trio of methods that `CurationV1` exposes: `get_recording(key)`, `get_sorting(key, as_dataframe=False)`, `get_sort_group_info(key)`. These delegate appropriately to `Sorting.get_recording(sorting_key)`, `Sorting.get_analyzer(sorting_key).sorting`, and a sort-group/electrode/brain-region join.
 3. Extends `get_spike_times()` if and only if `CurationV2` uses a different units-object-name. Per the NWB-column convention above, it does NOT, so `get_spike_times()` requires no changes — but a test must verify this.
@@ -765,7 +765,7 @@ This contract enforces the user's binding constraint: every v2 table is designed
 - Phase 4: `MatcherParameters`, `UnitMatchSelection`, `UnitMatchSelection.MemberCuration`, `UnitMatch`, `UnitMatch.Pair`, `TrackedUnit`, `TrackedUnit.Member`.
 - Phase 5: `FigPackCurationSelection`, `FigPackCuration`, plus all `_params/preset.py` registrations.
 
-**Invariant — do not weaken**: A reviewer of any Phase N PR must check that NO existing v2 table from Phase M<N is modified except by adding rows to its `contents` (for Lookup tables) or by adding rows via `make()` (for Computed tables). Adding columns, changing types, renaming columns, or altering FK structures is FORBIDDEN. Phase 1's forward-compatibility decisions above are the contract that lets this work.
+**Invariant — do not weaken**: A reviewer of any implementation PR that includes a later checkpoint must check that NO existing v2 table from an earlier checkpoint is modified except by adding rows to its `contents` (for Lookup tables) or by adding rows via `make()` (for Computed tables). Adding columns, changing types, renaming columns, or altering FK structures is FORBIDDEN. Phase 1's forward-compatibility decisions above are the contract that lets this work.
 
 ---
 

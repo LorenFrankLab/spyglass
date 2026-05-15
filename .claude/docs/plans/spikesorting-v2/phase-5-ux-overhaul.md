@@ -55,7 +55,7 @@ The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell n
   1. Confirm the actual installable package set. Current upstream uses the core `figpack` package plus a spike-sorting extension package (`figpack-spike-sorting` on PyPI, imported as `figpack_spike_sorting` in the upstream repository); do not assume `figpack` alone provides spike-sorting views.
   2. Verify the current spike-sorting extension API. Do not assume the stale example `figpack.spike_sorting.build_curation_view(analyzer)` or `view.publish()` exists; pin the real import path, view-construction API, and upload method in this plan before writing the DataJoint table.
   3. Test on a single example: build a curation view from a v2 SortingAnalyzer end-to-end and publish/upload to FigPack. Round-trip a known labels dict and merge-groups representation back via the verified API or documented state file. If FigPack can display a curation view but cannot persist edited curation state in a retrievable form, stop and escalate before schema finalization.
-  4. Record the verified FigPack and `figpack-spike-sorting` versions in this phase's PR description and in the optional dependency lower bounds.
+  4. Record the verified FigPack and `figpack-spike-sorting` versions in the implementation PR description or a checked-in resolver artifact and in the optional dependency lower bounds.
 
   **If FigPack is not usable at implementation time**: STOP Phase 5 and escalate to the project owner. The plan does not silently fall back to FigURL. Surface the blocker rather than ship a degraded UI. Possible resolutions (decided by project owner, not the implementer): wait for FigPack release; pin to a specific FigPack commit; add a contribution to upstream FigPack.
 
@@ -170,7 +170,7 @@ git diff --exit-code -- src/spyglass/spikesorting/v0 src/spyglass/spikesorting/v
 
 ## Review
 
-Before opening the PR for this phase, dispatch `code-reviewer` (or equivalent independent reviewer) against the diff. Confirm:
+Before opening or reviewing the implementation PR that contains this checkpoint, dispatch `code-reviewer` (or equivalent independent reviewer) against the diff. Confirm:
 - Every task in this phase is implemented as specified.
 - The "Deliberately not in this phase" list is honored — v1 is NOT removed, no v0/v1 schema touched, no existing v2 table altered.
 - Validation goals are covered; slow / integration tests are marked.

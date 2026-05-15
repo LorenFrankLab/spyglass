@@ -13,14 +13,14 @@ Adds **sort-then-match** cross-session unit tracking via UnitMatchPy. The design
 
 ## Executor Checklist
 
-Phase 4a PR:
+Phase 4a checkpoint:
 
 - Run UnitMatchPy end-to-end outside DataJoint and replace the appendix / shared-contracts / designs contract stubs with observed API details.
 - Use the isolated v2 matching `uv` environment; record UnitMatchPy, mat73, SpikeInterface, NumPy, and any GUI/import caveats from that environment.
 - Reconcile `shared-contracts.md` and `designs.md` with the actual matcher input/output layout.
 - Do not add DataJoint tables or `unit_matching.py` in 4a.
 
-Phase 4b PR:
+Phase 4b checkpoint:
 
 - Do not start 4b while `PHASE4A_CONTRACT_STUB` remains; run the grep gate in "Commands to run" first.
 - Implement `matcher_protocol.py`, `_unitmatch_backend.py`, `unit_matching.py`, and Phase 4 parameter schemas from the 4a findings.
@@ -103,13 +103,13 @@ Output of this sub-phase is documentation + a working notebook, NOT new tables. 
 
 ## Deliberately not in this phase
 
-- **DeepUnitMatch**. The `MatcherProtocol` design accepts it as a future plugin; Phase 4.1+ implements `_deepunitmatch_backend.py` separately. Not in this PR.
+- **DeepUnitMatch**. The `MatcherProtocol` design accepts it as a future plugin; Phase 4.1+ implements `_deepunitmatch_backend.py` separately. Not in this checkpoint.
 - **Concat identity backend.** A concat-backed Phase 3 sort has one `CurationV2` row for the concatenated recording, while Phase 4's `UnitMatchSelection.MemberCuration` intentionally pins one curation per `SessionGroup.Member`. Supporting identity matches for concat sorts needs a distinct concat-backed selection path or helper surface; defer it rather than weakening the per-member curation invariant.
 - **Drift correction inside the matcher**. UnitMatch does its own rigid-shift estimation; v2 does not pre-correct drift on inputs to UnitMatch.
 - **Replacing multi-day concat with UnitMatch as a workaround**. Phase 3 supports multi-day concat behind `allow_multi_day=True` (with explicit motion preset). Phase 4 is the **recommended** cross-day workflow, but does not remove Phase 3's opt-in path — they coexist.
 - **Cross-probe matching**. UnitMatch assumes one probe across sessions in a group. Multi-probe is out of scope.
 - **Curation propagation across sessions**. Phase 4 produces match pairs; if a user manually curates session A's unit 5 as `noise`, that label does NOT propagate to session B's matched unit. Curation-propagation tooling is a future feature.
-- **Supplementary Neuropixels, tetrode, and real-data validation.** These are useful follow-up PRs after the polymer-gated implementation lands. They should add their own fixtures, validation notes, and opt-in test markers without blocking the first UnitMatch implementation.
+- **Supplementary Neuropixels, tetrode, and real-data validation.** These are useful follow-up work after the polymer-gated implementation lands. They should add their own fixtures, validation notes, and opt-in test markers without blocking the first UnitMatch implementation.
 
 ## Validation goals
 
@@ -180,9 +180,9 @@ git diff --check -- src/spyglass/spikesorting/v2 tests/spikesorting/v2 docs/src/
 
 ## Review
 
-Before opening the PR for this phase, dispatch `code-reviewer` (or equivalent independent reviewer) against the diff. Confirm:
+Before opening or reviewing the implementation PR that contains this checkpoint, dispatch `code-reviewer` (or equivalent independent reviewer) against the diff. Confirm:
 - Every task in this phase is implemented as specified.
-- The "Deliberately not in this phase" list is honored — DeepUnitMatch and concat identity matching are not in this PR.
+- The "Deliberately not in this phase" list is honored — DeepUnitMatch and concat identity matching are not in this checkpoint.
 - Validation goals are covered; slow / integration tests are marked.
 - The MEArec-based **polymer** validation test (`test_v2_unitmatch_polymer_mearec_ground_truth`) runs in CI and passes its AUC > 0.85 criterion — this is the gate. If it fails, Phase 4 does not ship; the implementer escalates rather than relaxing the threshold.
 - `MatcherProtocol` is implementable by external code without touching v2 internals (verify by writing a 10-line dummy matcher in the test suite).

@@ -8,7 +8,7 @@ A next-generation spike sorting pipeline for Spyglass that (1) targets SpikeInte
 
 For agent invocation, **load only the slice you need**:
 
-1. **Working a specific phase?** Open the matching phase file and start with its `Executor Checklist`. Treat the checklist as the PR contract; use the longer Tasks / Validation sections as reference.
+1. **Working a specific phase/checkpoint?** Open the matching phase file and start with its `Executor Checklist`. Treat the checklist as the implementation contract for that slice of work; use the longer Tasks / Validation sections as reference.
 2. **Need shared semantics?** [shared-contracts.md](shared-contracts.md).
 3. **Need a per-component design?** [designs.md](designs.md).
 4. **Need v1 feature parity boundaries?** [feature-parity.md](feature-parity.md).
@@ -37,9 +37,9 @@ All implementation artifacts also use the [Code Artifact Naming](shared-contract
 - [shared-contracts.md](shared-contracts.md) — SortingAnalyzer layout convention, Pydantic parameter schema, MatcherProtocol plugin interface.
 - [designs.md](designs.md) — schema designs for each v2 table (Recording, Sorting, Curation, AnalyzerCuration, Recompute, SessionGroup, UnitMatch, FigPack curation, and pipeline helpers).
 - [feature-parity.md](feature-parity.md) — explicit v1 parity matrix, including intentional departures.
-- Phases (each ships as a separable PR):
+- Execution phases/checkpoints (PR boundaries are chosen by the project owner; phases are not required to ship as standalone PRs):
   - [phase-0-scaffolding.md](phase-0-scaffolding.md) — foundation work split into Phase 0a (module/CI/code-graph scaffolding) and Phase 0b (fixtures and v1 baseline capture); no v2 pipeline tables.
-  - [phase-0c-si-0104-prerequisite.md](phase-0c-si-0104-prerequisite.md) — required prerequisite PR that bumps the SI runtime for v2 and makes the legacy v0/v1 runtime boundary explicit before Phase 1 can land.
+  - [phase-0c-si-0104-prerequisite.md](phase-0c-si-0104-prerequisite.md) — required prerequisite checkpoint that bumps the SI runtime for v2 and makes the legacy v0/v1 runtime boundary explicit before Phase 1 can land.
   - [phase-1-modern-single-session.md](phase-1-modern-single-session.md) — SortingAnalyzer-based single-session sort end-to-end; new `SpikeSortingOutput.CurationV2` part.
   - [phase-2-analyzer-curation.md](phase-2-analyzer-curation.md) — metrics + auto-merge + burst-pair consolidated into `AnalyzerCuration`, plus recompute verification tables for storage reclamation.
   - [phase-3-session-group-concat.md](phase-3-session-group-concat.md) — `SessionGroup` table + `ConcatenatedRecording` for same-day chronic recordings.
@@ -69,4 +69,4 @@ Phase 3 SessionGroup + ConcatenatedRecording
                   -> Phase 5 UX/FigPack/notebooks
 ```
 
-Phase 1 is the first runtime v2 pipeline PR and requires Phase 0a, Phase 0b, and Phase 0c. Phase 0c is a hard gate because Phase 1 imports and runs SpikeInterface 0.104 APIs while legacy v0/v1 active-runtime workflows must either be guarded with clear legacy-environment messages or explicitly proven compatible.
+Phase 1 is the first runtime v2 pipeline checkpoint and requires Phase 0a, Phase 0b, and Phase 0c. Phase 0c is a hard gate because Phase 1 imports and runs SpikeInterface 0.104 APIs while legacy v0/v1 active-runtime workflows must either be guarded with clear legacy-environment messages or explicitly proven compatible. These checkpoints may be grouped into larger PRs if the gating order and validation evidence remain clear.

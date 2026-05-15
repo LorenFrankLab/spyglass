@@ -2,7 +2,7 @@
 
 [← back to PLAN.md](PLAN.md) · [overview](overview.md) · [appendix](appendix.md#spikeinterface-099--0104-migration-cheat-sheet)
 
-This is a required prerequisite PR before Phase 1. It changes the Spyglass
+This is a required prerequisite checkpoint before Phase 1. It changes the Spyglass
 SpikeInterface dependency boundary and must make the v1/v2 runtime split
 explicit before v2 runtime tables start landing.
 
@@ -35,8 +35,8 @@ Policy for this plan:
 - Update docs so users know v2 is the supported runtime path under new Spyglass/SI 0.104, while active v0/v1 processing requires a legacy SI 0.99 environment unless explicitly ported.
 - Bump the SI dependency for the v2 runtime environment and resolver-check Python 3.10, 3.11, and 3.12.
 - Prove legacy DataJoint schemas are unchanged.
-- Run query/import smoke tests for v0/v1 under SI 0.104; do not require active legacy populate/metric workflows to pass unless this PR explicitly ports them.
-- Record exact resolved package versions, sorter availability, and legacy-runtime boundary decisions in the PR description.
+- Run query/import smoke tests for v0/v1 under SI 0.104; do not require active legacy populate/metric workflows to pass unless this implementation explicitly ports them.
+- Record exact resolved package versions, sorter availability, and legacy-runtime boundary decisions in the PR description or a checked-in resolver artifact.
 
 ## Inputs to read first
 
@@ -64,7 +64,7 @@ Policy for this plan:
   - Store the audit summary in docs or the PR description; update this plan only if the decision changes v2 scope.
 
 - **Add runtime guards for unsupported legacy active workflows.**
-  - Guard v0/v1 active runtime paths that depend on WaveformExtractor-era APIs if they are not ported in this PR.
+  - Guard v0/v1 active runtime paths that depend on WaveformExtractor-era APIs if they are not ported in this implementation.
   - Error messages must be explicit: "This v1/v0 spike-sorting runtime path requires the legacy SpikeInterface 0.99 environment. Use v2 for new SI 0.104+ processing, or run this workflow in the legacy Spyglass environment."
   - Do not guard read/query paths that continue to work without invoking unsupported SI APIs.
   - Keep v0/v1 DataJoint schemas unchanged.
@@ -96,8 +96,8 @@ Policy for this plan:
 | Legacy import smoke | v0/v1 modules imported by existing downstream query paths import under SI 0.104, or unsupported active-runtime imports raise the explicit legacy-env guard. |
 | Legacy merge query smoke | Existing v0/v1 `SpikeSortingOutput` merge rows remain queryable for spike times / firing rates where the path does not invoke WaveformExtractor-era recomputation. |
 | Legacy runtime guard tests | v0/v1 active runtime paths classified as legacy-only raise the clear SI 0.99 environment message under SI 0.104. |
-| Optional v1 shim tests | Only if this PR ports a narrow v1 shim: `MetricCuration.get_waveforms`, relevant metric helpers, and BurstPair callers still satisfy documented behavior. |
-| `test_no_legacy_schema_changes` | v0/v1 DataJoint `definition` strings for recording, sorting, curation, metric curation, burst curation, and recompute tables are byte-identical before/after this PR. |
+| Optional v1 shim tests | Only if this implementation ports a narrow v1 shim: `MetricCuration.get_waveforms`, relevant metric helpers, and BurstPair callers still satisfy documented behavior. |
+| `test_no_legacy_schema_changes` | v0/v1 DataJoint `definition` strings for recording, sorting, curation, metric curation, burst curation, and recompute tables are byte-identical before/after this implementation. |
 | `test_pyproject_si_pin` | `pyproject.toml` requires `spikeinterface>=0.104,<0.105`. |
 | `test_sorter_runtime_resolution` | `mountainsort5` imports, `sis.installed_sorters()` includes `mountainsort5`, and MS4 runtime status is explicit: either `sis.installed_sorters()` includes `mountainsort4` or Phase 1's MS4 default row is blocked with a documented resolver issue. |
 | `test_optional_matching_extra_resolution` | The `spikesorting-v2-matching` extra includes both `UnitMatchPy>=3.3,<4` and `mat73`, resolves without NumPy incompatibility, and import guards produce a clear message if UnitMatchPy hits the `_tkinter` import path. |

@@ -6,7 +6,7 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
 
 ## Executor Checklist
 
-- Keep schemas unchanged from Phase 1; this PR is method-body-only.
+- Keep schemas unchanged from Phase 1; this checkpoint is method-body-only.
 - Implement `SessionGroup.create_group()` validation and date derivation.
 - Implement `ConcatenatedRecording.make()` by fetching the selection row first, then using it for member and parameter restrictions.
 - Lift the concat-source gate in `SortingSelection.insert_selection()` while keeping source-part and concat-artifact rejection guards.
@@ -125,7 +125,7 @@ git diff --check -- src/spyglass/spikesorting/v2 tests/spikesorting/v2 docs/src/
 
 ## Review
 
-Before opening the PR for this phase, dispatch `code-reviewer` (or equivalent independent reviewer) against the diff. Confirm:
+Before opening or reviewing the implementation PR that contains this checkpoint, dispatch `code-reviewer` (or equivalent independent reviewer) against the diff. Confirm:
 - Every task in this phase is implemented as specified.
 - The "Deliberately not in this phase" list is honored — no scope creep into Phase 4 (cross-session matching).
 - **No schema changes to `SortingSelection`.** Git diff against `src/spyglass/spikesorting/v2/sorting.py` shows changes ONLY inside method bodies — the `definition` string is byte-identical to the already-merged schema. The schema-stability test passes.

@@ -154,7 +154,7 @@ git diff --exit-code -- src/spyglass/spikesorting/v1
 
 ## Review
 
-Before opening the PR for this phase, dispatch `code-reviewer` (or equivalent independent reviewer) against the diff. Confirm:
+Before opening or reviewing the implementation PR that contains this checkpoint, dispatch `code-reviewer` (or equivalent independent reviewer) against the diff. Confirm:
 - Every task in this phase is implemented as specified.
 - The "Deliberately not in this phase" list is honored — no scope creep into adjacent phases.
 - Validation goals are covered; slow / integration tests are marked.
