@@ -132,6 +132,8 @@ analyzer = create_sorting_analyzer(
     overwrite=True,
 )
 # Core extensions must be computed at creation; downstream tables add more.
+# resolved_job_kwargs = _resolved_job_kwargs(sorter_params_row["job_kwargs"])
+# (see § Job-Kwargs Resolution — Sorting.make() resolves from SorterParameters).
 analyzer.compute(
     ["random_spikes", "noise_levels", "templates", "waveforms"],
     extension_params={
@@ -394,21 +396,78 @@ Do not add a `CurationV2` part for imported NWB Units, do not add `imported` to 
 
 Phase 1 introduces the convention; all v2 compute stages follow it.
 
-**Sources of `n_jobs` / `chunk_duration` / `progress_bar` / etc.**, in priority order:
+**Sources of `n_jobs` / `chunk_duration` / `progress_bar` / etc.**, in increasing
+precedence order (later wins on key conflict):
 
-1. **Per-row override** on the `Parameters` Lookup table's `job_kwargs` blob (optional secondary attribute).
+1. **SI global default** — whatever `spikeinterface.get_global_job_kwargs()` returns at populate time.
 2. **DataJoint config** — `dj.config['custom']['spikesorting_v2_job_kwargs']`, a dict.
-3. **SI global default** — whatever `spikeinterface.get_global_job_kwargs()` returns at populate time.
+3. **Per-row override(s)** — the `job_kwargs` blob on each parameter Lookup row
+   that governs the compute stage. A stage may have more than one such Lookup;
+   the caller passes them in an explicit order and the later one wins.
 
-A helper `_resolved_job_kwargs(key)` lives in `spyglass.spikesorting.v2.utils` and applies the merge. Compute stages call:
+A helper `_resolved_job_kwargs(*row_job_kwargs)` lives in
+`spyglass.spikesorting.v2.utils`. It takes zero or more `job_kwargs` blob values
+— the values already fetched from the parameter rows that govern this stage — in
+increasing precedence order, and merges them on top of the config and SI-global
+layers. `None` entries (the Lookup default) are skipped.
 
 ```python
-job_kwargs = _resolved_job_kwargs(key)
+def _resolved_job_kwargs(*row_job_kwargs: dict | None) -> dict:
+    """Merge SI-global, DataJoint-config, and per-row job kwargs.
+
+    Parameters
+    ----------
+    *row_job_kwargs
+        `job_kwargs` blob values from the parameter Lookup rows that govern
+        this compute stage, in increasing precedence order (later args win on
+        key conflict). `None` entries are skipped. The caller has already
+        fetched these rows for their `params` blob, so no extra query is needed.
+    """
+    merged = dict(si.get_global_job_kwargs())
+    merged.update(dj.config["custom"].get("spikesorting_v2_job_kwargs", {}))
+    for override in row_job_kwargs:
+        if override:
+            merged.update(override)
+    return merged
+```
+
+**Why the caller passes the blobs, not `key`.** A compute stage's populate `key`
+(e.g. `{recording_id}` for `Recording.make()`) does not share primary-key fields
+with its parameter Lookup, so the helper cannot join `key` to the Lookup
+generically — and a stage with two parameter Lookups would have no defined
+precedence. The stage's `make()` has already fetched its parameter row(s) for the
+`params` blob; it passes the `job_kwargs` field(s) of those same rows.
+
+**Per-stage call sites** (binding — this resolves the multi-parent ambiguity):
+
+| Compute stage | `_resolved_job_kwargs(...)` arguments, low → high precedence |
+| --- | --- |
+| `Recording.make()` | `PreprocessingParameters.job_kwargs` |
+| `ArtifactDetection.make()` | `ArtifactDetectionParameters.job_kwargs` |
+| `Sorting.make()` | `SorterParameters.job_kwargs` |
+| `AnalyzerCuration.make()` | `QualityMetricParameters.job_kwargs`, then `AutoCurationRules.job_kwargs` |
+| `ConcatenatedRecording.make()` | `PreprocessingParameters.job_kwargs`, then `MotionCorrectionParameters.job_kwargs` |
+| `UnitMatch.make()` | `MatcherParameters.job_kwargs` |
+
+Stages with two parameter Lookups resolve a key conflict by argument order — the
+second table wins. For `AnalyzerCuration` the auto-merge Lookup
+(`AutoCurationRules`) is the outer step and wins; for `ConcatenatedRecording`
+motion correction (`MotionCorrectionParameters`) runs last and wins. Single-Lookup
+stages pass exactly one argument. `Sorting.add_extensions()` is a `Sorting` method
+and resolves from `SorterParameters` like `Sorting.make()`.
+
+Compute stages call:
+
+```python
+job_kwargs = _resolved_job_kwargs(sorter_params_row["job_kwargs"])
 analyzer.compute([...], **job_kwargs)
 recording.save(folder=..., **job_kwargs)
 ```
 
-**Invariant**: never pass `n_jobs` as a positional or hardcoded literal inside `make()`. Always route through the resolver. Tests rely on being able to override via DataJoint config.
+**Invariant — do not weaken**: never pass `n_jobs` as a positional or hardcoded
+literal inside `make()`. Always route through the resolver, passing the governing
+parameter rows' `job_kwargs` in the documented order. Tests rely on being able to
+override via DataJoint config and via the per-row blob.
 
 ---
 

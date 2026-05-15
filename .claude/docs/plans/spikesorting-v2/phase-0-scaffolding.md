@@ -93,14 +93,14 @@ Phase 0b checkpoint:
 - **Implement `utils.py` with the shared helpers**:
   - `_validate_params(model_cls, params) -> dict` — Pydantic dispatch.
   - `_analyzer_path(key) -> Path` — resolves to `{SPYGLASS_TEMP_DIR}/spikesorting_v2/analyzers/{sorting_id}.analyzer/`. Reads `SPYGLASS_TEMP_DIR` from `dj.config['custom']['spikesorting_v2']['temp_dir']` falling back to `dj.config['stores']['raw']['location']` plus `/spikesorting_v2_temp`.
-  - `_resolved_job_kwargs(key) -> dict` — merge from `(1) Lookup row's job_kwargs field` (if set), `(2) dj.config['custom']['spikesorting_v2_job_kwargs']`, `(3) si.get_global_job_kwargs()`. Returns the merged dict ready to splat into `analyzer.compute(**kwargs)`.
+  - `_resolved_job_kwargs(*row_job_kwargs) -> dict` — merge, in increasing precedence: `(1) si.get_global_job_kwargs()`, `(2) dj.config['custom']['spikesorting_v2_job_kwargs']`, `(3)` zero or more per-row `job_kwargs` blobs the caller passes in increasing-precedence order (`None` entries skipped). Returns the merged dict ready to splat into `analyzer.compute(**kwargs)`. The helper does NOT take a populate `key` — see [shared-contracts.md § Job-Kwargs Resolution](shared-contracts.md#job-kwargs-resolution) for why, and for the binding per-stage call-site table.
   - `_hash_nwb_recording(analysis_file_name, object_id) -> str` — content hash (SHA-256) over the `ElectricalSeries.data` bytes inside the AnalysisNwbfile identified by `analysis_file_name` and `object_id`. Backend-agnostic (works for HDF5 or Zarr-backed NWBs). The hash anchors Phase 1's missing-artifact detection and feeds Phase 2's `RecordingArtifactRecompute*` machinery.
 
 - **Add a sanity test for scaffolding** in `tests/spikesorting/v2/test_scaffold.py` (run only in the SI 0.104 `pytest-v2` job until the prerequisite SI bump lands):
   - `test_module_imports` — `from spyglass.spikesorting import v2` succeeds.
   - `test_si_version_min` — in the `pytest-v2` job only, `import spikeinterface as si; from packaging.version import Version; assert Version(si.__version__) >= Version("0.104")`. The default v1 CI job still uses the current project pin and excludes `tests/spikesorting/v2/`; this test proves the dedicated v2 job is actually running in the modern-SI environment that Phase 1 requires.
   - `test_preprocessing_params_schema_default` — `PreprocessingParamsSchema().model_dump()` returns the expected dict shape; `model_validate({"bandpass_filter": {"freq_min": -1}})` raises `ValidationError`.
-  - `test_resolved_job_kwargs_merge` — set `dj.config['custom']['spikesorting_v2_job_kwargs'] = {"n_jobs": 4}`; assert `_resolved_job_kwargs({}) == {"n_jobs": 4, "chunk_duration": "1s", "progress_bar": True}` (the defaults filled in from SI's global).
+  - `test_resolved_job_kwargs_merge` — set `dj.config['custom']['spikesorting_v2_job_kwargs'] = {"n_jobs": 4}`; assert `_resolved_job_kwargs() == {"n_jobs": 4, "chunk_duration": "1s", "progress_bar": True}` (config over SI global defaults); assert a per-row blob wins over config (`_resolved_job_kwargs({"n_jobs": 8})["n_jobs"] == 8`); assert later args win over earlier (`_resolved_job_kwargs({"n_jobs": 8}, {"n_jobs": 2})["n_jobs"] == 2`); assert a `None` arg is skipped (`_resolved_job_kwargs(None)["n_jobs"] == 4`).
 
 - **Documentation update for 0a.** Add a short section to [CHANGELOG.md](CHANGELOG.md) under an "Unreleased" heading: "v2 spike sorting scaffolding: new `spyglass.spikesorting.v2` module tree with empty stubs; no runtime dependency pins changed; v1 remains the production path. The SpikeInterface 0.104 upgrade is a prerequisite checkpoint before runtime v2 work." No CLAUDE.md changes in this slice.
 
@@ -174,7 +174,7 @@ Phase 0b checkpoint:
 1. **Module imports cleanly**: `spyglass.spikesorting.v2` package import does not error.
 2. **`pytest-v2` job uses isolated SI ≥0.104**: version check inside the dedicated `uv` job; default v1 CI excludes the v2 tests until the global SI prerequisite checkpoint lands. The job must not rely on a shared/base environment.
 3. **`PreprocessingParamsSchema`**: default dump matches expected shape; bad values raise `pydantic.ValidationError`; `extra="forbid"` is enforced.
-4. **Helpers behave correctly**: `_resolved_job_kwargs` merges DataJoint config + SI global (per-row override wins); `_analyzer_path` returns the expected `{uuid}.analyzer` path format.
+4. **Helpers behave correctly**: `_resolved_job_kwargs` merges SI global + DataJoint config + per-row `job_kwargs` blobs in increasing precedence (later argument wins; `None` skipped); `_analyzer_path` returns the expected `{uuid}.analyzer` path format.
 5. **Draft schema validation**: `code_graph.py describe` succeeds for every table in the draft schema artifact; any FK warnings are explicitly recorded in `precondition-check.md`.
 
 ### Phase 0b goals
