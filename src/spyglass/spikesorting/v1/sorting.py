@@ -9,7 +9,6 @@ import numpy as np
 import pynwb
 import spikeinterface as si
 import spikeinterface.curation as sic
-import spikeinterface.extractors as se
 import spikeinterface.preprocessing as sip
 import spikeinterface.sorters as sis
 from spikeinterface.sortingcomponents.peak_detection import detect_peaks
@@ -269,16 +268,12 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
             SpikeSorterParameters * SpikeSortingSelection & key
         ).fetch1("sorter", "sorter_params")
 
-        recording_analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(
-            recording_key["analysis_file_name"]
-        )
-
         return [
             nwb_file_name,
             artifact_removed_intervals,
             sorter,
             sorter_params,
-            recording_analysis_nwb_file_abs_path,
+            recording_key,
         ]
 
     def make_compute(
@@ -288,10 +283,10 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         artifact_removed_intervals: IntervalLike,
         sorter: str,
         sorter_params: dict,
-        recording_analysis_nwb_file_abs_path: str,
+        recording_key: dict,
     ):
         sorting, timestamps = self._run_spike_sorter(
-            recording_analysis_nwb_file_abs_path=recording_analysis_nwb_file_abs_path,
+            recording_key=recording_key,
             artifact_removed_intervals=artifact_removed_intervals,
             sorter=sorter,
             sorter_params=sorter_params,
@@ -328,7 +323,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
 
     def _run_spike_sorter(
         self,
-        recording_analysis_nwb_file_abs_path,
+        recording_key,
         artifact_removed_intervals,
         sorter,
         sorter_params,
@@ -340,8 +335,8 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
 
         Parameters
         ----------
-        recording_analysis_nwb_file_abs_path : str
-            Path to recording NWB file
+        recording_key : dict
+            Key for the recording
         artifact_removed_intervals : np.ndarray
             Artifact-free time intervals
         sorter : str
@@ -357,9 +352,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
             Recording timestamps
         """
         # Load recording (spikeinterface)
-        recording = se.read_nwb_recording(
-            recording_analysis_nwb_file_abs_path, load_time_vector=True
-        )
+        recording = SpikeSortingRecording().get_recording(recording_key)
 
         timestamps = recording.get_times()
 
