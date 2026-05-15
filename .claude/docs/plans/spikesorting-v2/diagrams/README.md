@@ -1,6 +1,10 @@
 # Spike Sorting v2 — Table Structure Diagrams
 
-These diagrams show the DataJoint table structure that v2 introduces at each phase. Each diagram is **cumulative**: it shows the tables that exist after that phase ships, including baseline Spyglass tables that v2 depends on.
+These diagrams show the DataJoint table structure that v2 introduces at each phase/checkpoint. Each diagram is **cumulative**: it shows the tables that exist after that checkpoint is complete, including baseline Spyglass tables that v2 depends on.
+
+These files are reference diagrams, not execution instructions. If process
+wording in a diagram conflicts with `PLAN.md` or a phase/checkpoint file, follow
+the active plan text.
 
 Diagrams use Mermaid `erDiagram` syntax — GitHub renders them natively. To view locally, install a Mermaid-capable previewer or paste into [mermaid.live](https://mermaid.live).
 

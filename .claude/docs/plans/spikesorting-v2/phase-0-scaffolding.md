@@ -152,7 +152,7 @@ Phase 0b checkpoint:
 - **Add v1 baseline capture on the real-lab dataset (not minirec):**
   - New file `tests/spikesorting/v2/baseline_capture.py`, CLI args `--nwb-file`, `--sort-group-id`, `--interval-list-name`, `--output-dir`. Default `--nwb-file` reads from `SPIKESORTING_V2_REAL_NWB_PATH`.
   - Runs the v1 pipeline end-to-end with `clusterless_thresholder` (deterministic, seed=0) on the real-data NWB inside the isolated integration database. If the developer must query production to locate the source NWB or metadata, the query is read-only and requires `SPYGLASS_ALLOW_PRODUCTION_SMOKE=1`; all inserts/populates/write paths still target the test prefix and temporary analysis directories.
-  - Saves `baseline_v1_units.nwb`, `baseline_v1_spike_times.pkl`, `baseline_v1_recording_meta.json`.
+  - Saves small committed artifacts `baseline_v1_spike_times.pkl` and `baseline_v1_recording_meta.json`. If a units NWB export is needed for local debugging, write it outside git and record only its local path in the metadata JSON.
   - On successful capture, prints all relevant IDs + paths.
   - **NOT runnable in CI** (no real-data NWB in CI). Manually invoked by lab developers; output committed to `tests/spikesorting/v2/baselines/` as small pickle/json files (the units NWB stays on local disk, referenced by path).
 
@@ -181,7 +181,7 @@ Phase 0b checkpoint:
 
 1. **`_hash_nwb_recording` is deterministic** (slow): same backend, same `ElectricalSeries` bytes produce the same hash on repeated calls.
 2. **MEArec fixture round-trips Spyglass ingestion in the isolated test database** (slow): a generated fixture runs through `insert_sessions(...)` (or equivalent common-table population); `Session`, `Raw`, non-empty `Electrode`, and expected `IntervalList` rows exist; `ImportedSpikeSorting().insert_from_nwbfile(...)` puts ground-truth Units into `SpikeSortingOutput.ImportedSpikeSorting`.
-3. **v1 baseline capture works on real data without production writes** (slow, integration, env-var-gated): when `SPIKESORTING_V2_REAL_NWB_PATH` is set, `baseline_capture.py` produces three non-empty output files while connected to the isolated integration database. Skipped with an explicit message if the env var is unset. Production-connected metadata lookup requires `SPYGLASS_ALLOW_PRODUCTION_SMOKE=1` and remains read-only.
+3. **v1 baseline capture works on real data without production writes** (slow, integration, env-var-gated): when `SPIKESORTING_V2_REAL_NWB_PATH` is set, `baseline_capture.py` produces the expected small committed artifacts (`baseline_v1_spike_times.pkl`, `baseline_v1_recording_meta.json`) while connected to the isolated integration database. Skipped with an explicit message if the env var is unset. Production-connected metadata lookup requires `SPYGLASS_ALLOW_PRODUCTION_SMOKE=1` and remains read-only. Real NWB/unit files stay outside git; if a local units NWB export is produced, only its path is recorded in metadata.
 4. **v1 regression guard**: full v1 test suite passes under the current SI pin (no SI bump in Phase 0).
 
 ## Commands to run
@@ -241,7 +241,7 @@ git diff --check -- src/spyglass/spikesorting/v2 tests/spikesorting/v2 .claude/d
 - **`minirec`** — existing v1 fixture; reused. No changes needed.
 - **`tests/spikesorting/v2/conftest.py`** introduces:
   - `synthetic_si_recording_2s` — a synthetic 2-second 4-channel 30 kHz SI recording with 10 injected spikes per channel, deterministic seed. Built via `si.generate_recording(num_channels=4, sampling_frequency=30000, durations=[2.0], seed=0)`. Used by `test_hash_nwb_recording_stable`.
-- **Baseline artifacts directory**: `tests/spikesorting/v2/baselines/` (gitignored except for `.gitkeep`); `baseline_capture.py` writes into this directory.
+- **Baseline artifacts directory**: `tests/spikesorting/v2/baselines/` (gitignored except for `.gitkeep`; allowlist only `.pkl` / `.json` baseline files if committed). `baseline_capture.py` writes small pickle/json artifacts into this directory; real NWB/unit files stay outside git.
 
 ## Review
 

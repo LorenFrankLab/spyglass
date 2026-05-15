@@ -196,7 +196,7 @@ git diff --check -- src/spyglass/spikesorting/v2 src/spyglass/spikesorting/spike
 ## Fixtures
 
 - **`minirec`** — existing v1 fixture; reused. No changes needed.
-- **`baseline_v1_*.{nwb,pkl,json}`** — checked in by Phase 0 baseline capture run.
+- **`baseline_v1_*.{pkl,json}`** — small artifacts from the Phase 0 baseline capture run. Real NWB/unit files are not checked in; if needed, their local paths are recorded in the metadata JSON.
 - **`synthetic_recording_with_2_artifacts`** (new in `tests/spikesorting/v2/conftest.py`) — a 5-second synthetic SI recording with two injected artifact pulses at known timestamps; used by `test_artifact_get_removed_intervals_returns_complement`.
 
 ## Review

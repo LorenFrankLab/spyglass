@@ -3,6 +3,12 @@
 Working document accumulating evidence and design rationale for the v2 design.
 Date: 2026-05-11. Author: Eric Denovellis + Claude.
 
+**Historical / non-execution reference**: this file preserves prior-review
+context and older process assumptions. Executors should follow `PLAN.md`,
+`shared-contracts.md`, `designs.md`, and the active phase/checkpoint files when
+instructions differ. In particular, old PR-count or standalone-PR wording below
+is historical rationale, not the current execution model.
+
 ## Confidence Legend
 
 - 🟢 **High** — directly verified from source or vendor docs.
