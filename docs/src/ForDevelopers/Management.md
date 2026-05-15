@@ -347,8 +347,11 @@ Use the common `AnalysisNwbfile` table to clean up all analysis files:
 ```python
 from spyglass.common import AnalysisNwbfile
 
-# Run cleanup across all tables (common + custom)
-AnalysisNwbfile().cleanup()
+# Preview cleanup across all tables (common + custom)
+AnalysisNwbfile().cleanup(dry_run=True)
+
+# Apply the cleanup after reviewing the dry-run output
+AnalysisNwbfile().cleanup(dry_run=False)
 ```
 
 **Important**: Cleanup automatically coordinates across all custom
@@ -382,6 +385,9 @@ The cleanup process checks:
 - **Foreign key protection**: Respects downstream table dependencies
 - **Registry blocking**: Temporarily blocks new table registrations during
     cleanup
+- **Filesystem deletion limits**: Refuses destructive cleanup when the directory
+    scan would delete too large a fraction of analysis NWB files, or too many
+    files relative to the number of tracked analysis files.
 
 ### Custom Tables
 
