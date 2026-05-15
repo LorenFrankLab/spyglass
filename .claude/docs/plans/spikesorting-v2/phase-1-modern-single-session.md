@@ -154,7 +154,7 @@ Behaviors the Phase 1 validation goals must cover. Implementer chooses test name
 9. **Forward-compat schema (zero-migration)**: `SortingSelection` includes `RecordingSource` and `ConcatenatedRecordingSource` parts from day one; `ConcatenatedRecordingSource` insert requests raise a clear "not implemented yet" error until concat support lands; `ConcatenatedRecording.populate()` raises `NotImplementedError`; `ConcatenatedRecording.MemberBoundary` exists; `Sorting.object_id` and `CurationV2.object_id` are `varchar(72)` and use `object_id` (not `units_object_id`) per the merge convention.
 10. **CurationV2 integration**: `insert_curation(labels={})` succeeds (zero-unit invariant); labels validated against `CurationLabel` enum; auto-registers in `SpikeSortingOutput.CurationV2`; transaction is atomic — forced part-insert failure leaves no DB rows AND no orphan staged analysis file. Brain-region accessors return per-unit regions (single-session = `region_resolution='single_session'`; concat-backed raises `ConcatBrainRegionAmbiguousError` unless `allow_anchor_member=True`); `get_sort_group_info` returns ALL electrodes (regression vs v1 `fetch(limit=1)`); `get_matchable_unit_ids` excludes any unit with `reject`/`noise`/`artifact`.
 
-**Merge-dispatch goals** (verify `SpikeSortingOutput` works on v2 merge_ids, slow): `source_class_dict["CurationV2"]` resolves; `get_restricted_merge_ids(sources=['v2'])` returns v2 rows; the v2 restriction surface (nwb_file_name, team_name, sort_group_id, interval_list_name, preproc/artifact/sorter/sorting/curation IDs) all resolve through `RecordingSource` for single-session rows; source-part restrictions by `recording_id` and by non-source fields can be combined; `get_recording`, `get_sorting`, `get_sort_group_info`, `get_spike_times`, `get_spike_indicator`, `get_firing_rate`, `get_unit_brain_regions` all work end-to-end; `SortedSpikesGroup.get_spike_times` returns sane arrays for a v2-sourced merge_id.
+**Merge-dispatch and downstream-consumer goals** (verify `SpikeSortingOutput` works on v2 merge_ids, slow): `source_class_dict["CurationV2"]` resolves; `get_restricted_merge_ids(sources=['v2'])` returns v2 rows; the v2 restriction surface (nwb_file_name, team_name, sort_group_id, interval_list_name, preproc/artifact/sorter/sorting/curation IDs) all resolve through `RecordingSource` for single-session rows; source-part restrictions by `recording_id` and by non-source fields can be combined; `get_recording`, `get_sorting`, `get_sort_group_info`, `get_spike_times`, `get_spike_indicator`, `get_firing_rate`, `get_unit_brain_regions` all work end-to-end; `SortedSpikesGroup` can group a v2-sourced merge_id and return sane spike times / indicators / firing rates; the MUA path can consume that `SortedSpikesGroup` multiunit output; decoding merge consumers still resolve spike-sorting merge IDs.
 
 **Sort-correctness goals** (slow, integration):
 
@@ -176,10 +176,11 @@ test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
 
 pytest tests/spikesorting/v2/test_single_session_pipeline.py -q
 pytest tests/spikesorting/v2/test_integrity.py -q
+pytest tests/spikesorting/v2/test_downstream_consumers.py -q
 # Under SI 0.104, run only Phase-0c-classified legacy query/merge smoke
 # tests. Active v1 populate / metric workflows stay in the legacy SI 0.99
 # environment unless Phase 0c explicitly ported them.
-pytest tests/spikesorting/v1/test_merge.py tests/decoding -q
+pytest tests/spikesorting/v1/test_merge.py tests/spikesorting/v1/test_utils.py tests/decoding -q
 
 python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe RecordingSelection --file spyglass/spikesorting/v2/recording.py
 python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe Recording --file spyglass/spikesorting/v2/recording.py
@@ -210,7 +211,7 @@ Before opening or reviewing the implementation PR that contains this checkpoint,
 - Tests aren't trivial — they exercise the asserted behavior, not tautologies. Shared setup is in fixtures, not copy-pasted across tests.
 - Docstrings, test names, and module names don't reference this plan, phase numbers, or files inside `.claude/docs/plans/`.
 - The ground-truth tests (`test_v2_mearec_polymer_ground_truth`, `test_v2_mearec_neuropixels_ground_truth`) genuinely call `spikeinterface.comparison.compare_sorter_to_ground_truth` against the planted Units table and assert real per-unit accuracy thresholds — not mocked tautologies. The `test_v2_real_data_v1_parity` test (env-var gated) loads the v1-baseline pickle and asserts tolerance against the real-data sort; skipped with explicit message if the env var is unset. **No minirec-based parity test ships.**
-- `SpikeSortingOutput.CurationV2` part addition does NOT break existing v0/v1 merge queries — confirm by running the Phase-0c-classified legacy query/merge smoke tests plus downstream consumer tests (`tests/decoding`, `tests/ripple`). Do not require active v0/v1 populate or metric workflows under SI 0.104 unless Phase 0c explicitly ported them.
+- `SpikeSortingOutput.CurationV2` part addition does NOT break existing v0/v1 merge queries or spike-sorting downstream consumers — confirm by running the Phase-0c-classified legacy query/merge smoke tests plus downstream checks for `SortedSpikesGroup`, MUA multiunit output, and decoding. Do not require active v0/v1 populate or metric workflows under SI 0.104 unless Phase 0c explicitly ported them.
 - `set_group_by_shank()` overwrite-guard is honored (regression vs v1 silent overwrite).
 - `code_graph.py describe` returns clean output for every new table; `path --up`/`path --down` chains match the design DAG. Run with paths relative to `--src src`, review the JSON `warnings` block, and treat any unaccounted heuristic resolution as a blocker.
 - Documentation tasks (CHANGELOG, `docs/src/Features/SpikeSortingV2.md`, API stub) are landed.
