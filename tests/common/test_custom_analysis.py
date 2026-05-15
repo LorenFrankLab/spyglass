@@ -365,6 +365,7 @@ class TestCleanupAndRegistry:
         teardown,
         common,
         mock_create,
+        request,
     ):
         """Test orphan detection across all registered tables.
 
@@ -382,6 +383,16 @@ class TestCleanupAndRegistry:
 
         master_table = common.common_nwbfile.AnalysisNwbfile()
         custom_table, downstream = custom_analysis_tables
+        created_paths = {}
+
+        def _cleanup_created_files():
+            if not teardown:
+                return
+            for path in created_paths.values():
+                if path.exists():
+                    path.unlink()
+
+        request.addfinalizer(_cleanup_created_files)
 
         # Use mock_create fixture for fast file creation
         mock_create(custom_table)
@@ -408,7 +419,6 @@ class TestCleanupAndRegistry:
         downstream.insert_by_name(export_file)
         custom_table._copy_to_common(export_file)
 
-        analysis_dir = base_dir / "analysis"
         created_paths = {
             "null": Path(null_fp).resolve(),
             "orphan": Path(orph_fp).resolve(),
@@ -435,8 +445,13 @@ class TestCleanupAndRegistry:
             ]
 
         before_cleanup = {
-            path.resolve() for path in analysis_dir.rglob("*.nwb")
+            path for path in created_paths.values() if path.exists()
         }
+        missing_before_cleanup = set(created_paths.values()) - before_cleanup
+        assert not missing_before_cleanup, (
+            "AnalysisNwbfile.cleanup test setup did not create expected files: "
+            f"{_relative_paths(missing_before_cleanup)}"
+        )
         print(
             "AnalysisNwbfile.cleanup test plan: "
             f"{len(before_cleanup)} analysis .nwb files before cleanup; "
@@ -451,7 +466,9 @@ class TestCleanupAndRegistry:
         # insert table entries without downstream fk-references
         master_table.cleanup()
 
-        after_cleanup = {path.resolve() for path in analysis_dir.rglob("*.nwb")}
+        after_cleanup = {
+            path for path in created_paths.values() if path.exists()
+        }
         deleted_paths = before_cleanup - after_cleanup
         missing_deleted_paths = expected_deleted_paths - deleted_paths
         unexpected_deleted_paths = deleted_paths - expected_deleted_paths
