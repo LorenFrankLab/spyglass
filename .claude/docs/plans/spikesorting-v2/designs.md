@@ -261,7 +261,7 @@ class Recording(SpyglassMixin, dj.Computed):
 
 ## ArtifactDetectionParameters + ArtifactDetection
 
-Mirrors v1's structure but consumes the v2 NWB-resident `Recording` artifact (via `Recording.get_recording(key)`). v2 stores detected artifact intervals on `ArtifactDetection.Interval`, not in `IntervalList`.
+Mirrors v1's structure but consumes the v2 NWB-resident `Recording` artifact (via `Recording.get_recording(key)`). v2 stores detected artifact intervals on `ArtifactDetection.Interval`, not in `IntervalList`. The user-facing replacement for v1's UUID-named artifact interval row is `ArtifactDetection.get_artifact_removed_intervals(key)`, which derives artifact-free valid times from the original sort interval plus the `ArtifactDetection.Interval` part rows.
 
 ```python
 @schema
@@ -383,7 +383,7 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         """
 ```
 
-**Design change from v1**: v1 inserts the artifact-removed interval directly into `IntervalList` with `artifact_id` (UUID) as the `interval_list_name`. This collides with user-named intervals and uses `skip_duplicates=True` (forbidden in custom `make()`). v2 stores artifact intervals on its own part table and exposes `ArtifactDetection.get_artifact_removed_intervals(key)` for consumers.
+**Design change from v1**: v1 inserts the artifact-removed interval directly into `IntervalList` with `artifact_id` (UUID) as the `interval_list_name`. This collides with user-named intervals and uses `skip_duplicates=True` (forbidden in custom `make()`). v2 stores artifact intervals on its own part table and exposes `ArtifactDetection.get_artifact_removed_intervals(key)` for consumers. Do not teach users to look for v2 artifact results in `IntervalList`; that table remains for session/task/user valid-time intervals.
 
 **Source re-validation at populate time**: `ArtifactDetection.make()` MUST re-check that the upstream `ArtifactDetectionSelection` row has exactly one source part row at the start of `make()`, mirroring `Sorting.make()`'s pattern. This catches rows inserted via `dj.Manual.insert1()` that bypassed `insert_selection()`. See shared-contracts.md § Source Part Pattern.
 
@@ -960,7 +960,12 @@ Cross-session bundling for same-day chronic recordings.
 ```python
 @schema
 class SessionGroup(SpyglassMixin, dj.Manual):
-    """A named bundle of (session, sort_group, interval) tuples to analyze together.
+    """A named bundle of sorting members to analyze together.
+
+    A member is a (nwb_file_name, sort_group_id, interval_list_name, team_name)
+    tuple, not necessarily a whole NWB file. One NWB/day may contribute
+    multiple members through different intervals or sort groups, and a long
+    recording split across multiple NWB files may contribute multiple members.
 
     Multi-day concatenation is supported by the schema but is not the
     recommended default path for days/weeks-apart analyses. The same table is
@@ -1138,7 +1143,7 @@ class ConcatenatedRecordingSelection(SpyglassMixin, dj.Manual):
 
 @schema
 class ConcatenatedRecording(SpyglassMixin, dj.Computed):
-    """Virtual concatenated recording across SessionGroup members.
+    """Materialized concatenated recording cache across SessionGroup members.
 
     Materializes one NWB-resident artifact (the post-motion-corrected,
     post-whitening concatenated `ElectricalSeries`) per concat group.
@@ -1190,6 +1195,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
 
 - **Multi-day is opt-in, not the recommended default.** `SessionGroup.create_group(..., allow_multi_day=True)` is required for multi-date members; the default rejects them with a pointer to Phase 4 UnitMatch as the recommended cross-day workflow. `ConcatenatedRecording` does NOT auto-dispatch DREDge — `preset='auto'` resolves to `rigid_fast` for single-day and raises on multi-day (caller must pick an explicit preset). Multi-day concat is experimental and remains in scope behind the opt-in flag because the schema cost of supporting it is zero.
 - **Recording cache reuse** — `ConcatenatedRecording.make()` reads from already-populated `Recording` rows for each member, NOT from raw NWB. Avoids preprocessing twice.
+- **Materialized cache, not a group table** — `SessionGroup` is the grouping table. `ConcatenatedRecording` writes a potentially large, sorter-ready `ElectricalSeries` cache in `AnalysisNwbfile`. This intentionally duplicates the per-member `Recording` caches after motion correction / post-motion preprocessing so sorters see one continuous recording, but users should not create concat rows for whole-day data when narrower `IntervalList` members are sufficient.
 - **Segment boundaries** are persisted so spike times can be back-mapped to per-session sortings if needed.
 
 ---

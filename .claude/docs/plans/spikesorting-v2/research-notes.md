@@ -150,7 +150,7 @@ rec_processed = pipeline.apply(recording)
 
 🟢 **`set_global_job_kwargs(n_jobs=N, chunk_duration="1s")`** is the canonical pattern for parallel writes.
 
-🟢 **`concatenate_recordings([rec1, rec2])` → mono-segment virtual recording**; sorter sees one long timeline. Required for concat-and-sort.
+🟢 **`concatenate_recordings([rec1, rec2])` → mono-segment recording view before materialization**; sorter sees one long timeline after the v2 concat cache is written. Required for concat-and-sort.
 
 🟢 **`correct_motion(...)` presets**: `dredge`, `dredge_fast`, `medicine`, `kilosort_like`, `rigid_fast`, `nonrigid_accurate`, `nonrigid_fast_and_accurate`. DREDge (0.101+) handles cross-day drift best.
 
@@ -274,7 +274,7 @@ self.insert1({**key, "analysis_file_name": analysis_file_name, "result_object_id
 - `MatcherParameters` Lookup starts with `matcher='unitmatch'`. `deepunitmatch` remains a future plugin. `concat_identity` is deferred because concat-backed sorting has one curation for the concatenated recording, while Phase 4 intentionally models one pinned curation per `SessionGroup.Member`.
 - `UnitMatch` Computed dispatches to matcher backend.
 - Per-session sortings remain valid; matching is additive.
-- Concat path: `ConcatenatedRecording` builds virtual recording → existing `Sorting` table. It does not emit identity-mapping matches in this plan; concat-backed sorting and sort-then-match remain separate workflows.
+- Concat path: `ConcatenatedRecording` builds a materialized concat cache → existing `Sorting` table. It does not emit identity-mapping matches in this plan; concat-backed sorting and sort-then-match remain separate workflows.
 
 ### H6: Session group table for chronic recordings → 🟢 ADOPT
 - `SessionGroup` (Manual, master) + `SessionGroup.Member` (Part).

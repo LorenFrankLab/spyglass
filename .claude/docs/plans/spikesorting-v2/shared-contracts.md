@@ -151,7 +151,7 @@ analyzer.compute(
 
 ## Recording Cache Format
 
-The canonical preprocessed recording produced by `Recording.make()` and `ConcatenatedRecording.make()` lives **inside an `AnalysisNwbfile`** — NWB-resident, reusing Spyglass's existing cleanup, export, kachery, FigPack, and recompute machinery. This is distinct from the [SortingAnalyzer Storage Layout](#sortinganalyzer-storage-layout) above (which is per-sort scratch in `binary_folder` format).
+The canonical preprocessed recording produced by `Recording.make()` lives **inside an `AnalysisNwbfile`** — NWB-resident, reusing Spyglass's existing cleanup, export, kachery, FigPack, and recompute machinery. `ConcatenatedRecording.make()` uses the same NWB-resident storage contract, but it is a separate materialized concat cache: it reads per-member `Recording` caches and writes one sorter-ready concatenated `ElectricalSeries` after motion correction / post-motion preprocessing. This is distinct from the [SortingAnalyzer Storage Layout](#sortinganalyzer-storage-layout) above (which is per-sort scratch in `binary_folder` format).
 
 **Persistence on the DataJoint row** (final shape — see [overview.md § Zero-migration policy](overview.md#scope-and-dependency-policy)):
 
@@ -166,7 +166,7 @@ No `binary_cache_path` column. Binary sidecar storage is **explicitly out of MVP
 
 **Sort-time materialization of binary**: sorters that internally consume `recording.save(format="binary", folder=tmpdir)` keep doing so — that is per-sort scratch managed inside `Sorting.make()`, unrelated to the canonical recording artifact.
 
-**Invariant — do not weaken**: every v2 Recording (single-session or concatenated) is reachable through one `AnalysisNwbfile` row. No parallel artifact universe. Reasoning: dual-storage lifecycle costs (cleanup, export, kachery, FigPack, recompute) were repeatedly underestimated in v1, and the Phase 0 review explicitly rejected re-introducing them in v2 without measured justification.
+**Invariant — do not weaken**: every v2 recording artifact (`Recording` or `ConcatenatedRecording`) is reachable through one `AnalysisNwbfile` row. No parallel artifact universe. `SessionGroup` is the grouping table; `ConcatenatedRecording` is a potentially large materialized cache. Reasoning: dual-storage lifecycle costs (cleanup, export, kachery, FigPack, recompute) were repeatedly underestimated in v1, and the Phase 0 review explicitly rejected re-introducing them in v2 without measured justification.
 
 ---
 
