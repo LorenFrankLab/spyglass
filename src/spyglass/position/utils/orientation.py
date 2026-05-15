@@ -61,8 +61,10 @@ def get_span_start_stop(indices: np.ndarray) -> List[Tuple[int, int]]:
 
 def two_pt_orientation(
     pos_df: pd.DataFrame,
-    point1: str,
-    point2: str,
+    point1: str = None,
+    point2: str = None,
+    bodypart1: str = None,
+    bodypart2: str = None,
     **kwargs,
 ) -> np.ndarray:
     """Calculate orientation from vector between two bodyparts.
@@ -75,35 +77,25 @@ def two_pt_orientation(
     pos_df : pd.DataFrame
         Position data with MultiIndex columns: (bodypart, coord)
         where coord is 'x' or 'y'
-    point1 : str
-        Rear/tail marker — the vector originates here (V1 ``bodypart1``).
-    point2 : str
-        Front/head marker — the vector points away from here (V1 ``bodypart2``).
+    point1 : str, optional
+        Rear/tail marker — the vector originates here.
+    point2 : str, optional
+        Front/head marker — the vector points away from here.
+    bodypart1 : str, optional
+        V1 alias for ``point1``.
+    bodypart2 : str, optional
+        V1 alias for ``point2``.
     **kwargs
-        Additional keyword arguments (ignored, for compatibility)
+        Additional keyword arguments (ignored).
 
     Returns
     -------
     np.ndarray
         Orientation in radians, shape (n_frames,)
         NaN where either point is NaN
-
-    Examples
-    --------
-    >>> # pos_df has columns: ('green_led', 'x'), ('green_led', 'y'),
-    >>> #                      ('red_led', 'x'), ('red_led', 'y')
-    >>> orientation = two_pt_orientation(
-    ...     pos_df, point1='green_led', point2='red_led'
-    ... )
-    >>> orientation[0]  # Angle in radians
-    1.5707963267948966  # π/2 (pointing up)
-
-    Notes
-    -----
-    - Orientation is arctan2(y1-y2, x1-x2)
-    - Result is in range [-π, π]
-    - Returns NaN where either point has NaN coordinates
     """
+    point1 = point1 or bodypart1
+    point2 = point2 or bodypart2
     orientation = np.arctan2(
         pos_df[point1]["y"] - pos_df[point2]["y"],
         pos_df[point1]["x"] - pos_df[point2]["x"],

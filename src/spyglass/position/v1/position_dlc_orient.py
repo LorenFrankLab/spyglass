@@ -13,19 +13,17 @@ from spyglass.position.utils.orientation import (
     get_span_start_stop,
     interp_orientation,
     no_orientation,
+    two_pt_orientation,
 )
 from spyglass.utils import SpyglassMixin
 
-# Import V1 compatibility function from dlc_utils
-from .dlc_utils import two_pt_head_orientation
 from .position_dlc_cohort import DLCSmoothInterpCohort
 
 schema = dj.schema("position_v1_dlc_orient")
 
-# Add new functions for orientation calculation here
 _key_to_func_dict = {
     "none": no_orientation,
-    "red_green_orientation": two_pt_head_orientation,
+    "red_green_orientation": two_pt_orientation,
     "red_led_bisector": red_led_bisector_orientation,
 }
 

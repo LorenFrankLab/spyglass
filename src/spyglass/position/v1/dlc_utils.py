@@ -282,8 +282,6 @@ from spyglass.position.utils.interpolation import interp_position
 from spyglass.position.utils.orientation import (
     bisector_orientation,
     interp_orientation,
-    no_orientation,
-    two_pt_orientation,
 )
 
 # Add new functions for orientation calculation here
@@ -400,41 +398,6 @@ def smooth_moving_avg_v1(
     return interp_df
 
 
-def two_pt_head_orientation(pos_df: pd.DataFrame, **params):
-    """V1-compatible two-point orientation calculation.
-
-    This function provides backward compatibility for V1 code that uses
-    params.pop() to extract bodypart names.
-
-    Parameters
-    ----------
-    pos_df : pd.DataFrame
-        Position dataframe with MultiIndex columns
-    **params
-        V1-style parameters with bodypart1 and bodypart2 keys
-
-    Returns
-    -------
-    np.ndarray
-        Orientation in radians
-    """
-
-    BP1 = params.pop("bodypart1", None)
-    BP2 = params.pop("bodypart2", None)
-
-    if BP1 is None or BP2 is None:
-        raise ValueError("bodypart1 and bodypart2 must be specified")
-
-    from spyglass.common.common_usage import ActivityLog
-
-    ActivityLog().deprecate_log(
-        "two_pt_head_orientation",
-        alt="spyglass.position.utils.orientation.two_pt_orientation",
-    )
-    # Use the modern function with proper parameter mapping
-    return two_pt_orientation(pos_df, point1=BP1, point2=BP2)
-
-
 def red_led_bisector_orientation(pos_df: pd.DataFrame, **params):
     """V1-compatible bisector orientation calculation.
 
@@ -471,15 +434,6 @@ def red_led_bisector_orientation(pos_df: pd.DataFrame, **params):
     return bisector_orientation(pos_df, led1=LED1, led2=LED2, led3=LED3)
 
 
-# V1 compatibility constants
 _key_to_smooth_func_dict = {
     "moving_avg": smooth_moving_avg_v1,
-}
-
-
-# Orientation function lookup dictionary
-_key_to_func_dict = {
-    "none": no_orientation,
-    "red_green_orientation": two_pt_head_orientation,
-    "red_led_bisector": red_led_bisector_orientation,
 }
