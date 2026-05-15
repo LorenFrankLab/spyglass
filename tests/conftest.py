@@ -359,10 +359,10 @@ def pytest_addoption(parser):
 def _derive_dir_env_vars():
     """Return every `{PREFIX}_{KEY}_DIR` env var listed in directory_schema.json.
 
-    Kept in sync with ``SpyglassConfig.dir_to_var`` (settings.py) by reading the
-    same schema file. Used to scrub stale env vars before tests run, so a
-    shell-exported `DLC_VIDEO_DIR=/shared/prod/video` (or similar) cannot leak
-    into spyglass.settings after we override SPYGLASS_BASE_DIR.
+    Uses the same directory schema that ``SpyglassConfig`` uses to populate
+    relative directories. Used to scrub stale env vars before tests run, so
+    a shell-exported `DLC_VIDEO_DIR=/shared/prod/video` (or similar) cannot
+    leak into spyglass.settings after we override SPYGLASS_BASE_DIR.
     """
     schema_path = (
         Path(__file__).resolve().parents[1]
@@ -370,7 +370,14 @@ def _derive_dir_env_vars():
         / "spyglass"
         / "directory_schema.json"
     )
-    schema = json.loads(schema_path.read_text())["directory_schema"]
+    try:
+        schema = json.loads(schema_path.read_text())["directory_schema"]
+    except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise pytest.UsageError(
+            "Could not derive Spyglass test directory env vars from "
+            f"{schema_path}. Refusing to run tests without a complete scrub "
+            "list for path-related environment variables."
+        ) from exc
     return [
         f"{prefix.upper()}_{key.upper()}_DIR"
         for prefix, dirs in schema.items()
@@ -412,6 +419,76 @@ def _require_test_root_sentinel(base_dir: str | Path, source: str) -> None:
     )
 
 
+def _resolve_base_dir(config) -> tuple[str, str | None]:
+    """Resolve the pytest base dir and allocated temp dir, if any."""
+    env_base = os.environ.get("SPYGLASS_BASE_DIR")
+    if config.option.base_dir:
+        _require_test_root_sentinel(config.option.base_dir, "--base-dir")
+        return config.option.base_dir, None
+
+    if config.option.use_env_base_dir and env_base:
+        _require_test_root_sentinel(env_base, "SPYGLASS_BASE_DIR")
+        return env_base, None
+
+    # --no-teardown is meaningless with the temp-dir default: a fresh
+    # mkdtemp() is allocated each session, so DB rows from a previous
+    # run would point at a temp path that no longer exists on the next
+    # run. Require an explicit --base-dir (or --use-env-base-dir with
+    # SPYGLASS_BASE_DIR set) for persistent-state workflows.
+    if config.option.no_teardown:
+        raise pytest.UsageError(
+            "--no-teardown requires an explicit --base-dir (or "
+            "--use-env-base-dir with SPYGLASS_BASE_DIR set). The "
+            "default temp-dir base is created fresh each session, so "
+            "the preserved database would point at files that no "
+            "longer exist. Try: pytest --no-teardown --base-dir "
+            "./tests/_data/"
+        )
+
+    if config.option.use_env_base_dir and not env_base:
+        warnings.warn(
+            "--use-env-base-dir was passed but SPYGLASS_BASE_DIR is not set; "
+            "falling back to a temp dir.",
+            stacklevel=2,
+        )
+    elif env_base:
+        warnings.warn(
+            f"Ignoring SPYGLASS_BASE_DIR={env_base!r}; pass "
+            "--use-env-base-dir to honor it, or --base-dir to set an "
+            "explicit path. See issue #1573.",
+            stacklevel=2,
+        )
+
+    tmp_base_dir = tempfile.mkdtemp(prefix="spyglass_test_")
+    _write_test_root_sentinel(tmp_base_dir)
+    warnings.warn(
+        f"Using temp base_dir for tests: {tmp_base_dir}",
+        stacklevel=2,
+    )
+    return tmp_base_dir, tmp_base_dir
+
+
+def _warn_cleanup_failure(
+    action: str, path: str | Path, exc: Exception
+) -> None:
+    """Warn that best-effort pytest cleanup could not remove a path."""
+    warnings.warn(
+        f"Could not {action} during pytest cleanup: {path} ({exc})",
+        RuntimeWarning,
+        stacklevel=2,
+    )
+
+
+def _rmtree_warn(path: str | Path) -> None:
+    """Remove a directory tree, warning instead of silently swallowing errors."""
+    try:
+        shutil_rmtree(path)
+    except FileNotFoundError:
+        pass
+    except Exception as exc:
+        _warn_cleanup_failure("remove directory tree", path, exc)
+
+
 def pytest_configure(config):
     global BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS
     global NO_DLC, TMP_BASE_DIR
@@ -431,49 +508,7 @@ def pytest_configure(config):
     # no longer picked up silently; destructive tests (e.g.
     # AnalysisNwbfile.cleanup) would otherwise scan and delete production
     # files.
-    TMP_BASE_DIR = None
-    env_base = os.environ.get("SPYGLASS_BASE_DIR")
-    if config.option.base_dir:
-        _base_dir = config.option.base_dir
-        _require_test_root_sentinel(_base_dir, "--base-dir")
-    elif config.option.use_env_base_dir and env_base:
-        _base_dir = env_base
-        _require_test_root_sentinel(_base_dir, "SPYGLASS_BASE_DIR")
-    else:
-        # --no-teardown is meaningless with the temp-dir default: a fresh
-        # mkdtemp() is allocated each session, so DB rows from a previous
-        # run would point at a temp path that no longer exists on the next
-        # run. Require an explicit --base-dir (or --use-env-base-dir with
-        # SPYGLASS_BASE_DIR set) for persistent-state workflows.
-        if not TEARDOWN:
-            raise pytest.UsageError(
-                "--no-teardown requires an explicit --base-dir (or "
-                "--use-env-base-dir with SPYGLASS_BASE_DIR set). The "
-                "default temp-dir base is created fresh each session, so "
-                "the preserved database would point at files that no "
-                "longer exist. Try: pytest --no-teardown --base-dir "
-                "./tests/_data/"
-            )
-        if config.option.use_env_base_dir and not env_base:
-            print(
-                "[conftest] --use-env-base-dir was passed but "
-                "SPYGLASS_BASE_DIR is not set; falling back to a temp dir.",
-                file=sys.stderr,
-            )
-        elif env_base:
-            print(
-                f"[conftest] Ignoring SPYGLASS_BASE_DIR={env_base!r}; pass "
-                "--use-env-base-dir to honor it, or --base-dir to set an "
-                "explicit path. See issue #1573.",
-                file=sys.stderr,
-            )
-        TMP_BASE_DIR = tempfile.mkdtemp(prefix="spyglass_test_")
-        _base_dir = TMP_BASE_DIR
-        _write_test_root_sentinel(_base_dir)
-        print(
-            f"[conftest] Using temp base_dir for tests: {TMP_BASE_DIR}",
-            file=sys.stderr,
-        )
+    _base_dir, TMP_BASE_DIR = _resolve_base_dir(config)
 
     BASE_DIR = _resolved_path(_base_dir)
     BASE_DIR.mkdir(parents=True, exist_ok=True)
@@ -512,16 +547,14 @@ def pytest_configure(config):
     # frozen with test_mode=False.
     dj.config.update(SERVER.credentials)
 
-    # Scrub dj.config custom dir overrides from any globally saved config
+    # Scrub dj.config custom path/zone overrides from any globally saved config
     # (e.g. ~/.datajoint_config.json or dj_local_conf.json in cwd). Without
     # this, SpyglassConfig.load_config reads dj_custom.dlc_dirs / moseq_dirs
-    # / kachery_dirs before any env var and would pull in production paths
-    # saved by the user — defeating the BASE_DIR override (#1573, review
-    # finding). Reset spyglass_dirs to our resolved BASE_DIR too, so the
-    # dj.config path (line 177 in settings.py) agrees with the env-var
-    # fallback (line 178).
+    # / kachery_dirs before env vars and would pull in production paths saved
+    # by the user, defeating the BASE_DIR override. Reset spyglass_dirs to our
+    # resolved BASE_DIR so the dj.config path and env-var fallback agree.
     dj_custom = dj.config.setdefault("custom", {})
-    for _k in ("dlc_dirs", "moseq_dirs", "kachery_dirs"):
+    for _k in ("dlc_dirs", "moseq_dirs", "kachery_dirs", "kachery_zone"):
         dj_custom.pop(_k, None)
     dj_custom["spyglass_dirs"] = {"base": str(BASE_DIR)}
 
@@ -540,7 +573,7 @@ def pytest_unconfigure(config):
 
     if server is None:
         if tmp_base_dir is not None:
-            shutil_rmtree(tmp_base_dir, ignore_errors=True)
+            _rmtree_warn(tmp_base_dir)
         return
 
     from spyglass.utils.nwb_helper_fn import close_nwb_files
@@ -549,12 +582,23 @@ def pytest_unconfigure(config):
     if teardown:
         server.stop()
         if tmp_base_dir is None and base_dir is not None:
-            _require_test_root_sentinel(base_dir, "resolved test base_dir")
+            try:
+                _require_test_root_sentinel(base_dir, "resolved test base_dir")
+            except pytest.UsageError as exc:
+                warnings.warn(
+                    f"Skipping pytest filesystem cleanup: {exc}",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+                return
             # Selective cleanup only for user-supplied base_dirs; a temp dir
             # gets removed wholesale below, making per-subdir rmtree redundant.
             analysis_dir = base_dir / "analysis"
             for file in analysis_dir.glob("*.nwb"):
-                file.unlink()
+                try:
+                    file.unlink()
+                except Exception as exc:
+                    _warn_cleanup_failure("remove analysis file", file, exc)
             for subdir in [
                 "export",
                 "moseq",
@@ -562,12 +606,12 @@ def pytest_unconfigure(config):
                 "spikesorting",
                 "tmp",
             ]:
-                shutil_rmtree(str(base_dir / subdir), ignore_errors=True)
+                _rmtree_warn(base_dir / subdir)
 
-    # Always remove a temp base_dir we allocated, even with --no-teardown.
-    # It's under $TMPDIR, was created by this run, and has no reuse value.
+    # Remove any temp base_dir we allocated. It's under $TMPDIR, was created by
+    # this run, and has no reuse value.
     if tmp_base_dir is not None:
-        shutil_rmtree(tmp_base_dir, ignore_errors=True)
+        _rmtree_warn(tmp_base_dir)
 
 
 # ---------------------------- FIXTURES, TEST ENV ----------------------------
