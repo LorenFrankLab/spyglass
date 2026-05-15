@@ -77,7 +77,7 @@ Policy for this plan:
 - **Bump dependencies for the v2 runtime environment.**
   - Change `spikeinterface>=0.99.1,<0.100` to `spikeinterface>=0.104,<0.105`.
   - Add `mountainsort5>=0.5`.
-  - Verify the MS4 runtime package in the same resolver matrix. MS4 is known to install on Linux, so Phase 0c must record Linux resolver/runtime evidence and `spikeinterface.sorters.installed_sorters()` output before Phase 1 ships an MS4 default row. If macOS or another developer platform cannot install the runtime, document that platform-specific limitation and add a clear runtime guard instead of removing MS4 from the Linux-supported default set.
+  - Verify the MS4 runtime package in the same resolver matrix. MS4 is known to install on Linux, so Phase 0c must record Linux resolver/runtime evidence and `spikeinterface.sorters.installed_sorters()` output before Phase 1 ships an MS4 default row. If macOS or another developer platform cannot install the runtime, document that platform-specific limitation and add a clear runtime guard instead of removing MS4 from the Linux-supported default set. Record explicitly that MS4 is **not deterministic**; resolver/runtime checks prove availability only, not repeatable spike-time output.
   - Add optional dependency group `spikesorting-v2-matching = ["UnitMatchPy>=3.3,<4", "mat73"]` only after resolver testing confirms it does not force an incompatible NumPy downgrade in the supported Python range and the UnitMatchPy import path is usable or clearly guarded.
 
 - **Update user-facing docs.**
@@ -99,7 +99,7 @@ Policy for this plan:
 | Optional v1 shim tests | Only if this implementation ports a narrow v1 shim: `MetricCuration.get_waveforms`, relevant metric helpers, and BurstPair callers still satisfy documented behavior. |
 | `test_no_legacy_schema_changes` | v0/v1 DataJoint `definition` strings for recording, sorting, curation, metric curation, burst curation, and recompute tables are byte-identical before/after this implementation. |
 | `test_pyproject_si_pin` | `pyproject.toml` requires `spikeinterface>=0.104,<0.105`. |
-| `test_sorter_runtime_resolution` | `mountainsort5` imports, `sis.installed_sorters()` includes `mountainsort5`, and MS4 runtime status is explicit: Linux `sis.installed_sorters()` includes `mountainsort4`; any non-Linux runtime limitation is documented with a platform-specific guard. |
+| `test_sorter_runtime_resolution` | `mountainsort5` imports, `sis.installed_sorters()` includes `mountainsort5`, and MS4 runtime status is explicit: Linux `sis.installed_sorters()` includes `mountainsort4`; any non-Linux runtime limitation is documented with a platform-specific guard. This test does not assert deterministic MS4 output. |
 | `test_optional_matching_extra_resolution` | The `spikesorting-v2-matching` extra includes both `UnitMatchPy>=3.3,<4` and `mat73`, resolves without NumPy incompatibility, and import guards produce a clear message if UnitMatchPy hits the `_tkinter` import path. |
 
 ## Commands to run

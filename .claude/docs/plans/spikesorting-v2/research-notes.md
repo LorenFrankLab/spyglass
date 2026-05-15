@@ -69,7 +69,7 @@ current phase docs but should not distract from execution.
 2. Cross-session sorting via concatenation or UnitMatch / DeepUnitMatch.
 3. Better UX — fewer hand-edited dicts, less notebook-driven table manipulation.
 4. Handle chronic recordings (30 kHz × many channels × days).
-5. Verify against v1 where reasonable (modulo stochasticity of MountainSort).
+5. Verify against v1 where reasonable (modulo stochasticity of MountainSort; MS4 is not deterministic and is never an exact-output oracle).
 
 ## 2. Current State (v1) — High-Confidence Facts
 
@@ -300,7 +300,7 @@ self.insert1({**key, "analysis_file_name": analysis_file_name, "result_object_id
 ### H10: Validation against v1 → 🟢 ADOPT
 - `minirec` is only a plumbing fixture; it is too short to contain real spikes and must not be used as a sort-correctness or v1-parity oracle.
 - Sort correctness uses MEArec ground-truth fixtures and `spikeinterface.comparison.compare_sorter_to_ground_truth`.
-- v1 parity runs only when `SPIKESORTING_V2_REAL_NWB_PATH` is set. `clusterless_thresholder` is the deterministic tight-equivalence path; stochastic sorters use bounded qualitative tolerances.
+- v1 parity runs only when `SPIKESORTING_V2_REAL_NWB_PATH` is set. `clusterless_thresholder` is the tight spike-time equivalence path; stochastic sorters use bounded qualitative tolerances. MS4 is explicitly in the stochastic/non-exact category.
 
 ---
 
