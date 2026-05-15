@@ -4,14 +4,14 @@
 
 The MVP. Builds the complete single-session sort pipeline: preprocessing → artifact detection → sorting → initial curation → merge-table registration. Uses SortingAnalyzer (SI 0.104), Pydantic-validated parameters, and `insert_selection()` helpers that return a single dict. Includes a minimal `run_v2_pipeline()` orchestrator covering this phase's stages (Phase 5 extends with metrics, concat, FigPack, and a separate UnitMatch convenience helper). Parity-tests against the v1 baseline captured in Phase 0.
 
-**PREREQUISITES — must be merged before Phase 1 lands** (see [Phase 0c — SpikeInterface 0.104 prerequisite](phase-0c-si-0104-prerequisite.md)):
+**PREREQUISITES — must be merged before Phase 1 lands** (see [Phase 0c — SpikeInterface 0.104 compatibility boundary](phase-0c-si-0104-prerequisite.md)):
 
-1. v1's `extract_waveforms` / `load_waveforms` calls ported to `create_sorting_analyzer` / `load_sorting_analyzer`.
-2. v1 test suite green under SI 0.104.
-3. `pyproject.toml` SI pin bumped to `>=0.104,<0.105`; `mountainsort5>=0.5` added; MS4 runtime status resolved; optional `spikesorting-v2-matching` extra includes `UnitMatchPy>=3.3,<4` and `mat73`.
-4. Phase 0b MEArec fixtures generated; real-data v1 baseline captured when `SPIKESORTING_V2_REAL_NWB_PATH` is available, or explicitly documented as skipped for that environment. Any real-data capture uses the isolated integration database unless `SPYGLASS_ALLOW_PRODUCTION_SMOKE=1` is explicitly set for read-only production metadata lookup.
+1. `pyproject.toml` SI pin bumped to `>=0.104,<0.105`; `mountainsort5>=0.5` added; MS4 runtime status resolved; optional `spikesorting-v2-matching` extra includes `UnitMatchPy>=3.3,<4` and `mat73` if resolver checks pass.
+2. Phase 0c legacy audit complete: v0/v1 active-runtime paths are either guarded as legacy-SI-0.99-only or explicitly ported with schema-neutral compatibility shims.
+3. Existing v0/v1 merge/query paths that do not invoke unsupported WaveformExtractor-era recomputation remain queryable under the new environment, or failures have explicit legacy-environment messages.
+4. Phase 0b MEArec fixtures generated; real-data v1 baseline captured when `SPIKESORTING_V2_REAL_NWB_PATH` is available in a legacy SI 0.99 environment, or explicitly documented as skipped. Any real-data metadata lookup uses the isolated integration database unless `SPYGLASS_ALLOW_PRODUCTION_SMOKE=1` is explicitly set for read-only production metadata lookup.
 
-The first task of this phase (after prerequisites land) is to verify the new SI baseline by running the existing v1 test suite under 0.104 once more and capturing any newly-discovered regressions to fold into Phase 1 implementation notes.
+The first task of this phase (after prerequisites land) is to verify the SI 0.104 v2 environment and the legacy-runtime guards from Phase 0c. Do not spend Phase 1 implementation time broad-porting v1; active v1 runtime compatibility is outside Phase 1 unless Phase 0c explicitly chose a narrow shim.
 
 Phase 1 is large. The implementer may land it as one PR or as the following recommended slices; each slice's schemas must be in their final zero-migration shape regardless of how the work is chunked:
 
@@ -22,7 +22,7 @@ Phase 1 is large. The implementer may land it as one PR or as the following reco
 
 ## Executor Checklist
 
-- Re-run the SI 0.104 v1 baseline from Phase 0c before coding.
+- Re-run the SI 0.104 resolver/import smoke and legacy-runtime guard checks from Phase 0c before coding.
 - Use the isolated `uv` environment and isolated DataJoint integration database from Phase 0; do not run Phase 1 populate/recompute tests against production.
 - Implement Phase 1 `_params/`, `recording.py`, `artifact.py`, `sorting.py`, `curation.py`, and the minimal `pipeline.py` in the slice order above.
 - Declare forward-compatible Phase 3 tables exactly as designed, with `ConcatenatedRecording.make()` still gated by `NotImplementedError`.

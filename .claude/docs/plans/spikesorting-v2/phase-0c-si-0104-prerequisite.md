@@ -1,26 +1,47 @@
-# Phase 0c — SpikeInterface 0.104 prerequisite
+# Phase 0c — SpikeInterface 0.104 compatibility boundary
 
 [← back to PLAN.md](PLAN.md) · [overview](overview.md) · [appendix](appendix.md#spikeinterface-099--0104-migration-cheat-sheet)
 
-This is a required prerequisite PR before Phase 1. It is separated from Phase 0 because it changes the production v1 runtime dependency and must prove v1 still works before v2 starts landing runtime tables.
+This is a required prerequisite PR before Phase 1. It changes the Spyglass
+SpikeInterface dependency boundary and must make the v1/v2 runtime split
+explicit before v2 runtime tables start landing.
 
 ## Purpose
 
-Move Spyglass from `spikeinterface>=0.99.1,<0.100` to `spikeinterface>=0.104,<0.105` without breaking v1. The hard blocker is v1's WaveformExtractor usage (`extract_waveforms` / `load_waveforms`): modern SpikeInterface keeps these as back-compat shims over `SortingAnalyzer`, but v2 should implement against the native `SortingAnalyzer` API rather than the shim. The port changes v1 implementation internals only; it must not alter v1 schemas, v1 public table names, or v1 user workflows.
+Move v2 development to `spikeinterface>=0.104,<0.105` without pretending that
+the legacy spike-sorting runtime is automatically compatible. Current v0/v1 code
+uses WaveformExtractor-era APIs (`extract_waveforms`, `load_waveforms`,
+`WaveformExtractor`) in metric curation and burst workflows. If the global
+Spyglass pin moves to SI 0.104, those active legacy runtime paths may fail or
+change behavior.
+
+Policy for this plan:
+
+- v2 is the supported spike-sorting runtime path under the SI 0.104 environment.
+- v0/v1 source stays in-tree, and existing v0/v1 rows remain queryable through
+  the existing merge paths where possible.
+- Active v0/v1 population, waveform extraction, MetricCuration, BurstPair,
+  FigURL curation, and recompute workflows require the legacy SI 0.99 Spyglass
+  environment unless Phase 0c proves a narrow compatibility shim is safe.
+- Phase 0c may port a v1 path only if the audit shows the port is small,
+  schema-neutral, and behavior-preserving. Otherwise it documents the legacy
+  environment boundary and adds clear runtime guards.
 
 ## Executor Checklist
 
-- Work in a dedicated `uv` virtualenv; do not test the SI 0.104 resolver or UnitMatchPy extra in a shared/base environment.
-- Port v1 WaveformExtractor calls to SortingAnalyzer-compatible internals while preserving v1 public methods.
-- Update v1 metric/burst helpers or adapters so existing notebook-facing behavior still works.
-- Bump the SI dependency and resolver-check Python 3.10, 3.11, and 3.12.
-- Prove v1 schemas are byte-identical before/after the port.
-- Run the v0/v1 validation slice; Phase 1 remains blocked until this passes.
-- Record exact resolved package versions and sorter availability in the PR description.
+- Work in a dedicated `uv` virtualenv; do not test the SI 0.104 resolver or optional extras in a shared/base environment.
+- Audit v0/v1 SpikeInterface usage and classify each legacy surface as query-compatible, guarded legacy-runtime-only, or safe-to-port.
+- Add clear runtime guards / errors for legacy runtime paths that are not supported under SI 0.104.
+- Update docs so users know v2 is the supported runtime path under new Spyglass/SI 0.104, while active v0/v1 processing requires a legacy SI 0.99 environment unless explicitly ported.
+- Bump the SI dependency for the v2 runtime environment and resolver-check Python 3.10, 3.11, and 3.12.
+- Prove legacy DataJoint schemas are unchanged.
+- Run query/import smoke tests for v0/v1 under SI 0.104; do not require active legacy populate/metric workflows to pass unless this PR explicitly ports them.
+- Record exact resolved package versions, sorter availability, and legacy-runtime boundary decisions in the PR description.
 
 ## Inputs to read first
 
 - [pyproject.toml](../../../../pyproject.toml) — current SpikeInterface pin.
+- [src/spyglass/spikesorting/v0/](../../../../src/spyglass/spikesorting/v0/) — legacy WaveformExtractor usage.
 - [src/spyglass/spikesorting/v1/metric_curation.py](../../../../src/spyglass/spikesorting/v1/metric_curation.py) — WaveformExtractor usage and metric curation surface.
 - [src/spyglass/spikesorting/v1/burst_curation.py](../../../../src/spyglass/spikesorting/v1/burst_curation.py) — depends on `MetricCuration.get_waveforms`.
 - [.claude/docs/plans/spikesorting-v2/appendix.md § SpikeInterface 0.99 → 0.104 migration cheat sheet](appendix.md#spikeinterface-099--0104-migration-cheat-sheet).
@@ -31,24 +52,38 @@ Move Spyglass from `spikeinterface>=0.99.1,<0.100` to `spikeinterface>=0.104,<0.
 
 - **Create and use an isolated resolver/test environment.**
   - Use a dedicated `uv` virtualenv for the dependency bump and validation commands.
-  - Capture `python --version`, `uv pip freeze`, `spikeinterface.__version__`, `numpy.__version__`, `zarr.__version__`, `numcodecs.__version__`, `spikeinterface.sorters.installed_sorters()`, and UnitMatchPy import status in the PR description or a small resolver artifact.
+  - Capture `python --version`, `uv pip freeze`, `spikeinterface.__version__`, `numpy.__version__`, `zarr.__version__`, `numcodecs.__version__`, `spikeinterface.sorters.installed_sorters()`, and optional extra import status in the PR description or a small resolver artifact.
   - Do not run resolver probes from base/conda; a passing base-env import is not evidence that the project dependencies resolve.
 
-- **Port v1 WaveformExtractor usage to SortingAnalyzer-compatible code.**
-  - Replace `si.extract_waveforms(...)` with `si.create_sorting_analyzer(..., format="binary_folder", sparse=True, ...)`.
-  - Replace `si.load_waveforms(...)` with `si.load_sorting_analyzer(...)`.
-  - Preserve `MetricCuration.get_waveforms(...)` as a v1 public method name if notebooks or `BurstPair` still call it. Returning a SortingAnalyzer-backed compatibility object is acceptable, but the caller-facing behavior must remain covered by tests.
-  - Keep v1 DataJoint schemas unchanged.
+- **Audit legacy runtime compatibility.**
+  - Inventory all v0/v1 references to `extract_waveforms`, `load_waveforms`, `WaveformExtractor`, legacy metric helpers, and sorter APIs affected by SI 0.104.
+  - For each surface, decide:
+    - **query-compatible** — existing DB rows / merge outputs can still be read under SI 0.104;
+    - **guarded legacy-runtime-only** — active population/recompute/curation requires the SI 0.99 legacy environment;
+    - **safe-to-port** — a small adapter preserves behavior without schema changes.
+  - Store the audit summary in docs or the PR description; update this plan only if the decision changes v2 scope.
 
-- **Audit v1 metric helper compatibility.**
-  - Update `metric_utils.py` functions that assume a `WaveformExtractor` object, or provide a narrow adapter that supports the methods those helpers call.
-  - Confirm `BurstPair` helpers still render after the port.
+- **Add runtime guards for unsupported legacy active workflows.**
+  - Guard v0/v1 active runtime paths that depend on WaveformExtractor-era APIs if they are not ported in this PR.
+  - Error messages must be explicit: "This v1/v0 spike-sorting runtime path requires the legacy SpikeInterface 0.99 environment. Use v2 for new SI 0.104+ processing, or run this workflow in the legacy Spyglass environment."
+  - Do not guard read/query paths that continue to work without invoking unsupported SI APIs.
+  - Keep v0/v1 DataJoint schemas unchanged.
 
-- **Bump dependencies in `pyproject.toml`.**
+- **Optionally port only narrow legacy shims.**
+  - If a v1 compatibility adapter is genuinely small, it may replace `si.extract_waveforms(...)` with `si.create_sorting_analyzer(...)` and `si.load_waveforms(...)` with `si.load_sorting_analyzer(...)` while preserving public method names.
+  - Any such port must prove notebook-facing behavior and metric values remain within documented tolerances.
+  - If the port touches broad MetricCuration/BurstPair behavior, stop and keep the legacy-runtime boundary instead.
+
+- **Bump dependencies for the v2 runtime environment.**
   - Change `spikeinterface>=0.99.1,<0.100` to `spikeinterface>=0.104,<0.105`.
   - Add `mountainsort5>=0.5`.
   - Verify the MS4 runtime package in the same resolver matrix. A clean SI 0.104.3 Python 3.12 env exposes the `mountainsort4` wrapper but does not install the runtime; `pip install mountainsort4` can fail while building `isosplit5`. Phase 1 cannot ship an MS4 default row unless this phase proves `spikeinterface.sorters.installed_sorters()` includes `mountainsort4` on supported CI/dev envs, or documents the blocker and removes MS4 from the executable default set.
   - Add optional dependency group `spikesorting-v2-matching = ["UnitMatchPy>=3.3,<4", "mat73"]` only after resolver testing confirms it does not force an incompatible NumPy downgrade in the supported Python range and the UnitMatchPy import path is usable or clearly guarded.
+
+- **Update user-facing docs.**
+  - Document the environment split: v2/new processing uses SI 0.104+; active v0/v1 runtime workflows use the legacy SI 0.99 environment unless explicitly ported.
+  - Preserve the promise that existing v0/v1 rows stay queryable where possible.
+  - Do not describe v1 as the production runtime under the new SI pin unless this phase actually ports and validates it.
 
 - **Run resolver checks.**
   - Verify Python 3.10, 3.11, and 3.12 environments resolve.
@@ -58,13 +93,13 @@ Move Spyglass from `spikeinterface>=0.99.1,<0.100` to `spikeinterface>=0.104,<0.
 
 | Test | Asserts |
 | --- | --- |
-| `pytest tests/spikesorting/v1/` | Existing v1 spike-sorting tests pass under SI 0.104. |
-| `pytest tests/spikesorting/v0/ tests/spikesorting/v1/` | Legacy spike-sorting surfaces still import and run under the new pin. |
-| `test_metric_curation_get_waveforms_compat` | `MetricCuration.get_waveforms(key)` still supports all v1 callers exercised by `MetricCuration` and `BurstPair`. |
-| `test_burstpair_helpers_after_si0104_port` | `BurstPair` plotting / investigation helpers still execute against a metric-curation row. |
-| `test_no_v1_schema_changes` | v1 DataJoint `definition` strings for recording, sorting, curation, metric curation, burst curation, and recompute tables are byte-identical before/after the port. |
+| Legacy import smoke | v0/v1 modules imported by existing downstream query paths import under SI 0.104, or unsupported active-runtime imports raise the explicit legacy-env guard. |
+| Legacy merge query smoke | Existing v0/v1 `SpikeSortingOutput` merge rows remain queryable for spike times / firing rates where the path does not invoke WaveformExtractor-era recomputation. |
+| Legacy runtime guard tests | v0/v1 active runtime paths classified as legacy-only raise the clear SI 0.99 environment message under SI 0.104. |
+| Optional v1 shim tests | Only if this PR ports a narrow v1 shim: `MetricCuration.get_waveforms`, relevant metric helpers, and BurstPair callers still satisfy documented behavior. |
+| `test_no_legacy_schema_changes` | v0/v1 DataJoint `definition` strings for recording, sorting, curation, metric curation, burst curation, and recompute tables are byte-identical before/after this PR. |
 | `test_pyproject_si_pin` | `pyproject.toml` requires `spikeinterface>=0.104,<0.105`. |
-| `test_sorter_runtime_resolution` | `mountainsort5` imports, `sis.installed_sorters()` includes `mountainsort5`, and MS4 runtime status is explicit: either `sis.installed_sorters()` includes `mountainsort4` or the PR blocks Phase 1's MS4 default row with a documented resolver issue. |
+| `test_sorter_runtime_resolution` | `mountainsort5` imports, `sis.installed_sorters()` includes `mountainsort5`, and MS4 runtime status is explicit: either `sis.installed_sorters()` includes `mountainsort4` or Phase 1's MS4 default row is blocked with a documented resolver issue. |
 | `test_optional_matching_extra_resolution` | The `spikesorting-v2-matching` extra includes both `UnitMatchPy>=3.3,<4` and `mat73`, resolves without NumPy incompatibility, and import guards produce a clear message if UnitMatchPy hits the `_tkinter` import path. |
 
 ## Commands to run
@@ -75,8 +110,8 @@ source .venv-spikesorting-v2-si0104/bin/activate
 uv pip install -e ".[test]"
 python --version
 
-pytest tests/spikesorting/v0/ tests/spikesorting/v1/ -q
-pytest tests/spikesorting/v1/test_metric_curation.py tests/spikesorting/v1/test_burst.py -q
+pytest tests/spikesorting/v0/ tests/spikesorting/v1/ -q -k "import or merge or query or legacy_guard"
+pytest tests/spikesorting/v2/test_legacy_runtime_boundary.py -q
 uv pip check
 python - <<'PY'
 import spikeinterface as si
@@ -97,15 +132,16 @@ print("installed_sorters", sorted(installed))
 PY
 mkdir -p tests/spikesorting/v2
 uv pip freeze > tests/spikesorting/v2/si0104-freeze.txt
-git diff --check -- pyproject.toml src/spyglass/spikesorting/v1 tests/spikesorting/v1
+git diff --check -- pyproject.toml src/spyglass/spikesorting/v0 src/spyglass/spikesorting/v1 tests/spikesorting
 ```
 
 ## Deliberately not in this phase
 
 - No v2 production tables.
 - No v2 `Recording`, `Sorting`, `CurationV2`, `AnalyzerCuration`, `SessionGroup`, `UnitMatch`, or FigPack implementation.
-- No v1 feature redesign. This is an API-compatibility port plus dependency bump only.
+- No broad v1 redesign. The default outcome is an explicit legacy-runtime boundary, not a full v1 modernization.
+- No promise that active v0/v1 population, MetricCuration, BurstPair, FigURL, or recompute workflows run under SI 0.104 unless this phase explicitly ports and validates that surface.
 
 ## Review
 
-Before opening Phase 1, reviewers must confirm this phase has landed and that v1 remains the production path under SI 0.104. A failure here blocks Phase 1; do not skip or fold this work into the first v2 runtime PR.
+Before opening Phase 1, reviewers must confirm Phase 0c has landed, the SI 0.104 resolver is pinned, legacy runtime boundaries are documented, and unsupported v0/v1 active workflows fail with clear legacy-environment guidance. Phase 1 is blocked until this compatibility boundary is explicit; it is not blocked on a broad v1 runtime port.

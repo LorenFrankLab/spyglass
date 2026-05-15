@@ -30,7 +30,7 @@ Every phase uses an isolated Python environment and an isolated database for imp
 **Python environment**:
 
 - Use a dedicated `uv` virtualenv for v2 development, for example `.venv-spikesorting-v2`. Do not install SpikeInterface 0.104, UnitMatchPy, MEArec, FigPack, or resolver-test dependencies into a shared conda/base environment.
-- Phase 0a may keep the project-wide pin unchanged while the v2-only test job overrides SpikeInterface inside the isolated environment. Phase 0c owns the real project pin bump.
+- Phase 0a may keep the project-wide pin unchanged while the v2-only test job overrides SpikeInterface inside the isolated environment. Phase 0c owns the real project pin bump and the explicit v0/v1 legacy-runtime boundary.
 - Phase 0c and any phase that verifies third-party APIs records the exact versions used (`python --version`, `spikeinterface.__version__`, `uv pip freeze`, and relevant import/installed-sorter probes) in the PR description or a small artifact under `tests/spikesorting/v2/`.
 
 **Database tiers**:

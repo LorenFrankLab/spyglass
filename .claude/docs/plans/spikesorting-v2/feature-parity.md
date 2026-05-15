@@ -4,6 +4,14 @@
 
 This page is the parity contract. It distinguishes behavior v2 must preserve from intentional table/API departures. When in doubt, implementers should preserve downstream behavior and user workflows, not v1's exact table names.
 
+Runtime compatibility boundary: v2 is the supported runtime path under the
+SpikeInterface 0.104 environment introduced by Phase 0c. Existing v0/v1 rows
+remain queryable where possible, but active v0/v1 population, MetricCuration,
+BurstPair, FigURL, and recompute workflows require the legacy SI 0.99
+environment unless Phase 0c explicitly ports a narrow compatibility shim. The
+parity targets below describe user-facing workflow successors in v2, not a
+promise that v1 runtime code is modernized under SI 0.104.
+
 | v1 surface | v2 parity target | Notes |
 | --- | --- | --- |
 | `SortGroup.set_group_by_shank` | `SortGroupV2.set_group_by_shank` plus column-based grouping | v2 adds guarded deletion and non-shank grouping. Silent overwrite is intentionally not preserved. |
@@ -28,6 +36,7 @@ This page is the parity contract. It distinguishes behavior v2 must preserve fro
 - v2 does not write artifact-derived intervals into `IntervalList`.
 - v2 does not auto-create default rows for every installed SpikeInterface sorter.
 - v2 does not migrate existing v1 curation rows into `CurationV2`.
+- v2 does not guarantee active v0/v1 runtime workflows under the SI 0.104 environment. Legacy runtime workflows require the SI 0.99 environment unless explicitly ported by Phase 0c.
 - v2 does not implement `SpikeSortingRecording.update_ids()`. That v1 helper was a transition/backfill tool for recompute-era NWB files; v2's zero-migration policy requires final row fields when each table is introduced.
 - v2 does not clone the standalone `spike_times_to_valid_samples()` helper. The boundary-spike behavior is preserved inside `Sorting.make()` by running SpikeInterface's `remove_excess_spikes()` and by the Phase 1 boundary invariant test.
 - v2 does not remove, deprecate, or rewrite v0/v1.

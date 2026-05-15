@@ -15,7 +15,7 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
 
 **Prerequisites for parity validation:**
 
-- Before running the v1↔v2 metric parity test, extend and run `tests/spikesorting/v2/baseline_capture.py` against the Phase 0 real-data baseline sort to produce `baseline_metric_curation`. This capture runs v1 `MetricCuration.populate` and pickles the resulting metrics DataFrame. It uses the isolated integration database; `SPYGLASS_ALLOW_PRODUCTION_SMOKE=1` permits read-only production metadata lookup only. If `SPIKESORTING_V2_REAL_NWB_PATH` is unavailable, mark only the parity test skipped with an explicit message; the rest of Phase 2 still runs.
+- Before running the v1↔v2 metric parity test, produce `baseline_metric_curation` in the legacy SI 0.99 environment using `tests/spikesorting/v2/baseline_capture.py` against the Phase 0 real-data baseline sort. This capture runs v1 `MetricCuration.populate` and pickles the resulting metrics DataFrame before the SI 0.104 runtime boundary is applied. The Phase 2 SI 0.104 test loads that pickle; it does **not** run active v1 MetricCuration unless Phase 0c explicitly ported that surface. The capture uses the isolated integration database; `SPYGLASS_ALLOW_PRODUCTION_SMOKE=1` permits read-only production metadata lookup only. If `SPIKESORTING_V2_REAL_NWB_PATH` is unavailable, mark only the parity test skipped with an explicit message; the rest of Phase 2 still runs.
 
 **Inputs to read first:**
 
@@ -71,7 +71,7 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
 
 - **Add a `Sorting`-side method** (in [src/spyglass/spikesorting/v2/sorting.py](../../../../src/spyglass/spikesorting/v2/sorting.py) from Phase 1, extended here): `Sorting.add_extensions(key, extensions: list[str], **kwargs)`. This is a convenience for callers (including `AnalyzerCuration.make()`) to add extensions to an already-built analyzer in place. Internally: `analyzer = self.get_analyzer(key); analyzer.compute(extensions, **_resolved_job_kwargs(key) | kwargs)`. Documented as idempotent — SI's `compute()` skips already-computed extensions unless `overwrite=True`.
 
-- **Parity test against v1 MetricCuration**. New test `test_v2_analyzer_curation_vs_v1` (slow, integration): on the Phase 0 baseline-captured sort, compute v1 `MetricCuration` (via the existing v1 code path) and v2 `AnalyzerCuration`. Compare the per-unit `snr`, `isi_violation`, `firing_rate`, `num_spikes` columns. Tolerances:
+- **Parity test against v1 MetricCuration baseline**. New test `test_v2_analyzer_curation_vs_v1` (slow, integration): on the Phase 0 baseline-captured sort, load the legacy-environment v1 `MetricCuration` pickle and compute v2 `AnalyzerCuration` under SI 0.104. Do not invoke active v1 MetricCuration in the SI 0.104 test unless Phase 0c explicitly ported that surface. Compare the per-unit `snr`, `isi_violation`, `firing_rate`, `num_spikes` columns. Tolerances:
   - `snr`: ±30% (v1 uses mean, v2 uses median — they differ systematically).
   - `isi_violation`: exact (refractory-period violation count is deterministic given sorted spike times).
   - `firing_rate`: exact within float-rounding (spike count / duration).

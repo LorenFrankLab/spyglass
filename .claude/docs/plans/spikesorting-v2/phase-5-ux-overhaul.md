@@ -2,7 +2,7 @@
 
 [← back to PLAN.md](PLAN.md) · [overview](overview.md) · [designs](designs.md#run_v2_pipeline-orchestrator)
 
-The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell notebook → ≤10-cell notebook), Pydantic-validated parameter presets, FigPack as the v2 curation UI, and the full v2 notebook walkthrough. **v1 is NOT sunset by this plan**; v0 and v1 continue to coexist with v2 indefinitely.
+The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell notebook → ≤10-cell notebook), Pydantic-validated parameter presets, FigPack as the v2 curation UI, and the full v2 notebook walkthrough. **v1 source is NOT removed by this plan**; existing v0/v1 rows continue to coexist with v2. Active v0/v1 runtime workflows use the legacy SI 0.99 environment unless Phase 0c explicitly ports a narrow shim.
 
 ## Executor Checklist
 
@@ -98,12 +98,12 @@ The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell n
 - **Documentation overhaul**:
   - Promote `docs/src/Features/SpikeSortingV2.md` from "new pipeline" to "recommended for new work". Add a top banner.
   - Update root README "Quick example" snippet to use `run_v2_pipeline()`.
-  - Keep existing v0/v1 docs, API references, and notebooks accessible and live; do NOT mark v1 as deprecated. v0 and v1 remain populated paths for legacy data.
-  - Add a new docs page: `docs/src/Features/ChoosingSpikeSortingV1VsV2.md` — for users deciding which path to use. TL;DR: v2 is recommended for new work; v1 remains supported and available. Existing v1 sorts stay queryable through v1.
+  - Keep existing v0/v1 docs, API references, and notebooks accessible and live; do NOT remove v1 docs. Make the environment boundary explicit: active v0/v1 population and curation workflows use the legacy SI 0.99 environment unless Phase 0c explicitly ported that surface.
+  - Add a new docs page: `docs/src/Features/ChoosingSpikeSortingV1VsV2.md` — for users deciding which path to use. TL;DR: v2 is recommended for new work under the SI 0.104 environment; active v1 runtime workflows require the legacy SI 0.99 environment unless Phase 0c explicitly ported that surface. Existing v1 sorts stay queryable through v1 where possible.
   - In `docs/src/Features/ChoosingSpikeSortingV1VsV2.md`, include the import path explicitly: external or ground-truth NWB Units still use the existing `ImportedSpikeSorting` workflow and appear in `SpikeSortingOutput.ImportedSpikeSorting`; they are not reinserted as `CurationV2` rows.
   - Add CHANGELOG entry noting the full v2 orchestrator, FigPack curation, notebook rewrite, v2's recommended-for-new-work designation, v0/v1 continued support, and the opt-in `auto_curate=True` path.
 
-- **No v1 sunset criteria.** Per the resolved design decision in [overview.md](overview.md), v0 and v1 stay in-tree indefinitely. Phase 5 simply documents that v2 is the recommended path for new sorts; v1 docs stay live and unmarked-as-deprecated.
+- **No v1 source-removal criteria.** Per the resolved design decision in [overview.md](overview.md), v0 and v1 stay in-tree indefinitely. Phase 5 documents that v2 is the recommended path for new sorts under SI 0.104 and that active v1 runtime workflows use the legacy SI 0.99 environment unless explicitly ported; v1 docs stay live with that environment boundary.
 
 - **End-to-end integration test** `tests/spikesorting/v2/test_run_pipeline.py`:
   - `test_run_v2_pipeline_minirec_clusterless` — calls `run_v2_pipeline(...)` with default `auto_curate=False`, asserts manifest has the expected single-session stages (`recording`, `artifact_detection`, `sorting`, `initial_curation`) plus valid `merge_id`; downstream `SpikeSortingOutput.get_spike_times(...)` returns sane arrays. This is a plumbing/integration guard only; minirec is not a sort-correctness or parity oracle.
@@ -179,7 +179,7 @@ Before opening the PR for this phase, dispatch `code-reviewer` (or equivalent in
 - `run_v2_unit_match()` is idempotent by `(session_group_owner, session_group_name, matcher_params_name, curation_set_hash)` and does not conflate UnitMatch with concatenated sorting.
 - FigPack feasibility was verified before implementation began (or the project owner was escalated if FigPack proved unusable — no silent fallback).
 - All docs tasks landed: `docs/src/Features/SpikeSortingV2.md` banner, README snippet, `docs/src/Features/ChoosingSpikeSortingV1VsV2.md` decision page.
-- CHANGELOG.md mentions the delivered user-facing capabilities (orchestrator, FigPack, notebook rewrite), the opt-in `auto_curate=True` path, and v0/v1 continued support without referencing plan phases.
+- CHANGELOG.md mentions the delivered user-facing capabilities (orchestrator, FigPack, notebook rewrite), the opt-in `auto_curate=True` path, v0/v1 source/query coexistence, and the legacy-environment boundary for active v0/v1 runtime workflows without referencing plan phases.
 - Sanity: `git diff src/spyglass/spikesorting/v0/ src/spyglass/spikesorting/v1/` is empty — no v0/v1 source touched.
 - Sanity: `git diff` against any Phase 1–4 table `definition` strings is empty — zero-migration policy honored.
 - `code_graph.py describe` returns clean output for every new table; `path --up`/`path --down` chains match the design DAG; JSON warnings are empty or explicitly accounted for in `precondition-check.md`.
