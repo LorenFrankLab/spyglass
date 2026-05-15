@@ -64,7 +64,7 @@ def test_resolve_base_dir_ignores_env_without_flag(monkeypatch, tmp_path):
     monkeypatch.setenv("SPYGLASS_BASE_DIR", str(env_base))
     tmp_base_dir = _patch_mkdtemp(monkeypatch, tmp_path)
 
-    with pytest.warns(UserWarning, match="Ignoring SPYGLASS_BASE_DIR"):
+    with pytest.warns(RuntimeWarning, match="Ignoring SPYGLASS_BASE_DIR"):
         resolved, tmp_dir = root_conftest._resolve_base_dir(_config())
 
     assert Path(resolved) == tmp_base_dir
@@ -98,7 +98,7 @@ def test_resolve_base_dir_warns_when_env_flag_has_no_env(monkeypatch, tmp_path):
     monkeypatch.delenv("SPYGLASS_BASE_DIR", raising=False)
     tmp_base_dir = _patch_mkdtemp(monkeypatch, tmp_path)
 
-    with pytest.warns(UserWarning, match="SPYGLASS_BASE_DIR is not set"):
+    with pytest.warns(RuntimeWarning, match="SPYGLASS_BASE_DIR is not set"):
         resolved, tmp_dir = root_conftest._resolve_base_dir(
             _config(use_env_base_dir=True)
         )

@@ -445,10 +445,14 @@ def _resolve_base_dir(config) -> tuple[str, str | None]:
             "./tests/_data/"
         )
 
+    # RuntimeWarning, not the default UserWarning: conftest installs a
+    # module-level `filterwarnings("ignore", category=UserWarning)`, which
+    # would silently swallow these notices in a real run.
     if config.option.use_env_base_dir and not env_base:
         warnings.warn(
             "--use-env-base-dir was passed but SPYGLASS_BASE_DIR is not set; "
             "falling back to a temp dir.",
+            RuntimeWarning,
             stacklevel=2,
         )
     elif env_base:
@@ -456,6 +460,7 @@ def _resolve_base_dir(config) -> tuple[str, str | None]:
             f"Ignoring SPYGLASS_BASE_DIR={env_base!r}; pass "
             "--use-env-base-dir to honor it, or --base-dir to set an "
             "explicit path. See issue #1573.",
+            RuntimeWarning,
             stacklevel=2,
         )
 
@@ -463,6 +468,7 @@ def _resolve_base_dir(config) -> tuple[str, str | None]:
     _write_test_root_sentinel(tmp_base_dir)
     warnings.warn(
         f"Using temp base_dir for tests: {tmp_base_dir}",
+        RuntimeWarning,
         stacklevel=2,
     )
     return tmp_base_dir, tmp_base_dir
