@@ -461,9 +461,23 @@ class TestCleanupAndRegistry:
             f"{_relative_paths(expected_preserved_paths)}"
         )
 
-        # TODO: use `cleanup()` logic to find orphans
-        # Simulate orphan detection across all registered tables
-        # insert table entries without downstream fk-references
+        # Preflight the broad filesystem sweep before running destructive cleanup.
+        # This test intentionally covers the real unlink path, but it should
+        # never delete analysis files outside the fixture it created.
+        cleanup_plan = master_table._build_untracked_file_plan([custom_table])
+        unexpected_plan_deletions = (
+            cleanup_plan.files_to_delete - expected_deleted_paths
+        )
+        assert not unexpected_plan_deletions, (
+            "AnalysisNwbfile.cleanup preflight would delete analysis .nwb "
+            "files outside this test's expected targets: "
+            f"{_relative_paths(unexpected_plan_deletions)}"
+        )
+
+        master_table.cleanup(dry_run=True)
+
+        # Run one destructive integration path after the preflight so the test
+        # still verifies real orphan-row cleanup and filesystem unlinking.
         master_table.cleanup()
 
         after_cleanup = {
