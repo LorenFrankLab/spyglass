@@ -157,7 +157,9 @@ def _rmtree_warn(path: str | Path) -> None:
         _warn_cleanup_failure("remove directory tree", path, exc)
 
 
-def unconfigure_cleanup(server, tmp_base_dir, teardown, close_nwb_files) -> None:
+def unconfigure_cleanup(
+    server, tmp_base_dir, teardown, close_nwb_files
+) -> None:
     """Run pytest session teardown cleanup.
 
     Extracted from the ``pytest_unconfigure`` hook as a pure function so it
