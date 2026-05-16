@@ -20,7 +20,7 @@ pytest tests/position/v1/test_trodes.py
 pytest --cov=spyglass --cov-report term-missing
 
 # Debug mode (preserve database, verbose output)
-pytest --no-teardown -v
+pytest --no-teardown --base-dir ./tests/_data/ -v
 ```
 
 ______________________________________________________________________
@@ -193,7 +193,10 @@ pytest -m "not slow and not very_slow"
 **Preserve database between runs:**
 
 ```bash
-pytest --no-teardown  # Avoid container restart overhead
+# --no-teardown requires an explicit --base-dir, since the default
+# temp-dir base is created fresh each session — preserving the DB
+# without a stable filesystem leaves orphaned rows (#1573).
+pytest --no-teardown --base-dir ./tests/_data/
 ```
 
 **Run specific test files:**
@@ -207,7 +210,7 @@ pytest tests/position/v1/test_trodes.py
 **Combine for maximum speed:**
 
 ```bash
-pytest tests/common/test_session.py --no-teardown --quiet-spy
+pytest tests/common/test_session.py --no-teardown --base-dir ./tests/_data/ --quiet-spy
 ```
 
 ### For CI/CD
@@ -249,11 +252,32 @@ All tests run with default parameters from `pyproject.toml`. To customize:
 ### Data and Database Options
 
 ```bash
---base_dir PATH     # Where to store downloaded/created files
-# Default: ./tests/_data/
+--base-dir PATH     # Where to store downloaded/created files
+# Default: per-session temp directory (created by tempfile.mkdtemp).
+# SPYGLASS_BASE_DIR is IGNORED by default — pass --use-env-base-dir to
+# honor it. See issue #1573: a shell-exported SPYGLASS_BASE_DIR pointing
+# at shared/production storage would otherwise let destructive tests
+# (e.g. AnalysisNwbfile.cleanup) scan and delete real data.
+# Local developers who want reuse across runs should pass an explicit
+# --base-dir (e.g. --base-dir ./tests/_data/).
+# Persistent test roots must contain a .spyglass-test-root sentinel file.
+# This is a generic sandbox marker; pytest-created temp roots add it
+# automatically, and ./tests/_data/ includes one for local/CI reuse.
+# The sentinel is a durable opt-in, not a freshness check. Never add it
+# to shared or production data roots; use a dedicated test-only directory.
+
+--use-env-base-dir  # Opt back in to the SPYGLASS_BASE_DIR env var
+# when --base-dir is not supplied. Off by default. If the flag is
+# passed but SPYGLASS_BASE_DIR is unset, a warning is printed and the
+# default temp-dir fallback is used. If SPYGLASS_BASE_DIR is set, that
+# directory must contain .spyglass-test-root.
 
 --no-teardown       # Preserve Docker database on exit (default: False)
-# Useful for: inspecting database state, faster reruns
+# Useful for: inspecting database state, faster reruns.
+# Must be combined with --base-dir (or --use-env-base-dir) so the
+# preserved DB points at a stable filesystem path.
+# pytest only removes its own per-session temp base_dir automatically.
+# It does not clean persistent user-supplied base_dirs at teardown.
 
 --no-docker         # Don't launch Docker, connect to existing container
 # Useful for: GitHub Actions, manual Docker management
@@ -284,7 +308,7 @@ tests/path/file.py  # Run specific test file
 pytest tests/common/test_session.py::test_insert -s --pdb
 
 # Fast development cycle
-pytest -m "not slow" --no-teardown --quiet-spy -v
+pytest -m "not slow" --no-teardown --base-dir ./tests/_data/ --quiet-spy -v
 
 # Full coverage analysis
 pytest --cov=spyglass --cov-report html --cov-report term-missing
@@ -366,7 +390,7 @@ ______________________________________________________________________
 docker ps | grep spyglass
 
 # Manually start container
-pytest --no-teardown  # Run once to start container
+pytest --no-teardown --base-dir ./tests/_data/  # Run once to start container
 # Container persists for subsequent runs
 ```
 
@@ -380,7 +404,7 @@ suffix. If your branch name has special characters, consider renaming.
 pytest -m "not slow and not very_slow"
 
 # 2. Check if database is being recreated
-pytest --no-teardown  # Preserve database between runs
+pytest --no-teardown --base-dir ./tests/_data/  # Preserve database between runs
 
 # 3. Check test data cache
 ls -lh tests/_data/  # Should see cached files

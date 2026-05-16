@@ -57,6 +57,12 @@ from hdmf.build.warnings import MissingRequiredBuildWarning
 from numba import NumbaWarning
 from pandas.errors import PerformanceWarning
 
+from .base_dir_safety import (
+    _derive_dir_env_vars,
+    _resolve_base_dir,
+    _resolved_path,
+    unconfigure_cleanup,
+)
 from .container import DockerMySQLManager
 from .data_downloader import DataDownloader
 
@@ -202,7 +208,8 @@ _sklearn_parallel.warnings = _ModuleWarningsProxy(
 )
 
 # globals in pytest_configure:
-#     BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOAD, NO_DLC
+#     BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS,
+#     NO_DLC, TMP_BASE_DIR
 
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.simplefilter("ignore", category=ResourceWarning)
@@ -272,7 +279,10 @@ def pytest_addoption(parser):
     Parameters
     ----------
     --quiet-spy (bool):  Default False. Allow print statements from Spyglass.
-    --base-dir (str): Default './tests/test_data/'. Dir for local input file.
+    --base-dir (str): Default None. Dir for local input files. When unset,
+        a fresh per-session temp dir is used (see #1573).
+    --use-env-base-dir (bool): Default False. Honor SPYGLASS_BASE_DIR env
+        var when --base-dir is not supplied. Off by default for safety.
     --no-teardown (bool): Default False. Delete pipeline on close.
     --no-docker (bool): Default False. Run datajoint mysql server in Docker.
     --no-dlc (bool): Default False. Skip DLC tests. Also skip video downloads.
@@ -293,8 +303,22 @@ def pytest_addoption(parser):
         dest="base_dir",
         help=(
             "Directory for local input file. "
-            "Also reads SPYGLASS_BASE_DIR env var when unset. "
-            "Default: './tests/_data/'."
+            "When unset, a fresh temp directory is used per session to avoid "
+            "destructive actions against shared/production filesystems "
+            "(see issue #1573). Pass --use-env-base-dir to opt back in to "
+            "the SPYGLASS_BASE_DIR environment variable."
+        ),
+    )
+    parser.addoption(
+        "--use-env-base-dir",
+        action="store_true",
+        dest="use_env_base_dir",
+        default=False,
+        help=(
+            "Honor the SPYGLASS_BASE_DIR environment variable when "
+            "--base-dir is not supplied. Off by default so an exported "
+            "SPYGLASS_BASE_DIR pointing at shared storage cannot cause "
+            "tests to act on production files (issue #1573)."
         ),
     )
     parser.addoption(
@@ -335,7 +359,8 @@ def pytest_addoption(parser):
 
 
 def pytest_configure(config):
-    global BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS, NO_DLC
+    global BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS
+    global NO_DLC, TMP_BASE_DIR
 
     TEST_FILE = "minirec20230622.nwb"
     TEARDOWN = not config.option.no_teardown
@@ -344,12 +369,35 @@ def pytest_configure(config):
     NO_DLC = config.option.no_dlc
     pytest.NO_DLC = NO_DLC
 
-    _base_dir = config.option.base_dir or os.environ.get(
-        "SPYGLASS_BASE_DIR", "./tests/_data/"
-    )
-    BASE_DIR = Path(_base_dir).expanduser().absolute()
+    # Resolve base_dir with safety-first precedence (issue #1573):
+    #   1. --base-dir CLI flag (explicit opt-in to a specific path)
+    #   2. SPYGLASS_BASE_DIR env var *only if* --use-env-base-dir is set
+    #   3. Fresh per-session temp dir (safe default)
+    # An exported SPYGLASS_BASE_DIR pointing at shared/production storage is
+    # no longer picked up silently; destructive tests (e.g.
+    # AnalysisNwbfile.cleanup) would otherwise scan and delete production
+    # files.
+    _base_dir, TMP_BASE_DIR = _resolve_base_dir(config)
+
+    BASE_DIR = _resolved_path(_base_dir)
     BASE_DIR.mkdir(parents=True, exist_ok=True)
     RAW_DIR = BASE_DIR / "raw"
+
+    # Scrub every SPYGLASS_* / DLC_* / MOSEQ_* / KACHERY_* env var that
+    # spyglass.settings reads, so a user's shell can't mix stale subdir
+    # pointers into the resolved BASE_DIR. The list is derived from
+    # directory_schema.json (canonical source) plus the extras that
+    # settings.py reads by name (DLC_BASE_DIR, DLC_PROJECT_PATH,
+    # MOSEQ_BASE_DIR, KACHERY_ZONE).
+    _scrub_vars = set(_derive_dir_env_vars()) | {
+        "DLC_BASE_DIR",
+        "DLC_PROJECT_PATH",
+        "MOSEQ_BASE_DIR",
+        "KACHERY_ZONE",
+    }
+    for _stale in _scrub_vars:
+        os.environ.pop(_stale, None)
+
     os.environ["SPYGLASS_BASE_DIR"] = str(BASE_DIR)
     os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Disable GPU for tests
 
@@ -368,6 +416,17 @@ def pytest_configure(config):
     # frozen with test_mode=False.
     dj.config.update(SERVER.credentials)
 
+    # Scrub dj.config custom path/zone overrides from any globally saved config
+    # (e.g. ~/.datajoint_config.json or dj_local_conf.json in cwd). Without
+    # this, SpyglassConfig.load_config reads dj_custom.dlc_dirs / moseq_dirs
+    # / kachery_dirs before env vars and would pull in production paths saved
+    # by the user, defeating the BASE_DIR override. Reset spyglass_dirs to our
+    # resolved BASE_DIR so the dj.config path and env-var fallback agree.
+    dj_custom = dj.config.setdefault("custom", {})
+    for _k in ("dlc_dirs", "moseq_dirs", "kachery_dirs", "kachery_zone"):
+        dj_custom.pop(_k, None)
+    dj_custom["spyglass_dirs"] = {"base": str(BASE_DIR)}
+
     DOWNLOADS = DataDownloader(
         base_dir=BASE_DIR,
         verbose=VERBOSE,
@@ -376,16 +435,17 @@ def pytest_configure(config):
 
 
 def pytest_unconfigure(config):
-    from spyglass.utils.nwb_helper_fn import close_nwb_files
+    def _close_nwb_files():
+        from spyglass.utils.nwb_helper_fn import close_nwb_files
 
-    close_nwb_files()
-    if TEARDOWN:
-        SERVER.stop()
-        analysis_dir = BASE_DIR / "analysis"
-        for file in analysis_dir.glob("*.nwb"):
-            file.unlink()
-        for subdir in ["export", "moseq", "recording", "spikesorting", "tmp"]:
-            shutil_rmtree(str(BASE_DIR / subdir), ignore_errors=True)
+        close_nwb_files()
+
+    unconfigure_cleanup(
+        server=globals().get("SERVER"),
+        tmp_base_dir=globals().get("TMP_BASE_DIR"),
+        teardown=globals().get("TEARDOWN", False),
+        close_nwb_files=_close_nwb_files,
+    )
 
 
 # ---------------------------- FIXTURES, TEST ENV ----------------------------
