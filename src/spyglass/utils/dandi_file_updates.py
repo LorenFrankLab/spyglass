@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Union
 
 import h5py
 
@@ -16,8 +16,9 @@ STR_DTYPE = h5py.special_dtype(vlen=str)
 
 def update_analysis_for_dandi_standard(
     filepath: str,
-    age: str = "P4M/P8M",
+    age: Union[str, dict] = "P4M/P8M",
     resolve_external_table: bool = True,
+    weight_unit: str = "g",
 ):
     """Function to resolve common nwb file format errors within the database
 
@@ -26,10 +27,13 @@ def update_analysis_for_dandi_standard(
     filepath : str
         abs path to the file to edit
     age : str, optional
-        age to assign animal if missing, by default "P4M/P8M"
+        if string, age to assign animal if missing. if dict, age to assign for
+        each animal by default "P4M/P8M"
     resolve_external_table : bool, optional
         whether to update the external table. Set False if editing file
         outside the database, by default True
+    weight_unit : str, optional
+        unit to append to weight values that are missing units, by default "g"
     """
     from spyglass.common import LabMember
 
@@ -46,6 +50,9 @@ def update_analysis_for_dandi_standard(
             )
             # Adjust to single letter sex identifier
             standardize_sex_identifier(file)
+
+            # Ensure weight has units or is removed if unknown
+            ensure_weight_units(file, intended_unit=weight_unit)
 
             # replace subject species value "Rat" with "Rattus norvegicus"
             ensure_species_is_latin(file)
@@ -123,6 +130,36 @@ def standardize_sex_identifier(file: h5py.File):
     file["/general/subject/sex"][()] = new_sex_value
 
 
+def ensure_weight_units(file: h5py.File, intended_unit: str = "g"):
+    """
+    Ensure weight is stored with units or removed if unknown
+
+    Parameters
+    ----------
+    file : h5py.File
+        An open HDF5 file object.
+    intended_unit : str, optional
+        The unit to append to weight values that are missing units, by default "g"
+    """
+    subject_path = "/general/subject"
+    if "weight" not in file[subject_path]:
+        return
+    weight_path = "/general/subject/weight"
+
+    weight = file[weight_path][()].decode("utf-8")
+    if weight.lower() == "unknown":
+        # set a unknown weight value to None
+        file["/general/subject"].pop("weight")
+        return
+
+    valid_units = ("kg", "g", "mg", "ug", "g", "ng", "pg")
+    if weight.endswith(tuple(valid_units)):
+        return
+
+    new_weight = f"{weight} {intended_unit}"
+    file[weight_path][()] = new_weight
+
+
 def ensure_species_is_latin(file: h5py.File):
     """
     Ensure the subject species is in Latin binomial form or NCBI taxonomy link.
@@ -154,7 +191,7 @@ def ensure_species_is_latin(file: h5py.File):
         )
 
 
-def add_age_if_missing(file: h5py.File, age: str = "P4/P8"):
+def add_age_if_missing(file: h5py.File, age: Union[str, dict] = "P4M/P8M"):
     """
     Add the subject age if not present
 
@@ -163,12 +200,20 @@ def add_age_if_missing(file: h5py.File, age: str = "P4/P8"):
     file : h5py.File
         An open HDF5 file object.
 
-    age : str, optional
-       age of the subject, by default "P4/P8"
+    age : Union[str, dict], optional
+       age of the subject, if dict, lookup by subject_id, by default "P4M/P8M"
     """
     if "age" in file["/general/subject"]:
         return
-    new_age_value = age
+    if isinstance(age, str):
+        new_age_value = age
+    else:
+        animal_name = file["general/subject/subject_id"][()].decode("utf-8")
+        if animal_name not in age:
+            raise ValueError(
+                f"Age for animal '{animal_name}' not found in provided age dictionary."
+            )
+        new_age_value = age[animal_name]
     logger.info(f"Adding missing subject age, set to '{new_age_value}'.")
     file["/general/subject"].create_dataset(
         name="age", data=new_age_value, dtype=STR_DTYPE

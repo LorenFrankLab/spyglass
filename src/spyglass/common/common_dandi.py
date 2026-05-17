@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 from spyglass.common.common_usage import Export, ExportSelection
 from spyglass.settings import export_dir, raw_dir
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 from spyglass.utils.sql_helper_fn import SQLDumpHelper
 
 try:
@@ -27,6 +27,8 @@ try:
     from dandi.pynwb_utils import nwb_has_external_links
     from dandi.validate_types import Severity
 
+    MIN_SEVERITY_VALUE = Severity["ERROR"].value
+
 except (ImportError, ModuleNotFoundError) as e:
     (
         dandi,
@@ -38,11 +40,105 @@ except (ImportError, ModuleNotFoundError) as e:
         FileOperationMode,
         Severity,
         nwb_has_external_links,
-    ) = [None] * 9
+        MIN_SEVERITY_VALUE,
+    ) = [None] * 10
     logger.warning(e)
 
 
 schema = dj.schema("common_dandi")
+
+
+@schema
+class DandiViolationsSelection(SpyglassMixin, dj.Manual):
+    definition = """
+    -> Export.File
+    """
+
+    def check_paper_for_dandi_errors(
+        self, key: dict, n_processes: int = 128
+    ) -> bool:
+        """Run dandi validate checks on all files for a given paper.
+
+        If called on a previously-populated paper, will delete and re-populate the
+        DandiViolations table for that paper.
+
+        Parameters
+        ----------
+        key : dict
+            Export key for a single paper to be checked.
+        n_processes : int
+            Number of processes to use for validation. Default is 128.
+        """
+        if not len(Export & key) == 1:
+            raise ValueError("Key must correspond to exactly one paper export")
+
+        key = (Export & key).fetch1("KEY")
+        files_to_check = (Export.File() & key).fetch("KEY")
+        if not files_to_check:
+            logger.warning(
+                f"No files found for {key}. Skipping dandi validation."
+            )
+            return
+
+        if DandiViolations & key:
+            logger.info(
+                f"Existing Dandi violations found for {key}. Deleting and re-populating."
+            )
+            DandiViolations.delete(key)
+
+        self.insert(files_to_check, skip_duplicates=True)
+        DandiViolations.populate(
+            files_to_check,
+            processes=min(n_processes, len(files_to_check)),
+            display_progress=True,
+        )
+
+
+@schema
+class DandiViolations(SpyglassMixin, dj.Computed):
+    definition = """
+    -> DandiViolationsSelection
+    """
+
+    class Violations(dj.Part):
+        definition = """
+        -> master
+        violation_id: int
+        ---
+        id: varchar(128)
+        message: varchar(255)
+        full_error: longblob
+        file_path: varchar(255)
+        """
+
+    def make(self, key):
+        file_path = (Export.File() & key).fetch1("file_path")
+        validator_result = dandi.validate.validate(file_path)
+        filtered_results = [
+            result
+            for result in validator_result
+            if result.severity is not None
+            and result.severity.value >= MIN_SEVERITY_VALUE
+            and result.id != "DANDI.NO_DANDISET_FOUND"
+        ]
+        part_keys = [
+            {
+                **key,
+                "violation_id": i,
+                "id": result.id,
+                "message": result.message[:255]
+                .replace("'", "")
+                .encode("ascii", "ignore")
+                .decode(),  # ensure sql compatibility
+                "full_error": str(result).replace(
+                    "'", "''"
+                ),  # escape single quotes for SQL insertion
+                "file_path": file_path,
+            }
+            for i, result in enumerate(filtered_results)
+        ]
+        self.insert1(key)
+        self.Violations.insert(part_keys)
 
 
 @schema
