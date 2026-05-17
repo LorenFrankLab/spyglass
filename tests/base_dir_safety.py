@@ -88,19 +88,13 @@ def _resolve_base_dir(config) -> tuple[str, str | None]:
         _require_test_root_sentinel(config.option.base_dir, "--base-dir")
         return config.option.base_dir, None
 
-    if config.option.use_env_base_dir and env_base:
-        _require_test_root_sentinel(env_base, "SPYGLASS_BASE_DIR")
-        return env_base, None
-
     # --no-teardown is meaningless with the temp-dir default: a fresh
     # mkdtemp() is allocated each session, so DB rows from a previous
     # run would point at a temp path that no longer exists on the next
-    # run. Require an explicit --base-dir (or --use-env-base-dir with
-    # SPYGLASS_BASE_DIR set) for persistent-state workflows.
+    # run. Require an explicit --base-dir for persistent-state workflows.
     if config.option.no_teardown:
         raise pytest.UsageError(
-            "--no-teardown requires an explicit --base-dir (or "
-            "--use-env-base-dir with SPYGLASS_BASE_DIR set). The "
+            "--no-teardown requires an explicit --base-dir. The "
             "default temp-dir base is created fresh each session, so "
             "the preserved database would point at files that no "
             "longer exist. Try: pytest --no-teardown --base-dir "
@@ -110,18 +104,10 @@ def _resolve_base_dir(config) -> tuple[str, str | None]:
     # RuntimeWarning, not the default UserWarning: conftest installs a
     # module-level `filterwarnings("ignore", category=UserWarning)`, which
     # would silently swallow these notices in a real run.
-    if config.option.use_env_base_dir and not env_base:
-        warnings.warn(
-            "--use-env-base-dir was passed but SPYGLASS_BASE_DIR is not set; "
-            "falling back to a temp dir.",
-            RuntimeWarning,
-            stacklevel=2,
-        )
-    elif env_base:
+    if env_base:
         warnings.warn(
             f"Ignoring SPYGLASS_BASE_DIR={env_base!r}; pass "
-            "--use-env-base-dir to honor it, or --base-dir to set an "
-            "explicit path. See issue #1573.",
+            "--base-dir to set an explicit test path. See issue #1573.",
             RuntimeWarning,
             stacklevel=2,
         )

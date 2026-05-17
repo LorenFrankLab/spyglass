@@ -254,10 +254,10 @@ All tests run with default parameters from `pyproject.toml`. To customize:
 ```bash
 --base-dir PATH     # Where to store downloaded/created files
 # Default: per-session temp directory (created by tempfile.mkdtemp).
-# SPYGLASS_BASE_DIR is IGNORED by default — pass --use-env-base-dir to
-# honor it. See issue #1573: a shell-exported SPYGLASS_BASE_DIR pointing
-# at shared/production storage would otherwise let destructive tests
-# (e.g. AnalysisNwbfile.cleanup) scan and delete real data.
+# SPYGLASS_BASE_DIR is ignored. See issue #1573: a shell-exported
+# SPYGLASS_BASE_DIR pointing at shared/production storage would otherwise
+# let destructive tests (e.g. AnalysisNwbfile.cleanup) scan and delete
+# real data.
 # Local developers who want reuse across runs should pass an explicit
 # --base-dir (e.g. --base-dir ./tests/_data/).
 # Persistent test roots must contain a .spyglass-test-root sentinel file.
@@ -266,16 +266,10 @@ All tests run with default parameters from `pyproject.toml`. To customize:
 # The sentinel is a durable opt-in, not a freshness check. Never add it
 # to shared or production data roots; use a dedicated test-only directory.
 
---use-env-base-dir  # Opt back in to the SPYGLASS_BASE_DIR env var
-# when --base-dir is not supplied. Off by default. If the flag is
-# passed but SPYGLASS_BASE_DIR is unset, a warning is printed and the
-# default temp-dir fallback is used. If SPYGLASS_BASE_DIR is set, that
-# directory must contain .spyglass-test-root.
-
 --no-teardown       # Preserve Docker database on exit (default: False)
 # Useful for: inspecting database state, faster reruns.
-# Must be combined with --base-dir (or --use-env-base-dir) so the
-# preserved DB points at a stable filesystem path.
+# Must be combined with --base-dir so the preserved DB points at a stable
+# filesystem path.
 # pytest only removes its own per-session temp base_dir automatically.
 # It does not clean persistent user-supplied base_dirs at teardown.
 

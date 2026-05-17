@@ -281,8 +281,6 @@ def pytest_addoption(parser):
     --quiet-spy (bool):  Default False. Allow print statements from Spyglass.
     --base-dir (str): Default None. Dir for local input files. When unset,
         a fresh per-session temp dir is used (see #1573).
-    --use-env-base-dir (bool): Default False. Honor SPYGLASS_BASE_DIR env
-        var when --base-dir is not supplied. Off by default for safety.
     --no-teardown (bool): Default False. Delete pipeline on close.
     --no-docker (bool): Default False. Run datajoint mysql server in Docker.
     --no-dlc (bool): Default False. Skip DLC tests. Also skip video downloads.
@@ -305,20 +303,8 @@ def pytest_addoption(parser):
             "Directory for local input file. "
             "When unset, a fresh temp directory is used per session to avoid "
             "destructive actions against shared/production filesystems "
-            "(see issue #1573). Pass --use-env-base-dir to opt back in to "
-            "the SPYGLASS_BASE_DIR environment variable."
-        ),
-    )
-    parser.addoption(
-        "--use-env-base-dir",
-        action="store_true",
-        dest="use_env_base_dir",
-        default=False,
-        help=(
-            "Honor the SPYGLASS_BASE_DIR environment variable when "
-            "--base-dir is not supplied. Off by default so an exported "
-            "SPYGLASS_BASE_DIR pointing at shared storage cannot cause "
-            "tests to act on production files (issue #1573)."
+            "(see issue #1573). SPYGLASS_BASE_DIR is ignored by default; "
+            "pass --base-dir to set an explicit test path."
         ),
     )
     parser.addoption(
@@ -371,8 +357,7 @@ def pytest_configure(config):
 
     # Resolve base_dir with safety-first precedence (issue #1573):
     #   1. --base-dir CLI flag (explicit opt-in to a specific path)
-    #   2. SPYGLASS_BASE_DIR env var *only if* --use-env-base-dir is set
-    #   3. Fresh per-session temp dir (safe default)
+    #   2. Fresh per-session temp dir (safe default)
     # An exported SPYGLASS_BASE_DIR pointing at shared/production storage is
     # no longer picked up silently; destructive tests (e.g.
     # AnalysisNwbfile.cleanup) would otherwise scan and delete production
