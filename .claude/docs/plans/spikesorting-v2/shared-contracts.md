@@ -161,7 +161,7 @@ The canonical preprocessed recording produced by `Recording.make()` lives **insi
 - `-> AnalysisNwbfile` — Spyglass's existing analysis-NWB tracking table; cleanup / export / kachery / recompute all key off this FK.
 - `electrical_series_path: varchar(255)` — the deterministic NWB path used by `se.read_nwb_recording(...)`, for example `processing/ecephys/preprocessed_electrical_series`. This is not interchangeable with `object_id`.
 - `object_id: varchar(72)` — the `ElectricalSeries` HDF5/Zarr object identifier inside the NWB.
-- `cache_hash: char(64)` — SHA-256 over the `ElectricalSeries.data` bytes, backend-agnostic. Anchors missing-artifact detection (Phase 1) and feeds `RecordingArtifactRecompute*` (Phase 2).
+- `cache_hash: char(64)` — content digest of the recording's `AnalysisNwbfile`, computed by Spyglass's `NwbfileHasher` (the helper `_hash_nwb_recording(analysis_file_name)` is a thin wrapper, so v2 verification uses the same hashing path as the v1 recompute machinery rather than a parallel implementation). `NwbfileHasher` currently emits a 32-char digest; `char(64)` is kept as headroom so a future hash change needs no `Table.alter()`. Anchors missing-artifact detection (Phase 1) and feeds `RecordingArtifactRecompute*` (Phase 2). Note `NwbfileHasher` hashes the whole file (including some volatile metadata) — the recompute-tolerance question is settled separately when `RecordingArtifactRecompute*` lands.
 
 No `binary_cache_path` column. Binary sidecar storage is **explicitly out of MVP**. If a future maintainer measures a large win and scopes the full sidecar lifecycle, that work adds a separate opt-in table; it does NOT modify `Recording`'s columns.
 

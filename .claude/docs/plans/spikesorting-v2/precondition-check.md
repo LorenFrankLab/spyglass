@@ -89,3 +89,42 @@ The Spyglass-skill `code_graph.py` was re-run after adding `session_group_owner`
 - `path --to CurationV2 UnitMatchSelection --from-file spyglass/spikesorting/v2/_draft.py --to-file spyglass/spikesorting/v2/_draft.py --fail-on-heuristic` confirms `CurationV2 -> UnitMatchSelection.MemberCuration -> UnitMatchSelection`.
 
 The broad `path --up UnitMatchSelection --json` traversal still emits only the accounted warnings above: `AnalysisNwbfile` ambiguity between common/custom tables, and v0/v1/v2 `ArtifactDetection*` same-name resolution. The selected `ArtifactDetection*` targets are the v2 draft classes; any different selection remains a blocker.
+
+## 2026-05-18 re-check during v2 module scaffolding
+
+`code_graph.py` was re-run against the current source tree. The skill script
+lives at `scripts/code_graph.py` under the installed spyglass skill; run from
+the repo root with `--src src`.
+
+Upstream FK targets — all `describe` output matches the structure recorded
+above; **no drift**:
+
+- `Session` — PK `-> Nwbfile`; nullable `-> Subject` / `-> Institution` / `-> Lab`.
+- `Electrode` — `-> BrainRegion` is NON-null; `bad_channel` is `enum("True", "False")`.
+- `ElectrodeGroup` — PK `-> Session` + `electrode_group_name`; `-> BrainRegion`
+  NON-null; `-> [nullable] Probe`.
+- `BrainRegion` — PK `region_id: smallint auto_increment`.
+- `AnalysisNwbfile` (common) — PK `analysis_file_name: varchar(64)`; single
+  `-> Nwbfile` parent.
+- `Probe` — PK `probe_id`; `-> ProbeType`, `-> [nullable] DataAcquisitionDevice`;
+  `contact_side_numbering` is `enum("True", "False")`.
+- `ProbeType` — PK `probe_type`; `num_shanks: int`.
+- `SpikeSortingOutput` — PK `merge_id: uuid`.
+
+Draft schema — `describe SortingSelection --file spyglass/spikesorting/v2/_draft.py`
+reports PK `sorting_id: uuid` with non-PK FKs `-> [nullable] ArtifactDetection`
+and `-> SorterParameters`, matching the design.
+
+`path --up SortingSelection --file spyglass/spikesorting/v2/_draft.py --json`
+walks 46 nodes and emits exactly 4 `heuristic_resolution` warnings, all
+accounted for by the ambiguities recorded above:
+
+- `ArtifactDetection`, `ArtifactDetectionSelection`, and
+  `ArtifactDetectionParameters` each resolve to the v2 `_draft.py` class
+  (same-package preference) — expected.
+- `AnalysisNwbfile` resolves to `common/custom_nwbfile.py` — the documented
+  common-vs-custom ambiguity; the v2 design FKs the core common table.
+
+No unaccounted warnings; no v2 `RecordingArtifact*` / `SortingAnalyzer*` FK
+resolved to a v0/v1 recompute class. The draft schema remains structurally
+implementable as recorded.
