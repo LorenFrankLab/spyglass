@@ -153,9 +153,12 @@ jobs:
         # Cache test data step above). Without it, conftest.py now defaults
         # to a per-session temp directory for safety (issue #1573), which
         # would bypass the cache and re-download the NWB + video fixtures.
+        # tests/spikesorting/v2/ is excluded here -- it runs in the separate
+        # pytest-v2 job under SpikeInterface 0.104.
         pytest --no-docker --no-dlc --base-dir ./tests/_data/ \
           --cov-config=.coveragerc --cov=spyglass-neuro --cov-report=xml \
           ${{ steps.test_mode.outputs.marker_args }} \
+          --ignore=tests/spikesorting/v2 \
           tests/
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@v5
@@ -163,3 +166,40 @@ jobs:
         token: ${{ secrets.CODECOV_TOKEN }}
         flags: ${{ steps.test_mode.outputs.mode }}-tests
         name: ${{ steps.test_mode.outputs.description }}
+
+  pytest-v2:
+    # Modern spike-sorting scaffold tests run under SpikeInterface 0.104,
+    # isolated from the SpikeInterface 0.99 suite in run-tests above. The
+    # project-wide SpikeInterface pin is unchanged; this job overrides it
+    # inside a dedicated virtualenv. These tests need neither a database
+    # server nor sample data.
+    name: pytest-v2 (SpikeInterface 0.104)
+    # Skip if PR is closed but not merged
+    if: |-
+      github.event_name != 'pull_request' ||
+      github.event.action != 'closed' ||
+      github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.11'
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v6
+    - name: Install apt dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libmysqlclient-dev
+    - name: Create isolated environment (SpikeInterface 0.104)
+      run: |
+        uv venv --python 3.11 .venv-spikesorting-v2
+        uv pip install --python .venv-spikesorting-v2 -e ".[test]"
+        uv pip install --python .venv-spikesorting-v2 \
+          "spikeinterface>=0.104,<0.105"
+    - name: Run scaffold tests
+      run: |
+        .venv-spikesorting-v2/bin/pytest tests/spikesorting/v2/ \
+          --no-docker --no-dlc -q
