@@ -104,14 +104,27 @@ Plan-phase vocabulary is fine here (this is a plan document). Last updated
   unless `--use-env-base-dir` is passed (issue #1573). Verified the guard
   prevents recurrence.
 
+## Phase 0a completion status
+
+- **Committed** on `spikesorting-v2` (on top of the `0a2b7f19`
+  `test-base-dir-safety` merge): `fb571590` SI-0.104 annotation fix,
+  `24e603db` v2 module scaffolding, `5aed9094` `pytest-v2` CI job,
+  `d4d91e78` plan-doc updates, `82f76def` code-review fixes.
+- **Code-reviewed** (`scientific-code-reviewer`): APPROVE; the one must-fix
+  (`restore_custom_config` self-containment) and two quality items applied
+  in `82f76def`.
+- **v1 regression** (`pytest tests/spikesorting/v1/`, run in `spyglass-py310`,
+  SI 0.99, via Docker): **41 passed, 7 skipped, 4 errors**. The 4 errors are
+  one shared `recomp_tbl` fixture failing at setup (`test_recompute.py:53`,
+  empty `RecordingRecomputeSelection` -> `fetch("KEY")[0]` `IndexError`) --
+  an environment-sensitive fragility in the `slow`-marked v1 recompute tests,
+  **not** caused by Phase 0a (annotation-only changes cannot affect it).
+  Follow-up, not absorbed.
+
 ## Open items / follow-ups
 
-- **Phase 0a is uncommitted.** Logical commit groups intended: (1) SI-0.104
-  annotation fix, (2) v2 module scaffolding + `_params` + `utils` + tests,
-  (3) `pytest-v2` CI job, (4) `precondition-check.md` update. The
-  `test-base-dir-safety` merge is already committed (`0a2b7f19`).
-- **v1 regression not run** — Docker daemon down; would run in the
-  `spyglass-py310` env (created this session; SI 0.99, Python 3.10).
+- **v1 recompute test errors** — the 4 `test_recompute.py` setup errors above
+  are pre-existing / env-sensitive; file as a follow-up issue against v1.
 - **`NwbfileHasher` fix PR** — separate, off `master`; see above.
 - **Phase 0b ripple:** `_hash_nwb_recording` now takes an `AnalysisNwbfile`
   name, not an SI recording, so the planned `synthetic_si_recording_2s`
