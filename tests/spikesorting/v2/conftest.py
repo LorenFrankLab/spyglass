@@ -9,6 +9,9 @@ they need neither a database connection nor sample data. This module overrides
 a live database request the ``dj_conn`` / ``server`` fixtures explicitly.
 """
 
+import copy
+
+import datajoint as dj
 import pytest
 
 
@@ -21,3 +24,17 @@ def mini_insert():
     DataJoint at all, so no server or sample data is needed.
     """
     yield
+
+
+@pytest.fixture
+def restore_custom_config():
+    """Snapshot and restore ``dj.config['custom']`` around a test.
+
+    Also guarantees ``dj.config['custom']`` is a dict before the test runs,
+    so a test that assigns into it is self-contained regardless of how
+    pytest is invoked.
+    """
+    original = copy.deepcopy(dict(dj.config.get("custom") or {}))
+    dj.config["custom"] = copy.deepcopy(original)
+    yield
+    dj.config["custom"] = copy.deepcopy(original)

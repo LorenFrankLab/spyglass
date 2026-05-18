@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class BandpassFilterParams(BaseModel):
@@ -11,6 +11,15 @@ class BandpassFilterParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
     freq_min: float = Field(default=300.0, ge=0.0, le=15000.0)
     freq_max: float = Field(default=6000.0, ge=0.0, le=15000.0)
+
+    @model_validator(mode="after")
+    def _check_band(self) -> "BandpassFilterParams":
+        if self.freq_min >= self.freq_max:
+            raise ValueError(
+                f"freq_min ({self.freq_min}) must be below "
+                f"freq_max ({self.freq_max})"
+            )
+        return self
 
 
 class CommonReferenceParams(BaseModel):

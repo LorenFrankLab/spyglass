@@ -5,23 +5,10 @@ exercise the package skeleton, the preprocessing parameter schema, and the
 shared helpers -- none of them require a database connection.
 """
 
-import copy
 from pathlib import Path
 
 import datajoint as dj
 import pytest
-
-
-@pytest.fixture
-def restore_custom_config():
-    """Snapshot and restore ``dj.config['custom']`` around a test.
-
-    Tests that mutate the custom config block must not leak changes into
-    other tests in the session.
-    """
-    original = copy.deepcopy(dict(dj.config.get("custom", {}) or {}))
-    yield
-    dj.config["custom"] = copy.deepcopy(original)
 
 
 def test_module_imports():
@@ -62,6 +49,12 @@ def test_preprocessing_params_schema_default():
     with pytest.raises(pydantic.ValidationError):
         PreprocessingParamsSchema.model_validate(
             {"bandpass_filter": {"freq_min": -1}}
+        )
+
+    # Cross-field rule: freq_min must be below freq_max.
+    with pytest.raises(pydantic.ValidationError):
+        PreprocessingParamsSchema.model_validate(
+            {"bandpass_filter": {"freq_min": 6000, "freq_max": 300}}
         )
 
 
@@ -106,6 +99,8 @@ def test_resolved_job_kwargs_merge(restore_custom_config):
     assert _resolved_job_kwargs({"n_jobs": 8}, {"n_jobs": 2})["n_jobs"] == 2
     # A None argument is skipped, leaving the config value in place.
     assert _resolved_job_kwargs(None)["n_jobs"] == 4
+    # An empty-dict argument is skipped the same way.
+    assert _resolved_job_kwargs({})["n_jobs"] == 4
 
 
 def test_analyzer_path_format():

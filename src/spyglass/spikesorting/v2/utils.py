@@ -74,7 +74,7 @@ def _resolved_job_kwargs(*row_job_kwargs: dict | None) -> dict:
     *row_job_kwargs : dict or None
         ``job_kwargs`` blob values from the parameter rows that govern this
         compute stage, in increasing precedence order (a later argument wins
-        on key conflict). ``None`` entries are skipped.
+        on key conflict). ``None`` and empty-dict entries are skipped.
 
     Returns
     -------
