@@ -160,6 +160,11 @@ for label, interval_data in results.groupby("interval_labels"):
 - Tests default to a per-session temp `base_dir` and ignore an exported
     `SPYGLASS_BASE_DIR` unless `--use-env-base-dir` is passed, preventing
     destructive tests from acting on shared/production filesystems #1573
+- Add `spyglass.spikesorting.v2` module scaffolding: new module tree with
+    empty stubs and a dedicated test job; no runtime dependency pins changed
+    and v1 remains the production spike sorting path. Upgrading to
+    SpikeInterface 0.104 is a prerequisite checkpoint before any runtime v2
+    work lands
 
 ### Pipelines
 
