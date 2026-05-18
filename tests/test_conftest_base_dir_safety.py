@@ -55,7 +55,7 @@ def test_resolve_base_dir_accepts_marked_cli_path(tmp_path):
     assert tmp_base_dir is None
 
 
-def test_resolve_base_dir_ignores_env_without_flag(monkeypatch, tmp_path):
+def test_resolve_base_dir_ignores_unmarked_env(monkeypatch, tmp_path):
     env_base = tmp_path / "env-data"
     monkeypatch.setenv("SPYGLASS_BASE_DIR", str(env_base))
     tmp_base_dir = _patch_mkdtemp(monkeypatch, tmp_path)
@@ -72,18 +72,6 @@ def test_resolve_base_dir_ignores_marked_env(monkeypatch, tmp_path):
     env_base = tmp_path / "env-data"
     env_base.mkdir()
     _sentinel(env_base).write_text("test sandbox\n")
-    monkeypatch.setenv("SPYGLASS_BASE_DIR", str(env_base))
-    tmp_base_dir = _patch_mkdtemp(monkeypatch, tmp_path)
-
-    with pytest.warns(RuntimeWarning, match="Ignoring SPYGLASS_BASE_DIR"):
-        resolved, tmp_dir = bds._resolve_base_dir(_config())
-
-    assert Path(resolved) == tmp_base_dir
-    assert tmp_dir == str(tmp_base_dir)
-
-
-def test_resolve_base_dir_ignores_unmarked_env(monkeypatch, tmp_path):
-    env_base = tmp_path / "env-data"
     monkeypatch.setenv("SPYGLASS_BASE_DIR", str(env_base))
     tmp_base_dir = _patch_mkdtemp(monkeypatch, tmp_path)
 
