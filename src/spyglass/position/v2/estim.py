@@ -671,26 +671,30 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         pose_estimation = list(pose_estimations.values())[0]
         scorer = getattr(pose_estimation, "scorer", "DLC_scorer")
 
-        # Build DataFrame from PoseEstimationSeries
+        # Prefer the 3D object when available (produced by _make_3d).
+        pose_3d = pose_estimations.get("PoseEstimation_3d")
+        if pose_3d is not None:
+            pose_estimation = pose_3d
+            scorer = "triangulated"
+            is_3d = True
+        else:
+            is_3d = False
+
+        # Build DataFrame from PoseEstimationSeries.
         data_dict = {}
 
         for series in pose_estimation.pose_estimation_series.values():
             bodypart = series.name.replace("_pose", "")
 
-            # Extract x, y data (shape: n_frames, 2)
             pose_data = series.data[:]
-            x_data = pose_data[:, 0]
-            y_data = pose_data[:, 1]
+            data_dict[(scorer, bodypart, "x")] = pose_data[:, 0]
+            data_dict[(scorer, bodypart, "y")] = pose_data[:, 1]
+            if is_3d and pose_data.shape[1] >= 3:
+                data_dict[(scorer, bodypart, "z")] = pose_data[:, 2]
 
-            # Extract confidence
             confidence = series.confidence[:]
-
-            # Add to dictionary with MultiIndex keys
-            data_dict[(scorer, bodypart, "x")] = x_data
-            data_dict[(scorer, bodypart, "y")] = y_data
             data_dict[(scorer, bodypart, "likelihood")] = confidence
 
-        # Create DataFrame with MultiIndex columns
         df = pd.DataFrame(data_dict)
         df.columns = pd.MultiIndex.from_tuples(
             df.columns, names=["scorer", "bodyparts", "coords"]
@@ -702,7 +706,9 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         first_series = list(pose_estimation.pose_estimation_series.values())[0]
         df.index = pd.Index(first_series.timestamps[:], name="time")
 
-        self._logger.debug(f"Fetched {len(df)} frames of pose data")
+        self._logger.debug(
+            f"Fetched {len(df)} frames of pose data (3d={is_3d})"
+        )
 
         return df
 
@@ -778,7 +784,36 @@ class PoseEstim(SpyglassMixin, dj.Computed):
                 "VidFileGroup().get_nwb_file() to verify before populating."
             )
 
-        # Step 2: Trigger inference if needed and get output file info
+        # Step 2: Branch — 3D triangulation vs standard 2D path.
+        if self._is_3d_mode(key):
+            self._info_msg(
+                "3D mode detected — running per-camera triangulation."
+            )
+            analysis_file_name = self._make_3d(
+                key,
+                task_mode,
+                output_dir,
+                inference_params,
+                nwb_file_name,
+                tool,
+                video_paths,
+            )
+            self.insert1({**key, "analysis_file_name": analysis_file_name})
+            self._info_msg("PoseEstim (3D) entry inserted.")
+            return
+
+        # --- 2D path (single camera or multi-camera without calibration) ------
+
+        try:
+            _cam_idxs = (VidFileGroup.File & key).fetch("camera_index")
+        except Exception:
+            _cam_idxs = []
+        if len(_cam_idxs) > 1 and not (VidFileGroup.Calibration & key):
+            self._warn_msg(
+                "Multiple camera files detected but no Calibration entry found. "
+                "Falling back to first-camera 2D pose estimation."
+            )
+
         output_file_info = None
         if task_mode == "trigger":
             if not video_paths:
@@ -968,17 +1003,26 @@ class PoseEstim(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def _fetch_meters_per_pixel(key: dict) -> float:
-        """Fetch meters_per_pixel from the camera device for this video group.
+        """Fetch meters_per_pixel from the NWB CameraDevice for the group.
+
+        Used only by the single-camera 2D path.  The 3D triangulation path
+        derives real-world coordinates directly from camera extrinsics and
+        does not call this method.
 
         Parameters
         ----------
         key : dict
-            Must include vid_group_id.
+            Must include ``vid_group_id``.
 
         Returns
         -------
         float
-            Metres represented by one pixel, from the camera device record.
+            Metres represented by one pixel.
+
+        Raises
+        ------
+        ValueError
+            If no VideoFile entries exist for the group.
         """
         vf_keys = (VidFileGroup.File & key).fetch("KEY", as_dict=True)
         if not vf_keys:
@@ -1044,6 +1088,267 @@ class PoseEstim(SpyglassMixin, dj.Computed):
             f"'{key['vid_group_id']}': NWB object lookup failed and "
             "video file fallback also failed."
         )
+
+    @staticmethod
+    def _is_3d_mode(key: dict) -> bool:
+        """Return True when the group has ≥2 cameras with distinct indices ≥ 0 and a Calibration.
+
+        Parameters
+        ----------
+        key : dict
+            Must include ``vid_group_id``.
+
+        Returns
+        -------
+        bool
+        """
+        try:
+            file_rows = (VidFileGroup.File & key).fetch(
+                "camera_index", as_dict=False
+            )
+        except Exception:
+            # camera_index column absent (schema not yet migrated) → 2D only.
+            return False
+        distinct_cams = [ci for ci in file_rows if ci >= 0]
+        if len(set(distinct_cams)) < 2:
+            return False
+        return bool(VidFileGroup.Calibration & key)
+
+    @staticmethod
+    def _load_camera_calibrations(key: dict) -> dict:
+        """Load per-camera calibration dicts from VidFileGroup → Calibration.
+
+        Parameters
+        ----------
+        key : dict
+            Must include ``vid_group_id``.
+
+        Returns
+        -------
+        dict
+            Mapping camera_index → ``{"intrinsics": dict, "extrinsics": dict}``.
+
+        Raises
+        ------
+        ValueError
+            If no calibration entry exists or a camera slot has no row.
+        """
+        from spyglass.position.v2.video import Calibration
+
+        calib_link = VidFileGroup.Calibration & key
+        if not calib_link:
+            raise ValueError(
+                f"No Calibration linked to vid_group_id='{key['vid_group_id']}'."
+            )
+        calib_key = calib_link.fetch1("KEY")
+        cam_rows = (Calibration.Camera & calib_key).fetch(
+            "camera_index", "intrinsics", "extrinsics", as_dict=True
+        )
+        return {
+            r["camera_index"]: {
+                "intrinsics": r["intrinsics"],
+                "extrinsics": r["extrinsics"],
+            }
+            for r in cam_rows
+        }
+
+    def _make_3d(
+        self,
+        key: dict,
+        task_mode: str,
+        output_dir: str,
+        inference_params: dict,
+        nwb_file_name: str,
+        tool: str,
+        video_paths: list,
+    ) -> str:
+        """Run multi-camera 3D triangulation and store results in NWB.
+
+        Parameters
+        ----------
+        key : dict
+            Primary key from PoseEstimSelection.
+        task_mode, output_dir, inference_params, nwb_file_name, tool : ...
+            As resolved in ``make()``.
+        video_paths : list
+            Video file paths (may be empty if task_mode != 'trigger').
+
+        Returns
+        -------
+        str
+            ``analysis_file_name`` for the created NWB file.
+        """
+        from spyglass.position.utils.pose_processing import convert_to_cm
+        from spyglass.position.v2.utils.triangulation import triangulate_pose_df
+
+        file_rows = (VidFileGroup.File & key).fetch(
+            "KEY", "camera_index", as_dict=True
+        )
+        cam_indices = sorted(
+            {r["camera_index"] for r in file_rows if r["camera_index"] >= 0}
+        )
+
+        # Map camera_index → VideoFile key
+        ci_to_vf = {
+            r["camera_index"]: {
+                k: v for k, v in r.items() if k != "camera_index"
+            }
+            for r in file_rows
+            if r["camera_index"] >= 0
+        }
+
+        cam_dfs: dict = {}
+        cam_bodyparts: list = []
+        cam_scorer: str = "triangulated"
+
+        for ci in cam_indices:
+            vf_key = ci_to_vf[ci]
+            vf_entry = (VideoFile & vf_key).fetch1()
+            cam_video_path = vf_entry.get("path", "")
+
+            # Run or find per-camera output.
+            cam_output_info = None
+            if task_mode == "trigger" and cam_video_path:
+                model_key = {"model_id": key["model_id"]}
+                cam_output_info = self.run_inference(
+                    model_key,
+                    cam_video_path,
+                    destfolder=output_dir or None,
+                    **inference_params,
+                )
+
+            cam_outputs = self._find_output_files(
+                tool,
+                [cam_video_path] if cam_video_path else [],
+                output_dir,
+                cam_output_info,
+            )
+            if not cam_outputs:
+                raise FileNotFoundError(
+                    f"No output found for camera_index={ci}, "
+                    f"video={cam_video_path}"
+                )
+            cam_file = max(cam_outputs, key=lambda p: Path(p).stat().st_mtime)
+            df, scorer, bodyparts = self._load_pose_data(tool, cam_file)
+
+            cam_dfs[ci] = df
+            cam_bodyparts = bodyparts
+            cam_scorer = scorer
+
+        # Load calibration.
+        cam_calibrations = self._load_camera_calibrations(key)
+        inference_p = (PoseEstimParams & key).fetch1("params") or {}
+
+        from spyglass.position.utils.general import flatten_multiindex
+
+        # Flatten each camera DF to (bodypart, coord) for triangulation.
+        cam_flat = {ci: flatten_multiindex(df) for ci, df in cam_dfs.items()}
+
+        pose_3d_df = triangulate_pose_df(
+            cam_flat,
+            cam_calibrations,
+            cam_bodyparts,
+            min_confidence=inference_p.get("min_confidence", 0.6),
+            max_reproj_error=inference_p.get("max_reproj_error", 5.0),
+        )
+
+        # Extrinsics are in metres; convert to cm for consistency with 2D path.
+        for bp in cam_bodyparts:
+            for coord in ("x", "y", "z"):
+                pose_3d_df[("triangulated", bp, coord)] *= 100.0
+
+        # Store per-camera 2D + 3D in one analysis NWB file.
+        analysis_file_name = self._store_3d_estimation_nwb(
+            key,
+            cam_dfs,
+            cam_indices,
+            pose_3d_df,
+            cam_bodyparts,
+            cam_scorer,
+            nwb_file_name,
+        )
+        return analysis_file_name
+
+    def _store_3d_estimation_nwb(
+        self,
+        key: dict,
+        cam_dfs: dict,
+        cam_indices: list,
+        pose_3d_df: pd.DataFrame,
+        bodyparts: list,
+        scorer: str,
+        nwb_file_name: str,
+    ) -> str:
+        """Store per-camera 2D poses and 3D triangulated pose in one NWB file.
+
+        Parameters
+        ----------
+        key : dict
+            Primary key.
+        cam_dfs : dict
+            camera_index → MultiIndex pose DataFrame (2D, in pixels).
+        cam_indices : list
+            Sorted camera slot indices.
+        pose_3d_df : pd.DataFrame
+            3-level MultiIndex DataFrame ``(triangulated, bodypart, coord)``
+            with ``x, y, z, likelihood``.
+        bodyparts, scorer : list, str
+            Bodypart names and scorer string.
+        nwb_file_name : str
+            Source NWB file name.
+
+        Returns
+        -------
+        str
+            analysis_file_name.
+        """
+        analysis_file_name = AnalysisNwbfile().create(nwb_file_name)
+        nwb_analysis_file = AnalysisNwbfile()
+
+        vid_timestamps = self._fetch_video_timestamps(key)
+        builder = self._get_nwb_builder_cls()()
+
+        model_info = (
+            Model * ModelParams & {"model_id": key["model_id"]}
+        ).fetch1()
+        skeleton_key = {"skeleton_id": model_info["skeleton_id"]}
+        skeleton_edges = (Skeleton & skeleton_key).fetch1().get("edges", [])
+
+        analysis_abs_path = nwb_analysis_file.get_abs_path(analysis_file_name)
+
+        # Per-camera 2D PoseEstimation objects.
+        for ci in cam_indices:
+            cam_pe, cam_skel = builder.build_pose_estimation(
+                pose_df=cam_dfs[ci],
+                bodyparts=bodyparts,
+                scorer=scorer,
+                model_id=key["model_id"],
+                skeleton_edges=skeleton_edges,
+                description=f"2D pose estimation from camera {ci} (pixels)",
+                timestamps=vid_timestamps,
+                unit="pixels",
+            )
+            cam_pe.name = f"PoseEstimation_cam{ci}"
+            cam_skel.name = f"skeleton_{key['model_id']}_cam{ci}"
+            builder.store_to_nwb(cam_pe, cam_skel, analysis_abs_path)
+
+        # 3D triangulated PoseEstimation object (coords in cm).
+        pose_3d_obj, skel_3d = builder.build_3d_pose_estimation(
+            pose_3d_df=pose_3d_df,
+            bodyparts=bodyparts,
+            timestamps=vid_timestamps,
+            model_id=key["model_id"],
+            skeleton_edges=skeleton_edges,
+            unit="cm",
+            description="3D triangulated pose (rig coordinates, cm)",
+        )
+        builder.store_to_nwb(pose_3d_obj, skel_3d, analysis_abs_path)
+
+        nwb_analysis_file.add(
+            nwb_file_name=nwb_file_name,
+            analysis_file_name=analysis_file_name,
+        )
+        return analysis_file_name
 
     def _store_estimation_nwb(
         self,
@@ -1691,26 +1996,41 @@ class PoseV2(SpyglassMixin, dj.Computed):
         orient_series = nwb_data["orient"].spatial_series["orientation"]
         velocity_series = nwb_data["velocity"].time_series["velocity"]
 
-        # Get timestamps from centroid (should be same for all)
         timestamps = centroid_series.timestamps[:]
 
-        # Extract data arrays
-        centroid_data = centroid_series.data[:]  # (n_frames, 2)
-        orientation_data = orient_series.data[:]  # (n_frames,)
-        velocity_data = velocity_series.data[:]  # (n_frames, 3): vx, vy, speed
+        centroid_data = centroid_series.data[:]  # (n, 2) or (n, 3)
+        orientation_data = orient_series.data[:]  # (n,)
+        velocity_data = velocity_series.data[
+            :
+        ]  # (n, 3): vx,vy,speed  OR (n, 4): vx,vy,vz,speed
+        is_3d = centroid_data.shape[1] == 3
 
-        # Build DataFrame
-        df = pd.DataFrame(
-            {
-                "position_x": centroid_data[:, 0],
-                "position_y": centroid_data[:, 1],
-                "orientation": orientation_data,
-                "velocity_x": velocity_data[:, 0],
-                "velocity_y": velocity_data[:, 1],
-                "speed": velocity_data[:, 2],
-            },
-            index=pd.Index(timestamps, name="time"),
-        )
+        if is_3d:
+            df = pd.DataFrame(
+                {
+                    "position_x": centroid_data[:, 0],
+                    "position_y": centroid_data[:, 1],
+                    "position_z": centroid_data[:, 2],
+                    "orientation": orientation_data,
+                    "velocity_x": velocity_data[:, 0],
+                    "velocity_y": velocity_data[:, 1],
+                    "velocity_z": velocity_data[:, 2],
+                    "speed": velocity_data[:, 3],
+                },
+                index=pd.Index(timestamps, name="time"),
+            )
+        else:
+            df = pd.DataFrame(
+                {
+                    "position_x": centroid_data[:, 0],
+                    "position_y": centroid_data[:, 1],
+                    "orientation": orientation_data,
+                    "velocity_x": velocity_data[:, 0],
+                    "velocity_y": velocity_data[:, 1],
+                    "speed": velocity_data[:, 2],
+                },
+                index=pd.Index(timestamps, name="time"),
+            )
 
         return df
 
@@ -1956,7 +2276,9 @@ class PoseV2(SpyglassMixin, dj.Computed):
             {**key, "nwb_file_name": nwb_file_name},
             outputs["orientation"],
             outputs["centroid"],
-            outputs["velocity_2d"],
+            outputs[
+                "velocity_2d"
+            ],  # compute_pose_outputs key; may be (n,2) or (n,3)
             outputs["speed"],
             outputs["timestamps"],
             outputs["sampling_rate"],
@@ -2227,58 +2549,67 @@ class PoseV2(SpyglassMixin, dj.Computed):
         key: dict,
         orientation: np.ndarray,
         centroid: np.ndarray,
-        velocity_2d: np.ndarray,
+        velocity: np.ndarray,
         speed: np.ndarray,
         timestamps: np.ndarray,
         sampling_rate: float,
     ) -> tuple:
         """Store processed pose data in NWB file.
 
+        Accepts either 2D centroid/velocity ``(n, 2)`` or 3D ``(n, 3)``.
+
         Parameters
         ----------
         key : dict
-            Primary key
+            Primary key (must include ``nwb_file_name``).
         orientation : np.ndarray
-            Orientation in radians
+            Orientation in radians, shape ``(n,)``.
         centroid : np.ndarray
-            Centroid positions (n_frames, 2)
-        velocity_2d : np.ndarray
-            2D velocity vector (n_frames, 2) — x_vel, y_vel in cm/s
+            Centroid positions.  Shape ``(n, 2)`` for 2D (x, y) or
+            ``(n, 3)`` for 3D (x, y, z) in cm.
+        velocity : np.ndarray
+            Velocity vector matching centroid dimensionality.
+            Shape ``(n, 2)`` → columns ``(vx, vy, speed)`` stored.
+            Shape ``(n, 3)`` → columns ``(vx, vy, vz, speed)`` stored.
         speed : np.ndarray
-            Scalar speed (n_frames,) in cm/s
+            Scalar Euclidean speed, shape ``(n,)``, cm/s.
         timestamps : np.ndarray
-            Timestamps
+            Timestamps.
         sampling_rate : float
-            Sampling rate in Hz
+            Sampling rate in Hz.
 
         Returns
         -------
         tuple
-            (analysis_file_name, obj_ids) where obj_ids is dict with keys:
-            'orient', 'centroid', 'velocity', 'smoothed_pose'
+            ``(analysis_file_name, obj_ids)`` where ``obj_ids`` has keys
+            ``'orient'``, ``'centroid'``, ``'velocity'``, ``'smoothed_pose'``.
         """
         import pynwb
 
-        # Constant for unit conversion
         METERS_PER_CM = 0.01
+        is_3d = centroid.ndim == 2 and centroid.shape[1] == 3
 
-        # Create or get analysis NWB file
         a_fname = AnalysisNwbfile().create(key["nwb_file_name"])
         nwb_analysis_file = AnalysisNwbfile()
 
-        # Create Position object for centroid
+        ref_frame = "rig_origin" if is_3d else "(0,0) is top left"
+        centroid_desc = (
+            "Centroid position (x, y, z) in cm"
+            if is_3d
+            else "Centroid position (x, y) in cm"
+        )
+
         position = pynwb.behavior.Position(name="centroid")
         position.create_spatial_series(
             name="centroid",
             timestamps=timestamps,
             data=centroid,
-            reference_frame="(0,0) is top left",
+            reference_frame=ref_frame,
             conversion=METERS_PER_CM,
-            description="Centroid position (x, y) in cm",
+            description=centroid_desc,
             comments="Calculated from pose estimation bodyparts",
         )
 
-        # Create BehavioralTimeSeries for orientation
         orientation_ts = pynwb.behavior.CompassDirection(name="orientation")
         orientation_ts.create_spatial_series(
             name="orientation",
@@ -2286,36 +2617,40 @@ class PoseV2(SpyglassMixin, dj.Computed):
             data=orientation,
             conversion=1.0,
             unit="radians",
-            description="Animal orientation in radians",
+            description="Animal orientation in radians (XY-plane heading)",
             comments="Counter-clockwise from positive x-axis, range [-π, π]",
-            # reference_frame=??,
         )
 
-        # Create BehavioralTimeSeries for velocity — columns: vx, vy, speed
-        velocity_data = np.column_stack([velocity_2d, speed])
+        # Store velocity + speed as one timeseries:
+        # 2D: [vx, vy, speed] (n, 3)
+        # 3D: [vx, vy, vz, speed] (n, 4)
+        velocity_data = np.column_stack([velocity, speed])
+        vel_desc = (
+            "x_velocity, y_velocity, z_velocity, speed"
+            if is_3d
+            else "x_velocity, y_velocity, speed"
+        )
         velocity_ts = pynwb.behavior.BehavioralTimeSeries(name="velocity")
         velocity_ts.create_timeseries(
             name="velocity",
             timestamps=timestamps,
             data=velocity_data,
             unit="cm/s",
-            description="x_velocity, y_velocity, speed",
-            comments="2D velocity vector and scalar Euclidean speed in cm/s",
+            description=vel_desc,
+            comments="Velocity vector and scalar Euclidean speed in cm/s",
         )
 
-        # Create Position object for smoothed pose (centroid with metadata)
         smoothed_pose = pynwb.behavior.Position(name="smoothed_pose")
         smoothed_pose.create_spatial_series(
             name="smoothed_position",
             timestamps=timestamps,
             data=centroid,
-            reference_frame="(0,0) is top left",
+            reference_frame=ref_frame,
             conversion=METERS_PER_CM,
-            description="Smoothed position (x, y) in cm",
+            description="Smoothed position in cm",
             comments="Interpolated and smoothed centroid position",
         )
 
-        # Add objects to NWB file and get their IDs
         obj_ids = {
             "orient": nwb_analysis_file.add_nwb_object(a_fname, orientation_ts),
             "centroid": nwb_analysis_file.add_nwb_object(a_fname, position),
@@ -2325,7 +2660,6 @@ class PoseV2(SpyglassMixin, dj.Computed):
             ),
         }
 
-        # Register the relationship between raw and analysis NWB files
         nwb_analysis_file.add(
             nwb_file_name=key["nwb_file_name"],
             analysis_file_name=a_fname,

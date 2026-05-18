@@ -45,6 +45,7 @@ nav:
   - Getting Started:
       - Quickstart: GettingStarted/QUICKSTART.md
       - Database Setup: GettingStarted/DATABASE.md
+      - Position Pipelines: GettingStarted/POSITION.md
       - Troubleshooting: GettingStarted/TROUBLESHOOTING.md
   - Tutorials:
       - Overview: notebooks/index.md

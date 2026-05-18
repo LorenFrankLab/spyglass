@@ -25,6 +25,7 @@ import datajoint as dj
 from datajoint.hash import key_hash
 
 from spyglass.common import Session, TaskEpoch, VideoFile
+from spyglass.common.common_device import CameraDevice
 from spyglass.utils import SpyglassMixin
 
 
@@ -40,7 +41,7 @@ class VideoGroupParams:
     recursive: bool = False
 
 
-schema = dj.schema("cbroz_position_v2_video")
+schema = dj.schema("cbroz_position_v3_video")
 
 
 # ---------------------------------------------------------------------------
@@ -54,7 +55,13 @@ class CameraRig(SpyglassMixin, dj.Manual):
 
     A rig groups one or more cameras that are physically co-located and used
     together for a recording.  Each camera slot is described by
-    :class:`CameraRig.Camera`.
+    :class:`CameraRig.Camera`, which links a zero-based index to a
+    :class:`~spyglass.common.common_device.CameraDevice` entry — the
+    authoritative source for camera identity and ``meters_per_pixel``.
+
+    Insert order: :class:`~spyglass.common.common_device.CameraDevice` →
+    :class:`CameraRig` → :class:`CameraRig.Camera` → :class:`Calibration` →
+    :class:`Calibration.Camera`.
 
     Attributes
     ----------
@@ -76,6 +83,11 @@ class CameraRig(SpyglassMixin, dj.Manual):
     class Camera(dj.Part):
         """Individual camera slot in a rig.
 
+        Each slot maps a zero-based index (the camera's position in the rig)
+        to a :class:`~spyglass.common.common_device.CameraDevice` entry, which
+        is the authoritative source for camera identity and
+        ``meters_per_pixel``.
+
         Attributes
         ----------
         camera_rig_id : str
@@ -83,14 +95,15 @@ class CameraRig(SpyglassMixin, dj.Manual):
         camera_index : int
             Zero-based camera slot index within the rig.
         camera_name : str
-            Name matching a ``CameraDevice.camera_name`` entry.
+            Foreign key to :class:`~spyglass.common.common_device.CameraDevice`
+            — must exist there before inserting into this table.
         """
 
         definition = """
         -> master
         camera_index: int           # 0-based camera slot in rig
         ---
-        camera_name: varchar(80)    # matches CameraDevice.camera_name
+        -> CameraDevice             # physical camera device (source of truth)
         """
 
 
@@ -157,9 +170,12 @@ class Calibration(SpyglassMixin, dj.Manual):
 
         Attributes
         ----------
+        camera_rig_id : str
+            Inherited from :class:`CameraRig` via the parent
+            :class:`Calibration`.
         camera_index : int
-            Must match a ``camera_index`` in the parent
-            :class:`CameraRig.Camera`.
+            Foreign key to :class:`CameraRig.Camera` — the camera slot must
+            be registered in the rig before calibration can be stored.
         intrinsics : dict
             Focal length, principal point, and distortion coefficients.
         extrinsics : dict
@@ -170,7 +186,7 @@ class Calibration(SpyglassMixin, dj.Manual):
 
         definition = """
         -> master
-        camera_index: int           # matches CameraRig.Camera.camera_index
+        -> CameraRig.Camera         # enforces slot exists in the rig
         ---
         intrinsics: blob            # dict: fx, fy, cx, cy, dist_coeffs
         extrinsics: blob            # dict: R (3x3), t (3,) camera-to-rig
@@ -200,6 +216,8 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
         definition = """
         -> master
         -> VideoFile
+        ---
+        camera_index = -1: tinyint   # 0-based camera slot; -1 for single-cam groups
         """
 
     class Calibration(dj.Part):
@@ -291,8 +309,22 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
             )
             return vid_group_key
 
+        # Build per-file rows with optional camera_index.
+        camera_indices = key.get("camera_indices")
+        if camera_indices is not None and len(camera_indices) != len(vid_files):
+            raise ValueError(
+                f"camera_indices length ({len(camera_indices)}) must match "
+                f"number of valid video files ({len(vid_files)})."
+            )
+        file_rows = []
+        for i, vf in enumerate(vid_files):
+            row = dict(vid_group_key, **vf)
+            if camera_indices is not None:
+                row["camera_index"] = int(camera_indices[i])
+            file_rows.append(row)
+
         super().insert1(dict(vid_group_key, **description_key), **kwargs)
-        self.File().insert([dict(vid_group_key, **vf) for vf in vid_files])
+        self.File().insert(file_rows)
 
         return vid_group_key
 
@@ -302,54 +334,60 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
         video_files: List[Union[str, Path]],
         description: str,
         vid_group_id: Union[str, None] = None,
+        camera_indices: Optional[List[int]] = None,
     ) -> dict:
         """Create a video group from a list of video files.
 
         Parameters
         ----------
         video_files : List[Union[str, Path]]
-            List of video file paths
+            List of video file paths.
         description : str
-            Description of the video group
-        vid_group_id : Union[str, int, None], optional
-            Video group ID. If None, generated from description.
-            If string, hashed to integer. By default None
+            Description of the video group.
+        vid_group_id : Union[str, None], optional
+            Video group ID.  Auto-generated from description when ``None``.
+        camera_indices : List[int], optional
+            Zero-based camera slot index for each entry in *video_files*.
+            Must have the same length as *video_files* when provided.
+            Defaults to ``-1`` (single-camera sentinel) for all files.
 
         Returns
         -------
         dict
-            Dictionary with 'vid_group_id' key
+            Dictionary with 'vid_group_id' key.
 
         Raises
         ------
         ValueError
-            If video_files is empty or videos not found in VideoFile table
+            If *video_files* is empty, videos are not found in VideoFile, or
+            *camera_indices* length does not match *video_files*.
 
         Examples
         --------
-        >>> # Create group from list of video paths
+        >>> # Single-camera group (camera_index defaults to -1)
         >>> group_key = VidFileGroup.create_from_files(
-        ...     video_files=["/path/to/video1.mp4", "/path/to/video2.mp4"],
-        ...     description="Training videos for my model"
+        ...     video_files=["/path/to/video.mp4"],
+        ...     description="single-cam run"
         ... )
-        >>> print(group_key)
-        {'vid_group_id': 'a1b2c3d4e5f67890'}
+        >>> # Multi-camera group with explicit indices
+        >>> group_key = VidFileGroup.create_from_files(
+        ...     video_files=["/cam0.mp4", "/cam1.mp4"],
+        ...     description="stereo run",
+        ...     camera_indices=[0, 1],
+        ... )
         """
         if not video_files:
             raise ValueError("video_files list cannot be empty")
 
-        # Create the video group
         group_key = cls().insert1(
-            {
-                "vid_group_id": vid_group_id,
-                "description": description,
-            },
+            {"vid_group_id": vid_group_id, "description": description},
             skip_duplicates=True,
         )
-
-        # Add files to the group
-        cls().add_files(group_key["vid_group_id"], video_files)
-
+        cls().add_files(
+            group_key["vid_group_id"],
+            video_files,
+            camera_indices=camera_indices,
+        )
         return group_key
 
     @classmethod
@@ -450,52 +488,70 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
         cls,
         vid_group_id: str,
         video_files: List[Union[str, Path]],
+        camera_indices: Optional[List[int]] = None,
     ) -> List:
         """Add video files to an existing video group.
 
         Parameters
         ----------
         vid_group_id : str
-            Video group ID to add files to
+            Video group ID to add files to.
         video_files : List[Union[str, Path]]
-            List of video file paths to add
+            List of video file paths to add.
+        camera_indices : List[int], optional
+            Zero-based camera slot index for each file in *video_files*.
+            Defaults to ``-1`` (single-camera sentinel) for all files.
 
         Returns
         -------
         list
-            List of inserted file keys
+            List of inserted file rows.
 
         Raises
         ------
         ValueError
-            If video group doesn't exist. Videos not found in VideoFile are
-            skipped with a warning rather than raising an error.
+            If the video group doesn't exist or *camera_indices* length
+            does not match the number of found video files.  Videos not
+            found in VideoFile are skipped with a warning.
 
         Examples
         --------
-        >>> # Add more videos to existing group
-        >>> count = VidFileGroup.add_files(
-        ...     vid_group_id=123456789,
-        ...     video_files=["/path/to/new_video.mp4"]
+        >>> VidFileGroup.add_files("grp1", ["/path/to/new_video.mp4"])
+        >>> VidFileGroup.add_files(
+        ...     "grp1", ["/cam0.mp4", "/cam1.mp4"], camera_indices=[0, 1]
         ... )
-        >>> print(f"Added {count} files")
         """
-        # Check that group exists
         if not (cls() & {"vid_group_id": vid_group_id}):
             raise ValueError(f"Video group not found: {vid_group_id}")
 
-        inserts = []
+        resolved = []
         for video_path in video_files:
             try:
                 key = VideoFile().fetch_key_from_path(str(video_path))
-                inserts.append(dict(key, vid_group_id=vid_group_id))
+                resolved.append(key)
             except (ValueError, FileNotFoundError):
                 cls()._warn_msg(
                     f"Video not found in VideoFile table, skipping: {video_path}"
                 )
 
-        cls().File().insert(inserts, skip_duplicates=True)
+        if (
+            camera_indices is not None
+            and resolved
+            and len(camera_indices) != len(resolved)
+        ):
+            raise ValueError(
+                f"camera_indices length ({len(camera_indices)}) must match "
+                f"number of found video files ({len(resolved)})."
+            )
 
+        inserts = []
+        for i, vf_key in enumerate(resolved):
+            row = dict(vf_key, vid_group_id=vid_group_id)
+            if camera_indices is not None:
+                row["camera_index"] = int(camera_indices[i])
+            inserts.append(row)
+
+        cls().File().insert(inserts, skip_duplicates=True)
         return inserts
 
     @classmethod

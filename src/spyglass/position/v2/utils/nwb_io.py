@@ -251,6 +251,104 @@ class NDXPoseBuilder(BaseMixin):
 
         return pose_estimation, skeleton
 
+    def build_3d_pose_estimation(
+        self,
+        pose_3d_df: pd.DataFrame,
+        bodyparts: list,
+        timestamps: np.ndarray,
+        model_id: str,
+        skeleton_edges: list = None,
+        name: str = "PoseEstimation_3d",
+        description: str = "3D triangulated pose (rig coordinates, metres)",
+        unit: str = "metres",
+    ) -> tuple:
+        """Build a 3-D ndx-pose PoseEstimation from a triangulated DataFrame.
+
+        Parameters
+        ----------
+        pose_3d_df : pd.DataFrame
+            3-level MultiIndex ``(scorer, bodypart, coord)`` DataFrame with
+            ``x``, ``y``, ``z``, ``likelihood`` columns. ``scorer`` is
+            typically ``"triangulated"``.
+        bodyparts : list
+            Ordered bodypart names.
+        timestamps : np.ndarray
+            Per-frame timestamps in seconds.
+        model_id : str
+            Model identifier used for skeleton naming.
+        skeleton_edges : list, optional
+            Edge pairs for the skeleton.
+        name : str, optional
+            Name of the PoseEstimation NWB object.
+        description : str, optional
+            Free-text description.
+        unit : str, optional
+            Coordinate unit, default ``"metres"``.
+
+        Returns
+        -------
+        tuple
+            ``(pose_estimation, skeleton)`` ndx-pose objects.
+        """
+        if ndx_pose is None:  # pragma: no cover
+            raise ImportError(  # pragma: no cover
+                "ndx-pose is required. Install with: pip install ndx-pose>=0.2.0"
+            )
+
+        scorer = pose_3d_df.columns.get_level_values(0)[0]
+
+        bp_index = {bp: i for i, bp in enumerate(bodyparts)}
+        if skeleton_edges:
+            edge_indices = [
+                [bp_index[a], bp_index[b]]
+                for a, b in skeleton_edges
+                if a in bp_index and b in bp_index
+            ]
+            edge_array = (
+                np.array(edge_indices, dtype="uint8")
+                if edge_indices
+                else np.array([], dtype="uint8").reshape(0, 2)
+            )
+        else:
+            edge_array = np.array([], dtype="uint8").reshape(0, 2)
+
+        skeleton = ndx_pose.Skeleton(
+            name=f"skeleton_{model_id}_3d",
+            nodes=bodyparts,
+            edges=edge_array,
+        )
+
+        pose_series_list = []
+        for bp in bodyparts:
+            x = pose_3d_df[(scorer, bp, "x")].values
+            y = pose_3d_df[(scorer, bp, "y")].values
+            z = pose_3d_df[(scorer, bp, "z")].values
+            likelihood = pose_3d_df[(scorer, bp, "likelihood")].values
+            pose_data = np.column_stack([x, y, z])
+
+            series = ndx_pose.PoseEstimationSeries(
+                name=f"{bp}_pose",
+                description=f"3D pose estimation for {bp}",
+                data=pose_data,
+                unit=unit,
+                reference_frame="rig_origin",
+                timestamps=timestamps,
+                confidence=likelihood,
+                confidence_definition="triangulation quality (0=bad, 1=good)",
+            )
+            pose_series_list.append(series)
+
+        pose_estimation = ndx_pose.PoseEstimation(
+            name=name,
+            pose_estimation_series=pose_series_list,
+            description=description,
+            original_videos=[],
+            source_software="triangulation",
+            skeleton=skeleton,
+            scorer=scorer,
+        )
+        return pose_estimation, skeleton
+
     def store_to_nwb(
         self, pose_estimation, skeleton, analysis_abs_path: Union[Path, str]
     ) -> None:
