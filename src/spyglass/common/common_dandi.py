@@ -84,7 +84,7 @@ class DandiViolationsSelection(SpyglassMixin, dj.Manual):
             logger.info(
                 f"Existing Dandi violations found for {key}. Deleting and re-populating."
             )
-            DandiViolations.delete(key)
+            (DandiViolations & key).delete()
 
         self.insert(files_to_check, skip_duplicates=True)
         DandiViolations.populate(
@@ -138,7 +138,8 @@ class DandiViolations(SpyglassMixin, dj.Computed):
             for i, result in enumerate(filtered_results)
         ]
         self.insert1(key)
-        self.Violations.insert(part_keys)
+        if part_keys:
+            self.Violations.insert(part_keys)
 
 
 @schema
