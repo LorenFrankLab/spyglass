@@ -157,6 +157,9 @@ for label, interval_data in results.groupby("interval_labels"):
 - Fix typo in `env_defaults` key: `HD5_USE_FILE_LOCKING` →
     `HDF5_USE_FILE_LOCKING` so the HDF5 library actually sees the intended
     `FALSE` default #1575
+- Tests default to a per-session temp `base_dir` and ignore an exported
+    `SPYGLASS_BASE_DIR` unless `--use-env-base-dir` is passed, preventing
+    destructive tests from acting on shared/production filesystems #1573
 
 ### Pipelines
 
