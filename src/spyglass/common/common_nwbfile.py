@@ -55,7 +55,7 @@ class CleanupPlan:
     files_to_delete : set of pathlib.Path
         Files selected for filesystem deletion.
     empty_files : set of pathlib.Path
-        Empty files or directories selected for deletion.
+        Empty (0-byte) analysis files selected for deletion.
     untracked_files : set of pathlib.Path
         Non-empty files selected because no external store references them.
     """
@@ -694,9 +694,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         ):
             resolved_path = path.expanduser().resolve()
             scanned.add(resolved_path)
-            is_empty_file = path.is_file() and path.stat().st_size == 0
-            is_empty_dir = path.is_dir() and not any(path.iterdir())
-            if is_empty_file or is_empty_dir:
+            if path.is_file() and path.stat().st_size == 0:
                 empty.add(resolved_path)
             elif resolved_path not in tracked:
                 untracked.add(resolved_path)
@@ -793,7 +791,17 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             )
             return plan.files_to_delete, plan.tracked_files
 
+        # files_to_delete holds resolved paths, and Path.resolve() follows
+        # symlinks — a symlink inside analysis_dir resolves to its target.
+        # Skip any path that resolves outside analysis_dir so cleanup cannot
+        # delete data elsewhere via a symlink placed in the analysis directory.
+        analysis_dir = Path(self._analysis_dir).expanduser().resolve()
         for path in plan.files_to_delete:
+            if not path.is_relative_to(analysis_dir):
+                logger.warning(
+                    f"Skipping deletion outside analysis dir: {path}"
+                )
+                continue
             try:
                 path.unlink()
             except OSError as e:
