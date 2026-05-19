@@ -132,5 +132,3 @@ Plan-phase vocabulary is fine here (this is a plan document). Last updated
   lands.
 - **Incident restore** pending the storage admin (`zfs diff` of the five
   teardown-targeted directories against a pre-incident snapshot).
-- `ss_toplevel_genuine_missing.txt` in the repo root is an incident
-  investigation artifact — not to be committed with Phase 0a.
