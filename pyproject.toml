@@ -98,6 +98,10 @@ optional-dependencies.moseq-gpu = [
   "jax-moseq[cuda12]",
   "keypoint-moseq",
 ]
+optional-dependencies.spikesorting-v2-validation = [
+  "MEArec>=1.9",       # ground-truth simulated recordings
+  "neuroconv[mearec]", # MEArec -> NWB conversion + NWBInspector validation
+]
 optional-dependencies.test = [
   "codecov",                # for code coverage badge
   "docker",                 # for tests in a container

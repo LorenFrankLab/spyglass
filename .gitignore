@@ -149,6 +149,13 @@ tests/_data/*
 *.nwb
 *.DS_Store
 
+# Spike sorting v2 simulated fixtures: regenerated locally / in CI, never committed.
+tests/spikesorting/v2/fixtures/*.h5
+tests/spikesorting/v2/fixtures/*.nwb
+# Spike sorting v2 baseline artifacts: commit only the small .pkl/.json baselines.
+!tests/spikesorting/v2/baselines/*.pkl
+!tests/spikesorting/v2/baselines/*.json
+
 temp_nwb/*s
 
 *.mp4

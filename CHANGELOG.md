@@ -165,6 +165,11 @@ for label, interval_data in results.groupby("interval_labels"):
     and v1 remains the production spike sorting path. Upgrading to
     SpikeInterface 0.104 is a prerequisite checkpoint before any runtime v2
     work lands
+- Add modern-spike-sorting validation tooling: a `spikesorting-v2-validation`
+    optional extra, a MEArec ground-truth fixture generator and MEArec-to-NWB
+    converter, an isolated test-environment bootstrap, and v1 baseline-capture
+    tooling. No v2 pipeline tables or user-facing sorting path have landed;
+    fixtures are regenerated locally or in CI and are not committed
 
 ### Pipelines
 
