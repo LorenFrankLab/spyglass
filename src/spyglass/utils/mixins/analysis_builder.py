@@ -380,8 +380,7 @@ class AnalysisFileBuilder:
         ...     io.write(nwbf)
         """
         self._ensure_created("open_for_write")
-        path = self.get_path()
-        return pynwb.NWBHDF5IO(path=path, mode="a", load_namespaces=True)
+        return self.open_nwb[0]
 
     def get_path(self) -> str:
         """Get absolute filesystem path to analysis file.
