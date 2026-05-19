@@ -132,6 +132,107 @@ class PoseInferenceRunner(BaseMixin):
         self._info_msg(f"Inference complete. Output files: {output_paths}")
         return output_paths if len(output_paths) != 1 else output_paths[0]
 
+    def run_sleap_inference(
+        self,
+        model_info: dict,
+        video_path: Union[Path, str, list],
+        destfolder: Union[Path, str, None] = None,
+        **kwargs,
+    ) -> Union[str, list]:
+        """Run SLEAP inference on video(s).
+
+        Parameters
+        ----------
+        model_info : dict
+            Model table entry; ``model_path`` must point to a SLEAP model
+            directory (contains ``training_config.json`` and
+            ``best_model.h5`` or ``best_model``).
+        video_path : Union[Path, str, list]
+            Path(s) to video file(s) for inference.
+        destfolder : Union[Path, str, None], optional
+            Destination folder for output files. If None, saves alongside
+            the video, by default None.
+        **kwargs
+            Forwarded to ``sleap.load_model``; relevant keys are
+            ``batch_size``, ``peak_threshold``, ``integral_patch_size``.
+
+        Returns
+        -------
+        Union[str, list]
+            Path(s) to ``.analysis.h5`` file(s) produced by SLEAP. Falls
+            back to ``.predictions.slp`` path if h5 export is unavailable.
+
+        Raises
+        ------
+        FileNotFoundError
+            If any video path or the model directory does not exist.
+        ImportError
+            If SLEAP is not installed in the current environment.
+        """
+        if not isinstance(video_path, (list, tuple)):
+            video_path = [video_path]
+
+        for vp in video_path:
+            if not Path(vp).exists():
+                raise FileNotFoundError(f"Video not found: {vp}")
+
+        model_path = resolve_model_path(model_info["model_path"])
+        if not model_path.exists():
+            raise FileNotFoundError(
+                f"SLEAP model directory not found: {model_path}"
+            )
+
+        # Deferred import — mirrors the DLC pattern; avoids startup cost.
+        try:
+            import sleap
+        except ImportError as e:  # pragma: no cover
+            raise ImportError(  # pragma: no cover
+                "SLEAP is required for inference. "
+                "Install with: pip install sleap"
+            ) from e
+
+        # Only forward parameters that sleap.load_model accepts.
+        load_kwargs = {
+            k: kwargs[k]
+            for k in ("batch_size", "peak_threshold", "integral_patch_size")
+            if k in kwargs
+        }
+
+        self._info_msg(f"Loading SLEAP model from {model_path}")
+        predictor = sleap.load_model(str(model_path), **load_kwargs)
+
+        output_paths = []
+        for vp in video_path:
+            vp = Path(vp)
+            output_folder = Path(destfolder) if destfolder else vp.parent
+            output_folder.mkdir(parents=True, exist_ok=True)
+
+            slp_path = output_folder / f"{vp.stem}.predictions.slp"
+            h5_path = output_folder / f"{vp.stem}.analysis.h5"
+
+            self._info_msg(f"Running SLEAP inference on {vp}")
+            labels = predictor.predict(sleap.load_video(str(vp)))
+            labels.save(str(slp_path))
+
+            # Export analysis h5 (preferred downstream format).
+            labels.export_analysis(str(h5_path))
+
+            if h5_path.exists():
+                output_paths.append(str(h5_path))
+                self._info_msg(f"SLEAP analysis created: {h5_path}")
+            elif slp_path.exists():
+                output_paths.append(str(slp_path))
+                self._warn_msg(
+                    f"Analysis h5 not created; falling back to: {slp_path}"
+                )
+            else:
+                self._warn_msg(f"No SLEAP output found for {vp}")
+
+        self._info_msg(
+            f"SLEAP inference complete. Output files: {output_paths}"
+        )
+        return output_paths if len(output_paths) != 1 else output_paths[0]
+
 
 class NDXPoseBuilder(BaseMixin):
     """Handles building ndx-pose NWB structures."""

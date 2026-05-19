@@ -799,14 +799,15 @@ class ModelParams(SpyglassMixin, dj.Lookup):
 
 @schema
 class ModelSelection(SpyglassMixin, dj.Manual):
-    """Represents a paring of model parameters and video group for training."""
+    """Represents a pairing of model parameters and video group for training."""
 
     definition = """
     -> ModelParams
     -> VidFileGroup
     model_selection_id: varchar(32)
     ---
-    parent_id=NULL: varchar(32) # ID of parent model, if any
+    parent_id=NULL              : varchar(32)   # parent model for fine-tuning
+    training_labels_path=NULL   : varchar(255)  # SLEAP .slp labels file; NULL for DLC
     """
 
 

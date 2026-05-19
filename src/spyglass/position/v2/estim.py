@@ -39,6 +39,7 @@ from pynwb import NWBHDF5IO
 from spyglass.common import AnalysisNwbfile
 from spyglass.common.common_behav import VideoFile
 from spyglass.position.utils.dlc_io import parse_dlc_h5_output
+from spyglass.position.utils.sleap_io import parse_sleap_analysis_h5
 from spyglass.position.utils.validation import (
     validate_centroid_params,
     validate_orientation_params,
@@ -858,7 +859,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
             tool, primary_output_file
         )
         self._info_msg(
-            f"DLC data: {len(bodyparts)} bodyparts, {len(pose_df)} frames, "
+            f"Pose data: {len(bodyparts)} bodyparts, {len(pose_df)} frames, "
             f"scorer: {scorer}"
         )
 
@@ -928,17 +929,31 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         Parameters
         ----------
         tool : str
-            Tool name (e.g., 'DLC')
+            Tool name (e.g., 'DLC', 'SLEAP')
         output_file : str
             Path to output file
 
         Returns
         -------
         tuple
-            (pose_df, scorer, bodyparts)
+            (pose_df, scorer, bodyparts) where pose_df has a 3-level
+            MultiIndex (scorer, bodypart, coord) consistent with the DLC
+            format expected by the rest of the pipeline.
         """
         if tool == "DLC":
             return parse_dlc_h5_output(output_file, return_metadata=True)
+        elif tool == "SLEAP":
+            df_2level, scorer, bodyparts = parse_sleap_analysis_h5(
+                output_file, return_metadata=True
+            )
+            # Promote to 3-level MultiIndex (scorer, bodypart, coord) so the
+            # downstream pipeline (convert_to_cm, build_pose_estimation, etc.)
+            # works unchanged.
+            df_2level.columns = pd.MultiIndex.from_tuples(
+                [(scorer, bp, coord) for bp, coord in df_2level.columns],
+                names=["scorer", "bodyparts", "coords"],
+            )
+            return df_2level, scorer, bodyparts
         else:
             raise ValueError(f"Unsupported tool for data loading: {tool}")
 
@@ -990,6 +1005,11 @@ class PoseEstim(SpyglassMixin, dj.Computed):
             runner = self._get_inference_runner_cls()()
             return runner.run_dlc_inference(
                 model_info, video_path, save_as_csv, destfolder, **kwargs
+            )
+        elif tool == "SLEAP":
+            runner = self._get_inference_runner_cls()()
+            return runner.run_sleap_inference(
+                model_info, video_path, destfolder, **kwargs
             )
         elif tool == "ndx-pose":
             raise NotImplementedError(

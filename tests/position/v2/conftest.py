@@ -432,6 +432,23 @@ def skip_if_no_dlc():
     yield
 
 
+@pytest.fixture
+def skip_if_no_sleap():
+    """Skip test if SLEAP unavailable or --no-pose flag is set.
+
+    Mirrors skip_if_no_dlc. Use as a fixture parameter in any test that
+    requires a real SLEAP installation. Pass ``--no-pose`` to pytest to
+    skip all such tests in CI.
+    """
+    if getattr(pytest, "NO_POSE", False):
+        pytest.skip("Skipping SLEAP test (--no-pose flag set)")
+    try:
+        import sleap  # noqa: F401
+    except ImportError:
+        pytest.skip("Skipping SLEAP test (sleap not installed)")
+    yield
+
+
 @pytest.fixture(scope="session")
 def dlc_project_config(tmp_path_factory):
     """Session-scoped DLC project created from tests/_data/deeplabcut/.

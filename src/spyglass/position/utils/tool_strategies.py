@@ -1034,15 +1034,19 @@ class DLCStrategy(PoseToolStrategy):
 
 
 class SLEAPStrategy(PoseToolStrategy):
-    """SLEAP tool strategy implementation (placeholder/future)."""
+    """SLEAP tool strategy implementation."""
 
     @property
     def tool_name(self) -> str:
         return "SLEAP"
 
     @property
+    def source_software(self) -> str:
+        return "SLEAP"
+
+    @property
     def supports_training(self) -> bool:
-        return False  # SLEAP training not yet implemented
+        return True
 
     def get_required_params(self) -> Set[str]:
         return {
@@ -1147,11 +1151,119 @@ class SLEAPStrategy(PoseToolStrategy):
         sel_entry: dict,
         model_instance,
     ) -> dict:
-        """Train SLEAP model (not yet implemented)."""
-        raise NotImplementedError(
-            "SLEAP training not yet implemented. "
-            "Please use DLC or import pre-trained SLEAP models via load()."
+        """Train a SLEAP model via the sleap-train CLI.
+
+        Parameters
+        ----------
+        key : dict
+            ModelSelection key
+        params : dict
+            Training parameters from ModelParams. Must include
+            ``initial_config`` (path to SLEAP training config JSON).
+            Optional: ``run_name``, ``output_dir``, ``batch_size``,
+            ``peak_threshold``, ``integral_patch_size``.
+        skeleton_id : str
+            Skeleton ID (not used by SLEAP; stored for DB consistency)
+        vid_group : dict
+            VidFileGroup entry (not used directly by SLEAP CLI)
+        sel_entry : dict
+            Full ModelSelection entry. Must include
+            ``training_labels_path`` — path to .slp labels file.
+        model_instance
+            Model table instance for logging.
+
+        Returns
+        -------
+        dict
+            Model table entry with model_id, analysis_file_name, model_path.
+
+        Raises
+        ------
+        ValueError
+            If ``sel_entry["training_labels_path"]`` is None or empty.
+        FileNotFoundError
+            If the labels file or config file does not exist.
+        subprocess.CalledProcessError
+            If ``sleap-train`` exits with a non-zero status.
+        """
+        import subprocess
+
+        from spyglass.position.utils.protocols import default_pk_name
+
+        labels_path = sel_entry.get("training_labels_path")
+        if not labels_path:
+            raise ValueError(
+                "SLEAP training requires 'training_labels_path' in "
+                "ModelSelection. Set it to the path of your .slp labels file."
+            )
+
+        labels_path = Path(labels_path)
+        if not labels_path.exists():
+            raise FileNotFoundError(
+                f"SLEAP labels file not found: {labels_path}"
+            )
+
+        config_path = params.get("initial_config")
+        if config_path:
+            config_path = Path(config_path)
+            if not config_path.exists():
+                raise FileNotFoundError(
+                    f"SLEAP training config not found: {config_path}"
+                )
+
+        run_name = params.get("run_name") or default_pk_name(
+            "sleap-run", key or {}
         )
+        output_dir = params.get("output_dir", "")
+
+        cmd = ["sleap-train"]
+        if config_path:
+            cmd.append(str(config_path))
+        cmd.extend([str(labels_path), "--run_name", run_name])
+        if output_dir:
+            cmd.extend(["--output_dir", str(output_dir)])
+
+        model_instance._info_msg(f"Running SLEAP training: {' '.join(cmd)}")
+        subprocess.run(cmd, check=True)
+
+        # Locate model output directory
+        model_dir = self._find_model_output_dir(
+            run_name, output_dir or "models"
+        )
+        model_instance._info_msg(f"SLEAP model saved to: {model_dir}")
+
+        model_id = default_pk_name("sleap-mdl", key or {})
+
+        return dict(
+            key,
+            model_id=model_id,
+            analysis_file_name=None,
+            model_path=str(model_dir),
+        )
+
+    def _find_model_output_dir(self, run_name: str, output_dir: str) -> Path:
+        """Locate the model directory created by sleap-train.
+
+        Parameters
+        ----------
+        run_name : str
+            The ``--run_name`` passed to sleap-train.
+        output_dir : str
+            The ``--output_dir`` passed to sleap-train (or ``"models"``).
+
+        Returns
+        -------
+        Path
+            Path to the model directory.
+        """
+        candidate = Path(output_dir) / run_name
+        if candidate.exists():
+            return candidate
+        # Fallback: search cwd
+        cwd_candidate = Path.cwd() / "models" / run_name
+        if cwd_candidate.exists():
+            return cwd_candidate
+        return candidate  # return even if absent; caller handles missing
 
     def evaluate_model(
         self,
@@ -1162,8 +1274,115 @@ class SLEAPStrategy(PoseToolStrategy):
         show_errors: bool = True,
         **kwargs,
     ) -> dict:
-        """Evaluate SLEAP model (not yet implemented)."""
-        raise NotImplementedError("SLEAP evaluation not yet implemented.")
+        """Evaluate a trained SLEAP model via the sleap-eval CLI.
+
+        Parameters
+        ----------
+        model_entry : dict
+            Model table entry; must include ``model_path``.
+        params_entry : dict
+            ModelParams entry; ``params`` may include
+            ``training_labels`` (path to .slp labels for evaluation).
+        model_instance
+            Model table instance for logging.
+        plotting : bool
+            Currently unused for SLEAP (no equivalent CLI flag).
+        show_errors : bool
+            If True, log evaluation metrics to the model instance logger.
+        **kwargs
+            Additional options forwarded to sleap-eval.
+
+        Returns
+        -------
+        dict
+            Evaluation results with at least ``oks`` and ``mAP`` keys.
+
+        Raises
+        ------
+        FileNotFoundError
+            If the model directory does not exist.
+        subprocess.CalledProcessError
+            If ``sleap-eval`` exits with a non-zero status.
+        """
+        import subprocess
+        import tempfile
+
+        model_path = Path(model_entry.get("model_path", ""))
+        if not model_path.exists():
+            raise FileNotFoundError(
+                f"SLEAP model directory not found: {model_path}"
+            )
+
+        params = params_entry.get("params", {})
+        labels_path = params.get("training_labels") or kwargs.get("labels_path")
+
+        # Use a temp file if the caller supplied an explicit output path
+        eval_output = params.get("eval_output") or kwargs.get("eval_output")
+        _tmp = None
+        if eval_output is None:
+            _tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
+            eval_output = _tmp.name
+            _tmp.close()
+
+        cmd = ["sleap-eval", "--model", str(model_path)]
+        if labels_path:
+            cmd.extend(["--labels", str(labels_path)])
+        cmd.extend(["--output", str(eval_output)])
+
+        model_instance._info_msg(f"Running SLEAP evaluation: {' '.join(cmd)}")
+        subprocess.run(cmd, check=True)
+
+        results = self._parse_eval_results(eval_output)
+
+        if show_errors and results:
+            model_instance._info_msg(
+                f"SLEAP eval — OKS: {results.get('oks', 'N/A')}, "
+                f"mAP: {results.get('mAP', 'N/A')}"
+            )
+
+        return results
+
+    def _parse_eval_results(self, output_path: str) -> dict:
+        """Parse JSON evaluation results written by sleap-eval.
+
+        Parameters
+        ----------
+        output_path : str
+            Path to the JSON file written by sleap-eval.
+
+        Returns
+        -------
+        dict
+            Evaluation metrics; guaranteed to include ``oks`` and ``mAP``.
+        """
+        import json
+
+        output_path = Path(output_path)
+        if not output_path.exists():
+            return {"oks": None, "mAP": None}
+
+        with open(output_path) as f:
+            data = json.load(f)
+
+        # Normalise key names across SLEAP versions
+        results = {}
+        for out_key, candidates in [
+            ("oks", ["oks", "OKS", "mean_oks"]),
+            ("mAP", ["mAP", "map", "mean_ap"]),
+        ]:
+            for k in candidates:
+                if k in data:
+                    results[out_key] = data[k]
+                    break
+            else:
+                results[out_key] = data.get(out_key)
+
+        # Pass through any extra metrics
+        for k, v in data.items():
+            if k not in results:
+                results[k] = v
+
+        return results
 
     def find_output_files(
         self,
@@ -1171,12 +1390,21 @@ class SLEAPStrategy(PoseToolStrategy):
         output_dir: str = "",
         output_file_info: Any = None,
     ) -> list:
-        """Find SLEAP output files (placeholder implementation)."""
-        # SLEAP output discovery is not yet implemented; falls back to
-        # generic .slp file search in the expected output directory.
+        """Find SLEAP output files in output_dir.
+
+        Prefers ``*.analysis.h5`` (SLEAP analysis export); falls back to
+        ``*.predictions.slp`` (SLEAP project with embedded predictions).
+        Mirrors the structure of DLCStrategy.find_output_files().
+        """
+        if output_file_info:
+            if isinstance(output_file_info, str):
+                return [output_file_info]
+            return output_file_info
+
         from pathlib import Path
 
         output_files = []
+        patterns = self.get_output_file_patterns()
 
         for video_path in video_paths:
             video_path = Path(video_path)
@@ -1184,24 +1412,35 @@ class SLEAPStrategy(PoseToolStrategy):
                 self.get_default_output_location(str(video_path), output_dir)
             )
 
-            if search_dir.exists():
-                # Look for SLEAP output files (.slp files)
-                patterns = self.get_output_file_patterns()
-                sleap_files = list(search_dir.glob(patterns["primary"]))
-                if sleap_files:
-                    latest_file = max(
-                        sleap_files, key=lambda p: p.stat().st_mtime
-                    )
-                    output_files.append(str(latest_file))
+            if not self._fs.exists(search_dir):
+                continue
+
+            # Primary: *.analysis.h5
+            analysis_files = [
+                Path(p)
+                for p in self._fs.glob(str(search_dir / patterns["primary"]))
+            ]
+            if analysis_files:
+                latest = max(analysis_files, key=lambda p: p.stat().st_mtime)
+                output_files.append(str(latest))
+                continue
+
+            # Fallback: *.predictions.slp
+            slp_files = [
+                Path(p)
+                for p in self._fs.glob(str(search_dir / patterns["fallback"]))
+            ]
+            if slp_files:
+                latest = max(slp_files, key=lambda p: p.stat().st_mtime)
+                output_files.append(str(latest))
 
         return output_files
 
     def get_output_file_patterns(self) -> Dict[str, str]:
         """Get SLEAP-specific output file patterns."""
         return {
-            "primary": "*.slp",  # SLEAP project files
-            "predictions": "*.h5",  # SLEAP prediction files
-            "fallback": "*.slp",
+            "primary": "*.analysis.h5",  # SLEAP analysis export (preferred)
+            "fallback": "*.predictions.slp",  # SLEAP project with predictions
         }
 
 
