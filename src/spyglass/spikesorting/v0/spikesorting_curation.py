@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import os
 import shutil
@@ -838,11 +840,15 @@ def _get_num_spikes(
     return cluster_spikes
 
 
+# Quality-metric callables are resolved lazily so this module imports under
+# SpikeInterface 0.104, which renamed/removed some legacy entry points. v0
+# metric computation only runs under SI 0.99; any missing entries surface as a
+# clear error only when the metric is actually invoked.
 _metric_name_to_func = {
-    "snr": sq.compute_snrs,
+    "snr": getattr(sq, "compute_snrs", None),
     "isi_violation": _compute_isi_violation_fractions,
-    "nn_isolation": sq.nearest_neighbors_isolation,
-    "nn_noise_overlap": sq.nearest_neighbors_noise_overlap,
+    "nn_isolation": getattr(sq, "nearest_neighbors_isolation", None),
+    "nn_noise_overlap": getattr(sq, "nearest_neighbors_noise_overlap", None),
     "peak_offset": _get_peak_offset,
     "peak_channel": _get_peak_channel,
     "num_spikes": _get_num_spikes,

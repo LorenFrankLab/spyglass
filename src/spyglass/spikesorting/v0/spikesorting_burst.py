@@ -1,14 +1,14 @@
+from __future__ import annotations
+
 from itertools import permutations
 from typing import Dict, List, Tuple, Union
 
 import datajoint as dj
 import matplotlib.pyplot as plt
 import numpy as np
+import spikeinterface as si
 from scipy import stats
-from spikeinterface.postprocessing.correlograms import (
-    WaveformExtractor,
-    compute_correlograms,
-)
+from spikeinterface.postprocessing.correlograms import compute_correlograms
 
 from spyglass.settings import test_mode
 from spyglass.spikesorting.utils_burst import (
@@ -151,7 +151,7 @@ class BurstPair(SpyglassMixin, dj.Computed):
         logger.warning(f"{msg}: {pk}")  # simplify printed key
         self.insert1(key)
 
-    def _get_waves(self, key: dict) -> WaveformExtractor:
+    def _get_waves(self, key: dict) -> si.WaveformExtractor:
         """Get waveforms for a key, caching the result"""
         key_hash = dj.hash.key_hash(key)
         if cached := self._waves_cache.get(key_hash):
@@ -172,7 +172,7 @@ class BurstPair(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def _get_peak_amps1(
-        waves: WaveformExtractor, unit: int, timestamp_ind: int
+        waves: si.WaveformExtractor, unit: int, timestamp_ind: int
     ):
         """Get peak value for a unit at a given timestamp index"""
         wave = _get_peak_amplitude(
