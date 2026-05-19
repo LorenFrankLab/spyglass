@@ -5,7 +5,6 @@ the CREATE → POPULATE → REGISTER lifecycle for analysis NWB files, preventin
 common user errors like forgetting registration or modifying registered files.
 """
 
-from functools import cached_property
 from typing import Optional, Tuple
 
 import pynwb
@@ -231,12 +230,8 @@ class AnalysisFileBuilder:
 
         This is used internally to ensure that any open NWB file is properly
         closed and written before registration. It can also be called manually
-        if needed (e.g. to finalize changes before registration).
-
-        Raises
-        ------
-        ValueError
-            If no NWB file is currently open
+        if needed (e.g. to finalize changes before registration). If no NWB
+        file is currently open, this method does nothing.
         """
         if self._open_io is None or self._open_nwb is None:
             return
