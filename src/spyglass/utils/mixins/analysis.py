@@ -869,7 +869,7 @@ class AnalysisMixin(BaseMixin):
                 labels=labels,
             )
             io.write(nwbf)
-            return nwbf.units.object_id, waveforms_object_id
+            return units_object_id, waveforms_object_id
 
     def _add_units_to_open_nwb(
         self,
