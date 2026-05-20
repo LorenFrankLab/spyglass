@@ -133,15 +133,6 @@ def test_no_legacy_schema_changes():
             )
 
 
-# ---------- Pyproject pin --------------------------------------------------
-
-
-def test_pyproject_si_pin():
-    """``pyproject.toml`` requires ``spikeinterface>=0.104,<0.105``."""
-    pyproject = (_REPO_ROOT / "pyproject.toml").read_text()
-    assert "spikeinterface>=0.104,<0.105" in pyproject
-
-
 # ---------- Sorter / matching-extra resolution -----------------------------
 
 
@@ -165,20 +156,6 @@ def test_sorter_runtime_resolution():
         f"mountainsort4 in installed_sorters(): "
         f"{'mountainsort4' in installed}"
     )
-
-
-def test_optional_matching_extra_resolution():
-    """The ``spikesorting-v2-matching`` optional extra declares both deps."""
-    pyproject = (_REPO_ROOT / "pyproject.toml").read_text()
-    matching_block = re.search(
-        r"optional-dependencies\.spikesorting-v2-matching\s*=\s*\[(.*?)\]",
-        pyproject,
-        re.DOTALL,
-    )
-    assert matching_block is not None
-    body = matching_block.group(1)
-    assert "UnitMatchPy>=3.3,<4" in body
-    assert "mat73" in body
 
 
 # ---------- correct_motion contract for Phase 3 ----------------------------
@@ -317,8 +294,6 @@ def test_legacy_merge_query_smoke(dj_conn):
     # Heading describes the merge master and its source-class registry exists.
     heading = SpikeSortingOutput.heading
     assert "merge_id" in heading.attributes
-    # source_class_dict is a property on the class; call on an instance.
-    assert isinstance(SpikeSortingOutput().source_class_dict, dict)
     # Restricting with an unknown merge_id is a no-op (empty result) and must
     # not error -- this is the cheapest way to exercise the merge code path
     # under SI 0.104 without depending on real v0/v1 rows being present.

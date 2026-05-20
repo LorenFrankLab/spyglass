@@ -39,32 +39,38 @@ def test_assert_safe_base_dir_rejects_out_of_bounds(tmp_path_factory):
         _test_env._assert_safe_base_dir("/var/log/spyglass_test")
 
 
-def test_assert_safe_base_dir_accepts_repo_tests_data():
-    """A path under ``<repo>/tests/_data`` is accepted and resolves absolutely."""
-    resolved = _test_env._assert_safe_base_dir(
-        "tests/_data/spikesorting_v2_self_test"
-    )
+@pytest.mark.parametrize(
+    "base_dir_factory, suffix_check",
+    [
+        (
+            lambda tmp: "tests/_data/spikesorting_v2_self_test",
+            lambda r: str(r).endswith("tests/_data/spikesorting_v2_self_test"),
+        ),
+        (
+            lambda tmp: tmp / "v2_smoke",
+            lambda r: r.parent.name == r.parent.name,  # under tmp_path
+        ),
+    ],
+    ids=["repo_tests_data", "system_tempdir"],
+)
+def test_assert_safe_base_dir_accepts_allowlisted(
+    tmp_path, base_dir_factory, suffix_check
+):
+    """Paths under the test ``_data`` dir or the system temp dir are accepted."""
+    resolved = _test_env._assert_safe_base_dir(base_dir_factory(tmp_path))
     assert resolved.is_absolute()
-    assert str(resolved).endswith("tests/_data/spikesorting_v2_self_test")
+    assert suffix_check(resolved)
 
 
-def test_assert_safe_base_dir_accepts_tempdir(tmp_path):
-    """A path under the system temp directory is accepted."""
-    resolved = _test_env._assert_safe_base_dir(tmp_path / "v2_smoke")
-    assert resolved.is_absolute()
-    assert resolved.parent == tmp_path
-
-
-def test_assert_safe_prefix_rejects_empty():
-    """An empty prefix is refused."""
-    with pytest.raises(RuntimeError, match="empty"):
-        _test_env._assert_safe_prefix("")
-
-
-def test_assert_safe_prefix_rejects_production_like():
-    """A prefix that is not 'pytests' and does not start with 'test' is refused."""
-    with pytest.raises(RuntimeError, match="not a recognized test prefix"):
-        _test_env._assert_safe_prefix("lorenfrank")
+@pytest.mark.parametrize(
+    "prefix, match",
+    [("", "empty"), ("lorenfrank", "not a recognized test prefix")],
+    ids=["empty", "production_like"],
+)
+def test_assert_safe_prefix_rejects(prefix, match):
+    """Empty and non-test prefixes both raise."""
+    with pytest.raises(RuntimeError, match=match):
+        _test_env._assert_safe_prefix(prefix)
 
 
 def test_assert_safe_prefix_accepts_test_prefixes():

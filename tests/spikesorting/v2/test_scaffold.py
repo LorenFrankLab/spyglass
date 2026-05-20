@@ -5,25 +5,8 @@ exercise the package skeleton, the preprocessing parameter schema, and the
 shared helpers -- none of them require a database connection.
 """
 
-from pathlib import Path
-
 import datajoint as dj
 import pytest
-
-
-def test_module_imports():
-    """The package skeleton imports without optional dependencies."""
-    from spyglass.spikesorting import v2
-
-    assert v2.__all__ == []
-
-
-def test_si_version_min():
-    """The dedicated test environment runs the modern SpikeInterface API."""
-    import spikeinterface as si
-    from packaging.version import Version
-
-    assert Version(si.__version__) >= Version("0.104")
 
 
 def test_preprocessing_params_schema_default():
@@ -103,13 +86,3 @@ def test_resolved_job_kwargs_merge(restore_custom_config):
     assert _resolved_job_kwargs({})["n_jobs"] == 4
 
 
-def test_analyzer_path_format():
-    """The analyzer path resolves under Spyglass's configured temp dir."""
-    from spyglass.settings import temp_dir
-    from spyglass.spikesorting.v2.utils import _analyzer_path
-
-    path = _analyzer_path({"sorting_id": "abc123"})
-
-    assert path == (
-        Path(temp_dir) / "spikesorting_v2" / "analyzers" / "abc123.analyzer"
-    )

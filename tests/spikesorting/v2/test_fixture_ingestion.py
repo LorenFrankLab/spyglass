@@ -22,7 +22,9 @@ _FIXTURE_PATH = (
 def mearec_smoke_ingested(dj_conn):
     """Ingest the generated MEArec smoke fixture into the isolated DB.
 
-    Skips the test cleanly if the generator has not been run on this machine.
+    Also pulls the ground-truth units into ``ImportedSpikeSorting`` so the
+    downstream tests have an assertion-only body. Skips cleanly if the
+    generator has not been run on this machine.
     """
     if not _FIXTURE_PATH.exists():
         pytest.skip(
@@ -30,7 +32,13 @@ def mearec_smoke_ingested(dj_conn):
             "`python tests/spikesorting/v2/fixtures/generate_mearec.py "
             "--smoke` first."
         )
-    yield {"nwb_file_name": copy_and_insert_nwb(_FIXTURE_PATH)}
+    nwb_file_name = copy_and_insert_nwb(_FIXTURE_PATH)
+    from spyglass.spikesorting.imported import ImportedSpikeSorting
+
+    session_key = {"nwb_file_name": nwb_file_name}
+    if not (ImportedSpikeSorting & session_key):
+        ImportedSpikeSorting().insert_from_nwbfile(nwb_file_name)
+    yield session_key
 
 
 @pytest.mark.slow
@@ -82,8 +90,4 @@ def test_mearec_fixture_ingests_ground_truth_units(mearec_smoke_ingested):
     """``ImportedSpikeSorting`` picks up the ground-truth units table."""
     from spyglass.spikesorting.imported import ImportedSpikeSorting
 
-    if not (ImportedSpikeSorting & mearec_smoke_ingested):
-        ImportedSpikeSorting().insert_from_nwbfile(
-            mearec_smoke_ingested["nwb_file_name"]
-        )
     assert len(ImportedSpikeSorting & mearec_smoke_ingested) >= 1

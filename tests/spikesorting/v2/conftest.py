@@ -3,12 +3,11 @@
 The repository-wide ``tests/conftest.py`` defines a session-scoped, autouse
 ``mini_insert`` fixture that starts a Docker MySQL server and ingests the
 shared sample NWB file. The scaffold and pure-helper tests in this package
-exercise Pydantic models, path helpers, and static schema validation only --
-they need neither a database connection nor sample data. This module overrides
-``mini_insert`` with a no-op so those tests run without Docker. Database-tier
-tests in this package (the AnalysisNwbfile-backed hash determinism check and
-the MEArec fixture ingestion round-trip) request the DB-tier fixtures defined
-below directly, and they expect Docker to be available.
+exercise Pydantic models and pure helpers only -- they need neither a
+database connection nor sample data. This module overrides ``mini_insert``
+with a no-op so those tests run without Docker. Database-tier tests
+(the MEArec fixture ingestion round-trip) request ``dj_conn`` directly
+and expect Docker to be available.
 
 The fixture/baseline generator scripts and the standalone bootstrap helper
 are filtered out of collection so pytest does not try to import them as test
@@ -16,12 +15,9 @@ modules (their ``test_`` prefixes are coincidental component names).
 """
 
 import copy
-from pathlib import Path
 
 import datajoint as dj
 import pytest
-
-from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
 
 # These files are scripts and helper modules, not pytest test modules; the
 # leading ``test_`` is part of the component name (the standalone test
@@ -38,10 +34,9 @@ collect_ignore = [
 def mini_insert():
     """No-op override of the repository-wide sample-data ingestion fixture.
 
-    Spike sorting tests in this package that require a database request the
-    ``analysis_nwbfile_for_hash`` fixture (or ``dj_conn`` directly); the
-    scaffold and helper tests do not touch DataJoint at all, so no server or
-    sample data is needed.
+    Tests that need the database request ``dj_conn`` directly; the scaffold
+    and helper tests do not touch DataJoint, so no server or sample data is
+    needed.
     """
     yield
 
@@ -58,30 +53,3 @@ def restore_custom_config():
     dj.config["custom"] = copy.deepcopy(original)
     yield
     dj.config["custom"] = copy.deepcopy(original)
-
-
-@pytest.fixture(scope="session")
-def analysis_nwbfile_for_hash(dj_conn, mini_path):
-    """Create an ``AnalysisNwbfile`` row anchored to the bundled mini NWB.
-
-    Ingests ``minirec20230622.nwb`` into the isolated test database if it is
-    not already present, then creates a fresh ``AnalysisNwbfile`` linked to
-    it. Yields the analysis file name -- the argument
-    ``_hash_nwb_recording`` expects.
-
-    Skips the test cleanly if Docker is unavailable or sample data is missing.
-    """
-    if not Path(mini_path).exists():
-        pytest.skip(f"Sample NWB not found at {mini_path}.")
-
-    from spyglass.common import Nwbfile
-    from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
-
-    parent = get_nwb_copy_filename(mini_path.name)
-    if not (Nwbfile & {"nwb_file_name": parent}):
-        copy_and_insert_nwb(mini_path)
-
-    analysis_file_name = AnalysisNwbfile().create(parent)
-    AnalysisNwbfile().add(parent, analysis_file_name)
-    yield analysis_file_name
