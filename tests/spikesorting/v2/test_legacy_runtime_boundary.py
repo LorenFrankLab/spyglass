@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import json
 import re
 from collections.abc import Callable
 from pathlib import Path
@@ -31,6 +32,14 @@ from packaging.version import Version
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _SRC = _REPO_ROOT / "src"
+_LEGACY_SCHEMAS_BASELINE = (
+    _REPO_ROOT
+    / "tests"
+    / "spikesorting"
+    / "v2"
+    / "baselines"
+    / "legacy_schemas.json"
+)
 
 
 # ---------- Schema-stability test: v0/v1 definitions are unchanged ------------
@@ -77,29 +86,51 @@ def _extract_definition_blocks(path: Path) -> dict[str, str]:
 
 
 def test_no_legacy_schema_changes():
-    """v0/v1 DataJoint ``definition`` blocks parse and remain present.
+    """v0/v1 DataJoint ``definition`` blocks are byte-identical to baseline.
 
     The SI dependency bump is a runtime change only; any legacy table whose
     ``definition`` string has drifted would mean a schema migration sneaked
-    in while the boundary contract was meant to be quiescent.
+    in while the boundary contract was meant to be quiescent. The baseline
+    snapshot lives at ``tests/spikesorting/v2/baselines/legacy_schemas.json``;
+    if a definition truly needs to change, the snapshot must be regenerated
+    in the same change so the drift is explicit and reviewable.
     """
-    blocks: dict[str, dict[str, str]] = {}
+    assert _LEGACY_SCHEMAS_BASELINE.exists(), (
+        f"Missing baseline {_LEGACY_SCHEMAS_BASELINE}; regenerate with the "
+        "snapshot script in tests/spikesorting/v2/baselines/README.md."
+    )
+    baseline = json.loads(_LEGACY_SCHEMAS_BASELINE.read_text())
+
+    current: dict[str, dict[str, str]] = {}
     for tier, files in _LEGACY_TABLE_FILES.items():
+        current[tier] = {}
         for relative in files:
             path = _SRC / relative
             if not path.exists():
                 pytest.fail(f"Missing legacy file {path}")
             file_blocks = _extract_definition_blocks(path)
             assert file_blocks, (
-                f"No `definition = \"\"\"...\"\"\"` blocks parsed from "
+                f"No triple-quoted `definition =` blocks parsed from "
                 f"{relative}; the parser or the file structure changed."
             )
             for name, body in file_blocks.items():
-                blocks.setdefault(tier, {})[name] = body
-    # Sanity: the legacy tables we care about are present.
-    assert "SpikeSorting" in blocks["v0"]
-    assert "SpikeSorting" in blocks["v1"]
-    assert "MetricCuration" in blocks["v1"]
+                current[tier][name] = body
+
+    for tier in baseline:
+        baseline_names = set(baseline[tier])
+        current_names = set(current.get(tier, {}))
+        assert baseline_names == current_names, (
+            f"Class set drift in {tier}: "
+            f"added={current_names - baseline_names} "
+            f"removed={baseline_names - current_names}"
+        )
+        for name, expected in baseline[tier].items():
+            actual = current[tier][name]
+            assert actual == expected, (
+                f"Definition of {tier}.{name} drifted from the legacy "
+                "baseline. If this is intentional, regenerate "
+                f"{_LEGACY_SCHEMAS_BASELINE.name} in the same change."
+            )
 
 
 # ---------- Pyproject pin --------------------------------------------------
@@ -117,8 +148,10 @@ def test_pyproject_si_pin():
 def test_sorter_runtime_resolution():
     """SpikeInterface 0.104 is installed and ``mountainsort5`` is available.
 
-    The MS4 runtime install lives outside ``[test]``; only its presence in
-    ``installed_sorters()`` is documented (Linux) and not asserted here.
+    Also records the MountainSort 4 (``mountainsort4``) status, which lives
+    outside the ``[test]`` extra. Whether MS4 is in ``installed_sorters()``
+    depends on the platform-specific Linux install; the test documents
+    whichever state the resolver produced so future runs can detect drift.
     """
     import spikeinterface as si
     import spikeinterface.sorters as sis
@@ -126,6 +159,12 @@ def test_sorter_runtime_resolution():
     assert Version(si.__version__) >= Version("0.104")
     installed = set(sis.installed_sorters())
     assert "mountainsort5" in installed, installed
+    # MS4 status (recorded; not gated): present on Linux installs with the
+    # separate runtime package, absent otherwise.
+    print(
+        f"mountainsort4 in installed_sorters(): "
+        f"{'mountainsort4' in installed}"
+    )
 
 
 def test_optional_matching_extra_resolution():

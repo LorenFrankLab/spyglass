@@ -265,6 +265,53 @@ Plan-phase vocabulary is fine here (this is a plan document). Last updated
     `mearec_polymer_128ch_drift_120s`) — the generator is verified end to
     end via `--smoke`; running the full profile is left for the consumer.
 
+## Phase 1 carry-in from the Phase 0c independent review
+
+Items the independent code review surfaced that Phase 1 should address (or
+explicitly defer with a recorded justification). Not blocking the Phase 0c
+APPROVE rating; not yet filed as upstream GitHub issues unless noted.
+
+- **`probeinterface` space-check follow-up.** The legacy `probeinterface<0.3`
+  pin was bumped to `>=0.3.2` because SI 0.104 requires it. The previous
+  pin carried the comment "Bc some probes fail space checks"; no record of
+  which probes triggered that failure. Phase 1 lands `SortGroupV2` /
+  `Recording` and consumes probeinterface for shank/electrode assignment.
+  File an upstream issue capturing the lab's affected probe types and verify
+  whichever Phase 1 probe-coverage smoke proves the path still works.
+- **`spikeinterface.qualitymetrics` -> `spikeinterface.metrics.quality`
+  rename.** The legacy module path emits `DeprecationWarning` in 0.104 and
+  is removed in 0.105. Three files still import it
+  (`v1/metric_curation.py`, `v1/metric_utils.py`,
+  `v0/spikesorting_curation.py`). The current `<0.105` pin keeps the legacy
+  path alive. Any future widening of the SI pin must rename these imports
+  first. File an upstream issue so the rename is tracked, not buried in this
+  scratchpad.
+- **`test_optional_matching_extra_resolution`.** Currently a text-only
+  check of `pyproject.toml`. The plan's intent ("resolves without NumPy
+  incompatibility; UnitMatchPy import guard produces a clear message")
+  requires an actual install + import probe. Phase 1 either (a) installs
+  the extra into the resolver venv and adds an import assertion, or (b)
+  downgrades the validation spec with an explicit "intent: text-only"
+  justification. Until then, the test gives a false sense of coverage.
+- **`test_legacy_merge_query_smoke` per-dispatch coverage.** Phase 0c's
+  smoke restricts on a nonexistent UUID; it does not exercise
+  `SpikeSortingOutput.get_recording / get_sorting / get_spike_times`
+  per-version dispatch. Phase 1 lands the `CurationV2` part on
+  `SpikeSortingOutput`; its tests should extend this smoke to fetch
+  through each dispatch method on a v2 row.
+- **3.10 / 3.12 CI matrix gap.** The project's `requires-python` claims
+  support for 3.10, 3.11, and 3.12. Only 3.11 was resolver-tested in
+  Phase 0c (user-selected scope). The default v1 CI job runs on 3.10 under
+  legacy SI 0.99; no SI 0.104 CI job exercises 3.10 or 3.12. Phase 1
+  should evaluate adding 3.10 to the `pytest-v2` CI matrix before merge,
+  given NumPy 2.x extension-boundary risk.
+- **`FigurlCuration` UX gap.** Not guarded under the strict boundary
+  because its `make_compute` doesn't directly call a removed API, but the
+  upstream `MetricCuration` is guarded. Under SI 0.104, `FigurlCuration`
+  populate silently no-ops on an empty upstream selection rather than
+  raising the helpful legacy-environment error. Acceptable for now (no
+  data corruption, just a quiet skip); flag if a lab user trips on it.
+
 ## Open items / follow-ups
 
 - **v1 recompute test errors** — the 4 `test_recompute.py` setup errors above
