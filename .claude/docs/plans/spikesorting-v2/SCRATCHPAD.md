@@ -202,7 +202,13 @@ Plan-phase vocabulary is fine here (this is a plan document). Last updated
   `e5f4928a` SI-0.104 annotation deferral for v0/v1 spike sorting,
   `75d32152` MEArec ground-truth fixture infrastructure, `240911ef` drop
   scratchpad pointer to removed incident artifact, `57b52545` v1 baseline
-  capture + DB-tier v2 tests.
+  capture + DB-tier v2 tests, `291c6c0c` validation cleanup +
+  `NwbfileHasher` upstream `#1597` cross-reference, `b29b90cf`
+  ``/simplify`` pass (centralised the copy-and-insert ingest helper,
+  switched the converter to accept a ``ProbeLayout`` directly, dropped
+  the dead ``brain_region_map`` parameter and ``layout_for_fixture``
+  substring routing, collapsed smoke/full profile branching into a
+  single ``_profiles()`` mapping, trimmed WHAT-comments).
 - **Pytest validation under SI 0.104 + Docker**: `pytest tests/spikesorting/v2/`
   is **19 passed, 0 failed** (107 s). Goals 1 (hash determinism), 2 (MEArec
   fixture round-trip), and 4 (standalone-script isolation guards) are
