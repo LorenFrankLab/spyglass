@@ -191,5 +191,8 @@ docs/src/GettingStarted/QUICKSTART.md
 !docs/src/images/*png
 temp*
 
+# MEArec scratch (written to CWD by gen_templates)
+tmp_params_path.yaml
+
 # Version
 _version.py
