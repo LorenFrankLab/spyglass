@@ -172,8 +172,10 @@ for label, interval_data in results.groupby("interval_labels"):
     fixtures are regenerated locally or in CI and are not committed
 - **Move the Spyglass SpikeInterface pin to `>=0.104,<0.105`.** Forced
     bump of `probeinterface` to `>=0.3.2` (SI 0.104 requires it; the legacy
-    "some probes fail space checks" comment behind the previous `<0.3` pin
-    needs re-verification). Adds `mountainsort5>=0.5` and a
+    "some probes fail space checks" caveat is empirically retired -- the
+    lab's tetrode, LLNL polymer, and Neuropixels probe geometries all
+    build, roundtrip, and ingest through Spyglass under probeinterface
+    0.3.2 + SI 0.104). Adds `mountainsort5>=0.5` and a
     `spikesorting-v2-matching` optional extra (`UnitMatchPy>=3.3,<4`,
     `mat73`). v0/v1 DataJoint schemas are unchanged and existing rows
     remain queryable through `SpikeSortingOutput`, but **active v0/v1

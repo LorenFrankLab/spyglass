@@ -271,21 +271,24 @@ Items the independent code review surfaced that Phase 1 should address (or
 explicitly defer with a recorded justification). Not blocking the Phase 0c
 APPROVE rating; not yet filed as upstream GitHub issues unless noted.
 
-- **`probeinterface` space-check follow-up.** The legacy `probeinterface<0.3`
-  pin was bumped to `>=0.3.2` because SI 0.104 requires it. The previous
-  pin carried the comment "Bc some probes fail space checks"; no record of
-  which probes triggered that failure. Phase 1 lands `SortGroupV2` /
-  `Recording` and consumes probeinterface for shank/electrode assignment.
-  File an upstream issue capturing the lab's affected probe types and verify
-  whichever Phase 1 probe-coverage smoke proves the path still works.
+- **`probeinterface` space-check follow-up — resolved.** Probeinterface 0.3.2
+  was empirically verified against the lab's probe families (Frank-lab
+  tetrode; LLNL polymer 128c-4s6mm6cm; Neuropixels-128-sim): each builds,
+  JSON-roundtrips, and attaches to an SI 0.104 recording via
+  `set_probe()`. Live ingestion evidence: `pytest tests/spikesorting/v2/`
+  is 35/35 green, exercising both `mini_insert` minirec (tetrode) and the
+  MEArec polymer fixture round-trip through `insert_sessions` (`Probe`,
+  `ProbeType`, `Probe.Shank`, `Probe.Electrode` all populated). The
+  pyproject comment and CHANGELOG caveat are retired. Recorded in
+  `tests/spikesorting/v2/resolver/si0104-runtime.md`.
 - **`spikeinterface.qualitymetrics` -> `spikeinterface.metrics.quality`
-  rename.** The legacy module path emits `DeprecationWarning` in 0.104 and
-  is removed in 0.105. Three files still import it
-  (`v1/metric_curation.py`, `v1/metric_utils.py`,
-  `v0/spikesorting_curation.py`). The current `<0.105` pin keeps the legacy
-  path alive. Any future widening of the SI pin must rename these imports
-  first. File an upstream issue so the rename is tracked, not buried in this
-  scratchpad.
+  rename — resolved.** The three import sites
+  (`v0/spikesorting_curation.py`, `v1/metric_curation.py`,
+  `v1/metric_utils.py`) now use the new module path; importing them no
+  longer emits the SI 0.105 DeprecationWarning. The `getattr(sq, X, None)`
+  lazy wrappers and the guarded `make_compute` paths continue to behave
+  identically because the new and legacy modules expose the same set of
+  present/absent names under 0.104.
 - **`test_optional_matching_extra_resolution`.** Currently a text-only
   check of `pyproject.toml`. The plan's intent ("resolves without NumPy
   incompatibility; UnitMatchPy import guard produces a clear message")

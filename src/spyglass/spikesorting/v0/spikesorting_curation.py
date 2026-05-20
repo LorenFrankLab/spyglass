@@ -25,7 +25,7 @@ if not LabMember().user_is_admin and version.parse(
     )
 
 import spikeinterface.preprocessing as sip
-import spikeinterface.qualitymetrics as sq
+import spikeinterface.metrics.quality as sq
 
 from spyglass.common import BrainRegion, Electrode
 from spyglass.common.common_interval import IntervalList

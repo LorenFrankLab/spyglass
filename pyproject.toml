@@ -60,7 +60,7 @@ dependencies = [
   "opencv-python",
   "panel>=1.4",
   "position-tools>=0.1",
-  "probeinterface>=0.3.2",         # SI 0.104 requires this; legacy probe space-check issue must be re-verified
+  "probeinterface>=0.3.2",         # required by spikeinterface 0.104
   "pubnub<6.4",                    # TODO: remove this when sortingview is updated
   "pydotplus",
   "pynwb>=3.1.3",

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import spikeinterface as si
-import spikeinterface.qualitymetrics as sq
+import spikeinterface.metrics.quality as sq
 
 
 def compute_isi_violation_fractions(

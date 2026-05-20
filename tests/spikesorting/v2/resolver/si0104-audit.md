@@ -157,6 +157,10 @@ Recorded in [`si0104-runtime.md`](si0104-runtime.md). Key surprises:
 
 - The legacy `probeinterface<0.3` pin in `pyproject.toml` conflicts with
   `spikeinterface>=0.104`'s requirement `probeinterface>=0.3.2`. Updated
-  to `probeinterface>=0.3.2` so the resolver succeeds. The pre-bump
-  comment ("Bc some probes fail space checks") needs re-verification
-  against probeinterface 0.3.x; recorded as a follow-up.
+  to `probeinterface>=0.3.2`; the pre-bump "probes fail space checks"
+  caveat is empirically retired (tetrode + LLNL polymer + Neuropixels-128
+  probes all build / JSON-roundtrip / attach to SI 0.104 recordings; live
+  ingestion via `pytest tests/spikesorting/v2/` succeeds on both
+  minirec tetrodes and the MEArec polymer fixture). See
+  [`si0104-runtime.md`](si0104-runtime.md) for the probe-family
+  evidence.

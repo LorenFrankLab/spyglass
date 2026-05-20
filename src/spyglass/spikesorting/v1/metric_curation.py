@@ -9,7 +9,7 @@ import numpy as np
 import pynwb
 import spikeinterface as si
 import spikeinterface.preprocessing as sp
-import spikeinterface.qualitymetrics as sq
+import spikeinterface.metrics.quality as sq
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.settings import temp_dir

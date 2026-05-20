@@ -42,6 +42,14 @@
 
 `uv pip install -e ".[test]"` resolved on Python 3.11 without `--upgrade` overrides. Initial attempt failed because the legacy `probeinterface<0.3` pin conflicts with `spikeinterface>=0.104`'s requirement `probeinterface>=0.3.2`; the pin was updated to `probeinterface>=0.3.2`. No further conflicts.
 
+The pre-bump comment behind the `<0.3` pin ("Bc some probes fail space checks") is empirically retired by probeinterface 0.3.2:
+
+- **Frank-lab tetrode** (4 contacts, ~12.5 um pitch): builds, JSON-roundtrips via `write_probeinterface` / `read_probeinterface`, and attaches to a generated SI 0.104 recording via `recording.set_probe(...)`.
+- **LLNL polymer 128c-4s6mm6cm-15um-26um-sl** (4 shanks × 32 contacts, the current implant): same.
+- **Neuropixels-128-sim** (1 shank, 2-col staggered): same.
+
+Live ingestion evidence: `pytest tests/spikesorting/v2/` is 35/35 green and exercises (a) `mini_insert` of `minirec20230622.nwb` (Frank-lab tetrode) and (b) the MEArec polymer fixture round-trip through `insert_sessions` (128-ch 4-shank polymer). Both populate `Probe`, `ProbeType`, `Probe.Shank`, and `Probe.Electrode` without errors.
+
 ## Sorter availability (Linux x86_64)
 
 - `mountainsort5` installs via the project dependency and registers in `installed_sorters()`. **MS5 is not deterministic**; resolver/runtime checks prove availability only, not repeatable spike-time output.
