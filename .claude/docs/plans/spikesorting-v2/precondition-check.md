@@ -2,6 +2,8 @@
 
 Static-analysis findings from `code_graph.py describe <table>` run against every Spyglass FK target the v2 schema relies on. Captured at plan time so the Phase 0 implementer can compare against the current state and catch upstream drift.
 
+> **Slice 1a update**: `src/spyglass/spikesorting/v2/_draft.py` was deleted when the real `@schema`-decorated runtime modules (`recording.py`, `artifact.py`, `session_group.py`, `sorting.py`, `curation.py`) landed in slice 1a. The `--file spyglass/spikesorting/v2/_draft.py` example commands below remain as the historical Phase 0 invocation; current `code_graph.py` walks should target the runtime module files. The accounted `heuristic_resolution` ambiguities (AnalysisNwbfile common-vs-custom; v0/v1/v2 ArtifactDetection same-name) still apply and are confirmed against the runtime modules.
+
 Run command: `python /Users/edeno/Documents/GitHub/spyglass-skill/skills/spyglass/scripts/code_graph.py --src src describe <name> [--file <path-relative-to-src>]` (or the equivalent installed Spyglass-skill `scripts/code_graph.py` path).
 
 For draft-schema walks, use paths relative to `--src src`, for example:
