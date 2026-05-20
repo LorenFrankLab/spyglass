@@ -36,7 +36,6 @@ import argparse
 import json
 import os
 import pickle
-import shutil
 import sys
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
@@ -47,6 +46,7 @@ _THIS_DIR = Path(__file__).resolve().parent
 if str(_THIS_DIR) not in sys.path:
     sys.path.insert(0, str(_THIS_DIR))
 
+from _ingest_helpers import copy_and_insert_nwb  # noqa: E402
 from test_env import bootstrap_v2_test_environment  # noqa: E402
 
 _DEFAULT_BASE_DIR = "tests/_data/spikesorting_v2"
@@ -61,33 +61,6 @@ def _resolve_nwb(args: argparse.Namespace) -> Path | None:
     if not candidate:
         return None
     return Path(candidate).expanduser()
-
-
-def _ingest_nwb(nwb_path: Path) -> str:
-    """Copy the NWB into ``$SPYGLASS_RAW_DIR`` and ingest it.
-
-    Parameters
-    ----------
-    nwb_path : pathlib.Path
-        Source NWB file. Copied (not linked) into the isolated raw directory.
-
-    Returns
-    -------
-    str
-        The Spyglass ``nwb_file_name`` (filename inserted into ``Nwbfile``,
-        which appends a trailing underscore to the source file's basename).
-    """
-    from spyglass.common import Nwbfile
-    from spyglass.data_import import insert_sessions
-    from spyglass.settings import raw_dir
-
-    raw_target = Path(raw_dir) / nwb_path.name
-    if not raw_target.exists():
-        shutil.copy(nwb_path, raw_target)
-    insert_sessions(nwb_path.name, raise_err=True, reinsert=True)
-    return (Nwbfile & f"nwb_file_name LIKE '{nwb_path.stem}%'").fetch1(
-        "nwb_file_name"
-    )
 
 
 def _ensure_sort_group(nwb_file_name: str, sort_group_id: int) -> None:
@@ -283,7 +256,7 @@ def run_baseline_capture(
     spikes_path, meta_path : pathlib.Path
         The two written artifacts.
     """
-    nwb_file_name = _ingest_nwb(nwb_source)
+    nwb_file_name = copy_and_insert_nwb(nwb_source)
     _ensure_sort_group(nwb_file_name, sort_group_id)
     recording_pk = _populate_recording(
         nwb_file_name=nwb_file_name,
@@ -300,10 +273,9 @@ def run_baseline_capture(
     curation_pk = _insert_curation(sorting_pk["sorting_id"])
 
     spike_times, sampling_frequency = _read_spike_times(curation_pk)
-    duration_s = (
-        max(times[-1] for times in spike_times.values() if len(times)) - 0.0
-        if any(len(times) for times in spike_times.values())
-        else 0.0
+    duration_s = max(
+        (times[-1] for times in spike_times.values() if len(times)),
+        default=0.0,
     )
 
     metadata = {

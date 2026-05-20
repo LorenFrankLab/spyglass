@@ -21,6 +21,8 @@ from pathlib import Path
 import datajoint as dj
 import pytest
 
+from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
+
 # These files are scripts and helper modules, not pytest test modules; the
 # leading ``test_`` is part of the component name (the standalone test
 # environment bootstrap). Excluding them keeps ``--doctest-modules`` from
@@ -74,14 +76,11 @@ def analysis_nwbfile_for_hash(dj_conn, mini_path):
 
     from spyglass.common import Nwbfile
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.data_import import insert_sessions
+    from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
 
-    mini_dict = {"nwb_file_name": f"{mini_path.stem}_.nwb"}
-    if not (Nwbfile & mini_dict):
-        insert_sessions(mini_path.name, raise_err=True, reinsert=True)
-    parent = (Nwbfile & f"nwb_file_name LIKE '{mini_path.stem}%'").fetch1(
-        "nwb_file_name"
-    )
+    parent = get_nwb_copy_filename(mini_path.name)
+    if not (Nwbfile & {"nwb_file_name": parent}):
+        copy_and_insert_nwb(mini_path)
 
     analysis_file_name = AnalysisNwbfile().create(parent)
     AnalysisNwbfile().add(parent, analysis_file_name)

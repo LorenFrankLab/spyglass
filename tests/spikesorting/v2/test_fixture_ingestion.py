@@ -1,20 +1,16 @@
-"""Pytest counterpart to the fixture-generator's ingestion round-trip.
+"""Round-trip the generated MEArec smoke fixture through Spyglass ingestion.
 
-``generate_mearec.py`` already calls ``_verify_ingestion`` inline after writing
-each fixture, but the validation contract names it as a pytest validation goal
-so a ``pytest tests/spikesorting/v2/`` run can formally check it. The test
-skips cleanly if the generator has not yet been run on this machine.
-
-Database-tier (slow): needs Docker, the generated fixture NWB, and the v2
-``_fixtures`` helpers to know the layout the NWB was built from.
+Skips cleanly if the fixture NWB is not on disk (it is not committed; the
+generator script writes it locally or in CI).
 """
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 import pytest
+
+from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
 
 _FIXTURE_NAME = "mearec_polymer_smoke"
 _FIXTURE_PATH = (
@@ -26,8 +22,7 @@ _FIXTURE_PATH = (
 def mearec_smoke_ingested(dj_conn):
     """Ingest the generated MEArec smoke fixture into the isolated DB.
 
-    Skips the test cleanly if the generator has not been run on this machine
-    (the fixture NWB is not committed to git; it is regenerated locally).
+    Skips the test cleanly if the generator has not been run on this machine.
     """
     if not _FIXTURE_PATH.exists():
         pytest.skip(
@@ -35,19 +30,7 @@ def mearec_smoke_ingested(dj_conn):
             "`python tests/spikesorting/v2/fixtures/generate_mearec.py "
             "--smoke` first."
         )
-
-    from spyglass.common import Nwbfile
-    from spyglass.data_import import insert_sessions
-    from spyglass.settings import raw_dir
-
-    raw_target = Path(raw_dir) / _FIXTURE_PATH.name
-    if not raw_target.exists():
-        shutil.copy(_FIXTURE_PATH, raw_target)
-    insert_sessions(_FIXTURE_PATH.name, raise_err=True, reinsert=True)
-    nwb_file_name = (
-        Nwbfile & f"nwb_file_name LIKE '{_FIXTURE_PATH.stem}%'"
-    ).fetch1("nwb_file_name")
-    yield {"nwb_file_name": nwb_file_name}
+    yield {"nwb_file_name": copy_and_insert_nwb(_FIXTURE_PATH)}
 
 
 @pytest.mark.slow

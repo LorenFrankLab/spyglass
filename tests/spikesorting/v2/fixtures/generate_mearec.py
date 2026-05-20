@@ -30,7 +30,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import shutil
 import sys
 import tempfile
 import time
@@ -106,80 +105,76 @@ class GenProfile:
     template_n_jobs: int
 
 
-_FULL_PROFILE = GenProfile(
-    name="full",
-    n_templates_per_model=30,
-    template_n_jobs=-1,
-)
-_SMOKE_PROFILE = GenProfile(
-    name="smoke",
-    n_templates_per_model=2,
-    template_n_jobs=-1,
-)
+def _profiles() -> dict[str, tuple[GenProfile, tuple[FixtureSpec, ...]]]:
+    """Return ``{profile_name: (GenProfile, (FixtureSpec, ...))}`` mapping.
 
-
-def _fixture_specs(smoke: bool) -> list[FixtureSpec]:
-    """Return the fixture specs for a run.
-
-    Parameters
-    ----------
-    smoke : bool
-        If True, return a single tiny polymer fixture.
-
-    Returns
-    -------
-    list[FixtureSpec]
+    Defined as a function rather than a module-level constant because building
+    a ``ProbeLayout`` imports from ``spyglass.spikesorting.v2._fixtures``,
+    which must happen only after ``bootstrap_v2_test_environment`` has run.
     """
     from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import (
         neuropixels_probe_layout,
         polymer_probe_layout,
     )
 
-    if smoke:
-        return [
-            FixtureSpec(
-                name="mearec_polymer_smoke",
-                layout=polymer_probe_layout(),
-                duration_s=4.0,
-                n_exc=4,
-                n_inh=2,
-                drifting=False,
-                drift_um_per_min=0.0,
-                seed=0,
-            )
-        ]
-    return [
-        FixtureSpec(
-            name="mearec_polymer_128ch_60s",
-            layout=polymer_probe_layout(),
-            duration_s=60.0,
-            n_exc=17,
-            n_inh=7,
-            drifting=False,
-            drift_um_per_min=0.0,
-            seed=0,
+    polymer = polymer_probe_layout()
+    neuropixels = neuropixels_probe_layout()
+    return {
+        "smoke": (
+            GenProfile(
+                name="smoke", n_templates_per_model=2, template_n_jobs=-1
+            ),
+            (
+                FixtureSpec(
+                    name="mearec_polymer_smoke",
+                    layout=polymer,
+                    duration_s=4.0,
+                    n_exc=4,
+                    n_inh=2,
+                    drifting=False,
+                    drift_um_per_min=0.0,
+                    seed=0,
+                ),
+            ),
         ),
-        FixtureSpec(
-            name="mearec_neuropixels_60s",
-            layout=neuropixels_probe_layout(),
-            duration_s=60.0,
-            n_exc=14,
-            n_inh=6,
-            drifting=False,
-            drift_um_per_min=0.0,
-            seed=1,
+        "full": (
+            GenProfile(
+                name="full", n_templates_per_model=30, template_n_jobs=-1
+            ),
+            (
+                FixtureSpec(
+                    name="mearec_polymer_128ch_60s",
+                    layout=polymer,
+                    duration_s=60.0,
+                    n_exc=17,
+                    n_inh=7,
+                    drifting=False,
+                    drift_um_per_min=0.0,
+                    seed=0,
+                ),
+                FixtureSpec(
+                    name="mearec_neuropixels_60s",
+                    layout=neuropixels,
+                    duration_s=60.0,
+                    n_exc=14,
+                    n_inh=6,
+                    drifting=False,
+                    drift_um_per_min=0.0,
+                    seed=1,
+                ),
+                FixtureSpec(
+                    name="mearec_polymer_128ch_drift_120s",
+                    layout=polymer,
+                    duration_s=120.0,
+                    n_exc=17,
+                    n_inh=7,
+                    drifting=True,
+                    drift_um_per_min=5.0,
+                    seed=2,
+                ),
+            ),
         ),
-        FixtureSpec(
-            name="mearec_polymer_128ch_drift_120s",
-            layout=polymer_probe_layout(),
-            duration_s=120.0,
-            n_exc=17,
-            n_inh=7,
-            drifting=True,
-            drift_um_per_min=5.0,
-            seed=2,
-        ),
-    ]
+    }
 
 
 def _sha256(path: Path) -> str:
@@ -438,27 +433,13 @@ def _verify_ingestion(nwb_path: Path, spec: FixtureSpec) -> dict:
     AssertionError
         If any expected ingestion result is missing.
     """
-    from spyglass.common import (
-        Electrode,
-        IntervalList,
-        Nwbfile,
-        Raw,
-        Session,
-    )
+    from spyglass.common import Electrode, IntervalList, Raw, Session
     from spyglass.common.common_device import Probe, ProbeType
-    from spyglass.data_import import insert_sessions
-    from spyglass.settings import raw_dir
     from spyglass.spikesorting.imported import ImportedSpikeSorting
 
-    raw_target = Path(raw_dir) / nwb_path.name
-    if not raw_target.exists():
-        shutil.copy(nwb_path, raw_target)
+    from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
 
-    insert_sessions(nwb_path.name, raise_err=True, reinsert=True)
-
-    nwb_file_name = (Nwbfile & f"nwb_file_name LIKE '{nwb_path.stem}%'").fetch1(
-        "nwb_file_name"
-    )
+    nwb_file_name = copy_and_insert_nwb(nwb_path)
     session_key = {"nwb_file_name": nwb_file_name}
 
     assert len(Session & session_key) == 1, "Session row missing"
@@ -506,7 +487,7 @@ def _verify_ingestion(nwb_path: Path, spec: FixtureSpec) -> dict:
 def generate_fixtures(
     base_dir: Path,
     *,
-    smoke: bool,
+    profile_name: str,
     skip_ingestion: bool,
 ) -> Path:
     """Generate every fixture for a run and write the provenance manifest.
@@ -515,8 +496,8 @@ def generate_fixtures(
     ----------
     base_dir : pathlib.Path
         Resolved Spyglass base directory.
-    smoke : bool
-        Use the cheap smoke profile and the single tiny fixture.
+    profile_name : str
+        Key into ``_profiles()`` -- ``"smoke"`` or ``"full"``.
     skip_ingestion : bool
         Skip the Spyglass ingestion round-trip (geometry/conversion only).
 
@@ -527,8 +508,7 @@ def generate_fixtures(
     """
     from importlib.metadata import version as _pkg_version
 
-    profile = _SMOKE_PROFILE if smoke else _FULL_PROFILE
-    specs = _fixture_specs(smoke)
+    profile, specs = _profiles()[profile_name]
     fixtures_dir = _THIS_DIR
     work_dir = base_dir / "mearec_work"
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -540,6 +520,10 @@ def generate_fixtures(
         "spikeinterface_version": _pkg_version("spikeinterface"),
         "fixtures": {},
     }
+
+    from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import (
+        mearec_to_spyglass_nwb,
+    )
 
     for spec in specs:
         print(f"[{spec.name}]")
@@ -563,12 +547,11 @@ def generate_fixtures(
         )
         _generate_recording(spec, templates_h5, recording_h5)
 
-        from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import (
-            mearec_to_spyglass_nwb,
-        )
-
         mearec_to_spyglass_nwb(
-            recording_h5, nwb_path, fixture_name=spec.name
+            recording_h5,
+            nwb_path,
+            fixture_name=spec.name,
+            probe_layout=spec.layout,
         )
         print(f"  nwb: wrote {nwb_path.name}")
 
@@ -644,7 +627,7 @@ def main(argv: list[str] | None = None) -> int:
 
     generate_fixtures(
         Path(resolved_base_dir),
-        smoke=args.smoke,
+        profile_name="smoke" if args.smoke else "full",
         skip_ingestion=args.skip_ingestion,
     )
     return 0

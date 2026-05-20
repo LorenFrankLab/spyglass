@@ -172,34 +172,6 @@ def neuropixels_probe_layout() -> ProbeLayout:
     )
 
 
-def layout_for_fixture(fixture_name: str) -> ProbeLayout:
-    """Return the probe layout for a fixture, chosen by name.
-
-    Parameters
-    ----------
-    fixture_name : str
-        Fixture name; ``"polymer"`` or ``"neuropixels"`` must appear in it.
-
-    Returns
-    -------
-    ProbeLayout
-
-    Raises
-    ------
-    ValueError
-        If the fixture name does not name a known probe family.
-    """
-    lowered = fixture_name.lower()
-    if "polymer" in lowered:
-        return polymer_probe_layout()
-    if "neuropixels" in lowered:
-        return neuropixels_probe_layout()
-    raise ValueError(
-        f"Cannot infer a probe layout from fixture name {fixture_name!r}; "
-        "expected 'polymer' or 'neuropixels' to appear in the name."
-    )
-
-
 @dataclass
 class _GroundTruth:
     """Ground-truth units extracted from a MEArec recording generator."""
@@ -239,7 +211,9 @@ def _read_recording_traces(mearec_h5_path: Path) -> tuple[np.ndarray, float]:
     except (TypeError, ValueError):
         # Extractor without a uV gain: fall back to native units.
         traces = recording.get_traces()
-    return np.asarray(traces, dtype=np.float32), sampling_frequency
+    if traces.dtype != np.float32:
+        traces = traces.astype(np.float32, copy=False)
+    return traces, sampling_frequency
 
 
 def _read_ground_truth(mearec_h5_path: Path) -> _GroundTruth:
@@ -408,7 +382,6 @@ def _add_probe_and_electrodes(
         probe.add_shank(shank)
     nwbfile.add_device(probe)
 
-    # Default electrode columns, one row per contact, in contact order.
     for contact in layout.contacts:
         nwbfile.add_electrode(
             location=targeted_location,
@@ -566,7 +539,8 @@ def mearec_to_spyglass_nwb(
     out_nwb_path: Path | str,
     *,
     fixture_name: str,
-    brain_region_map: dict[int, str] | None = None,
+    probe_layout: ProbeLayout,
+    targeted_location: str = "Unknown",
 ) -> None:
     """Convert a MEArec recording into a Spyglass-ingestible NWB file.
 
@@ -577,49 +551,43 @@ def mearec_to_spyglass_nwb(
     out_nwb_path : pathlib.Path or str
         Destination NWB path. Overwritten if it exists.
     fixture_name : str
-        Fixture name; the probe family (``polymer`` / ``neuropixels``) is
-        inferred from it and it is recorded as the NWB ``session_id``.
-    brain_region_map : dict[int, str], optional
-        Maps shank index to brain region name. Because the NWB stays
-        ``trodes_to_nwb``-compatible -- one ``ElectrodeGroup`` for the whole
-        probe -- it cannot encode per-shank regions. When given, the region of
-        the lowest shank index is used as the single electrode-group
-        ``location`` (the default region for every electrode at ingestion).
-        Genuine multi-region tracing is set up after ingestion by overriding
-        ``Electrode.region_id`` per ``probe_shank``; this argument does not
-        split the probe into multiple electrode groups.
+        Fixture name, recorded as the NWB ``session_id`` and used to derive
+        the file ``identifier``.
+    probe_layout : ProbeLayout
+        Probe geometry the recording was simulated against. The MEArec
+        channel count must match ``layout.n_contacts``.
+    targeted_location : str, optional
+        Brain region recorded as the single ``NwbElectrodeGroup.location``
+        and used at ingestion as every electrode's default region. The
+        ``trodes_to_nwb``-compatible NWB cannot encode per-shank regions;
+        multi-region tracing is set up after ingestion by overriding
+        ``Electrode.region_id`` per ``probe_shank``.
 
     Raises
     ------
     ValueError
-        If the MEArec channel count does not match the inferred probe layout.
+        If the MEArec channel count does not match the layout.
     RuntimeError
         If NWBInspector reports a blocking finding on the written file.
     """
     mearec_h5_path = Path(mearec_h5_path)
     out_nwb_path = Path(out_nwb_path)
-    layout = layout_for_fixture(fixture_name)
 
     traces, sampling_frequency = _read_recording_traces(mearec_h5_path)
-    if traces.shape[1] != layout.n_contacts:
+    if traces.shape[1] != probe_layout.n_contacts:
         raise ValueError(
             f"MEArec recording {mearec_h5_path} has {traces.shape[1]} "
-            f"channels, but the {layout.probe_type} layout has "
-            f"{layout.n_contacts} contacts. Generate the recording with the "
-            "matching probe geometry."
+            f"channels, but the {probe_layout.probe_type} layout has "
+            f"{probe_layout.n_contacts} contacts. Generate the recording "
+            "with the matching probe geometry."
         )
     ground_truth = _read_ground_truth(mearec_h5_path)
-
-    if brain_region_map:
-        targeted_location = brain_region_map[min(brain_region_map)]
-    else:
-        targeted_location = "Unknown"
 
     nwbfile = _build_nwbfile(
         fixture_name=fixture_name,
         session_start=datetime(2023, 6, 22, 12, 0, 0, tzinfo=timezone.utc),
     )
-    _add_probe_and_electrodes(nwbfile, layout, targeted_location)
+    _add_probe_and_electrodes(nwbfile, probe_layout, targeted_location)
     _add_raw_ephys(nwbfile, traces, sampling_frequency)
     _add_ground_truth_units(nwbfile, ground_truth)
 
