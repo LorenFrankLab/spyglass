@@ -12,7 +12,11 @@ import datajoint as dj
 import yaml
 
 from spyglass.utils import SpyglassMixin, logger
-from spyglass.utils.git_utils import get_install_info
+from spyglass.utils.git_utils import (
+    WARN_DIRTY_ENV_DAYS,
+    get_install_info,
+    warn_if_dirty,
+)
 
 schema = dj.schema("common_user")
 
@@ -385,6 +389,8 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
     @cached_property
     def this_env(self) -> Optional[dict]:
         """Return the environment key. Cached to avoid rerunning insert."""
+        if not UserEnvironment._env_warned:
+            warn_if_dirty(get_install_info())
         if self.matching_env_id:
             return {"env_id": self.matching_env_id}
         del self.matching_env_id  # clear the cached property
@@ -477,6 +483,76 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
                 dirty = dirty & f"env_id NOT IN ({ids})"
 
         return dirty.proj(..., days_since_warn="DATEDIFF(NOW(), `timestamp`)")
+
+    def write_dirty_notifications(self, out_path: str = None) -> None:
+        """Write overdue dirty-install rows to out_path (or stdout if None).
+
+        Produces one tab-separated line per user where ``days_since_warn``
+        exceeds ``WARN_DIRTY_ENV_DAYS``:
+
+            user_email\\tdays_since_warn\\tspyglass_commit\\tdirty_path
+
+        Called by ``maintenance_scripts/cleanup.py``; output is consumed by
+        ``run_jobs.sh`` which sends emails via ``email_utils.sh``.  Users with
+        no ``LabMember.LabMemberInfo`` email record are skipped with a message
+        to stderr.
+
+        Parameters
+        ----------
+        out_path : str, optional
+            Destination file path.  Writes to stdout when ``None``.
+        """
+        import sys
+
+        from spyglass.common.common_lab import LabMember
+
+        overdue = [
+            row
+            for row in self.dirty_installs().fetch(as_dict=True)
+            if row["days_since_warn"] >= WARN_DIRTY_ENV_DAYS
+        ]
+        if not overdue:
+            return
+
+        member_rows = LabMember.LabMemberInfo.fetch(
+            "datajoint_user_name", "google_user_name", as_dict=True
+        )
+        email_by_dj_user = {
+            m["datajoint_user_name"]: m["google_user_name"]
+            for m in member_rows
+            if m["datajoint_user_name"]
+        }
+        known_users = sorted(email_by_dj_user, key=len, reverse=True)
+
+        out = open(out_path, "w") if out_path else sys.stdout
+        try:
+            for row in overdue:
+                env_id = row["env_id"]
+                dj_user = next(
+                    (u for u in known_users if env_id.startswith(u + "_")),
+                    None,
+                )
+                user_email = email_by_dj_user.get(dj_user) if dj_user else None
+                if user_email is None:
+                    print(
+                        f"No LabMemberInfo email for '{env_id}' — skipping.",
+                        file=sys.stderr,
+                    )
+                    continue
+                print(
+                    "\t".join(
+                        [
+                            user_email,
+                            str(row["days_since_warn"]),
+                            str(row["spyglass_commit"] or ""),
+                            str(row["dirty_path"] or ""),
+                        ]
+                    ),
+                    file=out,
+                )
+        finally:
+            if out_path:
+                out.close()
 
     def write_env_yaml(
         self,

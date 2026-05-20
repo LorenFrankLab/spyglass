@@ -17,6 +17,11 @@ regularly as cron jobs.
         called either `temp` or `tmp`.
     - This script also fetches the latest version information from PyPI to update
         the `SpyglassVersions` table.
+- `email_utils.sh`
+    - Shared bash email utility sourced by `run_jobs.sh`.
+    - Provides `send_email_message <to> <cc> <subject> <body>` using `curl` and
+        Gmail SMTPS, mirroring the approach in `check_disk_space.sh` with added CC
+        support.
 - `populate.py` - This script provides an example of how to run computations as
     part of cron jobs. This is not currently in use.
 - `run_jobs.sh` - This script ...
@@ -115,5 +120,5 @@ the app password instead.
 [^1]: Depending your system, you may need to run the script as `sudo` to set the
     permissions.
 
-[^2]: You may want to run the cronjob from a dedicated conda environment to avoid
-    issues with local editable installs or other package conflicts.
+[^2]: You may want to run the cronjob from a dedicated conda environment to
+    avoid issues with local editable installs or other package conflicts.

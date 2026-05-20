@@ -33,6 +33,9 @@ from spyglass.utils import logger
 
 _SUBPROCESS_KWARGS = dict(capture_output=True, text=True, timeout=10)
 
+# Days before a flagged dirty install triggers an admin notification.
+WARN_DIRTY_ENV_DAYS = 30
+
 # Matches the ``+g<hash>`` VCS suffix appended by setuptools-scm / hatch-vcs.
 _VCS_HASH_RE = re.compile(r"\+g([0-9a-f]+)$")
 
@@ -53,6 +56,82 @@ class _InstallInfoCache:
 
 # Module-level singleton — info computed on first access, then cached.
 _install_info = _InstallInfoCache()
+
+
+def warn_if_dirty(install_info: dict) -> None:
+    """Warn non-admin users when running a non-official Spyglass install.
+
+    Emits a ``logger.warning`` for two cases:
+
+    * **Dirty** (``has_local_changes=True``): full countdown warning.
+    * **Dev** (``is_dev=True``, no local changes): softer "older commit"
+      advisory.
+
+    Returns silently for official installs, admin users, or when the DB
+    is unreachable.  All ``spyglass.common`` imports are deferred inside
+    the function body to avoid a circular dependency (``common/`` already
+    imports from ``utils/``).
+
+    Parameters
+    ----------
+    install_info : dict
+        The dict returned by :func:`get_install_info`.
+    """
+    if install_info.get("is_official"):
+        return
+
+    # Deferred imports — common/ imports utils/, so top-level imports here
+    # would create a circular dependency.
+    try:
+        import datajoint as dj
+        from spyglass.common.common_lab import LabMember
+        from spyglass.common.common_user import UserEnvironment
+    except Exception:
+        return
+
+    try:
+        if LabMember().user_is_admin:
+            return
+    except Exception:
+        pass  # DB unreachable — still show warning
+
+    # Find how long this user has had a dirty install logged
+    days = 0
+    try:
+        dj_user = dj.config.get("database.user", "")
+        dirty = (
+            UserEnvironment
+            & f"env_id LIKE '{dj_user}_%'"
+            & "dirty_path IS NOT NULL"
+        )
+        if dirty:
+            from datetime import datetime
+
+            first_flagged = min(dirty.fetch("timestamp"))
+            days = (datetime.now() - first_flagged).days
+    except Exception:
+        pass
+
+    N = max(0, WARN_DIRTY_ENV_DAYS - days)
+
+    if install_info.get("has_local_changes"):
+        logger.warning(
+            "Your Spyglass repository is not on an official commit. "
+            "Please ensure you are running Spyglass from a clean "
+            "repository to avoid issues with reproducibility.\n\n"
+            "If this is an important change, please open a pull request "
+            "to merge your changes into the main branch. If not, please "
+            "reset your repository to an official commit.\n\n"
+            "If you need assistance, please contact the support team. "
+            "We will flag this issue for discussion if it is not "
+            f"resolved within {N} days."
+        )
+    elif install_info.get("is_dev"):
+        logger.warning(
+            "Spyglass is being run from an older commit. Please consider "
+            "updating to the latest version to ensure you have the latest "
+            "features and bug fixes."
+        )
 
 
 def get_install_info() -> dict:
