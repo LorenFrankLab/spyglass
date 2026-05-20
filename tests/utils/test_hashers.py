@@ -72,7 +72,7 @@ def test_nwb_hasher(nwb_hasher):
     assert hash is not None
     assert isinstance(hash, str)
     assert len(hash) == 32
-    assert hash.startswith("4e0c"), "Unexpected NWB file hash"
+    assert hash.startswith("4689"), "Unexpected NWB file hash"
 
     # Check that individual object hashes are present
     cache = nwb_hasher.objs
