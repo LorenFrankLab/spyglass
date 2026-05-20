@@ -168,11 +168,11 @@ jobs:
         name: ${{ steps.test_mode.outputs.description }}
 
   pytest-v2:
-    # Modern spike-sorting scaffold tests run under SpikeInterface 0.104,
-    # isolated from the SpikeInterface 0.99 suite in run-tests above. The
-    # project-wide SpikeInterface pin is unchanged; this job overrides it
-    # inside a dedicated virtualenv. These tests need neither a database
-    # server nor sample data.
+    # Modern spike-sorting tests run under SpikeInterface 0.104, isolated
+    # from the SpikeInterface 0.99 suite in run-tests above. Static-tier
+    # tests run DB-free; DB-tier tests (fixture ingestion, legacy-runtime
+    # boundary) connect to the MySQL service via the conftest's
+    # null_server path.
     name: pytest-v2 (SpikeInterface 0.104)
     # Skip if PR is closed but not merged
     if: |-
@@ -180,6 +180,19 @@ jobs:
       github.event.action != 'closed' ||
       github.event.pull_request.merged == true
     runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: datajoint/mysql:8.0
+        env:
+          MYSQL_DATABASE: localhost
+          MYSQL_ROOT_PASSWORD: tutorial
+        ports:
+          - 3308:3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
     steps:
     - name: Checkout
       uses: actions/checkout@v4
@@ -196,10 +209,10 @@ jobs:
     - name: Create isolated environment (SpikeInterface 0.104)
       run: |
         uv venv --python 3.11 .venv-spikesorting-v2
-        uv pip install --python .venv-spikesorting-v2 -e ".[test]"
+        uv pip install --python .venv-spikesorting-v2 -e ".[test,spikesorting-v2]"
         uv pip install --python .venv-spikesorting-v2 \
           "spikeinterface>=0.104,<0.105"
-    - name: Run scaffold tests
+    - name: Run modern spike-sorting tests
       run: |
         .venv-spikesorting-v2/bin/pytest tests/spikesorting/v2/ \
           --no-docker --no-dlc -q

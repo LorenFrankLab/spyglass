@@ -50,7 +50,6 @@ dependencies = [
   "ipympl",
   "kachery-cloud>=0.4",
   "matplotlib",
-  "mountainsort5>=0.5",
   "ndx-franklab-novela>=0.2.4",
   "ndx-optogenetics==0.3.0",
   "ndx-ophys-devices",
@@ -98,6 +97,9 @@ optional-dependencies.moseq-gpu = [
   "jax[cuda12]",
   "jax-moseq[cuda12]",
   "keypoint-moseq",
+]
+optional-dependencies.spikesorting-v2 = [
+  "mountainsort5>=0.5", # default v2 sorter; pulls isosplit6 + scikit-learn
 ]
 optional-dependencies.spikesorting-v2-matching = [
   "UnitMatchPy>=3.3,<4", # cross-session unit tracking (Phase 4)

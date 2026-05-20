@@ -33,10 +33,13 @@ def _legacy_runtime_message(component: str) -> str:
     """Compose the prescribed legacy-environment error message."""
     return (
         f"{component} requires the legacy SpikeInterface 0.99 environment. "
-        "Use the modern (v2) spike-sorting pipeline for new SpikeInterface "
-        "0.104+ processing, or run this workflow in the legacy Spyglass "
-        "environment. Existing v0/v1 rows remain queryable under the new "
-        "pin; only active populate / curation / recompute is gated."
+        "Existing v0/v1 rows remain queryable under the new pin; only active "
+        "populate / curation / recompute is gated. To continue this workflow: "
+        "either downgrade to a legacy Spyglass install pinned to "
+        "spikeinterface<0.101 in a separate conda environment, or switch new "
+        "processing to the modern v2 spike-sorting pipeline (see "
+        "src/spyglass/spikesorting/v2/ and the CHANGELOG entry for the "
+        "SpikeInterface 0.104 boundary)."
     )
 
 
