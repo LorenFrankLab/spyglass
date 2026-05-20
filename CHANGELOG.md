@@ -51,7 +51,7 @@ DLCProject().alter()
 
 ### Breaking Changes
 
-#### NwbfileHasher Now Includes Dataset Content (#XXXX)
+#### NwbfileHasher Now Includes Dataset Content (#1600)
 
 `NwbfileHasher` previously discarded the return value of `hash_dataset()`, so
 HDF5 Dataset values (the actual array data) were never incorporated into
@@ -187,7 +187,10 @@ for label, interval_data in results.groupby("interval_labels"):
 - Warn on no-operation restrictions #1586
 - Fix `NwbfileHasher` to include HDF5 Dataset content in file hash; add
     `SPYGLASS_LEGACY_HASHES` env var to `RecordingRecompute` for backward
-    compatibility with pre-fix hashes #XXXX
+    compatibility with pre-fix hashes #1600
+- Fix redundant hash computation in `SpikeSortingRecording._make_file`:
+    `_update_external` no longer re-reads the NWB file to verify a hash that was
+    just computed by the caller #1600
 
 ### Pipelines
 

@@ -742,37 +742,20 @@ class AnalysisMixin(BaseMixin):
         return hasher if return_hasher else hasher.hash
 
     def _update_external(self, analysis_file_name: str, hash: str):
-        """Update the external contents checksum for an analysis file.
+        """Update the external table entry for a recomputed analysis file.
 
-        Ensures that the file contents match the hash. If not, raise an error.
+        The caller is responsible for passing the hash computed immediately
+        after writing the file. No re-hash is performed here to avoid
+        redundant reads of large NWB files (#1598).
 
         Parameters
         ----------
         analysis_file_name : str
             The name of the analysis NWB file.
         hash : str
-            The hash of the file contents as calculated by NwbfileHasher.
-            If the hash does not match the file contents, the file and
-            downstream entries are deleted.
-
-        Raises
-        ------
-        ValueError
-            If the hash does not match the file contents, the file is deleted
-            and a ValueError is raised.
+            The hash of the file contents as calculated by NwbfileHasher,
+            passed directly from the caller.
         """
-        file_path = self.get_abs_path(analysis_file_name, from_schema=True)
-        new_hash = self.get_hash(analysis_file_name, from_schema=True)
-
-        if hash != new_hash:
-            Path(file_path).unlink()  # remove mismatched file
-            raise ValueError(
-                f"Checksum mismatch for analysis file '{file_path}'."
-                + HASH_ERROR_MSG.format(
-                    hash=hash, new_hash=new_hash, file_path=file_path
-                )
-            )
-
         file_path = self.__get_analysis_path(analysis_file_name, relative=True)
         key = (self._ext_tbl & f"filepath = '{str(file_path)}'").fetch1()
         abs_path = Path(self._analysis_dir) / file_path
