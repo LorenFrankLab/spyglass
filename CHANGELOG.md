@@ -47,6 +47,11 @@ LFPBandV1().fix_1481()
 from spyglass.position.v1.position_dlc_project import DLCProject
 
 DLCProject().alter()
+
+# Add dirty_path and spyglass_commit columns to UserEnvironment
+from spyglass.common.common_user import UserEnvironment
+
+UserEnvironment().alter()
 ```
 
 ### Breaking Changes

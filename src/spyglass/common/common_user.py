@@ -12,6 +12,7 @@ import datajoint as dj
 import yaml
 
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.git_utils import get_install_info
 
 schema = dj.schema("common_user")
 
@@ -34,6 +35,8 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
     timestamp=CURRENT_TIMESTAMP: timestamp  # Automatic timestamp
     UNIQUE INDEX (env_hash)
     has_editable=0: bool  # Whether the environment has editable installs
+    dirty_path=null: varchar(255)  # Path of local Spyglass clone, if any
+    spyglass_commit=null: varchar(40)  # Short git hash of the Spyglass install
     """
 
     # Note: this tables establishes the convention of an environment ID that
@@ -366,7 +369,11 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
     @cached_property
     def env_hash(self) -> str:
         """Compute an MD5 hash of the environment dictionary."""
-        env_json = json_dumps(self.parse_env_dict(self.env), sort_keys=True)
+        env_dict = self.parse_env_dict(self.env)
+        commit = get_install_info().get("commit_hash")
+        if commit:
+            env_dict["spyglass_commit"] = commit
+        env_json = json_dumps(env_dict, sort_keys=True)
         return md5(env_json.encode()).hexdigest()
 
     @cached_property
@@ -419,17 +426,57 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         if self.matching_env_id:  # if env is already stored
             return {"env_id": self.matching_env_id}
 
+        info = get_install_info()
         self.insert1(
             {  # if current env not stored, but name taken, increment
                 "env_id": self._increment_id(env_id),
                 "env_hash": self.env_hash,
                 "env": self.env,
                 "has_editable": self._has_editable,
+                "dirty_path": info.get("install_path"),
+                "spyglass_commit": info.get("commit_hash"),
             },
             skip_duplicates=False,
         )
         del self.matching_env_id  # clear the cached property
         return {"env_id": env_id}
+
+    def dirty_installs(self) -> "dj.expression.QueryExpression":
+        """Return dirty-install entries with days_since_warn.
+
+        Excludes env_id bases where the user has a more recent clean install
+        (``dirty_path IS NULL``), indicating the issue was self-resolved.
+
+        Returns a DataJoint query expression.  Callers needing a DataFrame
+        can call ``.fetch(format='frame')`` on the result.
+        """
+        dirty = self & "dirty_path IS NOT NULL"
+
+        if dirty and (clean := self & "dirty_path IS NULL"):
+            dirty_rows = dirty.fetch("env_id", "timestamp", as_dict=True)
+            clean_rows = clean.fetch("env_id", "timestamp", as_dict=True)
+
+            clean_by_base: dict = {}
+            for row in clean_rows:
+                m = re.match(r"^(.*?)(?:_\d{2})?$", row["env_id"])
+                base = m.group(1) if m else row["env_id"]
+                t = row["timestamp"]
+                if base not in clean_by_base or t > clean_by_base[base]:
+                    clean_by_base[base] = t
+
+            excluded = []
+            for row in dirty_rows:
+                m = re.match(r"^(.*?)(?:_\d{2})?$", row["env_id"])
+                base = m.group(1) if m else row["env_id"]
+                clean_ts = clean_by_base.get(base)
+                if clean_ts and clean_ts > row["timestamp"]:
+                    excluded.append(row["env_id"])
+
+            if excluded:
+                ids = ", ".join(f'"{eid}"' for eid in excluded)
+                dirty = dirty & f"env_id NOT IN ({ids})"
+
+        return dirty.proj(..., days_since_warn="DATEDIFF(NOW(), `timestamp`)")
 
     def write_env_yaml(
         self,
