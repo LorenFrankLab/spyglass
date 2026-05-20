@@ -531,7 +531,7 @@ def generate_fixtures(
         templates_tag = "drift" if spec.drifting else "static"
         templates_h5 = (
             work_dir
-            / f"templates_{spec.layout.probe_type}_{templates_tag}.h5"
+            / f"templates_{spec.layout.probe_type}_{profile.name}_{templates_tag}.h5"
         )
         recording_h5 = work_dir / f"{spec.name}.h5"
         nwb_path = fixtures_dir / f"{spec.name}.nwb"
