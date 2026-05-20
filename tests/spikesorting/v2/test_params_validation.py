@@ -205,6 +205,8 @@ def test_ms5_default_matches_appendix():
     assert blob["snippet_T1"] == 20
     assert blob["snippet_T2"] == 20
     assert blob["scheme2_detect_channel_radius"] == 50.0
+    assert blob["detect_time_radius_msec"] == 0.5
+    assert blob["scheme2_phase1_detect_channel_radius"] == 200.0
 
 
 def test_ms5_scheme_literal_enforced():
@@ -239,3 +241,33 @@ def test_generic_schema_accepts_arbitrary_kwargs():
     ).model_dump()
     assert blob["some_random_kwarg"] == 42
     assert blob["another"] == "value"
+
+
+# ---------- schema_version invariants --------------------------------------
+
+
+@pytest.mark.parametrize(
+    "schema_cls",
+    [
+        PreprocessingParamsSchema,
+        ArtifactDetectionParamsSchema,
+        MotionCorrectionParamsSchema,
+        MountainSort4Schema,
+        MountainSort5Schema,
+        Kilosort4Schema,
+        ClusterlessThresholderSchema,
+        SpykingCircus2Schema,
+        Tridesclous2Schema,
+        GenericSorterParamsSchema,
+    ],
+)
+def test_schema_version_present_and_equals_one(schema_cls):
+    """Every v2 Pydantic schema carries ``schema_version: int = 1``.
+
+    Pydantic Parameter Schema Convention requires this field so the
+    Lookup row can store the schema generation number alongside the
+    blob; a future model-breaking change bumps the version and adds a
+    LegacyParams shim rather than silently overwriting old rows.
+    """
+    blob = schema_cls().model_dump()
+    assert blob["schema_version"] == 1

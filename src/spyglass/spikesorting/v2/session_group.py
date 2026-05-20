@@ -1,14 +1,14 @@
 """Grouping of sessions for chronic and concatenated-recording workflows.
 
-Phase 1 declares these tables in their final-shape so ``SortingSelection``
-can FK ``ConcatenatedRecording`` from day one (zero-migration policy). The
-populate body of ``ConcatenatedRecording`` is gated behind
-``NotImplementedError`` until Phase 3 fills it in; the schema itself is
-frozen and Phase 3 only adds the consumer logic, not the shape.
+These tables are declared in their final-shape so ``SortingSelection``
+can FK ``ConcatenatedRecording`` from day one (zero-migration policy).
+The schema is frozen; the populate body of ``ConcatenatedRecording`` is
+gated behind ``NotImplementedError`` until the concat materializer
+lands -- only the consumer logic changes, never the row shape.
 
 Tables (all final-shape):
     SessionGroup (+ Member)                  -- Manual; user-facing grouping.
-    MotionCorrectionParameters               -- Lookup; validated in Phase 1.
+    MotionCorrectionParameters               -- Lookup; Pydantic-validated.
     ConcatenatedRecordingSelection           -- Manual; UUID PK.
     ConcatenatedRecording (+ MemberBoundary) -- Computed; make() is gated.
 """
@@ -44,7 +44,7 @@ class SessionGroup(SpyglassMixin, dj.Manual):
 
     Same-day groups are the default; multi-day requires
     ``allow_multi_day=True`` AND forces an explicit
-    ``MotionCorrectionParameters`` row (see ``create_group``, slice 1b).
+    ``MotionCorrectionParameters`` row (see ``create_group``).
     """
 
     definition = """
@@ -76,22 +76,22 @@ class SessionGroup(SpyglassMixin, dj.Manual):
     ) -> None:
         """Insert master + Member rows; derive dates from each Session.
 
-        Implemented in slice 1b. The schema is final-shape from Phase 1 so
-        users can start declaring groups for Phase 3 work once the
-        Recording chain materializes.
+        The schema is final-shape so users can start declaring groups
+        for the concat workflow as soon as the Recording chain
+        materializes; this helper is forward-declared.
         """
         raise NotImplementedError(
-            "SessionGroup.create_group lands in slice 1b"
+            "SessionGroup.create_group is not yet implemented"
         )
 
     @classmethod
     def is_multi_day(cls, key: dict) -> bool:
         """True if the group's members span two or more session dates.
 
-        Implemented in slice 1b.
+        Implemented in a follow-up change.
         """
         raise NotImplementedError(
-            "SessionGroup.is_multi_day lands in slice 1b"
+            "SessionGroup.is_multi_day is not yet implemented"
         )
 
 
@@ -99,9 +99,11 @@ class SessionGroup(SpyglassMixin, dj.Manual):
 class MotionCorrectionParameters(SpyglassMixin, dj.Lookup):
     """Validated motion-correction parameter blob.
 
-    Ships in Phase 1 so the Lookup's ``insert1`` can Pydantic-validate
-    its ``params`` blob at insert time even though the consumer
-    (``ConcatenatedRecording.make()``) is gated until Phase 3.
+    Ships before the consumer (``ConcatenatedRecording.make()``) lands
+    so this Lookup's ``insert1`` can Pydantic-validate its ``params``
+    blob at insert time. The validation surface is final-shape today;
+    the consumer activates without a migration once the concat
+    materializer is implemented.
     """
 
     definition = """
@@ -150,11 +152,11 @@ class MotionCorrectionParameters(SpyglassMixin, dj.Lookup):
 class ConcatenatedRecordingSelection(SpyglassMixin, dj.Manual):
     """One row per (SessionGroup, PreprocessingParameters, motion params).
 
-    UUID-keyed so downstream FKs are single-column (mirrors
-    ``RecordingSelection`` / ``Recording`` from the Phase 1 single-session
-    path). Schema is final-shape; the ``insert_selection`` helper landing
-    in Phase 3 enforces that every member has a populated ``Recording``
-    row matching the requested preprocessing parameters.
+    UUID-keyed so downstream FKs are single-column (mirrors the
+    single-session ``RecordingSelection`` / ``Recording`` shape). Schema
+    is final-shape; the ``insert_selection`` helper, when implemented,
+    enforces that every member has a populated ``Recording`` row
+    matching the requested preprocessing parameters.
     """
 
     definition = """
@@ -169,12 +171,12 @@ class ConcatenatedRecordingSelection(SpyglassMixin, dj.Manual):
     def insert_selection(cls, key: dict) -> dict:
         """Find-existing-or-insert; returns a single PK-only dict.
 
-        Gated until Phase 3; the schema is in place so other Phase 1
+        Forward-declared; the schema is in place so single-session
         tables can FK ``concat_recording_id`` from day one.
         """
         raise NotImplementedError(
-            "ConcatenatedRecordingSelection.insert_selection is implemented "
-            "in Phase 3 (session-group concat workflow)"
+            "ConcatenatedRecordingSelection.insert_selection is not yet "
+            "implemented"
         )
 
 
@@ -182,11 +184,11 @@ class ConcatenatedRecordingSelection(SpyglassMixin, dj.Manual):
 class ConcatenatedRecording(SpyglassMixin, dj.Computed):
     """Materialized cross-session concatenated recording cache.
 
-    The Phase 3 implementation writes a single sorter-ready
+    When implemented, ``make()`` writes a single sorter-ready
     ``ElectricalSeries`` covering the union of member intervals (with
     motion correction if requested), plus integer sample boundaries on
-    the ``MemberBoundary`` part. Phase 1 ships the schema as the
-    forward-compat FK target for ``SortingSelection``.
+    the ``MemberBoundary`` part. The schema is in place from day one as
+    the forward-compat FK target for ``SortingSelection``.
     """
 
     definition = """
@@ -212,11 +214,11 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
     def make(self, key):
         """Materialize the concatenated recording cache.
 
-        Gated until Phase 3. ``SortingSelection.insert_selection`` will
-        also reject ``ConcatenatedRecordingSource`` requests with a
-        matching error until Phase 3.
+        Forward-declared. ``SortingSelection.insert_selection`` also
+        rejects ``ConcatenatedRecordingSource`` requests with a matching
+        error until the consumer lands; the schemas are in their final
+        shape so both helpers can be relaxed without a migration.
         """
         raise NotImplementedError(
-            "ConcatenatedRecording.make() is not implemented yet "
-            "(Phase 3 session-group concat workflow)"
+            "ConcatenatedRecording.make() is not implemented yet"
         )

@@ -1,14 +1,15 @@
 """Preprocessed recording materialization for spike sorting.
 
-Slice 1a lands the final-shape table declarations; slice 1b fills in the
-classmethod / make() bodies that materialize the preprocessed
-``ElectricalSeries`` into an ``AnalysisNwbfile``.
-
 Tables (all final-shape under the zero-migration policy):
     SortGroupV2          -- per-session electrode grouping.
     PreprocessingParameters -- Pydantic-validated preprocessing blob.
     RecordingSelection   -- one row per (raw, sort group, interval, params).
     Recording            -- materialized preprocessed recording (NWB-resident).
+
+``insert1`` on the Lookup tables is live and Pydantic-validates the
+``params`` blob; ``insert_selection`` and ``make`` are forward-declared
+stubs that raise ``NotImplementedError`` until the matching runtime
+change lands.
 """
 
 from __future__ import annotations
@@ -36,9 +37,9 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
     Session FK and reference electrode; the part table enumerates the
     Electrode FKs that make up the group.
 
-    Constructors landing in slice 1b:
-        ``set_group_by_shank``
-        ``set_group_by_electrode_table_column``
+    Public constructors:
+        ``set_group_by_shank``                    -- shank-based grouping.
+        ``set_group_by_electrode_table_column``   -- arbitrary-column grouping.
     """
 
     definition = """
@@ -139,12 +140,9 @@ class RecordingSelection(SpyglassMixin, dj.Manual):
 
     @classmethod
     def insert_selection(cls, key: dict) -> dict:
-        """Find-existing-or-insert; returns a single PK-only dict.
-
-        Implemented in slice 1b.
-        """
+        """Find-existing-or-insert; returns a single PK-only dict."""
         raise NotImplementedError(
-            "RecordingSelection.insert_selection lands in slice 1b"
+            "RecordingSelection.insert_selection is not yet implemented"
         )
 
 
@@ -153,8 +151,8 @@ class Recording(SpyglassMixin, dj.Computed):
     """Preprocessed recording materialized NWB-resident in AnalysisNwbfile.
 
     The preprocessed ``ElectricalSeries`` lives inside an
-    ``AnalysisNwbfile`` (the canonical artifact). No binary sidecar in
-    Phase 1; see shared-contracts ``Recording Cache Format``.
+    ``AnalysisNwbfile`` (the canonical artifact). No binary sidecar; see
+    shared-contracts ``Recording Cache Format``.
     """
 
     definition = """
@@ -170,17 +168,15 @@ class Recording(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
-        """Materialize the preprocessed recording. Implemented in slice 1b."""
-        raise NotImplementedError(
-            "Recording.make lands in slice 1b (recording chain)"
-        )
+        """Materialize the preprocessed recording."""
+        raise NotImplementedError("Recording.make is not yet implemented")
 
     def get_recording(self, key):
         """Return the preprocessed SpikeInterface recording.
 
         Rebuilds the NWB artifact on demand if missing, without deleting
-        the DataJoint row. Implemented in slice 1b.
+        the DataJoint row.
         """
         raise NotImplementedError(
-            "Recording.get_recording lands in slice 1b"
+            "Recording.get_recording is not yet implemented"
         )

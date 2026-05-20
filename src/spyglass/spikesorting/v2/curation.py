@@ -1,16 +1,16 @@
 """Curation of sorted units.
 
-Slice 1a lands the final-shape table declarations; slice 1d fills in the
-classmethod / make() bodies that record manual labels and merges and
-register into ``SpikeSortingOutput.CurationV2``.
-
 Tables (all final-shape under the zero-migration policy):
     CurationV2 (+ Unit + UnitLabel) -- Manual; lineage via parent_curation_id.
 
 ``metrics_source`` is restricted to true CurationV2 provenance values
 (``manual``, ``analyzer_curation``, ``figpack``). External or
-ground-truth NWB Units continue to use ``ImportedSpikeSorting``; Phase 1
-does NOT duplicate them into ``CurationV2``.
+ground-truth NWB Units continue to use ``ImportedSpikeSorting``; v2 does
+NOT duplicate them into ``CurationV2``.
+
+``insert_curation`` and the accessors are forward-declared stubs that
+raise ``NotImplementedError`` until the matching runtime change lands;
+the schema is in place so other tables can FK ``curation_id`` today.
 """
 
 from __future__ import annotations
@@ -67,7 +67,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         unit_id: int
         ---
         -> Electrode
-        peak_amplitude_uV: float
+        peak_amplitude_uv: float    # peak template amplitude in microvolts
         n_spikes: int
         """
 
@@ -102,7 +102,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         All four inserts run inside one ``cls.connection.transaction``
         block; the curated-units NWB is staged separately and is
         deleted on any later failure because DataJoint cannot roll back
-        filesystem side effects. Implemented in slice 1d.
+        filesystem side effects. Implemented in a follow-up change.
 
         Parameters
         ----------
@@ -116,7 +116,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
             ``-1`` for a root curation; otherwise must reference an
             existing CurationV2 row for the same sorting.
         merge_groups
-            Optional list of merge-group dicts (slice 1d).
+            Optional list of merge-group dicts.
         apply_merges
             If True, write the merged-units NWB; otherwise the
             curated-units NWB matches the source Sorting units 1:1.
@@ -124,17 +124,17 @@ class CurationV2(SpyglassMixin, dj.Manual):
             Free-text curation description.
         """
         raise NotImplementedError(
-            "CurationV2.insert_curation lands in slice 1d"
+            "CurationV2.insert_curation is not yet implemented"
         )
 
     def get_sorting(self, key, as_dataframe: bool = False):
         """Return the curated SpikeInterface BaseSorting (or DataFrame)."""
-        raise NotImplementedError("CurationV2.get_sorting lands in slice 1d")
+        raise NotImplementedError("CurationV2.get_sorting is not yet implemented")
 
     def get_merged_sorting(self, key):
         """Return the curated BaseSorting with merge groups applied."""
         raise NotImplementedError(
-            "CurationV2.get_merged_sorting lands in slice 1d"
+            "CurationV2.get_merged_sorting is not yet implemented"
         )
 
     def get_unit_brain_regions(
@@ -149,10 +149,10 @@ class CurationV2(SpyglassMixin, dj.Manual):
         If ``include_labels`` is provided, restricts through
         ``CurationV2.UnitLabel`` and returns units with any requested
         label. Same concat-sort guard semantics as
-        ``Sorting.get_unit_brain_regions``. Implemented in slice 1d.
+        ``Sorting.get_unit_brain_regions``. Implemented in a follow-up change.
         """
         raise NotImplementedError(
-            "CurationV2.get_unit_brain_regions lands in slice 1d"
+            "CurationV2.get_unit_brain_regions is not yet implemented"
         )
 
     def get_matchable_unit_ids(
@@ -160,9 +160,9 @@ class CurationV2(SpyglassMixin, dj.Manual):
         key,
         exclude_labels=frozenset({"reject", "noise", "artifact"}),
     ):
-        """Curated unit IDs with no excluded labels. Implemented in slice 1d."""
+        """Curated unit IDs with no excluded labels. Implemented in a follow-up change."""
         raise NotImplementedError(
-            "CurationV2.get_matchable_unit_ids lands in slice 1d"
+            "CurationV2.get_matchable_unit_ids is not yet implemented"
         )
 
     def get_sort_group_info(self, key):
@@ -170,8 +170,8 @@ class CurationV2(SpyglassMixin, dj.Manual):
 
         Fix for the v1 ``fetch(limit=1)`` multi-region under-reporting
         bug. Returns a DataJoint relation (not a DataFrame) so callers
-        can chain restrictions. Implemented in slice 1d.
+        can chain restrictions. Implemented in a follow-up change.
         """
         raise NotImplementedError(
-            "CurationV2.get_sort_group_info lands in slice 1d"
+            "CurationV2.get_sort_group_info is not yet implemented"
         )

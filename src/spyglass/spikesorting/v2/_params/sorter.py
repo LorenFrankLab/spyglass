@@ -27,7 +27,8 @@ class MountainSort4Schema(BaseModel):
     ``src/spyglass/spikesorting/v1/sorting.py`` without the runtime
     ``tempdir`` field-mutation hack. MS4 is not deterministic and the SI
     0.104 wrapper still lists it even when the runtime is not installed;
-    Phase 0c records the platform-specific install evidence.
+    the per-platform install evidence is recorded in the v2 resolver
+    notes.
     """
 
     model_config = ConfigDict(extra="allow")

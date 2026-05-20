@@ -1,18 +1,18 @@
 """Validated parameter schema for the motion-correction parameter table.
 
-Schema lands in Phase 1 so ``MotionCorrectionParameters.insert_default()`` can
-validate the ``params`` blob at insert time even though the consumer
-(``ConcatenatedRecording.make()``) is gated behind ``NotImplementedError``
-until Phase 3.
+The schema lands before its consumer (``ConcatenatedRecording.make()``)
+so ``MotionCorrectionParameters.insert_default()`` can validate the
+``params`` blob at insert time. The consumer is gated behind
+``NotImplementedError`` until the concat materializer is implemented.
 
 The MVP concat path persists only the sorter-ready corrected
-``ElectricalSeries`` (plus member sample boundaries and a content hash); it
-does NOT persist motion trajectories or motion-info side artifacts. This
-schema rejects the SI ``correct_motion`` kwargs that would change that
-contract -- ``output_motion``, ``output_motion_info``, ``folder``, and
-``overwrite`` -- because allowing them would write untracked artifacts or
-mutate the corrected-recording return type that Phase 3's
-``ConcatenatedRecording`` materializer depends on.
+``ElectricalSeries`` (plus member sample boundaries and a content hash);
+it does NOT persist motion trajectories or motion-info side artifacts.
+This schema rejects the SI ``correct_motion`` kwargs that would change
+that contract -- ``output_motion``, ``output_motion_info``, ``folder``,
+and ``overwrite`` -- because allowing them would write untracked
+artifacts or mutate the corrected-recording return type that the future
+concat materializer depends on.
 """
 
 from __future__ import annotations
@@ -33,10 +33,10 @@ _SI_NATIVE_PRESETS = (
 )
 """``correct_motion`` presets exposed by SpikeInterface 0.104.
 
-Recorded by Phase 0c at
+The pinned signature was recorded at
 ``tests/spikesorting/v2/resolver/si0104-runtime.md``. Any drift in the
-upstream signature should re-trigger that resolver check; this tuple is the
-binding list this schema validates against.
+upstream signature should re-trigger that resolver check; this tuple is
+the binding list this schema validates against.
 """
 
 

@@ -1,22 +1,23 @@
 """Artifact detection over a preprocessed Recording.
 
-Slice 1a lands the final-shape table declarations; slice 1b fills in the
-classmethod / make() bodies that scan the recording for noisy intervals
-and write the artifact-removed valid times into ``common.IntervalList``
-under name ``f"artifact_{artifact_id}"``.
-
 Tables (all final-shape under the zero-migration policy):
     ArtifactDetectionParameters       -- threshold detection parameters.
     SharedArtifactGroup (+ Member)    -- opt-in cross-recording detection.
     ArtifactDetectionSelection        -- source parts encode input shape.
         .RecordingSource              -- single-recording path (default).
-        .SharedArtifactGroupSource    -- cross-recording path (#928).
+        .SharedArtifactSource    -- cross-recording path (#928).
     ArtifactDetection                 -- writes IntervalList rows; no part.
 
 Artifact-removed valid times live in ``common.IntervalList`` rather than a
 dedicated part table -- the UUID-suffixed name prevents collision with
 human-authored session intervals while letting downstream
 IntervalList-querying code consume them through the standard interface.
+
+``insert1`` on ``ArtifactDetectionParameters`` is live and
+Pydantic-validates the ``params`` blob; ``insert_selection``, ``make``,
+``get_artifact_removed_intervals``, ``delete``, and
+``SharedArtifactGroup.insert_group`` are forward-declared stubs that
+raise ``NotImplementedError`` until the matching runtime change lands.
 """
 
 from __future__ import annotations
@@ -95,7 +96,7 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
     shared set of valid times applied to every member.
 
     All members must belong to one session (enforced by the master row's
-    Session FK and re-checked by ``insert_group`` in slice 1b).
+    Session FK and re-checked by ``insert_group``).
     """
 
     definition = """
@@ -114,10 +115,10 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
     def insert_group(cls, name: str, members: list[dict]) -> None:
         """Insert master + Member rows; validate session consistency.
 
-        Implemented in slice 1b.
+        Implemented in a follow-up change.
         """
         raise NotImplementedError(
-            "SharedArtifactGroup.insert_group lands in slice 1b"
+            "SharedArtifactGroup.insert_group is not yet implemented"
         )
 
 
@@ -127,7 +128,7 @@ class ArtifactDetectionSelection(SpyglassMixin, dj.Manual):
 
     Source part rows make the input shape explicit: exactly one of
     ``RecordingSource`` (single-recording, default) or
-    ``SharedArtifactGroupSource`` (cross-recording, opt-in) must exist for
+    ``SharedArtifactSource`` (cross-recording, opt-in) must exist for
     each selection row. Enforced by ``insert_selection`` and re-checked at
     the start of ``ArtifactDetection.make()`` per the shared-contracts
     Source Part Pattern.
@@ -146,7 +147,7 @@ class ArtifactDetectionSelection(SpyglassMixin, dj.Manual):
         -> Recording
         """
 
-    class SharedArtifactGroupSource(SpyglassMixinPart):
+    class SharedArtifactSource(SpyglassMixinPart):
         definition = """
         -> master
         ---
@@ -157,10 +158,10 @@ class ArtifactDetectionSelection(SpyglassMixin, dj.Manual):
     def insert_selection(cls, key: dict) -> dict:
         """Insert master + exactly one source part; return PK-only dict.
 
-        Implemented in slice 1b.
+        Implemented in a follow-up change.
         """
         raise NotImplementedError(
-            "ArtifactDetectionSelection.insert_selection lands in slice 1b"
+            "ArtifactDetectionSelection.insert_selection is not yet implemented"
         )
 
     @classmethod
@@ -170,10 +171,10 @@ class ArtifactDetectionSelection(SpyglassMixin, dj.Manual):
         Used by ``ArtifactDetection.make()`` to dispatch on source shape
         and by the integrity tests to assert exactly-one-source.
 
-        Implemented in slice 1b.
+        Implemented in a follow-up change.
         """
         raise NotImplementedError(
-            "ArtifactDetectionSelection.resolve_source lands in slice 1b"
+            "ArtifactDetectionSelection.resolve_source is not yet implemented"
         )
 
 
@@ -195,29 +196,29 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
     def make(self, key):
         """Detect artifacts and write IntervalList rows.
 
-        Implemented in slice 1b. ``make()`` MUST re-check that the
+        Implemented in a follow-up change. ``make()`` MUST re-check that the
         upstream selection has exactly one source part row at entry, per
         the shared-contracts Source Part Pattern.
         """
         raise NotImplementedError(
-            "ArtifactDetection.make lands in slice 1b (recording chain)"
+            "ArtifactDetection.make is not yet implemented)"
         )
 
     def get_artifact_removed_intervals(self, key):
         """Thin ``IntervalList.fetch1('valid_times')`` wrapper.
 
-        Implemented in slice 1b.
+        Implemented in a follow-up change.
         """
         raise NotImplementedError(
-            "ArtifactDetection.get_artifact_removed_intervals lands in slice 1b"
+            "ArtifactDetection.get_artifact_removed_intervals is not yet implemented"
         )
 
     def delete(self, *args, **kwargs):
         """Override that also removes the matching IntervalList rows.
 
         DataJoint does not cascade through ``interval_list_name``-keyed
-        dependencies, so the cleanup is explicit. Implemented in slice 1b.
+        dependencies, so the cleanup is explicit. Implemented in a follow-up change.
         """
         raise NotImplementedError(
-            "ArtifactDetection.delete override lands in slice 1b"
+            "ArtifactDetection.delete override is not yet implemented"
         )
