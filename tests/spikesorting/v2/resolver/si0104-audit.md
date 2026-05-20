@@ -47,29 +47,36 @@ point gets a runtime guard in the next slice; no narrow shims are ported.
 
 ### guarded legacy-runtime-only
 
-Files with call-site usage of removed APIs. Each file's listed entry points
-get a runtime guard in the next slice; guards refuse to run under SI 0.104
-and direct callers to the legacy SI 0.99 environment.
+Files whose entry-point bodies directly call an API removed or changed in
+SI 0.104. Empirical verification narrowed the initial broad classification
+to **11 entry points across 8 files**; the remaining
+``SpikeSortingRecording``, ``SpikeSorting``, ``RecordingRecompute`` makes
+use only stable SI APIs (``read_nwb_recording``, ``bandpass_filter``,
+``run_sorter``, ``detect_peaks`` -- all present and backwards-compatible
+in 0.104) and are listed under query-compatible below.
 
-| File | Removed-API call sites | Entry points to guard |
+| File | Removed-API call sites | Guarded entry points |
 | --- | --- | --- |
-| `spyglass/spikesorting/v0/spikesorting_curation.py` | `si.extract_waveforms` (445), `si.WaveformExtractor.load_from_folder` (496, 678) | `Waveforms.make`, `WaveformSelection.insert`, `AutomaticCuration.make`, `CuratedSpikeSorting.make`, `Curation.load_waveforms`, `QualityMetrics.make`, `MetricSelection` paths |
+| `spyglass/spikesorting/v0/spikesorting_curation.py` | `si.extract_waveforms` (445), `si.WaveformExtractor.load_from_folder` (496, 678) | `Waveforms.make_compute`, `Waveforms.load_waveforms`, `QualityMetrics.make_compute` |
 | `spyglass/spikesorting/v0/spikesorting_burst.py` | calls `Waveforms().load_waveforms` (169) | `BurstPair.make` |
-| `spyglass/spikesorting/v0/spikesorting_recording.py` | `extractors.read_nwb_recording`, `preprocessing.bandpass_filter`, etc. — actively populates analysis NWB through SI APIs | `SpikeSortingRecording.make` |
-| `spyglass/spikesorting/v0/spikesorting_sorting.py` | `sorters.run_sorter`, `detect_peaks` from `sortingcomponents` | `SpikeSorting.make` |
-| `spyglass/spikesorting/v0/spikesorting_artifact.py` | `ChunkRecordingExecutor`, `ensure_n_jobs` (job_tools signature changed in 0.104) | `ArtifactDetection.make` |
-| `spyglass/spikesorting/v0/spikesorting_recompute.py` | recomputes through SI APIs | `RecordingRecompute.make` |
-| `spyglass/spikesorting/v1/metric_curation.py` | `si.extract_waveforms` (387), `si.load_waveforms` (395) | `MetricCuration.make`, `MetricCuration.get_waveforms` |
+| `spyglass/spikesorting/v0/spikesorting_artifact.py` | `ChunkRecordingExecutor` (258, signature widened in 0.104) | `ArtifactDetection.make` |
+| `spyglass/spikesorting/v1/metric_curation.py` | `si.extract_waveforms` (387), `si.load_waveforms` (395) | `MetricCuration.make_compute`, `MetricCuration.get_waveforms` |
 | `spyglass/spikesorting/v1/burst_curation.py` | depends on `MetricCuration.get_waveforms` | `BurstPair.make` |
-| `spyglass/spikesorting/v1/recording.py` | active populate through SI preprocessing | `SpikeSortingRecording.make` |
-| `spyglass/spikesorting/v1/sorting.py` | `sorters.run_sorter`, `detect_peaks` | `SpikeSorting.make` |
-| `spyglass/spikesorting/v1/artifact.py` | `ChunkRecordingExecutor`, `ensure_n_jobs` | `ArtifactDetection.make` |
-| `spyglass/spikesorting/v1/recompute.py` | recomputes through SI APIs | `RecordingRecompute.make` |
-| `spyglass/decoding/v0/clusterless.py` | `si.extract_waveforms` (215) | `UnitMarksIndicator.make` (and any other waveform-extracting populate) |
-| `spyglass/decoding/v1/waveform_features.py` | `si.extract_waveforms` (217) | `UnitWaveformFeatures.make` and the helper methods that call it |
-| `spyglass/utils/waveforms.py` | `waveform_extractor.get_waveforms()` body uses the WaveformExtractor protocol | `_get_peak_amplitude` -- callers (all v0/v1 metric paths) are guarded, so guarding here is transitive |
-| `spyglass/utils/mixins/analysis.py` | `add_units_waveforms` uses `waveform_extractor.get_waveforms()` / `.sorting.get_unit_ids()` | `add_units_waveforms` -- callers (v0/v1 curation paths) are guarded, transitive |
-| `spyglass/spikesorting/v1/metric_utils.py` | annotations on `si.WaveformExtractor` (Phase 0b deferred); helpers consumed by `MetricCuration` | guarded transitively via `MetricCuration` |
+| `spyglass/spikesorting/v1/artifact.py` | `ChunkRecordingExecutor` (292, signature widened in 0.104) | `ArtifactDetection.make` |
+| `spyglass/decoding/v0/clusterless.py` | `si.extract_waveforms` (215) | `UnitMarks.make` |
+| `spyglass/decoding/v1/waveform_features.py` | `si.extract_waveforms` (217 via `_fetch_waveform`) | `UnitWaveformFeatures.make` |
+
+Transitively guarded (no direct call site, but consumed only by the
+guarded entry points above):
+
+- `spyglass/utils/waveforms.py` (`_get_peak_amplitude`) -- duck-types on the
+  WaveformExtractor protocol; every caller is guarded.
+- `spyglass/utils/mixins/analysis.py` (`add_units_waveforms`) -- duck-types
+  on `WaveformExtractor.get_waveforms` and `.sorting.get_unit_ids`; every
+  caller is guarded.
+- `spyglass/spikesorting/v1/metric_utils.py` -- annotation-only
+  WaveformExtractor references (deferred in Phase 0b); only consumed by
+  guarded `MetricCuration` paths.
 
 ### query-compatible
 
@@ -90,6 +97,12 @@ merge outputs remain functional.
 | `spyglass/spikesorting/v0/merged_sorting_extractor.py` | subclasses `si.BaseSorting` / `si.BaseSortingSegment` -- base classes stable |
 | `spyglass/spikesorting/v1/curation.py` | `si.curation`, `si.extractors` -- read-paths stable. Note: `CurationV1.get_sorting`, `get_recording`, and `_write_sorting_to_nwb_with_curation` paths must be confirmed under SI 0.104 in Slice B; current expectation is read-only stable. |
 | `spyglass/spikesorting/v1/figurl_curation.py` | `import si` for stable types |
+| `spyglass/spikesorting/v0/spikesorting_recording.py` | active populate via `extractors.read_nwb_recording` + `preprocessing.bandpass_filter` / `common_reference` / `whiten` -- all stable in 0.104 (verified in `si0104-runtime.md`). `SpikeSortingRecording.make` is not guarded. |
+| `spyglass/spikesorting/v0/spikesorting_sorting.py` | `sorters.run_sorter` and `sortingcomponents.peak_detection.detect_peaks` -- both stable / backwards-compatible in 0.104. `SpikeSorting.make` is not guarded. |
+| `spyglass/spikesorting/v0/spikesorting_recompute.py` | recomputes through stable SI APIs; no removed-name call sites. `RecordingRecompute.make` is not guarded. |
+| `spyglass/spikesorting/v1/recording.py` | active populate uses stable preprocessing APIs only. Not guarded. |
+| `spyglass/spikesorting/v1/sorting.py` | `sorters.run_sorter` + `detect_peaks` stable. Not guarded. |
+| `spyglass/spikesorting/v1/recompute.py` | recomputes through stable APIs. Not guarded. |
 
 ### safe-to-port
 

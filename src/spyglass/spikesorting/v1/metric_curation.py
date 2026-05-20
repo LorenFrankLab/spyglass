@@ -13,13 +13,13 @@ import spikeinterface.qualitymetrics as sq
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.settings import temp_dir
+from spyglass.spikesorting._legacy_runtime import (
+    _require_legacy_si_environment,
+)
 from spyglass.spikesorting.v1.curation import (
     CurationV1,
     _list_to_merge_dict,
     _merge_dict_to_list,
-)
-from spyglass.spikesorting._legacy_runtime import (
-    _require_legacy_si_environment,
 )
 from spyglass.spikesorting.v1.metric_utils import (
     compute_isi_violation_fractions,

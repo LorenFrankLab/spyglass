@@ -10,6 +10,9 @@ import spikeinterface as si
 from scipy import stats
 from spikeinterface.postprocessing.correlograms import compute_correlograms
 
+from spyglass.spikesorting._legacy_runtime import (
+    _require_legacy_si_environment,
+)
 from spyglass.spikesorting.utils_burst import (
     calculate_ca,
     calculate_isi_violation,
@@ -19,9 +22,6 @@ from spyglass.spikesorting.utils_burst import (
     plot_burst_peak_over_time,
     plot_burst_xcorrel,
     validate_pairs,
-)
-from spyglass.spikesorting._legacy_runtime import (
-    _require_legacy_si_environment,
 )
 from spyglass.spikesorting.v1.metric_curation import (
     CurationV1,

@@ -3,11 +3,10 @@
 Several v0 and v1 active populate / curation / recompute paths still call
 SpikeInterface APIs that were removed or renamed in SpikeInterface 0.101+
 (``WaveformExtractor`` / ``extract_waveforms`` / ``load_waveforms`` /
-``ChunkRecordingExecutor`` signature widening / quality-metric renames). Phase
-0c's audit decision -- recorded under
-``tests/spikesorting/v2/resolver/si0104-audit.md`` -- is to gate those entry
-points behind an explicit legacy-environment error rather than let callers hit
-an opaque ``AttributeError`` or ``AssertionError`` from inside SpikeInterface.
+``ChunkRecordingExecutor`` signature widening / quality-metric renames). Those
+entry points are gated behind an explicit legacy-environment error rather than
+allowed to crash with an opaque ``AttributeError`` or ``AssertionError`` from
+inside SpikeInterface.
 
 The guard is intentionally narrow:
 
@@ -15,11 +14,11 @@ The guard is intentionally narrow:
   are not guarded.
 - v0/v1 schemas are unchanged; ``SpikeSortingOutput`` merge queries on existing
   rows keep functioning.
-- Phase 1+ v2 code is unaffected.
+- Modern (v2) spike-sorting code is unaffected.
 
 Callers add ``_require_legacy_si_environment()`` as the first statement of any
-``make()`` / public entry point classified as legacy-runtime-only in the
-audit. The helper is a no-op when running under SpikeInterface < 0.101.
+``make()`` / public entry point that needs the legacy SpikeInterface runtime.
+The helper is a no-op when running under SpikeInterface < 0.101.
 """
 
 from __future__ import annotations

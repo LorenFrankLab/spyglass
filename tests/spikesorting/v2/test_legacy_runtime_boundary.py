@@ -1,6 +1,7 @@
-"""Validation slice for the SpikeInterface-0.104 legacy-runtime boundary.
+"""Validation suite for the SpikeInterface-0.104 legacy-runtime boundary.
 
-Asserts every contract from Phase 0c:
+Asserts the contract that lets v2 ship under SpikeInterface 0.104 without
+breaking existing v0/v1 query paths:
 
 - the project is pinned to SI 0.104,
 - the v0/v1 spike-sorting modules and the non-spike-sorting consumers in
@@ -8,9 +9,10 @@ Asserts every contract from Phase 0c:
 - each guarded v0/v1 entry point raises the legacy-environment error at
   call time,
 - existing v0/v1 `SpikeSortingOutput` merge queries remain functional,
-- v0/v1 DataJoint ``definition`` strings are byte-identical to Phase 0a,
+- v0/v1 DataJoint ``definition`` strings have not drifted,
 - the resolver finds ``mountainsort5`` and the optional matching extra,
-- ``correct_motion`` exposes the kwargs Phase 3's contract requires.
+- ``correct_motion`` exposes the kwargs the v2 motion-correction contract
+  requires.
 
 These tests run under the resolver-clean SI 0.104 environment; the
 merge-query smoke test additionally needs Docker.
@@ -19,9 +21,9 @@ merge-query smoke test additionally needs Docker.
 from __future__ import annotations
 
 import importlib
-import importlib.metadata as _meta
 import inspect
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -33,10 +35,9 @@ _SRC = _REPO_ROOT / "src"
 
 # ---------- Schema-stability test: v0/v1 definitions are unchanged ------------
 
-# Mapping from the table's CamelCase name to the source file and the canonical
-# definition recorded at the start of Phase 0c. Generated from the Phase-0c
-# baseline; if any of these strings drifts, v0/v1 schemas have moved and the
-# legacy-runtime boundary contract is broken.
+# Source files whose DataJoint ``definition`` blocks must not drift while the
+# legacy-runtime boundary is in effect. The schemas are byte-identical to the
+# SI-0.99 baseline; any drift here would mean an active migration sneaked in.
 _LEGACY_TABLE_FILES = {
     "v0": [
         "spyglass/spikesorting/v0/spikesorting_recording.py",
@@ -65,18 +66,22 @@ def _extract_definition_blocks(path: Path) -> dict[str, str]:
     a preceding ``class Name`` declaration.
     """
     source = path.read_text()
+    # ``class`` can be at column 0 (master tables) or indented (DataJoint Part
+    # tables nested inside a master); both must be captured so a Part-table
+    # drift cannot slip past the snapshot.
     pattern = re.compile(
-        r"^class\s+(\w+).*?\n\s+definition\s*=\s*\"\"\"\n(.*?)\"\"\"",
+        r"^\s*class\s+(\w+).*?\n\s+definition\s*=\s*\"\"\"\n(.*?)\"\"\"",
         re.DOTALL | re.MULTILINE,
     )
     return {match.group(1): match.group(2) for match in pattern.finditer(source)}
 
 
 def test_no_legacy_schema_changes():
-    """v0/v1 DataJoint ``definition`` blocks parse and survive the SI bump.
+    """v0/v1 DataJoint ``definition`` blocks parse and remain present.
 
-    The bump is a runtime change only; if any legacy table's definition has
-    drifted under Phase 0c, the boundary contract is broken.
+    The SI dependency bump is a runtime change only; any legacy table whose
+    ``definition`` string has drifted would mean a schema migration sneaked
+    in while the boundary contract was meant to be quiescent.
     """
     blocks: dict[str, dict[str, str]] = {}
     for tier, files in _LEGACY_TABLE_FILES.items():
@@ -188,15 +193,17 @@ def test_legacy_import_smoke(module_name, dj_conn):
 # ---------- Each guarded entry point raises at call time -------------------
 
 
-def _assert_legacy_guard(component: str, callable_: callable) -> None:
-    """Assert ``callable_()`` raises the prescribed legacy-environment error."""
-    with pytest.raises(RuntimeError, match="legacy SpikeInterface 0.99"):
+def _assert_legacy_guard(
+    component: str, callable_: Callable[[], object]
+) -> None:
+    """Assert ``callable_()`` raises the prescribed legacy-environment error.
+
+    Captures the raised exception once so a guard that fails to raise on the
+    second invocation cannot silently pass the component-name assertion.
+    """
+    with pytest.raises(RuntimeError, match="legacy SpikeInterface 0.99") as exc_info:
         callable_()
-    # Sanity: error message names the component the caller invoked.
-    try:
-        callable_()
-    except RuntimeError as exc:
-        assert component in str(exc)
+    assert component in str(exc_info.value)
 
 
 def test_legacy_runtime_guard_raises_under_si_0104(dj_conn):
