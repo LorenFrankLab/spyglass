@@ -59,7 +59,7 @@ erDiagram
     Recording ||--o{ SharedArtifactGroup_Member : ""
     ArtifactDetectionParameters ||--o{ ArtifactDetectionSelection : ""
     ArtifactDetectionSelection ||--|| ArtifactDetection : "Computed"
-    ArtifactDetection ||--o{ ArtifactDetection_Interval : "part"
+    ArtifactDetection ||..o{ IntervalList : "writes artifact_{artifact_id} row(s)"
 
     %% --- Phase 3 concat chain ---
     SessionGroup ||--o{ SessionGroup_Member : "part"

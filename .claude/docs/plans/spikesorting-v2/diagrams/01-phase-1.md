@@ -15,7 +15,7 @@ End-to-end single-session sort: preprocessing → artifact detection → sorting
 | `ArtifactDetectionParameters` | Lookup | Threshold detection parameters. |
 | `SharedArtifactGroup` (+ `Member` part) | Manual | Opt-in: cross-recording artifact detection (issue #928). |
 | `ArtifactDetectionSelection` | Manual | Source parts: either `RecordingSource` or `SharedArtifactGroupSource`. |
-| `ArtifactDetection` (+ `Interval` part) | Computed | Artifact intervals on a part table, NOT in `IntervalList`. |
+| `ArtifactDetection` | Computed | Writes artifact-removed valid times to `common.IntervalList` as `f"artifact_{artifact_id}"`. |
 | `SorterParameters` | Lookup | Per-sorter Pydantic-validated params; MS4 / MS5 / KS4 / clusterless / SC2 / TDC2. |
 | `SortingSelection` | Manual | Source parts for `Recording` / `ConcatenatedRecording`, plus nullable `ArtifactDetection`. |
 | `Sorting` (+ `Unit` part) | Computed | Sorts via SI 0.104; writes units NWB + SortingAnalyzer folder; persists per-unit peak channel. |
@@ -115,12 +115,6 @@ erDiagram
     ArtifactDetection {
         uuid artifact_id PK
     }
-    ArtifactDetection_Interval {
-        uuid artifact_id PK
-        int interval_index PK
-        double start_time
-        double end_time
-    }
 
     Session ||--o{ SharedArtifactGroup : "FK"
     SharedArtifactGroup ||--o{ SharedArtifactGroup_Member : "part"
@@ -131,7 +125,7 @@ erDiagram
     SharedArtifactGroup ||--o{ ArtifactDetectionSelection_SharedArtifactGroupSource : "FK"
     ArtifactDetectionParameters ||--o{ ArtifactDetectionSelection : "FK"
     ArtifactDetectionSelection ||--|| ArtifactDetection : "Computed"
-    ArtifactDetection ||--o{ ArtifactDetection_Interval : "part"
+    ArtifactDetection ||..o{ IntervalList : "writes artifact_{artifact_id} row(s)"
 
     %% =========================================================
     %% Sorting
