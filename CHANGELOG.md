@@ -51,6 +51,33 @@ DLCProject().alter()
 
 ### Breaking Changes
 
+#### NwbfileHasher Now Includes Dataset Content (#XXXX)
+
+`NwbfileHasher` previously discarded the return value of `hash_dataset()`, so
+HDF5 Dataset values (the actual array data) were never incorporated into
+`SpikeSortingRecording.hash`. Only metadata (attrs, shape, dtype) was hashed.
+
+**Impact**: All V1 `SpikeSortingRecording` hashes computed before this fix are
+metadata-only. Running `RecordingRecompute.populate()` against a pre-fix stored
+hash will produce `matched=False` even when the file is identical, because the
+old and new hashers disagree on what to include.
+
+**If you have existing `matched=1` entries** from before this fix, those matches
+only verified metadata — Dataset content was not compared. These entries should
+be re-validated once all users have upgraded.
+
+**Backward compatibility**: Set `SPYGLASS_LEGACY_HASHES=true` in your shell
+environment to restore pre-fix (metadata-only) hashing in `RecordingRecompute`.
+This allows existing matched entries to be reproduced without recomputing, and
+is intended as a temporary bridge while labs transition:
+
+```bash
+SPYGLASS_LEGACY_HASHES=true python -c "
+from spyglass.spikesorting.v1.recompute import RecordingRecompute
+RecordingRecompute().populate(...)
+"
+```
+
 #### LFPBandV1 Fix
 
 If you were using a pre-release version of Spyglass 0.5.6 LFPBandV1 after April
@@ -158,6 +185,9 @@ for label, interval_data in results.groupby("interval_labels"):
     `HDF5_USE_FILE_LOCKING` so the HDF5 library actually sees the intended
     `FALSE` default #1575
 - Warn on no-operation restrictions #1586
+- Fix `NwbfileHasher` to include HDF5 Dataset content in file hash; add
+    `SPYGLASS_LEGACY_HASHES` env var to `RecordingRecompute` for backward
+    compatibility with pre-fix hashes #XXXX
 
 ### Pipelines
 
@@ -238,6 +268,9 @@ for label, interval_data in results.groupby("interval_labels"):
         seconds-to-samples conversion #1564
     - Trigger recording recompute in `SpikeSortingRecording.populate` when
         necessary #1588
+    - Fix `NwbfileHasher` to include HDF5 Dataset content in
+        `SpikeSortingRecording.hash`; previously only attrs/shape/dtype were
+        hashed so in-place Dataset edits were invisible to the hasher #XXXX
     - Restrict `ImportedSpikeSorting.Annotations` to the current session in
         `make_df_from_annotations` so `fetch_nwb` works across multiple sessions
         with overlapping unit ids #1581, #1592

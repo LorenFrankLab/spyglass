@@ -155,6 +155,7 @@ class NwbfileHasher:
         keep_obj_hash: bool = False,
         keep_file_open: bool = False,
         verbose: bool = False,
+        legacy_mode: bool = False,
     ):
         """Hashes the contents of an NWB file.
 
@@ -186,10 +187,16 @@ class NwbfileHasher:
             Keep the hash of each object in the NWB file, by default False.
         verbose : bool, optional
             Display progress bar, by default True.
+        legacy_mode : bool, optional
+            If True, reproduce the pre-fix behavior where Dataset content is
+            not incorporated into the hash (only attrs/shape/dtype are used).
+            Use only for comparing regenerated files against hashes computed
+            before the bug fix. Default False.
         """
         self.path = Path(path)
         self.file = h5py.File(path, "r")
         atexit.register(self.cleanup)
+        self.legacy_mode = legacy_mode
 
         if precision_lookup is None:
             precision_lookup = PRECISION_LOOKUP
@@ -261,7 +268,7 @@ class NwbfileHasher:
         if dataset.shape == ():
             raw_scalar = str(dataset[()])
             this_hash.update(self.serialize_attr_value(raw_scalar))
-            return
+            return this_hash.hexdigest()
 
         dataset_name = dataset.parent.name.split("/")[-1]
         precision = self.precision.get(dataset_name, None)
@@ -324,7 +331,8 @@ class NwbfileHasher:
                 this_hash.update(self.serialize_attr_value(attr_value))
 
             if isinstance(obj, h5py.Dataset):
-                _ = self.hash_dataset(obj)
+                if not self.legacy_mode:
+                    this_hash.update(self.hash_dataset(obj).encode())
             elif isinstance(obj, h5py.SoftLink):
                 this_hash.update(obj.path.encode())
             elif isinstance(obj, h5py.Group):
