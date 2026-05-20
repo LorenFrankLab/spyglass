@@ -121,6 +121,68 @@ Plan-phase vocabulary is fine here (this is a plan document). Last updated
   **not** caused by Phase 0a (annotation-only changes cannot affect it).
   Follow-up, not absorbed.
 
+## Phase 0b working decisions
+
+- **`neuroconv` override needed alongside the SI override.** The plan's
+  Phase 0b install commands install the project plus the `spikesorting-v2-
+  validation` extra, then override SpikeInterface to 0.104. The project's
+  `spikeinterface<0.100` pin transitively forces `neuroconv` down to 0.2.2,
+  which has no `mearec` extra; the SI override doesn't fix `neuroconv`. The
+  working install sequence is `uv pip install -e
+  ".[test,spikesorting-v2-validation]"` then `uv pip install --upgrade
+  "neuroconv[mearec]" "spikeinterface>=0.104,<0.105"`. Recorded in the
+  fixtures README; the phase-0 doc's command block stays out of scope to
+  edit but should be updated when Phase 0c rewrites it.
+
+- **NEURON downgrade to <9.** NEURON 9.0.x moved to C++ and changed the
+  scop_random API; MEArec 1.10.0's bundled BBP cell models still use the
+  pre-C++ syntax (`scop_random(arg)`), so `nrnivmodl` fails to compile their
+  mechanisms. Working pin: `neuron==8.2.7` (LFPy 2.3.7 still compatible).
+  Documented in the fixtures README.
+
+- **`delete_tmp=False` for `MEArec.gen_templates`.** MEArec's cleanup path
+  does a bare `shutil.rmtree` on the per-probe EAP scratch folder, which
+  fails on NFS with "Directory not empty" because of `.nfsXXXX` ghost
+  files. The templates are already loaded into memory by the time the
+  cleanup runs, so skipping it is safe; the leftover folder lives under
+  `~/.config/mearec/.../templates/physrot/tmp_*` and is harmless.
+
+- **SI-0.104 annotation-deferral extended to 5 v0/v1 files (commit
+  `e5f4928a`).** Phase 0a's `fb571590` fixed three core files so `import
+  spyglass` worked under SI 0.104; Phase 0b's ingestion round-trip (goal 2)
+  needs the merge import chain to also load cleanly, which pulls in v0+v1
+  spike sorting. Fixed `v0/spikesorting_curation.py`, `v1/metric_curation.py`,
+  `v1/metric_utils.py` with `from __future__ import annotations`; fixed
+  `v0/spikesorting_burst.py` and `v1/burst_curation.py` by dropping
+  `WaveformExtractor` from the broken `spikeinterface.postprocessing.
+  correlograms` import and retargeting their annotations to
+  `si.WaveformExtractor`; replaced module-level `sq.nearest_neighbors_*` /
+  `sq.compute_snrs` references in two `_metric_name_to_func` dicts with
+  `getattr(sq, ..., None)` so the dict materializes lazily. Zero runtime
+  behavior change under SI 0.99 (the legacy runtime path is unchanged); the
+  full v0/v1 SI 0.104 audit remains Phase 0c work.
+
+- **`ImportedSpikeSorting` idempotency in `_verify_ingestion`.** The plan's
+  round-trip test calls `ImportedSpikeSorting().insert_from_nwbfile`
+  unconditionally, but a rerun (or rerun-after-partial-failure) then hits
+  `DuplicateError` because the row already exists. Guarded with an
+  existence check so the round-trip is rerunnable without manual cleanup.
+
+- **v2 conftest layout.** The Phase 0a no-op `mini_insert` is kept for
+  static-tier tests run under `--no-docker --no-dlc`. DB-tier tests
+  (`test_recording_hash`, `test_fixture_ingestion`) request `dj_conn` and a
+  v2-specific `analysis_nwbfile_for_hash` fixture that does its own minirec
+  ingestion + creates an `AnalysisNwbfile`. `collect_ignore` excludes the
+  three helper scripts (`test_env.py`, `baseline_capture.py`,
+  `fixtures/generate_mearec.py`) from pytest discovery; their leading
+  `test_` is a component name (the standalone bootstrap), not a pytest
+  prefix.
+
+- **`baseline_capture.py --team-name` added.** The plan's CLI list omits
+  `--team-name`, but `SpikeSortingRecordingSelection` requires the
+  `team_name` foreign key. The argument is required (no default), so a lab
+  developer must pass their existing `LabTeam` name explicitly.
+
 ## Open items / follow-ups
 
 - **v1 recompute test errors** — the 4 `test_recompute.py` setup errors above
