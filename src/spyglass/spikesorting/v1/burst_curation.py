@@ -20,6 +20,9 @@ from spyglass.spikesorting.utils_burst import (
     plot_burst_xcorrel,
     validate_pairs,
 )
+from spyglass.spikesorting._legacy_runtime import (
+    _require_legacy_si_environment,
+)
 from spyglass.spikesorting.v1.metric_curation import (
     CurationV1,
     MetricCuration,
@@ -257,6 +260,7 @@ class BurstPair(SpyglassMixin, dj.Computed):
 
     def make(self, key) -> None:
         """Generate BurstPair metrics for a given key"""
+        _require_legacy_si_environment("v1 BurstPair.make")
         params = BurstPairParams().get_params(key)
 
         peak_amps, peak_timestamps = self.get_peak_amps(key)

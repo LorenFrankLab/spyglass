@@ -11,6 +11,9 @@ from scipy import stats
 from spikeinterface.postprocessing.correlograms import compute_correlograms
 
 from spyglass.settings import test_mode
+from spyglass.spikesorting._legacy_runtime import (
+    _require_legacy_si_environment,
+)
 from spyglass.spikesorting.utils_burst import (
     calculate_ca,
     calculate_isi_violation,
@@ -270,6 +273,7 @@ class BurstPair(SpyglassMixin, dj.Computed):
 
     def make(self, key) -> None:
         """Generate BurstPair metrics for a given key"""
+        _require_legacy_si_environment("v0 BurstPair.make")
         params = BurstPairParams().get_params(key)
 
         peak_amps, peak_timestamps = self.get_peak_amps(key)

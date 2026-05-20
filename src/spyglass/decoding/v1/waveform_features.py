@@ -14,6 +14,9 @@ import spikeinterface as si
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.settings import temp_dir
+from spyglass.spikesorting._legacy_runtime import (
+    _require_legacy_si_environment,
+)
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 from spyglass.spikesorting.v1 import SpikeSortingSelection
 from spyglass.utils import SpyglassMixin
@@ -131,6 +134,7 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
 
     def make(self, key):
         """Populate UnitWaveformFeatures table."""
+        _require_legacy_si_environment("v1 UnitWaveformFeatures.make")
         # get the list of feature parameters
         params = (WaveformFeaturesParams & key).fetch1("params")
 

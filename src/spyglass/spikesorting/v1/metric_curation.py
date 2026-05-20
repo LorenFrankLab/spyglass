@@ -18,6 +18,9 @@ from spyglass.spikesorting.v1.curation import (
     _list_to_merge_dict,
     _merge_dict_to_list,
 )
+from spyglass.spikesorting._legacy_runtime import (
+    _require_legacy_si_environment,
+)
 from spyglass.spikesorting.v1.metric_utils import (
     compute_isi_violation_fractions,
     get_num_spikes,
@@ -283,6 +286,7 @@ class MetricCuration(SpyglassMixin, dj.Computed):
         6. Saves the waveforms, metrics, labels, and merge groups to an
             analysis NWB file.
         """
+        _require_legacy_si_environment("v1 MetricCuration.make")
         nwb_file_name = upstream["nwb_file_name"]
         metric_params = upstream["metric_params"]
         label_params = upstream["label_params"]
@@ -349,6 +353,7 @@ class MetricCuration(SpyglassMixin, dj.Computed):
             fetch all spikes for units, by default False. Overrides
             max_spikes_per_unit in waveform_params
         """
+        _require_legacy_si_environment("v1 MetricCuration.get_waveforms")
         key_hash = dj.hash.key_hash(key)
         if cached := self._waves_cache.get(key_hash):
             return cached

@@ -1,0 +1,64 @@
+"""Runtime guard for v0/v1 spike-sorting paths that require legacy SpikeInterface.
+
+Several v0 and v1 active populate / curation / recompute paths still call
+SpikeInterface APIs that were removed or renamed in SpikeInterface 0.101+
+(``WaveformExtractor`` / ``extract_waveforms`` / ``load_waveforms`` /
+``ChunkRecordingExecutor`` signature widening / quality-metric renames). Phase
+0c's audit decision -- recorded under
+``tests/spikesorting/v2/resolver/si0104-audit.md`` -- is to gate those entry
+points behind an explicit legacy-environment error rather than let callers hit
+an opaque ``AttributeError`` or ``AssertionError`` from inside SpikeInterface.
+
+The guard is intentionally narrow:
+
+- Read-only / query paths that do not invoke removed APIs continue to work and
+  are not guarded.
+- v0/v1 schemas are unchanged; ``SpikeSortingOutput`` merge queries on existing
+  rows keep functioning.
+- Phase 1+ v2 code is unaffected.
+
+Callers add ``_require_legacy_si_environment()`` as the first statement of any
+``make()`` / public entry point classified as legacy-runtime-only in the
+audit. The helper is a no-op when running under SpikeInterface < 0.101.
+"""
+
+from __future__ import annotations
+
+from packaging.version import Version
+
+
+_LEGACY_BOUNDARY = Version("0.101")
+
+
+def _legacy_runtime_message(component: str) -> str:
+    """Compose the prescribed legacy-environment error message."""
+    return (
+        f"{component} requires the legacy SpikeInterface 0.99 environment. "
+        "Use the modern (v2) spike-sorting pipeline for new SpikeInterface "
+        "0.104+ processing, or run this workflow in the legacy Spyglass "
+        "environment. Existing v0/v1 rows remain queryable under the new "
+        "pin; only active populate / curation / recompute is gated."
+    )
+
+
+def _require_legacy_si_environment(component: str) -> None:
+    """Raise ``RuntimeError`` when SpikeInterface is past the legacy boundary.
+
+    Parameters
+    ----------
+    component : str
+        Human-readable name of the guarded entry point, e.g.
+        ``"v1 SpikeSorting.make"``. Used in the error message so the
+        traceback points at the workflow the caller invoked.
+
+    Raises
+    ------
+    RuntimeError
+        When the installed SpikeInterface version is at or past 0.101 (the
+        first release that removed the WaveformExtractor-era APIs the v0/v1
+        active runtime paths still depend on).
+    """
+    import spikeinterface
+
+    if Version(spikeinterface.__version__) >= _LEGACY_BOUNDARY:
+        raise RuntimeError(_legacy_runtime_message(component))

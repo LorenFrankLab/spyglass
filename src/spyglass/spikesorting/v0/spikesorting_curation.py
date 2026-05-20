@@ -31,6 +31,9 @@ from spyglass.common import BrainRegion, Electrode
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.settings import waveforms_dir
+from spyglass.spikesorting._legacy_runtime import (
+    _require_legacy_si_environment,
+)
 from spyglass.spikesorting.v0.merged_sorting_extractor import (
     MergedSortingExtractor,
 )
@@ -426,6 +429,7 @@ class Waveforms(SpyglassMixin, dj.Computed):
         2. Uses spikeinterface to extract waveforms
         3. Generates an analysis NWB file with the waveforms
         """
+        _require_legacy_si_environment("v0 Waveforms.make")
         analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
 
         recording = si.load_extractor(recording_path)
@@ -492,6 +496,7 @@ class Waveforms(SpyglassMixin, dj.Computed):
         -------
         we : spikeinterface.WaveformExtractor
         """
+        _require_legacy_si_environment("v0 Curation.load_waveforms")
         we_path = self._get_waveform_path(key)
         we = si.WaveformExtractor.load_from_folder(we_path)
         return we
@@ -673,6 +678,7 @@ class QualityMetrics(SpyglassMixin, dj.Computed):
             NN noise overlap, peak offset, peak channel, and number of spikes.
         3. Generates an analysis NWB file with the metrics.
         """
+        _require_legacy_si_environment("v0 QualityMetrics.make")
         # File name involves random string. Can't pass it through make_fetch.
         analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
         waveform_extractor = si.WaveformExtractor.load_from_folder(wf_path)
