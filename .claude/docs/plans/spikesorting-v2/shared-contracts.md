@@ -382,7 +382,7 @@ Implement `_get_restricted_merge_ids_v2(key, as_dict=False)` as the v2 analog of
 - Phase 2 keys: `analyzer_curation_id`, `metric_params_name`, `auto_curation_rules_name`.
 - Phase 3+ keys when their tables exist: `session_group_owner`, `session_group_name`, `concat_recording_id`.
 
-The implementation should join through the relevant v2 Selection tables and source parts, then restrict `SpikeSortingOutput.CurationV2`. Restrictions by `recording_id` route through `SortingSelection.RecordingSource`; restrictions by `concat_recording_id` route through `SortingSelection.ConcatenatedRecordingSource` once concat support lands. Unknown restriction fields should fail clearly rather than silently returning unrelated merge IDs. `restrict_by_artifact` remains accepted by the public method for API compatibility, but the v2 path ignores the v1-specific `IntervalList` rewrite because artifact intervals live on `ArtifactDetection.Interval`.
+The implementation should join through the relevant v2 Selection tables and source parts, then restrict `SpikeSortingOutput.CurationV2`. Restrictions by `recording_id` route through `SortingSelection.RecordingSource`; restrictions by `concat_recording_id` route through `SortingSelection.ConcatenatedRecordingSource` once concat support lands. Unknown restriction fields should fail clearly rather than silently returning unrelated merge IDs. `restrict_by_artifact` remains accepted by the public method for API compatibility; v2 looks up the artifact's `IntervalList` row by `(nwb_file_name, interval_list_name=f"artifact_{artifact_id}")` rather than v1's bare-UUID lookup.
 
 **Imported sorting parity**:
 

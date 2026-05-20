@@ -264,7 +264,7 @@ class Recording(SpyglassMixin, dj.Computed):
 
 ## ArtifactDetectionParameters + ArtifactDetection
 
-Mirrors v1's structure but consumes the v2 NWB-resident `Recording` artifact (via `Recording.get_recording(key)`). v2 stores detected artifact intervals on `ArtifactDetection.Interval`, not in `IntervalList`. The user-facing replacement for v1's UUID-named artifact interval row is `ArtifactDetection.get_artifact_removed_intervals(key)`, which derives artifact-free valid times from the original sort interval plus the `ArtifactDetection.Interval` part rows.
+Mirrors v1's structure but consumes the v2 NWB-resident `Recording` artifact (via `Recording.get_recording(key)`). v2 reuses Spyglass's `common.IntervalList` for the artifact-removed valid-time interval -- the same table session intervals live in -- under a UUID-decorated name (`f"artifact_{artifact_id}"`) so downstream `IntervalList`-querying code finds these intervals through the standard interface. `ArtifactDetection.get_artifact_removed_intervals(key)` is a thin `IntervalList.fetch1("valid_times")` wrapper.
 
 ```python
 @schema
@@ -368,26 +368,21 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
     definition = """
     -> ArtifactDetectionSelection
     """
-
-    class Interval(SpyglassMixinPart):
-        """One row per detected artifact interval (start, end) seconds.
-
-        Note we DO NOT insert into IntervalList with skip_duplicates=True
-        per custom_pipeline_authoring.md Non-Negotiable #6. Instead the
-        full artifact-removed interval is computed here as a side-effect-free
-        derivation; downstream consumers compute it on demand from this
-        part table.
-        """
-        definition = """
-        -> master
-        interval_index: int
-        ---
-        start_time: double
-        end_time: double
-        """
+    # No part table for the interval; the artifact-removed valid times are
+    # written to common.IntervalList under name f"artifact_{artifact_id}"
+    # at the end of make(). See the IntervalList convention below.
 ```
 
-**Design change from v1**: v1 inserts the artifact-removed interval directly into `IntervalList` with `artifact_id` (UUID) as the `interval_list_name`. This collides with user-named intervals and uses `skip_duplicates=True` (forbidden in custom `make()`). v2 stores artifact intervals on its own part table and exposes `ArtifactDetection.get_artifact_removed_intervals(key)` for consumers. Do not teach users to look for v2 artifact results in `IntervalList`; that table remains for session/task/user valid-time intervals.
+**`IntervalList` write convention** (replaces v1's broken pattern):
+
+- `ArtifactDetection.make()` writes one `IntervalList` row per affected session:
+  - `RecordingSource`: exactly one row, keyed by the source `Recording`'s `nwb_file_name`.
+  - `SharedArtifactGroupSource`: one row per distinct member `nwb_file_name`. All rows share the same `interval_list_name`; the `(nwb_file_name, interval_list_name)` PK keeps them distinct.
+- `interval_list_name = f"artifact_{artifact_id}"`. The UUID suffix guarantees the name does not collide with any human-authored session interval, and rerunning artifact detection legitimately fails with a duplicate-key error rather than silently overwriting.
+- Use `IntervalList.insert1(...)` -- **not** `skip_duplicates=True`. v1's `skip_duplicates=True` pattern is forbidden under `custom_pipeline_authoring.md` Non-Negotiable #6 because it masks real bugs; the UUID-suffixed name removes the only legitimate reason v1 needed it.
+- `ArtifactDetection.delete()` must remove the matching `IntervalList` rows (one or N depending on source). DataJoint does not cascade through `interval_list_name`-keyed dependencies, so the cleanup is explicit; the delete override fetches `artifact_id` (and, for shared-group sources, the member `nwb_file_name`s) before calling `super().delete()`.
+
+**Design change from v1**: v1 used `interval_list_name = str(artifact_id)` (raw UUID, no prefix) and called `IntervalList.insert1(..., skip_duplicates=True)` inside `make()`. v2 keeps the IntervalList write but (a) prefixes the name with `"artifact_"` so namespace queries can filter v2 artifact intervals from session/task intervals, (b) drops `skip_duplicates=True`, and (c) writes one row per member session for cross-recording (`SharedArtifactGroup`) detections instead of dropping the multi-session case.
 
 **Source re-validation at populate time**: `ArtifactDetection.make()` MUST re-check that the upstream `ArtifactDetectionSelection` row has exactly one source part row at the start of `make()`, mirroring `Sorting.make()`'s pattern. This catches rows inserted via `dj.Manual.insert1()` that bypassed `insert_selection()`. See shared-contracts.md § Source Part Pattern.
 
