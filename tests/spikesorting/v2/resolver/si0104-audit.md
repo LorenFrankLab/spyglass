@@ -100,22 +100,50 @@ implementer wants to revisit, the smallest credible port is the
 load in `v0/spikesorting_curation.py`. The plan permits this only if
 metric output stays within documented tolerances.
 
-## Empirical follow-up (verified in Slice B against `.venv-spikesorting-v2-si0104`)
+## Empirical findings (verified against `.venv-spikesorting-v2-si0104`)
 
-The classification above is source-code-only. The following items need
-empirical confirmation against the actual SI 0.104 install:
+Recorded in [`si0104-runtime.md`](si0104-runtime.md). Key surprises:
 
-- `spikeinterface.core.job_tools.ChunkRecordingExecutor` and `ensure_n_jobs`
-  - present? signature changed?
-- `spikeinterface.sortingcomponents.peak_detection.detect_peaks` -- still
-  exists under that path?
-- `spikeinterface.sorters.run_sorter` signature changes.
-- `spikeinterface.preprocessing.bandpass_filter`, `common_reference`,
-  `whiten` -- stable?
-- `spikeinterface.preprocessing.correct_motion` -- record signature, accepted
-  kwargs, side-artifact behavior (Phase 3 schema freezes against this).
-- `spikeinterface.sorters.installed_sorters()` -- includes `mountainsort5`
-  after the dep bump, plus MS4 on Linux.
+- `si.extract_waveforms` and `si.load_waveforms` are **importable** in
+  0.104 as backwards-compatibility shims redirecting to
+  `SortingAnalyzer`, but `extract_waveforms` **rejects
+  `overwrite=True/False`** (must be `None`). Every v0/v1 caller passes
+  `overwrite=True`, so the active populate paths still fail at runtime --
+  the strict-guard classification holds.
+- `si.WaveformExtractor` is fully removed; annotation-only references are
+  already deferred (Phase 0a `fb571590` + Phase 0b `e5f4928a`).
+- `sq.compute_snrs` is **present** in 0.104 (Phase 0b's
+  `getattr(sq, "compute_snrs", None)` was defensive; the underlying name
+  is fine). `sq.nearest_neighbors_isolation` and
+  `sq.nearest_neighbors_noise_overlap` are absent, as expected.
+- `spikeinterface.qualitymetrics` emits a `DeprecationWarning` and will be
+  removed in 0.105.0 in favor of `spikeinterface.metrics.quality`. The
+  pin `>=0.104,<0.105` keeps the legacy module path alive; a future SI
+  bump beyond 0.105 will need this module renamed.
+- `spikeinterface.core.job_tools.ChunkRecordingExecutor` is present but
+  its signature has widened: `init_func` and `init_args` are positional,
+  and `pool_engine`, `mp_context`, `need_worker_index` are new keywords.
+  v0/v1 `ArtifactDetection.make` callers using the old signature will
+  fail under 0.104 (guard required).
+- `ensure_n_jobs(recording, n_jobs=1)` -- stable.
+- `spikeinterface.sortingcomponents.peak_detection.detect_peaks` keeps
+  `**old_kwargs` for back-compat; usable from v0/v1.
+- `run_sorter` signature is broadly compatible; per-sorter parameter
+  changes still possible.
+- `correct_motion(recording, preset='dredge_fast', ...,
+  output_motion=False, output_motion_info=False, folder=None,
+  **job_kwargs)` -- supports Phase 3's "corrected recording only" MVP
+  contract directly with default kwargs. Recorded as the Phase 3
+  schema-freeze input in `si0104-runtime.md`.
+- `installed_sorters()` after the resolver-clean install:
+  `['lupin', 'mountainsort5', 'simple', 'spykingcircus2', 'tridesclous2']`.
+  `mountainsort4` is not auto-installed by `[test]`; flagged as a
+  documentation item (Linux runtime install is separate).
 
-Items that change a query-compatible classification to guarded-legacy will be
-recorded here.
+## Resolver-side change forced by the SI bump
+
+- The legacy `probeinterface<0.3` pin in `pyproject.toml` conflicts with
+  `spikeinterface>=0.104`'s requirement `probeinterface>=0.3.2`. Updated
+  to `probeinterface>=0.3.2` so the resolver succeeds. The pre-bump
+  comment ("Bc some probes fail space checks") needs re-verification
+  against probeinterface 0.3.x; recorded as a follow-up.
