@@ -66,6 +66,18 @@ Plan-phase vocabulary is fine here (this is a plan document). Last updated
   off `master`; that PR must (1) add a failing content-change test first and
   (2) handle invalidation — fixing the hash changes every value
   `NwbfileHasher` produces, so existing v1 recompute records go stale.
+  Externally tracked at
+  [LorenFrankLab/spyglass#1597](https://github.com/LorenFrankLab/spyglass/issues/1597)
+  (Samuel Bray, 2026-05-18), source-pinned to the same line. The adjacent open
+  PR [#1599](https://github.com/LorenFrankLab/spyglass/pull/1599)
+  (`recompute_hash` branch) fixes the recompute-trigger issue
+  [#1596](https://github.com/LorenFrankLab/spyglass/issues/1596), not the
+  hash content-discard. The redundant-hash perf concern in
+  [#1598](https://github.com/LorenFrankLab/spyglass/issues/1598) is also in
+  the same module. Phase 0b's hash-determinism test confirmed the documented
+  behavior: two distinct empty `AnalysisNwbfile`s produce identical digests
+  under the current `NwbfileHasher`. A content-change regression test is left
+  to the #1597 fix PR as the SCRATCHPAD decision originally specified.
 
 - **Open question — recompute hash tolerance.** A raw/exact content hash
   false-mismatches across environments (BLAS/SI/CPU float noise); v1 rounds
@@ -182,6 +194,33 @@ Plan-phase vocabulary is fine here (this is a plan document). Last updated
   `--team-name`, but `SpikeSortingRecordingSelection` requires the
   `team_name` foreign key. The argument is required (no default), so a lab
   developer must pass their existing `LabTeam` name explicitly.
+
+## Phase 0b completion status
+
+- **Committed** on `spikesorting-v2` (on top of Phase 0a's `ef80b78b`):
+  `6b79139a` modern-spike-sorting validation environment scaffolding,
+  `e5f4928a` SI-0.104 annotation deferral for v0/v1 spike sorting,
+  `75d32152` MEArec ground-truth fixture infrastructure, `240911ef` drop
+  scratchpad pointer to removed incident artifact, `57b52545` v1 baseline
+  capture + DB-tier v2 tests.
+- **Pytest validation under SI 0.104 + Docker**: `pytest tests/spikesorting/v2/`
+  is **19 passed, 0 failed** (107 s). Goals 1 (hash determinism), 2 (MEArec
+  fixture round-trip), and 4 (standalone-script isolation guards) are
+  verified.
+- **Smoke fixture round-trip**: `mearec_polymer_smoke.nwb` (128 ch, 4 s, 6
+  planted units) generated and ingested end to end with the expected row
+  counts (`n_electrodes=128`, `n_probe_electrodes=128`,
+  `num_shanks=4`, one `ImportedSpikeSorting` row).
+- **Not run in this session**:
+  - Goal 3 v1 baseline capture — needs `SPIKESORTING_V2_REAL_NWB_PATH` and
+    must run under the SI 0.99 v1 environment.
+  - Goal 5 v1 regression — also SI 0.99; tracked against Phase 0a's
+    `41 passed, 7 skipped, 4 errors` baseline (the four errors are
+    pre-existing recompute-fixture fragility, not caused by Phase 0b).
+  - Full-profile MEArec fixture generation
+    (`mearec_polymer_128ch_60s`, `mearec_neuropixels_60s`,
+    `mearec_polymer_128ch_drift_120s`) — the generator is verified end to
+    end via `--smoke`; running the full profile is left for the consumer.
 
 ## Open items / follow-ups
 
