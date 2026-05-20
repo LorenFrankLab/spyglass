@@ -496,7 +496,7 @@ class Waveforms(SpyglassMixin, dj.Computed):
         -------
         we : spikeinterface.WaveformExtractor
         """
-        _require_legacy_si_environment("v0 Curation.load_waveforms")
+        _require_legacy_si_environment("v0 Waveforms.load_waveforms")
         we_path = self._get_waveform_path(key)
         we = si.WaveformExtractor.load_from_folder(we_path)
         return we

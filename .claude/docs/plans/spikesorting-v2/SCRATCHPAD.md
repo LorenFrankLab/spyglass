@@ -195,6 +195,43 @@ Plan-phase vocabulary is fine here (this is a plan document). Last updated
   `team_name` foreign key. The argument is required (no default), so a lab
   developer must pass their existing `LabTeam` name explicitly.
 
+## Phase 0c completion status
+
+- **Committed** on `spikesorting-v2` (on top of Phase 0b's `b29b90cf`):
+  `458b9714` SI import audit + classification, `2077f2ae` SI 0.104 pin
+  bump + resolver evidence, `390598f8` v0/v1 active-runtime guards,
+  `de1beae2` legacy-runtime-boundary test suite + CHANGELOG.
+- **Pin landed**: `spikeinterface>=0.104,<0.105` is in `pyproject.toml`;
+  the project's resolver-clean venv `.venv-spikesorting-v2-si0104` on
+  Python 3.11 installs cleanly after a forced `probeinterface>=0.3.2`
+  bump (the legacy `<0.3` pin conflicted with SI 0.104's requirement;
+  the "some probes fail space checks" comment behind it needs
+  re-verification -- recorded as a follow-up).
+- **Resolver artifacts** at `tests/spikesorting/v2/resolver/`:
+  `si0104-audit.md`, `si0104-runtime.md`, `si0104-freeze.txt`,
+  `si0104-spikeinterface-imports.txt`.
+- **Strict legacy boundary**: 11 v0/v1 active entry points across 8 files
+  raise `RuntimeError` with the prescribed legacy-SI-0.99 message when
+  called under SI 0.104. v0/v1 schemas are byte-identical; existing
+  rows remain queryable through `SpikeSortingOutput`. Strict per the
+  user's selection; no narrow shims ported.
+- **`correct_motion` API contract** verified empirically: Phase 3 can
+  freeze against the recorded signature (the MVP "corrected recording
+  only" mode requires `output_motion=False, output_motion_info=False`,
+  both defaults).
+- **Pytest validation** under `.venv-spikesorting-v2-si0104` + Docker:
+  `pytest tests/spikesorting/v2/` is **35 passed, 0 failed** (98.85 s).
+  Phase 0b's 19 tests + Phase 0c's 16 new legacy-boundary tests.
+- **Not run in this session**:
+  - Python 3.10 / 3.12 resolver checks -- the user opted for 3.11 only;
+    the matrix evidence is intentionally narrower than the plan suggests.
+  - Live v0/v1 `pytest tests/spikesorting/v0/` / `pytest tests/spikesorting/v1/`
+    regression suites under the legacy SI 0.99 env. The guards are
+    no-ops under SI 0.99 by construction, and v0/v1 schemas are
+    unchanged, so the legacy runtime is structurally protected; the
+    smoke that proves this end-to-end runs in the lab's SI 0.99 conda
+    environment (e.g. `spyglass-py310`), not in the v2 venvs here.
+
 ## Phase 0b completion status
 
 - **Committed** on `spikesorting-v2` (on top of Phase 0a's `ef80b78b`):
