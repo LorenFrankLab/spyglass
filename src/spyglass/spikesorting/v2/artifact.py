@@ -3,13 +3,21 @@
 Tables (all final-shape under the zero-migration policy):
     ArtifactDetectionParameters       -- threshold detection parameters.
     SharedArtifactGroup (+ Member)    -- opt-in cross-recording detection.
-    ArtifactDetectionSelection        -- source parts encode input shape.
+    ArtifactSelection                 -- source parts encode input shape.
         .RecordingSource              -- single-recording path (default).
-        .SharedArtifactSource    -- cross-recording path (#928).
+        .SharedArtifactGroupSource    -- cross-recording path (#928).
     ArtifactDetection                 -- writes IntervalList rows; no part.
 
-Artifact-removed valid times live in ``common.IntervalList`` rather than a
-dedicated part table -- the UUID-suffixed name prevents collision with
+The master is named ``ArtifactSelection`` (rather than the verbose
+``ArtifactDetectionSelection``) so that the auto-generated FK constraint
+name for the source part referencing ``SharedArtifactGroup`` fits inside
+MySQL's 64-character identifier limit -- the longer master + the longer
+part together overflow. The shorter master also matches the v2 single-
+master-per-topic convention: there is only one v2 artifact-related
+``Selection`` table, so the ``Detection`` qualifier is redundant.
+
+Artifact-removed valid times live in ``common.IntervalList`` rather than
+a dedicated part table -- the UUID-suffixed name prevents collision with
 human-authored session intervals while letting downstream
 IntervalList-querying code consume them through the standard interface.
 
@@ -113,25 +121,22 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
 
     @classmethod
     def insert_group(cls, name: str, members: list[dict]) -> None:
-        """Insert master + Member rows; validate session consistency.
-
-        Implemented in a follow-up change.
-        """
+        """Insert master + Member rows; validate session consistency."""
         raise NotImplementedError(
             "SharedArtifactGroup.insert_group is not yet implemented"
         )
 
 
 @schema
-class ArtifactDetectionSelection(SpyglassMixin, dj.Manual):
+class ArtifactSelection(SpyglassMixin, dj.Manual):
     """One row per (parameters, source) artifact detection request.
 
     Source part rows make the input shape explicit: exactly one of
     ``RecordingSource`` (single-recording, default) or
-    ``SharedArtifactSource`` (cross-recording, opt-in) must exist for
-    each selection row. Enforced by ``insert_selection`` and re-checked at
-    the start of ``ArtifactDetection.make()`` per the shared-contracts
-    Source Part Pattern.
+    ``SharedArtifactGroupSource`` (cross-recording, opt-in) must exist
+    for each selection row. Enforced by ``insert_selection`` and
+    re-checked at the start of ``ArtifactDetection.make()`` per the
+    shared-contracts Source Part Pattern.
     """
 
     definition = """
@@ -147,7 +152,7 @@ class ArtifactDetectionSelection(SpyglassMixin, dj.Manual):
         -> Recording
         """
 
-    class SharedArtifactSource(SpyglassMixinPart):
+    class SharedArtifactGroupSource(SpyglassMixinPart):
         definition = """
         -> master
         ---
@@ -156,12 +161,9 @@ class ArtifactDetectionSelection(SpyglassMixin, dj.Manual):
 
     @classmethod
     def insert_selection(cls, key: dict) -> dict:
-        """Insert master + exactly one source part; return PK-only dict.
-
-        Implemented in a follow-up change.
-        """
+        """Insert master + exactly one source part; return PK-only dict."""
         raise NotImplementedError(
-            "ArtifactDetectionSelection.insert_selection is not yet implemented"
+            "ArtifactSelection.insert_selection is not yet implemented"
         )
 
     @classmethod
@@ -170,11 +172,9 @@ class ArtifactDetectionSelection(SpyglassMixin, dj.Manual):
 
         Used by ``ArtifactDetection.make()`` to dispatch on source shape
         and by the integrity tests to assert exactly-one-source.
-
-        Implemented in a follow-up change.
         """
         raise NotImplementedError(
-            "ArtifactDetectionSelection.resolve_source is not yet implemented"
+            "ArtifactSelection.resolve_source is not yet implemented"
         )
 
 
@@ -190,34 +190,32 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
     """
 
     definition = """
-    -> ArtifactDetectionSelection
+    -> ArtifactSelection
     """
 
     def make(self, key):
         """Detect artifacts and write IntervalList rows.
 
-        Implemented in a follow-up change. ``make()`` MUST re-check that the
-        upstream selection has exactly one source part row at entry, per
-        the shared-contracts Source Part Pattern.
+        ``make()`` MUST re-check that the upstream selection has exactly
+        one source part row at entry, per the shared-contracts Source
+        Part Pattern.
         """
         raise NotImplementedError(
-            "ArtifactDetection.make is not yet implemented)"
+            "ArtifactDetection.make is not yet implemented"
         )
 
     def get_artifact_removed_intervals(self, key):
-        """Thin ``IntervalList.fetch1('valid_times')`` wrapper.
-
-        Implemented in a follow-up change.
-        """
+        """Thin ``IntervalList.fetch1('valid_times')`` wrapper."""
         raise NotImplementedError(
-            "ArtifactDetection.get_artifact_removed_intervals is not yet implemented"
+            "ArtifactDetection.get_artifact_removed_intervals is not yet "
+            "implemented"
         )
 
     def delete(self, *args, **kwargs):
         """Override that also removes the matching IntervalList rows.
 
         DataJoint does not cascade through ``interval_list_name``-keyed
-        dependencies, so the cleanup is explicit. Implemented in a follow-up change.
+        dependencies, so the cleanup is explicit.
         """
         raise NotImplementedError(
             "ArtifactDetection.delete override is not yet implemented"

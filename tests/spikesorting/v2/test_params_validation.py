@@ -243,6 +243,49 @@ def test_generic_schema_accepts_arbitrary_kwargs():
     assert blob["another"] == "value"
 
 
+# ---------- dedicated sorter schemas reject typos --------------------------
+
+
+@pytest.mark.parametrize(
+    "schema_cls,typo_field",
+    [
+        (MountainSort4Schema, "detect_signe"),
+        (MountainSort5Schema, "snippet_T_1"),
+        (Kilosort4Schema, "Th_universal_typo"),
+        (ClusterlessThresholderSchema, "detect_threshhold"),
+    ],
+)
+def test_dedicated_sorter_schemas_reject_typos(schema_cls, typo_field):
+    """The strict dedicated schemas catch misspelled field names.
+
+    This is the value-add over the generic ``extra='allow'`` fallback:
+    typos like ``detect_signe`` (extra 'e') silently pass on the generic
+    schema but raise on MS4/MS5/KS4/Clusterless. SC2 and TDC2 stay
+    ``extra='allow'`` because their fields are not curated, so their
+    typos still pass here -- documented in the module docstring.
+    """
+    with pytest.raises(ValidationError):
+        schema_cls.model_validate({typo_field: 1})
+
+
+@pytest.mark.parametrize(
+    "schema_cls",
+    [SpykingCircus2Schema, Tridesclous2Schema],
+)
+def test_uncurated_sorter_schemas_accept_arbitrary_kwargs(schema_cls):
+    """SC2 and TDC2 keep ``extra='allow'`` -- arbitrary kwargs pass.
+
+    Documented in the module docstring as deliberate; SI validates these
+    at sort time. This test pins the behavior so a future tighten-up has
+    to actively decide to change it.
+    """
+    blob = schema_cls.model_validate(
+        {"random_sc2_kwarg": 99, "another": True}
+    ).model_dump()
+    assert blob["random_sc2_kwarg"] == 99
+    assert blob["another"] is True
+
+
 # ---------- schema_version invariants --------------------------------------
 
 

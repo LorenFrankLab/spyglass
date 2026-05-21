@@ -1,16 +1,28 @@
 """Validated parameter schemas for the sorter parameter table.
 
-One schema per supported v2 sorter, plus a generic ``extra="allow"`` fallback
-for any SpikeInterface sorter the installed environment exposes but the v2
-pipeline does not ship a dedicated default for. Each schema typed-validates
-the well-known fields and accepts additional kwargs (``extra="allow"``); SI
-itself validates the final kwargs dict at sort time, so a misspelled but
-SI-unknown kwarg is caught there rather than silently stored on the Lookup.
+One schema per supported v2 sorter, plus a generic ``extra="allow"``
+fallback for any SpikeInterface sorter the installed environment
+exposes but the v2 pipeline does not ship a dedicated default for.
 
-Concurrency parameters (``n_jobs``, ``chunk_duration``, ``progress_bar``) do
-NOT live on these schemas. They are stored on the per-row ``job_kwargs``
-blob column and resolved by ``_resolved_job_kwargs`` at populate time per the
-shared-contracts Job-Kwargs Resolution convention.
+Strictness policy:
+    MountainSort4Schema, MountainSort5Schema, Kilosort4Schema, and
+    ClusterlessThresholderSchema use ``extra="forbid"`` because their
+    field lists come from documented APIs (v1 mountain_default block and
+    appendix.md). A typo in one of their kwargs raises at Lookup insert
+    time -- the typo-catching is the value-add over the generic schema.
+
+    SpykingCircus2Schema and Tridesclous2Schema use ``extra="allow"``
+    because the v2 plan does not curate their fields; they exist as
+    dedicated dispatch slots for ``_get_sorter_schema``. SI's runtime
+    validates the final kwargs dict at sort time.
+
+    GenericSorterParamsSchema is the ``extra="allow"`` fallback for any
+    SI sorter outside the dedicated set.
+
+Concurrency parameters (``n_jobs``, ``chunk_duration``, ``progress_bar``)
+do NOT live on these schemas. They are stored on the per-row
+``job_kwargs`` blob column and resolved by ``_resolved_job_kwargs`` at
+populate time per the shared-contracts Job-Kwargs Resolution convention.
 """
 
 from __future__ import annotations
@@ -28,10 +40,11 @@ class MountainSort4Schema(BaseModel):
     ``tempdir`` field-mutation hack. MS4 is not deterministic and the SI
     0.104 wrapper still lists it even when the runtime is not installed;
     the per-platform install evidence is recorded in the v2 resolver
-    notes.
+    notes. ``extra="forbid"`` catches typos like ``detect_signe``
+    against the v1-documented field set.
     """
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
     schema_version: int = 1
     detect_sign: Literal[-1, 0, 1] = -1
     adjacency_radius: float = Field(default=100.0, ge=0.0)
@@ -48,13 +61,15 @@ class MountainSort4Schema(BaseModel):
 class MountainSort5Schema(BaseModel):
     """Validated schema for MountainSort 5.
 
-    Defaults follow ``appendix.md § MountainSort 5 install + params``. MS5
-    has no ``tempdir`` parameter (the v1 ``sorter_params.pop('tempdir',
-    None)`` hack is gone), and assumes the input recording has already
-    been bandpass-filtered and whitened by the upstream recording stage.
+    Defaults follow ``appendix.md § MountainSort 5 install + params``.
+    MS5 has no ``tempdir`` parameter (the v1 ``sorter_params.pop(
+    'tempdir', None)`` hack is gone), and assumes the input recording
+    has already been bandpass-filtered and whitened by the upstream
+    recording stage. ``extra="forbid"`` catches typos against the
+    documented MS5 field set.
     """
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
     schema_version: int = 1
     scheme: Literal["1", "2", "3"] = "2"
     detect_sign: Literal[-1, 0, 1] = -1
@@ -71,13 +86,14 @@ class Kilosort4Schema(BaseModel):
 
     Documents the v2-relevant kwargs from ``appendix.md § Kilosort 4
     install + params``. KS4 has a large parameter surface; this schema
-    types the most-used knobs and accepts additional kwargs via
-    ``extra="allow"``. KS4 is not a deterministic fallback (CPU/GPU
-    runtime differences can change spike times) and may require GPU for
-    non-trivial recordings.
+    types the most-used knobs and uses ``extra="forbid"`` so a typo
+    fails fast. Users who need an undocumented KS4 kwarg should extend
+    this schema rather than silently accept the new field. KS4 is not
+    a deterministic fallback (CPU/GPU runtime differences can change
+    spike times) and may require GPU for non-trivial recordings.
     """
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
     schema_version: int = 1
     Th_universal: float = Field(default=9.0, gt=0.0)
     Th_learned: float = Field(default=8.0, gt=0.0)
@@ -93,10 +109,11 @@ class ClusterlessThresholderSchema(BaseModel):
     is a Spyglass-specific peak-detection path built on
     ``spikeinterface.core.detect_peaks``. Default values mirror v1's
     ``default_clusterless`` row at
-    ``src/spyglass/spikesorting/v1/sorting.py``.
+    ``src/spyglass/spikesorting/v1/sorting.py``. ``extra="forbid"``
+    catches typos against the v1-documented field set.
     """
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
     schema_version: int = 1
     detect_threshold: float = Field(default=100.0, gt=0.0)
     method: Literal["locally_exclusive", "global"] = "locally_exclusive"
