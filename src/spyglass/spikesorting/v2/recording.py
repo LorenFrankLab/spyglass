@@ -130,32 +130,46 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         cls,
         nwb_file_name: str,
         new_sort_group_ids: list[int],
+        explicit_sort_group_ids: bool,
         delete_existing_entries: bool,
         confirm: bool,
     ) -> None:
         """Enforce the inspect-before-destroy contract.
 
-        Returns silently if the proposed insert is safe (no overlap with
-        existing rows or an explicit confirmed overwrite). Raises with
-        the offending state otherwise.
+        Default rerun behavior is to REFUSE: callers must either pass
+        explicit non-overlapping ``sort_group_ids`` (an opt-in additive
+        insert) or set ``delete_existing_entries=True, confirm=True``
+        after reviewing the deletion preview. Auto-allocation is allowed
+        ONLY on the first call for a session; on rerun it would silently
+        pad ``sort_group_id`` values, exactly the v1 regression this
+        guard was added to fix.
         """
         existing = cls & {"nwb_file_name": nwb_file_name}
         if len(existing) == 0:
             return
 
         if not delete_existing_entries:
+            if not explicit_sort_group_ids:
+                raise ValueError(
+                    f"SortGroupV2 already has rows for {nwb_file_name!r}; "
+                    "rerunning without an override would silently extend "
+                    "the sort-group set. Either pass explicit non-"
+                    "overlapping sort_group_ids to opt into an additive "
+                    "insert, or set delete_existing_entries=True, "
+                    "confirm=True after reviewing "
+                    f"SortGroupV2.preview_existing_entries({nwb_file_name!r})."
+                )
             existing_ids = set(existing.fetch("sort_group_id"))
             overlap = existing_ids & set(new_sort_group_ids)
             if overlap:
                 raise ValueError(
                     f"SortGroupV2 already has rows for {nwb_file_name!r} "
                     f"with overlapping sort_group_ids {sorted(overlap)}. "
-                    "Either pass non-overlapping sort_group_ids or call "
-                    "again with delete_existing_entries=True, confirm=True "
-                    "after reviewing SortGroupV2.preview_existing_entries"
+                    "Pick non-overlapping ids or set "
+                    "delete_existing_entries=True, confirm=True after "
+                    f"reviewing SortGroupV2.preview_existing_entries"
                     f"({nwb_file_name!r})."
                 )
-            # No overlap -- additive insert is safe.
             return
 
         if not confirm:
@@ -270,12 +284,16 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
                 "different column."
             )
 
-        # Pick sort_group_ids.
+        # Pick sort_group_ids. Auto-allocation is only safe on a fresh
+        # session; on rerun the caller must opt in via explicit
+        # sort_group_ids or delete_existing_entries=True (enforced in
+        # _handle_existing).
+        explicit_sort_group_ids = sort_group_ids is not None
         if sort_group_ids is None:
-            existing = (cls & {"nwb_file_name": nwb_file_name}).fetch(
+            existing_ids = (cls & {"nwb_file_name": nwb_file_name}).fetch(
                 "sort_group_id"
             )
-            start = int(max(existing)) + 1 if len(existing) else 0
+            start = int(max(existing_ids)) + 1 if len(existing_ids) else 0
             sort_group_ids = list(range(start, start + len(proposed)))
         elif len(sort_group_ids) != len(proposed):
             raise ValueError(
@@ -287,6 +305,7 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         cls._handle_existing(
             nwb_file_name=nwb_file_name,
             new_sort_group_ids=sort_group_ids,
+            explicit_sort_group_ids=explicit_sort_group_ids,
             delete_existing_entries=delete_existing_entries,
             confirm=confirm,
         )
@@ -391,11 +410,12 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
             mask = electrodes["bad_channel"] == "False"
             electrodes = electrodes[mask]
 
+        explicit_sort_group_ids = sort_group_ids is not None
         if sort_group_ids is None:
-            existing = (cls & {"nwb_file_name": nwb_file_name}).fetch(
+            existing_ids = (cls & {"nwb_file_name": nwb_file_name}).fetch(
                 "sort_group_id"
             )
-            start = int(max(existing)) + 1 if len(existing) else 0
+            start = int(max(existing_ids)) + 1 if len(existing_ids) else 0
             sort_group_ids = list(range(start, start + len(groups)))
         elif len(sort_group_ids) != len(groups):
             raise ValueError(
@@ -432,6 +452,7 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         cls._handle_existing(
             nwb_file_name=nwb_file_name,
             new_sort_group_ids=[sg for sg, _ in proposed],
+            explicit_sort_group_ids=explicit_sort_group_ids,
             delete_existing_entries=delete_existing_entries,
             confirm=confirm,
         )

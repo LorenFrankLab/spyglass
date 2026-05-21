@@ -41,6 +41,29 @@ def mini_insert():
     yield
 
 
+@pytest.fixture(autouse=True)
+def _disable_datajoint_safemode(request):
+    """Force ``dj.config['safemode']`` to boolean False for v2 tests.
+
+    The Docker MySQL credentials configured in ``tests/container.py`` set
+    ``safemode`` to the *string* ``"false"``, which Python evaluates as
+    truthy. DataJoint then prompts ``"Commit deletes? [yes, No]"`` on every
+    non-empty delete; under pytest's captured stdin that becomes an
+    ``EOFError`` which surfaces as a misleading "Delete cannot use a
+    transaction within an ongoing transaction" error on the next call.
+
+    Forcing the boolean before each test is the smallest fix that keeps
+    the v2 cleanup pattern (``super_delete`` between tests) working
+    without per-call ``safemode=False`` boilerplate. Per-test scope
+    (rather than session) because the session-scoped ``dj_conn`` fixture
+    calls ``dj.config.load(...)`` which overwrites our setting; depending
+    on ``dj_conn`` directly would force every v2 test to require Docker
+    even when none of its assertions touch the DB.
+    """
+    dj.config["safemode"] = False
+    yield
+
+
 @pytest.fixture
 def restore_custom_config():
     """Snapshot and restore ``dj.config['custom']`` around a test.
