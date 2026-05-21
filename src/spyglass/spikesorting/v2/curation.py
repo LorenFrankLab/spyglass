@@ -20,8 +20,10 @@ import datajoint as dj
 from spyglass.common.common_ephys import Electrode  # noqa: F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile  # noqa: F401
 from spyglass.spikesorting.v2.sorting import Sorting  # noqa: F401
+from spyglass.spikesorting.v2.utils import _assert_v2_db_safe
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart
 
+_assert_v2_db_safe()
 schema = dj.schema("spikesorting_v2_curation")
 
 

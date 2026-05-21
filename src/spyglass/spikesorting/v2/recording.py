@@ -22,9 +22,10 @@ from spyglass.common.common_nwbfile import AnalysisNwbfile  # noqa: F401
 from spyglass.spikesorting.v2._params.preprocessing import (
     PreprocessingParamsSchema,
 )
-from spyglass.spikesorting.v2.utils import _validate_params
+from spyglass.spikesorting.v2.utils import _assert_v2_db_safe, _validate_params
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart
 
+_assert_v2_db_safe()
 schema = dj.schema("spikesorting_v2_recording")
 
 

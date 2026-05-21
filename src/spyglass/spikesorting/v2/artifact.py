@@ -37,9 +37,10 @@ from spyglass.spikesorting.v2._params.artifact_detection import (
     ArtifactDetectionParamsSchema,
 )
 from spyglass.spikesorting.v2.recording import Recording
-from spyglass.spikesorting.v2.utils import _validate_params
+from spyglass.spikesorting.v2.utils import _assert_v2_db_safe, _validate_params
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart
 
+_assert_v2_db_safe()
 schema = dj.schema("spikesorting_v2_artifact")
 
 

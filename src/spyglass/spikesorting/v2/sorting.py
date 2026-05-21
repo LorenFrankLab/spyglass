@@ -27,9 +27,10 @@ from spyglass.spikesorting.v2.recording import Recording  # noqa: F401
 from spyglass.spikesorting.v2.session_group import (
     ConcatenatedRecording,  # noqa: F401
 )
-from spyglass.spikesorting.v2.utils import _validate_params
+from spyglass.spikesorting.v2.utils import _assert_v2_db_safe, _validate_params
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart
 
+_assert_v2_db_safe()
 schema = dj.schema("spikesorting_v2_sorting")
 
 
