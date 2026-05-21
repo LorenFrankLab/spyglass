@@ -553,7 +553,7 @@ source part tables instead of nullable source FKs on the master row:
 | Master table | Source parts | Meaning |
 | --- | --- | --- |
 | `SortingSelection` | `RecordingSource`, `ConcatenatedRecordingSource` | exactly one sort input source |
-| `ArtifactDetectionSelection` | `RecordingSource`, `SharedArtifactGroupSource` | exactly one artifact-detection input source |
+| `ArtifactSelection` | `RecordingSource`, `SharedArtifactGroupSource` | exactly one artifact-detection input source |
 
 This is the selected design because source-specific queries remain explicit:
 users join the source part they mean (`SortingSelection.RecordingSource` or
@@ -627,7 +627,7 @@ elif source.kind == "concatenated_recording":
 ```
 
 `SortingSelection.resolve_source(key)` returns kind `"recording"` or
-`"concatenated_recording"`. `ArtifactDetectionSelection.resolve_source(key)`
+`"concatenated_recording"`. `ArtifactSelection.resolve_source(key)`
 returns kind `"recording"` or `"shared_artifact_group"`. These are per-table
 classmethods, not a single shared resolver with table-specific branching.
 
@@ -658,9 +658,9 @@ are unique within each source family:
   `artifact_id`.
 - `SortingSelection.ConcatenatedRecordingSource`: source `concat_recording_id`
   + sorter fields + `artifact_id` (which must remain NULL for concat).
-- `ArtifactDetectionSelection.RecordingSource`: source `recording_id` +
+- `ArtifactSelection.RecordingSource`: source `recording_id` +
   `artifact_params_name`.
-- `ArtifactDetectionSelection.SharedArtifactGroupSource`: source
+- `ArtifactSelection.SharedArtifactGroupSource`: source
   `shared_artifact_group_name` + `artifact_params_name`.
 
 It runs with the rest of the v2 suite; not a separate nightly job or operational
@@ -672,7 +672,7 @@ The source FK lives on the source part, not on the selection master. This is the
 DataJoint-native way to model polymorphic sources, but it changes delete
 semantics: deleting a source row (`Recording`, `ConcatenatedRecording`, or
 `SharedArtifactGroup`) cascades to the matching source part row and **does not**
-automatically cascade to the `SortingSelection` or `ArtifactDetectionSelection`
+automatically cascade to the `SortingSelection` or `ArtifactSelection`
 master row. A source-polymorphic master with zero source parts is invalid and
 must not be treated as a usable selection.
 
@@ -692,7 +692,7 @@ def prune_orphaned_selections(cls, *, dry_run: bool = True) -> list[dict]:
 
 `SortingSelection.prune_orphaned_selections()` checks
 `RecordingSource` + `ConcatenatedRecordingSource`.
-`ArtifactDetectionSelection.prune_orphaned_selections()` checks
+`ArtifactSelection.prune_orphaned_selections()` checks
 `RecordingSource` + `SharedArtifactGroupSource`.
 
 Deletion guidance for maintainers: delete through the selection master or run
@@ -771,7 +771,7 @@ class Unit(SpyglassMixinPart):
     # via `Sorting.Unit * Electrode * BrainRegion`. Installs that need an
     # unknown-region sentinel should use a real BrainRegion row named
     # "Unknown" rather than NULL.
-    peak_amplitude_uV: float           # of the unit's template on the peak channel
+    peak_amplitude_uv: float           # of the unit's template on the peak channel
     n_spikes: int
     """
 ```
@@ -784,7 +784,7 @@ class Unit(SpyglassMixinPart):
 # On Sorting:
 Sorting.get_unit_brain_regions(
     key, *, allow_anchor_member: bool = False
-) -> pd.DataFrame  # cols: unit_id, electrode_id, region_name, peak_amplitude_uV
+) -> pd.DataFrame  # cols: unit_id, electrode_id, region_name, peak_amplitude_uv
 
 # On CurationV2 — same signature plus label filtering:
 CurationV2.get_unit_brain_regions(

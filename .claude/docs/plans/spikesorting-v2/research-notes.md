@@ -79,7 +79,7 @@ current phase docs but should not distract from execution.
 |------|--------|
 | `recording.py` | `SortGroup`, `SpikeSortingPreprocessingParameters`, `SpikeSortingRecordingSelection`, `SpikeSortingRecording` |
 | `sorting.py` | `SpikeSorterParameters`, `SpikeSortingSelection`, `SpikeSorting` |
-| `artifact.py` | `ArtifactDetectionParameters`, `ArtifactDetectionSelection`, `ArtifactDetection` |
+| `artifact.py` | `ArtifactDetectionParameters`, `ArtifactSelection`, `ArtifactDetection` |
 | `curation.py` | `CurationV1` |
 | `metric_curation.py` | `WaveformParameters`, `MetricParameters`, `MetricCurationParameters`, `MetricCurationSelection`, `MetricCuration` |
 | `figurl_curation.py` | `FigURLCurationSelection`, `FigURLCuration` |

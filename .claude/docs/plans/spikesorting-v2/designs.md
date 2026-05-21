@@ -320,7 +320,7 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
 
 
 @schema
-class ArtifactDetectionSelection(SpyglassMixin, dj.Manual):
+class ArtifactSelection(SpyglassMixin, dj.Manual):
     """One row per (recording, artifact params) pair to detect.
 
     UUID-keyed; populated via insert_selection() per shared-contracts.
@@ -366,7 +366,7 @@ class ArtifactDetectionSelection(SpyglassMixin, dj.Manual):
 @schema
 class ArtifactDetection(SpyglassMixin, dj.Computed):
     definition = """
-    -> ArtifactDetectionSelection
+    -> ArtifactSelection
     """
     # No part table for the interval; the artifact-removed valid times are
     # written to common.IntervalList under name f"artifact_{artifact_id}"
@@ -384,11 +384,11 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
 
 **Design change from v1**: v1 used `interval_list_name = str(artifact_id)` (raw UUID, no prefix) and called `IntervalList.insert1(..., skip_duplicates=True)` inside `make()`. v2 keeps the IntervalList write but (a) prefixes the name with `"artifact_"` so namespace queries can filter v2 artifact intervals from session/task intervals, (b) drops `skip_duplicates=True`, and (c) writes one row per member session for cross-recording (`SharedArtifactGroup`) detections instead of dropping the multi-session case.
 
-**Source re-validation at populate time**: `ArtifactDetection.make()` MUST re-check that the upstream `ArtifactDetectionSelection` row has exactly one source part row at the start of `make()`, mirroring `Sorting.make()`'s pattern. This catches rows inserted via `dj.Manual.insert1()` that bypassed `insert_selection()`. See shared-contracts.md § Source Part Pattern.
+**Source re-validation at populate time**: `ArtifactDetection.make()` MUST re-check that the upstream `ArtifactSelection` row has exactly one source part row at the start of `make()`, mirroring `Sorting.make()`'s pattern. This catches rows inserted via `dj.Manual.insert1()` that bypassed `insert_selection()`. See shared-contracts.md § Source Part Pattern.
 
 ```python
 def make(self, key):
-    source = ArtifactDetectionSelection.resolve_source(key)
+    source = ArtifactSelection.resolve_source(key)
     # ... rest of make() body
 ```
 
@@ -559,7 +559,7 @@ class Sorting(SpyglassMixin, dj.Computed):
                                             # for concat sorts; see class
                                             # docstring); brain region
                                             # reachable via Electrode * BrainRegion
-        peak_amplitude_uV: float
+        peak_amplitude_uv: float
         n_spikes: int
         """
 
@@ -638,7 +638,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         unit_id: int
         ---
         -> Electrode
-        peak_amplitude_uV: float
+        peak_amplitude_uv: float
         n_spikes: int
         """
 

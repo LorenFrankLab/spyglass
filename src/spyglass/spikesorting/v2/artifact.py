@@ -8,13 +8,14 @@ Tables (all final-shape under the zero-migration policy):
         .SharedArtifactGroupSource    -- cross-recording path (#928).
     ArtifactDetection                 -- writes IntervalList rows; no part.
 
-The master is named ``ArtifactSelection`` (rather than the verbose
-``ArtifactDetectionSelection``) so that the auto-generated FK constraint
-name for the source part referencing ``SharedArtifactGroup`` fits inside
-MySQL's 64-character identifier limit -- the longer master + the longer
-part together overflow. The shorter master also matches the v2 single-
-master-per-topic convention: there is only one v2 artifact-related
-``Selection`` table, so the ``Detection`` qualifier is redundant.
+The master is named ``ArtifactSelection`` (a shorter alternative to the
+verbose v1 ``ArtifactDetectionSelection`` pattern) so that the
+auto-generated FK constraint name for the source part referencing
+``SharedArtifactGroup`` fits inside MySQL's 64-character identifier
+limit -- the longer master + the longer part together overflow. The
+shorter master also matches the v2 single-master-per-topic convention:
+there is only one v2 artifact-related ``Selection`` table, so the
+``Detection`` qualifier is redundant.
 
 Artifact-removed valid times live in ``common.IntervalList`` rather than
 a dedicated part table -- the UUID-suffixed name prevents collision with

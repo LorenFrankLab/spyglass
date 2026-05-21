@@ -14,7 +14,7 @@ End-to-end single-session sort: preprocessing → artifact detection → sorting
 | `Recording` | Computed | NWB-resident preprocessed `ElectricalSeries` inside an `AnalysisNwbfile`. |
 | `ArtifactDetectionParameters` | Lookup | Threshold detection parameters. |
 | `SharedArtifactGroup` (+ `Member` part) | Manual | Opt-in: cross-recording artifact detection (issue #928). |
-| `ArtifactDetectionSelection` | Manual | Source parts: either `RecordingSource` or `SharedArtifactGroupSource`. |
+| `ArtifactSelection` | Manual | Source parts: either `RecordingSource` or `SharedArtifactGroupSource`. |
 | `ArtifactDetection` | Computed | Writes artifact-removed valid times to `common.IntervalList` as `f"artifact_{artifact_id}"`. |
 | `SorterParameters` | Lookup | Per-sorter Pydantic-validated params; MS4 / MS5 / KS4 / clusterless / SC2 / TDC2. |
 | `SortingSelection` | Manual | Source parts for `Recording` / `ConcatenatedRecording`, plus nullable `ArtifactDetection`. |
@@ -100,15 +100,15 @@ erDiagram
         varchar shared_artifact_group_name PK
         uuid recording_id PK
     }
-    ArtifactDetectionSelection {
+    ArtifactSelection {
         uuid artifact_id PK
         varchar artifact_params_name FK
     }
-    ArtifactDetectionSelection_RecordingSource {
+    ArtifactSelection_RecordingSource {
         uuid artifact_id PK
         uuid recording_id FK
     }
-    ArtifactDetectionSelection_SharedArtifactGroupSource {
+    ArtifactSelection_SharedArtifactGroupSource {
         uuid artifact_id PK
         varchar shared_artifact_group_name FK
     }
@@ -119,12 +119,12 @@ erDiagram
     Session ||--o{ SharedArtifactGroup : "FK"
     SharedArtifactGroup ||--o{ SharedArtifactGroup_Member : "part"
     Recording ||--o{ SharedArtifactGroup_Member : "FK"
-    ArtifactDetectionSelection ||--o{ ArtifactDetectionSelection_RecordingSource : "part"
-    ArtifactDetectionSelection ||--o{ ArtifactDetectionSelection_SharedArtifactGroupSource : "part"
-    Recording ||--o{ ArtifactDetectionSelection_RecordingSource : "FK"
-    SharedArtifactGroup ||--o{ ArtifactDetectionSelection_SharedArtifactGroupSource : "FK"
-    ArtifactDetectionParameters ||--o{ ArtifactDetectionSelection : "FK"
-    ArtifactDetectionSelection ||--|| ArtifactDetection : "Computed"
+    ArtifactSelection ||--o{ ArtifactSelection_RecordingSource : "part"
+    ArtifactSelection ||--o{ ArtifactSelection_SharedArtifactGroupSource : "part"
+    Recording ||--o{ ArtifactSelection_RecordingSource : "FK"
+    SharedArtifactGroup ||--o{ ArtifactSelection_SharedArtifactGroupSource : "FK"
+    ArtifactDetectionParameters ||--o{ ArtifactSelection : "FK"
+    ArtifactSelection ||--|| ArtifactDetection : "Computed"
     ArtifactDetection ||..o{ IntervalList : "writes artifact_{artifact_id} row(s)"
 
     %% =========================================================
@@ -162,7 +162,7 @@ erDiagram
         varchar nwb_file_name FK
         varchar electrode_group_name FK
         int electrode_id FK
-        float peak_amplitude_uV
+        float peak_amplitude_uv
         int n_spikes
     }
 
@@ -283,7 +283,7 @@ erDiagram
 flowchart LR
     A[SortGroupV2.set_group_by_shank] --> B[RecordingSelection.insert_selection]
     B --> C[Recording.populate]
-    C --> D[ArtifactDetectionSelection.insert_selection]
+    C --> D[ArtifactSelection.insert_selection]
     D --> E[ArtifactDetection.populate]
     C --> F[SortingSelection.insert_selection]
     E --> F
@@ -295,7 +295,7 @@ flowchart LR
 ## Critical design points
 
 - **Source parts on `SortingSelection`**: exactly one of `RecordingSource` / `ConcatenatedRecordingSource` exists. Enforced in `insert_selection()`, re-checked at the start of `Sorting.make()`, and covered by the v2 integrity test. The schema is final today; Phase 3 only relaxes the runtime guard that rejects `ConcatenatedRecordingSource`.
-- **Source parts on `ArtifactDetectionSelection`**: exactly one of `RecordingSource` / `SharedArtifactGroupSource` exists. Enforced in `insert_selection()`, re-checked at the start of `ArtifactDetection.make()`, and covered by the v2 integrity test.
+- **Source parts on `ArtifactSelection`**: exactly one of `RecordingSource` / `SharedArtifactGroupSource` exists. Enforced in `insert_selection()`, re-checked at the start of `ArtifactDetection.make()`, and covered by the v2 integrity test.
 - **`SortingSelection.artifact_id` is a real FK, not a loose UUID column.** Concat sorts leave it NULL.
 - **`Recording` is a single canonical NWB artifact per `recording_id`.** Subsequent sorts with different `SorterParameters` read the same `ElectricalSeries`. No per-stage re-materialization.
 - **`Sorting.Unit.electrode_id`** is the unit's peak-amplitude channel; brain region is reached via `Sorting.Unit * Electrode * BrainRegion`. Constant-time lookup, no template re-walking.
