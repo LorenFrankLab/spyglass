@@ -273,7 +273,7 @@ for label, interval_data in results.groupby("interval_labels"):
         necessary #1588
     - Fix `NwbfileHasher` to include HDF5 Dataset content in
         `SpikeSortingRecording.hash`; previously only attrs/shape/dtype were
-        hashed so in-place Dataset edits were invisible to the hasher #XXXX
+        hashed so in-place Dataset edits were invisible to the hasher #1600
     - Restrict `ImportedSpikeSorting.Annotations` to the current session in
         `make_df_from_annotations` so `fetch_nwb` works across multiple sessions
         with overlapping unit ids #1581, #1592

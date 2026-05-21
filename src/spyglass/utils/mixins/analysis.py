@@ -741,20 +741,13 @@ class AnalysisMixin(BaseMixin):
         )
         return hasher if return_hasher else hasher.hash
 
-    def _update_external(self, analysis_file_name: str, hash: str):
+    def _update_external(self, analysis_file_name: str):
         """Update the external table entry for a recomputed analysis file.
-
-        The caller is responsible for passing the hash computed immediately
-        after writing the file. No re-hash is performed here to avoid
-        redundant reads of large NWB files (#1598).
 
         Parameters
         ----------
         analysis_file_name : str
             The name of the analysis NWB file.
-        hash : str
-            The hash of the file contents as calculated by NwbfileHasher,
-            passed directly from the caller.
         """
         file_path = self.__get_analysis_path(analysis_file_name, relative=True)
         key = (self._ext_tbl & f"filepath = '{str(file_path)}'").fetch1()

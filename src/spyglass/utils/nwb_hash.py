@@ -186,7 +186,7 @@ class NwbfileHasher:
         keep_obj_hash : bool, optional
             Keep the hash of each object in the NWB file, by default False.
         verbose : bool, optional
-            Display progress bar, by default True.
+            Display progress bar, by default False.
         legacy_mode : bool, optional
             If True, reproduce the pre-fix behavior where Dataset content is
             not incorporated into the hash (only attrs/shape/dtype are used).
@@ -287,8 +287,16 @@ class NwbfileHasher:
         return isinstance(data, (float, int, np.number))
 
     def hash_dataset(self, dataset: h5py.Dataset):
-        if dataset.name in IGNORED_KEYS:
-            return  # Ignore source script
+        # Legacy mode preserves the original (broken) full-path check so that
+        # stored hashes remain reproducible. Non-legacy uses the basename so
+        # source_script and version datasets are actually skipped as intended.
+        check_name = (
+            dataset.name.split("/")[-1]
+            if not self.legacy_mode
+            else dataset.name
+        )
+        if check_name in IGNORED_KEYS:
+            return
 
         this_hash = md5(self.hash_shape_dtype(dataset))
 

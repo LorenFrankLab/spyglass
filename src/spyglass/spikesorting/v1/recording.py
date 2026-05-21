@@ -357,7 +357,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         )
 
         if recompute:
-            AnalysisNwbfile()._update_external(recompute_file_name, hash)
+            AnalysisNwbfile()._update_external(recompute_file_name)
 
         return dict(
             analysis_file_name=recording_nwb_file_name,
