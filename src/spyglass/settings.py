@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 import warnings
 from pathlib import Path
 
@@ -676,3 +677,23 @@ else:
     dlc_output_dir = sg_config.dlc_output_dir
     moseq_project_dir = sg_config.moseq_project_dir
     moseq_video_dir = sg_config.moseq_video_dir
+
+    from spyglass.utils.env_cache import (  # deferred — avoids cycle
+        _env_cache,
+        _trigger_env_logging,
+    )
+
+    if _env_cache.is_stale():
+        # Conda env has changed: fetch both raw outputs in the background and
+        # save them to disk so the *next* import's logging step has fresh data.
+        threading.Thread(
+            target=lambda: _env_cache.get(with_pip=True),
+            daemon=True,
+            name="spyglass-env-cache",
+        ).start()
+    else:
+        # Cache is fresh from a prior import's background thread: do the
+        # UserEnvironment insert + dirty warn now (still non-blocking).
+        threading.Thread(
+            target=_trigger_env_logging, daemon=True, name="spyglass-env-log"
+        ).start()

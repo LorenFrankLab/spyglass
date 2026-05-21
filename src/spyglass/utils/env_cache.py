@@ -1,24 +1,38 @@
 """Shared conda-environment cache for Spyglass.
 
 Avoids redundant ``conda env export`` / ``pip freeze`` subprocess calls by
-writing the parsed result to a per-(user, conda-env) YAML file in
+writing the raw subprocess outputs to a per-(user, conda-env) YAML file in
 ``temp_dir``.  The singleton ``_env_cache`` exported from this module is the
-single source of truth; all three callers that previously shelled out
-independently (``UserEnvironment``, ``AnalysisMixin``, ``SQLDumpHelper``)
-will delegate to it after Phase 6.
+single source of truth.
 
-Cache-file path
----------------
+Cache-file format
+-----------------
 ``{temp_dir}/.spyglass_conda_{os_user}_{conda_env}.yaml``
 
-``os_user``   — ``getpass.getuser()``   (OS login name, not the DB user)
-``conda_env`` — ``$CONDA_DEFAULT_ENV``  (defaults to ``"base"``)
+Contains two top-level keys::
 
-Two users sharing the same ``temp_dir`` get separate files; two conda
-environments active at once for the same user also get separate files.
+    conda: <raw conda env export dict — channels + dependencies>
+    pip:   <raw pip freeze list>
 
-Staleness
----------
+The merge of these two raw artifacts (conflict resolution, editable-install
+detection) is performed **in-process on demand** via ``get(with_pip=True)``
+and is never written back to disk.
+
+Who uses which mode
+-------------------
+``get()`` (conda-only, default)
+    ``AnalysisMixin._logged_env_info`` and ``SQLDumpHelper._export_conda_env``.
+    These callers previously ran ``conda env export`` alone; they receive the
+    same data they always did, with no additional pip processing.
+
+``get(with_pip=True)`` (merged)
+    ``UserEnvironment``.  Triggers conflict resolution, pip-only package
+    discovery, and editable-install detection — logic that was always unique
+    to ``UserEnvironment``, now expressed as a flag rather than a separate
+    code path.
+
+Cache staleness
+---------------
 ``conda-meta/history`` is updated by every ``conda install`` / ``remove``.
 The cache is stale when that file is newer than the cache file, or when
 ``$CONDA_PREFIX`` is absent (pip-only environments).
@@ -114,24 +128,28 @@ def _delim_split(
 
 
 class CondaEnvCache:
-    """Per-(user, conda-env) cache for the fully-parsed conda environment.
+    """Per-(user, conda-env) cache for conda environment data.
 
     Attributes
     ----------
     has_editable : bool
-        Set to ``True`` during ``_fetch_from_subprocess`` if any non-spyglass,
-        non-jsonschema editable install is found.  Retained on the instance so
-        ``UserEnvironment.insert_current_env`` can read it after Phase 6.
+        Set to ``True`` after ``_merge_conda_pip()`` detects any non-spyglass,
+        non-jsonschema editable install.  Only meaningful after a
+        ``get(with_pip=True)`` call.
     """
 
     def __init__(self) -> None:
-        self._cached_result = _NOT_COMPUTED
+        # Raw subprocess outputs — written to disk
+        self._cached_conda = _NOT_COMPUTED  # raw conda env export dict
+        self._cached_pip = _NOT_COMPUTED  # raw pip freeze list
+
+        # Merged result — computed in-process, never written to disk
+        self._merged = _NOT_COMPUTED
+
         self.has_editable: bool = False
 
-        # Parsing state — reset at the top of every _fetch_from_subprocess call
-        self._conda_export: dict = {}
+        # Merge-state — populated during _merge_conda_pip(), reset before each call
         self._conda_pip_dict: dict = {}
-        self._pip_freeze: list = []
         self._pip_custom: dict = {}
         self._freeze_comments: dict = {}
         self._conda_conflicts: dict = {}
@@ -172,26 +190,45 @@ class CondaEnvCache:
             > self._cache_path.stat().st_mtime
         )
 
-    def load(self) -> Optional[dict]:
-        """Deserialise the YAML cache file; return ``None`` on any error."""
+    def load(self) -> bool:
+        """Read raw conda and pip data from the disk cache.
+
+        Populates ``_cached_conda`` and ``_cached_pip`` from the YAML file.
+        Returns ``True`` on success, ``False`` on any error or missing key.
+        """
         try:
             with self._cache_path.open("r") as fh:
-                return yaml.safe_load(fh)
+                data = yaml.safe_load(fh)
+            if not isinstance(data, dict) or "conda" not in data:
+                return False
+            self._cached_conda = data["conda"]
+            self._cached_pip = data.get("pip", [])
+            return True
         except Exception:
-            return None
+            return False
 
-    def save(self, env_dict: dict) -> None:
-        """Atomically write *env_dict* to the cache file.
+    def save(self) -> None:
+        """Atomically write raw conda and pip data to the cache file.
 
         Writes to a PID-scoped temp file first, then renames — a single POSIX
         ``rename`` syscall that is atomic even under concurrent writers.
+        Only the raw subprocess outputs are persisted; the merged result is
+        always recomputed in-process.
         """
-        if self._cache_path is None:
+        if self._cache_path is None or self._cached_conda is _NOT_COMPUTED:
             return
+        data = {
+            "conda": self._cached_conda,
+            "pip": (
+                self._cached_pip
+                if self._cached_pip is not _NOT_COMPUTED
+                else []
+            ),
+        }
         tmp = self._cache_path.with_suffix(f".{os.getpid()}.tmp")
         try:
             with tmp.open("w") as fh:
-                yaml.dump(env_dict, fh)
+                yaml.dump(data, fh)
             os.replace(tmp, self._cache_path)
         except Exception:
             try:
@@ -199,40 +236,75 @@ class CondaEnvCache:
             except Exception:
                 pass
 
-    def get(self) -> dict:
-        """Return the fully-parsed conda environment dict.
+    def preload(self) -> None:
+        """Warm the in-process cache from disk if the disk cache is fresh.
+
+        When the disk cache is stale or absent this is a no-op; the subprocess
+        runs lazily on the first ``get()`` call instead.  Useful in tests that
+        need a synchronous warm-up.
+        """
+        if self._cached_conda is not _NOT_COMPUTED:
+            return
+        if not self.is_stale():
+            self.load()
+
+    # ── Public API ────────────────────────────────────────────────────────────
+
+    def get(self, with_pip: bool = False) -> dict:
+        """Return the conda environment dict.
+
+        Parameters
+        ----------
+        with_pip : bool, optional
+            Default ``False``.
+
+            * ``False`` — return the raw ``conda env export`` output
+              (``channels`` + ``dependencies`` from conda's perspective).
+              This is what ``AnalysisMixin`` and ``SQLDumpHelper`` use; it
+              matches their pre-cache behaviour exactly.
+
+            * ``True`` — additionally run ``pip freeze``, resolve conda/pip
+              version conflicts (pip wins), fold pip-only packages into the
+              dependency list, and collect editable / non-standard installs
+              into a ``custom`` section.  Pass ``True`` only when an accurate
+              pip-inclusive picture is needed (``UserEnvironment``).
+        """
+        self._ensure_raw()
+        if not with_pip:
+            return (
+                self._cached_conda
+                if self._cached_conda is not _NOT_COMPUTED
+                else {}
+            )
+        return self._get_merged()
+
+    # ── Internal: raw-data layer ──────────────────────────────────────────────
+
+    def _ensure_raw(self) -> None:
+        """Ensure ``_cached_conda`` and ``_cached_pip`` are populated.
 
         Order of precedence:
-        1. In-process cache (``_cached_result``) — fastest, no I/O.
-        2. On-disk YAML cache when not stale — one file read.
-        3. Fresh subprocess call — slowest; result saved to disk.
+        1. Already in-process — no I/O.
+        2. Fresh disk cache — one file read.
+        3. Subprocess — both ``conda env export`` and ``pip freeze``;
+           result saved to disk.
         """
-        if self._cached_result is not _NOT_COMPUTED:
-            return self._cached_result  # type: ignore[return-value]
+        if self._cached_conda is not _NOT_COMPUTED:
+            return
+        if not self.is_stale() and self.load():
+            return
+        self._fetch_from_subprocess()
+        self.save()
 
-        if not self.is_stale():
-            loaded = self.load()
-            if loaded is not None:
-                self._cached_result = loaded
-                return loaded
+    def _fetch_from_subprocess(self) -> None:
+        """Run ``conda env export`` and ``pip freeze``, storing raw outputs.
 
-        result = self._fetch_from_subprocess()
-        if result:
-            self.save(result)
-        self._cached_result = result
-        return result
+        Populates ``_cached_conda`` (raw conda export dict) and
+        ``_cached_pip`` (raw pip freeze list).  Does **not** merge them —
+        call ``_get_merged()`` for that.
 
-    # ── Subprocess fetch + parsing ────────────────────────────────────────────
-
-    def _fetch_from_subprocess(self) -> dict:
-        """Run ``conda env export`` + ``pip freeze`` and return the parsed dict.
-
-        The returned structure matches ``UserEnvironment.env``:
-        - ``channels``, ``dependencies`` (conda + pip merged), ``custom``
-          (editable / non-standard pip installs), ``raw pip freeze``.
-
-        Resets all parsing-state attributes before running so the method is
-        safe to call more than once on the same instance (e.g. in tests).
+        Resets all state first so the method is safe to call more than once
+        (e.g. in tests).
         """
         self._reset_state()
 
@@ -243,29 +315,13 @@ class CondaEnvCache:
                 "Failed to retrieve the Conda environment. "
                 "Recompute feature disabled."
             )
-            return {}  # pragma: no cover
+            return  # pragma: no cover
 
-        self._conda_export = {
+        self._cached_conda = {
             k: v
             for k, v in yaml.safe_load(conda_result.stdout).items()
             if k not in ("name", "prefix")
         }
-
-        # Separate the pip sub-list that conda embed inside dependencies
-        conda_pip_list: list = []
-        conda_deps: list = self._conda_export.get("dependencies", [])
-        for i, dep in enumerate(conda_deps):
-            if isinstance(dep, dict):
-                pip_obj = conda_deps.pop(i)
-                conda_pip_list = pip_obj.pop("pip", [])
-                break
-        self._conda_export["dependencies"] = conda_deps
-
-        if conda_pip_list:
-            self._conda_pip_dict = {
-                entry.split("==", maxsplit=1)[0]: entry
-                for entry in conda_pip_list
-            }
 
         # ── pip freeze ───────────────────────────────────────────────────────
         pip_result = sub_run(["pip", "freeze"], **SUBPROCESS_KWARGS)
@@ -274,37 +330,89 @@ class CondaEnvCache:
                 "Failed to retrieve the pip environment. "
                 "Recompute feature disabled."
             )
-            return {}  # pragma: no cover
+            return  # pragma: no cover
 
-        self._pip_freeze = [
+        self._cached_pip = [
             line.strip() for line in pip_result.stdout.splitlines()
         ]
 
-        for line in self._pip_freeze:
-            if not self._parse_pip_line(line):
-                return {}  # parse error already logged inside
-
-        self._warn_if_custom_or_conflict()
-
-        # ── Assemble final dict ───────────────────────────────────────────────
-        conda_deps = self._conda_export.pop("dependencies", [])
-        conda_deps.append({"pip": list(self._conda_pip_dict.values())})
-        self._conda_export["dependencies"] = conda_deps
-
-        if self._pip_custom:
-            self._conda_export["custom"] = self._pip_custom
-        self._conda_export["raw pip freeze"] = self._pip_freeze
-
-        return self._conda_export
-
     def _reset_state(self) -> None:
+        self._cached_conda = _NOT_COMPUTED
+        self._cached_pip = _NOT_COMPUTED
+        self._merged = _NOT_COMPUTED
         self.has_editable = False
-        self._conda_export = {}
         self._conda_pip_dict = {}
-        self._pip_freeze = []
         self._pip_custom = {}
         self._freeze_comments = {}
         self._conda_conflicts = {}
+
+    # ── Internal: merge layer (UserEnvironment only) ──────────────────────────
+
+    def _get_merged(self) -> dict:
+        """Return the merged conda+pip dict, computing it in-process if needed."""
+        if self._merged is not _NOT_COMPUTED:
+            return self._merged  # type: ignore[return-value]
+        self._merged = self._merge_conda_pip()
+        return self._merged
+
+    def _merge_conda_pip(self) -> dict:
+        """Merge raw conda export and pip freeze into a unified env dict.
+
+        This is the conflict-resolution pass that was previously the sole
+        domain of ``UserEnvironment``:
+
+        * Pip-only packages (not tracked by conda) are added to the pip
+          sub-list under ``dependencies``.
+        * When conda and pip disagree on a version, pip wins and the
+          conflict is recorded for logging.
+        * Editable and non-standard installs are collected into ``custom``.
+
+        Returns an empty dict if either raw input is unavailable.
+        """
+        if self._cached_conda is _NOT_COMPUTED or not self._cached_conda:
+            return {}
+
+        # Reset merge state so re-runs are safe
+        self.has_editable = False
+        self._conda_pip_dict = {}
+        self._pip_custom = {}
+        self._freeze_comments = {}
+        self._conda_conflicts = {}
+
+        conda_export = dict(
+            self._cached_conda
+        )  # shallow copy — don't mutate cache
+        conda_deps: list = list(conda_export.get("dependencies", []))
+
+        # Extract the pip sub-list that conda embeds inside dependencies
+        for i, dep in enumerate(conda_deps):
+            if isinstance(dep, dict):
+                pip_obj = conda_deps.pop(i)
+                for entry in pip_obj.pop("pip", []):
+                    pkg = entry.split("==", maxsplit=1)[0]
+                    self._conda_pip_dict[pkg] = entry
+                break
+        conda_export["dependencies"] = conda_deps
+
+        # Walk pip freeze, extending / overriding _conda_pip_dict
+        pip_list = (
+            self._cached_pip if self._cached_pip is not _NOT_COMPUTED else []
+        )
+        for line in pip_list:
+            if not self._parse_pip_line(line):
+                return {}  # parse error already logged
+
+        self._warn_if_custom_or_conflict()
+
+        # Reassemble the dependencies list with the merged pip sub-list
+        conda_deps = conda_export.pop("dependencies", [])
+        conda_deps.append({"pip": list(self._conda_pip_dict.values())})
+        conda_export["dependencies"] = conda_deps
+
+        if self._pip_custom:
+            conda_export["custom"] = self._pip_custom
+
+        return conda_export
 
     def _parse_pip_line(self, line: str) -> bool:
         """Classify and record one line from ``pip freeze`` output.
@@ -409,3 +517,19 @@ class CondaEnvCache:
 # ── Module-level singleton ────────────────────────────────────────────────────
 
 _env_cache = CondaEnvCache()
+
+
+def _trigger_env_logging() -> None:
+    """Background-thread target: insert current env into UserEnvironment.
+
+    Called on imports where the disk cache is already fresh — meaning a
+    previous import's background thread ran the conda subprocess and saved
+    the result.  All exceptions are swallowed so a failed DB connection
+    never surfaces as an import-time error.
+    """
+    try:
+        from spyglass.common.common_user import UserEnvironment
+
+        UserEnvironment().this_env
+    except Exception:
+        pass
