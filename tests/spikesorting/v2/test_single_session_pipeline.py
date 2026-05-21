@@ -293,3 +293,156 @@ def test_recording_populates_and_round_trips(
     assert rec.get_sampling_frequency() == pytest.approx(
         row["sampling_frequency"], rel=1e-6
     )
+
+
+# ---------- ArtifactSelection source-part pattern -------------------------
+
+
+@pytest.fixture
+def populated_recording(recording_selection_key):
+    """Ensure Recording is populated for the smoke selection."""
+    from spyglass.spikesorting.v2.recording import Recording
+
+    if not (Recording & recording_selection_key):
+        Recording.populate(recording_selection_key, reserve_jobs=False)
+    yield recording_selection_key
+
+
+@pytest.mark.slow
+def test_artifact_selection_inserts_master_and_source_part(populated_recording):
+    """``insert_selection`` writes exactly one master + one source row."""
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetectionParameters,
+        ArtifactSelection,
+    )
+
+    ArtifactDetectionParameters.insert_default()
+    key = {
+        "recording_id": populated_recording["recording_id"],
+        "artifact_params_name": "default",
+    }
+    # Clean any prior selection so we can assert on the count.
+    existing = (
+        ArtifactSelection.RecordingSource
+        & {"recording_id": populated_recording["recording_id"]}
+    ).fetch("KEY", as_dict=True)
+    for row in existing:
+        (ArtifactSelection & {"artifact_id": row["artifact_id"]}).super_delete(
+            warn=False
+        )
+
+    pk = ArtifactSelection.insert_selection(key)
+    assert isinstance(pk, dict)
+    assert set(pk.keys()) == {"artifact_id"}
+    assert len(ArtifactSelection & pk) == 1
+    assert len(ArtifactSelection.RecordingSource & pk) == 1
+    assert len(ArtifactSelection.SharedArtifactGroupSource & pk) == 0
+
+
+@pytest.mark.slow
+def test_artifact_selection_is_idempotent(populated_recording):
+    """Repeat ``insert_selection`` calls return the same PK; no duplicates."""
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetectionParameters,
+        ArtifactSelection,
+    )
+
+    ArtifactDetectionParameters.insert_default()
+    key = {
+        "recording_id": populated_recording["recording_id"],
+        "artifact_params_name": "default",
+    }
+    pk1 = ArtifactSelection.insert_selection(key)
+    pk2 = ArtifactSelection.insert_selection(key)
+    assert pk1 == pk2
+    assert (
+        len(
+            ArtifactSelection.RecordingSource
+            & {"recording_id": populated_recording["recording_id"]}
+            & {"artifact_id": pk1["artifact_id"]}
+        )
+        == 1
+    )
+
+
+@pytest.mark.slow
+def test_artifact_selection_rejects_zero_and_two_sources(populated_recording):
+    """``insert_selection`` requires exactly one source key."""
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetectionParameters,
+        ArtifactSelection,
+    )
+
+    ArtifactDetectionParameters.insert_default()
+
+    with pytest.raises(ValueError, match="exactly one source key"):
+        ArtifactSelection.insert_selection(
+            {"artifact_params_name": "default"}  # no source
+        )
+
+    with pytest.raises(ValueError, match="exactly one source key"):
+        ArtifactSelection.insert_selection(
+            {
+                "recording_id": populated_recording["recording_id"],
+                "shared_artifact_group_name": "fake",
+                "artifact_params_name": "default",
+            }
+        )
+
+
+@pytest.mark.slow
+def test_artifact_selection_resolve_source_returns_recording_kind(
+    populated_recording,
+):
+    """``resolve_source`` returns kind='recording' for a single-rec selection."""
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetectionParameters,
+        ArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.utils import SourceResolution
+
+    ArtifactDetectionParameters.insert_default()
+    pk = ArtifactSelection.insert_selection(
+        {
+            "recording_id": populated_recording["recording_id"],
+            "artifact_params_name": "default",
+        }
+    )
+    resolution = ArtifactSelection.resolve_source(pk)
+    assert isinstance(resolution, SourceResolution)
+    assert resolution.kind == "recording"
+    assert resolution.key == {
+        "recording_id": populated_recording["recording_id"]
+    }
+
+
+@pytest.mark.slow
+def test_artifact_selection_resolve_source_detects_bypass(populated_recording):
+    """``resolve_source`` raises ``SchemaBypassError`` when a master has
+    zero source part rows (an integrity bug, e.g. from direct dj
+    insert1 bypassing ``insert_selection``)."""
+    import uuid as _uuid
+
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetectionParameters,
+        ArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.exceptions import SchemaBypassError
+
+    ArtifactDetectionParameters.insert_default()
+    orphan_id = _uuid.uuid4()
+    # Insert master with NO source part to simulate bypass.
+    dj_table = ArtifactSelection()
+    dj_table.insert1(
+        {
+            "artifact_id": orphan_id,
+            "artifact_params_name": "default",
+        }
+    )
+    try:
+        with pytest.raises(SchemaBypassError, match="0 source part"):
+            ArtifactSelection.resolve_source({"artifact_id": orphan_id})
+    finally:
+        (ArtifactSelection & {"artifact_id": orphan_id}).super_delete(
+            warn=False
+        )

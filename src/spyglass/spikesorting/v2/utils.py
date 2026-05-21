@@ -3,14 +3,35 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import datajoint as dj
 import spikeinterface as si
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
+
+
+@dataclass(frozen=True)
+class SourceResolution:
+    """Result of ``<MasterTable>.resolve_source(key)`` on a source-part master.
+
+    Used at the top of ``Sorting.make()`` and ``ArtifactDetection.make()``
+    to dispatch on which source-part row backs the master. ``kind`` is
+    the source enum; ``key`` is the source-row PK fields (e.g.
+    ``{"recording_id": ...}`` or ``{"shared_artifact_group_name": ...}``)
+    so the caller can pass it straight into the upstream table's
+    ``get_*`` / fetch helpers.
+    """
+
+    kind: Literal[
+        "recording",
+        "concatenated_recording",
+        "shared_artifact_group",
+    ]
+    key: dict
 
 
 # ---------------------------------------------------------------------------
