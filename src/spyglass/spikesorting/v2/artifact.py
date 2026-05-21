@@ -354,6 +354,45 @@ class ArtifactSelection(SpyglassMixin, dj.Manual):
         return {k: new_master_key[k] for k in cls.primary_key}
 
     @classmethod
+    def prune_orphaned_selections(cls, dry_run: bool = True) -> list[dict]:
+        """Find or delete master rows that have no source-part row.
+
+        The source-part pattern's transactional ``insert_selection``
+        guarantees every master is born with exactly one source row,
+        but DataJoint cannot enforce that invariant across two part
+        tables -- if a maintenance script cascade-deletes from
+        ``Recording`` or ``SharedArtifactGroup`` it leaves a master row
+        with zero source children. This helper finds and (optionally)
+        removes those orphans via cautious_delete so downstream
+        ``ArtifactDetection`` / ``Sorting`` / ``CurationV2`` rows are
+        reviewed by the normal cascade preview.
+
+        Parameters
+        ----------
+        dry_run
+            If True (default), return the orphan master PKs without
+            deleting. If False, cautious_delete the orphans.
+
+        Returns
+        -------
+        list of dict
+            Orphan master PKs (``{"artifact_id": ...}``). Empty when
+            no orphans remain.
+        """
+        all_masters = cls.fetch("KEY", as_dict=True)
+        orphans: list[dict] = []
+        for master in all_masters:
+            rec_count = len(cls.RecordingSource & master)
+            shared_count = len(cls.SharedArtifactGroupSource & master)
+            if rec_count + shared_count == 0:
+                orphans.append(master)
+        if dry_run or not orphans:
+            return orphans
+        for orphan in orphans:
+            (cls & orphan).cautious_delete()
+        return orphans
+
+    @classmethod
     def resolve_source(cls, key: dict) -> SourceResolution:
         """Return the source-resolution record for an artifact selection.
 
@@ -491,8 +530,9 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         if not validated.detect:
             return _np.asarray([[timestamps[0], timestamps[-1]]])
 
-        # Phase 1 MVP: in-memory scan. Chunked iteration lands with the
-        # recompute pipeline; the smoke / 60s fixtures fit easily.
+        # In-memory scan: acceptable for recordings up to a few minutes;
+        # the smoke / 60s polymer fixtures fit easily. Chunked iteration
+        # is follow-up work alongside the recompute pipeline.
         traces = recording.get_traces(return_scaled=False)
         # Scale to microvolts using SI's stored gain so the threshold
         # comparison is in physical units.
@@ -586,12 +626,12 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         from spyglass.spikesorting.v2.recording import RecordingSelection
 
         source = ArtifactSelection.resolve_source(key)
-        artifact_id = (
-            (self & key).fetch1("KEY")["artifact_id"]
-            if (self & key)
-            else key["artifact_id"]
-        )
-        interval_list_name = f"artifact_{artifact_id}"
+        if "artifact_id" not in key:
+            raise ValueError(
+                "ArtifactDetection.get_artifact_removed_intervals: key "
+                "must include 'artifact_id'."
+            )
+        interval_list_name = f"artifact_{key['artifact_id']}"
 
         if source.kind == "recording":
             nwb_file_name = (

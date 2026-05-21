@@ -712,16 +712,25 @@ class Recording(SpyglassMixin, dj.Computed):
         )
 
         # Validate timestamp coverage of the saved artifact against the
-        # requested IntervalList. The check is the regression fix for
-        # silent-truncation bugs (#1133, #1585).
+        # user's IntervalList request -- NOT against the intersection
+        # with raw-data-valid-times that ``_restrict_recording`` uses
+        # for frame_slice. The check fires both when the user requests
+        # times that aren't in the raw recording (#1585) and when the
+        # written ElectricalSeries silently drops samples mid-write
+        # (#1133). Tolerance is 1.5 sample intervals so the off-by-one
+        # NWB boundary (last_ts = (N-1)/fs, not N/fs) does not trip
+        # the guard.
         saved_times = recording.get_times()
-        # The plan says "raise if shorter than requested by more than one
-        # sample". Use 1.5 sample intervals so floating-point epsilon on
-        # an exact-one-sample boundary (which happens because NWB stores
-        # timestamps at sample 0..N-1, i.e. last_ts = (N-1)/fs, not N/fs)
-        # does not trip the guard. Real truncation is always many samples.
+        raw_request = (
+            IntervalList
+            & {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": interval_list_name,
+            }
+        ).fetch1("valid_times")
+        requested_start = float(raw_request[0][0])
+        requested_end = float(raw_request[-1][-1])
         tolerance = 1.5 / sampling_frequency
-        requested_start, requested_end = requested_window
         missing_start = requested_start - saved_times[0]
         missing_end = requested_end - saved_times[-1]
         if missing_start > tolerance or missing_end > tolerance:
@@ -1022,8 +1031,8 @@ class Recording(SpyglassMixin, dj.Computed):
             from_schema=bool(existing_analysis_file_name),
         )
 
-        # Load the full preprocessed array. Phase 1 MVP: in-memory write
-        # is acceptable for fixtures up to a few minutes; longer
+        # Load the full preprocessed array. In-memory write is
+        # acceptable for fixtures up to a few minutes; longer
         # recordings will be revisited when chunked-iterator support
         # lands alongside the recompute pipeline.
         data = recording.get_traces(return_scaled=False)
@@ -1033,14 +1042,18 @@ class Recording(SpyglassMixin, dj.Computed):
         # array we are about to write and cross-reference after rebuild.
         cache_hash = hashlib.sha256(_np.ascontiguousarray(data).tobytes()).hexdigest()
 
+        # SI keeps channel gains aligned for standard Frank-lab probes;
+        # a divergence here would indicate a probe-config bug upstream.
+        # Surface it loudly rather than silently picking a single value.
         gains = _np.unique(recording.get_channel_gains())
         if len(gains) != 1:
-            # Tolerate per-channel gains by picking the first; SI keeps
-            # them aligned for standard probes. If a real divergence
-            # surfaces we can revisit.
-            conversion = float(gains[0]) * 1e-6
-        else:
-            conversion = float(gains[0]) * 1e-6
+            raise ValueError(
+                "Recording.make: recording has heterogeneous channel "
+                f"gains {gains.tolist()}; v2 ElectricalSeries write "
+                "requires a single conversion factor. Verify probe "
+                "metadata for the sort group."
+            )
+        conversion = float(gains[0]) * 1e-6
 
         with pynwb.NWBHDF5IO(
             path=analysis_abs_path, mode="a", load_namespaces=True

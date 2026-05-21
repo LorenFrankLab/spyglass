@@ -262,6 +262,29 @@ class SortingSelection(SpyglassMixin, dj.Manual):
         return {k: new_master_key[k] for k in cls.primary_key}
 
     @classmethod
+    def prune_orphaned_selections(cls, dry_run: bool = True) -> list[dict]:
+        """Find or delete master rows that have no source-part row.
+
+        See ``ArtifactSelection.prune_orphaned_selections`` for the full
+        rationale. Same contract: dry-run by default; with
+        ``dry_run=False`` runs cautious_delete on each orphan so the
+        cascade preview shows downstream ``Sorting`` / ``CurationV2`` /
+        ``SpikeSortingOutput.CurationV2`` impact.
+        """
+        all_masters = cls.fetch("KEY", as_dict=True)
+        orphans: list[dict] = []
+        for master in all_masters:
+            rec_count = len(cls.RecordingSource & master)
+            concat_count = len(cls.ConcatenatedRecordingSource & master)
+            if rec_count + concat_count == 0:
+                orphans.append(master)
+        if dry_run or not orphans:
+            return orphans
+        for orphan in orphans:
+            (cls & orphan).cautious_delete()
+        return orphans
+
+    @classmethod
     def resolve_source(cls, key: dict) -> SourceResolution:
         """Return the source-resolution record for a sorting selection.
 
@@ -623,9 +646,14 @@ class Sorting(SpyglassMixin, dj.Computed):
 
         if not artifact_frames:
             return recording
+        # SI's ``list_triggers`` is documented as a list-of-arrays, one
+        # per event channel. We pass a single numpy array wrapping ALL
+        # artifact frames so the mask zeros every artifact sample
+        # exactly once, independent of how SI interprets a bare Python
+        # list of scalars in future minor versions.
         return sip.remove_artifacts(
             recording=recording,
-            list_triggers=[artifact_frames],
+            list_triggers=[_np.asarray(artifact_frames, dtype=_np.int64)],
             ms_before=0.0,
             ms_after=0.0,
             mode="zeros",

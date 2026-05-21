@@ -693,6 +693,32 @@ def test_sorting_get_sorting_round_trips(populated_recording):
         assert times.min() >= rec_start
         assert times.max() <= rec_end
 
+    # Stronger absolute-timeline check: even on a recording starting at
+    # t=0 (the smoke fixture), the spike times read back must equal
+    # ``timestamps[sample_index]`` exactly. With the previous t_start=0.0
+    # hard-code AND relative-spike-time storage, ``return_times=True``
+    # also returned ``sample_index / fs``, which happened to match for
+    # t=0 recordings -- so we also check that
+    # ``get_unit_spike_train(return_times=False)`` returns valid sample
+    # indices that, when looked up in ``timestamps``, recover the
+    # original return_times array. That equivalence only holds when the
+    # absolute-timeline convention is implemented in BOTH write and
+    # read paths.
+    for uid in si_sorting.unit_ids:
+        sample_idx = si_sorting.get_unit_spike_train(
+            unit_id=uid, return_times=False
+        )
+        wall_times = si_sorting.get_unit_spike_train(
+            unit_id=uid, return_times=True
+        )
+        if len(sample_idx) == 0:
+            continue
+        # Allow at most one-sample drift from any int-rounding inside
+        # SI's time/sample-index conversion.
+        recovered = timestamps[sample_idx.astype(int)]
+        max_drift = float(abs(recovered - wall_times).max())
+        assert max_drift <= 1.0 / rec.get_sampling_frequency()
+
 
 @pytest.mark.slow
 def test_sorting_get_analyzer_loads_folder(populated_recording):
@@ -712,6 +738,155 @@ def test_sorting_get_analyzer_loads_folder(populated_recording):
     analyzer = Sorting().get_analyzer({"sorting_id": sorting_id})
     assert isinstance(analyzer, si.SortingAnalyzer)
     assert analyzer.has_extension("templates")
+
+
+@pytest.mark.slow
+def test_recording_truncation_caught(polymer_smoke_session):
+    """Validation goal #5: ``RecordingTruncatedError`` fires at populate
+    time when the IntervalList valid_times request more than the raw NWB
+    actually covers.
+
+    Synthesizes a sort interval that extends past the raw recording's
+    last timestamp by far more than ``1.5 / sampling_frequency`` and
+    asserts ``Recording.populate`` raises before any partial artifact
+    is written. The check is the regression fix for silent-truncation
+    bugs (#1133, #1585).
+    """
+    import numpy as _np
+
+    from spyglass.common import IntervalList
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2.exceptions import RecordingTruncatedError
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    PreprocessingParameters.insert_default()
+    LabTeam.insert1(
+        {
+            "team_name": "v2_test_team",
+            "team_description": "v2 pipeline tests",
+        },
+        skip_duplicates=True,
+    )
+    if not (SortGroupV2 & polymer_smoke_session):
+        SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+
+    # Write a synthetic IntervalList row whose end-time exceeds the
+    # raw recording's last timestamp by 1.0 second -- well past the
+    # 1.5 / fs tolerance that absorbs the off-by-one boundary.
+    truncated_interval_name = "v2_test_truncated"
+    raw_end = float(
+        (
+            IntervalList
+            & {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": "raw data valid times",
+            }
+        ).fetch1("valid_times")[-1][-1]
+    )
+    IntervalList.insert1(
+        {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": truncated_interval_name,
+            "valid_times": _np.asarray([[0.0, raw_end + 1.0]]),
+            "pipeline": "v2_test_truncation",
+        },
+        skip_duplicates=True,
+    )
+
+    sort_group_id = int(
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
+    )
+    selection_key = {
+        "nwb_file_name": nwb_file_name,
+        "sort_group_id": sort_group_id,
+        "interval_list_name": truncated_interval_name,
+        "preproc_params_name": "default_franklab",
+        "team_name": "v2_test_team",
+    }
+    pk = RecordingSelection.insert_selection(selection_key)
+
+    # Clear any prior Recording row so populate actually runs make().
+    (Recording & pk).super_delete(warn=False)
+    try:
+        with pytest.raises(RecordingTruncatedError, match="Missing seconds"):
+            Recording.populate(pk, reserve_jobs=False)
+        # The truncation guard must fire BEFORE the row is inserted --
+        # otherwise downstream consumers would silently see a short
+        # recording.
+        assert not (Recording & pk)
+    finally:
+        (RecordingSelection & pk).super_delete(warn=False)
+        (
+            IntervalList
+            & {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": truncated_interval_name,
+            }
+        ).super_delete(warn=False)
+
+
+@pytest.mark.slow
+def test_prune_orphaned_selections_finds_and_cleans(populated_recording):
+    """``prune_orphaned_selections`` finds master rows with no source
+    part and removes them when called with ``dry_run=False``.
+
+    Source-part atomicity is enforced at insert time, so orphans only
+    arise from upstream maintenance (e.g. a cascade delete from
+    Recording that removes the source-part row but leaves the master).
+    The helper backs the validation-goal-#8 cleanup path.
+    """
+    import uuid as _uuid
+
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetectionParameters,
+        ArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        SortingSelection,
+    )
+
+    ArtifactDetectionParameters.insert_default()
+    SorterParameters.insert_default()
+
+    # Inject orphans directly via dj.Manual.insert1 (bypassing
+    # insert_selection -- this is what an upstream cascade-delete leaves
+    # behind in production).
+    orphan_artifact = _uuid.uuid4()
+    ArtifactSelection().insert1(
+        {
+            "artifact_id": orphan_artifact,
+            "artifact_params_name": "default",
+        }
+    )
+    orphan_sorting = _uuid.uuid4()
+    SortingSelection().insert1(
+        {
+            "sorting_id": orphan_sorting,
+            "sorter": "mountainsort5",
+            "sorter_params_name": "franklab_tetrode_hippocampus_30kHz_ms5",
+            "artifact_id": None,
+        }
+    )
+
+    dry = ArtifactSelection.prune_orphaned_selections(dry_run=True)
+    assert {"artifact_id": orphan_artifact} in dry
+    # Non-dry-run removes the orphan and returns it for review.
+    deleted = ArtifactSelection.prune_orphaned_selections(dry_run=False)
+    assert {"artifact_id": orphan_artifact} in deleted
+    assert not (ArtifactSelection & {"artifact_id": orphan_artifact})
+
+    dry = SortingSelection.prune_orphaned_selections(dry_run=True)
+    assert {"sorting_id": orphan_sorting} in dry
+    deleted = SortingSelection.prune_orphaned_selections(dry_run=False)
+    assert {"sorting_id": orphan_sorting} in deleted
+    assert not (SortingSelection & {"sorting_id": orphan_sorting})
 
 
 @pytest.mark.slow
