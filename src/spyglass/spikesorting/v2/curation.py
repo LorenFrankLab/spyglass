@@ -8,9 +8,12 @@ Tables (all final-shape under the zero-migration policy):
 ground-truth NWB Units continue to use ``ImportedSpikeSorting``; v2 does
 NOT duplicate them into ``CurationV2``.
 
-``insert_curation`` and the accessors are forward-declared stubs that
-raise ``NotImplementedError`` until the matching runtime change lands;
-the schema is in place so other tables can FK ``curation_id`` today.
+``insert_curation`` registers each curation atomically across the
+master, ``Unit``, and ``UnitLabel`` parts plus the
+``SpikeSortingOutput.CurationV2`` merge-table row. The curated-units
+NWB is staged first; the AnalysisNwbfile DB-row registration moves
+inside the transaction so a later failure rolls the row back and the
+staged file is cleaned up in the except path.
 """
 
 from __future__ import annotations
@@ -99,7 +102,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
     def insert_curation(
         cls,
         sorting_key: dict,
-        labels: dict | None,
+        labels: dict,
         parent_curation_id: int = -1,
         merge_groups: list[list[int]] | None = None,
         apply_merges: bool = False,
@@ -217,9 +220,14 @@ class CurationV2(SpyglassMixin, dj.Manual):
             curation_id=curation_id,
         )
 
-        # Stage the curated-units NWB (filesystem side-effect; clean up
-        # on any later DB failure).
-        analysis_file_name, units_object_id = cls._stage_curated_units_nwb(
+        # Stage the curated-units NWB (filesystem side-effect; the DB
+        # row registration happens inside the transaction block below
+        # so it rolls back atomically with the other inserts).
+        (
+            analysis_file_name,
+            units_object_id,
+            staged_parent_nwb,
+        ) = cls._stage_curated_units_nwb(
             sorting_id=sorting_id,
             kept_unit_to_contributors=kept_unit_to_contributors,
             apply_merges=apply_merges,
@@ -267,6 +275,10 @@ class CurationV2(SpyglassMixin, dj.Manual):
             )
 
             with transaction_or_noop(cls.connection):
+                # Register the analysis file row FIRST inside the
+                # transaction so it rolls back atomically with the
+                # CurationV2 rows on any later failure.
+                AnalysisNwbfile().add(staged_parent_nwb, analysis_file_name)
                 cls.insert1(master_row)
                 cls.Unit.insert(unit_rows)
                 if unit_label_rows:
@@ -282,16 +294,13 @@ class CurationV2(SpyglassMixin, dj.Manual):
                     skip_duplicates=True,
                 )
         except Exception:
-            # Roll back the staged NWB so we do not leave an orphan file
-            # on disk (DataJoint already rolled back the DB rows).
+            # The transaction rolled back the AnalysisNwbfile row and
+            # the CurationV2 rows together; only the file on disk is
+            # left to clean up.
             try:
                 abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
                 if _pathlib.Path(abs_path).exists():
                     _pathlib.Path(abs_path).unlink()
-                (
-                    AnalysisNwbfile
-                    & {"analysis_file_name": analysis_file_name}
-                ).super_delete(warn=False)
             except Exception as cleanup_exc:  # pragma: no cover -- defensive
                 logger.error(
                     "CurationV2.insert_curation: failed to clean up "
@@ -357,6 +366,9 @@ class CurationV2(SpyglassMixin, dj.Manual):
         by_id = {int(row["unit_id"]): row for row in sorting_units}
 
         # Build mapping from contributor -> kept unit (head of group).
+        # A unit may only appear in ONE merge group: overlap across
+        # groups would silently double-count spikes when apply_merges
+        # is True and ambiguates the "kept unit" choice.
         merged_ids: set[int] = set()
         kept_to_contributors: dict[int, list[int]] = {}
         for group in merge_groups:
@@ -369,9 +381,23 @@ class CurationV2(SpyglassMixin, dj.Manual):
                         f"references unit_id={uid} that is not in "
                         f"Sorting.Unit for sorting_id={sorting_id}."
                     )
-            head = int(group[0])
-            kept_to_contributors[head] = [int(u) for u in group]
-            merged_ids.update(int(u) for u in group)
+            int_group = [int(u) for u in group]
+            overlap = merged_ids & set(int_group)
+            if overlap:
+                raise ValueError(
+                    f"CurationV2.insert_curation: merge_groups overlap "
+                    f"on unit_ids {sorted(overlap)}. A unit can belong "
+                    "to at most one merge group."
+                )
+            head = int_group[0]
+            if head in kept_to_contributors:
+                raise ValueError(
+                    f"CurationV2.insert_curation: merge_groups reuses "
+                    f"unit_id={head} as the head of two groups. Pick "
+                    "distinct heads."
+                )
+            kept_to_contributors[head] = int_group
+            merged_ids.update(int_group)
 
         # Non-merged units pass through 1:1.
         for uid in by_id:
@@ -471,8 +497,8 @@ class CurationV2(SpyglassMixin, dj.Manual):
                     )
                 lbl_list = labels.get(int(kept_uid), [])
                 label_str = ",".join(
-                    str(l.value) if isinstance(l, CurationLabel) else str(l)
-                    for l in lbl_list
+                    lbl.value if isinstance(lbl, CurationLabel) else str(lbl)
+                    for lbl in lbl_list
                 )
                 nwbf.add_unit(
                     spike_times=_np.asarray(spike_times, dtype=_np.float64),
@@ -482,8 +508,13 @@ class CurationV2(SpyglassMixin, dj.Manual):
             units_object_id = nwbf.units.object_id
             io.write(nwbf)
 
-        AnalysisNwbfile().add(nwb_file_name, analysis_file_name)
-        return analysis_file_name, units_object_id
+        # The AnalysisNwbfile DB-row registration (.add) is deliberately
+        # NOT done here -- the caller does it inside its transaction
+        # block so the row rolls back atomically if any of the
+        # CurationV2 / Unit / UnitLabel / merge-insert steps fail.
+        # The file on disk is the only side effect left to clean up on
+        # rollback.
+        return analysis_file_name, units_object_id, nwb_file_name
 
     # ---- Accessors -------------------------------------------------------
 

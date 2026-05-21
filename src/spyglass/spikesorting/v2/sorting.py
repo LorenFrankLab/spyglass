@@ -188,7 +188,8 @@ class SortingSelection(SpyglassMixin, dj.Manual):
         ValueError
             If zero or both source keys are supplied.
         NotImplementedError
-            If ``concat_recording_id`` is supplied (Phase 3 work).
+            If ``concat_recording_id`` is supplied -- concat-source
+            sorting is not yet implemented.
         DuplicateSelectionError
             If more than one master+source row matches.
         """
@@ -380,7 +381,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         if source.kind != "recording":
             raise NotImplementedError(
                 "Sorting.make: concatenated_recording source is not yet "
-                "implemented (Phase 3 work)."
+                "implemented."
             )
 
         sel_row = (SortingSelection & key).fetch1()

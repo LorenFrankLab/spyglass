@@ -132,20 +132,15 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         rec_table = RecordingSelection & rec_restriction
 
         # Artifact restriction narrows by artifact_id when present.
-        art_restriction = {}
-        if "artifact_id" in key:
-            art_restriction["artifact_id"] = key["artifact_id"]
-        if art_restriction:
-            art_table = ArtifactSelection & art_restriction
-            # Cross-join the artifact and recording sides to keep only
-            # the (recording, artifact) tuples that match both.
-            sort_rec_source = (
-                SortingSelection.RecordingSource * rec_table.proj()
-            ) & art_restriction
-            sort_master = SortingSelection * sort_rec_source.proj()
-        else:
-            sort_rec_source = SortingSelection.RecordingSource * rec_table.proj()
-            sort_master = SortingSelection * sort_rec_source.proj()
+        art_restriction = (
+            {"artifact_id": key["artifact_id"]}
+            if "artifact_id" in key
+            else {}
+        )
+        sort_rec_source = (
+            SortingSelection.RecordingSource * rec_table.proj()
+        ) & art_restriction
+        sort_master = SortingSelection * sort_rec_source.proj()
 
         sort_keys = [
             "sorter",
@@ -377,11 +372,10 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
 
         Dispatches through ``source_class_dict`` to the source table's
         ``get_unit_brain_regions`` accessor. v2's ``CurationV2`` defines
-        this method (lands with slice 1d.1); v0's ``CuratedSpikeSorting``
-        and v1's ``CurationV1`` do not, and a clear ``AttributeError``
-        is raised on those sources. This is intentional -- v0/v1 do not
-        carry the per-unit Electrode FK that the v2 Sorting.Unit
-        contract requires.
+        this method; v0's ``CuratedSpikeSorting`` and v1's ``CurationV1``
+        do not, and a clear ``AttributeError`` is raised on those
+        sources. This is intentional -- v0/v1 do not carry the per-unit
+        Electrode FK that the v2 Sorting.Unit contract requires.
 
         Parameters
         ----------
