@@ -7,15 +7,17 @@ Tables (all final-shape under the zero-migration policy):
     Recording            -- materialized preprocessed recording (NWB-resident).
 
 ``insert1`` on the Lookup tables is live and Pydantic-validates the
-``params`` blob; ``SortGroupV2.set_group_by_*`` constructors and
-``RecordingSelection.insert_selection`` are also live. ``Recording.make``
-and ``Recording.get_recording`` are forward-declared stubs that raise
-``NotImplementedError`` until the matching runtime change lands.
+``params`` blob. ``SortGroupV2.set_group_by_*`` constructors,
+``RecordingSelection.insert_selection``, and ``Recording.make`` /
+``get_recording`` are also live. The recording write applies bandpass
+filtering + common-reference referencing (no whitening; that is deferred
+to the sort stage so motion correction never sees whitened data).
 """
 
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 from typing import NamedTuple
 
 import datajoint as dj
@@ -23,7 +25,7 @@ import numpy as np
 
 from spyglass.common import IntervalList, LabTeam, Session  # noqa: F401
 from spyglass.common.common_ephys import Electrode, Raw  # noqa: F401
-from spyglass.common.common_nwbfile import AnalysisNwbfile  # noqa: F401
+from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile  # noqa: F401
 from spyglass.spikesorting.v2._params.preprocessing import (
     PreprocessingParamsSchema,
 )
@@ -593,12 +595,14 @@ class RecordingSelection(SpyglassMixin, dj.Manual):
             ``{"recording_id": <uuid>}`` -- never a list, never the full
             row.
         """
+        from spyglass.spikesorting.v2.exceptions import DuplicateSelectionError
+
         keys_minus_uuid = {k: v for k, v in key.items() if k != "recording_id"}
         existing = (cls & keys_minus_uuid).fetch("KEY", as_dict=True)
         if len(existing) == 1:
             return existing[0]
         if len(existing) > 1:
-            raise ValueError(
+            raise DuplicateSelectionError(
                 f"RecordingSelection has {len(existing)} duplicate "
                 f"selection rows for logical identity {keys_minus_uuid}. "
                 "This is an integrity bug; v2 inserts via this helper "
@@ -609,6 +613,10 @@ class RecordingSelection(SpyglassMixin, dj.Manual):
         return {k: new_key[k] for k in cls.primary_key}
 
 
+_ELECTRICAL_SERIES_NAME = "ProcessedElectricalSeries"
+_ELECTRICAL_SERIES_PATH = f"acquisition/{_ELECTRICAL_SERIES_NAME}"
+
+
 @schema
 class Recording(SpyglassMixin, dj.Computed):
     """Preprocessed recording materialized NWB-resident in AnalysisNwbfile.
@@ -616,6 +624,16 @@ class Recording(SpyglassMixin, dj.Computed):
     The preprocessed ``ElectricalSeries`` lives inside an
     ``AnalysisNwbfile`` (the canonical artifact). No binary sidecar; see
     shared-contracts ``Recording Cache Format``.
+
+    ``make()`` loads the raw NWB, restricts to the requested sort group
+    and interval, applies pre-motion preprocessing (bandpass + common
+    reference -- whitening is deferred to the sorter for sorters that
+    need it), writes one ``ElectricalSeries`` into a fresh
+    ``AnalysisNwbfile``, validates the saved timestamp range covers the
+    requested ``IntervalList.valid_times``, and records a SHA-256 hash
+    of the ``ElectricalSeries`` data bytes. ``get_recording`` exposes
+    the cached artifact and rebuilds on disk if missing, without
+    deleting the DataJoint row.
     """
 
     definition = """
@@ -631,15 +649,424 @@ class Recording(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
-        """Materialize the preprocessed recording."""
-        raise NotImplementedError("Recording.make is not yet implemented")
+        """Materialize the preprocessed recording and write to AnalysisNwbfile."""
+        import spikeinterface.extractors as se
+
+        from spyglass.spikesorting.v2.exceptions import (
+            RecordingTruncatedError,
+        )
+
+        sel = (RecordingSelection & key).fetch1()
+        nwb_file_name = sel["nwb_file_name"]
+        sort_group_id = int(sel["sort_group_id"])
+        interval_list_name = sel["interval_list_name"]
+        preproc_params_name = sel["preproc_params_name"]
+
+        raw_path = Nwbfile().get_abs_path(nwb_file_name)
+        recording = se.read_nwb_recording(raw_path, load_time_vector=True)
+        sampling_frequency = float(recording.get_sampling_frequency())
+
+        channel_ids = sorted(
+            (
+                SortGroupV2.SortGroupElectrode
+                & {
+                    "nwb_file_name": nwb_file_name,
+                    "sort_group_id": sort_group_id,
+                }
+            ).fetch("electrode_id"),
+            key=int,
+        )
+        if len(channel_ids) == 0:
+            raise ValueError(
+                f"Recording.make: sort group {sort_group_id} for "
+                f"{nwb_file_name!r} has zero electrodes."
+            )
+        ref_channel_id = int(
+            (
+                SortGroupV2
+                & {
+                    "nwb_file_name": nwb_file_name,
+                    "sort_group_id": sort_group_id,
+                }
+            ).fetch1("sort_reference_electrode_id")
+        )
+
+        recording, requested_window = self._restrict_recording(
+            recording=recording,
+            nwb_file_name=nwb_file_name,
+            interval_list_name=interval_list_name,
+            sort_group_channel_ids=channel_ids,
+            ref_channel_id=ref_channel_id,
+        )
+
+        recording = self._apply_pre_motion_preprocessing(
+            recording=recording,
+            ref_channel_id=ref_channel_id,
+            sort_group_channel_ids=channel_ids,
+            preproc_params_name=preproc_params_name,
+        )
+
+        analysis_file_name, object_id, cache_hash = self._write_nwb_artifact(
+            recording=recording,
+            nwb_file_name=nwb_file_name,
+        )
+
+        # Validate timestamp coverage of the saved artifact against the
+        # requested IntervalList. The check is the regression fix for
+        # silent-truncation bugs (#1133, #1585).
+        saved_times = recording.get_times()
+        # The plan says "raise if shorter than requested by more than one
+        # sample". Use 1.5 sample intervals so floating-point epsilon on
+        # an exact-one-sample boundary (which happens because NWB stores
+        # timestamps at sample 0..N-1, i.e. last_ts = (N-1)/fs, not N/fs)
+        # does not trip the guard. Real truncation is always many samples.
+        tolerance = 1.5 / sampling_frequency
+        requested_start, requested_end = requested_window
+        missing_start = requested_start - saved_times[0]
+        missing_end = requested_end - saved_times[-1]
+        if missing_start > tolerance or missing_end > tolerance:
+            raise RecordingTruncatedError(
+                "Recording.make wrote a shorter recording than requested. "
+                f"Requested IntervalList valid_times for {interval_list_name!r} "
+                f"in {nwb_file_name!r}: ({requested_start}, "
+                f"{requested_end}). Saved range: ({saved_times[0]}, "
+                f"{saved_times[-1]}). Missing seconds: start="
+                f"{missing_start:.6f}, end={missing_end:.6f}. Check the "
+                "raw NWB for dropped packets or interval misalignment."
+            )
+
+        self.insert1(
+            {
+                **key,
+                "analysis_file_name": analysis_file_name,
+                "electrical_series_path": _ELECTRICAL_SERIES_PATH,
+                "object_id": object_id,
+                "n_channels": recording.get_num_channels(),
+                "sampling_frequency": sampling_frequency,
+                "duration_s": float(
+                    saved_times[-1] - saved_times[0]
+                ),
+                "cache_hash": cache_hash,
+            }
+        )
+
+    # ---- Public accessors ------------------------------------------------
 
     def get_recording(self, key):
         """Return the preprocessed SpikeInterface recording.
 
-        Rebuilds the NWB artifact on demand if missing, without deleting
-        the DataJoint row.
+        Rebuilds the NWB artifact on demand if missing; the DataJoint
+        row is never deleted by this path -- the cache_hash on the row
+        is the source of truth for re-verification.
         """
-        raise NotImplementedError(
-            "Recording.get_recording is not yet implemented"
+        import spikeinterface.extractors as se
+
+        row = (self & key).fetch1()
+        abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
+        if not Path(abs_path).exists():
+            self._rebuild_nwb_artifact(key)
+            abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
+        return se.read_nwb_recording(abs_path, load_time_vector=True)
+
+    def _rebuild_nwb_artifact(self, key) -> None:
+        """Rebuild the NWB artifact for an existing row.
+
+        Runs the same preprocessing pipeline as ``make`` but writes to
+        the existing ``analysis_file_name`` slot and verifies the new
+        ``cache_hash`` matches the row. A mismatch surfaces silent
+        upstream drift (raw NWB edited / SI version skew); the row is
+        not auto-deleted so the user can diff before deciding.
+        """
+        import spikeinterface.extractors as se
+
+        from spyglass.spikesorting.v2.exceptions import (
+            RecordingTruncatedError,  # noqa: F401  -- raised inside helpers
         )
+
+        sel = (RecordingSelection & key).fetch1()
+        row = (self & key).fetch1()
+        nwb_file_name = sel["nwb_file_name"]
+        sort_group_id = int(sel["sort_group_id"])
+        interval_list_name = sel["interval_list_name"]
+        preproc_params_name = sel["preproc_params_name"]
+
+        raw_path = Nwbfile().get_abs_path(nwb_file_name)
+        recording = se.read_nwb_recording(raw_path, load_time_vector=True)
+        channel_ids = sorted(
+            (
+                SortGroupV2.SortGroupElectrode
+                & {
+                    "nwb_file_name": nwb_file_name,
+                    "sort_group_id": sort_group_id,
+                }
+            ).fetch("electrode_id"),
+            key=int,
+        )
+        ref_channel_id = int(
+            (
+                SortGroupV2
+                & {
+                    "nwb_file_name": nwb_file_name,
+                    "sort_group_id": sort_group_id,
+                }
+            ).fetch1("sort_reference_electrode_id")
+        )
+        recording, _ = self._restrict_recording(
+            recording=recording,
+            nwb_file_name=nwb_file_name,
+            interval_list_name=interval_list_name,
+            sort_group_channel_ids=channel_ids,
+            ref_channel_id=ref_channel_id,
+        )
+        recording = self._apply_pre_motion_preprocessing(
+            recording=recording,
+            ref_channel_id=ref_channel_id,
+            sort_group_channel_ids=channel_ids,
+            preproc_params_name=preproc_params_name,
+        )
+        _, _, rebuilt_hash = self._write_nwb_artifact(
+            recording=recording,
+            nwb_file_name=nwb_file_name,
+            existing_analysis_file_name=row["analysis_file_name"],
+        )
+        if rebuilt_hash != row["cache_hash"]:
+            logger.warning(
+                "Recording._rebuild_nwb_artifact: rebuilt cache_hash "
+                f"{rebuilt_hash} does not match stored {row['cache_hash']} "
+                "for analysis_file_name="
+                f"{row['analysis_file_name']!r}. The DataJoint row was not "
+                "deleted; inspect upstream raw NWB / SI version before "
+                "rerunning."
+            )
+
+    # ---- Implementation helpers -----------------------------------------
+
+    @staticmethod
+    def _get_sort_interval_window(
+        nwb_file_name: str, interval_list_name: str
+    ) -> tuple[float, float]:
+        """Return the (start, end) of the intersection between the sort
+        interval and the raw-data valid times.
+        """
+        sort_interval = (
+            IntervalList
+            & {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": interval_list_name,
+            }
+        ).fetch_interval()
+        raw_valid = (
+            IntervalList
+            & {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": "raw data valid times",
+            }
+        ).fetch_interval()
+        intersection = sort_interval.intersect(raw_valid)
+        times = intersection.times
+        if len(times) == 0:
+            raise ValueError(
+                f"Recording.make: interval list {interval_list_name!r} "
+                f"for {nwb_file_name!r} has zero intersection with raw "
+                "data valid times."
+            )
+        return float(times[0][0]), float(times[-1][-1])
+
+    @classmethod
+    def _restrict_recording(
+        cls,
+        recording,
+        nwb_file_name: str,
+        interval_list_name: str,
+        sort_group_channel_ids: list,
+        ref_channel_id: int,
+    ):
+        """Slice the SI recording in time and channels.
+
+        Returns the sliced recording and the (start, end) seconds of the
+        requested sort interval (after intersection with valid times).
+        The reference channel is included in the slice when it is a
+        positive electrode id so common_reference can subtract it; it
+        is dropped after referencing in ``_apply_pre_motion_preprocessing``.
+
+        Uses ``ChannelSliceRecording`` directly because SI 0.104 dropped
+        the ``recording.channel_slice(...)`` method that was available
+        on v1's SI 0.99 -- the constructor accepts the same kwargs.
+        """
+        import numpy as _np
+        from spikeinterface.core.channelslice import ChannelSliceRecording
+
+        window_start, window_end = cls._get_sort_interval_window(
+            nwb_file_name, interval_list_name
+        )
+
+        times = recording.get_times()
+        # Convert window seconds -> frame indices via timestamps.
+        start_frame = int(_np.searchsorted(times, window_start, side="left"))
+        end_frame = int(_np.searchsorted(times, window_end, side="right"))
+        recording = recording.frame_slice(
+            start_frame=start_frame, end_frame=end_frame
+        )
+
+        if ref_channel_id >= 0:
+            slice_ids = sorted(
+                set([int(c) for c in sort_group_channel_ids] + [ref_channel_id])
+            )
+        else:
+            slice_ids = [int(c) for c in sort_group_channel_ids]
+
+        si_ids = cls._spikeinterface_channel_ids(
+            nwb_file_name, slice_ids
+        )
+        recording = ChannelSliceRecording(
+            recording,
+            channel_ids=si_ids,
+            renamed_channel_ids=slice_ids,
+        )
+        return recording, (window_start, window_end)
+
+    @staticmethod
+    def _spikeinterface_channel_ids(
+        nwb_file_name: str, spyglass_ids
+    ):
+        """Map Spyglass electrode_ids onto SpikeInterface channel ids.
+
+        SpikeInterface 0.104's ``read_nwb_recording`` returns channel
+        ids as ``np.int64``; Spyglass stores ``electrode_id`` as ``int``.
+        The 1-1 map is direct.
+        """
+        return [int(c) for c in spyglass_ids]
+
+    @staticmethod
+    def _apply_pre_motion_preprocessing(
+        recording,
+        ref_channel_id: int,
+        sort_group_channel_ids: list,
+        preproc_params_name: str,
+    ):
+        """Apply the pre-motion preprocessing stack (filter + reference).
+
+        Whitening is deliberately deferred to the sorter stage so motion
+        correction never sees whitened data (SpikeInterface docs flag
+        whitening as destructive for motion estimators).
+        """
+        import numpy as _np
+        import spikeinterface.preprocessing as sip
+
+        params = (
+            PreprocessingParameters & {"preproc_params_name": preproc_params_name}
+        ).fetch1("params")
+        # The schema's helper bundles the stage-1 dict (bandpass +
+        # common_reference); we apply each preprocessor explicitly so
+        # the call surface here is pinned to SI 0.104.
+        validated = PreprocessingParamsSchema.model_validate(params)
+
+        if ref_channel_id >= 0:
+            recording = sip.common_reference(
+                recording,
+                reference="single",
+                ref_channel_ids=[int(ref_channel_id)],
+                dtype=_np.float64,
+            )
+            # Drop the reference channel from the recording surface so
+            # the sorter only sees the actual sort-group channels.
+            if int(ref_channel_id) in [
+                int(c) for c in recording.get_channel_ids()
+            ]:
+                recording = recording.remove_channels([int(ref_channel_id)])
+        elif ref_channel_id == -2:
+            recording = sip.common_reference(
+                recording,
+                reference="global",
+                operator=validated.common_reference.operator,
+                dtype=_np.float64,
+            )
+        elif ref_channel_id != -1:
+            raise ValueError(
+                "Recording.make: invalid sort_reference_electrode_id "
+                f"{ref_channel_id}. Use -1 (no reference), -2 (global "
+                "median), or a positive electrode id."
+            )
+
+        recording = sip.bandpass_filter(
+            recording,
+            freq_min=validated.bandpass_filter.freq_min,
+            freq_max=validated.bandpass_filter.freq_max,
+            dtype=_np.float64,
+        )
+        return recording
+
+    @staticmethod
+    def _write_nwb_artifact(
+        recording,
+        nwb_file_name: str,
+        existing_analysis_file_name: str | None = None,
+    ) -> tuple[str, str, str]:
+        """Write the preprocessed recording into an ``AnalysisNwbfile``.
+
+        Returns ``(analysis_file_name, electrical_series_object_id,
+        cache_hash)`` -- the latter is the SHA-256 of the saved data
+        bytes, used for rebuild verification.
+        """
+        import hashlib
+
+        import numpy as _np
+        import pynwb
+
+        analysis_file_name = AnalysisNwbfile().create(
+            nwb_file_name=nwb_file_name,
+            recompute_file_name=existing_analysis_file_name,
+        )
+        analysis_abs_path = AnalysisNwbfile.get_abs_path(
+            analysis_file_name,
+            from_schema=bool(existing_analysis_file_name),
+        )
+
+        # Load the full preprocessed array. Phase 1 MVP: in-memory write
+        # is acceptable for fixtures up to a few minutes; longer
+        # recordings will be revisited when chunked-iterator support
+        # lands alongside the recompute pipeline.
+        data = recording.get_traces(return_scaled=False)
+        times = recording.get_times()
+
+        # The cache_hash is over the saved bytes -- compute once on the
+        # array we are about to write and cross-reference after rebuild.
+        cache_hash = hashlib.sha256(_np.ascontiguousarray(data).tobytes()).hexdigest()
+
+        gains = _np.unique(recording.get_channel_gains())
+        if len(gains) != 1:
+            # Tolerate per-channel gains by picking the first; SI keeps
+            # them aligned for standard probes. If a real divergence
+            # surfaces we can revisit.
+            conversion = float(gains[0]) * 1e-6
+        else:
+            conversion = float(gains[0]) * 1e-6
+
+        with pynwb.NWBHDF5IO(
+            path=analysis_abs_path, mode="a", load_namespaces=True
+        ) as io:
+            nwbfile = io.read()
+            table_region = nwbfile.create_electrode_table_region(
+                region=[int(c) for c in recording.get_channel_ids()],
+                description="Sort group electrodes",
+            )
+            series = pynwb.ecephys.ElectricalSeries(
+                name=_ELECTRICAL_SERIES_NAME,
+                data=data,
+                electrodes=table_region,
+                timestamps=_np.ascontiguousarray(times),
+                filtering="Bandpass filter + common reference",
+                description=(
+                    f"Pre-motion preprocessed recording from "
+                    f"{nwb_file_name} for spike sorting"
+                ),
+                conversion=conversion,
+            )
+            nwbfile.add_acquisition(series)
+            object_id = nwbfile.acquisition[_ELECTRICAL_SERIES_NAME].object_id
+            io.write(nwbfile)
+
+        # Register the analysis file with Spyglass (creates the
+        # AnalysisNwbfile row + Externals entry).
+        AnalysisNwbfile().add(nwb_file_name, analysis_file_name)
+        return analysis_file_name, object_id, cache_hash

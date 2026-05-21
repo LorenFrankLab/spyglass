@@ -210,10 +210,86 @@ def test_recording_selection_insert_is_idempotent(polymer_smoke_session):
     assert isinstance(pk_first, dict)
     assert list(pk_first.keys()) == ["recording_id"]
     # And only one row in the table.
-    assert (
-        len(
-            RecordingSelection
-            & {k: v for k, v in selection_key.items()}
-        )
-        == 1
+    assert len(RecordingSelection & selection_key) == 1
+
+
+# ---------- Recording.make + get_recording --------------------------------
+
+
+@pytest.fixture(scope="module")
+def recording_selection_key(polymer_smoke_session):
+    """Insert a RecordingSelection row + return its PK.
+
+    Returns the ``{"recording_id": <uuid>}`` PK dict produced by
+    ``insert_selection``. Module-scoped so multiple Recording-side tests
+    share the same selection / materialization.
+    """
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+        RecordingSelection,
+        SortGroupV2,
+    )
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    (SortGroupV2 & polymer_smoke_session).super_delete(warn=False)
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    PreprocessingParameters.insert_default()
+    LabTeam.insert1(
+        {"team_name": "v2_test_team", "team_description": "v2 pipeline tests"},
+        skip_duplicates=True,
+    )
+
+    sort_group_id = int(
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
+    )
+    selection_key = {
+        "nwb_file_name": nwb_file_name,
+        "sort_group_id": sort_group_id,
+        "interval_list_name": "raw data valid times",
+        "preproc_params_name": "default_franklab",
+        "team_name": "v2_test_team",
+    }
+    return RecordingSelection.insert_selection(selection_key)
+
+
+@pytest.mark.slow
+def test_recording_populates_and_round_trips(
+    polymer_smoke_session, recording_selection_key
+):
+    """``Recording.make`` writes a preprocessed NWB; ``get_recording``
+    reads it back with the expected channel count, sampling rate, and
+    duration."""
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        SortGroupV2,
+    )
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    sort_group_id = int(
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
+    )
+    expected_n_channels = len(
+        SortGroupV2.SortGroupElectrode
+        & {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+        }
+    )
+
+    # Clear any prior Recording row for this selection (subsequent module
+    # runs would otherwise short-circuit populate()).
+    (Recording & recording_selection_key).super_delete(warn=False)
+    Recording.populate(recording_selection_key, reserve_jobs=False)
+    row = (Recording & recording_selection_key).fetch1()
+
+    assert row["n_channels"] == expected_n_channels
+    assert row["sampling_frequency"] == pytest.approx(32_000, rel=1e-3)
+    assert row["duration_s"] > 0.0
+    assert len(row["cache_hash"]) == 64  # sha256 hex
+
+    rec = Recording().get_recording(recording_selection_key)
+    assert rec.get_num_channels() == expected_n_channels
+    assert rec.get_sampling_frequency() == pytest.approx(
+        row["sampling_frequency"], rel=1e-6
     )
