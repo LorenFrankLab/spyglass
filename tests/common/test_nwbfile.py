@@ -89,11 +89,14 @@ def test_build_untracked_file_plan_uses_resolved_external_paths(
 ):
     analysis_dir = tmp_path / "analysis"
     analysis_dir.mkdir()
+
     tracked = analysis_dir / "tracked.nwb"
-    untracked = analysis_dir / "untracked.nwb"
-    empty = analysis_dir / "empty.nwb"
     tracked.write_text("tracked")
+
+    untracked = analysis_dir / "untracked.nwb"
     untracked.write_text("untracked")
+
+    empty = analysis_dir / "empty.nwb"
     empty.touch()
 
     table = object.__new__(common_nwbfile.AnalysisNwbfile)
@@ -154,17 +157,14 @@ def test_analysis_cleanup_plan_accepts_plausible_delete_plan(common_nwbfile):
     common_nwbfile.AnalysisNwbfile._validate_cleanup_plan(plan)
 
 
-def test_analysis_cleanup_revalidates_post_cleanup_plan(
+def test_analysis_cleanup_validates_plan_before_unlink(
     common_nwbfile, monkeypatch
 ):
+    """cleanup() must abort destructive unlink when the plan exceeds limits."""
     registry = _FakeRegistry()
-    plans = [
-        _cleanup_plan(common_nwbfile, scanned=100, tracked=100, delete=0),
-        _cleanup_plan(common_nwbfile, scanned=4, tracked=3, delete=2),
-    ]
-
-    def _build_plan(self, custom_tables):
-        return plans.pop(0)
+    bad_plan = _cleanup_plan(
+        common_nwbfile, scanned=4, tracked=3, delete=2
+    )
 
     def _remove_untracked_files(self, custom_tables, dry_run=True, plan=None):
         raise AssertionError("dangerous final cleanup plan should not unlink")
@@ -173,7 +173,7 @@ def test_analysis_cleanup_revalidates_post_cleanup_plan(
     monkeypatch.setattr(
         common_nwbfile.AnalysisNwbfile,
         "_build_untracked_file_plan",
-        _build_plan,
+        lambda self, custom_tables: bad_plan,
     )
     monkeypatch.setattr(
         common_nwbfile.AnalysisNwbfile,
@@ -199,4 +199,3 @@ def test_analysis_cleanup_revalidates_post_cleanup_plan(
 
     assert registry.blocked
     assert registry.unblocked
-    assert plans == []

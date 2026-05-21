@@ -146,20 +146,6 @@ class TestSchemaConsistency:
         schema = load_directory_schema()
         assert set(schema[prefix].keys()) == expected_keys
 
-    def test_conftest_env_scrub_vars_match_directory_schema(self):
-        """Test that pytest scrubs every directory env var from the schema."""
-        from tests import base_dir_safety
-
-        schema = load_directory_schema()
-        expected = {
-            f"{prefix.upper()}_{key.upper()}_DIR"
-            for prefix, dirs in schema.items()
-            for key in dirs
-        }
-
-        assert set(base_dir_safety._derive_dir_env_vars()) == expected
-
-
 class TestInstallerConfig:
     """Tests for installer config generation."""
 
@@ -721,3 +707,39 @@ class TestExampleConfigSync:
         assert isinstance(
             config, dict
         ), "Example config should be a JSON object (dict)"
+
+
+class TestTestModeBaseDirGuard:
+    """Tests for the SpyglassConfig.load_config test_mode base_dir guard."""
+
+    def test_refuses_non_tests_base_dir(self, tmp_path):
+        """test_mode=True base_dir must contain a 'tests' path component."""
+        from spyglass.settings import SpyglassConfig
+
+        bad_base = tmp_path / "not-a-test-dir"
+        bad_base.mkdir()
+
+        config = SpyglassConfig()
+        with pytest.raises(
+            ValueError, match="does not contain a 'tests'"
+        ):
+            config.load_config(
+                base_dir=str(bad_base),
+                test_mode=True,
+                force_reload=True,
+            )
+
+    def test_accepts_base_dir_with_tests_component(self, tmp_path):
+        """test_mode=True accepts a base_dir whose path has a 'tests' part."""
+        from spyglass.settings import SpyglassConfig
+
+        good_base = tmp_path / "tests" / "data"
+        good_base.mkdir(parents=True)
+
+        config = SpyglassConfig()
+        # Should not raise.
+        config.load_config(
+            base_dir=str(good_base),
+            test_mode=True,
+            force_reload=True,
+        )

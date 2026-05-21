@@ -452,14 +452,6 @@ class TestCleanupAndRegistry:
             "AnalysisNwbfile.cleanup test setup did not create expected files: "
             f"{_relative_paths(missing_before_cleanup)}"
         )
-        print(
-            "AnalysisNwbfile.cleanup test plan: "
-            f"{len(before_cleanup)} analysis .nwb files before cleanup; "
-            "expected delete="
-            f"{_relative_paths(expected_deleted_paths)}; "
-            "expected preserve="
-            f"{_relative_paths(expected_preserved_paths)}"
-        )
 
         # Run cleanup in dry-run mode first as a smoke check, then run the
         # destructive path so the test verifies real orphan-row cleanup and
@@ -476,11 +468,6 @@ class TestCleanupAndRegistry:
         deleted_paths = before_cleanup - after_cleanup
         missing_deleted_paths = expected_deleted_paths - deleted_paths
         unexpected_deleted_paths = deleted_paths - expected_deleted_paths
-        print(
-            "AnalysisNwbfile.cleanup test result: "
-            f"deleted {len(deleted_paths)} analysis .nwb files; "
-            f"deleted={_relative_paths(deleted_paths)}"
-        )
         assert not unexpected_deleted_paths, (
             "AnalysisNwbfile.cleanup deleted .nwb files not created as "
             "expected cleanup targets by this test: "
