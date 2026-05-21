@@ -1,0 +1,219 @@
+"""End-to-end behavior tests for the v2 single-session sort pipeline.
+
+This module exercises the v2 recording-side runtime against an ingested
+MEArec polymer smoke fixture: ``SortGroupV2`` constructors, the safety
+guards that fix v1's silent overwrite, and ``RecordingSelection``'s
+find-existing-or-insert helper.
+
+The downstream chain (``Recording.make`` / ``ArtifactDetection.make`` /
+``Sorting.make`` / ``CurationV2.insert_curation``) is exercised here as
+those bodies land; until then the slow integration assertions live in
+the runtime modules themselves.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
+
+_FIXTURE_NAME = "mearec_polymer_smoke"
+_FIXTURE_PATH = (
+    Path(__file__).resolve().parent / "fixtures" / f"{_FIXTURE_NAME}.nwb"
+)
+
+
+@pytest.fixture(scope="module")
+def polymer_smoke_session(dj_conn):
+    """Ingest the MEArec polymer smoke fixture and yield its session key.
+
+    Skips cleanly if the fixture NWB has not been generated.
+    """
+    if not _FIXTURE_PATH.exists():
+        pytest.skip(
+            f"Generated MEArec fixture {_FIXTURE_PATH.name} not found. Run "
+            "`python tests/spikesorting/v2/fixtures/generate_mearec.py "
+            "--smoke` first."
+        )
+    nwb_file_name = copy_and_insert_nwb(_FIXTURE_PATH)
+    yield {"nwb_file_name": nwb_file_name}
+
+
+# ---------- SortGroupV2 by shank -------------------------------------------
+
+
+@pytest.mark.slow
+def test_set_group_by_shank_creates_one_group_per_shank(polymer_smoke_session):
+    """The 128-channel 4-shank polymer fixture yields 4 sort groups of 32."""
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    # Clean any rows a previous module run may have left.
+    (SortGroupV2 & polymer_smoke_session).super_delete(warn=False)
+
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+
+    masters = SortGroupV2 & polymer_smoke_session
+    assert len(masters) == 4
+    parts = SortGroupV2.SortGroupElectrode & polymer_smoke_session
+    assert len(parts) == 128
+    counts = {
+        sg_id: len(
+            SortGroupV2.SortGroupElectrode
+            & polymer_smoke_session
+            & {"sort_group_id": sg_id}
+        )
+        for sg_id in masters.fetch("sort_group_id")
+    }
+    assert all(c == 32 for c in counts.values()), counts
+
+
+@pytest.mark.slow
+def test_set_group_by_shank_refuses_overlapping_rerun(polymer_smoke_session):
+    """Rerun without an override raises (fixes v1 silent-overwrite bug)."""
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    (SortGroupV2 & polymer_smoke_session).super_delete(warn=False)
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+
+    with pytest.raises(ValueError, match="overlapping sort_group_ids"):
+        SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+
+
+@pytest.mark.slow
+def test_set_group_by_shank_overwrite_requires_confirm(polymer_smoke_session):
+    """``delete_existing_entries=True, confirm=False`` returns a preview
+    and raises; ``confirm=True`` performs the cautious delete + reinsert."""
+    from spyglass.spikesorting.v2.recording import (
+        DeletionPreview,
+        SortGroupV2,
+    )
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    (SortGroupV2 & polymer_smoke_session).super_delete(warn=False)
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+
+    preview = SortGroupV2.preview_existing_entries(nwb_file_name)
+    assert isinstance(preview, DeletionPreview)
+    assert preview.sort_group_rows == 4
+    assert preview.electrode_rows == 128
+
+    with pytest.raises(ValueError, match="requires confirm=True"):
+        SortGroupV2.set_group_by_shank(
+            nwb_file_name=nwb_file_name,
+            delete_existing_entries=True,
+        )
+
+    # Confirmed overwrite succeeds and produces a fresh set.
+    SortGroupV2.set_group_by_shank(
+        nwb_file_name=nwb_file_name,
+        delete_existing_entries=True,
+        confirm=True,
+    )
+    assert len(SortGroupV2 & polymer_smoke_session) == 4
+
+
+# ---------- SortGroupV2 by electrode-table column --------------------------
+
+
+@pytest.mark.slow
+def test_set_group_by_column_matches_by_shank(polymer_smoke_session):
+    """Grouping by the ``probe_shank`` column reproduces ``by_shank``."""
+    from spyglass.common.common_ephys import Electrode
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    (SortGroupV2 & polymer_smoke_session).super_delete(warn=False)
+
+    shanks = sorted(
+        set(
+            int(s)
+            for s in (Electrode & polymer_smoke_session).fetch("probe_shank")
+        )
+    )
+    groups = [[shank] for shank in shanks]
+    SortGroupV2.set_group_by_electrode_table_column(
+        nwb_file_name=nwb_file_name,
+        column="probe_shank",
+        groups=groups,
+    )
+    assert len(SortGroupV2 & polymer_smoke_session) == 4
+    assert (
+        len(SortGroupV2.SortGroupElectrode & polymer_smoke_session) == 128
+    )
+
+
+@pytest.mark.slow
+def test_set_group_by_column_lists_valid_columns_on_typo(
+    polymer_smoke_session,
+):
+    """A bogus column name fails with the valid-column list in the error."""
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    with pytest.raises(ValueError) as excinfo:
+        SortGroupV2.set_group_by_electrode_table_column(
+            nwb_file_name=polymer_smoke_session["nwb_file_name"],
+            column="probe_shanke",  # typo
+            groups=[[0]],
+        )
+    msg = str(excinfo.value)
+    assert "probe_shanke" in msg
+    assert "probe_shank" in msg  # the suggestion is implicit -- it's listed
+
+
+# ---------- RecordingSelection.insert_selection ---------------------------
+
+
+@pytest.mark.slow
+def test_recording_selection_insert_is_idempotent(polymer_smoke_session):
+    """Repeat calls return the same PK and never duplicate rows."""
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+        RecordingSelection,
+        SortGroupV2,
+    )
+    from spyglass.common.common_lab import LabTeam
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    (SortGroupV2 & polymer_smoke_session).super_delete(warn=False)
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    PreprocessingParameters.insert_default()
+
+    # Pick the first sort group + a session interval the fixture provides.
+    sort_group_id = (SortGroupV2 & polymer_smoke_session).fetch(
+        "sort_group_id"
+    )[0]
+    interval_list_name = (
+        "raw data valid times"  # canonical name written by insert_sessions
+    )
+
+    # Ensure a LabTeam exists (the round-trip ingestion does not create one).
+    team_name = "v2_test_team"
+    LabTeam.insert1(
+        {"team_name": team_name, "team_description": "v2 pipeline tests"},
+        skip_duplicates=True,
+    )
+
+    selection_key = {
+        "nwb_file_name": nwb_file_name,
+        "sort_group_id": int(sort_group_id),
+        "interval_list_name": interval_list_name,
+        "preproc_params_name": "default_franklab",
+        "team_name": team_name,
+    }
+    pk_first = RecordingSelection.insert_selection(selection_key)
+    pk_second = RecordingSelection.insert_selection(selection_key)
+    assert pk_first == pk_second
+    assert isinstance(pk_first, dict)
+    assert list(pk_first.keys()) == ["recording_id"]
+    # And only one row in the table.
+    assert (
+        len(
+            RecordingSelection
+            & {k: v for k, v in selection_key.items()}
+        )
+        == 1
+    )
