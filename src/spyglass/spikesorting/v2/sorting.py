@@ -344,26 +344,191 @@ class Sorting(SpyglassMixin, dj.Computed):
         """
 
     def make(self, key):
-        """Sort, build analyzer, populate Unit part.
+        """Sort, build analyzer, write Units NWB, populate Unit part.
 
         Re-checks ``SortingSelection.resolve_source(key)`` at entry per
-        the shared-contracts Source Part Pattern.
+        the shared-contracts Source Part Pattern. Single-recording path
+        only today; concat raises ``NotImplementedError``.
         """
-        raise NotImplementedError(
-            "Sorting.make is not yet implemented"
+        import datetime as _dt
+
+        from spyglass.spikesorting.v2.recording import (
+            Recording,
+            RecordingSelection,
         )
 
+        source = SortingSelection.resolve_source(key)
+        if source.kind != "recording":
+            raise NotImplementedError(
+                "Sorting.make: concatenated_recording source is not yet "
+                "implemented (Phase 3 work)."
+            )
+
+        sel_row = (SortingSelection & key).fetch1()
+        recording_id = source.key["recording_id"]
+        recording = Recording().get_recording({"recording_id": recording_id})
+
+        if sel_row.get("artifact_id"):
+            recording = self._apply_artifact_mask(
+                recording=recording,
+                artifact_id=sel_row["artifact_id"],
+                recording_id=recording_id,
+            )
+
+        sorter_row = (
+            SorterParameters
+            & {
+                "sorter": sel_row["sorter"],
+                "sorter_params_name": sel_row["sorter_params_name"],
+            }
+        ).fetch1()
+        sorter = sorter_row["sorter"]
+        sorter_params = dict(sorter_row["params"])
+        # ``schema_version`` is Pydantic bookkeeping; the SI sorter
+        # wrapper does not accept it.
+        sorter_params.pop("schema_version", None)
+
+        sorting_obj = self._run_sorter(
+            sorter=sorter,
+            sorter_params=sorter_params,
+            recording=recording,
+            sorting_id=key["sorting_id"],
+        )
+        sorting_obj = self._remove_excess_spikes(sorting_obj, recording)
+
+        analyzer_folder = self._build_analyzer(
+            sorting=sorting_obj, recording=recording, key=key
+        )
+
+        nwb_file_name = (
+            RecordingSelection & {"recording_id": recording_id}
+        ).fetch1("nwb_file_name")
+        analysis_file_name, units_object_id = self._write_units_nwb(
+            sorting=sorting_obj,
+            recording=recording,
+            nwb_file_name=nwb_file_name,
+        )
+
+        self.insert1(
+            {
+                **key,
+                "analysis_file_name": analysis_file_name,
+                "object_id": units_object_id,
+                "analyzer_folder": str(analyzer_folder),
+                "n_units": len(sorting_obj.unit_ids),
+                "time_of_sort": _dt.datetime.now(),
+            }
+        )
+        self._populate_unit_part(
+            sorting=sorting_obj,
+            recording_id=recording_id,
+            nwb_file_name=nwb_file_name,
+            key=key,
+            analyzer_folder=analyzer_folder,
+        )
+
+    # ---- Accessors -------------------------------------------------------
+
     def get_sorting(self, key):
-        """Return the SpikeInterface BaseSorting. Implemented in a follow-up change."""
-        raise NotImplementedError("Sorting.get_sorting is not yet implemented")
+        """Return the SpikeInterface BaseSorting backed by the units NWB.
+
+        The v2 Units NWB does NOT carry an ``ElectricalSeries`` (the
+        canonical preprocessed recording lives in the Recording's
+        AnalysisNwbfile), so both ``sampling_frequency`` and ``t_start``
+        must be supplied explicitly to ``NwbSortingExtractor`` --
+        otherwise its auto-detection raises looking for a non-existent
+        ElectricalSeries in the units NWB.
+
+        ``t_start`` is the recording's first wall-clock timestamp,
+        derived from the upstream Recording's AnalysisNwbfile via SI's
+        ``read_nwb_recording``. This matches the absolute spike-times
+        stored by ``_write_units_nwb`` (spike_times = timestamps[
+        sample_index]) so ``sorting.get_unit_spike_train(uid)`` returns
+        the original sample indices and ``return_times=True`` returns
+        the recording-timeline times.
+        """
+        from spikeinterface.extractors import NwbSortingExtractor
+
+        from spyglass.spikesorting.v2.recording import Recording
+
+        row = (self & key).fetch1()
+        abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
+        source = SortingSelection.resolve_source(key)
+        recording_id = source.key["recording_id"]
+        rec_row = (Recording & {"recording_id": recording_id}).fetch1()
+        fs = float(rec_row["sampling_frequency"])
+        t_start = self._recording_t_start(rec_row)
+        return NwbSortingExtractor(
+            file_path=abs_path, sampling_frequency=fs, t_start=t_start
+        )
+
+    @staticmethod
+    def _recording_t_start(recording_row) -> float:
+        """Return the first timestamp of the upstream Recording.
+
+        Opens the Recording's ``AnalysisNwbfile`` ``ElectricalSeries``
+        and reads only the first timestamp value. Cheaper than loading
+        the full SI recording -- HDF5 lets us index timestamps[0]
+        without materializing the dataset.
+        """
+        import pynwb
+
+        abs_path = AnalysisNwbfile.get_abs_path(
+            recording_row["analysis_file_name"]
+        )
+        # electrical_series_path is "acquisition/ProcessedElectricalSeries"
+        series_name = recording_row["electrical_series_path"].rsplit(
+            "/", 1
+        )[-1]
+        with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
+            nwbf = io.read()
+            series = nwbf.acquisition[series_name]
+            return float(series.timestamps[0])
 
     def get_analyzer(self, key):
         """Return the SortingAnalyzer; rebuild on missing folder.
 
-        Implemented in a follow-up change. Recompute is in-place; the DataJoint row
-        is not deleted on a missing analyzer folder.
+        Recompute is in-place; the DataJoint row is not deleted on a
+        missing analyzer folder.
         """
-        raise NotImplementedError("Sorting.get_analyzer is not yet implemented")
+        import spikeinterface as si
+
+        from spyglass.spikesorting.v2.utils import _analyzer_path
+
+        folder = _analyzer_path({"sorting_id": key["sorting_id"]})
+        if not folder.exists():
+            self._rebuild_analyzer_folder(key)
+        return si.load_sorting_analyzer(folder)
+
+    def _rebuild_analyzer_folder(self, key) -> None:
+        """Rebuild the analyzer folder for an existing Sorting row.
+
+        Reloads the canonical sorting from the units NWB so the
+        rebuilt analyzer is bit-equivalent to the one Sorting.make
+        wrote -- not a fresh, possibly nondeterministic, sort.
+        """
+        from spyglass.spikesorting.v2.recording import Recording
+
+        sel_row = (SortingSelection & key).fetch1()
+        source = SortingSelection.resolve_source(key)
+        if source.kind != "recording":
+            raise NotImplementedError(
+                "Sorting._rebuild_analyzer_folder: concat source not yet "
+                "implemented."
+            )
+        recording = Recording().get_recording(
+            {"recording_id": source.key["recording_id"]}
+        )
+        if sel_row.get("artifact_id"):
+            recording = self._apply_artifact_mask(
+                recording=recording,
+                artifact_id=sel_row["artifact_id"],
+                recording_id=source.key["recording_id"],
+            )
+        sorting_obj = self.get_sorting(key)
+        self._build_analyzer(
+            sorting=sorting_obj, recording=recording, key=key
+        )
 
     def get_unit_brain_regions(
         self, key, *, allow_anchor_member: bool = False
@@ -371,10 +536,313 @@ class Sorting(SpyglassMixin, dj.Computed):
         """Per-unit brain regions via Sorting.Unit * Electrode * BrainRegion.
 
         Single-session sorts return ``region_resolution='single_session'``.
-        Concat sorts raise ``ConcatBrainRegionAmbiguousError`` unless
-        ``allow_anchor_member=True``; with the flag the returned rows are
+        Concat sorts (when implemented) raise
+        ``ConcatBrainRegionAmbiguousError`` unless
+        ``allow_anchor_member=True``; the anchor-member output is
         labeled ``region_resolution='anchor_member'``.
         """
-        raise NotImplementedError(
-            "Sorting.get_unit_brain_regions is not yet implemented"
+        import pandas as pd
+
+        from spyglass.common.common_ephys import Electrode as _Electrode
+        from spyglass.common.common_region import BrainRegion
+
+        source = SortingSelection.resolve_source(key)
+        if source.kind == "concatenated_recording":
+            from spyglass.spikesorting.v2.exceptions import (
+                ConcatBrainRegionAmbiguousError,
+            )
+
+            if not allow_anchor_member:
+                raise ConcatBrainRegionAmbiguousError(
+                    f"Sorting.get_unit_brain_regions: sorting_id "
+                    f"{key['sorting_id']} is concat-backed; the unit peak "
+                    "channel maps to multiple Electrode rows (one per "
+                    "SessionGroup.Member). Pass allow_anchor_member=True "
+                    "to return anchor-member regions, or use "
+                    "TrackedUnit.get_unit_brain_regions for per-session "
+                    "regions."
+                )
+            resolution = "anchor_member"
+        else:
+            resolution = "single_session"
+
+        joined = (
+            (self.Unit & key) * _Electrode * BrainRegion
+        ).fetch(
+            "unit_id",
+            "electrode_id",
+            "region_name",
+            "subregion_name",
+            "subsubregion_name",
+            as_dict=True,
         )
+        df = pd.DataFrame(joined)
+        df["region_resolution"] = resolution
+        return df
+
+    # ---- Implementation helpers -----------------------------------------
+
+    @staticmethod
+    def _apply_artifact_mask(recording, artifact_id, recording_id):
+        """Zero out artifact intervals on the recording.
+
+        Looks up the IntervalList row written by ArtifactDetection.make
+        and uses ``sip.remove_artifacts(mode='zeros')`` to mask the
+        complement of the artifact-removed valid times.
+        """
+        import numpy as _np
+        import spikeinterface.preprocessing as sip
+
+        from spyglass.common.common_interval import IntervalList
+        from spyglass.spikesorting.v2.recording import RecordingSelection
+
+        nwb_file_name = (
+            RecordingSelection & {"recording_id": recording_id}
+        ).fetch1("nwb_file_name")
+        interval_list_name = f"artifact_{artifact_id}"
+        valid_times = (
+            IntervalList
+            & {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": interval_list_name,
+            }
+        ).fetch1("valid_times")
+
+        timestamps = recording.get_times()
+        artifact_frames = []
+        cursor = timestamps[0]
+        for vs, ve in valid_times:
+            if vs > cursor:
+                start = int(_np.searchsorted(timestamps, cursor))
+                end = int(_np.searchsorted(timestamps, vs))
+                artifact_frames.extend(range(start, end))
+            cursor = max(cursor, ve)
+        if cursor < timestamps[-1]:
+            start = int(_np.searchsorted(timestamps, cursor))
+            artifact_frames.extend(range(start, len(timestamps)))
+
+        if not artifact_frames:
+            return recording
+        return sip.remove_artifacts(
+            recording=recording,
+            list_triggers=[artifact_frames],
+            ms_before=0.0,
+            ms_after=0.0,
+            mode="zeros",
+        )
+
+    @staticmethod
+    def _run_sorter(sorter, sorter_params, recording, sorting_id):
+        """Dispatch sort execution; clusterless_thresholder vs SI sorters."""
+        import tempfile
+
+        import numpy as _np
+        import spikeinterface as si
+        import spikeinterface.sorters as sis
+
+        if sorter == "clusterless_thresholder":
+            from spikeinterface.sortingcomponents.peak_detection import (
+                detect_peaks,
+            )
+
+            params = dict(sorter_params)
+            if "local_radius_um" in params:
+                params["radius_um"] = params.pop("local_radius_um")
+            params.pop("outputs", None)
+
+            detected = detect_peaks(recording, **params)
+            return si.NumpySorting.from_times_labels(
+                times_list=detected["sample_index"],
+                labels_list=_np.zeros(len(detected), dtype=_np.int32),
+                sampling_frequency=recording.get_sampling_frequency(),
+            )
+
+        tmpdir = tempfile.mkdtemp(prefix=f"sort_{sorting_id}_")
+        return sis.run_sorter(
+            sorter_name=sorter,
+            recording=recording,
+            folder=tmpdir,
+            remove_existing_folder=True,
+            **sorter_params,
+        )
+
+    @staticmethod
+    def _remove_excess_spikes(sorting, recording):
+        """Drop spikes whose sample index is outside the recording window."""
+        import spikeinterface.curation as sic
+
+        return sic.remove_excess_spikes(sorting, recording)
+
+    @staticmethod
+    def _build_analyzer(sorting, recording, key):
+        """Build the binary-folder SortingAnalyzer + base extensions."""
+        import spikeinterface as si
+
+        from spyglass.spikesorting.v2.utils import (
+            _analyzer_path,
+            _resolved_job_kwargs,
+        )
+
+        folder = _analyzer_path({"sorting_id": key["sorting_id"]})
+        folder.parent.mkdir(parents=True, exist_ok=True)
+
+        sorter_row = (
+            SorterParameters
+            & {
+                "sorter": (SortingSelection & key).fetch1("sorter"),
+                "sorter_params_name": (
+                    SortingSelection & key
+                ).fetch1("sorter_params_name"),
+            }
+        ).fetch1()
+        job_kwargs = _resolved_job_kwargs(sorter_row["job_kwargs"])
+
+        analyzer = si.create_sorting_analyzer(
+            sorting=sorting,
+            recording=recording,
+            sparse=True,
+            format="binary_folder",
+            folder=folder,
+            return_in_uV=True,
+            overwrite=True,
+        )
+        analyzer.compute(
+            ["random_spikes", "noise_levels", "templates", "waveforms"],
+            extension_params={
+                "random_spikes": {
+                    "max_spikes_per_unit": 500,
+                    "method": "uniform",
+                },
+                "waveforms": {"ms_before": 1.0, "ms_after": 2.0},
+            },
+            **job_kwargs,
+        )
+        return folder
+
+    @staticmethod
+    def _write_units_nwb(sorting, recording, nwb_file_name):
+        """Write a fresh AnalysisNwbfile containing only the v2 Units table.
+
+        Spike times are stored in the recording's absolute timeline
+        (``timestamps[sample_index]``) -- matching v1's convention --
+        so downstream consumers can compare directly against the
+        Recording's IntervalList valid_times. ``AnalysisNwbfile().create``
+        already strips any parent ``/units`` from the analysis NWB so
+        the v2 sort outputs are the only Units rows in the file
+        (addresses #1437).
+        """
+        import pynwb
+
+        analysis_file_name = AnalysisNwbfile().create(
+            nwb_file_name=nwb_file_name
+        )
+        analysis_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+
+        timestamps = recording.get_times()
+        with pynwb.NWBHDF5IO(
+            path=analysis_abs_path, mode="a", load_namespaces=True
+        ) as io:
+            nwbf = io.read()
+            for unit_id in sorting.unit_ids:
+                spike_indices = sorting.get_unit_spike_train(unit_id=unit_id)
+                # Map sample indices into the recording's wall-clock so
+                # the stored spike times match Recording.get_times()
+                # exactly. v1 uses this same convention.
+                spike_times = timestamps[spike_indices]
+                nwbf.add_unit(spike_times=spike_times, id=int(unit_id))
+            units_object_id = nwbf.units.object_id
+            io.write(nwbf)
+
+        AnalysisNwbfile().add(nwb_file_name, analysis_file_name)
+        return analysis_file_name, units_object_id
+
+    @staticmethod
+    def _populate_unit_part(
+        sorting,
+        recording_id,
+        nwb_file_name,
+        key,
+        analyzer_folder,
+    ):
+        """Insert one ``Sorting.Unit`` row per sorted unit.
+
+        Each row carries the full ``Electrode`` FK for the peak-amplitude
+        channel (resolved through the sort group's
+        ``SortGroupV2.SortGroupElectrode``) plus the peak template
+        amplitude in microvolts and the spike count.
+        """
+        import numpy as _np
+        import spikeinterface as si
+        from spikeinterface.core import template_tools
+
+        from spyglass.spikesorting.v2.exceptions import NonIntegerUnitIDError
+        from spyglass.spikesorting.v2.recording import (
+            RecordingSelection,
+            SortGroupV2,
+        )
+
+        analyzer = si.load_sorting_analyzer(analyzer_folder)
+        peak_channels = template_tools.get_template_extremum_channel(
+            analyzer, outputs="id"
+        )
+        peak_amplitudes = template_tools.get_template_extremum_amplitude(
+            analyzer
+        )
+
+        sort_group_id = int(
+            (
+                RecordingSelection & {"recording_id": recording_id}
+            ).fetch1("sort_group_id")
+        )
+        sg_electrodes = (
+            SortGroupV2.SortGroupElectrode
+            & {
+                "nwb_file_name": nwb_file_name,
+                "sort_group_id": sort_group_id,
+            }
+        ).fetch(as_dict=True)
+        electrode_by_id = {
+            int(row["electrode_id"]): row for row in sg_electrodes
+        }
+
+        rows = []
+        for unit_id in sorting.unit_ids:
+            try:
+                int_unit_id = int(unit_id)
+            except (TypeError, ValueError) as exc:
+                raise NonIntegerUnitIDError(
+                    f"Sorting.make: sorter returned unit_id {unit_id!r} "
+                    "that does not convert to int. v2's Sorting.Unit "
+                    "stores int unit_ids; remap before insertion if "
+                    "the sorter emits non-convertible IDs."
+                ) from exc
+            peak_chan = int(peak_channels[unit_id])
+            if peak_chan not in electrode_by_id:
+                raise RuntimeError(
+                    f"Sorting.make: peak channel {peak_chan} for unit "
+                    f"{int_unit_id} is not in sort group "
+                    f"{sort_group_id} for {nwb_file_name!r}. Sort group "
+                    "/ recording channel-id mismatch."
+                )
+            n_spikes = int(
+                len(sorting.get_unit_spike_train(unit_id=unit_id))
+            )
+            rows.append(
+                {
+                    **key,
+                    "unit_id": int_unit_id,
+                    **{
+                        k: electrode_by_id[peak_chan][k]
+                        for k in (
+                            "nwb_file_name",
+                            "electrode_group_name",
+                            "electrode_id",
+                        )
+                    },
+                    "peak_amplitude_uv": float(
+                        _np.abs(peak_amplitudes[unit_id])
+                    ),
+                    "n_spikes": n_spikes,
+                }
+            )
+        Sorting.Unit.insert(rows)

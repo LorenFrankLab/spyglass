@@ -570,6 +570,151 @@ def test_artifact_detection_delete_removes_interval_list_row(
 
 
 @pytest.mark.slow
+def test_sorting_populates_with_mountainsort5(populated_recording):
+    """``Sorting.make`` runs MountainSort5 on the smoke fixture and writes
+    a fresh Units NWB + SortingAnalyzer folder. ``Sorting.Unit`` is
+    populated with the peak electrode + amplitude per unit."""
+    from spyglass.common.common_ephys import Electrode
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetectionParameters,
+        ArtifactDetection,
+        ArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        Sorting,
+        SortingSelection,
+    )
+
+    SorterParameters.insert_default()
+    ArtifactDetectionParameters.insert_default()
+
+    # Ensure a no-op artifact detection is in place so the sort uses
+    # the full recording.
+    art_pk = ArtifactSelection.insert_selection(
+        {
+            "recording_id": populated_recording["recording_id"],
+            "artifact_params_name": "none",
+        }
+    )
+    if not (ArtifactDetection & art_pk):
+        ArtifactDetection.populate(art_pk, reserve_jobs=False)
+
+    sort_pk = SortingSelection.insert_selection(
+        {
+            "recording_id": populated_recording["recording_id"],
+            "sorter": "mountainsort5",
+            "sorter_params_name": (
+                "franklab_tetrode_hippocampus_30kHz_ms5"
+            ),
+            "artifact_id": art_pk["artifact_id"],
+        }
+    )
+
+    # Clear any prior populate.
+    (Sorting & sort_pk).super_delete(warn=False)
+    Sorting.populate(sort_pk, reserve_jobs=False)
+
+    row = (Sorting & sort_pk).fetch1()
+    assert row["n_units"] > 0
+    assert row["analyzer_folder"]
+    from pathlib import Path
+
+    assert Path(row["analyzer_folder"]).exists()
+
+    n_unit_rows = len(Sorting.Unit & sort_pk)
+    assert n_unit_rows == row["n_units"]
+
+    # Every Sorting.Unit row's peak electrode_id must belong to the
+    # sort group of the upstream Recording.
+    from spyglass.spikesorting.v2.recording import (
+        RecordingSelection,
+        SortGroupV2,
+    )
+
+    sg_id = int(
+        (RecordingSelection & populated_recording).fetch1("sort_group_id")
+    )
+    unit_electrodes = (Sorting.Unit & sort_pk).fetch("electrode_id")
+    sort_group_electrodes = set(
+        (
+            SortGroupV2.SortGroupElectrode
+            & populated_recording
+            & {"sort_group_id": sg_id}
+        ).fetch("electrode_id")
+    )
+    assert set(unit_electrodes).issubset(sort_group_electrodes)
+
+    # Peak amplitudes are positive (we abs() them in make).
+    amplitudes = (Sorting.Unit & sort_pk).fetch("peak_amplitude_uv")
+    assert (amplitudes > 0).all()
+
+
+@pytest.mark.slow
+def test_sorting_get_sorting_round_trips(populated_recording):
+    """``Sorting.get_sorting`` returns the same unit IDs as the row.
+
+    Also asserts spike times are stored in the recording's absolute
+    timeline (v1 convention): the SI sorting's
+    ``get_unit_spike_train(uid, return_times=True)`` falls within
+    ``[recording.get_times()[0], recording.get_times()[-1]]``, which
+    only holds if ``_write_units_nwb`` stored absolute times and
+    ``get_sorting`` reconstructs the proper ``t_start``.
+    """
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.sorting import (
+        Sorting,
+        SortingSelection,
+    )
+
+    # Reuse whatever sorting the previous test produced (module-scoped
+    # fixture). Find any sorting row for this recording.
+    sortings = (
+        SortingSelection.RecordingSource
+        & {"recording_id": populated_recording["recording_id"]}
+    ).fetch("sorting_id")
+    assert len(sortings) > 0, "Run test_sorting_populates_* first"
+    sorting_id = sortings[0]
+    row = (Sorting & {"sorting_id": sorting_id}).fetch1()
+    si_sorting = Sorting().get_sorting({"sorting_id": sorting_id})
+    assert len(si_sorting.unit_ids) == row["n_units"]
+
+    # Recording's wall-clock window.
+    rec = Recording().get_recording(populated_recording)
+    timestamps = rec.get_times()
+    rec_start = float(timestamps[0])
+    rec_end = float(timestamps[-1])
+
+    # Spike times for every unit must lie inside the recording window.
+    for uid in si_sorting.unit_ids:
+        times = si_sorting.get_unit_spike_train(unit_id=uid, return_times=True)
+        if len(times) == 0:
+            continue
+        assert times.min() >= rec_start
+        assert times.max() <= rec_end
+
+
+@pytest.mark.slow
+def test_sorting_get_analyzer_loads_folder(populated_recording):
+    """``Sorting.get_analyzer`` loads the SortingAnalyzer from the folder."""
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2.sorting import (
+        Sorting,
+        SortingSelection,
+    )
+
+    sortings = (
+        SortingSelection.RecordingSource
+        & {"recording_id": populated_recording["recording_id"]}
+    ).fetch("sorting_id")
+    sorting_id = sortings[0]
+    analyzer = Sorting().get_analyzer({"sorting_id": sorting_id})
+    assert isinstance(analyzer, si.SortingAnalyzer)
+    assert analyzer.has_extension("templates")
+
+
+@pytest.mark.slow
 def test_artifact_selection_resolve_source_detects_bypass(populated_recording):
     """``resolve_source`` raises ``SchemaBypassError`` when a master has
     zero source part rows (an integrity bug, e.g. from direct dj
