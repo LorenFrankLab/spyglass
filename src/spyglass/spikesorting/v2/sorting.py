@@ -674,13 +674,26 @@ class Sorting(SpyglassMixin, dj.Computed):
             )
 
             params = dict(sorter_params)
+            # v1-era kwarg rename: the SI 0.99 `local_radius_um` became
+            # `radius_um` in 0.101+.
             if "local_radius_um" in params:
                 params["radius_um"] = params.pop("local_radius_um")
-            params.pop("outputs", None)
+            # Spyglass-side / v1-era fields SI 0.104's detect_peaks no
+            # longer accepts: ``outputs`` (Spyglass routing hint),
+            # ``random_chunk_kwargs`` (renamed to
+            # ``random_slices_kwargs`` and managed internally), and
+            # ``noise_levels`` (SI computes these on demand). Strip
+            # them so the call survives the v1-style default Lookup row.
+            for stale in ("outputs", "random_chunk_kwargs", "noise_levels"):
+                params.pop(stale, None)
 
             detected = detect_peaks(recording, **params)
-            return si.NumpySorting.from_times_labels(
-                times_list=detected["sample_index"],
+            # SI 0.104 renamed ``from_times_labels`` to
+            # ``from_samples_and_labels`` (sample indices) /
+            # ``from_times_and_labels`` (absolute seconds). We pass
+            # sample indices from ``detect_peaks``.
+            return si.NumpySorting.from_samples_and_labels(
+                samples_list=detected["sample_index"],
                 labels_list=_np.zeros(len(detected), dtype=_np.int32),
                 sampling_frequency=recording.get_sampling_frequency(),
             )

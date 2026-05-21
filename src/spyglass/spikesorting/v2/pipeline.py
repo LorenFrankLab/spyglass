@@ -1,3 +1,213 @@
-"""Convenience orchestration across the spike sorting tables."""
+"""Convenience orchestration across the spike sorting tables.
 
-# Runtime implementation added by the matching spike-sorting v2 change.
+``run_v2_pipeline`` chains the slice 1b + 1c + 1d.1 stages into one call
+so notebook users can populate an end-to-end single-session sort
+without writing the per-stage insert_selection / populate boilerplate.
+Phase 2 extends with metrics + auto-curation; Phase 3 adds concat;
+Phase 5 adds the matcher + FigPack hooks.
+
+Presets are Pydantic-validated bundles of Lookup-row names; the
+orchestrator looks them up at first call. Three presets ship with
+Phase 1:
+    franklab_tetrode_mountainsort4
+    franklab_tetrode_mountainsort5
+    franklab_tetrode_clusterless_thresholder
+
+The orchestrator is idempotent: re-running with the same inputs finds
+existing rows via the insert_selection helpers and returns the same
+manifest (with the same merge_id) without inserting duplicates.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict
+
+
+class _Preset(BaseModel):
+    """A v2 pipeline preset: a bundle of Lookup-row names.
+
+    The orchestrator consults this bundle once, then drives the
+    ``insert_selection`` -> ``populate`` chain on each stage. ``params``
+    Lookup row names must exist in the database before
+    ``run_v2_pipeline`` is called; the preset itself does NOT insert
+    Lookup rows (default rows are inserted explicitly by callers via
+    ``*.insert_default()``).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    preproc_params_name: str
+    artifact_params_name: str
+    sorter: str
+    sorter_params_name: str
+
+
+_PRESETS: dict[str, _Preset] = {
+    "franklab_tetrode_mountainsort4": _Preset(
+        preproc_params_name="default_franklab",
+        artifact_params_name="default",
+        sorter="mountainsort4",
+        sorter_params_name="franklab_tetrode_hippocampus_30kHz_ms4",
+    ),
+    "franklab_tetrode_mountainsort5": _Preset(
+        preproc_params_name="default_franklab",
+        artifact_params_name="default",
+        sorter="mountainsort5",
+        sorter_params_name="franklab_tetrode_hippocampus_30kHz_ms5",
+    ),
+    "franklab_tetrode_clusterless_thresholder": _Preset(
+        preproc_params_name="default_franklab",
+        artifact_params_name="default",
+        sorter="clusterless_thresholder",
+        sorter_params_name="default",
+    ),
+}
+
+
+def run_v2_pipeline(
+    nwb_file_name: str,
+    sort_group_id: int,
+    interval_list_name: str,
+    team_name: str,
+    preset: str = "franklab_tetrode_mountainsort5",
+    description: str = "",
+) -> dict[str, Any]:
+    """End-to-end single-session sort: recording -> artifact -> sort -> curation.
+
+    Chains the v2 ``insert_selection`` + ``populate`` calls into one
+    call. Idempotent: re-running with the same inputs returns the same
+    manifest (same merge_id, same intermediate PKs) without
+    duplicating rows.
+
+    Parameters
+    ----------
+    nwb_file_name
+        Session whose data will be sorted. The session must already be
+        ingested via ``insert_sessions``.
+    sort_group_id
+        ID of an existing ``SortGroupV2`` row for this session.
+        Callers create sort groups via
+        ``SortGroupV2.set_group_by_shank`` (or
+        ``set_group_by_electrode_table_column``) before calling this
+        helper; the orchestrator does not auto-create them because
+        sort-group structure is session-specific user input.
+    interval_list_name
+        Name of the IntervalList row to sort. Typically ``"raw data
+        valid times"`` for a full-session sort.
+    team_name
+        LabTeam owning the sort. Must already exist in
+        ``common.LabTeam``.
+    preset
+        Preset name from ``_PRESETS``. Phase 1 ships three:
+        ``franklab_tetrode_mountainsort4``,
+        ``franklab_tetrode_mountainsort5`` (default), and
+        ``franklab_tetrode_clusterless_thresholder``.
+    description
+        Free-text description passed to ``CurationV2.insert_curation``.
+
+    Returns
+    -------
+    dict
+        Manifest with the following stage keys:
+            ``preset``                : the preset name
+            ``recording_id``          : RecordingSelection PK
+            ``artifact_id``           : ArtifactSelection PK
+            ``sorting_id``            : SortingSelection PK
+            ``curation_id``           : CurationV2 PK
+            ``merge_id``              : SpikeSortingOutput master PK
+        Downstream consumers should key off ``merge_id``.
+
+    Raises
+    ------
+    PipelineInputError
+        If ``preset`` is not a known name.
+    ValueError
+        If the upstream sort group / session / interval list / team
+        do not exist (raised by the underlying insert helpers).
+    """
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        Sorting,
+        SortingSelection,
+    )
+
+    if preset not in _PRESETS:
+        raise PipelineInputError(
+            f"run_v2_pipeline: preset {preset!r} is not in _PRESETS. "
+            f"Valid presets: {sorted(_PRESETS)}."
+        )
+    bundle = _PRESETS[preset]
+
+    rec_pk = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": int(sort_group_id),
+            "interval_list_name": interval_list_name,
+            "preproc_params_name": bundle.preproc_params_name,
+            "team_name": team_name,
+        }
+    )
+    if not (Recording & rec_pk):
+        Recording.populate(rec_pk, reserve_jobs=False)
+
+    art_pk = ArtifactSelection.insert_selection(
+        {
+            "recording_id": rec_pk["recording_id"],
+            "artifact_params_name": bundle.artifact_params_name,
+        }
+    )
+    if not (ArtifactDetection & art_pk):
+        ArtifactDetection.populate(art_pk, reserve_jobs=False)
+
+    sort_pk = SortingSelection.insert_selection(
+        {
+            "recording_id": rec_pk["recording_id"],
+            "sorter": bundle.sorter,
+            "sorter_params_name": bundle.sorter_params_name,
+            "artifact_id": art_pk["artifact_id"],
+        }
+    )
+    if not (Sorting & sort_pk):
+        Sorting.populate(sort_pk, reserve_jobs=False)
+
+    # Idempotent curation: if a root (parent_curation_id=-1) curation
+    # already exists for this sorting, reuse it; otherwise insert a
+    # fresh one. The CurationV2 part on the merge table is auto-
+    # registered inside insert_curation, so re-using a row reuses its
+    # merge_id.
+    existing_root = (
+        CurationV2 & sort_pk & {"parent_curation_id": -1}
+    ).fetch("KEY", as_dict=True)
+    if existing_root:
+        curation_pk = existing_root[0]
+    else:
+        curation_pk = CurationV2.insert_curation(
+            sorting_key=sort_pk,
+            labels={},
+            parent_curation_id=-1,
+            description=description or f"run_v2_pipeline preset={preset}",
+        )
+
+    merge_id = (
+        SpikeSortingOutput.CurationV2 & curation_pk
+    ).fetch1("merge_id")
+
+    return {
+        "preset": preset,
+        "recording_id": rec_pk["recording_id"],
+        "artifact_id": art_pk["artifact_id"],
+        "sorting_id": sort_pk["sorting_id"],
+        "curation_id": curation_pk["curation_id"],
+        "merge_id": merge_id,
+    }

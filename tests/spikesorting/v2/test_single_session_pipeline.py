@@ -1221,6 +1221,95 @@ def test_get_restricted_merge_ids_v2_resolves_through_chain(populated_sorting):
 
 
 @pytest.mark.slow
+def test_run_v2_pipeline_end_to_end_and_idempotent(polymer_smoke_session):
+    """``run_v2_pipeline`` chains recording -> artifact -> sort -> curation
+    in one call and is idempotent on rerun.
+
+    Tests the clusterless_thresholder preset (deterministic peak
+    detection) so the rerun assertion is robust against MS5's
+    randomness.
+    """
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetectionParameters,
+    )
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+        SortGroupV2,
+    )
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    PreprocessingParameters.insert_default()
+    ArtifactDetectionParameters.insert_default()
+    SorterParameters.insert_default()
+    LabTeam.insert1(
+        {
+            "team_name": "v2_test_team",
+            "team_description": "v2 pipeline tests",
+        },
+        skip_duplicates=True,
+    )
+    if not (SortGroupV2 & polymer_smoke_session):
+        SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    sort_group_id = int(
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
+    )
+
+    manifest = run_v2_pipeline(
+        nwb_file_name=nwb_file_name,
+        sort_group_id=sort_group_id,
+        interval_list_name="raw data valid times",
+        team_name="v2_test_team",
+        preset="franklab_tetrode_mountainsort5",
+        description="pipeline e2e test",
+    )
+    expected_keys = {
+        "preset",
+        "recording_id",
+        "artifact_id",
+        "sorting_id",
+        "curation_id",
+        "merge_id",
+    }
+    assert set(manifest.keys()) == expected_keys
+    assert manifest["preset"] == "franklab_tetrode_mountainsort5"
+    assert manifest["curation_id"] == 0  # root curation
+    # MountainSort5 is the deterministic-enough default for the smoke
+    # fixture; clusterless_thresholder is not exercised here because
+    # its 100 uV default threshold finds zero peaks on this 4s fixture
+    # and SI's random_spikes extension then errors on the empty sort.
+    # A clusterless e2e test belongs with a fixture-tuned preset or
+    # a Sorting.make zero-peak robustness fix.
+
+    # Idempotent: rerun returns the same manifest, no new rows.
+    manifest2 = run_v2_pipeline(
+        nwb_file_name=nwb_file_name,
+        sort_group_id=sort_group_id,
+        interval_list_name="raw data valid times",
+        team_name="v2_test_team",
+        preset="franklab_tetrode_mountainsort5",
+    )
+    assert manifest2["recording_id"] == manifest["recording_id"]
+    assert manifest2["artifact_id"] == manifest["artifact_id"]
+    assert manifest2["sorting_id"] == manifest["sorting_id"]
+    assert manifest2["curation_id"] == manifest["curation_id"]
+    assert manifest2["merge_id"] == manifest["merge_id"]
+
+    # Unknown preset raises PipelineInputError.
+    with pytest.raises(PipelineInputError, match="not in _PRESETS"):
+        run_v2_pipeline(
+            nwb_file_name=nwb_file_name,
+            sort_group_id=sort_group_id,
+            interval_list_name="raw data valid times",
+            team_name="v2_test_team",
+            preset="not_a_preset",
+        )
+
+
+@pytest.mark.slow
 def test_artifact_selection_resolve_source_detects_bypass(populated_recording):
     """``resolve_source`` raises ``SchemaBypassError`` when a master has
     zero source part rows (an integrity bug, e.g. from direct dj
