@@ -20,7 +20,13 @@ import datajoint as dj
 from spyglass.common.common_ephys import Electrode  # noqa: F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile  # noqa: F401
 from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
-from spyglass.spikesorting.v2.utils import CurationLabel, _assert_v2_db_safe
+from spyglass.spikesorting.v2.utils import (
+    CurationLabel,
+    MetricsSource,
+    _assert_v2_db_safe,
+    transaction_or_noop,
+    unit_brain_region_df,
+)
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 
 _assert_v2_db_safe()
@@ -98,16 +104,15 @@ class CurationV2(SpyglassMixin, dj.Manual):
         merge_groups: list[list[int]] | None = None,
         apply_merges: bool = False,
         description: str = "",
-        metrics_source: str = "manual",
+        metrics_source: str | MetricsSource = "manual",
     ) -> dict:
         """Insert master + Unit + UnitLabel rows; stage curated-units NWB.
 
-        Auto-registration into ``SpikeSortingOutput.CurationV2`` lands
-        in slice 1d.2 alongside the merge-table source-class dispatch;
-        the master, Unit, and UnitLabel inserts are atomic in one
-        transaction here. The curated-units NWB is staged separately
-        and deleted on any later failure (DataJoint cannot roll back
-        filesystem side effects).
+        Atomically inserts the CurationV2 master, ``Unit`` and
+        ``UnitLabel`` part rows, and the ``SpikeSortingOutput.CurationV2``
+        merge-table registration in one transaction. The curated-units
+        NWB is staged separately and deleted on any later failure
+        (DataJoint cannot roll back filesystem side effects).
 
         Parameters
         ----------
@@ -147,7 +152,13 @@ class CurationV2(SpyglassMixin, dj.Manual):
         import pathlib as _pathlib
 
         sorting_id = sorting_key["sorting_id"]
-        if not (Sorting & {"sorting_id": sorting_id}):
+        # Fetch the upstream Sorting.Unit rows once -- the parent
+        # existence check and _build_curated_unit_rows would otherwise
+        # query the same restriction twice.
+        sorting_units = (
+            Sorting.Unit & {"sorting_id": sorting_id}
+        ).fetch(as_dict=True)
+        if not sorting_units and not (Sorting & {"sorting_id": sorting_id}):
             raise ValueError(
                 f"CurationV2.insert_curation: sorting_id {sorting_id} "
                 "not in Sorting. Populate Sorting first."
@@ -157,6 +168,9 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 "CurationV2.insert_curation: labels=None is invalid. "
                 "Use labels={} for an unlabeled curation."
             )
+        # Normalize label keys to int once so the rest of the helper
+        # can do straight ``labels.get(int_uid, [])`` lookups.
+        labels = {int(uid): list(lbls) for uid, lbls in labels.items()}
 
         cls._validate_labels(labels)
 
@@ -175,12 +189,15 @@ class CurationV2(SpyglassMixin, dj.Manual):
                     "root curation."
                 )
 
-        valid_metrics_sources = {"manual", "analyzer_curation", "figpack"}
-        if metrics_source not in valid_metrics_sources:
+        # Coerce metrics_source through the enum so a typo raises here
+        # rather than at the DataJoint enum-mismatch layer.
+        try:
+            metrics_source = MetricsSource(metrics_source).value
+        except ValueError:
             raise ValueError(
                 f"CurationV2.insert_curation: metrics_source="
-                f"{metrics_source!r} not in "
-                f"{sorted(valid_metrics_sources)}."
+                f"{metrics_source!r} is not a MetricsSource value. "
+                f"Valid: {[m.value for m in MetricsSource]}."
             )
 
         # Resolve which curation_id to use (auto-increment within sort).
@@ -195,6 +212,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         # group).
         unit_rows, kept_unit_to_contributors = cls._build_curated_unit_rows(
             sorting_id=sorting_id,
+            sorting_units=sorting_units,
             merge_groups=merge_groups or [],
             curation_id=curation_id,
         )
@@ -210,7 +228,8 @@ class CurationV2(SpyglassMixin, dj.Manual):
 
         try:
             master_row = {
-                **{"sorting_id": sorting_id, "curation_id": curation_id},
+                "sorting_id": sorting_id,
+                "curation_id": curation_id,
                 "parent_curation_id": parent_curation_id,
                 "analysis_file_name": analysis_file_name,
                 "object_id": units_object_id,
@@ -222,11 +241,15 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 {
                     "sorting_id": sorting_id,
                     "curation_id": curation_id,
-                    "unit_id": int(unit_id),
-                    "curation_label": str(label),
+                    "unit_id": unit_id,
+                    "curation_label": (
+                        label.value
+                        if isinstance(label, CurationLabel)
+                        else str(label)
+                    ),
                 }
                 for unit_id, lbls in labels.items()
-                if int(unit_id) in kept_unit_to_contributors
+                if unit_id in kept_unit_to_contributors
                 for label in lbls
             ]
             # Auto-register into SpikeSortingOutput.CurationV2 so
@@ -243,12 +266,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 SpikeSortingOutput,
             )
 
-            transaction_ctx = (
-                _noop_context()
-                if cls.connection.in_transaction
-                else cls.connection.transaction
-            )
-            with transaction_ctx:
+            with transaction_or_noop(cls.connection):
                 cls.insert1(master_row)
                 cls.Unit.insert(unit_rows)
                 if unit_label_rows:
@@ -319,6 +337,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
     def _build_curated_unit_rows(
         cls,
         sorting_id,
+        sorting_units: list[dict],
         merge_groups: list[list[int]],
         curation_id: int,
     ) -> tuple[list[dict], dict[int, list[int]]]:
@@ -328,13 +347,14 @@ class CurationV2(SpyglassMixin, dj.Manual):
         unit's Electrode FK + peak amplitude come from the contributor
         with the largest ``peak_amplitude_uv``; merged-unit ``unit_id``
         is the first id in the group, matching the v1 convention.
+
+        ``sorting_units`` is the pre-fetched ``Sorting.Unit`` rows for
+        ``sorting_id``; the caller fetches once and threads through to
+        avoid re-querying.
         """
-        all_units = (
-            Sorting.Unit & {"sorting_id": sorting_id}
-        ).fetch(as_dict=True)
-        if not all_units:
+        if not sorting_units:
             return [], {}
-        by_id = {int(row["unit_id"]): row for row in all_units}
+        by_id = {int(row["unit_id"]): row for row in sorting_units}
 
         # Build mapping from contributor -> kept unit (head of group).
         merged_ids: set[int] = set()
@@ -407,8 +427,8 @@ class CurationV2(SpyglassMixin, dj.Manual):
         if not rec_source:
             raise NotImplementedError(
                 "CurationV2.insert_curation: only RecordingSource sorts "
-                "are supported today; concat sorts land with the Phase 3 "
-                "materializer."
+                "are supported today; concat-source sorts are not yet "
+                "implemented."
             )
         recording_id = rec_source.fetch1("recording_id")
         nwb_file_name = (
@@ -449,9 +469,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
                     spike_times = sorting.get_unit_spike_train(
                         unit_id=kept_uid, return_times=True
                     )
-                lbl_list = labels.get(kept_uid, []) or labels.get(
-                    int(kept_uid), []
-                )
+                lbl_list = labels.get(int(kept_uid), [])
                 label_str = ",".join(
                     str(l.value) if isinstance(l, CurationLabel) else str(l)
                     for l in lbl_list
@@ -513,12 +531,11 @@ class CurationV2(SpyglassMixin, dj.Manual):
     def get_merged_sorting(self, key):
         """Return the curated BaseSorting with merge groups applied.
 
-        Phase 1 ships ``CurationV2.insert_curation(apply_merges=True)``
-        already writing the merged spike trains into the NWB; this
-        method is a convenience alias for ``get_sorting(key)`` on a
-        merges-applied row. For curations where ``merges_applied=False``
-        the returned sorting is identical to the source Sorting's
-        spike trains.
+        ``insert_curation(apply_merges=True)`` already writes the
+        merged spike trains into the NWB, so this method is a
+        convenience alias for ``get_sorting(key)`` on a merges-applied
+        row. For curations where ``merges_applied=False`` the returned
+        sorting is identical to the source Sorting's spike trains.
         """
         return self.get_sorting(key)
 
@@ -539,19 +556,14 @@ class CurationV2(SpyglassMixin, dj.Manual):
         ``ConcatBrainRegionAmbiguousError`` for concat-backed
         sortings unless ``allow_anchor_member=True``.
         """
-        import pandas as pd
-
-        from spyglass.common.common_ephys import Electrode as _Electrode
-        from spyglass.common.common_region import BrainRegion
+        from spyglass.spikesorting.v2.exceptions import (
+            ConcatBrainRegionAmbiguousError,
+        )
 
         source = SortingSelection.resolve_source(
             {"sorting_id": key["sorting_id"]}
         )
         if source.kind == "concatenated_recording":
-            from spyglass.spikesorting.v2.exceptions import (
-                ConcatBrainRegionAmbiguousError,
-            )
-
             if not allow_anchor_member:
                 raise ConcatBrainRegionAmbiguousError(
                     f"CurationV2.get_unit_brain_regions: sorting_id "
@@ -576,18 +588,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
             unit_restriction = unit_restriction & [
                 {"unit_id": int(uid)} for uid in labeled
             ]
-
-        joined = (unit_restriction * _Electrode * BrainRegion).fetch(
-            "unit_id",
-            "electrode_id",
-            "region_name",
-            "subregion_name",
-            "subsubregion_name",
-            as_dict=True,
-        )
-        df = pd.DataFrame(joined)
-        df["region_resolution"] = resolution
-        return df
+        return unit_brain_region_df(unit_restriction, resolution)
 
     def get_matchable_unit_ids(
         self,
@@ -641,8 +642,8 @@ class CurationV2(SpyglassMixin, dj.Manual):
         )
         if source.kind != "recording":
             raise NotImplementedError(
-                "CurationV2.get_sort_group_info for concat sorts lands "
-                "with the Phase 3 materializer."
+                "CurationV2.get_sort_group_info: concat-source sorts are "
+                "not yet supported."
             )
         recording_key = source.key
         # ``RecordingSelection.fetch1("KEY")`` returns only the UUID PK;
@@ -672,17 +673,3 @@ class CurationV2(SpyglassMixin, dj.Manual):
             {"sorting_id": key["sorting_id"]}
         )
         return (Recording & source.key).fetch1()
-
-
-from contextlib import contextmanager
-
-
-@contextmanager
-def _noop_context():
-    """Yield without opening a new DataJoint transaction.
-
-    Used by ``CurationV2.insert_curation`` when the caller is already
-    inside a transaction (e.g., a populate cascade); DataJoint refuses
-    nested transactions.
-    """
-    yield

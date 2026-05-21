@@ -1,14 +1,15 @@
 """Convenience orchestration across the spike sorting tables.
 
-``run_v2_pipeline`` chains the slice 1b + 1c + 1d.1 stages into one call
-so notebook users can populate an end-to-end single-session sort
-without writing the per-stage insert_selection / populate boilerplate.
-Phase 2 extends with metrics + auto-curation; Phase 3 adds concat;
-Phase 5 adds the matcher + FigPack hooks.
+``run_v2_pipeline`` chains the recording -> artifact -> sort ->
+curation stages into one call so notebook users can populate an
+end-to-end single-session sort without writing the per-stage
+insert_selection / populate boilerplate. The orchestrator focuses on
+the minimum-viable single-session path; richer surfaces (metrics +
+auto-curation, concat sorts, cross-session matching, UI hooks) come
+in later versions.
 
 Presets are Pydantic-validated bundles of Lookup-row names; the
-orchestrator looks them up at first call. Three presets ship with
-Phase 1:
+orchestrator looks them up at first call. Three presets ship today:
     franklab_tetrode_mountainsort4
     franklab_tetrode_mountainsort5
     franklab_tetrode_clusterless_thresholder
@@ -99,7 +100,7 @@ def run_v2_pipeline(
         LabTeam owning the sort. Must already exist in
         ``common.LabTeam``.
     preset
-        Preset name from ``_PRESETS``. Phase 1 ships three:
+        Preset name from ``_PRESETS``. Three presets ship today:
         ``franklab_tetrode_mountainsort4``,
         ``franklab_tetrode_mountainsort5`` (default), and
         ``franklab_tetrode_clusterless_thresholder``.
@@ -149,6 +150,9 @@ def run_v2_pipeline(
         )
     bundle = _PRESETS[preset]
 
+    # DataJoint's ``populate()`` is idempotent (no-ops on present
+    # rows), so no separate ``if not (X & pk)`` guards are needed
+    # before each call.
     rec_pk = RecordingSelection.insert_selection(
         {
             "nwb_file_name": nwb_file_name,
@@ -158,8 +162,7 @@ def run_v2_pipeline(
             "team_name": team_name,
         }
     )
-    if not (Recording & rec_pk):
-        Recording.populate(rec_pk, reserve_jobs=False)
+    Recording.populate(rec_pk, reserve_jobs=False)
 
     art_pk = ArtifactSelection.insert_selection(
         {
@@ -167,8 +170,7 @@ def run_v2_pipeline(
             "artifact_params_name": bundle.artifact_params_name,
         }
     )
-    if not (ArtifactDetection & art_pk):
-        ArtifactDetection.populate(art_pk, reserve_jobs=False)
+    ArtifactDetection.populate(art_pk, reserve_jobs=False)
 
     sort_pk = SortingSelection.insert_selection(
         {
@@ -178,8 +180,7 @@ def run_v2_pipeline(
             "artifact_id": art_pk["artifact_id"],
         }
     )
-    if not (Sorting & sort_pk):
-        Sorting.populate(sort_pk, reserve_jobs=False)
+    Sorting.populate(sort_pk, reserve_jobs=False)
 
     # Idempotent curation: if a root (parent_curation_id=-1) curation
     # already exists for this sorting, reuse it; otherwise insert a

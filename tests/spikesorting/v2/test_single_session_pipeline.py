@@ -1094,6 +1094,7 @@ def test_curation_v2_get_sort_group_info_returns_all_electrodes(populated_sortin
         RecordingSelection,
         SortGroupV2,
     )
+    from spyglass.spikesorting.v2.sorting import SortingSelection
 
     _clear_curations(populated_sorting)
     pk = CurationV2.insert_curation(
@@ -1105,16 +1106,7 @@ def test_curation_v2_get_sort_group_info_returns_all_electrodes(populated_sortin
     # the full sort group.
     rec_row = (
         RecordingSelection
-        & (
-            (
-                __import__(
-                    "spyglass.spikesorting.v2.sorting",
-                    fromlist=["SortingSelection"],
-                )
-                .SortingSelection.RecordingSource
-                & populated_sorting
-            )
-        )
+        & (SortingSelection.RecordingSource & populated_sorting)
     ).fetch1()
     expected = len(
         SortGroupV2.SortGroupElectrode

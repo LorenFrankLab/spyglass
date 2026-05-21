@@ -77,9 +77,6 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         -> CuratedSpikeSorting
         """
 
-    # v2 part table is only declared when the v2 module is importable
-    # in the current environment (see the lazy import at module top).
-    # Otherwise the merge table keeps the v0/v1 surface untouched.
     if _CurationV2 is not None:
 
         class CurationV2(SpyglassMixin, dj.Part):  # noqa: F811
@@ -104,7 +101,7 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         ``sorter``, ``sorter_params_name``, ``sorting_id``, and
         ``curation_id`` must all resolve through the v2 Selection
         tables and source parts to ``SpikeSortingOutput.CurationV2``.
-        Concat-source restrictions land with the Phase 3 materializer.
+        Concat-source restrictions are not yet supported.
         """
         if _CurationV2 is None:
             return [] if not as_dict else []

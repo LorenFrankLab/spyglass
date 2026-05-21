@@ -44,6 +44,8 @@ from spyglass.spikesorting.v2.utils import (
     SourceResolution,
     _assert_v2_db_safe,
     _validate_params,
+    find_orphaned_masters,
+    transaction_or_noop,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart
 
@@ -213,13 +215,9 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
             for rid in member_recording_ids
         ]
 
-        if cls.connection.in_transaction:
+        with transaction_or_noop(cls.connection):
             cls.insert1(master_row)
             cls.Member.insert(member_rows)
-        else:
-            with cls.connection.transaction:
-                cls.insert1(master_row)
-                cls.Member.insert(member_rows)
 
 
 @schema
@@ -344,13 +342,9 @@ class ArtifactSelection(SpyglassMixin, dj.Manual):
             "artifact_id": new_master_key["artifact_id"],
             **source_restriction,
         }
-        if cls.connection.in_transaction:
+        with transaction_or_noop(cls.connection):
             cls.insert1(new_master_key)
             source_part.insert1(new_part_key)
-        else:
-            with cls.connection.transaction:
-                cls.insert1(new_master_key)
-                source_part.insert1(new_part_key)
         return {k: new_master_key[k] for k in cls.primary_key}
 
     @classmethod
@@ -379,13 +373,10 @@ class ArtifactSelection(SpyglassMixin, dj.Manual):
             Orphan master PKs (``{"artifact_id": ...}``). Empty when
             no orphans remain.
         """
-        all_masters = cls.fetch("KEY", as_dict=True)
-        orphans: list[dict] = []
-        for master in all_masters:
-            rec_count = len(cls.RecordingSource & master)
-            shared_count = len(cls.SharedArtifactGroupSource & master)
-            if rec_count + shared_count == 0:
-                orphans.append(master)
+        orphans = find_orphaned_masters(
+            cls,
+            [cls.RecordingSource, cls.SharedArtifactGroupSource],
+        )
         if dry_run or not orphans:
             return orphans
         for orphan in orphans:

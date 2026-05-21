@@ -33,6 +33,9 @@ from spyglass.spikesorting.v2.utils import (
     SourceResolution,
     _assert_v2_db_safe,
     _validate_params,
+    find_orphaned_masters,
+    transaction_or_noop,
+    unit_brain_region_df,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart
 
@@ -252,13 +255,9 @@ class SortingSelection(SpyglassMixin, dj.Manual):
             "sorting_id": new_master_key["sorting_id"],
             **source_restriction,
         }
-        if cls.connection.in_transaction:
+        with transaction_or_noop(cls.connection):
             cls.insert1(new_master_key)
             source_part.insert1(new_part_key)
-        else:
-            with cls.connection.transaction:
-                cls.insert1(new_master_key)
-                source_part.insert1(new_part_key)
         return {k: new_master_key[k] for k in cls.primary_key}
 
     @classmethod
@@ -271,13 +270,10 @@ class SortingSelection(SpyglassMixin, dj.Manual):
         cascade preview shows downstream ``Sorting`` / ``CurationV2`` /
         ``SpikeSortingOutput.CurationV2`` impact.
         """
-        all_masters = cls.fetch("KEY", as_dict=True)
-        orphans: list[dict] = []
-        for master in all_masters:
-            rec_count = len(cls.RecordingSource & master)
-            concat_count = len(cls.ConcatenatedRecordingSource & master)
-            if rec_count + concat_count == 0:
-                orphans.append(master)
+        orphans = find_orphaned_masters(
+            cls,
+            [cls.RecordingSource, cls.ConcatenatedRecordingSource],
+        )
         if dry_run or not orphans:
             return orphans
         for orphan in orphans:
@@ -559,22 +555,16 @@ class Sorting(SpyglassMixin, dj.Computed):
         """Per-unit brain regions via Sorting.Unit * Electrode * BrainRegion.
 
         Single-session sorts return ``region_resolution='single_session'``.
-        Concat sorts (when implemented) raise
-        ``ConcatBrainRegionAmbiguousError`` unless
+        Concat sorts raise ``ConcatBrainRegionAmbiguousError`` unless
         ``allow_anchor_member=True``; the anchor-member output is
         labeled ``region_resolution='anchor_member'``.
         """
-        import pandas as pd
-
-        from spyglass.common.common_ephys import Electrode as _Electrode
-        from spyglass.common.common_region import BrainRegion
+        from spyglass.spikesorting.v2.exceptions import (
+            ConcatBrainRegionAmbiguousError,
+        )
 
         source = SortingSelection.resolve_source(key)
         if source.kind == "concatenated_recording":
-            from spyglass.spikesorting.v2.exceptions import (
-                ConcatBrainRegionAmbiguousError,
-            )
-
             if not allow_anchor_member:
                 raise ConcatBrainRegionAmbiguousError(
                     f"Sorting.get_unit_brain_regions: sorting_id "
@@ -588,20 +578,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             resolution = "anchor_member"
         else:
             resolution = "single_session"
-
-        joined = (
-            (self.Unit & key) * _Electrode * BrainRegion
-        ).fetch(
-            "unit_id",
-            "electrode_id",
-            "region_name",
-            "subregion_name",
-            "subsubregion_name",
-            as_dict=True,
-        )
-        df = pd.DataFrame(joined)
-        df["region_resolution"] = resolution
-        return df
+        return unit_brain_region_df(self.Unit & key, resolution)
 
     # ---- Implementation helpers -----------------------------------------
 

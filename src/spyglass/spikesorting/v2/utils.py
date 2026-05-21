@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -13,6 +14,37 @@ import spikeinterface as si
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
+
+
+@contextmanager
+def transaction_or_noop(connection):
+    """Open a DataJoint transaction unless one is already active.
+
+    Source-part inserts and curation inserts both want to wrap their
+    master + part rows in one transaction; but the same helpers may be
+    called from inside an existing populate cascade where DataJoint
+    refuses nested transactions. This context manager makes the
+    transaction wrap a no-op when the connection is already in one.
+    """
+    if connection.in_transaction:
+        yield
+    else:
+        with connection.transaction:
+            yield
+
+
+class MetricsSource(str, Enum):
+    """Provenance of metrics attached to a ``CurationV2`` row.
+
+    Matches the enum on the table's ``metrics_source`` column. Promoted
+    from a runtime set check so a typo at insert time raises a clear
+    ``ValueError`` instead of a DataJoint enum-mismatch error from
+    MySQL.
+    """
+
+    manual = "manual"
+    analyzer_curation = "analyzer_curation"
+    figpack = "figpack"
 
 
 class CurationLabel(str, Enum):
@@ -32,6 +64,59 @@ class CurationLabel(str, Enum):
     noise = "noise"
     artifact = "artifact"
     reject = "reject"
+
+
+def find_orphaned_masters(master_table, part_tables: list) -> list[dict]:
+    """Return master PKs whose source-part counts sum to zero.
+
+    Shared implementation of ``ArtifactSelection.prune_orphaned_selections``
+    and ``SortingSelection.prune_orphaned_selections``. ``part_tables``
+    is the list of source-part tables to count against the master --
+    e.g. ``[RecordingSource, SharedArtifactGroupSource]`` for artifact
+    selection, ``[RecordingSource, ConcatenatedRecordingSource]`` for
+    sorting selection.
+
+    Source-part atomicity is enforced at insert time by the
+    transactional ``insert_selection`` helpers, but DataJoint cannot
+    enforce "exactly one source per master" across two part tables;
+    an upstream cascade-delete from ``Recording`` or
+    ``SharedArtifactGroup`` / ``ConcatenatedRecording`` can leave the
+    master row without any source children. This helper finds those
+    orphans so a maintenance script can review or remove them.
+    """
+    orphans: list[dict] = []
+    for master in master_table.fetch("KEY", as_dict=True):
+        if sum(len(part & master) for part in part_tables) == 0:
+            orphans.append(master)
+    return orphans
+
+
+def unit_brain_region_df(unit_relation, resolution: str):
+    """Join a Unit-part relation against Electrode * BrainRegion.
+
+    Shared implementation of ``Sorting.get_unit_brain_regions`` and
+    ``CurationV2.get_unit_brain_regions``. The Unit relation must
+    carry an ``Electrode`` FK; the join walks it to ``BrainRegion``
+    (non-null FK on ``Electrode``) and returns a DataFrame with the
+    standard column set + a ``region_resolution`` literal label so
+    concat-backed callers can distinguish anchor-member results.
+    """
+    import pandas as pd
+
+    from spyglass.common.common_ephys import Electrode as _Electrode
+    from spyglass.common.common_region import BrainRegion
+
+    joined = (unit_relation * _Electrode * BrainRegion).fetch(
+        "unit_id",
+        "electrode_id",
+        "region_name",
+        "subregion_name",
+        "subsubregion_name",
+        as_dict=True,
+    )
+    df = pd.DataFrame(joined)
+    df["region_resolution"] = resolution
+    return df
 
 
 @dataclass(frozen=True)
