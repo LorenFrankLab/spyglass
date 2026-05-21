@@ -692,9 +692,14 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             Path(self._analysis_dir).rglob("*.nwb"),
             desc="Scanning analysis files  ",  # Note extra spaces for alignment
         ):
+            # rglob("*.nwb") only yields files; skip symlinks so a stray
+            # symlink under analysis_dir can't add its target (potentially
+            # outside analysis_dir) to the deletion plan.
+            if path.is_symlink():
+                continue
             resolved_path = path.expanduser().resolve()
             scanned.add(resolved_path)
-            if path.is_file() and path.stat().st_size == 0:
+            if path.stat().st_size == 0:
                 empty.add(resolved_path)
             elif resolved_path not in tracked:
                 untracked.add(resolved_path)
@@ -918,16 +923,15 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         self._info_msg(heading + suffix)
 
         registry = AnalysisRegistry()
-
         registry.block_new_inserts(dry_run=dry_run)
 
-        try:
-            # Get all custom tables first so we can check their tracked files
-            custom_tables = list(registry.all_classes)
-            num_tables = len(custom_tables) + 1  # +1 for common table
-            common_orphans = self.get_orphans().proj()
-            untracked_file_plan = self._build_untracked_file_plan(custom_tables)
+        # Get all custom tables first so we can check their tracked files
+        custom_tables = list(registry.all_classes)
+        num_tables = len(custom_tables) + 1  # +1 for common table
+        common_orphans = self.get_orphans().proj()
 
+        try:
+            untracked_file_plan = self._build_untracked_file_plan(custom_tables)
             if not dry_run:
                 self._validate_cleanup_plan(
                     untracked_file_plan,
@@ -958,18 +962,9 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                 f"orphans, {len(unused)} unused externals"
             )
 
-            # Remove untracked files. For destructive cleanup, rescan after
-            # orphan/external cleanup so newly untracked common analysis files
-            # are included, and validate the final deletion plan before unlink.
-            if not dry_run:
-                untracked_file_plan = self._build_untracked_file_plan(
-                    custom_tables
-                )
-                self._validate_cleanup_plan(
-                    untracked_file_plan,
-                    max_delete_fraction=max_delete_fraction,
-                    max_delete_to_tracked_ratio=max_delete_to_tracked_ratio,
-                )
+            # Apply the deletion plan built before the orphan/external pass.
+            # Newly untracked files produced by this run's orphan deletion get
+            # caught on the next cleanup invocation.
             _ = self._remove_untracked_files(
                 custom_tables, dry_run=dry_run, plan=untracked_file_plan
             )
