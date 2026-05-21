@@ -298,7 +298,7 @@ def test_recording_populates_and_round_trips(
 # ---------- ArtifactSelection source-part pattern -------------------------
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def populated_recording(recording_selection_key):
     """Ensure Recording is populated for the smoke selection."""
     from spyglass.spikesorting.v2.recording import Recording
@@ -887,6 +887,248 @@ def test_prune_orphaned_selections_finds_and_cleans(populated_recording):
     deleted = SortingSelection.prune_orphaned_selections(dry_run=False)
     assert {"sorting_id": orphan_sorting} in deleted
     assert not (SortingSelection & {"sorting_id": orphan_sorting})
+
+
+@pytest.fixture(scope="module")
+def populated_sorting(populated_recording):
+    """Ensure a Sorting row exists for the smoke fixture via MS5.
+
+    Module-scoped so the curation-side tests reuse the same sort.
+    """
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactDetectionParameters,
+        ArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        Sorting,
+        SortingSelection,
+    )
+
+    SorterParameters.insert_default()
+    ArtifactDetectionParameters.insert_default()
+    art_pk = ArtifactSelection.insert_selection(
+        {
+            "recording_id": populated_recording["recording_id"],
+            "artifact_params_name": "none",
+        }
+    )
+    if not (ArtifactDetection & art_pk):
+        ArtifactDetection.populate(art_pk, reserve_jobs=False)
+    sort_pk = SortingSelection.insert_selection(
+        {
+            "recording_id": populated_recording["recording_id"],
+            "sorter": "mountainsort5",
+            "sorter_params_name": (
+                "franklab_tetrode_hippocampus_30kHz_ms5"
+            ),
+            "artifact_id": art_pk["artifact_id"],
+        }
+    )
+    if not (Sorting & sort_pk):
+        Sorting.populate(sort_pk, reserve_jobs=False)
+    yield sort_pk
+
+
+@pytest.mark.slow
+def test_curation_v2_insert_root_unlabeled(populated_sorting):
+    """``insert_curation(labels={})`` writes a root curation with no
+    ``UnitLabel`` rows and a ``CurationV2.Unit`` row per sorted unit."""
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    # Clean any prior curations for this sort so the assertion on
+    # curation_id is stable.
+    (CurationV2 & populated_sorting).super_delete(warn=False)
+
+    pk = CurationV2.insert_curation(
+        sorting_key=populated_sorting, labels={}
+    )
+    assert pk == {**populated_sorting, "curation_id": 0}
+    assert len(CurationV2 & pk) == 1
+    n_units = (Sorting & populated_sorting).fetch1("n_units")
+    assert len(CurationV2.Unit & pk) == n_units
+    assert len(CurationV2.UnitLabel & pk) == 0
+
+    row = (CurationV2 & pk).fetch1()
+    assert row["parent_curation_id"] == -1
+    assert row["merges_applied"] == 0
+    assert row["metrics_source"] == "manual"
+
+
+@pytest.mark.slow
+def test_curation_v2_insert_with_labels(populated_sorting):
+    """Labels round-trip into ``CurationV2.UnitLabel`` and unknown
+    labels raise before any DB rows are written."""
+    import pytest as _pytest
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    (CurationV2 & populated_sorting).super_delete(warn=False)
+
+    units = (Sorting.Unit & populated_sorting).fetch("unit_id")
+    assert len(units) > 0
+    target_unit = int(units[0])
+    labels = {target_unit: ["mua", "accept"]}
+
+    pk = CurationV2.insert_curation(
+        sorting_key=populated_sorting,
+        labels=labels,
+        description="manual labels test",
+    )
+    label_rows = (CurationV2.UnitLabel & pk).fetch(as_dict=True)
+    label_set = {(r["unit_id"], r["curation_label"]) for r in label_rows}
+    assert (target_unit, "mua") in label_set
+    assert (target_unit, "accept") in label_set
+    assert (CurationV2 & pk).fetch1("description") == "manual labels test"
+
+    # Unknown label rejects.
+    with _pytest.raises(ValueError, match="not in CurationLabel"):
+        CurationV2.insert_curation(
+            sorting_key=populated_sorting,
+            labels={target_unit: ["good"]},  # v1-era label not in v2 enum
+        )
+
+
+@pytest.mark.slow
+def test_curation_v2_parent_validation_and_nonincreasing_ids(populated_sorting):
+    """parent_curation_id must reference an existing row for the same
+    sort; auto-incremented curation_id starts at 0 and increments."""
+    import pytest as _pytest
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    (CurationV2 & populated_sorting).super_delete(warn=False)
+
+    pk0 = CurationV2.insert_curation(
+        sorting_key=populated_sorting, labels={}
+    )
+    assert pk0["curation_id"] == 0
+
+    # Child curation referencing pk0 succeeds.
+    pk1 = CurationV2.insert_curation(
+        sorting_key=populated_sorting,
+        labels={},
+        parent_curation_id=0,
+    )
+    assert pk1["curation_id"] == 1
+    assert (CurationV2 & pk1).fetch1("parent_curation_id") == 0
+
+    # Bogus parent rejects.
+    with _pytest.raises(ValueError, match="does not exist for sorting_id"):
+        CurationV2.insert_curation(
+            sorting_key=populated_sorting,
+            labels={},
+            parent_curation_id=999,
+        )
+
+    # None labels reject.
+    with _pytest.raises(ValueError, match="labels=None is invalid"):
+        CurationV2.insert_curation(
+            sorting_key=populated_sorting, labels=None
+        )
+
+
+@pytest.mark.slow
+def test_curation_v2_get_matchable_unit_ids_filters_labels(populated_sorting):
+    """``get_matchable_unit_ids`` excludes units carrying any excluded
+    label even when they also carry an included label, and includes
+    untagged units.
+
+    The smoke fixture's MS5 sort can yield a small unit count
+    (commonly 1 on this 4s fixture), so the test exercises the
+    multi-label-collision case on the first unit and asserts
+    untagged passthrough on any remaining units that exist.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    (CurationV2 & populated_sorting).super_delete(warn=False)
+    units = sorted(int(u) for u in (Sorting.Unit & populated_sorting).fetch("unit_id"))
+    assert len(units) >= 1
+    # Tag the first unit with BOTH an excluded label (artifact) and
+    # an included label (mua). The "any excluded label wins" rule
+    # must surface despite the included label being present.
+    labels = {units[0]: ["mua", "artifact"]}
+    pk = CurationV2.insert_curation(
+        sorting_key=populated_sorting, labels=labels
+    )
+    matchable = CurationV2().get_matchable_unit_ids(pk)
+    matchable_set = set(matchable.tolist())
+    assert units[0] not in matchable_set
+    # Any further units are untagged and pass through.
+    for uid in units[1:]:
+        assert uid in matchable_set
+
+
+@pytest.mark.slow
+def test_curation_v2_get_sort_group_info_returns_all_electrodes(populated_sorting):
+    """``get_sort_group_info`` returns a DataJoint relation covering
+    every electrode in the sort group -- regression vs v1's
+    ``fetch(limit=1)``."""
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.recording import (
+        RecordingSelection,
+        SortGroupV2,
+    )
+
+    (CurationV2 & populated_sorting).super_delete(warn=False)
+    pk = CurationV2.insert_curation(
+        sorting_key=populated_sorting, labels={}
+    )
+    rel = CurationV2().get_sort_group_info(pk)
+    # The relation is a DataJoint object (not a DataFrame); we can
+    # restrict it further. Just fetching its length proves it spans
+    # the full sort group.
+    rec_row = (
+        RecordingSelection
+        & (
+            (
+                __import__(
+                    "spyglass.spikesorting.v2.sorting",
+                    fromlist=["SortingSelection"],
+                )
+                .SortingSelection.RecordingSource
+                & populated_sorting
+            )
+        )
+    ).fetch1()
+    expected = len(
+        SortGroupV2.SortGroupElectrode
+        & {
+            "nwb_file_name": rec_row["nwb_file_name"],
+            "sort_group_id": rec_row["sort_group_id"],
+        }
+    )
+    assert len(rel) == expected
+    assert expected > 1  # must be a multi-row relation, NOT v1's limit=1
+
+
+@pytest.mark.slow
+def test_curation_v2_get_sorting_round_trips_spike_times(populated_sorting):
+    """``get_sorting`` returns a SI BaseSorting whose spike times match
+    the upstream Sorting's after the curation is applied (no merges,
+    no labels => identical spike trains)."""
+    import numpy as np
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    (CurationV2 & populated_sorting).super_delete(warn=False)
+    pk = CurationV2.insert_curation(
+        sorting_key=populated_sorting, labels={}
+    )
+    src_sorting = Sorting().get_sorting(populated_sorting)
+    cur_sorting = CurationV2().get_sorting(pk)
+    assert set(cur_sorting.unit_ids) == set(src_sorting.unit_ids)
+    for uid in src_sorting.unit_ids:
+        src_times = src_sorting.get_unit_spike_train(uid, return_times=True)
+        cur_times = cur_sorting.get_unit_spike_train(int(uid), return_times=True)
+        assert len(src_times) == len(cur_times)
+        if len(src_times):
+            assert np.allclose(np.sort(src_times), np.sort(cur_times))
 
 
 @pytest.mark.slow

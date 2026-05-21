@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -12,6 +13,25 @@ import spikeinterface as si
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
+
+
+class CurationLabel(str, Enum):
+    """Curation labels recognized by ``CurationV2.insert_curation``.
+
+    Members match the v1 convention list at
+    ``src/spyglass/spikesorting/v1/curation.py``; v2 promotes the
+    list from a docstring to an enforced enum so a typo raises at
+    insert time. Free-form ``dj.Manual.insert1`` calls bypassing the
+    helper remain permitted (DataJoint cannot enforce enums on
+    varchar columns), and downstream filters fall back to the v1
+    list for any unrecognized label that slipped in.
+    """
+
+    accept = "accept"
+    mua = "mua"
+    noise = "noise"
+    artifact = "artifact"
+    reject = "reject"
 
 
 @dataclass(frozen=True)
