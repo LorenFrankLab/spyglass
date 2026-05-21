@@ -188,8 +188,9 @@ class NwbfileHasher:
         verbose : bool, optional
             Display progress bar, by default False.
         legacy_mode : bool, optional
-            If True, reproduce the pre-fix behavior where Dataset content is
-            not incorporated into the hash (only attrs/shape/dtype are used).
+            If True, reproduce the pre-fix behavior where dataset hashing is
+            skipped entirely. In this mode, dataset content is not
+            incorporated into the hash via ``hash_dataset()``.
             Use only for comparing regenerated files against hashes computed
             before the bug fix. Default False.
         """
@@ -373,7 +374,9 @@ class NwbfileHasher:
 
             if isinstance(obj, h5py.Dataset):
                 if not self.legacy_mode:
-                    this_hash.update(self.hash_dataset(obj).encode())
+                    dataset_digest = self.hash_dataset(obj)
+                    if dataset_digest is not None:
+                        this_hash.update(dataset_digest.encode())
             elif isinstance(obj, h5py.SoftLink):
                 this_hash.update(obj.path.encode())
             elif isinstance(obj, h5py.Group):
