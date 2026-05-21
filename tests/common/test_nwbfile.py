@@ -196,8 +196,11 @@ def test_analysis_cleanup_plan_accepts_ratio_at_threshold(common_nwbfile):
     )
 
 
-def test_build_untracked_file_plan_skips_symlinks(common_nwbfile, tmp_path):
-    """Symlinks under analysis_dir must not appear in any plan set."""
+def test_build_untracked_file_plan_skips_symlinks(
+    common_nwbfile, tmp_path, caplog
+):
+    """Symlinks under analysis_dir must not appear in any plan set,
+    and must emit a warning naming the symlink and its target."""
     outside_target = tmp_path / "outside" / "shared.nwb"
     outside_target.parent.mkdir()
     outside_target.write_text("shared data")
@@ -215,11 +218,17 @@ def test_build_untracked_file_plan_skips_symlinks(common_nwbfile, tmp_path):
     table.__dict__["_analysis_dir"] = str(analysis_dir)
     table._ext_tbl = _FakeExternalTable([])
 
-    plan = table._build_untracked_file_plan(custom_tables=[])
+    with caplog.at_level("WARNING"):
+        plan = table._build_untracked_file_plan(custom_tables=[])
 
     assert outside_target.resolve() not in plan.scanned_files
     assert outside_target.resolve() not in plan.files_to_delete
     assert plan.scanned_files == {real.resolve()}
+    assert any(
+        "Skipping symlink" in record.message
+        and str(link) in record.message
+        for record in caplog.records
+    ), "symlink skip should emit a warning naming the symlink path"
 
 
 def test_remove_untracked_files_refuses_path_outside_analysis_dir(
@@ -342,3 +351,100 @@ def test_analysis_cleanup_validates_plan_before_unlink(
 
     assert registry.blocked
     assert registry.unblocked
+
+
+def test_cleanup_preserves_original_exception_when_unblock_raises(
+    common_nwbfile, monkeypatch
+):
+    """If both the cleanup body AND unblock_new_inserts raise, the original
+    cleanup-body exception must propagate (unblock failure becomes a log line,
+    not the user-visible error)."""
+
+    class _RaisingRegistry:
+        all_classes = []
+        blocked = False
+
+        def block_new_inserts(self, dry_run):
+            self.blocked = True
+
+        def unblock_new_inserts(self):
+            raise RuntimeError("unblock_kaboom")
+
+    registry = _RaisingRegistry()
+    bad_plan = _cleanup_plan(
+        common_nwbfile, scanned=4, tracked=3, delete=2
+    )
+
+    monkeypatch.setattr(common_nwbfile, "AnalysisRegistry", lambda: registry)
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisNwbfile,
+        "_build_untracked_file_plan",
+        lambda self, custom_tables: bad_plan,
+    )
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisNwbfile,
+        "get_orphans",
+        lambda self: _EmptyQuery(),
+    )
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisNwbfile,
+        "cleanup_external",
+        lambda self, dry_run, delete_external_files: [],
+    )
+
+    table = object.__new__(common_nwbfile.AnalysisNwbfile)
+    # The validator should raise "above the safety limit", not "unblock_kaboom".
+    with pytest.raises(RuntimeError, match="above the safety limit"):
+        common_nwbfile.AnalysisNwbfile.cleanup(
+            table, dry_run=False, max_delete_fraction=0.25
+        )
+
+
+def test_cleanup_propagates_unblock_failure_when_body_succeeds(
+    common_nwbfile, monkeypatch
+):
+    """If the cleanup body succeeds but unblock_new_inserts raises, the unblock
+    failure must propagate so the operator notices the stuck-blocked state."""
+
+    class _RaisingRegistry:
+        all_classes = []
+        blocked = False
+
+        def block_new_inserts(self, dry_run):
+            self.blocked = True
+
+        def unblock_new_inserts(self):
+            raise RuntimeError("unblock_kaboom")
+
+    registry = _RaisingRegistry()
+    good_plan = _cleanup_plan(
+        common_nwbfile, scanned=8, tracked=6, delete=1
+    )
+
+    monkeypatch.setattr(common_nwbfile, "AnalysisRegistry", lambda: registry)
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisNwbfile,
+        "_build_untracked_file_plan",
+        lambda self, custom_tables: good_plan,
+    )
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisNwbfile,
+        "_remove_untracked_files",
+        lambda self, custom_tables, dry_run, plan: (set(), set()),
+    )
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisNwbfile,
+        "get_orphans",
+        lambda self: _EmptyQuery(),
+    )
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisNwbfile,
+        "cleanup_external",
+        lambda self, dry_run, delete_external_files: [],
+    )
+
+    table = object.__new__(common_nwbfile.AnalysisNwbfile)
+    with pytest.raises(RuntimeError, match="unblock_kaboom"):
+        common_nwbfile.AnalysisNwbfile.cleanup(
+            table, dry_run=False, max_delete_fraction=0.9
+        )

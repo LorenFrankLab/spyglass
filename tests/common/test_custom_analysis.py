@@ -429,11 +429,6 @@ class TestCleanupAndRegistry:
             created_paths["null"],
             created_paths["orphan"],
         }
-        expected_preserved_paths = {
-            created_paths["valid"],
-            created_paths["export"],
-        }
-
         def _relative_paths(paths):
             return [
                 (
