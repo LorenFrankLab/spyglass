@@ -743,3 +743,85 @@ class TestTestModeBaseDirGuard:
             test_mode=True,
             force_reload=True,
         )
+
+
+class TestTestModeEnvVarIgnore:
+    """Tests that test_mode=True ignores directory env vars.
+
+    A shell-exported SPYGLASS_RAW_DIR / DLC_BASE_DIR / MOSEQ_BASE_DIR /
+    KACHERY_ZONE pointing at production must not leak into the resolved
+    test configuration.
+    """
+
+    @pytest.fixture
+    def test_base(self, tmp_path):
+        base = tmp_path / "tests" / "data"
+        base.mkdir(parents=True)
+        return base
+
+    def test_ignores_per_key_dir_env_var(
+        self, monkeypatch, test_base
+    ):
+        """SPYGLASS_RAW_DIR is ignored under test_mode; resolves to base/raw."""
+        from spyglass.settings import SpyglassConfig
+
+        evil = "/tmp/some-production-raw"
+        monkeypatch.setenv("SPYGLASS_RAW_DIR", evil)
+
+        cfg = SpyglassConfig()
+        cfg.load_config(
+            base_dir=str(test_base), test_mode=True, force_reload=True
+        )
+
+        assert cfg.raw_dir == str(test_base / "raw")
+        assert evil not in cfg.raw_dir
+
+    def test_ignores_dlc_base_dir_env_var(
+        self, monkeypatch, test_base
+    ):
+        from spyglass.settings import SpyglassConfig
+
+        evil = "/tmp/some-production-dlc"
+        monkeypatch.setenv("DLC_BASE_DIR", evil)
+
+        cfg = SpyglassConfig()
+        cfg.load_config(
+            base_dir=str(test_base), test_mode=True, force_reload=True
+        )
+
+        assert evil not in cfg._dlc_base
+
+    def test_ignores_moseq_base_dir_env_var(
+        self, monkeypatch, test_base
+    ):
+        from spyglass.settings import SpyglassConfig
+
+        evil = "/tmp/some-production-moseq"
+        monkeypatch.setenv("MOSEQ_BASE_DIR", evil)
+
+        cfg = SpyglassConfig()
+        cfg.load_config(
+            base_dir=str(test_base), test_mode=True, force_reload=True
+        )
+
+        assert evil not in cfg._moseq_base
+
+    def test_ignores_kachery_zone_env_var(
+        self, monkeypatch, test_base
+    ):
+        from spyglass.settings import SpyglassConfig
+        import datajoint as dj
+
+        # Clear any saved dj.config kachery_zone so the test isolates env-var
+        # behavior. The fallback should be the hardcoded "franklab.default".
+        dj.config.get("custom", {}).pop("kachery_zone", None)
+
+        evil = "evil.production.zone"
+        monkeypatch.setenv("KACHERY_ZONE", evil)
+
+        cfg = SpyglassConfig()
+        cfg.load_config(
+            base_dir=str(test_base), test_mode=True, force_reload=True
+        )
+
+        assert cfg.config.get("KACHERY_ZONE") != evil

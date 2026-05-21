@@ -157,6 +157,149 @@ def test_analysis_cleanup_plan_accepts_plausible_delete_plan(common_nwbfile):
     common_nwbfile.AnalysisNwbfile._validate_cleanup_plan(plan)
 
 
+def test_analysis_cleanup_plan_accepts_empty_delete(common_nwbfile):
+    """delete_count == 0 short-circuits before any other validation kicks in."""
+    # tracked=0 would normally trigger "no tracked analysis files"; the empty
+    # delete plan must return before that check.
+    plan = _cleanup_plan(common_nwbfile, scanned=3, tracked=0, delete=0)
+
+    common_nwbfile.AnalysisNwbfile._validate_cleanup_plan(plan)
+
+
+def test_analysis_cleanup_plan_accepts_fraction_at_threshold(common_nwbfile):
+    """Fraction exactly at max_delete_fraction must pass (strict > guard)."""
+    plan = _cleanup_plan(common_nwbfile, scanned=10, tracked=10, delete=9)
+
+    common_nwbfile.AnalysisNwbfile._validate_cleanup_plan(
+        plan, max_delete_fraction=0.9, max_delete_to_tracked_ratio=10.0
+    )
+
+
+def test_analysis_cleanup_plan_rejects_fraction_just_above_threshold(
+    common_nwbfile,
+):
+    """Fraction just above max_delete_fraction must raise."""
+    plan = _cleanup_plan(common_nwbfile, scanned=11, tracked=10, delete=10)
+
+    with pytest.raises(RuntimeError, match="above the safety limit"):
+        common_nwbfile.AnalysisNwbfile._validate_cleanup_plan(
+            plan, max_delete_fraction=0.9, max_delete_to_tracked_ratio=100.0
+        )
+
+
+def test_analysis_cleanup_plan_accepts_ratio_at_threshold(common_nwbfile):
+    """Ratio exactly at max_delete_to_tracked_ratio must pass."""
+    plan = _cleanup_plan(common_nwbfile, scanned=100, tracked=1, delete=10)
+
+    common_nwbfile.AnalysisNwbfile._validate_cleanup_plan(
+        plan, max_delete_fraction=1.0, max_delete_to_tracked_ratio=10.0
+    )
+
+
+def test_build_untracked_file_plan_skips_symlinks(common_nwbfile, tmp_path):
+    """Symlinks under analysis_dir must not appear in any plan set."""
+    outside_target = tmp_path / "outside" / "shared.nwb"
+    outside_target.parent.mkdir()
+    outside_target.write_text("shared data")
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+
+    real = analysis_dir / "real.nwb"
+    real.write_text("real")
+
+    link = analysis_dir / "escape.nwb"
+    link.symlink_to(outside_target)
+
+    table = object.__new__(common_nwbfile.AnalysisNwbfile)
+    table.__dict__["_analysis_dir"] = str(analysis_dir)
+    table._ext_tbl = _FakeExternalTable([])
+
+    plan = table._build_untracked_file_plan(custom_tables=[])
+
+    assert outside_target.resolve() not in plan.scanned_files
+    assert outside_target.resolve() not in plan.files_to_delete
+    assert plan.scanned_files == {real.resolve()}
+
+
+def test_remove_untracked_files_refuses_path_outside_analysis_dir(
+    common_nwbfile, tmp_path
+):
+    """Plans containing paths outside analysis_dir must not unlink anything."""
+    outside_target = tmp_path / "outside" / "shared.nwb"
+    outside_target.parent.mkdir()
+    outside_target.write_text("shared data")
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+
+    plan = common_nwbfile.CleanupPlan(
+        scanned_files={outside_target.resolve()},
+        tracked_files=set(),
+        files_to_delete={outside_target.resolve()},
+        empty_files=set(),
+        untracked_files={outside_target.resolve()},
+    )
+
+    table = object.__new__(common_nwbfile.AnalysisNwbfile)
+    table.__dict__["_analysis_dir"] = str(analysis_dir)
+
+    table._remove_untracked_files(
+        custom_tables=[], dry_run=False, plan=plan
+    )
+
+    assert outside_target.exists()
+
+
+def test_analysis_cleanup_dry_run_warns_on_refused_plan(
+    common_nwbfile, monkeypatch, caplog
+):
+    """dry_run=True must surface a validation refusal as a warning, not raise."""
+    registry = _FakeRegistry()
+    # block_new_inserts is hard-coded to expect dry_run=False; relax for this test.
+    monkeypatch.setattr(
+        _FakeRegistry,
+        "block_new_inserts",
+        lambda self, dry_run: setattr(self, "blocked", True),
+    )
+    bad_plan = _cleanup_plan(
+        common_nwbfile, scanned=4, tracked=3, delete=2
+    )
+
+    monkeypatch.setattr(common_nwbfile, "AnalysisRegistry", lambda: registry)
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisNwbfile,
+        "_build_untracked_file_plan",
+        lambda self, custom_tables: bad_plan,
+    )
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisNwbfile,
+        "_remove_untracked_files",
+        lambda self, custom_tables, dry_run, plan: (set(), set()),
+    )
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisNwbfile,
+        "get_orphans",
+        lambda self: _EmptyQuery(),
+    )
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisNwbfile,
+        "cleanup_external",
+        lambda self, dry_run, delete_external_files: [],
+    )
+
+    table = object.__new__(common_nwbfile.AnalysisNwbfile)
+    with caplog.at_level("WARNING"):
+        common_nwbfile.AnalysisNwbfile.cleanup(
+            table, dry_run=True, max_delete_fraction=0.25
+        )
+
+    assert any(
+        "Cleanup plan would be refused" in record.message
+        for record in caplog.records
+    )
+
+
 def test_analysis_cleanup_validates_plan_before_unlink(
     common_nwbfile, monkeypatch
 ):
