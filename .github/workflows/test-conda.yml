@@ -149,12 +149,9 @@ jobs:
         fi
     - name: Run tests (${{ steps.test_mode.outputs.description }})
       run: |
-        # --base-dir pins tests to the cached tests/_data/ path (see
-        # Cache test data step above). Without it, conftest.py now defaults
-        # to a per-session temp directory for safety (issue #1573), which
-        # would bypass the cache and re-download the NWB + video fixtures.
-        # tests/_data contains .spyglass-test-root so pytest recognizes it
-        # as an explicit test sandbox.
+        # --base-dir matches the conftest default (./tests/_data/) and the
+        # path covered by the cache-test-data step above. Pinned explicitly
+        # so cache hits are stable across any future conftest default change.
         pytest --no-docker --no-dlc --base-dir ./tests/_data/ \
           --cov-config=.coveragerc --cov=spyglass-neuro --cov-report=xml \
           ${{ steps.test_mode.outputs.marker_args }} \

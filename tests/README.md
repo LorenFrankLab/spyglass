@@ -193,11 +193,10 @@ pytest -m "not slow and not very_slow"
 **Preserve database between runs:**
 
 ```bash
-# --no-teardown requires an explicit --base-dir, since the default
-# temp-dir base is created fresh each session — preserving the DB
-# without a stable filesystem leaves orphaned rows (#1573).
-pytest --no-teardown --base-dir ./tests/_data/
+pytest --no-teardown
 ```
+
+Persists state across runs in the default `./tests/_data/` base.
 
 **Run specific test files:**
 
@@ -253,25 +252,17 @@ All tests run with default parameters from `pyproject.toml`. To customize:
 
 ```bash
 --base-dir PATH     # Where to store downloaded/created files
-# Default: per-session temp directory (created by tempfile.mkdtemp).
-# SPYGLASS_BASE_DIR is ignored. See issue #1573: a shell-exported
-# SPYGLASS_BASE_DIR pointing at shared/production storage would otherwise
-# let destructive tests (e.g. AnalysisNwbfile.cleanup) scan and delete
-# real data.
-# Local developers who want reuse across runs should pass an explicit
-# --base-dir (e.g. --base-dir ./tests/_data/).
-# Persistent test roots must contain a .spyglass-test-root sentinel file.
-# This is a generic sandbox marker; pytest-created temp roots add it
-# automatically, and ./tests/_data/ includes one for local/CI reuse.
-# The sentinel is a durable opt-in, not a freshness check. Never add it
-# to shared or production data roots; use a dedicated test-only directory.
+# Default: ./tests/_data/. SPYGLASS_BASE_DIR in the environment is ignored
+# by the test suite — a shell-exported value pointing at shared/production
+# storage would let destructive tests (e.g. AnalysisNwbfile.cleanup) scan
+# and delete real data. Pass --base-dir explicitly to override the default.
+#
+# settings.py enforces, in test_mode=True, that the resolved base_dir
+# contains a 'tests' path component. Pointing --base-dir at a path outside
+# any tests/ directory raises a ValueError before tests collect.
 
 --no-teardown       # Preserve Docker database on exit (default: False)
 # Useful for: inspecting database state, faster reruns.
-# Must be combined with --base-dir so the preserved DB points at a stable
-# filesystem path.
-# pytest only removes its own per-session temp base_dir automatically.
-# It does not clean persistent user-supplied base_dirs at teardown.
 
 --no-docker         # Don't launch Docker, connect to existing container
 # Useful for: GitHub Actions, manual Docker management
