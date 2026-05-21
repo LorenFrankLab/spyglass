@@ -697,8 +697,12 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             # symlink under analysis_dir can't add its target (potentially
             # outside analysis_dir) to the deletion plan.
             if path.is_symlink():
+                try:
+                    target = os.readlink(path)
+                except OSError:
+                    target = "<unreadable>"
                 logger.warning(
-                    f"Skipping symlink in analysis dir: {path}"
+                    f"Skipping symlink in analysis dir: {path} -> {target}"
                 )
                 continue
             resolved_path = path.expanduser().resolve()
@@ -804,9 +808,9 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         # symlinks — a symlink inside analysis_dir resolves to its target.
         # Skip any path that resolves outside analysis_dir so cleanup cannot
         # delete data elsewhere via a symlink placed in the analysis directory.
-        analysis_dir = Path(self._analysis_dir).expanduser().resolve()
+        analysis_root = Path(self._analysis_dir).expanduser().resolve()
         for path in plan.files_to_delete:
-            if not path.is_relative_to(analysis_dir):
+            if not path.is_relative_to(analysis_root):
                 logger.warning(
                     f"Skipping deletion outside analysis dir: {path}"
                 )
@@ -987,18 +991,20 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
 
         finally:
             if not dry_run:
+                # Capture the outer try-block exception (if any) BEFORE the
+                # inner try: sys.exc_info() inside the inner except returns
+                # the inner exception, not the outer one. We only want to
+                # re-raise an unblock failure when no other exception is
+                # already propagating from the cleanup body.
+                cleanup_exc = sys.exc_info()[1]
                 try:
                     registry.unblock_new_inserts()
                 except Exception as unblock_err:
-                    # Don't let unblock failure mask an active exception from
-                    # the try-block — Python would otherwise replace it,
-                    # leaving the real cause only in __context__. Log and
-                    # re-raise only if no exception is already propagating.
                     self._logger.error(
                         f"Failed to unblock inserts after cleanup: "
                         f"{unblock_err}"
                     )
-                    if sys.exc_info()[0] is None:
+                    if cleanup_exc is None:
                         raise
 
     def check_all_files(self, resolve_tables: bool = False) -> dict:
