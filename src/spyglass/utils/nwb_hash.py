@@ -232,6 +232,33 @@ class NwbfileHasher:
 
         return items_to_process
 
+    @staticmethod
+    def _normalize_h5str(value: Any) -> Any:
+        """Decode h5py bytes to str for cross-version hash stability.
+
+        h5py 2.x returns str for variable-length strings; h5py 3.x returns
+        bytes. Without normalization, ``str(b'x')`` = ``"b'x'"`` (with the b
+        prefix), which differs from ``str('x')`` = ``"x"``, producing
+        different hashes for the same logical value.
+
+        Only called when ``legacy_mode=False``; legacy mode preserves the
+        original bytes-as-repr behavior so stored hashes remain reproducible.
+        """
+        if isinstance(value, (bytes, np.bytes_)):
+            return value.decode("utf-8", errors="replace")
+        if isinstance(value, np.ndarray) and value.dtype.kind == "O":
+            return np.array(
+                [
+                    (
+                        v.decode("utf-8", errors="replace")
+                        if isinstance(v, (bytes, np.bytes_))
+                        else v
+                    )
+                    for v in value.flat
+                ]
+            ).reshape(value.shape)
+        return value
+
     def serialize_attr_value(self, value: Any):
         """Serializes an attribute value into bytes for hashing.
 
@@ -249,7 +276,7 @@ class NwbfileHasher:
         """
         if isinstance(value, np.ndarray):
             return value.astype(str).tobytes()  # must be 'astype(str)'
-        elif isinstance(value, (str, int, float)):
+        elif isinstance(value, (str, int, float, np.generic)):
             return str(value).encode()
         return repr(value).encode()  # For other, use repr
 
@@ -266,8 +293,10 @@ class NwbfileHasher:
         this_hash = md5(self.hash_shape_dtype(dataset))
 
         if dataset.shape == ():
-            raw_scalar = str(dataset[()])
-            this_hash.update(self.serialize_attr_value(raw_scalar))
+            raw = dataset[()]
+            if not self.legacy_mode:
+                raw = self._normalize_h5str(raw)
+            this_hash.update(self.serialize_attr_value(str(raw)))
             return this_hash.hexdigest()
 
         dataset_name = dataset.parent.name.split("/")[-1]
@@ -279,6 +308,8 @@ class NwbfileHasher:
         while start < size:
             end = min(start + self.batch_size, size)
             data = dataset[start:end]
+            if not self.legacy_mode:
+                data = self._normalize_h5str(data)
             if precision and self.is_roundable(data):
                 data = np.round(data, precision)
             this_hash.update(self.serialize_attr_value(data))
@@ -326,6 +357,8 @@ class NwbfileHasher:
                 if attr_key in IGNORED_KEYS:
                     continue
                 attr_value = obj.attrs[attr_key]
+                if not self.legacy_mode:
+                    attr_value = self._normalize_h5str(attr_value)
                 this_hash.update(self.hash_shape_dtype(attr_value))
                 this_hash.update(attr_key.encode())
                 this_hash.update(self.serialize_attr_value(attr_value))
