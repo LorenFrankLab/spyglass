@@ -146,6 +146,7 @@ class TestSchemaConsistency:
         schema = load_directory_schema()
         assert set(schema[prefix].keys()) == expected_keys
 
+
 class TestInstallerConfig:
     """Tests for installer config generation."""
 
@@ -720,9 +721,7 @@ class TestTestModeBaseDirGuard:
         bad_base.mkdir()
 
         config = SpyglassConfig()
-        with pytest.raises(
-            ValueError, match="does not contain a 'tests'"
-        ):
+        with pytest.raises(ValueError, match="does not contain a 'tests'"):
             config.load_config(
                 base_dir=str(bad_base),
                 test_mode=True,
@@ -759,9 +758,7 @@ class TestTestModeEnvVarIgnore:
         base.mkdir(parents=True)
         return base
 
-    def test_ignores_per_key_dir_env_var(
-        self, monkeypatch, test_base
-    ):
+    def test_ignores_per_key_dir_env_var(self, monkeypatch, test_base):
         """SPYGLASS_RAW_DIR is ignored under test_mode; resolves to base/raw."""
         from spyglass.settings import SpyglassConfig
 
@@ -775,9 +772,7 @@ class TestTestModeEnvVarIgnore:
 
         assert cfg.raw_dir == str(test_base / "raw")
 
-    def test_ignores_dlc_base_dir_env_var(
-        self, monkeypatch, test_base
-    ):
+    def test_ignores_dlc_base_dir_env_var(self, monkeypatch, test_base):
         from spyglass.settings import SpyglassConfig
 
         evil = "/tmp/some-production-dlc"
@@ -790,9 +785,7 @@ class TestTestModeEnvVarIgnore:
 
         assert cfg._dlc_base == str(test_base / "deeplabcut")
 
-    def test_ignores_dlc_project_path_env_var(
-        self, monkeypatch, test_base
-    ):
+    def test_ignores_dlc_project_path_env_var(self, monkeypatch, test_base):
         """DLC_PROJECT_PATH is the other env-var fallback for DLC base dir."""
         from spyglass.settings import SpyglassConfig
 
@@ -807,9 +800,7 @@ class TestTestModeEnvVarIgnore:
 
         assert cfg._dlc_base == str(test_base / "deeplabcut")
 
-    def test_ignores_moseq_base_dir_env_var(
-        self, monkeypatch, test_base
-    ):
+    def test_ignores_moseq_base_dir_env_var(self, monkeypatch, test_base):
         from spyglass.settings import SpyglassConfig
 
         evil = "/tmp/some-production-moseq"
@@ -822,9 +813,7 @@ class TestTestModeEnvVarIgnore:
 
         assert cfg._moseq_base == str(test_base / "moseq")
 
-    def test_ignores_kachery_zone_env_var(
-        self, monkeypatch, test_base
-    ):
+    def test_ignores_kachery_zone_env_var(self, monkeypatch, test_base):
         from spyglass.settings import SpyglassConfig
         import datajoint as dj
 

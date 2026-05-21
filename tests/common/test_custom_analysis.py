@@ -429,6 +429,7 @@ class TestCleanupAndRegistry:
             created_paths["null"],
             created_paths["orphan"],
         }
+
         def _relative_paths(paths):
             return [
                 (

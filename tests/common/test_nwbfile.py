@@ -225,8 +225,7 @@ def test_build_untracked_file_plan_skips_symlinks(
     assert outside_target.resolve() not in plan.files_to_delete
     assert plan.scanned_files == {real.resolve()}
     assert any(
-        "Skipping symlink" in record.message
-        and str(link) in record.message
+        "Skipping symlink" in record.message and str(link) in record.message
         for record in caplog.records
     ), "symlink skip should emit a warning naming the symlink path"
 
@@ -253,9 +252,7 @@ def test_remove_untracked_files_refuses_path_outside_analysis_dir(
     table = object.__new__(common_nwbfile.AnalysisNwbfile)
     table.__dict__["_analysis_dir"] = str(analysis_dir)
 
-    table._remove_untracked_files(
-        custom_tables=[], dry_run=False, plan=plan
-    )
+    table._remove_untracked_files(custom_tables=[], dry_run=False, plan=plan)
 
     assert outside_target.exists()
 
@@ -271,9 +268,7 @@ def test_analysis_cleanup_dry_run_warns_on_refused_plan(
         "block_new_inserts",
         lambda self, dry_run: setattr(self, "blocked", True),
     )
-    bad_plan = _cleanup_plan(
-        common_nwbfile, scanned=4, tracked=3, delete=2
-    )
+    bad_plan = _cleanup_plan(common_nwbfile, scanned=4, tracked=3, delete=2)
 
     monkeypatch.setattr(common_nwbfile, "AnalysisRegistry", lambda: registry)
     monkeypatch.setattr(
@@ -314,9 +309,7 @@ def test_analysis_cleanup_validates_plan_before_unlink(
 ):
     """cleanup() must abort destructive unlink when the plan exceeds limits."""
     registry = _FakeRegistry()
-    bad_plan = _cleanup_plan(
-        common_nwbfile, scanned=4, tracked=3, delete=2
-    )
+    bad_plan = _cleanup_plan(common_nwbfile, scanned=4, tracked=3, delete=2)
 
     def _remove_untracked_files(self, custom_tables, dry_run=True, plan=None):
         raise AssertionError("dangerous final cleanup plan should not unlink")
@@ -371,9 +364,7 @@ def test_cleanup_preserves_original_exception_when_unblock_raises(
             raise RuntimeError("unblock_kaboom")
 
     registry = _RaisingRegistry()
-    bad_plan = _cleanup_plan(
-        common_nwbfile, scanned=4, tracked=3, delete=2
-    )
+    bad_plan = _cleanup_plan(common_nwbfile, scanned=4, tracked=3, delete=2)
 
     monkeypatch.setattr(common_nwbfile, "AnalysisRegistry", lambda: registry)
     monkeypatch.setattr(
@@ -417,9 +408,7 @@ def test_cleanup_propagates_unblock_failure_when_body_succeeds(
             raise RuntimeError("unblock_kaboom")
 
     registry = _RaisingRegistry()
-    good_plan = _cleanup_plan(
-        common_nwbfile, scanned=8, tracked=6, delete=1
-    )
+    good_plan = _cleanup_plan(common_nwbfile, scanned=8, tracked=6, delete=1)
 
     monkeypatch.setattr(common_nwbfile, "AnalysisRegistry", lambda: registry)
     monkeypatch.setattr(
