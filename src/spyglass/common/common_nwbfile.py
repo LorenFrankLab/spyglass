@@ -1,5 +1,6 @@
 import os
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Union
@@ -696,6 +697,9 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             # symlink under analysis_dir can't add its target (potentially
             # outside analysis_dir) to the deletion plan.
             if path.is_symlink():
+                logger.warning(
+                    f"Skipping symlink in analysis dir: {path}"
+                )
                 continue
             resolved_path = path.expanduser().resolve()
             scanned.add(resolved_path)
@@ -914,9 +918,12 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             cleanups. Defaults to 0.9.
         max_delete_to_tracked_ratio : float
             Maximum ratio of filesystem cleanup deletions to tracked analysis
-            files. This limit applies only to filesystem deletion of untracked
-            or empty analysis NWB files, not to orphan row deletion. Defaults
-            to 10.0.
+            files. Set high by default (10.0) so it only flags scans where
+            untracked-file count dwarfs tracked-file count by an order of
+            magnitude — a strong signal that the analysis directory is mixed
+            with non-analysis data or a wrong path was supplied. This limit
+            applies only to filesystem deletion of untracked or empty analysis
+            NWB files, not to orphan row deletion. Defaults to 10.0.
         """
         heading = "============== Analysis Cleanup "
         suffix = "(Dry Run) ==============" if dry_run else "=============="
@@ -932,12 +939,20 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
 
         try:
             untracked_file_plan = self._build_untracked_file_plan(custom_tables)
-            if not dry_run:
+            try:
                 self._validate_cleanup_plan(
                     untracked_file_plan,
                     max_delete_fraction=max_delete_fraction,
                     max_delete_to_tracked_ratio=max_delete_to_tracked_ratio,
                 )
+            except RuntimeError as plan_err:
+                # Dry-run previews must surface refusal; real runs must abort.
+                if dry_run:
+                    self._logger.warning(
+                        f"Cleanup plan would be refused: {plan_err}"
+                    )
+                else:
+                    raise
 
             # Process each custom analysis table.
             # Subtract valid entries from common_orphans
@@ -962,16 +977,29 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                 f"orphans, {len(unused)} unused externals"
             )
 
-            # Apply the deletion plan built before the orphan/external pass.
-            # Newly untracked files produced by this run's orphan deletion get
-            # caught on the next cleanup invocation.
+            # Reuse the pre-pass plan rather than rescanning: rescanning here
+            # would bypass the validate-before-act guard already applied to
+            # this plan. Files newly orphaned by this run's orphan deletion
+            # are caught on the next cleanup invocation.
             _ = self._remove_untracked_files(
                 custom_tables, dry_run=dry_run, plan=untracked_file_plan
             )
 
         finally:
             if not dry_run:
-                registry.unblock_new_inserts()
+                try:
+                    registry.unblock_new_inserts()
+                except Exception as unblock_err:
+                    # Don't let unblock failure mask an active exception from
+                    # the try-block — Python would otherwise replace it,
+                    # leaving the real cause only in __context__. Log and
+                    # re-raise only if no exception is already propagating.
+                    self._logger.error(
+                        f"Failed to unblock inserts after cleanup: "
+                        f"{unblock_err}"
+                    )
+                    if sys.exc_info()[0] is None:
+                        raise
 
     def check_all_files(self, resolve_tables: bool = False) -> dict:
         """Check files across all analysis tables for issues.

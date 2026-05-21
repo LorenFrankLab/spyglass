@@ -384,9 +384,8 @@ def pytest_configure(config):
     dj.config.update(SERVER.credentials)
 
     # Point spyglass_dirs.base at the resolved test base so dj.config and the
-    # resolved path agree. The settings.py test-mode guard (added in this PR)
-    # handles the case where a shell config left non-test directory paths in
-    # dj.config["custom"] — that's no longer this conftest's concern.
+    # resolved path agree. Non-test directory paths in dj.config["custom"] are
+    # refused by the SpyglassConfig test_mode guard at load_config time.
     dj.config.setdefault("custom", {})["spyglass_dirs"] = {"base": str(BASE_DIR)}
 
     DOWNLOADS = DataDownloader(
