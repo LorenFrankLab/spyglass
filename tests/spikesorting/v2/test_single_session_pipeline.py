@@ -417,6 +417,44 @@ def test_artifact_selection_resolve_source_returns_recording_kind(
 
 
 @pytest.mark.slow
+def test_shared_artifact_group_insert_validates_session(populated_recording):
+    """``SharedArtifactGroup.insert_group`` writes master + members
+    when all members share a session; raises on mismatch."""
+    from spyglass.spikesorting.v2.artifact import SharedArtifactGroup
+
+    # Clean any prior group with the same name.
+    (
+        SharedArtifactGroup & {"shared_artifact_group_name": "test_group"}
+    ).super_delete(warn=False)
+
+    SharedArtifactGroup.insert_group(
+        "test_group",
+        [{"recording_id": populated_recording["recording_id"]}],
+    )
+    assert len(SharedArtifactGroup & {"shared_artifact_group_name": "test_group"}) == 1
+    assert (
+        len(
+            SharedArtifactGroup.Member
+            & {"shared_artifact_group_name": "test_group"}
+        )
+        == 1
+    )
+
+    # Empty members rejects.
+    with pytest.raises(ValueError, match="members list is empty"):
+        SharedArtifactGroup.insert_group("empty_group", [])
+
+    # Missing recording_id rejects.
+    with pytest.raises(ValueError, match="must include 'recording_id'"):
+        SharedArtifactGroup.insert_group("bad_group", [{"foo": "bar"}])
+
+    # Cleanup.
+    (
+        SharedArtifactGroup & {"shared_artifact_group_name": "test_group"}
+    ).super_delete(warn=False)
+
+
+@pytest.mark.slow
 def test_artifact_detection_populates_and_writes_interval_list(
     populated_recording,
 ):

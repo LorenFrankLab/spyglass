@@ -129,10 +129,97 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
 
     @classmethod
     def insert_group(cls, name: str, members: list[dict]) -> None:
-        """Insert master + Member rows; validate session consistency."""
-        raise NotImplementedError(
-            "SharedArtifactGroup.insert_group is not yet implemented"
+        """Insert master + Member rows; validate session consistency.
+
+        Parameters
+        ----------
+        name
+            Group name (PK on the master). Must be unique within the
+            installation.
+        members
+            List of dicts identifying member recordings. Each dict must
+            contain at least ``recording_id`` (other fields are ignored
+            so the caller can pass arbitrary upstream rows / PKs).
+
+        Raises
+        ------
+        ValueError
+            If ``members`` is empty, if any member ``recording_id`` is
+            not a populated ``Recording``, or if members span more than
+            one session. The shared-group detection assumes all members
+            share a time axis -- mixing sessions makes the
+            artifact-removed valid times undefined.
+        """
+        from spyglass.spikesorting.v2.recording import (
+            Recording,
+            RecordingSelection,
         )
+
+        if not members:
+            raise ValueError(
+                "SharedArtifactGroup.insert_group: members list is empty. "
+                "Pass at least one recording_id dict."
+            )
+
+        member_recording_ids = []
+        for m in members:
+            if "recording_id" not in m:
+                raise ValueError(
+                    "SharedArtifactGroup.insert_group: every member dict "
+                    "must include 'recording_id'. Got: " + str(m)
+                )
+            member_recording_ids.append(m["recording_id"])
+
+        # All recording_ids must reference populated Recording rows.
+        missing = [
+            rid
+            for rid in member_recording_ids
+            if not (Recording & {"recording_id": rid})
+        ]
+        if missing:
+            raise ValueError(
+                "SharedArtifactGroup.insert_group: recording_id(s) "
+                f"{missing} are not in Recording. Populate Recording for "
+                "those selections first."
+            )
+
+        sessions = list(
+            {
+                (
+                    RecordingSelection & {"recording_id": rid}
+                ).fetch1("nwb_file_name")
+                for rid in member_recording_ids
+            }
+        )
+        if len(sessions) != 1:
+            raise ValueError(
+                "SharedArtifactGroup.insert_group: members span "
+                f"{len(sessions)} sessions ({sorted(sessions)}); a shared "
+                "artifact-detection pass only makes sense within one "
+                "session because the detection writes IntervalList rows "
+                "keyed by (nwb_file_name, interval_list_name)."
+            )
+        (nwb_file_name,) = sessions
+
+        master_row = {
+            "shared_artifact_group_name": name,
+            "nwb_file_name": nwb_file_name,
+        }
+        member_rows = [
+            {
+                "shared_artifact_group_name": name,
+                "recording_id": rid,
+            }
+            for rid in member_recording_ids
+        ]
+
+        if cls.connection.in_transaction:
+            cls.insert1(master_row)
+            cls.Member.insert(member_rows)
+        else:
+            with cls.connection.transaction:
+                cls.insert1(master_row)
+                cls.Member.insert(member_rows)
 
 
 @schema
