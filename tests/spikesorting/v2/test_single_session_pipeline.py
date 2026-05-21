@@ -295,6 +295,27 @@ def test_recording_populates_and_round_trips(
     )
 
 
+def _clear_curations(sorting_key):
+    """Delete CurationV2 rows for a sorting + the corresponding
+    SpikeSortingOutput merge master rows.
+
+    DataJoint refuses to delete a part table row whose master is still
+    present, so the cleanup walks from the merge master down: first
+    drop the SpikeSortingOutput master rows that point at any
+    CurationV2 part rows for this sorting (cascades the part), then
+    drop the CurationV2 rows themselves.
+    """
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    merge_ids = (
+        SpikeSortingOutput.CurationV2 & sorting_key
+    ).fetch("merge_id")
+    for mid in merge_ids:
+        (SpikeSortingOutput & {"merge_id": mid}).super_delete(warn=False)
+    (CurationV2 & sorting_key).super_delete(warn=False)
+
+
 # ---------- ArtifactSelection source-part pattern -------------------------
 
 
@@ -940,7 +961,7 @@ def test_curation_v2_insert_root_unlabeled(populated_sorting):
 
     # Clean any prior curations for this sort so the assertion on
     # curation_id is stable.
-    (CurationV2 & populated_sorting).super_delete(warn=False)
+    _clear_curations(populated_sorting)
 
     pk = CurationV2.insert_curation(
         sorting_key=populated_sorting, labels={}
@@ -966,7 +987,7 @@ def test_curation_v2_insert_with_labels(populated_sorting):
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import Sorting
 
-    (CurationV2 & populated_sorting).super_delete(warn=False)
+    _clear_curations(populated_sorting)
 
     units = (Sorting.Unit & populated_sorting).fetch("unit_id")
     assert len(units) > 0
@@ -1000,7 +1021,7 @@ def test_curation_v2_parent_validation_and_nonincreasing_ids(populated_sorting):
 
     from spyglass.spikesorting.v2.curation import CurationV2
 
-    (CurationV2 & populated_sorting).super_delete(warn=False)
+    _clear_curations(populated_sorting)
 
     pk0 = CurationV2.insert_curation(
         sorting_key=populated_sorting, labels={}
@@ -1045,7 +1066,7 @@ def test_curation_v2_get_matchable_unit_ids_filters_labels(populated_sorting):
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import Sorting
 
-    (CurationV2 & populated_sorting).super_delete(warn=False)
+    _clear_curations(populated_sorting)
     units = sorted(int(u) for u in (Sorting.Unit & populated_sorting).fetch("unit_id"))
     assert len(units) >= 1
     # Tag the first unit with BOTH an excluded label (artifact) and
@@ -1074,7 +1095,7 @@ def test_curation_v2_get_sort_group_info_returns_all_electrodes(populated_sortin
         SortGroupV2,
     )
 
-    (CurationV2 & populated_sorting).super_delete(warn=False)
+    _clear_curations(populated_sorting)
     pk = CurationV2.insert_curation(
         sorting_key=populated_sorting, labels={}
     )
@@ -1116,7 +1137,7 @@ def test_curation_v2_get_sorting_round_trips_spike_times(populated_sorting):
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import Sorting
 
-    (CurationV2 & populated_sorting).super_delete(warn=False)
+    _clear_curations(populated_sorting)
     pk = CurationV2.insert_curation(
         sorting_key=populated_sorting, labels={}
     )
@@ -1129,6 +1150,74 @@ def test_curation_v2_get_sorting_round_trips_spike_times(populated_sorting):
         assert len(src_times) == len(cur_times)
         if len(src_times):
             assert np.allclose(np.sort(src_times), np.sort(cur_times))
+
+
+@pytest.mark.slow
+def test_curation_v2_auto_registers_in_merge_table(populated_sorting):
+    """``insert_curation`` writes the matching
+    ``SpikeSortingOutput.CurationV2`` part row in the same transaction;
+    a merge_id resolves back through ``get_unit_brain_regions``."""
+    from spyglass.spikesorting.spikesorting_merge import (
+        SpikeSortingOutput,
+        source_class_dict,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    assert "CurationV2" in source_class_dict
+    assert hasattr(SpikeSortingOutput, "CurationV2")
+
+    _clear_curations(populated_sorting)
+    # Belt and suspenders: also clear any stale merge rows for this sort.
+    stale = (
+        SpikeSortingOutput.CurationV2 & populated_sorting
+    ).fetch("merge_id")
+    for mid in stale:
+        (SpikeSortingOutput & {"merge_id": mid}).super_delete(warn=False)
+
+    pk = CurationV2.insert_curation(
+        sorting_key=populated_sorting, labels={}
+    )
+    # The merge part now has exactly one row for this curation.
+    merge_rows = (
+        SpikeSortingOutput.CurationV2 & pk
+    ).fetch(as_dict=True)
+    assert len(merge_rows) == 1
+    merge_id = merge_rows[0]["merge_id"]
+    # And the master surfaces the v2 source enum.
+    assert (
+        SpikeSortingOutput & {"merge_id": merge_id}
+    ).fetch1("source") == "CurationV2"
+
+    # Dispatch round-trip: get_unit_brain_regions resolves to
+    # CurationV2's accessor and returns a DataFrame.
+    df = SpikeSortingOutput.get_unit_brain_regions({"merge_id": merge_id})
+    assert "unit_id" in df.columns
+    assert "region_resolution" in df.columns
+
+
+@pytest.mark.slow
+def test_get_restricted_merge_ids_v2_resolves_through_chain(populated_sorting):
+    """``get_restricted_merge_ids(sources=['v2'])`` resolves the v2
+    restriction surface (sorting_id, curation_id, ...) down to a
+    merge_id from the CurationV2 part."""
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    _clear_curations(populated_sorting)
+    pk = CurationV2.insert_curation(
+        sorting_key=populated_sorting, labels={}
+    )
+    merge_ids = SpikeSortingOutput().get_restricted_merge_ids(
+        {"sorting_id": pk["sorting_id"], "curation_id": pk["curation_id"]},
+        sources=["v2"],
+    )
+    assert len(merge_ids) == 1
+    # Re-resolving by sorter name also hits the same merge_id.
+    merge_ids2 = SpikeSortingOutput().get_restricted_merge_ids(
+        {"sorter": "mountainsort5"},
+        sources=["v2"],
+    )
+    assert merge_ids[0] in list(merge_ids2)
 
 
 @pytest.mark.slow

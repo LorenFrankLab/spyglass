@@ -21,6 +21,21 @@ from spyglass.utils.dj_mixin import SpyglassMixin
 from spyglass.utils.logging import logger
 from spyglass.utils.spikesorting import firing_rate_from_spike_indicator
 
+# v2 is in-development and gated behind the DB-host safety guard
+# (raises on non-localhost). Import the v2 module lazily and wrap in
+# try/except so v0/v1-only environments keep working unchanged; the
+# v2 part table on SpikeSortingOutput is then only declared when v2
+# is importable in the current environment.
+try:
+    from spyglass.spikesorting.v2.curation import (
+        CurationV2 as _CurationV2,
+    )
+except Exception as _v2_import_err:  # pragma: no cover -- v0/v1 envs
+    _CurationV2 = None
+    _v2_import_error = _v2_import_err
+else:
+    _v2_import_error = None
+
 schema = dj.schema("spikesorting_merge")
 
 source_class_dict = {
@@ -28,6 +43,8 @@ source_class_dict = {
     "ImportedSpikeSorting": ImportedSpikeSorting,
     "CurationV1": CurationV1,
 }
+if _CurationV2 is not None:
+    source_class_dict["CurationV2"] = _CurationV2
 
 
 @schema
@@ -59,6 +76,100 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         ---
         -> CuratedSpikeSorting
         """
+
+    # v2 part table is only declared when the v2 module is importable
+    # in the current environment (see the lazy import at module top).
+    # Otherwise the merge table keeps the v0/v1 surface untouched.
+    if _CurationV2 is not None:
+
+        class CurationV2(SpyglassMixin, dj.Part):  # noqa: F811
+            definition = """
+            -> master
+            ---
+            -> _CurationV2
+            """
+
+    def _get_restricted_merge_ids_v2(
+        self,
+        key: dict,
+        as_dict: bool = False,
+    ) -> Union[None, list, dict]:
+        """Resolve v2-source merge ids for a restriction key.
+
+        Handles the v2 restriction surface called out in
+        ``shared-contracts.md § SpikeSortingOutput Part-Table
+        Convention for v2``: ``nwb_file_name``, ``team_name``,
+        ``sort_group_id``, ``interval_list_name``,
+        ``preproc_params_name``, ``recording_id``, ``artifact_id``,
+        ``sorter``, ``sorter_params_name``, ``sorting_id``, and
+        ``curation_id`` must all resolve through the v2 Selection
+        tables and source parts to ``SpikeSortingOutput.CurationV2``.
+        Concat-source restrictions land with the Phase 3 materializer.
+        """
+        if _CurationV2 is None:
+            return [] if not as_dict else []
+
+        from spyglass.spikesorting.v2.artifact import (
+            ArtifactSelection,
+        )
+        from spyglass.spikesorting.v2.recording import (
+            RecordingSelection,
+        )
+        from spyglass.spikesorting.v2.sorting import (
+            Sorting,
+            SortingSelection,
+        )
+
+        # Resolve as far as v2.Recording-side from upstream FKs first.
+        # We compose the join down the pipeline so each new
+        # restriction-bearing key field narrows the relation.
+        rec_keys = [
+            "nwb_file_name",
+            "team_name",
+            "sort_group_id",
+            "interval_list_name",
+            "preproc_params_name",
+            "recording_id",
+        ]
+        rec_restriction = {k: key[k] for k in rec_keys if k in key}
+        rec_table = RecordingSelection & rec_restriction
+
+        # Artifact restriction narrows by artifact_id when present.
+        art_restriction = {}
+        if "artifact_id" in key:
+            art_restriction["artifact_id"] = key["artifact_id"]
+        if art_restriction:
+            art_table = ArtifactSelection & art_restriction
+            # Cross-join the artifact and recording sides to keep only
+            # the (recording, artifact) tuples that match both.
+            sort_rec_source = (
+                SortingSelection.RecordingSource * rec_table.proj()
+            ) & art_restriction
+            sort_master = SortingSelection * sort_rec_source.proj()
+        else:
+            sort_rec_source = SortingSelection.RecordingSource * rec_table.proj()
+            sort_master = SortingSelection * sort_rec_source.proj()
+
+        sort_keys = [
+            "sorter",
+            "sorter_params_name",
+            "sorting_id",
+            "artifact_id",
+        ]
+        sort_restriction = {k: key[k] for k in sort_keys if k in key}
+        sort_master = sort_master & sort_restriction
+
+        curation_keys = ["curation_id"]
+        curation_restriction = {
+            k: key[k] for k in curation_keys if k in key
+        }
+        curation_table = (
+            _CurationV2 * sort_master.proj("sorting_id")
+        ) & curation_restriction
+
+        # Join the merge part to find the corresponding merge_ids.
+        joined = SpikeSortingOutput.CurationV2 * curation_table.proj()
+        return joined.fetch("merge_id", as_dict=as_dict)
 
     def _get_restricted_merge_ids_v1(
         self,
@@ -163,6 +274,23 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
                 )
             )
 
+        if "v2" in sources:
+            if _CurationV2 is None:
+                raise RuntimeError(
+                    "SpikeSortingOutput.get_restricted_merge_ids: v2 source "
+                    "requested but spyglass.spikesorting.v2 is not "
+                    "importable in this environment. The v2 DB-host safety "
+                    "guard refuses non-localhost; set "
+                    "SPYGLASS_SPIKESORTING_V2_ALLOW_NONLOCAL_DB=1 to bypass "
+                    "with the documented risk caveat."
+                )
+            merge_ids.extend(
+                self._get_restricted_merge_ids_v2(
+                    key.copy(),
+                    as_dict=as_dict,
+                )
+            )
+
         return merge_ids
 
     @classmethod
@@ -245,6 +373,52 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             spike_indicator = spike_indicator[:, np.newaxis]
 
         return spike_indicator
+
+    @classmethod
+    def get_unit_brain_regions(cls, key):
+        """Per-unit brain regions for a merge_key.
+
+        Dispatches through ``source_class_dict`` to the source table's
+        ``get_unit_brain_regions`` accessor. v2's ``CurationV2`` defines
+        this method (lands with slice 1d.1); v0's ``CuratedSpikeSorting``
+        and v1's ``CurationV1`` do not, and a clear ``AttributeError``
+        is raised on those sources. This is intentional -- v0/v1 do not
+        carry the per-unit Electrode FK that the v2 Sorting.Unit
+        contract requires.
+
+        Parameters
+        ----------
+        key : dict
+            A merge_key (or any restriction that resolves to one).
+
+        Returns
+        -------
+        pandas.DataFrame
+            One row per curated unit with ``unit_id``, ``electrode_id``,
+            ``region_name``, ``subregion_name``, ``subsubregion_name``,
+            and ``region_resolution``.
+        """
+        source_table = source_class_dict[
+            to_camel_case(cls.merge_get_parent(key).table_name)
+        ]
+        if not hasattr(source_table, "get_unit_brain_regions"):
+            raise AttributeError(
+                "SpikeSortingOutput.get_unit_brain_regions: source table "
+                f"{source_table.__name__} does not define "
+                "get_unit_brain_regions. Only v2's CurationV2 carries "
+                "the per-unit Electrode FK that this accessor needs."
+            )
+        # Fetch the FULL part row (not just KEY) so the dispatch
+        # target sees the upstream FK fields it needs -- e.g., the
+        # CurationV2 part's (sorting_id, curation_id) are non-PK
+        # FKs that ``fetch("KEY")`` would drop.
+        part_rows = cls.merge_get_part(key).fetch(as_dict=True)
+        if len(part_rows) != 1:
+            raise ValueError(
+                "SpikeSortingOutput.get_unit_brain_regions: merge_key "
+                f"matched {len(part_rows)} part rows; expected exactly one."
+            )
+        return source_table().get_unit_brain_regions(part_rows[0])
 
     @classmethod
     def get_firing_rate(
