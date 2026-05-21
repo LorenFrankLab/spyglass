@@ -145,7 +145,6 @@ tests/_data/*
 *.cameraHWSync
 *.stateScriptLog
 tests/_data/*
-!tests/_data/.spyglass-test-root
 
 *.nwb
 *.DS_Store
