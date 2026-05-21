@@ -328,27 +328,240 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
     def make(self, key):
         """Detect artifacts and write IntervalList rows.
 
-        ``make()`` MUST re-check that the upstream selection has exactly
-        one source part row at entry, per the shared-contracts Source
-        Part Pattern.
+        Re-checks the upstream selection has exactly one source part
+        row at entry (Layer 2 of the source-part pattern). For a
+        single-recording source, loads the cached preprocessed
+        ``ElectricalSeries`` via ``Recording.get_recording``, scans for
+        amplitude / z-score threshold crossings, expands them by the
+        configured removal window, and writes the artifact-removed
+        valid times into ``common.IntervalList`` under name
+        ``f"artifact_{artifact_id}"``.
+
+        The shared-artifact-group source path runs the same detection
+        over the union of channels across the group's member recordings
+        and writes one ``IntervalList`` row per distinct member
+        ``nwb_file_name``; that branch lands once
+        ``SharedArtifactGroup.insert_group`` is implemented.
         """
-        raise NotImplementedError(
-            "ArtifactDetection.make is not yet implemented"
+        source = ArtifactSelection.resolve_source(key)
+        params = (
+            ArtifactDetectionParameters
+            * (ArtifactSelection & key)
+        ).fetch1("params")
+        validated = ArtifactDetectionParamsSchema.model_validate(params)
+
+        if source.kind == "recording":
+            self._make_single_recording(key, source.key, validated)
+        elif source.kind == "shared_artifact_group":
+            raise NotImplementedError(
+                "ArtifactDetection.make for SharedArtifactGroup is not yet "
+                "implemented; populate SharedArtifactGroup.insert_group "
+                "first."
+            )
+        else:
+            raise RuntimeError(
+                f"ArtifactDetection.make: unexpected source kind "
+                f"{source.kind!r}."
+            )
+
+    def _make_single_recording(self, key, source_key, validated):
+        """Implementation of make() for the RecordingSource path."""
+        from spyglass.spikesorting.v2.recording import (
+            Recording,
+            RecordingSelection,
         )
+
+        recording_id = source_key["recording_id"]
+        nwb_file_name = (
+            RecordingSelection & {"recording_id": recording_id}
+        ).fetch1("nwb_file_name")
+        recording = Recording().get_recording({"recording_id": recording_id})
+
+        valid_times = self._detect_artifacts(recording, validated)
+
+        interval_list_name = f"artifact_{key['artifact_id']}"
+        IntervalList.insert1(
+            {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": interval_list_name,
+                "valid_times": valid_times,
+                "pipeline": "spikesorting_artifact_v2",
+            }
+        )
+        self.insert1(key)
+
+    @staticmethod
+    def _detect_artifacts(recording, validated):
+        """Run amplitude / z-score artifact scan on a SI recording.
+
+        Returns an ``ndarray`` of shape ``(n_intervals, 2)`` containing
+        the artifact-removed valid times in seconds. When ``detect`` is
+        False the full recording window is returned untouched.
+        """
+        import numpy as _np
+
+        timestamps = recording.get_times()
+        if not validated.detect:
+            return _np.asarray([[timestamps[0], timestamps[-1]]])
+
+        # Phase 1 MVP: in-memory scan. Chunked iteration lands with the
+        # recompute pipeline; the smoke / 60s fixtures fit easily.
+        traces = recording.get_traces(return_scaled=False)
+        # Scale to microvolts using SI's stored gain so the threshold
+        # comparison is in physical units.
+        gains = recording.get_channel_gains()
+        traces_uv = traces.astype(_np.float32) * gains[None, :]
+        absolute = _np.abs(traces_uv)
+
+        n_channels = traces.shape[1]
+        n_required = int(
+            _np.ceil(validated.proportion_above_thresh * n_channels)
+        )
+
+        if validated.amplitude_thresh_uV is not None:
+            above_amp = absolute > validated.amplitude_thresh_uV
+        else:
+            above_amp = _np.zeros_like(absolute, dtype=bool)
+        if validated.zscore_thresh is not None:
+            mu = traces_uv.mean(axis=0, keepdims=True)
+            sigma = traces_uv.std(axis=0, keepdims=True) + 1e-12
+            zscores = _np.abs((traces_uv - mu) / sigma)
+            above_z = zscores > validated.zscore_thresh
+        else:
+            above_z = _np.zeros_like(absolute, dtype=bool)
+
+        if (
+            validated.amplitude_thresh_uV is not None
+            and validated.zscore_thresh is not None
+        ):
+            channel_hit = above_amp & above_z
+        elif validated.amplitude_thresh_uV is not None:
+            channel_hit = above_amp
+        else:
+            channel_hit = above_z
+
+        frames_above = (channel_hit.sum(axis=1) >= n_required).nonzero()[0]
+        if len(frames_above) == 0:
+            return _np.asarray([[timestamps[0], timestamps[-1]]])
+
+        fs = recording.get_sampling_frequency()
+        half_window_frames = int(
+            _np.ceil(validated.removal_window_ms * 1e-3 * fs / 2)
+        )
+        join_window_frames = int(
+            _np.ceil(validated.join_window_ms * 1e-3 * fs)
+        )
+
+        # Build artifact intervals in frame indices, then convert to
+        # seconds and subtract from the recording window.
+        spans = []
+        cur_start = frames_above[0]
+        cur_end = frames_above[0]
+        for f in frames_above[1:]:
+            if f - cur_end <= join_window_frames:
+                cur_end = f
+            else:
+                spans.append((cur_start, cur_end))
+                cur_start = f
+                cur_end = f
+        spans.append((cur_start, cur_end))
+
+        artifact_intervals = []
+        for start_f, end_f in spans:
+            start_f = max(0, start_f - half_window_frames)
+            end_f = min(len(timestamps) - 1, end_f + half_window_frames)
+            artifact_intervals.append(
+                [timestamps[start_f], timestamps[end_f]]
+            )
+
+        # Subtract artifact intervals from the recording window.
+        valid_start = timestamps[0]
+        valid_end = timestamps[-1]
+        kept = []
+        cursor = valid_start
+        for art_start, art_end in artifact_intervals:
+            if art_start > cursor:
+                kept.append([cursor, art_start])
+            cursor = max(cursor, art_end)
+        if cursor < valid_end:
+            kept.append([cursor, valid_end])
+        return _np.asarray(kept) if kept else _np.empty((0, 2))
 
     def get_artifact_removed_intervals(self, key):
-        """Thin ``IntervalList.fetch1('valid_times')`` wrapper."""
+        """Thin ``IntervalList.fetch1('valid_times')`` wrapper.
+
+        Returns the artifact-removed valid times array for the
+        ``artifact_id`` keyed by ``key``. The IntervalList row's
+        ``nwb_file_name`` is resolved through the upstream source part
+        so this works for both single-recording and (once implemented)
+        shared-artifact-group selections.
+        """
+        from spyglass.spikesorting.v2.recording import RecordingSelection
+
+        source = ArtifactSelection.resolve_source(key)
+        artifact_id = (
+            (self & key).fetch1("KEY")["artifact_id"]
+            if (self & key)
+            else key["artifact_id"]
+        )
+        interval_list_name = f"artifact_{artifact_id}"
+
+        if source.kind == "recording":
+            nwb_file_name = (
+                RecordingSelection
+                & {"recording_id": source.key["recording_id"]}
+            ).fetch1("nwb_file_name")
+            return (
+                IntervalList
+                & {
+                    "nwb_file_name": nwb_file_name,
+                    "interval_list_name": interval_list_name,
+                }
+            ).fetch1("valid_times")
+
         raise NotImplementedError(
-            "ArtifactDetection.get_artifact_removed_intervals is not yet "
-            "implemented"
+            "ArtifactDetection.get_artifact_removed_intervals for "
+            "SharedArtifactGroup is not yet implemented."
         )
 
-    def delete(self, *args, **kwargs):
+    def delete(self, *args, safemode=None, **kwargs):
         """Override that also removes the matching IntervalList rows.
 
         DataJoint does not cascade through ``interval_list_name``-keyed
-        dependencies, so the cleanup is explicit.
+        dependencies, so the cleanup is explicit. We fetch the
+        ``artifact_id`` (and, for shared-group sources, the member
+        ``nwb_file_name``s) up front, delete the master row(s) via
+        ``super().delete``, then drop the matching IntervalList rows.
         """
-        raise NotImplementedError(
-            "ArtifactDetection.delete override is not yet implemented"
-        )
+        from spyglass.spikesorting.v2.recording import RecordingSelection
+
+        # Collect the IntervalList rows to clean up BEFORE we delete the
+        # master rows -- the source-part join no longer resolves after
+        # the master is gone.
+        interval_rows_to_remove = []
+        for row in self.fetch(as_dict=True):
+            try:
+                source = ArtifactSelection.resolve_source(row)
+            except Exception:
+                continue
+            interval_list_name = f"artifact_{row['artifact_id']}"
+            if source.kind == "recording":
+                nwb_file_name = (
+                    RecordingSelection
+                    & {"recording_id": source.key["recording_id"]}
+                ).fetch1("nwb_file_name")
+                interval_rows_to_remove.append(
+                    {
+                        "nwb_file_name": nwb_file_name,
+                        "interval_list_name": interval_list_name,
+                    }
+                )
+            # shared_artifact_group branch lands with the group helper.
+
+        if safemode is None:
+            super().delete(*args, **kwargs)
+        else:
+            super().delete(*args, safemode=safemode, **kwargs)
+
+        for restriction in interval_rows_to_remove:
+            (IntervalList & restriction).super_delete(warn=False)

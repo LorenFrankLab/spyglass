@@ -417,6 +417,121 @@ def test_artifact_selection_resolve_source_returns_recording_kind(
 
 
 @pytest.mark.slow
+def test_artifact_detection_populates_and_writes_interval_list(
+    populated_recording,
+):
+    """``ArtifactDetection.make`` writes one ``IntervalList`` row under
+    ``f"artifact_{artifact_id}"`` and the row is fetchable via
+    ``get_artifact_removed_intervals``."""
+    from spyglass.common import IntervalList
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactDetectionParameters,
+        ArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.recording import RecordingSelection
+
+    ArtifactDetectionParameters.insert_default()
+    # Clean any prior selection / detection.
+    existing = (
+        ArtifactSelection.RecordingSource
+        & {"recording_id": populated_recording["recording_id"]}
+    ).fetch("KEY", as_dict=True)
+    for row in existing:
+        ArtifactDetection & row  # noqa: B018 -- silence linter on unused expr
+        (ArtifactDetection & {"artifact_id": row["artifact_id"]}).delete()
+        (ArtifactSelection & {"artifact_id": row["artifact_id"]}).super_delete(
+            warn=False
+        )
+
+    pk = ArtifactSelection.insert_selection(
+        {
+            "recording_id": populated_recording["recording_id"],
+            "artifact_params_name": "none",
+        }
+    )
+    ArtifactDetection.populate(pk, reserve_jobs=False)
+    assert len(ArtifactDetection & pk) == 1
+
+    nwb_file_name = (
+        RecordingSelection & populated_recording
+    ).fetch1("nwb_file_name")
+    interval_list_name = f"artifact_{pk['artifact_id']}"
+    saved = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": interval_list_name,
+        }
+    ).fetch1("valid_times")
+    assert saved.shape[1] == 2  # (n_intervals, 2)
+    # The "none" preset means no artifacts removed -> full window.
+    assert saved.shape[0] == 1
+    assert saved[0][0] < saved[0][-1]
+
+    retrieved = ArtifactDetection().get_artifact_removed_intervals(pk)
+    assert (retrieved == saved).all()
+
+
+@pytest.mark.slow
+def test_artifact_detection_delete_removes_interval_list_row(
+    populated_recording,
+):
+    """``ArtifactDetection.delete()`` cleans up the matching
+    ``IntervalList`` row (DataJoint does not cascade through
+    ``interval_list_name``-keyed dependencies)."""
+    from spyglass.common import IntervalList
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactDetectionParameters,
+        ArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.recording import RecordingSelection
+
+    ArtifactDetectionParameters.insert_default()
+    existing = (
+        ArtifactSelection.RecordingSource
+        & {"recording_id": populated_recording["recording_id"]}
+    ).fetch("KEY", as_dict=True)
+    for row in existing:
+        (ArtifactDetection & {"artifact_id": row["artifact_id"]}).delete()
+        (ArtifactSelection & {"artifact_id": row["artifact_id"]}).super_delete(
+            warn=False
+        )
+
+    pk = ArtifactSelection.insert_selection(
+        {
+            "recording_id": populated_recording["recording_id"],
+            "artifact_params_name": "none",
+        }
+    )
+    ArtifactDetection.populate(pk, reserve_jobs=False)
+
+    nwb_file_name = (
+        RecordingSelection & populated_recording
+    ).fetch1("nwb_file_name")
+    interval_list_name = f"artifact_{pk['artifact_id']}"
+    assert (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": interval_list_name,
+        }
+    )
+
+    (ArtifactDetection & pk).delete()
+
+    assert not (ArtifactDetection & pk)
+    assert not (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": interval_list_name,
+        }
+    )
+
+
+@pytest.mark.slow
 def test_artifact_selection_resolve_source_detects_bypass(populated_recording):
     """``resolve_source`` raises ``SchemaBypassError`` when a master has
     zero source part rows (an integrity bug, e.g. from direct dj
