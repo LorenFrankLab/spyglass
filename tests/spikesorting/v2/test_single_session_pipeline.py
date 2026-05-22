@@ -51,7 +51,7 @@ def test_set_group_by_shank_creates_one_group_per_shank(polymer_smoke_session):
 
     nwb_file_name = polymer_smoke_session["nwb_file_name"]
     # Clean any rows a previous module run may have left.
-    (SortGroupV2 & polymer_smoke_session).super_delete(warn=False)
+    _clean_session_v2(polymer_smoke_session)
 
     SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
 
@@ -76,7 +76,7 @@ def test_set_group_by_shank_refuses_overlapping_rerun(polymer_smoke_session):
     from spyglass.spikesorting.v2.recording import SortGroupV2
 
     nwb_file_name = polymer_smoke_session["nwb_file_name"]
-    (SortGroupV2 & polymer_smoke_session).super_delete(warn=False)
+    _clean_session_v2(polymer_smoke_session)
     SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
 
     with pytest.raises(ValueError, match="silently extend"):
@@ -93,7 +93,7 @@ def test_set_group_by_shank_overwrite_requires_confirm(polymer_smoke_session):
     )
 
     nwb_file_name = polymer_smoke_session["nwb_file_name"]
-    (SortGroupV2 & polymer_smoke_session).super_delete(warn=False)
+    _clean_session_v2(polymer_smoke_session)
     SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
 
     preview = SortGroupV2.preview_existing_entries(nwb_file_name)
@@ -126,7 +126,7 @@ def test_set_group_by_column_matches_by_shank(polymer_smoke_session):
     from spyglass.spikesorting.v2.recording import SortGroupV2
 
     nwb_file_name = polymer_smoke_session["nwb_file_name"]
-    (SortGroupV2 & polymer_smoke_session).super_delete(warn=False)
+    _clean_session_v2(polymer_smoke_session)
 
     shanks = sorted(
         set(
@@ -178,7 +178,7 @@ def test_recording_selection_insert_is_idempotent(polymer_smoke_session):
     from spyglass.common.common_lab import LabTeam
 
     nwb_file_name = polymer_smoke_session["nwb_file_name"]
-    (SortGroupV2 & polymer_smoke_session).super_delete(warn=False)
+    _clean_session_v2(polymer_smoke_session)
     SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
     PreprocessingParameters.insert_default()
 
@@ -232,7 +232,7 @@ def recording_selection_key(polymer_smoke_session):
     )
 
     nwb_file_name = polymer_smoke_session["nwb_file_name"]
-    (SortGroupV2 & polymer_smoke_session).super_delete(warn=False)
+    _clean_session_v2(polymer_smoke_session)
     SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
     PreprocessingParameters.insert_default()
     LabTeam.insert1(
@@ -342,6 +342,90 @@ def _clear_curations(sorting_key):
     for mid in merge_ids:
         (SpikeSortingOutput & {"merge_id": mid}).super_delete(warn=False)
     (CurationV2 & sorting_key).super_delete(warn=False)
+
+
+def _clean_session_v2(session_key):
+    """Cascade-aware cleanup of every v2 row for a session.
+
+    The v2 source-polymorphic source-part pattern leaves
+    ``ArtifactSelection`` and ``SortingSelection`` MASTERS with no
+    direct FK to upstream tables (only their ``RecordingSource`` PARTS
+    carry the FK). DataJoint's cascade can't traverse that gap: a
+    ``super_delete(SortGroupV2 & session_key)`` raises ``Attempt to
+    delete part table ... before deleting from its master`` once the
+    cascade reaches ``ArtifactSelection.RecordingSource`` because
+    DataJoint refuses to drop a part without its master.
+
+    Tests historically worked around this with an order-of-declaration
+    convention (SortGroup tests run before tests that populate
+    ArtifactSelection, so the cascade chain stays empty). Anything that
+    runs the suite in a different order (``-k``, parallel sharding,
+    rerun-failed) tripped the same DataJoint error. This helper makes
+    the cleanup order-independent by walking the dependency graph
+    leaves-first and deleting source-polymorphic masters explicitly
+    before their upstream tables.
+
+    Parameters
+    ----------
+    session_key
+        Dict containing at least ``nwb_file_name``. All v2 rows tied to
+        this session are dropped.
+    """
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    # Step 1: drop any merge-master rows whose CurationV2 part points
+    # to a sorting derived from this session. The merge insert wraps
+    # the part FK in a transaction with the master, so cleanup must
+    # take the master first to satisfy the master-before-part rule.
+    rec_keys = (
+        RecordingSelection & session_key
+    ).fetch("KEY", as_dict=True)
+    if rec_keys:
+        sorting_keys = (
+            SortingSelection.RecordingSource
+            & [{"recording_id": r["recording_id"]} for r in rec_keys]
+        ).fetch("KEY", as_dict=True)
+        if sorting_keys:
+            merge_ids = (
+                SpikeSortingOutput.CurationV2 & sorting_keys
+            ).fetch("merge_id")
+            for mid in merge_ids:
+                (
+                    SpikeSortingOutput & {"merge_id": mid}
+                ).super_delete(warn=False)
+            (CurationV2 & sorting_keys).super_delete(warn=False)
+            (Sorting & sorting_keys).super_delete(warn=False)
+            # Step 2: drop SortingSelection masters BEFORE removing
+            # Recording, otherwise the Recording cascade tries to
+            # delete the orphan RecordingSource part and fails.
+            (SortingSelection & sorting_keys).super_delete(warn=False)
+
+        # Step 3: same pattern for ArtifactDetection / ArtifactSelection.
+        artifact_keys = (
+            ArtifactSelection.RecordingSource
+            & [{"recording_id": r["recording_id"]} for r in rec_keys]
+        ).fetch("KEY", as_dict=True)
+        if artifact_keys:
+            (ArtifactDetection & artifact_keys).super_delete(warn=False)
+            (ArtifactSelection & artifact_keys).super_delete(warn=False)
+
+    # Step 4: now the cascade is unblocked -- Recording, SortGroupV2
+    # can be deleted normally. We super_delete each so a leftover
+    # IntervalList row from a prior aborted test is also picked up.
+    (Recording & rec_keys).super_delete(warn=False) if rec_keys else None
+    (RecordingSelection & session_key).super_delete(warn=False)
+    (SortGroupV2 & session_key).super_delete(warn=False)
 
 
 # ---------- ArtifactSelection source-part pattern -------------------------
