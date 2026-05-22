@@ -464,6 +464,13 @@ Phase 1b is **mostly behavior-preserving for deterministic paths**: `clusterless
 
   Update the `"default"` row in `ArtifactDetectionParameters._DEFAULT_CONTENTS` to match. The `"none"` row (`detect=False`) is unaffected. Add a docstring note to `ArtifactDetectionParamsSchema` explaining the v1 bug and the v2 fix, citing v1 file:line.
 
+  **Pre-landing audit step (REQUIRED before merging this task):** the `proportion_above_thresh` default flip from 0.5 → 1.0 changes the behavioral outcome of every integration test that uses the `"default"` artifact preset without explicitly overriding `proportion_above_thresh`. Before landing the schema change, the executor MUST:
+
+  1. `grep -nE "artifact_params_name.*default|insert_default\(\).*ArtifactDetection" tests/spikesorting/v2/` and review every callsite.
+  2. For each integration test that passes `artifact_params_name="default"` without an explicit `proportion_above_thresh` override, run the test against the new default and confirm the test's expected outcomes still hold. Specifically: a test on a low-amplitude fixture (smoke + 60s polymer) may now flag FEWER frames as artifacts (proportion=1.0 requires ALL channels above threshold; proportion=0.5 only needed half). Tests that asserted "at least one valid interval gap" with the default preset are most at risk.
+  3. Where a test's expected outcome materially changes, either tighten the test's parameter override to keep the 0.5 semantics explicit OR update the assertion to reflect the new default.
+  4. Tests that pass `proportion_above_thresh=0.5` explicitly (e.g., `test_detect_artifacts_*` in the synthetic-recording bundle) are unaffected and need no change.
+
   **CHANGELOG entry** (must ship in this PR):
 
   ```
@@ -689,6 +696,8 @@ Phase 1b is **mostly behavior-preserving for deterministic paths**: `clusterless
 
 - **N23 [MEDIUM] — Flip artifact combine logic from AND back to OR.** v2 at [v2/artifact.py:594-600](../../../../src/spyglass/spikesorting/v2/artifact.py#L594-L600) does `channel_hit = above_amp & above_z` when both thresholds set. v1 at [utils.py:198](../../../../src/spyglass/spikesorting/utils.py#L198) does `np.logical_or(above_z, above_a)`. v1 is the belt-and-suspenders default — flag a frame if EITHER detector trips. Fix: restore OR semantics. If user-configurability is desired, add a `combine: Literal["and","or"] = "or"` field to `ArtifactDetectionParamsSchema`, default "or" matching v1.
 
+  **Update the existing AND-encoding test** at [tests/spikesorting/v2/test_single_session_pipeline.py:2948](../../../../tests/spikesorting/v2/test_single_session_pipeline.py#L2948) (`test_detect_artifacts_amplitude_and_zscore_combined`). The current docstring explicitly names "AND mode at line 596" and the test was built to pin AND semantics. When N23 lands and the combine flips to OR, that test's assertion will fail because the 80 µV uniform baseline (above amplitude threshold everywhere; z-score ~0 because the baseline is uniform) will be flagged in its entirety. **Do not delete the test** — keep its synthetic-data setup but update the assertion to verify OR semantics: with both thresholds set under default-OR, the baseline frames trip on amplitude alone AND the 200 µV step deviation trips on both. The valid-times array should now reflect the OR coverage. If a `combine` field is added with default `"or"`, the test should also parameterize over `combine=("or", "and")` to verify both code paths.
+
 - **N37, N46 [LOW] — Restore artifact-detection verbose logging.** v2's `_detect_artifacts` is silent; v1 emitted `logger.info` for threshold config and `logger.warning("No artifacts detected.")` when the detection found nothing ([v1/artifact.py:258-261,318](../../../../src/spyglass/spikesorting/v1/artifact.py#L258-L261)). Add equivalents at the top of `_detect_artifacts` (log chosen thresholds + detect-on/off) and at the empty-frames branch ([v2/artifact.py:603](../../../../src/spyglass/spikesorting/v2/artifact.py#L603)).
 
 - **N47 [LOW] — Surface the `resolve_source` swallow in `ArtifactDetection.delete()`** at [v2/artifact.py:712-713](../../../../src/spyglass/spikesorting/v2/artifact.py#L712-L713). Currently `except Exception: continue` silently skips IntervalList cleanup. Add `logger.error("ArtifactDetection.delete: resolve_source failed for {row}; leaving IntervalList rows in place.")` before the `continue`.
@@ -745,7 +754,13 @@ Phase 1b is **mostly behavior-preserving for deterministic paths**: `clusterless
 
 ### Recording
 
-- **N28 [MEDIUM] — Honor the stored `electrical_series_path` in `Recording.get_recording`.** Spec at [shared-contracts.md:162-163](shared-contracts.md) says the column drives the reader path. Runtime at [v2/recording.py:825](../../../../src/spyglass/spikesorting/v2/recording.py#L825) ignores it and uses SI auto-detect, which is ambiguous if a future writer puts more than one `ElectricalSeries` in the analysis NWB. Fix: `se.read_nwb_recording(abs_path, electrical_series_path=row["electrical_series_path"], load_time_vector=True)`. Apply to `_recording_t_start` and any other call site.
+- **N28 [MEDIUM] — Honor the stored `electrical_series_path` in `Recording.get_recording`.** Spec at [shared-contracts.md:162-163](shared-contracts.md) says the column drives the reader path. Runtime at [v2/recording.py:825](../../../../src/spyglass/spikesorting/v2/recording.py#L825) ignores it and uses SI auto-detect, which is ambiguous if a future writer puts more than one `ElectricalSeries` in the analysis NWB. Fix: `se.read_nwb_recording(abs_path, electrical_series_path=row["electrical_series_path"], load_time_vector=True)`.
+
+  **Two production call sites need the same fix, not one**:
+  1. `Recording.get_recording` at [v2/recording.py:811-825](../../../../src/spyglass/spikesorting/v2/recording.py#L811-L825) — the user-facing accessor.
+  2. `Recording._rebuild_nwb_artifact` at [v2/recording.py:827-896](../../../../src/spyglass/spikesorting/v2/recording.py#L827-L896) — the recompute path. The rebuild reads the raw NWB and re-emits the preprocessed artifact; if it reads via SI auto-detect, a future raw NWB with multiple ElectricalSeries (e.g., LFP + raw) silently picks the wrong source.
+
+  Also apply to `_recording_t_start` ([v2/sorting.py:523-543](../../../../src/spyglass/spikesorting/v2/sorting.py#L523-L543)) which opens the AnalysisNwbfile directly and reads the series by name. Verify the existing helper already honors `electrical_series_path` from the recording row — if not, fix as the third callsite.
 
 - **N31 [MEDIUM] — Restore v1's `channel_name` electrode-column lookup.** v1 at [v1/recording.py:683-712](../../../../src/spyglass/spikesorting/v1/recording.py#L683-L712) reads the raw NWB's electrodes table and, if a `channel_name` string column exists, maps integer `electrode_id` → NWB string channel-name (which SI 0.104's `read_nwb_recording` uses as the channel ID). v2 at [v2/recording.py:984-994](../../../../src/spyglass/spikesorting/v2/recording.py#L984-L994) unconditionally returns ints. The Frank-lab MEArec fixture lacks `channel_name`, so this hides in tests — but production NWBs with `channel_name` would fail to match the SI channel IDs. Port v1's branch verbatim.
 
@@ -936,6 +951,8 @@ A 4-agent sweep (test-suite parity, git-log mining, notebook-walkthrough parity,
   - `test_merge_dispatch_get_sort_group_info_on_v2_merge_id` — same for `get_sort_group_info`. Cross-references R2.
   - `test_sorted_spikes_group_time_slice_param_consistency` — v1 asserts `fetch_spike_data` returns equivalent results across `time_slice` parameter forms (`tuple`, `slice`, `list`); replicate on a v2-sourced merge_id.
   - `test_sort_group_ids_monotonically_increasing` — assert `SortGroupV2.set_group_by_shank` produces sort_group_ids starting at 0 with no gaps (v1 convention; tested in v1 but only cardinality is asserted in v2).
+  - `test_merge_dispatch_get_spike_indicator_on_v2_merge_id` — explicit dispatch test on `SpikeSortingOutput.get_spike_indicator(merge_key, time_array)` for a v2 merge_id. `get_spike_indicator` iterates over `get_spike_times` output ([spikesorting_merge.py:359-389](../../../../src/spyglass/spikesorting/spikesorting_merge.py#L359-L389)) and is the primary consumer-facing API for clusterless decoding. Without a v2-specific test, any future regression in v2's `get_spike_times` dispatch silently breaks this downstream path. Assert the returned shape is `(len(time_array), n_units)` and the dtype is float / bool.
+  - `test_merge_dispatch_get_firing_rate_on_v2_merge_id` — same for `SpikeSortingOutput.get_firing_rate(merge_key, time_array)` ([spikesorting_merge.py:437-470](../../../../src/spyglass/spikesorting/spikesorting_merge.py#L437-L470)). Assert the returned array has the expected shape, is non-negative everywhere, and the unit_id axis matches `CurationV2.Unit`.
 
   These are bundled as one task because each test is ≤10 LOC and they all assert v1-shape contracts. Add them to `tests/spikesorting/v2/test_single_session_pipeline.py` or a new `test_v1_parity.py` module — implementer's choice.
 
@@ -962,6 +979,22 @@ A 4-agent sweep (test-suite parity, git-log mining, notebook-walkthrough parity,
 - **No new tables or part tables beyond `CurationV2.MergeGroup`** (B3). The MergeGroup part is the SINGLE deliberate schema addition in Phase 1b, authorized by the user as the queryability + FK-validation choice over v1's NWB-column pattern. No other new tables or part tables in this phase.
 - **No changes to source-part contracts.** `SortingSelection.RecordingSource` / `ConcatenatedRecordingSource` and `ArtifactSelection.RecordingSource` / `SharedArtifactGroupSource` keep their Phase 1 shape. Layer-1 transaction-wrapped inserts and Layer-2 `resolve_source` re-checks are unchanged.
 - **No v2 companion to `common_file_tracking._get_v1_deleted_files` (R16 deferral).** [common_file_tracking.py:71-94](../../../../src/spyglass/common/common_file_tracking.py#L71-L94) queries v1's `RecordingRecompute` table to identify analysis files that were intentionally deleted via the v1 recompute workflow — these are excluded from the "orphan files" report. v2 has no equivalent recompute table in Phase 1 or Phase 1b; the equivalent (`RecordingArtifactRecompute*`) lands in Phase 2. Today, no v2 sort has been intentionally deleted (no v2 recompute machinery exists), so the practical impact is zero. The forward concern is documented in [phase-2-analyzer-curation.md](phase-2-analyzer-curation.md): when Phase 2 ships the recompute workflow, it must also add a `_get_v2_deleted_files()` companion to `common_file_tracking` so file-tracking infrastructure sees v2 deletes too. Phase 1b adds NO code or schema here — flagged here so a Phase 1b reviewer doesn't mistake the gap for a regression.
+
+## Test tiers
+
+The validation slice below mixes tests that run in milliseconds with tests that run in minutes. Mark each test with one of the five tiers below (registered as pytest markers in `pyproject.toml`'s `[tool.pytest.ini_options]` `markers` list) so CI can run the right subset at the right cadence. Replace the blanket `@pytest.mark.slow` usage with the specific tier marker; `@pytest.mark.integration` becomes redundant for T3-T5 since the tier implies it.
+
+| Tier | Marker | Setup cost | Definition | Per-test runtime |
+| --- | --- | --- | --- | --- |
+| **T1** | `@pytest.mark.unit` | none | Pure-Python: Pydantic validation, AST static checks, helper-function unit tests | <1 s |
+| **T2** | `@pytest.mark.db_unit` | Docker MySQL only | DB-tier but no populate: idempotency, error paths, schema validation through `dj_conn`. v2 schema activation requires Docker at import time even when the test body doesn't query | <5 s after Docker is up |
+| **T3** | `@pytest.mark.stage` | Docker + populate one Computed table | One-stage integration: `Recording`, `ArtifactDetection`, or `Sorting` populate plus its accessor round-trip | 10-60 s |
+| **T4** | `@pytest.mark.pipeline` | Docker + full chain | Recording → Artifact → Sort → Curation populate; uses smoke fixture | 60-120 s |
+| **T5** | `@pytest.mark.regression_gate` | Docker + heavy / 60s fixture / multiproc | Correctness gates (60 s MEArec ground truth), memory budgets, parallel populate, baseline comparison | >2 min |
+
+Default CI runs T1 + T2 + T3. PR-target branch and nightly runs add T4 + T5. The `slow` marker is retired (replaced by `T3`-`T5`). The `integration` marker is retired (implied by `T3`-`T5`). The `memory` and `parallel` marks become `T5` sub-categorizations within the `regression_gate` tier.
+
+Tier assignment for each validation-slice test appears as the **first column** of the table below. When a test naturally fits multiple tiers (e.g., an AST check that ALSO exercises a runtime path), pick the lowest tier whose setup is sufficient — a T1 test that incidentally needs Docker for an import side effect is a T2.
 
 ## Validation slice
 
@@ -1030,7 +1063,7 @@ A 4-agent sweep (test-suite parity, git-log mining, notebook-walkthrough parity,
 
 The first three tests are the **correctness gates**: if any fails, the refactor changed behavior and must not merge. The memory and parallel-populate tests are **regression gates**: they make sure Phase 1b's stated benefits are actually delivered.
 
-Mark slow / integration tests with `@pytest.mark.slow` and `@pytest.mark.integration` per the rest of the v2 suite. The `memory` and `parallel` marks are new; register them in `pyproject.toml` `[tool.pytest.ini_options]` `markers` if they aren't already.
+Mark each test with the tier marker from the **Test tiers** section above (`@pytest.mark.unit`, `@pytest.mark.db_unit`, `@pytest.mark.stage`, `@pytest.mark.pipeline`, or `@pytest.mark.regression_gate`). Register all five in `pyproject.toml`'s `[tool.pytest.ini_options]` `markers` list, including descriptions, so `pytest --markers` self-documents the convention. Retire `@pytest.mark.slow` and `@pytest.mark.integration` as redundant once the tier markers are in place. The validation slice does NOT enumerate the tier per row above — the executor assigns tiers as part of writing the tests, following the rubric: AST/Pydantic-only → T1; needs `dj_conn` but no populate → T2; populates one Computed → T3; full pipeline → T4; >2 min or multiprocessing → T5.
 
 ## Fixtures
 
