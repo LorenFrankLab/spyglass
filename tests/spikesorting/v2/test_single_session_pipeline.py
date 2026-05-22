@@ -300,7 +300,26 @@ def test_recording_populates_and_round_trips(
 
     assert row["n_channels"] == expected_n_channels
     assert row["sampling_frequency"] == pytest.approx(32_000, rel=1e-3)
-    assert row["duration_s"] > 0.0
+    # The smoke fixture is 4 seconds of polymer data. Compare to the
+    # IntervalList's actual valid_times span so a regression that
+    # silently truncated to e.g. 0.1 s would surface (rather than
+    # passing via ``> 0.0``).
+    from spyglass.common.common_interval import IntervalList
+
+    raw_times = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": "raw data valid times",
+        }
+    ).fetch1("valid_times")
+    expected_duration = float(raw_times[-1][-1] - raw_times[0][0])
+    assert row["duration_s"] == pytest.approx(
+        expected_duration, rel=1e-3
+    ), (
+        f"Recording.duration_s = {row['duration_s']}; expected "
+        f"~{expected_duration} from IntervalList valid_times span."
+    )
     assert len(row["cache_hash"]) == 64  # sha256 hex
 
     rec = Recording().get_recording(recording_selection_key)
@@ -877,21 +896,20 @@ def test_sorting_get_sorting_round_trips(populated_sorting):
 
 
 @pytest.mark.slow
-def test_sorting_get_analyzer_loads_folder(populated_recording):
-    """``Sorting.get_analyzer`` loads the SortingAnalyzer from the folder."""
+def test_sorting_get_analyzer_loads_folder(populated_sorting):
+    """``Sorting.get_analyzer`` loads the SortingAnalyzer from the folder.
+
+    Depends on ``populated_sorting`` so the analyzer folder is
+    guaranteed to exist, eliminating the silent
+    ``IndexError`` on an empty ``sortings[0]`` lookup that the
+    prior ``populated_recording`` dependency exposed under
+    isolated / reordered runs.
+    """
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2.sorting import (
-        Sorting,
-        SortingSelection,
-    )
+    from spyglass.spikesorting.v2.sorting import Sorting
 
-    sortings = (
-        SortingSelection.RecordingSource
-        & {"recording_id": populated_recording["recording_id"]}
-    ).fetch("sorting_id")
-    sorting_id = sortings[0]
-    analyzer = Sorting().get_analyzer({"sorting_id": sorting_id})
+    analyzer = Sorting().get_analyzer(populated_sorting)
     assert isinstance(analyzer, si.SortingAnalyzer)
     assert analyzer.has_extension("templates")
 
@@ -1109,8 +1127,21 @@ def test_curation_v2_insert_root_unlabeled(populated_sorting):
     )
     assert pk == {**populated_sorting, "curation_id": 0}
     assert len(CurationV2 & pk) == 1
-    n_units = (Sorting & populated_sorting).fetch1("n_units")
-    assert len(CurationV2.Unit & pk) == n_units
+    # Pin not just the count but the actual unit_id set: a regression
+    # that produced the wrong unit ids (e.g., an off-by-one on
+    # _build_curated_unit_rows) would pass a count-only check.
+    expected_unit_ids = set(
+        int(u) for u in (Sorting.Unit & populated_sorting).fetch("unit_id")
+    )
+    curated_unit_ids = set(
+        int(u) for u in (CurationV2.Unit & pk).fetch("unit_id")
+    )
+    assert curated_unit_ids == expected_unit_ids, (
+        f"CurationV2.Unit unit_ids {sorted(curated_unit_ids)} differ "
+        f"from Sorting.Unit unit_ids {sorted(expected_unit_ids)} for "
+        "a root curation with no merges -- units should pass through "
+        "1:1."
+    )
     assert len(CurationV2.UnitLabel & pk) == 0
 
     row = (CurationV2 & pk).fetch1()
@@ -1318,10 +1349,26 @@ def test_curation_v2_auto_registers_in_merge_table(populated_sorting):
     ).fetch1("source") == "CurationV2"
 
     # Dispatch round-trip: get_unit_brain_regions resolves to
-    # CurationV2's accessor and returns a DataFrame.
+    # CurationV2's accessor and returns a DataFrame. Tighter than a
+    # column-name-only check: an empty DataFrame with the right
+    # schema would pass a column check but indicate a broken join,
+    # so also pin row count and unit-id set.
     df = SpikeSortingOutput.get_unit_brain_regions({"merge_id": merge_id})
     assert "unit_id" in df.columns
     assert "region_resolution" in df.columns
+    expected_unit_ids = set(
+        int(u) for u in (CurationV2.Unit & pk).fetch("unit_id")
+    )
+    assert len(df) == len(expected_unit_ids), (
+        f"get_unit_brain_regions returned {len(df)} rows; expected "
+        f"{len(expected_unit_ids)} (one per CurationV2.Unit row)."
+    )
+    assert set(int(u) for u in df["unit_id"]) == expected_unit_ids, (
+        f"get_unit_brain_regions unit_ids {sorted(df['unit_id'])} "
+        f"differ from CurationV2.Unit unit_ids "
+        f"{sorted(expected_unit_ids)}; the dispatch returned the "
+        "wrong rows."
+    )
 
 
 @pytest.mark.slow
@@ -1367,6 +1414,26 @@ def test_spike_sorting_output_get_spike_times_v2_dispatch(populated_sorting):
         f"expected {expected_units} from Sorting.n_units."
     )
 
+    # Spike times must fall within the recording's wall-clock window,
+    # specifically [t_start, t_end] where t_start is the FIRST
+    # timestamp of the upstream recording. The smoke fixture starts
+    # at t=0 so a naive ``>= 0.0`` check is satisfied by both correct
+    # (absolute-time) and broken (relative-time) implementations.
+    # Pinning against the actual t_start (and t_end) catches a
+    # regression to relative storage on any non-zero-start session.
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    recording_id = (
+        SortingSelection.RecordingSource & populated_sorting
+    ).fetch1("recording_id")
+    rec = Recording().get_recording({"recording_id": recording_id})
+    rec_t_start = float(rec.get_times()[0])
+    rec_t_end = float(rec.get_times()[-1])
+
     for unit_idx, times in enumerate(spike_times):
         arr = _np.asarray(times)
         assert arr.dtype.kind == "f", (
@@ -1374,9 +1441,20 @@ def test_spike_sorting_output_get_spike_times_v2_dispatch(populated_sorting):
             f"{arr.dtype.kind!r}, expected 'f' (float seconds)."
         )
         if arr.size:
-            assert arr.min() >= 0.0, (
-                f"Unit {unit_idx}: negative spike time {arr.min()!r}; "
-                "v2 stores absolute timestamps which must be >= 0."
+            # Strict absolute-time check: any spike before t_start
+            # would indicate a relative-time / t_start=0 regression.
+            # The tolerance is one sample (1/fs).
+            fs = rec.get_sampling_frequency()
+            assert arr.min() >= rec_t_start - 1.0 / fs, (
+                f"Unit {unit_idx}: spike time {arr.min():.9f} is "
+                f"earlier than recording t_start {rec_t_start:.9f}. "
+                "v2 stores absolute timestamps; a regression to "
+                "relative-time storage (or t_start=0 hardcoding) "
+                "would surface here on a non-zero-start session."
+            )
+            assert arr.max() <= rec_t_end + 1.0 / fs, (
+                f"Unit {unit_idx}: spike time {arr.max():.9f} is "
+                f"later than recording t_end {rec_t_end:.9f}."
             )
 
 
@@ -2173,11 +2251,38 @@ def test_fetch_nwb_v2_dispatch(populated_sorting):
     # v2 stores the Units NWB; ``object_id`` is the convention key
     # downstream consumers use to fetch spike times. Either
     # ``object_id`` (the v2/v1 convention) or ``units`` (the v0
-    # convention) must be present.
+    # convention) must be present AND non-None.
     assert "object_id" in payload or "units" in payload, (
         f"fetch_nwb result missing both 'object_id' and 'units' keys; "
         f"got keys {sorted(payload.keys())}."
     )
+    if "object_id" in payload:
+        # ``payload["object_id"]`` is the DataFrame that fetch_nwb
+        # builds from the Units NWB referenced by CurationV2.object_id.
+        # The schema-only assertion above just checked the key is
+        # present; this check pins that the DataFrame actually
+        # round-tripped from the NWB (non-None, has rows, has the
+        # expected columns).
+        loaded = payload["object_id"]
+        assert loaded is not None, (
+            "fetch_nwb returned object_id=None; the v2 Units NWB "
+            "did not round-trip through the merge dispatch."
+        )
+        # DataFrame check: rows correspond to CurationV2.Unit rows
+        # (one row per kept unit).
+        expected_unit_ids = set(
+            int(u) for u in (CurationV2.Unit & pk).fetch("unit_id")
+        )
+        loaded_unit_ids = set(int(u) for u in loaded.index)
+        assert loaded_unit_ids == expected_unit_ids, (
+            f"fetch_nwb returned Units rows for unit_ids "
+            f"{sorted(loaded_unit_ids)}; expected "
+            f"{sorted(expected_unit_ids)}."
+        )
+        assert "spike_times" in loaded.columns, (
+            f"fetch_nwb Units DataFrame missing spike_times; "
+            f"got columns {list(loaded.columns)}."
+        )
 
 
 # ---------- initialize_v2_defaults idempotency ---------------------------
@@ -2418,6 +2523,20 @@ def test_run_v2_pipeline_clusterless_preset(polymer_smoke_session):
     # amplitudes are smaller). Insert a tuned row so the populate
     # actually produces a unit -- mirrors the standalone clusterless
     # e2e test.
+    #
+    # CRITICAL: the test mutates the ``default`` row IN PLACE because
+    # the preset bundle in pipeline.py hard-codes
+    # ``sorter_params_name="default"``. We snapshot the original row
+    # before mutating and restore it in a ``finally`` so this test
+    # does not contaminate subsequent ones that expect the 100 uV
+    # default. Without the restore step, every later test in the
+    # same pytest session sees the 5 uV row, which is a real
+    # cross-test ordering hazard.
+    default_key = {
+        "sorter": "clusterless_thresholder",
+        "sorter_params_name": "default",
+    }
+    original_default = (SorterParameters & default_key).fetch1()
     SorterParameters().insert1(
         {
             "sorter": "clusterless_thresholder",
@@ -2437,24 +2556,34 @@ def test_run_v2_pipeline_clusterless_preset(polymer_smoke_session):
         replace=True,
     )
 
-    manifest = run_v2_pipeline(
-        nwb_file_name=nwb_file_name,
-        sort_group_id=sort_group_id,
-        interval_list_name="raw data valid times",
-        team_name="v2_test_team",
-        preset="franklab_tetrode_clusterless_thresholder",
-    )
-    assert manifest["preset"] == "franklab_tetrode_clusterless_thresholder"
-    for key in (
-        "recording_id",
-        "artifact_id",
-        "sorting_id",
-        "curation_id",
-        "merge_id",
-    ):
-        assert manifest.get(key) is not None, (
-            f"Manifest missing {key!r}; got {manifest}."
+    try:
+        manifest = run_v2_pipeline(
+            nwb_file_name=nwb_file_name,
+            sort_group_id=sort_group_id,
+            interval_list_name="raw data valid times",
+            team_name="v2_test_team",
+            preset="franklab_tetrode_clusterless_thresholder",
         )
+        assert manifest["preset"] == "franklab_tetrode_clusterless_thresholder"
+        for key in (
+            "recording_id",
+            "artifact_id",
+            "sorting_id",
+            "curation_id",
+            "merge_id",
+        ):
+            assert manifest.get(key) is not None, (
+                f"Manifest missing {key!r}; got {manifest}."
+            )
+    finally:
+        # Restore the original 100 uV default row so subsequent
+        # tests / sessions are not poisoned by the 5 uV value.
+        # Use update1 rather than insert1(replace=True): the test
+        # populated downstream SortingSelection rows that FK back
+        # to this SorterParameters row, so DJ's replace path
+        # (delete + reinsert) is blocked by the FK constraint.
+        # update1 modifies the secondary attributes in place.
+        SorterParameters.update1(original_default)
 
 
 # ---------- Sorting.make rollback file cleanup ---------------------------
@@ -3422,6 +3551,372 @@ def test_imported_dispatch_survives_v2_module_loaded(populated_sorting):
     ) is not None
     # And the Imported part table is reachable through the master.
     assert hasattr(SpikeSortingOutput, "ImportedSpikeSorting")
+
+
+# ---------- L5-A: global-median reference (ref_channel_id=-2) ------------
+
+
+@pytest.mark.slow
+def test_recording_make_global_median_reference(polymer_smoke_session):
+    """``Recording._apply_pre_motion_preprocessing`` applies the
+    global-median reference when ``ref_channel_id == -2``.
+
+    Every other recording test uses ``sort_reference_electrode_id =
+    -1`` (no reference), so the ``elif ref_channel_id == -2`` branch
+    in recording.py has never been exercised. This test populates a
+    Recording with ``sort_reference_electrode_id = -2`` and pins:
+
+    1. The populate completes without raising (the cross-schema
+       ``validated.common_reference.operator`` field resolution
+       works -- a load-bearing untested code path).
+    2. The resulting traces differ from a no-reference (``-1``)
+       recording on the same data: CMR is applied BEFORE bandpass
+       so the final per-sample channel median is not exactly zero,
+       but the data IS materially different from the unreferenced
+       version (signed-traces sum and overall variance shift).
+    """
+    import numpy as _np
+
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+
+    _clean_session_v2(polymer_smoke_session)
+    initialize_v2_defaults()
+    LabTeam.insert1(
+        {
+            "team_name": "v2_test_team",
+            "team_description": "v2 pipeline tests",
+        },
+        skip_duplicates=True,
+    )
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    sort_group_id = int(
+        sorted(
+            (SortGroupV2 & polymer_smoke_session).fetch("sort_group_id")
+        )[0]
+    )
+
+    # No-reference baseline (-1).
+    rec_pk_unref = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+            "interval_list_name": "raw data valid times",
+            "preproc_params_name": "default_franklab",
+            "team_name": "v2_test_team",
+        }
+    )
+    Recording.populate(rec_pk_unref, reserve_jobs=False)
+    traces_unref = Recording().get_recording(rec_pk_unref).get_traces()
+
+    # Switch SortGroupV2 to global-median reference (-2) and
+    # repopulate. A new RecordingSelection gets minted because the
+    # cache_hash depends on input data.
+    SortGroupV2.update1(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+            "sort_reference_electrode_id": -2,
+        }
+    )
+    assert (
+        (
+            SortGroupV2
+            & {"nwb_file_name": nwb_file_name, "sort_group_id": sort_group_id}
+        ).fetch1("sort_reference_electrode_id")
+        == -2
+    )
+    # Drop the unref Recording so the new selection materializes a
+    # fresh global-median recording rather than reusing the cached
+    # bytes.
+    (Recording & rec_pk_unref).super_delete(warn=False)
+    Recording.populate(rec_pk_unref, reserve_jobs=False)
+    traces_ref = Recording().get_recording(rec_pk_unref).get_traces()
+
+    # Pin (1): same shape (the channel set is unchanged for -2;
+    # -1 also doesn't drop a channel, so shapes match).
+    assert traces_ref.shape == traces_unref.shape
+
+    # Pin (2): the recordings are materially different. The
+    # global-median reference subtracts the per-sample channel
+    # median; even after bandpass that produces a measurable shift
+    # in the recording's first moment vs the unreferenced version.
+    delta = float(_np.abs(traces_ref - traces_unref).mean())
+    assert delta > 1e-6, (
+        f"Global-median (-2) and no-reference (-1) recordings are "
+        f"indistinguishable (mean |diff| = {delta:.2e}). The -2 "
+        "branch may not be applying CMR; check the call to "
+        "sip.common_reference(reference='global')."
+    )
+
+
+# ---------- L5-B: DuplicateSelectionError on insert_selection -----------
+
+
+@pytest.mark.slow
+def test_recording_selection_raises_on_duplicate_logical_identity(
+    polymer_smoke_session,
+):
+    """``RecordingSelection.insert_selection`` raises
+    ``DuplicateSelectionError`` when the table already contains
+    multiple rows with the same logical identity (an integrity bug
+    that should never happen via the helper but can happen if a
+    caller bypasses it with raw ``insert``).
+
+    Without this test the integrity guard at
+    ``recording.py:609-615`` is dead code that, if it silently
+    broke, would let downstream consumers index ``[0]`` on
+    duplicate rows.
+    """
+    import uuid as _uuid
+
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2.exceptions import DuplicateSelectionError
+    from spyglass.spikesorting.v2.recording import (
+        RecordingSelection,
+        SortGroupV2,
+    )
+
+    _clean_session_v2(polymer_smoke_session)
+    initialize_v2_defaults()
+    LabTeam.insert1(
+        {
+            "team_name": "v2_test_team",
+            "team_description": "v2 pipeline tests",
+        },
+        skip_duplicates=True,
+    )
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    sort_group_id = int(
+        sorted(
+            (SortGroupV2 & polymer_smoke_session).fetch("sort_group_id")
+        )[0]
+    )
+    logical_identity = {
+        "nwb_file_name": nwb_file_name,
+        "sort_group_id": sort_group_id,
+        "interval_list_name": "raw data valid times",
+        "preproc_params_name": "default_franklab",
+        "team_name": "v2_test_team",
+    }
+    # Bypass the helper to plant the duplicate (this is what the
+    # guard exists to catch in case some script uses raw dj.insert).
+    planted_ids = []
+    RecordingSelection().insert1(
+        {**logical_identity, "recording_id": _uuid.uuid4()}
+    )
+    RecordingSelection().insert1(
+        {**logical_identity, "recording_id": _uuid.uuid4()}
+    )
+    planted_ids = list(
+        (RecordingSelection & logical_identity).fetch("recording_id")
+    )
+
+    try:
+        with pytest.raises(DuplicateSelectionError, match="duplicate"):
+            RecordingSelection.insert_selection(logical_identity)
+    finally:
+        # CRITICAL: clean up the duplicates we planted so the next
+        # test's RecordingSelection.insert_selection doesn't trip
+        # the same guard. Without this teardown, the function-scoped
+        # populated_recording fixture (whose body calls
+        # insert_selection) would fail in every subsequent test.
+        for rid in planted_ids:
+            (
+                RecordingSelection & {"recording_id": rid}
+            ).super_delete(warn=False)
+
+
+# ---------- L5-C: ArtifactDetection.delete handles orphans ---------------
+
+
+@pytest.mark.slow
+def test_artifact_detection_delete_handles_orphan_source_part(
+    populated_recording, monkeypatch
+):
+    """``ArtifactDetection.delete`` does not crash when an
+    ArtifactSelection master row's source part fails to resolve.
+
+    The except branch at ``artifact.py:711-713`` catches
+    ``resolve_source`` failures during the IntervalList-cleanup
+    loop. Without a test, a regression that re-raised the
+    exception (instead of skipping the orphan) would surface only
+    in production. DataJoint refuses to delete a part table
+    directly, so we monkeypatch ``ArtifactSelection.resolve_source``
+    to raise -- this is the exact failure mode the except branch
+    was written to handle (an orphan master whose source part has
+    been cascade-deleted via some upstream path).
+    """
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactDetectionParameters,
+        ArtifactSelection,
+    )
+
+    ArtifactDetectionParameters.insert_default()
+    art_pk = ArtifactSelection.insert_selection(
+        {
+            "recording_id": populated_recording["recording_id"],
+            "artifact_params_name": "none",
+        }
+    )
+    ArtifactDetection.populate(art_pk, reserve_jobs=False)
+
+    # Patch resolve_source to raise the same shape of exception an
+    # orphan master would produce (the source-part lookup fails).
+    def _broken_resolve(cls, key):
+        raise RuntimeError("simulated orphan: source part missing")
+
+    monkeypatch.setattr(
+        ArtifactSelection,
+        "resolve_source",
+        classmethod(_broken_resolve),
+    )
+
+    # The delete should complete without raising. The current
+    # implementation's except block (artifact.py:711-713) skips
+    # rows whose source can't be resolved.
+    (ArtifactDetection & art_pk).delete(safemode=False)
+    assert len(ArtifactDetection & art_pk) == 0, (
+        "ArtifactDetection row should be deleted even when "
+        "resolve_source raises; the except branch must not "
+        "short-circuit the master delete."
+    )
+
+
+# ---------- L5-D: _write_units_nwb zero-unit guard (sorting layer) -------
+
+
+@pytest.mark.slow
+def test_write_units_nwb_handles_zero_unit_sorter(populated_recording):
+    """``Sorting._write_units_nwb`` initializes an empty Units NWB
+    when the sorter produces zero unit ids.
+
+    The guard at ``sorting.py:822-826`` is the sorting-layer analog
+    of the curation-layer guard tested by
+    ``test_curation_v2_stages_empty_units_nwb_on_zero_kept_units``.
+    Without this test, a regression in the zero-unit handling at
+    the Sorting layer (e.g., a refactor that adds ``add_unit_column``
+    before the guard, exactly the bug recently fixed in
+    CurationV2) would crash on real datasets where the sorter
+    finds no units.
+    """
+    import numpy as _np
+    import pynwb
+    import spikeinterface as si
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    recording = Recording().get_recording(
+        {"recording_id": populated_recording["recording_id"]}
+    )
+    empty_sorting = si.NumpySorting.from_unit_dict(
+        units_dict_list=[{}],
+        sampling_frequency=recording.get_sampling_frequency(),
+    )
+
+    from spyglass.spikesorting.v2.recording import RecordingSelection
+
+    nwb_file_name = (
+        RecordingSelection
+        & {"recording_id": populated_recording["recording_id"]}
+    ).fetch1("nwb_file_name")
+
+    analysis_file_name, units_object_id = Sorting._write_units_nwb(
+        sorting=empty_sorting,
+        recording=recording,
+        nwb_file_name=nwb_file_name,
+    )
+    try:
+        # Object id is defined (the guard initialized an empty
+        # Units table rather than leaving ``nwbf.units = None``).
+        assert isinstance(units_object_id, str)
+        assert len(units_object_id) > 0
+
+        # The staged NWB on disk is readable and has an empty Units
+        # table.
+        abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+        with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
+            nwbf = io.read()
+            assert nwbf.units is not None
+            assert len(nwbf.units.id[:]) == 0, (
+                f"Expected empty Units table; got "
+                f"{len(nwbf.units.id[:])} rows."
+            )
+    finally:
+        # Tidy up the staged file. _write_units_nwb does not register
+        # the file (the caller does so inside a transaction); we
+        # unlink the bare file since no DJ row was registered.
+        import pathlib as _pathlib
+
+        abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+        if _pathlib.Path(abs_path).exists():
+            _pathlib.Path(abs_path).unlink()
+
+
+# ---------- L1-D: artifact at recording boundary boundary clamp ----------
+
+
+def test_detect_artifacts_clamps_artifact_at_recording_end(dj_conn):
+    """``_detect_artifacts`` clamps the half-open end of an artifact
+    that runs to the last sample.
+
+    The clamp ``min(end_f + 1, len(timestamps) - 1)`` at
+    ``artifact.py:631`` ensures the saved interval doesn't index
+    out of bounds when the artifact reaches the recording end. No
+    prior test puts a transient near the end of the recording, so
+    this clamp branch was unexercised.
+    """
+    import numpy as _np
+
+    from spyglass.spikesorting.v2._params.artifact_detection import (
+        ArtifactDetectionParamsSchema,
+    )
+    from spyglass.spikesorting.v2.artifact import ArtifactDetection
+
+    n_samples, n_channels = 1000, 4
+    traces = _np.zeros((n_samples, n_channels), dtype=_np.float32)
+    # Transient at the very end of the recording.
+    traces[990:1000, :] = 200.0
+    rec = _build_synthetic_rec(traces)
+
+    params = ArtifactDetectionParamsSchema(
+        detect=True,
+        amplitude_thresh_uV=50.0,
+        zscore_thresh=None,
+        proportion_above_thresh=0.5,
+        removal_window_ms=0.05,
+        join_window_ms=0.0,
+    )
+    valid_times = ArtifactDetection._detect_artifacts(rec, params)
+    timestamps = rec.get_times()
+
+    # The artifact runs from frame 990 to the end. The clamp
+    # produces a single valid interval before the artifact (the
+    # tail-valid case at line 653 fires only if cursor < valid_end,
+    # which is false here because the artifact reaches the end).
+    assert valid_times.shape == (1, 2), (
+        f"Expected one valid interval ending before the boundary "
+        f"artifact, got shape {valid_times.shape}."
+    )
+    assert valid_times[0][0] == pytest.approx(timestamps[0], abs=1e-9)
+    # The valid interval ends BEFORE the artifact span (boundary
+    # not included).
+    assert valid_times[0][1] < timestamps[990] + 1e-9, (
+        f"Valid interval ends at {valid_times[0][1]}, after the "
+        f"start of the boundary artifact ({timestamps[990]}). "
+        "The boundary clamp may have an off-by-one regression."
+    )
 
 
 # =========================================================================
