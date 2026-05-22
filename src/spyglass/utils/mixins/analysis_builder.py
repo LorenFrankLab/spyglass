@@ -136,6 +136,8 @@ class AnalysisFileBuilder:
                     f"File will be detected and cleaned up by "
                     f"AnalysisNwbfile.cleanup()"
                 )
+            if self._open_io:
+                self._open_io.close()
             return False  # Don't suppress exception
 
         # Always auto-register on successful exit
@@ -149,6 +151,8 @@ class AnalysisFileBuilder:
                     f"Failed to register analysis file "
                     f"'{self.analysis_file_name}': {e}"
                 )
+            if self._open_io:
+                self._open_io.close()
             raise  # Re-raise registration error
 
         return False  # Never suppress exceptions
