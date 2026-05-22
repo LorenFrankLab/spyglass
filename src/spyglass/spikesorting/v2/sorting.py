@@ -666,11 +666,20 @@ class Sorting(SpyglassMixin, dj.Computed):
         # artifact frames so the mask zeros every artifact sample
         # exactly once, independent of how SI interprets a bare Python
         # list of scalars in future minor versions.
+        #
+        # ``ms_before=None, ms_after=None`` is the documented "single
+        # sample" mode and uses the ``pad is None`` code path in SI
+        # 0.104's RemoveArtifactsRecordingSegment.get_traces (each
+        # trigger zeros exactly its own frame). ``ms_before=0.0,
+        # ms_after=0.0`` looks equivalent but triggers a boundary
+        # bug in SI 0.104 where the first artifact frame in any
+        # contiguous run is left unmasked (the ``trig - pad[0] <= 0``
+        # branch assigns to an empty slice).
         return sip.remove_artifacts(
             recording=recording,
             list_triggers=[_np.asarray(artifact_frames, dtype=_np.int64)],
-            ms_before=0.0,
-            ms_after=0.0,
+            ms_before=None,
+            ms_after=None,
             mode="zeros",
         )
 
