@@ -88,18 +88,16 @@ rows.
 
 ```python
 from spyglass.common.common_lab import LabTeam
-from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
+from spyglass.spikesorting.v2 import initialize_v2_defaults
 from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
-from spyglass.spikesorting.v2.recording import (
-    PreprocessingParameters,
-    SortGroupV2,
-)
-from spyglass.spikesorting.v2.sorting import SorterParameters
+from spyglass.spikesorting.v2.recording import SortGroupV2
 
-# One-time setup of the default Lookup rows the preset references.
-PreprocessingParameters.insert_default()
-ArtifactDetectionParameters.insert_default()
-SorterParameters.insert_default()
+# Replace with the session you've already ingested via insert_sessions.
+nwb_file_name = "your_session_.nwb"
+
+# One-shot install of every required default Lookup row
+# (PreprocessingParameters + ArtifactDetectionParameters + SorterParameters).
+initialize_v2_defaults()
 LabTeam.insert1(
     {"team_name": "my_team", "team_description": "..."},
     skip_duplicates=True,
@@ -119,6 +117,15 @@ manifest = run_v2_pipeline(
 merge_id = manifest["merge_id"]  # key off this downstream
 ```
 
+Available presets:
+
+- `franklab_tetrode_mountainsort4` -- legacy MountainSort4 (parity with v1)
+- `franklab_tetrode_mountainsort5` -- **recommended**, current MS5 defaults
+- `franklab_tetrode_clusterless_thresholder` -- peak-detection only (no
+    clustering), feeds the clusterless decoding pipeline
+
+`run_v2_pipeline.list_presets()` returns the same list at runtime.
+
 ### Stage-by-stage (custom preset)
 
 `run_v2_pipeline` is a convenience wrapper. The underlying stages can be
@@ -135,6 +142,8 @@ from spyglass.spikesorting.v2.sorting import (
     Sorting, SortingSelection,
 )
 from spyglass.spikesorting.v2.curation import CurationV2
+
+nwb_file_name = "your_session_.nwb"  # same session as above
 
 rec_pk = RecordingSelection.insert_selection({
     "nwb_file_name": nwb_file_name,

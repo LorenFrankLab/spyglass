@@ -272,6 +272,47 @@ def _resolved_job_kwargs(*row_job_kwargs: dict | None) -> dict:
     return merged
 
 
+def _ensure_lookup_row_exists(
+    lookup_table,
+    restriction: dict,
+    *,
+    helper_name: str,
+    insert_default_path: str,
+) -> None:
+    """Pre-check that a Lookup-row FK target exists before insert_selection.
+
+    Without this guard, a missing Lookup row produces an opaque
+    DataJoint ``IntegrityError`` ("foreign key constraint fails")
+    that gives the user no hint about which Lookup table is empty or
+    how to populate it. Raise a clear ``ValueError`` instead so the
+    notebook user can fix the setup in one step.
+
+    Parameters
+    ----------
+    lookup_table
+        The Lookup table class whose row is required (e.g.
+        ``PreprocessingParameters``).
+    restriction
+        The dict identifying the required row (e.g.
+        ``{"preproc_params_name": "default_franklab"}``).
+    helper_name
+        Name of the insert_selection helper calling us, for the error
+        message (e.g. ``"RecordingSelection.insert_selection"``).
+    insert_default_path
+        Importable path that loads the default rows (e.g.
+        ``"PreprocessingParameters.insert_default()"``).
+    """
+    if not (lookup_table & restriction):
+        raise ValueError(
+            f"{helper_name}: required Lookup row not found in "
+            f"{lookup_table.__name__} for {restriction}. "
+            f"Run {insert_default_path} first to install the default "
+            "rows, or insert your custom row before retrying. The "
+            "one-shot `spyglass.spikesorting.v2.initialize_v2_defaults()`"
+            " installs every required default in one call."
+        )
+
+
 def _hash_nwb_recording(analysis_file_name: str) -> str:
     """Return a content hash of a recording's AnalysisNwbfile.
 

@@ -44,6 +44,23 @@ class _Preset(BaseModel):
     sorter_params_name: str
 
 
+def list_presets() -> list[str]:
+    """Return the sorted preset names accepted by ``run_v2_pipeline``.
+
+    Notebook-discoverable accessor so users don't need to read the
+    module source to learn what's available.
+
+    Examples
+    --------
+    >>> from spyglass.spikesorting.v2.pipeline import list_presets
+    >>> list_presets()
+    ['franklab_tetrode_clusterless_thresholder',
+     'franklab_tetrode_mountainsort4',
+     'franklab_tetrode_mountainsort5']
+    """
+    return sorted(_PRESETS)
+
+
 _PRESETS: dict[str, _Preset] = {
     "franklab_tetrode_mountainsort4": _Preset(
         preproc_params_name="default_franklab",
@@ -145,8 +162,10 @@ def run_v2_pipeline(
 
     if preset not in _PRESETS:
         raise PipelineInputError(
-            f"run_v2_pipeline: preset {preset!r} is not in _PRESETS. "
-            f"Valid presets: {sorted(_PRESETS)}."
+            f"run_v2_pipeline: unknown preset {preset!r}. "
+            f"Available presets: {sorted(_PRESETS)}. "
+            "Call run_v2_pipeline? to see the docstring, or check "
+            "spyglass.spikesorting.v2.pipeline.list_presets()."
         )
     bundle = _PRESETS[preset]
 

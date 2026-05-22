@@ -466,41 +466,36 @@ def test_artifact_selection_resolve_source_returns_recording_kind(
 
 
 @pytest.mark.slow
-def test_shared_artifact_group_insert_validates_session(populated_recording):
-    """``SharedArtifactGroup.insert_group`` writes master + members
-    when all members share a session; raises on mismatch."""
+def test_shared_artifact_group_insert_is_gated_for_phase_1(populated_recording):
+    """``SharedArtifactGroup.insert_group`` is gated in Phase 1.
+
+    ``ArtifactDetection.make`` does not implement the shared-group
+    branch yet, so allowing ``insert_group`` to succeed would let users
+    insert rows that cannot populate. The gate raises
+    ``NotImplementedError`` with a clear hint at the
+    single-recording artifact path. When the shared-group branch
+    lands in Phase 2 this gate is lifted and the validation tests
+    inside ``insert_group`` (under ``# pragma: no cover``) become
+    active again -- this test then flips to assert the success path.
+    """
     from spyglass.spikesorting.v2.artifact import SharedArtifactGroup
 
-    # Clean any prior group with the same name.
-    (
-        SharedArtifactGroup & {"shared_artifact_group_name": "test_group"}
-    ).super_delete(warn=False)
-
-    SharedArtifactGroup.insert_group(
-        "test_group",
-        [{"recording_id": populated_recording["recording_id"]}],
-    )
-    assert len(SharedArtifactGroup & {"shared_artifact_group_name": "test_group"}) == 1
-    assert (
-        len(
-            SharedArtifactGroup.Member
-            & {"shared_artifact_group_name": "test_group"}
+    with pytest.raises(NotImplementedError, match="gated until"):
+        SharedArtifactGroup.insert_group(
+            "test_group",
+            [{"recording_id": populated_recording["recording_id"]}],
         )
-        == 1
-    )
 
-    # Empty members rejects.
-    with pytest.raises(ValueError, match="members list is empty"):
+    # Verify the gate fires BEFORE any validation runs, i.e., it
+    # doesn't matter what's in members.
+    with pytest.raises(NotImplementedError, match="gated until"):
         SharedArtifactGroup.insert_group("empty_group", [])
 
-    # Missing recording_id rejects.
-    with pytest.raises(ValueError, match="must include 'recording_id'"):
-        SharedArtifactGroup.insert_group("bad_group", [{"foo": "bar"}])
-
-    # Cleanup.
-    (
-        SharedArtifactGroup & {"shared_artifact_group_name": "test_group"}
-    ).super_delete(warn=False)
+    # No master row was created.
+    assert (
+        len(SharedArtifactGroup & {"shared_artifact_group_name": "test_group"})
+        == 0
+    )
 
 
 @pytest.mark.slow
@@ -1216,6 +1211,62 @@ def test_curation_v2_auto_registers_in_merge_table(populated_sorting):
 
 
 @pytest.mark.slow
+def test_spike_sorting_output_get_spike_times_v2_dispatch(populated_sorting):
+    """``SpikeSortingOutput.get_spike_times`` dispatches to a v2 source.
+
+    The previous review caught that the consumer-facing
+    ``get_spike_times`` had a v0 / v1 / imported test but no v2
+    dispatch path. This regression test pins the v2 NWB
+    ``object_id`` -> spike-times resolution through the merge master,
+    so a change to the v2 Units-NWB layout that breaks
+    ``fetch_nwb`` immediately fails the suite.
+    """
+    import numpy as _np
+
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    _clear_curations(populated_sorting)
+    pk = CurationV2.insert_curation(
+        sorting_key=populated_sorting, labels={}
+    )
+    merge_id = (SpikeSortingOutput.CurationV2 & pk).fetch1("merge_id")
+
+    # The consumer-facing API returns a list of per-unit spike-time
+    # arrays. Pin shape (n_units arrays) + dtype (float seconds) +
+    # value range (non-negative, within the recording duration).
+    spike_times = SpikeSortingOutput().get_spike_times(
+        {"merge_id": merge_id}
+    )
+    assert isinstance(spike_times, list)
+    assert len(spike_times) > 0, (
+        "get_spike_times returned no unit arrays for a v2 curation "
+        "that ``Sorting`` reports as having n_units > 0; the merge "
+        "dispatch likely broke."
+    )
+
+    sort_row = (Sorting & populated_sorting).fetch1()
+    expected_units = int(sort_row["n_units"])
+    assert len(spike_times) == expected_units, (
+        f"get_spike_times returned {len(spike_times)} unit arrays, "
+        f"expected {expected_units} from Sorting.n_units."
+    )
+
+    for unit_idx, times in enumerate(spike_times):
+        arr = _np.asarray(times)
+        assert arr.dtype.kind == "f", (
+            f"Unit {unit_idx}: spike times dtype kind "
+            f"{arr.dtype.kind!r}, expected 'f' (float seconds)."
+        )
+        if arr.size:
+            assert arr.min() >= 0.0, (
+                f"Unit {unit_idx}: negative spike time {arr.min()!r}; "
+                "v2 stores absolute timestamps which must be >= 0."
+            )
+
+
+@pytest.mark.slow
 def test_get_restricted_merge_ids_v2_resolves_through_chain(populated_sorting):
     """``get_restricted_merge_ids(sources=['v2'])`` resolves the v2
     restriction surface (sorting_id, curation_id, ...) down to a
@@ -1319,7 +1370,7 @@ def test_run_v2_pipeline_end_to_end_and_idempotent(polymer_smoke_session):
     assert manifest2["merge_id"] == manifest["merge_id"]
 
     # Unknown preset raises PipelineInputError.
-    with pytest.raises(PipelineInputError, match="not in _PRESETS"):
+    with pytest.raises(PipelineInputError, match="unknown preset"):
         run_v2_pipeline(
             nwb_file_name=nwb_file_name,
             sort_group_id=sort_group_id,
@@ -1469,8 +1520,30 @@ def test_clusterless_thresholder_end_to_end(polymer_smoke_session):
     assert len(Sorting.Unit & sort_pk) == 1
     unit_row = (Sorting.Unit & sort_pk).fetch1()
     assert unit_row["unit_id"] == 0
-    assert unit_row["n_spikes"] > 0
-    assert unit_row["peak_amplitude_uv"] > 0.0
+
+    # Signal-quality floor: the smoke fixture is 4 s with ~6 planted
+    # units firing at ~5-10 Hz, so the planted spike count is on the
+    # order of ~150-200 across the sort group. ``n_spikes > 0`` would
+    # accept a broken detector that returned a single noise spike, so
+    # require a count consistent with finding most planted peaks.
+    assert unit_row["n_spikes"] >= 20, (
+        f"Clusterless found only {unit_row['n_spikes']} peaks on the "
+        "smoke fixture; expected at least 20 given the planted firing "
+        "rates and the 5 uV detect_threshold. A buggy detector that "
+        "returns a single false-positive would pass `n_spikes > 0`."
+    )
+    # Peak amplitude floor: any detected peak must clear the configured
+    # 5 uV threshold (the threshold is the magnitude of the negative
+    # peak, so the stored absolute peak_amplitude_uv should be >= 5).
+    # A detector that misreports amplitudes by a unit-conversion bug
+    # would surface as a violation here.
+    assert unit_row["peak_amplitude_uv"] >= 3.0, (
+        f"Clusterless reported peak_amplitude_uv="
+        f"{unit_row['peak_amplitude_uv']:.3f} below the 5 uV "
+        "detect_threshold (allowing some tolerance for template-vs-"
+        "raw-peak differences). Check for an amplitude-units bug "
+        "(uV vs raw counts vs volts)."
+    )
 
 
 # ---------- 60s MEArec ground-truth correctness gate ----------------------
@@ -1626,6 +1699,17 @@ def test_mountainsort5_ground_truth_polymer_60s(polymer_60s_session):
     perf = comparison.get_performance(method="by_unit", output="pandas")
     accuracies = perf["accuracy"].values
     n_planted = len(accuracies)
+
+    # Guard against a vacuous pass: ``n_planted // 2 == 0 >= 0`` would
+    # silently approve a fixture that produced zero ground-truth units
+    # (e.g., MEArec generation half-failed). The polymer 60s fixture is
+    # built with 24 planted units; require well over half so a half-run
+    # generation surfaces.
+    assert n_planted >= 12, (
+        f"60s polymer fixture has only {n_planted} planted units; expected "
+        "around 24. Regenerate the fixture before trusting this gate."
+    )
+
     n_well_detected = int((accuracies >= 0.7).sum())
     threshold_half = n_planted // 2
     assert n_well_detected >= threshold_half, (
@@ -1633,4 +1717,22 @@ def test_mountainsort5_ground_truth_polymer_60s(polymer_60s_session):
         f"of {n_planted} planted units at accuracy >= 0.7; "
         f"validation goal requires >= {threshold_half}. "
         f"Per-unit accuracies: {sorted(accuracies, reverse=True)[:8]}..."
+    )
+
+    # Precision floor: even if half the GT units are well-detected, a
+    # sorter outputting hundreds of spurious units would still hit
+    # ``accuracy >= 0.7`` on the matched ones (the
+    # ``compare_sorter_to_ground_truth`` accuracy = tp / (tp + fn + fp)
+    # implicitly bounds this, but the bound is exhaustive_gt-mediated).
+    # Assert directly that the precision distribution per GT unit looks
+    # reasonable -- the matched-unit precision should be >= 0.5 for the
+    # well-detected units, otherwise the matching is suspicious.
+    precision = perf["precision"].values
+    well_detected_mask = accuracies >= 0.7
+    well_detected_precision = precision[well_detected_mask]
+    assert (well_detected_precision >= 0.5).all(), (
+        "Well-detected GT units have suspiciously low precision: "
+        f"min={well_detected_precision.min():.3f}; expected >= 0.5 for "
+        f"every unit with accuracy >= 0.7. Per-unit precision: "
+        f"{sorted(precision, reverse=True)[:8]}..."
     )
