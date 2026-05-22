@@ -29,7 +29,11 @@ from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile  # noqa: F40
 from spyglass.spikesorting.v2._params.preprocessing import (
     PreprocessingParamsSchema,
 )
-from spyglass.spikesorting.v2.utils import _assert_v2_db_safe, _validate_params
+from spyglass.spikesorting.v2.utils import (
+    _assert_v2_db_safe,
+    _validate_params,
+    transaction_or_noop,
+)
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 
 _assert_v2_db_safe()
@@ -331,16 +335,15 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
                     }
                 )
 
-        # Two separate inserts (matches v1 pattern). Atomic transaction
-        # wrapping is omitted because the upstream caller may already be
-        # inside a DataJoint transaction (e.g., during a populate cascade
-        # or after a cautious_delete that leaves the connection in a
-        # transactional state); DataJoint refuses nested transactions.
-        # The part rows reference the master rows by FK, so a failed
-        # part-insert after a successful master-insert leaves a
-        # detectable orphan rather than schema corruption.
-        cls.insert(master_rows)
-        cls.SortGroupElectrode.insert(part_rows)
+        # Wrap master + part inserts in one transaction so a part-insert
+        # failure (e.g., FK violation on a stale Electrode row) rolls
+        # back the master rows too. ``transaction_or_noop`` is a no-op
+        # when the caller is already inside a transaction (populate
+        # cascade, post-cautious_delete state), avoiding the nested-
+        # transaction error DataJoint would otherwise raise.
+        with transaction_or_noop(cls.connection):
+            cls.insert(master_rows)
+            cls.SortGroupElectrode.insert(part_rows)
 
     @classmethod
     def set_group_by_electrode_table_column(
@@ -478,10 +481,11 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
                     }
                 )
 
-        # See set_group_by_shank for the rationale on not wrapping these
-        # two inserts in a single explicit transaction.
-        cls.insert(master_rows)
-        cls.SortGroupElectrode.insert(part_rows)
+        # See set_group_by_shank for the rationale on wrapping these
+        # two inserts in a transaction_or_noop block.
+        with transaction_or_noop(cls.connection):
+            cls.insert(master_rows)
+            cls.SortGroupElectrode.insert(part_rows)
 
 
 @schema
@@ -596,6 +600,7 @@ class RecordingSelection(SpyglassMixin, dj.Manual):
             row.
         """
         from spyglass.spikesorting.v2.exceptions import DuplicateSelectionError
+        from spyglass.spikesorting.v2.utils import _ensure_lookup_row_exists
 
         keys_minus_uuid = {k: v for k, v in key.items() if k != "recording_id"}
         existing = (cls & keys_minus_uuid).fetch("KEY", as_dict=True)
@@ -607,6 +612,15 @@ class RecordingSelection(SpyglassMixin, dj.Manual):
                 f"selection rows for logical identity {keys_minus_uuid}. "
                 "This is an integrity bug; v2 inserts via this helper "
                 "should not produce duplicates."
+            )
+        # Translate the would-be DataJoint FK IntegrityError into a
+        # clear "missing default row" message before the insert attempts.
+        if "preproc_params_name" in keys_minus_uuid:
+            _ensure_lookup_row_exists(
+                PreprocessingParameters,
+                {"preproc_params_name": keys_minus_uuid["preproc_params_name"]},
+                helper_name="RecordingSelection.insert_selection",
+                insert_default_path="PreprocessingParameters.insert_default()",
             )
         new_key = {**keys_minus_uuid, "recording_id": uuid.uuid4()}
         cls.insert1(new_key)
@@ -650,11 +664,14 @@ class Recording(SpyglassMixin, dj.Computed):
 
     def make(self, key):
         """Materialize the preprocessed recording and write to AnalysisNwbfile."""
+        import pathlib as _pathlib
+
         import spikeinterface.extractors as se
 
         from spyglass.spikesorting.v2.exceptions import (
             RecordingTruncatedError,
         )
+        from spyglass.spikesorting.v2.utils import transaction_or_noop
 
         sel = (RecordingSelection & key).fetch1()
         nwb_file_name = sel["nwb_file_name"]
@@ -734,6 +751,18 @@ class Recording(SpyglassMixin, dj.Computed):
         missing_start = requested_start - saved_times[0]
         missing_end = requested_end - saved_times[-1]
         if missing_start > tolerance or missing_end > tolerance:
+            # File written but never registered: clean it up before
+            # raising so the AnalysisNwbfile cleanup tooling doesn't
+            # have to chase an orphan from a request-time validation.
+            try:
+                abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+                if _pathlib.Path(abs_path).exists():
+                    _pathlib.Path(abs_path).unlink()
+            except Exception as cleanup_exc:  # pragma: no cover -- defensive
+                logger.error(
+                    "Recording.make: failed to clean up unregistered "
+                    f"analysis file {analysis_file_name!r}: {cleanup_exc!r}"
+                )
             raise RecordingTruncatedError(
                 "Recording.make wrote a shorter recording than requested. "
                 f"Requested IntervalList valid_times for {interval_list_name!r} "
@@ -744,20 +773,38 @@ class Recording(SpyglassMixin, dj.Computed):
                 "raw NWB for dropped packets or interval misalignment."
             )
 
-        self.insert1(
-            {
-                **key,
-                "analysis_file_name": analysis_file_name,
-                "electrical_series_path": _ELECTRICAL_SERIES_PATH,
-                "object_id": object_id,
-                "n_channels": recording.get_num_channels(),
-                "sampling_frequency": sampling_frequency,
-                "duration_s": float(
-                    saved_times[-1] - saved_times[0]
-                ),
-                "cache_hash": cache_hash,
-            }
-        )
+        # Register the analysis file row and the Recording row
+        # atomically: if the Recording insert fails, the AnalysisNwbfile
+        # row rolls back too. The file on disk is the only side effect
+        # left to clean up on rollback (handled in the except below).
+        try:
+            with transaction_or_noop(self.connection):
+                AnalysisNwbfile().add(nwb_file_name, analysis_file_name)
+                self.insert1(
+                    {
+                        **key,
+                        "analysis_file_name": analysis_file_name,
+                        "electrical_series_path": _ELECTRICAL_SERIES_PATH,
+                        "object_id": object_id,
+                        "n_channels": recording.get_num_channels(),
+                        "sampling_frequency": sampling_frequency,
+                        "duration_s": float(
+                            saved_times[-1] - saved_times[0]
+                        ),
+                        "cache_hash": cache_hash,
+                    }
+                )
+        except Exception:
+            try:
+                abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+                if _pathlib.Path(abs_path).exists():
+                    _pathlib.Path(abs_path).unlink()
+            except Exception as cleanup_exc:  # pragma: no cover -- defensive
+                logger.error(
+                    "Recording.make: failed to clean up staged analysis "
+                    f"file {analysis_file_name!r}: {cleanup_exc!r}"
+                )
+            raise
 
     # ---- Public accessors ------------------------------------------------
 
@@ -1016,6 +1063,12 @@ class Recording(SpyglassMixin, dj.Computed):
         Returns ``(analysis_file_name, electrical_series_object_id,
         cache_hash)`` -- the latter is the SHA-256 of the saved data
         bytes, used for rebuild verification.
+
+        Writes the file to disk only; the caller is responsible for
+        registering the AnalysisNwbfile row (via ``AnalysisNwbfile().add``
+        or the ``AnalysisFileBuilder`` context manager) inside its
+        DataJoint transaction so the file registration and the v2 table
+        row commit atomically.
         """
         import hashlib
 
@@ -1034,8 +1087,9 @@ class Recording(SpyglassMixin, dj.Computed):
         # Load the full preprocessed array. In-memory write is
         # acceptable for fixtures up to a few minutes; longer
         # recordings will be revisited when chunked-iterator support
-        # lands alongside the recompute pipeline.
-        data = recording.get_traces(return_scaled=False)
+        # lands alongside the recompute pipeline. SI 0.104 renamed
+        # the ``return_scaled`` kwarg to ``return_in_uV``.
+        data = recording.get_traces(return_in_uV=False)
         times = recording.get_times()
 
         # The cache_hash is over the saved bytes -- compute once on the
@@ -1079,7 +1133,4 @@ class Recording(SpyglassMixin, dj.Computed):
             object_id = nwbfile.acquisition[_ELECTRICAL_SERIES_NAME].object_id
             io.write(nwbfile)
 
-        # Register the analysis file with Spyglass (creates the
-        # AnalysisNwbfile row + Externals entry).
-        AnalysisNwbfile().add(nwb_file_name, analysis_file_name)
         return analysis_file_name, object_id, cache_hash

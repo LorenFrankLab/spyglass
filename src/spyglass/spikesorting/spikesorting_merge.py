@@ -24,17 +24,48 @@ from spyglass.utils.spikesorting import firing_rate_from_spike_indicator
 # v2 is in-development and gated behind the DB-host safety guard
 # (raises on non-localhost). Import the v2 module lazily and wrap in
 # try/except so v0/v1-only environments keep working unchanged; the
-# v2 part table on SpikeSortingOutput is then only declared when v2
-# is importable in the current environment.
+# v2 part table on SpikeSortingOutput is only declared when v2 is
+# importable in the current environment, because DataJoint requires
+# the FK target table to exist at schema-compile time.
+#
+# When v2 is unavailable we keep the original import exception in
+# ``_v2_import_error`` and surface it (with traceback context) the
+# moment a v2-requiring helper is called — otherwise users see an
+# opaque "v2 not loaded" message and have to dig for the real cause
+# (non-localhost DB, missing pydantic, SI version skew, etc).
 try:
     from spyglass.spikesorting.v2.curation import (
-        CurationV2 as _CurationV2,
+        CurationV2 as CurationV2,
     )
 except Exception as _v2_import_err:  # pragma: no cover -- v0/v1 envs
-    _CurationV2 = None
-    _v2_import_error = _v2_import_err
+    CurationV2 = None
+    _v2_import_error: Union[Exception, None] = _v2_import_err
 else:
     _v2_import_error = None
+
+
+def _raise_v2_unavailable(caller: str) -> None:
+    """Raise a clear RuntimeError when v2 is requested but didn't import.
+
+    Surfaces the original import exception (set at module load) so users
+    don't have to guess whether v2 failed because of the non-localhost
+    DB guard, a missing dependency, or a code-level error in the v2
+    module. Use this from every v2-requiring helper instead of letting
+    `_CurationV2 is None` propagate as an `AttributeError` later.
+    """
+    cause = _v2_import_error
+    detail = (
+        f" Original import error: {type(cause).__name__}: {cause}"
+        if cause is not None
+        else ""
+    )
+    raise RuntimeError(
+        f"{caller}: spyglass.spikesorting.v2 is not importable in "
+        "this environment. The v2 DB-host safety guard refuses "
+        "non-localhost databases; set "
+        "SPYGLASS_SPIKESORTING_V2_ALLOW_NONLOCAL_DB=1 to bypass with "
+        f"the documented risk caveat.{detail}"
+    ) from cause
 
 schema = dj.schema("spikesorting_merge")
 
@@ -43,8 +74,8 @@ source_class_dict = {
     "ImportedSpikeSorting": ImportedSpikeSorting,
     "CurationV1": CurationV1,
 }
-if _CurationV2 is not None:
-    source_class_dict["CurationV2"] = _CurationV2
+if CurationV2 is not None:
+    source_class_dict["CurationV2"] = CurationV2
 
 
 @schema
@@ -77,13 +108,13 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         -> CuratedSpikeSorting
         """
 
-    if _CurationV2 is not None:
+    if CurationV2 is not None:
 
         class CurationV2(SpyglassMixin, dj.Part):  # noqa: F811
             definition = """
             -> master
             ---
-            -> _CurationV2
+            -> CurationV2
             """
 
     def _get_restricted_merge_ids_v2(
@@ -103,17 +134,15 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         tables and source parts to ``SpikeSortingOutput.CurationV2``.
         Concat-source restrictions are not yet supported.
         """
-        if _CurationV2 is None:
-            return [] if not as_dict else []
+        if CurationV2 is None:
+            _raise_v2_unavailable(
+                "SpikeSortingOutput._get_restricted_merge_ids_v2"
+            )
 
-        from spyglass.spikesorting.v2.artifact import (
-            ArtifactSelection,
-        )
         from spyglass.spikesorting.v2.recording import (
             RecordingSelection,
         )
         from spyglass.spikesorting.v2.sorting import (
-            Sorting,
             SortingSelection,
         )
 
@@ -131,17 +160,15 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         rec_restriction = {k: key[k] for k in rec_keys if k in key}
         rec_table = RecordingSelection & rec_restriction
 
-        # Artifact restriction narrows by artifact_id when present.
-        art_restriction = (
-            {"artifact_id": key["artifact_id"]}
-            if "artifact_id" in key
-            else {}
-        )
+        # Build the SortingSelection-side relation; ``artifact_id`` is
+        # a master-side column, so we apply it together with the other
+        # sort_keys on the master after the part join (filtering on the
+        # RecordingSource part would silently no-op because DataJoint
+        # drops attributes not in the relation's heading).
         sort_rec_source = (
             SortingSelection.RecordingSource * rec_table.proj()
-        ) & art_restriction
+        )
         sort_master = SortingSelection * sort_rec_source.proj()
-
         sort_keys = [
             "sorter",
             "sorter_params_name",
@@ -156,7 +183,7 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             k: key[k] for k in curation_keys if k in key
         }
         curation_table = (
-            _CurationV2 * sort_master.proj("sorting_id")
+            CurationV2 * sort_master.proj("sorting_id")
         ) & curation_restriction
 
         # Join the merge part to find the corresponding merge_ids.
@@ -267,14 +294,9 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             )
 
         if "v2" in sources:
-            if _CurationV2 is None:
-                raise RuntimeError(
-                    "SpikeSortingOutput.get_restricted_merge_ids: v2 source "
-                    "requested but spyglass.spikesorting.v2 is not "
-                    "importable in this environment. The v2 DB-host safety "
-                    "guard refuses non-localhost; set "
-                    "SPYGLASS_SPIKESORTING_V2_ALLOW_NONLOCAL_DB=1 to bypass "
-                    "with the documented risk caveat."
+            if CurationV2 is None:
+                _raise_v2_unavailable(
+                    "SpikeSortingOutput.get_restricted_merge_ids"
                 )
             merge_ids.extend(
                 self._get_restricted_merge_ids_v2(

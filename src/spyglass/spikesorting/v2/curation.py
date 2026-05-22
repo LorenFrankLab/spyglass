@@ -85,7 +85,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
     class UnitLabel(SpyglassMixinPart):
         """Labels on curated units; one row per (unit, label).
 
-        A unit may carry multiple labels (e.g. ``mua`` + ``burst_parent``);
+        A unit may carry multiple labels (e.g. ``mua`` + ``artifact``);
         unlabeled units have zero ``UnitLabel`` rows. The NWB units table
         still gets a ``curation_label`` indexed column so v1-style
         consumers see empty lists for unlabeled units. Labels are
@@ -504,6 +504,23 @@ class CurationV2(SpyglassMixin, dj.Manual):
                     spike_times=_np.asarray(spike_times, dtype=_np.float64),
                     id=int(kept_uid),
                     curation_label=label_str,
+                )
+            # pynwb leaves ``nwbf.units = None`` if no add_unit() was
+            # called, so an empty curation (zero kept units) would crash
+            # on .object_id. Initialize an empty Units table explicitly.
+            if nwbf.units is None:
+                nwbf.units = pynwb.misc.Units(
+                    name="units",
+                    description=(
+                        "Empty units table (curation kept zero units)."
+                    ),
+                )
+                nwbf.units.add_column(
+                    name="curation_label",
+                    description=(
+                        "Curation label(s) from CurationV2.insert_curation; "
+                        "empty for placeholder Units."
+                    ),
                 )
             units_object_id = nwbf.units.object_id
             io.write(nwbf)

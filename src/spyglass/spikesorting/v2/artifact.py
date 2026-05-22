@@ -133,6 +133,16 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
     def insert_group(cls, name: str, members: list[dict]) -> None:
         """Insert master + Member rows; validate session consistency.
 
+        Currently gated: Phase 1 does not implement the matching
+        ``ArtifactDetection`` make-body branch for the
+        ``SharedArtifactGroupSource`` part, so inserting a group here
+        would create rows that cannot populate downstream. The schema
+        is declared (final-shape) so v2 won't need a migration when
+        the shared-group path lands; ``insert_group`` raises
+        ``NotImplementedError`` until then so users get a clear
+        message instead of an opaque ``ArtifactDetection.make``
+        failure later.
+
         Parameters
         ----------
         name
@@ -145,6 +155,11 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
 
         Raises
         ------
+        NotImplementedError
+            Always (Phase 1 gate). The validation logic below is
+            preserved (under ``# pragma: no cover``) so it can be
+            re-enabled when ``ArtifactDetection.make`` ships the
+            shared-group branch.
         ValueError
             If ``members`` is empty, if any member ``recording_id`` is
             not a populated ``Recording``, or if members span more than
@@ -152,12 +167,20 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
             share a time axis -- mixing sessions makes the
             artifact-removed valid times undefined.
         """
-        from spyglass.spikesorting.v2.recording import (
+        raise NotImplementedError(
+            "SharedArtifactGroup.insert_group is gated until "
+            "ArtifactDetection.make ships the shared-group branch. "
+            "Use the single-recording artifact path "
+            "(ArtifactSelection.insert_selection with recording_id) "
+            "for Phase 1."
+        )
+
+        from spyglass.spikesorting.v2.recording import (  # pragma: no cover
             Recording,
             RecordingSelection,
         )
 
-        if not members:
+        if not members:  # pragma: no cover
             raise ValueError(
                 "SharedArtifactGroup.insert_group: members list is empty. "
                 "Pass at least one recording_id dict."
@@ -334,6 +357,17 @@ class ArtifactSelection(SpyglassMixin, dj.Manual):
                 "via this helper should not produce duplicates."
             )
 
+        # Translate the would-be DataJoint FK IntegrityError into a
+        # clear "missing default row" message before the inserts attempt.
+        from spyglass.spikesorting.v2.utils import _ensure_lookup_row_exists
+
+        _ensure_lookup_row_exists(
+            ArtifactDetectionParameters,
+            master_restriction,
+            helper_name="ArtifactSelection.insert_selection",
+            insert_default_path="ArtifactDetectionParameters.insert_default()",
+        )
+
         new_master_key = {
             **master_restriction,
             "artifact_id": uuid.uuid4(),
@@ -487,6 +521,7 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
             Recording,
             RecordingSelection,
         )
+        from spyglass.spikesorting.v2.utils import transaction_or_noop
 
         recording_id = source_key["recording_id"]
         nwb_file_name = (
@@ -496,16 +531,21 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
 
         valid_times = self._detect_artifacts(recording, validated)
 
+        # Wrap the IntervalList write and the ArtifactDetection insert
+        # in a single transaction: a failed master insert otherwise
+        # leaves an orphan IntervalList row named ``artifact_<uuid>``
+        # that has no FK reference and won't be reaped by cascade.
         interval_list_name = f"artifact_{key['artifact_id']}"
-        IntervalList.insert1(
-            {
-                "nwb_file_name": nwb_file_name,
-                "interval_list_name": interval_list_name,
-                "valid_times": valid_times,
-                "pipeline": "spikesorting_artifact_v2",
-            }
-        )
-        self.insert1(key)
+        with transaction_or_noop(self.connection):
+            IntervalList.insert1(
+                {
+                    "nwb_file_name": nwb_file_name,
+                    "interval_list_name": interval_list_name,
+                    "valid_times": valid_times,
+                    "pipeline": "spikesorting_artifact_v2",
+                }
+            )
+            self.insert1(key)
 
     @staticmethod
     def _detect_artifacts(recording, validated):
@@ -523,8 +563,9 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
 
         # In-memory scan: acceptable for recordings up to a few minutes;
         # the smoke / 60s polymer fixtures fit easily. Chunked iteration
-        # is follow-up work alongside the recompute pipeline.
-        traces = recording.get_traces(return_scaled=False)
+        # is follow-up work alongside the recompute pipeline. SI 0.104
+        # renamed the ``return_scaled`` kwarg to ``return_in_uV``.
+        traces = recording.get_traces(return_in_uV=False)
         # Scale to microvolts using SI's stored gain so the threshold
         # comparison is in physical units.
         gains = recording.get_channel_gains()
@@ -588,8 +629,16 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         for start_f, end_f in spans:
             start_f = max(0, start_f - half_window_frames)
             end_f = min(len(timestamps) - 1, end_f + half_window_frames)
+            # ``end_f`` is the INCLUSIVE last artifact sample, but the
+            # interval is stored as a half-open ``[start, end)`` where
+            # ``end`` is the first non-artifact sample. Otherwise the
+            # complement (saved as valid_times) would silently include
+            # ``timestamps[end_f]`` -- an artifact sample -- in the
+            # next valid interval, and ``Sorting._apply_artifact_mask``
+            # would fail to mask that sample before the sort.
+            end_time = timestamps[min(end_f + 1, len(timestamps) - 1)]
             artifact_intervals.append(
-                [timestamps[start_f], timestamps[end_f]]
+                [timestamps[start_f], end_time]
             )
 
         # Subtract artifact intervals from the recording window.
@@ -681,5 +730,14 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         else:
             super().delete(*args, safemode=safemode, **kwargs)
 
+        # Clean up the matching IntervalList rows through cautious_delete
+        # (the user already passed the same team-permission check on the
+        # parent ArtifactDetection rows above keyed by the same
+        # nwb_file_name, so the IntervalList check is a re-verification,
+        # not a bypass). super_delete here would silently delete other
+        # users' rows under shared lab sessions.
         for restriction in interval_rows_to_remove:
-            (IntervalList & restriction).super_delete(warn=False)
+            rows = IntervalList & restriction
+            if len(rows) == 0:
+                continue
+            rows.delete(safemode=False)

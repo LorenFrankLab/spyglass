@@ -37,7 +37,7 @@ from spyglass.spikesorting.v2.utils import (
     transaction_or_noop,
     unit_brain_region_df,
 )
-from spyglass.utils import SpyglassMixin, SpyglassMixinPart
+from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 
 _assert_v2_db_safe()
 schema = dj.schema("spikesorting_v2_sorting")
@@ -248,6 +248,20 @@ class SortingSelection(SpyglassMixin, dj.Manual):
                 "via this helper should not produce duplicates."
             )
 
+        # Translate the would-be DataJoint FK IntegrityError into a
+        # clear "missing default row" message before the inserts attempt.
+        from spyglass.spikesorting.v2.utils import _ensure_lookup_row_exists
+
+        _ensure_lookup_row_exists(
+            SorterParameters,
+            {
+                "sorter": key["sorter"],
+                "sorter_params_name": key["sorter_params_name"],
+            },
+            helper_name="SortingSelection.insert_selection",
+            insert_default_path="SorterParameters.insert_default()",
+        )
+
         new_master_key = {
             **master_restriction,
             "sorting_id": uuid.uuid4(),
@@ -429,23 +443,46 @@ class Sorting(SpyglassMixin, dj.Computed):
             nwb_file_name=nwb_file_name,
         )
 
-        self.insert1(
-            {
-                **key,
-                "analysis_file_name": analysis_file_name,
-                "object_id": units_object_id,
-                "analyzer_folder": str(analyzer_folder),
-                "n_units": len(sorting_obj.unit_ids),
-                "time_of_sort": _dt.datetime.now(),
-            }
-        )
-        self._populate_unit_part(
-            sorting=sorting_obj,
-            recording_id=recording_id,
-            nwb_file_name=nwb_file_name,
-            key=key,
-            analyzer_folder=analyzer_folder,
-        )
+        # Register the analysis file + Sorting master + Sorting.Unit
+        # part rows atomically: if any part fails (e.g., a sorter
+        # returned a non-integer unit_id), the AnalysisNwbfile and
+        # master rows roll back together. The units NWB on disk is the
+        # only side effect left to clean up on rollback.
+        import pathlib as _pathlib
+
+        from spyglass.spikesorting.v2.utils import transaction_or_noop
+
+        try:
+            with transaction_or_noop(self.connection):
+                AnalysisNwbfile().add(nwb_file_name, analysis_file_name)
+                self.insert1(
+                    {
+                        **key,
+                        "analysis_file_name": analysis_file_name,
+                        "object_id": units_object_id,
+                        "analyzer_folder": str(analyzer_folder),
+                        "n_units": len(sorting_obj.unit_ids),
+                        "time_of_sort": _dt.datetime.now(),
+                    }
+                )
+                self._populate_unit_part(
+                    sorting=sorting_obj,
+                    recording_id=recording_id,
+                    nwb_file_name=nwb_file_name,
+                    key=key,
+                    analyzer_folder=analyzer_folder,
+                )
+        except Exception:
+            try:
+                abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+                if _pathlib.Path(abs_path).exists():
+                    _pathlib.Path(abs_path).unlink()
+            except Exception as cleanup_exc:  # pragma: no cover -- defensive
+                logger.error(
+                    "Sorting.make: failed to clean up staged units NWB "
+                    f"{analysis_file_name!r}: {cleanup_exc!r}"
+                )
+            raise
 
     # ---- Accessors -------------------------------------------------------
 
@@ -769,10 +806,22 @@ class Sorting(SpyglassMixin, dj.Computed):
                 # exactly. v1 uses this same convention.
                 spike_times = timestamps[spike_indices]
                 nwbf.add_unit(spike_times=spike_times, id=int(unit_id))
+            # pynwb leaves ``nwbf.units = None`` if no add_unit() was
+            # called, so a zero-unit sort would crash on .object_id.
+            # Initialize an empty Units table explicitly (v1 has the
+            # same guard at v1/sorting.py:578).
+            if nwbf.units is None:
+                nwbf.units = pynwb.misc.Units(
+                    name="units",
+                    description="Empty units table (sorter found zero units).",
+                )
             units_object_id = nwbf.units.object_id
             io.write(nwbf)
 
-        AnalysisNwbfile().add(nwb_file_name, analysis_file_name)
+        # The AnalysisNwbfile DB-row registration (.add) is deliberately
+        # NOT done here -- ``Sorting.make`` registers it inside its
+        # ``transaction_or_noop`` block so the row rolls back atomically
+        # if any of the master / Unit-part inserts fail.
         return analysis_file_name, units_object_id
 
     @staticmethod
