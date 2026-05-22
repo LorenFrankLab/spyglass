@@ -1694,11 +1694,38 @@ def test_mountainsort5_ground_truth_polymer_60s(polymer_60s_session):
         exhaustive_gt=True,
     )
 
-    # Per-unit performance is a DataFrame indexed by GT unit_id; the
-    # ``accuracy`` column is the standard tp / (tp + fn + fp) score.
+    # Per-unit performance is a DataFrame indexed by GT unit_id.
+    # SI 0.104's ``get_performance(method='by_unit')`` exposes:
+    #   accuracy  = tp / (tp + fn + fp)
+    #   recall    = tp / (tp + fn)
+    #   precision = tp / (tp + fp)
+    #   false_discovery_rate
+    #   miss_rate
+    # Each is keyed by GT unit_id (Hungarian-matched to a detected unit).
     perf = comparison.get_performance(method="by_unit", output="pandas")
     accuracies = perf["accuracy"].values
+    recall = perf["recall"].values
+    precision = perf["precision"].values
     n_planted = len(accuracies)
+
+    # ---- Diagnostic summary so a failure (or a soft regression) surfaces
+    # the distribution rather than a single pass/fail bit. Always logged.
+    summary = (
+        f"\n[MS5 vs 60s polymer GT] n_planted={n_planted}, "
+        f"n_detected={len(tested_sorting.unit_ids)}\n"
+        f"  accuracy  mean={accuracies.mean():.3f} "
+        f"median={float(np.median(accuracies)):.3f} "
+        f"min={accuracies.min():.3f} max={accuracies.max():.3f}\n"
+        f"  recall    mean={recall.mean():.3f} "
+        f"median={float(np.median(recall)):.3f} "
+        f"min={recall.min():.3f} max={recall.max():.3f}\n"
+        f"  precision mean={precision.mean():.3f} "
+        f"median={float(np.median(precision)):.3f} "
+        f"min={precision.min():.3f} max={precision.max():.3f}\n"
+        f"  per-unit accuracy (sorted): "
+        f"{[round(float(a), 3) for a in sorted(accuracies, reverse=True)]}"
+    )
+    print(summary)
 
     # Guard against a vacuous pass: ``n_planted // 2 == 0 >= 0`` would
     # silently approve a fixture that produced zero ground-truth units
@@ -1707,32 +1734,56 @@ def test_mountainsort5_ground_truth_polymer_60s(polymer_60s_session):
     # generation surfaces.
     assert n_planted >= 12, (
         f"60s polymer fixture has only {n_planted} planted units; expected "
-        "around 24. Regenerate the fixture before trusting this gate."
+        f"around 24. Regenerate the fixture before trusting this gate."
+        f"{summary}"
     )
 
+    # Detection-count floor: at least half the planted units must have
+    # accuracy >= 0.7. This is the primary correctness gate.
     n_well_detected = int((accuracies >= 0.7).sum())
     threshold_half = n_planted // 2
     assert n_well_detected >= threshold_half, (
         f"MS5 on the 60s polymer fixture detected {n_well_detected} "
         f"of {n_planted} planted units at accuracy >= 0.7; "
-        f"validation goal requires >= {threshold_half}. "
-        f"Per-unit accuracies: {sorted(accuracies, reverse=True)[:8]}..."
+        f"validation goal requires >= {threshold_half}."
+        f"{summary}"
     )
 
-    # Precision floor: even if half the GT units are well-detected, a
-    # sorter outputting hundreds of spurious units would still hit
-    # ``accuracy >= 0.7`` on the matched ones (the
-    # ``compare_sorter_to_ground_truth`` accuracy = tp / (tp + fn + fp)
-    # implicitly bounds this, but the bound is exhaustive_gt-mediated).
-    # Assert directly that the precision distribution per GT unit looks
-    # reasonable -- the matched-unit precision should be >= 0.5 for the
-    # well-detected units, otherwise the matching is suspicious.
-    precision = perf["precision"].values
+    # Precision floor: the well-detected units must also have
+    # precision >= 0.5. Otherwise a sorter that emits many spurious
+    # spikes alongside each true unit (e.g., a buggy duplicate-spike
+    # bug) could clear the accuracy gate by coincidence.
     well_detected_mask = accuracies >= 0.7
     well_detected_precision = precision[well_detected_mask]
     assert (well_detected_precision >= 0.5).all(), (
-        "Well-detected GT units have suspiciously low precision: "
-        f"min={well_detected_precision.min():.3f}; expected >= 0.5 for "
-        f"every unit with accuracy >= 0.7. Per-unit precision: "
-        f"{sorted(precision, reverse=True)[:8]}..."
+        f"Well-detected GT units have low precision: min="
+        f"{well_detected_precision.min():.3f}; expected >= 0.5 for every "
+        f"unit with accuracy >= 0.7.{summary}"
+    )
+
+    # Recall floor on well-detected units. accuracy is symmetric in fn
+    # and fp; a unit can have accuracy=0.7 with recall=0.7/precision=1.0
+    # (missing real spikes) or recall=1.0/precision=0.7 (spurious extra
+    # spikes). The precision floor above bounds the second mode; this
+    # bounds the first so a well-detected unit must actually find most
+    # of its planted spikes.
+    well_detected_recall = recall[well_detected_mask]
+    assert (well_detected_recall >= 0.5).all(), (
+        f"Well-detected GT units have low recall: min="
+        f"{well_detected_recall.min():.3f}; expected >= 0.5 for every "
+        f"unit with accuracy >= 0.7 (a unit can't be 'well detected' "
+        f"if it's missing more than half its planted spikes).{summary}"
+    )
+
+    # Distribution-shape floor: well-detected units should have HIGH
+    # accuracy, not barely-passing accuracy. A pipeline regression that
+    # drives every accuracy from ~0.95 down to ~0.71 should fail this
+    # test even though the count gate above still passes.
+    well_detected_accuracy = accuracies[well_detected_mask]
+    assert well_detected_accuracy.mean() >= 0.85, (
+        f"Mean accuracy of well-detected units is "
+        f"{well_detected_accuracy.mean():.3f}; expected >= 0.85 "
+        f"(MS5 typically produces ~0.95 on this fixture). A regression "
+        f"that drove accuracies down while keeping enough above 0.7 to "
+        f"pass the count gate would surface here.{summary}"
     )
