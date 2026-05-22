@@ -295,6 +295,34 @@ def test_recording_populates_and_round_trips(
     )
 
 
+_POLYMER_60S_PATH = (
+    Path(__file__).resolve().parent / "fixtures" / "mearec_polymer_128ch_60s.nwb"
+)
+
+
+@pytest.fixture(scope="module")
+def polymer_60s_session(dj_conn):
+    """Ingest the 60s polymer MEArec fixture for the ground-truth tests.
+
+    Skips cleanly if the fixture has not been generated. Module-scoped
+    so the clusterless e2e + MS5 ground-truth tests share the same
+    ingestion.
+    """
+    if not _POLYMER_60S_PATH.exists():
+        pytest.skip(
+            "60s polymer fixture not on disk -- run "
+            "`python tests/spikesorting/v2/fixtures/generate_mearec.py` "
+            "(no --smoke) first."
+        )
+    nwb_file_name = copy_and_insert_nwb(_POLYMER_60S_PATH)
+    from spyglass.spikesorting.imported import ImportedSpikeSorting
+
+    session_key = {"nwb_file_name": nwb_file_name}
+    if not (ImportedSpikeSorting & session_key):
+        ImportedSpikeSorting().insert_from_nwbfile(nwb_file_name)
+    yield session_key
+
+
 def _clear_curations(sorting_key):
     """Delete CurationV2 rows for a sorting + the corresponding
     SpikeSortingOutput merge master rows.
@@ -1331,3 +1359,278 @@ def test_artifact_selection_resolve_source_detects_bypass(populated_recording):
         (ArtifactSelection & {"artifact_id": orphan_id}).super_delete(
             warn=False
         )
+
+
+# ---------- Clusterless thresholder end-to-end ----------------------------
+
+
+@pytest.mark.slow
+def test_clusterless_thresholder_end_to_end(polymer_smoke_session):
+    """Clusterless-thresholder finds peaks and round-trips through the
+    pipeline.
+
+    The default ``clusterless_thresholder`` Lookup row uses a 100 uV
+    amplitude threshold that finds zero peaks on the 4-second smoke
+    fixture's amplitudes. This test inserts a custom ``SorterParameters``
+    row with a tuned (lower) threshold and exercises
+    Recording -> Artifact -> Sorting through that row, bypassing the
+    preset bundle but reusing every Selection / make() body.
+    """
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactDetectionParameters,
+        ArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        Sorting,
+        SortingSelection,
+    )
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    PreprocessingParameters.insert_default()
+    ArtifactDetectionParameters.insert_default()
+    LabTeam.insert1(
+        {
+            "team_name": "v2_test_team",
+            "team_description": "v2 pipeline tests",
+        },
+        skip_duplicates=True,
+    )
+    if not (SortGroupV2 & polymer_smoke_session):
+        SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    sort_group_id = int(
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
+    )
+
+    # Insert a clusterless row tuned for the smoke fixture's amplitude
+    # distribution. MEArec template amplitudes on this fixture are
+    # smaller than typical lab data; a 5 uV threshold reliably surfaces
+    # planted spikes for the 4s smoke recording.
+    custom_params_name = "smoke_clusterless_5uv"
+    SorterParameters().insert1(
+        {
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": custom_params_name,
+            "params": {
+                "detect_threshold": 5.0,
+                "method": "locally_exclusive",
+                "peak_sign": "neg",
+                "exclude_sweep_ms": 0.1,
+                "local_radius_um": 100.0,
+                "outputs": "sorting",
+            },
+            "params_schema_version": 1,
+            "job_kwargs": None,
+        },
+        skip_duplicates=True,
+    )
+
+    rec_pk = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+            "interval_list_name": "raw data valid times",
+            "preproc_params_name": "default_franklab",
+            "team_name": "v2_test_team",
+        }
+    )
+    Recording.populate(rec_pk, reserve_jobs=False)
+
+    art_pk = ArtifactSelection.insert_selection(
+        {
+            "recording_id": rec_pk["recording_id"],
+            "artifact_params_name": "none",
+        }
+    )
+    ArtifactDetection.populate(art_pk, reserve_jobs=False)
+
+    sort_pk = SortingSelection.insert_selection(
+        {
+            "recording_id": rec_pk["recording_id"],
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": custom_params_name,
+            "artifact_id": art_pk["artifact_id"],
+        }
+    )
+    (Sorting & sort_pk).super_delete(warn=False)
+    Sorting.populate(sort_pk, reserve_jobs=False)
+
+    row = (Sorting & sort_pk).fetch1()
+    # Clusterless puts every peak into a single unit_id=0.
+    assert row["n_units"] == 1
+    assert len(Sorting.Unit & sort_pk) == 1
+    unit_row = (Sorting.Unit & sort_pk).fetch1()
+    assert unit_row["unit_id"] == 0
+    assert unit_row["n_spikes"] > 0
+    assert unit_row["peak_amplitude_uv"] > 0.0
+
+
+# ---------- 60s MEArec ground-truth correctness gate ----------------------
+
+
+@pytest.mark.slow
+def test_mountainsort5_ground_truth_polymer_60s(polymer_60s_session):
+    """MS5 on the 60s polymer fixture finds the planted units.
+
+    Primary correctness gate: per-unit accuracy >= 0.7 for at least
+    half of planted units, computed via
+    ``spikeinterface.comparison.compare_sorter_to_ground_truth``
+    against the ``ImportedSpikeSorting`` ground truth that
+    ``insert_from_nwbfile`` loaded from the MEArec NWB.
+    """
+    from spikeinterface.comparison import compare_sorter_to_ground_truth
+
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactDetectionParameters,
+        ArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        Sorting,
+        SortingSelection,
+    )
+
+    nwb_file_name = polymer_60s_session["nwb_file_name"]
+
+    PreprocessingParameters.insert_default()
+    ArtifactDetectionParameters.insert_default()
+    SorterParameters.insert_default()
+    LabTeam.insert1(
+        {
+            "team_name": "v2_test_team",
+            "team_description": "v2 pipeline tests",
+        },
+        skip_duplicates=True,
+    )
+
+    if not (SortGroupV2 & polymer_60s_session):
+        SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+
+    # Sort each of the 4 shanks; aggregate the per-shank SI sortings
+    # by shifting unit ids so MS5's overlapping local ids do not
+    # collide across shanks.
+    sort_group_ids = sorted(
+        int(g) for g in (SortGroupV2 & polymer_60s_session).fetch("sort_group_id")
+    )
+    sortings_by_shank = []
+    for sg_id in sort_group_ids:
+        rec_pk = RecordingSelection.insert_selection(
+            {
+                "nwb_file_name": nwb_file_name,
+                "sort_group_id": sg_id,
+                "interval_list_name": "raw data valid times",
+                "preproc_params_name": "default_franklab",
+                "team_name": "v2_test_team",
+            }
+        )
+        Recording.populate(rec_pk, reserve_jobs=False)
+        art_pk = ArtifactSelection.insert_selection(
+            {
+                "recording_id": rec_pk["recording_id"],
+                "artifact_params_name": "none",
+            }
+        )
+        ArtifactDetection.populate(art_pk, reserve_jobs=False)
+        sort_pk = SortingSelection.insert_selection(
+            {
+                "recording_id": rec_pk["recording_id"],
+                "sorter": "mountainsort5",
+                "sorter_params_name": (
+                    "franklab_tetrode_hippocampus_30kHz_ms5"
+                ),
+                "artifact_id": art_pk["artifact_id"],
+            }
+        )
+        Sorting.populate(sort_pk, reserve_jobs=False)
+        sortings_by_shank.append(Sorting().get_sorting(sort_pk))
+
+    # Combine the per-shank sortings into one BaseSorting for the
+    # ground-truth comparison. SI's ``aggregate_units`` produces a
+    # single sorting with shank-disjoint unit ids -- but the result's
+    # unit_ids dtype is ``uint64``, which SI 0.104's
+    # ``compare_sorter_to_ground_truth`` Hungarian matcher rejects
+    # (it only accepts dtype kinds 'i' or 'U'). Rename the units to
+    # contiguous signed-int ids to round-trip through the matcher.
+    import numpy as np
+    from spikeinterface import aggregate_units
+
+    aggregated = aggregate_units(sortings_by_shank)
+    tested_sorting = aggregated.rename_units(
+        np.arange(len(aggregated.unit_ids), dtype=np.int64)
+    )
+
+    # Ground truth: the planted MEArec units stored in the source
+    # NWB's ``/units`` table. ``ImportedSpikeSorting`` registers the
+    # table but does not expose ``get_sorting`` (the merge-table
+    # dispatch raises NotImplementedError for v0/v1/imported sources),
+    # so we read the NWB directly and build a NumpySorting.
+    import pynwb
+    import spikeinterface as si
+
+    from spyglass.common.common_nwbfile import Nwbfile
+
+    raw_nwb_path = Nwbfile().get_abs_path(nwb_file_name)
+    with pynwb.NWBHDF5IO(raw_nwb_path, "r", load_namespaces=True) as io:
+        gt_nwb = io.read()
+        es = gt_nwb.acquisition["e-series"]
+        # MEArec writes a fixed-rate ElectricalSeries (no timestamps
+        # array). Read ``rate`` directly; fall back to the timestamps
+        # diff only if rate is missing.
+        if es.rate is not None:
+            fs = float(es.rate)
+        else:
+            fs = float(1.0 / np.diff(es.timestamps[:2])[0])
+        gt_units = {}
+        for idx, unit_id in enumerate(gt_nwb.units.id[:]):
+            gt_units[int(unit_id)] = np.asarray(
+                gt_nwb.units["spike_times"][idx]
+            )
+    gt_sorting = si.NumpySorting.from_unit_dict(
+        units_dict_list=[
+            {
+                int(uid): (times * fs).astype(np.int64)
+                for uid, times in gt_units.items()
+            }
+        ],
+        sampling_frequency=fs,
+    )
+
+    comparison = compare_sorter_to_ground_truth(
+        gt_sorting=gt_sorting,
+        tested_sorting=tested_sorting,
+        gt_name="mearec_polymer_60s_planted",
+        tested_name="v2_mountainsort5",
+        delta_time=0.4,
+        match_score=0.5,
+        exhaustive_gt=True,
+    )
+
+    # Per-unit performance is a DataFrame indexed by GT unit_id; the
+    # ``accuracy`` column is the standard tp / (tp + fn + fp) score.
+    perf = comparison.get_performance(method="by_unit", output="pandas")
+    accuracies = perf["accuracy"].values
+    n_planted = len(accuracies)
+    n_well_detected = int((accuracies >= 0.7).sum())
+    threshold_half = n_planted // 2
+    assert n_well_detected >= threshold_half, (
+        f"MS5 on the 60s polymer fixture detected {n_well_detected} "
+        f"of {n_planted} planted units at accuracy >= 0.7; "
+        f"validation goal requires >= {threshold_half}. "
+        f"Per-unit accuracies: {sorted(accuracies, reverse=True)[:8]}..."
+    )
