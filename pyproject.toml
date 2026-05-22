@@ -71,7 +71,7 @@ dependencies = [
 ]
 
 optional-dependencies.dlc = [
-  "deeplabcut[tf]", # removing dlc pin removes need to pin tf/numba
+  "deeplabcut[tf]<3.0", # pin to 2.0 until PositionV2 release
   "ffmpeg",
 ]
 optional-dependencies.docs = [
