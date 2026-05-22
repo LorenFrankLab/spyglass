@@ -223,6 +223,7 @@ for label, interval_data in results.groupby("interval_labels"):
     - Fix ingestion nwb files with position objects but no spatial series #1405
     - Ignore `percent_frames` when using `limit` in `DLCPosVideo` #1418
     - Increase `DLCProject.config_path` length #1534
+    - Restrict `DLC<3.0` #1605
 
 - Spikesorting
 
