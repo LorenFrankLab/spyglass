@@ -11,3 +11,5 @@ Spyglass.
 - [Mixin](./Mixin.md) - Spyglass-specific functionalities to DataJoint tables,
     including fetching NWB files, long-distance restrictions, and permission
     checks on delete operations.
+- [Spike Sorting v2](./SpikeSortingV2.md) - Modern SpikeInterface 0.104-based
+    spike sorting pipeline (`spyglass.spikesorting.v2`).

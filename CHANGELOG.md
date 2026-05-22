@@ -267,6 +267,23 @@ for label, interval_data in results.groupby("interval_labels"):
         seconds-to-samples conversion #1564
     - Trigger recording recompute in `SpikeSortingRecording.populate` when
         necessary #1588
+    - Add `spyglass.spikesorting.v2` Phase 1 single-session pipeline on
+        SpikeInterface 0.104's `SortingAnalyzer` API: `SortGroupV2`,
+        `PreprocessingParameters` / `RecordingSelection` / `Recording`,
+        `ArtifactDetectionParameters` / `SharedArtifactGroup` /
+        `ArtifactSelection` / `ArtifactDetection`, `SorterParameters` /
+        `SortingSelection` / `Sorting`, and `CurationV2`. Adds a
+        `SpikeSortingOutput.CurationV2` part so v0, v1, imported, and v2
+        curations coexist on one merge surface (downstream consumers --
+        decoding, ripple detection, brain-region lookup -- continue to
+        key off `merge_id` unchanged). Ships a
+        `spyglass.spikesorting.v2.pipeline.run_v2_pipeline` orchestrator
+        with three presets (`franklab_tetrode_mountainsort4`,
+        `franklab_tetrode_mountainsort5`,
+        `franklab_tetrode_clusterless_thresholder`); idempotent by design.
+        See [Spike Sorting v2](./Features/SpikeSortingV2.md). Active
+        v0/v1 workflows continue to require the legacy SI 0.99
+        environment
 
 ## [0.5.5] (Aug 6, 2025)
 
