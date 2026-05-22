@@ -2524,6 +2524,471 @@ def test_sorting_make_rollback_cleans_units_nwb(
     )
 
 
+# ---------- ArtifactDetection: signal-level _detect_artifacts ------------
+
+
+@pytest.mark.slow
+def test_detect_artifacts_finds_known_transient(dj_conn):
+    """``ArtifactDetection._detect_artifacts`` runs its amplitude-
+    threshold scan body and produces the expected valid-time
+    complement of a known synthetic transient.
+
+    Every existing artifact test uses the ``"none"`` preset which
+    short-circuits at the ``if not validated.detect`` guard in
+    ``_detect_artifacts`` (artifact.py:584) and writes a single all-
+    valid interval. That left the entire amplitude-threshold
+    detection body (~50 lines, the actual artifact-finding code) at
+    0% coverage.
+
+    This test calls ``_detect_artifacts`` directly with a synthetic
+    ``NumpyRecording`` carrying a deterministic 200-sample, 200 uV
+    transient at frames 1000-1199. The threshold (50 uV) and
+    proportion (50% of channels) are set so the transient
+    reliably trips detection and nothing else does. Asserts the
+    returned ``valid_times`` has exactly two intervals straddling
+    the planted transient and excludes the artifact samples.
+    """
+    import numpy as _np
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._params.artifact_detection import (
+        ArtifactDetectionParamsSchema,
+    )
+    from spyglass.spikesorting.v2.artifact import ArtifactDetection
+
+    # Build a synthetic 4-channel, 5000-sample recording with a
+    # 200 uV transient at frames 1000-1199 across all channels.
+    # Gain = 1.0 so traces are already in uV.
+    fs = 30_000.0
+    n_samples = 5000
+    n_channels = 4
+    traces = _np.zeros((n_samples, n_channels), dtype=_np.float32)
+    traces[1000:1200, :] = 200.0
+    rec = si.NumpyRecording(
+        traces_list=[traces], sampling_frequency=fs
+    )
+    rec.set_channel_gains([1.0] * n_channels)
+
+    # detect=True, 50 uV threshold, 50% of channels (= 2 of 4)
+    # must exceed simultaneously. The transient hits all 4
+    # channels at 200 uV; nothing else exceeds 50 uV. The
+    # minimal positive removal_window_ms (Pydantic enforces > 0)
+    # expands the artifact span by ceil(removal_window_ms * fs /
+    # 2000) frames on each side. At fs=30 kHz and 0.05 ms that's
+    # ``ceil(0.05 * 30000 / 2000) = 1`` frame -- intentionally
+    # small so the assertions below can be exact.
+    params = ArtifactDetectionParamsSchema(
+        detect=True,
+        amplitude_thresh_uV=50.0,
+        zscore_thresh=None,
+        proportion_above_thresh=0.5,
+        removal_window_ms=0.05,
+        join_window_ms=0.0,
+    )
+
+    valid_times = ArtifactDetection._detect_artifacts(rec, params)
+    timestamps = rec.get_times()
+
+    # half_window_frames = ceil(0.05 ms * 30 kHz / 2 / 1000) = 1.
+    # Artifact span expands from [1000, 1199] to [999, 1200]. The
+    # saved valid intervals straddle this expanded artifact run.
+    expected_start_f = 999  # 1000 - half_window
+    expected_end_f = 1200  # 1199 + half_window
+    expected_end_open_f = expected_end_f + 1  # half-open boundary
+
+    assert valid_times.shape == (2, 2), (
+        f"Expected exactly 2 valid intervals around the synthetic "
+        f"transient at frames 1000-1199, got shape {valid_times.shape}. "
+        "_detect_artifacts either skipped the detection body or "
+        "merged the artifact and valid runs incorrectly."
+    )
+    # First valid interval ends at the start of the expanded
+    # artifact span.
+    assert valid_times[0][0] == pytest.approx(timestamps[0], abs=1e-9)
+    assert valid_times[0][1] == pytest.approx(
+        timestamps[expected_start_f], abs=1e-9
+    ), (
+        f"First valid interval ends at {valid_times[0][1]}, expected "
+        f"{timestamps[expected_start_f]} (start of the expanded "
+        "artifact span)."
+    )
+    # Second valid interval starts AT the first sample AFTER the
+    # expanded artifact span (the half-open fix from the prior
+    # review: the saved interval starts at
+    # ``timestamps[end_f + 1]``, so the LAST artifact frame is
+    # NOT silently included in the next valid interval).
+    assert valid_times[1][0] == pytest.approx(
+        timestamps[expected_end_open_f], abs=1e-9
+    ), (
+        f"Second valid interval starts at {valid_times[1][0]}, expected "
+        f"{timestamps[expected_end_open_f]} (first sample AFTER the "
+        "expanded artifact span). If this is "
+        f"``timestamps[{expected_end_f}]`` the off-by-one fix at "
+        "the END of the artifact interval has regressed."
+    )
+    assert valid_times[1][1] == pytest.approx(timestamps[-1], abs=1e-9)
+
+
+@pytest.mark.slow
+def test_detect_artifacts_no_threshold_crossings(dj_conn):
+    """``_detect_artifacts`` returns the full recording window as a
+    single valid interval when no frame trips the threshold.
+
+    Exercises the early-return branch at ``len(frames_above) == 0``
+    (artifact.py:603) without short-circuiting at the
+    ``detect=False`` guard. Complements the synthetic-transient
+    test by covering the "detection ran but found nothing" path.
+    """
+    import numpy as _np
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._params.artifact_detection import (
+        ArtifactDetectionParamsSchema,
+    )
+    from spyglass.spikesorting.v2.artifact import ArtifactDetection
+
+    # Recording with all-zero traces -- nothing can exceed any
+    # positive threshold.
+    rec = si.NumpyRecording(
+        traces_list=[_np.zeros((2000, 4), dtype=_np.float32)],
+        sampling_frequency=30_000.0,
+    )
+    rec.set_channel_gains([1.0] * 4)
+
+    params = ArtifactDetectionParamsSchema(
+        detect=True,
+        amplitude_thresh_uV=10.0,
+        zscore_thresh=None,
+        proportion_above_thresh=0.5,
+    )
+    valid_times = ArtifactDetection._detect_artifacts(rec, params)
+    timestamps = rec.get_times()
+
+    assert valid_times.shape == (1, 2)
+    assert valid_times[0][0] == pytest.approx(timestamps[0], abs=1e-9)
+    assert valid_times[0][1] == pytest.approx(timestamps[-1], abs=1e-9)
+
+
+def _build_synthetic_rec(traces, fs=30_000.0):
+    """Helper: wrap a (n_samples, n_channels) array as a SI NumpyRecording
+    with unit gains so trace values can be reasoned about as microvolts."""
+    import spikeinterface as si
+
+    rec = si.NumpyRecording(traces_list=[traces], sampling_frequency=fs)
+    rec.set_channel_gains([1.0] * traces.shape[1])
+    return rec
+
+
+@pytest.mark.slow
+def test_detect_artifacts_zscore_only_detection(dj_conn):
+    """``_detect_artifacts`` runs the z-score-only branch when
+    ``amplitude_thresh_uV is None``.
+
+    Exercises:
+    - line 583 (``amplitude_thresh_uV is None`` -> ``above_amp =
+      zeros_like``)
+    - lines 585-588 (z-score computation)
+    - line 600 (``channel_hit = above_z`` when only zscore set)
+
+    Builds a recording with low-amplitude background noise plus a
+    high-z-score transient at known frames. The transient's
+    absolute amplitude is modest (5 uV) but its z-score is large
+    relative to the channel's near-zero mean.
+    """
+    import numpy as _np
+
+    from spyglass.spikesorting.v2._params.artifact_detection import (
+        ArtifactDetectionParamsSchema,
+    )
+    from spyglass.spikesorting.v2.artifact import ArtifactDetection
+
+    rng = _np.random.default_rng(42)
+    n_samples, n_channels = 5000, 4
+    # Background noise std=0.5 uV. Short (10-sample) 500 uV
+    # transient: keeps the global std small (~22 uV) so the
+    # transient samples sit at z ~= 22, well above the
+    # zscore_thresh=10 gate. A longer / lower transient inflates
+    # the per-channel std and would silently drop the transient's
+    # z-score below threshold -- exactly the kind of footgun
+    # z-score detection has in practice.
+    traces = (
+        rng.normal(0.0, 0.5, size=(n_samples, n_channels))
+        .astype(_np.float32)
+    )
+    traces[2000:2010, :] = 500.0
+    rec = _build_synthetic_rec(traces)
+
+    params = ArtifactDetectionParamsSchema(
+        detect=True,
+        amplitude_thresh_uV=None,  # z-score only
+        zscore_thresh=10.0,
+        proportion_above_thresh=0.5,
+        removal_window_ms=0.05,
+        join_window_ms=0.0,
+    )
+    valid_times = ArtifactDetection._detect_artifacts(rec, params)
+    timestamps = rec.get_times()
+
+    assert valid_times.shape == (2, 2), (
+        f"z-score-only detection expected 2 valid intervals around the "
+        f"transient at frames 2000-2009, got shape {valid_times.shape}."
+    )
+    # Pinpoint the artifact run via the expanded boundaries
+    # (half_window_frames=1).
+    assert valid_times[0][1] == pytest.approx(
+        timestamps[1999], abs=1e-9
+    )
+    assert valid_times[1][0] == pytest.approx(
+        timestamps[2011], abs=1e-9
+    )
+
+
+@pytest.mark.slow
+def test_detect_artifacts_amplitude_and_zscore_combined(dj_conn):
+    """``_detect_artifacts`` requires BOTH thresholds when both are
+    set (AND mode at line 596).
+
+    Builds two transients:
+      A) High amplitude (100 uV) but baseline z-score-disqualifying
+         because channels are saturated (low std).
+      B) High amplitude AND high z-score.
+
+    Only transient B clears the AND gate. (To keep this test fully
+    deterministic with the noise distribution, we use two channel
+    blocks that have distinctly different baselines.)
+    """
+    import numpy as _np
+
+    from spyglass.spikesorting.v2._params.artifact_detection import (
+        ArtifactDetectionParamsSchema,
+    )
+    from spyglass.spikesorting.v2.artifact import ArtifactDetection
+
+    n_samples, n_channels = 5000, 4
+    # Per-channel baseline: 80 uV constant on all channels. The
+    # amplitude detection at thresh=50 uV would flag every frame
+    # because 80 > 50 on all channels everywhere -- which is
+    # exactly the scenario the AND mode is meant to filter out.
+    # Combined with z-score, only frames that ALSO have anomalous
+    # per-channel z-score get flagged.
+    traces = _np.full((n_samples, n_channels), 80.0, dtype=_np.float32)
+    # Insert a single high-z-score deviation at frames 3000-3099 on
+    # all channels: 200 uV (the per-channel mean is ~80; 200 is
+    # well above the per-channel std).
+    traces[3000:3100, :] = 200.0
+    rec = _build_synthetic_rec(traces)
+
+    params = ArtifactDetectionParamsSchema(
+        detect=True,
+        amplitude_thresh_uV=50.0,
+        zscore_thresh=5.0,
+        proportion_above_thresh=0.5,
+        removal_window_ms=0.05,
+        join_window_ms=0.0,
+    )
+    valid_times = ArtifactDetection._detect_artifacts(rec, params)
+    timestamps = rec.get_times()
+
+    # Only the per-channel anomaly at frames 3000-3099 trips the
+    # combined gate; the baseline 80 uV is uniform so its z-score
+    # is ~0 everywhere despite passing the amplitude threshold.
+    assert valid_times.shape == (2, 2), (
+        f"AND-mode (amplitude AND z-score) expected to flag the "
+        f"high-z-score region at frames 3000-3099, got shape "
+        f"{valid_times.shape}."
+    )
+    assert valid_times[0][1] == pytest.approx(
+        timestamps[2999], abs=1e-9
+    )
+    assert valid_times[1][0] == pytest.approx(
+        timestamps[3101], abs=1e-9
+    )
+
+
+@pytest.mark.slow
+def test_detect_artifacts_join_window_merges_runs(dj_conn):
+    """``_detect_artifacts`` merges two artifact runs separated by
+    fewer than ``join_window_frames`` into a single artifact span.
+
+    Exercises line 621 (``cur_end = f`` inside the join branch)
+    which the existing single-run test doesn't hit. Builds two
+    transients separated by 10 frames; with join_window_ms set so
+    join_window_frames > 10, the runs merge into one. With a
+    smaller join window, the runs stay separate.
+    """
+    import numpy as _np
+
+    from spyglass.spikesorting.v2._params.artifact_detection import (
+        ArtifactDetectionParamsSchema,
+    )
+    from spyglass.spikesorting.v2.artifact import ArtifactDetection
+
+    n_samples, n_channels = 5000, 4
+    traces = _np.zeros((n_samples, n_channels), dtype=_np.float32)
+    traces[1000:1100, :] = 100.0  # artifact A
+    traces[1110:1210, :] = 100.0  # artifact B; 10 frames after A
+    rec = _build_synthetic_rec(traces)
+    fs = rec.get_sampling_frequency()
+
+    # join_window_ms = 1.0 -> join_window_frames = ceil(1 * 30 / 1) =
+    # 30 frames. Gap between A and B is 10 frames, so they merge.
+    merged = ArtifactDetection._detect_artifacts(
+        rec,
+        ArtifactDetectionParamsSchema(
+            detect=True,
+            amplitude_thresh_uV=50.0,
+            zscore_thresh=None,
+            proportion_above_thresh=0.5,
+            removal_window_ms=0.05,
+            join_window_ms=1.0,
+        ),
+    )
+    assert merged.shape == (2, 2), (
+        f"With join_window_ms=1.0 (= 30 frames > 10-frame gap), the two "
+        f"transients should merge into one artifact span, leaving 2 "
+        f"valid intervals; got shape {merged.shape}."
+    )
+
+    # join_window_ms = 0.1 -> join_window_frames = ceil(0.1 * 30 /
+    # 1) = 3 frames. Gap of 10 stays unbridged; two separate
+    # artifact runs, three valid intervals.
+    unmerged = ArtifactDetection._detect_artifacts(
+        rec,
+        ArtifactDetectionParamsSchema(
+            detect=True,
+            amplitude_thresh_uV=50.0,
+            zscore_thresh=None,
+            proportion_above_thresh=0.5,
+            removal_window_ms=0.05,
+            join_window_ms=0.1,
+        ),
+    )
+    assert unmerged.shape == (3, 2), (
+        f"With join_window_ms=0.1 (= 3 frames < 10-frame gap), the two "
+        f"transients stay separate, leaving 3 valid intervals; got "
+        f"shape {unmerged.shape}."
+    )
+
+
+@pytest.mark.slow
+def test_artifact_detection_parameters_validates_via_insert1(dj_conn):
+    """``ArtifactDetectionParameters.insert1`` validates the
+    ``params`` blob through Pydantic before the row is written.
+
+    Exercises lines 92-96 (the custom ``insert1`` override).
+    A blob with an unknown key violates ``extra="forbid"`` and the
+    insert is rejected before any row reaches the DB.
+    """
+    from pydantic import ValidationError
+
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetectionParameters,
+    )
+
+    bad_row = {
+        "artifact_params_name": "params_validates_unit_test",
+        "params": {
+            "detect": True,
+            "amplitude_thresh_uV": 100.0,
+            "not_a_real_field": "x",  # rejected by extra="forbid"
+        },
+        "params_schema_version": 1,
+        "job_kwargs": None,
+    }
+    with pytest.raises(ValidationError):
+        ArtifactDetectionParameters().insert1(bad_row)
+
+    assert (
+        len(
+            ArtifactDetectionParameters
+            & {
+                "artifact_params_name": "params_validates_unit_test"
+            }
+        )
+        == 0
+    ), "Failed validation should not have written a row."
+
+
+# ---------- CurationV2.insert_curation rollback cleanup ------------------
+
+
+@pytest.mark.slow
+def test_curation_v2_insert_rollback_cleans_units_nwb(
+    populated_sorting, monkeypatch
+):
+    """``CurationV2.insert_curation``'s except block unlinks the
+    staged Units NWB on a transaction rollback.
+
+    Mirrors ``test_sorting_make_rollback_cleans_units_nwb`` (which
+    pins the same contract for Sorting.make). Patches
+    ``SpikeSortingOutput._merge_insert`` to raise mid-transaction so
+    the curation rows + AnalysisNwbfile registration roll back. The
+    except block must unlink the staged units NWB so the file
+    system doesn't accumulate orphans on each retry.
+    """
+    import pathlib as _pathlib
+
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    _clear_curations(populated_sorting)
+
+    from spyglass.settings import analysis_dir as _ad
+
+    analysis_dir = _pathlib.Path(_ad)
+    before = (
+        {p.name for p in analysis_dir.rglob("*.nwb")}
+        if analysis_dir.exists()
+        else set()
+    )
+
+    original_merge_insert = SpikeSortingOutput._merge_insert
+
+    def _broken_merge_insert(cls, *args, **kwargs):
+        raise RuntimeError("simulated merge_insert failure")
+
+    monkeypatch.setattr(
+        SpikeSortingOutput, "_merge_insert", classmethod(_broken_merge_insert)
+    )
+
+    with pytest.raises(RuntimeError, match="simulated merge_insert failure"):
+        CurationV2.insert_curation(
+            sorting_key=populated_sorting,
+            labels={},
+            description="rollback regression test",
+        )
+
+    # Restore the original (monkeypatch.setattr handles teardown but
+    # being explicit is clearer than relying on fixture order).
+    monkeypatch.setattr(
+        SpikeSortingOutput, "_merge_insert", original_merge_insert
+    )
+
+    # No CurationV2 / SpikeSortingOutput row was inserted.
+    assert len(CurationV2 & populated_sorting) == 0, (
+        "CurationV2 row present after a transaction that should "
+        "have rolled back."
+    )
+    assert len(SpikeSortingOutput.CurationV2 & populated_sorting) == 0, (
+        "SpikeSortingOutput.CurationV2 merge-part row present after "
+        "a transaction that should have rolled back."
+    )
+
+    # No new orphan analysis NWB file remains on disk: the except
+    # block in insert_curation unlinks the staged file.
+    after = (
+        {p.name for p in analysis_dir.rglob("*.nwb")}
+        if analysis_dir.exists()
+        else set()
+    )
+    new_files = after - before
+    assert not new_files, (
+        f"CurationV2.insert_curation rollback left orphan analysis "
+        f"files: {new_files}. The except-block in insert_curation "
+        f"must unlink the staged file when the transaction rolls back."
+    )
+
+
 # =========================================================================
 # End of Phase 1 review followups.
 # =========================================================================
