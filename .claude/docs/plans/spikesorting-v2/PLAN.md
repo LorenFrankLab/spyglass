@@ -41,6 +41,7 @@ All implementation artifacts also use the [Code Artifact Naming](shared-contract
   - [phase-0-scaffolding.md](phase-0-scaffolding.md) — foundation work split into Phase 0a (module/CI/code-graph scaffolding) and Phase 0b (fixtures and v1 baseline capture); no v2 pipeline tables.
   - [phase-0c-si-0104-prerequisite.md](phase-0c-si-0104-prerequisite.md) — required prerequisite checkpoint that bumps the SI runtime for v2 and makes the legacy v0/v1 runtime boundary explicit before Phase 1 can land.
   - [phase-1-modern-single-session.md](phase-1-modern-single-session.md) — SortingAnalyzer-based single-session sort end-to-end; new `SpikeSortingOutput.CurationV2` part.
+  - [phase-1b-runtime-regressions.md](phase-1b-runtime-regressions.md) — runtime regressions + v1 parity fixes between Phase 1 and Phase 2. Covers (1) chunked HDF5 writes on `Recording.make` (port v1's `SpikeInterfaceRecordingDataChunkIterator` / `TimestampsDataChunkIterator`); (2) tri-part `make_fetch` / `make_compute` / `make_insert` + `_parallel_make = True` on `Recording`, `ArtifactDetection`, `Sorting` (transaction-blocking fix); (3) nine v1-behavior regressions (R1–R9): missing `CurationV2.get_recording`, `get_sort_group_info` not classmethod, `Sorting` tempdir leak, lost float64 external whitening, lost disjoint-interval concatenation, missing `is_filtered=True` annotation, missing `min_segment_length` field, boundary-spike clip (test-gated), Singularity carve-out for KS2.5/KS3/IronClust; (4) three default/API parity reverts (B1–B3): artifact thresholds revert to v1 (3000/1.0), `apply_merges` reverts to v1's `apply_merge`, new `CurationV2.MergeGroup` part table restores queryable merge-group provenance; (5) one improvement over v1 (B5): handle multi-segment NWBs; (6) one v2 behavior to keep (B7): the stricter heterogeneous-gain raise (v1 is buggy). The `CurationV2.MergeGroup` addition is the SINGLE deliberate schema exception to the zero-migration policy; documented in [overview.md § Resolved Design Decisions](overview.md#resolved-design-decisions).
   - [phase-2-analyzer-curation.md](phase-2-analyzer-curation.md) — metrics + auto-merge + burst-pair consolidated into `AnalyzerCuration`, plus recompute verification tables for storage reclamation.
   - [phase-3-session-group-concat.md](phase-3-session-group-concat.md) — `SessionGroup` table + `ConcatenatedRecording` for same-day chronic recordings.
   - [phase-4-unitmatch-cross-session.md](phase-4-unitmatch-cross-session.md) — pluggable matcher backend with UnitMatchPy; polymer validation gate.
@@ -58,8 +59,9 @@ Phase 0c SI 0.104 compatibility boundary + dependency bump
   -> Phase 1 single-session v2 MVP
 
 Phase 1 single-session v2 MVP
-  -> Phase 2 AnalyzerCuration + recompute verification
-  -> Phase 3 SessionGroup + ConcatenatedRecording
+  -> Phase 1b runtime regressions (chunked NWB writes + tri-part parallel populate)
+      -> Phase 2 AnalyzerCuration + recompute verification
+      -> Phase 3 SessionGroup + ConcatenatedRecording
 
 Phase 3 SessionGroup + ConcatenatedRecording
   -> Phase 4a UnitMatchPy technical spike
@@ -71,4 +73,4 @@ Phase 3 SessionGroup + ConcatenatedRecording
                           -> Phase 5b UX/FigPack tables/notebooks/docs
 ```
 
-Execution happens on the long-lived `spikesorting-v2` integration branch with checkpoint commits. Phase 1 is the first runtime v2 pipeline checkpoint and requires Phase 0a, Phase 0b, and Phase 0c. Phase 0c is a hard gate because Phase 1 imports and runs SpikeInterface 0.104 APIs while legacy v0/v1 active-runtime workflows must either be guarded with clear legacy-environment messages or explicitly proven compatible. Checkpoint commits may be grouped into larger review PRs if the gating order and validation evidence remain clear.
+Execution happens on the long-lived `spikesorting-v2` integration branch with checkpoint commits. Phase 1 is the first runtime v2 pipeline checkpoint and requires Phase 0a, Phase 0b, and Phase 0c. Phase 0c is a hard gate because Phase 1 imports and runs SpikeInterface 0.104 APIs while legacy v0/v1 active-runtime workflows must either be guarded with clear legacy-environment messages or explicitly proven compatible. Phase 1b is a hard gate before Phase 2 and Phase 3 because both later phases populate against `Recording` / `Sorting` at lab-relevant scales (Phase 2 builds analyzer extensions on top of the cached `ElectricalSeries`; Phase 3 concatenates per-member `Recording` rows), and the Phase 1 in-memory write OOMs before either can run on real chronic data. Checkpoint commits may be grouped into larger review PRs if the gating order and validation evidence remain clear.

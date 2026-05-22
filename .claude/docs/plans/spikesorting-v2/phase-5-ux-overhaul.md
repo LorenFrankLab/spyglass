@@ -127,6 +127,14 @@ The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell n
 
 - **Notebook smoke test**: `tests/spikesorting/v2/test_notebooks.py` — uses `jupytext` (already a docs optional dep at [pyproject.toml](../../../../pyproject.toml)) to execute `notebooks/13_Spike_SortingV2.ipynb` cell-by-cell against the `minirec` fixture. Marked slow.
 
+- **Document GitHub-hosted curation JSON ingress workflow (audit followup NB-N5 from Phase 1b sweep).** v1 supports loading curation labels/merge_groups from a GitHub-hosted `curation.json` via `FigURLCuration.generate_curation_uri` and `gh://.../curation.json` URIs (v1 notebook cells `924cdfce`, `b2e9b018`). Phase 5's FigPack design replaces FigURL but does not document the equivalent v2 workflow for loading external curation JSONs. Common Frank-lab pattern for sharing manual curations between users.
+
+  Pick one of the two paths (implementer's choice; Phase 5a feasibility evidence may inform):
+  - (a) **Extend `CurationV2.insert_curation`** to accept a `curation_uri: str | None = None` kwarg that, when set, reads `labels` and `merge_groups` from a JSON at the URI (supports `gh://`, `file://`, and `http(s)://`). The dict keys map directly to `insert_curation`'s `labels` and `merge_groups` args.
+  - (b) **Document the manual "read JSON → dict" pattern** in the Phase 5 notebook + `SpikeSortingV2.md` so users know v2's curation surface is "Python dict in" rather than "URI in", and example code shows how to convert a v1-shaped curation.json to v2's `insert_curation(labels=..., merge_groups=...)` call.
+
+  Both paths preserve the v1 workflow; (a) is closer to v1's API surface, (b) is simpler to implement.
+
 ## Deliberately not in this phase
 
 - **No v0/v1 source removal.** v0 and v1 stay in-tree indefinitely; this plan never sunsets them. v2 does not back-port to v1's FigURL flow either.
