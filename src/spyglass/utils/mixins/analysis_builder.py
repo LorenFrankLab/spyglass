@@ -16,55 +16,53 @@ from spyglass.utils.logging import logger
 class AnalysisFileBuilder:
     """Context manager for safe analysis file creation.
 
-    Enforces CREATE → POPULATE → REGISTER lifecycle with automatic state
-    tracking and fail-fast error messages.
+        Enforces CREATE → POPULATE → REGISTER lifecycle with automatic state
+        tracking and fail-fast error messages.
 
-    The builder prevents common errors:
-    - Forgetting to call add() (auto-registration on __exit__)
-    - Calling helpers after registration (state checks with clear errors)
-    - Opening files in write mode after registration (prevented)
-    - Losing track of file state (explicit state machine)
-    - Creating orphaned files on exception (logged for cleanup)
+        The builder prevents common errors:
+        - Forgetting to call add() (auto-registration on __exit__)
+        - Calling helpers after registration (state checks with clear errors)
+        - Opening files in write mode after registration (prevented)
+        - Losing track of file state (explicit state machine)
+        - Creating orphaned files on exception (logged for cleanup)
 
-    Parameters
-    ----------
-    analysis_table : AnalysisMixin instance
-        The table to create/register file in (master or custom)
-    nwb_file_name : str
-        Parent NWB file name
+        Parameters
+        ----------
+        analysis_table : AnalysisMixin instance
+            The table to create/register file in (master or custom)
+        nwb_file_name : str
+            Parent NWB file name
 
-    Attributes
-    ----------
-    analysis_file_name : str
-        Name of created analysis file (set after __enter__)
-    nwb_file_name : str
-        Parent NWB file name
+        Attributes
+        ----------
+        analysis_file_name : str
+            Name of created analysis file (set after __enter__)
+        nwb_file_name : str
+            Parent NWB file name
 
-    Examples
-    --------
-    Basic usage with helper methods:
-    >>> with AnalysisNwbfile().build(nwb_file_name) as builder:
-    ...     builder.add_nwb_object(my_data, "results")
-    ...     file = builder.analysis_file_name
-    # File automatically registered on exit!
+        Examples
+        --------
+        Basic usage with helper methods:
+        >>> with AnalysisNwbfile().build(nwb_file_name) as builder:
+        ...     builder.add_nwb_object(my_data, "results")
+        ...     file = builder.analysis_file_name
+        # File automatically registered on exit!
 
-    Multiple helper calls:
-    >>> with AnalysisNwbfile().build(nwb_file_name) as builder:
-    ...     builder.add_nwb_object(position_data, "position")
-    ...     builder.add_nwb_object(velocity_data, "velocity")
-    ...     file = builder.analysis_file_name
+        Multiple helper calls:
+        >>> with AnalysisNwbfile().build(nwb_file_name) as builder:
+        ...     builder.add_nwb_object(position_data, "position")
+        ...     builder.add_nwb_object(velocity_data, "velocity")
+        ...     file = builder.analysis_file_name
 
-    Direct NWB I/O for complex operations:
-    >>> with AnalysisNwbfile().build(nwb_file_name) as builder:
-    ...     with builder.open_for_write() as io:
-    ...         nwbf = io.read()
+        Direct NWB I/O for complex operations:
+        >>> with AnalysisNwbfile().build(nwb_file_name) as builder:
+        ...     io, nwbf = builder.open_nwb
     ...         nwbf.add_unit(spike_times=times, id=unit_id)
-    ...         io.write(nwbf)
-    ...     file = builder.analysis_file_name
+        ...     file = builder.analysis_file_name
 
-    See Also
-    --------
-    AnalysisMixin.build : Factory method that creates this builder
+        See Also
+        --------
+        AnalysisMixin.build : Factory method that creates this builder
     """
 
     def __init__(self, analysis_table, nwb_file_name: str):
@@ -161,7 +159,7 @@ class AnalysisFileBuilder:
         """Ensure file is in CREATED state (not INIT or REGISTERED).
 
         This helper validates that population methods (add_nwb_object, add_units,
-        open_for_write) are called at the correct time in the lifecycle.
+        open_nwb) are called at the correct time in the lifecycle.
 
         Parameters
         ----------
@@ -192,6 +190,8 @@ class AnalysisFileBuilder:
 
     @property
     def open_nwb(self):
+        """Tuple of (io, nwb) for currently open NWB file, or opens it if not already open."""
+        self._ensure_created("open_nwb")
         if self._open_nwb is None:
             self._open_io = pynwb.NWBHDF5IO(
                 path=self.get_path(),
@@ -359,32 +359,6 @@ class AnalysisFileBuilder:
         return self._table._add_units_waveforms_to_open_nwb(
             nwbf, waveform_extractor
         )
-
-    def open_for_write(self):
-        """Open analysis file for direct NWB I/O (POPULATE phase).
-
-        Returns context manager for NWBHDF5IO in append mode.
-        Only works if file is CREATED but not yet REGISTERED.
-
-        Returns
-        -------
-        io : pynwb.NWBHDF5IO
-            Context manager for file I/O
-
-        Raises
-        ------
-        ValueError
-            If called before create or after registration
-
-        Examples
-        --------
-        >>> with builder.open_for_write() as io:
-        ...     nwbf = io.read()
-        ...     nwbf.add_unit(spike_times=times, id=unit_id)
-        ...     io.write(nwbf)
-        """
-        self._ensure_created("open_for_write")
-        return self.open_nwb[0]
 
     def get_path(self) -> str:
         """Get absolute filesystem path to analysis file.

@@ -510,10 +510,8 @@ class AnalysisMixin(BaseMixin):
 
         Direct I/O for complex cases:
         >>> with AnalysisNwbfile().build(nwb_file_name) as builder:
-        ...     with builder.open_for_write() as io:
-        ...         nwbf = io.read()
-        ...         nwbf.add_unit(spike_times=times, id=unit_id)
-        ...         io.write(nwbf)
+        ...     io, nwbf =builder.open_nwb
+        ...     nwbf.add_unit(spike_times=times, id=unit_id)
 
         See Also
         --------
