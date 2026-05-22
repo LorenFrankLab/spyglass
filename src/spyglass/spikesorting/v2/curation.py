@@ -472,54 +472,62 @@ class CurationV2(SpyglassMixin, dj.Manual):
             path=analysis_abs_path, mode="a", load_namespaces=True
         ) as io:
             nwbf = io.read()
-            nwbf.add_unit_column(
-                name="curation_label",
-                description=(
-                    "Curation label(s) from CurationV2.insert_curation; "
-                    "comma-separated when multi-labeled, empty if "
-                    "unlabeled."
-                ),
-            )
-            for kept_uid, contribs in kept_unit_to_contributors.items():
-                if apply_merges and len(contribs) > 1:
-                    spike_times = _np.concatenate(
-                        [
-                            sorting.get_unit_spike_train(
-                                unit_id=u, return_times=True
-                            )
-                            for u in contribs
-                        ]
-                    )
-                    spike_times.sort()
-                else:
-                    spike_times = sorting.get_unit_spike_train(
-                        unit_id=kept_uid, return_times=True
-                    )
-                lbl_list = labels.get(int(kept_uid), [])
-                label_str = ",".join(
-                    lbl.value if isinstance(lbl, CurationLabel) else str(lbl)
-                    for lbl in lbl_list
+            # Add the ``curation_label`` column ONLY when at least one
+            # unit will be written. Adding a column ahead of any
+            # ``add_unit`` call would create an empty Units table whose
+            # ``curation_label`` column has no rows; pynwb's writer
+            # then fails dtype inference at ``io.write`` with
+            # "Cannot infer dtype of empty list or tuple". For the
+            # empty-curation case (zero kept units after filtering, or
+            # the contrived all-merged-away case) we initialize a
+            # bare ``pynwb.misc.Units`` without the column so the
+            # write succeeds.
+            if kept_unit_to_contributors:
+                nwbf.add_unit_column(
+                    name="curation_label",
+                    description=(
+                        "Curation label(s) from CurationV2.insert_curation; "
+                        "comma-separated when multi-labeled, empty if "
+                        "unlabeled."
+                    ),
                 )
-                nwbf.add_unit(
-                    spike_times=_np.asarray(spike_times, dtype=_np.float64),
-                    id=int(kept_uid),
-                    curation_label=label_str,
-                )
-            # pynwb leaves ``nwbf.units = None`` if no add_unit() was
-            # called, so an empty curation (zero kept units) would crash
-            # on .object_id. Initialize an empty Units table explicitly.
-            if nwbf.units is None:
+                for kept_uid, contribs in kept_unit_to_contributors.items():
+                    if apply_merges and len(contribs) > 1:
+                        spike_times = _np.concatenate(
+                            [
+                                sorting.get_unit_spike_train(
+                                    unit_id=u, return_times=True
+                                )
+                                for u in contribs
+                            ]
+                        )
+                        spike_times.sort()
+                    else:
+                        spike_times = sorting.get_unit_spike_train(
+                            unit_id=kept_uid, return_times=True
+                        )
+                    lbl_list = labels.get(int(kept_uid), [])
+                    label_str = ",".join(
+                        lbl.value
+                        if isinstance(lbl, CurationLabel)
+                        else str(lbl)
+                        for lbl in lbl_list
+                    )
+                    nwbf.add_unit(
+                        spike_times=_np.asarray(
+                            spike_times, dtype=_np.float64
+                        ),
+                        id=int(kept_uid),
+                        curation_label=label_str,
+                    )
+            else:
+                # Empty curation: initialize an empty Units table so
+                # ``.object_id`` is defined and ``io.write`` does not
+                # try to infer a dtype for any column.
                 nwbf.units = pynwb.misc.Units(
                     name="units",
                     description=(
                         "Empty units table (curation kept zero units)."
-                    ),
-                )
-                nwbf.units.add_column(
-                    name="curation_label",
-                    description=(
-                        "Curation label(s) from CurationV2.insert_curation; "
-                        "empty for placeholder Units."
                     ),
                 )
             units_object_id = nwbf.units.object_id

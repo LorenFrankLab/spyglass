@@ -801,7 +801,7 @@ def test_sorting_populates_with_mountainsort5(populated_recording):
 
 
 @pytest.mark.slow
-def test_sorting_get_sorting_round_trips(populated_recording):
+def test_sorting_get_sorting_round_trips(populated_sorting):
     """``Sorting.get_sorting`` returns the same unit IDs as the row.
 
     Also asserts spike times are stored in the recording's absolute
@@ -810,27 +810,33 @@ def test_sorting_get_sorting_round_trips(populated_recording):
     ``[recording.get_times()[0], recording.get_times()[-1]]``, which
     only holds if ``_write_units_nwb`` stored absolute times and
     ``get_sorting`` reconstructs the proper ``t_start``.
+
+    Depends on ``populated_sorting`` (not ``populated_recording``)
+    so the Sorting row this test inspects is guaranteed to exist
+    regardless of test ordering or selection (``-k``, ``--lf``).
     """
-    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+    )
     from spyglass.spikesorting.v2.sorting import (
         Sorting,
         SortingSelection,
     )
 
-    # Reuse whatever sorting the previous test produced (module-scoped
-    # fixture). Find any sorting row for this recording.
-    sortings = (
-        SortingSelection.RecordingSource
-        & {"recording_id": populated_recording["recording_id"]}
-    ).fetch("sorting_id")
-    assert len(sortings) > 0, "Run test_sorting_populates_* first"
-    sorting_id = sortings[0]
-    row = (Sorting & {"sorting_id": sorting_id}).fetch1()
-    si_sorting = Sorting().get_sorting({"sorting_id": sorting_id})
+    row = (Sorting & populated_sorting).fetch1()
+    si_sorting = Sorting().get_sorting(populated_sorting)
     assert len(si_sorting.unit_ids) == row["n_units"]
 
-    # Recording's wall-clock window.
-    rec = Recording().get_recording(populated_recording)
+    # Recording's wall-clock window. Look up the recording via the
+    # source-part: ``recording_id`` is a non-PK FK on
+    # ``SortingSelection.RecordingSource`` (the PK is sorting_id),
+    # so fetch the recording_id explicitly rather than via
+    # ``fetch1("KEY")`` which only returns PK fields.
+    recording_id = (
+        SortingSelection.RecordingSource & populated_sorting
+    ).fetch1("recording_id")
+    rec = Recording().get_recording({"recording_id": recording_id})
     timestamps = rec.get_times()
     rec_start = float(timestamps[0])
     rec_end = float(timestamps[-1])
@@ -1117,8 +1123,6 @@ def test_curation_v2_insert_root_unlabeled(populated_sorting):
 def test_curation_v2_insert_with_labels(populated_sorting):
     """Labels round-trip into ``CurationV2.UnitLabel`` and unknown
     labels raise before any DB rows are written."""
-    import pytest as _pytest
-
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import Sorting
 
@@ -1141,7 +1145,7 @@ def test_curation_v2_insert_with_labels(populated_sorting):
     assert (CurationV2 & pk).fetch1("description") == "manual labels test"
 
     # Unknown label rejects.
-    with _pytest.raises(ValueError, match="not in CurationLabel"):
+    with pytest.raises(ValueError, match="not in CurationLabel"):
         CurationV2.insert_curation(
             sorting_key=populated_sorting,
             labels={target_unit: ["good"]},  # v1-era label not in v2 enum
@@ -1152,8 +1156,6 @@ def test_curation_v2_insert_with_labels(populated_sorting):
 def test_curation_v2_parent_validation_and_nonincreasing_ids(populated_sorting):
     """parent_curation_id must reference an existing row for the same
     sort; auto-incremented curation_id starts at 0 and increments."""
-    import pytest as _pytest
-
     from spyglass.spikesorting.v2.curation import CurationV2
 
     _clear_curations(populated_sorting)
@@ -1173,7 +1175,7 @@ def test_curation_v2_parent_validation_and_nonincreasing_ids(populated_sorting):
     assert (CurationV2 & pk1).fetch1("parent_curation_id") == 0
 
     # Bogus parent rejects.
-    with _pytest.raises(ValueError, match="does not exist for sorting_id"):
+    with pytest.raises(ValueError, match="does not exist for sorting_id"):
         CurationV2.insert_curation(
             sorting_key=populated_sorting,
             labels={},
@@ -1181,7 +1183,7 @@ def test_curation_v2_parent_validation_and_nonincreasing_ids(populated_sorting):
         )
 
     # None labels reject.
-    with _pytest.raises(ValueError, match="labels=None is invalid"):
+    with pytest.raises(ValueError, match="labels=None is invalid"):
         CurationV2.insert_curation(
             sorting_key=populated_sorting, labels=None
         )
@@ -1395,12 +1397,24 @@ def test_get_restricted_merge_ids_v2_resolves_through_chain(populated_sorting):
         sources=["v2"],
     )
     assert len(merge_ids) == 1
-    # Re-resolving by sorter name also hits the same merge_id.
+    # Re-resolving by the FULL set of v2 chain fields (more
+    # restrictive than ``sorter`` alone, which would match every v2
+    # MS5 sorting from any prior test run) returns the same single
+    # merge_id. The previous looser assertion (``merge_ids[0] in
+    # merge_ids2``) was vacuously satisfied if state pollution
+    # produced multiple matches.
     merge_ids2 = SpikeSortingOutput().get_restricted_merge_ids(
-        {"sorter": "mountainsort5"},
+        {
+            "sorter": "mountainsort5",
+            "sorting_id": pk["sorting_id"],
+            "curation_id": pk["curation_id"],
+        },
         sources=["v2"],
     )
-    assert merge_ids[0] in list(merge_ids2)
+    assert list(merge_ids2) == list(merge_ids), (
+        f"Restricting by sorter+sorting_id+curation_id returned "
+        f"{list(merge_ids2)}; expected exactly {list(merge_ids)}."
+    )
 
 
 @pytest.mark.slow
@@ -1940,7 +1954,6 @@ def test_recording_t_start_reads_first_timestamp(tmp_path, dj_conn):
     """
     import numpy as np
     import pynwb
-    import pytest
     from datetime import datetime
     from unittest.mock import patch
 
@@ -2253,14 +2266,19 @@ def test_recording_make_rejects_heterogeneous_gains(populated_recording):
 
 
 @pytest.mark.slow
-def test_curation_v2_zero_kept_units(populated_sorting):
-    """A curation where every unit is labeled ``noise`` keeps zero
-    units; the resulting NWB roundtrips with an empty Units table.
+def test_curation_v2_all_units_labeled_noise(populated_sorting):
+    """All-noise label set: ``get_matchable_unit_ids`` returns empty
+    AND ``insert_curation`` succeeds without crashing.
 
-    Pins the empty-sort guard added in ``_stage_curated_units_nwb``:
-    without it, ``nwbf.units.object_id`` raises ``AttributeError``
-    because pynwb leaves ``nwbf.units = None`` if no ``add_unit`` is
-    called.
+    Pins two contracts together: (1) the label-based filtering in
+    ``get_matchable_unit_ids`` correctly excludes every unit when
+    every unit is labeled ``noise``, and (2) ``insert_curation``
+    completes even when every unit is labeled an excluded class.
+    The curated Units NWB still contains every unit because the
+    label filter is applied at the *consumer* (``get_matchable_*``)
+    rather than at NWB-write time; the empty-units guard in
+    ``_stage_curated_units_nwb`` is exercised by the sibling test
+    ``test_curation_v2_stages_empty_units_nwb_on_zero_kept_units``.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import Sorting
@@ -2272,14 +2290,14 @@ def test_curation_v2_zero_kept_units(populated_sorting):
     unit_ids = (Sorting.Unit & populated_sorting).fetch("unit_id")
     assert len(unit_ids) > 0, (
         "populated_sorting fixture should have at least one unit; "
-        "test cannot assert zero-kept behavior on an empty source."
+        "test cannot assert noise-labeled behavior on an empty source."
     )
     noise_labels = {int(uid): [CurationLabel.noise] for uid in unit_ids}
 
     pk = CurationV2.insert_curation(
         sorting_key=populated_sorting,
         labels=noise_labels,
-        description="zero-kept curation regression",
+        description="all-noise curation regression",
     )
 
     # get_matchable_unit_ids filters out noise/artifact/reject, so
@@ -2290,15 +2308,67 @@ def test_curation_v2_zero_kept_units(populated_sorting):
         f"noise; got {list(matchable)}."
     )
 
-    # And the curated NWB roundtrips without crashing on the
-    # empty-Units case. (insert_curation with ``apply_merges=False``
-    # writes ALL units to the curated NWB; the matchable filter only
-    # affects what get_matchable_unit_ids returns. The empty-units
-    # guard is exercised when every unit gets a noise label AND we
-    # ask for the filtered-down sorting -- which v2 doesn't expose
-    # as a single call. The regression we care about is just that
-    # the insert succeeded with an empty kept set, which it did
-    # above without raising.)
+    # The curated NWB still has all units (labels are stored
+    # separately in CurationV2.UnitLabel, not used to filter the
+    # written units). Verify:
+    n_curated_units = len(CurationV2.Unit & pk)
+    assert n_curated_units == len(unit_ids), (
+        f"Curated NWB has {n_curated_units} units; expected "
+        f"{len(unit_ids)} (labels do NOT filter the written units, "
+        "only the matchable-unit accessor)."
+    )
+
+
+@pytest.mark.slow
+def test_curation_v2_stages_empty_units_nwb_on_zero_kept_units(
+    populated_sorting, monkeypatch
+):
+    """``_stage_curated_units_nwb`` initializes an empty
+    ``pynwb.misc.Units`` when ``kept_unit_to_contributors`` is
+    empty, so ``nwbf.units.object_id`` does not raise
+    ``AttributeError``.
+
+    Pynwb leaves ``nwbf.units = None`` if no ``add_unit`` is
+    called. The v2 guard at ``curation.py:_stage_curated_units_nwb``
+    initializes an empty ``Units`` table explicitly in this case.
+    This test forces the empty-kept path via monkeypatch (the
+    natural way to hit it -- a sorting with zero units -- is
+    rejected upstream by ``Sorting.make``).
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    _clear_curations(populated_sorting)
+
+    # Patch _build_curated_unit_rows to return empty so the
+    # NWB-staging call enters the kept_unit_to_contributors={}
+    # branch. No call to add_unit will run, so the guard at
+    # ``if nwbf.units is None`` is the only thing preventing the
+    # AttributeError at ``nwbf.units.object_id``.
+    original = CurationV2._build_curated_unit_rows.__func__
+
+    def _empty_rows(cls, sorting_id, sorting_units, merge_groups, curation_id):
+        return [], {}
+
+    monkeypatch.setattr(
+        CurationV2,
+        "_build_curated_unit_rows",
+        classmethod(_empty_rows),
+    )
+
+    pk = CurationV2.insert_curation(
+        sorting_key=populated_sorting,
+        labels={},
+        description="empty-kept rollback guard regression",
+    )
+    # The CurationV2 row exists; no AttributeError raised inside the
+    # transaction. The curated NWB has zero Unit part rows.
+    assert len(CurationV2 & pk) == 1
+    assert len(CurationV2.Unit & pk) == 0
+
+    # Restore (monkeypatch handles teardown; explicit for clarity).
+    monkeypatch.setattr(
+        CurationV2, "_build_curated_unit_rows", classmethod(original)
+    )
 
 
 # ---------- run_v2_pipeline preset coverage ------------------------------
@@ -2322,8 +2392,6 @@ def test_run_v2_pipeline_clusterless_preset(polymer_smoke_session):
     and validated whenever a user installs mountainsort4 and runs
     the orchestrator.
     """
-    import pytest as _pytest
-
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
@@ -2527,11 +2595,18 @@ def test_sorting_make_rollback_cleans_units_nwb(
 # ---------- ArtifactDetection: signal-level _detect_artifacts ------------
 
 
-@pytest.mark.slow
 def test_detect_artifacts_finds_known_transient(dj_conn):
     """``ArtifactDetection._detect_artifacts`` runs its amplitude-
     threshold scan body and produces the expected valid-time
     complement of a known synthetic transient.
+
+    Logically a unit test (the body calls a ``@staticmethod`` on an
+    in-memory ``NumpyRecording`` -- no DataJoint queries, no NWB
+    I/O). ``dj_conn`` is required only because importing the v2
+    ``artifact`` module activates ``dj.schema("spikesorting_v2_artifact")``
+    at module load time, which needs a live MySQL connection. The
+    test itself runs in well under a second and is not slow-marked
+    so it executes on every commit.
 
     Every existing artifact test uses the ``"none"`` preset which
     short-circuits at the ``if not validated.detect`` guard in
@@ -2629,7 +2704,6 @@ def test_detect_artifacts_finds_known_transient(dj_conn):
     assert valid_times[1][1] == pytest.approx(timestamps[-1], abs=1e-9)
 
 
-@pytest.mark.slow
 def test_detect_artifacts_no_threshold_crossings(dj_conn):
     """``_detect_artifacts`` returns the full recording window as a
     single valid interval when no frame trips the threshold.
@@ -2679,7 +2753,6 @@ def _build_synthetic_rec(traces, fs=30_000.0):
     return rec
 
 
-@pytest.mark.slow
 def test_detect_artifacts_zscore_only_detection(dj_conn):
     """``_detect_artifacts`` runs the z-score-only branch when
     ``amplitude_thresh_uV is None``.
@@ -2743,19 +2816,16 @@ def test_detect_artifacts_zscore_only_detection(dj_conn):
     )
 
 
-@pytest.mark.slow
 def test_detect_artifacts_amplitude_and_zscore_combined(dj_conn):
     """``_detect_artifacts`` requires BOTH thresholds when both are
     set (AND mode at line 596).
 
-    Builds two transients:
-      A) High amplitude (100 uV) but baseline z-score-disqualifying
-         because channels are saturated (low std).
-      B) High amplitude AND high z-score.
-
-    Only transient B clears the AND gate. (To keep this test fully
-    deterministic with the noise distribution, we use two channel
-    blocks that have distinctly different baselines.)
+    Builds a recording with a constant 80 uV baseline (clears the
+    50 uV amplitude threshold on every frame, but produces ~0
+    z-score everywhere because the baseline is uniform) plus a
+    200 uV step deviation at frames 3000-3099 (clears both the
+    amplitude AND z-score gates). Pins that the AND-mode flags
+    only the step deviation, not the baseline.
     """
     import numpy as _np
 
@@ -2805,7 +2875,6 @@ def test_detect_artifacts_amplitude_and_zscore_combined(dj_conn):
     )
 
 
-@pytest.mark.slow
 def test_detect_artifacts_join_window_merges_runs(dj_conn):
     """``_detect_artifacts`` merges two artifact runs separated by
     fewer than ``join_window_frames`` into a single artifact span.
@@ -2987,6 +3056,372 @@ def test_curation_v2_insert_rollback_cleans_units_nwb(
         f"files: {new_files}. The except-block in insert_curation "
         f"must unlink the staged file when the transaction rolls back."
     )
+
+
+# ---------- Recording.make rollback file cleanup -------------------------
+
+
+@pytest.mark.slow
+def test_recording_make_rollback_cleans_analysis_nwb(
+    polymer_smoke_session, monkeypatch
+):
+    """``Recording.make`` unlinks its staged AnalysisNwbfile on a
+    transaction rollback.
+
+    Mirrors ``test_sorting_make_rollback_cleans_units_nwb`` for the
+    Recording stage. Patches ``Recording.insert1`` to raise inside
+    the transaction (after ``AnalysisNwbfile().add`` has run), so
+    the transaction rolls back. The except block in
+    ``Recording.make`` is responsible for unlinking the staged
+    preprocessed NWB.
+    """
+    import pathlib as _pathlib
+
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+
+    _clean_session_v2(polymer_smoke_session)
+    initialize_v2_defaults()
+    LabTeam.insert1(
+        {
+            "team_name": "v2_test_team",
+            "team_description": "v2 pipeline tests",
+        },
+        skip_duplicates=True,
+    )
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    sort_group_id = int(
+        sorted(
+            (SortGroupV2 & polymer_smoke_session).fetch("sort_group_id")
+        )[0]
+    )
+    rec_pk = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+            "interval_list_name": "raw data valid times",
+            "preproc_params_name": "default_franklab",
+            "team_name": "v2_test_team",
+        }
+    )
+    (Recording & rec_pk).super_delete(warn=False)
+
+    from spyglass.settings import analysis_dir as _ad
+
+    analysis_dir = _pathlib.Path(_ad)
+    before = (
+        {p.name for p in analysis_dir.rglob("*.nwb")}
+        if analysis_dir.exists()
+        else set()
+    )
+
+    # Force a failure AFTER the NWB is written and registered
+    # (Recording.make wraps AnalysisNwbfile().add + self.insert1 in
+    # transaction_or_noop; patching self.insert1 makes the
+    # transaction roll back with the file already on disk).
+    original_insert1 = Recording.insert1
+
+    def _broken_insert1(self, *args, **kwargs):
+        raise RuntimeError("simulated Recording.insert1 failure")
+
+    monkeypatch.setattr(Recording, "insert1", _broken_insert1)
+
+    Recording.populate(rec_pk, reserve_jobs=False, suppress_errors=True)
+
+    # Restore (monkeypatch teardown also restores).
+    monkeypatch.setattr(Recording, "insert1", original_insert1)
+
+    # No Recording row, no orphan NWB file.
+    assert len(Recording & rec_pk) == 0, (
+        "Recording row present after rollback; transaction did not "
+        "roll back."
+    )
+    after = (
+        {p.name for p in analysis_dir.rglob("*.nwb")}
+        if analysis_dir.exists()
+        else set()
+    )
+    new_files = after - before
+    assert not new_files, (
+        f"Recording.make rollback left orphan analysis files: "
+        f"{new_files}. The except-block must unlink the staged file."
+    )
+
+
+# ---------- CurationV2 with merge_groups / apply_merges=True -------------
+
+
+@pytest.mark.slow
+def test_curation_v2_insert_with_merge_groups_apply_merges(
+    polymer_60s_session,
+):
+    """``CurationV2.insert_curation`` with ``merge_groups`` +
+    ``apply_merges=True`` writes a curated NWB whose unit_ids are
+    the merge-group heads, and whose merged unit's spike train is
+    the sorted union of its contributors.
+
+    Exercises ``_build_curated_unit_rows`` with a non-empty merge
+    list (amplitude-inheritance: kept unit gets electrode/amplitude
+    from the highest-amplitude contributor) AND
+    ``_stage_curated_units_nwb`` with ``apply_merges=True``
+    (concatenated + sorted spike trains).
+
+    Uses the 60s polymer fixture rather than the smoke fixture
+    because MS5 finds only 1 unit on the 4s smoke recording -- too
+    few to test merging. The 60s recording yields ~26 units (one
+    sort group, all 4 shanks aggregated through the same flow).
+    """
+    import numpy as _np
+
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        Sorting,
+        SortingSelection,
+    )
+
+    # Set up the v2 chain on the 60s session, one sort group, so
+    # MS5 finds enough units to merge. This is heavier than the
+    # smoke-fixture setup but unavoidable to exercise this path
+    # without injecting synthetic Sorting.Unit rows.
+    _clean_session_v2(polymer_60s_session)
+    initialize_v2_defaults()
+    LabTeam.insert1(
+        {
+            "team_name": "v2_test_team",
+            "team_description": "v2 pipeline tests",
+        },
+        skip_duplicates=True,
+    )
+    nwb_file_name = polymer_60s_session["nwb_file_name"]
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    sort_group_id = int(
+        sorted(
+            (SortGroupV2 & polymer_60s_session).fetch("sort_group_id")
+        )[0]
+    )
+    rec_pk = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+            "interval_list_name": "raw data valid times",
+            "preproc_params_name": "default_franklab",
+            "team_name": "v2_test_team",
+        }
+    )
+    Recording.populate(rec_pk, reserve_jobs=False)
+    art_pk = ArtifactSelection.insert_selection(
+        {
+            "recording_id": rec_pk["recording_id"],
+            "artifact_params_name": "none",
+        }
+    )
+    ArtifactDetection.populate(art_pk, reserve_jobs=False)
+    sort_pk = SortingSelection.insert_selection(
+        {
+            "recording_id": rec_pk["recording_id"],
+            "sorter": "mountainsort5",
+            "sorter_params_name": (
+                "franklab_tetrode_hippocampus_30kHz_ms5"
+            ),
+            "artifact_id": art_pk["artifact_id"],
+        }
+    )
+    Sorting.populate(sort_pk, reserve_jobs=False)
+
+    units = sorted(
+        int(u) for u in (Sorting.Unit & sort_pk).fetch("unit_id")
+    )
+    assert len(units) >= 2, (
+        f"Sorting on the 60s polymer fixture yielded {len(units)} units; "
+        "need >= 2 to test merging. (MS5 typically finds 5+ per shank "
+        "on this fixture; a regression upstream would surface here.)"
+    )
+
+    # Merge the first two units.
+    head, absorbed = units[0], units[1]
+    merge_groups = [[head, absorbed]]
+    pk = CurationV2.insert_curation(
+        sorting_key=sort_pk,
+        labels={},
+        merge_groups=merge_groups,
+        apply_merges=True,
+        description="merge_groups regression",
+    )
+
+    # CurationV2.Unit has one row fewer than Sorting.Unit (the
+    # absorbed unit is no longer a distinct row).
+    curated_unit_ids = set(int(u) for u in (CurationV2.Unit & pk).fetch("unit_id"))
+    assert curated_unit_ids == set(units) - {absorbed}, (
+        f"Curated unit ids = {sorted(curated_unit_ids)}; "
+        f"expected {sorted(set(units) - {absorbed})} (head kept, "
+        "absorbed removed)."
+    )
+
+    # The merged unit's spike train in the curated NWB is the
+    # sorted union of the contributors' spike trains. Use
+    # ``apply_merges=True`` writes concatenated spike trains.
+    src_sorting = Sorting().get_sorting(sort_pk)
+    src_head = _np.asarray(
+        src_sorting.get_unit_spike_train(unit_id=head, return_times=True)
+    )
+    src_absorbed = _np.asarray(
+        src_sorting.get_unit_spike_train(unit_id=absorbed, return_times=True)
+    )
+    expected_merged = _np.sort(
+        _np.concatenate([src_head, src_absorbed])
+    )
+
+    curated_sorting = CurationV2().get_sorting(pk)
+    merged_times = _np.asarray(
+        curated_sorting.get_unit_spike_train(unit_id=head, return_times=True)
+    )
+    assert len(merged_times) == len(expected_merged), (
+        f"Merged unit has {len(merged_times)} spikes; expected "
+        f"{len(expected_merged)} (head + absorbed concatenated)."
+    )
+    _np.testing.assert_array_equal(merged_times, expected_merged)
+
+    # And the n_spikes column on CurationV2.Unit reflects the merge.
+    head_row = (CurationV2.Unit & pk & {"unit_id": head}).fetch1()
+    assert head_row["n_spikes"] == len(expected_merged), (
+        f"CurationV2.Unit.n_spikes for merged head = "
+        f"{head_row['n_spikes']}; expected {len(expected_merged)}."
+    )
+
+
+# ---------- _detect_artifacts cross-channel proportion boundary ----------
+
+
+def test_detect_artifacts_below_proportion_threshold_ignored(dj_conn):
+    """``_detect_artifacts`` does NOT flag artifact frames when
+    fewer than ``proportion_above_thresh`` of channels exceed the
+    amplitude threshold.
+
+    Existing detection tests put the transient on every channel,
+    so the proportion gate is never the binding constraint. This
+    test puts a 200 uV transient on a SINGLE channel of a
+    4-channel recording with ``proportion_above_thresh=0.5``
+    (= ceil(0.5 * 4) = 2 channels required). Detection must not
+    fire: the single-channel transient does not meet the cross-
+    channel quorum.
+    """
+    import numpy as _np
+
+    from spyglass.spikesorting.v2._params.artifact_detection import (
+        ArtifactDetectionParamsSchema,
+    )
+    from spyglass.spikesorting.v2.artifact import ArtifactDetection
+
+    n_samples, n_channels = 5000, 4
+    traces = _np.zeros((n_samples, n_channels), dtype=_np.float32)
+    # ONE channel has a 200 uV transient at frames 1000-1099; the
+    # other three channels stay at zero. 1 of 4 channels is below
+    # the 2-of-4 requirement.
+    traces[1000:1100, 0] = 200.0
+    rec = _build_synthetic_rec(traces)
+
+    params = ArtifactDetectionParamsSchema(
+        detect=True,
+        amplitude_thresh_uV=50.0,
+        zscore_thresh=None,
+        proportion_above_thresh=0.5,
+        removal_window_ms=0.05,
+        join_window_ms=0.0,
+    )
+    valid_times = ArtifactDetection._detect_artifacts(rec, params)
+    timestamps = rec.get_times()
+
+    assert valid_times.shape == (1, 2), (
+        f"Single-channel transient should NOT trip cross-channel "
+        f"proportion gate (1/4 < 0.5 required); expected one full "
+        f"valid interval but got shape {valid_times.shape}."
+    )
+    assert valid_times[0][0] == pytest.approx(timestamps[0], abs=1e-9)
+    assert valid_times[0][1] == pytest.approx(timestamps[-1], abs=1e-9)
+
+
+# ---------- SortingSelection concat-source gate --------------------------
+
+
+@pytest.mark.slow
+def test_sorting_selection_rejects_concat_source(dj_conn):
+    """``SortingSelection.insert_selection`` refuses
+    ``concat_recording_id`` with ``NotImplementedError``.
+
+    The Phase 1 plan declares the ``ConcatenatedRecordingSource``
+    schema final-shape under the zero-migration policy, but the
+    make-body branch isn't implemented yet. Pins the gate so a
+    premature attempt to wire up the concat path immediately fails
+    this test.
+    """
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    with pytest.raises(NotImplementedError, match="concatenated"):
+        SortingSelection.insert_selection(
+            {
+                "concat_recording_id": "00000000-0000-0000-0000-000000000000",
+                "sorter": "mountainsort5",
+                "sorter_params_name": (
+                    "franklab_tetrode_hippocampus_30kHz_ms5"
+                ),
+            }
+        )
+
+
+# ---------- v1 / imported dispatch regression after v2 import ------------
+
+
+@pytest.mark.slow
+def test_imported_dispatch_survives_v2_module_loaded(populated_sorting):
+    """v0 / v1 / imported sources still dispatch correctly through
+    ``SpikeSortingOutput.source_class_dict`` after the v2 module
+    adds itself to the registry.
+
+    Regression guard for the conditional ``source_class_dict["CurationV2"]
+    = CurationV2`` block in ``spikesorting_merge.py``: a future
+    refactor that broke v1 dispatch as a side effect of v2 changes
+    should fail this test.
+
+    Uses the ImportedSpikeSorting source registered by the test
+    bootstrap (via ``mini_insert``) rather than v0/v1 sorting paths,
+    because the v2 environment has SpikeInterface 0.104 which is
+    incompatible with the SI 0.99-based v0/v1 production code.
+    """
+    from spyglass.spikesorting.imported import ImportedSpikeSorting
+    from spyglass.spikesorting.spikesorting_merge import (
+        SpikeSortingOutput,
+        source_class_dict,
+    )
+
+    # Both v2 and the imported source must be registered.
+    assert "CurationV2" in source_class_dict
+    assert "ImportedSpikeSorting" in source_class_dict
+    # The Merge class also resolves both via merge_get_parent_class.
+    assert SpikeSortingOutput().merge_get_parent_class(
+        "CurationV2"
+    ) is not None
+    assert SpikeSortingOutput().merge_get_parent_class(
+        "ImportedSpikeSorting"
+    ) is not None
+    # And the Imported part table is reachable through the master.
+    assert hasattr(SpikeSortingOutput, "ImportedSpikeSorting")
 
 
 # =========================================================================
