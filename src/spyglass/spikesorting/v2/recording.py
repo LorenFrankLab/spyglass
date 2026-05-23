@@ -728,19 +728,31 @@ class Recording(SpyglassMixin, dj.Computed):
         # compute stage does not need to re-read them. The validated
         # model is DeepHash-stable across the two ``make_fetch``
         # calls DataJoint makes (Pydantic ``__dict__`` is primitives).
-        preproc_params = (
+        preproc_row = (
             PreprocessingParameters
             & {"preproc_params_name": sel["preproc_params_name"]}
-        ).fetch1("params")
+        ).fetch1()
         preproc_validated = PreprocessingParamsSchema.model_validate(
-            preproc_params
+            preproc_row["params"]
         )
+        # N22: also pull the job_kwargs blob so ``make_compute`` can
+        # call ``_resolved_job_kwargs(preproc_job_kwargs)`` per the
+        # shared-contracts.md "Job-Kwargs Resolution" invariant.
+        # Currently the Recording write path streams via HDMF's
+        # chunked iterator and does not consume SI-style job_kwargs;
+        # the resolver call is kept so the override channels
+        # (``dj.config['custom']['spikesorting_v2_job_kwargs']`` and
+        # the per-row blob) are testable here and so future
+        # consumers can pick up the resolved dict without retrofitting
+        # the fetch.
+        preproc_job_kwargs = preproc_row.get("job_kwargs")
         return (
             sel,
             channel_ids,
             ref_channel_id,
             raw_request,
             preproc_validated,
+            preproc_job_kwargs,
         )
 
     def make_compute(
@@ -751,6 +763,7 @@ class Recording(SpyglassMixin, dj.Computed):
         ref_channel_id,
         raw_request,
         preproc_validated,
+        preproc_job_kwargs,
     ):
         """Run the preprocessing + streaming write outside any DB transaction.
 
@@ -775,6 +788,18 @@ class Recording(SpyglassMixin, dj.Computed):
 
         nwb_file_name = sel["nwb_file_name"]
         interval_list_name = sel["interval_list_name"]
+
+        # N22: shared-contracts.md "Job-Kwargs Resolution" requires
+        # every v2 compute stage to call ``_resolved_job_kwargs(...)``
+        # so the override channels (DataJoint config + per-row blob)
+        # are testable. The Recording streaming write path uses HDMF's
+        # chunked iterator and does not consume SI-style job_kwargs
+        # in Phase 1, so the resolved dict is informational. The
+        # resolver still runs so a monkey-patched ``_resolved_job_kwargs``
+        # in tests confirms this stage's resolution path is wired.
+        from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
+
+        _resolved_job_kwargs(preproc_job_kwargs)  # noqa: F841 -- N22 hook
 
         raw_path = Nwbfile().get_abs_path(nwb_file_name)
         recording = se.read_nwb_recording(raw_path, load_time_vector=True)

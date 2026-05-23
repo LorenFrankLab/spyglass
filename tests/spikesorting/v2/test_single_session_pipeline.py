@@ -2893,7 +2893,9 @@ def test_boundary_spike_round_trip_does_not_raise(
     # ``NumpySorting`` with a spike at exactly ``n_samples - 1`` on
     # the artifact-masked recording. ``_run_sorter`` is a
     # ``@staticmethod`` so we patch the class attribute directly.
-    def _boundary_run_sorter(sorter, sorter_params, recording, sorting_id):
+    def _boundary_run_sorter(
+        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None
+    ):
         import spikeinterface as si
 
         n_samples = int(recording.get_num_samples())
@@ -3012,6 +3014,8 @@ def test_detect_artifacts_finds_known_transient(dj_conn):
         proportion_above_thresh=0.5,
         removal_window_ms=0.05,
         join_window_ms=0.0,
+
+        min_length_s=0.001,  # R13 default 1.0 would wipe synthetic-recording intervals
     )
 
     valid_times = ArtifactDetection._detect_artifacts(rec, params)
@@ -3151,6 +3155,8 @@ def test_detect_artifacts_zscore_only_detection(dj_conn):
         proportion_above_thresh=0.5,
         removal_window_ms=0.05,
         join_window_ms=0.0,
+
+        min_length_s=0.001,  # R13 default 1.0 would wipe synthetic-recording intervals
     )
     valid_times = ArtifactDetection._detect_artifacts(rec, params)
     timestamps = rec.get_times()
@@ -3170,15 +3176,27 @@ def test_detect_artifacts_zscore_only_detection(dj_conn):
 
 
 def test_detect_artifacts_amplitude_and_zscore_combined(dj_conn):
-    """``_detect_artifacts`` requires BOTH thresholds when both are
-    set (AND mode at line 596).
+    """``_detect_artifacts`` OR-combines thresholds when both are set.
 
-    Builds a recording with a constant 80 uV baseline (clears the
-    50 uV amplitude threshold on every frame, but produces ~0
-    z-score everywhere because the baseline is uniform) plus a
-    200 uV step deviation at frames 3000-3099 (clears both the
-    amplitude AND z-score gates). Pins that the AND-mode flags
-    only the step deviation, not the baseline.
+    Phase 1b N23 reverted Phase 1's AND combine back to v1's OR
+    (``np.logical_or(above_z, above_a)`` at ``v1/utils.py:198``).
+    Under OR a frame is flagged if EITHER detector trips, so this
+    test's synthetic 80 uV baseline (which clears the 50 uV
+    amplitude threshold on every channel everywhere) flags the
+    entire recording: the baseline frames trip amplitude alone,
+    and the 200 uV step deviation at frames 3000-3099 trips both
+    detectors. Net result: ``valid_times`` is empty (whole
+    recording flagged as artifact) under OR; under Phase 1's AND
+    only the step region was flagged. Keeping the synthetic
+    setup unchanged so the test name and data continue to point
+    at the AND-vs-OR semantics directly; the assertion is what
+    flips.
+
+    The N20 cross-channel z-score change is also active here: the
+    z-score is computed across channels per frame (uniform
+    baseline -> ~0 z-score), not per channel over time. Combined
+    with OR, the baseline still flags via amplitude, so the test
+    outcome is the same regardless of the z-score axis change.
     """
     import numpy as _np
 
@@ -3188,16 +3206,12 @@ def test_detect_artifacts_amplitude_and_zscore_combined(dj_conn):
     from spyglass.spikesorting.v2.artifact import ArtifactDetection
 
     n_samples, n_channels = 5000, 4
-    # Per-channel baseline: 80 uV constant on all channels. The
-    # amplitude detection at thresh=50 uV would flag every frame
-    # because 80 > 50 on all channels everywhere -- which is
-    # exactly the scenario the AND mode is meant to filter out.
-    # Combined with z-score, only frames that ALSO have anomalous
-    # per-channel z-score get flagged.
+    # 80 uV uniform baseline clears the 50 uV amplitude threshold
+    # on every channel for every frame; the 200 uV step at
+    # frames 3000-3099 trips both amplitude and (in v1's
+    # cross-channel form, briefly) z-score. Under OR everything
+    # is artifact.
     traces = _np.full((n_samples, n_channels), 80.0, dtype=_np.float32)
-    # Insert a single high-z-score deviation at frames 3000-3099 on
-    # all channels: 200 uV (the per-channel mean is ~80; 200 is
-    # well above the per-channel std).
     traces[3000:3100, :] = 200.0
     rec = _build_synthetic_rec(traces)
 
@@ -3208,23 +3222,21 @@ def test_detect_artifacts_amplitude_and_zscore_combined(dj_conn):
         proportion_above_thresh=0.5,
         removal_window_ms=0.05,
         join_window_ms=0.0,
+
+        min_length_s=0.001,  # R13 default 1.0 would wipe synthetic-recording intervals
     )
     valid_times = ArtifactDetection._detect_artifacts(rec, params)
-    timestamps = rec.get_times()
 
-    # Only the per-channel anomaly at frames 3000-3099 trips the
-    # combined gate; the baseline 80 uV is uniform so its z-score
-    # is ~0 everywhere despite passing the amplitude threshold.
-    assert valid_times.shape == (2, 2), (
-        f"AND-mode (amplitude AND z-score) expected to flag the "
-        f"high-z-score region at frames 3000-3099, got shape "
-        f"{valid_times.shape}."
-    )
-    assert valid_times[0][1] == pytest.approx(
-        timestamps[2999], abs=1e-9
-    )
-    assert valid_times[1][0] == pytest.approx(
-        timestamps[3101], abs=1e-9
+    # OR mode: baseline trips amplitude alone -> every frame is
+    # flagged. ``valid_times`` is shape (0, 2). v1 parity restored
+    # from Phase 1's silent flip to AND.
+    assert valid_times.shape == (0, 2), (
+        f"OR-mode (amplitude OR z-score) expected to flag the entire "
+        f"recording given the 80 uV uniform baseline clears the 50 uV "
+        f"amplitude threshold on every channel; got shape "
+        f"{valid_times.shape}. Phase 1 had this test asserting AND "
+        f"semantics; N23 restored v1's OR semantics. If this fails "
+        f"with shape (2, 2), the AND combine has silently regressed."
     )
 
 
@@ -3263,6 +3275,8 @@ def test_detect_artifacts_join_window_merges_runs(dj_conn):
             proportion_above_thresh=0.5,
             removal_window_ms=0.05,
             join_window_ms=1.0,
+
+            min_length_s=0.001,  # R13 default 1.0 would wipe synthetic-recording intervals
         ),
     )
     assert merged.shape == (2, 2), (
@@ -3283,6 +3297,8 @@ def test_detect_artifacts_join_window_merges_runs(dj_conn):
             proportion_above_thresh=0.5,
             removal_window_ms=0.05,
             join_window_ms=0.1,
+
+            min_length_s=0.001,  # R13 default 1.0 would wipe synthetic-recording intervals
         ),
     )
     assert unmerged.shape == (3, 2), (
@@ -3697,6 +3713,8 @@ def test_detect_artifacts_below_proportion_threshold_ignored(dj_conn):
         proportion_above_thresh=0.5,
         removal_window_ms=0.05,
         join_window_ms=0.0,
+
+        min_length_s=0.001,  # R13 default 1.0 would wipe synthetic-recording intervals
     )
     valid_times = ArtifactDetection._detect_artifacts(rec, params)
     timestamps = rec.get_times()
@@ -4121,6 +4139,8 @@ def test_detect_artifacts_clamps_artifact_at_recording_end(dj_conn):
         proportion_above_thresh=0.5,
         removal_window_ms=0.05,
         join_window_ms=0.0,
+
+        min_length_s=0.001,  # R13 default 1.0 would wipe synthetic-recording intervals
     )
     valid_times = ArtifactDetection._detect_artifacts(rec, params)
     timestamps = rec.get_times()

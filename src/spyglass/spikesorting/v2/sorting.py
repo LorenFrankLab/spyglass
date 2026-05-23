@@ -21,6 +21,7 @@ import uuid
 
 import datajoint as dj
 
+from spyglass.common import IntervalList  # noqa: F401
 from spyglass.common.common_ephys import Electrode  # noqa: F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile  # noqa: F401
 from spyglass.spikesorting.v2._params.sorter import _get_sorter_schema
@@ -418,9 +419,39 @@ class Sorting(SpyglassMixin, dj.Computed):
         nwb_file_name = (
             RecordingSelection & {"recording_id": source.key["recording_id"]}
         ).fetch1("nwb_file_name")
-        return (source, sel_row, sorter_row, nwb_file_name)
 
-    def make_compute(self, key, source, sel_row, sorter_row, nwb_file_name):
+        # N25: pre-fetch the observation-interval window so
+        # ``_write_units_nwb`` can write ``obs_intervals=`` on every
+        # ``add_unit`` call. Downstream firing-rate computations
+        # need the artifact-removed valid_times to know which
+        # segments of the recording the sort actually observed --
+        # without this column the units NWB looks like the unit
+        # was observed across the full session even where the
+        # artifact mask blanked the signal. Matches v1 at
+        # ``v1/sorting.py:597``. When ``artifact_id`` is unset the
+        # caller (make_compute) falls back to the recording's
+        # full timestamp envelope.
+        if sel_row.get("artifact_id"):
+            obs_intervals = (
+                IntervalList
+                & {
+                    "nwb_file_name": nwb_file_name,
+                    "interval_list_name": f"artifact_{sel_row['artifact_id']}",
+                }
+            ).fetch1("valid_times")
+        else:
+            obs_intervals = None
+        return (source, sel_row, sorter_row, nwb_file_name, obs_intervals)
+
+    def make_compute(
+        self,
+        key,
+        source,
+        sel_row,
+        sorter_row,
+        nwb_file_name,
+        obs_intervals,
+    ):
         """Sort, build analyzer, stage Units NWB outside any DB transaction.
 
         The long-running steps run here:
@@ -461,11 +492,25 @@ class Sorting(SpyglassMixin, dj.Computed):
         # wrapper does not accept it.
         sorter_params.pop("schema_version", None)
 
+        # N22 / L2-N8: resolve job_kwargs ONCE per compute stage
+        # (shared-contracts.md "Job-Kwargs Resolution" invariant).
+        # The resolved dict flows into BOTH ``sis.run_sorter`` AND
+        # ``analyzer.compute`` so a user's ``n_jobs=N`` override --
+        # via ``dj.config['custom']['spikesorting_v2_job_kwargs']``
+        # or via the per-row ``job_kwargs`` blob -- propagates to
+        # both stages from one resolution. Phase 1 only honored
+        # job_kwargs inside ``_build_analyzer``; the sort itself
+        # (the longer of the two) ignored them.
+        from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
+
+        job_kwargs = _resolved_job_kwargs(sorter_row["job_kwargs"])
+
         sorting_obj = self._run_sorter(
             sorter=sorter,
             sorter_params=sorter_params,
             recording=recording,
             sorting_id=key["sorting_id"],
+            job_kwargs=job_kwargs,
         )
         sorting_obj = self._remove_excess_spikes(sorting_obj, recording)
 
@@ -474,12 +519,14 @@ class Sorting(SpyglassMixin, dj.Computed):
         # folder AND the staged units NWB (if it was created). Pass
         # ``sorter_row`` so ``_build_analyzer`` does not re-issue the
         # ``SortingSelection`` + ``SorterParameters`` reads we
-        # already did in ``make_fetch``.
+        # already did in ``make_fetch``; pass ``job_kwargs`` so the
+        # analyzer uses the same resolved value as the sorter.
         analyzer_folder = self._build_analyzer(
             sorting=sorting_obj,
             recording=recording,
             key=key,
             sorter_row=sorter_row,
+            job_kwargs=job_kwargs,
         )
         analysis_file_name = None
         try:
@@ -487,6 +534,7 @@ class Sorting(SpyglassMixin, dj.Computed):
                 sorting=sorting_obj,
                 recording=recording,
                 nwb_file_name=nwb_file_name,
+                obs_intervals=obs_intervals,
             )
         except Exception:
             # N51 mode A: analyzer folder was created but the units
@@ -851,7 +899,14 @@ class Sorting(SpyglassMixin, dj.Computed):
     )
 
     @staticmethod
-    def _run_sorter(sorter, sorter_params, recording, sorting_id):
+    def _run_sorter(
+        sorter,
+        sorter_params,
+        recording,
+        sorting_id,
+        *,
+        job_kwargs=None,
+    ):
         """Dispatch sort execution; clusterless_thresholder vs SI sorters.
 
         For SI sorters the per-sort scratch directory is anchored to
@@ -884,16 +939,61 @@ class Sorting(SpyglassMixin, dj.Computed):
             # `radius_um` in 0.101+.
             if "local_radius_um" in params:
                 params["radius_um"] = params.pop("local_radius_um")
-            # Spyglass-side / v1-era fields SI 0.104's detect_peaks no
-            # longer accepts: ``outputs`` (Spyglass routing hint),
+            # N19: ``noise_levels=[1.0]`` is DELIBERATELY forwarded to
+            # ``detect_peaks`` (via SI 0.104's ``**old_kwargs`` ->
+            # ``method_kwargs`` routing). With ``noise_levels`` absent,
+            # SI computes per-channel MAD and treats
+            # ``detect_threshold`` as a MAD multiplier; with
+            # ``noise_levels=[1.0]`` SI broadcasts that single value
+            # to every channel so ``detect_threshold`` stays in
+            # microvolts. Matches v1's deliberate choice at
+            # ``v1/sorting.py:177,402-404``. A user's
+            # ``detect_threshold=100.0`` was 100 µV in v1; without
+            # this passthrough it would become ~100xMAD on noisy
+            # channels, silently shifting detection ~5x.
+            #
+            # The remaining strip handles fields SI 0.104's
+            # ``detect_peaks`` actively rejects: ``outputs`` (a
+            # Spyglass routing hint that never had an SI meaning) and
             # ``random_chunk_kwargs`` (renamed to
-            # ``random_slices_kwargs`` and managed internally), and
-            # ``noise_levels`` (SI computes these on demand). Strip
-            # them so the call survives the v1-style default Lookup row.
-            for stale in ("outputs", "random_chunk_kwargs", "noise_levels"):
+            # ``random_slices_kwargs`` and now managed internally).
+            for stale in ("outputs", "random_chunk_kwargs"):
                 params.pop(stale, None)
 
-            detected = detect_peaks(recording, **params)
+            # N22: route resolved job_kwargs into detect_peaks via
+            # the explicit kwarg. SI 0.104's signature is
+            # ``detect_peaks(recording, method, method_kwargs,
+            # ...)`` and rejects the legacy ``**old_kwargs`` mode
+            # whenever ``job_kwargs`` is non-None; route per-method
+            # kwargs (detect_threshold, peak_sign, noise_levels,
+            # radius_um, etc.) through the explicit ``method_kwargs``
+            # dict instead.
+            #
+            # SI 0.104's locally_exclusive computes
+            # ``self.noise_levels * detect_threshold`` and indexes
+            # the resulting ``abs_thresholds`` per channel. The v1-
+            # stored shape ``[1.0]`` (single value) is meant to
+            # represent "one microvolt per channel everywhere";
+            # SI 0.99 broadcast it implicitly, SI 0.104 wants a
+            # length-``n_channels`` array. Broadcast manually so a
+            # 32-channel recording does not divide-by-zero on
+            # missing per-channel entries inside the numba kernel.
+            if "noise_levels" in params:
+                nl = _np.asarray(params["noise_levels"], dtype=_np.float64)
+                if nl.size == 1:
+                    nl = _np.full(
+                        recording.get_num_channels(),
+                        float(nl[0]),
+                        dtype=_np.float64,
+                    )
+                params["noise_levels"] = nl
+            method = params.pop("method", "locally_exclusive")
+            detected = detect_peaks(
+                recording,
+                method=method,
+                method_kwargs=params,
+                job_kwargs=(job_kwargs or None),
+            )
             # SI 0.104 renamed ``from_times_labels`` to
             # ``from_samples_and_labels`` (sample indices) /
             # ``from_times_and_labels`` (absolute seconds). We pass
@@ -945,6 +1045,13 @@ class Sorting(SpyglassMixin, dj.Computed):
             # workspace, ``mp_context`` / ``max_threads_per_process``
             # are noisy in containerized runs) so they are stripped
             # only for these sorters.
+            # N22: resolved job_kwargs (n_jobs, chunk_duration, etc.)
+            # flow into ``sis.run_sorter`` via the ``**sorter_params``
+            # catch-all -- SI splits them into per-sorter and SI
+            # control args internally. Merging via dict update lets a
+            # per-row ``job_kwargs`` override anything the row's
+            # sorter_params happened to set.
+            sj_kwargs = job_kwargs or {}
             if sorter.lower() in Sorting._MATLAB_SORTERS:
                 clean_params = {
                     k: v
@@ -958,6 +1065,7 @@ class Sorting(SpyglassMixin, dj.Computed):
                     remove_existing_folder=True,
                     singularity_image=True,
                     **clean_params,
+                    **sj_kwargs,
                 )
 
             return sis.run_sorter(
@@ -966,6 +1074,7 @@ class Sorting(SpyglassMixin, dj.Computed):
                 folder=sorter_temp_dir.name,
                 remove_existing_folder=True,
                 **sorter_params,
+                **sj_kwargs,
             )
         finally:
             # ``TemporaryDirectory`` auto-cleans on garbage collection,
@@ -983,7 +1092,14 @@ class Sorting(SpyglassMixin, dj.Computed):
         return sic.remove_excess_spikes(sorting, recording)
 
     @staticmethod
-    def _build_analyzer(sorting, recording, key, *, sorter_row=None):
+    def _build_analyzer(
+        sorting,
+        recording,
+        key,
+        *,
+        sorter_row=None,
+        job_kwargs=None,
+    ):
         """Build the binary-folder SortingAnalyzer + base extensions.
 
         ``sorter_row`` is the already-fetched ``SorterParameters`` row
@@ -994,6 +1110,13 @@ class Sorting(SpyglassMixin, dj.Computed):
         ``sorter_row=None`` and pays the DB cost once -- that path is
         rare (missing analyzer folder) and not on the populate hot
         path, so the lookup is acceptable there.
+
+        ``job_kwargs`` is the already-resolved dict from
+        ``_resolved_job_kwargs`` -- when ``make_compute`` calls
+        ``_run_sorter`` and ``_build_analyzer`` from the same
+        invocation it resolves once and threads through; the rebuild
+        path falls back to resolving locally (same DB-read tradeoff
+        as ``sorter_row``).
         """
         import spikeinterface as si
 
@@ -1014,7 +1137,8 @@ class Sorting(SpyglassMixin, dj.Computed):
                     )
                 )
             ).fetch1()
-        job_kwargs = _resolved_job_kwargs(sorter_row["job_kwargs"])
+        if job_kwargs is None:
+            job_kwargs = _resolved_job_kwargs(sorter_row["job_kwargs"])
 
         analyzer = si.create_sorting_analyzer(
             sorting=sorting,
@@ -1039,7 +1163,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         return folder
 
     @staticmethod
-    def _write_units_nwb(sorting, recording, nwb_file_name):
+    def _write_units_nwb(sorting, recording, nwb_file_name, obs_intervals=None):
         """Write a fresh AnalysisNwbfile containing only the v2 Units table.
 
         Spike times are stored in the recording's absolute timeline
@@ -1049,7 +1173,17 @@ class Sorting(SpyglassMixin, dj.Computed):
         already strips any parent ``/units`` from the analysis NWB so
         the v2 sort outputs are the only Units rows in the file
         (addresses #1437).
+
+        N25 + N43: every unit row carries ``obs_intervals`` (the
+        artifact-removed valid-time window the sort observed) and a
+        ``curation_label`` placeholder list (``["uncurated"]``).
+        Both columns mirror v1 at ``v1/sorting.py:583-598``;
+        external readers that grep for either column on a
+        pre-curation NWB now find them. ``obs_intervals`` defaults
+        to the recording's full timestamp envelope when no artifact
+        mask was applied (``obs_intervals=None``).
         """
+        import numpy as _np
         import pynwb
 
         analysis_file_name = AnalysisNwbfile().create(
@@ -1058,17 +1192,48 @@ class Sorting(SpyglassMixin, dj.Computed):
         analysis_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
 
         timestamps = recording.get_times()
+        if obs_intervals is None:
+            # Fall back to the full recording window when no artifact
+            # IntervalList was supplied; matches the no-mask sort
+            # semantics (the sort observed every sample).
+            obs_intervals_arr = _np.asarray(
+                [[float(timestamps[0]), float(timestamps[-1])]]
+            )
+        else:
+            obs_intervals_arr = _np.asarray(obs_intervals)
+
         with pynwb.NWBHDF5IO(
             path=analysis_abs_path, mode="a", load_namespaces=True
         ) as io:
             nwbf = io.read()
+            # N43: declare the ``curation_label`` indexed list
+            # column BEFORE adding any unit so v1-style readers that
+            # grep for the column on a pre-curation NWB find it.
+            # Conditional on at least one unit being written;
+            # ``pynwb`` cannot infer dtype on an empty
+            # ``add_unit_column`` followed by ``io.write``.
+            if len(sorting.unit_ids) > 0:
+                nwbf.add_unit_column(
+                    name="curation_label",
+                    description=(
+                        "Curation label list (placeholder "
+                        "``[\"uncurated\"]`` at sort time; refined "
+                        "by CurationV2.insert_curation)."
+                    ),
+                    index=True,
+                )
             for unit_id in sorting.unit_ids:
                 spike_indices = sorting.get_unit_spike_train(unit_id=unit_id)
                 # Map sample indices into the recording's wall-clock so
                 # the stored spike times match Recording.get_times()
                 # exactly. v1 uses this same convention.
                 spike_times = timestamps[spike_indices]
-                nwbf.add_unit(spike_times=spike_times, id=int(unit_id))
+                nwbf.add_unit(
+                    spike_times=spike_times,
+                    id=int(unit_id),
+                    obs_intervals=obs_intervals_arr,
+                    curation_label=["uncurated"],
+                )
             # pynwb leaves ``nwbf.units = None`` if no add_unit() was
             # called, so a zero-unit sort would crash on .object_id.
             # Initialize an empty Units table explicitly (v1 has the

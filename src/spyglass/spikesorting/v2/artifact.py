@@ -47,7 +47,7 @@ from spyglass.spikesorting.v2.utils import (
     find_orphaned_masters,
     transaction_or_noop,
 )
-from spyglass.utils import SpyglassMixin, SpyglassMixinPart
+from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 
 _assert_v2_db_safe()
 schema = dj.schema("spikesorting_v2_artifact")
@@ -513,16 +513,26 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
                 f"{source.kind!r}."
             )
 
-        params = (
+        # N22: pre-fetch both the params blob and the job_kwargs
+        # blob so ``make_compute`` can call
+        # ``_resolved_job_kwargs(...)`` per shared-contracts.md
+        # "Job-Kwargs Resolution". Phase 1's ``_detect_artifacts``
+        # is an in-memory scan and does not consume SI-style
+        # job_kwargs, but the resolver call is required so the
+        # override channels are testable here. ``fetch1(a, b)``
+        # returns a tuple; unpack directly.
+        params_blob, artifact_job_kwargs = (
             ArtifactDetectionParameters * (ArtifactSelection & key)
-        ).fetch1("params")
-        validated = ArtifactDetectionParamsSchema.model_validate(params)
+        ).fetch1("params", "job_kwargs")
+        validated = ArtifactDetectionParamsSchema.model_validate(params_blob)
         nwb_file_name = (
             RecordingSelection & {"recording_id": source.key["recording_id"]}
         ).fetch1("nwb_file_name")
-        return (source, validated, nwb_file_name)
+        return (source, validated, nwb_file_name, artifact_job_kwargs)
 
-    def make_compute(self, key, source, validated, nwb_file_name):
+    def make_compute(
+        self, key, source, validated, nwb_file_name, artifact_job_kwargs
+    ):
         """Run artifact detection outside any DB transaction.
 
         Loads the cached preprocessed recording via
@@ -533,6 +543,17 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         artifact-removed ``valid_times`` plus the upstream metadata
         ``make_insert`` needs.
         """
+        # N22: resolve job_kwargs even though the in-memory
+        # ``_detect_artifacts`` scan does not consume them. The
+        # resolver call exercises the DataJoint-config and per-row
+        # override channels so tests can monkey-patch
+        # ``_resolved_job_kwargs`` and confirm the artifact compute
+        # stage was wired through. See the Recording.make_compute
+        # comment for the same pattern.
+        from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
+
+        _resolved_job_kwargs(artifact_job_kwargs)  # noqa: F841 -- N22 hook
+
         recording = Recording().get_recording(
             {"recording_id": source.key["recording_id"]}
         )
@@ -576,7 +597,24 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
 
         timestamps = recording.get_times()
         if not validated.detect:
+            logger.info(
+                "ArtifactDetection: detect=False; returning full "
+                "recording window as a single valid interval."
+            )
             return _np.asarray([[timestamps[0], timestamps[-1]]])
+
+        # N37: log the threshold configuration so a population
+        # report can audit which detection mode actually fired per
+        # row. Matches v1's logger.info at v1/artifact.py:258-261.
+        logger.info(
+            "ArtifactDetection: scanning with "
+            f"amplitude_thresh_uV={validated.amplitude_thresh_uV}, "
+            f"zscore_thresh={validated.zscore_thresh}, "
+            f"proportion_above_thresh={validated.proportion_above_thresh}, "
+            f"removal_window_ms={validated.removal_window_ms}, "
+            f"join_window_ms={validated.join_window_ms}, "
+            f"min_length_s={validated.min_length_s}."
+        )
 
         # In-memory scan: acceptable for recordings up to a few minutes;
         # the smoke / 60s polymer fixtures fit easily. Chunked iteration
@@ -599,18 +637,39 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         else:
             above_amp = _np.zeros_like(absolute, dtype=bool)
         if validated.zscore_thresh is not None:
-            mu = traces_uv.mean(axis=0, keepdims=True)
-            sigma = traces_uv.std(axis=0, keepdims=True) + 1e-12
-            zscores = _np.abs((traces_uv - mu) / sigma)
+            # N20: z-score ACROSS channels per frame (not per channel
+            # over time). Detects common-mode artifact events
+            # (chewing, head movement, behavioral artifacts that hit
+            # all channels at once); per-channel-over-time z-score
+            # detects per-channel baseline drift, which is what Phase
+            # 1's ``mean(axis=0)`` / ``std(axis=0)`` form computed.
+            # Matches v1's ``stats.zscore(traces, axis=1)`` at
+            # ``v1/utils.py:185,193``: ``axis=1`` is the channels
+            # axis (rows are time frames), so the same z-score value
+            # is computed for every channel within a single frame
+            # using THAT FRAME's across-channel statistics. A
+            # 50x common-mode spike on all channels surfaces; a
+            # per-channel baseline shift does not.
+            ch_mean = traces_uv.mean(axis=1, keepdims=True)
+            ch_std = traces_uv.std(axis=1, keepdims=True) + 1e-12
+            zscores = _np.abs((traces_uv - ch_mean) / ch_std)
             above_z = zscores > validated.zscore_thresh
         else:
             above_z = _np.zeros_like(absolute, dtype=bool)
 
+        # N23: OR combine logic (belt-and-suspenders): flag a frame
+        # if EITHER detector trips. v1 at ``v1/utils.py:198`` uses
+        # ``np.logical_or(above_z, above_a)``; Phase 1's silent flip
+        # to AND made the dual-threshold mode strictly less
+        # sensitive than either single-threshold mode -- the
+        # opposite of the v1 intent. The single-threshold paths
+        # (only one of amplitude / zscore set) are unchanged
+        # because ``zeros | above_x == above_x``.
         if (
             validated.amplitude_thresh_uV is not None
             and validated.zscore_thresh is not None
         ):
-            channel_hit = above_amp & above_z
+            channel_hit = above_amp | above_z
         elif validated.amplitude_thresh_uV is not None:
             channel_hit = above_amp
         else:
@@ -618,6 +677,14 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
 
         frames_above = (channel_hit.sum(axis=1) >= n_required).nonzero()[0]
         if len(frames_above) == 0:
+            # N46: matches v1's warning at v1/artifact.py:318 so a
+            # downstream consumer noticing "all valid times" can see
+            # whether detection was attempted-and-empty vs skipped.
+            logger.warning(
+                "ArtifactDetection: scan found zero artifact frames; "
+                "returning the full recording window as a single "
+                "valid interval."
+            )
             return _np.asarray([[timestamps[0], timestamps[-1]]])
 
         fs = recording.get_sampling_frequency()
@@ -741,7 +808,18 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         for row in self.fetch(as_dict=True):
             try:
                 source = ArtifactSelection.resolve_source(row)
-            except Exception:
+            except Exception as resolve_exc:
+                # N47: surface the swallow so a broken
+                # ``resolve_source`` does not silently leave
+                # ``IntervalList`` rows behind. The row's master
+                # is still deleted by the cascade below; only the
+                # paired IntervalList cleanup is skipped here.
+                logger.error(
+                    "ArtifactDetection.delete: resolve_source failed for "
+                    f"{ {k: row[k] for k in ('artifact_id',)} }; leaving "
+                    f"IntervalList rows in place. Underlying error: "
+                    f"{resolve_exc!r}"
+                )
                 continue
             interval_list_name = f"artifact_{row['artifact_id']}"
             if source.kind == "recording":

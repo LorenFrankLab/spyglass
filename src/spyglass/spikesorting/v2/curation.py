@@ -540,14 +540,28 @@ class CurationV2(SpyglassMixin, dj.Manual):
             # bare ``pynwb.misc.Units`` without the column so the
             # write succeeds.
             if kept_unit_to_contributors:
-                nwbf.add_unit_column(
-                    name="curation_label",
-                    description=(
-                        "Curation label(s) from CurationV2.insert_curation; "
-                        "comma-separated when multi-labeled, empty if "
-                        "unlabeled."
-                    ),
-                )
+                # N26: ``curation_label`` is written as an
+                # ``index=True`` (ragged) column with a per-unit
+                # list of label strings, matching v1's
+                # ``v1/curation.py:398-403`` shape. External
+                # readers (e.g. ``v1/figurl_curation.py:83-101``
+                # which does ``list(nwb_sorting.get('curation_label',
+                # []))``) expect a list per unit and would
+                # misparse a comma-separated string by splitting
+                # on every character. The Phase 1 docstring at
+                # ``CurationV2.UnitLabel`` already described this
+                # shape; the writer body was the one place still
+                # emitting a string.
+                #
+                # v1's pattern is to call ``add_unit(...)`` first,
+                # then add the column with ``data=label_values``
+                # AFTER -- this gives pynwb a full per-unit
+                # list-of-lists to infer dtype from. If we
+                # pre-declare the column and pass labels per
+                # ``add_unit``, pynwb fails dtype inference when
+                # all labels happen to be empty (the
+                # ``labels={}`` case R15 makes ergonomic).
+                all_labels: list[list[str]] = []
                 for kept_uid, contribs in kept_unit_to_contributors.items():
                     if apply_merge and len(contribs) > 1:
                         spike_times = _np.concatenate(
@@ -564,18 +578,38 @@ class CurationV2(SpyglassMixin, dj.Manual):
                             unit_id=kept_uid, return_times=True
                         )
                     lbl_list = labels.get(int(kept_uid), [])
-                    label_str = ",".join(
+                    label_list = [
                         lbl.value
                         if isinstance(lbl, CurationLabel)
                         else str(lbl)
                         for lbl in lbl_list
-                    )
+                    ]
+                    all_labels.append(label_list)
                     nwbf.add_unit(
                         spike_times=_np.asarray(
                             spike_times, dtype=_np.float64
                         ),
                         id=int(kept_uid),
-                        curation_label=label_str,
+                    )
+                # Only add the column when at least one unit
+                # carries a non-empty label list. pynwb's dtype
+                # inference fails on an all-empty list-of-lists
+                # ("Cannot infer dtype of empty list"); the
+                # column-missing case is handled by downstream
+                # readers via ``nwb_sorting.get('curation_label',
+                # [])``.
+                if any(all_labels):
+                    nwbf.add_unit_column(
+                        name="curation_label",
+                        description=(
+                            "Curation label list from "
+                            "CurationV2.insert_curation; one entry "
+                            "per label, empty list if unlabeled. "
+                            "Indexed (ragged) column matching v1's "
+                            "shape at v1/curation.py:398-403."
+                        ),
+                        data=all_labels,
+                        index=True,
                     )
             else:
                 # Empty curation: initialize an empty Units table so
