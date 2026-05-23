@@ -476,66 +476,80 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
     -> ArtifactSelection
     """
 
-    def make(self, key):
-        """Detect artifacts and write IntervalList rows.
+    # Tri-part dispatch enables non-daemon parallel populate via
+    # Spyglass's ``PopulateMixin`` and -- more importantly -- moves
+    # the long-running detection loop OUTSIDE the framework
+    # transaction. See ``Recording`` for the same pattern and the
+    # background on DataJoint #1170 / Spyglass #1030.
+    _parallel_make = True
 
-        Re-checks the upstream selection has exactly one source part
-        row at entry (Layer 2 of the source-part pattern). For a
-        single-recording source, loads the cached preprocessed
-        ``ElectricalSeries`` via ``Recording.get_recording``, scans for
-        amplitude / z-score threshold crossings, expands them by the
-        configured removal window, and writes the artifact-removed
-        valid times into ``common.IntervalList`` under name
-        ``f"artifact_{artifact_id}"``.
+    def make_fetch(self, key):
+        """Read every DB input the compute step needs.
 
-        The shared-artifact-group source path runs the same detection
-        over the union of channels across the group's member recordings
-        and writes one ``IntervalList`` row per distinct member
-        ``nwb_file_name``; that branch lands once
-        ``SharedArtifactGroup.insert_group`` is implemented.
+        Layer-2 source re-check happens here so a row whose source
+        part was deleted (cascade orphan) fails fast inside
+        ``make_fetch``; raising here is cheap and deterministic.
+        The shared-artifact-group source path is still gated by
+        ``NotImplementedError`` -- the runtime body lands once
+        ``SharedArtifactGroup.insert_group`` ships. Tuple return is
+        DeepHash-stable across the two calls DataJoint makes (before
+        compute and again inside the transaction).
         """
-        source = ArtifactSelection.resolve_source(key)
-        params = (
-            ArtifactDetectionParameters
-            * (ArtifactSelection & key)
-        ).fetch1("params")
-        validated = ArtifactDetectionParamsSchema.model_validate(params)
+        from spyglass.spikesorting.v2.recording import RecordingSelection
 
-        if source.kind == "recording":
-            self._make_single_recording(key, source.key, validated)
-        elif source.kind == "shared_artifact_group":
+        source = ArtifactSelection.resolve_source(key)
+        if source.kind == "shared_artifact_group":
             raise NotImplementedError(
                 "ArtifactDetection.make for SharedArtifactGroup is not yet "
                 "implemented; populate SharedArtifactGroup.insert_group "
                 "first."
             )
-        else:
+        if source.kind != "recording":
             raise RuntimeError(
                 f"ArtifactDetection.make: unexpected source kind "
                 f"{source.kind!r}."
             )
 
-    def _make_single_recording(self, key, source_key, validated):
-        """Implementation of make() for the RecordingSource path."""
-        from spyglass.spikesorting.v2.recording import (
-            Recording,
-            RecordingSelection,
+        params = (
+            ArtifactDetectionParameters * (ArtifactSelection & key)
+        ).fetch1("params")
+        validated = ArtifactDetectionParamsSchema.model_validate(params)
+        nwb_file_name = (
+            RecordingSelection & {"recording_id": source.key["recording_id"]}
+        ).fetch1("nwb_file_name")
+        return (source, validated, nwb_file_name)
+
+    def make_compute(self, key, source, validated, nwb_file_name):
+        """Run artifact detection outside any DB transaction.
+
+        Loads the cached preprocessed recording via
+        ``Recording.get_recording`` (regenerates the artifact on
+        disk if missing -- still inside ``make_compute``, no DB
+        lock), scans for amplitude / z-score threshold crossings,
+        expands them by the configured removal window. Returns the
+        artifact-removed ``valid_times`` plus the upstream metadata
+        ``make_insert`` needs.
+        """
+        recording = Recording().get_recording(
+            {"recording_id": source.key["recording_id"]}
         )
+        valid_times = self._detect_artifacts(recording, validated)
+        return (valid_times, nwb_file_name)
+
+    def make_insert(self, key, valid_times, nwb_file_name):
+        """Write the artifact ``IntervalList`` + master row atomically.
+
+        DataJoint's tri-part dispatch opens the framework transaction
+        around this method; the inner ``transaction_or_noop`` is a
+        no-op (yields without re-opening when a transaction is
+        already active). Kept defensively per the Phase 1b invariant
+        so an out-of-populate caller still gets atomic registration.
+        """
         from spyglass.spikesorting.v2.utils import transaction_or_noop
 
-        recording_id = source_key["recording_id"]
-        nwb_file_name = (
-            RecordingSelection & {"recording_id": recording_id}
-        ).fetch1("nwb_file_name")
-        recording = Recording().get_recording({"recording_id": recording_id})
-
-        valid_times = self._detect_artifacts(recording, validated)
-
-        # Wrap the IntervalList write and the ArtifactDetection insert
-        # in a single transaction: a failed master insert otherwise
-        # leaves an orphan IntervalList row named ``artifact_<uuid>``
-        # that has no FK reference and won't be reaped by cascade.
         interval_list_name = f"artifact_{key['artifact_id']}"
+        # no-op when framework transaction is active; kept defensively
+        # so an out-of-populate caller still gets atomic registration.
         with transaction_or_noop(self.connection):
             IntervalList.insert1(
                 {

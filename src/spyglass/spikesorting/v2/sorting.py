@@ -377,19 +377,24 @@ class Sorting(SpyglassMixin, dj.Computed):
         n_spikes: int
         """
 
-    def make(self, key):
-        """Sort, build analyzer, write Units NWB, populate Unit part.
+    # Tri-part dispatch + parallel populate. ``Sorting.make`` is the
+    # longest of the three Computed stages (sorters routinely take
+    # 5-20 minutes); moving the run outside the framework
+    # transaction is the dominant motivation. Parallel populate via
+    # the non-daemon process pool is the secondary benefit.
+    _parallel_make = True
 
-        Re-checks ``SortingSelection.resolve_source(key)`` at entry per
-        the shared-contracts Source Part Pattern. Single-recording path
-        only today; concat raises ``NotImplementedError``.
+    def make_fetch(self, key):
+        """Read every DB input the compute step needs.
+
+        Layer-2 source re-check fires here; concat raises
+        ``NotImplementedError`` until the schema's concat runtime
+        lands. All returned values are deterministic bytes
+        (DataJoint fetches inline dicts) so DataJoint's tri-part
+        DeepHash integrity check across the two fetches stays
+        stable.
         """
-        import datetime as _dt
-
-        from spyglass.spikesorting.v2.recording import (
-            Recording,
-            RecordingSelection,
-        )
+        from spyglass.spikesorting.v2.recording import RecordingSelection
 
         source = SortingSelection.resolve_source(key)
         if source.kind != "recording":
@@ -399,6 +404,43 @@ class Sorting(SpyglassMixin, dj.Computed):
             )
 
         sel_row = (SortingSelection & key).fetch1()
+        sorter_row = (
+            SorterParameters
+            & {
+                "sorter": sel_row["sorter"],
+                "sorter_params_name": sel_row["sorter_params_name"],
+            }
+        ).fetch1()
+        nwb_file_name = (
+            RecordingSelection & {"recording_id": source.key["recording_id"]}
+        ).fetch1("nwb_file_name")
+        return (source, sel_row, sorter_row, nwb_file_name)
+
+    def make_compute(self, key, source, sel_row, sorter_row, nwb_file_name):
+        """Sort, build analyzer, stage Units NWB outside any DB transaction.
+
+        The long-running steps run here:
+
+        - load the cached preprocessed recording,
+        - apply the artifact mask if ``artifact_id`` is set,
+        - dispatch ``_run_sorter`` (clusterless thresholder or SI
+          sorter; R3 / R9 / N38 / N39 carve-outs apply),
+        - ``_remove_excess_spikes`` (boundary safety),
+        - ``_build_analyzer`` (writes the ``analyzer_folder`` on disk),
+        - ``_write_units_nwb`` (stages the AnalysisNwbfile on disk
+          without registering it).
+
+        Cleanup contract (N51 failure-mode A): if anything raises
+        between ``_build_analyzer`` and the end of this method, the
+        analyzer folder and any staged units NWB are removed before
+        the exception propagates. DataJoint will not call
+        ``make_insert`` once this raises, so cleanup has to happen
+        here.
+        """
+        import shutil as _shutil
+
+        from spyglass.spikesorting.v2.recording import Recording
+
         recording_id = source.key["recording_id"]
         recording = Recording().get_recording({"recording_id": recording_id})
 
@@ -409,13 +451,6 @@ class Sorting(SpyglassMixin, dj.Computed):
                 recording_id=recording_id,
             )
 
-        sorter_row = (
-            SorterParameters
-            & {
-                "sorter": sel_row["sorter"],
-                "sorter_params_name": sel_row["sorter_params_name"],
-            }
-        ).fetch1()
         sorter = sorter_row["sorter"]
         sorter_params = dict(sorter_row["params"])
         # ``schema_version`` is Pydantic bookkeeping; the SI sorter
@@ -430,29 +465,79 @@ class Sorting(SpyglassMixin, dj.Computed):
         )
         sorting_obj = self._remove_excess_spikes(sorting_obj, recording)
 
+        # ``_build_analyzer`` creates the analyzer folder on disk.
+        # From this point on a failure must clean BOTH the analyzer
+        # folder AND the staged units NWB (if it was created). Pass
+        # ``sorter_row`` so ``_build_analyzer`` does not re-issue the
+        # ``SortingSelection`` + ``SorterParameters`` reads we
+        # already did in ``make_fetch``.
         analyzer_folder = self._build_analyzer(
-            sorting=sorting_obj, recording=recording, key=key
-        )
-
-        nwb_file_name = (
-            RecordingSelection & {"recording_id": recording_id}
-        ).fetch1("nwb_file_name")
-        analysis_file_name, units_object_id = self._write_units_nwb(
             sorting=sorting_obj,
             recording=recording,
-            nwb_file_name=nwb_file_name,
+            key=key,
+            sorter_row=sorter_row,
+        )
+        analysis_file_name = None
+        try:
+            analysis_file_name, units_object_id = self._write_units_nwb(
+                sorting=sorting_obj,
+                recording=recording,
+                nwb_file_name=nwb_file_name,
+            )
+        except Exception:
+            # N51 mode A: analyzer folder was created but the units
+            # NWB write failed. Remove the analyzer folder so a
+            # half-built scratch dir does not leak.
+            try:
+                if analyzer_folder.exists():
+                    _shutil.rmtree(analyzer_folder, ignore_errors=False)
+            except Exception as cleanup_exc:  # pragma: no cover -- defensive
+                logger.error(
+                    "Sorting.make_compute: failed to remove analyzer "
+                    f"folder {analyzer_folder!r}: {cleanup_exc!r}"
+                )
+            raise
+
+        return (
+            sorting_obj,
+            analysis_file_name,
+            units_object_id,
+            analyzer_folder,
+            recording_id,
+            nwb_file_name,
         )
 
-        # Register the analysis file + Sorting master + Sorting.Unit
-        # part rows atomically: if any part fails (e.g., a sorter
-        # returned a non-integer unit_id), the AnalysisNwbfile and
-        # master rows roll back together. The units NWB on disk is the
-        # only side effect left to clean up on rollback.
-        import pathlib as _pathlib
+    def make_insert(
+        self,
+        key,
+        sorting_obj,
+        analysis_file_name,
+        units_object_id,
+        analyzer_folder,
+        recording_id,
+        nwb_file_name,
+    ):
+        """Atomic registration of the AnalysisNwbfile + master + Unit rows.
 
-        from spyglass.spikesorting.v2.utils import transaction_or_noop
+        DataJoint's tri-part dispatch wraps this method in the
+        framework transaction; the inner ``transaction_or_noop``
+        is a no-op there (kept defensively per the Phase 1b
+        invariant). ``_populate_unit_part`` runs INSIDE the
+        transaction so its unit-part rows commit atomically with
+        the master row; the plan explicitly forbids splitting it
+        across stages.
+
+        N51 failure-mode B: if the registration raises after a
+        successful ``make_compute``, the staged units NWB AND the
+        analyzer folder are removed before propagating.
+        """
+        import datetime as _dt
+        import pathlib as _pathlib
+        import shutil as _shutil
 
         try:
+            # no-op when framework transaction is active; kept defensively
+            # so an out-of-populate caller still gets atomic registration.
             with transaction_or_noop(self.connection):
                 AnalysisNwbfile().add(nwb_file_name, analysis_file_name)
                 self.insert1(
@@ -479,8 +564,18 @@ class Sorting(SpyglassMixin, dj.Computed):
                     _pathlib.Path(abs_path).unlink()
             except Exception as cleanup_exc:  # pragma: no cover -- defensive
                 logger.error(
-                    "Sorting.make: failed to clean up staged units NWB "
-                    f"{analysis_file_name!r}: {cleanup_exc!r}"
+                    "Sorting.make_insert: failed to clean up staged units "
+                    f"NWB {analysis_file_name!r}: {cleanup_exc!r}"
+                )
+            # N51 mode B: analyzer folder also needs removal so a
+            # rolled-back populate does not leave a 5-50 GB orphan.
+            try:
+                if analyzer_folder.exists():
+                    _shutil.rmtree(analyzer_folder, ignore_errors=False)
+            except Exception as cleanup_exc:  # pragma: no cover -- defensive
+                logger.error(
+                    "Sorting.make_insert: failed to remove analyzer "
+                    f"folder {analyzer_folder!r}: {cleanup_exc!r}"
                 )
             raise
 
@@ -566,6 +661,10 @@ class Sorting(SpyglassMixin, dj.Computed):
         """
         from spyglass.spikesorting.v2.recording import Recording
 
+        import shutil as _shutil
+
+        from spyglass.spikesorting.v2.utils import _analyzer_path
+
         sel_row = (SortingSelection & key).fetch1()
         source = SortingSelection.resolve_source(key)
         if source.kind != "recording":
@@ -583,9 +682,26 @@ class Sorting(SpyglassMixin, dj.Computed):
                 recording_id=source.key["recording_id"],
             )
         sorting_obj = self.get_sorting(key)
-        self._build_analyzer(
-            sorting=sorting_obj, recording=recording, key=key
-        )
+        # N51: ``_build_analyzer`` writes a folder to disk; a mid-
+        # rebuild failure would otherwise leak a partial scratch
+        # folder. Removing it before re-raising keeps the rebuild
+        # path's invariant ("analyzer folder reflects the canonical
+        # sort") true under failure.
+        folder = _analyzer_path({"sorting_id": key["sorting_id"]})
+        try:
+            self._build_analyzer(
+                sorting=sorting_obj, recording=recording, key=key
+            )
+        except Exception:
+            try:
+                if folder.exists():
+                    _shutil.rmtree(folder, ignore_errors=False)
+            except Exception as cleanup_exc:  # pragma: no cover -- defensive
+                logger.error(
+                    "Sorting._rebuild_analyzer_folder: failed to remove "
+                    f"partial analyzer folder {folder!r}: {cleanup_exc!r}"
+                )
+            raise
 
     def get_unit_brain_regions(
         self, key, *, allow_anchor_member: bool = False
@@ -683,9 +799,36 @@ class Sorting(SpyglassMixin, dj.Computed):
             mode="zeros",
         )
 
+    # Sorters that ship as MATLAB containers in SpikeInterface. These
+    # need ``singularity_image=True`` and a small kwarg-strip carve-out
+    # so the v1-style default Lookup rows survive containerization (R9
+    # / N38). The check is name-only; users who insert custom rows for
+    # other MATLAB sorters can extend this set by subclassing.
+    _MATLAB_SORTERS = ("kilosort2_5", "kilosort3", "ironclust")
+    _MATLAB_SORTER_STRIP_KWARGS = (
+        "tempdir",
+        "mp_context",
+        "max_threads_per_process",
+    )
+
     @staticmethod
     def _run_sorter(sorter, sorter_params, recording, sorting_id):
-        """Dispatch sort execution; clusterless_thresholder vs SI sorters."""
+        """Dispatch sort execution; clusterless_thresholder vs SI sorters.
+
+        For SI sorters the per-sort scratch directory is anchored to
+        ``spyglass.settings.temp_dir`` via
+        ``tempfile.TemporaryDirectory`` so the dir is cleaned on
+        successful exit and on raise (R3). The directory is also
+        ``chmod 0o777``'d so SI sorter subprocesses with a different
+        uid (rootless container, slurm scenarios) can write into it
+        (N39).
+
+        MATLAB-based sorters (Kilosort 2.5 / 3, IronClust) get the
+        ``singularity_image=True`` flag from SI's container API plus a
+        small kwarg-strip carve-out (R9 / N38) so v1-style rows
+        survive the containerized call.
+        """
+        import os
         import tempfile
 
         import numpy as _np
@@ -722,14 +865,57 @@ class Sorting(SpyglassMixin, dj.Computed):
                 sampling_frequency=recording.get_sampling_frequency(),
             )
 
-        tmpdir = tempfile.mkdtemp(prefix=f"sort_{sorting_id}_")
-        return sis.run_sorter(
-            sorter_name=sorter,
-            recording=recording,
-            folder=tmpdir,
-            remove_existing_folder=True,
-            **sorter_params,
+        # SI sorter path. Anchor scratch under Spyglass's temp_dir so a
+        # disk-full surface fails in a known location and the dir is
+        # auto-removed on context exit (R3 fix for the tempdir leak).
+        # ``os.chmod`` makes the dir world-writable so a sorter
+        # subprocess running under a different uid can write into it
+        # (N39 fix).
+        from spyglass.settings import temp_dir as _spyglass_temp_dir
+
+        sorter_temp_dir = tempfile.TemporaryDirectory(
+            prefix=f"sort_{sorting_id}_",
+            dir=_spyglass_temp_dir,
         )
+        try:
+            os.chmod(sorter_temp_dir.name, 0o777)
+
+            # MATLAB sorter carve-out (R9 + N38). The
+            # ``singularity_image=True`` flag triggers SI's container
+            # runner; some v1-style kwargs do not survive the container
+            # boundary (``tempdir`` clashes with the container's own
+            # workspace, ``mp_context`` / ``max_threads_per_process``
+            # are noisy in containerized runs) so they are stripped
+            # only for these sorters.
+            if sorter.lower() in Sorting._MATLAB_SORTERS:
+                clean_params = {
+                    k: v
+                    for k, v in sorter_params.items()
+                    if k not in Sorting._MATLAB_SORTER_STRIP_KWARGS
+                }
+                return sis.run_sorter(
+                    sorter_name=sorter,
+                    recording=recording,
+                    folder=sorter_temp_dir.name,
+                    remove_existing_folder=True,
+                    singularity_image=True,
+                    **clean_params,
+                )
+
+            return sis.run_sorter(
+                sorter_name=sorter,
+                recording=recording,
+                folder=sorter_temp_dir.name,
+                remove_existing_folder=True,
+                **sorter_params,
+            )
+        finally:
+            # ``TemporaryDirectory`` auto-cleans on garbage collection,
+            # but the explicit ``.cleanup()`` in a ``finally`` makes
+            # the cleanup point obvious and survives the worker
+            # process exit predictably under the parallel-populate
+            # process pool.
+            sorter_temp_dir.cleanup()
 
     @staticmethod
     def _remove_excess_spikes(sorting, recording):
@@ -739,8 +925,18 @@ class Sorting(SpyglassMixin, dj.Computed):
         return sic.remove_excess_spikes(sorting, recording)
 
     @staticmethod
-    def _build_analyzer(sorting, recording, key):
-        """Build the binary-folder SortingAnalyzer + base extensions."""
+    def _build_analyzer(sorting, recording, key, *, sorter_row=None):
+        """Build the binary-folder SortingAnalyzer + base extensions.
+
+        ``sorter_row`` is the already-fetched ``SorterParameters`` row
+        from ``make_fetch``; passing it through avoids three redundant
+        DB round-trips during ``make_compute`` (we cannot read inside
+        ``make_compute`` per the tri-part contract). The rebuild path
+        does not have the row pre-fetched, so it leaves
+        ``sorter_row=None`` and pays the DB cost once -- that path is
+        rare (missing analyzer folder) and not on the populate hot
+        path, so the lookup is acceptable there.
+        """
         import spikeinterface as si
 
         from spyglass.spikesorting.v2.utils import (
@@ -751,15 +947,15 @@ class Sorting(SpyglassMixin, dj.Computed):
         folder = _analyzer_path({"sorting_id": key["sorting_id"]})
         folder.parent.mkdir(parents=True, exist_ok=True)
 
-        sorter_row = (
-            SorterParameters
-            & {
-                "sorter": (SortingSelection & key).fetch1("sorter"),
-                "sorter_params_name": (
-                    SortingSelection & key
-                ).fetch1("sorter_params_name"),
-            }
-        ).fetch1()
+        if sorter_row is None:
+            sorter_row = (
+                SorterParameters
+                & (
+                    (SortingSelection & key).proj(
+                        "sorter", "sorter_params_name"
+                    )
+                )
+            ).fetch1()
         job_kwargs = _resolved_job_kwargs(sorter_row["job_kwargs"])
 
         analyzer = si.create_sorting_analyzer(

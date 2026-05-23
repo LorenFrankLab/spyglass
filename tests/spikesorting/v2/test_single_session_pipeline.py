@@ -242,9 +242,11 @@ def test_tripart_dispatch_active(dj_conn):
     """
     import inspect
 
+    from spyglass.spikesorting.v2.artifact import ArtifactDetection
     from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.sorting import Sorting
 
-    for cls in (Recording,):
+    for cls in (Recording, ArtifactDetection, Sorting):
         assert inspect.isgeneratorfunction(cls.make), (
             f"{cls.__name__}.make must remain the inherited generator "
             "from AutoPopulate so tri-part dispatch fires; a regular-"
@@ -2767,6 +2769,19 @@ def test_sorting_make_rollback_cleans_units_nwb(
         f"Sorting.make rollback left orphan analysis files: {new_files}. "
         "The except-block in Sorting.make must unlink the staged file "
         "when the transaction rolls back."
+    )
+
+    # N51 mode B: the analyzer folder created by ``_build_analyzer``
+    # must also be removed by ``make_insert``'s rollback path. A
+    # 5-50 GB analyzer folder orphan per failed populate is the
+    # leak this guards against.
+    from spyglass.spikesorting.v2.utils import _analyzer_path
+
+    analyzer_folder = _analyzer_path(sort_pk)
+    assert not analyzer_folder.exists(), (
+        f"Sorting.make rollback left analyzer folder {analyzer_folder} "
+        "on disk. The except-block in Sorting.make_insert must "
+        "shutil.rmtree it when the transaction rolls back."
     )
 
 
