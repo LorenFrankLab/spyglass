@@ -2721,6 +2721,159 @@ def test_sorting_make_rollback_cleans_units_nwb(
     )
 
 
+# ---------- Boundary-spike round-trip (R8 decision gate) -----------------
+
+
+@pytest.mark.slow
+def test_boundary_spike_round_trip_does_not_raise(
+    polymer_smoke_session, monkeypatch
+):
+    """A spike at the recording's final sample survives the v2 NWB round-trip.
+
+    Phase 1b's R8 decision is gated by this test. SpikeInterface's
+    ``NwbSortingExtractor`` has historically been strict about spikes
+    that map back to a sample at or past ``n_samples`` after the
+    ``timestamps[sample_index] -> spike_times[]`` -> ``round((t -
+    t_start) * fs)`` round-trip. If SI 0.104 raises here, we fold in
+    v1's ``spike_times_to_valid_samples`` clip on read. If it does
+    not raise, the clip is unnecessary and the test is kept as a
+    regression guard.
+
+    Construction strategy
+    ---------------------
+    The shipped sorters do not deterministically produce a boundary
+    spike, so we monkey-patch ``Sorting._run_sorter`` to return a
+    hand-built ``NumpySorting`` with one unit whose spike train
+    includes ``n_samples - 1`` and one earlier in-bounds spike. The
+    rest of ``Sorting.make`` runs normally:
+    ``_remove_excess_spikes`` should keep both samples
+    (``n_samples - 1 < n_samples``), ``_write_units_nwb`` writes
+    ``timestamps[sample_index]`` as the absolute time, and
+    ``Sorting().get_sorting`` reads back via ``NwbSortingExtractor``.
+    The round-trip is also exercised through
+    ``CurationV2.insert_curation`` + ``CurationV2.get_sorting`` so
+    both production read paths are covered.
+    """
+    import numpy as _np
+
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        Sorting,
+        SortingSelection,
+    )
+
+    _clean_session_v2(polymer_smoke_session)
+    initialize_v2_defaults()
+    LabTeam.insert1(
+        {
+            "team_name": "v2_test_team",
+            "team_description": "v2 pipeline tests",
+        },
+        skip_duplicates=True,
+    )
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    sort_group_id = int(
+        sorted(
+            (SortGroupV2 & polymer_smoke_session).fetch("sort_group_id")
+        )[0]
+    )
+    rec_pk = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+            "interval_list_name": "raw data valid times",
+            "preproc_params_name": "default_franklab",
+            "team_name": "v2_test_team",
+        }
+    )
+    Recording.populate(rec_pk, reserve_jobs=False)
+
+    art_pk = ArtifactSelection.insert_selection(
+        {
+            "recording_id": rec_pk["recording_id"],
+            "artifact_params_name": "none",
+        }
+    )
+    ArtifactDetection.populate(art_pk, reserve_jobs=False)
+
+    sort_pk = SortingSelection.insert_selection(
+        {
+            "recording_id": rec_pk["recording_id"],
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": "default",
+            "artifact_id": art_pk["artifact_id"],
+        }
+    )
+    (Sorting & sort_pk).super_delete(warn=False)
+
+    # Monkey-patch ``_run_sorter`` to deterministically return a
+    # ``NumpySorting`` with a spike at exactly ``n_samples - 1`` on
+    # the artifact-masked recording. ``_run_sorter`` is a
+    # ``@staticmethod`` so we patch the class attribute directly.
+    def _boundary_run_sorter(sorter, sorter_params, recording, sorting_id):
+        import spikeinterface as si
+
+        n_samples = int(recording.get_num_samples())
+        # Place one spike near the start and one at the very last
+        # sample. The boundary one is what tests SI's read-side
+        # bounds check; the earlier one keeps the unit "real" so
+        # downstream analyzer math doesn't degenerate.
+        samples = _np.array([100, n_samples - 1], dtype=_np.int64)
+        labels = _np.zeros(samples.size, dtype=_np.int32)
+        return si.NumpySorting.from_samples_and_labels(
+            samples_list=[samples],
+            labels_list=[labels],
+            sampling_frequency=recording.get_sampling_frequency(),
+        )
+
+    monkeypatch.setattr(Sorting, "_run_sorter", staticmethod(_boundary_run_sorter))
+
+    Sorting.populate(sort_pk, reserve_jobs=False)
+    assert Sorting & sort_pk, (
+        "Sorting.populate failed when the synthetic sorter produced "
+        "a boundary spike; this is the failure mode R8 watches for "
+        "but inside _write_units_nwb rather than at read time."
+    )
+
+    # First read path: Sorting.get_sorting -> NwbSortingExtractor
+    # must construct without raising. Unit set must include the one
+    # we planted.
+    sorting_obj = Sorting().get_sorting(sort_pk)
+    assert 0 in sorting_obj.get_unit_ids(), (
+        "Boundary-spike sorting did not survive Sorting.get_sorting "
+        f"round-trip; unit_ids={list(sorting_obj.get_unit_ids())}."
+    )
+
+    # Second read path: CurationV2 + CurationV2.get_sorting. The
+    # curated NWB write goes through a different code path than
+    # Sorting._write_units_nwb but reads back via the same
+    # NwbSortingExtractor pattern. Pass labels={} so insert_curation
+    # accepts the call on Phase 1's strict signature.
+    curation_pk = CurationV2.insert_curation(
+        sorting_key=sort_pk,
+        labels={},
+        parent_curation_id=-1,
+        description="R8 boundary-spike test",
+    )
+    curated = CurationV2().get_sorting(curation_pk)
+    assert 0 in curated.get_unit_ids(), (
+        "Boundary-spike unit lost on the CurationV2 round-trip; "
+        f"curated unit_ids={list(curated.get_unit_ids())}."
+    )
+
+
 # ---------- ArtifactDetection: signal-level _detect_artifacts ------------
 
 

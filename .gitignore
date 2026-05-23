@@ -155,6 +155,12 @@ tests/spikesorting/v2/fixtures/*.nwb
 # Spike sorting v2 baseline artifacts: commit only the small .pkl/.json baselines.
 !tests/spikesorting/v2/baselines/*.pkl
 !tests/spikesorting/v2/baselines/*.json
+# Spike sorting v2 Phase 1 baseline bundle: large npz/pickle stays local-only;
+# only the regen workflow + small manifest/metrics land in git. The
+# *-allow-rules below override the broad *.json / *.npz / *.pkl rules
+# further down this file.
+tests/spikesorting/v2/_fixtures/phase1_baseline/*.npz
+tests/spikesorting/v2/_fixtures/phase1_baseline/*.pkl
 
 temp_nwb/*s
 
@@ -181,6 +187,13 @@ dj_local_conf*
 !/.vscode/settings.json
 !/notebooks/notebook-images/dlc_scratch.png
 !/notebooks/notebook-images/dlc_existing.png
+
+# Re-include small Phase 1 baseline metadata after the broad *.json /
+# *.pkl / *.npz rules above. The heavy artifacts inside phase1_baseline/
+# stay ignored via the per-file rules earlier in this file.
+!tests/spikesorting/v2/_fixtures/phase1_baseline/MANIFEST.json
+!tests/spikesorting/v2/_fixtures/phase1_baseline/stage_metrics.json
+!tests/spikesorting/v2/_fixtures/phase1_baseline/README.md
 
 # Documentation
 docs/site/

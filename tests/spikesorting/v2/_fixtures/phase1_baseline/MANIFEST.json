@@ -1,0 +1,21 @@
+{
+  "artifact_id": "402af8ab-0dfe-4e44-af3e-8ff4f8ce7485",
+  "curation_id": 0,
+  "fixture_filename": "mearec_polymer_128ch_60s.nwb",
+  "interval_list_name": "raw data valid times",
+  "merge_id": "76101552-c00e-8bbd-6417-f59632853810",
+  "n_curated_units": 1,
+  "n_units": 1,
+  "numpy": "2.4.6",
+  "nwb_file_name": "mearec_polymer_128ch_60s_.nwb",
+  "preset": "franklab_tetrode_clusterless_thresholder",
+  "pynwb": "3.1.3",
+  "python": "3.11.13",
+  "recording_id": "9023567a-0266-49c9-86d8-b9a85281334f",
+  "sort_group_id": 0,
+  "sorting_id": "8cfc2f9d-595a-482d-ac26-0a8ac52f7a9c",
+  "source_sha": "d977e1802e727f155311019538f5aca2007cc3a2",
+  "spikeinterface": "0.104.3",
+  "spyglass": "0.5.5a2.dev156+gef80b78b6.d20260519",
+  "team_name": "v2_baseline_team"
+}
