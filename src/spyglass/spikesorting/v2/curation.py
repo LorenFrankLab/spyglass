@@ -98,6 +98,39 @@ class CurationV2(SpyglassMixin, dj.Manual):
         curation_label: varchar(32)
         """
 
+    class MergeGroup(SpyglassMixinPart):
+        """Per-merge-group provenance: kept unit <- contributor units.
+
+        Restores v1's merge-group recoverability lost when v2
+        replaced v1's ``merge_groups`` NWB column with a per-unit
+        kept-set. v1 stored merge groups as a single list-of-lists
+        column on the units NWB; v2 stores them here as queryable
+        part rows so bulk-audit queries ("show me every (kept_unit,
+        contributor) pair across sortings"), provenance retrieval
+        ("for this paper, list every merge decision"), and
+        DataJoint-level FK enforcement that contributor unit_ids
+        reference real ``Sorting.Unit`` rows are all easy.
+
+        Schema choice (part table over the v1 NWB-column pattern)
+        is documented in ``overview.md`` Resolved Design Decision
+        #7 as the **one authorized exception** to the zero-
+        migration policy. Phase 1b is the ONLY phase permitted to
+        add part tables to existing v2 masters; later phases must
+        adhere strictly to decision #5.
+
+        One row per ``(kept_unit_id, contributor_unit_id)``. The
+        kept unit appears as its own contributor for unmerged
+        units (one row, ``contributor_unit_id == unit_id``); this
+        makes "list every unit's merge provenance" a single
+        restriction without special-casing the no-merge units.
+        """
+
+        definition = """
+        -> CurationV2.Unit
+        contributor_unit_id: int     # source unit before the merge
+        ---
+        """
+
     @classmethod
     def insert_curation(
         cls,
@@ -274,6 +307,23 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 SpikeSortingOutput,
             )
 
+            # B3: persist per-unit merge provenance for queryable
+            # bulk-audit and FK enforcement. ``kept_unit_to_contributors``
+            # already includes 1-unit entries for unmerged units
+            # (built in ``_build_curated_unit_rows``), so every
+            # ``CurationV2.Unit`` row has at least one matching
+            # ``MergeGroup`` row.
+            merge_group_rows = [
+                {
+                    "sorting_id": sorting_id,
+                    "curation_id": curation_id,
+                    "unit_id": kept_uid,
+                    "contributor_unit_id": int(contributor_uid),
+                }
+                for kept_uid, contributors in kept_unit_to_contributors.items()
+                for contributor_uid in contributors
+            ]
+
             with transaction_or_noop(cls.connection):
                 # Register the analysis file row FIRST inside the
                 # transaction so it rolls back atomically with the
@@ -283,6 +333,8 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 cls.Unit.insert(unit_rows)
                 if unit_label_rows:
                     cls.UnitLabel.insert(unit_label_rows)
+                if merge_group_rows:
+                    cls.MergeGroup.insert(merge_group_rows)
                 SpikeSortingOutput._merge_insert(
                     [
                         {
@@ -543,24 +595,69 @@ class CurationV2(SpyglassMixin, dj.Manual):
 
     # ---- Accessors -------------------------------------------------------
 
-    def get_sorting(self, key, as_dataframe: bool = False):
+    @classmethod
+    def get_recording(cls, key):
+        """Return the cached preprocessed recording for a CurationV2 row.
+
+        Mirrors ``CurationV1.get_recording`` at
+        ``v1/curation.py:163-179``. Resolves the upstream
+        ``Recording`` via ``SortingSelection.resolve_source`` and
+        delegates to ``Recording().get_recording`` (which already
+        applies the R6 ``is_filtered=True`` annotation). Repeating
+        the annotation here is harmless and matches v1's exact
+        call surface.
+
+        ``@classmethod`` so the merge-table dispatcher's
+        ``source_table.get_recording(merge_key)`` call (which
+        binds the part class, not an instance) resolves correctly
+        for v2 ``merge_id``s. Without this method, the dispatcher
+        at ``spikesorting_merge.py:317`` raises ``AttributeError``
+        on every v2 ``merge_id`` -- Phase 1b R1.
+
+        ``key`` is normalized through a DataJoint restriction so it
+        accepts both the single-dict form (``{"sorting_id": ...}``)
+        and the list-of-dict form the merge dispatcher passes
+        (``query.fetch("KEY")``). Both forms are valid DataJoint
+        restrictions; ``fetch1`` raises if more than one row matches.
+        """
+        from spyglass.spikesorting.v2.recording import Recording
+
+        sorting_id = (cls & key).fetch1("sorting_id")
+        source = SortingSelection.resolve_source(
+            {"sorting_id": sorting_id}
+        )
+        if source.kind != "recording":
+            raise NotImplementedError(
+                "CurationV2.get_recording: concat-source sorts are not "
+                "yet supported."
+            )
+        recording = Recording().get_recording(source.key)
+        recording.annotate(is_filtered=True)  # R6
+        return recording
+
+    @classmethod
+    def get_sorting(cls, key, as_dataframe: bool = False):
         """Return the curated SpikeInterface BaseSorting (or DataFrame).
 
         With ``as_dataframe=True`` returns a pandas DataFrame mirroring
         v1's ``Curation.fetch_nwb`` convenience -- one row per unit
         with the spike-times list, useful for ad-hoc inspection that
         does not need a full SI sorting object.
+
+        ``@classmethod`` per Phase 1b N53 so the merge-table
+        dispatcher binds correctly when called as
+        ``source_table.get_sorting(merge_key)``.
         """
         from spikeinterface.extractors import NwbSortingExtractor
 
-        row = (self & key).fetch1()
+        row = (cls & key).fetch1()
         abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
 
         # CurationV2's units NWB does not carry an ElectricalSeries, so
         # we must supply ``sampling_frequency`` and ``t_start`` directly
         # (mirrors ``Sorting.get_sorting``). t_start is the recording's
         # first wall-clock timestamp.
-        recording_row = self._upstream_recording_row(key)
+        recording_row = cls._upstream_recording_row(key)
         fs = float(recording_row["sampling_frequency"])
         t_start = Sorting._recording_t_start(recording_row)
 
@@ -584,16 +681,63 @@ class CurationV2(SpyglassMixin, dj.Manual):
             }
         )
 
-    def get_merged_sorting(self, key):
+    @classmethod
+    def get_merge_groups(cls, key) -> dict[int, list[int]]:
+        """Return ``{kept_unit_id: [contributor_unit_id, ...]}`` for a curation.
+
+        Reads the ``CurationV2.MergeGroup`` part rows (B3) and
+        groups them by kept unit. Every ``CurationV2.Unit`` row
+        has at least one ``MergeGroup`` entry -- unmerged units
+        carry themselves as their sole contributor. This makes
+        "did unit X involve a merge?" a simple
+        ``len(merge_groups[X]) > 1`` check.
+
+        Used by ``get_merged_sorting`` (N21) and exposed publicly
+        so users can do bulk-audit queries directly.
+        """
+        rows = (cls.MergeGroup & key).fetch(
+            "unit_id", "contributor_unit_id", as_dict=True
+        )
+        groups: dict[int, list[int]] = {}
+        for row in rows:
+            uid = int(row["unit_id"])
+            groups.setdefault(uid, []).append(int(row["contributor_unit_id"]))
+        # Sort contributor lists deterministically so callers can
+        # rely on stable ordering when comparing across runs.
+        for uid in groups:
+            groups[uid].sort()
+        return groups
+
+    @classmethod
+    def get_merged_sorting(cls, key):
         """Return the curated BaseSorting with merge groups applied.
 
-        ``insert_curation(apply_merges=True)`` already writes the
-        merged spike trains into the NWB, so this method is a
-        convenience alias for ``get_sorting(key)`` on a merges-applied
-        row. For curations where ``merges_applied=False`` the returned
-        sorting is identical to the source Sorting's spike trains.
+        Matches v1's semantic at ``v1/curation.py:228-266``: merges
+        are queried from ``CurationV2.MergeGroup`` and applied
+        lazily via ``spikeinterface.curation.MergeUnitsSorting``,
+        regardless of the ``merges_applied`` flag on the master
+        row. Code that built a curation with ``apply_merges=False``
+        (to preview) and then asked for the merged sorting now
+        actually gets the merged trains. Phase 1b N21 fix.
+
+        If no merge group has more than one contributor (i.e. no
+        merge was requested), returns the base sorting verbatim
+        without invoking ``MergeUnitsSorting``.
         """
-        return self.get_sorting(key)
+        import spikeinterface.curation as sc
+
+        base = cls.get_sorting(key)
+        merge_groups = cls.get_merge_groups(key)
+        units_to_merge = [
+            contribs
+            for kept_uid, contribs in merge_groups.items()
+            if len(contribs) > 1
+        ]
+        if not units_to_merge:
+            return base
+        return sc.MergeUnitsSorting(
+            parent_sorting=base, units_to_merge=units_to_merge
+        )
 
     def get_unit_brain_regions(
         self,
@@ -677,7 +821,8 @@ class CurationV2(SpyglassMixin, dj.Manual):
             kept = [int(u) for u in all_units]
         return np.asarray(sorted(kept), dtype=int)
 
-    def get_sort_group_info(self, key):
+    @classmethod
+    def get_sort_group_info(cls, key):
         """Return ALL electrodes in the sort group joined to BrainRegion.
 
         Fix for the v1 ``fetch(limit=1)`` multi-region under-reporting
@@ -685,6 +830,13 @@ class CurationV2(SpyglassMixin, dj.Manual):
         single-row) covering EVERY electrode in the sort group so a
         multi-region probe surfaces every represented region. Callers
         can chain restrictions / fetches on the returned relation.
+
+        ``@classmethod`` per Phase 1b R2: the merge-table dispatcher
+        at ``spikesorting_merge.py:346`` calls
+        ``source_table.get_sort_group_info(merge_key)`` with the
+        bound part *class* (not an instance), so the previous
+        instance-method shape raised ``TypeError`` on every v2
+        ``merge_id``.
         """
         from spyglass.common.common_ephys import Electrode as _Electrode
         from spyglass.common.common_region import BrainRegion
@@ -693,9 +845,8 @@ class CurationV2(SpyglassMixin, dj.Manual):
             SortGroupV2,
         )
 
-        source = SortingSelection.resolve_source(
-            {"sorting_id": key["sorting_id"]}
-        )
+        sorting_id = (cls & key).fetch1("sorting_id")
+        source = SortingSelection.resolve_source({"sorting_id": sorting_id})
         if source.kind != "recording":
             raise NotImplementedError(
                 "CurationV2.get_sort_group_info: concat-source sorts are "
@@ -716,16 +867,22 @@ class CurationV2(SpyglassMixin, dj.Manual):
             SortGroupV2.SortGroupElectrode & sg_restriction
         ) * _Electrode * BrainRegion
 
-    def _upstream_recording_row(self, key) -> dict:
+    @classmethod
+    def _upstream_recording_row(cls, key) -> dict:
         """Fetch the upstream Recording row for a CurationV2 key.
 
         Used by ``get_sorting`` to recover the recording's
-        sampling-frequency and first-timestamp metadata (matching the
-        ``Sorting.get_sorting`` round-trip convention).
+        sampling-frequency and first-timestamp metadata (matching
+        the ``Sorting.get_sorting`` round-trip convention).
+        ``@classmethod`` per N53 so it can be invoked from the
+        other classmethod accessors.
+
+        ``key`` may be a single dict or the list-of-dict form the
+        merge dispatcher passes; the restriction-based fetch
+        normalizes both.
         """
         from spyglass.spikesorting.v2.recording import Recording
 
-        source = SortingSelection.resolve_source(
-            {"sorting_id": key["sorting_id"]}
-        )
+        sorting_id = (cls & key).fetch1("sorting_id")
+        source = SortingSelection.resolve_source({"sorting_id": sorting_id})
         return (Recording & source.key).fetch1()
