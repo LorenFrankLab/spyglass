@@ -67,23 +67,26 @@ class ArtifactDetectionParameters(SpyglassMixin, dj.Lookup):
     artifact_params_name: varchar(64)
     ---
     params: blob
-    params_schema_version=1: int
+    params_schema_version=2: int
     job_kwargs=null: blob
     """
 
+    # Row-level ``params_schema_version`` matches the inner
+    # ``ArtifactDetectionParamsSchema.schema_version`` (bumped to 2
+    # in Phase 1b R13 for ``min_length_s``).
     _DEFAULT_CONTENTS: tuple = (
         (
             "none",
             ArtifactDetectionParamsSchema(
                 detect=False, amplitude_thresh_uV=None
             ).model_dump(),
-            1,
+            2,
             None,
         ),
         (
             "default",
             ArtifactDetectionParamsSchema().model_dump(),
-            1,
+            2,
             None,
         ),
     )
@@ -666,6 +669,21 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
             cursor = max(cursor, art_end)
         if cursor < valid_end:
             kept.append([cursor, valid_end])
+
+        # R13: drop valid-interval slivers shorter than
+        # ``min_length_s`` (default 1.0 s) before returning. Without
+        # this, a noisy recording with frequent artifacts leaves
+        # millisecond-scale slivers between artifact intervals that
+        # downstream ``Sorting._apply_artifact_mask`` iterates one by
+        # one; SI sorters may also crash on micro-intervals. Matches
+        # v1's hardcoded ``min_length=1`` at
+        # ``src/spyglass/spikesorting/v1/artifact.py:327-328``.
+        if kept:
+            kept = [
+                [start, end]
+                for start, end in kept
+                if (end - start) >= validated.min_length_s
+            ]
         return _np.asarray(kept) if kept else _np.empty((0, 2))
 
     def get_artifact_removed_intervals(self, key):

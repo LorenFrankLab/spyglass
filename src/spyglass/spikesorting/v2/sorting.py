@@ -116,7 +116,11 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
             _validate_params(
                 _get_sorter_schema("clusterless_thresholder"), {}
             ),
-            1,
+            # Phase 1b N48 bumped ClusterlessThresholderSchema to
+            # schema_version=2 by dropping ``outputs`` and
+            # ``random_chunk_kwargs``; this row tracks the same
+            # version. Other sorter rows are unchanged at 1.
+            2,
             None,
         ),
     )
@@ -879,6 +883,25 @@ class Sorting(SpyglassMixin, dj.Computed):
         )
         try:
             os.chmod(sorter_temp_dir.name, 0o777)
+
+            # R4: restore v1's external float64 whitening. The upstream
+            # ``Recording._apply_pre_motion_preprocessing`` runs bandpass
+            # + reference at float64; pre-whitening here keeps the
+            # whitening step at the same precision. MS4's internal
+            # whitening operates at float32 (see Mountainsort4Sorter
+            # wrapper), which v1 deliberately bypassed for precision
+            # parity. Mirrors ``v1/sorting.py:428-430``: if the sorter
+            # asks for whitening, run it externally at float64 and turn
+            # the sorter's internal whitening off so we do not whiten
+            # twice. Runs AFTER the clusterless branch returns and
+            # AFTER the upstream artifact mask was applied in
+            # ``Sorting.make_compute`` -- artifact-masked frames should
+            # not bias whitening's covariance estimate.
+            if sorter_params.get("whiten", False):
+                import spikeinterface.preprocessing as sip
+
+                recording = sip.whiten(recording, dtype=_np.float64)
+                sorter_params = {**sorter_params, "whiten": False}
 
             # MATLAB sorter carve-out (R9 + N38). The
             # ``singularity_image=True`` flag triggers SI's container

@@ -27,7 +27,7 @@ populate time per the shared-contracts Job-Kwargs Resolution convention.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -105,24 +105,45 @@ class Kilosort4Schema(BaseModel):
 class ClusterlessThresholderSchema(BaseModel):
     """Validated schema for the clusterless-thresholder special case.
 
-    Not an SpikeInterface registered sorter; ``clusterless_thresholder``
+    Not a SpikeInterface registered sorter; ``clusterless_thresholder``
     is a Spyglass-specific peak-detection path built on
-    ``spikeinterface.core.detect_peaks``. Default values mirror v1's
-    ``default_clusterless`` row at
-    ``src/spyglass/spikesorting/v1/sorting.py``. ``extra="forbid"``
+    ``spikeinterface.sortingcomponents.peak_detection.detect_peaks``.
+    Default values mirror v1's ``default_clusterless`` row at
+    ``src/spyglass/spikesorting/v1/sorting.py:177``. ``extra="forbid"``
     catches typos against the v1-documented field set.
+
+    Phase 1b N48 dropped two dead fields from v1's row shape:
+
+    * ``outputs`` was a Spyglass routing hint; the runtime always
+      treats the detector output as a sorting and never reads this
+      field. Removed.
+    * ``random_chunk_kwargs`` was renamed to ``random_slices_kwargs``
+      and is now managed internally by SI 0.104 ``detect_peaks``; the
+      v1 field had no effect in Phase 1's strip-and-call path.
+      Removed.
+
+    ``noise_levels`` STAYS on the schema even though Phase 1 strips
+    it at runtime -- N19 (Batch 7) restores its semantics by
+    forwarding ``noise_levels=[1.0]`` to ``detect_peaks`` so the
+    user-facing ``detect_threshold`` is in microvolts rather than
+    being interpreted as a MAD multiplier. See v1 evidence at
+    ``src/spyglass/spikesorting/v1/sorting.py:177,402-404``.
+
+    ``schema_version`` bumped to 2 to mark the field-drop. New rows
+    must not carry ``outputs`` / ``random_chunk_kwargs``;
+    ``extra="forbid"`` enforces this at insert time. Existing v1-
+    shaped rows on disk are tolerated by the runtime strip path in
+    ``Sorting._run_sorter``.
     """
 
     model_config = ConfigDict(extra="forbid")
-    schema_version: int = 1
+    schema_version: int = 2
     detect_threshold: float = Field(default=100.0, gt=0.0)
     method: Literal["locally_exclusive", "global"] = "locally_exclusive"
     peak_sign: Literal["neg", "pos", "both"] = "neg"
     exclude_sweep_ms: float = Field(default=0.1, gt=0.0)
     local_radius_um: float = Field(default=100.0, gt=0.0)
     noise_levels: list[float] = Field(default_factory=lambda: [1.0])
-    random_chunk_kwargs: dict[str, Any] = Field(default_factory=dict)
-    outputs: Literal["sorting"] = "sorting"
 
 
 class SpykingCircus2Schema(BaseModel):

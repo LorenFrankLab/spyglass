@@ -26,13 +26,19 @@ class ArtifactDetectionParamsSchema(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
-    schema_version: int = 1
+    schema_version: int = 2
+    # Phase 1b R13 bumped to 2 by adding ``min_length_s``: the
+    # artifact-removed valid_times are filtered to drop slivers
+    # shorter than this many seconds before the sorter sees them.
+    # Default ``1.0`` matches v1's hardcoded value at
+    # ``src/spyglass/spikesorting/v1/artifact.py:327-328``.
     detect: bool = True
     amplitude_thresh_uV: float | None = Field(default=500.0, ge=0.0)
     zscore_thresh: float | None = Field(default=None, ge=0.0)
     proportion_above_thresh: float = Field(default=0.5, gt=0.0, le=1.0)
     removal_window_ms: float = Field(default=1.0, gt=0.0)
     join_window_ms: float = Field(default=1.0, ge=0.0)
+    min_length_s: float = Field(default=1.0, gt=0.0)
 
     @model_validator(mode="after")
     def _check_thresholds(self) -> "ArtifactDetectionParamsSchema":

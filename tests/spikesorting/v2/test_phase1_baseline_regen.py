@@ -90,6 +90,16 @@ def test_regenerate_phase1_baseline(dj_conn):
         "sorter_params_name": "default",
     }
     original_default = (SorterParameters & default_key).fetch1()
+    # NOTE: the Phase 1 baseline was originally captured with
+    # ``outputs="sorting"`` and ``params_schema_version=1``. Phase 1b
+    # N48 dropped that field from ``ClusterlessThresholderSchema``
+    # (now schema_version 2). The regen workflow recommends running
+    # this on Phase 1 tip code BEFORE the refactor lands -- if you
+    # are regenerating against a fresh checkout that already includes
+    # the N48 schema edit, drop the ``outputs`` key and bump
+    # ``params_schema_version`` to 2 (already done below). The
+    # runtime strip path tolerates either shape, so the sort output
+    # is unchanged.
     SorterParameters().insert1(
         {
             "sorter": "clusterless_thresholder",
@@ -100,9 +110,8 @@ def test_regenerate_phase1_baseline(dj_conn):
                 "peak_sign": "neg",
                 "exclude_sweep_ms": 0.1,
                 "local_radius_um": 100.0,
-                "outputs": "sorting",
             },
-            "params_schema_version": 1,
+            "params_schema_version": 2,
             "job_kwargs": None,
         },
         skip_duplicates=False,

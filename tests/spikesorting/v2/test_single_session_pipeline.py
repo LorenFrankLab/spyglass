@@ -1721,6 +1721,9 @@ def test_clusterless_thresholder_end_to_end(polymer_smoke_session):
     # smaller than typical lab data; a 5 uV threshold reliably surfaces
     # planted spikes for the 4s smoke recording.
     custom_params_name = "smoke_clusterless_5uv"
+    # Phase 1b N48 dropped ``outputs`` and ``random_chunk_kwargs``
+    # from ``ClusterlessThresholderSchema``; the test params dict
+    # must not carry them (extra="forbid" rejects on insert).
     SorterParameters().insert1(
         {
             "sorter": "clusterless_thresholder",
@@ -1731,9 +1734,8 @@ def test_clusterless_thresholder_end_to_end(polymer_smoke_session):
                 "peak_sign": "neg",
                 "exclude_sweep_ms": 0.1,
                 "local_radius_um": 100.0,
-                "outputs": "sorting",
             },
-            "params_schema_version": 1,
+            "params_schema_version": 2,
             "job_kwargs": None,
         },
         skip_duplicates=True,
@@ -2588,6 +2590,12 @@ def test_run_v2_pipeline_clusterless_preset(polymer_smoke_session):
         "sorter_params_name": "default",
     }
     original_default = (SorterParameters & default_key).fetch1()
+    # Phase 1b N48 dropped ``outputs`` and ``random_chunk_kwargs`` from
+    # ``ClusterlessThresholderSchema`` (extra="forbid"); the test
+    # params dict must not carry them. The runtime strip path in
+    # ``Sorting._run_sorter`` still tolerates either shape -- but
+    # ``SorterParameters.insert1`` validates through Pydantic first,
+    # so the v1-era ``outputs`` key would fail at insert time.
     SorterParameters().insert1(
         {
             "sorter": "clusterless_thresholder",
@@ -2598,9 +2606,8 @@ def test_run_v2_pipeline_clusterless_preset(polymer_smoke_session):
                 "peak_sign": "neg",
                 "exclude_sweep_ms": 0.1,
                 "local_radius_um": 100.0,
-                "outputs": "sorting",
             },
-            "params_schema_version": 1,
+            "params_schema_version": 2,
             "job_kwargs": None,
         },
         skip_duplicates=False,

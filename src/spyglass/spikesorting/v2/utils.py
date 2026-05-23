@@ -382,6 +382,81 @@ def _get_recording_timestamps(
     return timestamps
 
 
+def _consolidate_intervals(intervals, timestamps):
+    """Convert ``(start_time, stop_time)`` intervals to frame indices.
+
+    Ports v1's helper at
+    ``src/spyglass/spikesorting/v1/recording.py:715`` with the
+    off-by-one bug **fixed**: v1 computed
+    ``stop_indices = searchsorted(side="right") - 1`` (an INCLUSIVE
+    end index), then passed that value to
+    ``frame_slice(end_frame=stop)`` whose ``end_frame`` is
+    EXCLUSIVE. Net effect: v1 silently dropped the last sample
+    (~33 us at 30 kHz) of every disjoint interval. The v2 port
+    keeps ``side="right"`` semantics and uses the result directly
+    as the exclusive end -- matching SI's convention and v2's
+    existing ``_get_sort_interval_window`` behavior. Document the
+    v1 divergence in the docstring; the join-overlap condition is
+    adjusted accordingly (``stop >= next_start`` instead of
+    v1's ``stop >= next_start - 1``).
+
+    Parameters
+    ----------
+    intervals : array-like
+        Iterable of ``(start_seconds, stop_seconds)`` tuples. The
+        helper sorts and consolidates overlapping/adjacent
+        intervals before returning.
+    timestamps : numpy.ndarray
+        Strictly increasing wall-clock timestamps for the recording.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``(n_consolidated, 2)`` array of ``(start_frame,
+        end_frame_exclusive)`` integer pairs suitable for
+        ``recording.frame_slice(start_frame=..., end_frame=...)``.
+    """
+    import numpy as _np
+
+    intervals = _np.asarray(intervals)
+    if intervals.ndim == 1:
+        intervals = intervals.reshape(-1, 2)
+    if intervals.shape[1] != 2:
+        raise ValueError("Input array must have shape (N_Intervals, 2).")
+
+    # Sort defensively; v1 did the same. Stable ordering by start.
+    if not _np.all(intervals[:-1] <= intervals[1:]):
+        intervals = intervals[_np.argsort(intervals[:, 0])]
+
+    start_indices = _np.searchsorted(
+        timestamps, intervals[:, 0], side="left"
+    )
+    # Exclusive end -- ``side="right"`` returns the count of
+    # timestamps <= value, which is exactly the half-open end SI's
+    # ``frame_slice`` expects. v1 subtracted 1 here (bug).
+    stop_indices = _np.searchsorted(
+        timestamps, intervals[:, 1], side="right"
+    )
+
+    consolidated = []
+    start, stop = int(start_indices[0]), int(stop_indices[0])
+    for next_start, next_stop in zip(start_indices, stop_indices):
+        next_start = int(next_start)
+        next_stop = int(next_stop)
+        # Overlap / adjacency in exclusive-end form: next_start <= stop
+        # (== means strictly adjacent). v1 used ``stop >= next_start - 1``
+        # because its ``stop`` was inclusive; the conditions are
+        # equivalent under the off-by-one rewrite.
+        if next_start <= stop:
+            stop = max(stop, next_stop)
+        else:
+            consolidated.append((start, stop))
+            start, stop = next_start, next_stop
+
+    consolidated.append((start, stop))
+    return _np.asarray(consolidated, dtype=_np.int64)
+
+
 def _hash_nwb_recording(analysis_file_name: str) -> str:
     """Return a content hash of a recording's AnalysisNwbfile.
 

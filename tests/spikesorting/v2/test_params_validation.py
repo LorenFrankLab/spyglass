@@ -226,12 +226,26 @@ def test_ks4_defaults_match_appendix():
 
 
 def test_clusterless_default_matches_v1():
-    """Clusterless-thresholder defaults mirror v1's row."""
+    """Clusterless-thresholder defaults mirror v1's row (post-N48).
+
+    Phase 1b N48 dropped ``outputs`` and ``random_chunk_kwargs`` from
+    ``ClusterlessThresholderSchema`` (both stripped at runtime in
+    ``Sorting._run_sorter``); ``noise_levels`` is kept because N19
+    (Batch 7) restores its semantics. The blob shape now reflects
+    v1's runtime-relevant fields only.
+    """
     blob = ClusterlessThresholderSchema().model_dump()
     assert blob["detect_threshold"] == 100.0
     assert blob["method"] == "locally_exclusive"
     assert blob["peak_sign"] == "neg"
-    assert blob["outputs"] == "sorting"
+    # N48 regression guard: the dropped fields must not appear in the
+    # validated blob. Re-adding them to the schema without
+    # justification would silently break the N19 / runtime-strip
+    # invariants.
+    assert "outputs" not in blob
+    assert "random_chunk_kwargs" not in blob
+    # ``noise_levels`` stays because N19 forwards it to detect_peaks.
+    assert blob["noise_levels"] == [1.0]
 
 
 def test_generic_schema_accepts_arbitrary_kwargs():
