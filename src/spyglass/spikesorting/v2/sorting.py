@@ -18,8 +18,11 @@ raise ``NotImplementedError`` until the matching runtime change lands.
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
+from typing import TYPE_CHECKING, NamedTuple
 
 import datajoint as dj
+import numpy as np
 
 from spyglass.common import IntervalList  # noqa: F401
 from spyglass.common.common_ephys import Electrode  # noqa: F401
@@ -32,6 +35,7 @@ from spyglass.spikesorting.v2.session_group import (
 )
 from spyglass.spikesorting.v2.utils import (
     SourceResolution,
+    _assert_schema_version_matches,
     _assert_v2_db_safe,
     _validate_params,
     find_orphaned_masters,
@@ -39,6 +43,30 @@ from spyglass.spikesorting.v2.utils import (
     unit_brain_region_df,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
+
+if TYPE_CHECKING:
+    import spikeinterface as si
+
+
+class SortingFetched(NamedTuple):
+    """DB-side inputs gathered by :meth:`Sorting.make_fetch`."""
+
+    source: SourceResolution
+    sel_row: dict
+    sorter_row: dict
+    nwb_file_name: str
+    obs_intervals: np.ndarray | None
+
+
+class SortingComputed(NamedTuple):
+    """Outputs of :meth:`Sorting.make_compute`."""
+
+    sorting_obj: "si.BaseSorting"
+    analysis_file_name: str
+    units_object_id: str
+    analyzer_folder: Path
+    recording_id: str
+    nwb_file_name: str
 
 _assert_v2_db_safe()
 schema = dj.schema("spikesorting_v2_sorting")
@@ -70,6 +98,9 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
         row = dict(row)
         schema_cls = _get_sorter_schema(row["sorter"])
         row["params"] = _validate_params(schema_cls, row["params"])
+        _assert_schema_version_matches(
+            row, schema_cls, table_name="SorterParameters"
+        )
         super().insert1(row, **kwargs)
 
     _DEFAULT_CONTENTS: tuple = (
@@ -117,10 +148,10 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
             _validate_params(
                 _get_sorter_schema("clusterless_thresholder"), {}
             ),
-            # Phase 1b N48 bumped ClusterlessThresholderSchema to
-            # schema_version=2 by dropping ``outputs`` and
-            # ``random_chunk_kwargs``; this row tracks the same
-            # version. Other sorter rows are unchanged at 1.
+            # ClusterlessThresholderSchema bumped to schema_version=2
+            # by dropping ``outputs`` and ``random_chunk_kwargs``;
+            # this row tracks the same version. Other sorter rows are
+            # unchanged at 1.
             2,
             None,
         ),
@@ -420,7 +451,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             RecordingSelection & {"recording_id": source.key["recording_id"]}
         ).fetch1("nwb_file_name")
 
-        # N25: pre-fetch the observation-interval window so
+        # Pre-fetch the observation-interval window so
         # ``_write_units_nwb`` can write ``obs_intervals=`` on every
         # ``add_unit`` call. Downstream firing-rate computations
         # need the artifact-removed valid_times to know which
@@ -441,7 +472,13 @@ class Sorting(SpyglassMixin, dj.Computed):
             ).fetch1("valid_times")
         else:
             obs_intervals = None
-        return (source, sel_row, sorter_row, nwb_file_name, obs_intervals)
+        return SortingFetched(
+            source=source,
+            sel_row=sel_row,
+            sorter_row=sorter_row,
+            nwb_file_name=nwb_file_name,
+            obs_intervals=obs_intervals,
+        )
 
     def make_compute(
         self,
@@ -459,18 +496,17 @@ class Sorting(SpyglassMixin, dj.Computed):
         - load the cached preprocessed recording,
         - apply the artifact mask if ``artifact_id`` is set,
         - dispatch ``_run_sorter`` (clusterless thresholder or SI
-          sorter; R3 / R9 / N38 / N39 carve-outs apply),
+          sorter; tempdir + Singularity + container carve-outs apply),
         - ``_remove_excess_spikes`` (boundary safety),
         - ``_build_analyzer`` (writes the ``analyzer_folder`` on disk),
         - ``_write_units_nwb`` (stages the AnalysisNwbfile on disk
           without registering it).
 
-        Cleanup contract (N51 failure-mode A): if anything raises
-        between ``_build_analyzer`` and the end of this method, the
-        analyzer folder and any staged units NWB are removed before
-        the exception propagates. DataJoint will not call
-        ``make_insert`` once this raises, so cleanup has to happen
-        here.
+        Cleanup contract (failure-mode A): if anything raises between
+        ``_build_analyzer`` and the end of this method, the analyzer
+        folder and any staged units NWB are removed before the
+        exception propagates. DataJoint will not call ``make_insert``
+        once this raises, so cleanup has to happen here.
         """
         import shutil as _shutil
 
@@ -492,15 +528,15 @@ class Sorting(SpyglassMixin, dj.Computed):
         # wrapper does not accept it.
         sorter_params.pop("schema_version", None)
 
-        # N22 / L2-N8: resolve job_kwargs ONCE per compute stage
+        # Resolve job_kwargs ONCE per compute stage
         # (shared-contracts.md "Job-Kwargs Resolution" invariant).
         # The resolved dict flows into BOTH ``sis.run_sorter`` AND
         # ``analyzer.compute`` so a user's ``n_jobs=N`` override --
         # via ``dj.config['custom']['spikesorting_v2_job_kwargs']``
         # or via the per-row ``job_kwargs`` blob -- propagates to
-        # both stages from one resolution. Phase 1 only honored
-        # job_kwargs inside ``_build_analyzer``; the sort itself
-        # (the longer of the two) ignored them.
+        # both stages from one resolution. The sort itself is the
+        # longer of the two; honoring job_kwargs only in
+        # ``_build_analyzer`` would leave the sorter ignoring them.
         from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
 
         job_kwargs = _resolved_job_kwargs(sorter_row["job_kwargs"])
@@ -537,9 +573,9 @@ class Sorting(SpyglassMixin, dj.Computed):
                 obs_intervals=obs_intervals,
             )
         except Exception:
-            # N51 mode A: analyzer folder was created but the units
-            # NWB write failed. Remove the analyzer folder so a
-            # half-built scratch dir does not leak.
+            # Mode A cleanup: analyzer folder was created but the
+            # units NWB write failed. Remove the analyzer folder so
+            # a half-built scratch dir does not leak.
             try:
                 if analyzer_folder.exists():
                     _shutil.rmtree(analyzer_folder, ignore_errors=False)
@@ -550,13 +586,13 @@ class Sorting(SpyglassMixin, dj.Computed):
                 )
             raise
 
-        return (
-            sorting_obj,
-            analysis_file_name,
-            units_object_id,
-            analyzer_folder,
-            recording_id,
-            nwb_file_name,
+        return SortingComputed(
+            sorting_obj=sorting_obj,
+            analysis_file_name=analysis_file_name,
+            units_object_id=units_object_id,
+            analyzer_folder=analyzer_folder,
+            recording_id=recording_id,
+            nwb_file_name=nwb_file_name,
         )
 
     def make_insert(
@@ -572,14 +608,13 @@ class Sorting(SpyglassMixin, dj.Computed):
         """Atomic registration of the AnalysisNwbfile + master + Unit rows.
 
         DataJoint's tri-part dispatch wraps this method in the
-        framework transaction; the inner ``transaction_or_noop``
-        is a no-op there (kept defensively per the Phase 1b
-        invariant). ``_populate_unit_part`` runs INSIDE the
-        transaction so its unit-part rows commit atomically with
-        the master row; the plan explicitly forbids splitting it
-        across stages.
+        framework transaction; the inner ``transaction_or_noop`` is
+        a no-op there (kept defensively). ``_populate_unit_part``
+        runs INSIDE the transaction so its unit-part rows commit
+        atomically with the master row; splitting it across stages
+        is explicitly forbidden.
 
-        N51 failure-mode B: if the registration raises after a
+        Failure-mode B: if the registration raises after a
         successful ``make_compute``, the staged units NWB AND the
         analyzer folder are removed before propagating.
         """
@@ -619,7 +654,7 @@ class Sorting(SpyglassMixin, dj.Computed):
                     "Sorting.make_insert: failed to clean up staged units "
                     f"NWB {analysis_file_name!r}: {cleanup_exc!r}"
                 )
-            # N51 mode B: analyzer folder also needs removal so a
+            # Mode B cleanup: analyzer folder also needs removal so a
             # rolled-back populate does not leave a 5-50 GB orphan.
             try:
                 if analyzer_folder.exists():
@@ -734,11 +769,11 @@ class Sorting(SpyglassMixin, dj.Computed):
                 recording_id=source.key["recording_id"],
             )
         sorting_obj = self.get_sorting(key)
-        # N51: ``_build_analyzer`` writes a folder to disk; a mid-
-        # rebuild failure would otherwise leak a partial scratch
-        # folder. Removing it before re-raising keeps the rebuild
-        # path's invariant ("analyzer folder reflects the canonical
-        # sort") true under failure.
+        # ``_build_analyzer`` writes a folder to disk; a mid-rebuild
+        # failure would otherwise leak a partial scratch folder.
+        # Removing it before re-raising keeps the rebuild path's
+        # invariant ("analyzer folder reflects the canonical sort")
+        # true under failure.
         folder = _analyzer_path({"sorting_id": key["sorting_id"]})
         try:
             self._build_analyzer(
@@ -760,19 +795,20 @@ class Sorting(SpyglassMixin, dj.Computed):
 
         The ``analyzer_folder`` path column on ``Sorting`` is not
         tracked by DataJoint, so a plain ``.delete()`` would leave
-        the 5-50 GB scratch folder on disk per row. R11 mirrors
+        the 5-50 GB scratch folder on disk per row. Mirrors
         ``ArtifactDetection.delete``'s IntervalList cleanup pattern:
-        collect every folder path BEFORE the cascade delete (the
-        row needed to compute the path is gone after), then call
-        ``super().delete()``, then ``shutil.rmtree`` each
-        collected path. ``ignore_errors=False`` so a permission
-        error surfaces loudly rather than getting swallowed.
+        collect every folder path BEFORE the cascade delete (the row
+        needed to compute the path is gone after), then call
+        ``super().delete()``, then ``shutil.rmtree`` each collected
+        path. ``ignore_errors=False`` so a permission error surfaces
+        loudly rather than getting swallowed.
 
         Two cleanup paths already cover other points in the
-        ``analyzer_folder`` lifecycle: R3 cleans the sorter
-        scratch ``TemporaryDirectory`` on successful sort, and
-        N51 cleans the folder on populate failure. R11 closes the
-        third lifecycle event: row deletion.
+        ``analyzer_folder`` lifecycle: ``_run_sorter`` cleans the
+        sorter scratch ``TemporaryDirectory`` on successful sort,
+        and the make_compute / make_insert except blocks clean the
+        folder on populate failure. This override closes the third
+        lifecycle event: row deletion.
         """
         import shutil as _shutil
 
@@ -888,9 +924,9 @@ class Sorting(SpyglassMixin, dj.Computed):
 
     # Sorters that ship as MATLAB containers in SpikeInterface. These
     # need ``singularity_image=True`` and a small kwarg-strip carve-out
-    # so the v1-style default Lookup rows survive containerization (R9
-    # / N38). The check is name-only; users who insert custom rows for
-    # other MATLAB sorters can extend this set by subclassing.
+    # so the v1-style default Lookup rows survive containerization.
+    # The check is name-only; users who insert custom rows for other
+    # MATLAB sorters can extend this set by subclassing.
     _MATLAB_SORTERS = ("kilosort2_5", "kilosort3", "ironclust")
     _MATLAB_SORTER_STRIP_KWARGS = (
         "tempdir",
@@ -912,15 +948,14 @@ class Sorting(SpyglassMixin, dj.Computed):
         For SI sorters the per-sort scratch directory is anchored to
         ``spyglass.settings.temp_dir`` via
         ``tempfile.TemporaryDirectory`` so the dir is cleaned on
-        successful exit and on raise (R3). The directory is also
+        successful exit and on raise. The directory is also
         ``chmod 0o777``'d so SI sorter subprocesses with a different
-        uid (rootless container, slurm scenarios) can write into it
-        (N39).
+        uid (rootless container, slurm scenarios) can write into it.
 
         MATLAB-based sorters (Kilosort 2.5 / 3, IronClust) get the
-        ``singularity_image=True`` flag from SI's container API plus a
-        small kwarg-strip carve-out (R9 / N38) so v1-style rows
-        survive the containerized call.
+        ``singularity_image=True`` flag from SI's container API plus
+        a small kwarg-strip carve-out so v1-style rows survive the
+        containerized call.
         """
         import os
         import tempfile
@@ -939,10 +974,10 @@ class Sorting(SpyglassMixin, dj.Computed):
             # `radius_um` in 0.101+.
             if "local_radius_um" in params:
                 params["radius_um"] = params.pop("local_radius_um")
-            # N19: ``noise_levels=[1.0]`` is DELIBERATELY forwarded to
+            # ``noise_levels=[1.0]`` is DELIBERATELY forwarded to
             # ``detect_peaks`` (via SI 0.104's ``**old_kwargs`` ->
-            # ``method_kwargs`` routing). With ``noise_levels`` absent,
-            # SI computes per-channel MAD and treats
+            # ``method_kwargs`` routing). With ``noise_levels``
+            # absent, SI computes per-channel MAD and treats
             # ``detect_threshold`` as a MAD multiplier; with
             # ``noise_levels=[1.0]`` SI broadcasts that single value
             # to every channel so ``detect_threshold`` stays in
@@ -960,8 +995,8 @@ class Sorting(SpyglassMixin, dj.Computed):
             for stale in ("outputs", "random_chunk_kwargs"):
                 params.pop(stale, None)
 
-            # N22: route resolved job_kwargs into detect_peaks via
-            # the explicit kwarg. SI 0.104's signature is
+            # Route resolved job_kwargs into detect_peaks via the
+            # explicit kwarg. SI 0.104's signature is
             # ``detect_peaks(recording, method, method_kwargs,
             # ...)`` and rejects the legacy ``**old_kwargs`` mode
             # whenever ``job_kwargs`` is non-None; route per-method
@@ -1004,12 +1039,11 @@ class Sorting(SpyglassMixin, dj.Computed):
                 sampling_frequency=recording.get_sampling_frequency(),
             )
 
-        # SI sorter path. Anchor scratch under Spyglass's temp_dir so a
-        # disk-full surface fails in a known location and the dir is
-        # auto-removed on context exit (R3 fix for the tempdir leak).
+        # SI sorter path. Anchor scratch under Spyglass's temp_dir so
+        # a disk-full surface fails in a known location and the dir
+        # is auto-removed on context exit (fix for the tempdir leak).
         # ``os.chmod`` makes the dir world-writable so a sorter
-        # subprocess running under a different uid can write into it
-        # (N39 fix).
+        # subprocess running under a different uid can write into it.
         from spyglass.settings import temp_dir as _spyglass_temp_dir
 
         sorter_temp_dir = tempfile.TemporaryDirectory(
@@ -1019,34 +1053,35 @@ class Sorting(SpyglassMixin, dj.Computed):
         try:
             os.chmod(sorter_temp_dir.name, 0o777)
 
-            # R4: restore v1's external float64 whitening. The upstream
-            # ``Recording._apply_pre_motion_preprocessing`` runs bandpass
-            # + reference at float64; pre-whitening here keeps the
-            # whitening step at the same precision. MS4's internal
-            # whitening operates at float32 (see Mountainsort4Sorter
-            # wrapper), which v1 deliberately bypassed for precision
-            # parity. Mirrors ``v1/sorting.py:428-430``: if the sorter
-            # asks for whitening, run it externally at float64 and turn
-            # the sorter's internal whitening off so we do not whiten
+            # Restore v1's external float64 whitening. The upstream
+            # ``Recording._apply_pre_motion_preprocessing`` runs
+            # bandpass + reference at float64; pre-whitening here
+            # keeps the whitening step at the same precision. MS4's
+            # internal whitening operates at float32 (see
+            # Mountainsort4Sorter wrapper), which v1 deliberately
+            # bypassed for precision parity. Mirrors
+            # ``v1/sorting.py:428-430``: if the sorter asks for
+            # whitening, run it externally at float64 and turn the
+            # sorter's internal whitening off so we do not whiten
             # twice. Runs AFTER the clusterless branch returns and
             # AFTER the upstream artifact mask was applied in
-            # ``Sorting.make_compute`` -- artifact-masked frames should
-            # not bias whitening's covariance estimate.
+            # ``Sorting.make_compute`` -- artifact-masked frames
+            # should not bias whitening's covariance estimate.
             if sorter_params.get("whiten", False):
                 import spikeinterface.preprocessing as sip
 
                 recording = sip.whiten(recording, dtype=_np.float64)
                 sorter_params = {**sorter_params, "whiten": False}
 
-            # MATLAB sorter carve-out (R9 + N38). The
-            # ``singularity_image=True`` flag triggers SI's container
-            # runner; some v1-style kwargs do not survive the container
-            # boundary (``tempdir`` clashes with the container's own
-            # workspace, ``mp_context`` / ``max_threads_per_process``
-            # are noisy in containerized runs) so they are stripped
-            # only for these sorters.
-            # N22: resolved job_kwargs (n_jobs, chunk_duration, etc.)
-            # flow into ``sis.run_sorter`` via the ``**sorter_params``
+            # MATLAB sorter carve-out. The ``singularity_image=True``
+            # flag triggers SI's container runner; some v1-style
+            # kwargs do not survive the container boundary
+            # (``tempdir`` clashes with the container's own workspace,
+            # ``mp_context`` / ``max_threads_per_process`` are noisy
+            # in containerized runs) so they are stripped only for
+            # these sorters.
+            # Resolved job_kwargs (n_jobs, chunk_duration, etc.) flow
+            # into ``sis.run_sorter`` via the ``**sorter_params``
             # catch-all -- SI splits them into per-sorter and SI
             # control args internally. Merging via dict update lets a
             # per-row ``job_kwargs`` override anything the row's
@@ -1174,8 +1209,8 @@ class Sorting(SpyglassMixin, dj.Computed):
         the v2 sort outputs are the only Units rows in the file
         (addresses #1437).
 
-        N25 + N43: every unit row carries ``obs_intervals`` (the
-        artifact-removed valid-time window the sort observed) and a
+        Every unit row carries ``obs_intervals`` (the artifact-
+        removed valid-time window the sort observed) and a
         ``curation_label`` placeholder list (``["uncurated"]``).
         Both columns mirror v1 at ``v1/sorting.py:583-598``;
         external readers that grep for either column on a
@@ -1206,9 +1241,9 @@ class Sorting(SpyglassMixin, dj.Computed):
             path=analysis_abs_path, mode="a", load_namespaces=True
         ) as io:
             nwbf = io.read()
-            # N43: declare the ``curation_label`` indexed list
-            # column BEFORE adding any unit so v1-style readers that
-            # grep for the column on a pre-curation NWB find it.
+            # Declare the ``curation_label`` indexed list column
+            # BEFORE adding any unit so v1-style readers that grep
+            # for the column on a pre-curation NWB find it.
             # Conditional on at least one unit being written;
             # ``pynwb`` cannot infer dtype on an empty
             # ``add_unit_column`` followed by ``io.write``.

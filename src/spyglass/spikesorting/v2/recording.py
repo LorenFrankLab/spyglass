@@ -30,6 +30,7 @@ from spyglass.spikesorting.v2._params.preprocessing import (
     PreprocessingParamsSchema,
 )
 from spyglass.spikesorting.v2.utils import (
+    _assert_schema_version_matches,
     _assert_v2_db_safe,
     _validate_params,
     transaction_or_noop,
@@ -505,10 +506,11 @@ class PreprocessingParameters(SpyglassMixin, dj.Lookup):
     """
 
     # Row-level ``params_schema_version`` matches the inner
-    # ``PreprocessingParamsSchema.schema_version`` (bumped to 2 in
-    # Phase 1b for R7 + R18). The DataJoint column default also
-    # changed to 2 so a custom row that omits the column gets
-    # tagged as v2 instead of pretending to be v1.
+    # ``PreprocessingParamsSchema.schema_version`` (bumped to 2 for
+    # ``min_segment_length`` + removal of the dead ``reference``
+    # field). The DataJoint column default also changed to 2 so a
+    # custom row that omits the column gets tagged as v2 instead of
+    # pretending to be v1.
     _DEFAULT_CONTENTS: tuple = (
         (
             "default_franklab",
@@ -547,6 +549,9 @@ class PreprocessingParameters(SpyglassMixin, dj.Lookup):
         row = dict(row)
         row["params"] = _validate_params(
             PreprocessingParamsSchema, row["params"]
+        )
+        _assert_schema_version_matches(
+            row, PreprocessingParamsSchema, table_name="PreprocessingParameters"
         )
         super().insert1(row, **kwargs)
 
@@ -636,6 +641,41 @@ _ELECTRICAL_SERIES_NAME = "ProcessedElectricalSeries"
 _ELECTRICAL_SERIES_PATH = f"acquisition/{_ELECTRICAL_SERIES_NAME}"
 
 
+class RecordingFetched(NamedTuple):
+    """DB-side inputs gathered by :meth:`Recording.make_fetch`.
+
+    Tri-part dispatch unpacks this positionally into ``make_compute``;
+    fields are listed in the order they appear in the compute
+    signature.
+    """
+
+    sel: dict
+    channel_ids: list
+    ref_channel_id: int
+    sort_valid_times: np.ndarray
+    raw_valid_times: np.ndarray
+    preproc_validated: PreprocessingParamsSchema
+    preproc_job_kwargs: dict | None
+
+
+class RecordingComputed(NamedTuple):
+    """Outputs of :meth:`Recording.make_compute`.
+
+    Unpacked positionally into ``make_insert``.
+    """
+
+    analysis_file_name: str
+    object_id: str
+    cache_hash: str
+    saved_start: float
+    saved_end: float
+    sampling_frequency: float
+    n_channels: int
+    duration_s: float
+    sel: dict
+    sort_valid_times: np.ndarray
+
+
 @schema
 class Recording(SpyglassMixin, dj.Computed):
     """Preprocessed recording materialized NWB-resident in AnalysisNwbfile.
@@ -717,11 +757,18 @@ class Recording(SpyglassMixin, dj.Computed):
                 }
             ).fetch1("sort_reference_electrode_id")
         )
-        raw_request = (
+        sort_valid_times = (
             IntervalList
             & {
                 "nwb_file_name": nwb_file_name,
                 "interval_list_name": interval_list_name,
+            }
+        ).fetch1("valid_times")
+        raw_valid_times = (
+            IntervalList
+            & {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": "raw data valid times",
             }
         ).fetch1("valid_times")
         # Pre-fetch + validate the preprocessing params here so the
@@ -735,8 +782,8 @@ class Recording(SpyglassMixin, dj.Computed):
         preproc_validated = PreprocessingParamsSchema.model_validate(
             preproc_row["params"]
         )
-        # N22: also pull the job_kwargs blob so ``make_compute`` can
-        # call ``_resolved_job_kwargs(preproc_job_kwargs)`` per the
+        # Pull the job_kwargs blob so ``make_compute`` can call
+        # ``_resolved_job_kwargs(preproc_job_kwargs)`` per the
         # shared-contracts.md "Job-Kwargs Resolution" invariant.
         # Currently the Recording write path streams via HDMF's
         # chunked iterator and does not consume SI-style job_kwargs;
@@ -746,13 +793,14 @@ class Recording(SpyglassMixin, dj.Computed):
         # consumers can pick up the resolved dict without retrofitting
         # the fetch.
         preproc_job_kwargs = preproc_row.get("job_kwargs")
-        return (
-            sel,
-            channel_ids,
-            ref_channel_id,
-            raw_request,
-            preproc_validated,
-            preproc_job_kwargs,
+        return RecordingFetched(
+            sel=sel,
+            channel_ids=channel_ids,
+            ref_channel_id=ref_channel_id,
+            sort_valid_times=sort_valid_times,
+            raw_valid_times=raw_valid_times,
+            preproc_validated=preproc_validated,
+            preproc_job_kwargs=preproc_job_kwargs,
         )
 
     def make_compute(
@@ -761,7 +809,8 @@ class Recording(SpyglassMixin, dj.Computed):
         sel,
         channel_ids,
         ref_channel_id,
-        raw_request,
+        sort_valid_times,
+        raw_valid_times,
         preproc_validated,
         preproc_job_kwargs,
     ):
@@ -789,17 +838,17 @@ class Recording(SpyglassMixin, dj.Computed):
         nwb_file_name = sel["nwb_file_name"]
         interval_list_name = sel["interval_list_name"]
 
-        # N22: shared-contracts.md "Job-Kwargs Resolution" requires
-        # every v2 compute stage to call ``_resolved_job_kwargs(...)``
-        # so the override channels (DataJoint config + per-row blob)
-        # are testable. The Recording streaming write path uses HDMF's
-        # chunked iterator and does not consume SI-style job_kwargs
-        # in Phase 1, so the resolved dict is informational. The
-        # resolver still runs so a monkey-patched ``_resolved_job_kwargs``
-        # in tests confirms this stage's resolution path is wired.
+        # shared-contracts.md "Job-Kwargs Resolution" requires every v2
+        # compute stage to call ``_resolved_job_kwargs(...)`` so the
+        # override channels (DataJoint config + per-row blob) are
+        # testable. The Recording streaming write path uses HDMF's
+        # chunked iterator and does not consume SI-style job_kwargs in
+        # Phase 1, so the resolved dict is informational. The resolver
+        # still runs so a monkey-patched ``_resolved_job_kwargs`` in
+        # tests confirms this stage's resolution path is wired.
         from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
 
-        _resolved_job_kwargs(preproc_job_kwargs)  # noqa: F841 -- N22 hook
+        _resolved_job_kwargs(preproc_job_kwargs)
 
         raw_path = Nwbfile().get_abs_path(nwb_file_name)
         recording = se.read_nwb_recording(raw_path, load_time_vector=True)
@@ -811,6 +860,8 @@ class Recording(SpyglassMixin, dj.Computed):
             interval_list_name=interval_list_name,
             sort_group_channel_ids=channel_ids,
             ref_channel_id=ref_channel_id,
+            sort_valid_times=sort_valid_times,
+            raw_valid_times=raw_valid_times,
             min_segment_length=preproc_validated.min_segment_length,
         )
         recording = self._apply_pre_motion_preprocessing(
@@ -828,11 +879,11 @@ class Recording(SpyglassMixin, dj.Computed):
         # writes a stub first, so even a mid-write failure can leave
         # the stub on disk -- the same cleanup pattern covers it.
         #
-        # R5: ``timestamps_override`` is non-None on the multi-
-        # interval path so ``_write_nwb_artifact`` writes the
-        # per-interval wall-clock timestamps instead of the synthetic
-        # 0-based array ``concatenate_recordings(..., ignore_times=True)``
-        # would otherwise produce.
+        # ``timestamps_override`` is non-None on the multi-interval
+        # path so ``_write_nwb_artifact`` writes the per-interval
+        # wall-clock timestamps instead of the synthetic 0-based array
+        # ``concatenate_recordings(..., ignore_times=True)`` would
+        # otherwise produce.
         analysis_file_name = None
         try:
             analysis_file_name, object_id, cache_hash = self._write_nwb_artifact(
@@ -840,8 +891,8 @@ class Recording(SpyglassMixin, dj.Computed):
                 nwb_file_name=nwb_file_name,
                 timestamps_override=timestamps_override,
             )
-            # ``_get_recording_timestamps`` handles multi-segment NWBs
-            # (B5); a single-segment recording delegates to
+            # ``_get_recording_timestamps`` handles multi-segment
+            # NWBs; a single-segment recording delegates to
             # ``recording.get_times()`` exactly.
             from spyglass.spikesorting.v2.utils import _get_recording_timestamps
 
@@ -867,17 +918,17 @@ class Recording(SpyglassMixin, dj.Computed):
                     )
             raise
 
-        return (
-            analysis_file_name,
-            object_id,
-            cache_hash,
-            saved_start,
-            saved_end,
-            sampling_frequency,
-            n_channels,
-            duration_s,
-            sel,
-            raw_request,
+        return RecordingComputed(
+            analysis_file_name=analysis_file_name,
+            object_id=object_id,
+            cache_hash=cache_hash,
+            saved_start=saved_start,
+            saved_end=saved_end,
+            sampling_frequency=sampling_frequency,
+            n_channels=n_channels,
+            duration_s=duration_s,
+            sel=sel,
+            sort_valid_times=sort_valid_times,
         )
 
     def make_insert(
@@ -892,7 +943,7 @@ class Recording(SpyglassMixin, dj.Computed):
         n_channels,
         duration_s,
         sel,
-        raw_request,
+        sort_valid_times,
     ):
         """Truncation check + atomic registration inside the framework transaction.
 
@@ -900,10 +951,9 @@ class Recording(SpyglassMixin, dj.Computed):
         transaction around this method, so the inner
         ``transaction_or_noop`` block becomes a no-op (it yields
         without re-opening when a transaction is active). The wrap
-        is kept defensively per the Phase 1b invariants: if
-        ``make_insert`` is ever called outside ``populate()``, the
-        ``AnalysisNwbfile`` registration and the ``self.insert1``
-        still commit atomically.
+        is kept defensively: if ``make_insert`` is ever called
+        outside ``populate()``, the ``AnalysisNwbfile`` registration
+        and the ``self.insert1`` still commit atomically.
 
         The truncation check fires both when the user requests
         timestamps outside the raw recording (#1585) and when the
@@ -922,8 +972,8 @@ class Recording(SpyglassMixin, dj.Computed):
         nwb_file_name = sel["nwb_file_name"]
         interval_list_name = sel["interval_list_name"]
 
-        requested_start = float(raw_request[0][0])
-        requested_end = float(raw_request[-1][-1])
+        requested_start = float(sort_valid_times[0][0])
+        requested_end = float(sort_valid_times[-1][-1])
         tolerance = 1.5 / sampling_frequency
         missing_start = requested_start - saved_start
         missing_end = requested_end - saved_end
@@ -998,12 +1048,12 @@ class Recording(SpyglassMixin, dj.Computed):
             self._rebuild_nwb_artifact(key)
             abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
         rec = se.read_nwb_recording(abs_path, load_time_vector=True)
-        # R6: matches v1's annotation at ``v1/curation.py:178``. The
+        # Matches v1's annotation at ``v1/curation.py:178``. The
         # cached preprocessed artifact is bandpass-filtered + common-
         # referenced; without this annotation a downstream SI
         # consumer (e.g. a sorter that auto-applies a bandpass) may
         # re-filter the already-filtered recording. The same call
-        # exists on ``CurationV2.get_recording`` (Batch 5).
+        # exists on ``CurationV2.get_recording``.
         rec.annotate(is_filtered=True)
         return rec
 
@@ -1056,12 +1106,28 @@ class Recording(SpyglassMixin, dj.Computed):
                 & {"preproc_params_name": preproc_params_name}
             ).fetch1("params")
         )
+        sort_valid_times = (
+            IntervalList
+            & {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": interval_list_name,
+            }
+        ).fetch1("valid_times")
+        raw_valid_times = (
+            IntervalList
+            & {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": "raw data valid times",
+            }
+        ).fetch1("valid_times")
         recording, timestamps_override = self._restrict_recording(
             recording=recording,
             nwb_file_name=nwb_file_name,
             interval_list_name=interval_list_name,
             sort_group_channel_ids=channel_ids,
             ref_channel_id=ref_channel_id,
+            sort_valid_times=sort_valid_times,
+            raw_valid_times=raw_valid_times,
             min_segment_length=preproc_validated.min_segment_length,
         )
         recording = self._apply_pre_motion_preprocessing(
@@ -1088,49 +1154,6 @@ class Recording(SpyglassMixin, dj.Computed):
 
     # ---- Implementation helpers -----------------------------------------
 
-    @staticmethod
-    def _get_sort_interval_window(
-        nwb_file_name: str,
-        interval_list_name: str,
-        *,
-        min_segment_length: float = 1.0,
-    ) -> tuple[float, float]:
-        """Return the (start, end) of the intersection between the sort
-        interval and the raw-data valid times.
-
-        R7: ``min_segment_length`` (in seconds) is passed to
-        ``Interval.intersect(..., min_length=...)`` so sub-second
-        slivers between disjoint valid-time chunks are dropped
-        before the sorter sees them. Default ``1.0`` matches v1's
-        ``min_segment_length`` default at
-        ``src/spyglass/spikesorting/v1/recording.py:135``.
-        """
-        sort_interval = (
-            IntervalList
-            & {
-                "nwb_file_name": nwb_file_name,
-                "interval_list_name": interval_list_name,
-            }
-        ).fetch_interval()
-        raw_valid = (
-            IntervalList
-            & {
-                "nwb_file_name": nwb_file_name,
-                "interval_list_name": "raw data valid times",
-            }
-        ).fetch_interval()
-        intersection = sort_interval.intersect(
-            raw_valid, min_length=min_segment_length
-        )
-        times = intersection.times
-        if len(times) == 0:
-            raise ValueError(
-                f"Recording.make: interval list {interval_list_name!r} "
-                f"for {nwb_file_name!r} has zero intersection with raw "
-                "data valid times."
-            )
-        return float(times[0][0]), float(times[-1][-1])
-
     @classmethod
     def _restrict_recording(
         cls,
@@ -1139,6 +1162,8 @@ class Recording(SpyglassMixin, dj.Computed):
         interval_list_name: str,
         sort_group_channel_ids: list,
         ref_channel_id: int,
+        sort_valid_times,
+        raw_valid_times,
         *,
         min_segment_length: float = 1.0,
     ):
@@ -1148,8 +1173,8 @@ class Recording(SpyglassMixin, dj.Computed):
 
         - ``recording`` is the time- and channel-restricted SI
           recording. For a single-interval intersection it is a
-          ``frame_slice``; for a multi-interval (R5) intersection
-          it is ``concatenate_recordings(sliced)``.
+          ``frame_slice``; for a multi-interval intersection it is
+          ``concatenate_recordings(sliced)``.
         - ``timestamps_override`` is ``None`` for the single-interval
           path (the recording's own ``get_times()`` returns the
           right wall-clock values). For the multi-interval path it
@@ -1170,55 +1195,44 @@ class Recording(SpyglassMixin, dj.Computed):
         dropped the ``recording.channel_slice(...)`` method that
         was available on v1's SI 0.99 -- the constructor accepts
         the same kwargs.
+
+        Parameters
+        ----------
+        sort_valid_times, raw_valid_times
+            ``(n, 2)`` ndarrays of [start, end] seconds for the sort
+            interval and the raw-data valid times. Fetched by
+            ``make_fetch`` so the tri-part compute step does no DB
+            I/O.
         """
         from spikeinterface import concatenate_recordings
         from spikeinterface.core.channelslice import ChannelSliceRecording
 
+        from spyglass.common.common_interval import Interval
         from spyglass.spikesorting.v2.utils import (
             _consolidate_intervals,
             _get_recording_timestamps,
         )
 
-        # B5: route through ``_get_recording_timestamps`` so multi-
-        # segment NWBs concatenate correctly. The single-segment path
-        # is identical to ``recording.get_times()`` (delegation). N50
-        # would override here once the monotonicity-correction lands.
+        # Route through ``_get_recording_timestamps`` so multi-segment
+        # NWBs concatenate correctly. The single-segment path is
+        # identical to ``recording.get_times()`` (delegation).
         times = _get_recording_timestamps(recording)
 
-        # R5: when the requested sort interval is disjoint (e.g., a
+        # When the requested sort interval is disjoint (e.g., a
         # run+sleep+run epoch group), frame-slice each chunk
         # separately and concatenate; a single ``frame_slice`` on the
-        # outer envelope (the Phase 1 behavior) silently sorts the
-        # inter-chunk gaps too. Matches
-        # ``v1/recording.py:556-583``. The intersect + min_length
-        # filter is the same as in ``_get_sort_interval_window``;
-        # repeating it here keeps the disjoint-interval array
-        # available without an extra DB round-trip.
-        sort_interval = (
-            IntervalList
-            & {
-                "nwb_file_name": nwb_file_name,
-                "interval_list_name": interval_list_name,
-            }
-        ).fetch_interval()
-        raw_valid = (
-            IntervalList
-            & {
-                "nwb_file_name": nwb_file_name,
-                "interval_list_name": "raw data valid times",
-            }
-        ).fetch_interval()
-        intersection = sort_interval.intersect(
-            raw_valid, min_length=min_segment_length
+        # outer envelope silently sorts the inter-chunk gaps too.
+        # Matches ``v1/recording.py:556-583``.
+        intersection = Interval(sort_valid_times).intersect(
+            Interval(raw_valid_times), min_length=min_segment_length
         )
         valid_times = intersection.times  # (n, 2) ndarray, seconds
         if len(valid_times) == 0:
-            # R5 + R7: after the min_segment_length filter the
-            # intersection may be empty -- e.g. a noisy session where
-            # every chunk is shorter than the threshold. Raise here
-            # instead of crashing downstream on
-            # ``_consolidate_intervals`` index access. Mirrors the
-            # earlier guard in ``_get_sort_interval_window``.
+            # After the min_segment_length filter the intersection may
+            # be empty -- e.g. a noisy session where every chunk is
+            # shorter than the threshold. Raise here instead of
+            # crashing downstream on ``_consolidate_intervals`` index
+            # access.
             raise ValueError(
                 f"Recording.make: interval list {interval_list_name!r} "
                 f"for {nwb_file_name!r} has zero intersection with raw "
@@ -1229,11 +1243,10 @@ class Recording(SpyglassMixin, dj.Computed):
         intervals_in_frames = _consolidate_intervals(valid_times, times)
 
         if len(intervals_in_frames) > 1:
-            # R5: ``concatenate_recordings`` defaults to
-            # ``ignore_times=True``, which strips the wall-clock
-            # timestamps off each ``frame_slice`` segment. Without
-            # explicit handling the downstream
-            # ``_write_nwb_artifact`` would call
+            # ``concatenate_recordings`` defaults to ``ignore_times=True``,
+            # which strips the wall-clock timestamps off each
+            # ``frame_slice`` segment. Without explicit handling the
+            # downstream ``_write_nwb_artifact`` would call
             # ``recording.get_times()`` on the time-stripped concat
             # and get a synthetic 0-based array. Build the
             # concatenated-interval timestamps from ``times[s:e]``
@@ -1384,8 +1397,8 @@ class Recording(SpyglassMixin, dj.Computed):
             When set, write into the existing slot (the recompute /
             rebuild path) rather than minting a new analysis file.
         timestamps_override : numpy.ndarray, optional
-            Pre-computed timestamps (e.g. monotonicity-corrected per
-            N50). ``None`` lets the helper concatenate per-segment
+            Pre-computed timestamps (e.g. monotonicity-corrected).
+            ``None`` lets the helper concatenate per-segment
             ``recording.get_times()`` via
             :func:`_get_recording_timestamps`.
         """
@@ -1426,7 +1439,7 @@ class Recording(SpyglassMixin, dj.Computed):
             # heterogeneous gains are scaled by the wrong factor.
             # Catching the input invariant at populate time is
             # preferred to silently producing incorrectly-scaled
-            # data (see shared-contracts.md and Phase 1b B7).
+            # data (see shared-contracts.md).
             gains = _np.unique(recording.get_channel_gains())
             if len(gains) != 1:
                 raise ValueError(
@@ -1440,8 +1453,8 @@ class Recording(SpyglassMixin, dj.Computed):
             # The data iterator drives ``recording.get_traces(...)``
             # per chunk and never materializes the whole array. The
             # timestamps iterator wraps a 1D vector; resolve through
-            # ``_get_recording_timestamps`` so multi-segment NWBs
-            # (B5) and an N50-corrected override both flow through
+            # ``_get_recording_timestamps`` so multi-segment NWBs and
+            # monotonicity-corrected overrides both flow through
             # correctly.
             sampling_frequency = float(recording.get_sampling_frequency())
             timestamps = _get_recording_timestamps(
@@ -1487,7 +1500,7 @@ class Recording(SpyglassMixin, dj.Computed):
             # timestamps, electrodes, conversion, ElectricalSeries
             # metadata -- not just trace data. Matches
             # shared-contracts.md Recording Cache Format and the v1
-            # recompute hashing path (R17).
+            # recompute hashing path.
             cache_hash = _hash_nwb_recording(analysis_file_name)
         except Exception:
             try:

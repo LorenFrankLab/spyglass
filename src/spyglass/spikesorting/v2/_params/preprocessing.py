@@ -32,9 +32,8 @@ class CommonReferenceParams(BaseModel):
     preprocessing params is intentionally not exposed in v2 because
     no production v1 workflow used it -- v1 hardcoded the same
     dispatch (see ``src/spyglass/spikesorting/v1/recording.py:597-619``).
-    Promoted from "silent runtime override" to "field removed" in
-    Phase 1b R18 so the schema does not lie about what the runtime
-    honors.
+    Promoted from "silent runtime override" to "field removed" so
+    the schema does not lie about what the runtime honors.
 
     ``operator`` IS used on the global-median branch and stays.
     """
@@ -72,11 +71,11 @@ class PreprocessingParamsSchema(BaseModel):
         correction by the single-recording or concatenated-recording
         sorting path.
 
-    ``schema_version`` was bumped to 2 in Phase 1b to mark the
-    schema-incompatible edits:
-    * R7: added ``min_segment_length`` (drops sub-second slivers from
+    ``schema_version`` was bumped to 2 to mark the schema-
+    incompatible edits:
+    * added ``min_segment_length`` (drops sub-second slivers from
       the intersected sort interval before the sorter sees them).
-    * R18: removed ``CommonReferenceParams.reference`` (dead field).
+    * removed ``CommonReferenceParams.reference`` (dead field).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -90,7 +89,7 @@ class PreprocessingParamsSchema(BaseModel):
     whiten: WhitenParams | None = Field(default_factory=WhitenParams)
     # whiten=None for sorters that do their own whitening (Kilosort 4).
     min_segment_length: float = Field(default=1.0, ge=0.0)
-    # R7: drop disjoint-interval slivers shorter than this many seconds
+    # Drop disjoint-interval slivers shorter than this many seconds
     # before the sorter sees them. Matches v1's default at
     # ``src/spyglass/spikesorting/v1/recording.py:135``; passed through
     # to ``sort_interval.intersect(..., min_length=...)``.

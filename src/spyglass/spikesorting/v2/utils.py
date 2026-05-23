@@ -217,6 +217,51 @@ def _validate_params(model_cls: type[BaseModel], payload: dict) -> dict:
     return model_cls.model_validate(payload).model_dump()
 
 
+def _assert_schema_version_matches(
+    row: dict, model_cls: type[BaseModel], *, table_name: str
+) -> None:
+    """Raise if a Lookup row's ``params_schema_version`` disagrees with
+    the inner Pydantic schema_version.
+
+    Each v2 Lookup table stores a ``params_schema_version`` column
+    alongside the validated ``params`` blob. The blob also carries a
+    ``schema_version`` field (Pydantic-validated). If a user inserts
+    a row where the two values disagree, downstream code that
+    branches on the outer column will silently route v2 rows to v1
+    behavior (or vice versa). This helper catches the drift at
+    insert time so the row never lands.
+
+    Parameters
+    ----------
+    row : dict
+        The full row dict being inserted. Must have a ``params``
+        entry that already contains a ``schema_version`` (i.e. the
+        caller has already run ``_validate_params``).
+    model_cls : type[pydantic.BaseModel]
+        The schema class. Its default ``schema_version`` is used as
+        the fallback when the row omits ``params_schema_version``.
+    table_name : str
+        Human-readable table name for the error message.
+
+    Raises
+    ------
+    ValueError
+        If ``row['params_schema_version']`` is set and does not match
+        ``row['params']['schema_version']``.
+    """
+    inner = int(row["params"]["schema_version"])
+    if "params_schema_version" not in row:
+        return
+    outer = int(row["params_schema_version"])
+    if inner != outer:
+        raise ValueError(
+            f"{table_name}.insert1: params_schema_version={outer} does "
+            f"not match the inner Pydantic schema_version={inner} on the "
+            "validated params blob. Drop the column or align it with the "
+            "blob's schema_version."
+        )
+
+
 def _analyzer_path(key: dict) -> Path:
     """Return the on-disk SortingAnalyzer folder for a sorting row.
 
@@ -349,9 +394,9 @@ def _get_recording_timestamps(
         Source recording whose timestamps are needed.
     override : numpy.ndarray, optional
         Pre-computed timestamps (already monotonicity-corrected, if
-        applicable) to return verbatim. The plan's N50 task uses
-        this to propagate the corrected array; B5 introduces the
-        kwarg so the plumbing is in place before N50's body lands.
+        applicable) to return verbatim. Callers that have a
+        corrected timestamp array pass it here so this helper does
+        not re-derive it from the recording.
 
     Returns
     -------
@@ -394,8 +439,7 @@ def _consolidate_intervals(intervals, timestamps):
     EXCLUSIVE. Net effect: v1 silently dropped the last sample
     (~33 us at 30 kHz) of every disjoint interval. The v2 port
     keeps ``side="right"`` semantics and uses the result directly
-    as the exclusive end -- matching SI's convention and v2's
-    existing ``_get_sort_interval_window`` behavior. Document the
+    as the exclusive end -- matching SI's convention. Document the
     v1 divergence in the docstring; the join-overlap condition is
     adjusted accordingly (``stop >= next_start`` instead of
     v1's ``stop >= next_start - 1``).

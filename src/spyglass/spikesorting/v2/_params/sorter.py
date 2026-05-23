@@ -112,21 +112,20 @@ class ClusterlessThresholderSchema(BaseModel):
     ``src/spyglass/spikesorting/v1/sorting.py:177``. ``extra="forbid"``
     catches typos against the v1-documented field set.
 
-    Phase 1b N48 dropped two dead fields from v1's row shape:
+    Dropped two dead fields from v1's row shape:
 
     * ``outputs`` was a Spyglass routing hint; the runtime always
       treats the detector output as a sorting and never reads this
       field. Removed.
     * ``random_chunk_kwargs`` was renamed to ``random_slices_kwargs``
       and is now managed internally by SI 0.104 ``detect_peaks``; the
-      v1 field had no effect in Phase 1's strip-and-call path.
+      v1 field had no effect in the prior strip-and-call path.
       Removed.
 
-    ``noise_levels`` STAYS on the schema even though Phase 1 strips
-    it at runtime -- N19 (Batch 7) restores its semantics by
-    forwarding ``noise_levels=[1.0]`` to ``detect_peaks`` so the
-    user-facing ``detect_threshold`` is in microvolts rather than
-    being interpreted as a MAD multiplier. See v1 evidence at
+    ``noise_levels`` STAYS on the schema. ``Sorting._run_sorter``
+    forwards ``noise_levels=[1.0]`` to ``detect_peaks`` so the user-
+    facing ``detect_threshold`` is in microvolts rather than being
+    interpreted as a MAD multiplier. See v1 evidence at
     ``src/spyglass/spikesorting/v1/sorting.py:177,402-404``.
 
     ``schema_version`` bumped to 2 to mark the field-drop. New rows

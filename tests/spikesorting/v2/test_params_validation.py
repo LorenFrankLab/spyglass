@@ -327,13 +327,16 @@ def test_uncurated_sorter_schemas_accept_arbitrary_kwargs(schema_cls):
         GenericSorterParamsSchema,
     ],
 )
-def test_schema_version_present_and_equals_one(schema_cls):
-    """Every v2 Pydantic schema carries ``schema_version: int = 1``.
+def test_schema_version_present_and_positive(schema_cls):
+    """Every v2 Pydantic schema carries a positive ``schema_version`` int.
 
     Pydantic Parameter Schema Convention requires this field so the
     Lookup row can store the schema generation number alongside the
-    blob; a future model-breaking change bumps the version and adds a
+    blob; a model-breaking change bumps the version and adds a
     LegacyParams shim rather than silently overwriting old rows.
+    The exact value differs per schema (preprocessing + artifact +
+    clusterless were bumped to 2 when their field sets changed).
     """
     blob = schema_cls().model_dump()
-    assert blob["schema_version"] == 1
+    assert isinstance(blob["schema_version"], int)
+    assert blob["schema_version"] >= 1

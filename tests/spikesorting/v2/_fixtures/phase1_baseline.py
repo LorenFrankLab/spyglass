@@ -360,7 +360,7 @@ def _capture_recording_baseline(*, recording_id) -> RecordingBaseline:
         # The Phase 1 writer puts the ElectricalSeries under acquisition.
         # We look it up by object_id rather than name so the test does
         # not need the private ``_ELECTRICAL_SERIES_NAME`` constant.
-        series = _resolve_object_by_id(nwbfile, row["object_id"])
+        series = nwbfile.objects[row["object_id"]]
         traces = np.asarray(series.data[:])
         timestamps = np.asarray(series.timestamps[:])
     return RecordingBaseline(
@@ -437,17 +437,6 @@ def _curation_sampling_frequency(curation_pk: dict) -> float:
 
     sorting_obj = Sorting().get_sorting({"sorting_id": curation_pk["sorting_id"]})
     return float(sorting_obj.get_sampling_frequency())
-
-
-def _resolve_object_by_id(nwbfile, object_id: str):
-    """Walk ``nwbfile.objects`` for the container whose ``object_id`` matches."""
-    for obj in nwbfile.objects.values():
-        if getattr(obj, "object_id", None) == object_id:
-            return obj
-    raise RuntimeError(
-        f"phase1 baseline: object_id={object_id!r} not found in NWB file "
-        f"{nwbfile.identifier!r}; capture cannot proceed."
-    )
 
 
 def _write_bundle(

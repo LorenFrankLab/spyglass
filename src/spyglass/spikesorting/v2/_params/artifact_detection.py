@@ -27,21 +27,21 @@ class ArtifactDetectionParamsSchema(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     schema_version: int = 2
-    # Phase 1b R13 bumped to 2 by adding ``min_length_s``: the
-    # artifact-removed valid_times are filtered to drop slivers
-    # shorter than this many seconds before the sorter sees them.
-    # Default ``1.0`` matches v1's hardcoded value at
+    # Bumped to 2 by adding ``min_length_s``: the artifact-removed
+    # valid_times are filtered to drop slivers shorter than this
+    # many seconds before the sorter sees them. Default ``1.0``
+    # matches v1's hardcoded value at
     # ``src/spyglass/spikesorting/v1/artifact.py:327-328``.
     #
-    # Phase 1b B1 keeps ``amplitude_thresh_uV=500.0`` (v2's bug-fix
-    # default; matches v1's effective Intan-probe behavior within
-    # ~15%) and reverts ``proportion_above_thresh`` to ``1.0``
-    # (v1's principled "all channels must exceed" default;
-    # Phase 1's silent 0.5 had no documented justification).
-    # The B1 CHANGELOG entry explains the v1 unit-conversion bug
-    # that motivated keeping 500 uV; users with custom v1
-    # thresholds should translate ``v1_value * probe_gain * 1e-6``
-    # to the v2-equivalent uV value.
+    # ``amplitude_thresh_uV=500.0`` is v2's bug-fix default (matches
+    # v1's effective Intan-probe behavior within ~15%) and
+    # ``proportion_above_thresh`` is ``1.0`` (v1's principled "all
+    # channels must exceed" default; a 0.5 default had no documented
+    # justification). The CHANGELOG entry explains the v1 unit-
+    # conversion bug that motivated keeping 500 uV; users with
+    # custom v1 thresholds should translate
+    # ``v1_value * probe_gain_uV_per_count`` to the v2-equivalent uV
+    # value.
     detect: bool = True
     amplitude_thresh_uV: float | None = Field(default=500.0, ge=0.0)
     zscore_thresh: float | None = Field(default=None, ge=0.0)

@@ -114,9 +114,8 @@ class CurationV2(SpyglassMixin, dj.Manual):
         Schema choice (part table over the v1 NWB-column pattern)
         is documented in ``overview.md`` Resolved Design Decision
         #7 as the **one authorized exception** to the zero-
-        migration policy. Phase 1b is the ONLY phase permitted to
-        add part tables to existing v2 masters; later phases must
-        adhere strictly to decision #5.
+        migration policy. Later phases must adhere strictly to
+        decision #5.
 
         One row per ``(kept_unit_id, contributor_unit_id)``. The
         kept unit appears as its own contributor for unmerged
@@ -158,8 +157,8 @@ class CurationV2(SpyglassMixin, dj.Manual):
             Dict ``unit_id -> [label, ...]``. Each label is validated
             against the ``CurationLabel`` enum. ``None`` (the default)
             and ``{}`` are equivalent and produce a curation with no
-            ``UnitLabel`` rows -- R15 matches v1's permissive default
-            at ``v1/curation.py:49``.
+            ``UnitLabel`` rows -- matches v1's permissive default at
+            ``v1/curation.py:49``.
         parent_curation_id
             ``-1`` for a root curation; otherwise must reference an
             existing CurationV2 row for the same sorting.
@@ -174,10 +173,9 @@ class CurationV2(SpyglassMixin, dj.Manual):
             (union of contributors); if False (default), it stores the
             original Sorting spike trains 1:1 so merge edits can be
             reviewed before committing. CurationV2.Unit always reflects
-            the post-merge unit set regardless. v1 spelling per B2:
-            matches ``CurationV1.insert_curation`` at
-            ``v1/curation.py:50`` so existing v1 caller code keeps
-            working unchanged.
+            the post-merge unit set regardless. v1 spelling matches
+            ``CurationV1.insert_curation`` at ``v1/curation.py:50``
+            so existing v1 caller code keeps working unchanged.
         description
             Free-text curation description.
         metrics_source
@@ -204,8 +202,8 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 "not in Sorting. Populate Sorting first."
             )
         if labels is None:
-            # R15: ``None`` is semantically equivalent to "no labels"
-            # per v1's ``CurationV1.insert_curation`` signature at
+            # ``None`` is semantically equivalent to "no labels" per
+            # v1's ``CurationV1.insert_curation`` signature at
             # ``v1/curation.py:49``. Normalize to ``{}`` so the rest
             # of the helper does not need an extra None check.
             labels = {}
@@ -312,7 +310,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 SpikeSortingOutput,
             )
 
-            # B3: persist per-unit merge provenance for queryable
+            # Persist per-unit merge provenance for queryable
             # bulk-audit and FK enforcement. ``kept_unit_to_contributors``
             # already includes 1-unit entries for unmerged units
             # (built in ``_build_curated_unit_rows``), so every
@@ -540,18 +538,16 @@ class CurationV2(SpyglassMixin, dj.Manual):
             # bare ``pynwb.misc.Units`` without the column so the
             # write succeeds.
             if kept_unit_to_contributors:
-                # N26: ``curation_label`` is written as an
-                # ``index=True`` (ragged) column with a per-unit
-                # list of label strings, matching v1's
-                # ``v1/curation.py:398-403`` shape. External
-                # readers (e.g. ``v1/figurl_curation.py:83-101``
-                # which does ``list(nwb_sorting.get('curation_label',
-                # []))``) expect a list per unit and would
-                # misparse a comma-separated string by splitting
-                # on every character. The Phase 1 docstring at
-                # ``CurationV2.UnitLabel`` already described this
-                # shape; the writer body was the one place still
-                # emitting a string.
+                # ``curation_label`` is written as an ``index=True``
+                # (ragged) column with a per-unit list of label
+                # strings, matching v1's ``v1/curation.py:398-403``
+                # shape. External readers (e.g.
+                # ``v1/figurl_curation.py:83-101`` which does
+                # ``list(nwb_sorting.get('curation_label', []))``)
+                # expect a list per unit and would misparse a
+                # comma-separated string by splitting on every
+                # character. The ``CurationV2.UnitLabel`` docstring
+                # already described this shape.
                 #
                 # v1's pattern is to call ``add_unit(...)`` first,
                 # then add the column with ``data=label_values``
@@ -559,8 +555,8 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 # list-of-lists to infer dtype from. If we
                 # pre-declare the column and pass labels per
                 # ``add_unit``, pynwb fails dtype inference when
-                # all labels happen to be empty (the
-                # ``labels={}`` case R15 makes ergonomic).
+                # all labels happen to be empty (the no-labels
+                # case).
                 all_labels: list[list[str]] = []
                 for kept_uid, contribs in kept_unit_to_contributors.items():
                     if apply_merge and len(contribs) > 1:
@@ -642,16 +638,16 @@ class CurationV2(SpyglassMixin, dj.Manual):
         ``v1/curation.py:163-179``. Resolves the upstream
         ``Recording`` via ``SortingSelection.resolve_source`` and
         delegates to ``Recording().get_recording`` (which already
-        applies the R6 ``is_filtered=True`` annotation). Repeating
+        applies the ``is_filtered=True`` annotation). Repeating
         the annotation here is harmless and matches v1's exact
         call surface.
 
         ``@classmethod`` so the merge-table dispatcher's
-        ``source_table.get_recording(merge_key)`` call (which
-        binds the part class, not an instance) resolves correctly
-        for v2 ``merge_id``s. Without this method, the dispatcher
-        at ``spikesorting_merge.py:317`` raises ``AttributeError``
-        on every v2 ``merge_id`` -- Phase 1b R1.
+        ``source_table.get_recording(merge_key)`` call (which binds
+        the part class, not an instance) resolves correctly for v2
+        ``merge_id``s. Without this method, the dispatcher at
+        ``spikesorting_merge.py:317`` raises ``AttributeError`` on
+        every v2 ``merge_id``.
 
         ``key`` is normalized through a DataJoint restriction so it
         accepts both the single-dict form (``{"sorting_id": ...}``)
@@ -671,7 +667,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 "yet supported."
             )
         recording = Recording().get_recording(source.key)
-        recording.annotate(is_filtered=True)  # R6
+        recording.annotate(is_filtered=True)
         return recording
 
     @classmethod
@@ -683,8 +679,8 @@ class CurationV2(SpyglassMixin, dj.Manual):
         with the spike-times list, useful for ad-hoc inspection that
         does not need a full SI sorting object.
 
-        ``@classmethod`` per Phase 1b N53 so the merge-table
-        dispatcher binds correctly when called as
+        ``@classmethod`` so the merge-table dispatcher binds
+        correctly when called as
         ``source_table.get_sorting(merge_key)``.
         """
         from spikeinterface.extractors import NwbSortingExtractor
@@ -724,15 +720,15 @@ class CurationV2(SpyglassMixin, dj.Manual):
     def get_merge_groups(cls, key) -> dict[int, list[int]]:
         """Return ``{kept_unit_id: [contributor_unit_id, ...]}`` for a curation.
 
-        Reads the ``CurationV2.MergeGroup`` part rows (B3) and
-        groups them by kept unit. Every ``CurationV2.Unit`` row
-        has at least one ``MergeGroup`` entry -- unmerged units
-        carry themselves as their sole contributor. This makes
-        "did unit X involve a merge?" a simple
-        ``len(merge_groups[X]) > 1`` check.
+        Reads the ``CurationV2.MergeGroup`` part rows and groups
+        them by kept unit. Every ``CurationV2.Unit`` row has at
+        least one ``MergeGroup`` entry -- unmerged units carry
+        themselves as their sole contributor. This makes "did unit
+        X involve a merge?" a simple ``len(merge_groups[X]) > 1``
+        check.
 
-        Used by ``get_merged_sorting`` (N21) and exposed publicly
-        so users can do bulk-audit queries directly.
+        Used by ``get_merged_sorting`` and exposed publicly so
+        users can do bulk-audit queries directly.
         """
         rows = (cls.MergeGroup & key).fetch(
             "unit_id", "contributor_unit_id", as_dict=True
@@ -757,7 +753,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         regardless of the ``merges_applied`` flag on the master
         row. Code that built a curation with ``apply_merge=False``
         (to preview) and then asked for the merged sorting now
-        actually gets the merged trains. Phase 1b N21 fix.
+        actually gets the merged trains.
 
         If no merge group has more than one contributor (i.e. no
         merge was requested), returns the base sorting verbatim
@@ -870,12 +866,11 @@ class CurationV2(SpyglassMixin, dj.Manual):
         multi-region probe surfaces every represented region. Callers
         can chain restrictions / fetches on the returned relation.
 
-        ``@classmethod`` per Phase 1b R2: the merge-table dispatcher
-        at ``spikesorting_merge.py:346`` calls
+        ``@classmethod`` so the merge-table dispatcher at
+        ``spikesorting_merge.py:346`` (which calls
         ``source_table.get_sort_group_info(merge_key)`` with the
-        bound part *class* (not an instance), so the previous
-        instance-method shape raised ``TypeError`` on every v2
-        ``merge_id``.
+        bound part *class*, not an instance) does not raise
+        ``TypeError`` on v2 ``merge_id``s.
         """
         from spyglass.common.common_ephys import Electrode as _Electrode
         from spyglass.common.common_region import BrainRegion
@@ -913,8 +908,8 @@ class CurationV2(SpyglassMixin, dj.Manual):
         Used by ``get_sorting`` to recover the recording's
         sampling-frequency and first-timestamp metadata (matching
         the ``Sorting.get_sorting`` round-trip convention).
-        ``@classmethod`` per N53 so it can be invoked from the
-        other classmethod accessors.
+        ``@classmethod`` so it can be invoked from the other
+        classmethod accessors.
 
         ``key`` may be a single dict or the list-of-dict form the
         merge dispatcher passes; the restriction-based fetch
