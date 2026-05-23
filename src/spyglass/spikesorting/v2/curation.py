@@ -135,10 +135,10 @@ class CurationV2(SpyglassMixin, dj.Manual):
     def insert_curation(
         cls,
         sorting_key: dict,
-        labels: dict,
+        labels: dict | None = None,
         parent_curation_id: int = -1,
         merge_groups: list[list[int]] | None = None,
-        apply_merges: bool = False,
+        apply_merge: bool = False,
         description: str = "",
         metrics_source: str | MetricsSource = "manual",
     ) -> dict:
@@ -156,9 +156,10 @@ class CurationV2(SpyglassMixin, dj.Manual):
             ``{sorting_id}`` of the upstream Sorting row.
         labels
             Dict ``unit_id -> [label, ...]``. Each label is validated
-            against the ``CurationLabel`` enum. Use ``{}`` for an
-            unlabeled curation; ``None`` is rejected (callers must be
-            explicit about "no labels").
+            against the ``CurationLabel`` enum. ``None`` (the default)
+            and ``{}`` are equivalent and produce a curation with no
+            ``UnitLabel`` rows -- R15 matches v1's permissive default
+            at ``v1/curation.py:49``.
         parent_curation_id
             ``-1`` for a root curation; otherwise must reference an
             existing CurationV2 row for the same sorting.
@@ -168,12 +169,15 @@ class CurationV2(SpyglassMixin, dj.Manual):
             of the highest-amplitude contributor; its ``unit_id`` is
             the first id in the group. Non-listed units pass through
             1:1.
-        apply_merges
+        apply_merge
             If True, the curated-units NWB stores merged spike trains
             (union of contributors); if False (default), it stores the
             original Sorting spike trains 1:1 so merge edits can be
             reviewed before committing. CurationV2.Unit always reflects
-            the post-merge unit set regardless.
+            the post-merge unit set regardless. v1 spelling per B2:
+            matches ``CurationV1.insert_curation`` at
+            ``v1/curation.py:50`` so existing v1 caller code keeps
+            working unchanged.
         description
             Free-text curation description.
         metrics_source
@@ -200,10 +204,11 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 "not in Sorting. Populate Sorting first."
             )
         if labels is None:
-            raise ValueError(
-                "CurationV2.insert_curation: labels=None is invalid. "
-                "Use labels={} for an unlabeled curation."
-            )
+            # R15: ``None`` is semantically equivalent to "no labels"
+            # per v1's ``CurationV1.insert_curation`` signature at
+            # ``v1/curation.py:49``. Normalize to ``{}`` so the rest
+            # of the helper does not need an extra None check.
+            labels = {}
         # Normalize label keys to int once so the rest of the helper
         # can do straight ``labels.get(int_uid, [])`` lookups.
         labels = {int(uid): list(lbls) for uid, lbls in labels.items()}
@@ -263,7 +268,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         ) = cls._stage_curated_units_nwb(
             sorting_id=sorting_id,
             kept_unit_to_contributors=kept_unit_to_contributors,
-            apply_merges=apply_merges,
+            apply_merge=apply_merge,
             labels=labels,
         )
 
@@ -274,7 +279,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 "parent_curation_id": parent_curation_id,
                 "analysis_file_name": analysis_file_name,
                 "object_id": units_object_id,
-                "merges_applied": bool(apply_merges and merge_groups),
+                "merges_applied": bool(apply_merge and merge_groups),
                 "metrics_source": metrics_source,
                 "description": description,
             }
@@ -419,7 +424,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
 
         # Build mapping from contributor -> kept unit (head of group).
         # A unit may only appear in ONE merge group: overlap across
-        # groups would silently double-count spikes when apply_merges
+        # groups would silently double-count spikes when apply_merge
         # is True and ambiguates the "kept unit" choice.
         merged_ids: set[int] = set()
         kept_to_contributors: dict[int, list[int]] = {}
@@ -481,14 +486,14 @@ class CurationV2(SpyglassMixin, dj.Manual):
         cls,
         sorting_id,
         kept_unit_to_contributors: dict,
-        apply_merges: bool,
+        apply_merge: bool,
         labels: dict,
     ) -> tuple[str, str]:
         """Write the curated-units NWB. Returns (analysis_file_name, units_object_id).
 
-        With ``apply_merges=True`` the kept unit's spike train is the
+        With ``apply_merge=True`` the kept unit's spike train is the
         union of its contributors' spike trains. With
-        ``apply_merges=False`` only the non-merged units (and the
+        ``apply_merge=False`` only the non-merged units (and the
         first/head id of each merge group, taken from the source) are
         written 1:1 -- merge edits can still be reviewed before
         committing. CurationV2.Unit reflects the post-merge set
@@ -544,7 +549,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
                     ),
                 )
                 for kept_uid, contribs in kept_unit_to_contributors.items():
-                    if apply_merges and len(contribs) > 1:
+                    if apply_merge and len(contribs) > 1:
                         spike_times = _np.concatenate(
                             [
                                 sorting.get_unit_spike_train(
@@ -716,7 +721,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         are queried from ``CurationV2.MergeGroup`` and applied
         lazily via ``spikeinterface.curation.MergeUnitsSorting``,
         regardless of the ``merges_applied`` flag on the master
-        row. Code that built a curation with ``apply_merges=False``
+        row. Code that built a curation with ``apply_merge=False``
         (to preview) and then asked for the merged sorting now
         actually gets the merged trains. Phase 1b N21 fix.
 

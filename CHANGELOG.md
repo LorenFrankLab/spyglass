@@ -51,6 +51,30 @@ DLCProject().alter()
 
 ### Breaking Changes
 
+#### Spike Sorting v2 fixes a v1 artifact-detection unit-conversion bug
+
+Spike sorting v2 fixes an artifact-detection unit-conversion bug present
+in v1 since the `amplitude_thresh_uV` field was introduced. v1's
+`_compute_artifact_chunk` compared raw int16 NWB counts against the
+`amplitude_thresh_uV` field, ignoring the probe's gain. For Frank-lab
+Intan probes (0.195 µV/count) this meant v1's documented default of
+3000 was effectively ~585 µV; for Neuropixels at gain=500 (2.34 µV/count)
+v1's 3000 was effectively ~7020 µV. v2 correctly scales traces by
+channel gain before comparison.
+
+The v2 default of `amplitude_thresh_uV = 500.0` matches v1's effective
+Intan-probe behavior within ~15%. v1 users with custom thresholds
+should translate `v2_threshold_uV = v1_value * probe_gain_uV_per_count`
+to get the v2-equivalent uV value (e.g., on Intan at 0.195 µV/count,
+v1's nominal 3000 was effectively `3000 * 0.195 ≈ 585 µV` in v2 units).
+The Spyglass convention is `recording.get_channel_gains()` in µV/count,
+so no further unit conversion is needed. v2 also reverts
+`proportion_above_thresh` to v1's default of `1.0` ("all channels must
+exceed"); Phase 1 of v2 development had silently shipped 0.5 without
+justification.
+
+Upstream issue filed on LorenFrankLab/spyglass to track v1's bug.
+
 #### LFPBandV1 Fix
 
 If you were using a pre-release version of Spyglass 0.5.6 LFPBandV1 after April

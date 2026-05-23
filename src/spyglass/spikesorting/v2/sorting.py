@@ -707,6 +707,41 @@ class Sorting(SpyglassMixin, dj.Computed):
                 )
             raise
 
+    def delete(self, *args, safemode=None, **kwargs):
+        """Cascade-delete + analyzer-folder cleanup on disk.
+
+        The ``analyzer_folder`` path column on ``Sorting`` is not
+        tracked by DataJoint, so a plain ``.delete()`` would leave
+        the 5-50 GB scratch folder on disk per row. R11 mirrors
+        ``ArtifactDetection.delete``'s IntervalList cleanup pattern:
+        collect every folder path BEFORE the cascade delete (the
+        row needed to compute the path is gone after), then call
+        ``super().delete()``, then ``shutil.rmtree`` each
+        collected path. ``ignore_errors=False`` so a permission
+        error surfaces loudly rather than getting swallowed.
+
+        Two cleanup paths already cover other points in the
+        ``analyzer_folder`` lifecycle: R3 cleans the sorter
+        scratch ``TemporaryDirectory`` on successful sort, and
+        N51 cleans the folder on populate failure. R11 closes the
+        third lifecycle event: row deletion.
+        """
+        import shutil as _shutil
+
+        from spyglass.spikesorting.v2.utils import _analyzer_path
+
+        folders_to_remove = [
+            _analyzer_path({"sorting_id": row["sorting_id"]})
+            for row in self.fetch("KEY", as_dict=True)
+        ]
+        if safemode is None:
+            super().delete(*args, **kwargs)
+        else:
+            super().delete(*args, safemode=safemode, **kwargs)
+        for folder in folders_to_remove:
+            if folder.exists():
+                _shutil.rmtree(folder, ignore_errors=False)
+
     def get_unit_brain_regions(
         self, key, *, allow_anchor_member: bool = False
     ):

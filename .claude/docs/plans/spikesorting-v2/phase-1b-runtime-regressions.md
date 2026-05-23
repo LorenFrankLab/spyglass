@@ -482,8 +482,11 @@ Phase 1b is **mostly behavior-preserving for deterministic paths**: `clusterless
   gain=500 (2.34 µV/count) v1's 3000 was effectively ~7020 µV. v2 correctly
   scales traces by channel gain before comparison. The v2 default of 500 µV
   matches v1's effective Intan-probe behavior within ~15%. v1 users with
-  custom thresholds should translate v1_value × probe_gain × 1e-6 to get
-  the v2-equivalent uV value.
+  custom thresholds should translate v2_threshold_uV = v1_value ×
+  probe_gain_uV_per_count to get the v2-equivalent uV value (e.g.,
+  Intan 0.195 µV/count: v1's 3000 → 3000 × 0.195 ≈ 585 µV in v2 units).
+  Spyglass convention: recording.get_channel_gains() is already in
+  µV/count, so no further unit conversion is needed.
   ```
 
   See also the "File v1 issues" task below for upstream tracking of the bug.

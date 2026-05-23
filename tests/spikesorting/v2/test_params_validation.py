@@ -65,12 +65,21 @@ def test_preprocessing_whiten_disabled_dumps_empty_post_motion():
 
 
 def test_artifact_default_keeps_v1_field_names():
-    """Defaults match v1 field names plus the v2 additions."""
+    """Defaults match v1 field names plus the v2 additions.
+
+    Phase 1b B1 default values:
+    * ``amplitude_thresh_uV == 500.0`` -- v2's bug-fix value
+      (matches v1's effective Intan-probe behavior; v1's
+      nominal 3000 was a unit-conversion bug, see the
+      CHANGELOG entry).
+    * ``proportion_above_thresh == 1.0`` -- v1 parity revert
+      from Phase 1's silently-changed 0.5.
+    """
     blob = ArtifactDetectionParamsSchema().model_dump()
     assert blob["detect"] is True
     assert blob["amplitude_thresh_uV"] == 500.0
     assert blob["zscore_thresh"] is None
-    assert blob["proportion_above_thresh"] == 0.5
+    assert blob["proportion_above_thresh"] == 1.0
     assert blob["removal_window_ms"] == 1.0
     assert blob["join_window_ms"] == 1.0
 

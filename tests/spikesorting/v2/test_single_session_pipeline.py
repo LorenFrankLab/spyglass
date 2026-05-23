@@ -3507,7 +3507,7 @@ def test_recording_make_rollback_cleans_analysis_nwb(
     )
 
 
-# ---------- CurationV2 with merge_groups / apply_merges=True -------------
+# ---------- CurationV2 with merge_groups / apply_merge=True --------------
 
 
 @pytest.mark.slow
@@ -3515,14 +3515,14 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
     polymer_60s_session,
 ):
     """``CurationV2.insert_curation`` with ``merge_groups`` +
-    ``apply_merges=True`` writes a curated NWB whose unit_ids are
+    ``apply_merge=True`` writes a curated NWB whose unit_ids are
     the merge-group heads, and whose merged unit's spike train is
     the sorted union of its contributors.
 
     Exercises ``_build_curated_unit_rows`` with a non-empty merge
     list (amplitude-inheritance: kept unit gets electrode/amplitude
     from the highest-amplitude contributor) AND
-    ``_stage_curated_units_nwb`` with ``apply_merges=True``
+    ``_stage_curated_units_nwb`` with ``apply_merge=True``
     (concatenated + sorted spike trains).
 
     Uses the 60s polymer fixture rather than the smoke fixture
@@ -3614,7 +3614,7 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
         sorting_key=sort_pk,
         labels={},
         merge_groups=merge_groups,
-        apply_merges=True,
+        apply_merge=True,
         description="merge_groups regression",
     )
 
@@ -3629,7 +3629,7 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
 
     # The merged unit's spike train in the curated NWB is the
     # sorted union of the contributors' spike trains. Use
-    # ``apply_merges=True`` writes concatenated spike trains.
+    # ``apply_merge=True`` writes concatenated spike trains.
     src_sorting = Sorting().get_sorting(sort_pk)
     src_head = _np.asarray(
         src_sorting.get_unit_spike_train(unit_id=head, return_times=True)

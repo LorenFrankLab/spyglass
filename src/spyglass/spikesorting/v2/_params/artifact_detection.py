@@ -32,10 +32,20 @@ class ArtifactDetectionParamsSchema(BaseModel):
     # shorter than this many seconds before the sorter sees them.
     # Default ``1.0`` matches v1's hardcoded value at
     # ``src/spyglass/spikesorting/v1/artifact.py:327-328``.
+    #
+    # Phase 1b B1 keeps ``amplitude_thresh_uV=500.0`` (v2's bug-fix
+    # default; matches v1's effective Intan-probe behavior within
+    # ~15%) and reverts ``proportion_above_thresh`` to ``1.0``
+    # (v1's principled "all channels must exceed" default;
+    # Phase 1's silent 0.5 had no documented justification).
+    # The B1 CHANGELOG entry explains the v1 unit-conversion bug
+    # that motivated keeping 500 uV; users with custom v1
+    # thresholds should translate ``v1_value * probe_gain * 1e-6``
+    # to the v2-equivalent uV value.
     detect: bool = True
     amplitude_thresh_uV: float | None = Field(default=500.0, ge=0.0)
     zscore_thresh: float | None = Field(default=None, ge=0.0)
-    proportion_above_thresh: float = Field(default=0.5, gt=0.0, le=1.0)
+    proportion_above_thresh: float = Field(default=1.0, gt=0.0, le=1.0)
     removal_window_ms: float = Field(default=1.0, gt=0.0)
     join_window_ms: float = Field(default=1.0, ge=0.0)
     min_length_s: float = Field(default=1.0, gt=0.0)
