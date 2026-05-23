@@ -227,6 +227,27 @@ class CurationV2(SpyglassMixin, dj.Manual):
                     f"{sorting_id}. Pass parent_curation_id=-1 for a "
                     "root curation."
                 )
+        else:
+            # Idempotency: if a root curation already exists for this
+            # sorting_id, return its key without staging a new NWB or
+            # creating a duplicate row. Matches v1's pattern at
+            # ``v1/curation.py:88-93``; without this, every repeat
+            # call grows another row + analysis file + merge-table
+            # entry.
+            existing_root = (
+                cls
+                & {
+                    "sorting_id": sorting_id,
+                    "parent_curation_id": -1,
+                }
+            ).fetch("KEY", as_dict=True)
+            if existing_root:
+                logger.warning(
+                    "CurationV2.insert_curation: root curation already "
+                    f"exists for sorting_id={sorting_id}; returning "
+                    "existing key without staging a new NWB."
+                )
+                return existing_root[0]
 
         # Coerce metrics_source through the enum so a typo raises here
         # rather than at the DataJoint enum-mismatch layer.
@@ -277,7 +298,13 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 "parent_curation_id": parent_curation_id,
                 "analysis_file_name": analysis_file_name,
                 "object_id": units_object_id,
-                "merges_applied": bool(apply_merge and merge_groups),
+                # Record user intent verbatim, matching v1's
+                # ``v1/curation.py:123`` semantic. ``apply_merge=True``
+                # with empty ``merge_groups`` stores True (intent was
+                # to merge, nothing to merge) rather than collapsing
+                # to the effective state -- consistent with v1 and
+                # avoids silent semantic divergence.
+                "merges_applied": bool(apply_merge),
                 "metrics_source": metrics_source,
                 "description": description,
             }
@@ -704,14 +731,32 @@ class CurationV2(SpyglassMixin, dj.Manual):
 
         import pandas as pd
 
+        # Join the ``curation_label`` lists from ``UnitLabel`` so the
+        # returned DataFrame mirrors v1's ``Curation.fetch_nwb`` shape
+        # (``v1/curation.py:197-209`` returns ``nwbf.units.to_dataframe()``
+        # which carries the ``curation_label`` column). External
+        # notebook code reading ``df["curation_label"]`` works on v2
+        # rows without poking at the part table directly.
+        unit_ids = [int(uid) for uid in si_sorting.unit_ids]
+        label_rows = (cls.UnitLabel & key).fetch(
+            "unit_id", "curation_label", as_dict=True
+        )
+        labels_by_unit: dict[int, list[str]] = {}
+        for lr in label_rows:
+            labels_by_unit.setdefault(int(lr["unit_id"]), []).append(
+                str(lr["curation_label"])
+            )
         return pd.DataFrame(
             {
-                "unit_id": [int(uid) for uid in si_sorting.unit_ids],
+                "unit_id": unit_ids,
                 "spike_times": [
                     si_sorting.get_unit_spike_train(
                         unit_id=uid, return_times=True
                     )
                     for uid in si_sorting.unit_ids
+                ],
+                "curation_label": [
+                    labels_by_unit.get(uid, []) for uid in unit_ids
                 ],
             }
         )

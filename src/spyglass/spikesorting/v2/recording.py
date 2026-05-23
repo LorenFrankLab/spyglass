@@ -656,6 +656,8 @@ class RecordingFetched(NamedTuple):
     raw_valid_times: np.ndarray
     preproc_validated: PreprocessingParamsSchema
     preproc_job_kwargs: dict | None
+    probe_types: tuple
+    electrode_group_names: tuple
 
 
 class RecordingComputed(NamedTuple):
@@ -793,6 +795,23 @@ class Recording(SpyglassMixin, dj.Computed):
         # consumers can pick up the resolved dict without retrofitting
         # the fetch.
         preproc_job_kwargs = preproc_row.get("job_kwargs")
+        # Per-channel ``probe_type`` + ``electrode_group_name`` for the
+        # sort group. Used by ``make_compute`` to decide whether the
+        # legacy ``tetrode_12.5`` probe-geometry patch (v1 parity at
+        # ``v1/recording.py:630-643``) applies. Fetched here so
+        # ``make_compute`` stays DB-I/O free per the tri-part contract.
+        from spyglass.common.common_ephys import Electrode as _Electrode
+        from spyglass.common.common_device import Probe as _Probe
+
+        probe_rows = (
+            _Electrode * _Probe
+            & {"nwb_file_name": nwb_file_name}
+            & [{"electrode_id": int(c)} for c in channel_ids]
+        ).fetch("probe_type", "electrode_group_name", as_dict=True)
+        probe_types = tuple(r["probe_type"] for r in probe_rows)
+        electrode_group_names = tuple(
+            r["electrode_group_name"] for r in probe_rows
+        )
         return RecordingFetched(
             sel=sel,
             channel_ids=channel_ids,
@@ -801,6 +820,8 @@ class Recording(SpyglassMixin, dj.Computed):
             raw_valid_times=raw_valid_times,
             preproc_validated=preproc_validated,
             preproc_job_kwargs=preproc_job_kwargs,
+            probe_types=probe_types,
+            electrode_group_names=electrode_group_names,
         )
 
     def make_compute(
@@ -813,6 +834,8 @@ class Recording(SpyglassMixin, dj.Computed):
         raw_valid_times,
         preproc_validated,
         preproc_job_kwargs,
+        probe_types,
+        electrode_group_names,
     ):
         """Run the preprocessing + streaming write outside any DB transaction.
 
@@ -869,6 +892,12 @@ class Recording(SpyglassMixin, dj.Computed):
             ref_channel_id=ref_channel_id,
             sort_group_channel_ids=channel_ids,
             validated=preproc_validated,
+        )
+        recording = self._maybe_apply_tetrode_geometry(
+            recording=recording,
+            probe_types=probe_types,
+            electrode_group_names=electrode_group_names,
+            sort_group_channel_ids=channel_ids,
         )
 
         # Stage the AnalysisNwbfile via ``_write_nwb_artifact``. If
@@ -1047,7 +1076,17 @@ class Recording(SpyglassMixin, dj.Computed):
         if not Path(abs_path).exists():
             self._rebuild_nwb_artifact(key)
             abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
-        rec = se.read_nwb_recording(abs_path, load_time_vector=True)
+        # Honor the stored ``electrical_series_path`` rather than
+        # letting SI auto-detect the series. A future writer that
+        # places more than one ``ElectricalSeries`` in the analysis
+        # NWB (e.g., LFP next to raw) would silently pick the wrong
+        # source under auto-detect. The path is part of the v2 row's
+        # contract per shared-contracts.md "Recording Cache Format".
+        rec = se.read_nwb_recording(
+            abs_path,
+            electrical_series_path=row["electrical_series_path"],
+            load_time_vector=True,
+        )
         # Matches v1's annotation at ``v1/curation.py:178``. The
         # cached preprocessed artifact is bandpass-filtered + common-
         # referenced; without this annotation a downstream SI
@@ -1135,6 +1174,22 @@ class Recording(SpyglassMixin, dj.Computed):
             ref_channel_id=ref_channel_id,
             sort_group_channel_ids=channel_ids,
             validated=preproc_validated,
+        )
+        from spyglass.common.common_ephys import Electrode as _Electrode
+        from spyglass.common.common_device import Probe as _Probe
+
+        probe_rows = (
+            _Electrode * _Probe
+            & {"nwb_file_name": nwb_file_name}
+            & [{"electrode_id": int(c)} for c in channel_ids]
+        ).fetch("probe_type", "electrode_group_name", as_dict=True)
+        recording = self._maybe_apply_tetrode_geometry(
+            recording=recording,
+            probe_types=tuple(r["probe_type"] for r in probe_rows),
+            electrode_group_names=tuple(
+                r["electrode_group_name"] for r in probe_rows
+            ),
+            sort_group_channel_ids=channel_ids,
         )
         _, _, rebuilt_hash = self._write_nwb_artifact(
             recording=recording,
@@ -1296,11 +1351,69 @@ class Recording(SpyglassMixin, dj.Computed):
     ):
         """Map Spyglass electrode_ids onto SpikeInterface channel ids.
 
-        SpikeInterface 0.104's ``read_nwb_recording`` returns channel
-        ids as ``np.int64``; Spyglass stores ``electrode_id`` as ``int``.
-        The 1-1 map is direct.
+        SpikeInterface 0.104's ``read_nwb_recording`` uses the raw NWB
+        electrodes table's ``channel_name`` string column as the
+        channel id if present; otherwise integer ``electrode_id`` is
+        the channel id (the 1-1 fallback). Matches v1's lookup at
+        ``v1/recording.py:683-712`` so production NWBs that carry a
+        ``channel_name`` column resolve correctly. The Frank-lab
+        MEArec fixture lacks the column and falls through to the
+        integer path.
         """
-        return [int(c) for c in spyglass_ids]
+        import pynwb
+
+        nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name)
+        with pynwb.NWBHDF5IO(nwb_file_abs_path, mode="r") as io:
+            nwbfile = io.read()
+            electrodes_table = nwbfile.electrodes
+            if "channel_name" not in electrodes_table.colnames:
+                return [int(c) for c in spyglass_ids]
+            channel_names = electrodes_table["channel_name"]
+            return [channel_names[int(c)] for c in spyglass_ids]
+
+    @staticmethod
+    def _maybe_apply_tetrode_geometry(
+        recording,
+        probe_types: tuple,
+        electrode_group_names: tuple,
+        sort_group_channel_ids: list,
+    ):
+        """Attach the ``tetrode_12.5`` probe geometry when the sort group fits.
+
+        Matches v1's patch at ``v1/recording.py:630-643``: sort groups
+        of exactly 4 channels on a single ``tetrode_12.5`` probe and
+        a single electrode group get an explicit
+        ``(0,0)-(0,12.5)-(12.5,0)-(12.5,12.5)`` µm probe with 6.25 µm
+        contact radius. Covers legacy Frank-lab NWBs where contact
+        positions were never written into the electrode table.
+        Geometry-aware sorters (Kilosort, MountainSort5) on those
+        recordings depend on this patch; clusterless_thresholder and
+        MS4 are unaffected.
+        """
+        unique_probes = set(probe_types)
+        unique_groups = set(electrode_group_names)
+        if (
+            len(unique_probes) == 1
+            and next(iter(unique_probes)) == "tetrode_12.5"
+            and len(sort_group_channel_ids) == 4
+            and len(unique_groups) == 1
+        ):
+            import numpy as _np
+            import probeinterface as pi
+
+            tetrode = pi.Probe(ndim=2)
+            position = [[0, 0], [0, 12.5], [12.5, 0], [12.5, 12.5]]
+            tetrode.set_contacts(
+                position,
+                shapes="circle",
+                shape_params={"radius": 6.25},
+            )
+            tetrode.set_contact_ids(
+                [str(c) for c in sort_group_channel_ids]
+            )
+            tetrode.set_device_channel_indices(_np.arange(4))
+            recording = recording.set_probe(tetrode, in_place=True)
+        return recording
 
     @staticmethod
     def _apply_pre_motion_preprocessing(

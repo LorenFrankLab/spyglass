@@ -120,6 +120,7 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
     def _get_restricted_merge_ids_v2(
         self,
         key: dict,
+        restrict_by_artifact: bool = True,
         as_dict: bool = False,
     ) -> Union[None, list, dict]:
         """Resolve v2-source merge ids for a restriction key.
@@ -133,6 +134,16 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         ``curation_id`` must all resolve through the v2 Selection
         tables and source parts to ``SpikeSortingOutput.CurationV2``.
         Concat-source restrictions are not yet supported.
+
+        Unknown restriction keys raise ``ValueError`` rather than
+        silently dropping through; v1 used to drop bad keys quietly,
+        which made typos return wrong-but-non-empty results.
+
+        ``restrict_by_artifact=True`` honors the v2 IntervalList
+        convention where the artifact-removed valid_times row is
+        named ``f"artifact_{artifact_id}"``. Callers can supply
+        either the bare artifact id or the artifact-named
+        IntervalList; both resolve.
         """
         if CurationV2 is None:
             _raise_v2_unavailable(
@@ -146,9 +157,6 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             SortingSelection,
         )
 
-        # Resolve as far as v2.Recording-side from upstream FKs first.
-        # We compose the join down the pipeline so each new
-        # restriction-bearing key field narrows the relation.
         rec_keys = [
             "nwb_file_name",
             "team_name",
@@ -157,28 +165,46 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             "preproc_params_name",
             "recording_id",
         ]
-        rec_restriction = {k: key[k] for k in rec_keys if k in key}
-        rec_table = RecordingSelection & rec_restriction
-
-        # Build the SortingSelection-side relation; ``artifact_id`` is
-        # a master-side column, so we apply it together with the other
-        # sort_keys on the master after the part join (filtering on the
-        # RecordingSource part would silently no-op because DataJoint
-        # drops attributes not in the relation's heading).
-        sort_rec_source = (
-            SortingSelection.RecordingSource * rec_table.proj()
-        )
-        sort_master = SortingSelection * sort_rec_source.proj()
         sort_keys = [
             "sorter",
             "sorter_params_name",
             "sorting_id",
             "artifact_id",
         ]
+        curation_keys = ["curation_id"]
+        allowed = set(rec_keys) | set(sort_keys) | set(curation_keys)
+        unknown = set(key) - allowed
+        if unknown:
+            raise ValueError(
+                "SpikeSortingOutput._get_restricted_merge_ids_v2: "
+                f"unknown restriction keys {sorted(unknown)}. Allowed: "
+                f"{sorted(allowed)}."
+            )
+
+        key = key.copy()
+        # ``restrict_by_artifact`` maps the artifact-named IntervalList
+        # convention (``f"artifact_{artifact_id}"``) back to the
+        # ``artifact_id`` master-side column so the v2 join chain
+        # downstream resolves correctly.
+        if restrict_by_artifact and "interval_list_name" in key:
+            interval_list_name = key["interval_list_name"]
+            if (
+                isinstance(interval_list_name, str)
+                and interval_list_name.startswith("artifact_")
+            ):
+                key["artifact_id"] = interval_list_name[len("artifact_"):]
+                key.pop("interval_list_name", None)
+
+        rec_restriction = {k: key[k] for k in rec_keys if k in key}
+        rec_table = RecordingSelection & rec_restriction
+
+        sort_rec_source = (
+            SortingSelection.RecordingSource * rec_table.proj()
+        )
+        sort_master = SortingSelection * sort_rec_source.proj()
         sort_restriction = {k: key[k] for k in sort_keys if k in key}
         sort_master = sort_master & sort_restriction
 
-        curation_keys = ["curation_id"]
         curation_restriction = {
             k: key[k] for k in curation_keys if k in key
         }
@@ -186,7 +212,6 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             CurationV2 * sort_master.proj("sorting_id")
         ) & curation_restriction
 
-        # Join the merge part to find the corresponding merge_ids.
         joined = SpikeSortingOutput.CurationV2 * curation_table.proj()
         return joined.fetch("merge_id", as_dict=as_dict)
 
@@ -241,7 +266,7 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
     def get_restricted_merge_ids(
         self,
         key: dict,
-        sources: list = ["v0", "v1"],
+        sources: list = ["v0", "v1", "v2"],
         restrict_by_artifact: bool = True,
         as_dict: bool = False,
     ) -> Union[None, list, dict]:
@@ -301,6 +326,7 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             merge_ids.extend(
                 self._get_restricted_merge_ids_v2(
                     key.copy(),
+                    restrict_by_artifact=restrict_by_artifact,
                     as_dict=as_dict,
                 )
             )
