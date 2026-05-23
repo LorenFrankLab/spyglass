@@ -152,12 +152,43 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
             merge_key, params["waveform_extraction_params"]
         )
 
-        source_key = SpikeSortingOutput().merge_get_parent(merge_key).fetch1()
+        source_parent = SpikeSortingOutput().merge_get_parent(merge_key)
+        source_table_name = source_parent.table_name
+        source_key = source_parent.fetch1()
         # v0 pipeline
         if "sorter" in source_key and "nwb_file_name" in source_key:
             sorter = source_key["sorter"]
             nwb_file_name = source_key["nwb_file_name"]
             analysis_nwb_key = "units"
+        elif "curation_v2" in source_table_name:
+            # v2 pipeline: resolve sorter + nwb_file_name through the
+            # v2 SortingSelection.RecordingSource part + v2's
+            # RecordingSelection. v2 has no CurationV1/SpikeSortingSelection.
+            # Unit-id indexing below uses NWB ``.id`` (the true unit_id);
+            # v2 merge-applied sortings produce sparse unit_ids, so any
+            # callsite that mapped a positional index back to a unit_id
+            # would mis-index here.
+            from spyglass.spikesorting.v2.recording import (
+                RecordingSelection as _V2RecordingSelection,
+            )
+            from spyglass.spikesorting.v2.sorting import (
+                SortingSelection as _V2SortingSelection,
+            )
+
+            sorting_id = (
+                SpikeSortingOutput.CurationV2 & merge_key
+            ).fetch1("sorting_id")
+            recording_id = (
+                _V2SortingSelection.RecordingSource
+                & {"sorting_id": sorting_id}
+            ).fetch1("recording_id")
+            sorter = (
+                _V2SortingSelection & {"sorting_id": sorting_id}
+            ).fetch1("sorter")
+            nwb_file_name = (
+                _V2RecordingSelection & {"recording_id": recording_id}
+            ).fetch1("nwb_file_name")
+            analysis_nwb_key = "object_id"
         # v1 pipeline
         else:
             sorting_id = (SpikeSortingOutput.CurationV1 & merge_key).fetch1(

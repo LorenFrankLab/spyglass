@@ -70,11 +70,21 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
                 SpikeSortingOutput & {"merge_id": key["spikesorting_merge_id"]}
             ).fetch_nwb()[0]
             nwb_field_name = _get_spike_obj_name(nwb_file)
-            spikes = nwb_file[nwb_field_name]["spike_times"].to_list()
-            if key["unit_id"] > len(spikes) and not self._test_mode:
+            # Compare against the NWB's actual unit_id set (the
+            # DataFrame index), not the count. v2 merge-applied
+            # sortings produce sparse unit_ids, so the count is
+            # smaller than the max id.
+            nwb_unit_ids = {
+                int(uid) for uid in nwb_file[nwb_field_name].index
+            }
+            if (
+                int(key["unit_id"]) not in nwb_unit_ids
+                and not self._test_mode
+            ):
                 raise ValueError(
-                    f"unit_id {key['unit_id']} is greater than ",
-                    f"the number of units in {key['spikesorting_merge_id']}",
+                    f"unit_id {key['unit_id']} is not present in "
+                    f"{key['spikesorting_merge_id']} "
+                    f"(valid ids: {sorted(nwb_unit_ids)})."
                 )
             self.insert1(unit_key)
         # add annotation
@@ -117,14 +127,27 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
         unit_ids = []
         for nwb_file, merge_id in zip(nwb_file_list, merge_ids):
             nwb_field_name = _get_spike_obj_name(nwb_file)
-            sorting_spike_times = nwb_file[nwb_field_name][
-                "spike_times"
-            ].to_list()
+            # Build an explicit ``unit_id -> spike_times`` map keyed
+            # by the NWB's actual unit ids. v2 merge-applied
+            # sortings produce sparse unit_id sets; positional
+            # ``sorting_spike_times[unit_id]`` would mis-index.
+            unit_id_to_spike_times = dict(
+                zip(
+                    [
+                        int(uid)
+                        for uid in nwb_file[nwb_field_name].index
+                    ],
+                    nwb_file[nwb_field_name]["spike_times"].to_list(),
+                )
+            )
             include_unit = np.unique(
                 (self & {"spikesorting_merge_id": merge_id}).fetch("unit_id")
             )
             spikes.extend(
-                [sorting_spike_times[unit_id] for unit_id in include_unit]
+                [
+                    unit_id_to_spike_times[int(unit_id)]
+                    for unit_id in include_unit
+                ]
             )
             unit_ids.extend(
                 [

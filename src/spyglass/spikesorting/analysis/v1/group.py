@@ -201,9 +201,19 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             sorting_spike_times = nwb_file[nwb_field_name][
                 "spike_times"
             ].to_list()
+            # Use the NWB ``.id`` (the true unit_id) rather than the
+            # positional range. v2 merge-applied sortings produce
+            # sparse unit_id sets (e.g., {1, 3, 5} after collapsing
+            # {1,2}, {3,4}, {5}); positional indexing would mislabel
+            # them as {0, 1, 2}. The DataFrame returned by
+            # ``fetch_nwb`` is already indexed by the NWB id column
+            # for both v1 and v2 writers.
+            nwb_unit_ids = [
+                int(uid) for uid in nwb_file[nwb_field_name].index
+            ]
             file_unit_ids = [
                 {"spikesorting_merge_id": merge_id, "unit_id": unit_id}
-                for unit_id in range(len(sorting_spike_times))
+                for unit_id in nwb_unit_ids
             ]
 
             # filter the spike times based on the labels if present
