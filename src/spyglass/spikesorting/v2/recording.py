@@ -642,12 +642,16 @@ class Recording(SpyglassMixin, dj.Computed):
     ``make()`` loads the raw NWB, restricts to the requested sort group
     and interval, applies pre-motion preprocessing (bandpass + common
     reference -- whitening is deferred to the sorter for sorters that
-    need it), writes one ``ElectricalSeries`` into a fresh
+    need it), streams one ``ElectricalSeries`` into a fresh
     ``AnalysisNwbfile``, validates the saved timestamp range covers the
-    requested ``IntervalList.valid_times``, and records a SHA-256 hash
-    of the ``ElectricalSeries`` data bytes. ``get_recording`` exposes
-    the cached artifact and rebuilds on disk if missing, without
-    deleting the DataJoint row.
+    requested ``IntervalList.valid_times``, and records an
+    ``NwbfileHasher`` digest of the persisted file (per shared-contracts
+    Recording Cache Format; the v1 recompute machinery uses the same
+    hashing path). The populate body is split into ``make_fetch`` /
+    ``make_compute`` / ``make_insert`` so the long-running write does
+    not hold a DB transaction. ``get_recording`` exposes the cached
+    artifact and rebuilds on disk if missing, without deleting the
+    DataJoint row.
     """
 
     definition = """
@@ -662,26 +666,27 @@ class Recording(SpyglassMixin, dj.Computed):
     cache_hash: char(64)
     """
 
-    def make(self, key):
-        """Materialize the preprocessed recording and write to AnalysisNwbfile."""
-        import pathlib as _pathlib
+    # ``_parallel_make = True`` lets Spyglass's ``PopulateMixin``
+    # dispatch parallel populate via a non-daemon process pool. The
+    # tri-part ``make_fetch`` / ``make_compute`` / ``make_insert``
+    # methods below are what actually fire under
+    # ``inspect.isgeneratorfunction(self.make)`` -- the inherited
+    # generator from ``AutoPopulate.make`` is left in place so
+    # DataJoint sees a generator function and routes through tri-part.
+    _parallel_make = True
 
-        import spikeinterface.extractors as se
+    def make_fetch(self, key):
+        """Read every DB input the compute step needs (no SI / NWB I/O).
 
-        from spyglass.spikesorting.v2.exceptions import (
-            RecordingTruncatedError,
-        )
-        from spyglass.spikesorting.v2.utils import transaction_or_noop
-
+        Returns a tuple suitable for DataJoint's tri-part dispatch
+        contract: deterministic byte representations across two
+        successive fetches so the framework's DeepHash integrity
+        check inside the transaction does not raise.
+        """
         sel = (RecordingSelection & key).fetch1()
         nwb_file_name = sel["nwb_file_name"]
         sort_group_id = int(sel["sort_group_id"])
         interval_list_name = sel["interval_list_name"]
-        preproc_params_name = sel["preproc_params_name"]
-
-        raw_path = Nwbfile().get_abs_path(nwb_file_name)
-        recording = se.read_nwb_recording(raw_path, load_time_vector=True)
-        sampling_frequency = float(recording.get_sampling_frequency())
 
         channel_ids = sorted(
             (
@@ -707,37 +712,6 @@ class Recording(SpyglassMixin, dj.Computed):
                 }
             ).fetch1("sort_reference_electrode_id")
         )
-
-        recording, requested_window = self._restrict_recording(
-            recording=recording,
-            nwb_file_name=nwb_file_name,
-            interval_list_name=interval_list_name,
-            sort_group_channel_ids=channel_ids,
-            ref_channel_id=ref_channel_id,
-        )
-
-        recording = self._apply_pre_motion_preprocessing(
-            recording=recording,
-            ref_channel_id=ref_channel_id,
-            sort_group_channel_ids=channel_ids,
-            preproc_params_name=preproc_params_name,
-        )
-
-        analysis_file_name, object_id, cache_hash = self._write_nwb_artifact(
-            recording=recording,
-            nwb_file_name=nwb_file_name,
-        )
-
-        # Validate timestamp coverage of the saved artifact against the
-        # user's IntervalList request -- NOT against the intersection
-        # with raw-data-valid-times that ``_restrict_recording`` uses
-        # for frame_slice. The check fires both when the user requests
-        # times that aren't in the raw recording (#1585) and when the
-        # written ElectricalSeries silently drops samples mid-write
-        # (#1133). Tolerance is 1.5 sample intervals so the off-by-one
-        # NWB boundary (last_ts = (N-1)/fs, not N/fs) does not trip
-        # the guard.
-        saved_times = recording.get_times()
         raw_request = (
             IntervalList
             & {
@@ -745,14 +719,154 @@ class Recording(SpyglassMixin, dj.Computed):
                 "interval_list_name": interval_list_name,
             }
         ).fetch1("valid_times")
+        return (sel, channel_ids, ref_channel_id, raw_request)
+
+    def make_compute(self, key, sel, channel_ids, ref_channel_id, raw_request):
+        """Run the preprocessing + streaming write outside any DB transaction.
+
+        This is the long-running step (open raw NWB, frame-slice +
+        channel-slice, bandpass + reference, stream the
+        ElectricalSeries into a fresh ``AnalysisNwbfile``, hash the
+        persisted file). Returning happens before the framework
+        opens its commit transaction, so a 20-minute write here does
+        not hold any DB lock -- the original motivation for the
+        tri-part refactor.
+
+        Cleanup contract: ``_write_nwb_artifact`` either writes a
+        full file or raises before any registration; if a later step
+        in this method raises after the file is on disk, we unlink
+        it before propagating so a half-written artifact never
+        outlives a failed compute. ``make_insert`` is responsible
+        for cleanup on insert-time rollback (see below).
+        """
+        import pathlib as _pathlib
+
+        import spikeinterface.extractors as se
+
+        nwb_file_name = sel["nwb_file_name"]
+        interval_list_name = sel["interval_list_name"]
+        preproc_params_name = sel["preproc_params_name"]
+
+        raw_path = Nwbfile().get_abs_path(nwb_file_name)
+        recording = se.read_nwb_recording(raw_path, load_time_vector=True)
+        sampling_frequency = float(recording.get_sampling_frequency())
+
+        recording, _ = self._restrict_recording(
+            recording=recording,
+            nwb_file_name=nwb_file_name,
+            interval_list_name=interval_list_name,
+            sort_group_channel_ids=channel_ids,
+            ref_channel_id=ref_channel_id,
+        )
+        recording = self._apply_pre_motion_preprocessing(
+            recording=recording,
+            ref_channel_id=ref_channel_id,
+            sort_group_channel_ids=channel_ids,
+            preproc_params_name=preproc_params_name,
+        )
+
+        # Stage the AnalysisNwbfile via ``_write_nwb_artifact``. If
+        # any failure occurs from this point on (mid-stream write,
+        # boundary computation, etc.) the staged file must be
+        # unlinked before we propagate, otherwise a partial NWB
+        # outlives a failed compute. ``AnalysisNwbfile().create``
+        # writes a stub first, so even a mid-write failure can leave
+        # the stub on disk -- the same cleanup pattern covers it.
+        analysis_file_name = None
+        try:
+            analysis_file_name, object_id, cache_hash = self._write_nwb_artifact(
+                recording=recording, nwb_file_name=nwb_file_name
+            )
+            # ``_get_recording_timestamps`` handles multi-segment NWBs
+            # (B5); a single-segment recording delegates to
+            # ``recording.get_times()`` exactly.
+            from spyglass.spikesorting.v2.utils import _get_recording_timestamps
+
+            saved_times = _get_recording_timestamps(recording)
+            saved_start = float(saved_times[0])
+            saved_end = float(saved_times[-1])
+            n_channels = int(recording.get_num_channels())
+            duration_s = float(saved_end - saved_start)
+        except Exception:
+            # The file may be on disk; unlink before re-raising so a
+            # half-committed artifact does not survive. The
+            # registration would have happened in ``make_insert``,
+            # which DataJoint will not call once this raises.
+            if analysis_file_name is not None:
+                try:
+                    abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+                    if _pathlib.Path(abs_path).exists():
+                        _pathlib.Path(abs_path).unlink()
+                except Exception as cleanup_exc:  # pragma: no cover -- defensive
+                    logger.error(
+                        "Recording.make_compute: failed to clean up staged "
+                        f"analysis file {analysis_file_name!r}: {cleanup_exc!r}"
+                    )
+            raise
+
+        return (
+            analysis_file_name,
+            object_id,
+            cache_hash,
+            saved_start,
+            saved_end,
+            sampling_frequency,
+            n_channels,
+            duration_s,
+            sel,
+            raw_request,
+        )
+
+    def make_insert(
+        self,
+        key,
+        analysis_file_name,
+        object_id,
+        cache_hash,
+        saved_start,
+        saved_end,
+        sampling_frequency,
+        n_channels,
+        duration_s,
+        sel,
+        raw_request,
+    ):
+        """Truncation check + atomic registration inside the framework transaction.
+
+        DataJoint's tri-part dispatch already opens the master
+        transaction around this method, so the inner
+        ``transaction_or_noop`` block becomes a no-op (it yields
+        without re-opening when a transaction is active). The wrap
+        is kept defensively per the Phase 1b invariants: if
+        ``make_insert`` is ever called outside ``populate()``, the
+        ``AnalysisNwbfile`` registration and the ``self.insert1``
+        still commit atomically.
+
+        The truncation check fires both when the user requests
+        timestamps outside the raw recording (#1585) and when the
+        written ElectricalSeries silently drops samples mid-write
+        (#1133). Tolerance is 1.5 sample intervals so the off-by-one
+        NWB boundary (``last_ts = (N-1)/fs``, not ``N/fs``) does not
+        trip the guard.
+        """
+        import pathlib as _pathlib
+
+        from spyglass.spikesorting.v2.exceptions import (
+            RecordingTruncatedError,
+        )
+        from spyglass.spikesorting.v2.utils import transaction_or_noop
+
+        nwb_file_name = sel["nwb_file_name"]
+        interval_list_name = sel["interval_list_name"]
+
         requested_start = float(raw_request[0][0])
         requested_end = float(raw_request[-1][-1])
         tolerance = 1.5 / sampling_frequency
-        missing_start = requested_start - saved_times[0]
-        missing_end = requested_end - saved_times[-1]
+        missing_start = requested_start - saved_start
+        missing_end = requested_end - saved_end
         if missing_start > tolerance or missing_end > tolerance:
             # File written but never registered: clean it up before
-            # raising so the AnalysisNwbfile cleanup tooling doesn't
+            # raising so the AnalysisNwbfile cleanup tooling does not
             # have to chase an orphan from a request-time validation.
             try:
                 abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
@@ -760,24 +874,24 @@ class Recording(SpyglassMixin, dj.Computed):
                     _pathlib.Path(abs_path).unlink()
             except Exception as cleanup_exc:  # pragma: no cover -- defensive
                 logger.error(
-                    "Recording.make: failed to clean up unregistered "
+                    "Recording.make_insert: failed to clean up unregistered "
                     f"analysis file {analysis_file_name!r}: {cleanup_exc!r}"
                 )
             raise RecordingTruncatedError(
                 "Recording.make wrote a shorter recording than requested. "
                 f"Requested IntervalList valid_times for {interval_list_name!r} "
                 f"in {nwb_file_name!r}: ({requested_start}, "
-                f"{requested_end}). Saved range: ({saved_times[0]}, "
-                f"{saved_times[-1]}). Missing seconds: start="
+                f"{requested_end}). Saved range: ({saved_start}, "
+                f"{saved_end}). Missing seconds: start="
                 f"{missing_start:.6f}, end={missing_end:.6f}. Check the "
                 "raw NWB for dropped packets or interval misalignment."
             )
 
-        # Register the analysis file row and the Recording row
-        # atomically: if the Recording insert fails, the AnalysisNwbfile
-        # row rolls back too. The file on disk is the only side effect
-        # left to clean up on rollback (handled in the except below).
         try:
+            # ``transaction_or_noop`` no-ops inside the framework
+            # transaction; kept as defensive scaffolding so the
+            # registration stays atomic if ``make_insert`` is ever
+            # called outside ``populate()``.
             with transaction_or_noop(self.connection):
                 AnalysisNwbfile().add(nwb_file_name, analysis_file_name)
                 self.insert1(
@@ -786,11 +900,9 @@ class Recording(SpyglassMixin, dj.Computed):
                         "analysis_file_name": analysis_file_name,
                         "electrical_series_path": _ELECTRICAL_SERIES_PATH,
                         "object_id": object_id,
-                        "n_channels": recording.get_num_channels(),
+                        "n_channels": n_channels,
                         "sampling_frequency": sampling_frequency,
-                        "duration_s": float(
-                            saved_times[-1] - saved_times[0]
-                        ),
+                        "duration_s": duration_s,
                         "cache_hash": cache_hash,
                     }
                 )
@@ -801,8 +913,8 @@ class Recording(SpyglassMixin, dj.Computed):
                     _pathlib.Path(abs_path).unlink()
             except Exception as cleanup_exc:  # pragma: no cover -- defensive
                 logger.error(
-                    "Recording.make: failed to clean up staged analysis "
-                    f"file {analysis_file_name!r}: {cleanup_exc!r}"
+                    "Recording.make_insert: failed to clean up staged "
+                    f"analysis file {analysis_file_name!r}: {cleanup_exc!r}"
                 )
             raise
 
@@ -952,11 +1064,16 @@ class Recording(SpyglassMixin, dj.Computed):
         import numpy as _np
         from spikeinterface.core.channelslice import ChannelSliceRecording
 
+        from spyglass.spikesorting.v2.utils import _get_recording_timestamps
+
         window_start, window_end = cls._get_sort_interval_window(
             nwb_file_name, interval_list_name
         )
 
-        times = recording.get_times()
+        # B5: route through ``_get_recording_timestamps`` so multi-
+        # segment NWBs concatenate correctly. The single-segment path
+        # is identical to ``recording.get_times()`` (delegation).
+        times = _get_recording_timestamps(recording)
         # Convert window seconds -> frame indices via timestamps.
         start_frame = int(_np.searchsorted(times, window_start, side="left"))
         end_frame = int(_np.searchsorted(times, window_end, side="right"))
@@ -1057,80 +1174,159 @@ class Recording(SpyglassMixin, dj.Computed):
         recording,
         nwb_file_name: str,
         existing_analysis_file_name: str | None = None,
+        timestamps_override=None,
     ) -> tuple[str, str, str]:
         """Write the preprocessed recording into an ``AnalysisNwbfile``.
 
+        Streams the ``(n_samples, n_channels)`` trace array and the
+        ``(n_samples,)`` timestamps vector into the ElectricalSeries
+        via HDMF's ``GenericDataChunkIterator`` (``buffer_gb=5``,
+        matching v1's production choice). Without streaming, a
+        30 kHz x 128 ch x 1 h recording (~110 GB float64) would have
+        to materialize in RAM before the NWB write, which OOMs on
+        any lab workstation.
+
         Returns ``(analysis_file_name, electrical_series_object_id,
-        cache_hash)`` -- the latter is the SHA-256 of the saved data
-        bytes, used for rebuild verification.
+        cache_hash)``. The ``cache_hash`` is computed **after** the
+        write via ``_hash_nwb_recording`` -- the ``NwbfileHasher``
+        digest of the file we just persisted, per shared-contracts.md
+        Recording Cache Format. The v1 recompute machinery uses the
+        same hashing path, so v2 verification does not maintain a
+        parallel implementation.
 
-        Writes the file to disk only; the caller is responsible for
-        registering the AnalysisNwbfile row (via ``AnalysisNwbfile().add``
-        or the ``AnalysisFileBuilder`` context manager) inside its
-        DataJoint transaction so the file registration and the v2 table
-        row commit atomically.
+        Writes the file to disk only; the caller registers the
+        ``AnalysisNwbfile`` row inside its DataJoint transaction so
+        the file registration and the v2 row commit atomically.
+
+        Parameters
+        ----------
+        recording : si.BaseRecording
+            The preprocessed recording to materialize.
+        nwb_file_name : str
+            Parent NWB filename (passed to ``AnalysisNwbfile().create``).
+        existing_analysis_file_name : str, optional
+            When set, write into the existing slot (the recompute /
+            rebuild path) rather than minting a new analysis file.
+        timestamps_override : numpy.ndarray, optional
+            Pre-computed timestamps (e.g. monotonicity-corrected per
+            N50). ``None`` lets the helper concatenate per-segment
+            ``recording.get_times()`` via
+            :func:`_get_recording_timestamps`.
         """
-        import hashlib
-
         import numpy as _np
         import pynwb
 
+        from spyglass.spikesorting.v2._nwb_iterators import (
+            SpikeInterfaceRecordingDataChunkIterator,
+            TimestampsDataChunkIterator,
+        )
+        from spyglass.spikesorting.v2.utils import (
+            _get_recording_timestamps,
+            _hash_nwb_recording,
+        )
+
+        import pathlib as _pathlib
+
+        # ``AnalysisNwbfile().create`` writes a stub file to disk
+        # before we open it for the streaming write. Track the
+        # filename from the first byte on disk and unlink on any
+        # failure between here and the post-write hash, so a
+        # partial / aborted write never outlives this call.
         analysis_file_name = AnalysisNwbfile().create(
             nwb_file_name=nwb_file_name,
             recompute_file_name=existing_analysis_file_name,
         )
-        analysis_abs_path = AnalysisNwbfile.get_abs_path(
-            analysis_file_name,
-            from_schema=bool(existing_analysis_file_name),
-        )
-
-        # Load the full preprocessed array. In-memory write is
-        # acceptable for fixtures up to a few minutes; longer
-        # recordings will be revisited when chunked-iterator support
-        # lands alongside the recompute pipeline. SI 0.104 renamed
-        # the ``return_scaled`` kwarg to ``return_in_uV``.
-        data = recording.get_traces(return_in_uV=False)
-        times = recording.get_times()
-
-        # The cache_hash is over the saved bytes -- compute once on the
-        # array we are about to write and cross-reference after rebuild.
-        cache_hash = hashlib.sha256(_np.ascontiguousarray(data).tobytes()).hexdigest()
-
-        # SI keeps channel gains aligned for standard Frank-lab probes;
-        # a divergence here would indicate a probe-config bug upstream.
-        # Surface it loudly rather than silently picking a single value.
-        gains = _np.unique(recording.get_channel_gains())
-        if len(gains) != 1:
-            raise ValueError(
-                "Recording.make: recording has heterogeneous channel "
-                f"gains {gains.tolist()}; v2 ElectricalSeries write "
-                "requires a single conversion factor. Verify probe "
-                "metadata for the sort group."
+        try:
+            analysis_abs_path = AnalysisNwbfile.get_abs_path(
+                analysis_file_name,
+                from_schema=bool(existing_analysis_file_name),
             )
-        conversion = float(gains[0]) * 1e-6
 
-        with pynwb.NWBHDF5IO(
-            path=analysis_abs_path, mode="a", load_namespaces=True
-        ) as io:
-            nwbfile = io.read()
-            table_region = nwbfile.create_electrode_table_region(
-                region=[int(c) for c in recording.get_channel_ids()],
-                description="Sort group electrodes",
+            # v2 raises instead of silently picking gains[0] (v1's
+            # behavior at v1/recording.py:858). The "pick first"
+            # approach is a latent correctness bug: the chosen gain
+            # becomes the universal conversion factor on the
+            # ElectricalSeries, so signals on channels with
+            # heterogeneous gains are scaled by the wrong factor.
+            # Catching the input invariant at populate time is
+            # preferred to silently producing incorrectly-scaled
+            # data (see shared-contracts.md and Phase 1b B7).
+            gains = _np.unique(recording.get_channel_gains())
+            if len(gains) != 1:
+                raise ValueError(
+                    "Recording.make: recording has heterogeneous channel "
+                    f"gains {gains.tolist()}; v2 ElectricalSeries write "
+                    "requires a single conversion factor. Verify probe "
+                    "metadata for the sort group."
+                )
+            conversion = float(gains[0]) * 1e-6
+
+            # The data iterator drives ``recording.get_traces(...)``
+            # per chunk and never materializes the whole array. The
+            # timestamps iterator wraps a 1D vector; resolve through
+            # ``_get_recording_timestamps`` so multi-segment NWBs
+            # (B5) and an N50-corrected override both flow through
+            # correctly.
+            sampling_frequency = float(recording.get_sampling_frequency())
+            timestamps = _get_recording_timestamps(
+                recording, override=timestamps_override
             )
-            series = pynwb.ecephys.ElectricalSeries(
-                name=_ELECTRICAL_SERIES_NAME,
-                data=data,
-                electrodes=table_region,
-                timestamps=_np.ascontiguousarray(times),
-                filtering="Bandpass filter + common reference",
-                description=(
-                    f"Pre-motion preprocessed recording from "
-                    f"{nwb_file_name} for spike sorting"
-                ),
-                conversion=conversion,
+            data_iterator = SpikeInterfaceRecordingDataChunkIterator(
+                recording=recording, return_in_uV=False, buffer_gb=5
             )
-            nwbfile.add_acquisition(series)
-            object_id = nwbfile.acquisition[_ELECTRICAL_SERIES_NAME].object_id
-            io.write(nwbfile)
+            timestamps_iterator = TimestampsDataChunkIterator(
+                timestamps=timestamps,
+                sampling_frequency=sampling_frequency,
+                buffer_gb=5,
+            )
+
+            with pynwb.NWBHDF5IO(
+                path=analysis_abs_path, mode="a", load_namespaces=True
+            ) as io:
+                nwbfile = io.read()
+                table_region = nwbfile.create_electrode_table_region(
+                    region=[int(c) for c in recording.get_channel_ids()],
+                    description="Sort group electrodes",
+                )
+                series = pynwb.ecephys.ElectricalSeries(
+                    name=_ELECTRICAL_SERIES_NAME,
+                    data=data_iterator,
+                    electrodes=table_region,
+                    timestamps=timestamps_iterator,
+                    filtering="Bandpass filter + common reference",
+                    description=(
+                        f"Pre-motion preprocessed recording from "
+                        f"{nwb_file_name} for spike sorting"
+                    ),
+                    conversion=conversion,
+                )
+                nwbfile.add_acquisition(series)
+                object_id = nwbfile.acquisition[
+                    _ELECTRICAL_SERIES_NAME
+                ].object_id
+                io.write(nwbfile)
+
+            # Hash the persisted file (not in-memory bytes) so the
+            # digest reflects what was actually written --
+            # timestamps, electrodes, conversion, ElectricalSeries
+            # metadata -- not just trace data. Matches
+            # shared-contracts.md Recording Cache Format and the v1
+            # recompute hashing path (R17).
+            cache_hash = _hash_nwb_recording(analysis_file_name)
+        except Exception:
+            try:
+                _abs = AnalysisNwbfile.get_abs_path(
+                    analysis_file_name,
+                    from_schema=bool(existing_analysis_file_name),
+                )
+                if _pathlib.Path(_abs).exists():
+                    _pathlib.Path(_abs).unlink()
+            except Exception as cleanup_exc:  # pragma: no cover -- defensive
+                logger.error(
+                    "Recording._write_nwb_artifact: failed to clean up "
+                    f"partial analysis file {analysis_file_name!r}: "
+                    f"{cleanup_exc!r}"
+                )
+            raise
 
         return analysis_file_name, object_id, cache_hash

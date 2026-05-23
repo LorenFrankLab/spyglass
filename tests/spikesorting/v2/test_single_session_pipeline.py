@@ -219,6 +219,50 @@ def test_recording_selection_insert_is_idempotent(polymer_smoke_session):
     assert len(RecordingSelection & selection_key) == 1
 
 
+# ---------- Tri-part dispatch active smoke gate ---------------------------
+
+
+def test_tripart_dispatch_active(dj_conn):
+    """Each refactored Computed table uses DataJoint's tri-part dispatch.
+
+    Plan-required smoke gate. DataJoint's ``AutoPopulate.populate`` only
+    fires the ``make_fetch`` / ``make_compute`` / ``make_insert``
+    sequence when ``inspect.isgeneratorfunction(self.make) is True``
+    -- i.e. the inherited generator-based ``make`` from
+    ``AutoPopulate`` is in use. If a subclass overrides ``make`` with
+    a regular function, DataJoint falls back to monolithic and the
+    tri-part methods become dead code; the long-transaction
+    regression silently persists. This test catches that failure
+    mode in milliseconds.
+
+    Recording's tri-part landed in Phase 1b Batch 2;
+    ArtifactDetection and Sorting are added in later batches. The
+    parametrize list grows as those refactors land so a future
+    "consolidate back into ``make``" change fails loudly.
+    """
+    import inspect
+
+    from spyglass.spikesorting.v2.recording import Recording
+
+    for cls in (Recording,):
+        assert inspect.isgeneratorfunction(cls.make), (
+            f"{cls.__name__}.make must remain the inherited generator "
+            "from AutoPopulate so tri-part dispatch fires; a regular-"
+            "function override would silently re-enable the monolithic "
+            "long-transaction path."
+        )
+        for attr in ("make_fetch", "make_compute", "make_insert"):
+            assert getattr(cls, attr, None) is not None, (
+                f"{cls.__name__}.{attr} missing; tri-part dispatch "
+                "needs all three methods defined."
+            )
+        assert getattr(cls, "_parallel_make", False) is True, (
+            f"{cls.__name__}._parallel_make is not True; the "
+            "non-daemon process-pool path is the secondary benefit "
+            "of the tri-part refactor and should be enabled."
+        )
+
+
 # ---------- Recording.make + get_recording --------------------------------
 
 
@@ -320,7 +364,12 @@ def test_recording_populates_and_round_trips(
         f"Recording.duration_s = {row['duration_s']}; expected "
         f"~{expected_duration} from IntervalList valid_times span."
     )
-    assert len(row["cache_hash"]) == 64  # sha256 hex
+    # ``cache_hash`` is now an ``NwbfileHasher`` digest (R17). The
+    # exact digest length (currently 32-char MD5 hex) is not pinned
+    # by the plan; the ``char(64)`` schema column is headroom for a
+    # future hash change. Assert non-empty rather than a fixed
+    # length so a hash-algorithm swap does not break this test.
+    assert isinstance(row["cache_hash"], str) and row["cache_hash"]
 
     rec = Recording().get_recording(recording_selection_key)
     assert rec.get_num_channels() == expected_n_channels

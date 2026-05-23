@@ -313,6 +313,75 @@ def _ensure_lookup_row_exists(
         )
 
 
+def _get_recording_timestamps(
+    recording,
+    override=None,
+):
+    """Return the absolute-time vector for a SpikeInterface recording.
+
+    Two responsibilities:
+
+    1. **Multi-segment NWB support.** SpikeInterface's
+       ``recording.get_times()`` only returns the active-segment
+       times; a multi-segment NWB (epoch-stitched recordings) would
+       silently report just segment 0. This helper concatenates the
+       per-segment timestamps into one ``(total_frames,)`` array so
+       downstream code sees the whole-session timeline.
+
+    2. **Caller-supplied corrected vector.** The non-monotonic
+       timestamp repair (Spyglass v1 in-flight on
+       ``copilot/fix-populating-artifact-detection``; ported here as
+       a defensive measure) computes a corrected timestamps array
+       once at the top of ``Recording.make`` and threads it through
+       to subsequent helpers. ``override`` is that hook: when not
+       ``None``, return it verbatim. ``Recording.make`` passes the
+       repaired array; helpers called outside the make path (e.g.
+       ``get_recording``) leave ``override=None`` and get the
+       segment-aware ``get_times()`` concatenation.
+
+    Mirrors v1's helper at
+    ``src/spyglass/spikesorting/utils.py:260-279`` with the
+    additional ``override`` plumbing.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        Source recording whose timestamps are needed.
+    override : numpy.ndarray, optional
+        Pre-computed timestamps (already monotonicity-corrected, if
+        applicable) to return verbatim. The plan's N50 task uses
+        this to propagate the corrected array; B5 introduces the
+        kwarg so the plumbing is in place before N50's body lands.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``(total_frames,)`` float array of wall-clock seconds.
+    """
+    import numpy as _np
+
+    if override is not None:
+        return _np.asarray(override)
+
+    num_segments = recording.get_num_segments()
+    if num_segments <= 1:
+        return recording.get_times()
+
+    frames_per_segment = [0] + [
+        recording.get_num_frames(segment_index=i)
+        for i in range(num_segments)
+    ]
+    cumsum_frames = _np.cumsum(frames_per_segment)
+    total_frames = int(cumsum_frames[-1])
+
+    timestamps = _np.zeros((total_frames,), dtype=_np.float64)
+    for i in range(num_segments):
+        start_index = int(cumsum_frames[i])
+        end_index = int(cumsum_frames[i + 1])
+        timestamps[start_index:end_index] = recording.get_times(segment_index=i)
+    return timestamps
+
+
 def _hash_nwb_recording(analysis_file_name: str) -> str:
     """Return a content hash of a recording's AnalysisNwbfile.
 
