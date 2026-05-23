@@ -501,6 +501,41 @@ def _consolidate_intervals(intervals, timestamps):
     return _np.asarray(consolidated, dtype=_np.int64)
 
 
+def get_spiking_sorting_v2_merge_ids(
+    restriction: dict, as_dict: bool = False
+) -> list:
+    """Return merge ids for a v2 spike-sorting restriction.
+
+    Notebook-discoverable parallel of v1's
+    ``get_spiking_sorting_v1_merge_ids``
+    (``src/spyglass/spikesorting/v1/utils.py:37-109``); thin wrapper
+    over ``SpikeSortingOutput()._get_restricted_merge_ids_v2`` so
+    users can do ``get_spiking_sorting_v2_merge_ids(restriction)``
+    without poking at the private merge-table method directly.
+
+    ``as_dict`` is an enhancement over v1's surface (v1 always
+    returned a plain list of UUIDs); the default ``False`` matches
+    v1's behavior so a v1 caller copied verbatim works unchanged.
+
+    Parameters
+    ----------
+    restriction : dict
+        Restriction on any v2 column (``nwb_file_name``,
+        ``sort_group_id``, ``interval_list_name``,
+        ``preproc_params_name``, ``recording_id``, ``artifact_id``,
+        ``sorter``, ``sorter_params_name``, ``sorting_id``,
+        ``curation_id``). Unknown keys raise ``ValueError``.
+    as_dict : bool, optional
+        Return list of ``{"merge_id": uuid}`` dicts when True;
+        a list of UUIDs when False (default).
+    """
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+
+    return SpikeSortingOutput()._get_restricted_merge_ids_v2(
+        restriction, as_dict=as_dict
+    )
+
+
 def _hash_nwb_recording(analysis_file_name: str) -> str:
     """Return a content hash of a recording's AnalysisNwbfile.
 

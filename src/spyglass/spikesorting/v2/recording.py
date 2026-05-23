@@ -514,7 +514,17 @@ class PreprocessingParameters(SpyglassMixin, dj.Lookup):
     _DEFAULT_CONTENTS: tuple = (
         (
             "default_franklab",
-            PreprocessingParamsSchema().model_dump(),
+            # ``whiten=None`` mirrors the other two presets and the
+            # deferred-to-sorter reality: whitening happens
+            # externally inside ``Sorting._run_sorter`` (the float64
+            # path), not at the preprocessing stage. The
+            # ``WhitenParams`` schema is forward-compat scaffolding
+            # for motion correction; flipping the default to None
+            # here removes the schema/runtime mismatch where the
+            # saved blob said "whiten on" but no whitening happened.
+            PreprocessingParamsSchema.model_validate(
+                {"whiten": None}
+            ).model_dump(),
             2,
             None,
         ),
@@ -865,8 +875,8 @@ class Recording(SpyglassMixin, dj.Computed):
         # compute stage to call ``_resolved_job_kwargs(...)`` so the
         # override channels (DataJoint config + per-row blob) are
         # testable. The Recording streaming write path uses HDMF's
-        # chunked iterator and does not consume SI-style job_kwargs in
-        # Phase 1, so the resolved dict is informational. The resolver
+        # chunked iterator and does not consume SI-style job_kwargs
+        # yet, so the resolved dict is informational. The resolver
         # still runs so a monkey-patched ``_resolved_job_kwargs`` in
         # tests confirms this stage's resolution path is wired.
         from spyglass.spikesorting.v2.utils import _resolved_job_kwargs

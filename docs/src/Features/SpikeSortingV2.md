@@ -213,3 +213,16 @@ the same tables with:
 
 The Phase 3 tables are declared (final-shape) in Phase 1 with gated `make()`
 bodies, so there are no schema migrations between phases.
+
+## Rerunning fixtures + tests against an existing v2 database
+
+`SortGroupV2.set_group_by_shank` does not honor v1's `test_mode=True`
+short-circuit -- v1 would silently no-op if existing sort-group rows for the
+session were already present, which masked re-run idempotency bugs. v2
+treats every call as authoritative: if rows already exist and you want them
+replaced, pass `delete_existing_entries=True, confirm=True` (the existing
+v2 kwargs). If you only want to add rows for previously-unseen sort groups,
+supply explicit `sort_group_ids=` so v2 knows which to insert.
+
+Test fixtures that previously relied on the v1 short-circuit must opt into
+the explicit flow above -- there is no v2 equivalent of `test_mode`.

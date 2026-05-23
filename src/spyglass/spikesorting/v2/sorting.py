@@ -668,7 +668,7 @@ class Sorting(SpyglassMixin, dj.Computed):
 
     # ---- Accessors -------------------------------------------------------
 
-    def get_sorting(self, key):
+    def get_sorting(self, key, as_dataframe: bool = False):
         """Return the SpikeInterface BaseSorting backed by the units NWB.
 
         The v2 Units NWB does NOT carry an ``ElectricalSeries`` (the
@@ -685,6 +685,15 @@ class Sorting(SpyglassMixin, dj.Computed):
         sample_index]) so ``sorting.get_unit_spike_train(uid)`` returns
         the original sample indices and ``return_times=True`` returns
         the recording-timeline times.
+
+        ``as_dataframe=True`` returns a pandas DataFrame with
+        ``unit_id`` + ``spike_times`` (in seconds) columns -- a
+        pre-curation peek convenience mirroring v1's
+        ``(SpikeSorting & key).fetch_nwb()`` notebook pattern. The
+        ``CurationV2.get_sorting`` accessor uses the same
+        ``as_dataframe`` flag with the same core columns and adds
+        a ``curation_label`` column joined from
+        ``CurationV2.UnitLabel``.
         """
         from spikeinterface.extractors import NwbSortingExtractor
 
@@ -697,8 +706,31 @@ class Sorting(SpyglassMixin, dj.Computed):
         rec_row = (Recording & {"recording_id": recording_id}).fetch1()
         fs = float(rec_row["sampling_frequency"])
         t_start = self._recording_t_start(rec_row)
-        return NwbSortingExtractor(
+        si_sorting = NwbSortingExtractor(
             file_path=abs_path, sampling_frequency=fs, t_start=t_start
+        )
+        if not as_dataframe:
+            return si_sorting
+
+        import pandas as pd
+
+        # v2's units NWB writer stores unit_ids as integers via
+        # ``add_unit(id=int(kept_uid), ...)`` -- the cast back to int
+        # here matches that contract. If SI ever returns string IDs
+        # (e.g., an externally-ingested NWB with string-typed unit
+        # IDs), this cast would raise; pre-curation NWBs written by
+        # v2 itself always pass.
+        unit_ids = [int(uid) for uid in si_sorting.unit_ids]
+        return pd.DataFrame(
+            {
+                "unit_id": unit_ids,
+                "spike_times": [
+                    si_sorting.get_unit_spike_train(
+                        unit_id=uid, return_times=True
+                    )
+                    for uid in si_sorting.unit_ids
+                ],
+            }
         )
 
     @staticmethod

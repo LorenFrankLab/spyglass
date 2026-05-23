@@ -45,10 +45,10 @@ class CommonReferenceParams(BaseModel):
 class WhitenParams(BaseModel):
     """Whitening options applied after motion correction.
 
-    ``whiten`` is dead in Phase 1 (whitening is deferred to the sorter
-    via ``Sorting._run_sorter``'s external float64 whitening path);
-    the field exists as forward-compat scaffolding for Phase 3's
-    ``ConcatenatedRecording.make`` motion-correction +
+    ``whiten`` is currently inert (whitening is deferred to the
+    sorter via ``Sorting._run_sorter``'s external float64 whitening
+    path); the field exists as forward-compat scaffolding for the
+    eventual ``ConcatenatedRecording.make`` motion-correction +
     post-motion-whitening flow. See
     ``PreprocessingParamsSchema.to_post_motion_dict``.
     """

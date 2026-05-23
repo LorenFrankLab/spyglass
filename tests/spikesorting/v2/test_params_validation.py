@@ -274,7 +274,6 @@ def test_generic_schema_accepts_arbitrary_kwargs():
     [
         (MountainSort4Schema, "detect_signe"),
         (MountainSort5Schema, "snippet_T_1"),
-        (Kilosort4Schema, "Th_universal_typo"),
         (ClusterlessThresholderSchema, "detect_threshhold"),
     ],
 )
@@ -283,12 +282,30 @@ def test_dedicated_sorter_schemas_reject_typos(schema_cls, typo_field):
 
     This is the value-add over the generic ``extra='allow'`` fallback:
     typos like ``detect_signe`` (extra 'e') silently pass on the generic
-    schema but raise on MS4/MS5/KS4/Clusterless. SC2 and TDC2 stay
-    ``extra='allow'`` because their fields are not curated, so their
-    typos still pass here -- documented in the module docstring.
+    schema but raise on MS4/MS5/Clusterless. SC2, TDC2 and Kilosort4
+    use ``extra='allow'`` (KS4 by N34 design, to mirror v1's escape
+    hatch at ``v1/sorting.py:184-189`` that lets users pass any
+    SI-recognized kwarg through without an upstream schema PR), so
+    their typos still pass here -- documented in the module docstring.
     """
     with pytest.raises(ValidationError):
         schema_cls.model_validate({typo_field: 1})
+
+
+def test_kilosort4_schema_accepts_extra_kwargs():
+    """KS4 schema accepts undocumented SI kwargs (N34).
+
+    Mirrors v1's escape hatch: a user wanting to set ``batch_size``
+    or ``nearest_chans`` on KS4 should not need a Spyglass PR to
+    add the field to the schema. ``extra='allow'`` lets the field
+    pass through to SI's KS4 runtime, which validates at sort time.
+    """
+    blob = Kilosort4Schema.model_validate(
+        {"Th_universal": 9.0, "batch_size": 60000, "nearest_chans": 10}
+    ).model_dump()
+    assert blob["Th_universal"] == 9.0
+    assert blob["batch_size"] == 60000
+    assert blob["nearest_chans"] == 10
 
 
 @pytest.mark.parametrize(

@@ -160,8 +160,8 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
     def insert_group(cls, name: str, members: list[dict]) -> None:
         """Insert master + Member rows; validate session consistency.
 
-        Currently gated: Phase 1 does not implement the matching
-        ``ArtifactDetection`` make-body branch for the
+        Currently gated: ``ArtifactDetection.make`` does not yet
+        implement the matching make-body branch for the
         ``SharedArtifactGroupSource`` part, so inserting a group here
         would create rows that cannot populate downstream. The schema
         is declared (final-shape) so v2 won't need a migration when
@@ -183,10 +183,10 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
         Raises
         ------
         NotImplementedError
-            Always (Phase 1 gate). The validation logic below is
+            Always, until ``ArtifactDetection.make`` ships the
+            shared-group branch. The validation logic below is
             preserved (under ``# pragma: no cover``) so it can be
-            re-enabled when ``ArtifactDetection.make`` ships the
-            shared-group branch.
+            re-enabled then.
         ValueError
             If ``members`` is empty, if any member ``recording_id`` is
             not a populated ``Recording``, or if members span more than
@@ -199,7 +199,7 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
             "ArtifactDetection.make ships the shared-group branch. "
             "Use the single-recording artifact path "
             "(ArtifactSelection.insert_selection with recording_id) "
-            "for Phase 1."
+            "until then."
         )
 
         from spyglass.spikesorting.v2.recording import (  # pragma: no cover

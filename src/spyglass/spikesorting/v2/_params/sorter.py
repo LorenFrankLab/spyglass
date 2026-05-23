@@ -86,14 +86,17 @@ class Kilosort4Schema(BaseModel):
 
     Documents the v2-relevant kwargs from ``appendix.md § Kilosort 4
     install + params``. KS4 has a large parameter surface; this schema
-    types the most-used knobs and uses ``extra="forbid"`` so a typo
-    fails fast. Users who need an undocumented KS4 kwarg should extend
-    this schema rather than silently accept the new field. KS4 is not
-    a deterministic fallback (CPU/GPU runtime differences can change
-    spike times) and may require GPU for non-trivial recordings.
+    types the most-used knobs but uses ``extra="allow"`` so users who
+    need an undocumented KS4 kwarg (``batch_size``, ``nearest_chans``,
+    etc.) can pass it through to SI without an upstream schema PR.
+    Matches v1's escape hatch at ``v1/sorting.py:184-189`` which
+    expanded sorter contents via ``sis.get_default_sorter_params``.
+    KS4 is not a deterministic fallback (CPU/GPU runtime differences
+    can change spike times) and may require GPU for non-trivial
+    recordings.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
     schema_version: int = 1
     Th_universal: float = Field(default=9.0, gt=0.0)
     Th_learned: float = Field(default=8.0, gt=0.0)
