@@ -117,6 +117,55 @@ def test_kilosort4_schema_accepts_extra_kwargs_v1_parity():
     assert blob["nearest_chans"] == 10
 
 
+def test_ms4_default_row_only_shipped_when_ms4_installed():
+    """Phase 0c MS4 runtime guard.
+
+    The Phase 0c plan (``phase-0c-si-0104-prerequisite.md:124``)
+    requires MS4 runtime status to be EXPLICIT: either MS4 is in
+    ``sis.installed_sorters()`` (and the default Lookup row is safe
+    to ship), or the missing-MS4 case must be documented with a
+    platform-specific guard. v2 ships an MS4 default row at
+    ``SorterParameters._DEFAULT_CONTENTS`` but the resolver
+    artifact at ``tests/spikesorting/v2/resolver/si0104-runtime.md``
+    shows MS4 is NOT in the installed-sorter set in the v2 test
+    image. This test pins the contract: if MS4 is not installed,
+    a v2 user attempting to ``Sorting.populate`` with the MS4
+    default row will hit ``sis.run_sorter`` with an unregistered
+    sorter and get an unhelpful SI error. The right behavior is to
+    SKIP the MS4 row at ``insert_default`` time when MS4 isn't
+    importable, OR to emit a clear deprecation warning. This test
+    skips cleanly when MS4 IS installed (so it doesn't block the
+    happy path) and FAILS with a clear message when MS4 is missing
+    but the default row is still in the contents tuple -- forcing
+    the install-guard issue to a head.
+    """
+    import spikeinterface.sorters as sis
+
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    ms4_installed = "mountainsort4" in sis.installed_sorters()
+    ms4_default_rows = [
+        row
+        for row in SorterParameters._DEFAULT_CONTENTS
+        if row[0] == "mountainsort4"
+    ]
+    if ms4_installed:
+        return  # happy path: MS4 row + MS4 runtime both present
+
+    assert not ms4_default_rows, (
+        "SorterParameters._DEFAULT_CONTENTS ships MS4 default rows "
+        f"({[r[1] for r in ms4_default_rows]!r}) but MS4 is not in "
+        "sis.installed_sorters() on this platform. A v2 user "
+        "calling SorterParameters.insert_default() then "
+        "Sorting.populate(... sorter='mountainsort4' ...) will hit "
+        "an unhelpful SI 'sorter not registered' error. The Phase "
+        "0c plan requires MS4 runtime status to be explicit: "
+        "either install MS4 (Linux only, separate dep) OR gate the "
+        "default row insert behind ``if 'mountainsort4' in "
+        "sis.installed_sorters()``."
+    )
+
+
 def test_clusterless_schema_documents_dead_fields_or_drops_them():
     """N48: dead ``outputs`` / ``random_chunk_kwargs`` fields are gone."""
     fields = ClusterlessThresholderSchema.model_fields
@@ -165,12 +214,23 @@ def test_no_phase_label_leakage_in_runtime_code():
     intentionally allowed to keep historical phase-naming since
     they reference an immutable baseline.
     """
+    # parents[3] = repo root (parents[2] is ``tests/``, NOT
+    # ``tests/src/``). The earlier ``parents[2]`` form resolved
+    # to a nonexistent ``tests/src/...`` path so ``rglob`` walked
+    # zero files and the test silently passed regardless of any
+    # leakage in real source. Verify the resolved root exists
+    # before scanning to keep this kind of typo loud.
     v2_src = (
-        Path(__file__).resolve().parents[2]
+        Path(__file__).resolve().parents[3]
         / "src"
         / "spyglass"
         / "spikesorting"
         / "v2"
+    )
+    assert v2_src.is_dir(), (
+        f"v1-parity phase-label scan resolved to {v2_src!r}, which "
+        "is not a directory; the test would scan zero files and "
+        "produce a vacuous pass. Check the parents[N] index."
     )
     offenders: list[str] = []
     for py_path in v2_src.rglob("*.py"):

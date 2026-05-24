@@ -99,6 +99,7 @@ optional-dependencies.moseq-gpu = [
   "keypoint-moseq",
 ]
 optional-dependencies.spikesorting-v2 = [
+  "mountainsort4",      # v1 production sorter; pulls ml_ms4alg + isosplit5
   "mountainsort5>=0.5", # default v2 sorter; pulls isosplit6 + scikit-learn
 ]
 optional-dependencies.spikesorting-v2-matching = [

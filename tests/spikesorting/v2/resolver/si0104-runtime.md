@@ -53,5 +53,5 @@ Live ingestion evidence: `pytest tests/spikesorting/v2/` is 35/35 green and exer
 ## Sorter availability (Linux x86_64)
 
 - `mountainsort5` installs via the project dependency and registers in `installed_sorters()`. **MS5 is not deterministic**; resolver/runtime checks prove availability only, not repeatable spike-time output.
-- `mountainsort4` is **not** in the `[test]` extra and not auto-resolved. Its installation needs a separate Linux runtime package; recorded here as a documentation item, not added to the default deps in this phase.
-- Sorters actually in `installed_sorters()` after this install: ['lupin', 'mountainsort5', 'simple', 'spykingcircus2', 'tridesclous2']
+- `mountainsort4` is now in the `[spikesorting-v2]` extra (Phase 1d code-review followup). The PyPI package `mountainsort4` pulls `ml_ms4alg` + `isosplit5` + `pybind11` + `spikeextractors` -- the Linux-only legacy runtime. **MS4 is not deterministic either**; same caveat as MS5. Adding it to the v2 extra surfaces it for the v1-parity default Lookup rows (`franklab_tetrode_hippocampus_30kHz_ms4`, `franklab_probe_ctx_30kHz_ms4`) so a v2 user installing `pip install "spyglass-neuro[spikesorting-v2]"` gets a complete sorter set.
+- Sorters actually in `installed_sorters()` after this install: `['lupin', 'mountainsort4', 'mountainsort5', 'simple', 'spykingcircus2', 'tridesclous2']`.
