@@ -179,8 +179,7 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
     def insert_group(cls, name: str, members: list[dict]) -> None:
         """Insert master + Member rows; validate session consistency.
 
-        Phase 1 plan-line 67 + Phase 1e (audit-driven activation):
-        a ``SharedArtifactGroup`` is a named bundle of populated
+        A ``SharedArtifactGroup`` is a named bundle of populated
         ``Recording`` rows whose artifact-detection pass should run
         ONCE over the union of channels. The matching
         ``ArtifactDetection.make_compute`` branch unions the channels
@@ -713,18 +712,19 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         # (older test stubs) fall back to the single
         # ``nwb_file_name``.
         targets = per_member_nwb_files or (nwb_file_name,)
+        interval_rows = [
+            {
+                "nwb_file_name": member_nwb,
+                "interval_list_name": interval_list_name,
+                "valid_times": valid_times,
+                "pipeline": "spikesorting_artifact_v2",
+            }
+            for member_nwb in targets
+        ]
         # no-op when framework transaction is active; kept defensively
         # so an out-of-populate caller still gets atomic registration.
         with transaction_or_noop(self.connection):
-            for member_nwb in targets:
-                IntervalList.insert1(
-                    {
-                        "nwb_file_name": member_nwb,
-                        "interval_list_name": interval_list_name,
-                        "valid_times": valid_times,
-                        "pipeline": "spikesorting_artifact_v2",
-                    }
-                )
+            IntervalList.insert(interval_rows)
             self.insert1(key)
 
     @staticmethod

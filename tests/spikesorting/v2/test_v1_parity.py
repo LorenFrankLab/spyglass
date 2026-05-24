@@ -150,7 +150,15 @@ def test_ms4_default_row_only_shipped_when_ms4_installed():
         if row[0] == "mountainsort4"
     ]
     if ms4_installed:
-        return  # happy path: MS4 row + MS4 runtime both present
+        # Skip rather than bare-return so pytest reports
+        # SKIPPED visibly -- a bare ``return`` registers as a
+        # PASSED test with zero assertions, losing the "what was
+        # exercised" signal.
+        pytest.skip(
+            "mountainsort4 is in sis.installed_sorters(); the "
+            "default-row vs runtime guard is a non-issue on this "
+            "platform."
+        )
 
     assert not ms4_default_rows, (
         "SorterParameters._DEFAULT_CONTENTS ships MS4 default rows "

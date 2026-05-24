@@ -460,6 +460,7 @@ def _clean_session_v2(session_key):
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetection,
         ArtifactSelection,
+        SharedArtifactGroup,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.recording import (
@@ -505,7 +506,20 @@ def _clean_session_v2(session_key):
             (ArtifactDetection & artifact_keys).super_delete(warn=False)
             (ArtifactSelection & artifact_keys).super_delete(warn=False)
 
-    # Step 4: now the cascade is unblocked -- Recording, SortGroupV2
+    # Step 4: SharedArtifactGroup tables. The master FK's Session
+    # and the Member part FK's Recording, so prior shared-group
+    # rows pointing at THIS session's Recording rows must be
+    # cleaned before we drop Recording -- otherwise DJ refuses to
+    # cascade through the part-without-master constraint. Delete
+    # master + Member explicitly (master first satisfies the
+    # master-before-part rule).
+    shared_groups = (
+        SharedArtifactGroup & session_key
+    ).fetch("KEY", as_dict=True)
+    if shared_groups:
+        (SharedArtifactGroup & shared_groups).super_delete(warn=False)
+
+    # Step 5: now the cascade is unblocked -- Recording, SortGroupV2
     # can be deleted normally. We super_delete each so a leftover
     # IntervalList row from a prior aborted test is also picked up.
     (Recording & rec_keys).super_delete(warn=False) if rec_keys else None
@@ -4868,61 +4882,25 @@ def test_merge_dispatch_restrict_by_artifact_honored_in_v2(populated_sorting):
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_merge_dispatch_get_spike_indicator_on_v2_merge_id(populated_sorting):
-    """N54 downstream-consumer: ``SpikeSortingOutput.get_spike_indicator``
-    works on v2 merge_ids.
+@pytest.mark.parametrize(
+    "method_name",
+    ["get_spike_indicator", "get_firing_rate"],
+)
+def test_merge_dispatch_consumer_api_works_on_v2_merge_id(
+    populated_sorting, method_name
+):
+    """N54 downstream-consumer dispatch sanity for the two highest-
+    leverage time-binned APIs.
 
     ``get_spike_indicator`` is the consumer-facing API for
-    clusterless decoding; it iterates ``get_spike_times(merge_key)``
-    output and binary-indicates per unit per time bin. The audit
-    flagged this as the highest-leverage missing downstream-
-    consumer test (any regression to v2's ``get_spike_times``
-    dispatch silently breaks clusterless decoding).
-    """
-    import numpy as _np
-
-    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
-    from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.sorting import Sorting
-
-    _clear_curations(populated_sorting)
-    pk = CurationV2.insert_curation(
-        sorting_key=populated_sorting, labels={}
-    )
-    merge_id = (SpikeSortingOutput.CurationV2 & pk).fetch1("merge_id")
-
-    n_units = int((Sorting & populated_sorting).fetch1("n_units"))
-    assert n_units >= 1
-
-    # Construct a time array spanning the recording window. The
-    # smoke fixture is ~4 s; 100 ms bins -> ~40 time points.
-    time_array = _np.arange(0.0, 4.0, 0.1)
-    indicator = SpikeSortingOutput().get_spike_indicator(
-        {"merge_id": merge_id}, time_array
-    )
-    assert indicator.shape == (len(time_array), n_units), (
-        f"get_spike_indicator returned shape {indicator.shape}; "
-        f"expected ({len(time_array)}, {n_units}). v2 dispatch "
-        "regression."
-    )
-    # Indicator is binary {0, 1} (or float bool); every entry is
-    # non-negative and finite. ``np.any`` is True iff the sorter
-    # found at least one spike inside any time bin.
-    assert _np.all(indicator >= 0)
-    assert _np.all(_np.isfinite(indicator))
-
-
-@pytest.mark.slow
-@pytest.mark.integration
-def test_merge_dispatch_get_firing_rate_on_v2_merge_id(populated_sorting):
-    """N54 downstream-consumer: ``SpikeSortingOutput.get_firing_rate``
-    works on v2 merge_ids.
-
-    ``get_firing_rate`` is the second highest-leverage downstream
-    consumer for decoding / unit-quality metrics; it computes
-    per-unit instantaneous firing rates over a time grid. Returned
-    array must be non-negative everywhere and have shape
-    (n_time, n_units).
+    clusterless decoding; ``get_firing_rate`` is the
+    decoding/unit-quality counterpart. Both iterate
+    ``get_spike_times(merge_key)`` under the hood -- a regression
+    in v2's ``get_spike_times`` dispatch silently breaks
+    downstream consumers. Both APIs must return a
+    ``(n_time, n_units)`` array, non-negative everywhere,
+    finite. Parametrized so the same shape contract is verified
+    on both with identical setup.
     """
     import numpy as _np
 
@@ -4940,18 +4918,17 @@ def test_merge_dispatch_get_firing_rate_on_v2_merge_id(populated_sorting):
     assert n_units >= 1
 
     time_array = _np.arange(0.0, 4.0, 0.1)
-    firing_rate = SpikeSortingOutput().get_firing_rate(
-        {"merge_id": merge_id}, time_array
+    method = getattr(SpikeSortingOutput(), method_name)
+    result = method({"merge_id": merge_id}, time_array)
+    assert result.shape == (len(time_array), n_units), (
+        f"{method_name} returned shape {result.shape}; expected "
+        f"({len(time_array)}, {n_units}). v2 dispatch regression."
     )
-    assert firing_rate.shape == (len(time_array), n_units), (
-        f"get_firing_rate returned shape {firing_rate.shape}; "
-        f"expected ({len(time_array)}, {n_units})."
+    assert _np.all(result >= 0), (
+        f"{method_name} returned negative values somewhere; "
+        "the indicator/rate contract is non-negative."
     )
-    assert _np.all(firing_rate >= 0), (
-        "Firing rate must be non-negative everywhere; v2 dispatch "
-        "regression."
-    )
-    assert _np.all(_np.isfinite(firing_rate))
+    assert _np.all(_np.isfinite(result))
 
 
 @pytest.mark.slow

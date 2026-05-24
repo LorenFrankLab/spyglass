@@ -1235,6 +1235,24 @@ class Sorting(SpyglassMixin, dj.Computed):
         )
 
         folder = _analyzer_path({"sorting_id": key["sorting_id"]})
+
+        # Zero-unit short-circuit BEFORE any I/O or DB fetch:
+        # ``create_sorting_analyzer(sparse=True)`` -> ``estimate_sparsity``
+        # -> ``random_spikes_selection`` crashes on ``np.concatenate([])``
+        # for empty sortings. ``_populate_unit_part`` iterates an empty
+        # ``sorting.unit_ids`` and writes zero Unit rows; the Sorting
+        # master row commits with ``n_units=0``. Return the (not yet
+        # created) folder path -- ``Sorting.get_analyzer`` rebuilds
+        # on demand if a downstream consumer needs it.
+        if sorting.get_num_units() == 0:
+            logger.warning(
+                "Sorting._build_analyzer: sorting_id="
+                f"{key.get('sorting_id')!r} has zero units; skipping "
+                "analyzer build. Check ``detect_threshold`` / "
+                "artifact masking if you expected non-zero output."
+            )
+            return folder
+
         folder.parent.mkdir(parents=True, exist_ok=True)
 
         if sorter_row is None:
@@ -1248,28 +1266,6 @@ class Sorting(SpyglassMixin, dj.Computed):
             ).fetch1()
         if job_kwargs is None:
             job_kwargs = _resolved_job_kwargs(sorter_row["job_kwargs"])
-
-        # Zero-unit sortings (e.g., ``clusterless_thresholder`` with
-        # a high ``detect_threshold`` on a quiet session) crash both
-        # ``create_sorting_analyzer(sparse=True)`` -- which routes
-        # through ``estimate_sparsity`` -> ``random_spikes_selection``
-        # and fails on ``np.concatenate([])`` -- and the downstream
-        # ``analyzer.compute([...])`` extension list. Skip the
-        # analyzer build entirely on zero units; ``_populate_unit_part``
-        # iterates an empty ``sorting.unit_ids`` and writes zero Unit
-        # rows. The downstream ``Sorting.get_analyzer`` path explicitly
-        # rebuilds the analyzer on demand if the folder is missing,
-        # so a zero-unit sort safely leaves no folder behind. The
-        # Sorting master row still commits with ``n_units=0`` so the
-        # user sees the sort completed and just found nothing.
-        if sorting.get_num_units() == 0:
-            logger.warning(
-                "Sorting._build_analyzer: sorting_id="
-                f"{key.get('sorting_id')!r} has zero units; skipping "
-                "analyzer build. Check ``detect_threshold`` / "
-                "artifact masking if you expected non-zero output."
-            )
-            return folder
 
         analyzer = si.create_sorting_analyzer(
             sorting=sorting,
