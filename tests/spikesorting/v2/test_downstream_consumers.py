@@ -257,6 +257,143 @@ def test_consumer_api_shape_contract(populated_sorting, method_name):
 
 @pytest.mark.slow
 @pytest.mark.integration
+def test_sorted_spikes_decoding_selection_accepts_v2_merge_id(populated_sorting):
+    """A ``SortedSpikesDecodingSelection`` row keyed on a v2 ``merge_id``
+    can be INSERTED -- the FK chain resolves end-to-end.
+
+    Phase 1 plan-line 218 ("decoding merge-id resolution") asks for
+    proof that the decoding table's FK/selection path actually
+    accepts a v2 merge_id. Without this gate, a broken FK
+    (e.g. ``SpikeSortingOutput.CurationV2`` missing or
+    ``SortedSpikesGroup.Units.spikesorting_merge_id`` not resolving
+    to v2) would surface only when a downstream user tried to
+    populate a decoder on a v2 sort. The chain this exercises is::
+
+        SortedSpikesDecodingSelection
+          -> SortedSpikesGroup
+            -> SortedSpikesGroup.Units (spikesorting_merge_id=v2 merge_id)
+              -> SpikeSortingOutput (master)
+                -> SpikeSortingOutput.CurationV2 (v2 dispatch part)
+                  -> CurationV2 (v2 master)
+
+    The test is INSERT-only. We do NOT populate ``SortedSpikesDecodingV1``
+    -- the compute step requires position data + non_local_detector
+    weights that the smoke fixture lacks. The reviewer's gate is
+    "the selection table accepts the v2 merge_id"; the populate
+    surface is exercised in tests/decoding/ on real position data.
+    """
+    pytest.importorskip(
+        "non_local_detector",
+        reason="decoding extras not installed; FK gate is decoding-side.",
+    )
+    pytest.importorskip("track_linearization")
+    from spyglass.decoding.v1.core import DecodingParameters, PositionGroup
+    from spyglass.decoding.v1.sorted_spikes import (
+        SortedSpikesDecodingSelection,
+    )
+    from spyglass.spikesorting.analysis.v1.group import (
+        SortedSpikesGroup,
+        UnitSelectionParams,
+    )
+    from spyglass.spikesorting.v2.recording import RecordingSelection
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    _, merge_id = _make_v2_root_curation(populated_sorting)
+    UnitSelectionParams().insert_default()
+    # ``DecodingParameters.insert_default`` is broken upstream
+    # (calls ``cls.super()`` which doesn't resolve). Insert through
+    # the instance method instead -- ``DecodingParameters.insert`` is
+    # overridden to convert classes to dicts on the way in.
+    DecodingParameters().insert(
+        DecodingParameters.contents, skip_duplicates=True
+    )
+
+    recording_id = (
+        SortingSelection.RecordingSource & populated_sorting
+    ).fetch1("recording_id")
+    actual_nwb = (
+        RecordingSelection & {"recording_id": recording_id}
+    ).fetch1("nwb_file_name")
+
+    sorted_group_name = "v2_decoding_fk_test_sorted_spikes_group"
+    existing_group = SortedSpikesGroup & {
+        "sorted_spikes_group_name": sorted_group_name,
+        "nwb_file_name": actual_nwb,
+    }
+    if existing_group:
+        existing_group.super_delete(warn=False)
+    SortedSpikesGroup().create_group(
+        group_name=sorted_group_name,
+        nwb_file_name=actual_nwb,
+        unit_filter_params_name="all_units",
+        keys=[{"spikesorting_merge_id": merge_id}],
+    )
+
+    pos_group_name = "v2_decoding_fk_test_position_group"
+    existing_pos = PositionGroup & {
+        "nwb_file_name": actual_nwb,
+        "position_group_name": pos_group_name,
+    }
+    if existing_pos:
+        existing_pos.super_delete(warn=False)
+    # Master-only insert -- no Position parts. The decoding selection
+    # FK lands on PositionGroup, not PositionGroup.Position, so the
+    # parts are not required to satisfy the chain we're proving here.
+    PositionGroup.insert1(
+        {
+            "nwb_file_name": actual_nwb,
+            "position_group_name": pos_group_name,
+        },
+        skip_duplicates=True,
+    )
+
+    decoding_param_name = next(
+        name
+        for name in DecodingParameters.fetch("decoding_param_name")
+        if "sorted" in name
+    )
+
+    selection_key = {
+        "nwb_file_name": actual_nwb,
+        "sorted_spikes_group_name": sorted_group_name,
+        "unit_filter_params_name": "all_units",
+        "position_group_name": pos_group_name,
+        "decoding_param_name": decoding_param_name,
+        "encoding_interval": "raw data valid times",
+        "decoding_interval": "raw data valid times",
+        "estimate_decoding_params": True,
+    }
+    existing_sel = SortedSpikesDecodingSelection & selection_key
+    if existing_sel:
+        existing_sel.super_delete(warn=False)
+    SortedSpikesDecodingSelection.insert1(selection_key)
+
+    inserted = SortedSpikesDecodingSelection & selection_key
+    assert len(inserted) == 1, (
+        "SortedSpikesDecodingSelection insert succeeded but the row is "
+        "not retrievable -- FK chain landed in an inconsistent state."
+    )
+
+    # The FK chain is satisfied: the inserted decoding-selection row
+    # joins back to a SortedSpikesGroup.Units row whose
+    # spikesorting_merge_id IS the v2 merge_id we constructed.
+    linked_merge_ids = (
+        SortedSpikesGroup.Units
+        & {
+            "nwb_file_name": actual_nwb,
+            "sorted_spikes_group_name": sorted_group_name,
+            "unit_filter_params_name": "all_units",
+        }
+    ).fetch("spikesorting_merge_id")
+    assert merge_id in linked_merge_ids, (
+        f"Decoding selection row references SortedSpikesGroup whose "
+        f"Units do not include v2 merge_id={merge_id!r}; the FK chain "
+        "from the decoding selection back to the v2 merge_id is broken."
+    )
+
+
+@pytest.mark.slow
+@pytest.mark.integration
 def test_sorted_spikes_group_per_unit_and_mua_firing_rate(populated_sorting):
     """``SortedSpikesGroup`` built from a v2 merge_id supports both
     per-unit and multiunit (MUA) firing-rate readouts.

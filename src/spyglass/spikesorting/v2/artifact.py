@@ -254,7 +254,7 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
         per_member_recording_rows = (
             Recording
             & [{"recording_id": rid} for rid in member_recording_ids]
-        ).fetch("recording_id", "sampling_frequency", "duration_s", as_dict=True)
+        ).fetch("recording_id", "sampling_frequency", as_dict=True)
         per_member_selection_rows = (
             RecordingSelection
             & [{"recording_id": rid} for rid in member_recording_ids]
@@ -299,27 +299,40 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
                 "``si.aggregate_channels`` requires identical fs."
             )
 
-        # Duration / n_samples must match too. We approximate
-        # ``n_samples`` from ``sampling_frequency * duration_s``;
-        # tolerance is one sample interval to absorb the
-        # floating-point off-by-one between ``duration_s`` (end
-        # timestamp - start timestamp = (N-1)/fs) and the actual
-        # sample count. Differing durations indicate members were
-        # sliced on different ``interval_list_name`` -- aggregate
-        # would crash with a shape mismatch.
-        durations = sorted(
-            float(rec_by_id[str(rid)]["duration_s"])
-            for rid in member_recording_ids
-        )
-        if durations[-1] - durations[0] > 1.5 / sampling_frequencies.pop():
+        # Exact n_samples + dtype check. The earlier duration_s
+        # check (sampling_frequency * duration_s, with one-sample
+        # tolerance) still allowed a 1-sample mismatch through --
+        # which ``si.aggregate_channels`` rejects with an opaque
+        # shape-mismatch deep inside SI at populate time. Load each
+        # member's preprocessed recording through ``Recording.
+        # get_recording`` (the same path ``make_compute`` uses) and
+        # require EXACT ``get_num_samples()`` + ``get_dtype()``
+        # equality. The I/O is paid once at insert; the populate
+        # path reuses the same NWB so the SI page cache is warm.
+        per_member_sizes: dict[str, tuple[int, str]] = {}
+        for rid in member_recording_ids:
+            rec_obj = Recording().get_recording({"recording_id": rid})
+            per_member_sizes[str(rid)] = (
+                int(rec_obj.get_num_samples()),
+                str(rec_obj.get_dtype()),
+            )
+        distinct_n_samples = {n for (n, _) in per_member_sizes.values()}
+        if len(distinct_n_samples) != 1:
             raise ValueError(
                 "SharedArtifactGroup.insert_group: members have "
-                "differing durations "
-                f"{[f'{d:.6f}' for d in durations]}; "
-                "the shared-group artifact-detection assumes all "
-                "members share a time axis. Likely cause: "
-                "different ``interval_list_name`` values on the "
-                "upstream RecordingSelection rows."
+                f"differing exact n_samples "
+                f"{sorted(distinct_n_samples)}; "
+                "``si.aggregate_channels`` requires identical sample "
+                "counts. Likely cause: different "
+                "``interval_list_name`` values on the upstream "
+                "RecordingSelection rows."
+            )
+        distinct_dtypes = {dt for (_, dt) in per_member_sizes.values()}
+        if len(distinct_dtypes) != 1:
+            raise ValueError(
+                "SharedArtifactGroup.insert_group: members have "
+                f"differing dtypes {sorted(distinct_dtypes)}; "
+                "``si.aggregate_channels`` requires identical dtype."
             )
 
         master_row = {
