@@ -142,6 +142,8 @@ Phase 1 is large. The implementer may land it as one change set or as the follow
 - **No recompute table implementation in Phase 1.** Phase 1 exposes `Recording.get_recording()` and `Sorting.get_analyzer()` missing-artifact rebuild helpers. Phase 2 adds the explicit `RecordingArtifactRecompute*` / `SortingAnalyzerRecompute*` verification and safe-deletion tables, so this is a sequencing boundary, not a deferral out of the v2 plan.
 - **No automated import of v1 curations into v2.** Different question; if needed, handle in a separate `legacy_import.py` module later.
 
+(Phase 1b restores chunked `ElectricalSeries` writes + tri-part `make` + `_parallel_make = True` on `Recording`, `ArtifactDetection`, and `Sorting` so the streaming and parallel-populate items above are no longer permanently out of scope — Phase 1 intentionally shipped without them; Phase 1b ships both. See `phase-1b-runtime-regressions.md`.)
+
 ## Validation goals
 
 Behaviors the Phase 1 validation goals must cover. Implementer chooses test names and splits; each goal must have at least one assertion exercising it.

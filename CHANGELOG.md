@@ -75,6 +75,89 @@ justification.
 
 Upstream issue filed on LorenFrankLab/spyglass to track v1's bug.
 
+#### Spike Sorting v2 Phase 1b: streaming Recording write, parallel populate, and v1-parity restorations
+
+Phase 1b is a focused fix-up between Phase 1 (initial v2 landing) and
+Phase 2 (analyzer curation). It addresses two runtime regressions and
+47 v1-parity divergences found across multiple audit passes.
+
+**Two runtime regressions fixed:**
+
+- `Recording.make` now **streams** the preprocessed
+  `ElectricalSeries` to NWB via HDMF's `GenericDataChunkIterator`
+  (`buffer_gb=5`, matching v1's production choice). Previously the
+  full `(n_samples, n_channels)` float64 array materialized in RAM
+  before the write — 30 kHz × 128 ch × 1 h ≈ 110 GB, which OOM'd
+  on any lab workstation.
+- `Recording`, `ArtifactDetection`, and `Sorting` are now **tri-part**
+  (`make_fetch` / `make_compute` / `make_insert`) with
+  `_parallel_make = True`. The compute step runs outside the DataJoint
+  framework transaction, so a 20-minute sort no longer blocks every
+  other user from declaring or modifying tables on the same database
+  (Spyglass #1030, DataJoint #1170).
+
+**v1-parity restorations (selected):** external float64 whitening
+restored on the sort path; disjoint sort intervals concatenated
+correctly instead of silently including inter-interval gaps;
+`min_segment_length` field restored; `min_length=1.0s` artifact
+sliver filter restored; tetrode_12.5 probe geometry patch ported for
+legacy Frank-lab NWBs; `channel_name` electrode column lookup
+restored; KS2.5 / KS3 / IronClust Singularity carve-out restored;
+sorter tempdir + analyzer folder cleanup; `obs_intervals` written on
+every unit; `curation_label="uncurated"` placeholder column; v1's
+permissive `labels=None` accepted again; `apply_merge` kwarg name
+restored; verbose artifact-detection logging restored; `is_filtered=True`
+annotation restored; `noise_levels=[1.0]` forwarded to
+`detect_peaks` so `detect_threshold` stays in microvolts (otherwise it
+would silently become a MAD multiplier); cross-channel z-score for
+artifact detection (common-mode events) restored; artifact-combine
+flipped back to OR semantics; job_kwargs resolution wired into all
+three compute stages; `cache_hash` switched to `NwbfileHasher` per
+the documented contract; dead `common_reference.reference` field
+removed; v1's `Curation.get_recording` / `get_sort_group_info`
+methods added to `CurationV2` (without these, the merge dispatcher
+raised on every v2 `merge_id`); all four `CurationV2` accessors
+made `@classmethod` for surface symmetry with v1.
+
+**API additions:** `CurationV2.MergeGroup` part table records
+per-(kept-unit, contributor-unit) merge provenance with FK
+validation (user-authorized exception to the zero-migration policy;
+chosen over v1's NWB-column pattern for queryability);
+`CurationV2.get_merge_groups(key)` and a `get_merged_sorting` that
+actually applies merges at fetch (matching v1 semantics);
+`Sorting.get_sorting(as_dataframe=True)` for pre-curation peek;
+`CurationV2.get_sorting(as_dataframe=True)` includes the
+`curation_label` column joined from `CurationV2.UnitLabel`;
+`get_spiking_sorting_v2_merge_ids` notebook-discoverable helper
+mirroring v1's surface.
+
+**Cross-pipeline fixes:** sparse unit_id consumers in
+`decoding/v1/waveform_features.py` (added a v2-aware branch in the
+source-resolution chain), `spikesorting/analysis/v1/group.py`
+(index by NWB `.id` rather than positional range), and
+`spikesorting/analysis/v1/unit_annotation.py` (validator + lookup
+both use the actual unit_id set instead of `len(spikes)`). Without
+these, v2 merge-applied sortings would silently misindex
+downstream decoding and unit annotation.
+
+**Merge dispatch hardening:** `SpikeSortingOutput.get_restricted_merge_ids`
+now defaults to `sources=["v0", "v1", "v2"]` so v2 users copying
+v1 notebooks see v2 merge_ids without explicit `sources=` arg;
+unknown restriction keys raise `ValueError` instead of silently
+dropping; `restrict_by_artifact=True` now honors the v2
+`f"artifact_{artifact_id}"` IntervalList convention.
+
+**Defensive port from v1's in-flight fix:** non-monotonic timestamp
+repair in `Recording.make`. Raw NWBs with floating-point precision
+artifacts or epoch stitching can have non-strictly-increasing
+timestamps; downstream `np.searchsorted` then returns wrong frame
+indices, silently shifting sort-interval windows. The repair
+enforces `adjusted[i] >= adjusted[i-1] + sample_period` via a
+vectorized cumulative-max in shifted coordinates (`u[i] = ts[i] -
+i*sample_period`), correctly handling backslide-and-return
+patterns that plain cumulative-max would miss. Cross-references the
+in-flight v1 PR on `copilot/fix-populating-artifact-detection`.
+
 #### LFPBandV1 Fix
 
 If you were using a pre-release version of Spyglass 0.5.6 LFPBandV1 after April

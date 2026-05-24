@@ -214,6 +214,62 @@ the same tables with:
 The Phase 3 tables are declared (final-shape) in Phase 1 with gated `make()`
 bodies, so there are no schema migrations between phases.
 
+## Streaming, parallel populate, and v1 parity
+
+The Phase 1 landing of v2 had two runtime gaps that Phase 1b closes:
+
+- **Streaming Recording writes.** `Recording.make` now streams the
+  preprocessed `ElectricalSeries` to NWB via HDMF's
+  `GenericDataChunkIterator` (`buffer_gb=5`, matching v1's production
+  choice). The full trace array is never materialized in RAM; chronic
+  recordings (30 kHz × 128 ch × 1 h ≈ 110 GB float64) populate on any
+  lab workstation. The chunked-write helpers live in
+  `spikesorting.v2._nwb_iterators` (port of v1's
+  `SpikeInterfaceRecordingDataChunkIterator` and
+  `TimestampsDataChunkIterator`).
+- **Tri-part `make` + `_parallel_make = True`** on `Recording`,
+  `ArtifactDetection`, and `Sorting`. The compute step runs outside
+  DataJoint's framework transaction, so a 20-minute sort no longer
+  holds the row locks that would block other users from declaring or
+  modifying tables on the same database. Set
+  `dj.config["custom"]["spikesorting_v2_job_kwargs"] = {"n_jobs": N}`
+  to thread N workers through every compute stage (the resolver is
+  wired into Recording, ArtifactDetection, and Sorting; v1's pattern
+  applied only on the sorter call).
+
+Phase 1b also restores v1-parity behavior on a long list of points
+where Phase 1 silently diverged (R-tag and N-tag items in the
+plan); see the v0.5.6 CHANGELOG for the full list. Key user-visible
+items:
+
+- The `CurationV2.MergeGroup` part table records every merge group's
+  `(kept_unit_id, contributor_unit_id)` rows with FK validation;
+  `CurationV2.get_merge_groups(key)` returns a
+  `{kept: [contributors]}` dict, and `CurationV2.get_merged_sorting`
+  applies merges lazily at fetch regardless of the `merges_applied`
+  flag (matching v1 semantics where a curation created with
+  `apply_merge=False` can still be inspected as merged).
+- `CurationV2.insert_curation` is idempotent on root curations
+  (`parent_curation_id=-1`): a second call for the same `sorting_id`
+  returns the existing key + emits a `logger.warning` instead of
+  staging a duplicate NWB + new row.
+- The `apply_merge` kwarg name is back (v1 spelling); `labels=None`
+  is accepted (semantically equivalent to `{}`).
+- `Sorting.get_sorting(key, as_dataframe=True)` and
+  `CurationV2.get_sorting(key, as_dataframe=True)` both return a
+  pandas DataFrame with `unit_id` + `spike_times` (seconds) columns;
+  the CurationV2 form also joins the `curation_label` list column
+  from `UnitLabel`.
+- `get_spiking_sorting_v2_merge_ids(restriction, as_dict=False)` in
+  `spyglass.spikesorting.v2.utils` is the notebook-discoverable
+  parallel of v1's `get_spiking_sorting_v1_merge_ids`.
+- `SpikeSortingOutput.get_restricted_merge_ids` now defaults to
+  `sources=["v0", "v1", "v2"]` so v2 users copying v1 notebook
+  patterns see v2 merge_ids without an explicit `sources=` arg.
+  Unknown restriction keys raise `ValueError` instead of silently
+  dropping (matches shared-contracts.md "Unknown restriction fields
+  should fail clearly").
+
 ## Rerunning fixtures + tests against an existing v2 database
 
 `SortGroupV2.set_group_by_shank` does not honor v1's `test_mode=True`
