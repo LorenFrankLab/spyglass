@@ -1039,7 +1039,9 @@ def test_recording_truncation_caught(polymer_smoke_session):
     # Clear any prior Recording row so populate actually runs make().
     (Recording & pk).super_delete(warn=False)
     try:
-        with pytest.raises(RecordingTruncatedError, match="Missing seconds"):
+        with pytest.raises(
+            RecordingTruncatedError, match="Missing: .* seconds|Missing: \\d"
+        ):
             Recording.populate(pk, reserve_jobs=False)
         # The truncation guard must fire BEFORE the row is inserted --
         # otherwise downstream consumers would silently see a short
@@ -4197,3 +4199,255 @@ def test_detect_artifacts_clamps_artifact_at_recording_end(dj_conn):
 # =========================================================================
 # End of Phase 1 review followups.
 # =========================================================================
+
+
+# =========================================================================
+# Phase 1d-C: high-leverage missing tests from the v1-parity audit.
+# =========================================================================
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_cache_hash_uses_nwbfile_hasher(populated_recording):
+    """R17: ``Recording.cache_hash`` matches ``_hash_nwb_recording``.
+
+    The Phase 1 cache_hash was ``hashlib.sha256(data.tobytes())``
+    -- content-blind to timestamps, electrodes, and conversion
+    metadata. shared-contracts.md "Recording Cache Format" binds
+    cache_hash to ``NwbfileHasher`` (Spyglass's content hasher
+    used by the v1 recompute machinery); Phase 1b R17 ported the
+    contract. This test independently recomputes the hash and
+    asserts the stored value matches -- a regression to the
+    data-only sha256 would silently pass the existing
+    ``isinstance(cache_hash, str)`` check.
+    """
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.utils import _hash_nwb_recording
+
+    row = (Recording & populated_recording).fetch1()
+    expected = _hash_nwb_recording(row["analysis_file_name"])
+    assert row["cache_hash"] == expected, (
+        f"cache_hash {row['cache_hash']!r} does not match "
+        f"independently-computed NwbfileHasher digest {expected!r}. "
+        "R17 contract violated -- check that "
+        "Recording._write_nwb_artifact still routes through "
+        "_hash_nwb_recording instead of a data-only sha256."
+    )
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_merge_dispatch_get_recording_works_for_v2(populated_sorting):
+    """R1/R6: ``SpikeSortingOutput.get_recording`` returns a v2
+    recording with ``is_filtered=True`` annotated.
+
+    Without R1 (the new ``CurationV2.get_recording`` classmethod
+    + part-table source-class wiring), the merge dispatcher at
+    ``spikesorting_merge.py:317`` raised ``AttributeError`` on
+    every v2 ``merge_id``. Without R6 (``recording.annotate(
+    is_filtered=True)``), downstream SI consumers may re-apply
+    a bandpass to the already-filtered preprocessed recording.
+    Pin both invariants in one test.
+    """
+    import spikeinterface as si
+
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    _clear_curations(populated_sorting)
+    pk = CurationV2.insert_curation(
+        sorting_key=populated_sorting, labels={}
+    )
+    merge_id = (SpikeSortingOutput.CurationV2 & pk).fetch1("merge_id")
+
+    rec = SpikeSortingOutput().get_recording({"merge_id": merge_id})
+    assert isinstance(rec, si.BaseRecording), (
+        f"SpikeSortingOutput.get_recording returned {type(rec)}; "
+        "expected SI BaseRecording."
+    )
+    assert rec.get_annotation("is_filtered") is True, (
+        "Returned recording must carry is_filtered=True so a "
+        "downstream sorter does not re-bandpass already-filtered "
+        "data. R6 annotation regression."
+    )
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_merge_dispatch_get_sort_group_info_works_for_v2(populated_sorting):
+    """R2: ``SpikeSortingOutput.get_sort_group_info`` returns the
+    full electrode set for a v2 merge_id.
+
+    Before R2, ``CurationV2.get_sort_group_info`` was an instance
+    method; the merge dispatcher at
+    ``spikesorting_merge.py:346`` calls it as
+    ``source_table.get_sort_group_info(merge_key)`` where
+    ``source_table`` is the bound class, not an instance --
+    raised ``TypeError: missing self``. With R2's classmethod
+    conversion, the call resolves. This test confirms it
+    actually returns a non-empty multi-row relation.
+    """
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    _clear_curations(populated_sorting)
+    pk = CurationV2.insert_curation(
+        sorting_key=populated_sorting, labels={}
+    )
+    merge_id = (SpikeSortingOutput.CurationV2 & pk).fetch1("merge_id")
+
+    info = SpikeSortingOutput.get_sort_group_info({"merge_id": merge_id})
+    rows = info.fetch(as_dict=True)
+    assert len(rows) > 0, (
+        "get_sort_group_info returned zero rows; the v1 "
+        "fetch(limit=1) multi-region under-reporting bug has "
+        "regressed (R2)."
+    )
+    # The result must include the electrode-level columns the
+    # plan documents (rows for every electrode in the sort
+    # group, joined to BrainRegion). Spot-check a couple of
+    # canonical column names.
+    for required in ("electrode_id", "region_name"):
+        assert required in rows[0], (
+            f"get_sort_group_info row missing {required!r}; check "
+            "the relation join order."
+        )
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_disjoint_sort_intervals_concatenated(polymer_smoke_session):
+    """R5: ``Recording.make`` honors disjoint sort intervals.
+
+    Without R5's ``_consolidate_intervals`` + ``concatenate_recordings``
+    pattern, ``Recording.make`` took ``(times[0][0], times[-1][-1])``
+    -- the outer envelope, silently including inter-interval gaps.
+    This test writes a synthetic IntervalList row whose
+    ``valid_times`` has two disjoint chunks with a deliberate gap,
+    populates Recording, then re-reads the written
+    ``ElectricalSeries.timestamps`` and asserts:
+
+    1. The written timestamps span is SHORTER than the gap-inclusive
+       envelope (the gap was actually excluded).
+    2. No written timestamp falls inside the gap.
+
+    Without R5, both assertions fail (the gap is included).
+    """
+    import uuid as _uuid
+
+    import numpy as _np
+    import pynwb
+
+    from spyglass.common.common_interval import IntervalList
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    PreprocessingParameters.insert_default()
+    LabTeam.insert1(
+        {
+            "team_name": "v2_test_team",
+            "team_description": "v2 pipeline tests",
+        },
+        skip_duplicates=True,
+    )
+    if not (SortGroupV2 & polymer_smoke_session):
+        SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+
+    raw_times = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": "raw data valid times",
+        }
+    ).fetch1("valid_times")
+    t0 = float(raw_times[0][0])
+    t_end = float(raw_times[-1][-1])
+    # Build two disjoint sub-intervals inside the raw window with
+    # a deliberate gap. min_segment_length default is 1.0 s, so
+    # each chunk must be >= 1s for the helper not to drop them.
+    total = t_end - t0
+    # min_segment_length default is 1.0 s; intersect's per-chunk
+    # length must be strictly > 1.0 s to survive (floating-point
+    # boundaries on a 1.0 s-exact chunk are sometimes dropped).
+    # Use 1.2 s chunks separated by 0.5 s gap, total 2.9 s --
+    # fits in the 4 s smoke fixture.
+    assert total >= 2.9, (
+        f"Smoke fixture is too short ({total}s) for the disjoint "
+        "test; need at least 2.9s."
+    )
+    chunk1_end = t0 + 1.2
+    gap_end = t0 + 1.7
+    chunk2_end = min(t0 + 2.9, t_end)
+    disjoint_times = _np.array(
+        [[t0, chunk1_end], [gap_end, chunk2_end]]
+    )
+
+    sort_group_id = int(
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
+    )
+    disjoint_interval_name = f"v2_disjoint_test_{_uuid.uuid4().hex[:8]}"
+    IntervalList.insert1(
+        {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": disjoint_interval_name,
+            "valid_times": disjoint_times,
+            "pipeline": "v2_disjoint_test",
+        }
+    )
+
+    rec_pk = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+            "interval_list_name": disjoint_interval_name,
+            "preproc_params_name": "default_franklab",
+            "team_name": "v2_test_team",
+        }
+    )
+    Recording.populate(rec_pk, reserve_jobs=False)
+    row = (Recording & rec_pk).fetch1()
+    abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
+
+    with pynwb.NWBHDF5IO(
+        path=abs_path, mode="r", load_namespaces=True
+    ) as io:
+        nwbf = io.read()
+        series_path = row["electrical_series_path"]
+        series_name = series_path.rsplit("/", 1)[-1]
+        series = nwbf.acquisition[series_name]
+        written_times = _np.asarray(series.timestamps[:])
+
+    # The written length should be approximately
+    # (chunk1 duration + chunk2 duration) * fs, not the full
+    # envelope. Allow 5% slack for fs jitter and boundary
+    # rounding.
+    fs = float(row["sampling_frequency"])
+    expected_n = int(
+        ((chunk1_end - t0) + (chunk2_end - gap_end)) * fs
+    )
+    assert (
+        0.95 * expected_n <= len(written_times) <= 1.05 * expected_n
+    ), (
+        f"Written timestamps length {len(written_times)} differs "
+        f"from expected ~{expected_n} (sum of disjoint chunks). "
+        "R5 disjoint-interval concat regression."
+    )
+    # No written timestamp falls inside the gap (chunk1_end,
+    # gap_end). Allow tiny boundary slack via 1.5 / fs.
+    tol = 1.5 / fs
+    in_gap = (written_times > chunk1_end + tol) & (
+        written_times < gap_end - tol
+    )
+    assert not _np.any(in_gap), (
+        f"Found {int(in_gap.sum())} written timestamps inside the "
+        f"disjoint gap ({chunk1_end}, {gap_end}). R5's "
+        "_consolidate_intervals + concatenate_recordings split was "
+        "bypassed."
+    )

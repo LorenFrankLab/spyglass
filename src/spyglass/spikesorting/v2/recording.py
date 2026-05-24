@@ -941,12 +941,20 @@ class Recording(SpyglassMixin, dj.Computed):
         nwb_file_name = sel["nwb_file_name"]
         interval_list_name = sel["interval_list_name"]
 
-        requested_start = float(sort_valid_times[0][0])
-        requested_end = float(sort_valid_times[-1][-1])
+        # Truncation check: compare SAVED DURATION against the SUM of
+        # requested chunk durations, not against the outer envelope.
+        # On the multi-interval (R5 disjoint) path the saved data
+        # correctly excludes inter-chunk gaps, so its wall-clock
+        # ``saved_end`` is shorter than ``sort_valid_times[-1][-1]``
+        # by the gap total; a naive envelope comparison would
+        # spuriously flag every disjoint sort as truncated.
+        requested_total = float(
+            sum(end - start for start, end in sort_valid_times)
+        )
+        saved_total = float(saved_end - saved_start)
         tolerance = 1.5 / sampling_frequency
-        missing_start = requested_start - saved_start
-        missing_end = requested_end - saved_end
-        if missing_start > tolerance or missing_end > tolerance:
+        missing = requested_total - saved_total
+        if missing > tolerance:
             # File written but never registered: clean it up before
             # raising so the AnalysisNwbfile cleanup tooling does not
             # have to chase an orphan from a request-time validation.
@@ -961,11 +969,11 @@ class Recording(SpyglassMixin, dj.Computed):
             raise RecordingTruncatedError(
                 "Recording.make wrote a shorter recording than requested. "
                 f"Requested IntervalList valid_times for {interval_list_name!r} "
-                f"in {nwb_file_name!r}: ({requested_start}, "
-                f"{requested_end}). Saved range: ({saved_start}, "
-                f"{saved_end}). Missing seconds: start="
-                f"{missing_start:.6f}, end={missing_end:.6f}. Check the "
-                "raw NWB for dropped packets or interval misalignment."
+                f"in {nwb_file_name!r}: total {requested_total:.6f}s across "
+                f"{len(sort_valid_times)} chunk(s). Saved duration: "
+                f"{saved_total:.6f}s (range {saved_start} -> {saved_end}). "
+                f"Missing: {missing:.6f}s. Check the raw NWB for dropped "
+                "packets or interval misalignment."
             )
 
         try:
