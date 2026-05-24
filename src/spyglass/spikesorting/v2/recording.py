@@ -840,28 +840,18 @@ class Recording(SpyglassMixin, dj.Computed):
     ):
         """Run the preprocessing + streaming write outside any DB transaction.
 
-        This is the long-running step (open raw NWB, frame-slice +
-        channel-slice, bandpass + reference, stream the
-        ElectricalSeries into a fresh ``AnalysisNwbfile``, hash the
-        persisted file). Returning happens before the framework
-        opens its commit transaction, so a 20-minute write here does
-        not hold any DB lock -- the original motivation for the
-        tri-part refactor.
+        Long-running step (open raw NWB, frame/channel slice, bandpass
+        + reference, stream ElectricalSeries into a fresh
+        ``AnalysisNwbfile``, hash the persisted file). Returning
+        happens before the framework opens its commit transaction so
+        a 20-minute write here does not hold any DB lock -- the
+        original motivation for the tri-part refactor.
 
-        Cleanup contract: ``_write_nwb_artifact`` either writes a
-        full file or raises before any registration; if a later step
-        in this method raises after the file is on disk, we unlink
-        it before propagating so a half-written artifact never
-        outlives a failed compute. ``make_insert`` is responsible
-        for cleanup on insert-time rollback (see below).
+        Pipeline body is shared with ``_rebuild_nwb_artifact`` via
+        ``_compute_recording_artifact``; this method only handles
+        the populate-side staging contract and the
+        ``RecordingComputed`` boxing.
         """
-        import pathlib as _pathlib
-
-        import spikeinterface.extractors as se
-
-        nwb_file_name = sel["nwb_file_name"]
-        interval_list_name = sel["interval_list_name"]
-
         # shared-contracts.md "Job-Kwargs Resolution" requires every v2
         # compute stage to call ``_resolved_job_kwargs(...)`` so the
         # override channels (DataJoint config + per-row blob) are
@@ -874,83 +864,28 @@ class Recording(SpyglassMixin, dj.Computed):
 
         _resolved_job_kwargs(preproc_job_kwargs)
 
-        raw_path = Nwbfile().get_abs_path(nwb_file_name)
-        recording = se.read_nwb_recording(raw_path, load_time_vector=True)
-        sampling_frequency = float(recording.get_sampling_frequency())
-
-        # Non-monotonic timestamp repair. See
-        # ``_repaired_timestamps`` for the rationale + algorithm.
-        all_timestamps = self._repaired_timestamps(recording, raw_path)
-
-        recording, timestamps_override = self._restrict_recording(
-            recording=recording,
-            nwb_file_name=nwb_file_name,
-            interval_list_name=interval_list_name,
-            sort_group_channel_ids=channel_ids,
+        raw_path = Nwbfile().get_abs_path(sel["nwb_file_name"])
+        (
+            analysis_file_name,
+            object_id,
+            cache_hash,
+            sampling_frequency,
+            saved_start,
+            saved_end,
+            n_channels,
+            duration_s,
+        ) = self._compute_recording_artifact(
+            raw_path=raw_path,
+            nwb_file_name=sel["nwb_file_name"],
+            interval_list_name=sel["interval_list_name"],
+            channel_ids=channel_ids,
             ref_channel_id=ref_channel_id,
             sort_valid_times=sort_valid_times,
             raw_valid_times=raw_valid_times,
-            min_segment_length=preproc_validated.min_segment_length,
-            corrected_timestamps=all_timestamps,
-        )
-        recording = self._apply_pre_motion_preprocessing(
-            recording=recording,
-            ref_channel_id=ref_channel_id,
-            sort_group_channel_ids=channel_ids,
-            validated=preproc_validated,
-        )
-        recording = self._maybe_apply_tetrode_geometry(
-            recording=recording,
+            preproc_validated=preproc_validated,
             probe_types=probe_types,
             electrode_group_names=electrode_group_names,
-            sort_group_channel_ids=channel_ids,
         )
-
-        # Stage the AnalysisNwbfile via ``_write_nwb_artifact``. If
-        # any failure occurs from this point on (mid-stream write,
-        # boundary computation, etc.) the staged file must be
-        # unlinked before we propagate, otherwise a partial NWB
-        # outlives a failed compute. ``AnalysisNwbfile().create``
-        # writes a stub first, so even a mid-write failure can leave
-        # the stub on disk -- the same cleanup pattern covers it.
-        #
-        # ``timestamps_override`` is non-None on the multi-interval
-        # path so ``_write_nwb_artifact`` writes the per-interval
-        # wall-clock timestamps instead of the synthetic 0-based array
-        # ``concatenate_recordings(..., ignore_times=True)`` would
-        # otherwise produce.
-        analysis_file_name = None
-        try:
-            analysis_file_name, object_id, cache_hash = self._write_nwb_artifact(
-                recording=recording,
-                nwb_file_name=nwb_file_name,
-                timestamps_override=timestamps_override,
-            )
-            # ``_get_recording_timestamps`` handles multi-segment
-            # NWBs; a single-segment recording delegates to
-            # ``recording.get_times()`` exactly.
-            from spyglass.spikesorting.v2.utils import _get_recording_timestamps
-
-            saved_times = _get_recording_timestamps(recording)
-            saved_start = float(saved_times[0])
-            saved_end = float(saved_times[-1])
-            n_channels = int(recording.get_num_channels())
-            duration_s = float(saved_end - saved_start)
-        except Exception:
-            # The file may be on disk; unlink before re-raising so a
-            # half-committed artifact does not survive. The
-            # registration would have happened in ``make_insert``,
-            # which DataJoint will not call once this raises.
-            if analysis_file_name is not None:
-                try:
-                    abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
-                    _pathlib.Path(abs_path).unlink(missing_ok=True)
-                except Exception as cleanup_exc:  # pragma: no cover -- defensive
-                    logger.error(
-                        "Recording.make_compute: failed to clean up staged "
-                        f"analysis file {analysis_file_name!r}: {cleanup_exc!r}"
-                    )
-            raise
 
         return RecordingComputed(
             analysis_file_name=analysis_file_name,
@@ -1102,70 +1037,97 @@ class Recording(SpyglassMixin, dj.Computed):
     def _rebuild_nwb_artifact(self, key) -> None:
         """Rebuild the NWB artifact for an existing row.
 
-        Runs the same preprocessing pipeline as ``make`` but writes to
-        the existing ``analysis_file_name`` slot and verifies the new
-        ``cache_hash`` matches the row. A mismatch surfaces silent
-        upstream drift (raw NWB edited / SI version skew); the row is
-        not auto-deleted so the user can diff before deciding.
+        Runs the same preprocessing pipeline as ``make_compute`` via
+        the shared ``_compute_recording_artifact`` helper, writing to
+        the existing ``analysis_file_name`` slot, and verifies the
+        new ``cache_hash`` matches the row. A mismatch surfaces
+        silent upstream drift (raw NWB edited / SI version skew);
+        the row is not auto-deleted so the user can diff before
+        deciding.
+
+        Calls ``make_fetch`` to re-derive every DB input the
+        pipeline needs; this is the same fetch the populate path
+        uses, so a rebuild cannot drift from the original write's
+        inputs.
         """
+        fetched = self.make_fetch(key)
+        row = (self & key).fetch1()
+        raw_path = Nwbfile().get_abs_path(fetched.sel["nwb_file_name"])
+        (_, _, rebuilt_hash, *_) = self._compute_recording_artifact(
+            raw_path=raw_path,
+            nwb_file_name=fetched.sel["nwb_file_name"],
+            interval_list_name=fetched.sel["interval_list_name"],
+            channel_ids=fetched.channel_ids,
+            ref_channel_id=fetched.ref_channel_id,
+            sort_valid_times=fetched.sort_valid_times,
+            raw_valid_times=fetched.raw_valid_times,
+            preproc_validated=fetched.preproc_validated,
+            probe_types=fetched.probe_types,
+            electrode_group_names=fetched.electrode_group_names,
+            existing_analysis_file_name=row["analysis_file_name"],
+        )
+        if rebuilt_hash != row["cache_hash"]:
+            logger.warning(
+                "Recording._rebuild_nwb_artifact: rebuilt cache_hash "
+                f"{rebuilt_hash} does not match stored {row['cache_hash']} "
+                "for analysis_file_name="
+                f"{row['analysis_file_name']!r}. The DataJoint row was not "
+                "deleted; inspect upstream raw NWB / SI version before "
+                "rerunning."
+            )
+
+    # ---- Implementation helpers -----------------------------------------
+
+    def _compute_recording_artifact(
+        self,
+        *,
+        raw_path: str,
+        nwb_file_name: str,
+        interval_list_name: str,
+        channel_ids: list,
+        ref_channel_id: int,
+        sort_valid_times,
+        raw_valid_times,
+        preproc_validated: PreprocessingParamsSchema,
+        probe_types: tuple,
+        electrode_group_names: tuple,
+        existing_analysis_file_name: str | None = None,
+    ) -> tuple[str, str, str, float, float, float, int, float]:
+        """Open raw NWB, run preprocessing, stream to AnalysisNwbfile.
+
+        Pipeline body shared between ``make_compute`` (fresh write,
+        ``existing_analysis_file_name=None``) and
+        ``_rebuild_nwb_artifact`` (overwrite the row's slot,
+        ``existing_analysis_file_name=row["analysis_file_name"]``).
+
+        Returns ``(analysis_file_name, object_id, cache_hash,
+        sampling_frequency, saved_start, saved_end, n_channels,
+        duration_s)`` -- the metadata needed for the
+        ``RecordingComputed`` boxing.
+
+        Cleanup contract: ``_write_nwb_artifact`` either writes a
+        full file or raises before any registration; if a later
+        metadata-extraction step raises after the file is on disk
+        AND ``existing_analysis_file_name is None`` (fresh write
+        path), the staged file is unlinked before propagation so a
+        half-written artifact never outlives a failed compute. On
+        the rebuild path the file IS the canonical cache so we do
+        NOT unlink -- a mid-write failure surfaces via the hash
+        mismatch check in the caller.
+        """
+        import pathlib as _pathlib
+
         import spikeinterface.extractors as se
 
-        from spyglass.spikesorting.v2.exceptions import (
-            RecordingTruncatedError,  # noqa: F401  -- raised inside helpers
-        )
+        from spyglass.spikesorting.v2.utils import _get_recording_timestamps
 
-        sel = (RecordingSelection & key).fetch1()
-        row = (self & key).fetch1()
-        nwb_file_name = sel["nwb_file_name"]
-        sort_group_id = int(sel["sort_group_id"])
-        interval_list_name = sel["interval_list_name"]
-        preproc_params_name = sel["preproc_params_name"]
-
-        raw_path = Nwbfile().get_abs_path(nwb_file_name)
         recording = se.read_nwb_recording(raw_path, load_time_vector=True)
-        # Apply the same non-monotonic timestamp repair on the rebuild
-        # path so the recomputed cache_hash uses the same
-        # corrected-timestamps array as the original write.
+        sampling_frequency = float(recording.get_sampling_frequency())
+
+        # Non-monotonic timestamp repair. See ``_repaired_timestamps``
+        # for the rationale + algorithm.
         all_timestamps = self._repaired_timestamps(recording, raw_path)
-        channel_ids = sorted(
-            (
-                SortGroupV2.SortGroupElectrode
-                & {
-                    "nwb_file_name": nwb_file_name,
-                    "sort_group_id": sort_group_id,
-                }
-            ).fetch("electrode_id"),
-            key=int,
-        )
-        ref_channel_id = int(
-            (
-                SortGroupV2
-                & {
-                    "nwb_file_name": nwb_file_name,
-                    "sort_group_id": sort_group_id,
-                }
-            ).fetch1("sort_reference_electrode_id")
-        )
-        preproc_validated = PreprocessingParamsSchema.model_validate(
-            (
-                PreprocessingParameters
-                & {"preproc_params_name": preproc_params_name}
-            ).fetch1("params")
-        )
-        sort_valid_times = (
-            IntervalList
-            & {
-                "nwb_file_name": nwb_file_name,
-                "interval_list_name": interval_list_name,
-            }
-        ).fetch1("valid_times")
-        raw_valid_times = (
-            IntervalList
-            & {
-                "nwb_file_name": nwb_file_name,
-                "interval_list_name": "raw data valid times",
-            }
-        ).fetch1("valid_times")
+
         recording, timestamps_override = self._restrict_recording(
             recording=recording,
             nwb_file_name=nwb_file_name,
@@ -1183,32 +1145,59 @@ class Recording(SpyglassMixin, dj.Computed):
             sort_group_channel_ids=channel_ids,
             validated=preproc_validated,
         )
-        probe_types, electrode_group_names = self._fetch_sort_group_probe_info(
-            nwb_file_name, channel_ids
-        )
         recording = self._maybe_apply_tetrode_geometry(
             recording=recording,
             probe_types=probe_types,
             electrode_group_names=electrode_group_names,
             sort_group_channel_ids=channel_ids,
         )
-        _, _, rebuilt_hash = self._write_nwb_artifact(
-            recording=recording,
-            nwb_file_name=nwb_file_name,
-            existing_analysis_file_name=row["analysis_file_name"],
-            timestamps_override=timestamps_override,
-        )
-        if rebuilt_hash != row["cache_hash"]:
-            logger.warning(
-                "Recording._rebuild_nwb_artifact: rebuilt cache_hash "
-                f"{rebuilt_hash} does not match stored {row['cache_hash']} "
-                "for analysis_file_name="
-                f"{row['analysis_file_name']!r}. The DataJoint row was not "
-                "deleted; inspect upstream raw NWB / SI version before "
-                "rerunning."
-            )
 
-    # ---- Implementation helpers -----------------------------------------
+        analysis_file_name = None
+        try:
+            (
+                analysis_file_name,
+                object_id,
+                cache_hash,
+            ) = self._write_nwb_artifact(
+                recording=recording,
+                nwb_file_name=nwb_file_name,
+                existing_analysis_file_name=existing_analysis_file_name,
+                timestamps_override=timestamps_override,
+            )
+            saved_times = _get_recording_timestamps(recording)
+            saved_start = float(saved_times[0])
+            saved_end = float(saved_times[-1])
+            n_channels = int(recording.get_num_channels())
+            duration_s = float(saved_end - saved_start)
+        except Exception:
+            # Only unlink on fresh-write failures; on rebuild the
+            # file IS the cache and partial-write damage is surfaced
+            # via the caller's hash-mismatch warning.
+            if (
+                existing_analysis_file_name is None
+                and analysis_file_name is not None
+            ):
+                try:
+                    abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+                    _pathlib.Path(abs_path).unlink(missing_ok=True)
+                except Exception as cleanup_exc:  # pragma: no cover -- defensive
+                    logger.error(
+                        "Recording._compute_recording_artifact: failed to "
+                        "clean up staged analysis file "
+                        f"{analysis_file_name!r}: {cleanup_exc!r}"
+                    )
+            raise
+
+        return (
+            analysis_file_name,
+            object_id,
+            cache_hash,
+            sampling_frequency,
+            saved_start,
+            saved_end,
+            n_channels,
+            duration_s,
+        )
 
     @classmethod
     def _restrict_recording(
