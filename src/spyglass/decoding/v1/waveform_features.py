@@ -160,7 +160,12 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
             sorter = source_key["sorter"]
             nwb_file_name = source_key["nwb_file_name"]
             analysis_nwb_key = "units"
-        elif "curation_v2" in source_table_name:
+        # v2 pipeline -- exact-match dispatch (not substring) so a
+        # future ``metric_curation_v2`` table cannot silently match
+        # the wrong branch. DataJoint table_name is the snake_case
+        # of the class name; ``CurationV2`` resolves to
+        # ``__curation_v2``.
+        elif source_table_name == "__curation_v2":
             # v2 pipeline: resolve sorter + nwb_file_name through the
             # v2 SortingSelection.RecordingSource part + v2's
             # RecordingSelection. v2 has no CurationV1/SpikeSortingSelection.

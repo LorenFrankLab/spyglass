@@ -158,6 +158,52 @@ i*sample_period`), correctly handling backslide-and-return
 patterns that plain cumulative-max would miss. Cross-references the
 in-flight v1 PR on `copilot/fix-populating-artifact-detection`.
 
+**Migration notes for v1 users porting workflows to v2:**
+
+- **Default Lookup row names changed.** v1 shipped a single
+  `PreprocessingParameters` row named `"default"`; v2 ships
+  `"default_franklab"`, `"default_neuropixels"`, and `"no_filter"`.
+  v1's single `"franklab_tetrode_hippocampus_30KHz"` (capital K)
+  `SorterParameters` row is now `"franklab_tetrode_hippocampus_30kHz_ms4"`
+  (lowercase k + sorter suffix), with a sibling `_ms5` row. v1
+  notebooks referencing the old names by string must update.
+- **`PreprocessingParamsSchema` field renames + drops.** v1's
+  top-level `frequency_min` / `frequency_max` / `margin_ms` / `seed`
+  are now nested under `bandpass_filter.{freq_min, freq_max}` and the
+  `margin_ms` / `seed` knobs are dropped (whitening is deferred to
+  the sorter; `margin_ms` was unused in v1's preprocessing).
+  `extra="forbid"` rejects v1-shaped blobs at insert; users
+  porting custom parameter rows must re-shape them under v2's
+  schema.
+- **Artifact `IntervalList` naming convention changed** from v1's
+  raw-UUID `interval_list_name` to v2's `f"artifact_{artifact_id}"`.
+  Notebook code that fetched IntervalList rows by raw UUID must
+  prepend `"artifact_"`. The `restrict_by_artifact=True` path on
+  `SpikeSortingOutput.get_restricted_merge_ids` accepts either
+  shape.
+- **`_consolidate_intervals` off-by-one fix.** v1's helper used
+  `searchsorted(side="right") - 1` for the per-interval end frame,
+  silently dropping the last sample (~33 µs at 30 kHz) of every
+  disjoint interval. v2 corrects this (uses `side="right"` without
+  the subtraction). v1 and v2 caches for the same multi-interval
+  input are therefore not byte-equivalent at the per-interval
+  boundary; the trace arrays differ by one sample per interval.
+  `cache_hash` will not match.
+- **`SortGroupV2.set_group_by_shank` API.** v1's per-group
+  `references: dict` parameter is gone; v2 takes a single
+  `sort_reference_electrode_id`. Users who need per-group
+  references in v2 must build the rows manually.
+- **Tetrode probe `set_contact_ids`** now passes string ids
+  (`[str(c) for c in sort_group_channel_ids]`) instead of v1's raw
+  integers. probeinterface accepts both; flagged for users who
+  introspect contact_id types.
+- **Artifact detection is not yet chunked.** v1 used
+  `ChunkRecordingExecutor` for memory-bounded artifact scans; v2's
+  current `_detect_artifacts` loads `recording.get_traces(...)`
+  fully into RAM (acceptable for <few-minute recordings, follow-up
+  work for chronic-scale). The `job_kwargs` resolver is wired but
+  not yet consumed at this stage.
+
 #### LFPBandV1 Fix
 
 If you were using a pre-release version of Spyglass 0.5.6 LFPBandV1 after April
