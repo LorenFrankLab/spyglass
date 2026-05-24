@@ -463,11 +463,17 @@ class Sorting(SpyglassMixin, dj.Computed):
         # caller (make_compute) falls back to the recording's
         # full timestamp envelope.
         if sel_row.get("artifact_id"):
+            from spyglass.spikesorting.v2.utils import (
+                artifact_interval_list_name,
+            )
+
             obs_intervals = (
                 IntervalList
                 & {
                     "nwb_file_name": nwb_file_name,
-                    "interval_list_name": f"artifact_{sel_row['artifact_id']}",
+                    "interval_list_name": artifact_interval_list_name(
+                        sel_row["artifact_id"]
+                    ),
                 }
             ).fetch1("valid_times")
         else:
@@ -515,11 +521,10 @@ class Sorting(SpyglassMixin, dj.Computed):
         recording_id = source.key["recording_id"]
         recording = Recording().get_recording({"recording_id": recording_id})
 
-        if sel_row.get("artifact_id"):
+        if sel_row.get("artifact_id") and obs_intervals is not None:
             recording = self._apply_artifact_mask(
                 recording=recording,
-                artifact_id=sel_row["artifact_id"],
-                recording_id=recording_id,
+                valid_times=obs_intervals,
             )
 
         sorter = sorter_row["sorter"]
@@ -647,8 +652,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         except Exception:
             try:
                 abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
-                if _pathlib.Path(abs_path).exists():
-                    _pathlib.Path(abs_path).unlink()
+                _pathlib.Path(abs_path).unlink(missing_ok=True)
             except Exception as cleanup_exc:  # pragma: no cover -- defensive
                 logger.error(
                     "Sorting.make_insert: failed to clean up staged units "
@@ -795,10 +799,28 @@ class Sorting(SpyglassMixin, dj.Computed):
             {"recording_id": source.key["recording_id"]}
         )
         if sel_row.get("artifact_id"):
+            from spyglass.common.common_interval import IntervalList
+            from spyglass.spikesorting.v2.recording import RecordingSelection
+            from spyglass.spikesorting.v2.utils import (
+                artifact_interval_list_name,
+            )
+
+            nwb_file_name = (
+                RecordingSelection
+                & {"recording_id": source.key["recording_id"]}
+            ).fetch1("nwb_file_name")
+            valid_times = (
+                IntervalList
+                & {
+                    "nwb_file_name": nwb_file_name,
+                    "interval_list_name": artifact_interval_list_name(
+                        sel_row["artifact_id"]
+                    ),
+                }
+            ).fetch1("valid_times")
             recording = self._apply_artifact_mask(
                 recording=recording,
-                artifact_id=sel_row["artifact_id"],
-                recording_id=source.key["recording_id"],
+                valid_times=valid_times,
             )
         sorting_obj = self.get_sorting(key)
         # ``_build_analyzer`` writes a folder to disk; a mid-rebuild
@@ -892,46 +914,47 @@ class Sorting(SpyglassMixin, dj.Computed):
     # ---- Implementation helpers -----------------------------------------
 
     @staticmethod
-    def _apply_artifact_mask(recording, artifact_id, recording_id):
-        """Zero out artifact intervals on the recording.
+    def _apply_artifact_mask(recording, valid_times):
+        """Zero out the complement of ``valid_times`` on the recording.
 
-        Looks up the IntervalList row written by ArtifactDetection.make
-        and uses ``sip.remove_artifacts(mode='zeros')`` to mask the
-        complement of the artifact-removed valid times.
+        ``valid_times`` is the artifact-removed (start, end) seconds
+        array from the upstream ``IntervalList``; ``make_fetch``
+        already fetched it as ``obs_intervals`` so ``make_compute``
+        passes it through here instead of re-issuing the DB lookup
+        (the tri-part contract forbids DB I/O inside compute).
         """
         import numpy as _np
         import spikeinterface.preprocessing as sip
 
-        from spyglass.common.common_interval import IntervalList
-        from spyglass.spikesorting.v2.recording import RecordingSelection
-
-        nwb_file_name = (
-            RecordingSelection & {"recording_id": recording_id}
-        ).fetch1("nwb_file_name")
-        interval_list_name = f"artifact_{artifact_id}"
-        valid_times = (
-            IntervalList
-            & {
-                "nwb_file_name": nwb_file_name,
-                "interval_list_name": interval_list_name,
-            }
-        ).fetch1("valid_times")
-
         timestamps = recording.get_times()
-        artifact_frames = []
+        # Walk the valid intervals left-to-right, collecting the
+        # complement (artifact gaps) as a list of (start_frame,
+        # end_frame) pairs. Each pair is materialized via
+        # ``np.arange`` and concatenated -- ~100x faster than the
+        # equivalent ``list.extend(range(start, end))`` for
+        # multi-million-sample recordings (Python-int boxing for
+        # every frame is the bottleneck of the loop form).
+        frame_ranges: list[tuple[int, int]] = []
         cursor = timestamps[0]
         for vs, ve in valid_times:
             if vs > cursor:
                 start = int(_np.searchsorted(timestamps, cursor))
                 end = int(_np.searchsorted(timestamps, vs))
-                artifact_frames.extend(range(start, end))
+                if end > start:
+                    frame_ranges.append((start, end))
             cursor = max(cursor, ve)
         if cursor < timestamps[-1]:
             start = int(_np.searchsorted(timestamps, cursor))
-            artifact_frames.extend(range(start, len(timestamps)))
+            end = len(timestamps)
+            if end > start:
+                frame_ranges.append((start, end))
 
-        if not artifact_frames:
+        if not frame_ranges:
             return recording
+
+        artifact_frames = _np.concatenate(
+            [_np.arange(s, e, dtype=_np.int64) for s, e in frame_ranges]
+        )
         # SI's ``list_triggers`` is documented as a list-of-arrays, one
         # per event channel. We pass a single numpy array wrapping ALL
         # artifact frames so the mask zeros every artifact sample
@@ -948,7 +971,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         # branch assigns to an empty slice).
         return sip.remove_artifacts(
             recording=recording,
-            list_triggers=[_np.asarray(artifact_frames, dtype=_np.int64)],
+            list_triggers=[artifact_frames],
             ms_before=None,
             ms_after=None,
             mode="zeros",

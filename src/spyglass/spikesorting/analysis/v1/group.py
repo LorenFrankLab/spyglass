@@ -201,19 +201,9 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             sorting_spike_times = nwb_file[nwb_field_name][
                 "spike_times"
             ].to_list()
-            # Use the NWB ``.id`` (the true unit_id) rather than the
-            # positional range. v2 merge-applied sortings produce
-            # sparse unit_id sets (e.g., {1, 3, 5} after collapsing
-            # {1,2}, {3,4}, {5}); positional indexing would mislabel
-            # them as {0, 1, 2}. The DataFrame returned by
-            # ``fetch_nwb`` is already indexed by the NWB id column
-            # for both v1 and v2 writers.
-            nwb_unit_ids = [
-                int(uid) for uid in nwb_file[nwb_field_name].index
-            ]
             file_unit_ids = [
                 {"spikesorting_merge_id": merge_id, "unit_id": unit_id}
-                for unit_id in nwb_unit_ids
+                for unit_id in _get_nwb_unit_ids(nwb_file, nwb_field_name)
             ]
 
             # filter the spike times based on the labels if present
@@ -364,3 +354,17 @@ def _get_spike_obj_name(nwb_file, allow_empty=False):
     if nwb_field_name is None and not allow_empty:
         raise ValueError("NWB file does not have 'object_id' or 'units' field")
     return nwb_field_name
+
+
+def _get_nwb_unit_ids(nwb_file, nwb_field_name) -> list[int]:
+    """Return the NWB units table's unit_id list (true ids, not positional).
+
+    v2 merge-applied sortings produce sparse unit_id sets (the kept
+    unit retains the head id, contributors disappear from the keep
+    set); any caller mapping a positional index back to a unit_id
+    would mis-label them. The DataFrame returned by
+    ``SpyglassMixin.fetch_nwb`` is indexed by the NWB ``id``
+    column for both v1 and v2 writers, so this helper centralizes
+    the "read the true ids" idiom.
+    """
+    return [int(uid) for uid in nwb_file[nwb_field_name].index]

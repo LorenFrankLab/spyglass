@@ -381,8 +381,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
             # left to clean up.
             try:
                 abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
-                if _pathlib.Path(abs_path).exists():
-                    _pathlib.Path(abs_path).unlink()
+                _pathlib.Path(abs_path).unlink(missing_ok=True)
             except Exception as cleanup_exc:  # pragma: no cover -- defensive
                 logger.error(
                     "CurationV2.insert_curation: failed to clean up "

@@ -180,19 +180,17 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
                 SortingSelection as _V2SortingSelection,
             )
 
-            sorting_id = (
-                SpikeSortingOutput.CurationV2 & merge_key
-            ).fetch1("sorting_id")
-            recording_id = (
-                _V2SortingSelection.RecordingSource
-                & {"sorting_id": sorting_id}
-            ).fetch1("recording_id")
-            sorter = (
-                _V2SortingSelection & {"sorting_id": sorting_id}
-            ).fetch1("sorter")
-            nwb_file_name = (
-                _V2RecordingSelection & {"recording_id": recording_id}
-            ).fetch1("nwb_file_name")
+            # Single chained join across CurationV2 -> SortingSelection
+            # (+ RecordingSource part) -> RecordingSelection. Avoids
+            # four separate round-trips for what is one
+            # join-resolvable record.
+            joined = (
+                SpikeSortingOutput.CurationV2
+                * _V2SortingSelection
+                * _V2SortingSelection.RecordingSource
+                * _V2RecordingSelection
+            ) & merge_key
+            sorter, nwb_file_name = joined.fetch1("sorter", "nwb_file_name")
             analysis_nwb_key = "object_id"
         # v1 pipeline
         else:

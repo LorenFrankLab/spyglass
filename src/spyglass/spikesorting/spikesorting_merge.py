@@ -181,18 +181,21 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
                 f"{sorted(allowed)}."
             )
 
+        from spyglass.spikesorting.v2.utils import (
+            parse_artifact_interval_list_name,
+        )
+
         key = key.copy()
         # ``restrict_by_artifact`` maps the artifact-named IntervalList
         # convention (``f"artifact_{artifact_id}"``) back to the
         # ``artifact_id`` master-side column so the v2 join chain
         # downstream resolves correctly.
         if restrict_by_artifact and "interval_list_name" in key:
-            interval_list_name = key["interval_list_name"]
-            if (
-                isinstance(interval_list_name, str)
-                and interval_list_name.startswith("artifact_")
-            ):
-                key["artifact_id"] = interval_list_name[len("artifact_"):]
+            artifact_id = parse_artifact_interval_list_name(
+                key["interval_list_name"]
+            )
+            if artifact_id is not None:
+                key["artifact_id"] = artifact_id
                 key.pop("interval_list_name", None)
 
         rec_restriction = {k: key[k] for k in rec_keys if k in key}

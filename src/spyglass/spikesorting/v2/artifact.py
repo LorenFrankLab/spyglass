@@ -599,9 +599,12 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         already active). Kept defensively so an out-of-populate
         caller still gets atomic registration.
         """
-        from spyglass.spikesorting.v2.utils import transaction_or_noop
+        from spyglass.spikesorting.v2.utils import (
+            artifact_interval_list_name,
+            transaction_or_noop,
+        )
 
-        interval_list_name = f"artifact_{key['artifact_id']}"
+        interval_list_name = artifact_interval_list_name(key["artifact_id"])
         # no-op when framework transaction is active; kept defensively
         # so an out-of-populate caller still gets atomic registration.
         with transaction_or_noop(self.connection):
@@ -792,6 +795,9 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         shared-artifact-group selections.
         """
         from spyglass.spikesorting.v2.recording import RecordingSelection
+        from spyglass.spikesorting.v2.utils import (
+            artifact_interval_list_name,
+        )
 
         source = ArtifactSelection.resolve_source(key)
         if "artifact_id" not in key:
@@ -799,7 +805,7 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
                 "ArtifactDetection.get_artifact_removed_intervals: key "
                 "must include 'artifact_id'."
             )
-        interval_list_name = f"artifact_{key['artifact_id']}"
+        interval_list_name = artifact_interval_list_name(key["artifact_id"])
 
         if source.kind == "recording":
             nwb_file_name = (
@@ -830,6 +836,10 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         """
         from spyglass.spikesorting.v2.recording import RecordingSelection
 
+        from spyglass.spikesorting.v2.utils import (
+            artifact_interval_list_name,
+        )
+
         # Collect the IntervalList rows to clean up BEFORE we delete the
         # master rows -- the source-part join no longer resolves after
         # the master is gone.
@@ -850,7 +860,9 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
                     f"{resolve_exc!r}"
                 )
                 continue
-            interval_list_name = f"artifact_{row['artifact_id']}"
+            interval_list_name = artifact_interval_list_name(
+                row["artifact_id"]
+            )
             if source.kind == "recording":
                 nwb_file_name = (
                     RecordingSelection

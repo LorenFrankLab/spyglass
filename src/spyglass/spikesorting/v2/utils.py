@@ -501,6 +501,33 @@ def _consolidate_intervals(intervals, timestamps):
     return _np.asarray(consolidated, dtype=_np.int64)
 
 
+_ARTIFACT_INTERVAL_LIST_PREFIX = "artifact_"
+
+
+def artifact_interval_list_name(artifact_id) -> str:
+    """Return the ``IntervalList.interval_list_name`` for an artifact id.
+
+    Centralizes the v2 convention ``f"artifact_{artifact_id}"`` so the
+    prefix lives in one place; ``parse_artifact_interval_list_name``
+    is its inverse.
+    """
+    return f"{_ARTIFACT_INTERVAL_LIST_PREFIX}{artifact_id}"
+
+
+def parse_artifact_interval_list_name(name: str):
+    """Return the artifact id encoded in an artifact IntervalList name.
+
+    Returns ``None`` if ``name`` is not in the artifact-named form,
+    matching the merge-dispatcher's "leave non-artifact names alone"
+    contract.
+    """
+    if isinstance(name, str) and name.startswith(
+        _ARTIFACT_INTERVAL_LIST_PREFIX
+    ):
+        return name[len(_ARTIFACT_INTERVAL_LIST_PREFIX) :]
+    return None
+
+
 def get_spiking_sorting_v2_merge_ids(
     restriction: dict, as_dict: bool = False
 ) -> list:
@@ -539,9 +566,9 @@ def get_spiking_sorting_v2_merge_ids(
 def _hash_nwb_recording(analysis_file_name: str) -> str:
     """Return a content hash of a recording's AnalysisNwbfile.
 
-    Delegates to Spyglass's ``NwbfileHasher`` so v2 recompute verification
-    uses the same hashing path as the v1 recompute machinery rather than a
-    parallel implementation.
+    Delegates to ``AnalysisNwbfile().get_hash`` (the project's blessed
+    wrapper over ``NwbfileHasher``) so v2 verification uses the same
+    hashing path as the v1 recompute machinery.
 
     Parameters
     ----------
@@ -554,7 +581,5 @@ def _hash_nwb_recording(analysis_file_name: str) -> str:
         The ``NwbfileHasher`` digest of the file.
     """
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.utils.nwb_hash import NwbfileHasher
 
-    abs_path = AnalysisNwbfile().get_abs_path(analysis_file_name)
-    return NwbfileHasher(abs_path).hash
+    return AnalysisNwbfile().get_hash(analysis_file_name)

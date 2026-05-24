@@ -944,8 +944,7 @@ class Recording(SpyglassMixin, dj.Computed):
             if analysis_file_name is not None:
                 try:
                     abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
-                    if _pathlib.Path(abs_path).exists():
-                        _pathlib.Path(abs_path).unlink()
+                    _pathlib.Path(abs_path).unlink(missing_ok=True)
                 except Exception as cleanup_exc:  # pragma: no cover -- defensive
                     logger.error(
                         "Recording.make_compute: failed to clean up staged "
@@ -1018,8 +1017,7 @@ class Recording(SpyglassMixin, dj.Computed):
             # have to chase an orphan from a request-time validation.
             try:
                 abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
-                if _pathlib.Path(abs_path).exists():
-                    _pathlib.Path(abs_path).unlink()
+                _pathlib.Path(abs_path).unlink(missing_ok=True)
             except Exception as cleanup_exc:  # pragma: no cover -- defensive
                 logger.error(
                     "Recording.make_insert: failed to clean up unregistered "
@@ -1057,8 +1055,7 @@ class Recording(SpyglassMixin, dj.Computed):
         except Exception:
             try:
                 abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
-                if _pathlib.Path(abs_path).exists():
-                    _pathlib.Path(abs_path).unlink()
+                _pathlib.Path(abs_path).unlink(missing_ok=True)
             except Exception as cleanup_exc:  # pragma: no cover -- defensive
                 logger.error(
                     "Recording.make_insert: failed to clean up staged "
@@ -1713,8 +1710,7 @@ class Recording(SpyglassMixin, dj.Computed):
                     analysis_file_name,
                     from_schema=bool(existing_analysis_file_name),
                 )
-                if _pathlib.Path(_abs).exists():
-                    _pathlib.Path(_abs).unlink()
+                _pathlib.Path(_abs).unlink(missing_ok=True)
             except Exception as cleanup_exc:  # pragma: no cover -- defensive
                 logger.error(
                     "Recording._write_nwb_artifact: failed to clean up "

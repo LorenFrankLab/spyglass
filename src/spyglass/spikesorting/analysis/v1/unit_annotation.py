@@ -3,7 +3,10 @@ from typing import Optional, Union
 import datajoint as dj
 import numpy as np
 
-from spyglass.spikesorting.analysis.v1.group import _get_spike_obj_name
+from spyglass.spikesorting.analysis.v1.group import (
+    _get_nwb_unit_ids,
+    _get_spike_obj_name,
+)
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 from spyglass.utils import logger
 from spyglass.utils.dj_mixin import SpyglassMixin
@@ -70,13 +73,10 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
                 SpikeSortingOutput & {"merge_id": key["spikesorting_merge_id"]}
             ).fetch_nwb()[0]
             nwb_field_name = _get_spike_obj_name(nwb_file)
-            # Compare against the NWB's actual unit_id set (the
-            # DataFrame index), not the count. v2 merge-applied
-            # sortings produce sparse unit_ids, so the count is
-            # smaller than the max id.
-            nwb_unit_ids = {
-                int(uid) for uid in nwb_file[nwb_field_name].index
-            }
+            # Compare against the NWB's actual unit_id set, not the
+            # count -- v2 sparse-id sortings break the count-as-bound
+            # heuristic.
+            nwb_unit_ids = set(_get_nwb_unit_ids(nwb_file, nwb_field_name))
             if (
                 int(key["unit_id"]) not in nwb_unit_ids
                 and not self._test_mode
@@ -140,15 +140,11 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
         for nwb_file, merge_id in zip(nwb_file_list, merge_ids):
             nwb_field_name = _get_spike_obj_name(nwb_file)
             # Build an explicit ``unit_id -> spike_times`` map keyed
-            # by the NWB's actual unit ids. v2 merge-applied
-            # sortings produce sparse unit_id sets; positional
-            # ``sorting_spike_times[unit_id]`` would mis-index.
+            # by the NWB's actual unit ids -- v2 sparse-id sortings
+            # would mis-index a positional list-of-spike_times.
             unit_id_to_spike_times = dict(
                 zip(
-                    [
-                        int(uid)
-                        for uid in nwb_file[nwb_field_name].index
-                    ],
+                    _get_nwb_unit_ids(nwb_file, nwb_field_name),
                     nwb_file[nwb_field_name]["spike_times"].to_list(),
                 )
             )
