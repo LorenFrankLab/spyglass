@@ -242,14 +242,37 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
                 "those selections first."
             )
 
-        sessions = list(
-            {
-                (
-                    RecordingSelection & {"recording_id": rid}
-                ).fetch1("nwb_file_name")
-                for rid in member_recording_ids
-            }
+        # Time-axis compatibility check. ``RecordingSelection`` is
+        # keyed by (nwb_file_name, sort_group_id, interval_list_name,
+        # preproc_params_name, team_name); same NWB does NOT imply
+        # same time axis. ``si.aggregate_channels`` requires every
+        # member to share ``n_samples``, ``sampling_frequency``, and
+        # dtype, otherwise the union construction crashes deep inside
+        # SI with an opaque "shape mismatch" error at populate time.
+        # Catch the invariant at insert time so the user gets a
+        # clear diagnostic before populate.
+        per_member_recording_rows = (
+            Recording
+            & [{"recording_id": rid} for rid in member_recording_ids]
+        ).fetch("recording_id", "sampling_frequency", "duration_s", as_dict=True)
+        per_member_selection_rows = (
+            RecordingSelection
+            & [{"recording_id": rid} for rid in member_recording_ids]
+        ).fetch(
+            "recording_id",
+            "nwb_file_name",
+            "interval_list_name",
+            as_dict=True,
         )
+        # Index by recording_id so we can compose the two relations.
+        rec_by_id = {
+            str(r["recording_id"]): r for r in per_member_recording_rows
+        }
+        sel_by_id = {
+            str(r["recording_id"]): r for r in per_member_selection_rows
+        }
+
+        sessions = {sel_by_id[str(rid)]["nwb_file_name"] for rid in member_recording_ids}
         if len(sessions) != 1:
             raise ValueError(
                 "SharedArtifactGroup.insert_group: members span "
@@ -259,6 +282,45 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
                 "keyed by (nwb_file_name, interval_list_name)."
             )
         (nwb_file_name,) = sessions
+
+        # Sampling frequency must match: SI's ``aggregate_channels``
+        # requires identical fs. A typo in upstream preproc params
+        # could silently produce different ``sampling_frequency``
+        # values on the same NWB; catch it here.
+        sampling_frequencies = {
+            float(rec_by_id[str(rid)]["sampling_frequency"])
+            for rid in member_recording_ids
+        }
+        if len(sampling_frequencies) != 1:
+            raise ValueError(
+                "SharedArtifactGroup.insert_group: members have "
+                f"differing sampling frequencies "
+                f"{sorted(sampling_frequencies)}; "
+                "``si.aggregate_channels`` requires identical fs."
+            )
+
+        # Duration / n_samples must match too. We approximate
+        # ``n_samples`` from ``sampling_frequency * duration_s``;
+        # tolerance is one sample interval to absorb the
+        # floating-point off-by-one between ``duration_s`` (end
+        # timestamp - start timestamp = (N-1)/fs) and the actual
+        # sample count. Differing durations indicate members were
+        # sliced on different ``interval_list_name`` -- aggregate
+        # would crash with a shape mismatch.
+        durations = sorted(
+            float(rec_by_id[str(rid)]["duration_s"])
+            for rid in member_recording_ids
+        )
+        if durations[-1] - durations[0] > 1.5 / sampling_frequencies.pop():
+            raise ValueError(
+                "SharedArtifactGroup.insert_group: members have "
+                "differing durations "
+                f"{[f'{d:.6f}' for d in durations]}; "
+                "the shared-group artifact-detection assumes all "
+                "members share a time axis. Likely cause: "
+                "different ``interval_list_name`` values on the "
+                "upstream RecordingSelection rows."
+            )
 
         master_row = {
             "shared_artifact_group_name": name,

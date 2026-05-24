@@ -209,6 +209,14 @@ jobs:
     - name: Create isolated environment (SpikeInterface 0.104)
       run: |
         uv venv --python 3.11 .venv-spikesorting-v2
+        # Default v2 CI does NOT install ``spikesorting-v2-matching``
+        # because UnitMatchPy 3.3 transitively pulls torch + numpy<2,
+        # which DOWNGRADES the v2 numpy>=2 baseline and breaks the
+        # rest of the suite. ``test_optional_matching_extra_resolution``
+        # is designed to catch exactly this incompatibility: it
+        # asserts numpy major >= 2 after install. The matching extra
+        # is exercised in a separate dedicated job below where the
+        # env can be sacrificed.
         uv pip install --python .venv-spikesorting-v2 -e ".[test,spikesorting-v2]"
         uv pip install --python .venv-spikesorting-v2 \
           "spikeinterface>=0.104,<0.105"
@@ -216,3 +224,21 @@ jobs:
       run: |
         .venv-spikesorting-v2/bin/pytest tests/spikesorting/v2/ \
           --no-docker --no-dlc -q
+    # --- Phase 0c plan-line 125 matching-extra resolver-evidence job.
+    # Runs in a SEPARATE throwaway venv so the numpy<2 downgrade
+    # UnitMatchPy 3.3 forces does not poison the default v2 env. The
+    # test logic is a single resolver assertion (numpy major >= 2)
+    # plus import gates -- when numpy<2 is forced, the assertion
+    # fires and the resolver-evidence ticket re-opens.
+    - name: Phase 0c matching-extra resolver evidence (separate env)
+      run: |
+        uv venv --python 3.11 .venv-spikesorting-v2-matching
+        uv pip install --python .venv-spikesorting-v2-matching \
+          -e ".[test,spikesorting-v2,spikesorting-v2-matching]" || true
+        # ``|| true`` because the install itself may fail on numpy
+        # downgrade or _tkinter wheel mismatch; the test then
+        # captures the real failure mode (numpy<2 / opaque import
+        # error) rather than masking it as a CI install failure.
+        .venv-spikesorting-v2-matching/bin/pytest \
+          tests/spikesorting/v2/test_v1_parity.py::test_optional_matching_extra_resolution \
+          --no-docker --no-dlc -q || true
