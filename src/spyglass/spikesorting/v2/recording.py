@@ -1369,6 +1369,10 @@ class Recording(SpyglassMixin, dj.Computed):
             channel_names = electrodes_table["channel_name"]
             return [channel_names[int(c)] for c in spyglass_ids]
 
+    # 10M float64 timestamps -> ~80 MB diff buffer per chunk; fits
+    # comfortably under per-process memory budgets. A 24 h x 30 kHz
+    # session is ~2.6e9 samples -> ~260 chunks, each iteration's
+    # Python overhead negligible vs the chunk math.
     _MONOTONICITY_CHECK_CHUNK_SIZE = 10_000_000
 
     @staticmethod
@@ -1455,12 +1459,21 @@ class Recording(SpyglassMixin, dj.Computed):
         buffer = np.subtract(all_timestamps, i_times_sp)
         np.maximum.accumulate(buffer, out=buffer)
         np.add(buffer, i_times_sp, out=buffer)
+        # ``n_changed`` is the count of samples whose value moved
+        # after the cummax round-trip -- typically larger than
+        # ``n_issues`` because a single backslide cascades up to its
+        # cummax peak. Affordable (one bool array ~N bytes vs the
+        # ~16 N-byte working set) and the cascade count helps
+        # diagnose epoch-stitching scope vs a one-off precision
+        # blip.
+        n_changed = int(np.count_nonzero(buffer != all_timestamps))
         logger.warning(
             f"Source recording {raw_path!r} has {n_issues} "
-            "non-monotonic timestamp(s); adjusted to strictly "
-            "increasing (offsets of <= one sample_period). Likely "
-            "floating-point precision or epoch-stitching artifacts; "
-            "consider validating the source recording."
+            f"non-monotonic timestamp(s); adjusted {n_changed} "
+            "sample(s) to strictly increasing (offsets of <= one "
+            "sample_period). Likely floating-point precision or "
+            "epoch-stitching artifacts; consider validating the "
+            "source recording."
         )
         return buffer
 

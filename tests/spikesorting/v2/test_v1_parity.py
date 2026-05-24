@@ -232,25 +232,43 @@ def test_n50_chunked_monotonicity_count_matches_unchunked():
     """The chunked monotonicity counter agrees with np.diff over chunks.
 
     The chunked counter (used to keep peak memory bounded for chronic
-    recordings) overlaps adjacent chunks by one sample so boundary
-    diffs are computed exactly once. Verify the count matches the
-    naive ``np.sum(np.diff(ts) <= 0)`` for arbitrary chunk sizes,
-    including the small-chunk case where many chunks contribute.
+    recordings) overlaps adjacent chunks by one sample so the diff at
+    every boundary is computed exactly once. Parametrizations are
+    chosen so:
+
+    * Multiple chunks contribute (chunk_size < n) for every case.
+    * At least one injected non-monotonic event sits ON a chunk
+      boundary for each chunk_size -- this is the off-by-one
+      regression we are guarding against (without the overlap-by-one
+      window, a boundary event would be counted zero or two times).
     """
     from spyglass.spikesorting.v2.recording import Recording
 
     rng = np.random.default_rng(0xCA7E)
-    ts = np.cumsum(rng.uniform(0.0009, 0.0011, size=10_000))
-    # Inject some non-monotonic spots.
-    for i in (123, 1_000, 5_555, 9_999):
-        ts[i] = ts[i - 1] - 0.001
+    n = 10_000
+    ts = np.cumsum(rng.uniform(0.0009, 0.0011, size=n))
+    # Inject 4 non-monotonic spots at fixed offsets PLUS one per
+    # tested chunk size at the exact boundary. The fixed offsets
+    # land at various positions inside / across chunks; the
+    # boundary-injected ones land precisely at i == k*chunk_size
+    # so a broken overlap window would miscount them.
+    fixed_offenders = (123, 1_000, 5_555, 9_999)
+    chunk_sizes = (5, 100, 1_000, 3_333)
+    for cs in chunk_sizes:
+        boundary = cs  # i = 1 * chunk_size: exact overlap point
+        for i in (*fixed_offenders, boundary):
+            ts[i] = ts[i - 1] - 0.001
 
-    expected = int(np.sum(np.diff(ts) <= 0))
-    for chunk_size in (5, 100, 1_000, 10_000, 100_000):
-        assert (
-            Recording._count_non_monotonic_chunked(ts, chunk_size)
-            == expected
-        ), f"chunked counter disagreed at chunk_size={chunk_size}"
+        expected = int(np.sum(np.diff(ts) <= 0))
+        actual = Recording._count_non_monotonic_chunked(ts, cs)
+        assert actual == expected, (
+            f"chunked counter at chunk_size={cs}: got {actual}, "
+            f"expected {expected}. Boundary-event miscount is the "
+            "off-by-one regression this test guards against."
+        )
+        # Reset the boundary offender so the next iteration injects
+        # its own.
+        ts[boundary] = ts[boundary - 1] + 0.001
 
 
 @pytest.mark.parametrize(
