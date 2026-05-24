@@ -895,13 +895,20 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         return _np.asarray(kept) if kept else _np.empty((0, 2))
 
     def get_artifact_removed_intervals(self, key):
-        """Thin ``IntervalList.fetch1('valid_times')`` wrapper.
+        """Return the artifact-removed ``valid_times`` for ``key``.
 
-        Returns the artifact-removed valid times array for the
-        ``artifact_id`` keyed by ``key``. The IntervalList row's
-        ``nwb_file_name`` is resolved through the upstream source part
-        so this works for both single-recording and (once implemented)
-        shared-artifact-group selections.
+        Single-recording source: one ``IntervalList`` row keyed by
+        the recording's parent ``nwb_file_name`` -- returned as a
+        plain ``(n_intervals, 2)`` ndarray.
+
+        Shared-artifact-group source: ``make_insert`` writes one
+        ``IntervalList`` row per distinct member ``nwb_file_name``
+        (today single-session, so length 1). Returns a dict
+        keyed by ``nwb_file_name`` mapping to the per-member
+        ``valid_times`` array. All values are equal across keys
+        (the detection ran ONCE over the unioned channels and
+        ``make_insert`` wrote the same array per member), so a
+        caller that wants a single array can ``next(iter(d.values()))``.
         """
         from spyglass.spikesorting.v2.recording import RecordingSelection
         from spyglass.spikesorting.v2.utils import (
@@ -929,10 +936,33 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
                 }
             ).fetch1("valid_times")
 
-        raise NotImplementedError(
-            "ArtifactDetection.get_artifact_removed_intervals for "
-            "SharedArtifactGroup is not yet implemented."
+        # shared_artifact_group source: collect the member
+        # nwb_file_names through the Member -> RecordingSelection
+        # join, fetch each member's IntervalList row, return a
+        # name->valid_times dict.
+        members = (
+            SharedArtifactGroup.Member
+            * RecordingSelection
+            & {
+                "shared_artifact_group_name": source.key[
+                    "shared_artifact_group_name"
+                ]
+            }
+        ).fetch("nwb_file_name", as_dict=True)
+        member_nwb_files = list(
+            dict.fromkeys(m["nwb_file_name"] for m in members)
         )
+        rows = (
+            IntervalList
+            & [
+                {
+                    "nwb_file_name": nwb,
+                    "interval_list_name": interval_list_name,
+                }
+                for nwb in member_nwb_files
+            ]
+        ).fetch("nwb_file_name", "valid_times", as_dict=True)
+        return {row["nwb_file_name"]: row["valid_times"] for row in rows}
 
     def delete(self, *args, safemode=None, **kwargs):
         """Override that also removes the matching IntervalList rows.
@@ -983,7 +1013,32 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
                         "interval_list_name": interval_list_name,
                     }
                 )
-            # shared_artifact_group branch lands with the group helper.
+            elif source.kind == "shared_artifact_group":
+                # ``make_insert`` wrote one IntervalList row per
+                # distinct member ``nwb_file_name``; collect them
+                # all for cleanup. The Member -> RecordingSelection
+                # join surfaces the per-member nwb_file_name set.
+                members = (
+                    SharedArtifactGroup.Member
+                    * RecordingSelection
+                    & {
+                        "shared_artifact_group_name": source.key[
+                            "shared_artifact_group_name"
+                        ]
+                    }
+                ).fetch("nwb_file_name", as_dict=True)
+                seen = set()
+                for m in members:
+                    nwb = m["nwb_file_name"]
+                    if nwb in seen:
+                        continue
+                    seen.add(nwb)
+                    interval_rows_to_remove.append(
+                        {
+                            "nwb_file_name": nwb,
+                            "interval_list_name": interval_list_name,
+                        }
+                    )
 
         if safemode is None:
             super().delete(*args, **kwargs)

@@ -4933,6 +4933,108 @@ def test_merge_dispatch_consumer_api_works_on_v2_merge_id(
 
 @pytest.mark.slow
 @pytest.mark.integration
+def test_sorted_spikes_group_works_with_v2_merge_id(populated_sorting):
+    """N54 downstream-consumer: ``SortedSpikesGroup`` builds and
+    fetches spike data + firing rate on a v2 merge_id.
+
+    Constructs a ``SortedSpikesGroup`` from a v2 curation's
+    merge_id (the cross-pipeline path used by decoding and
+    ripple-detection workflows), then exercises
+    ``fetch_spike_data``, ``get_spike_indicator``,
+    ``get_firing_rate`` (per-unit and MUA-multiunit modes).
+    Catches the N36 sparse-unit_id and the v2-merge-dispatch
+    regressions on the actual SortedSpikesGroup surface, not
+    just the SpikeSortingOutput primitive APIs.
+    """
+    import numpy as _np
+
+    from spyglass.spikesorting.analysis.v1.group import (
+        SortedSpikesGroup,
+        UnitSelectionParams,
+    )
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    _clear_curations(populated_sorting)
+    pk = CurationV2.insert_curation(
+        sorting_key=populated_sorting, labels={}
+    )
+    merge_id = (SpikeSortingOutput.CurationV2 & pk).fetch1("merge_id")
+
+    # Use the default ``all_units`` UnitSelectionParams that ships
+    # with the analysis module.
+    UnitSelectionParams().insert_default()
+    from spyglass.spikesorting.v2.recording import RecordingSelection
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    recording_id = (
+        SortingSelection.RecordingSource & populated_sorting
+    ).fetch1("recording_id")
+    actual_nwb = (
+        RecordingSelection & {"recording_id": recording_id}
+    ).fetch1("nwb_file_name")
+
+    group_name = "v2_test_sorted_spikes_group"
+    # Idempotent: drop any prior group from earlier test runs.
+    existing = SortedSpikesGroup & {
+        "sorted_spikes_group_name": group_name,
+        "nwb_file_name": actual_nwb,
+    }
+    if existing:
+        existing.super_delete(warn=False)
+
+    SortedSpikesGroup().create_group(
+        group_name=group_name,
+        nwb_file_name=actual_nwb,
+        unit_filter_params_name="all_units",
+        keys=[{"spikesorting_merge_id": merge_id}],
+    )
+    group_key = {
+        "sorted_spikes_group_name": group_name,
+        "nwb_file_name": actual_nwb,
+        "unit_filter_params_name": "all_units",
+    }
+
+    # 1. fetch_spike_data returns per-unit spike-time arrays.
+    spike_times, file_unit_ids = SortedSpikesGroup.fetch_spike_data(
+        group_key, return_unit_ids=True
+    )
+    assert isinstance(spike_times, list)
+    assert len(spike_times) >= 1, (
+        "SortedSpikesGroup.fetch_spike_data returned zero units for a "
+        "v2 merge_id with n_units>=1; N36 sparse-id regression."
+    )
+    # file_unit_ids is a list of dicts; each carries the v2 merge_id
+    # + unit_id from the NWB index (not a positional range).
+    for entry in file_unit_ids:
+        assert entry["spikesorting_merge_id"] == merge_id
+
+    # 2. get_spike_indicator: (n_time, n_units) shape, non-negative.
+    time_array = _np.arange(0.0, 4.0, 0.1)
+    indicator = SortedSpikesGroup.get_spike_indicator(group_key, time_array)
+    n_units = int((Sorting & populated_sorting).fetch1("n_units"))
+    assert indicator.shape == (len(time_array), n_units)
+    assert _np.all(indicator >= 0)
+
+    # 3. get_firing_rate per-unit AND multiunit (MUA).
+    fr_per_unit = SortedSpikesGroup.get_firing_rate(
+        group_key, time_array, multiunit=False
+    )
+    assert fr_per_unit.shape == (len(time_array), n_units)
+    assert _np.all(fr_per_unit >= 0)
+
+    fr_mua = SortedSpikesGroup.get_firing_rate(
+        group_key, time_array, multiunit=True
+    )
+    # Multiunit firing rate is a single trace per group.
+    assert fr_mua.shape == (len(time_array), 1)
+    assert _np.all(fr_mua >= 0)
+    assert _np.all(_np.isfinite(fr_mua))
+
+
+@pytest.mark.slow
+@pytest.mark.integration
 def test_shared_artifact_group_populate_end_to_end(
     populated_recording, polymer_smoke_session
 ):
@@ -4996,3 +5098,38 @@ def test_shared_artifact_group_populate_end_to_end(
     ).fetch(as_dict=True)
     assert len(rows) == 1
     assert rows[0]["pipeline"] == "spikesorting_artifact_v2"
+
+    # ``get_artifact_removed_intervals`` returns a dict keyed by
+    # member nwb_file_name for shared-group sources. Today single
+    # member -> single entry in the dict; the value array equals
+    # the IntervalList row's valid_times.
+    import numpy as _np
+
+    shared_intervals = ArtifactDetection().get_artifact_removed_intervals(
+        art_pk
+    )
+    assert isinstance(shared_intervals, dict), (
+        f"get_artifact_removed_intervals returned {type(shared_intervals)}; "
+        "expected dict for shared-group source."
+    )
+    assert nwb_file_name in shared_intervals
+    _np.testing.assert_array_equal(
+        shared_intervals[nwb_file_name], rows[0]["valid_times"]
+    )
+
+    # ``ArtifactDetection.delete()`` cleans up the matching
+    # IntervalList rows for ALL member nwb_file_names, not just
+    # the recording-source case.
+    (ArtifactDetection & art_pk).delete(safemode=False)
+    remaining = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": interval_name,
+        }
+    ).fetch(as_dict=True)
+    assert len(remaining) == 0, (
+        "ArtifactDetection.delete() left an orphan IntervalList "
+        "row for a shared-group artifact; the delete-cleanup "
+        "branch for shared sources is broken."
+    )

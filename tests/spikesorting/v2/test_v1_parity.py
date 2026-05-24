@@ -117,6 +117,82 @@ def test_kilosort4_schema_accepts_extra_kwargs_v1_parity():
     assert blob["nearest_chans"] == 10
 
 
+def test_optional_matching_extra_resolution():
+    """Phase 0c contract: ``spikesorting-v2-matching`` extra
+    resolves cleanly with the v2 NumPy + Python pins and a
+    ``UnitMatchPy`` import does not fail loudly on the
+    ``_tkinter`` import path that older versions trip on.
+
+    Plan reference: ``phase-0c-si-0104-prerequisite.md:125``.
+    The extra ships ``UnitMatchPy>=3.3,<4`` + ``mat73``. The
+    test:
+
+    1. If the extra is NOT installed (the default test
+       environment), skip cleanly so this test acts as
+       documentation rather than a hard requirement -- it
+       activates only when a user installs ``pip install
+       "spyglass-neuro[spikesorting-v2-matching]"``.
+    2. If installed, verify:
+       a. ``mat73`` imports.
+       b. ``UnitMatchPy`` imports OR raises a *clear* import
+          error citing ``_tkinter`` (the known ``UnitMatchPy``
+          GUI dependency that broke on minimal Python builds);
+          a bare ``ImportError`` without ``_tkinter`` in the
+          message is the actual regression we guard against.
+       c. NumPy version remains in the v2-supported range
+          (``>=2.0``) -- ``UnitMatchPy`` historically pinned
+          ``numpy<2`` which would force an environment
+          downgrade. The Phase 0c plan requires the resolver to
+          have confirmed this does not happen.
+    """
+    import importlib
+    import importlib.util
+
+    mat73_available = importlib.util.find_spec("mat73") is not None
+    unitmatch_available = importlib.util.find_spec("UnitMatchPy") is not None
+
+    if not (mat73_available or unitmatch_available):
+        pytest.skip(
+            "spikesorting-v2-matching extra is not installed in "
+            "this environment; this test activates when the user "
+            "runs ``pip install spyglass-neuro[spikesorting-v2-matching]``."
+        )
+
+    # mat73 is the small ScilabHDF5 .mat reader; failure here would
+    # be a packaging regression on the extra itself.
+    if mat73_available:
+        import mat73  # noqa: F401
+
+    # UnitMatchPy: a clean import IS the desired contract. If it
+    # raises, the error message MUST cite ``_tkinter`` (the known
+    # GUI-import dependency) so a user can diagnose; a bare
+    # ``ImportError`` without a clue is the failure mode we guard
+    # against.
+    if unitmatch_available:
+        try:
+            importlib.import_module("UnitMatchPy")
+        except ImportError as exc:
+            assert "_tkinter" in str(exc) or "tkinter" in str(exc), (
+                f"UnitMatchPy import failed with an opaque "
+                f"ImportError that does not cite the known "
+                f"``_tkinter`` cause: {exc!r}. Phase 0c required "
+                "the import path to either succeed or surface the "
+                "``_tkinter`` dependency clearly."
+            )
+
+    # NumPy compatibility: the v2 supported pin is ``>=2.0``. A
+    # matching-extra install MUST NOT have forced a downgrade.
+    import numpy as np
+
+    np_major = int(np.__version__.split(".")[0])
+    assert np_major >= 2, (
+        f"NumPy {np.__version__} is below the v2-supported >=2.0 "
+        "pin; spikesorting-v2-matching install forced an "
+        "environment downgrade -- the Phase 0c resolver evidence "
+        "needs re-verification."
+    )
+
+
 def test_ms4_default_row_only_shipped_when_ms4_installed():
     """Phase 0c MS4 runtime guard.
 
