@@ -115,6 +115,22 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
             None,
         ),
         (
+            # v1-parity port of the ``franklab_probe_ctx_30KHz`` row at
+            # ``v1/sorting.py:158-159`` (cortex-probe MS4 preset).
+            # Cortex probes have lower spike-band content than
+            # tetrodes; the ``freq_min=300`` floor catches more of
+            # the spectrum than the tetrode preset's ``freq_min=600``.
+            # Name normalized to v2's lowercase-k convention.
+            "mountainsort4",
+            "franklab_probe_ctx_30kHz_ms4",
+            _validate_params(
+                _get_sorter_schema("mountainsort4"),
+                {"freq_min": 300.0, "freq_max": 6000.0},
+            ),
+            1,
+            None,
+        ),
+        (
             "mountainsort5",
             "franklab_tetrode_hippocampus_30kHz_ms5",
             _validate_params(_get_sorter_schema("mountainsort5"), {}),
@@ -690,13 +706,15 @@ class Sorting(SpyglassMixin, dj.Computed):
         the original sample indices and ``return_times=True`` returns
         the recording-timeline times.
 
-        ``as_dataframe=True`` returns a pandas DataFrame with
-        ``unit_id`` + ``spike_times`` (in seconds) columns -- a
-        pre-curation peek convenience mirroring v1's
-        ``(SpikeSorting & key).fetch_nwb()`` notebook pattern. The
-        ``CurationV2.get_sorting`` accessor uses the same
-        ``as_dataframe`` flag with the same core columns and adds
-        a ``curation_label`` column joined from
+        ``as_dataframe=True`` returns a pandas DataFrame whose
+        **index is the unit_id** and which carries a
+        ``spike_times`` column (in seconds) -- mirrors v1's
+        ``nwb.units.to_dataframe()`` shape at
+        ``v1/curation.py:197-209``. Notebook code using
+        ``df.loc[uid]["spike_times"]`` works on both v1 and v2
+        outputs. The ``CurationV2.get_sorting`` accessor uses the
+        same ``as_dataframe`` flag with the same index + spike_times
+        column and adds a ``curation_label`` column joined from
         ``CurationV2.UnitLabel``.
         """
         from spikeinterface.extractors import NwbSortingExtractor
@@ -725,16 +743,20 @@ class Sorting(SpyglassMixin, dj.Computed):
         # IDs), this cast would raise; pre-curation NWBs written by
         # v2 itself always pass.
         unit_ids = [int(uid) for uid in si_sorting.unit_ids]
+        spike_times = [
+            si_sorting.get_unit_spike_train(
+                unit_id=uid, return_times=True
+            )
+            for uid in si_sorting.unit_ids
+        ]
+        # Index by ``unit_id`` (matches v1's
+        # ``nwb.units.to_dataframe()`` shape) so notebook code
+        # using ``df.loc[uid]`` reads the right row instead of a
+        # positional row that may not even exist on sparse-id
+        # post-merge sortings.
         return pd.DataFrame(
-            {
-                "unit_id": unit_ids,
-                "spike_times": [
-                    si_sorting.get_unit_spike_train(
-                        unit_id=uid, return_times=True
-                    )
-                    for uid in si_sorting.unit_ids
-                ],
-            }
+            {"spike_times": spike_times},
+            index=pd.Index(unit_ids, name="unit_id"),
         )
 
     @staticmethod
@@ -1293,21 +1315,29 @@ class Sorting(SpyglassMixin, dj.Computed):
             path=analysis_abs_path, mode="a", load_namespaces=True
         ) as io:
             nwbf = io.read()
-            # Declare the ``curation_label`` indexed list column
-            # BEFORE adding any unit so v1-style readers that grep
-            # for the column on a pre-curation NWB find it.
-            # Conditional on at least one unit being written;
-            # ``pynwb`` cannot infer dtype on an empty
-            # ``add_unit_column`` followed by ``io.write``.
+            # ``curation_label`` is a scalar ``"uncurated"`` at sort
+            # time, matching v1's pre-curation NWB shape at
+            # ``v1/sorting.py:583-598``. External readers expecting
+            # v1's shape do
+            # ``nwb.units["curation_label"][i] == "uncurated"`` and
+            # would silently fail an equality check against a list.
+            # ``CurationV2.insert_curation`` rewrites this to the
+            # indexed ragged-list shape at post-curation time, which
+            # is the v1-curated shape. The pre-vs-post shape
+            # discontinuity is inherited from v1 and is intentional.
+            #
+            # ``add_unit_column`` must be declared BEFORE any
+            # ``add_unit`` call that passes the column as a kwarg;
+            # pynwb rejects the kwarg as "extra keys" otherwise.
+            # The scalar shape (no ``index=True``) matches v1.
             if len(sorting.unit_ids) > 0:
                 nwbf.add_unit_column(
                     name="curation_label",
                     description=(
-                        "Curation label list (placeholder "
-                        "``[\"uncurated\"]`` at sort time; refined "
-                        "by CurationV2.insert_curation)."
+                        "Curation label scalar; ``\"uncurated\"`` at "
+                        "sort time, refined to a per-unit label list "
+                        "by CurationV2.insert_curation."
                     ),
-                    index=True,
                 )
             for unit_id in sorting.unit_ids:
                 spike_indices = sorting.get_unit_spike_train(unit_id=unit_id)
@@ -1319,7 +1349,7 @@ class Sorting(SpyglassMixin, dj.Computed):
                     spike_times=spike_times,
                     id=int(unit_id),
                     obs_intervals=obs_intervals_arr,
-                    curation_label=["uncurated"],
+                    curation_label="uncurated",
                 )
             # pynwb leaves ``nwbf.units = None`` if no add_unit() was
             # called, so a zero-unit sort would crash on .object_id.

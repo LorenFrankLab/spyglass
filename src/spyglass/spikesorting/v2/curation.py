@@ -745,19 +745,23 @@ class CurationV2(SpyglassMixin, dj.Manual):
             labels_by_unit.setdefault(int(lr["unit_id"]), []).append(
                 str(lr["curation_label"])
             )
+        spike_times = [
+            si_sorting.get_unit_spike_train(
+                unit_id=uid, return_times=True
+            )
+            for uid in si_sorting.unit_ids
+        ]
+        # Index by ``unit_id`` (matches v1's ``nwb.units.to_dataframe()``
+        # shape, the same indexing Sorting.get_sorting(as_dataframe=True)
+        # uses); see that method's docstring for the rationale.
         return pd.DataFrame(
             {
-                "unit_id": unit_ids,
-                "spike_times": [
-                    si_sorting.get_unit_spike_train(
-                        unit_id=uid, return_times=True
-                    )
-                    for uid in si_sorting.unit_ids
-                ],
+                "spike_times": spike_times,
                 "curation_label": [
                     labels_by_unit.get(uid, []) for uid in unit_ids
                 ],
-            }
+            },
+            index=pd.Index(unit_ids, name="unit_id"),
         )
 
     @classmethod
