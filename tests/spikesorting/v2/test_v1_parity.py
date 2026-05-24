@@ -175,11 +175,6 @@ def test_no_phase_label_leakage_in_runtime_code():
     offenders: list[str] = []
     for py_path in v2_src.rglob("*.py"):
         text = py_path.read_text()
-        for needle in ("Phase 1\b", "Phase 1b\b", "Phase 1c\b"):
-            # Re-check non-greedy: look for literal "Phase 1 " or "Phase 1\n" etc.
-            pass
-        # Simpler: just look for the literal substrings; if any
-        # legitimate use creeps in later, this test surfaces it.
         for literal in ("Phase 1 ", "Phase 1b ", "Phase 1c ", "Phase 1.", "Phase 1\n"):
             if literal in text:
                 offenders.append(f"{py_path.relative_to(v2_src)}: {literal!r}")

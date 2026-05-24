@@ -806,21 +806,12 @@ class Recording(SpyglassMixin, dj.Computed):
         # the fetch.
         preproc_job_kwargs = preproc_row.get("job_kwargs")
         # Per-channel ``probe_type`` + ``electrode_group_name`` for the
-        # sort group. Used by ``make_compute`` to decide whether the
+        # sort group, used by ``make_compute`` to decide whether the
         # legacy ``tetrode_12.5`` probe-geometry patch (v1 parity at
         # ``v1/recording.py:630-643``) applies. Fetched here so
         # ``make_compute`` stays DB-I/O free per the tri-part contract.
-        from spyglass.common.common_ephys import Electrode as _Electrode
-        from spyglass.common.common_device import Probe as _Probe
-
-        probe_rows = (
-            _Electrode * _Probe
-            & {"nwb_file_name": nwb_file_name}
-            & [{"electrode_id": int(c)} for c in channel_ids]
-        ).fetch("probe_type", "electrode_group_name", as_dict=True)
-        probe_types = tuple(r["probe_type"] for r in probe_rows)
-        electrode_group_names = tuple(
-            r["electrode_group_name"] for r in probe_rows
+        probe_types, electrode_group_names = self._fetch_sort_group_probe_info(
+            nwb_file_name, channel_ids
         )
         return RecordingFetched(
             sel=sel,
@@ -887,7 +878,7 @@ class Recording(SpyglassMixin, dj.Computed):
         recording = se.read_nwb_recording(raw_path, load_time_vector=True)
         sampling_frequency = float(recording.get_sampling_frequency())
 
-        # Non-monotonic timestamp repair (N50). See
+        # Non-monotonic timestamp repair. See
         # ``_repaired_timestamps`` for the rationale + algorithm.
         all_timestamps = self._repaired_timestamps(recording, raw_path)
 
@@ -1135,8 +1126,8 @@ class Recording(SpyglassMixin, dj.Computed):
 
         raw_path = Nwbfile().get_abs_path(nwb_file_name)
         recording = se.read_nwb_recording(raw_path, load_time_vector=True)
-        # Apply the N50 non-monotonic timestamp repair on the rebuild
-        # path too so the recomputed cache_hash uses the same
+        # Apply the same non-monotonic timestamp repair on the rebuild
+        # path so the recomputed cache_hash uses the same
         # corrected-timestamps array as the original write.
         all_timestamps = self._repaired_timestamps(recording, raw_path)
         channel_ids = sorted(
@@ -1195,20 +1186,13 @@ class Recording(SpyglassMixin, dj.Computed):
             sort_group_channel_ids=channel_ids,
             validated=preproc_validated,
         )
-        from spyglass.common.common_ephys import Electrode as _Electrode
-        from spyglass.common.common_device import Probe as _Probe
-
-        probe_rows = (
-            _Electrode * _Probe
-            & {"nwb_file_name": nwb_file_name}
-            & [{"electrode_id": int(c)} for c in channel_ids]
-        ).fetch("probe_type", "electrode_group_name", as_dict=True)
+        probe_types, electrode_group_names = self._fetch_sort_group_probe_info(
+            nwb_file_name, channel_ids
+        )
         recording = self._maybe_apply_tetrode_geometry(
             recording=recording,
-            probe_types=tuple(r["probe_type"] for r in probe_rows),
-            electrode_group_names=tuple(
-                r["electrode_group_name"] for r in probe_rows
-            ),
+            probe_types=probe_types,
+            electrode_group_names=electrode_group_names,
             sort_group_channel_ids=channel_ids,
         )
         _, _, rebuilt_hash = self._write_nwb_artifact(
@@ -1450,6 +1434,34 @@ class Recording(SpyglassMixin, dj.Computed):
             "source recording."
         )
         return adjusted
+
+    @staticmethod
+    def _fetch_sort_group_probe_info(
+        nwb_file_name: str, channel_ids
+    ) -> tuple[tuple, tuple]:
+        """Fetch per-channel ``probe_type`` + ``electrode_group_name``.
+
+        Returns a pair of tuples (probe_types, electrode_group_names),
+        one entry per channel id in ``channel_ids``. The tuple form
+        is DeepHash-stable (NamedTuple field constraint for
+        ``RecordingFetched``). Used by both the populate path
+        (``make_fetch``) and the rebuild path
+        (``_rebuild_nwb_artifact``) to feed
+        ``_maybe_apply_tetrode_geometry``.
+        """
+        from spyglass.common.common_ephys import Electrode as _Electrode
+        from spyglass.common.common_device import Probe as _Probe
+
+        probe_rows = (
+            _Electrode * _Probe
+            & {"nwb_file_name": nwb_file_name}
+            & [{"electrode_id": int(c)} for c in channel_ids]
+        ).fetch("probe_type", "electrode_group_name", as_dict=True)
+        probe_types = tuple(r["probe_type"] for r in probe_rows)
+        electrode_group_names = tuple(
+            r["electrode_group_name"] for r in probe_rows
+        )
+        return probe_types, electrode_group_names
 
     @staticmethod
     def _maybe_apply_tetrode_geometry(

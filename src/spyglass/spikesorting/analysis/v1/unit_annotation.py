@@ -123,6 +123,18 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
             return_merge_ids=True
         )
 
+        # Single DB query for every (merge_id, unit_id) selection up
+        # front, then group in memory. Per-merge-id ``self.fetch`` in
+        # the loop was an N+1 against ``UnitAnnotation``.
+        annotation_rows = (self).fetch(
+            "spikesorting_merge_id", "unit_id", as_dict=True
+        )
+        include_by_merge: dict = {}
+        for row in annotation_rows:
+            include_by_merge.setdefault(
+                row["spikesorting_merge_id"], []
+            ).append(int(row["unit_id"]))
+
         spikes = []
         unit_ids = []
         for nwb_file, merge_id in zip(nwb_file_list, merge_ids):
@@ -140,9 +152,7 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
                     nwb_file[nwb_field_name]["spike_times"].to_list(),
                 )
             )
-            include_unit = np.unique(
-                (self & {"spikesorting_merge_id": merge_id}).fetch("unit_id")
-            )
+            include_unit = sorted(set(include_by_merge.get(merge_id, [])))
             spikes.extend(
                 [
                     unit_id_to_spike_times[int(unit_id)]
