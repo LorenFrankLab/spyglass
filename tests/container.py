@@ -199,6 +199,27 @@ class DockerMySQLManager:
             self.container.restart()
 
         else:
+            # Opt-in volume mount: ``SPYGLASS_TEST_MYSQL_DATA_DIR``
+            # lets the caller bind-mount MySQL's data dir onto a
+            # filesystem with more headroom (default Docker storage
+            # lives on ``/var/lib/docker`` and can fill the root
+            # partition). Per-container subdir keeps parallel test
+            # runs from clobbering each other's data.
+            import os as _os
+
+            data_root = _os.environ.get("SPYGLASS_TEST_MYSQL_DATA_DIR")
+            volumes = None
+            if data_root:
+                container_data_dir = _os.path.join(
+                    data_root, self.container_name
+                )
+                _os.makedirs(container_data_dir, exist_ok=True)
+                volumes = {
+                    container_data_dir: {
+                        "bind": "/var/lib/mysql",
+                        "mode": "rw",
+                    }
+                }
             self._ran_container = self.client.containers.run(
                 image=f"{self.image_name}:{self.mysql_version}",
                 name=self.container_name,
@@ -207,6 +228,7 @@ class DockerMySQLManager:
                     f"MYSQL_ROOT_PASSWORD={self.password}",
                     "MYSQL_DEFAULT_STORAGE_ENGINE=InnoDB",
                 ],
+                volumes=volumes,
                 detach=True,
                 tty=True,
             )
