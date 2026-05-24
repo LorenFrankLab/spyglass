@@ -228,6 +228,31 @@ def test_n50_repair_clean_increasing_passthrough():
     np.testing.assert_array_equal(out, rec.get_times())
 
 
+def test_n50_chunked_monotonicity_count_matches_unchunked():
+    """The chunked monotonicity counter agrees with np.diff over chunks.
+
+    The chunked counter (used to keep peak memory bounded for chronic
+    recordings) overlaps adjacent chunks by one sample so boundary
+    diffs are computed exactly once. Verify the count matches the
+    naive ``np.sum(np.diff(ts) <= 0)`` for arbitrary chunk sizes,
+    including the small-chunk case where many chunks contribute.
+    """
+    from spyglass.spikesorting.v2.recording import Recording
+
+    rng = np.random.default_rng(0xCA7E)
+    ts = np.cumsum(rng.uniform(0.0009, 0.0011, size=10_000))
+    # Inject some non-monotonic spots.
+    for i in (123, 1_000, 5_555, 9_999):
+        ts[i] = ts[i - 1] - 0.001
+
+    expected = int(np.sum(np.diff(ts) <= 0))
+    for chunk_size in (5, 100, 1_000, 10_000, 100_000):
+        assert (
+            Recording._count_non_monotonic_chunked(ts, chunk_size)
+            == expected
+        ), f"chunked counter disagreed at chunk_size={chunk_size}"
+
+
 @pytest.mark.parametrize(
     "input_ts,expected",
     [

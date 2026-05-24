@@ -1369,6 +1369,33 @@ class Recording(SpyglassMixin, dj.Computed):
             channel_names = electrodes_table["channel_name"]
             return [channel_names[int(c)] for c in spyglass_ids]
 
+    _MONOTONICITY_CHECK_CHUNK_SIZE = 10_000_000
+
+    @staticmethod
+    def _count_non_monotonic_chunked(timestamps, chunk_size) -> int:
+        """Memory-bounded count of ``i`` where ``ts[i] <= ts[i-1]``.
+
+        ``np.diff(timestamps) <= 0`` allocates two full-length
+        arrays (the diff and the bool mask) -- ~16N bytes peak.
+        For 24 h x 30 kHz that's ~40 GB transient. Chunking with a
+        one-sample overlap keeps peak at ``chunk_size * 16`` bytes
+        regardless of N, at the cost of a Python-level loop over
+        ``ceil(N / chunk_size)`` iterations (~260 for the 24 h
+        case -- negligible vs the chunk work).
+        """
+        n = len(timestamps)
+        if n < 2:
+            return 0
+        total = 0
+        # Use ``chunk_size + 1`` window so adjacent chunks overlap by
+        # one sample; the diff at every boundary is computed exactly
+        # once.
+        for start in range(0, n - 1, chunk_size):
+            end = min(start + chunk_size + 1, n)
+            window_diffs = np.diff(timestamps[start:end])
+            total += int(np.count_nonzero(window_diffs <= 0))
+        return total
+
     @staticmethod
     def _repaired_timestamps(recording, raw_path):
         """Return monotonicity-corrected timestamps for ``recording``.
@@ -1395,31 +1422,47 @@ class Recording(SpyglassMixin, dj.Computed):
         repairs the "backslide and exact-return"
         ``[T, T-eps, T]`` pattern that a plain cumulative-max
         on the raw timestamps misses.
+
+        Memory: the no-repair fast path uses a chunked monotonicity
+        check (bounded peak regardless of N -- see
+        ``_count_non_monotonic_chunked``) so a 24 h x 30 kHz
+        chronic recording does not allocate ~40 GB just to verify
+        timestamps are already monotonic. The repair path reuses
+        the ``indices`` buffer for both the shift and unshift,
+        cutting peak from ~32 N to ~16 N bytes.
         """
         from spyglass.spikesorting.v2.utils import (
             _get_recording_timestamps,
         )
 
         all_timestamps = _get_recording_timestamps(recording)
-        diffs = np.diff(all_timestamps)
-        if not np.any(diffs <= 0):
+        n_issues = Recording._count_non_monotonic_chunked(
+            all_timestamps, Recording._MONOTONICITY_CHECK_CHUNK_SIZE
+        )
+        if n_issues == 0:
             return all_timestamps
-        n_issues = int(np.sum(diffs <= 0))
         sample_period = 1.0 / float(recording.get_sampling_frequency())
-        indices = np.arange(len(all_timestamps), dtype=np.float64)
-        shifted = all_timestamps - indices * sample_period
-        monotone_shifted = np.maximum.accumulate(shifted)
-        adjusted = monotone_shifted + indices * sample_period
-        n_changed = int(np.sum(adjusted != all_timestamps))
+        # ``i_times_sp`` is the per-index shift; build once, mutate
+        # in-place so we are not paying for two separate
+        # ``np.arange * sample_period`` allocations on the
+        # subtract/add round-trip.
+        i_times_sp = np.arange(len(all_timestamps), dtype=np.float64)
+        i_times_sp *= sample_period
+        # ``buffer`` holds the shifted timestamps; ``cummax`` is
+        # applied in-place and the unshift is in-place too. Total
+        # peak: ``i_times_sp`` + ``buffer`` = ~16 N bytes (vs
+        # ~32 N for the prior 4-array version).
+        buffer = np.subtract(all_timestamps, i_times_sp)
+        np.maximum.accumulate(buffer, out=buffer)
+        np.add(buffer, i_times_sp, out=buffer)
         logger.warning(
             f"Source recording {raw_path!r} has {n_issues} "
-            f"non-monotonic timestamp(s); repaired {n_changed} "
-            "sample(s) to strictly increasing (offsets of <= one "
-            "sample_period). Likely floating-point precision or "
-            "epoch-stitching artifacts; consider validating the "
-            "source recording."
+            "non-monotonic timestamp(s); adjusted to strictly "
+            "increasing (offsets of <= one sample_period). Likely "
+            "floating-point precision or epoch-stitching artifacts; "
+            "consider validating the source recording."
         )
-        return adjusted
+        return buffer
 
     @staticmethod
     def _fetch_sort_group_probe_info(
