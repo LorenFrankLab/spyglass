@@ -1000,105 +1000,130 @@ class Sorting(SpyglassMixin, dj.Computed):
     ):
         """Dispatch sort execution; clusterless_thresholder vs SI sorters.
 
-        For SI sorters the per-sort scratch directory is anchored to
-        ``spyglass.settings.temp_dir`` via
-        ``tempfile.TemporaryDirectory`` so the dir is cleaned on
-        successful exit and on raise. The directory is also
-        ``chmod 0o777``'d so SI sorter subprocesses with a different
-        uid (rootless container, slurm scenarios) can write into it.
+        Clusterless is a Spyglass-specific peak-detection path with no
+        SI scratch directory or external whitening; SI sorters get
+        per-sort scratch, external whitening, and a small MATLAB-
+        sorter carve-out. The two paths share nothing but the
+        signature; dispatch routes each to its own helper.
+        """
+        if sorter == "clusterless_thresholder":
+            return Sorting._run_clusterless_thresholder(
+                sorter_params=sorter_params,
+                recording=recording,
+                job_kwargs=job_kwargs,
+            )
+        return Sorting._run_si_sorter(
+            sorter=sorter,
+            sorter_params=sorter_params,
+            recording=recording,
+            sorting_id=sorting_id,
+            job_kwargs=job_kwargs,
+        )
 
-        MATLAB-based sorters (Kilosort 2.5 / 3, IronClust) get the
-        ``singularity_image=True`` flag from SI's container API plus
-        a small kwarg-strip carve-out so v1-style rows survive the
-        containerized call.
+    @staticmethod
+    def _run_clusterless_thresholder(
+        sorter_params,
+        recording,
+        job_kwargs,
+    ):
+        """Run Spyglass's clusterless-thresholder peak-detection path.
+
+        Not an SI registered sorter; uses
+        ``spikeinterface.sortingcomponents.peak_detection.detect_peaks``
+        directly and wraps the result in a ``NumpySorting``.
+
+        ``noise_levels=[1.0]`` is DELIBERATELY forwarded so SI's
+        ``locally_exclusive`` interprets ``detect_threshold`` in
+        microvolts (not MAD multiples). Without it SI computes
+        per-channel MAD and a user's ``detect_threshold=100`` becomes
+        ~100xMAD on noisy channels, silently shifting detection ~5x.
+        Matches v1's deliberate choice at
+        ``v1/sorting.py:177,402-404``. The ``[1.0]`` singleton is
+        broadcast to length ``n_channels`` because SI 0.104's
+        ``locally_exclusive`` indexes ``noise_levels * detect_threshold``
+        per channel and the singleton would otherwise divide-by-zero
+        inside the numba kernel.
+        """
+        import numpy as _np
+        import spikeinterface as si
+        from spikeinterface.sortingcomponents.peak_detection import (
+            detect_peaks,
+        )
+
+        params = dict(sorter_params)
+        # v1-era kwarg rename: SI 0.99 ``local_radius_um`` became
+        # ``radius_um`` in 0.101+.
+        if "local_radius_um" in params:
+            params["radius_um"] = params.pop("local_radius_um")
+        # SI 0.104 ``detect_peaks`` rejects v1's stale routing hints
+        # via the new ``(method, method_kwargs, job_kwargs)`` shape:
+        # ``outputs`` was a Spyglass-only routing hint, and
+        # ``random_chunk_kwargs`` was renamed to
+        # ``random_slices_kwargs`` and is now managed internally.
+        for stale in ("outputs", "random_chunk_kwargs"):
+            params.pop(stale, None)
+
+        if "noise_levels" in params:
+            nl = _np.asarray(params["noise_levels"], dtype=_np.float64)
+            if nl.size == 1:
+                nl = _np.full(
+                    recording.get_num_channels(),
+                    float(nl[0]),
+                    dtype=_np.float64,
+                )
+            params["noise_levels"] = nl
+
+        method = params.pop("method", "locally_exclusive")
+        detected = detect_peaks(
+            recording,
+            method=method,
+            method_kwargs=params,
+            job_kwargs=(job_kwargs or None),
+        )
+        # SI 0.104 renamed ``from_times_labels`` to
+        # ``from_samples_and_labels`` (sample indices); ``detect_peaks``
+        # already returns sample indices.
+        return si.NumpySorting.from_samples_and_labels(
+            samples_list=detected["sample_index"],
+            labels_list=_np.zeros(len(detected), dtype=_np.int32),
+            sampling_frequency=recording.get_sampling_frequency(),
+        )
+
+    @staticmethod
+    def _run_si_sorter(
+        sorter,
+        sorter_params,
+        recording,
+        sorting_id,
+        job_kwargs,
+    ):
+        """Run an SI registered sorter under a managed scratch dir.
+
+        Scratch is anchored under ``spyglass.settings.temp_dir`` via
+        ``tempfile.TemporaryDirectory`` so the dir is cleaned on
+        successful exit AND on raise (fixes the tempdir leak).
+        ``os.chmod 0o777`` makes it world-writable so SI sorter
+        subprocesses with a different uid (rootless container, slurm
+        scenarios) can write into it.
+
+        External float64 whitening matches v1 (``v1/sorting.py:428-430``):
+        if the sorter asks for whitening, run it externally at float64
+        and turn the sorter's internal whitening off so we do not
+        whiten twice. Runs AFTER the upstream artifact mask was
+        applied in ``Sorting.make_compute`` -- artifact-masked frames
+        should not bias whitening's covariance estimate.
+
+        MATLAB sorters (Kilosort 2.5 / 3, IronClust) get
+        ``singularity_image=True`` and the strip-kwargs carve-out:
+        ``tempdir`` / ``mp_context`` / ``max_threads_per_process`` do
+        not survive containerization.
         """
         import os
         import tempfile
 
         import numpy as _np
-        import spikeinterface as si
         import spikeinterface.sorters as sis
 
-        if sorter == "clusterless_thresholder":
-            from spikeinterface.sortingcomponents.peak_detection import (
-                detect_peaks,
-            )
-
-            params = dict(sorter_params)
-            # v1-era kwarg rename: the SI 0.99 `local_radius_um` became
-            # `radius_um` in 0.101+.
-            if "local_radius_um" in params:
-                params["radius_um"] = params.pop("local_radius_um")
-            # ``noise_levels=[1.0]`` is DELIBERATELY forwarded to
-            # ``detect_peaks`` (via SI 0.104's ``**old_kwargs`` ->
-            # ``method_kwargs`` routing). With ``noise_levels``
-            # absent, SI computes per-channel MAD and treats
-            # ``detect_threshold`` as a MAD multiplier; with
-            # ``noise_levels=[1.0]`` SI broadcasts that single value
-            # to every channel so ``detect_threshold`` stays in
-            # microvolts. Matches v1's deliberate choice at
-            # ``v1/sorting.py:177,402-404``. A user's
-            # ``detect_threshold=100.0`` was 100 µV in v1; without
-            # this passthrough it would become ~100xMAD on noisy
-            # channels, silently shifting detection ~5x.
-            #
-            # The remaining strip handles fields SI 0.104's
-            # ``detect_peaks`` actively rejects: ``outputs`` (a
-            # Spyglass routing hint that never had an SI meaning) and
-            # ``random_chunk_kwargs`` (renamed to
-            # ``random_slices_kwargs`` and now managed internally).
-            for stale in ("outputs", "random_chunk_kwargs"):
-                params.pop(stale, None)
-
-            # Route resolved job_kwargs into detect_peaks via the
-            # explicit kwarg. SI 0.104's signature is
-            # ``detect_peaks(recording, method, method_kwargs,
-            # ...)`` and rejects the legacy ``**old_kwargs`` mode
-            # whenever ``job_kwargs`` is non-None; route per-method
-            # kwargs (detect_threshold, peak_sign, noise_levels,
-            # radius_um, etc.) through the explicit ``method_kwargs``
-            # dict instead.
-            #
-            # SI 0.104's locally_exclusive computes
-            # ``self.noise_levels * detect_threshold`` and indexes
-            # the resulting ``abs_thresholds`` per channel. The v1-
-            # stored shape ``[1.0]`` (single value) is meant to
-            # represent "one microvolt per channel everywhere";
-            # SI 0.99 broadcast it implicitly, SI 0.104 wants a
-            # length-``n_channels`` array. Broadcast manually so a
-            # 32-channel recording does not divide-by-zero on
-            # missing per-channel entries inside the numba kernel.
-            if "noise_levels" in params:
-                nl = _np.asarray(params["noise_levels"], dtype=_np.float64)
-                if nl.size == 1:
-                    nl = _np.full(
-                        recording.get_num_channels(),
-                        float(nl[0]),
-                        dtype=_np.float64,
-                    )
-                params["noise_levels"] = nl
-            method = params.pop("method", "locally_exclusive")
-            detected = detect_peaks(
-                recording,
-                method=method,
-                method_kwargs=params,
-                job_kwargs=(job_kwargs or None),
-            )
-            # SI 0.104 renamed ``from_times_labels`` to
-            # ``from_samples_and_labels`` (sample indices) /
-            # ``from_times_and_labels`` (absolute seconds). We pass
-            # sample indices from ``detect_peaks``.
-            return si.NumpySorting.from_samples_and_labels(
-                samples_list=detected["sample_index"],
-                labels_list=_np.zeros(len(detected), dtype=_np.int32),
-                sampling_frequency=recording.get_sampling_frequency(),
-            )
-
-        # SI sorter path. Anchor scratch under Spyglass's temp_dir so
-        # a disk-full surface fails in a known location and the dir
-        # is auto-removed on context exit (fix for the tempdir leak).
-        # ``os.chmod`` makes the dir world-writable so a sorter
-        # subprocess running under a different uid can write into it.
         from spyglass.settings import temp_dir as _spyglass_temp_dir
 
         sorter_temp_dir = tempfile.TemporaryDirectory(
@@ -1108,70 +1133,42 @@ class Sorting(SpyglassMixin, dj.Computed):
         try:
             os.chmod(sorter_temp_dir.name, 0o777)
 
-            # Restore v1's external float64 whitening. The upstream
-            # ``Recording._apply_pre_motion_preprocessing`` runs
-            # bandpass + reference at float64; pre-whitening here
-            # keeps the whitening step at the same precision. MS4's
-            # internal whitening operates at float32 (see
-            # Mountainsort4Sorter wrapper), which v1 deliberately
-            # bypassed for precision parity. Mirrors
-            # ``v1/sorting.py:428-430``: if the sorter asks for
-            # whitening, run it externally at float64 and turn the
-            # sorter's internal whitening off so we do not whiten
-            # twice. Runs AFTER the clusterless branch returns and
-            # AFTER the upstream artifact mask was applied in
-            # ``Sorting.make_compute`` -- artifact-masked frames
-            # should not bias whitening's covariance estimate.
             if sorter_params.get("whiten", False):
                 import spikeinterface.preprocessing as sip
 
                 recording = sip.whiten(recording, dtype=_np.float64)
                 sorter_params = {**sorter_params, "whiten": False}
 
-            # MATLAB sorter carve-out. The ``singularity_image=True``
-            # flag triggers SI's container runner; some v1-style
-            # kwargs do not survive the container boundary
-            # (``tempdir`` clashes with the container's own workspace,
-            # ``mp_context`` / ``max_threads_per_process`` are noisy
-            # in containerized runs) so they are stripped only for
-            # these sorters.
             # Resolved job_kwargs (n_jobs, chunk_duration, etc.) flow
-            # into ``sis.run_sorter`` via the ``**sorter_params``
-            # catch-all -- SI splits them into per-sorter and SI
-            # control args internally. Merging via dict update lets a
-            # per-row ``job_kwargs`` override anything the row's
-            # sorter_params happened to set.
+            # into ``sis.run_sorter`` via the ``**`` catch-all; SI
+            # splits them into per-sorter and control args
+            # internally. ``sorter_params`` already merged any
+            # per-row job_kwargs upstream.
             sj_kwargs = job_kwargs or {}
-            if sorter.lower() in Sorting._MATLAB_SORTERS:
-                clean_params = {
-                    k: v
-                    for k, v in sorter_params.items()
-                    if k not in Sorting._MATLAB_SORTER_STRIP_KWARGS
-                }
-                return sis.run_sorter(
-                    sorter_name=sorter,
-                    recording=recording,
-                    folder=sorter_temp_dir.name,
-                    remove_existing_folder=True,
-                    singularity_image=True,
-                    **clean_params,
-                    **sj_kwargs,
-                )
-
-            return sis.run_sorter(
+            run_kwargs = dict(
                 sorter_name=sorter,
                 recording=recording,
                 folder=sorter_temp_dir.name,
                 remove_existing_folder=True,
-                **sorter_params,
-                **sj_kwargs,
+            )
+            if sorter.lower() in Sorting._MATLAB_SORTERS:
+                run_kwargs["singularity_image"] = True
+                effective_params = {
+                    k: v
+                    for k, v in sorter_params.items()
+                    if k not in Sorting._MATLAB_SORTER_STRIP_KWARGS
+                }
+            else:
+                effective_params = sorter_params
+            return sis.run_sorter(
+                **run_kwargs, **effective_params, **sj_kwargs
             )
         finally:
             # ``TemporaryDirectory`` auto-cleans on garbage collection,
             # but the explicit ``.cleanup()`` in a ``finally`` makes
-            # the cleanup point obvious and survives the worker
-            # process exit predictably under the parallel-populate
-            # process pool.
+            # the cleanup point obvious and survives worker-process
+            # exit predictably under the parallel-populate process
+            # pool.
             sorter_temp_dir.cleanup()
 
     @staticmethod
