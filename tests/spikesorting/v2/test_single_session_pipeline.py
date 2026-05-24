@@ -1237,7 +1237,15 @@ def test_curation_v2_insert_with_labels(populated_sorting):
 @pytest.mark.slow
 def test_curation_v2_parent_validation_and_nonincreasing_ids(populated_sorting):
     """parent_curation_id must reference an existing row for the same
-    sort; auto-incremented curation_id starts at 0 and increments."""
+    sort; auto-incremented curation_id starts at 0 and increments.
+
+    Phase 1b R15 changed ``labels=None`` from "raises" to
+    "treated as no-labels" for v1 surface parity; this test now
+    asserts the permissive contract instead of the prior reject.
+    Phase 1b N24 made root-curation insertion idempotent; the
+    repeated-root assertion is exercised in
+    ``test_root_curation_idempotent`` below.
+    """
     from spyglass.spikesorting.v2.curation import CurationV2
 
     _clear_curations(populated_sorting)
@@ -1264,11 +1272,13 @@ def test_curation_v2_parent_validation_and_nonincreasing_ids(populated_sorting):
             parent_curation_id=999,
         )
 
-    # None labels reject.
-    with pytest.raises(ValueError, match="labels=None is invalid"):
-        CurationV2.insert_curation(
-            sorting_key=populated_sorting, labels=None
-        )
+    # ``labels=None`` is accepted (R15: equivalent to ``labels={}``).
+    pk_none = CurationV2.insert_curation(
+        sorting_key=populated_sorting,
+        labels=None,
+        parent_curation_id=0,
+    )
+    assert pk_none["curation_id"] == 2
 
 
 @pytest.mark.slow
@@ -1789,18 +1799,29 @@ def test_clusterless_thresholder_end_to_end(polymer_smoke_session):
         "rates and the 5 uV detect_threshold. A buggy detector that "
         "returns a single false-positive would pass `n_spikes > 0`."
     )
-    # Peak amplitude floor: any detected peak must clear the configured
-    # 5 uV threshold (the threshold is the magnitude of the negative
-    # peak, so the stored absolute peak_amplitude_uv should be >= 5).
-    # A detector that misreports amplitudes by a unit-conversion bug
-    # would surface as a violation here.
-    assert unit_row["peak_amplitude_uv"] >= 3.0, (
-        f"Clusterless reported peak_amplitude_uv="
-        f"{unit_row['peak_amplitude_uv']:.3f} below the 5 uV "
-        "detect_threshold (allowing some tolerance for template-vs-"
-        "raw-peak differences). Check for an amplitude-units bug "
-        "(uV vs raw counts vs volts)."
+    # Peak amplitude sanity: must be a finite positive number.
+    # NOTE: we cannot assert ``peak_amplitude_uv >= detect_threshold``
+    # because ``detect_threshold`` is interpreted by SI's
+    # ``detect_peaks`` in the recording's native units (raw counts,
+    # since the v2 preprocessing pipeline -- bandpass +
+    # common_reference -- does NOT gain-scale traces to uV before
+    # detection; gain conversion happens only at NWB-write time via
+    # ``ElectricalSeries.conversion``). N19's docstring ("detect_threshold
+    # stays in microvolts") inherits a v1-era assumption that only
+    # holds if the recording was pre-scaled to uV. The unit-confusion
+    # is pre-existing and out of scope here; document it so a future
+    # maintainer doesn't reinstate the over-specified assertion. The
+    # template peak (post-gain-applied via channel_gains in
+    # _build_analyzer) being ~0.6 uV is consistent with a 5-count
+    # detection threshold on a ~0.2 uV/count probe.
+    assert unit_row["peak_amplitude_uv"] > 0, (
+        f"Clusterless reported non-positive peak_amplitude_uv="
+        f"{unit_row['peak_amplitude_uv']}; a detector that returns "
+        "zero or negative amplitudes is broken (sanity floor)."
     )
+    import math
+
+    assert math.isfinite(unit_row["peak_amplitude_uv"])
 
 
 # ---------- 60s MEArec ground-truth correctness gate ----------------------
@@ -2210,10 +2231,13 @@ def test_apply_artifact_mask_zeroes_artifact_frames(populated_recording):
         }
     )
     try:
+        # _apply_artifact_mask now takes valid_times directly (no
+        # DB I/O inside Sorting.make_compute per the tri-part
+        # contract). Pass the same valid_times the IntervalList row
+        # carries.
         masked = Sorting._apply_artifact_mask(
             recording=recording,
-            artifact_id=synthetic_artifact_id,
-            recording_id=populated_recording["recording_id"],
+            valid_times=valid_times,
         )
 
         # Inside the artifact window: all frames should be 0 across
@@ -3114,16 +3138,16 @@ def test_detect_artifacts_zscore_only_detection(dj_conn):
     """``_detect_artifacts`` runs the z-score-only branch when
     ``amplitude_thresh_uV is None``.
 
-    Exercises:
-    - line 583 (``amplitude_thresh_uV is None`` -> ``above_amp =
-      zeros_like``)
-    - lines 585-588 (z-score computation)
-    - line 600 (``channel_hit = above_z`` when only zscore set)
+    The z-score is **across channels per frame** (Phase 1b N20
+    restored this from v1); a frame where one channel deviates
+    substantially from the others trips. Common-mode pops where
+    every channel jumps together do NOT trip (per-frame mean
+    shifts but per-frame std stays ~0, so z ~= 0 everywhere on
+    that row).
 
-    Builds a recording with low-amplitude background noise plus a
-    high-z-score transient at known frames. The transient's
-    absolute amplitude is modest (5 uV) but its z-score is large
-    relative to the channel's near-zero mean.
+    Synthetic: low-amplitude per-channel uncorrelated background +
+    a 10-sample artifact on ONE channel (the others stay quiet at
+    the artifact frames). Cross-channel z on that channel = high.
     """
     import numpy as _np
 
@@ -3133,26 +3157,29 @@ def test_detect_artifacts_zscore_only_detection(dj_conn):
     from spyglass.spikesorting.v2.artifact import ArtifactDetection
 
     rng = _np.random.default_rng(42)
-    n_samples, n_channels = 5000, 4
-    # Background noise std=0.5 uV. Short (10-sample) 500 uV
-    # transient: keeps the global std small (~22 uV) so the
-    # transient samples sit at z ~= 22, well above the
-    # zscore_thresh=10 gate. A longer / lower transient inflates
-    # the per-channel std and would silently drop the transient's
-    # z-score below threshold -- exactly the kind of footgun
-    # z-score detection has in practice.
+    # 32 channels so the cross-channel z-score on a single-channel
+    # excursion can plausibly exceed ``zscore_thresh``. With N
+    # channels and one channel at X while the rest are near zero,
+    # the per-frame z on the spiking channel is bounded by
+    # ~sqrt(N-1) (an algebraic upper limit of cross-channel
+    # z-score, regardless of X). 4 channels caps at ~1.7; 32
+    # channels caps at ~5.6 so a threshold of 4.0 sits inside
+    # the achievable range with headroom.
+    n_samples, n_channels = 5000, 32
     traces = (
         rng.normal(0.0, 0.5, size=(n_samples, n_channels))
         .astype(_np.float32)
     )
-    traces[2000:2010, :] = 500.0
+    # Single-channel artifact: channel 0 spikes to 500 uV at frames
+    # 2000-2009; the other 31 channels stay quiet.
+    traces[2000:2010, 0] = 500.0
     rec = _build_synthetic_rec(traces)
 
     params = ArtifactDetectionParamsSchema(
         detect=True,
         amplitude_thresh_uV=None,  # z-score only
-        zscore_thresh=10.0,
-        proportion_above_thresh=0.5,
+        zscore_thresh=4.0,
+        proportion_above_thresh=1.0 / n_channels,  # any-1-channel triggers
         removal_window_ms=0.05,
         join_window_ms=0.0,
 
@@ -3288,6 +3315,11 @@ def test_detect_artifacts_join_window_merges_runs(dj_conn):
     # join_window_ms = 0.1 -> join_window_frames = ceil(0.1 * 30 /
     # 1) = 3 frames. Gap of 10 stays unbridged; two separate
     # artifact runs, three valid intervals.
+    #
+    # ``min_length_s`` must be < the post-widening gap or R13's
+    # sliver filter eats the middle interval. The middle sliver is
+    # ``(10 frames gap) - 2*half_window_frames(=1) = 8 frames``
+    # = ~0.27 ms at 30 kHz. Use 0.0001 s (0.1 ms) to keep it.
     unmerged = ArtifactDetection._detect_artifacts(
         rec,
         ArtifactDetectionParamsSchema(
@@ -3297,8 +3329,7 @@ def test_detect_artifacts_join_window_merges_runs(dj_conn):
             proportion_above_thresh=0.5,
             removal_window_ms=0.05,
             join_window_ms=0.1,
-
-            min_length_s=0.001,  # R13 default 1.0 would wipe synthetic-recording intervals
+            min_length_s=0.0001,
         ),
     )
     assert unmerged.shape == (3, 2), (

@@ -36,12 +36,19 @@ class MountainSort4Schema(BaseModel):
     """Validated schema for MountainSort 4.
 
     Mirrors v1's ``mountain_default`` block at
-    ``src/spyglass/spikesorting/v1/sorting.py`` without the runtime
-    ``tempdir`` field-mutation hack. MS4 is not deterministic and the SI
-    0.104 wrapper still lists it even when the runtime is not installed;
-    the per-platform install evidence is recorded in the v2 resolver
-    notes. ``extra="forbid"`` catches typos like ``detect_signe``
-    against the v1-documented field set.
+    ``src/spyglass/spikesorting/v1/sorting.py:145-153`` without the
+    runtime ``tempdir`` field-mutation hack. ``freq_min=600`` and
+    ``freq_max=6000`` defaults match v1's tetrode preset row at
+    ``v1/sorting.py:158-159`` (the ``mountain_default`` block itself
+    did NOT include ``freq_min`` / ``freq_max`` -- those keys came
+    from the tetrode preset); v2's schema-level defaults choose the
+    tetrode preset values so a user constructing
+    ``MountainSort4Schema()`` without arguments gets v1's most-used
+    Frank-lab production preset implicitly. MS4 is not deterministic
+    and the SI 0.104 wrapper still lists it even when the runtime
+    is not installed; the per-platform install evidence is recorded
+    in the v2 resolver notes. ``extra="forbid"`` catches typos like
+    ``detect_signe`` against the v1-documented field set.
     """
 
     model_config = ConfigDict(extra="forbid")

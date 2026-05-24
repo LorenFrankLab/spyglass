@@ -10,7 +10,13 @@ import pytest
 
 
 def test_preprocessing_params_schema_default():
-    """The preprocessing schema has the expected default shape and guards."""
+    """The preprocessing schema has the expected default shape and guards.
+
+    Phase 1b raised ``schema_version`` to 2 (R7 + R18): added
+    ``min_segment_length`` and removed the dead
+    ``common_reference.reference`` field. Defaults below reflect
+    the v2 schema as shipped.
+    """
     import pydantic
 
     from spyglass.spikesorting.v2._params.preprocessing import (
@@ -18,10 +24,11 @@ def test_preprocessing_params_schema_default():
     )
 
     assert PreprocessingParamsSchema().model_dump() == {
-        "schema_version": 1,
+        "schema_version": 2,
         "bandpass_filter": {"freq_min": 300.0, "freq_max": 6000.0},
-        "common_reference": {"reference": "global", "operator": "median"},
+        "common_reference": {"operator": "median"},
         "whiten": {"dtype": "float32"},
+        "min_segment_length": 1.0,
     }
 
     # extra="forbid": an unknown field is rejected.
@@ -50,7 +57,7 @@ def test_preprocessing_params_stage_split():
     params = PreprocessingParamsSchema()
     assert params.to_pre_motion_dict() == {
         "bandpass_filter": {"freq_min": 300.0, "freq_max": 6000.0},
-        "common_reference": {"reference": "global", "operator": "median"},
+        "common_reference": {"operator": "median"},
     }
     assert params.to_post_motion_dict() == {"whiten": {"dtype": "float32"}}
 

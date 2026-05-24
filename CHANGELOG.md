@@ -203,6 +203,53 @@ in-flight v1 PR on `copilot/fix-populating-artifact-detection`.
   fully into RAM (acceptable for <few-minute recordings, follow-up
   work for chronic-scale). The `job_kwargs` resolver is wired but
   not yet consumed at this stage.
+- **`franklab_probe_ctx_30KHz` cortex preset is not shipped on v2.**
+  v1 had a `MountainSort4` Lookup row by this name; v2 ships only the
+  hippocampus + Neuropixels presets. Cortex-probe users must insert
+  their own row, e.g.
+  `SorterParameters().insert1({"sorter": "mountainsort4",
+  "sorter_params_name": "franklab_probe_ctx_30kHz_ms4", "params":
+  MountainSort4Schema(freq_min=300.0, freq_max=6000.0).model_dump(),
+  "params_schema_version": 1, "job_kwargs": None})`.
+- **`Sorting.get_sorting(as_dataframe=True)` and
+  `CurationV2.get_sorting(as_dataframe=True)` DataFrame shape.**
+  v1's `Curation.get_sorting(as_dataframe=True)` returned
+  `nwbf.units.to_dataframe()` whose **index is the unit_id**; v2
+  returns a DataFrame with `unit_id` as a **column** and a default
+  positional index. Notebook code doing `df.loc[uid]` silently
+  reads the wrong row. Recommend transitioning to `df.set_index(
+  "unit_id").loc[uid]` until v2's shape is aligned with v1 in a
+  follow-up. v1 metric / `merge_groups` columns are NOT in v2's
+  DataFrame either; consult `CurationV2.Unit` + `CurationV2.MergeGroup`
+  part tables for the equivalent data.
+- **Pre-curation NWB `curation_label` is `["uncurated"]` (list), not
+  the v1 scalar `"uncurated"`.** External NWB readers (FigURL, DANDI
+  export tooling) doing `nwb.units["curation_label"][i] ==
+  "uncurated"` must update to `"uncurated" in nwb.units[
+  "curation_label"][i]`. The list shape matches the post-curation
+  v2 indexed-column convention (Phase 1b N26) but is a regression
+  from v1's scalar at the pre-curation stage.
+- **`merge_groups` and per-metric unit columns no longer in the
+  curated-units NWB.** v1 wrote both at NWB-write time
+  (`v1/curation.py:404-428`). v2 stores merge provenance in the
+  `CurationV2.MergeGroup` part table (queryable via
+  `CurationV2.get_merge_groups(key)`) and defers metric columns to
+  Phase 2 `AnalyzerCuration`. Pure-NWB consumers (DANDI export,
+  external tools) lose these columns; DataJoint consumers gain the
+  queryable + FK-validated shape.
+- **`detect_threshold` units for `clusterless_thresholder` are NOT
+  truly microvolts.** The N19 docstring says "stays in microvolts"
+  because the path forwards `noise_levels=[1.0]` to SI's
+  `detect_peaks`, but this only puts the threshold in microvolts
+  if the upstream recording is already gain-scaled. v2's
+  preprocessing (bandpass + common_reference at float64) does NOT
+  apply gains; the recording remains in raw count space. So a
+  user's `detect_threshold=100` is effectively "100 raw counts"
+  (~20 uV on a 0.2 uV/count Intan probe), not 100 uV. This is a
+  v1-inherited unit confusion; we did not introduce or fix it in
+  Phase 1b. Document threshold values in counts (or in
+  count-equivalent uV via `count × gain_uV_per_count`) until v2
+  ships a gain-aware detection path.
 
 #### LFPBandV1 Fix
 

@@ -6,7 +6,17 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class BandpassFilterParams(BaseModel):
-    """Bandpass filter cutoffs applied before referencing."""
+    """Bandpass filter cutoffs applied before referencing.
+
+    Defaults ``freq_min=300.0``, ``freq_max=6000.0`` mirror v1's
+    ``default`` ``SpikeSortingPreprocessingParameters`` row at
+    ``src/spyglass/spikesorting/v1/recording.py:131-132``. v1 had no
+    standalone schema defaults (``frequency_min`` / ``frequency_max``
+    were always required keys on the params blob); v2 promotes them
+    to schema-level defaults so a user constructing
+    ``PreprocessingParamsSchema()`` without arguments gets v1's
+    production preset implicitly.
+    """
 
     model_config = ConfigDict(extra="forbid")
     freq_min: float = Field(default=300.0, ge=0.0, le=15000.0)
@@ -36,6 +46,10 @@ class CommonReferenceParams(BaseModel):
     the schema does not lie about what the runtime honors.
 
     ``operator`` IS used on the global-median branch and stays.
+    Note: v1 hardcoded ``operator="median"`` at
+    ``v1/recording.py:611``; v2 exposes the choice as a user knob.
+    The default ``"median"`` preserves v1's behavior; passing
+    ``"average"`` is a v2-only capability.
     """
 
     model_config = ConfigDict(extra="forbid")
