@@ -367,19 +367,28 @@ def test_sorting_get_sorting_accepts_as_dataframe_flag():
 def test_make_compute_is_pure():
     """make_compute on Recording / ArtifactDetection / Sorting writes no DB rows.
 
-    Static AST guard: each ``make_compute`` body does not call
-    ``self.insert1``, ``AnalysisNwbfile().add``,
-    ``IntervalList.insert1``, or any method on ``self.connection``.
-    Guards against future refactors that re-introduce monolithic
-    ``make`` patterns.
+    Static AST guard. The forbidden surface is:
+
+    1. **Any** call whose attribute name is ``insert1`` / ``insert``
+       on a name or call expression (catches ``self.insert1``,
+       ``IntervalList.insert1``, ``IntervalList().insert1``,
+       and aliased forms like ``tbl = IntervalList(); tbl.insert1``).
+    2. ``AnalysisNwbfile().add`` and the aliased
+       ``nwb = AnalysisNwbfile(); nwb.add`` form.
+    3. Any access on ``self.connection`` (transaction control belongs
+       in ``make_insert``).
+
+    Local-alias receivers are caught by walking assigns: a binding
+    like ``tbl = IntervalList()`` taints ``tbl`` for the rest of
+    the function body. The previous narrow check only flagged
+    direct ``IntervalList.insert1(...)`` calls; this widened
+    version surfaces refactors that route through a local alias.
     """
     from spyglass.spikesorting.v2 import artifact, recording, sorting
 
-    forbidden_calls = {
-        ("self", "insert1"),
-        ("IntervalList", "insert1"),
-        ("self", "connection"),
-    }
+    forbidden_attrs = {"insert", "insert1", "insert_many"}
+    forbidden_receiver_types = {"IntervalList", "AnalysisNwbfile"}
+
     for mod, cls_name in [
         (recording, "Recording"),
         (artifact, "ArtifactDetection"),
@@ -388,25 +397,72 @@ def test_make_compute_is_pure():
         cls = getattr(mod, cls_name)
         src = inspect.getsource(cls.make_compute)
         tree = ast.parse(inspect.cleandoc(src))
+
+        # Walk assigns to build the set of local names that bind a
+        # forbidden-receiver-type instance (``x = IntervalList()``,
+        # ``y = AnalysisNwbfile()``). Receivers tainted this way
+        # propagate the same write-forbidden semantics.
+        tainted_names = set(forbidden_receiver_types)
         for node in ast.walk(tree):
-            if isinstance(node, ast.Call):
-                func = node.func
+            if isinstance(node, ast.Assign) and isinstance(
+                node.value, ast.Call
+            ):
+                callee = node.value.func
+                callee_name = (
+                    callee.id if isinstance(callee, ast.Name) else None
+                )
+                if callee_name in forbidden_receiver_types:
+                    for tgt in node.targets:
+                        if isinstance(tgt, ast.Name):
+                            tainted_names.add(tgt.id)
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if not isinstance(func, ast.Attribute):
+                continue
+            attr = func.attr
+
+            # (1) Any insert*/insert1/insert_many on self, a tainted
+            # local alias, or directly on a forbidden receiver type.
+            if attr in forbidden_attrs:
+                # ``self.insert1``
                 if (
-                    isinstance(func, ast.Attribute)
-                    and isinstance(func.value, ast.Name)
+                    isinstance(func.value, ast.Name)
+                    and func.value.id == "self"
                 ):
-                    pair = (func.value.id, func.attr)
-                    assert pair not in forbidden_calls, (
+                    pytest.fail(
                         f"{cls_name}.make_compute calls "
-                        f"{pair[0]}.{pair[1]}; make_compute must be "
-                        "pure (no DB writes)."
+                        f"self.{attr}; make_compute must be pure "
+                        "(no DB writes)."
                     )
-                # Also catch the (Cls).add pattern where Cls is an
-                # ``AnalysisNwbfile`` call expression.
+                # ``IntervalList.insert1`` / ``aliased.insert1``
                 if (
-                    isinstance(func, ast.Attribute)
-                    and func.attr == "add"
-                    and isinstance(func.value, ast.Call)
+                    isinstance(func.value, ast.Name)
+                    and func.value.id in tainted_names
+                ):
+                    pytest.fail(
+                        f"{cls_name}.make_compute calls "
+                        f"{func.value.id}.{attr}; that DB write "
+                        "must move to make_insert."
+                    )
+                # ``IntervalList().insert1`` (instance-call form)
+                if (
+                    isinstance(func.value, ast.Call)
+                    and isinstance(func.value.func, ast.Name)
+                    and func.value.func.id in forbidden_receiver_types
+                ):
+                    pytest.fail(
+                        f"{cls_name}.make_compute calls "
+                        f"{func.value.func.id}().{attr}; that DB "
+                        "write must move to make_insert."
+                    )
+
+            # (2) ``AnalysisNwbfile().add`` and aliased ``nwb.add``.
+            if attr == "add":
+                if (
+                    isinstance(func.value, ast.Call)
                     and isinstance(func.value.func, ast.Name)
                     and func.value.func.id == "AnalysisNwbfile"
                 ):
@@ -415,35 +471,248 @@ def test_make_compute_is_pure():
                         "AnalysisNwbfile().add; that must run in "
                         "make_insert."
                     )
+                if (
+                    isinstance(func.value, ast.Name)
+                    and func.value.id in tainted_names
+                ):
+                    pytest.fail(
+                        f"{cls_name}.make_compute calls "
+                        f"{func.value.id}.add (likely aliased "
+                        "AnalysisNwbfile); must move to make_insert."
+                    )
+
+            # (3) ``self.connection.<anything>`` (transaction control).
+            if (
+                isinstance(func.value, ast.Attribute)
+                and isinstance(func.value.value, ast.Name)
+                and func.value.value.id == "self"
+                and func.value.attr == "connection"
+            ):
+                pytest.fail(
+                    f"{cls_name}.make_compute calls self.connection"
+                    f".{attr}; transaction control belongs in "
+                    "make_insert."
+                )
+
+
+def test_make_compute_purity_guard_actually_catches_regressions():
+    """Tripwire: the widened AST guard catches local-alias regressions.
+
+    Builds a synthetic source string with each of the regression
+    patterns the widened guard is supposed to flag, runs the same
+    AST walk against it, and asserts each pattern fires the
+    pytest.fail. Without this meta-test, a future "simplification"
+    that narrows the guard would silently leave production
+    refactors un-guarded.
+    """
+    import ast as _ast
+    import textwrap
+
+    REGRESSION_SAMPLES = {
+        "self.insert1": "def make_compute(self, key):\n    self.insert1({'x': 1})\n",
+        "IntervalList.insert1 direct": (
+            "def make_compute(self, key):\n"
+            "    IntervalList.insert1({'x': 1})\n"
+        ),
+        "IntervalList().insert1 instance-call": (
+            "def make_compute(self, key):\n"
+            "    IntervalList().insert1({'x': 1})\n"
+        ),
+        "aliased IntervalList.insert1": (
+            "def make_compute(self, key):\n"
+            "    tbl = IntervalList()\n"
+            "    tbl.insert1({'x': 1})\n"
+        ),
+        "AnalysisNwbfile().add": (
+            "def make_compute(self, key):\n"
+            "    AnalysisNwbfile().add('a', 'b')\n"
+        ),
+        "aliased AnalysisNwbfile.add": (
+            "def make_compute(self, key):\n"
+            "    nwb = AnalysisNwbfile()\n"
+            "    nwb.add('a', 'b')\n"
+        ),
+        "self.connection.<anything>": (
+            "def make_compute(self, key):\n"
+            "    self.connection.commit_transaction()\n"
+        ),
+    }
+
+    # Re-derive the same forbidden surface the guard uses; if the
+    # guard ever drifts, this meta-test naturally drifts with it
+    # because both reference the same constants.
+    forbidden_attrs = {"insert", "insert1", "insert_many"}
+    forbidden_receiver_types = {"IntervalList", "AnalysisNwbfile"}
+
+    def _guard_walks(src: str) -> bool:
+        """Return True iff the AST walk (mirror of the real guard)
+        would have failed on this source."""
+        tree = _ast.parse(textwrap.dedent(src))
+        tainted = set(forbidden_receiver_types)
+        for n in _ast.walk(tree):
+            if isinstance(n, _ast.Assign) and isinstance(n.value, _ast.Call):
+                cf = n.value.func
+                if isinstance(cf, _ast.Name) and cf.id in forbidden_receiver_types:
+                    for tgt in n.targets:
+                        if isinstance(tgt, _ast.Name):
+                            tainted.add(tgt.id)
+        for n in _ast.walk(tree):
+            if not isinstance(n, _ast.Call):
+                continue
+            f = n.func
+            if not isinstance(f, _ast.Attribute):
+                continue
+            if f.attr in forbidden_attrs:
+                if isinstance(f.value, _ast.Name) and f.value.id == "self":
+                    return True
+                if isinstance(f.value, _ast.Name) and f.value.id in tainted:
+                    return True
+                if (
+                    isinstance(f.value, _ast.Call)
+                    and isinstance(f.value.func, _ast.Name)
+                    and f.value.func.id in forbidden_receiver_types
+                ):
+                    return True
+            if f.attr == "add":
+                if (
+                    isinstance(f.value, _ast.Call)
+                    and isinstance(f.value.func, _ast.Name)
+                    and f.value.func.id == "AnalysisNwbfile"
+                ):
+                    return True
+                if isinstance(f.value, _ast.Name) and f.value.id in tainted:
+                    return True
+            if (
+                isinstance(f.value, _ast.Attribute)
+                and isinstance(f.value.value, _ast.Name)
+                and f.value.value.id == "self"
+                and f.value.attr == "connection"
+            ):
+                return True
+        return False
+
+    for label, src in REGRESSION_SAMPLES.items():
+        assert _guard_walks(src), (
+            f"AST guard failed to catch regression sample {label!r}; "
+            "test_make_compute_is_pure would silently pass on this "
+            "pattern. Widen the guard."
+        )
 
 
 def test_curation_v2_nwb_write_outside_transaction():
     """CurationV2.insert_curation stages NWB BEFORE transaction.
 
     Manual-table insert_curation has no framework transaction; the
-    NWB write must happen OUTSIDE the explicit ``transaction_or_noop``
-    block to keep the inner transaction short.
+    NWB write must happen OUTSIDE the explicit
+    ``transaction_or_noop`` block to keep the inner transaction
+    short.
+
+    Strategy: walk the AST. Find the ``with transaction_or_noop(...)``
+    block (matches both the bare-name and ``alias = transaction_or_noop``
+    aliased forms by checking the resolved context-manager call's
+    function name). Inside that block's body, no NWB-write helper
+    or ``AnalysisNwbfile().create`` / ``pynwb.NWBHDF5IO`` call is
+    allowed. Outside it, the NWB-write helper must be called at
+    least once and before any ``with`` whose CM is
+    ``transaction_or_noop``.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
 
     src = inspect.getsource(CurationV2.insert_curation)
-    stage_idx = src.find("_stage_curated_units_nwb")
-    txn_idx = src.find("with transaction_or_noop")
-    assert stage_idx != -1, "missing _stage_curated_units_nwb call"
-    assert txn_idx != -1, "missing transaction_or_noop block"
-    assert stage_idx < txn_idx, (
-        "_stage_curated_units_nwb must be called BEFORE the "
-        "transaction_or_noop block."
+    tree = ast.parse(inspect.cleandoc(src))
+
+    NWB_WRITE_NAMES = {"_stage_curated_units_nwb"}
+    NWB_CREATE_PATTERNS = {
+        # ``AnalysisNwbfile().create``: Call -> Attribute "create"
+        # on a Call whose func.id is "AnalysisNwbfile"
+        "AnalysisNwbfile_create",
+        "pynwb_NWBHDF5IO",
+    }
+
+    def _is_forbidden_call(node):
+        """True if node is a Call that writes NWB or stages units."""
+        if not isinstance(node, ast.Call):
+            return None
+        func = node.func
+        # Direct helper call: ``_stage_curated_units_nwb(...)`` or
+        # ``self._stage_curated_units_nwb(...)`` or
+        # ``cls._stage_curated_units_nwb(...)``
+        if isinstance(func, ast.Name) and func.id in NWB_WRITE_NAMES:
+            return func.id
+        if isinstance(func, ast.Attribute) and func.attr in NWB_WRITE_NAMES:
+            return func.attr
+        # ``AnalysisNwbfile().create``
+        if (
+            isinstance(func, ast.Attribute)
+            and func.attr == "create"
+            and isinstance(func.value, ast.Call)
+            and isinstance(func.value.func, ast.Name)
+            and func.value.func.id == "AnalysisNwbfile"
+        ):
+            return "AnalysisNwbfile_create"
+        # ``pynwb.NWBHDF5IO(...)``
+        if (
+            isinstance(func, ast.Attribute)
+            and func.attr == "NWBHDF5IO"
+            and isinstance(func.value, ast.Name)
+            and func.value.id == "pynwb"
+        ):
+            return "pynwb_NWBHDF5IO"
+        # Bare ``NWBHDF5IO(...)`` (imported directly)
+        if isinstance(func, ast.Name) and func.id == "NWBHDF5IO":
+            return "NWBHDF5IO_direct"
+        return None
+
+    # Find every ``with`` block whose context manager is a
+    # ``transaction_or_noop(...)`` call (or attribute thereof).
+    txn_blocks = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.With):
+            continue
+        for item in node.items:
+            ctx = item.context_expr
+            if isinstance(ctx, ast.Call):
+                cm_func = ctx.func
+                cm_name = (
+                    cm_func.id
+                    if isinstance(cm_func, ast.Name)
+                    else (
+                        cm_func.attr
+                        if isinstance(cm_func, ast.Attribute)
+                        else None
+                    )
+                )
+                if cm_name == "transaction_or_noop":
+                    txn_blocks.append(node)
+                    break
+
+    assert len(txn_blocks) >= 1, (
+        "CurationV2.insert_curation must use transaction_or_noop "
+        "for atomic master+part inserts; no such ``with`` block "
+        "was found."
     )
-    # And nothing inside the transaction block invokes the stage helper
-    # or pynwb.NWBHDF5IO / AnalysisNwbfile.create.
-    txn_body = src[txn_idx:]
-    for forbidden in (
-        "_stage_curated_units_nwb(",
-        "pynwb.NWBHDF5IO(",
-        "AnalysisNwbfile().create",
-    ):
-        assert forbidden not in txn_body, (
-            f"{forbidden!r} must not appear inside the transaction; "
-            "it would re-introduce the long-transaction problem."
-        )
+
+    # No forbidden NWB-write calls allowed inside any txn block.
+    for txn_block in txn_blocks:
+        for body_node in txn_block.body:
+            for sub in ast.walk(body_node):
+                forbidden = _is_forbidden_call(sub)
+                if forbidden is not None:
+                    pytest.fail(
+                        f"CurationV2.insert_curation calls "
+                        f"{forbidden!r} INSIDE a transaction_or_noop "
+                        "block; the heavy NWB write must happen "
+                        "OUTSIDE the transaction to keep it short."
+                    )
+
+    # The stage helper MUST be called somewhere -- catches a refactor
+    # that quietly drops the call.
+    has_stage_call = any(
+        _is_forbidden_call(n) in NWB_WRITE_NAMES
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Call)
+    )
+    assert has_stage_call, (
+        "CurationV2.insert_curation does not call "
+        "_stage_curated_units_nwb; the NWB staging step is missing."
+    )
