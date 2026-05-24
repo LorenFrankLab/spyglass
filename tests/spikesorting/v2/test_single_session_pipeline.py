@@ -642,35 +642,57 @@ def test_artifact_selection_resolve_source_returns_recording_kind(
 
 
 @pytest.mark.slow
-def test_shared_artifact_group_insert_is_gated_for_phase_1(populated_recording):
-    """``SharedArtifactGroup.insert_group`` is gated in Phase 1.
+def test_shared_artifact_group_insert_validates_inputs(populated_recording):
+    """``SharedArtifactGroup.insert_group`` validates session
+    consistency, recording existence, and non-empty members.
 
-    ``ArtifactDetection.make`` does not implement the shared-group
-    branch yet, so allowing ``insert_group`` to succeed would let users
-    insert rows that cannot populate. The gate raises
-    ``NotImplementedError`` with a clear hint at the
-    single-recording artifact path. When the shared-group branch
-    lands in Phase 2 this gate is lifted and the validation tests
-    inside ``insert_group`` (under ``# pragma: no cover``) become
-    active again -- this test then flips to assert the success path.
+    Phase 1d code-review finding #1: Phase 1 plan-line 67 required
+    the shared-group path to be implemented in Phase 1; Phase 1b
+    explicitly preserved the prior NotImplementedError gate. The
+    activation in 1d-followup lifts the gate; this test pins the
+    validation contract.
     """
     from spyglass.spikesorting.v2.artifact import SharedArtifactGroup
 
-    with pytest.raises(NotImplementedError, match="gated until"):
-        SharedArtifactGroup.insert_group(
-            "test_group",
-            [{"recording_id": populated_recording["recording_id"]}],
-        )
-
-    # Verify the gate fires BEFORE any validation runs, i.e., it
-    # doesn't matter what's in members.
-    with pytest.raises(NotImplementedError, match="gated until"):
+    # Empty members -> ValueError.
+    with pytest.raises(ValueError, match="members list is empty"):
         SharedArtifactGroup.insert_group("empty_group", [])
 
-    # No master row was created.
+    # Member missing recording_id -> ValueError.
+    with pytest.raises(ValueError, match="must include 'recording_id'"):
+        SharedArtifactGroup.insert_group(
+            "bad_member", [{"not_recording_id": "x"}]
+        )
+
+    # Non-existent recording_id -> ValueError.
+    import uuid as _uuid
+
+    bogus_rid = _uuid.uuid4()
+    with pytest.raises(ValueError, match="not in Recording"):
+        SharedArtifactGroup.insert_group(
+            "bogus_recording",
+            [{"recording_id": bogus_rid}],
+        )
+
+    # Happy path: one real recording -> master + Member rows
+    # written in one transaction.
+    SharedArtifactGroup.insert_group(
+        "v2_solo_group",
+        [{"recording_id": populated_recording["recording_id"]}],
+    )
     assert (
-        len(SharedArtifactGroup & {"shared_artifact_group_name": "test_group"})
-        == 0
+        len(
+            SharedArtifactGroup
+            & {"shared_artifact_group_name": "v2_solo_group"}
+        )
+        == 1
+    )
+    assert (
+        len(
+            SharedArtifactGroup.Member
+            & {"shared_artifact_group_name": "v2_solo_group"}
+        )
+        == 1
     )
 
 
@@ -1611,16 +1633,19 @@ def test_run_v2_pipeline_end_to_end_and_idempotent(polymer_smoke_session):
         "sorting_id",
         "curation_id",
         "merge_id",
+        "n_units",
     }
     assert set(manifest.keys()) == expected_keys
     assert manifest["preset"] == "franklab_tetrode_mountainsort5"
     assert manifest["curation_id"] == 0  # root curation
-    # MountainSort5 is the deterministic-enough default for the smoke
-    # fixture; clusterless_thresholder is not exercised here because
-    # its 100 uV default threshold finds zero peaks on this 4s fixture
-    # and SI's random_spikes extension then errors on the empty sort.
-    # A clusterless e2e test belongs with a fixture-tuned preset or
-    # a Sorting.make zero-peak robustness fix.
+    assert manifest["n_units"] >= 1
+    # The smoke fixture's clusterless 100 uV default IS exercised in
+    # ``test_run_v2_pipeline_clusterless_default_handles_zero_units_
+    # gracefully`` -- it confirms the orchestrator's zero-unit
+    # short-circuit returns a partial manifest with
+    # ``curation_id=None, merge_id=None`` instead of crashing inside
+    # CurationV2.insert_curation. MS5 here is the populated-units
+    # path.
 
     # Idempotent: rerun returns the same manifest, no new rows.
     manifest2 = run_v2_pipeline(
@@ -2668,6 +2693,91 @@ def test_run_v2_pipeline_clusterless_preset(polymer_smoke_session):
         # (delete + reinsert) is blocked by the FK constraint.
         # update1 modifies the secondary attributes in place.
         SorterParameters.update1(original_default)
+
+
+@pytest.mark.slow
+def test_run_v2_pipeline_clusterless_default_handles_zero_units_gracefully(
+    polymer_smoke_session,
+):
+    """``run_v2_pipeline`` with the SHIPPED ``clusterless_thresholder``
+    default (100 uV ``detect_threshold``) on the smoke fixture
+    finds zero peaks AND completes without crashing.
+
+    Phase 1d code-review finding #5: the prior clusterless test
+    mutates the shipped preset to 5 uV. That validates the
+    populated-units path but does NOT exercise the zero-unit path
+    a production user would hit when no spikes are above the
+    threshold. Before this commit, ``_build_analyzer`` called
+    ``analyzer.compute([...])`` unconditionally and SI's
+    ``random_spikes`` / ``templates`` extensions crashed on a
+    zero-unit sorting. This test pins the new guard: zero-unit
+    sortings skip the extension compute and the orchestrator
+    still produces a complete manifest with ``n_units == 0``.
+    """
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    _clean_session_v2(polymer_smoke_session)
+    initialize_v2_defaults()
+    LabTeam.insert1(
+        {
+            "team_name": "v2_test_team",
+            "team_description": "v2 pipeline tests",
+        },
+        skip_duplicates=True,
+    )
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    sort_group_id = int(
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
+    )
+
+    # Use the SHIPPED default (100 uV) which finds zero peaks on
+    # the smoke fixture. NO row mutation -- this is the production-
+    # contract test.
+    manifest = run_v2_pipeline(
+        nwb_file_name=nwb_file_name,
+        sort_group_id=sort_group_id,
+        interval_list_name="raw data valid times",
+        team_name="v2_test_team",
+        preset="franklab_tetrode_clusterless_thresholder",
+    )
+
+    # Recording / artifact / sorting IDs are populated; curation +
+    # merge are explicitly None because SI's NwbSortingExtractor
+    # cannot open an empty units NWB and the orchestrator short-
+    # circuits curation when n_units == 0.
+    for key in ("recording_id", "artifact_id", "sorting_id"):
+        assert manifest.get(key) is not None, (
+            f"Zero-unit manifest missing {key!r}; got {manifest}."
+        )
+    assert manifest["n_units"] == 0
+    assert manifest["curation_id"] is None, (
+        "Orchestrator should NOT run CurationV2.insert_curation on "
+        "a zero-unit sort -- SI cannot open the empty units NWB "
+        "and the curation step would crash. The partial-manifest "
+        "contract returns ``curation_id=None`` instead."
+    )
+    assert manifest["merge_id"] is None
+
+    # Sorting row exists with ``n_units == 0``.
+    sort_pk = {"sorting_id": manifest["sorting_id"]}
+    sort_row = (Sorting & sort_pk).fetch1()
+    assert sort_row["n_units"] == 0, (
+        f"Expected zero units from shipped clusterless default "
+        f"on the smoke fixture, got n_units={sort_row['n_units']}. "
+        "Either the smoke fixture's amplitudes changed (unlikely) "
+        "or the unit-conversion semantics shifted -- audit the "
+        "detect_threshold units."
+    )
+    assert len(Sorting.Unit & sort_pk) == 0, (
+        "Sorting.Unit has rows for a zero-unit sort; the "
+        "_populate_unit_part path should iterate zero ids and "
+        "insert zero rows."
+    )
 
 
 # ---------- Sorting.make rollback file cleanup ---------------------------
@@ -4754,3 +4864,158 @@ def test_merge_dispatch_restrict_by_artifact_honored_in_v2(populated_sorting):
         f"merge_id (expected {expected!r}, got {list(merge_ids)!r}); "
         "N40 regression."
     )
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_merge_dispatch_get_spike_indicator_on_v2_merge_id(populated_sorting):
+    """N54 downstream-consumer: ``SpikeSortingOutput.get_spike_indicator``
+    works on v2 merge_ids.
+
+    ``get_spike_indicator`` is the consumer-facing API for
+    clusterless decoding; it iterates ``get_spike_times(merge_key)``
+    output and binary-indicates per unit per time bin. The audit
+    flagged this as the highest-leverage missing downstream-
+    consumer test (any regression to v2's ``get_spike_times``
+    dispatch silently breaks clusterless decoding).
+    """
+    import numpy as _np
+
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    _clear_curations(populated_sorting)
+    pk = CurationV2.insert_curation(
+        sorting_key=populated_sorting, labels={}
+    )
+    merge_id = (SpikeSortingOutput.CurationV2 & pk).fetch1("merge_id")
+
+    n_units = int((Sorting & populated_sorting).fetch1("n_units"))
+    assert n_units >= 1
+
+    # Construct a time array spanning the recording window. The
+    # smoke fixture is ~4 s; 100 ms bins -> ~40 time points.
+    time_array = _np.arange(0.0, 4.0, 0.1)
+    indicator = SpikeSortingOutput().get_spike_indicator(
+        {"merge_id": merge_id}, time_array
+    )
+    assert indicator.shape == (len(time_array), n_units), (
+        f"get_spike_indicator returned shape {indicator.shape}; "
+        f"expected ({len(time_array)}, {n_units}). v2 dispatch "
+        "regression."
+    )
+    # Indicator is binary {0, 1} (or float bool); every entry is
+    # non-negative and finite. ``np.any`` is True iff the sorter
+    # found at least one spike inside any time bin.
+    assert _np.all(indicator >= 0)
+    assert _np.all(_np.isfinite(indicator))
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_merge_dispatch_get_firing_rate_on_v2_merge_id(populated_sorting):
+    """N54 downstream-consumer: ``SpikeSortingOutput.get_firing_rate``
+    works on v2 merge_ids.
+
+    ``get_firing_rate`` is the second highest-leverage downstream
+    consumer for decoding / unit-quality metrics; it computes
+    per-unit instantaneous firing rates over a time grid. Returned
+    array must be non-negative everywhere and have shape
+    (n_time, n_units).
+    """
+    import numpy as _np
+
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    _clear_curations(populated_sorting)
+    pk = CurationV2.insert_curation(
+        sorting_key=populated_sorting, labels={}
+    )
+    merge_id = (SpikeSortingOutput.CurationV2 & pk).fetch1("merge_id")
+
+    n_units = int((Sorting & populated_sorting).fetch1("n_units"))
+    assert n_units >= 1
+
+    time_array = _np.arange(0.0, 4.0, 0.1)
+    firing_rate = SpikeSortingOutput().get_firing_rate(
+        {"merge_id": merge_id}, time_array
+    )
+    assert firing_rate.shape == (len(time_array), n_units), (
+        f"get_firing_rate returned shape {firing_rate.shape}; "
+        f"expected ({len(time_array)}, {n_units})."
+    )
+    assert _np.all(firing_rate >= 0), (
+        "Firing rate must be non-negative everywhere; v2 dispatch "
+        "regression."
+    )
+    assert _np.all(_np.isfinite(firing_rate))
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_shared_artifact_group_populate_end_to_end(
+    populated_recording, polymer_smoke_session
+):
+    """End-to-end shared-group populate writes one IntervalList per
+    member ``nwb_file_name``.
+
+    Phase 1d code-review finding #1: the Phase 1 plan requires the
+    cross-recording shared-artifact path to be implemented; this
+    test pins the contract. With a single-recording smoke fixture
+    the shared group has one member, so ``per_member_nwb_files``
+    has length 1 and one IntervalList row is written. The same
+    code path scales to N members on a multi-recording session
+    (out of scope for the smoke fixture).
+    """
+    from spyglass.common.common_interval import IntervalList
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactDetectionParameters,
+        ArtifactSelection,
+        SharedArtifactGroup,
+    )
+    from spyglass.spikesorting.v2.utils import (
+        artifact_interval_list_name,
+    )
+
+    ArtifactDetectionParameters.insert_default()
+    group_name = "v2_e2e_shared_group"
+
+    # Clean up any prior group from earlier test runs.
+    (
+        SharedArtifactGroup
+        & {"shared_artifact_group_name": group_name}
+    ).super_delete(warn=False)
+
+    SharedArtifactGroup.insert_group(
+        group_name,
+        [{"recording_id": populated_recording["recording_id"]}],
+    )
+
+    art_pk = ArtifactSelection.insert_selection(
+        {
+            "shared_artifact_group_name": group_name,
+            "artifact_params_name": "none",
+        }
+    )
+    # ``none`` preset writes a full-window valid interval so the test
+    # is amplitude-fixture-independent.
+    ArtifactDetection.populate(art_pk, reserve_jobs=False)
+
+    # Exactly one IntervalList row (one member), keyed by the
+    # member's nwb_file_name with the canonical artifact-named
+    # convention.
+    interval_name = artifact_interval_list_name(art_pk["artifact_id"])
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    rows = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": interval_name,
+        }
+    ).fetch(as_dict=True)
+    assert len(rows) == 1
+    assert rows[0]["pipeline"] == "spikesorting_artifact_v2"

@@ -57,19 +57,38 @@ schema = dj.schema("spikesorting_v2_artifact")
 
 
 class ArtifactFetched(NamedTuple):
-    """DB-side inputs gathered by :meth:`ArtifactDetection.make_fetch`."""
+    """DB-side inputs gathered by :meth:`ArtifactDetection.make_fetch`.
+
+    For ``source.kind == "recording"`` only the single-recording
+    fields are populated and ``member_recording_ids`` /
+    ``member_nwb_file_names`` are ``None``. For
+    ``source.kind == "shared_artifact_group"`` the per-recording
+    fields are populated as ordered tuples (length n_members) and
+    the single-recording ``nwb_file_name`` is the common parent
+    session validated at ``insert_group`` time.
+    """
 
     source: SourceResolution
     validated: ArtifactDetectionParamsSchema
     nwb_file_name: str
     artifact_job_kwargs: dict | None
+    member_recording_ids: tuple | None = None
+    member_nwb_file_names: tuple | None = None
 
 
 class ArtifactComputed(NamedTuple):
-    """Outputs of :meth:`ArtifactDetection.make_compute`."""
+    """Outputs of :meth:`ArtifactDetection.make_compute`.
+
+    ``per_member_nwb_files`` is a tuple of distinct
+    ``nwb_file_name`` strings the ``make_insert`` step must write
+    one ``IntervalList`` row per. For the single-recording path it
+    is ``(nwb_file_name,)`` of length 1; for the shared-group path
+    it is the distinct set across the member recordings.
+    """
 
     valid_times: np.ndarray
     nwb_file_name: str
+    per_member_nwb_files: tuple = ()
 
 
 @schema
@@ -160,15 +179,15 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
     def insert_group(cls, name: str, members: list[dict]) -> None:
         """Insert master + Member rows; validate session consistency.
 
-        Currently gated: ``ArtifactDetection.make`` does not yet
-        implement the matching make-body branch for the
-        ``SharedArtifactGroupSource`` part, so inserting a group here
-        would create rows that cannot populate downstream. The schema
-        is declared (final-shape) so v2 won't need a migration when
-        the shared-group path lands; ``insert_group`` raises
-        ``NotImplementedError`` until then so users get a clear
-        message instead of an opaque ``ArtifactDetection.make``
-        failure later.
+        Phase 1 plan-line 67 + Phase 1e (audit-driven activation):
+        a ``SharedArtifactGroup`` is a named bundle of populated
+        ``Recording`` rows whose artifact-detection pass should run
+        ONCE over the union of channels. The matching
+        ``ArtifactDetection.make_compute`` branch unions the channels
+        across all members, runs the same threshold scan as the
+        single-recording path, and ``make_insert`` writes one
+        ``IntervalList`` row per member ``nwb_file_name`` so each
+        member session sees the artifact times in its own namespace.
 
         Parameters
         ----------
@@ -176,38 +195,27 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
             Group name (PK on the master). Must be unique within the
             installation.
         members
-            List of dicts identifying member recordings. Each dict must
-            contain at least ``recording_id`` (other fields are ignored
-            so the caller can pass arbitrary upstream rows / PKs).
+            List of dicts identifying member recordings. Each dict
+            must contain at least ``recording_id`` (other fields are
+            ignored so the caller can pass arbitrary upstream rows
+            / PKs).
 
         Raises
         ------
-        NotImplementedError
-            Always, until ``ArtifactDetection.make`` ships the
-            shared-group branch. The validation logic below is
-            preserved (under ``# pragma: no cover``) so it can be
-            re-enabled then.
         ValueError
-            If ``members`` is empty, if any member ``recording_id`` is
-            not a populated ``Recording``, or if members span more than
-            one session. The shared-group detection assumes all members
-            share a time axis -- mixing sessions makes the
-            artifact-removed valid times undefined.
+            If ``members`` is empty, if any member ``recording_id``
+            is not a populated ``Recording``, or if members span
+            more than one session. The shared-group detection
+            requires all members to share a time axis -- mixing
+            sessions makes the artifact-removed valid times
+            undefined.
         """
-        raise NotImplementedError(
-            "SharedArtifactGroup.insert_group is gated until "
-            "ArtifactDetection.make ships the shared-group branch. "
-            "Use the single-recording artifact path "
-            "(ArtifactSelection.insert_selection with recording_id) "
-            "until then."
-        )
-
-        from spyglass.spikesorting.v2.recording import (  # pragma: no cover
+        from spyglass.spikesorting.v2.recording import (
             Recording,
             RecordingSelection,
         )
 
-        if not members:  # pragma: no cover
+        if not members:
             raise ValueError(
                 "SharedArtifactGroup.insert_group: members list is empty. "
                 "Pass at least one recording_id dict."
@@ -516,60 +524,108 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         Layer-2 source re-check happens here so a row whose source
         part was deleted (cascade orphan) fails fast inside
         ``make_fetch``; raising here is cheap and deterministic.
-        The shared-artifact-group source path is still gated by
-        ``NotImplementedError`` -- the runtime body lands once
-        ``SharedArtifactGroup.insert_group`` ships. Tuple return is
-        DeepHash-stable across the two calls DataJoint makes (before
-        compute and again inside the transaction).
+        For the shared-artifact-group source, fetch the ordered
+        member ``recording_id`` + ``nwb_file_name`` tuples so
+        ``make_compute`` can union their channels without further
+        DB I/O.  Tuple return is DeepHash-stable across the two
+        calls DataJoint makes (before compute and again inside the
+        transaction).
         """
         from spyglass.spikesorting.v2.recording import RecordingSelection
 
         source = ArtifactSelection.resolve_source(key)
-        if source.kind == "shared_artifact_group":
-            raise NotImplementedError(
-                "ArtifactDetection.make for SharedArtifactGroup is not yet "
-                "implemented; populate SharedArtifactGroup.insert_group "
-                "first."
-            )
-        if source.kind != "recording":
-            raise RuntimeError(
-                f"ArtifactDetection.make: unexpected source kind "
-                f"{source.kind!r}."
-            )
 
-        # Pre-fetch both the params blob and the job_kwargs blob so
-        # ``make_compute`` can call ``_resolved_job_kwargs(...)`` per
-        # shared-contracts.md "Job-Kwargs Resolution". The in-memory
-        # ``_detect_artifacts`` scan does not consume SI-style
-        # job_kwargs, but the resolver call is required so the
-        # override channels are testable here. ``fetch1(a, b)``
-        # returns a tuple; unpack directly.
         params_blob, artifact_job_kwargs = (
             ArtifactDetectionParameters * (ArtifactSelection & key)
         ).fetch1("params", "job_kwargs")
         validated = ArtifactDetectionParamsSchema.model_validate(params_blob)
-        nwb_file_name = (
-            RecordingSelection & {"recording_id": source.key["recording_id"]}
-        ).fetch1("nwb_file_name")
-        return ArtifactFetched(
-            source=source,
-            validated=validated,
-            nwb_file_name=nwb_file_name,
-            artifact_job_kwargs=artifact_job_kwargs,
+
+        if source.kind == "recording":
+            nwb_file_name = (
+                RecordingSelection
+                & {"recording_id": source.key["recording_id"]}
+            ).fetch1("nwb_file_name")
+            return ArtifactFetched(
+                source=source,
+                validated=validated,
+                nwb_file_name=nwb_file_name,
+                artifact_job_kwargs=artifact_job_kwargs,
+                member_recording_ids=None,
+                member_nwb_file_names=None,
+            )
+
+        if source.kind == "shared_artifact_group":
+            # Members come from SharedArtifactGroup.Member ordered by
+            # ``recording_id`` so the deterministic tuple shape is
+            # DeepHash-stable across both make_fetch calls. The
+            # per-member ``nwb_file_name`` lookup is bulk-fetched
+            # via a join.
+            members = (
+                SharedArtifactGroup.Member
+                * RecordingSelection
+                & {
+                    "shared_artifact_group_name": source.key[
+                        "shared_artifact_group_name"
+                    ]
+                }
+            ).fetch("recording_id", "nwb_file_name", as_dict=True, order_by="recording_id")
+            if not members:
+                raise RuntimeError(
+                    "ArtifactDetection.make: SharedArtifactGroup "
+                    f"{source.key['shared_artifact_group_name']!r} has "
+                    "zero members; insert_group should have rejected "
+                    "the empty case."
+                )
+            member_recording_ids = tuple(
+                str(m["recording_id"]) for m in members
+            )
+            member_nwb_file_names = tuple(
+                m["nwb_file_name"] for m in members
+            )
+            # ``insert_group`` validated single-session, so the
+            # ``nwb_file_name`` is unique; surface the canonical one
+            # so callers that only need the master nwb_file_name
+            # (single-recording-shaped consumers) keep working.
+            nwb_file_name = member_nwb_file_names[0]
+            return ArtifactFetched(
+                source=source,
+                validated=validated,
+                nwb_file_name=nwb_file_name,
+                artifact_job_kwargs=artifact_job_kwargs,
+                member_recording_ids=member_recording_ids,
+                member_nwb_file_names=member_nwb_file_names,
+            )
+
+        raise RuntimeError(
+            f"ArtifactDetection.make: unexpected source kind {source.kind!r}."
         )
 
     def make_compute(
-        self, key, source, validated, nwb_file_name, artifact_job_kwargs
+        self,
+        key,
+        source,
+        validated,
+        nwb_file_name,
+        artifact_job_kwargs,
+        member_recording_ids=None,
+        member_nwb_file_names=None,
     ):
         """Run artifact detection outside any DB transaction.
 
-        Loads the cached preprocessed recording via
-        ``Recording.get_recording`` (regenerates the artifact on
-        disk if missing -- still inside ``make_compute``, no DB
-        lock), scans for amplitude / z-score threshold crossings,
-        expands them by the configured removal window. Returns the
-        artifact-removed ``valid_times`` plus the upstream metadata
-        ``make_insert`` needs.
+        For ``source.kind == "recording"``: load the single cached
+        preprocessed recording and scan it.
+
+        For ``source.kind == "shared_artifact_group"``: load each
+        member's preprocessed recording, ``si.aggregate_channels``
+        them into a single recording (column-stack along the
+        channel axis -- the union of channels), then scan the
+        unioned recording ONCE. The same ``valid_times`` array
+        gets written into every member's ``IntervalList`` so each
+        member session sees the artifact times in its own
+        namespace.
+
+        Returns ``valid_times`` plus the per-member-nwb-file
+        target list ``make_insert`` writes to.
         """
         # Resolve job_kwargs even though the in-memory
         # ``_detect_artifacts`` scan does not consume them. The
@@ -582,15 +638,57 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
 
         _resolved_job_kwargs(artifact_job_kwargs)
 
-        recording = Recording().get_recording(
-            {"recording_id": source.key["recording_id"]}
-        )
-        valid_times = self._detect_artifacts(recording, validated)
+        if source.kind == "recording":
+            recording = Recording().get_recording(
+                {"recording_id": source.key["recording_id"]}
+            )
+            valid_times = self._detect_artifacts(recording, validated)
+            return ArtifactComputed(
+                valid_times=valid_times,
+                nwb_file_name=nwb_file_name,
+                per_member_nwb_files=(nwb_file_name,),
+            )
+
+        # shared_artifact_group source.
+        import spikeinterface as si
+
+        if not member_recording_ids:
+            raise RuntimeError(
+                "ArtifactDetection.make_compute: shared-group source "
+                "has no member_recording_ids; make_fetch contract "
+                "violated."
+            )
+        per_member_recordings = [
+            Recording().get_recording({"recording_id": rid})
+            for rid in member_recording_ids
+        ]
+        # ``aggregate_channels`` column-stacks along the channel
+        # axis (column = channel). All members must share the same
+        # n_samples + fs + dtype, which the same-session check at
+        # ``insert_group`` guarantees -- members live in one
+        # ``nwb_file_name`` so their time axes match by
+        # construction.
+        unioned = si.aggregate_channels(per_member_recordings)
+        valid_times = self._detect_artifacts(unioned, validated)
+        # One IntervalList row per distinct member nwb_file_name;
+        # ``insert_group`` enforces single-session, so the distinct
+        # set has length 1 today, but keep the tuple shape so a
+        # future cross-session relaxation does not need a make-body
+        # change.
+        per_member_nwb_files = tuple(dict.fromkeys(member_nwb_file_names))
         return ArtifactComputed(
-            valid_times=valid_times, nwb_file_name=nwb_file_name
+            valid_times=valid_times,
+            nwb_file_name=nwb_file_name,
+            per_member_nwb_files=per_member_nwb_files,
         )
 
-    def make_insert(self, key, valid_times, nwb_file_name):
+    def make_insert(
+        self,
+        key,
+        valid_times,
+        nwb_file_name,
+        per_member_nwb_files=(),
+    ):
         """Write the artifact ``IntervalList`` + master row atomically.
 
         DataJoint's tri-part dispatch opens the framework transaction
@@ -598,6 +696,11 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         no-op (yields without re-opening when a transaction is
         already active). Kept defensively so an out-of-populate
         caller still gets atomic registration.
+
+        Writes ONE ``IntervalList`` row per distinct member
+        ``nwb_file_name`` so each session sees the artifact times.
+        For the single-recording path this is one row keyed by the
+        master's ``nwb_file_name``.
         """
         from spyglass.spikesorting.v2.utils import (
             artifact_interval_list_name,
@@ -605,17 +708,23 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         )
 
         interval_list_name = artifact_interval_list_name(key["artifact_id"])
+        # Backwards compat: callers that constructed
+        # ``ArtifactComputed`` without ``per_member_nwb_files``
+        # (older test stubs) fall back to the single
+        # ``nwb_file_name``.
+        targets = per_member_nwb_files or (nwb_file_name,)
         # no-op when framework transaction is active; kept defensively
         # so an out-of-populate caller still gets atomic registration.
         with transaction_or_noop(self.connection):
-            IntervalList.insert1(
-                {
-                    "nwb_file_name": nwb_file_name,
-                    "interval_list_name": interval_list_name,
-                    "valid_times": valid_times,
-                    "pipeline": "spikesorting_artifact_v2",
-                }
-            )
+            for member_nwb in targets:
+                IntervalList.insert1(
+                    {
+                        "nwb_file_name": member_nwb,
+                        "interval_list_name": interval_list_name,
+                        "valid_times": valid_times,
+                        "pipeline": "spikesorting_artifact_v2",
+                    }
+                )
             self.insert1(key)
 
     @staticmethod

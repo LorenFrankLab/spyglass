@@ -201,6 +201,26 @@ def run_v2_pipeline(
     )
     Sorting.populate(sort_pk, reserve_jobs=False)
 
+    # Zero-unit short-circuit: SI's ``NwbSortingExtractor`` cannot
+    # open an empty units NWB (no ``spike_times`` column to read),
+    # which makes ``CurationV2.insert_curation`` crash mid-stage on
+    # a sort that legitimately found no peaks. When the sort has
+    # zero units, return a partial manifest with
+    # ``curation_id``/``merge_id`` set to None. The Sorting row is
+    # still populated and visible to the user; they can re-run with
+    # a lower ``detect_threshold`` or skip the merge step.
+    n_units = int((Sorting & sort_pk).fetch1("n_units"))
+    if n_units == 0:
+        return {
+            "preset": preset,
+            "recording_id": rec_pk["recording_id"],
+            "artifact_id": art_pk["artifact_id"],
+            "sorting_id": sort_pk["sorting_id"],
+            "curation_id": None,
+            "merge_id": None,
+            "n_units": 0,
+        }
+
     # Idempotent curation: if a root (parent_curation_id=-1) curation
     # already exists for this sorting, reuse it; otherwise insert a
     # fresh one. The CurationV2 part on the merge table is auto-
@@ -230,4 +250,5 @@ def run_v2_pipeline(
         "sorting_id": sort_pk["sorting_id"],
         "curation_id": curation_pk["curation_id"],
         "merge_id": merge_id,
+        "n_units": n_units,
     }

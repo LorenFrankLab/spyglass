@@ -1249,6 +1249,28 @@ class Sorting(SpyglassMixin, dj.Computed):
         if job_kwargs is None:
             job_kwargs = _resolved_job_kwargs(sorter_row["job_kwargs"])
 
+        # Zero-unit sortings (e.g., ``clusterless_thresholder`` with
+        # a high ``detect_threshold`` on a quiet session) crash both
+        # ``create_sorting_analyzer(sparse=True)`` -- which routes
+        # through ``estimate_sparsity`` -> ``random_spikes_selection``
+        # and fails on ``np.concatenate([])`` -- and the downstream
+        # ``analyzer.compute([...])`` extension list. Skip the
+        # analyzer build entirely on zero units; ``_populate_unit_part``
+        # iterates an empty ``sorting.unit_ids`` and writes zero Unit
+        # rows. The downstream ``Sorting.get_analyzer`` path explicitly
+        # rebuilds the analyzer on demand if the folder is missing,
+        # so a zero-unit sort safely leaves no folder behind. The
+        # Sorting master row still commits with ``n_units=0`` so the
+        # user sees the sort completed and just found nothing.
+        if sorting.get_num_units() == 0:
+            logger.warning(
+                "Sorting._build_analyzer: sorting_id="
+                f"{key.get('sorting_id')!r} has zero units; skipping "
+                "analyzer build. Check ``detect_threshold`` / "
+                "artifact masking if you expected non-zero output."
+            )
+            return folder
+
         analyzer = si.create_sorting_analyzer(
             sorting=sorting,
             recording=recording,
@@ -1383,7 +1405,18 @@ class Sorting(SpyglassMixin, dj.Computed):
         channel (resolved through the sort group's
         ``SortGroupV2.SortGroupElectrode``) plus the peak template
         amplitude in microvolts and the spike count.
+
+        Zero-unit early-return: ``_build_analyzer`` skips the
+        ``create_sorting_analyzer`` call when ``sorting.get_num_units
+        () == 0`` (SI's ``estimate_sparsity`` crashes on empty
+        sortings), so the analyzer folder does not exist. There are
+        no units to insert in that case; return early so
+        ``si.load_sorting_analyzer`` is not called against a
+        non-existent folder.
         """
+        if sorting.get_num_units() == 0:
+            return
+
         import numpy as _np
         import spikeinterface as si
         from spikeinterface.core import template_tools

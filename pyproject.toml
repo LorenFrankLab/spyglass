@@ -207,6 +207,23 @@ markers = [
   # Special markers
   "serial: Tests that must run serially (not parallel-safe)",
   "regenerate: Tests that regenerate large on-disk fixtures (manual run only)",
+
+  # Test-tier markers (spike sorting v2 Phase 1b plan).
+  # Convention from .claude/docs/plans/spikesorting-v2/phase-1b-runtime-regressions.md:
+  #   T1 unit          - <1s, no Docker
+  #   T2 db_unit       - <5s, Docker MySQL only (no populate)
+  #   T3 stage         - 10-60s, populate one Computed table
+  #   T4 pipeline      - 60-120s, full Recording -> Curation
+  #   T5 regression_gate - >2min, 60s fixture / memory / parallel
+  # New v2 tests should use these tier markers. The existing
+  # ``slow`` / ``integration`` marks above are not retired -- a
+  # bulk rename across the 75 marked v2 tests is out of scope for
+  # the audit-fix batch and was deferred to a separate marker-
+  # migration PR. CI runners can dispatch on either set.
+  "db_unit: DB-tier without populate (Docker MySQL connection only)",
+  "stage: Populate one Computed table (Recording / Artifact / Sorting)",
+  "pipeline: Full Recording -> Artifact -> Sort -> Curation pipeline",
+  "regression_gate: Heavy regression gate (60s fixture, memory, parallel)",
 ]
 
 [tool.coverage.run] # NOTE: changes need to be mirrored in tests/.coveragerc

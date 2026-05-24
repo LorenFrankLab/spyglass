@@ -237,6 +237,40 @@ in-flight v1 PR on `copilot/fix-populating-artifact-detection`.
   Phase 2 `AnalyzerCuration`. Pure-NWB consumers (DANDI export,
   external tools) lose these columns; DataJoint consumers gain the
   queryable + FK-validated shape.
+- **`SharedArtifactGroup` cross-recording artifact detection
+  activated** (was gated to `NotImplementedError` through Phase 1b).
+  Phase 1 plan-line 67 required this; Phase 1d code-review
+  followup activated it. `SharedArtifactGroup.insert_group(name,
+  members)` validates session consistency + Recording existence;
+  `ArtifactDetection.populate(...)` on a `SharedArtifactGroupSource`
+  loads each member's preprocessed recording, unions their
+  channels via `si.aggregate_channels`, runs the threshold scan
+  ONCE over the union, and writes one `IntervalList` row per
+  distinct member `nwb_file_name`. Use this for behavioral
+  artifacts visible on every probe (chewing, licking,
+  head-bumps) where per-recording detection would miss the
+  cross-channel signal.
+- **`clusterless_thresholder` zero-peak graceful path.**
+  `Sorting._build_analyzer` previously crashed on a zero-unit
+  sorting (SI's `random_spikes` extension can't sample from an
+  empty unit set); the shipped 100 µV `clusterless_thresholder`
+  default on the 4 s smoke fixture finds zero peaks. Phase 1d
+  followup adds a zero-unit guard so the analyzer build short-
+  circuits and the Sorting row still commits with `n_units=0`.
+  `run_v2_pipeline` returns a partial manifest
+  (`curation_id=None, merge_id=None, n_units=0`) instead of
+  crashing inside CurationV2.insert_curation -- SI's
+  NwbSortingExtractor cannot open an empty units NWB. Users
+  with zero-unit sorts should lower `detect_threshold` or
+  revisit artifact masking before retrying.
+- **`mountainsort4` is now in the `spikesorting-v2` extra.**
+  Phase 0c required MS4 runtime evidence before Phase 1 shipped
+  the MS4 default Lookup rows; the runtime was previously a
+  manual install. The MS4 package is now pinned via
+  `pip install "spyglass-neuro[spikesorting-v2]"` and pulls
+  `ml_ms4alg` + `isosplit5` + `pybind11` + `spikeextractors`.
+  Linux-only legacy runtime; same non-determinism caveat as
+  MS5.
 - **`detect_threshold` units for `clusterless_thresholder` are NOT
   truly microvolts.** The N19 docstring says "stays in microvolts"
   because the path forwards `noise_levels=[1.0]` to SI's
