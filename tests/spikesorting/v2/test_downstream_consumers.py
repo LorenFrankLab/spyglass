@@ -1,10 +1,9 @@
 """Downstream-consumer smoke tests for v2 spike-sorting outputs.
 
-Phase 1 plan-line 182 commands ``pytest tests/spikesorting/v2/
-test_downstream_consumers.py -q``; this module is the named target
-for that command. It exercises the downstream consumer surfaces
-that a Frank-lab decoding / ripple-detection workflow would hit
-on a v2 ``merge_id``:
+This module is the canonical target for the suite-runner contract
+``pytest tests/spikesorting/v2/test_downstream_consumers.py -q``.
+It exercises the downstream consumer surfaces that a Frank-lab
+decoding / ripple-detection workflow would hit on a v2 ``merge_id``:
 
 - ``SpikeSortingOutput.get_recording`` / ``get_sorting`` /
   ``get_sort_group_info`` (the merge-dispatch entrypoints).
@@ -20,14 +19,10 @@ breaks clusterless decoding; this module is the focused gate. All
 tests are integration-tier (require ``populated_sorting`` from
 conftest.py) and marked ``slow + integration``.
 
-Cross-references:
-- Phase 1d audit-followup commits also added related tests inline
-  in ``test_single_session_pipeline.py`` (the same fixtures are
-  shared via the conftest, so tests can live in either file). This
-  module is the canonical "downstream consumers" target.
-- The SortedSpikesGroup MUA path tests ``firing_rate_from_spike_
-  indicator`` with ``multiunit=True``, the v1-MultiUnitActivity-
-  parity invariant the plan flags at line 218.
+The ``SortedSpikesGroup`` MUA test exercises
+``firing_rate_from_spike_indicator`` with ``multiunit=True``, the
+v1-MultiUnitActivity-parity invariant (the analysis-side equivalent
+of v1's per-bin multi-unit firing rate).
 """
 
 from __future__ import annotations
@@ -411,11 +406,10 @@ def test_sorted_spikes_group_per_unit_and_mua_firing_rate(populated_sorting):
     """``SortedSpikesGroup`` built from a v2 merge_id supports both
     per-unit and multiunit (MUA) firing-rate readouts.
 
-    This is the v1-MultiUnitActivity-parity invariant the plan
-    flags at phase-1-modern-single-session.md:218 -- the MUA path
-    must compose with v2 sparse-unit_id sortings without
-    misindexing. Per-unit shape is ``(n_time, n_units)``; MUA
-    collapses to ``(n_time, 1)``.
+    The v1-MultiUnitActivity-parity invariant: the MUA path must
+    compose with v2 sparse-unit_id sortings without misindexing.
+    Per-unit shape is ``(n_time, n_units)``; MUA collapses to
+    ``(n_time, 1)``.
     """
     from spyglass.spikesorting.analysis.v1.group import (
         SortedSpikesGroup,

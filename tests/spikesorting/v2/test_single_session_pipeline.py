@@ -2909,16 +2909,14 @@ def test_run_v2_pipeline_clusterless_default_handles_zero_units_gracefully(
     default (100 uV ``detect_threshold``) on the smoke fixture
     finds zero peaks AND completes without crashing.
 
-    Phase 1d code-review finding #5: this is a DELIBERATE plan
-    divergence (``phase-1-modern-single-session.md:171`` updated
-    to acknowledge). The orchestrator short-circuits curation on
-    a zero-unit sort because SI's ``NwbSortingExtractor`` cannot
-    open the empty units NWB; the manifest is then PARTIAL with
-    ``curation_id=None, merge_id=None, n_units=0`` -- not the
-    "complete manifest" the plan originally promised. The
-    alternative (forcing curation) crashes with an opaque
-    KeyError. The partial-manifest contract gives the user a
-    clean signal that the sort ran and found nothing.
+    On a zero-unit sort the orchestrator short-circuits curation
+    because SI's ``NwbSortingExtractor`` cannot open an empty
+    units NWB; the returned manifest is PARTIAL with
+    ``curation_id=None, merge_id=None, n_units=0`` instead of a
+    complete one. The alternative (forcing curation through)
+    crashes with an opaque KeyError. The partial-manifest contract
+    gives the user a clean signal that the sort ran and found
+    nothing.
     """
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults
@@ -3589,11 +3587,12 @@ def test_detect_artifacts_join_window_merges_runs(dj_conn):
     """``_detect_artifacts`` merges two artifact runs separated by
     fewer than ``join_window_frames`` into a single artifact span.
 
-    Exercises line 621 (``cur_end = f`` inside the join branch)
-    which the existing single-run test doesn't hit. Builds two
-    transients separated by 10 frames; with join_window_ms set so
-    join_window_frames > 10, the runs merge into one. With a
-    smaller join window, the runs stay separate.
+    Exercises the ``cur_end = f`` branch inside
+    ``_detect_artifacts``'s join loop which the single-run test
+    doesn't hit. Builds two transients separated by 10 frames;
+    with join_window_ms set so join_window_frames > 10, the runs
+    merge into one. With a smaller join window, the runs stay
+    separate.
     """
     import numpy as _np
 
@@ -4496,8 +4495,10 @@ def test_detect_artifacts_clamps_artifact_at_recording_end(dj_conn):
 
     # The artifact runs from frame 990 to the end. The clamp
     # produces a single valid interval before the artifact (the
-    # tail-valid case at line 653 fires only if cursor < valid_end,
-    # which is false here because the artifact reaches the end).
+    # tail-valid branch in ``_detect_artifacts`` -- the
+    # ``if cursor < valid_end`` guard -- fires only if there is
+    # tail after the last artifact, which is false here because
+    # the artifact reaches the end).
     assert valid_times.shape == (1, 2), (
         f"Expected one valid interval ending before the boundary "
         f"artifact, got shape {valid_times.shape}."
@@ -5346,18 +5347,17 @@ _NEUROPIXELS_60S_PATH = (
 def neuropixels_60s_session(dj_conn):
     """Ingest the 60s Neuropixels MEArec fixture for GT comparison.
 
-    Skips cleanly if the fixture has not been generated. Phase 1
-    plan-line 167 requires Neuropixels GT coverage for
-    informational dense-probe correctness; the polymer fixture
-    remains the shipping gate.
+    Skips cleanly if the fixture has not been generated. The
+    Neuropixels GT coverage is informational dense-probe
+    correctness; the polymer fixture remains the shipping gate.
     """
     if not _NEUROPIXELS_60S_PATH.exists():
         pytest.skip(
             "Neuropixels-60s MEArec fixture not on disk -- run "
             "`python tests/spikesorting/v2/fixtures/generate_mearec.py "
             "--neuropixels --duration 60` (or equivalent) first. The "
-            "Phase 1 plan-line 167 contract activates when the fixture "
-            "is present."
+            "dense-probe informational gate activates when the "
+            "fixture is present."
         )
     nwb_file_name = copy_and_insert_nwb(_NEUROPIXELS_60S_PATH)
     from spyglass.spikesorting.imported import ImportedSpikeSorting

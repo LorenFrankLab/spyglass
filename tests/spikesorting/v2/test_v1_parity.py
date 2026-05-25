@@ -118,12 +118,11 @@ def test_kilosort4_schema_accepts_extra_kwargs_v1_parity():
 
 
 def test_optional_matching_extra_resolution():
-    """Phase 0c contract: ``spikesorting-v2-matching`` extra
-    resolves cleanly with the v2 NumPy + Python pins and a
-    ``UnitMatchPy`` import does not fail loudly on the
-    ``_tkinter`` import path that older versions trip on.
+    """``spikesorting-v2-matching`` extra resolves cleanly with the
+    v2 NumPy + Python pins and a ``UnitMatchPy`` import does not
+    fail loudly on the ``_tkinter`` import path that older
+    versions trip on.
 
-    Plan reference: ``phase-0c-si-0104-prerequisite.md:125``.
     The extra ships ``UnitMatchPy>=3.3,<4`` + ``mat73``. The
     test:
 
@@ -210,14 +209,13 @@ def test_optional_matching_extra_resolution():
 
 
 def test_ms4_default_row_only_shipped_when_ms4_installed():
-    """Phase 0c MS4 runtime guard.
+    """MS4 runtime guard.
 
-    The Phase 0c plan (``phase-0c-si-0104-prerequisite.md:124``)
-    requires MS4 runtime status to be EXPLICIT: either MS4 is in
-    ``sis.installed_sorters()`` (and the default Lookup row is safe
-    to ship), or the missing-MS4 case must be documented with a
-    platform-specific guard. v2 ships an MS4 default row at
-    ``SorterParameters._DEFAULT_CONTENTS`` but the resolver
+    MS4 runtime status must be EXPLICIT: either MS4 is in
+    ``sis.installed_sorters()`` (and the default Lookup row is
+    safe to ship), or the missing-MS4 case must be documented
+    with a platform-specific guard. v2 ships an MS4 default row
+    at ``SorterParameters._DEFAULT_CONTENTS`` but the resolver
     artifact at ``tests/spikesorting/v2/resolver/si0104-runtime.md``
     shows MS4 is NOT in the installed-sorter set in the v2 test
     image. This test pins the contract: if MS4 is not installed,
