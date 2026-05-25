@@ -799,7 +799,107 @@ def test_shared_artifact_group_insert_rejects_mismatched_durations(
     )
 
 
-import numpy as _np  # noqa: E402 -- used by the test above
+@pytest.mark.slow
+def test_shared_artifact_group_insert_rejects_mismatched_dtypes(
+    populated_recording, polymer_smoke_session, monkeypatch
+):
+    """``insert_group`` rejects members whose preprocessed
+    recordings have differing ``get_dtype()`` values.
+
+    Constructing two real recordings of the same NWB with
+    different dtypes requires preproc-param plumbing the test
+    fixtures don't currently exercise; monkeypatch
+    ``Recording.get_recording`` to return SI-compatible stubs that
+    share ``n_samples`` but differ in ``get_dtype()``. This
+    exercises the dtype branch of the strict check; the
+    n_samples branch is exercised by
+    ``test_shared_artifact_group_insert_rejects_mismatched_durations``
+    above.
+    """
+    from spyglass.common.common_interval import IntervalList
+    from spyglass.spikesorting.v2.artifact import SharedArtifactGroup
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    raw_times = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": "raw data valid times",
+        }
+    ).fetch1("valid_times")
+    t0 = float(raw_times[0][0])
+    second_interval = "v2_shared_group_test_dtype_window"
+    # 2.5s window is well above the min_segment_length=1.0s filter
+    # the Recording pipeline applies; we only need a SECOND
+    # Recording row so the test has two distinct recording_ids to
+    # group, the dtype divergence is injected via monkeypatch
+    # below.
+    IntervalList.insert1(
+        {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": second_interval,
+            "valid_times": _np.asarray([[t0, t0 + 2.5]]),
+            "pipeline": "shared_group_dtype_test",
+        },
+        skip_duplicates=True,
+    )
+    sort_group_id = int(
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
+    )
+    second_rec_pk = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+            "interval_list_name": second_interval,
+            "preproc_params_name": "default_franklab",
+            "team_name": "v2_test_team",
+        }
+    )
+    Recording.populate(second_rec_pk, reserve_jobs=False)
+
+    rid_a = populated_recording["recording_id"]
+    rid_b = second_rec_pk["recording_id"]
+
+    class _FakeRec:
+        def __init__(self, n_samples, dtype_str):
+            self._n = n_samples
+            self._dtype = dtype_str
+
+        def get_num_samples(self):
+            return self._n
+
+        def get_dtype(self):
+            return self._dtype
+
+    def _fake_get_recording(self, key):
+        # Both stubs share ``n_samples`` so the dtype branch -- not
+        # the n_samples branch -- is the only thing that can raise.
+        if str(key["recording_id"]) == str(rid_a):
+            return _FakeRec(n_samples=30000, dtype_str="float32")
+        return _FakeRec(n_samples=30000, dtype_str="int16")
+
+    monkeypatch.setattr(Recording, "get_recording", _fake_get_recording)
+
+    with pytest.raises(ValueError, match="differing dtypes"):
+        SharedArtifactGroup.insert_group(
+            "v2_mismatched_dtypes",
+            [{"recording_id": rid_a}, {"recording_id": rid_b}],
+        )
+    assert (
+        len(
+            SharedArtifactGroup
+            & {"shared_artifact_group_name": "v2_mismatched_dtypes"}
+        )
+        == 0
+    )
+
+
+import numpy as _np  # noqa: E402 -- used by the tests above
 
 
 @pytest.mark.slow
@@ -5273,14 +5373,16 @@ def neuropixels_60s_session(dj_conn):
 def test_mountainsort5_ground_truth_neuropixels_60s(neuropixels_60s_session):
     """MS5 on the 60s Neuropixels fixture finds the planted units.
 
-    Phase 1 plan-line 167: dense-probe informational correctness
-    coverage. Mirrors the polymer 60s gate at line 1962 but with
-    the looser informational thresholds the plan permits for the
-    dense-probe slice (``accuracy >= 0.7`` for at least one third
-    of planted units, mean of well-detected at least 0.8). The
-    upstream ``neuropixels_60s_session`` fixture skips cleanly
-    when the MEArec NWB is not on disk, so this test runs only
-    when the fixture has been generated.
+    Dense-probe informational correctness coverage. Mirrors
+    ``test_mountainsort5_ground_truth_polymer_60s`` but with the
+    looser informational thresholds appropriate for the dense-probe
+    slice: primary count gate at ``accuracy >= 0.7`` for at least
+    one third of planted units, plus precision / recall / mean-
+    accuracy floors on the well-detected subset (matching the
+    polymer gate's secondary floors). The upstream
+    ``neuropixels_60s_session`` fixture skips cleanly when the
+    MEArec NWB is not on disk, so this test runs only when the
+    fixture has been generated.
     """
     import numpy as np
     import pynwb
@@ -5362,9 +5464,9 @@ def test_mountainsort5_ground_truth_neuropixels_60s(neuropixels_60s_session):
         sortings_by_shank.append(Sorting().get_sorting(sort_pk))
 
     aggregated = aggregate_units(sortings_by_shank)
-    # uint64 unit_ids reject the Hungarian matcher's accepted
-    # dtypes; rename to contiguous signed ints. Same trick the
-    # polymer gate uses at line 2058.
+    # uint64 unit_ids reject the Hungarian matcher's accepted dtypes;
+    # rename to contiguous signed ints. Same trick
+    # ``test_mountainsort5_ground_truth_polymer_60s`` uses.
     tested_sorting = aggregated.rename_units(
         np.arange(len(aggregated.unit_ids), dtype=np.int64)
     )
@@ -5376,7 +5478,12 @@ def test_mountainsort5_ground_truth_neuropixels_60s(neuropixels_60s_session):
         if es.rate is not None:
             fs = float(es.rate)
         else:
-            fs = float(1.0 / np.diff(es.timestamps[:2])[0])
+            diff_s = float(np.diff(es.timestamps[:2])[0])
+            assert diff_s > 0, (
+                f"NWB e-series timestamps near t=0 are not "
+                f"monotonic (diff={diff_s}); cannot derive fs."
+            )
+            fs = 1.0 / diff_s
         gt_units = {
             int(uid): np.asarray(gt_nwb.units["spike_times"][idx])
             for idx, uid in enumerate(gt_nwb.units.id[:])
@@ -5428,7 +5535,7 @@ def test_mountainsort5_ground_truth_neuropixels_60s(neuropixels_60s_session):
         f"regenerate the fixture before trusting this gate.{summary}"
     )
 
-    # Plan-line 167 informational threshold: at least one third of
+    # Primary informational threshold: at least one third of
     # planted units detected at accuracy >= 0.7. Looser than the
     # polymer shipping gate because dense-probe MS5 settings are
     # less mature in this codepath.
@@ -5440,23 +5547,49 @@ def test_mountainsort5_ground_truth_neuropixels_60s(neuropixels_60s_session):
         f"informational threshold requires >= {threshold}.{summary}"
     )
 
+    # Secondary floors on the well-detected subset. Mirror the
+    # polymer gate so a sorter that explodes the false-positive
+    # rate, misses most planted spikes, or produces barely-passing
+    # accuracies cannot clear the count gate by coincidence.
+    well_detected_mask = accuracies >= 0.7
+    well_detected_precision = precision[well_detected_mask]
+    well_detected_recall = recall[well_detected_mask]
+    well_detected_accuracy = accuracies[well_detected_mask]
+    assert (well_detected_precision >= 0.5).all(), (
+        f"Well-detected GT units have low precision: min="
+        f"{well_detected_precision.min():.3f}; expected >= 0.5 for "
+        f"every unit with accuracy >= 0.7.{summary}"
+    )
+    assert (well_detected_recall >= 0.5).all(), (
+        f"Well-detected GT units have low recall: min="
+        f"{well_detected_recall.min():.3f}; expected >= 0.5 for every "
+        f"unit with accuracy >= 0.7.{summary}"
+    )
+    assert well_detected_accuracy.mean() >= 0.8, (
+        f"Mean accuracy of well-detected units is "
+        f"{well_detected_accuracy.mean():.3f}; expected >= 0.8 (the "
+        f"informational threshold the docstring claims).{summary}"
+    )
+
 
 @pytest.mark.slow
 @pytest.mark.integration
 def test_v2_real_data_v1_parity():
     """v1 ↔ v2 parity on real (not MEArec) NWB; env-var gated.
 
-    Phase 1 plan-line 170: real-data sanity check on the
-    ``clusterless_thresholder`` slice (the sorter Frank-lab v1
-    baseline-capture writes via ``baseline_capture.py``). The
-    plan tolerance for clusterless_thresholder is "±1 sample on
-    detected peak indices" -- a deterministic threshold sorter
-    SHOULD detect the same peaks under SI 0.104 as it did under
-    SI 0.99. The mountainsort / kilosort tolerance bands the plan
-    permits (±50% unit count, ±30% median firing rate) only apply
-    when the lab user has produced baseline pickles for those
-    sorters; the baseline_capture CLI currently only writes the
-    clusterless slice (see baseline_capture.py:294).
+    Real-data sanity check on the ``clusterless_thresholder``
+    slice (the sorter Frank-lab v1 baseline-capture writes via
+    ``baseline_capture.py``). The contract for
+    clusterless_thresholder is "±1 sample on detected peak
+    indices" -- a deterministic threshold sorter SHOULD detect the
+    same peaks under SI 0.104 as it did under SI 0.99. The test
+    enforces a 1.5-sample threshold (1 sample of contract + 0.5
+    sample of floating-point fence-post slack between SI 0.99
+    and 0.104 timestamp construction). The mountainsort /
+    kilosort tolerance bands (±50% unit count, ±30% median
+    firing rate) only apply when the lab user has produced
+    baseline pickles for those sorters; the baseline_capture
+    CLI currently only writes the clusterless slice.
 
     Env vars:
       ``SPIKESORTING_V2_REAL_NWB_PATH`` -> path to the lab NWB.
@@ -5484,8 +5617,7 @@ def test_v2_real_data_v1_parity():
             "baseline_v1_recording_meta.json (default location: "
             "<nwb-dir>/v1_baseline/, override via "
             "SPIKESORTING_V2_BASELINE_DIR) and runs the "
-            "clusterless_thresholder parity comparison within "
-            "plan-line-170 tolerances."
+            "clusterless_thresholder parity comparison."
         )
 
     nwb_path = _Path(real_nwb_env)
@@ -5510,18 +5642,50 @@ def test_v2_real_data_v1_parity():
             f"{nwb_path} --output-dir {baseline_dir}` first."
         )
 
-    with open(spikes_pkl, "rb") as fh:
-        v1_spike_times = pickle.load(fh)
-    meta = _json.loads(meta_json.read_text())
+    regen_hint = (
+        f"Regenerate via baseline_capture.py "
+        f"--nwb-file {nwb_path} --output-dir {baseline_dir}."
+    )
+    try:
+        with open(spikes_pkl, "rb") as fh:
+            v1_spike_times = pickle.load(fh)
+    except (pickle.UnpicklingError, EOFError, AttributeError) as exc:
+        raise RuntimeError(
+            f"v1 baseline pickle at {spikes_pkl} is corrupt or "
+            f"class-incompatible ({type(exc).__name__}: {exc}). "
+            f"{regen_hint}"
+        ) from exc
+    try:
+        meta = _json.loads(meta_json.read_text())
+    except _json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"v1 baseline meta at {meta_json} is malformed "
+            f"({type(exc).__name__}: {exc}). {regen_hint}"
+        ) from exc
 
-    if meta.get("sorter") != "clusterless_thresholder":
+    required_meta_keys = {
+        "sorter",
+        "sort_group_id",
+        "interval_list_name",
+        "team_name",
+        "sampling_frequency_hz",
+    }
+    missing_meta_keys = required_meta_keys - set(meta)
+    if missing_meta_keys:
+        raise RuntimeError(
+            f"v1 baseline meta at {meta_json} is missing required keys "
+            f"{sorted(missing_meta_keys)}; baseline schema has drifted "
+            f"or the file is truncated. {regen_hint}"
+        )
+
+    if meta["sorter"] != "clusterless_thresholder":
         pytest.skip(
-            "v1 baseline captured for sorter="
-            f"{meta.get('sorter')!r}; this parity gate only "
-            "implements the clusterless_thresholder tolerance "
-            "(plan-line 170 ±1 sample). Regenerate the baseline "
-            "with --sorter clusterless_thresholder, or extend "
-            "this test for mountainsort/kilosort tolerance bands."
+            f"v1 baseline captured for sorter={meta['sorter']!r}; "
+            "this parity gate only implements the "
+            "clusterless_thresholder ±1-sample tolerance. "
+            "Regenerate the baseline with "
+            "--sorter clusterless_thresholder, or extend this "
+            "test for mountainsort/kilosort tolerance bands."
         )
 
     # Run v2 on the same (sort_group_id, interval_list_name, team).
@@ -5620,24 +5784,37 @@ def test_v2_real_data_v1_parity():
         "should match exactly. A mismatch indicates a real "
         "regression in detection / labeling."
     )
+    # Non-vacuous-pass guard: if both unit sets are empty (e.g.
+    # the baseline was captured on a recording with no above-
+    # threshold peaks), the loop below iterates zero times and
+    # the test passes without verifying any spike times.
+    assert len(v1_keys) >= 1, (
+        "v1 baseline has zero units; the per-unit drift check "
+        "below would pass vacuously. Regenerate "
+        "baseline_v1_spike_times.pkl on a recording with above-"
+        "threshold activity."
+    )
 
+    threshold_samples = 1.5
     for uid in v1_keys:
         v1_arr = np.sort(np.asarray(v1_spike_times[uid]))
         v2_arr = np.sort(v2_spike_times[uid])
+        assert v1_arr.size >= 1, (
+            f"unit {uid}: v1 baseline has zero spikes -- per-unit "
+            "drift check is meaningless. Regenerate baseline."
+        )
         assert v1_arr.shape == v2_arr.shape, (
             f"unit {uid}: v1 has {v1_arr.size} spikes, v2 has "
-            f"{v2_arr.size}; clusterless_thresholder ±1-sample "
-            "tolerance cannot reconcile a count divergence."
+            f"{v2_arr.size}; clusterless_thresholder tolerance "
+            "cannot reconcile a count divergence."
         )
         max_abs_drift_s = float(np.max(np.abs(v1_arr - v2_arr)))
-        # Allow 1.5 samples of slack so a floating-point fence
-        # post off-by-one between SI 0.99 and 0.104 timestamp
-        # construction does not trip the gate; ±1 sample is the
-        # plan, 0.5 of a sample is the slack.
-        assert max_abs_drift_s <= 1.5 * one_sample_s, (
+        assert max_abs_drift_s <= threshold_samples * one_sample_s, (
             f"unit {uid}: max |v1 - v2| spike-time drift = "
             f"{max_abs_drift_s:.6f}s = "
-            f"{max_abs_drift_s * fs:.2f} samples; plan-line 170 "
-            f"tolerance is ±1 sample (= {one_sample_s:.6f}s) for "
-            "clusterless_thresholder."
+            f"{max_abs_drift_s * fs:.2f} samples; "
+            f"clusterless_thresholder tolerance is "
+            f"{threshold_samples} samples "
+            f"(= {threshold_samples * one_sample_s:.6f}s; 1 sample "
+            "contract + 0.5 sample SI-version fence-post slack)."
         )

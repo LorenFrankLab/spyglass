@@ -261,13 +261,11 @@ def test_sorted_spikes_decoding_selection_accepts_v2_merge_id(populated_sorting)
     """A ``SortedSpikesDecodingSelection`` row keyed on a v2 ``merge_id``
     can be INSERTED -- the FK chain resolves end-to-end.
 
-    Phase 1 plan-line 218 ("decoding merge-id resolution") asks for
-    proof that the decoding table's FK/selection path actually
-    accepts a v2 merge_id. Without this gate, a broken FK
-    (e.g. ``SpikeSortingOutput.CurationV2`` missing or
-    ``SortedSpikesGroup.Units.spikesorting_merge_id`` not resolving
-    to v2) would surface only when a downstream user tried to
-    populate a decoder on a v2 sort. The chain this exercises is::
+    Without this gate, a broken FK (e.g. ``SpikeSortingOutput.
+    CurationV2`` missing or ``SortedSpikesGroup.Units.
+    spikesorting_merge_id`` not resolving to v2) would surface only
+    when a downstream user tried to populate a decoder on a v2
+    sort. The chain this exercises is::
 
         SortedSpikesDecodingSelection
           -> SortedSpikesGroup
@@ -276,11 +274,11 @@ def test_sorted_spikes_decoding_selection_accepts_v2_merge_id(populated_sorting)
                 -> SpikeSortingOutput.CurationV2 (v2 dispatch part)
                   -> CurationV2 (v2 master)
 
-    The test is INSERT-only. We do NOT populate ``SortedSpikesDecodingV1``
-    -- the compute step requires position data + non_local_detector
-    weights that the smoke fixture lacks. The reviewer's gate is
-    "the selection table accepts the v2 merge_id"; the populate
-    surface is exercised in tests/decoding/ on real position data.
+    The test is INSERT-only. ``SortedSpikesDecodingV1.populate`` is
+    not exercised here -- the compute step requires position data
+    + non_local_detector weights that the smoke fixture lacks; the
+    populate surface is exercised in tests/decoding/ on real
+    position data.
     """
     pytest.importorskip(
         "non_local_detector",
@@ -336,9 +334,9 @@ def test_sorted_spikes_decoding_selection_accepts_v2_merge_id(populated_sorting)
     }
     if existing_pos:
         existing_pos.super_delete(warn=False)
-    # Master-only insert -- no Position parts. The decoding selection
-    # FK lands on PositionGroup, not PositionGroup.Position, so the
-    # parts are not required to satisfy the chain we're proving here.
+    # The decoding selection FK lands on PositionGroup, not
+    # PositionGroup.Position, so the parts are not required to
+    # satisfy the chain we're proving here.
     PositionGroup.insert1(
         {
             "nwb_file_name": actual_nwb,
@@ -347,11 +345,18 @@ def test_sorted_spikes_decoding_selection_accepts_v2_merge_id(populated_sorting)
         skip_duplicates=True,
     )
 
-    decoding_param_name = next(
+    sorted_param_names = [
         name
         for name in DecodingParameters.fetch("decoding_param_name")
         if "sorted" in name
-    )
+    ]
+    if not sorted_param_names:
+        pytest.skip(
+            "DecodingParameters.contents has no sorted-spikes entry "
+            "(upstream rename or content drop); cannot exercise the "
+            "FK chain without a valid decoding_param_name."
+        )
+    decoding_param_name = sorted_param_names[0]
 
     selection_key = {
         "nwb_file_name": actual_nwb,
@@ -374,21 +379,29 @@ def test_sorted_spikes_decoding_selection_accepts_v2_merge_id(populated_sorting)
         "not retrievable -- FK chain landed in an inconsistent state."
     )
 
-    # The FK chain is satisfied: the inserted decoding-selection row
-    # joins back to a SortedSpikesGroup.Units row whose
-    # spikesorting_merge_id IS the v2 merge_id we constructed.
-    linked_merge_ids = (
-        SortedSpikesGroup.Units
-        & {
-            "nwb_file_name": actual_nwb,
-            "sorted_spikes_group_name": sorted_group_name,
-            "unit_filter_params_name": "all_units",
-        }
-    ).fetch("spikesorting_merge_id")
-    assert merge_id in linked_merge_ids, (
-        f"Decoding selection row references SortedSpikesGroup whose "
-        f"Units do not include v2 merge_id={merge_id!r}; the FK chain "
-        "from the decoding selection back to the v2 merge_id is broken."
+    # Explicit join across every hop of the FK chain back to the v2
+    # ``CurationV2`` master, restricted to the merge_id we just
+    # inserted. A non-empty result PROVES every FK in the chain is
+    # consistent; a broken hop would either reject the join or drop
+    # the row.
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    full_chain = (
+        SortedSpikesDecodingSelection
+        * SortedSpikesGroup.Units
+        * SpikeSortingOutput.CurationV2.proj(
+            spikesorting_merge_id="merge_id"
+        )
+        * CurationV2
+        & selection_key
+        & {"spikesorting_merge_id": merge_id}
+    )
+    assert len(full_chain) >= 1, (
+        f"Full FK join from SortedSpikesDecodingSelection -> "
+        f"SortedSpikesGroup.Units -> SpikeSortingOutput.CurationV2 "
+        f"-> CurationV2 returned zero rows for merge_id={merge_id!r}; "
+        "at least one hop in the chain is broken."
     )
 
 

@@ -147,11 +147,27 @@ def test_optional_matching_extra_resolution():
     """
     import importlib
     import importlib.util
+    import os
 
     mat73_available = importlib.util.find_spec("mat73") is not None
     unitmatch_available = importlib.util.find_spec("UnitMatchPy") is not None
 
     if not (mat73_available or unitmatch_available):
+        # In CI's dedicated matching-extra job (which sets
+        # ``SPIKESORTING_V2_MATCHING_EXTRA_REQUIRED=1`` AFTER running
+        # ``uv pip install ...[spikesorting-v2-matching]``), the
+        # absence of both deps means the install step itself failed
+        # -- ``|| true`` in the workflow swallowed it. Fail loud here
+        # so a permanent extra-declaration bug cannot pose as a
+        # transient install failure.
+        if os.environ.get("SPIKESORTING_V2_MATCHING_EXTRA_REQUIRED"):
+            pytest.fail(
+                "SPIKESORTING_V2_MATCHING_EXTRA_REQUIRED=1 but "
+                "neither ``mat73`` nor ``UnitMatchPy`` are "
+                "importable -- the matching-extra install in this "
+                "env must have failed silently. Check the "
+                "preceding ``uv pip install`` step's log."
+            )
         pytest.skip(
             "spikesorting-v2-matching extra is not installed in "
             "this environment; this test activates when the user "

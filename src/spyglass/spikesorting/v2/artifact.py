@@ -307,11 +307,19 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
         # member's preprocessed recording through ``Recording.
         # get_recording`` (the same path ``make_compute`` uses) and
         # require EXACT ``get_num_samples()`` + ``get_dtype()``
-        # equality. The I/O is paid once at insert; the populate
-        # path reuses the same NWB so the SI page cache is warm.
+        # equality.
         per_member_sizes: dict[str, tuple[int, str]] = {}
         for rid in member_recording_ids:
-            rec_obj = Recording().get_recording({"recording_id": rid})
+            try:
+                rec_obj = Recording().get_recording({"recording_id": rid})
+            except Exception as exc:
+                raise RuntimeError(
+                    "SharedArtifactGroup.insert_group: failed to load "
+                    f"preprocessed recording for recording_id={rid!r} "
+                    f"({type(exc).__name__}: {exc}). The strict "
+                    "n_samples / dtype check at insert time requires "
+                    "every member recording to be readable."
+                ) from exc
             per_member_sizes[str(rid)] = (
                 int(rec_obj.get_num_samples()),
                 str(rec_obj.get_dtype()),

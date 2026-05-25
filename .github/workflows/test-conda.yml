@@ -231,20 +231,24 @@ jobs:
     # plus import gates -- when numpy<2 is forced, the assertion
     # fires and the resolver-evidence ticket re-opens.
     - name: Phase 0c matching-extra resolver evidence (separate env)
+      env:
+        # Promotes the test's "extras not importable" branch from
+        # ``pytest.skip`` to ``pytest.fail``. The install step below
+        # tolerates failure (transient build / network issues) but
+        # MUST be followed by importable deps; a silent install
+        # failure would otherwise leave the test skipping while CI
+        # stays green.
+        SPIKESORTING_V2_MATCHING_EXTRA_REQUIRED: "1"
       run: |
         uv venv --python 3.11 .venv-spikesorting-v2-matching
-        # Install tolerates failure -- some upstream resolver
-        # breakages are transient (network, build-wheel issues) and
-        # are NOT what this gate measures. The resolver-evidence
-        # signal comes from the pytest run below: if the install
-        # succeeded, the test asserts the post-install state
-        # (numpy >= 2, importable matching deps, _tkinter clean);
-        # if the install failed, the test skips with the
-        # not-installed message and CI surfaces the install error
-        # in the previous step's log. Either way, the test itself
-        # MUST NOT be masked by ``|| true`` -- a numpy<2 downgrade
-        # or an opaque ImportError needs to fail this step loudly
-        # so the matching-extra resolver-evidence ticket re-opens.
+        # Install tolerates failure: upstream resolver breakages are
+        # often transient (network, build-wheel) and NOT what this
+        # gate measures. The resolver-evidence signal comes from the
+        # pytest run below. With SPIKESORTING_V2_MATCHING_EXTRA_REQUIRED=1
+        # the test fails (not skips) when the post-install deps are
+        # absent, so a permanent extra-declaration bug cannot pose as
+        # a transient install hiccup. The pytest run itself must NOT
+        # be masked by ``|| true``.
         uv pip install --python .venv-spikesorting-v2-matching \
           -e ".[test,spikesorting-v2,spikesorting-v2-matching]" || true
         .venv-spikesorting-v2-matching/bin/pytest \
