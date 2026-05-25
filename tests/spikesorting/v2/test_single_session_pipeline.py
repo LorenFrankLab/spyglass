@@ -5372,11 +5372,16 @@ def test_mountainsort5_ground_truth_neuropixels_60s(neuropixels_60s_session):
 
     Dense-probe informational correctness coverage. Mirrors
     ``test_mountainsort5_ground_truth_polymer_60s`` but with the
-    looser informational thresholds appropriate for the dense-probe
-    slice: primary count gate at ``accuracy >= 0.7`` for at least
-    one third of planted units, plus precision / recall / mean-
-    accuracy floors on the well-detected subset (matching the
-    polymer gate's secondary floors). The upstream
+    informational dense-probe correctness coverage. Primary count
+    gate is the plan-specified ``accuracy >= 0.7`` for at least
+    three-quarters of planted units, plus precision / recall /
+    mean-accuracy floors on the well-detected subset (matching
+    the polymer gate's secondary floors). The threshold may only
+    be loosened with committed calibration evidence in
+    ``fixtures_manifest.json`` showing the MS5 distribution this
+    dense-probe fixture actually produces; until then a failure
+    here is a signal that MS5 settings need tuning, NOT that the
+    threshold should be relaxed silently. The upstream
     ``neuropixels_60s_session`` fixture skips cleanly when the
     MEArec NWB is not on disk, so this test runs only when the
     fixture has been generated.
@@ -5532,16 +5537,20 @@ def test_mountainsort5_ground_truth_neuropixels_60s(neuropixels_60s_session):
         f"regenerate the fixture before trusting this gate.{summary}"
     )
 
-    # Primary informational threshold: at least one third of
-    # planted units detected at accuracy >= 0.7. Looser than the
-    # polymer shipping gate because dense-probe MS5 settings are
-    # less mature in this codepath.
+    # Plan-required informational threshold: at least three
+    # quarters of planted units detected at accuracy >= 0.7. The
+    # threshold may only be loosened with calibration evidence
+    # committed to ``fixtures_manifest.json`` showing the actual
+    # MS5 distribution this fixture produces; a failure here is a
+    # signal that MS5 settings need tuning, not a license to relax
+    # the gate.
     n_well_detected = int((accuracies >= 0.7).sum())
-    threshold = max(1, n_planted // 3)
+    threshold = max(1, (n_planted * 3) // 4)
     assert n_well_detected >= threshold, (
         f"MS5 on the 60s Neuropixels fixture detected {n_well_detected} "
         f"of {n_planted} planted units at accuracy >= 0.7; "
-        f"informational threshold requires >= {threshold}.{summary}"
+        f"plan threshold requires >= {threshold} (3/4 of planted)."
+        f"{summary}"
     )
 
     # Secondary floors on the well-detected subset. Mirror the
@@ -5723,20 +5732,44 @@ def test_v2_real_data_v1_parity():
     ):
         SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
 
+    # v1 ships ``"default"`` preproc params; v2 ships
+    # ``"default_franklab"`` (the v2-named equivalent: bandpass +
+    # common_reference under v2's Pydantic schema). If the baseline
+    # meta declares ``"default"`` we map it to ``"default_franklab"``
+    # so the v2 pipeline runs the equivalent preprocessing; any
+    # other meta value is used verbatim so a user can capture a
+    # baseline against a non-default preset and expect v2 to honor
+    # it. Hardcoding ``"default_franklab"`` (the previous bug) made
+    # the test sort under the v2 default regardless of what the
+    # baseline used.
+    v1_to_v2_preproc = {"default": "default_franklab"}
+    preproc_name_meta = meta.get("preproc_param_name", "default")
+    preproc_name_v2 = v1_to_v2_preproc.get(
+        preproc_name_meta, preproc_name_meta
+    )
+
     rec_pk = RecordingSelection.insert_selection(
         {
             "nwb_file_name": nwb_file_name,
             "sort_group_id": int(meta["sort_group_id"]),
             "interval_list_name": meta["interval_list_name"],
-            "preproc_params_name": "default_franklab",
+            "preproc_params_name": preproc_name_v2,
             "team_name": meta["team_name"],
         }
     )
     Recording.populate(rec_pk, reserve_jobs=False)
+    # Honor the baseline's artifact-detection params. If v1 ran
+    # with ``"default"`` (which detects + masks above-threshold
+    # peaks) and v2 ran with ``"none"`` (skip artifact scanning),
+    # v2 would be sorting unmasked data and the per-spike drift
+    # check below would compare different pipelines. v2 ships the
+    # same ``"default"`` artifact-params name with the same
+    # semantics.
+    artifact_name_meta = meta.get("artifact_param_name", "default")
     art_pk = ArtifactSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],
-            "artifact_params_name": "none",
+            "artifact_params_name": artifact_name_meta,
         }
     )
     ArtifactDetection.populate(art_pk, reserve_jobs=False)
@@ -5744,7 +5777,9 @@ def test_v2_real_data_v1_parity():
         {
             "recording_id": rec_pk["recording_id"],
             "sorter": "clusterless_thresholder",
-            "sorter_params_name": "default_clusterless",
+            "sorter_params_name": meta.get(
+                "sorter_param_name", "default_clusterless"
+            ),
             "artifact_id": art_pk["artifact_id"],
         }
     )

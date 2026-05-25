@@ -220,6 +220,24 @@ jobs:
         uv pip install --python .venv-spikesorting-v2 -e ".[test,spikesorting-v2]"
         uv pip install --python .venv-spikesorting-v2 \
           "spikeinterface>=0.104,<0.105"
+    - name: Generate MEArec smoke fixture
+      # The smoke MEArec NWB (mearec_polymer_smoke.nwb, ~4s, small
+      # template set) is required by the v2 integration tests in
+      # test_integrity.py, test_downstream_consumers.py, and the
+      # core test_single_session_pipeline.py paths. Without this
+      # step those tests skip via the ``_FIXTURE_PATH.exists()``
+      # guard and CI passes vacuously even when the pipeline has
+      # regressed. The fixture is regenerated from a fixed seed
+      # so the output is deterministic; SHAs in
+      # ``fixtures/fixtures_manifest.json`` pin the contract.
+      #
+      # The 60s polymer / 60s Neuropixels / 120s drift fixtures
+      # are NOT generated here (too slow for default CI); their
+      # tests skip cleanly when absent and are intended for the
+      # manual / scheduled full runs.
+      run: |
+        .venv-spikesorting-v2/bin/python \
+          tests/spikesorting/v2/fixtures/generate_mearec.py --smoke
     - name: Run modern spike-sorting tests
       run: |
         .venv-spikesorting-v2/bin/pytest tests/spikesorting/v2/ \

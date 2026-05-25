@@ -150,49 +150,65 @@ def test_optional_matching_extra_resolution():
     mat73_available = importlib.util.find_spec("mat73") is not None
     unitmatch_available = importlib.util.find_spec("UnitMatchPy") is not None
 
-    if not (mat73_available or unitmatch_available):
+    matching_required = bool(
+        os.environ.get("SPIKESORTING_V2_MATCHING_EXTRA_REQUIRED")
+    )
+
+    if matching_required:
         # In CI's dedicated matching-extra job (which sets
-        # ``SPIKESORTING_V2_MATCHING_EXTRA_REQUIRED=1`` AFTER running
-        # ``uv pip install ...[spikesorting-v2-matching]``), the
-        # absence of both deps means the install step itself failed
-        # -- ``|| true`` in the workflow swallowed it. Fail loud here
-        # so a permanent extra-declaration bug cannot pose as a
-        # transient install failure.
-        if os.environ.get("SPIKESORTING_V2_MATCHING_EXTRA_REQUIRED"):
+        # ``SPIKESORTING_V2_MATCHING_EXTRA_REQUIRED=1`` AFTER
+        # running ``uv pip install ...[spikesorting-v2-matching]``)
+        # the extra contract is BOTH ``mat73`` AND ``UnitMatchPy``.
+        # An or-gate (passing on mat73 alone) would silently let a
+        # broken UnitMatchPy declaration through whenever mat73
+        # happens to resolve.
+        missing = []
+        if not mat73_available:
+            missing.append("mat73")
+        if not unitmatch_available:
+            missing.append("UnitMatchPy")
+        if missing:
             pytest.fail(
                 "SPIKESORTING_V2_MATCHING_EXTRA_REQUIRED=1 but "
-                "neither ``mat73`` nor ``UnitMatchPy`` are "
-                "importable -- the matching-extra install in this "
-                "env must have failed silently. Check the "
+                f"the following matching-extra deps are not "
+                f"importable: {missing}. The matching-extra install "
+                "in this env must have failed silently. Check the "
                 "preceding ``uv pip install`` step's log."
             )
+    elif not (mat73_available and unitmatch_available):
+        # Default env: the extra is not installed and we don't
+        # require it. Skip cleanly so the test acts as
+        # documentation. (Use AND here too -- if only one of the
+        # two is importable in the default env, that's an unusual
+        # state worth noting but not a CI failure outside the
+        # dedicated job.)
         pytest.skip(
-            "spikesorting-v2-matching extra is not installed in "
-            "this environment; this test activates when the user "
-            "runs ``pip install spyglass-neuro[spikesorting-v2-matching]``."
+            "spikesorting-v2-matching extra is not fully installed "
+            "in this environment (mat73="
+            f"{mat73_available}, UnitMatchPy={unitmatch_available}); "
+            "this test activates when the user runs "
+            "``pip install spyglass-neuro[spikesorting-v2-matching]``."
         )
 
     # mat73 is the small ScilabHDF5 .mat reader; failure here would
     # be a packaging regression on the extra itself.
-    if mat73_available:
-        import mat73  # noqa: F401
+    import mat73  # noqa: F401
 
     # UnitMatchPy: a clean import IS the desired contract. If it
     # raises, the error message MUST cite ``_tkinter`` (the known
     # GUI-import dependency) so a user can diagnose; a bare
     # ``ImportError`` without a clue is the failure mode we guard
     # against.
-    if unitmatch_available:
-        try:
-            importlib.import_module("UnitMatchPy")
-        except ImportError as exc:
-            assert "_tkinter" in str(exc) or "tkinter" in str(exc), (
-                f"UnitMatchPy import failed with an opaque "
-                f"ImportError that does not cite the known "
-                f"``_tkinter`` cause: {exc!r}. The resolver-evidence "
-                "contract requires the import path to either succeed "
-                "or surface the ``_tkinter`` dependency clearly."
-            )
+    try:
+        importlib.import_module("UnitMatchPy")
+    except ImportError as exc:
+        assert "_tkinter" in str(exc) or "tkinter" in str(exc), (
+            f"UnitMatchPy import failed with an opaque "
+            f"ImportError that does not cite the known "
+            f"``_tkinter`` cause: {exc!r}. The resolver-evidence "
+            "contract requires the import path to either succeed "
+            "or surface the ``_tkinter`` dependency clearly."
+        )
 
     # NumPy compatibility: the v2 supported pin is ``>=2.0``. A
     # matching-extra install MUST NOT have forced a downgrade.
