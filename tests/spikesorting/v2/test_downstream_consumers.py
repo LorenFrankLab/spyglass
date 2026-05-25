@@ -169,8 +169,10 @@ def test_get_recording_returns_filtered_recording(populated_sorting):
     an SI BaseRecording with ``is_filtered=True``.
 
     The annotation guards downstream sorters from re-bandpassing an
-    already-filtered preprocessed recording. Without R1+R6, the
-    merge dispatcher raised AttributeError on every v2 merge_id.
+    already-filtered preprocessed recording. Without the
+    ``is_filtered`` annotation + the merge-dispatch get_recording
+    wiring, the merge dispatcher raises AttributeError on every v2
+    merge_id.
     """
     import spikeinterface as si
 

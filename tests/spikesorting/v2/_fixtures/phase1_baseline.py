@@ -1,34 +1,37 @@
-"""Phase 1 baseline-artifact capture for v2 spike-sorting regression tests.
+"""Pre-refactor baseline-artifact capture for v2 spike-sorting regression
+tests.
 
 Why this file exists
 --------------------
-The Phase 1b refactor changes the internal shape of ``Recording.make`` /
-``ArtifactDetection.make`` / ``Sorting.make`` from monolithic to tri-part,
-and switches the ``Recording`` write path to a streaming HDF5 iterator.
-Several v2 surfaces are expected to remain bit-equivalent through the
-refactor: the ``Recording`` AnalysisNwbfile's trace + timestamps arrays
-under deterministic preprocessing, and the ``clusterless_thresholder``
-sorter's per-unit spike samples (no whitening, deterministic peak detection).
+The v2 tri-part refactor changes the internal shape of
+``Recording.make`` / ``ArtifactDetection.make`` / ``Sorting.make`` from
+monolithic to tri-part, and switches the ``Recording`` write path to a
+streaming HDF5 iterator. Several v2 surfaces are expected to remain
+bit-equivalent through the refactor: the ``Recording`` AnalysisNwbfile's
+trace + timestamps arrays under deterministic preprocessing, and the
+``clusterless_thresholder`` sorter's per-unit spike samples (no
+whitening, deterministic peak detection).
 
-To prove the refactor preserves those bits we need a baseline captured on
-the **unmodified Phase 1 code**. This module is the capture machinery:
+To prove the refactor preserves those bits we need a baseline captured
+on the **unmodified pre-refactor code**. This module is the capture
+machinery:
 
     1. ``regenerate(...)`` runs ``run_v2_pipeline`` against the 60s MEArec
        polymer fixture under ``preset="franklab_tetrode_clusterless_thresholder"``
        and writes a small bundle of numpy / json files to
        ``tests/spikesorting/v2/_fixtures/phase1_baseline/``.
     2. ``load(...)`` reads that bundle off disk without touching the
-       database. Validation tests in Phase 1b's slice load through this.
+       database. Validation tests load through this.
 
 The choice of ``clusterless_thresholder`` is deliberate -- it is the only
 shipped sorter whose output is deterministic AND does not depend on
-whitening, so it is the natural bit-equivalence gate through the R4
+whitening, so it is the natural bit-equivalence gate through the
 external-whitening change. Stochastic sorters (MS4 / MS5 / KS4) are
 re-baselined separately, not against this bundle.
 
 Regeneration workflow
 ---------------------
-The bundle MUST be regenerated on Phase-1-tip code, before any Phase 1b
+The bundle MUST be regenerated on pre-refactor tip code, before any v2
 edits land. The check-in workflow:
 
     1. ``git stash`` any in-progress refactor edits.
@@ -85,7 +88,7 @@ _POLYMER_60S_PATH = (
 
 @dataclass(frozen=True)
 class RecordingBaseline:
-    """Phase 1 byte-equivalence reference for the Recording artifact."""
+    """Pre-refactor byte-equivalence reference for the Recording artifact."""
 
     cache_hash: str
     object_id: str
@@ -96,7 +99,7 @@ class RecordingBaseline:
 
 @dataclass(frozen=True)
 class SortingBaseline:
-    """Phase 1 reference for the Sorting NWB output."""
+    """Pre-refactor reference for the Sorting NWB output."""
 
     object_id: str
     analysis_file_name: str
@@ -109,7 +112,7 @@ class SortingBaseline:
 
 @dataclass(frozen=True)
 class CurationBaseline:
-    """Phase 1 reference for the CurationV2 NWB output."""
+    """Pre-refactor reference for the CurationV2 NWB output."""
 
     object_id: str
     analysis_file_name: str
@@ -216,7 +219,7 @@ def regenerate(
     description: str = "phase1 baseline capture",
     output_dir: Path = PHASE1_BASELINE_DIR,
 ) -> Phase1Baseline:
-    """Run the clusterless preset and persist the Phase 1 baseline bundle.
+    """Run the clusterless preset and persist the pre-refactor baseline bundle.
 
     This is the **slow** path; it runs the full ``Recording -> Artifact
     -> Sort -> Curation`` chain inside the isolated test database. The
@@ -304,10 +307,10 @@ def regenerate(
     # gate (gating is the validation slice's job).
     if not sorting_baseline.spike_samples_per_unit:
         raise RuntimeError(
-            "Phase 1 baseline regen: sorting produced zero units on the "
-            "60s polymer fixture. Inspect the clusterless_thresholder "
-            "default-row threshold; aborting before writing a useless "
-            "baseline."
+            "Pre-refactor baseline regen: sorting produced zero units "
+            "on the 60s polymer fixture. Inspect the "
+            "clusterless_thresholder default-row threshold; aborting "
+            "before writing a useless baseline."
         )
 
     manifest_blob = _current_environment_manifest(source_sha=None)
@@ -357,7 +360,7 @@ def _capture_recording_baseline(*, recording_id) -> RecordingBaseline:
         path=analysis_path, mode="r", load_namespaces=True
     ) as io:
         nwbfile = io.read()
-        # The Phase 1 writer puts the ElectricalSeries under acquisition.
+        # The pre-refactor writer puts the ElectricalSeries under acquisition.
         # We look it up by object_id rather than name so the test does
         # not need the private ``_ELECTRICAL_SERIES_NAME`` constant.
         series = nwbfile.objects[row["object_id"]]
@@ -403,8 +406,8 @@ def _capture_curation_baseline(*, curation_pk) -> CurationBaseline:
     """Re-read the CurationV2 NWB and snapshot per-unit spike times (s).
 
     Curated NWBs may shrink the unit set (merges, label drops); we capture
-    whatever the curated NWB carries, so a Phase 1b regression that
-    accidentally removes more units would show up as a missing key.
+    whatever the curated NWB carries, so a regression that accidentally
+    removes more units would show up as a missing key.
     """
     import pynwb
 
@@ -526,10 +529,10 @@ def load(*, output_dir: Path = PHASE1_BASELINE_DIR) -> Phase1Baseline:
     ]
     if missing:
         raise FileNotFoundError(
-            "Phase 1 baseline bundle is incomplete; missing files: "
+            "Pre-refactor baseline bundle is incomplete; missing files: "
             f"{[str(p) for p in missing]}. Regenerate via "
             "`pytest tests/spikesorting/v2/test_phase1_baseline_regen.py -q` "
-            "from a clean checkout of Phase 1 tip."
+            "from a clean checkout of the pre-refactor tip."
         )
 
     manifest = json.loads(MANIFEST_PATH_LOCAL.read_text())
@@ -606,21 +609,21 @@ def _assert_round_trip(
 ) -> None:
     """Sanity-check that what was written matches what we just held in RAM."""
     if reloaded.recording.cache_hash != recording.cache_hash:
-        raise RuntimeError("Phase 1 baseline round-trip: cache_hash drifted.")
+        raise RuntimeError("Pre-refactor baseline round-trip: cache_hash drifted.")
     if not np.array_equal(reloaded.recording.traces, recording.traces):
-        raise RuntimeError("Phase 1 baseline round-trip: traces differ.")
+        raise RuntimeError("Pre-refactor baseline round-trip: traces differ.")
     if not np.array_equal(reloaded.recording.timestamps, recording.timestamps):
-        raise RuntimeError("Phase 1 baseline round-trip: timestamps differ.")
+        raise RuntimeError("Pre-refactor baseline round-trip: timestamps differ.")
     if reloaded.sorting.spike_samples_per_unit.keys() != sorting.spike_samples_per_unit.keys():
-        raise RuntimeError("Phase 1 baseline round-trip: unit_id sets differ.")
+        raise RuntimeError("Pre-refactor baseline round-trip: unit_id sets differ.")
     for uid, arr in sorting.spike_samples_per_unit.items():
         if not np.array_equal(reloaded.sorting.spike_samples_per_unit[uid], arr):
             raise RuntimeError(
-                f"Phase 1 baseline round-trip: unit {uid} spike samples differ."
+                f"Pre-refactor baseline round-trip: unit {uid} spike samples differ."
             )
     if reloaded.curation.spike_times_per_unit.keys() != curation.spike_times_per_unit.keys():
         raise RuntimeError(
-            "Phase 1 baseline round-trip: curation unit_id sets differ."
+            "Pre-refactor baseline round-trip: curation unit_id sets differ."
         )
     # Per-unit value check too: a serialization regression that
     # changes spike times without changing the unit count would
@@ -628,5 +631,5 @@ def _assert_round_trip(
     for uid, arr in curation.spike_times_per_unit.items():
         if not np.array_equal(reloaded.curation.spike_times_per_unit[uid], arr):
             raise RuntimeError(
-                f"Phase 1 baseline round-trip: curated unit {uid} spike times differ."
+                f"Pre-refactor baseline round-trip: curated unit {uid} spike times differ."
             )

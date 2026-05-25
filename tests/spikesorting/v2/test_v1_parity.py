@@ -1,15 +1,14 @@
-"""v1-parity validation slice for Phase 1b.
+"""v1-parity validation slice.
 
 Tests in this module verify that v2 behavior matches v1's documented
-contract on points where Phase 1 silently diverged. Each test is
-short, focused, and either pure-Python (T1) or DB-tier without
-populate (T2) -- the heavier integration / regression tests live
-in ``test_single_session_pipeline.py``.
+contract on points where the earlier v2 work silently diverged. Each
+test is short, focused, and either pure-Python or DB-tier without
+populate -- the heavier integration / regression tests live in
+``test_single_session_pipeline.py``.
 
-Where a test pins down the fix for a specific Phase 1b plan item
-(R/N/B tag), the docstring cites the tag and the v1 source line so
-a future reviewer can confirm we did not drift away from v1's
-intent without justification.
+Where a test pins down the fix for a specific v1↔v2 divergence the
+docstring cites the v1 source line so a future reviewer can confirm
+we did not drift away from v1's intent without justification.
 """
 
 from __future__ import annotations
@@ -37,16 +36,16 @@ from spyglass.spikesorting.v2._params.sorter import (
 pytestmark = pytest.mark.usefixtures("dj_conn")
 
 
-# ---------- B1 / R7 / R13 / R18 schema defaults ----------------------------
+# ---------- schema defaults ------------------------------------------------
 
 
 def test_artifact_defaults_match_b1_revised():
-    """B1: amplitude_thresh_uV=500.0 µV; proportion_above_thresh=1.0.
+    """``amplitude_thresh_uV=500.0`` µV; ``proportion_above_thresh=1.0``.
 
     The amplitude default is the v1-effective Frank-lab Intan
     threshold post-unit-conversion-fix (v1's 3000 nominal == ~585 µV
-    on 0.195 µV/count Intan probes). proportion=1.0 reverts v2's
-    silent flip from v1's "all channels must exceed".
+    on 0.195 µV/count Intan probes). proportion=1.0 reverts an
+    earlier silent flip from v1's "all channels must exceed".
     """
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
@@ -58,7 +57,7 @@ def test_artifact_defaults_match_b1_revised():
 
 
 def test_common_reference_field_removed_from_schema():
-    """R18: the dead ``reference`` field is gone; ``operator`` stays."""
+    """The dead ``reference`` field is gone; ``operator`` stays."""
     assert "reference" not in CommonReferenceParams.model_fields
     assert "operator" in CommonReferenceParams.model_fields
     from pydantic import ValidationError
@@ -68,7 +67,7 @@ def test_common_reference_field_removed_from_schema():
 
 
 def test_default_franklab_whiten_none():
-    """N35: ``default_franklab`` preset ships ``whiten=None``.
+    """``default_franklab`` preset ships ``whiten=None``.
 
     Matches the other two presets and the deferred-to-sorter
     reality. The WhitenParams schema is preserved as
@@ -88,14 +87,14 @@ def test_default_franklab_whiten_none():
 
 
 def test_min_segment_length_field_present():
-    """R7: ``PreprocessingParamsSchema`` carries ``min_segment_length``."""
+    """``PreprocessingParamsSchema`` carries ``min_segment_length``."""
     blob = PreprocessingParamsSchema().model_dump()
     assert "min_segment_length" in blob
     assert blob["min_segment_length"] == 1.0
 
 
 def test_artifact_min_length_s_field_present():
-    """R13: ``ArtifactDetectionParamsSchema`` carries ``min_length_s``."""
+    """``ArtifactDetectionParamsSchema`` carries ``min_length_s``."""
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
     )
@@ -105,11 +104,11 @@ def test_artifact_min_length_s_field_present():
     assert blob["min_length_s"] == 1.0
 
 
-# ---------- N34 / N48 schema escape hatches ---------------------------------
+# ---------- schema escape hatches -------------------------------------------
 
 
 def test_kilosort4_schema_accepts_extra_kwargs_v1_parity():
-    """N34: KS4 schema mirrors v1's escape hatch (extra='allow')."""
+    """KS4 schema mirrors v1's escape hatch (extra='allow')."""
     blob = Kilosort4Schema.model_validate(
         {"Th_universal": 9.0, "batch_size": 60_000, "nearest_chans": 10}
     ).model_dump()
@@ -140,9 +139,9 @@ def test_optional_matching_extra_resolution():
           message is the actual regression we guard against.
        c. NumPy version remains in the v2-supported range
           (``>=2.0``) -- ``UnitMatchPy`` historically pinned
-          ``numpy<2`` which would force an environment
-          downgrade. The Phase 0c plan requires the resolver to
-          have confirmed this does not happen.
+          ``numpy<2`` which would force an environment downgrade.
+          The resolver-evidence contract requires this not to
+          happen.
     """
     import importlib
     import importlib.util
@@ -190,9 +189,9 @@ def test_optional_matching_extra_resolution():
             assert "_tkinter" in str(exc) or "tkinter" in str(exc), (
                 f"UnitMatchPy import failed with an opaque "
                 f"ImportError that does not cite the known "
-                f"``_tkinter`` cause: {exc!r}. Phase 0c required "
-                "the import path to either succeed or surface the "
-                "``_tkinter`` dependency clearly."
+                f"``_tkinter`` cause: {exc!r}. The resolver-evidence "
+                "contract requires the import path to either succeed "
+                "or surface the ``_tkinter`` dependency clearly."
             )
 
     # NumPy compatibility: the v2 supported pin is ``>=2.0``. A
@@ -203,8 +202,8 @@ def test_optional_matching_extra_resolution():
     assert np_major >= 2, (
         f"NumPy {np.__version__} is below the v2-supported >=2.0 "
         "pin; spikesorting-v2-matching install forced an "
-        "environment downgrade -- the Phase 0c resolver evidence "
-        "needs re-verification."
+        "environment downgrade -- the matching-extra resolver "
+        "evidence needs re-verification."
     )
 
 
@@ -256,28 +255,28 @@ def test_ms4_default_row_only_shipped_when_ms4_installed():
         "sis.installed_sorters() on this platform. A v2 user "
         "calling SorterParameters.insert_default() then "
         "Sorting.populate(... sorter='mountainsort4' ...) will hit "
-        "an unhelpful SI 'sorter not registered' error. The Phase "
-        "0c plan requires MS4 runtime status to be explicit: "
-        "either install MS4 (Linux only, separate dep) OR gate the "
-        "default row insert behind ``if 'mountainsort4' in "
-        "sis.installed_sorters()``."
+        "an unhelpful SI 'sorter not registered' error. MS4 "
+        "runtime status must be explicit: either install MS4 "
+        "(Linux only, separate dep) OR gate the default row insert "
+        "behind ``if 'mountainsort4' in sis.installed_sorters()``."
     )
 
 
 def test_clusterless_schema_documents_dead_fields_or_drops_them():
-    """N48: dead ``outputs`` / ``random_chunk_kwargs`` fields are gone."""
+    """Dead ``outputs`` / ``random_chunk_kwargs`` fields are gone."""
     fields = ClusterlessThresholderSchema.model_fields
-    # ``noise_levels`` STAYS per N19; the other two are gone post-N48.
+    # ``noise_levels`` STAYS (the runtime forwards it to detect_peaks);
+    # the other two are gone.
     assert "noise_levels" in fields
     assert "outputs" not in fields
     assert "random_chunk_kwargs" not in fields
 
 
-# ---------- N45 + B7 user-facing helpers ------------------------------------
+# ---------- user-facing helpers ---------------------------------------------
 
 
 def test_v2_merge_ids_helper_exists():
-    """N45: v2-side parallel of v1's ``get_spiking_sorting_v1_merge_ids``."""
+    """v2-side parallel of v1's ``get_spiking_sorting_v1_merge_ids``."""
     from spyglass.spikesorting.v2.utils import (
         get_spiking_sorting_v2_merge_ids,
     )
@@ -288,7 +287,7 @@ def test_v2_merge_ids_helper_exists():
 
 
 def test_heterogeneous_gain_rationale_comment_present():
-    """B7: the v1 latent-bug rationale comment is durable in source.
+    """The v1 latent-bug rationale comment is durable in source.
 
     The comment lives above the ``_np.unique(recording.get_channel_
     gains())`` check inside ``Recording._write_nwb_artifact``.
@@ -302,15 +301,18 @@ def test_heterogeneous_gain_rationale_comment_present():
     assert "heterogeneous" in src.lower()
 
 
-# ---------- N27 phase-label leakage ----------------------------------------
+# ---------- phase-label leakage --------------------------------------------
 
 
 def test_no_phase_label_leakage_in_runtime_code():
-    """N27: zero ``Phase 1`` / ``Phase 1b`` hits in runtime v2 source.
+    """Zero plan-phase identifier hits in runtime v2 source.
 
-    Comments + docstrings included. Tests + baseline fixtures are
-    intentionally allowed to keep historical phase-naming since
-    they reference an immutable baseline.
+    The shared-contracts "Code Artifact Naming" invariant forbids
+    plan-phase identifiers (the literal strings checked below) in
+    runtime code, including comments and docstrings. Tests and
+    baseline-fixture machinery may still reference these labels
+    because they describe an immutable historical baseline that the
+    test corpus compares against.
     """
     # parents[3] = repo root (parents[2] is ``tests/``, NOT
     # ``tests/src/``). The earlier ``parents[2]`` form resolved
@@ -340,11 +342,11 @@ def test_no_phase_label_leakage_in_runtime_code():
     assert not offenders, f"Phase-label leakage in runtime v2: {offenders}"
 
 
-# ---------- N29 merge dispatch ---------------------------------------------
+# ---------- merge dispatch --------------------------------------------------
 
 
 def test_merge_dispatch_raises_on_unknown_restriction_keys():
-    """N29: unknown restriction keys raise instead of silently dropping."""
+    """Unknown restriction keys raise instead of silently dropping."""
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 
     with pytest.raises(ValueError, match="bogus_field"):
@@ -354,7 +356,7 @@ def test_merge_dispatch_raises_on_unknown_restriction_keys():
 
 
 def test_get_restricted_merge_ids_default_sources_includes_v2():
-    """N49: default sources list includes v2 so v1 callers see v2 rows."""
+    """Default sources list includes v2 so v1 callers see v2 rows."""
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 
     sig = inspect.signature(SpikeSortingOutput.get_restricted_merge_ids)
@@ -362,7 +364,7 @@ def test_get_restricted_merge_ids_default_sources_includes_v2():
     assert default == ["v0", "v1", "v2"]
 
 
-# ---------- N50 timestamp repair (pure-numpy unit) --------------------------
+# ---------- timestamp repair (pure-numpy unit) ------------------------------
 
 
 def test_n50_repair_clean_increasing_passthrough():
@@ -481,11 +483,11 @@ def test_n50_repair_non_monotonic_patterns(input_ts, expected):
     assert np.all(np.diff(out) > 0)
 
 
-# ---------- N42 / N53 CurationV2 accessor surface --------------------------
+# ---------- CurationV2 accessor surface ------------------------------------
 
 
 def test_curation_v2_accessors_are_classmethod():
-    """N53: all four CurationV2 accessor methods are @classmethod.
+    """All CurationV2 accessor methods are @classmethod.
 
     Lets the merge dispatcher's
     ``source_table.get_recording(merge_key)`` call (which binds
@@ -507,11 +509,11 @@ def test_curation_v2_accessors_are_classmethod():
         )
 
 
-# ---------- N52 Sorting.get_sorting as_dataframe ---------------------------
+# ---------- Sorting.get_sorting as_dataframe -------------------------------
 
 
 def test_sorting_get_sorting_accepts_as_dataframe_flag():
-    """N52: ``Sorting.get_sorting`` accepts ``as_dataframe`` kwarg."""
+    """``Sorting.get_sorting`` accepts ``as_dataframe`` kwarg."""
     from spyglass.spikesorting.v2.sorting import Sorting
 
     sig = inspect.signature(Sorting.get_sorting)

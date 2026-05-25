@@ -158,13 +158,14 @@ def test_sorter_runtime_resolution():
     )
 
 
-# ---------- correct_motion contract for Phase 3 ----------------------------
+# ---------- correct_motion contract for the motion-correction MVP ----------
 
 
 def test_correct_motion_api_contract():
-    """``correct_motion`` exposes the kwargs Phase 3's MVP contract needs.
+    """``correct_motion`` exposes the kwargs the motion-correction MVP
+    contract needs.
 
-    Phase 3 persists only the corrected ``ElectricalSeries`` + sample
+    The MVP persists only the corrected ``ElectricalSeries`` + sample
     boundaries + hash. The API must accept ``output_motion=False`` and
     ``output_motion_info=False`` and have a ``preset`` kwarg.
     """

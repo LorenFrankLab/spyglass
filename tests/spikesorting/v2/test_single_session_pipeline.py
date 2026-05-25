@@ -235,10 +235,10 @@ def test_tripart_dispatch_active(dj_conn):
     regression silently persists. This test catches that failure
     mode in milliseconds.
 
-    Recording's tri-part landed in Phase 1b Batch 2;
-    ArtifactDetection and Sorting are added in later batches. The
-    parametrize list grows as those refactors land so a future
-    "consolidate back into ``make``" change fails loudly.
+    The parametrize list covers Recording / ArtifactDetection /
+    Sorting -- the three v2 tables that use tri-part dispatch --
+    so a future "consolidate back into ``make``" change fails
+    loudly.
     """
     import inspect
 
@@ -366,7 +366,7 @@ def test_recording_populates_and_round_trips(
         f"Recording.duration_s = {row['duration_s']}; expected "
         f"~{expected_duration} from IntervalList valid_times span."
     )
-    # ``cache_hash`` is now an ``NwbfileHasher`` digest (R17). The
+    # ``cache_hash`` is an ``NwbfileHasher`` digest. The
     # exact digest length (currently 32-char MD5 hex) is not pinned
     # by the plan; the ``char(64)`` schema column is headroom for a
     # future hash change. Assert non-empty rather than a fixed
@@ -661,10 +661,10 @@ def test_shared_artifact_group_insert_validates_inputs(populated_recording):
     consistency, recording existence, sampling-frequency match,
     duration / n_samples match, and non-empty members.
 
-    Phase 1d code-review (round 4) tightened the time-axis check
-    beyond "same nwb_file_name" -- ``RecordingSelection`` identity
-    includes ``interval_list_name``, so same NWB does NOT imply
-    same n_samples or fs. The invariants asserted here mirror what
+    The time-axis check is intentionally stricter than "same
+    nwb_file_name" -- ``RecordingSelection`` identity includes
+    ``interval_list_name``, so same NWB does NOT imply same
+    n_samples or fs. The invariants asserted here mirror what
     ``si.aggregate_channels`` requires inside ``make_compute``.
     """
     from spyglass.spikesorting.v2.artifact import SharedArtifactGroup
@@ -1469,12 +1469,11 @@ def test_curation_v2_parent_validation_and_nonincreasing_ids(populated_sorting):
     """parent_curation_id must reference an existing row for the same
     sort; auto-incremented curation_id starts at 0 and increments.
 
-    Phase 1b R15 changed ``labels=None`` from "raises" to
-    "treated as no-labels" for v1 surface parity; this test now
-    asserts the permissive contract instead of the prior reject.
-    Phase 1b N24 made root-curation insertion idempotent; the
-    repeated-root assertion is exercised in
-    ``test_root_curation_idempotent`` below.
+    For v1 surface parity ``labels=None`` is treated as no-labels
+    rather than raising; this test asserts the permissive contract.
+    Root-curation insertion is idempotent; the repeated-root
+    assertion is exercised in ``test_root_curation_idempotent``
+    below.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
 
@@ -1502,7 +1501,7 @@ def test_curation_v2_parent_validation_and_nonincreasing_ids(populated_sorting):
             parent_curation_id=999,
         )
 
-    # ``labels=None`` is accepted (R15: equivalent to ``labels={}``).
+    # ``labels=None`` is accepted (equivalent to ``labels={}``).
     pk_none = CurationV2.insert_curation(
         sorting_key=populated_sorting,
         labels=None,
@@ -1964,9 +1963,9 @@ def test_clusterless_thresholder_end_to_end(polymer_smoke_session):
     # smaller than typical lab data; a 5 uV threshold reliably surfaces
     # planted spikes for the 4s smoke recording.
     custom_params_name = "smoke_clusterless_5uv"
-    # Phase 1b N48 dropped ``outputs`` and ``random_chunk_kwargs``
-    # from ``ClusterlessThresholderSchema``; the test params dict
-    # must not carry them (extra="forbid" rejects on insert).
+    # ``ClusterlessThresholderSchema`` rejects ``outputs`` and
+    # ``random_chunk_kwargs`` via extra="forbid", so the test
+    # params dict must not carry them.
     SorterParameters().insert1(
         {
             "sorter": "clusterless_thresholder",
@@ -2039,9 +2038,9 @@ def test_clusterless_thresholder_end_to_end(polymer_smoke_session):
     # since the v2 preprocessing pipeline -- bandpass +
     # common_reference -- does NOT gain-scale traces to uV before
     # detection; gain conversion happens only at NWB-write time via
-    # ``ElectricalSeries.conversion``). N19's docstring ("detect_threshold
-    # stays in microvolts") inherits a v1-era assumption that only
-    # holds if the recording was pre-scaled to uV. The unit-confusion
+    # ``ElectricalSeries.conversion``). The "detect_threshold stays
+    # in microvolts" docstring inherits a v1-era assumption that
+    # only holds if the recording was pre-scaled to uV. The unit-confusion
     # is pre-existing and out of scope here; document it so a future
     # maintainer doesn't reinstate the over-specified assertion. The
     # template peak (post-gain-applied via channel_gains in
@@ -2301,7 +2300,7 @@ def test_mountainsort5_ground_truth_polymer_60s(polymer_60s_session):
 
 
 # =========================================================================
-# Phase 1 review followups: gap-closing tests.
+# Test-appropriateness review followups: gap-closing tests.
 #
 # Tests below address the gaps identified in the test-appropriateness
 # review:
@@ -2847,12 +2846,13 @@ def test_run_v2_pipeline_clusterless_preset(polymer_smoke_session):
         "sorter_params_name": "default",
     }
     original_default = (SorterParameters & default_key).fetch1()
-    # Phase 1b N48 dropped ``outputs`` and ``random_chunk_kwargs`` from
-    # ``ClusterlessThresholderSchema`` (extra="forbid"); the test
-    # params dict must not carry them. The runtime strip path in
+    # ``ClusterlessThresholderSchema`` (extra="forbid") rejects
+    # ``outputs`` and ``random_chunk_kwargs``; the test params
+    # dict must not carry them. The runtime strip path in
     # ``Sorting._run_sorter`` still tolerates either shape -- but
-    # ``SorterParameters.insert1`` validates through Pydantic first,
-    # so the v1-era ``outputs`` key would fail at insert time.
+    # ``SorterParameters.insert1`` validates through Pydantic
+    # first, so the v1-era ``outputs`` key would fail at insert
+    # time.
     SorterParameters().insert1(
         {
             "sorter": "clusterless_thresholder",
@@ -3118,10 +3118,10 @@ def test_sorting_make_rollback_cleans_units_nwb(
         "when the transaction rolls back."
     )
 
-    # N51 mode B: the analyzer folder created by ``_build_analyzer``
-    # must also be removed by ``make_insert``'s rollback path. A
-    # 5-50 GB analyzer folder orphan per failed populate is the
-    # leak this guards against.
+    # The analyzer folder created by ``_build_analyzer`` must also
+    # be removed by ``make_insert``'s rollback path. A 5-50 GB
+    # analyzer folder orphan per failed populate is the leak this
+    # guards against.
     from spyglass.spikesorting.v2.utils import _analyzer_path
 
     analyzer_folder = _analyzer_path(sort_pk)
@@ -3132,7 +3132,7 @@ def test_sorting_make_rollback_cleans_units_nwb(
     )
 
 
-# ---------- Boundary-spike round-trip (R8 decision gate) -----------------
+# ---------- Boundary-spike round-trip (clip decision gate) -----------------
 
 
 @pytest.mark.slow
@@ -3141,14 +3141,14 @@ def test_boundary_spike_round_trip_does_not_raise(
 ):
     """A spike at the recording's final sample survives the v2 NWB round-trip.
 
-    Phase 1b's R8 decision is gated by this test. SpikeInterface's
-    ``NwbSortingExtractor`` has historically been strict about spikes
-    that map back to a sample at or past ``n_samples`` after the
-    ``timestamps[sample_index] -> spike_times[]`` -> ``round((t -
-    t_start) * fs)`` round-trip. If SI 0.104 raises here, we fold in
-    v1's ``spike_times_to_valid_samples`` clip on read. If it does
-    not raise, the clip is unnecessary and the test is kept as a
-    regression guard.
+    This test gates the decision on whether to fold in v1's
+    ``spike_times_to_valid_samples`` clip. SpikeInterface's
+    ``NwbSortingExtractor`` has historically been strict about
+    spikes that map back to a sample at or past ``n_samples`` after
+    the ``timestamps[sample_index] -> spike_times[]`` -> ``round((t
+    - t_start) * fs)`` round-trip. If SI 0.104 raises here, the v1
+    clip is required on read; if it does not raise, the clip is
+    unnecessary and the test is kept as a regression guard.
 
     Construction strategy
     ---------------------
@@ -3256,8 +3256,9 @@ def test_boundary_spike_round_trip_does_not_raise(
     Sorting.populate(sort_pk, reserve_jobs=False)
     assert Sorting & sort_pk, (
         "Sorting.populate failed when the synthetic sorter produced "
-        "a boundary spike; this is the failure mode R8 watches for "
-        "but inside _write_units_nwb rather than at read time."
+        "a boundary spike; this is the failure mode the clip-decision "
+        "gate watches for but inside _write_units_nwb rather than at "
+        "read time."
     )
 
     # First read path: Sorting.get_sorting -> NwbSortingExtractor
@@ -3273,12 +3274,12 @@ def test_boundary_spike_round_trip_does_not_raise(
     # curated NWB write goes through a different code path than
     # Sorting._write_units_nwb but reads back via the same
     # NwbSortingExtractor pattern. Pass labels={} so insert_curation
-    # accepts the call on Phase 1's strict signature.
+    # accepts the call on the strict signature.
     curation_pk = CurationV2.insert_curation(
         sorting_key=sort_pk,
         labels={},
         parent_curation_id=-1,
-        description="R8 boundary-spike test",
+        description="boundary-spike round-trip test",
     )
     curated = CurationV2().get_sorting(curation_pk)
     assert 0 in curated.get_unit_ids(), (
@@ -3355,7 +3356,7 @@ def test_detect_artifacts_finds_known_transient(dj_conn):
         removal_window_ms=0.05,
         join_window_ms=0.0,
 
-        min_length_s=0.001,  # R13 default 1.0 would wipe synthetic-recording intervals
+        min_length_s=0.001,  # default 1.0 would wipe synthetic-recording intervals
     )
 
     valid_times = ArtifactDetection._detect_artifacts(rec, params)
@@ -3454,12 +3455,11 @@ def test_detect_artifacts_zscore_only_detection(dj_conn):
     """``_detect_artifacts`` runs the z-score-only branch when
     ``amplitude_thresh_uV is None``.
 
-    The z-score is **across channels per frame** (Phase 1b N20
-    restored this from v1); a frame where one channel deviates
-    substantially from the others trips. Common-mode pops where
-    every channel jumps together do NOT trip (per-frame mean
-    shifts but per-frame std stays ~0, so z ~= 0 everywhere on
-    that row).
+    The z-score is **across channels per frame** (matching v1's
+    semantics); a frame where one channel deviates substantially
+    from the others trips. Common-mode pops where every channel
+    jumps together do NOT trip (per-frame mean shifts but
+    per-frame std stays ~0, so z ~= 0 everywhere on that row).
 
     Synthetic: low-amplitude per-channel uncorrelated background +
     a 10-sample artifact on ONE channel (the others stay quiet at
@@ -3499,7 +3499,7 @@ def test_detect_artifacts_zscore_only_detection(dj_conn):
         removal_window_ms=0.05,
         join_window_ms=0.0,
 
-        min_length_s=0.001,  # R13 default 1.0 would wipe synthetic-recording intervals
+        min_length_s=0.001,  # default 1.0 would wipe synthetic-recording intervals
     )
     valid_times = ArtifactDetection._detect_artifacts(rec, params)
     timestamps = rec.get_times()
@@ -3521,25 +3521,24 @@ def test_detect_artifacts_zscore_only_detection(dj_conn):
 def test_detect_artifacts_amplitude_and_zscore_combined(dj_conn):
     """``_detect_artifacts`` OR-combines thresholds when both are set.
 
-    Phase 1b N23 reverted Phase 1's AND combine back to v1's OR
-    (``np.logical_or(above_z, above_a)`` at ``v1/utils.py:198``).
-    Under OR a frame is flagged if EITHER detector trips, so this
-    test's synthetic 80 uV baseline (which clears the 50 uV
-    amplitude threshold on every channel everywhere) flags the
-    entire recording: the baseline frames trip amplitude alone,
-    and the 200 uV step deviation at frames 3000-3099 trips both
-    detectors. Net result: ``valid_times`` is empty (whole
-    recording flagged as artifact) under OR; under Phase 1's AND
-    only the step region was flagged. Keeping the synthetic
-    setup unchanged so the test name and data continue to point
-    at the AND-vs-OR semantics directly; the assertion is what
-    flips.
+    v2 matches v1's OR semantics (``np.logical_or(above_z,
+    above_a)`` at ``v1/utils.py:198``). Under OR a frame is flagged
+    if EITHER detector trips, so this test's synthetic 80 uV
+    baseline (which clears the 50 uV amplitude threshold on every
+    channel everywhere) flags the entire recording: the baseline
+    frames trip amplitude alone, and the 200 uV step deviation at
+    frames 3000-3099 trips both detectors. Net result:
+    ``valid_times`` is empty (whole recording flagged as artifact)
+    under OR; an earlier AND combine flagged only the step region.
+    Keeping the synthetic setup unchanged so the test name and data
+    continue to point at the AND-vs-OR semantics directly; the
+    assertion is what flips.
 
-    The N20 cross-channel z-score change is also active here: the
-    z-score is computed across channels per frame (uniform
-    baseline -> ~0 z-score), not per channel over time. Combined
-    with OR, the baseline still flags via amplitude, so the test
-    outcome is the same regardless of the z-score axis change.
+    The cross-channel z-score is also active here: the z-score is
+    computed across channels per frame (uniform baseline -> ~0
+    z-score), not per channel over time. Combined with OR, the
+    baseline still flags via amplitude, so the test outcome is the
+    same regardless of the z-score axis change.
     """
     import numpy as _np
 
@@ -3566,20 +3565,20 @@ def test_detect_artifacts_amplitude_and_zscore_combined(dj_conn):
         removal_window_ms=0.05,
         join_window_ms=0.0,
 
-        min_length_s=0.001,  # R13 default 1.0 would wipe synthetic-recording intervals
+        min_length_s=0.001,  # default 1.0 would wipe synthetic-recording intervals
     )
     valid_times = ArtifactDetection._detect_artifacts(rec, params)
 
     # OR mode: baseline trips amplitude alone -> every frame is
     # flagged. ``valid_times`` is shape (0, 2). v1 parity restored
-    # from Phase 1's silent flip to AND.
+    # after an earlier silent flip to AND.
     assert valid_times.shape == (0, 2), (
         f"OR-mode (amplitude OR z-score) expected to flag the entire "
         f"recording given the 80 uV uniform baseline clears the 50 uV "
         f"amplitude threshold on every channel; got shape "
-        f"{valid_times.shape}. Phase 1 had this test asserting AND "
-        f"semantics; N23 restored v1's OR semantics. If this fails "
-        f"with shape (2, 2), the AND combine has silently regressed."
+        f"{valid_times.shape}. v2 enforces v1's OR semantics; if "
+        f"this fails with shape (2, 2), an AND combine has silently "
+        f"regressed."
     )
 
 
@@ -3620,7 +3619,7 @@ def test_detect_artifacts_join_window_merges_runs(dj_conn):
             removal_window_ms=0.05,
             join_window_ms=1.0,
 
-            min_length_s=0.001,  # R13 default 1.0 would wipe synthetic-recording intervals
+            min_length_s=0.001,  # default 1.0 would wipe synthetic-recording intervals
         ),
     )
     assert merged.shape == (2, 2), (
@@ -3633,7 +3632,7 @@ def test_detect_artifacts_join_window_merges_runs(dj_conn):
     # 1) = 3 frames. Gap of 10 stays unbridged; two separate
     # artifact runs, three valid intervals.
     #
-    # ``min_length_s`` must be < the post-widening gap or R13's
+    # ``min_length_s`` must be < the post-widening gap or the
     # sliver filter eats the middle interval. The middle sliver is
     # ``(10 frames gap) - 2*half_window_frames(=1) = 8 frames``
     # = ~0.27 ms at 30 kHz. Use 0.0001 s (0.1 ms) to keep it.
@@ -4062,7 +4061,7 @@ def test_detect_artifacts_below_proportion_threshold_ignored(dj_conn):
         removal_window_ms=0.05,
         join_window_ms=0.0,
 
-        min_length_s=0.001,  # R13 default 1.0 would wipe synthetic-recording intervals
+        min_length_s=0.001,  # default 1.0 would wipe synthetic-recording intervals
     )
     valid_times = ArtifactDetection._detect_artifacts(rec, params)
     timestamps = rec.get_times()
@@ -4084,11 +4083,11 @@ def test_sorting_selection_rejects_concat_source(dj_conn):
     """``SortingSelection.insert_selection`` refuses
     ``concat_recording_id`` with ``NotImplementedError``.
 
-    The Phase 1 plan declares the ``ConcatenatedRecordingSource``
-    schema final-shape under the zero-migration policy, but the
-    make-body branch isn't implemented yet. Pins the gate so a
-    premature attempt to wire up the concat path immediately fails
-    this test.
+    The ``ConcatenatedRecordingSource`` schema is declared in its
+    final shape under the zero-migration policy, but the make-body
+    branch is not implemented yet. Pins the gate so a premature
+    attempt to wire up the concat path immediately fails this
+    test.
     """
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
@@ -4488,7 +4487,7 @@ def test_detect_artifacts_clamps_artifact_at_recording_end(dj_conn):
         removal_window_ms=0.05,
         join_window_ms=0.0,
 
-        min_length_s=0.001,  # R13 default 1.0 would wipe synthetic-recording intervals
+        min_length_s=0.001,  # default 1.0 would wipe synthetic-recording intervals
     )
     valid_times = ArtifactDetection._detect_artifacts(rec, params)
     timestamps = rec.get_times()
@@ -4514,29 +4513,28 @@ def test_detect_artifacts_clamps_artifact_at_recording_end(dj_conn):
 
 
 # =========================================================================
-# End of Phase 1 review followups.
+# End of test-appropriateness review followups.
 # =========================================================================
 
 
 # =========================================================================
-# Phase 1d-C: high-leverage missing tests from the v1-parity audit.
+# High-leverage missing tests from the v1-parity audit.
 # =========================================================================
 
 
 @pytest.mark.slow
 @pytest.mark.integration
 def test_cache_hash_uses_nwbfile_hasher(populated_recording):
-    """R17: ``Recording.cache_hash`` matches ``_hash_nwb_recording``.
+    """``Recording.cache_hash`` matches ``_hash_nwb_recording``.
 
-    The Phase 1 cache_hash was ``hashlib.sha256(data.tobytes())``
+    An earlier cache_hash was ``hashlib.sha256(data.tobytes())``
     -- content-blind to timestamps, electrodes, and conversion
     metadata. shared-contracts.md "Recording Cache Format" binds
     cache_hash to ``NwbfileHasher`` (Spyglass's content hasher
-    used by the v1 recompute machinery); Phase 1b R17 ported the
-    contract. This test independently recomputes the hash and
-    asserts the stored value matches -- a regression to the
-    data-only sha256 would silently pass the existing
-    ``isinstance(cache_hash, str)`` check.
+    used by the v1 recompute machinery). This test independently
+    recomputes the hash and asserts the stored value matches -- a
+    regression to the data-only sha256 would silently pass the
+    existing ``isinstance(cache_hash, str)`` check.
     """
     from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.utils import _hash_nwb_recording
@@ -4546,7 +4544,7 @@ def test_cache_hash_uses_nwbfile_hasher(populated_recording):
     assert row["cache_hash"] == expected, (
         f"cache_hash {row['cache_hash']!r} does not match "
         f"independently-computed NwbfileHasher digest {expected!r}. "
-        "R17 contract violated -- check that "
+        "NwbfileHasher contract violated -- check that "
         "Recording._write_nwb_artifact still routes through "
         "_hash_nwb_recording instead of a data-only sha256."
     )
@@ -4555,16 +4553,16 @@ def test_cache_hash_uses_nwbfile_hasher(populated_recording):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_merge_dispatch_get_recording_works_for_v2(populated_sorting):
-    """R1/R6: ``SpikeSortingOutput.get_recording`` returns a v2
-    recording with ``is_filtered=True`` annotated.
+    """``SpikeSortingOutput.get_recording`` returns a v2 recording
+    with ``is_filtered=True`` annotated.
 
-    Without R1 (the new ``CurationV2.get_recording`` classmethod
-    + part-table source-class wiring), the merge dispatcher at
-    ``spikesorting_merge.py:317`` raised ``AttributeError`` on
-    every v2 ``merge_id``. Without R6 (``recording.annotate(
-    is_filtered=True)``), downstream SI consumers may re-apply
-    a bandpass to the already-filtered preprocessed recording.
-    Pin both invariants in one test.
+    Without the ``CurationV2.get_recording`` classmethod +
+    part-table source-class wiring, the merge dispatcher at
+    ``spikesorting_merge.py:317`` raises ``AttributeError`` on
+    every v2 ``merge_id``. Without the ``recording.annotate(
+    is_filtered=True)`` call, downstream SI consumers may re-apply
+    a bandpass to the already-filtered preprocessed recording. Pin
+    both invariants in one test.
     """
     import spikeinterface as si
 
@@ -4585,22 +4583,22 @@ def test_merge_dispatch_get_recording_works_for_v2(populated_sorting):
     assert rec.get_annotation("is_filtered") is True, (
         "Returned recording must carry is_filtered=True so a "
         "downstream sorter does not re-bandpass already-filtered "
-        "data. R6 annotation regression."
+        "data; is_filtered annotation regression."
     )
 
 
 @pytest.mark.slow
 @pytest.mark.integration
 def test_merge_dispatch_get_sort_group_info_works_for_v2(populated_sorting):
-    """R2: ``SpikeSortingOutput.get_sort_group_info`` returns the
-    full electrode set for a v2 merge_id.
+    """``SpikeSortingOutput.get_sort_group_info`` returns the full
+    electrode set for a v2 merge_id.
 
-    Before R2, ``CurationV2.get_sort_group_info`` was an instance
-    method; the merge dispatcher at
-    ``spikesorting_merge.py:346`` calls it as
+    Before ``CurationV2.get_sort_group_info`` was promoted to a
+    classmethod, the merge dispatcher at
+    ``spikesorting_merge.py:346`` called it as
     ``source_table.get_sort_group_info(merge_key)`` where
     ``source_table`` is the bound class, not an instance --
-    raised ``TypeError: missing self``. With R2's classmethod
+    raising ``TypeError: missing self``. With the classmethod
     conversion, the call resolves. This test confirms it
     actually returns a non-empty multi-row relation.
     """
@@ -4618,7 +4616,7 @@ def test_merge_dispatch_get_sort_group_info_works_for_v2(populated_sorting):
     assert len(rows) > 0, (
         "get_sort_group_info returned zero rows; the v1 "
         "fetch(limit=1) multi-region under-reporting bug has "
-        "regressed (R2)."
+        "regressed."
     )
     # The result must include the electrode-level columns the
     # plan documents (rows for every electrode in the sort
@@ -4634,9 +4632,9 @@ def test_merge_dispatch_get_sort_group_info_works_for_v2(populated_sorting):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_disjoint_sort_intervals_concatenated(polymer_smoke_session):
-    """R5: ``Recording.make`` honors disjoint sort intervals.
+    """``Recording.make`` honors disjoint sort intervals.
 
-    Without R5's ``_consolidate_intervals`` + ``concatenate_recordings``
+    Without the ``_consolidate_intervals`` + ``concatenate_recordings``
     pattern, ``Recording.make`` took ``(times[0][0], times[-1][-1])``
     -- the outer envelope, silently including inter-interval gaps.
     This test writes a synthetic IntervalList row whose
@@ -4648,7 +4646,8 @@ def test_disjoint_sort_intervals_concatenated(polymer_smoke_session):
        envelope (the gap was actually excluded).
     2. No written timestamp falls inside the gap.
 
-    Without R5, both assertions fail (the gap is included).
+    Without the consolidate-and-concatenate pattern, both
+    assertions fail (the gap is included).
     """
     import uuid as _uuid
 
@@ -4754,7 +4753,7 @@ def test_disjoint_sort_intervals_concatenated(polymer_smoke_session):
     ), (
         f"Written timestamps length {len(written_times)} differs "
         f"from expected ~{expected_n} (sum of disjoint chunks). "
-        "R5 disjoint-interval concat regression."
+        "Disjoint-interval concat regression."
     )
     # No written timestamp falls inside the gap (chunk1_end,
     # gap_end). Allow tiny boundary slack via 1.5 / fs.
@@ -4764,28 +4763,28 @@ def test_disjoint_sort_intervals_concatenated(polymer_smoke_session):
     )
     assert not _np.any(in_gap), (
         f"Found {int(in_gap.sum())} written timestamps inside the "
-        f"disjoint gap ({chunk1_end}, {gap_end}). R5's "
+        f"disjoint gap ({chunk1_end}, {gap_end}); the "
         "_consolidate_intervals + concatenate_recordings split was "
         "bypassed."
     )
 
 
 # =========================================================================
-# Phase 1d-E: remaining named validation-slice tests.
+# Remaining named validation-slice tests.
 # =========================================================================
 
 
 @pytest.mark.slow
 @pytest.mark.integration
 def test_merges_applied_records_user_intent(populated_sorting):
-    """N41: ``merges_applied`` stores ``apply_merge`` verbatim.
+    """``merges_applied`` stores ``apply_merge`` verbatim.
 
-    Phase 1 shipped ``merges_applied = bool(apply_merge and
-    merge_groups)`` -- a caller passing ``apply_merge=True,
-    merge_groups=None`` got ``False`` (effective state). v1's
-    semantic at ``v1/curation.py:123`` stores ``apply_merge``
-    verbatim (user intent). Phase 1b N41 reverted to v1's
-    behavior; this test pins that contract.
+    An earlier v2 implementation shipped ``merges_applied =
+    bool(apply_merge and merge_groups)`` -- a caller passing
+    ``apply_merge=True, merge_groups=None`` got ``False``
+    (effective state). v1's semantic at ``v1/curation.py:123``
+    stores ``apply_merge`` verbatim (user intent); v2 matches v1
+    here and this test pins the contract.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
 
@@ -4798,20 +4797,21 @@ def test_merges_applied_records_user_intent(populated_sorting):
     )
     assert (CurationV2 & pk).fetch1("merges_applied") == 1, (
         "merges_applied should be 1 (True) when apply_merge=True "
-        "regardless of merge_groups content; got 0. N41 regression."
+        "regardless of merge_groups content; got 0 -- regression "
+        "to the effective-state semantic."
     )
 
 
 @pytest.mark.slow
 @pytest.mark.integration
 def test_get_sorting_dataframe_includes_curation_label(populated_sorting):
-    """N42: ``CurationV2.get_sorting(as_dataframe=True)`` carries
+    """``CurationV2.get_sorting(as_dataframe=True)`` carries
     a ``curation_label`` column joined from UnitLabel.
 
     v1's ``Curation.get_sorting(as_dataframe=True)`` returned
     ``nwbf.units.to_dataframe()`` which carried ``curation_label``.
-    Phase 1 v2 stripped the join, producing only unit_id +
-    spike_times. Phase 1b N42 joined the labels back in; this
+    An earlier v2 implementation stripped the join, producing only
+    unit_id + spike_times; v2 now joins the labels back in. This
     test pins the column presence + correct per-unit values.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -4828,7 +4828,7 @@ def test_get_sorting_dataframe_includes_curation_label(populated_sorting):
     df = CurationV2().get_sorting(pk, as_dataframe=True)
     assert "curation_label" in df.columns, (
         "DataFrame missing the curation_label column joined from "
-        "UnitLabel; N42 regression."
+        "UnitLabel."
     )
     # The labeled unit carries ["mua"]; any other unit carries [].
     assert df.loc[units[0], "curation_label"] == ["mua"]
@@ -4845,12 +4845,12 @@ def test_get_sorting_dataframe_includes_curation_label(populated_sorting):
 def test_recording_get_recording_honors_electrical_series_path(
     populated_recording, monkeypatch
 ):
-    """N28: ``Recording.get_recording`` forwards
+    """``Recording.get_recording`` forwards
     ``electrical_series_path`` to SI's ``read_nwb_recording``.
 
-    Without N28, a future AnalysisNwbfile with more than one
-    ElectricalSeries (e.g., LFP next to raw) would let SI auto-
-    detect the wrong source. Monkey-patches
+    Without the forwarding, a future AnalysisNwbfile with more
+    than one ElectricalSeries (e.g., LFP next to raw) would let
+    SI auto-detect the wrong source. Monkey-patches
     ``se.read_nwb_recording`` to capture the kwarg.
     """
     import spikeinterface.extractors as se
@@ -4873,7 +4873,7 @@ def test_recording_get_recording_honors_electrical_series_path(
     assert captured_kwargs.get("electrical_series_path") == expected, (
         f"se.read_nwb_recording called without electrical_series_path"
         f"={expected!r}; got {captured_kwargs.get('electrical_series_path')!r}. "
-        "N28 regression -- the stored column is being ignored."
+        "Regression -- the stored column is being ignored."
     )
 
 
@@ -4882,15 +4882,15 @@ def test_recording_get_recording_honors_electrical_series_path(
 def test_sorting_nwb_writes_obs_intervals_and_curation_label_placeholder(
     populated_sorting,
 ):
-    """N25 + N43: pre-curation NWB carries per-unit ``obs_intervals``
-    and a ``curation_label="uncurated"`` scalar placeholder.
+    """Pre-curation NWB carries per-unit ``obs_intervals`` and a
+    ``curation_label="uncurated"`` scalar placeholder.
 
     v1's pre-curation NWB (``v1/sorting.py:583-598``) wrote both;
-    Phase 1 v2 wrote only ``spike_times`` + ``id``. Phase 1b N25
-    restored ``obs_intervals``; Phase 1d-A restored the scalar
-    ``curation_label="uncurated"`` (Phase 1b N43's original
-    implementation had inflated this to a ragged list which
-    broke v1-style equality checks).
+    an earlier v2 implementation wrote only ``spike_times`` +
+    ``id``, and a subsequent fix inflated ``curation_label`` to a
+    ragged list which broke v1-style equality checks. v2 now
+    matches v1 exactly: ``obs_intervals`` per-unit + scalar
+    ``"uncurated"`` string in ``curation_label``.
     """
     import pynwb
 
@@ -4907,40 +4907,38 @@ def test_sorting_nwb_writes_obs_intervals_and_curation_label_placeholder(
 
     assert len(df) > 0, "populated_sorting yielded zero units"
     assert "obs_intervals" in df.columns, (
-        "Units NWB missing per-unit obs_intervals column; N25 "
-        "regression."
+        "Units NWB missing per-unit obs_intervals column."
     )
     # obs_intervals should be a non-empty (n_intervals, 2) array
     # per unit. Each row should have a valid window.
     for uid, obs in df["obs_intervals"].items():
         assert obs is not None and len(obs) >= 1, (
-            f"Unit {uid} has empty obs_intervals; N25 regression."
+            f"Unit {uid} has empty obs_intervals."
         )
     assert "curation_label" in df.columns, (
-        "Units NWB missing curation_label placeholder column; "
-        "N43 regression."
+        "Units NWB missing curation_label placeholder column."
     )
-    # Scalar shape (1d-A): every unit carries the string
-    # ``"uncurated"`` -- NOT a list.
+    # Scalar shape: every unit carries the string ``"uncurated"``
+    # -- NOT a list (a list shape would break v1-style equality
+    # checks).
     for uid, lbl in df["curation_label"].items():
         assert lbl == "uncurated", (
             f"Unit {uid} has curation_label={lbl!r}; expected scalar "
-            "string ``'uncurated'`` (1d-A restored v1's shape from "
-            "the Phase 1b N43 ragged-list regression)."
+            "string ``'uncurated'``."
         )
 
 
 @pytest.mark.slow
 @pytest.mark.integration
 def test_curation_label_post_curation_is_indexed_ragged_list(populated_sorting):
-    """N26: post-curation NWB writes ``curation_label`` as an
-    indexed (ragged) list column matching v1's shape.
+    """Post-curation NWB writes ``curation_label`` as an indexed
+    (ragged) list column matching v1's shape.
 
-    The pre-curation shape is scalar (N43 + 1d-A); the
-    post-curation shape is the ragged list per-unit (N26 +
-    v1/curation.py:398-403). Tests assume the same NWB file
-    written by ``CurationV2.insert_curation`` carries the
-    ragged shape.
+    The pre-curation shape is scalar; the post-curation shape is
+    the ragged list per-unit (mirrors
+    ``v1/curation.py:398-403``). Tests assume the same NWB file
+    written by ``CurationV2.insert_curation`` carries the ragged
+    shape.
     """
     import pynwb
 
@@ -4979,7 +4977,7 @@ def test_curation_label_post_curation_is_indexed_ragged_list(populated_sorting):
     assert isinstance(labeled_value, (list, _np.ndarray)), (
         f"curation_label for labeled unit is {type(labeled_value)}; "
         "expected list / ndarray (ragged column from index=True). "
-        "N26 regression."
+        "Regression to a non-indexed column."
     )
     assert set(labeled_value) == {"mua", "artifact"}
 
@@ -4987,13 +4985,14 @@ def test_curation_label_post_curation_is_indexed_ragged_list(populated_sorting):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_sorting_delete_removes_analyzer_folder(populated_sorting):
-    """R11: ``Sorting.delete()`` cleans up the analyzer folder on disk.
+    """``Sorting.delete()`` cleans up the analyzer folder on disk.
 
     v2 introduced ``analyzer_folder`` as a 5-50 GB scratch path
-    not tracked by DataJoint. Without R11's delete override, the
-    folder leaks every time a Sorting row is dropped. Test
-    populates a sort, asserts the folder exists, deletes the row
-    with ``safemode=False``, then asserts the folder is gone.
+    not tracked by DataJoint. Without ``Sorting``'s delete
+    override, the folder leaks every time a Sorting row is
+    dropped. Test populates a sort, asserts the folder exists,
+    deletes the row with ``safemode=False``, then asserts the
+    folder is gone.
     """
     from spyglass.spikesorting.v2.sorting import Sorting
     from spyglass.spikesorting.v2.utils import _analyzer_path
@@ -5026,20 +5025,21 @@ def test_sorting_delete_removes_analyzer_folder(populated_sorting):
     (Sorting & populated_sorting).delete(safemode=False)
     assert not folder.exists(), (
         f"analyzer_folder {folder} still exists after "
-        "Sorting.delete(); R11 cleanup regression."
+        "Sorting.delete(); cleanup regression."
     )
 
 
 @pytest.mark.slow
 @pytest.mark.integration
 def test_merge_dispatch_restrict_by_artifact_honored_in_v2(populated_sorting):
-    """N40: ``SpikeSortingOutput.get_restricted_merge_ids`` with
+    """``SpikeSortingOutput.get_restricted_merge_ids`` with
     ``restrict_by_artifact=True`` honors the v2 ``f"artifact_
     {artifact_id}"`` IntervalList naming convention.
 
     The dispatcher converts ``interval_list_name="artifact_<uuid>"``
     back to ``artifact_id=<uuid>`` for the v2 join chain. Without
-    N40, an artifact-named restriction returns no v2 merge_ids.
+    this conversion an artifact-named restriction returns no v2
+    merge_ids.
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -5068,8 +5068,7 @@ def test_merge_dispatch_restrict_by_artifact_honored_in_v2(populated_sorting):
     )
     assert expected in merge_ids, (
         f"Artifact-named restriction did not surface the populated "
-        f"merge_id (expected {expected!r}, got {list(merge_ids)!r}); "
-        "N40 regression."
+        f"merge_id (expected {expected!r}, got {list(merge_ids)!r})."
     )
 
 
@@ -5082,7 +5081,7 @@ def test_merge_dispatch_restrict_by_artifact_honored_in_v2(populated_sorting):
 def test_merge_dispatch_consumer_api_works_on_v2_merge_id(
     populated_sorting, method_name
 ):
-    """N54 downstream-consumer dispatch sanity for the two highest-
+    """Downstream-consumer dispatch sanity for the two highest-
     leverage time-binned APIs.
 
     ``get_spike_indicator`` is the consumer-facing API for
@@ -5127,7 +5126,7 @@ def test_merge_dispatch_consumer_api_works_on_v2_merge_id(
 @pytest.mark.slow
 @pytest.mark.integration
 def test_sorted_spikes_group_works_with_v2_merge_id(populated_sorting):
-    """N54 downstream-consumer: ``SortedSpikesGroup`` builds and
+    """Downstream-consumer: ``SortedSpikesGroup`` builds and
     fetches spike data + firing rate on a v2 merge_id.
 
     Constructs a ``SortedSpikesGroup`` from a v2 curation's
@@ -5135,9 +5134,9 @@ def test_sorted_spikes_group_works_with_v2_merge_id(populated_sorting):
     ripple-detection workflows), then exercises
     ``fetch_spike_data``, ``get_spike_indicator``,
     ``get_firing_rate`` (per-unit and MUA-multiunit modes).
-    Catches the N36 sparse-unit_id and the v2-merge-dispatch
-    regressions on the actual SortedSpikesGroup surface, not
-    just the SpikeSortingOutput primitive APIs.
+    Catches sparse-unit_id and v2-merge-dispatch regressions on
+    the actual SortedSpikesGroup surface, not just the
+    SpikeSortingOutput primitive APIs.
     """
     import numpy as _np
 
@@ -5196,7 +5195,7 @@ def test_sorted_spikes_group_works_with_v2_merge_id(populated_sorting):
     assert isinstance(spike_times, list)
     assert len(spike_times) >= 1, (
         "SortedSpikesGroup.fetch_spike_data returned zero units for a "
-        "v2 merge_id with n_units>=1; N36 sparse-id regression."
+        "v2 merge_id with n_units>=1; sparse-unit_id regression."
     )
     # file_unit_ids is a list of dicts; each carries the v2 merge_id
     # + unit_id from the NWB index (not a positional range).
@@ -5234,13 +5233,11 @@ def test_shared_artifact_group_populate_end_to_end(
     """End-to-end shared-group populate writes one IntervalList per
     member ``nwb_file_name``.
 
-    Phase 1d code-review finding #1: the Phase 1 plan requires the
-    cross-recording shared-artifact path to be implemented; this
-    test pins the contract. With a single-recording smoke fixture
-    the shared group has one member, so ``per_member_nwb_files``
-    has length 1 and one IntervalList row is written. The same
-    code path scales to N members on a multi-recording session
-    (out of scope for the smoke fixture).
+    Cross-recording shared-artifact path contract. With a single-
+    recording smoke fixture the shared group has one member, so
+    ``per_member_nwb_files`` has length 1 and one IntervalList row
+    is written. The same code path scales to N members on a
+    multi-recording session (out of scope for the smoke fixture).
     """
     from spyglass.common.common_interval import IntervalList
     from spyglass.spikesorting.v2.artifact import (
@@ -5329,10 +5326,10 @@ def test_shared_artifact_group_populate_end_to_end(
 
 
 # =========================================================================
-# Phase 1 plan-required real-data correctness gates (scaffolded; skip when
-# fixtures absent). These activate when the user generates the fixture or
-# sets the gating env var; the scaffolding documents the contract and
-# guarantees the test surface exists for future CI gating.
+# Real-data correctness gates (scaffolded; skip when fixtures absent).
+# These activate when the user generates the fixture or sets the gating
+# env var; the scaffolding documents the contract and guarantees the test
+# surface exists for future CI gating.
 # =========================================================================
 
 

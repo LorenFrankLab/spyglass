@@ -12,10 +12,10 @@ import pytest
 def test_preprocessing_params_schema_default():
     """The preprocessing schema has the expected default shape and guards.
 
-    Phase 1b raised ``schema_version`` to 2 (R7 + R18): added
+    ``schema_version`` is 2 (the v2 shipping schema): added
     ``min_segment_length`` and removed the dead
     ``common_reference.reference`` field. Defaults below reflect
-    the v2 schema as shipped.
+    the schema as shipped.
     """
     import pydantic
 

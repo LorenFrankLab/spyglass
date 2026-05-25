@@ -67,13 +67,13 @@ def test_preprocessing_whiten_disabled_dumps_empty_post_motion():
 def test_artifact_default_keeps_v1_field_names():
     """Defaults match v1 field names plus the v2 additions.
 
-    Phase 1b B1 default values:
+    Shipping v2 default values:
     * ``amplitude_thresh_uV == 500.0`` -- v2's bug-fix value
       (matches v1's effective Intan-probe behavior; v1's
       nominal 3000 was a unit-conversion bug, see the
       CHANGELOG entry).
     * ``proportion_above_thresh == 1.0`` -- v1 parity revert
-      from Phase 1's silently-changed 0.5.
+      from an earlier silently-changed 0.5.
     """
     blob = ArtifactDetectionParamsSchema().model_dump()
     assert blob["detect"] is True
@@ -235,25 +235,26 @@ def test_ks4_defaults_match_appendix():
 
 
 def test_clusterless_default_matches_v1():
-    """Clusterless-thresholder defaults mirror v1's row (post-N48).
+    """Clusterless-thresholder defaults mirror v1's row.
 
-    Phase 1b N48 dropped ``outputs`` and ``random_chunk_kwargs`` from
-    ``ClusterlessThresholderSchema`` (both stripped at runtime in
-    ``Sorting._run_sorter``); ``noise_levels`` is kept because N19
-    (Batch 7) restores its semantics. The blob shape now reflects
-    v1's runtime-relevant fields only.
+    ``ClusterlessThresholderSchema`` drops ``outputs`` and
+    ``random_chunk_kwargs`` (both stripped at runtime in
+    ``Sorting._run_sorter``); ``noise_levels`` is kept because v1's
+    semantics depend on it. The blob shape now reflects v1's
+    runtime-relevant fields only.
     """
     blob = ClusterlessThresholderSchema().model_dump()
     assert blob["detect_threshold"] == 100.0
     assert blob["method"] == "locally_exclusive"
     assert blob["peak_sign"] == "neg"
-    # N48 regression guard: the dropped fields must not appear in the
+    # Regression guard: the dropped fields must not appear in the
     # validated blob. Re-adding them to the schema without
-    # justification would silently break the N19 / runtime-strip
+    # justification would silently break the runtime-strip
     # invariants.
     assert "outputs" not in blob
     assert "random_chunk_kwargs" not in blob
-    # ``noise_levels`` stays because N19 forwards it to detect_peaks.
+    # ``noise_levels`` stays because the runtime forwards it to
+    # detect_peaks.
     assert blob["noise_levels"] == [1.0]
 
 
@@ -283,7 +284,7 @@ def test_dedicated_sorter_schemas_reject_typos(schema_cls, typo_field):
     This is the value-add over the generic ``extra='allow'`` fallback:
     typos like ``detect_signe`` (extra 'e') silently pass on the generic
     schema but raise on MS4/MS5/Clusterless. SC2, TDC2 and Kilosort4
-    use ``extra='allow'`` (KS4 by N34 design, to mirror v1's escape
+    use ``extra='allow'`` (KS4 by design, to mirror v1's escape
     hatch at ``v1/sorting.py:184-189`` that lets users pass any
     SI-recognized kwarg through without an upstream schema PR), so
     their typos still pass here -- documented in the module docstring.
@@ -293,7 +294,7 @@ def test_dedicated_sorter_schemas_reject_typos(schema_cls, typo_field):
 
 
 def test_kilosort4_schema_accepts_extra_kwargs():
-    """KS4 schema accepts undocumented SI kwargs (N34).
+    """KS4 schema accepts undocumented SI kwargs.
 
     Mirrors v1's escape hatch: a user wanting to set ``batch_size``
     or ``nearest_chans`` on KS4 should not need a Spyglass PR to

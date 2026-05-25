@@ -2,7 +2,7 @@
 
 Runs the v1 pipeline -- recording materialization, artifact detection,
 ``clusterless_thresholder`` sort, ``CurationV1`` -- against a real NWB file and
-writes small artifacts that Phase 1 parity tests will compare the modern (v2)
+writes small artifacts that v1 ↔ v2 parity tests will compare the modern (v2)
 pipeline output against.
 
 Must be invoked under the **v1 (SpikeInterface 0.99) runtime environment**, not

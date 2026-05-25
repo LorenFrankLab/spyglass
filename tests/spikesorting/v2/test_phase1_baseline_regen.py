@@ -1,4 +1,5 @@
-"""Regenerate the Phase 1 baseline bundle for v2 spike-sorting regression tests.
+"""Regenerate the pre-refactor baseline bundle for v2 spike-sorting
+regression tests.
 
 This test exists so the baseline bundle can be regenerated via a single
 pytest invocation, but the test itself is intentionally not part of the
@@ -8,9 +9,10 @@ small bundle to ``tests/spikesorting/v2/_fixtures/phase1_baseline/``.
 
 Workflow
 --------
-This test must be run on **unmodified Phase 1 code**, before any Phase 1b
-refactor edit lands. The artifacts it writes are the "what Phase 1
-produced" reference that the Phase 1b validation slice compares against.
+This test must be run on **unmodified pre-refactor code**, before any
+v2 refactor edit lands. The artifacts it writes are the "what the
+pre-refactor code produced" reference that the validation slice
+compares against.
 
 Workflow:
 
@@ -71,7 +73,7 @@ def test_regenerate_phase1_baseline(dj_conn):
     LabTeam.insert1(
         {
             "team_name": "v2_baseline_team",
-            "team_description": "v2 Phase 1 baseline capture",
+            "team_description": "v2 pre-refactor baseline capture",
         },
         skip_duplicates=True,
     )
@@ -90,13 +92,14 @@ def test_regenerate_phase1_baseline(dj_conn):
         "sorter_params_name": "default",
     }
     original_default = (SorterParameters & default_key).fetch1()
-    # NOTE: the Phase 1 baseline was originally captured with
-    # ``outputs="sorting"`` and ``params_schema_version=1``. Phase 1b
-    # N48 dropped that field from ``ClusterlessThresholderSchema``
-    # (now schema_version 2). The regen workflow recommends running
-    # this on Phase 1 tip code BEFORE the refactor lands -- if you
-    # are regenerating against a fresh checkout that already includes
-    # the N48 schema edit, drop the ``outputs`` key and bump
+    # NOTE: the pre-refactor baseline was originally captured with
+    # ``outputs="sorting"`` and ``params_schema_version=1``. The v2
+    # tri-part refactor dropped that field from
+    # ``ClusterlessThresholderSchema`` (now schema_version 2). The
+    # regen workflow recommends running this on pre-refactor tip
+    # code BEFORE the refactor lands -- if you are regenerating
+    # against a fresh checkout that already includes the schema
+    # edit, drop the ``outputs`` key and bump
     # ``params_schema_version`` to 2 (already done below). The
     # runtime strip path tolerates either shape, so the sort output
     # is unchanged.
