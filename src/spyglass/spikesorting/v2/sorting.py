@@ -1161,6 +1161,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         import tempfile
 
         import numpy as _np
+        import spikeinterface as _si
         import spikeinterface.sorters as sis
 
         from spyglass.settings import temp_dir as _spyglass_temp_dir
@@ -1172,18 +1173,36 @@ class Sorting(SpyglassMixin, dj.Computed):
         try:
             os.chmod(sorter_temp_dir.name, 0o777)
 
+            # spikeextractors 0.9.11 (a transitive dep of SI's MS4
+            # wrapper at ``spikeinterface/sorters/external/mountainsort4.py``)
+            # references the removed ``numpy.Inf`` alias at
+            # ``spikeextractors/extraction_tools.py:766``; that crashes
+            # under numpy >= 2.0. Restore the alias for the duration
+            # of this call -- assignment is benign (``np.inf`` is what
+            # ``np.Inf`` always meant) and survives subsequent calls.
+            if sorter.lower() == "mountainsort4" and not hasattr(_np, "Inf"):
+                _np.Inf = _np.inf
+
             if sorter_params.get("whiten", False):
                 import spikeinterface.preprocessing as sip
 
                 recording = sip.whiten(recording, dtype=_np.float64)
                 sorter_params = {**sorter_params, "whiten": False}
 
-            # Resolved job_kwargs (n_jobs, chunk_duration, etc.) flow
-            # into ``sis.run_sorter`` via the ``**`` catch-all; SI
-            # splits them into per-sorter and control args
-            # internally. ``sorter_params`` already merged any
-            # per-row job_kwargs upstream.
-            sj_kwargs = job_kwargs or {}
+            # Resolved job_kwargs (n_jobs, chunk_duration, progress_bar,
+            # etc.) install via ``si.set_global_job_kwargs`` and are
+            # picked up by ``run_sorter`` through SI's global state.
+            # They MUST NOT be splatted into ``run_sorter(**...)``: SI
+            # 0.104's ``run_sorter`` signature has ``**sorter_params``
+            # as the only catch-all, so any extra kwargs flow straight
+            # into the sorter and trip strict per-sorter validators
+            # (MS4, MS5, KS4 all raise ``Invalid parameters: [...]``
+            # for pool_engine / n_jobs / chunk_duration / progress_bar
+            # / mp_context / max_threads_per_worker).
+            sj_kwargs = dict(job_kwargs or {})
+            previous_global = dict(_si.get_global_job_kwargs())
+            if sj_kwargs:
+                _si.set_global_job_kwargs(**sj_kwargs)
             run_kwargs = dict(
                 sorter_name=sorter,
                 recording=recording,
@@ -1199,9 +1218,11 @@ class Sorting(SpyglassMixin, dj.Computed):
                 }
             else:
                 effective_params = sorter_params
-            return sis.run_sorter(
-                **run_kwargs, **effective_params, **sj_kwargs
-            )
+            try:
+                return sis.run_sorter(**run_kwargs, **effective_params)
+            finally:
+                if sj_kwargs:
+                    _si.set_global_job_kwargs(**previous_global)
         finally:
             # ``TemporaryDirectory`` auto-cleans on garbage collection,
             # but the explicit ``.cleanup()`` in a ``finally`` makes
