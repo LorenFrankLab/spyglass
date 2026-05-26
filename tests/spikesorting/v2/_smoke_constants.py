@@ -42,6 +42,50 @@ SMOKE_CLUSTERLESS_PARAMS: dict = {
     "local_radius_um": 100.0,
 }
 
+#: Name of the polymer-60s MountainSort4 ``SpikeSorterParameters`` row.
+#: Owned end-to-end by the parity tests on both pipelines (NOT derived
+#: from v1's ``franklab_tetrode_hippocampus_30KHz`` /
+#: ``franklab_probe_ctx_30KHz`` shipping rows, which are tetrode-tuned;
+#: the polymer probe has 32 channels per shank with a different
+#: geometry). v2 capture-side test pre-inserts the same row into v2's
+#: ``SorterParameters`` so the canonical_sorter_params fingerprint
+#: matches on both sides.
+MS4_60S_POLYMER_PARAM_NAME = "ms4_60s_polymer"
+
+#: Polymer-probe 60s MountainSort4 params, tuned for v2's preproc
+#: (300-6000 Hz bandpass + median CAR -- ``filter=False`` so MS4 does
+#: not double-filter). ``clip_size=50`` (≈1.5ms at 32 kHz) is slightly
+#: larger than the v1 ``mountain_default`` of 40 (better captures the
+#: full polymer-spike waveform). All other fields match v1's
+#: ``franklab_probe_ctx_30KHz`` (``mountain_default + freq_min=300``).
+#: Must also be insertable into v2's ``SorterParameters`` (validated
+#: by ``MountainSort4Schema`` -- ``extra="forbid"``), so no SI-only
+#: keys like ``tempdir`` are stored here.
+MS4_60S_POLYMER_PARAMS: dict = {
+    "detect_sign": -1,
+    "adjacency_radius": 100.0,
+    "freq_min": 300.0,
+    "freq_max": 6000.0,
+    "filter": False,
+    "whiten": True,
+    "num_workers": 1,
+    "clip_size": 50,
+    "detect_threshold": 3.0,
+    "detect_interval": 10,
+}
+
+#: Initial broad MS4 parity bands (n_units ± 50%, median FR ± 30%).
+#: MS4 is stochastic (no seed control) AND its SI wrapper rewrote
+#: between 0.99 → 0.104 (the C++ MS4 1.0.7 binary itself is byte-
+#: identical across envs; differences come from SI-side wrapping).
+#: Phase B11 calibration tightens this after measuring within-version
+#: variance via the B10 repeat-run protocol.
+MS4_BROAD_TRIAGE: dict = {
+    "n_units_rel_band": 0.50,
+    "n_units_abs_band": 2,
+    "median_fr_rel_band": 0.30,
+}
+
 #: v1 -> v2 ``preproc_param_name`` translation for shipped default
 #: rows. v1's ``"default"`` is the bandpass + common_reference
 #: configuration; v2 ships the same semantics under the explicit name

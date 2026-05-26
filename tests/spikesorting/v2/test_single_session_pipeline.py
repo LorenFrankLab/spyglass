@@ -6188,3 +6188,372 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
 
     if failures:
         pytest.fail("v1↔v2 spike-time divergence:\n  " + "\n  ".join(failures))
+
+
+_MS4_PARITY_CASES = [
+    ("mearec_polymer_128ch_60s", sg) for sg in (0, 1, 2, 3)
+]
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "fixture_stem,sort_group_id",
+    _MS4_PARITY_CASES,
+    ids=[f"{stem}-shank{sg}" for stem, sg in _MS4_PARITY_CASES],
+)
+def test_v2_real_data_v1_parity_mountainsort4(
+    fixture_stem, sort_group_id, dj_conn
+):
+    """v1 ↔ v2 MountainSort4 parity on the polymer 60s fixture.
+
+    MS4 is stochastic (no seed control -- ``MountainSort4Sorter.default_params()``
+    has no ``seed`` field in either SI 0.99.1 or 0.104.3, confirmed
+    empirically). The C++ MS4 1.0.7 binary is byte-identical across
+    envs; any v1↔v2 divergence comes from SI's wrapping (preproc,
+    chunking, parameter forwarding) layered on top.
+
+    Contract: aggregate bands (NOT per-spike, unlike clusterless),
+    initial broad triage from
+    :data:`tests.spikesorting.v2._smoke_constants.MS4_BROAD_TRIAGE`:
+
+    * ``|v2_n_units - v1_n_units| ≤ max(50% of v1_n_units, 2)``
+    * ``|v2_median_fr - v1_median_fr| / v1_median_fr ≤ 30%`` (rel)
+
+    Phase B11 calibration tightens these bands once we measure the
+    within-version repeat-run drift (the B10 protocol).
+
+    Env vars / SKIP semantics: same as :func:`test_v2_real_data_v1_parity`
+    plus a SKIP-env-unavailable when MS4 is not installed in v2's
+    sorter set (overridable to FAIL via
+    ``SPIKESORTING_V2_REQUIRE_MS4=1``).
+    """
+    import json as _json
+    import os
+    import pickle
+    from pathlib import Path as _Path
+
+    import numpy as np
+
+    from tests.spikesorting.v2._smoke_constants import (
+        EXPECTED_DEGENERATE_CASES,
+        MS4_60S_POLYMER_PARAM_NAME,
+        MS4_60S_POLYMER_PARAMS,
+        MS4_BROAD_TRIAGE,
+    )
+
+    # MS4 install gate (v2 side; v1 install is checked at capture time).
+    import spikeinterface.sorters as _ss
+    if "mountainsort4" not in _ss.installed_sorters():
+        msg = (
+            "mountainsort4 not in spikeinterface.sorters.installed_sorters(); "
+            "skipping. Set SPIKESORTING_V2_REQUIRE_MS4=1 to make this a "
+            "hard fail."
+        )
+        if os.environ.get("SPIKESORTING_V2_REQUIRE_MS4") == "1":
+            pytest.fail(msg)
+        pytest.skip(msg)
+
+    fixture_path = (
+        _Path(__file__).parent / "fixtures" / f"{fixture_stem}.nwb"
+    )
+    if not fixture_path.exists():
+        pytest.skip(
+            f"NWB fixture {fixture_path} missing; generate via "
+            "tests/spikesorting/v2/fixtures/generate_mearec.py first."
+        )
+
+    sorter_label = "ms4"
+    baseline_root_env = os.environ.get("SPIKESORTING_V2_BASELINE_ROOT")
+    if baseline_root_env:
+        baseline_dir = (
+            _Path(baseline_root_env)
+            / fixture_stem
+            / sorter_label
+            / f"shank{sort_group_id}"
+        )
+    else:
+        pytest.skip(
+            "SPIKESORTING_V2_BASELINE_ROOT unset -- set it to a "
+            "directory tree of `<root>/<fixture_stem>/ms4/shank<N>/"
+            "{baseline_v1_spike_times.pkl,baseline_v1_recording_meta.json}` "
+            "to enable the v1↔v2 MS4 matrix verification. Captures are "
+            "produced by tests/spikesorting/v2/scripts/capture_polymer_ms4.sh."
+        )
+
+    triple = (fixture_stem, "mountainsort4", sort_group_id)
+    if triple in EXPECTED_DEGENERATE_CASES:
+        pytest.skip(
+            f"SKIP-expected-degenerate: {EXPECTED_DEGENERATE_CASES[triple]}"
+        )
+
+    spikes_pkl = baseline_dir / "baseline_v1_spike_times.pkl"
+    meta_json = baseline_dir / "baseline_v1_recording_meta.json"
+    if not (spikes_pkl.exists() and meta_json.exists()):
+        msg = (
+            f"v1 MS4 baseline artifacts not found at {baseline_dir}/. "
+            "Generate via `tests/spikesorting/v2/scripts/"
+            "capture_polymer_ms4.sh` under the v1 conda env."
+        )
+        if baseline_root_env:
+            pytest.fail(msg)
+        pytest.skip(msg)
+
+    with open(spikes_pkl, "rb") as fh:
+        v1_spike_times = pickle.load(fh)
+    meta = _json.loads(meta_json.read_text())
+
+    if meta.get("sorter") != "mountainsort4":
+        pytest.skip(
+            f"v1 baseline at {baseline_dir} was captured for "
+            f"sorter={meta.get('sorter')!r}; MS4 parity test refuses "
+            "to apply MS4-band contract against a non-MS4 baseline."
+        )
+
+    # Set up v2 pipeline -- mirrors the clusterless test until the
+    # SorterParameters insert and the comparator.
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactDetectionParameters,
+        ArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        Sorting,
+        SortingSelection,
+    )
+
+    nwb_file_name = copy_and_insert_nwb(fixture_path)
+    PreprocessingParameters.insert_default()
+    ArtifactDetectionParameters.insert_default()
+    SorterParameters.insert_default()
+
+    # v2-side insert of the polymer-60s MS4 row. Owned end-to-end by
+    # this test pair (parity_canonical also strips schema_version, so
+    # the canonical fingerprint matches v1's row even though v2's
+    # Pydantic schema stamps it).
+    sorter_params_name = MS4_60S_POLYMER_PARAM_NAME
+    (
+        SorterParameters
+        & {"sorter": "mountainsort4", "sorter_params_name": sorter_params_name}
+    ).delete(safemode=False)
+    SorterParameters().insert1(
+        {
+            "sorter": "mountainsort4",
+            "sorter_params_name": sorter_params_name,
+            "params": dict(MS4_60S_POLYMER_PARAMS),
+            "params_schema_version": 1,
+            "job_kwargs": None,
+        },
+        skip_duplicates=False,
+    )
+
+    LabTeam.insert1(
+        {"team_name": meta["team_name"], "team_description": "v1 MS4 parity"},
+        skip_duplicates=True,
+    )
+    if not (
+        SortGroupV2
+        & {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": int(meta["sort_group_id"]),
+        }
+    ):
+        SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+
+    from tests.spikesorting.v2._smoke_constants import (
+        v2_preproc_name_for_v1,
+    )
+    preproc_name_v2 = v2_preproc_name_for_v1(
+        meta.get("preproc_param_name", "default")
+    )
+    rec_pk = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": int(meta["sort_group_id"]),
+            "interval_list_name": meta["interval_list_name"],
+            "preproc_params_name": preproc_name_v2,
+            "team_name": meta["team_name"],
+        }
+    )
+    Recording.populate(rec_pk, reserve_jobs=False)
+
+    artifact_name_meta = meta.get("artifact_param_name", "default")
+    art_pk = ArtifactSelection.insert_selection(
+        {
+            "recording_id": rec_pk["recording_id"],
+            "artifact_params_name": artifact_name_meta,
+        }
+    )
+    ArtifactDetection.populate(art_pk, reserve_jobs=False)
+
+    # --- v1↔v2 invariant fingerprint check (same shape as clusterless) ---
+    import hashlib as _hashlib
+
+    from spyglass.common import Electrode, IntervalList
+    from spyglass.spikesorting.v2.utils import (
+        artifact_interval_list_name,
+    )
+    from tests.spikesorting.v2._parity_canonical import (
+        _normalize,
+        assert_canonical_dict_equal,
+        canonical_artifact,
+        canonical_preproc,
+        canonical_sorter,
+    )
+
+    _fingerprint_fields = (
+        "nwb_sha256",
+        "sort_group_electrode_ids",
+        "bad_channel_by_electrode_id",
+        "canonical_preproc_params",
+        "canonical_artifact_params",
+        "artifact_valid_times",
+        "canonical_sorter_params",
+    )
+    missing_fp = sorted(set(_fingerprint_fields) - set(meta))
+    if missing_fp:
+        pytest.skip(
+            f"v1 MS4 baseline meta at {meta_json} lacks fingerprint "
+            f"field(s) {missing_fp}; baseline was captured before the "
+            "invariant-fingerprint schema landed."
+        )
+
+    v2_valid_times_raw = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": artifact_interval_list_name(
+                art_pk["artifact_id"]
+            ),
+        }
+    ).fetch1("valid_times")
+    v2_valid_times = np.round(
+        np.ascontiguousarray(v2_valid_times_raw, dtype="<f8").reshape(-1, 2),
+        decimals=3,
+    )
+    v2_fingerprints = {
+        "nwb_sha256": _hashlib.sha256(fixture_path.read_bytes()).hexdigest(),
+        "sort_group_electrode_ids": sorted(
+            int(eid)
+            for eid in (
+                SortGroupV2.SortGroupElectrode
+                & {
+                    "nwb_file_name": nwb_file_name,
+                    "sort_group_id": int(meta["sort_group_id"]),
+                }
+            ).fetch("electrode_id")
+        ),
+        "bad_channel_by_electrode_id": {
+            str(int(row["electrode_id"])): bool(row["bad_channel"] == "True")
+            for row in (
+                Electrode & {"nwb_file_name": nwb_file_name}
+            ).fetch("KEY", "electrode_id", "bad_channel", as_dict=True)
+        },
+        "canonical_preproc_params": canonical_preproc(
+            (
+                PreprocessingParameters
+                & {"preproc_params_name": preproc_name_v2}
+            ).fetch1("params")
+        ),
+        "canonical_artifact_params": canonical_artifact(
+            (
+                ArtifactDetectionParameters
+                & {"artifact_params_name": artifact_name_meta}
+            ).fetch1("params")
+        ),
+        "artifact_valid_times": _normalize(v2_valid_times),
+        "canonical_sorter_params": canonical_sorter(
+            "mountainsort4",
+            (
+                SorterParameters
+                & {
+                    "sorter": "mountainsort4",
+                    "sorter_params_name": sorter_params_name,
+                }
+            ).fetch1("params"),
+        ),
+    }
+    v1_fingerprints = {field: meta[field] for field in _fingerprint_fields}
+    assert_canonical_dict_equal(
+        v1_fingerprints, v2_fingerprints, path="fingerprints"
+    )
+
+    # Now run the MS4 sort and compute aggregate metrics.
+    sort_pk = SortingSelection.insert_selection(
+        {
+            "recording_id": rec_pk["recording_id"],
+            "sorter": "mountainsort4",
+            "sorter_params_name": sorter_params_name,
+            "artifact_id": art_pk["artifact_id"],
+        }
+    )
+    Sorting.populate(sort_pk, reserve_jobs=False)
+    curation_pk = CurationV2.insert_curation(sorting_key=sort_pk, labels={})
+    merge_id = (SpikeSortingOutput.CurationV2 & curation_pk).fetch1("merge_id")
+
+    v2_per_unit = SpikeSortingOutput().get_spike_times({"merge_id": merge_id})
+    v2_spike_times = {
+        i: np.asarray(arr) for i, arr in enumerate(v2_per_unit)
+    }
+    v1_spike_times_arrs = {
+        int(uid): np.asarray(times)
+        for uid, times in v1_spike_times.items()
+    }
+
+    duration_s = float(meta["approx_last_spike_s"])
+    if duration_s <= 0:
+        pytest.fail("v1 baseline approx_last_spike_s <= 0; non-comparable.")
+
+    def _aggregate(spike_dict, dur):
+        n_units = len(spike_dict)
+        if n_units == 0 or dur <= 0:
+            return n_units, 0.0
+        rates = sorted(len(t) / dur for t in spike_dict.values())
+        mid = n_units // 2
+        median_fr = (
+            rates[mid]
+            if n_units % 2 == 1
+            else (rates[mid - 1] + rates[mid]) / 2
+        )
+        return n_units, median_fr
+
+    v1_n, v1_fr = _aggregate(v1_spike_times_arrs, duration_s)
+    v2_n, v2_fr = _aggregate(v2_spike_times, duration_s)
+
+    print(
+        f"\n[parity-ms4] {fixture_stem} shank{sort_group_id}\n"
+        f"  v1: n_units={v1_n}, median_fr={v1_fr:.3f} Hz\n"
+        f"  v2: n_units={v2_n}, median_fr={v2_fr:.3f} Hz"
+    )
+
+    # MS4_BROAD_TRIAGE bands. Phase B11 tightens these post-calibration.
+    n_band = max(
+        v1_n * MS4_BROAD_TRIAGE["n_units_rel_band"],
+        MS4_BROAD_TRIAGE["n_units_abs_band"],
+    )
+    fr_band_abs = abs(v1_fr * MS4_BROAD_TRIAGE["median_fr_rel_band"])
+    failures = []
+    if abs(v2_n - v1_n) > n_band:
+        failures.append(
+            f"n_units divergence: |v2_n({v2_n}) - v1_n({v1_n})|={abs(v2_n - v1_n)} "
+            f"> band={n_band} (rel={MS4_BROAD_TRIAGE['n_units_rel_band']:.0%} "
+            f"abs={MS4_BROAD_TRIAGE['n_units_abs_band']})."
+        )
+    if v1_fr > 0 and abs(v2_fr - v1_fr) > fr_band_abs:
+        failures.append(
+            f"median_fr divergence: |v2_fr({v2_fr:.3f}) - v1_fr({v1_fr:.3f})|"
+            f"={abs(v2_fr - v1_fr):.3f} Hz > rel-band="
+            f"{MS4_BROAD_TRIAGE['median_fr_rel_band']:.0%} ({fr_band_abs:.3f} Hz)."
+        )
+    if failures:
+        pytest.fail("v1↔v2 MS4 aggregate-band divergence:\n  " + "\n  ".join(failures))

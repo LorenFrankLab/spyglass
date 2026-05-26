@@ -176,10 +176,9 @@ def _populate_sorting(
     recording_id: str,
     artifact_id: str,
     sorter_param_name: str = "default_clusterless",
+    sorter: str = "clusterless_thresholder",
 ) -> dict:
-    """Populate ``SpikeSorting`` with ``clusterless_thresholder``.
-
-    Returns the populated sorting PK.
+    """Populate ``SpikeSorting`` and return the populated sorting PK.
 
     Parameters
     ----------
@@ -190,6 +189,11 @@ def _populate_sorting(
         template amplitudes never reach 100 uV (e.g. the MEArec
         smoke fixture), the caller must pre-insert a lower-
         threshold row and pass its name here.
+    sorter : str, optional
+        SI sorter dispatch name. Defaults to
+        ``"clusterless_thresholder"``. ``"mountainsort4"`` requires
+        a pre-inserted ``ms4_60s_polymer`` (or other) row via
+        :func:`_ensure_ms4_param_row`.
     """
     from spyglass.spikesorting.v1 import (
         SpikeSorterParameters,
@@ -202,7 +206,7 @@ def _populate_sorting(
         "nwb_file_name": nwb_file_name,
         "recording_id": recording_id,
         "interval_list_name": str(artifact_id),
-        "sorter": "clusterless_thresholder",
+        "sorter": sorter,
         "sorter_param_name": sorter_param_name,
     }
     SpikeSortingSelection.insert_selection(selection_key)
@@ -433,6 +437,7 @@ def run_baseline_capture(
     output_dir: Path,
     sorter_param_name: str = "default_clusterless",
     artifact_param_name: str = "default",
+    sorter: str = "clusterless_thresholder",
 ) -> tuple[Path, Path]:
     """Run the full v1 pipeline on ``nwb_source`` and write baseline artifacts.
 
@@ -454,6 +459,14 @@ def run_baseline_capture(
         ``"default_clusterless"`` (Frank-lab 100 uV production
         threshold). For synthetic fixtures with smaller template
         amplitudes the caller must pre-insert a lower-threshold row.
+    sorter : str, optional
+        SI sorter name. Defaults to ``"clusterless_thresholder"``;
+        pass ``"mountainsort4"`` to capture an MS4 baseline. The
+        MS4 path additionally enforces the aggregate-validation
+        gate (n_units >= 2 AND median_firing_rate > 0) before
+        writing the baseline -- a one-unit MS4 baseline is
+        inherently degenerate for the
+        ``n_units ± band, median_fr ± band`` parity contract.
 
     Returns
     -------
@@ -478,6 +491,7 @@ def run_baseline_capture(
         recording_id=recording_pk["recording_id"],
         artifact_id=artifact_pk["artifact_id"],
         sorter_param_name=sorter_param_name,
+        sorter=sorter,
     )
     curation_pk = _insert_curation(sorting_pk["sorting_id"])
 
@@ -512,12 +526,43 @@ def run_baseline_capture(
         default=0.0,
     )
 
+    # MS4 aggregate-validation gate. The MS4 parity contract is
+    # ``n_units ± band`` + ``median_firing_rate ± band``; both
+    # metrics are degenerate / undefined when fewer than 2 units
+    # are produced (median over one value is the value itself, no
+    # variance signal). Refuse to write the baseline so the
+    # operator either tunes ``detect_threshold`` or adds the case
+    # to ``EXPECTED_DEGENERATE_CASES`` with evidence.
+    if sorter == "mountainsort4":
+        median_fr = 0.0
+        if spike_times and duration_s > 0:
+            firing_rates = [
+                len(times) / duration_s for times in spike_times.values()
+            ]
+            firing_rates.sort()
+            mid = len(firing_rates) // 2
+            median_fr = (
+                firing_rates[mid]
+                if len(firing_rates) % 2 == 1
+                else (firing_rates[mid - 1] + firing_rates[mid]) / 2
+            )
+        if len(spike_times) < 2 or median_fr <= 0:
+            raise RuntimeError(
+                f"baseline_capture: MS4 produced n_units={len(spike_times)}, "
+                f"median_firing_rate={median_fr:.3f} Hz on "
+                f"{nwb_source.name} sort_group_id={sort_group_id} -- "
+                "below the aggregate-validation gate "
+                "(n_units >= 2 AND median_fr > 0). Re-tune "
+                "detect_threshold for this shank or add the triple to "
+                "_smoke_constants.EXPECTED_DEGENERATE_CASES with evidence."
+            )
+
     fingerprints = _compute_invariant_fingerprints(
         nwb_source=nwb_source,
         nwb_file_name=nwb_file_name,
         sort_group_id=sort_group_id,
         artifact_id=str(artifact_pk["artifact_id"]),
-        sorter="clusterless_thresholder",
+        sorter=sorter,
         sorter_param_name=sorter_param_name,
         preproc_param_name="default",
         artifact_param_name=artifact_param_name,
@@ -536,7 +581,7 @@ def run_baseline_capture(
         "n_units": len(spike_times),
         "sampling_frequency_hz": sampling_frequency,
         "approx_last_spike_s": float(duration_s),
-        "sorter": "clusterless_thresholder",
+        "sorter": sorter,
         "sorter_param_name": sorter_param_name,
         "preproc_param_name": "default",
         "artifact_param_name": artifact_param_name,
@@ -633,6 +678,19 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "fingerprint check on synthetic fixtures with no real artifacts."
         ),
     )
+    parser.add_argument(
+        "--sorter",
+        default="clusterless_thresholder",
+        choices=("clusterless_thresholder", "mountainsort4"),
+        help=(
+            "SI sorter to dispatch. Defaults to "
+            "'clusterless_thresholder'. 'mountainsort4' pre-inserts "
+            "the polymer-60s tuned row "
+            "(_smoke_constants.MS4_60S_POLYMER_PARAM_NAME) before "
+            "sorting and enforces an MS4 aggregate-validation gate "
+            "(n_units >= 2 AND median_firing_rate > 0) on the baseline."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -692,6 +750,40 @@ def _ensure_smoke_sorter_param_row(sorter_param_name: str) -> None:
     )
 
 
+def _ensure_ms4_param_row(sorter_param_name: str) -> None:
+    """Refresh the polymer-60s MountainSort4 ``SpikeSorterParameters`` row.
+
+    The Frank-lab v1 defaults
+    (``franklab_tetrode_hippocampus_30KHz`` / ``franklab_probe_ctx_30KHz``)
+    are tetrode-tuned (4 channels per group, varying freq ranges).
+    The polymer 60s parity matrix sorts on 32-channel polymer shanks at
+    32 kHz, so it owns its own row named ``ms4_60s_polymer``
+    (set in :data:`tests.spikesorting.v2._smoke_constants.MS4_60S_POLYMER_PARAM_NAME`).
+
+    Race-safety: identical to :func:`_ensure_smoke_sorter_param_row`.
+    Only delete when an existing row's payload mismatches; insert with
+    ``skip_duplicates=True`` so a concurrent / earlier capture's row
+    is a no-op, not an error. v1 ``SpikeSorterParameters`` is in a
+    schema that does NOT honor ``dj.config["database.prefix"]``.
+    """
+    from spyglass.spikesorting.v1 import SpikeSorterParameters
+    from tests.spikesorting.v2._smoke_constants import (
+        MS4_60S_POLYMER_PARAMS,
+    )
+
+    key = {
+        "sorter": "mountainsort4",
+        "sorter_param_name": sorter_param_name,
+    }
+    existing = (SpikeSorterParameters & key).fetch("sorter_params", limit=1)
+    if len(existing) > 0 and existing[0] != MS4_60S_POLYMER_PARAMS:
+        (SpikeSorterParameters & key).delete(safemode=False)
+    SpikeSorterParameters().insert1(
+        {**key, "sorter_params": dict(MS4_60S_POLYMER_PARAMS)},
+        skip_duplicates=True,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point: bootstrap the test environment and run the v1 baseline."""
     args = _parse_args(argv)
@@ -722,11 +814,15 @@ def main(argv: list[str] | None = None) -> int:
         allow_production_smoke=allow_production_smoke,
     )
 
-    # Pre-insert a smoke-friendly sorter row if the caller asked for a
-    # name other than the shipped default; the test runner expects
-    # the row to exist before run_baseline_capture references it.
-    if args.sorter_param_name != "default_clusterless":
-        _ensure_smoke_sorter_param_row(args.sorter_param_name)
+    # Pre-insert the sorter-specific row if the caller asked for a
+    # name other than each sorter's shipped default; the test runner
+    # expects the row to exist before run_baseline_capture references it.
+    if args.sorter == "clusterless_thresholder":
+        if args.sorter_param_name != "default_clusterless":
+            _ensure_smoke_sorter_param_row(args.sorter_param_name)
+    elif args.sorter == "mountainsort4":
+        # Owned end-to-end by the parity tests -- no derive-from-default.
+        _ensure_ms4_param_row(args.sorter_param_name)
 
     run_baseline_capture(
         nwb_source=nwb_source,
@@ -736,6 +832,7 @@ def main(argv: list[str] | None = None) -> int:
         output_dir=Path(args.output_dir),
         artifact_param_name=args.artifact_param_name,
         sorter_param_name=args.sorter_param_name,
+        sorter=args.sorter,
     )
     return 0
 
