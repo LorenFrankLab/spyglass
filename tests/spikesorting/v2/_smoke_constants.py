@@ -75,7 +75,31 @@ V1_TO_V2_SORTER_PARAM_NAMES: dict = {
 #: An unlisted case with missing baseline artifacts under an active
 #: ``SPIKESORTING_V2_BASELINE_ROOT`` is a FAIL, not a SKIP, because a
 #: broken tmux capture must not pass silently.
-EXPECTED_DEGENERATE_CASES: dict[tuple[str, str, int], str] = {}
+EXPECTED_DEGENERATE_CASES: dict[tuple[str, str, int], str] = {
+    # smoke shank 3 on mearec_polymer_smoke: v1 baseline writes n_units=1
+    # with exactly ONE spike across the whole 4s recording (approx_last_
+    # spike_s=1.58s); v2's locally_exclusive (PR #4341, ratio-not-raw
+    # amplitude comparison) correctly does NOT promote that single
+    # threshold crossing to a unit. Downstream SI's
+    # ``estimate_templates_with_accumulator`` then raises
+    # ``estimate_templates() need non empty sorting`` because v2's
+    # sorting is empty. Both behaviors are scientifically correct on a
+    # near-silent shank; the parity test cannot meaningfully compare
+    # "1 lone peak" vs "0 units".
+    (
+        "mearec_polymer_smoke",
+        "clusterless_thresholder",
+        3,
+    ): (
+        "smk shank 3: v1 baseline contains 1 lone spike at "
+        "approx_last_spike_s=1.58s on a 4s recording (effectively no "
+        "planted unit reaches this shank); v2's improved "
+        "locally_exclusive (PR #4341) correctly does not promote that "
+        "single threshold crossing to a unit, so downstream "
+        "estimate_templates raises 'need non empty sorting'. Both "
+        "outcomes are correct on a near-silent shank."
+    ),
+}
 
 
 def v2_preproc_name_for_v1(v1_name: str) -> str:
