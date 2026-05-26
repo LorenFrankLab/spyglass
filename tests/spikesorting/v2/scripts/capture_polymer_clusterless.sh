@@ -12,10 +12,17 @@
 # cd's to the v2 checkout's repo root instead. The spyglass-v1-parity
 # env is dev-installed against the same repo and pins SI 0.99, so the
 # v1 imports inside baseline_capture.py still resolve to v1 tables;
-# only the cwd differs from the plan. Database isolation between v1
-# captures and v2 tests is enforced by --database-prefix (per-case
-# `test_<fix>_cl_s<N>` schema name) and --base-dir (per-case temp
-# directory), not by cwd separation.
+# only the cwd differs from the plan.
+#
+# Concurrency note: the plan calls for 8 parallel tmux sessions with
+# per-case --database-prefix isolation. Empirically that does NOT work
+# on this codebase: v1 schemas declare ``dj.schema("spikesorting_v1_*")``
+# with a hardcoded name (NO ``database.prefix`` prepended), so all
+# parallel sessions race on the SAME MySQL schema and the smoke-row
+# delete↔insert + fetch1 chain blow up. The script runs the eight
+# captures sequentially inside ONE long-lived tmux session; total wall
+# time ~14 min (4 × 30 s smoke + 4 × 3 min for 60 s polymer) instead of
+# the plan's ~25-min parallel estimate. Acceptable for Phase A.
 #
 # Usage:
 #     export SPIKESORTING_V2_BASELINE_ROOT=/path/to/baseline/root
@@ -51,32 +58,36 @@ declare -A ABBREV=(
   [mearec_polymer_128ch_60s]=p60
 )
 
+# Build the sequential capture command as a single shell pipeline so it
+# can run inside one long-lived tmux session.
+SESSION="parity-cap-clusterless-matrix"
+SEQUENCE=""
 for FIX in mearec_polymer_smoke mearec_polymer_128ch_60s; do
   ABV=${ABBREV[$FIX]}
   for SHANK in 0 1 2 3; do
-    SESSION="parity-cap-clusterless-${FIX}-shank${SHANK}"
     BASE_DIR="${BASE_ROOT}/${FIX}/clusterless/shank${SHANK}"
     OUT_DIR="${ROOT}/${FIX}/clusterless/shank${SHANK}"
     PREFIX="test_${ABV}_cl_s${SHANK}"
     mkdir -p "$BASE_DIR" "$OUT_DIR"
-    tmux new-session -d -s "$SESSION" "
-      cd '$REPO_ROOT' &&
-      '$V1_PYTHON' \
-        tests/spikesorting/v2/baseline_capture.py \
-        --nwb-file tests/spikesorting/v2/fixtures/${FIX}.nwb \
-        --team-name v2_test_team \
-        --interval-list-name 'raw data valid times' \
-        --sort-group-id $SHANK \
-        --sorter-param-name smoke_clusterless_5uv \
-        --artifact-param-name none \
-        --database-prefix '$PREFIX' \
-        --base-dir '$BASE_DIR' \
-        --output-dir '$OUT_DIR' \
-        2>&1 | tee '$OUT_DIR/capture.log'
-    "
+    SEQUENCE+="echo '=== ${FIX} shank ${SHANK} ===' && "
+    SEQUENCE+="'$V1_PYTHON' tests/spikesorting/v2/baseline_capture.py "
+    SEQUENCE+="--nwb-file tests/spikesorting/v2/fixtures/${FIX}.nwb "
+    SEQUENCE+="--team-name v2_test_team "
+    SEQUENCE+="--interval-list-name 'raw data valid times' "
+    SEQUENCE+="--sort-group-id $SHANK "
+    SEQUENCE+="--sorter-param-name smoke_clusterless_5uv "
+    SEQUENCE+="--artifact-param-name none "
+    SEQUENCE+="--database-prefix '$PREFIX' "
+    SEQUENCE+="--base-dir '$BASE_DIR' "
+    SEQUENCE+="--output-dir '$OUT_DIR' "
+    SEQUENCE+="2>&1 | tee '$OUT_DIR/capture.log'; "
   done
 done
+SEQUENCE+="echo '=== ALL 8 CAPTURES COMPLETE ==='"
 
-echo "Launched 8 tmux clusterless captures."
-echo "Monitor: tmux ls"
-echo "Output: $ROOT/<fixture_stem>/clusterless/shank<N>/"
+tmux new-session -d -s "$SESSION" "cd '$REPO_ROOT' && $SEQUENCE"
+
+echo "Launched serial capture sequence in tmux session: $SESSION"
+echo "Monitor: tmux attach -t $SESSION  (detach: Ctrl-b d)"
+echo "         tail -f $ROOT/<fixture_stem>/clusterless/shank<N>/capture.log"
+echo "Output:  $ROOT/<fixture_stem>/clusterless/shank<N>/"

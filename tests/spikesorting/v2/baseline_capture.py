@@ -623,7 +623,6 @@ def _ensure_smoke_sorter_param_row(sorter_param_name: str) -> None:
         "sorter": "clusterless_thresholder",
         "sorter_param_name": sorter_param_name,
     }
-    (SpikeSorterParameters & key).delete(safemode=False)
     # ``noise_levels`` intentionally omitted so SI 0.99 computes it
     # from the recording itself; passing a Python list fails inside
     # SI's ``detect_peaks`` with ``can't multiply sequence by
@@ -633,9 +632,23 @@ def _ensure_smoke_sorter_param_row(sorter_param_name: str) -> None:
     # here only.
     v1_payload = dict(SMOKE_CLUSTERLESS_PARAMS)
     v1_payload.update({"outputs": "sorting", "random_chunk_kwargs": {}})
+
+    # v1 ``SpikeSorterParameters`` lives in a schema that does NOT honor
+    # ``dj.config["database.prefix"]`` (verified empirically: schema name
+    # remains ``spikesorting_v1_sorting`` regardless of prefix), so
+    # parallel captures share this table. The row name is the same
+    # across all sessions, but the params blob might drift if an
+    # earlier capture wrote a stale schema. Two-step refresh:
+    # (1) if an existing row's payload mismatches, delete it; otherwise
+    # leave it intact so concurrent sessions don't race delete↔insert.
+    # (2) insert with ``skip_duplicates=True`` so a concurrent session
+    # that already inserted the row is a no-op, not an error.
+    existing = (SpikeSorterParameters & key).fetch("sorter_params", limit=1)
+    if len(existing) > 0 and existing[0] != v1_payload:
+        (SpikeSorterParameters & key).delete(safemode=False)
     SpikeSorterParameters().insert1(
         {**key, "sorter_params": v1_payload},
-        skip_duplicates=False,
+        skip_duplicates=True,
     )
 
 
