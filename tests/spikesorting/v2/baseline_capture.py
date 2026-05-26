@@ -314,6 +314,7 @@ def _compute_invariant_fingerprints(
     # Lazy import: ``_parity_canonical`` lives next to this module so the
     # capture script remains self-contained on the v1 worktree after sync.
     from tests.spikesorting.v2._parity_canonical import (
+        _normalize,
         canonical_artifact,
         canonical_preproc,
         canonical_sorter,
@@ -357,8 +358,12 @@ def _compute_invariant_fingerprints(
 
     # v1's ``ArtifactDetection`` writes the artifact-removed times to
     # ``IntervalList`` keyed by ``interval_list_name=str(artifact_id)``
-    # (``src/spyglass/spikesorting/v1/artifact.py:200``). Pin dtype and
-    # include shape so the hash is comparison-stable across writers.
+    # (``src/spyglass/spikesorting/v1/artifact.py:200``). Stored as the
+    # canonical (shape-aware) array rather than a sha256 hash so the
+    # v2-side fingerprint check survives bit-level float drift between
+    # the two pipelines while still catching n-interval or
+    # duration-level divergences. ``assert_canonical_dict_equal``
+    # compares element-wise with ``math.isclose(rel_tol=1e-9)``.
     valid_times_raw = (
         IntervalList
         & {
@@ -367,10 +372,7 @@ def _compute_invariant_fingerprints(
         }
     ).fetch1("valid_times")
     valid_times = np.ascontiguousarray(valid_times_raw, dtype="<f8")
-    artifact_valid_times_hash = hashlib.sha256(
-        valid_times.tobytes()
-        + np.asarray(valid_times.shape, dtype="<i8").tobytes()
-    ).hexdigest()
+    artifact_valid_times = _normalize(valid_times)
 
     canonical_sorter_params = canonical_sorter(
         sorter,
@@ -386,7 +388,7 @@ def _compute_invariant_fingerprints(
         "bad_channel_by_electrode_id": bad_channel_by_electrode_id,
         "canonical_preproc_params": canonical_preproc_params,
         "canonical_artifact_params": canonical_artifact_params,
-        "artifact_valid_times_hash": artifact_valid_times_hash,
+        "artifact_valid_times": artifact_valid_times,
         "canonical_sorter_params": canonical_sorter_params,
     }
 

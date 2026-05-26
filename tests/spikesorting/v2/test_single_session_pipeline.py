@@ -5607,7 +5607,7 @@ _PARITY_FIXTURE_CASES = [
     _PARITY_FIXTURE_CASES,
     ids=[f"{stem}-shank{sg}" for stem, sg in _PARITY_FIXTURE_CASES],
 )
-def test_v2_real_data_v1_parity(fixture_stem, sort_group_id):
+def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
     """v1 ↔ v2 ``clusterless_thresholder`` parity on the polymer matrix.
 
     The deterministic threshold sorter SHOULD detect the same peaks
@@ -5622,7 +5622,7 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id):
     comparison runs, the v2 side reconstructs its own state and
     asserts each fingerprint (``nwb_sha256``, ``sort_group_electrode_ids``,
     ``bad_channel_by_electrode_id``, ``canonical_preproc_params``,
-    ``canonical_artifact_params``, ``artifact_valid_times_hash``,
+    ``canonical_artifact_params``, ``artifact_valid_times``,
     ``canonical_sorter_params``) matches the v1 baseline. A
     fingerprint mismatch FAILs with a path-tagged diff so an
     input-layer skew never gets conflated with an output-layer
@@ -5907,6 +5907,7 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id):
         artifact_interval_list_name,
     )
     from tests.spikesorting.v2._parity_canonical import (
+        _normalize,
         assert_canonical_dict_equal,
         canonical_artifact,
         canonical_preproc,
@@ -5919,7 +5920,7 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id):
         "bad_channel_by_electrode_id",
         "canonical_preproc_params",
         "canonical_artifact_params",
-        "artifact_valid_times_hash",
+        "artifact_valid_times",
         "canonical_sorter_params",
     )
     missing_fp = sorted(set(_fingerprint_fields) - set(meta))
@@ -5970,10 +5971,13 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id):
                 & {"artifact_params_name": artifact_name_meta}
             ).fetch1("params")
         ),
-        "artifact_valid_times_hash": _hashlib.sha256(
-            v2_valid_times.tobytes()
-            + np.asarray(v2_valid_times.shape, dtype="<i8").tobytes()
-        ).hexdigest(),
+        # Stored as the canonical (shape-aware) array rather than a
+        # sha256 hash: bit-level float drift between the v1 (SI 0.99)
+        # and v2 (SI 0.104) ``IntervalList.valid_times`` round-trips
+        # would otherwise FAIL even when the two intervals are
+        # semantically identical. ``assert_canonical_dict_equal``
+        # compares element-wise with ``math.isclose(rel_tol=1e-9)``.
+        "artifact_valid_times": _normalize(v2_valid_times),
         "canonical_sorter_params": canonical_sorter(
             "clusterless_thresholder",
             (
