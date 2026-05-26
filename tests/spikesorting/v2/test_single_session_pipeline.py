@@ -5775,19 +5775,13 @@ def test_v2_real_data_v1_parity():
         # (the historical noise_levels=[1.0] regression injected raw-uV
         # semantics; a delete-then-insert guarantees the row matches
         # the schema version this test was written for).
-        import datajoint as _dj
-
-        existing = SorterParameters & {
-            "sorter": "clusterless_thresholder",
-            "sorter_params_name": sorter_params_name,
-        }
-        if existing:
-            prior_safemode = _dj.config.get("safemode", True)
-            _dj.config["safemode"] = False
-            try:
-                existing.delete()
-            finally:
-                _dj.config["safemode"] = prior_safemode
+        (
+            SorterParameters
+            & {
+                "sorter": "clusterless_thresholder",
+                "sorter_params_name": sorter_params_name,
+            }
+        ).delete(safemode=False)
         SorterParameters().insert1(
             {
                 "sorter": "clusterless_thresholder",
@@ -5946,6 +5940,6 @@ def test_v2_real_data_v1_parity():
             f"unit {uid}: v2 detected {v2_arr.size} spikes vs v1's "
             f"{v1_arr.size}; excess > {extra_spike_ratio:.0%} budget "
             f"(allowed {max_v2}). Likely a sorter-parameter semantic "
-            "mismatch (e.g. ``noise_levels`` semantics) -- see "
-            "investigation in followup #11 commit message."
+            "mismatch (e.g. forwarding ``noise_levels=[1.0]`` so the "
+            "threshold reads in raw uV instead of MAD multiples)."
         )

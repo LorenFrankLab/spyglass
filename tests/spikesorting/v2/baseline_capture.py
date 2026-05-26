@@ -438,8 +438,6 @@ def _ensure_smoke_sorter_param_row(sorter_param_name: str) -> None:
     The v2 parity test does the same delete-then-insert dance for
     the same reason.
     """
-    import datajoint as dj
-
     from spyglass.spikesorting.v1 import SpikeSorterParameters
     from tests.spikesorting.v2._smoke_constants import (
         SMOKE_CLUSTERLESS_PARAMS,
@@ -449,14 +447,7 @@ def _ensure_smoke_sorter_param_row(sorter_param_name: str) -> None:
         "sorter": "clusterless_thresholder",
         "sorter_param_name": sorter_param_name,
     }
-    existing = SpikeSorterParameters & key
-    if existing:
-        prior_safemode = dj.config.get("safemode", True)
-        dj.config["safemode"] = False
-        try:
-            existing.delete()
-        finally:
-            dj.config["safemode"] = prior_safemode
+    (SpikeSorterParameters & key).delete(safemode=False)
     # ``noise_levels`` intentionally omitted so SI 0.99 computes it
     # from the recording itself; passing a Python list fails inside
     # SI's ``detect_peaks`` with ``can't multiply sequence by

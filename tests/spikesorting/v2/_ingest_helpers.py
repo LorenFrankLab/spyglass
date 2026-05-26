@@ -53,16 +53,10 @@ def copy_and_insert_nwb(nwb_source: Path | str) -> str:
         # for the target name (cascades through downstream tables) so
         # ``populate_all_common`` actually runs.
         from spyglass.common.common_nwbfile import Nwbfile
-        import datajoint as dj
 
         target_copy = get_nwb_copy_filename(nwb_source.name)
-        existing = Nwbfile() & {"nwb_file_name": target_copy}
-        if existing:
-            prior_safemode = dj.config.get("safemode", True)
-            dj.config["safemode"] = False
-            try:
-                existing.delete()
-            finally:
-                dj.config["safemode"] = prior_safemode
+        (Nwbfile() & {"nwb_file_name": target_copy}).delete(
+            safemode=False
+        )
     insert_sessions(nwb_source.name, **kwargs)
     return get_nwb_copy_filename(nwb_source.name)

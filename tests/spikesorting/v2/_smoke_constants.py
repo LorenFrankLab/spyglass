@@ -33,7 +33,7 @@ SMOKE_CLUSTERLESS_PARAM_NAME = "smoke_clusterless_5uv"
 #: interpreted as a MAD multiplier (matching the v1 baseline-capture
 #: row); forwarding ``[1.0]`` would silently flip the semantic to raw
 #: microvolts and explode the detection count by ~1,400x on this
-#: fixture (the regression that drove v2 spike-sorting followup #11).
+#: fixture.
 SMOKE_CLUSTERLESS_PARAMS: dict = {
     "detect_threshold": 5.0,
     "method": "locally_exclusive",
