@@ -400,12 +400,12 @@ def polymer_60s_session(dj_conn):
             "(no --smoke) first."
         )
     nwb_file_name = copy_and_insert_nwb(_POLYMER_60S_PATH)
-    from spyglass.spikesorting.imported import ImportedSpikeSorting
-
-    session_key = {"nwb_file_name": nwb_file_name}
-    if not (ImportedSpikeSorting & session_key):
-        ImportedSpikeSorting().insert_from_nwbfile(nwb_file_name)
-    yield session_key
+    # ``ImportedSpikeSorting`` only reads ``nwbfile.units``; planted
+    # ground-truth lives in the sidecar processing module now so
+    # there is nothing for it to ingest from these synthetic
+    # fixtures. The GT-accuracy test below reads the sidecar
+    # directly via ``get_ground_truth_units_table``.
+    yield {"nwb_file_name": nwb_file_name}
 
 
 def _clear_curations(sorting_key):
@@ -2066,8 +2066,9 @@ def test_mountainsort5_ground_truth_polymer_60s(polymer_60s_session):
     Primary correctness gate: per-unit accuracy >= 0.7 for at least
     half of planted units, computed via
     ``spikeinterface.comparison.compare_sorter_to_ground_truth``
-    against the ``ImportedSpikeSorting`` ground truth that
-    ``insert_from_nwbfile`` loaded from the MEArec NWB.
+    against the sidecar ground-truth units table written by
+    ``mearec_to_spyglass_nwb`` and read via
+    ``get_ground_truth_units_table``.
     """
     from spikeinterface.comparison import compare_sorter_to_ground_truth
 
@@ -2158,15 +2159,18 @@ def test_mountainsort5_ground_truth_polymer_60s(polymer_60s_session):
         np.arange(len(aggregated.unit_ids), dtype=np.int64)
     )
 
-    # Ground truth: the planted MEArec units stored in the source
-    # NWB's ``/units`` table. ``ImportedSpikeSorting`` registers the
-    # table but does not expose ``get_sorting`` (the merge-table
-    # dispatch raises NotImplementedError for v0/v1/imported sources),
-    # so we read the NWB directly and build a NumpySorting.
+    # Ground truth: the planted MEArec units stored in the sidecar
+    # ``ProcessingModule("ground_truth")["units"]`` table. We don't
+    # use ``ImportedSpikeSorting`` (its merge-table dispatch raises
+    # NotImplementedError for v0/v1/imported sources); we read the
+    # NWB directly via the sidecar helper and build a NumpySorting.
     import pynwb
     import spikeinterface as si
 
     from spyglass.common.common_nwbfile import Nwbfile
+    from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import (
+        get_ground_truth_units_table,
+    )
 
     raw_nwb_path = Nwbfile().get_abs_path(nwb_file_name)
     with pynwb.NWBHDF5IO(raw_nwb_path, "r", load_namespaces=True) as io:
@@ -2179,10 +2183,15 @@ def test_mountainsort5_ground_truth_polymer_60s(polymer_60s_session):
             fs = float(es.rate)
         else:
             fs = float(1.0 / np.diff(es.timestamps[:2])[0])
+        gt_units_table = get_ground_truth_units_table(gt_nwb)
+        assert gt_units_table is not None, (
+            f"Fixture {nwb_file_name!r} has no sidecar ground-truth "
+            "units; regenerate via generate_mearec.py."
+        )
         gt_units = {}
-        for idx, unit_id in enumerate(gt_nwb.units.id[:]):
+        for idx, unit_id in enumerate(gt_units_table.id[:]):
             gt_units[int(unit_id)] = np.asarray(
-                gt_nwb.units["spike_times"][idx]
+                gt_units_table["spike_times"][idx]
             )
     gt_sorting = si.NumpySorting.from_unit_dict(
         units_dict_list=[
@@ -5357,12 +5366,9 @@ def neuropixels_60s_session(dj_conn):
             "fixture is present."
         )
     nwb_file_name = copy_and_insert_nwb(_NEUROPIXELS_60S_PATH)
-    from spyglass.spikesorting.imported import ImportedSpikeSorting
-
-    session_key = {"nwb_file_name": nwb_file_name}
-    if not (ImportedSpikeSorting & session_key):
-        ImportedSpikeSorting().insert_from_nwbfile(nwb_file_name)
-    yield session_key
+    # Planted GT lives in the sidecar processing module; the
+    # GT-accuracy test reads it via ``get_ground_truth_units_table``.
+    yield {"nwb_file_name": nwb_file_name}
 
 
 @pytest.mark.slow
@@ -5473,6 +5479,10 @@ def test_mountainsort5_ground_truth_neuropixels_60s(neuropixels_60s_session):
         np.arange(len(aggregated.unit_ids), dtype=np.int64)
     )
 
+    from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import (
+        get_ground_truth_units_table,
+    )
+
     raw_nwb_path = Nwbfile().get_abs_path(nwb_file_name)
     with pynwb.NWBHDF5IO(raw_nwb_path, "r", load_namespaces=True) as io:
         gt_nwb = io.read()
@@ -5486,9 +5496,14 @@ def test_mountainsort5_ground_truth_neuropixels_60s(neuropixels_60s_session):
                 f"monotonic (diff={diff_s}); cannot derive fs."
             )
             fs = 1.0 / diff_s
+        gt_units_table = get_ground_truth_units_table(gt_nwb)
+        assert gt_units_table is not None, (
+            f"Fixture {nwb_file_name!r} has no sidecar ground-truth "
+            "units; regenerate via generate_mearec.py."
+        )
         gt_units = {
-            int(uid): np.asarray(gt_nwb.units["spike_times"][idx])
-            for idx, uid in enumerate(gt_nwb.units.id[:])
+            int(uid): np.asarray(gt_units_table["spike_times"][idx])
+            for idx, uid in enumerate(gt_units_table.id[:])
         }
     gt_sorting = si.NumpySorting.from_unit_dict(
         units_dict_list=[
@@ -5581,21 +5596,36 @@ def test_mountainsort5_ground_truth_neuropixels_60s(neuropixels_60s_session):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_v2_real_data_v1_parity():
-    """v1 ↔ v2 parity on real (not MEArec) NWB; env-var gated.
+    """v1 ↔ v2 parity on real (or MEArec smoke) NWB; env-var gated.
 
     Real-data sanity check on the ``clusterless_thresholder``
-    slice (the sorter Frank-lab v1 baseline-capture writes via
-    ``baseline_capture.py``). The contract for
-    clusterless_thresholder is "±1 sample on detected peak
-    indices" -- a deterministic threshold sorter SHOULD detect the
-    same peaks under SI 0.104 as it did under SI 0.99. The test
-    enforces a 1.5-sample threshold (1 sample of contract + 0.5
-    sample of floating-point fence-post slack between SI 0.99
-    and 0.104 timestamp construction). The mountainsort /
-    kilosort tolerance bands (±50% unit count, ±30% median
-    firing rate) only apply when the lab user has produced
-    baseline pickles for those sorters; the baseline_capture
-    CLI currently only writes the clusterless slice.
+    slice (the sorter ``baseline_capture.py`` writes). The
+    nominal contract for clusterless_thresholder is "±1 sample
+    on detected peak indices" -- a deterministic threshold
+    sorter SHOULD detect the same peaks under SI 0.104 as it
+    did under SI 0.99. The test enforces a 1.5-sample threshold
+    (1 sample of contract + 0.5 sample of floating-point
+    fence-post slack between SI 0.99 and 0.104 timestamp
+    construction). The mountainsort / kilosort tolerance bands
+    (±50% unit count, ±30% median firing rate) only apply when
+    the lab user has produced baseline pickles for those
+    sorters; the baseline_capture CLI currently only writes the
+    clusterless slice.
+
+    Known limitation: on the MEArec smoke fixture, the
+    SI 0.99 vs 0.104 implementations of
+    ``spikeinterface.sortingcomponents.peak_detection.detect_peaks``
+    produce VASTLY different spike counts at the same nominal
+    ``detect_threshold`` (~1,400x divergence observed locally
+    with detect_threshold=5.0). The ±1.5-sample tolerance is
+    designed for production lab NWBs where v1 and v2 use the
+    same underlying SI-internal noise estimate; the smoke
+    fixture's tiny ~4-second window produces unstable noise
+    estimates that diverge across SI versions. Activate this
+    test against real lab NWBs (where v1 baselines were
+    captured pre-refactor) for a meaningful parity signal;
+    the smoke fixture is useful only as an end-to-end plumbing
+    check (it WILL fail the spike-count assertion).
 
     Env vars:
       ``SPIKESORTING_V2_REAL_NWB_PATH`` -> path to the lab NWB.
@@ -5719,6 +5749,45 @@ def test_v2_real_data_v1_parity():
     PreprocessingParameters.insert_default()
     ArtifactDetectionParameters.insert_default()
     SorterParameters.insert_default()
+    # Mirror baseline_capture's smoke-row insertion: if the v1
+    # baseline used a non-default clusterless threshold (e.g.
+    # ``smoke_clusterless_5uv`` for the MEArec smoke fixture),
+    # pre-insert the corresponding row in v2 so the FK check in
+    # ``SortingSelection.insert_selection`` resolves. Without
+    # this guard the test fails opaquely with a missing-row
+    # ValueError instead of producing the spike-count signal the
+    # parity comparison is supposed to expose.
+    sorter_params_name = meta.get(
+        "sorter_param_name", "default_clusterless"
+    )
+    if sorter_params_name != "default_clusterless" and not (
+        SorterParameters
+        & {
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": sorter_params_name,
+        }
+    ):
+        SorterParameters().insert1(
+            {
+                "sorter": "clusterless_thresholder",
+                "sorter_params_name": sorter_params_name,
+                # 5 uV threshold mirrors baseline_capture's
+                # smoke row. Other custom names would need
+                # their own params; the parity test is
+                # explicitly only wired for the smoke 5 uV
+                # variant + the production default.
+                "params": {
+                    "detect_threshold": 5.0,
+                    "method": "locally_exclusive",
+                    "peak_sign": "neg",
+                    "exclude_sweep_ms": 0.1,
+                    "local_radius_um": 100.0,
+                },
+                "params_schema_version": 2,
+                "job_kwargs": None,
+            },
+            skip_duplicates=True,
+        )
     LabTeam.insert1(
         {"team_name": meta["team_name"], "team_description": "v1 parity"},
         skip_duplicates=True,
@@ -5777,9 +5846,7 @@ def test_v2_real_data_v1_parity():
         {
             "recording_id": rec_pk["recording_id"],
             "sorter": "clusterless_thresholder",
-            "sorter_params_name": meta.get(
-                "sorter_param_name", "default_clusterless"
-            ),
+            "sorter_params_name": sorter_params_name,
             "artifact_id": art_pk["artifact_id"],
         }
     )

@@ -58,16 +58,16 @@ def test_regenerate_phase1_baseline(dj_conn):
         )
 
     from spyglass.common.common_lab import LabTeam
-    from spyglass.spikesorting.imported import ImportedSpikeSorting
     from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2.recording import SortGroupV2
     from spyglass.spikesorting.v2.sorting import SorterParameters
 
     # The polymer 60s fixture is large; copy_and_insert_nwb is idempotent.
+    # Ground-truth units live in the sidecar processing module --
+    # ``ImportedSpikeSorting`` only reads ``nwbfile.units`` and is
+    # not needed here.
     nwb_file_name = copy_and_insert_nwb(_POLYMER_60S_PATH)
     session_key = {"nwb_file_name": nwb_file_name}
-    if not (ImportedSpikeSorting & session_key):
-        ImportedSpikeSorting().insert_from_nwbfile(nwb_file_name)
 
     initialize_v2_defaults()
     LabTeam.insert1(

@@ -141,10 +141,21 @@ def _populate_sorting(
     nwb_file_name: str,
     recording_id: str,
     artifact_id: str,
+    sorter_param_name: str = "default_clusterless",
 ) -> dict:
     """Populate ``SpikeSorting`` with ``clusterless_thresholder``.
 
     Returns the populated sorting PK.
+
+    Parameters
+    ----------
+    sorter_param_name : str, optional
+        Name of an existing ``SpikeSorterParameters`` row to use.
+        Defaults to ``"default_clusterless"`` (100 uV threshold, the
+        Frank-lab production value). For synthetic fixtures whose
+        template amplitudes never reach 100 uV (e.g. the MEArec
+        smoke fixture), the caller must pre-insert a lower-
+        threshold row and pass its name here.
     """
     from spyglass.spikesorting.v1 import (
         SpikeSorterParameters,
@@ -158,7 +169,7 @@ def _populate_sorting(
         "recording_id": recording_id,
         "interval_list_name": str(artifact_id),
         "sorter": "clusterless_thresholder",
-        "sorter_param_name": "default_clusterless",
+        "sorter_param_name": sorter_param_name,
     }
     SpikeSortingSelection.insert_selection(selection_key)
     sort_pk = (SpikeSortingSelection & selection_key).proj().fetch1("KEY")
@@ -234,6 +245,7 @@ def run_baseline_capture(
     interval_list_name: str,
     team_name: str,
     output_dir: Path,
+    sorter_param_name: str = "default_clusterless",
 ) -> tuple[Path, Path]:
     """Run the full v1 pipeline on ``nwb_source`` and write baseline artifacts.
 
@@ -250,6 +262,11 @@ def run_baseline_capture(
         Lab team name; must exist in ``LabTeam`` before invocation.
     output_dir : pathlib.Path
         Destination for the small committed baseline artifacts.
+    sorter_param_name : str, optional
+        Name of an existing ``SpikeSorterParameters`` row. Defaults to
+        ``"default_clusterless"`` (Frank-lab 100 uV production
+        threshold). For synthetic fixtures with smaller template
+        amplitudes the caller must pre-insert a lower-threshold row.
 
     Returns
     -------
@@ -269,6 +286,7 @@ def run_baseline_capture(
         nwb_file_name=nwb_file_name,
         recording_id=recording_pk["recording_id"],
         artifact_id=artifact_pk["artifact_id"],
+        sorter_param_name=sorter_param_name,
     )
     curation_pk = _insert_curation(sorting_pk["sorting_id"])
 
@@ -292,7 +310,7 @@ def run_baseline_capture(
         "sampling_frequency_hz": sampling_frequency,
         "approx_last_spike_s": float(duration_s),
         "sorter": "clusterless_thresholder",
-        "sorter_param_name": "default_clusterless",
+        "sorter_param_name": sorter_param_name,
         "preproc_param_name": "default",
         "artifact_param_name": "default",
         "spikeinterface_version": _pkg_version("spikeinterface"),
@@ -363,6 +381,17 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Optional path to an existing DataJoint config file.",
     )
+    parser.add_argument(
+        "--sorter-param-name",
+        default="default_clusterless",
+        help=(
+            "Name of the SpikeSorterParameters row to sort with. "
+            "Defaults to 'default_clusterless' (Frank-lab 100 uV "
+            "production threshold). For synthetic fixtures with "
+            "smaller template amplitudes (e.g. MEArec smoke), pre-"
+            "insert a lower-threshold row and pass its name here."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -396,14 +425,61 @@ def main(argv: list[str] | None = None) -> int:
         allow_production_smoke=allow_production_smoke,
     )
 
+    # Pre-insert a smoke-friendly sorter row if the caller asked for a
+    # name other than the shipped default; the test runner expects
+    # the row to exist before run_baseline_capture references it.
+    if args.sorter_param_name != "default_clusterless":
+        _ensure_smoke_sorter_param_row(args.sorter_param_name)
+
     run_baseline_capture(
         nwb_source=nwb_source,
         sort_group_id=args.sort_group_id,
         interval_list_name=args.interval_list_name,
         team_name=args.team_name,
         output_dir=Path(args.output_dir),
+        sorter_param_name=args.sorter_param_name,
     )
     return 0
+
+
+def _ensure_smoke_sorter_param_row(sorter_param_name: str) -> None:
+    """Insert a low-threshold clusterless_thresholder row if absent.
+
+    Frank-lab's 100 uV default rejects every peak the synthetic
+    MEArec smoke fixture produces (its templates max out around
+    a few uV); without a calibrated row the v1 sort produces zero
+    units and the curation step crashes on the empty units table.
+    A 5 uV threshold reliably surfaces planted peaks while staying
+    above the simulator's noise floor.
+    """
+    from spyglass.spikesorting.v1 import SpikeSorterParameters
+
+    existing = SpikeSorterParameters & {
+        "sorter": "clusterless_thresholder",
+        "sorter_param_name": sorter_param_name,
+    }
+    if existing:
+        return
+    # ``noise_levels`` intentionally omitted so SI 0.99 computes it
+    # from the recording itself; passing a Python list fails inside
+    # SI's ``detect_peaks`` with ``can't multiply sequence by
+    # non-int of type 'float'``.
+    SpikeSorterParameters().insert1(
+        {
+            "sorter": "clusterless_thresholder",
+            "sorter_param_name": sorter_param_name,
+            "sorter_params": {
+                "detect_threshold": 5.0,
+                "method": "locally_exclusive",
+                "peak_sign": "neg",
+                "exclude_sweep_ms": 0.1,
+                "local_radius_um": 100,
+                "outputs": "sorting",
+                "random_chunk_kwargs": {},
+            },
+        },
+        skip_duplicates=True,
+    )
 
 
 if __name__ == "__main__":

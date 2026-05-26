@@ -22,9 +22,15 @@ _FIXTURE_PATH = (
 def mearec_smoke_ingested(dj_conn):
     """Ingest the generated MEArec smoke fixture into the isolated DB.
 
-    Also pulls the ground-truth units into ``ImportedSpikeSorting`` so the
-    downstream tests have an assertion-only body. Skips cleanly if the
-    generator has not been run on this machine.
+    The ground-truth units live in a sidecar
+    ``ProcessingModule("ground_truth")["units"]`` (NOT in
+    ``nwbfile.units``) so the canonical units slot stays free for
+    real sorter outputs and v1↔v2 parity baselines can be captured
+    without HDMF "units already set" errors. ``ImportedSpikeSorting``
+    only reads ``nwbfile.units``, so it is intentionally NOT invoked
+    here.
+
+    Skips cleanly if the generator has not been run on this machine.
     """
     if not _FIXTURE_PATH.exists():
         pytest.skip(
@@ -33,12 +39,7 @@ def mearec_smoke_ingested(dj_conn):
             "--smoke` first."
         )
     nwb_file_name = copy_and_insert_nwb(_FIXTURE_PATH)
-    from spyglass.spikesorting.imported import ImportedSpikeSorting
-
-    session_key = {"nwb_file_name": nwb_file_name}
-    if not (ImportedSpikeSorting & session_key):
-        ImportedSpikeSorting().insert_from_nwbfile(nwb_file_name)
-    yield session_key
+    yield {"nwb_file_name": nwb_file_name}
 
 
 @pytest.mark.slow
@@ -86,8 +87,42 @@ def test_mearec_fixture_registers_probe_with_correct_shanks(
 
 
 @pytest.mark.slow
-def test_mearec_fixture_ingests_ground_truth_units(mearec_smoke_ingested):
-    """``ImportedSpikeSorting`` picks up the ground-truth units table."""
-    from spyglass.spikesorting.imported import ImportedSpikeSorting
+def test_mearec_fixture_writes_sidecar_ground_truth_units(mearec_smoke_ingested):
+    """Planted ground-truth units land in the sidecar processing module.
 
-    assert len(ImportedSpikeSorting & mearec_smoke_ingested) >= 1
+    Re-opens the source NWB and verifies the sidecar
+    ``ProcessingModule("ground_truth")["units"]`` table exists with the
+    expected per-unit columns. ``nwbfile.units`` MUST be empty so the
+    canonical slot stays free for real sorter outputs.
+    """
+    import pynwb
+
+    from spyglass.common.common_nwbfile import Nwbfile
+    from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import (
+        get_ground_truth_units_table,
+    )
+
+    raw_nwb_path = Nwbfile().get_abs_path(mearec_smoke_ingested["nwb_file_name"])
+    with pynwb.NWBHDF5IO(raw_nwb_path, "r", load_namespaces=True) as io:
+        nwb = io.read()
+        assert nwb.units is None, (
+            "MEArec smoke fixture leaked planted ground-truth units "
+            "into nwbfile.units; sidecar migration regression."
+        )
+        gt_table = get_ground_truth_units_table(nwb)
+        assert gt_table is not None, (
+            "Sidecar ground-truth units table missing from MEArec "
+            "smoke fixture."
+        )
+        assert len(gt_table.id[:]) >= 1
+        for col in (
+            "spike_times",
+            "position_x",
+            "position_y",
+            "position_z",
+            "cell_type",
+            "is_ground_truth",
+        ):
+            assert col in gt_table.colnames, (
+                f"Sidecar units table missing expected column {col!r}."
+            )
