@@ -244,10 +244,30 @@ def _read_spike_times(curation_key: dict) -> tuple[dict, float]:
     """
     import numpy as np
 
-    from spyglass.spikesorting.v1 import CurationV1, SpikeSortingRecording
+    from spyglass.spikesorting.v1 import (
+        CurationV1,
+        SpikeSorting,
+        SpikeSortingRecording,
+    )
 
     sorting = CurationV1.get_sorting(curation_key)
-    recording = SpikeSortingRecording.get_recording(curation_key)
+    # ``SpikeSortingRecording.get_recording(curation_key)`` calls
+    # ``(cls & curation_key).fetch1(...)``. DataJoint's ``&`` does NOT
+    # auto-restrict via FK chain across distant tables -- the curation
+    # key has ``sorting_id``/``curation_id`` but no ``recording_id``,
+    # and ``SpikeSortingRecording`` has no ``sorting_id`` column, so
+    # the restriction is vacuous and fetch1 raises whenever the shared
+    # ``spikesorting_v1_recording`` schema accumulates >1 row (which
+    # happens immediately on the second capture against the shared
+    # schema, see ``capture_polymer_clusterless.sh`` concurrency note).
+    # Resolve recording_id explicitly via SpikeSorting (which IS keyed
+    # by sorting_id) and pass the recording_id pk to get_recording.
+    recording_id = (
+        SpikeSorting & {"sorting_id": curation_key["sorting_id"]}
+    ).fetch1("recording_id")
+    recording = SpikeSortingRecording.get_recording(
+        {"recording_id": recording_id}
+    )
     sampling_frequency = float(recording.get_sampling_frequency())
     spike_times = {
         int(unit_id): np.asarray(sorting.get_unit_spike_train(unit_id))
