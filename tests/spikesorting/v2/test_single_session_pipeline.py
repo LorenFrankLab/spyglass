@@ -5588,45 +5588,71 @@ def test_mountainsort5_ground_truth_neuropixels_60s(neuropixels_60s_session):
     )
 
 
+_PARITY_FIXTURE_CASES = [
+    ("mearec_polymer_smoke", 0),
+    ("mearec_polymer_smoke", 1),
+    ("mearec_polymer_smoke", 2),
+    ("mearec_polymer_smoke", 3),
+    ("mearec_polymer_128ch_60s", 0),
+    ("mearec_polymer_128ch_60s", 1),
+    ("mearec_polymer_128ch_60s", 2),
+    ("mearec_polymer_128ch_60s", 3),
+]
+
+
 @pytest.mark.slow
 @pytest.mark.integration
-def test_v2_real_data_v1_parity():
-    """v1 ↔ v2 parity on real (or MEArec smoke) NWB; env-var gated.
+@pytest.mark.parametrize(
+    "fixture_stem,sort_group_id",
+    _PARITY_FIXTURE_CASES,
+    ids=[f"{stem}-shank{sg}" for stem, sg in _PARITY_FIXTURE_CASES],
+)
+def test_v2_real_data_v1_parity(fixture_stem, sort_group_id):
+    """v1 ↔ v2 ``clusterless_thresholder`` parity on the polymer matrix.
 
-    Real-data sanity check on the ``clusterless_thresholder``
-    slice (the sorter ``baseline_capture.py`` writes). The
-    nominal contract for clusterless_thresholder is "±1 sample
-    on detected peak indices" -- a deterministic threshold
-    sorter SHOULD detect the same peaks under SI 0.104 as it
-    did under SI 0.99. The test enforces a 1.5-sample threshold
-    (1 sample of contract + 0.5 sample of floating-point
-    fence-post slack between SI 0.99 and 0.104 timestamp
-    construction). The mountainsort / kilosort tolerance bands
-    (±50% unit count, ±30% median firing rate) only apply when
-    the lab user has produced baseline pickles for those
-    sorters; the baseline_capture CLI currently only writes the
-    clusterless slice.
+    The deterministic threshold sorter SHOULD detect the same peaks
+    under SI 0.104 as it did under SI 0.99. The test enforces a
+    ±1.5-sample asymmetric per-spike contract: every v1 spike must
+    match a v2 spike within 1.5 samples (``unmatched_v1 > 0`` FAILs);
+    v2 may have bounded extras (20% + 5 detections budget) attributed
+    to documented cross-SI-version ``detect_peaks`` drift. Both
+    ``unmatched_v1`` and ``unmatched_v2`` are reported per case.
 
-    Sidecar requirement: the smoke parity row (``smoke_clusterless_5uv``)
+    **Invariant fingerprint contract:** before any spike-time
+    comparison runs, the v2 side reconstructs its own state and
+    asserts each fingerprint (``nwb_sha256``, ``sort_group_electrode_ids``,
+    ``bad_channel_by_electrode_id``, ``canonical_preproc_params``,
+    ``canonical_artifact_params``, ``artifact_valid_times_hash``,
+    ``canonical_sorter_params``) matches the v1 baseline. A
+    fingerprint mismatch FAILs with a path-tagged diff so an
+    input-layer skew never gets conflated with an output-layer
+    regression. See ``.claude/docs/plans/spikesorting-v2/parity-extensions.md``
+    § "Invariant fingerprinting".
+
+    Sidecar history: the smoke parity row (``smoke_clusterless_5uv``)
     must NOT carry ``noise_levels`` -- that lets SI compute its own
     per-channel MAD and the threshold is interpreted as a MAD
     multiplier, matching how ``baseline_capture._ensure_smoke_sorter_param_row``
     inserts the v1 row. If ``noise_levels=[1.0]`` is forwarded
     (the production default for the 100 uV ``default_clusterless``
-    row), the smoke threshold becomes raw uV and is below the noise
-    floor of the synthetic recording, producing ~1,400x more
-    detections than v1. Pre-investigation note: an earlier version
-    of this docstring blamed "SI 0.99 vs 0.104 noise-estimate drift
-    on tiny windows"; that was wrong. The MAD estimates agree to
-    0.1% across SI versions on this fixture, and the divergence is
-    entirely driven by which kwargs are forwarded to ``detect_peaks``.
+    row), the smoke threshold becomes raw uV and produces ~1,400x
+    more detections than v1. The schema v3 + tolerance-aware
+    matcher landed in followup #11 to close that divergence; the
+    canonical-sorter fingerprint check guarantees it stays closed.
 
     Env vars:
-      ``SPIKESORTING_V2_REAL_NWB_PATH`` -> path to the lab NWB.
-      ``SPIKESORTING_V2_BASELINE_DIR``  -> directory holding the
-                                           v1 baseline artifacts.
-                                           Defaults to
-                                           ``<nwb dir>/v1_baseline``.
+      ``SPIKESORTING_V2_BASELINE_ROOT`` -> directory tree
+          ``$ROOT/<fixture_stem>/clusterless/shank<N>/``
+          containing ``baseline_v1_spike_times.pkl`` and
+          ``baseline_v1_recording_meta.json``. The matrix-verification
+          entrypoint -- when set, missing baselines FAIL (a broken
+          capture must not skip silently) unless the
+          ``(fixture_stem, sorter, sort_group_id)`` triple is in
+          ``EXPECTED_DEGENERATE_CASES`` (then SKIP).
+
+      ``SPIKESORTING_V2_BASELINE_DIR`` -> legacy single-dir shim
+          for ``(mearec_polymer_smoke, 0)`` only; other
+          parametrizations skip with a clear message.
     """
     import json as _json
     import os
@@ -5635,46 +5661,73 @@ def test_v2_real_data_v1_parity():
 
     import numpy as np
 
-    real_nwb_env = os.environ.get("SPIKESORTING_V2_REAL_NWB_PATH")
-    if not real_nwb_env:
+    from tests.spikesorting.v2._smoke_constants import EXPECTED_DEGENERATE_CASES
+
+    # The NWB lives in the v2 checkout's fixtures directory; the
+    # capture-side ran from the v1 worktree but wrote spike times +
+    # meta under SPIKESORTING_V2_BASELINE_ROOT, so the v2 test reads
+    # from the v2 fixture directly and verifies sha256 against the
+    # baseline meta below.
+    fixture_path = (
+        _Path(__file__).parent / "fixtures" / f"{fixture_stem}.nwb"
+    )
+    if not fixture_path.exists():
         pytest.skip(
-            "SPIKESORTING_V2_REAL_NWB_PATH unset -- the v1↔v2 real-"
-            "data parity gate runs only when a lab user points the "
-            "env var at a production NWB + adjacent v1 baseline "
-            "artifacts. Set SPIKESORTING_V2_REAL_NWB_PATH=<path-to-"
-            "nwb>.nwb to activate; the test then loads "
-            "baseline_v1_spike_times.pkl + "
-            "baseline_v1_recording_meta.json (default location: "
-            "<nwb-dir>/v1_baseline/, override via "
-            "SPIKESORTING_V2_BASELINE_DIR) and runs the "
-            "clusterless_thresholder parity comparison."
+            f"NWB fixture {fixture_path} missing; generate via "
+            "tests/spikesorting/v2/fixtures/generate_mearec.py first."
         )
 
-    nwb_path = _Path(real_nwb_env)
-    if not nwb_path.exists():
-        pytest.skip(
-            f"SPIKESORTING_V2_REAL_NWB_PATH={real_nwb_env!r} does "
-            "not exist on disk; cannot run parity gate."
+    sorter_label = "clusterless"
+    baseline_root_env = os.environ.get("SPIKESORTING_V2_BASELINE_ROOT")
+    baseline_dir_legacy_env = os.environ.get("SPIKESORTING_V2_BASELINE_DIR")
+    legacy_case = (fixture_stem, sort_group_id) == ("mearec_polymer_smoke", 0)
+
+    if baseline_root_env:
+        baseline_dir = (
+            _Path(baseline_root_env)
+            / fixture_stem
+            / sorter_label
+            / f"shank{sort_group_id}"
         )
-    baseline_dir_env = os.environ.get("SPIKESORTING_V2_BASELINE_DIR")
-    baseline_dir = (
-        _Path(baseline_dir_env)
-        if baseline_dir_env
-        else nwb_path.parent / "v1_baseline"
-    )
+    elif baseline_dir_legacy_env and legacy_case:
+        baseline_dir = _Path(baseline_dir_legacy_env)
+    else:
+        pytest.skip(
+            "SPIKESORTING_V2_BASELINE_ROOT unset -- set it to a "
+            "directory tree of `<root>/<fixture_stem>/clusterless/"
+            "shank<N>/{baseline_v1_spike_times.pkl,baseline_v1_recording_meta.json}` "
+            "to enable the v1↔v2 matrix verification. Captures are "
+            "produced by tests/spikesorting/v2/scripts/"
+            "capture_polymer_clusterless.sh."
+        )
+
+    triple = (fixture_stem, "clusterless_thresholder", sort_group_id)
+    if triple in EXPECTED_DEGENERATE_CASES:
+        pytest.skip(
+            f"SKIP-expected-degenerate: {EXPECTED_DEGENERATE_CASES[triple]}"
+        )
+
     spikes_pkl = baseline_dir / "baseline_v1_spike_times.pkl"
     meta_json = baseline_dir / "baseline_v1_recording_meta.json"
     if not (spikes_pkl.exists() and meta_json.exists()):
-        pytest.skip(
-            f"v1 baseline artifacts not found at {baseline_dir}/; "
-            "generate via `python tests/spikesorting/v2/"
-            "baseline_capture.py --nwb-file "
-            f"{nwb_path} --output-dir {baseline_dir}` first."
+        msg = (
+            f"v1 baseline artifacts not found at {baseline_dir}/. "
+            "Generate via `tests/spikesorting/v2/scripts/"
+            "capture_polymer_clusterless.sh` under the v1 conda env."
         )
+        if baseline_root_env:
+            # SPIKESORTING_V2_BASELINE_ROOT is set: the operator opted
+            # into matrix verification, so a missing baseline is a
+            # capture-side regression, not a skip. To intentionally
+            # skip a known-degenerate case, add the triple to
+            # ``EXPECTED_DEGENERATE_CASES`` with evidence.
+            pytest.fail(msg)
+        pytest.skip(msg)
 
+    nwb_path = fixture_path
     regen_hint = (
-        f"Regenerate via baseline_capture.py "
-        f"--nwb-file {nwb_path} --output-dir {baseline_dir}."
+        f"Regenerate via baseline_capture.py --nwb-file {nwb_path} "
+        f"--sort-group-id {sort_group_id} --output-dir {baseline_dir}."
     )
     try:
         with open(spikes_pkl, "rb") as fh:
@@ -5837,6 +5890,108 @@ def test_v2_real_data_v1_parity():
         }
     )
     ArtifactDetection.populate(art_pk, reserve_jobs=False)
+
+    # --- v1↔v2 invariant fingerprint check ---
+    # Reconstruct the same fingerprints from v2 tables and assert
+    # each matches what v1 baseline_capture wrote. Done BEFORE the
+    # sort so an input-layer skew (different electrodes, different
+    # bad-channel mask, schema-incompatible params, divergent
+    # artifact valid_times) is never silently absorbed into the
+    # downstream spike-time comparison. See
+    # ``.claude/docs/plans/spikesorting-v2/parity-extensions.md`` §
+    # "Invariant fingerprinting".
+    import hashlib as _hashlib
+
+    from spyglass.common import Electrode, IntervalList
+    from spyglass.spikesorting.v2.utils import (
+        artifact_interval_list_name,
+    )
+    from tests.spikesorting.v2._parity_canonical import (
+        assert_canonical_dict_equal,
+        canonical_artifact,
+        canonical_preproc,
+        canonical_sorter,
+    )
+
+    _fingerprint_fields = (
+        "nwb_sha256",
+        "sort_group_electrode_ids",
+        "bad_channel_by_electrode_id",
+        "canonical_preproc_params",
+        "canonical_artifact_params",
+        "artifact_valid_times_hash",
+        "canonical_sorter_params",
+    )
+    missing_fp = sorted(set(_fingerprint_fields) - set(meta))
+    if missing_fp:
+        pytest.skip(
+            f"v1 baseline meta at {meta_json} lacks fingerprint "
+            f"field(s) {missing_fp}; baseline was captured before "
+            f"the invariant-fingerprint schema landed. {regen_hint}"
+        )
+
+    v2_valid_times_raw = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": artifact_interval_list_name(
+                art_pk["artifact_id"]
+            ),
+        }
+    ).fetch1("valid_times")
+    v2_valid_times = np.ascontiguousarray(v2_valid_times_raw, dtype="<f8")
+    v2_fingerprints = {
+        "nwb_sha256": _hashlib.sha256(nwb_path.read_bytes()).hexdigest(),
+        "sort_group_electrode_ids": sorted(
+            int(eid)
+            for eid in (
+                SortGroupV2.SortGroupElectrode
+                & {
+                    "nwb_file_name": nwb_file_name,
+                    "sort_group_id": int(meta["sort_group_id"]),
+                }
+            ).fetch("electrode_id")
+        ),
+        "bad_channel_by_electrode_id": {
+            str(int(row["electrode_id"])): bool(row["bad_channel"] == "True")
+            for row in (
+                Electrode & {"nwb_file_name": nwb_file_name}
+            ).fetch("KEY", "electrode_id", "bad_channel", as_dict=True)
+        },
+        "canonical_preproc_params": canonical_preproc(
+            (
+                PreprocessingParameters
+                & {"preproc_params_name": preproc_name_v2}
+            ).fetch1("params")
+        ),
+        "canonical_artifact_params": canonical_artifact(
+            (
+                ArtifactDetectionParameters
+                & {"artifact_params_name": artifact_name_meta}
+            ).fetch1("params")
+        ),
+        "artifact_valid_times_hash": _hashlib.sha256(
+            v2_valid_times.tobytes()
+            + np.asarray(v2_valid_times.shape, dtype="<i8").tobytes()
+        ).hexdigest(),
+        "canonical_sorter_params": canonical_sorter(
+            "clusterless_thresholder",
+            (
+                SorterParameters
+                & {
+                    "sorter": "clusterless_thresholder",
+                    "sorter_params_name": sorter_params_name,
+                }
+            ).fetch1("params"),
+        ),
+    }
+    v1_fingerprints = {
+        field: meta[field] for field in _fingerprint_fields
+    }
+    assert_canonical_dict_equal(
+        v1_fingerprints, v2_fingerprints, path="fingerprints"
+    )
+
     sort_pk = SortingSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],
@@ -5889,16 +6044,23 @@ def test_v2_real_data_v1_parity():
         "threshold activity."
     )
 
-    # Per-unit comparison: every v1 spike must have a v2 counterpart
-    # within ±1.5 samples (nearest-neighbor match). v2 is allowed to
-    # detect a small number of EXTRA peaks v1 didn't (cross-SI-
-    # version random_slices / sample-window drift in detect_peaks
-    # produces ±a-few extras on this fixture even after fixing the
-    # ``noise_levels`` semantic), bounded by ``extra_spike_ratio``.
-    # A real regression would either drop v1 spikes (matched-fraction
-    # < 1.0) or explode v2's count (extra ratio >> the bound).
+    # Per-unit asymmetric per-spike comparison.
+    #
+    # Clusterless contract (parity-extensions.md § "Documented v2
+    # divergences"): every v1 spike must match a v2 spike within
+    # ±1.5 samples -- ``unmatched_v1 > 0`` is a FAIL unless a
+    # divergence-table row covers it. v2 may have bounded extras
+    # (20% + 5 budget) attributed to cross-SI-version
+    # ``detect_peaks`` random_slices / sample-window drift after
+    # the ``noise_levels`` semantic was fixed in followup #11.
+    # ``unmatched_v2`` is reported per case (not asserted) so a
+    # creeping detection-rate change surfaces as a triage signal
+    # rather than a silent pass.
     threshold_samples = 1.5
-    extra_spike_ratio = 0.20  # v2 allowed up to 20% extra detections
+    extra_spike_ratio = 0.20
+    tol_s = threshold_samples * one_sample_s
+    diagnostic_rows: list[tuple[int, int, int, int, int, int]] = []
+    failures: list[str] = []
     for uid in v1_keys:
         v1_arr = np.sort(np.asarray(v1_spike_times[uid]))
         v2_arr = np.sort(v2_spike_times[uid])
@@ -5912,34 +6074,92 @@ def test_v2_real_data_v1_parity():
         # raise ``IndexError`` with a stack trace instead of the
         # diagnostic message this assertion is supposed to surface.
         if v2_arr.size == 0:
-            pytest.fail(
+            diagnostic_rows.append(
+                (uid, int(v1_arr.size), 0, 0, int(v1_arr.size), 0)
+            )
+            failures.append(
                 f"unit {uid}: v1 has {v1_arr.size} spikes, v2 "
                 "detected zero; nearest-neighbor match impossible. "
                 "Regression in v2 sort path."
             )
-        tol_s = threshold_samples * one_sample_s
+            continue
+
+        # v1 -> v2 nearest neighbor: each v1 spike's distance to the
+        # closest v2 spike. Two candidates per v1 spike (searchsorted
+        # gives the insertion index; left/right neighbors), take
+        # the minimum.
         idx = np.searchsorted(v2_arr, v1_arr)
         idx_left = np.clip(idx - 1, 0, v2_arr.size - 1)
         idx_right = np.clip(idx, 0, v2_arr.size - 1)
-        left_diff = np.abs(v1_arr - v2_arr[idx_left])
-        right_diff = np.abs(v1_arr - v2_arr[idx_right])
-        nearest_diff = np.minimum(left_diff, right_diff)
-        matched = nearest_diff <= tol_s
-        n_matched = int(matched.sum())
-        assert n_matched == v1_arr.size, (
-            f"unit {uid}: only {n_matched}/{v1_arr.size} v1 spikes "
-            f"have a v2 counterpart within {threshold_samples} samples "
-            f"({tol_s:.6f}s). max unmatched drift "
-            f"{float(nearest_diff[~matched].max() * fs):.2f} samples."
+        v1_to_v2_diff = np.minimum(
+            np.abs(v1_arr - v2_arr[idx_left]),
+            np.abs(v1_arr - v2_arr[idx_right]),
         )
+        v1_matched = v1_to_v2_diff <= tol_s
+        n_matched = int(v1_matched.sum())
+        unmatched_v1 = int(v1_arr.size - n_matched)
+
+        # v2 -> v1 nearest neighbor: each v2 spike's distance to the
+        # closest v1 spike. ``unmatched_v2`` is a triage signal (the
+        # 20%+5 budget on v2_arr.size is the assertion that catches a
+        # blow-up; per-spike unmatched_v2 surfaces a quieter drift).
+        idx2 = np.searchsorted(v1_arr, v2_arr)
+        idx2_left = np.clip(idx2 - 1, 0, v1_arr.size - 1)
+        idx2_right = np.clip(idx2, 0, v1_arr.size - 1)
+        v2_to_v1_diff = np.minimum(
+            np.abs(v2_arr - v1_arr[idx2_left]),
+            np.abs(v2_arr - v1_arr[idx2_right]),
+        )
+        unmatched_v2 = int((v2_to_v1_diff > tol_s).sum())
+
+        diagnostic_rows.append(
+            (
+                uid,
+                int(v1_arr.size),
+                int(v2_arr.size),
+                n_matched,
+                unmatched_v1,
+                unmatched_v2,
+            )
+        )
+
+        if unmatched_v1 > 0:
+            failures.append(
+                f"unit {uid}: {unmatched_v1}/{v1_arr.size} v1 spikes "
+                f"lack a v2 match within {threshold_samples} samples "
+                f"({tol_s:.6f}s). max unmatched drift "
+                f"{float(v1_to_v2_diff[~v1_matched].max() * fs):.2f} samples."
+            )
+
         # Cap v2's excess detections; a 1,400x explosion (the pre-fix
         # state when ``noise_levels=[1.0]`` was injected into the
         # smoke row) fails this assertion loud and clear.
         max_v2 = int(v1_arr.size * (1.0 + extra_spike_ratio)) + 5
-        assert v2_arr.size <= max_v2, (
-            f"unit {uid}: v2 detected {v2_arr.size} spikes vs v1's "
-            f"{v1_arr.size}; excess > {extra_spike_ratio:.0%} budget "
-            f"(allowed {max_v2}). Likely a sorter-parameter semantic "
-            "mismatch (e.g. forwarding ``noise_levels=[1.0]`` so the "
-            "threshold reads in raw uV instead of MAD multiples)."
+        if v2_arr.size > max_v2:
+            failures.append(
+                f"unit {uid}: v2 detected {v2_arr.size} spikes vs v1's "
+                f"{v1_arr.size}; excess > {extra_spike_ratio:.0%} budget "
+                f"(allowed {max_v2}). Likely a sorter-parameter semantic "
+                "mismatch (e.g. forwarding ``noise_levels=[1.0]`` so the "
+                "threshold reads in raw uV instead of MAD multiples)."
+            )
+
+    # Diagnostic block: one line per unit, then a summary line.
+    # Printed unconditionally so a passing run still records the
+    # per-unit unmatched counts for the next reviewer.
+    print(
+        f"\n[parity] {fixture_stem} shank{sort_group_id} clusterless"
+    )
+    print(
+        f"  {'unit':>5} {'v1_n':>6} {'v2_n':>6} {'matched':>8} "
+        f"{'unmatched_v1':>13} {'unmatched_v2':>13}"
+    )
+    for row in diagnostic_rows:
+        uid, v1n, v2n, nm, um1, um2 = row
+        print(
+            f"  {uid:>5} {v1n:>6} {v2n:>6} {nm:>8} "
+            f"{um1:>13} {um2:>13}"
         )
+
+    if failures:
+        pytest.fail("v1↔v2 spike-time divergence:\n  " + "\n  ".join(failures))

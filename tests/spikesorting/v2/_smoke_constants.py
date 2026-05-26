@@ -60,6 +60,24 @@ V1_TO_V2_SORTER_PARAM_NAMES: dict = {
 }
 
 
+#: ``(fixture_stem, sorter, sort_group_id)`` triples that legitimately
+#: skip the v1↔v2 parity gate because the v1 capture cannot produce
+#: a non-degenerate baseline on that shank (MEArec planted no
+#: detectable units on the shank, MS4 produced ``< 2`` units, etc.).
+#:
+#: Each entry MUST be evidence-backed: the reason string should cite
+#: the MEArec generator log (planted-unit counts per shank) AND the
+#: capture-side output (``v1 sort produced 0/1 unit on this shank``).
+#: A label without evidence is not acceptable -- see
+#: ``parity-extensions.md`` § "Result taxonomy".
+#:
+#: Populated during capture-side triage (Phase A10 / B-side captures).
+#: An unlisted case with missing baseline artifacts under an active
+#: ``SPIKESORTING_V2_BASELINE_ROOT`` is a FAIL, not a SKIP, because a
+#: broken tmux capture must not pass silently.
+EXPECTED_DEGENERATE_CASES: dict[tuple[str, str, int], str] = {}
+
+
 def v2_preproc_name_for_v1(v1_name: str) -> str:
     """Map a v1 ``preproc_param_name`` to the v2 equivalent.
 

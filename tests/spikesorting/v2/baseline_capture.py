@@ -33,6 +33,7 @@ Usage
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import pickle
@@ -223,6 +224,118 @@ def _read_spike_times(curation_key: dict) -> tuple[dict, float]:
     return spike_times, sampling_frequency
 
 
+def _compute_invariant_fingerprints(
+    *,
+    nwb_source: Path,
+    nwb_file_name: str,
+    sort_group_id: int,
+    artifact_id: str,
+    sorter: str,
+    sorter_param_name: str,
+    preproc_param_name: str,
+    artifact_param_name: str,
+) -> dict:
+    """Compute the seven invariant fingerprints for v1↔v2 parity verification.
+
+    The fingerprints encode the inputs that v1 and v2 MUST agree on
+    for a parity comparison to be meaningful (same NWB bytes, same
+    sort-group electrodes, same bad-channel mask, same effective
+    preproc / artifact / sorter kwargs, same artifact-removed
+    valid times). The v2 parity test reconstructs its own state and
+    asserts each fingerprint matches before comparing spike times.
+    Contract: see ``.claude/docs/plans/spikesorting-v2/parity-extensions.md``
+    § "Invariant fingerprinting".
+    """
+    import numpy as np
+
+    from spyglass.common import Electrode, IntervalList
+    from spyglass.spikesorting.v1 import (
+        ArtifactDetectionParameters,
+        SortGroup,
+        SpikeSorterParameters,
+        SpikeSortingPreprocessingParameters,
+    )
+
+    # Lazy import: ``_parity_canonical`` lives next to this module so the
+    # capture script remains self-contained on the v1 worktree after sync.
+    from tests.spikesorting.v2._parity_canonical import (
+        canonical_artifact,
+        canonical_preproc,
+        canonical_sorter,
+    )
+
+    nwb_sha256 = hashlib.sha256(nwb_source.read_bytes()).hexdigest()
+
+    sort_group_electrode_ids = sorted(
+        int(eid)
+        for eid in (
+            SortGroup.SortGroupElectrode
+            & {
+                "nwb_file_name": nwb_file_name,
+                "sort_group_id": sort_group_id,
+            }
+        ).fetch("electrode_id")
+    )
+
+    # JSON has no native int-key support; serialize with stringified keys
+    # and let the v2 reader re-canonicalize via ``{int(k): v for k, v in ...}``.
+    bad_channel_by_electrode_id = {
+        str(int(row["electrode_id"])): bool(row["bad_channel"] == "True")
+        for row in (
+            Electrode & {"nwb_file_name": nwb_file_name}
+        ).fetch("KEY", "electrode_id", "bad_channel", as_dict=True)
+    }
+
+    canonical_preproc_params = canonical_preproc(
+        (
+            SpikeSortingPreprocessingParameters
+            & {"preproc_param_name": preproc_param_name}
+        ).fetch1("preproc_params")
+    )
+
+    canonical_artifact_params = canonical_artifact(
+        (
+            ArtifactDetectionParameters
+            & {"artifact_param_name": artifact_param_name}
+        ).fetch1("artifact_params")
+    )
+
+    # v1's ``ArtifactDetection`` writes the artifact-removed times to
+    # ``IntervalList`` keyed by ``interval_list_name=str(artifact_id)``
+    # (``src/spyglass/spikesorting/v1/artifact.py:200``). Pin dtype and
+    # include shape so the hash is comparison-stable across writers.
+    valid_times_raw = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": str(artifact_id),
+        }
+    ).fetch1("valid_times")
+    valid_times = np.ascontiguousarray(valid_times_raw, dtype="<f8")
+    artifact_valid_times_hash = hashlib.sha256(
+        valid_times.tobytes()
+        + np.asarray(valid_times.shape, dtype="<i8").tobytes()
+    ).hexdigest()
+
+    canonical_sorter_params = canonical_sorter(
+        sorter,
+        (
+            SpikeSorterParameters
+            & {"sorter": sorter, "sorter_param_name": sorter_param_name}
+        ).fetch1("sorter_params"),
+    )
+
+    return {
+        "nwb_sha256": nwb_sha256,
+        "sort_group_electrode_ids": sort_group_electrode_ids,
+        "bad_channel_by_electrode_id": bad_channel_by_electrode_id,
+        "canonical_preproc_params": canonical_preproc_params,
+        "canonical_artifact_params": canonical_artifact_params,
+        "artifact_valid_times_hash": artifact_valid_times_hash,
+        "canonical_sorter_params": canonical_sorter_params,
+    }
+
+
 def _write_artifacts(
     output_dir: Path,
     spike_times: dict,
@@ -321,6 +434,17 @@ def run_baseline_capture(
         default=0.0,
     )
 
+    fingerprints = _compute_invariant_fingerprints(
+        nwb_source=nwb_source,
+        nwb_file_name=nwb_file_name,
+        sort_group_id=sort_group_id,
+        artifact_id=str(artifact_pk["artifact_id"]),
+        sorter="clusterless_thresholder",
+        sorter_param_name=sorter_param_name,
+        preproc_param_name="default",
+        artifact_param_name="default",
+    )
+
     metadata = {
         "nwb_file_name": nwb_file_name,
         "nwb_source_path": str(nwb_source),
@@ -340,6 +464,7 @@ def run_baseline_capture(
         "artifact_param_name": "default",
         "spikeinterface_version": _pkg_version("spikeinterface"),
         "spyglass_version": _pkg_version("spyglass-neuro"),
+        **fingerprints,
     }
     spikes_path, meta_path = _write_artifacts(
         output_dir, spike_times, metadata
