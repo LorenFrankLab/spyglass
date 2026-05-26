@@ -414,7 +414,8 @@ def _verify_ingestion(nwb_path: Path, spec: FixtureSpec) -> dict:
 
     Proves a freshly generated fixture ingests end to end: a ``Session``,
     ``Raw``, non-empty ``Electrode`` table, ``IntervalList`` rows, the probe
-    tables, and the ground-truth ``ImportedSpikeSorting`` units all appear.
+    tables, and the sidecar ``ground_truth/units`` processing-module
+    table all appear.
 
     Parameters
     ----------
@@ -435,7 +436,6 @@ def _verify_ingestion(nwb_path: Path, spec: FixtureSpec) -> dict:
     """
     from spyglass.common import Electrode, IntervalList, Raw, Session
     from spyglass.common.common_device import Probe, ProbeType
-    from spyglass.spikesorting.imported import ImportedSpikeSorting
 
     from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
 
@@ -467,12 +467,30 @@ def _verify_ingestion(nwb_path: Path, spec: FixtureSpec) -> dict:
         f"ProbeType.num_shanks {num_shanks} != {spec.layout.n_shanks}"
     )
 
-    # Idempotent: insert_from_nwbfile has no skip_duplicates path; only call
-    # it when no ImportedSpikeSorting row exists yet for this NWB.
-    if not (ImportedSpikeSorting & session_key):
-        ImportedSpikeSorting().insert_from_nwbfile(nwb_file_name)
-    n_imported = len(ImportedSpikeSorting & session_key)
-    assert n_imported >= 1, "ImportedSpikeSorting did not ingest the units"
+    # Planted ground-truth units live in a sidecar
+    # ``ProcessingModule("ground_truth")["units"]`` table (NOT
+    # ``nwbfile.units``), so ``ImportedSpikeSorting`` -- which only
+    # reads ``nwbfile.units`` -- has nothing to ingest from these
+    # fixtures and is intentionally NOT exercised here. Verify
+    # instead that the sidecar table is present and non-empty.
+    import pynwb
+
+    from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import (
+        get_ground_truth_units_table,
+    )
+
+    with pynwb.NWBHDF5IO(str(nwb_path), "r", load_namespaces=True) as io:
+        nwb = io.read()
+        assert nwb.units is None, (
+            "Source NWB leaked planted units into nwbfile.units; "
+            "they belong in the sidecar processing module so the v1 "
+            "baseline-capture path can write to nwbfile.units freely."
+        )
+        gt_table = get_ground_truth_units_table(nwb)
+        assert gt_table is not None, (
+            "Source NWB missing sidecar ground-truth units table."
+        )
+        n_planted = int(len(gt_table.id[:]))
 
     return {
         "nwb_file_name": nwb_file_name,
@@ -480,7 +498,7 @@ def _verify_ingestion(nwb_path: Path, spec: FixtureSpec) -> dict:
         "n_interval_lists": int(n_intervals),
         "n_probe_electrodes": int(probe_electrodes),
         "num_shanks": int(num_shanks),
-        "imported_spike_sorting_rows": int(n_imported),
+        "ground_truth_units": n_planted,
     }
 
 

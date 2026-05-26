@@ -95,30 +95,41 @@ def test_regenerate_phase1_baseline(dj_conn):
     # NOTE: the pre-refactor baseline was originally captured with
     # ``outputs="sorting"`` and ``params_schema_version=1``. The v2
     # tri-part refactor dropped that field from
-    # ``ClusterlessThresholderSchema`` (now schema_version 2). The
-    # regen workflow recommends running this on pre-refactor tip
-    # code BEFORE the refactor lands -- if you are regenerating
-    # against a fresh checkout that already includes the schema
-    # edit, drop the ``outputs`` key and bump
-    # ``params_schema_version`` to 2 (already done below). The
-    # runtime strip path tolerates either shape, so the sort output
-    # is unchanged.
-    SorterParameters().insert1(
+    # ``ClusterlessThresholderSchema`` (schema_version 2), and a
+    # follow-up made ``noise_levels`` optional (schema_version 3,
+    # ``None`` -> SI computes per-channel MAD). The row below
+    # tracks the current schema_version (3) and intentionally
+    # OMITS ``noise_levels`` so the threshold is interpreted as a
+    # MAD multiplier on this synthetic fixture; without that the
+    # 5 uV raw threshold floods the detection with noise crossings.
+    # ``update1`` (not ``insert1(replace=True)``) because the
+    # persistent test DB may already carry SortingSelection rows
+    # from prior test runs that FK back to (sorter='clusterless_
+    # thresholder', sorter_params_name='default'); a replace would
+    # cascade-delete the parent row and fail with an FK integrity
+    # error. ``update1`` mutates the non-PK fields in place so the
+    # child rows stay valid.
+    from spyglass.spikesorting.v2._params.sorter import (
+        ClusterlessThresholderSchema,
+    )
+
+    smoke_params = ClusterlessThresholderSchema.model_validate(
+        {
+            "detect_threshold": 5.0,
+            "method": "locally_exclusive",
+            "peak_sign": "neg",
+            "exclude_sweep_ms": 0.1,
+            "local_radius_um": 100.0,
+        }
+    ).model_dump()
+    SorterParameters.update1(
         {
             "sorter": "clusterless_thresholder",
             "sorter_params_name": "default",
-            "params": {
-                "detect_threshold": 5.0,
-                "method": "locally_exclusive",
-                "peak_sign": "neg",
-                "exclude_sweep_ms": 0.1,
-                "local_radius_um": 100.0,
-            },
-            "params_schema_version": 2,
+            "params": smoke_params,
+            "params_schema_version": 3,
             "job_kwargs": None,
-        },
-        skip_duplicates=False,
-        replace=True,
+        }
     )
 
     try:
