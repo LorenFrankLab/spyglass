@@ -5940,7 +5940,13 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
             ),
         }
     ).fetch1("valid_times")
-    v2_valid_times = np.ascontiguousarray(v2_valid_times_raw, dtype="<f8")
+    # Canonicalize to ``(n_intervals, 2)`` and round to 1 ms -- see
+    # baseline_capture._compute_invariant_fingerprints for why
+    # (1-sample-at-end convention difference between v1 and v2).
+    v2_valid_times = np.round(
+        np.ascontiguousarray(v2_valid_times_raw, dtype="<f8").reshape(-1, 2),
+        decimals=3,
+    )
     v2_fingerprints = {
         "nwb_sha256": _hashlib.sha256(nwb_path.read_bytes()).hexdigest(),
         "sort_group_electrode_ids": sorted(

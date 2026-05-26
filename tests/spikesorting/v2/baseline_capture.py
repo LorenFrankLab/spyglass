@@ -371,7 +371,23 @@ def _compute_invariant_fingerprints(
             "interval_list_name": str(artifact_id),
         }
     ).fetch1("valid_times")
-    valid_times = np.ascontiguousarray(valid_times_raw, dtype="<f8")
+    # v1 stores ``valid_times`` as a 1D ``[start, end]`` for a single
+    # interval and 2D ``[[start, end], ...]`` for multiple intervals.
+    # v2 always stores 2D. Canonicalize both sides to ``(n_intervals,
+    # 2)`` so the fingerprint comparison is shape-agnostic.
+    #
+    # Round to nearest millisecond before fingerprinting. At 32 kHz
+    # one sample is 31.25 µs, and v1 ends its last interval at
+    # ``(n_samples - 1) / fs`` while v2 ends at ``n_samples / fs`` --
+    # a 1-sample boundary convention difference (~31 µs on the END
+    # only). 1 ms rounding absorbs that off-by-one without hiding
+    # multi-sample (>1 ms ⇒ >32 samples at 32 kHz) divergences. For
+    # higher sample rates the rounding is correspondingly tighter
+    # in samples (e.g. 1 ms = 30 samples at 30 kHz).
+    valid_times = np.round(
+        np.ascontiguousarray(valid_times_raw, dtype="<f8").reshape(-1, 2),
+        decimals=3,
+    )
     artifact_valid_times = _normalize(valid_times)
 
     canonical_sorter_params = canonical_sorter(

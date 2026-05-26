@@ -196,6 +196,11 @@ def assert_canonical_dict_equal(
 # Schema-only keys that v1's ``SpikeSorterParameters`` blob carries
 # but never reach the SI sorter call. Dropping them on both sides
 # keeps the fingerprint stable across the v1 / v2 schema asymmetry.
+#
+# ``schema_version`` is stamped by v2's Pydantic schema and absent
+# from v1; strip on both sides regardless of sorter.
+_SCHEMA_ONLY_SORTER_KEYS: frozenset[str] = frozenset({"schema_version"})
+
 _LEGACY_SORTER_KEYS: dict[str, frozenset[str]] = {
     "clusterless_thresholder": frozenset({"outputs", "random_chunk_kwargs"}),
     "mountainsort4": frozenset({"outputs"}),
@@ -216,7 +221,7 @@ def canonical_sorter(sorter: str, params: dict) -> dict:
     future sorter added to the parity matrix degrades gracefully
     until the canonical rules are extended.
     """
-    drop = _LEGACY_SORTER_KEYS.get(sorter, frozenset())
+    drop = _LEGACY_SORTER_KEYS.get(sorter, frozenset()) | _SCHEMA_ONLY_SORTER_KEYS
     cleaned = {k: v for k, v in params.items() if k not in drop}
     if sorter == "clusterless_thresholder":
         if cleaned.get("noise_levels", "__sentinel__") is None:
