@@ -162,13 +162,22 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
             "clusterless_thresholder",
             "default",
             _validate_params(
-                _get_sorter_schema("clusterless_thresholder"), {}
+                _get_sorter_schema("clusterless_thresholder"),
+                # ``noise_levels=[1.0]`` mirrors v1's
+                # ``default_clusterless`` at
+                # ``src/spyglass/spikesorting/v1/sorting.py:177``,
+                # making the shipped ``detect_threshold=100`` read
+                # as microvolts (raw amplitude) rather than as a
+                # MAD multiplier. The smoke / synthetic-fixture
+                # rows OMIT ``noise_levels`` so SI computes
+                # per-channel MAD and the threshold tracks the
+                # recording's noise floor.
+                {"noise_levels": [1.0]},
             ),
-            # ClusterlessThresholderSchema bumped to schema_version=2
-            # by dropping ``outputs`` and ``random_chunk_kwargs``;
-            # this row tracks the same version. Other sorter rows are
-            # unchanged at 1.
-            2,
+            # ClusterlessThresholderSchema is at schema_version=3:
+            # v2 dropped ``outputs`` / ``random_chunk_kwargs``;
+            # v3 made ``noise_levels`` optional (None -> SI MAD).
+            3,
             None,
         ),
     )
@@ -1054,17 +1063,20 @@ class Sorting(SpyglassMixin, dj.Computed):
         ``spikeinterface.sortingcomponents.peak_detection.detect_peaks``
         directly and wraps the result in a ``NumpySorting``.
 
-        ``noise_levels=[1.0]`` is DELIBERATELY forwarded so SI's
-        ``locally_exclusive`` interprets ``detect_threshold`` in
-        microvolts (not MAD multiples). Without it SI computes
-        per-channel MAD and a user's ``detect_threshold=100`` becomes
-        ~100xMAD on noisy channels, silently shifting detection ~5x.
-        Matches v1's deliberate choice at
-        ``v1/sorting.py:177,402-404``. The ``[1.0]`` singleton is
-        broadcast to length ``n_channels`` because SI 0.104's
-        ``locally_exclusive`` indexes ``noise_levels * detect_threshold``
-        per channel and the singleton would otherwise divide-by-zero
-        inside the numba kernel.
+        ``noise_levels`` handling: when the params row supplies a
+        non-``None`` value (e.g. ``default_clusterless`` ships
+        ``noise_levels=[1.0]``), SI's ``locally_exclusive`` interprets
+        ``detect_threshold`` in raw microvolts -- matching v1's choice
+        at ``v1/sorting.py:177``. A scalar (singleton list) is
+        broadcast to length ``n_channels`` because SI's
+        ``locally_exclusive`` indexes ``noise_levels[chan] *
+        detect_threshold`` per channel. When the params row omits
+        ``noise_levels`` (default in v2, and what the smoke /
+        synthetic-fixture rows do), SI computes per-channel MAD
+        internally and ``detect_threshold`` is interpreted as a MAD
+        multiplier -- which is what the v1 baseline-capture script
+        relies on for the ``smoke_clusterless_5uv`` row to find any
+        peaks on the MEArec fixture.
         """
         import numpy as _np
         import spikeinterface as si
@@ -1085,8 +1097,13 @@ class Sorting(SpyglassMixin, dj.Computed):
         for stale in ("outputs", "random_chunk_kwargs"):
             params.pop(stale, None)
 
-        if "noise_levels" in params:
-            nl = _np.asarray(params["noise_levels"], dtype=_np.float64)
+        nl_in = params.get("noise_levels")
+        if nl_in is None:
+            # Drop the key entirely so ``detect_peaks`` falls through to
+            # SI's per-channel MAD estimation path.
+            params.pop("noise_levels", None)
+        else:
+            nl = _np.asarray(nl_in, dtype=_np.float64)
             if nl.size == 1:
                 nl = _np.full(
                     recording.get_num_channels(),

@@ -239,9 +239,12 @@ def test_clusterless_default_matches_v1():
 
     ``ClusterlessThresholderSchema`` drops ``outputs`` and
     ``random_chunk_kwargs`` (both stripped at runtime in
-    ``Sorting._run_sorter``); ``noise_levels`` is kept because v1's
-    semantics depend on it. The blob shape now reflects v1's
-    runtime-relevant fields only.
+    ``Sorting._run_sorter``); ``noise_levels`` is now OPTIONAL --
+    callers who want raw-uV threshold semantics pass
+    ``noise_levels=[1.0]`` explicitly (mirroring v1's
+    ``default_clusterless``); callers who want MAD-multiplier
+    semantics omit it so SI computes per-channel noise internally.
+    The shipped v2 ``default`` row passes ``[1.0]`` for v1 parity.
     """
     blob = ClusterlessThresholderSchema().model_dump()
     assert blob["detect_threshold"] == 100.0
@@ -253,9 +256,12 @@ def test_clusterless_default_matches_v1():
     # invariants.
     assert "outputs" not in blob
     assert "random_chunk_kwargs" not in blob
-    # ``noise_levels`` stays because the runtime forwards it to
-    # detect_peaks.
-    assert blob["noise_levels"] == [1.0]
+    # ``noise_levels`` is now optional; schema default is None
+    # (SI computes per-channel MAD). Explicit ``[1.0]`` opt-in is
+    # the path the v2 production ``default`` row takes.
+    assert blob["noise_levels"] is None
+    explicit = ClusterlessThresholderSchema(noise_levels=[1.0]).model_dump()
+    assert explicit["noise_levels"] == [1.0]
 
 
 def test_generic_schema_accepts_arbitrary_kwargs():

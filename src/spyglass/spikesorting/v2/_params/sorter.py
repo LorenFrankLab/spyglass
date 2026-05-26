@@ -132,27 +132,31 @@ class ClusterlessThresholderSchema(BaseModel):
       v1 field had no effect in the prior strip-and-call path.
       Removed.
 
-    ``noise_levels`` STAYS on the schema. ``Sorting._run_sorter``
-    forwards ``noise_levels=[1.0]`` to ``detect_peaks`` so the user-
-    facing ``detect_threshold`` is in microvolts rather than being
-    interpreted as a MAD multiplier. See v1 evidence at
-    ``src/spyglass/spikesorting/v1/sorting.py:177,402-404``.
+    ``noise_levels`` defaults to ``None`` (omit from the
+    ``detect_peaks`` call), restoring SI's per-channel MAD
+    estimation as the default. Callers that want the user-facing
+    ``detect_threshold`` interpreted as raw microvolts must pass
+    ``noise_levels=[1.0]`` explicitly -- v1's ``default_clusterless``
+    row at ``src/spyglass/spikesorting/v1/sorting.py:177`` did
+    exactly this so its 100 uV threshold reads in microvolts. The
+    v2 shipping default mirrors that choice; rows tuned for
+    synthetic / low-amplitude fixtures (e.g. ``smoke_clusterless_5uv``)
+    leave ``noise_levels`` unset so the threshold is in MAD multiples
+    and tracks the recording's actual noise floor.
 
-    ``schema_version`` bumped to 2 to mark the field-drop. New rows
-    must not carry ``outputs`` / ``random_chunk_kwargs``;
-    ``extra="forbid"`` enforces this at insert time. Existing v1-
-    shaped rows on disk are tolerated by the runtime strip path in
-    ``Sorting._run_sorter``.
+    ``schema_version`` is 3: 2 dropped ``outputs`` /
+    ``random_chunk_kwargs``; 3 made ``noise_levels`` optional.
+    ``extra="forbid"`` enforces the field set at insert time.
     """
 
     model_config = ConfigDict(extra="forbid")
-    schema_version: int = 2
+    schema_version: int = 3
     detect_threshold: float = Field(default=100.0, gt=0.0)
     method: Literal["locally_exclusive", "global"] = "locally_exclusive"
     peak_sign: Literal["neg", "pos", "both"] = "neg"
     exclude_sweep_ms: float = Field(default=0.1, gt=0.0)
     local_radius_um: float = Field(default=100.0, gt=0.0)
-    noise_levels: list[float] = Field(default_factory=lambda: [1.0])
+    noise_levels: list[float] | None = Field(default=None)
 
 
 class SpykingCircus2Schema(BaseModel):
