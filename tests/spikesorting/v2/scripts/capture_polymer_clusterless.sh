@@ -35,6 +35,17 @@ BASE_ROOT=/tmp/spyglass-v1-base
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../../../.." && pwd)
 
+# ``conda run -n spyglass-v1-parity python`` resolves to the wrong env
+# on this host (CONDA_DEFAULT_ENV leakage from the parent shell makes
+# conda run pick spyglass-dlc instead). Invoke the env's python
+# directly to bypass the broken conda-run dispatch; override via
+# SPYGLASS_V1_PARITY_PYTHON if the env lives elsewhere.
+V1_PYTHON=${SPYGLASS_V1_PARITY_PYTHON:-/home/edeno/miniconda3/envs/spyglass-v1-parity/bin/python}
+if [ ! -x "$V1_PYTHON" ]; then
+  echo "ERROR: v1 python interpreter $V1_PYTHON not found or not executable." >&2
+  exit 1
+fi
+
 declare -A ABBREV=(
   [mearec_polymer_smoke]=smk
   [mearec_polymer_128ch_60s]=p60
@@ -50,13 +61,14 @@ for FIX in mearec_polymer_smoke mearec_polymer_128ch_60s; do
     mkdir -p "$BASE_DIR" "$OUT_DIR"
     tmux new-session -d -s "$SESSION" "
       cd '$REPO_ROOT' &&
-      conda run -n spyglass-v1-parity python \
+      '$V1_PYTHON' \
         tests/spikesorting/v2/baseline_capture.py \
         --nwb-file tests/spikesorting/v2/fixtures/${FIX}.nwb \
         --team-name v2_test_team \
         --interval-list-name 'raw data valid times' \
         --sort-group-id $SHANK \
         --sorter-param-name smoke_clusterless_5uv \
+        --artifact-param-name none \
         --database-prefix '$PREFIX' \
         --base-dir '$BASE_DIR' \
         --output-dir '$OUT_DIR' \

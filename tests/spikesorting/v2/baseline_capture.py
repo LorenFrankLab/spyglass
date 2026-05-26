@@ -84,6 +84,23 @@ def _ensure_sort_group(nwb_file_name: str, sort_group_id: int) -> None:
         )
 
 
+def _ensure_lab_team(team_name: str) -> None:
+    """Insert ``LabTeam(team_name)`` if missing under the active schema.
+
+    Each ``--database-prefix`` runs against a freshly-bootstrapped
+    DataJoint schema, so ``LabTeam`` is empty unless we insert here.
+    ``SpikeSortingRecordingSelection`` FKs ``team_name`` to
+    ``common_lab.lab_team(team_name)``, so the insert MUST happen
+    before ``_populate_recording``.
+    """
+    from spyglass.common.common_lab import LabTeam
+
+    LabTeam.insert1(
+        {"team_name": team_name, "team_description": "v1 baseline capture"},
+        skip_duplicates=True,
+    )
+
+
 def _populate_recording(
     nwb_file_name: str,
     sort_group_id: int,
@@ -117,8 +134,24 @@ def _populate_recording(
     return ssr_pk
 
 
-def _populate_artifact_detection(recording_id: str) -> dict:
-    """Populate ``ArtifactDetection`` with default params and return its PK."""
+def _populate_artifact_detection(
+    recording_id: str,
+    artifact_param_name: str = "default",
+) -> dict:
+    """Populate ``ArtifactDetection`` and return its PK.
+
+    Parameters
+    ----------
+    artifact_param_name : str, optional
+        Existing ``ArtifactDetectionParameters`` row name. Defaults to
+        ``"default"`` (v1: 3000 µV threshold). For the polymer parity
+        matrix pass ``"none"`` so the artifact stage is a typed
+        no-detect on both pipelines; v1's ``"default"`` and v2's
+        ``"default"`` rows ship different ``amplitude_thresh_uV`` (3000
+        vs 500 after the v1 unit-conversion bug fix), which would
+        otherwise FAIL the ``canonical_artifact_params`` fingerprint
+        check.
+    """
     from spyglass.spikesorting.v1 import (
         ArtifactDetection,
         ArtifactDetectionParameters,
@@ -128,7 +161,7 @@ def _populate_artifact_detection(recording_id: str) -> dict:
     ArtifactDetectionParameters().insert_default()
     selection_key = {
         "recording_id": recording_id,
-        "artifact_param_name": "default",
+        "artifact_param_name": artifact_param_name,
     }
     ArtifactDetectionSelection.insert_selection(selection_key)
     ArtifactDetection.populate(selection_key)
@@ -359,6 +392,7 @@ def run_baseline_capture(
     team_name: str,
     output_dir: Path,
     sorter_param_name: str = "default_clusterless",
+    artifact_param_name: str = "default",
 ) -> tuple[Path, Path]:
     """Run the full v1 pipeline on ``nwb_source`` and write baseline artifacts.
 
@@ -387,6 +421,7 @@ def run_baseline_capture(
         The two written artifacts.
     """
     nwb_file_name = copy_and_insert_nwb(nwb_source)
+    _ensure_lab_team(team_name)
     _ensure_sort_group(nwb_file_name, sort_group_id)
     recording_pk = _populate_recording(
         nwb_file_name=nwb_file_name,
@@ -394,7 +429,10 @@ def run_baseline_capture(
         interval_list_name=interval_list_name,
         team_name=team_name,
     )
-    artifact_pk = _populate_artifact_detection(recording_pk["recording_id"])
+    artifact_pk = _populate_artifact_detection(
+        recording_pk["recording_id"],
+        artifact_param_name=artifact_param_name,
+    )
     sorting_pk = _populate_sorting(
         nwb_file_name=nwb_file_name,
         recording_id=recording_pk["recording_id"],
@@ -442,7 +480,7 @@ def run_baseline_capture(
         sorter="clusterless_thresholder",
         sorter_param_name=sorter_param_name,
         preproc_param_name="default",
-        artifact_param_name="default",
+        artifact_param_name=artifact_param_name,
     )
 
     metadata = {
@@ -461,7 +499,7 @@ def run_baseline_capture(
         "sorter": "clusterless_thresholder",
         "sorter_param_name": sorter_param_name,
         "preproc_param_name": "default",
-        "artifact_param_name": "default",
+        "artifact_param_name": artifact_param_name,
         "spikeinterface_version": _pkg_version("spikeinterface"),
         "spyglass_version": _pkg_version("spyglass-neuro"),
         **fingerprints,
@@ -540,6 +578,19 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "production threshold). For synthetic fixtures with "
             "smaller template amplitudes (e.g. MEArec smoke), pre-"
             "insert a lower-threshold row and pass its name here."
+        ),
+    )
+    parser.add_argument(
+        "--artifact-param-name",
+        default="default",
+        help=(
+            "Name of the ArtifactDetectionParameters row to use. "
+            "Defaults to 'default' (v1: 3000 uV threshold). For the "
+            "polymer parity matrix pass 'none' so the artifact stage "
+            "is a typed no-detect on both pipelines -- v1's 'default' "
+            "and v2's 'default' rows differ in amplitude_thresh_uV "
+            "(3000 vs 500), which would FAIL the canonical_artifact_params "
+            "fingerprint check on synthetic fixtures with no real artifacts."
         ),
     )
     return parser.parse_args(argv)
@@ -630,6 +681,7 @@ def main(argv: list[str] | None = None) -> int:
         interval_list_name=args.interval_list_name,
         team_name=args.team_name,
         output_dir=Path(args.output_dir),
+        artifact_param_name=args.artifact_param_name,
         sorter_param_name=args.sorter_param_name,
     )
     return 0
