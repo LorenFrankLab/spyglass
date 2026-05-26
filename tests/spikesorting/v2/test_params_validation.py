@@ -264,6 +264,37 @@ def test_clusterless_default_matches_v1():
     assert explicit["noise_levels"] == [1.0]
 
 
+def test_clusterless_default_row_ships_noise_levels_one(dj_conn):
+    """The shipped ``clusterless_thresholder`` / ``default`` row has
+    ``noise_levels=[1.0]`` baked into ``params``.
+
+    Regression guard for the 1,400x noise_levels divergence: a
+    future refactor that silently drops ``{"noise_levels": [1.0]}``
+    from ``SorterParameters._DEFAULT_CONTENTS`` would let the v2
+    production default fall back to MAD-multiplier semantics, so
+    a user setting ``detect_threshold=100`` would silently get
+    ~100xMAD on noisy channels (a ~5x detection shift) instead of
+    the 100 uV raw-amplitude threshold the v1 ``default_clusterless``
+    row ships.
+    """
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    SorterParameters().insert_default()
+    row = (
+        SorterParameters
+        & {
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": "default",
+        }
+    ).fetch1()
+    assert row["params"]["detect_threshold"] == 100.0
+    assert row["params"]["noise_levels"] == [1.0], (
+        "Shipped clusterless `default` row dropped the explicit "
+        "noise_levels=[1.0] opt-in; production behavior has silently "
+        "regressed from raw-uV semantics to MAD-multiplier semantics."
+    )
+
+
 def test_generic_schema_accepts_arbitrary_kwargs():
     """The generic fallback accepts any payload (``extra='allow'``)."""
     blob = GenericSorterParamsSchema.model_validate(

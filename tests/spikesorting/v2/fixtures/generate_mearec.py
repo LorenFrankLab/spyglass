@@ -491,6 +491,10 @@ def _verify_ingestion(nwb_path: Path, spec: FixtureSpec) -> dict:
             "Source NWB missing sidecar ground-truth units table."
         )
         n_planted = int(len(gt_table.id[:]))
+        assert n_planted >= 1, (
+            "Sidecar ground-truth units table is empty; MEArec "
+            "simulation produced no planted units."
+        )
 
     return {
         "nwb_file_name": nwb_file_name,

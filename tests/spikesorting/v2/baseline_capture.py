@@ -291,6 +291,31 @@ def run_baseline_capture(
     curation_pk = _insert_curation(sorting_pk["sorting_id"])
 
     spike_times, sampling_frequency = _read_spike_times(curation_pk)
+
+    # Refuse to write an uninformative baseline. A zero-unit or
+    # all-empty-units bundle cannot serve as a v2 parity reference
+    # (the parity test rejects it downstream, but failing here
+    # avoids committing a useless artifact and gives the operator
+    # an immediate signal that the sort parameters need tuning).
+    if not spike_times:
+        raise RuntimeError(
+            "baseline_capture: v1 sort produced zero units on "
+            f"{nwb_source.name} with sorter_param_name="
+            f"{sorter_param_name!r}. Refusing to write a useless "
+            "baseline. Lower the detection threshold (or pass a "
+            "smoke-friendly --sorter-param-name) and re-run."
+        )
+    empty_units = sorted(
+        int(uid) for uid, times in spike_times.items() if len(times) == 0
+    )
+    if empty_units:
+        raise RuntimeError(
+            "baseline_capture: v1 sort produced unit(s) with zero "
+            f"spikes: {empty_units}. A baseline with empty units "
+            "would make the per-unit parity drift check vacuous. "
+            "Re-run on a longer / higher-amplitude segment."
+        )
+
     duration_s = max(
         (times[-1] for times in spike_times.values() if len(times)),
         default=0.0,
@@ -395,6 +420,58 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _ensure_smoke_sorter_param_row(sorter_param_name: str) -> None:
+    """Refresh the smoke-fixture ``clusterless_thresholder`` row.
+
+    Frank-lab's 100 uV default rejects every peak the synthetic
+    MEArec smoke fixture produces (its templates max out around a
+    few uV); without a calibrated row the v1 sort produces zero
+    units and the curation step crashes on the empty units table.
+    A 5 uV threshold reliably surfaces planted peaks while staying
+    above the simulator's noise floor.
+
+    Always deletes any existing row with the same name before
+    inserting -- a stale row from an earlier capture (possibly
+    written with different ``noise_levels`` / ``detect_threshold``
+    semantics under a prior schema) would silently be reused and
+    flip the v1 baseline's contract without the caller knowing.
+    The v2 parity test does the same delete-then-insert dance for
+    the same reason.
+    """
+    import datajoint as dj
+
+    from spyglass.spikesorting.v1 import SpikeSorterParameters
+    from tests.spikesorting.v2._smoke_constants import (
+        SMOKE_CLUSTERLESS_PARAMS,
+    )
+
+    key = {
+        "sorter": "clusterless_thresholder",
+        "sorter_param_name": sorter_param_name,
+    }
+    existing = SpikeSorterParameters & key
+    if existing:
+        prior_safemode = dj.config.get("safemode", True)
+        dj.config["safemode"] = False
+        try:
+            existing.delete()
+        finally:
+            dj.config["safemode"] = prior_safemode
+    # ``noise_levels`` intentionally omitted so SI 0.99 computes it
+    # from the recording itself; passing a Python list fails inside
+    # SI's ``detect_peaks`` with ``can't multiply sequence by
+    # non-int of type 'float'``. v1's ``SpikeSorterParameters``
+    # schema also expects the legacy ``outputs`` / ``random_chunk_kwargs``
+    # keys that v2's pydantic-validated schema drops; supply them
+    # here only.
+    v1_payload = dict(SMOKE_CLUSTERLESS_PARAMS)
+    v1_payload.update({"outputs": "sorting", "random_chunk_kwargs": {}})
+    SpikeSorterParameters().insert1(
+        {**key, "sorter_params": v1_payload},
+        skip_duplicates=False,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point: bootstrap the test environment and run the v1 baseline."""
     args = _parse_args(argv)
@@ -440,46 +517,6 @@ def main(argv: list[str] | None = None) -> int:
         sorter_param_name=args.sorter_param_name,
     )
     return 0
-
-
-def _ensure_smoke_sorter_param_row(sorter_param_name: str) -> None:
-    """Insert a low-threshold clusterless_thresholder row if absent.
-
-    Frank-lab's 100 uV default rejects every peak the synthetic
-    MEArec smoke fixture produces (its templates max out around
-    a few uV); without a calibrated row the v1 sort produces zero
-    units and the curation step crashes on the empty units table.
-    A 5 uV threshold reliably surfaces planted peaks while staying
-    above the simulator's noise floor.
-    """
-    from spyglass.spikesorting.v1 import SpikeSorterParameters
-
-    existing = SpikeSorterParameters & {
-        "sorter": "clusterless_thresholder",
-        "sorter_param_name": sorter_param_name,
-    }
-    if existing:
-        return
-    # ``noise_levels`` intentionally omitted so SI 0.99 computes it
-    # from the recording itself; passing a Python list fails inside
-    # SI's ``detect_peaks`` with ``can't multiply sequence by
-    # non-int of type 'float'``.
-    SpikeSorterParameters().insert1(
-        {
-            "sorter": "clusterless_thresholder",
-            "sorter_param_name": sorter_param_name,
-            "sorter_params": {
-                "detect_threshold": 5.0,
-                "method": "locally_exclusive",
-                "peak_sign": "neg",
-                "exclude_sweep_ms": 0.1,
-                "local_radius_um": 100,
-                "outputs": "sorting",
-                "random_chunk_kwargs": {},
-            },
-        },
-        skip_duplicates=True,
-    )
 
 
 if __name__ == "__main__":

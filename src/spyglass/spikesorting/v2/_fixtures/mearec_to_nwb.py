@@ -4,10 +4,14 @@ The output is structurally identical to a ``trodes_to_nwb``-produced NWB so that
 Spyglass's ``insert_sessions`` ingests it end to end: one ``ndx_franklab_novela``
 ``Probe`` device, one ``NwbElectrodeGroup`` for the whole probe, an electrode
 table carrying the novela columns ``Electrode.make()`` consumes, and an
-``ElectricalSeries`` named ``"e-series"``. A ground-truth ``units`` table -- not
-part of normal ``trodes_to_nwb`` output -- is added so the simulation's planted
-spikes can be imported with ``ImportedSpikeSorting`` and used as a sort-accuracy
-oracle.
+``ElectricalSeries`` named ``"e-series"``. A ground-truth ``Units`` table -- not
+part of normal ``trodes_to_nwb`` output -- is added in a SIDECAR
+``ProcessingModule("ground_truth")`` so the simulation's planted spikes are
+readable via :func:`get_ground_truth_units_table` for sort-accuracy oracles.
+Keeping planted units OUT of ``nwbfile.units`` leaves the canonical units slot
+free for real sorter outputs (the v1 baseline-capture path writes to
+``nwbfile.units`` directly and would fail HDMF's "units already set" guard
+otherwise).
 
 The electrode/probe layout mirrors the Frank-lab reference probe metadata
 (``trodes_to_nwb`` ``device_metadata/probe_metadata``). The recording traces are

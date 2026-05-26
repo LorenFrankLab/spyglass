@@ -171,6 +171,13 @@ addopts = [
   "--cov=spyglass",
   "--cov-report=term-missing",
   "--no-cov-on-fail",
+  # ``regenerate`` tests write large on-disk baseline bundles and
+  # MUST NOT run in the default suite -- a path-selected default
+  # run would silently overwrite committed baselines and any
+  # subsequent comparison gate would compare today's output to
+  # today's output (gate becomes a no-op). Opt in with
+  # ``-m regenerate`` to deliberately regenerate.
+  "-m", "not regenerate",
 ]
 testpaths = [ "tests" ]
 log_level = "INFO"

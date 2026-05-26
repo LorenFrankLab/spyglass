@@ -83,6 +83,16 @@ def phase1_baseline_artifacts():
     populate request ``dj_conn`` and ``polymer_60s_session`` alongside
     this fixture; this one is the cheap-load layer.
 
+    **Local / manual gate, not a CI gate.** Only the lightweight
+    ``MANIFEST.json`` + ``stage_metrics.json`` are committed; the
+    heavy ``.npz`` / ``.pkl`` payloads are gitignored. CI runs
+    therefore skip every test that depends on this fixture (the
+    bundle is "not present"). To exercise the gate locally,
+    regenerate the bundle on pre-refactor tip via
+    ``pytest tests/spikesorting/v2/test_phase1_baseline_regen.py
+    -m regenerate`` (the ``regenerate`` marker is excluded by
+    default in ``pyproject.toml``).
+
     Skipped with a clear pointer to the regen workflow if the bundle is
     missing or if the captured SI / NumPy / pynwb versions diverge from
     the current environment. Version drift would invalidate the

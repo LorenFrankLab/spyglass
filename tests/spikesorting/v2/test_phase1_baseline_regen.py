@@ -112,15 +112,12 @@ def test_regenerate_phase1_baseline(dj_conn):
     from spyglass.spikesorting.v2._params.sorter import (
         ClusterlessThresholderSchema,
     )
+    from tests.spikesorting.v2._smoke_constants import (
+        SMOKE_CLUSTERLESS_PARAMS,
+    )
 
     smoke_params = ClusterlessThresholderSchema.model_validate(
-        {
-            "detect_threshold": 5.0,
-            "method": "locally_exclusive",
-            "peak_sign": "neg",
-            "exclude_sweep_ms": 0.1,
-            "local_radius_um": 100.0,
-        }
+        SMOKE_CLUSTERLESS_PARAMS
     ).model_dump()
     SorterParameters.update1(
         {

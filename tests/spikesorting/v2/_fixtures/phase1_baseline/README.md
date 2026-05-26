@@ -1,10 +1,20 @@
-# Phase 1 baseline bundle (local-only)
+# Pre-refactor baseline bundle (local-only)
 
 This directory holds reference artifacts captured by running the v2 spike-sorting
-pipeline against the 60s MEArec polymer fixture on unmodified Phase 1 code.
-The Phase 1b validation slice compares the post-refactor pipeline output to
-these artifacts on deterministic paths (the `Recording` trace + timestamps and
+pipeline against the 60s MEArec polymer fixture on unmodified pre-refactor code.
+The validation slice compares the post-refactor pipeline output to these
+artifacts on deterministic paths (the `Recording` trace + timestamps and
 `clusterless_thresholder` spike samples).
+
+> **CI gating reality.** Only the lightweight `MANIFEST.json` and
+> `stage_metrics.json` are committed; the heavy `.npz` / `.pkl` payloads are
+> gitignored. Default CI therefore **skips** every test that depends on the
+> `phase1_baseline_artifacts` fixture. This is a **local / manual** regression
+> gate: a developer regenerates the bundle on pre-refactor tip, runs the
+> dependent validation tests locally to confirm bit-equivalence, then commits
+> the refactor. CI re-runs the `phase1_baseline_consumer` smoke checks
+> (which load the small metadata files) but cannot exercise the full
+> trace/spike-time comparison without the heavy artifacts.
 
 ## What's committed vs local
 

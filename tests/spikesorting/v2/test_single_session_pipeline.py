@@ -1958,25 +1958,22 @@ def test_clusterless_thresholder_end_to_end(polymer_smoke_session):
         sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
     )
 
-    # Insert a clusterless row tuned for the smoke fixture's amplitude
-    # distribution. MEArec template amplitudes on this fixture are
-    # smaller than typical lab data; a 5 uV threshold reliably surfaces
-    # planted spikes for the 4s smoke recording.
-    custom_params_name = "smoke_clusterless_5uv"
-    # ``ClusterlessThresholderSchema`` rejects ``outputs`` and
-    # ``random_chunk_kwargs`` via extra="forbid", so the test
-    # params dict must not carry them.
+    # Insert the smoke-fixture sort row from the shared constants
+    # so any future param tweak lands in one place
+    # (tests/spikesorting/v2/_smoke_constants.py) and the v1
+    # baseline-capture + v2 pipeline + parity test all stay in
+    # lockstep.
+    from tests.spikesorting.v2._smoke_constants import (
+        SMOKE_CLUSTERLESS_PARAM_NAME,
+        SMOKE_CLUSTERLESS_PARAMS,
+    )
+
+    custom_params_name = SMOKE_CLUSTERLESS_PARAM_NAME
     SorterParameters().insert1(
         {
             "sorter": "clusterless_thresholder",
             "sorter_params_name": custom_params_name,
-            "params": {
-                "detect_threshold": 5.0,
-                "method": "locally_exclusive",
-                "peak_sign": "neg",
-                "exclude_sweep_ms": 0.1,
-                "local_radius_um": 100.0,
-            },
+            "params": dict(SMOKE_CLUSTERLESS_PARAMS),
             "params_schema_version": 3,
             "job_kwargs": None,
         },
@@ -2862,17 +2859,15 @@ def test_run_v2_pipeline_clusterless_preset(polymer_smoke_session):
     # ``SorterParameters.insert1`` validates through Pydantic
     # first, so the v1-era ``outputs`` key would fail at insert
     # time.
+    from tests.spikesorting.v2._smoke_constants import (
+        SMOKE_CLUSTERLESS_PARAMS,
+    )
+
     SorterParameters().insert1(
         {
             "sorter": "clusterless_thresholder",
             "sorter_params_name": "default",
-            "params": {
-                "detect_threshold": 5.0,
-                "method": "locally_exclusive",
-                "peak_sign": "neg",
-                "exclude_sweep_ms": 0.1,
-                "local_radius_um": 100.0,
-            },
+            "params": dict(SMOKE_CLUSTERLESS_PARAMS),
             "params_schema_version": 3,
             "job_kwargs": None,
         },
@@ -5756,18 +5751,30 @@ def test_v2_real_data_v1_parity():
     # this guard the test fails opaquely with a missing-row
     # ValueError instead of producing the spike-count signal the
     # parity comparison is supposed to expose.
-    sorter_params_name = meta.get(
-        "sorter_param_name", "default_clusterless"
+    # Map v1's row-name conventions to v2's equivalents. v1 ships
+    # ``preproc_param_name="default"`` / ``sorter_param_name=
+    # "default_clusterless"``; v2 ships ``preproc_params_name=
+    # "default_franklab"`` / ``sorter_params_name="default"``. The
+    # smoke row (``smoke_clusterless_5uv``) is consistently named
+    # across both pipelines. Custom names that the lab user picks
+    # are honored verbatim (fall-through in the mapping helpers).
+    from tests.spikesorting.v2._smoke_constants import (
+        SMOKE_CLUSTERLESS_PARAM_NAME,
+        SMOKE_CLUSTERLESS_PARAMS,
+        v2_preproc_name_for_v1,
+        v2_sorter_name_for_v1,
     )
-    if sorter_params_name != "default_clusterless":
+
+    sorter_params_name = v2_sorter_name_for_v1(
+        meta.get("sorter_param_name", "default_clusterless")
+    )
+    if sorter_params_name == SMOKE_CLUSTERLESS_PARAM_NAME:
         # Use delete-then-insert (not skip_duplicates=True) because a
-        # stale row left over from an earlier test run -- especially
-        # one captured under the old schema where ``noise_levels``
-        # defaulted to ``[1.0]`` -- would silently shadow this
-        # insert and flip the threshold's semantic meaning back to
-        # raw uV, producing a ~1,400x spike-count divergence vs the
-        # v1 baseline. Cautious delete + re-insert guarantees the
-        # row matches the schema version this test was written for.
+        # stale row left over from an earlier test run could silently
+        # shadow this insert and flip the threshold's semantic meaning
+        # (the historical noise_levels=[1.0] regression injected raw-uV
+        # semantics; a delete-then-insert guarantees the row matches
+        # the schema version this test was written for).
         import datajoint as _dj
 
         existing = SorterParameters & {
@@ -5785,25 +5792,14 @@ def test_v2_real_data_v1_parity():
             {
                 "sorter": "clusterless_thresholder",
                 "sorter_params_name": sorter_params_name,
-                # 5x-MAD threshold mirrors baseline_capture's
-                # smoke row. ``noise_levels`` is OMITTED so SI
-                # computes per-channel MAD and ``detect_threshold``
-                # is interpreted as a multiplier of MAD -- matching
-                # how the v1 baseline-capture row is built.
-                # Forwarding ``[1.0]`` here would silently flip the
-                # semantics to raw uV and produce ~1,400x more
-                # detections than v1.
-                "params": {
-                    "detect_threshold": 5.0,
-                    "method": "locally_exclusive",
-                    "peak_sign": "neg",
-                    "exclude_sweep_ms": 0.1,
-                    "local_radius_um": 100.0,
-                },
+                # Smoke params shared with baseline_capture via
+                # _smoke_constants; ``noise_levels`` is omitted so
+                # SI computes per-channel MAD on both sides.
+                "params": dict(SMOKE_CLUSTERLESS_PARAMS),
                 "params_schema_version": 3,
                 "job_kwargs": None,
             },
-            skip_duplicates=True,
+            skip_duplicates=False,
         )
     LabTeam.insert1(
         {"team_name": meta["team_name"], "team_description": "v1 parity"},
@@ -5818,20 +5814,8 @@ def test_v2_real_data_v1_parity():
     ):
         SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
 
-    # v1 ships ``"default"`` preproc params; v2 ships
-    # ``"default_franklab"`` (the v2-named equivalent: bandpass +
-    # common_reference under v2's Pydantic schema). If the baseline
-    # meta declares ``"default"`` we map it to ``"default_franklab"``
-    # so the v2 pipeline runs the equivalent preprocessing; any
-    # other meta value is used verbatim so a user can capture a
-    # baseline against a non-default preset and expect v2 to honor
-    # it. Hardcoding ``"default_franklab"`` (the previous bug) made
-    # the test sort under the v2 default regardless of what the
-    # baseline used.
-    v1_to_v2_preproc = {"default": "default_franklab"}
-    preproc_name_meta = meta.get("preproc_param_name", "default")
-    preproc_name_v2 = v1_to_v2_preproc.get(
-        preproc_name_meta, preproc_name_meta
+    preproc_name_v2 = v2_preproc_name_for_v1(
+        meta.get("preproc_param_name", "default")
     )
 
     rec_pk = RecordingSelection.insert_selection(
@@ -5928,10 +5912,21 @@ def test_v2_real_data_v1_parity():
             f"unit {uid}: v1 baseline has zero spikes -- per-unit "
             "drift check is meaningless. Regenerate baseline."
         )
+        # Defend against ``v2_arr.size == 0`` (a regression that
+        # drops every detection); ``np.searchsorted`` would yield
+        # ``idx_left = idx_right = 0`` and the indexed read would
+        # raise ``IndexError`` with a stack trace instead of the
+        # diagnostic message this assertion is supposed to surface.
+        if v2_arr.size == 0:
+            pytest.fail(
+                f"unit {uid}: v1 has {v1_arr.size} spikes, v2 "
+                "detected zero; nearest-neighbor match impossible. "
+                "Regression in v2 sort path."
+            )
         tol_s = threshold_samples * one_sample_s
         idx = np.searchsorted(v2_arr, v1_arr)
-        idx_left = np.clip(idx - 1, 0, max(0, v2_arr.size - 1))
-        idx_right = np.clip(idx, 0, max(0, v2_arr.size - 1))
+        idx_left = np.clip(idx - 1, 0, v2_arr.size - 1)
+        idx_right = np.clip(idx, 0, v2_arr.size - 1)
         left_diff = np.abs(v1_arr - v2_arr[idx_left])
         right_diff = np.abs(v1_arr - v2_arr[idx_right])
         nearest_diff = np.minimum(left_diff, right_diff)
