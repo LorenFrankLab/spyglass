@@ -246,8 +246,8 @@ def _read_spike_times(curation_key: dict) -> tuple[dict, float]:
 
     from spyglass.spikesorting.v1 import (
         CurationV1,
-        SpikeSorting,
         SpikeSortingRecording,
+        SpikeSortingSelection,
     )
 
     sorting = CurationV1.get_sorting(curation_key)
@@ -260,10 +260,12 @@ def _read_spike_times(curation_key: dict) -> tuple[dict, float]:
     # ``spikesorting_v1_recording`` schema accumulates >1 row (which
     # happens immediately on the second capture against the shared
     # schema, see ``capture_polymer_clusterless.sh`` concurrency note).
-    # Resolve recording_id explicitly via SpikeSorting (which IS keyed
-    # by sorting_id) and pass the recording_id pk to get_recording.
+    # Resolve recording_id explicitly via SpikeSortingSelection (which
+    # IS keyed by sorting_id and carries the recording_id FK in its
+    # secondary attributes) and pass the recording_id PK to
+    # ``get_recording``.
     recording_id = (
-        SpikeSorting & {"sorting_id": curation_key["sorting_id"]}
+        SpikeSortingSelection & {"sorting_id": curation_key["sorting_id"]}
     ).fetch1("recording_id")
     recording = SpikeSortingRecording.get_recording(
         {"recording_id": recording_id}
