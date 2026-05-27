@@ -87,6 +87,14 @@ class FixtureSpec:
     drifting: bool
     drift_um_per_min: float
     seed: int
+    # Optional overrides for MEArec's template-placement / amplitude
+    # constraints. The defaults work for polymer and Neuropixels-scale
+    # probes but reject ALL cell positions on a tetrode (single
+    # ``contact_size=12.5`` probe with spatial extent < 30 µm).
+    # Per-fixture override: e.g. ``{"min_amp": 20, "ylim": [-60, 60],
+    # "zlim": [-60, 60]}`` opens the placement volume for tiny probes.
+    # ``None`` leaves MEArec's defaults untouched.
+    templates_overrides: dict | None = None
 
 
 @dataclass
@@ -180,6 +188,16 @@ def _profiles() -> dict[str, tuple[GenProfile, tuple[FixtureSpec, ...]]]:
                 # detectable spikes. 4 exc + 1 inh is a realistic upper
                 # bound for what a single tetrode could record from in vivo;
                 # too many planted units would just stack noise.
+                #
+                # ``templates_overrides``: MEArec's default placement
+                # constraints (``ylim=None, zlim=None``) auto-fit the
+                # probe's spatial extent + 30 µm overhang. For a tetrode
+                # at ±6.25 µm that's a ~75 µm cube and ``min_amp=30``,
+                # which rejects all candidate cell positions (verified:
+                # ``0 EAPs in 5.4s`` on the first attempt). Open the
+                # placement volume to ±60 µm and drop ``min_amp`` to
+                # 20 µV so MEArec can place ~10 candidate cells per
+                # model in a tetrode-realistic in-vivo spatial regime.
                 FixtureSpec(
                     name="mearec_tetrode_60s",
                     layout=tetrode,
@@ -189,6 +207,11 @@ def _profiles() -> dict[str, tuple[GenProfile, tuple[FixtureSpec, ...]]]:
                     drifting=False,
                     drift_um_per_min=0.0,
                     seed=3,
+                    templates_overrides={
+                        "ylim": [-60, 60],
+                        "zlim": [-60, 60],
+                        "min_amp": 20,
+                    },
                 ),
             ),
         ),
@@ -279,6 +302,7 @@ def _generate_templates(
     *,
     drifting: bool,
     seed: int,
+    overrides: dict | None = None,
 ) -> None:
     """Generate (or reuse) a biophysical template library for a probe.
 
@@ -308,6 +332,10 @@ def _generate_templates(
     params["n"] = profile.n_templates_per_model
     params["seed"] = seed
     params["drifting"] = drifting
+    # Per-spec overrides for placement-volume / amplitude constraints
+    # (needed for small probes; see FixtureSpec.templates_overrides).
+    if overrides:
+        params.update(overrides)
 
     cell_models_folder = _cell_models_folder()
     # The bundled cell models ship as .mod source; compile them into a shared
@@ -619,6 +647,7 @@ def generate_fixtures(
             templates_h5,
             drifting=spec.drifting,
             seed=spec.seed,
+            overrides=spec.templates_overrides,
         )
         _generate_recording(spec, templates_h5, recording_h5)
 

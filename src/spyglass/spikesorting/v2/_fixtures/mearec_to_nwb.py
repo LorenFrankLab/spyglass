@@ -192,8 +192,19 @@ def tetrode_probe_layout() -> ProbeLayout:
     Mirrors the canonical metadata at
     https://github.com/LorenFrankLab/trodes_to_nwb/blob/main/src/trodes_to_nwb/device_metadata/probe_metadata/tetrode_12.5.yml :
     one shank with 4 wire-electrode contacts arranged in a square
-    at ±6.25 µm in x and z (rel_y = 0 for all). 12.5 µm contact size,
-    contact_side_numbering = true.
+    at ±6.25 µm pitch. 12.5 µm contact size, ``contact_side_numbering = true``.
+
+    **Axis convention note**: trodes_to_nwb's YAML uses ``rel_y=0`` with
+    varying ``rel_z`` (probe in XZ plane, normal = +Y). MEArec/MEAutility
+    expect probes in the XY plane (``rel_z=0``, normal = +Z) -- e.g.
+    :func:`polymer_probe_layout` and :func:`neuropixels_probe_layout`
+    both follow this. A probe with ``rel_z≠0`` raises
+    ``TypeError: 'NoneType' object is not subscriptable`` deep inside
+    MEAutility because ``electrode.normal`` is never computed. We
+    therefore swap the YAML's ``rel_y`` and ``rel_z``: same 2D square
+    geometry, axes renamed to MEArec's expected frame. The committed
+    NWB writes the same channel positions either way (Spyglass reads
+    ``rel_x``/``rel_y``/``rel_z`` symmetrically).
 
     Single sort group (sort_group_id = 0), 4 channels. The narrow
     spatial extent means only units within ~30 µm of the tetrode
@@ -203,16 +214,17 @@ def tetrode_probe_layout() -> ProbeLayout:
     Returns
     -------
     ProbeLayout
-        1 shank × 4 contacts, square geometry.
+        1 shank × 4 contacts, square geometry in the XY plane.
     """
     half = _TETRODE_HALF_PITCH_UM
-    # Order matches the YAML's id sequence: 0 (+x, +z), 1 (-x, +z),
-    # 2 (-x, -z), 3 (+x, -z).
+    # Order matches the YAML's id sequence: 0 (+x, +y), 1 (-x, +y),
+    # 2 (-x, -y), 3 (+x, -y). rel_z=0 to put the probe in the XY plane
+    # (MEArec convention) -- see docstring's "Axis convention note".
     positions = [
-        (+half, 0.0, +half),
-        (-half, 0.0, +half),
-        (-half, 0.0, -half),
-        (+half, 0.0, -half),
+        (+half, +half, 0.0),
+        (-half, +half, 0.0),
+        (-half, -half, 0.0),
+        (+half, -half, 0.0),
     ]
     contacts = tuple(
         ProbeContact(
