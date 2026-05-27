@@ -78,13 +78,65 @@ MS4_60S_POLYMER_PARAMS: dict = {
 #: MS4 is stochastic (no seed control) AND its SI wrapper rewrote
 #: between 0.99 → 0.104 (the C++ MS4 1.0.7 binary itself is byte-
 #: identical across envs; differences come from SI-side wrapping).
-#: Phase B11 calibration tightens this after measuring within-version
-#: variance via the B10 repeat-run protocol.
+#: Superseded by :data:`MS4_CALIBRATED` after Phase B11 measurement;
+#: kept for reference.
 MS4_BROAD_TRIAGE: dict = {
     "n_units_rel_band": 0.50,
     "n_units_abs_band": 2,
     "median_fr_rel_band": 0.30,
 }
+
+#: Phase B11 calibration of MS4 within-version variance, measured on
+#: ``mearec_polymer_128ch_60s`` shanks 0 and 2 via the B10 protocol
+#: (2 runs per side per shank). Schema:
+#:
+#:     {(fixture_stem, "ms4", shank): {kind: {"d_n_units": int,
+#:                                            "d_median_fr_hz": float}}}
+#:
+#: kinds: ``"v1v1"`` (v1↔v1 drift, deterministic), ``"v2v2"`` (v2↔v2
+#: drift), ``"v1v2_max"`` (max(v1↔v2) across paired runs).
+#:
+#: Key observation: v1 MS4 is deterministic on this fixture (run-to-
+#: run drift = 0 in both n_units and median_fr); v2 MS4 has a small
+#: stochasticity (≤ 1 unit; ≤ 0.74 Hz, i.e. ≤ 3% of median_fr). MS4's
+#: C++ binary is byte-identical across envs (1.0.7); v2's drift comes
+#: from SI 0.104's wrapper (possibly the rewritten get_noise_levels
+#: per SI PR #3359 or threadpool ordering under the new pool engine).
+MS4_VARIANCE_TABLE: dict[tuple[str, str, int], dict] = {
+    ("mearec_polymer_128ch_60s", "ms4", 0): {
+        "v1v1": {"d_n_units": 0, "d_median_fr_hz": 0.0000},
+        "v2v2": {"d_n_units": 1, "d_median_fr_hz": 0.7416},
+        "v1v2_max": {"d_n_units": 1, "d_median_fr_hz": 0.7416},
+    },
+    ("mearec_polymer_128ch_60s", "ms4", 2): {
+        "v1v1": {"d_n_units": 0, "d_median_fr_hz": 0.0000},
+        "v2v2": {"d_n_units": 1, "d_median_fr_hz": 0.2667},
+        "v1v2_max": {"d_n_units": 1, "d_median_fr_hz": 0.2667},
+    },
+}
+
+#: Calibrated MS4 parity bands derived from :data:`MS4_VARIANCE_TABLE`
+#: per the Phase B11 rule ``band = max(v1v1, v2v2) + fixed_margin``
+#: where ``fixed_margin = (1 unit, 5 percentage points FR)``:
+#:
+#:   * n_units: max(0, 1) drift + 1-unit margin = 2 absolute (5% of
+#:     40-unit shank 0; 4.2% of 48-unit shank 2). The relative band
+#:     is set to 10% to absorb across-shank variation a bit.
+#:   * median_fr: max(0%, 3.04% rel drift on s0) + 5pp = 8.04% rel,
+#:     rounded up to 10% for headroom.
+#:
+#: Substantially tighter than :data:`MS4_BROAD_TRIAGE` (was 50% / 30%);
+#: replaces it as the active MS4 contract.
+MS4_CALIBRATED: dict = {
+    "n_units_rel_band": 0.10,
+    "n_units_abs_band": 2,
+    "median_fr_rel_band": 0.10,
+}
+
+#: Active MS4 parity band set. Tests should reference this constant
+#: rather than picking between BROAD/CALIBRATED so the active band
+#: lives in one place.
+MS4_BANDS: dict = MS4_CALIBRATED
 
 #: v1 -> v2 ``preproc_param_name`` translation for shipped default
 #: rows. v1's ``"default"`` is the bandpass + common_reference

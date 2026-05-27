@@ -6214,14 +6214,17 @@ def test_v2_real_data_v1_parity_mountainsort4(
     chunking, parameter forwarding) layered on top.
 
     Contract: aggregate bands (NOT per-spike, unlike clusterless),
-    initial broad triage from
-    :data:`tests.spikesorting.v2._smoke_constants.MS4_BROAD_TRIAGE`:
+    sourced from
+    :data:`tests.spikesorting.v2._smoke_constants.MS4_BANDS`. After
+    Phase B11 calibration on shanks 0 and 2 (two repeats per side)
+    these are:
 
-    * ``|v2_n_units - v1_n_units| ≤ max(50% of v1_n_units, 2)``
-    * ``|v2_median_fr - v1_median_fr| / v1_median_fr ≤ 30%`` (rel)
+    * ``|v2_n_units - v1_n_units| ≤ max(10% of v1_n_units, 2)``
+    * ``|v2_median_fr - v1_median_fr| / v1_median_fr ≤ 10%`` (rel)
 
-    Phase B11 calibration tightens these bands once we measure the
-    within-version repeat-run drift (the B10 protocol).
+    See :data:`MS4_VARIANCE_TABLE` for the calibration measurements
+    (v1v1 drift = 0 on both shanks → MS4 deterministic on v1; v2v2
+    drift ≤ 1 unit / 0.74 Hz ≤ 3% of median_fr).
 
     Env vars / SKIP semantics: same as :func:`test_v2_real_data_v1_parity`
     plus a SKIP-env-unavailable when MS4 is not installed in v2's
@@ -6239,7 +6242,7 @@ def test_v2_real_data_v1_parity_mountainsort4(
         EXPECTED_DEGENERATE_CASES,
         MS4_60S_POLYMER_PARAM_NAME,
         MS4_60S_POLYMER_PARAMS,
-        MS4_BROAD_TRIAGE,
+        MS4_BANDS,
     )
 
     # MS4 install gate (v2 side; v1 install is checked at capture time).
@@ -6536,24 +6539,26 @@ def test_v2_real_data_v1_parity_mountainsort4(
         f"  v2: n_units={v2_n}, median_fr={v2_fr:.3f} Hz"
     )
 
-    # MS4_BROAD_TRIAGE bands. Phase B11 tightens these post-calibration.
+    # MS4_BANDS = MS4_CALIBRATED post-Phase B11 (n_units ± 10% or
+    # ± 2, median_fr ± 10% rel). See MS4_VARIANCE_TABLE for the
+    # calibration measurements.
     n_band = max(
-        v1_n * MS4_BROAD_TRIAGE["n_units_rel_band"],
-        MS4_BROAD_TRIAGE["n_units_abs_band"],
+        v1_n * MS4_BANDS["n_units_rel_band"],
+        MS4_BANDS["n_units_abs_band"],
     )
-    fr_band_abs = abs(v1_fr * MS4_BROAD_TRIAGE["median_fr_rel_band"])
+    fr_band_abs = abs(v1_fr * MS4_BANDS["median_fr_rel_band"])
     failures = []
     if abs(v2_n - v1_n) > n_band:
         failures.append(
             f"n_units divergence: |v2_n({v2_n}) - v1_n({v1_n})|={abs(v2_n - v1_n)} "
-            f"> band={n_band} (rel={MS4_BROAD_TRIAGE['n_units_rel_band']:.0%} "
-            f"abs={MS4_BROAD_TRIAGE['n_units_abs_band']})."
+            f"> band={n_band} (rel={MS4_BANDS['n_units_rel_band']:.0%} "
+            f"abs={MS4_BANDS['n_units_abs_band']})."
         )
     if v1_fr > 0 and abs(v2_fr - v1_fr) > fr_band_abs:
         failures.append(
             f"median_fr divergence: |v2_fr({v2_fr:.3f}) - v1_fr({v1_fr:.3f})|"
             f"={abs(v2_fr - v1_fr):.3f} Hz > rel-band="
-            f"{MS4_BROAD_TRIAGE['median_fr_rel_band']:.0%} ({fr_band_abs:.3f} Hz)."
+            f"{MS4_BANDS['median_fr_rel_band']:.0%} ({fr_band_abs:.3f} Hz)."
         )
     if failures:
         pytest.fail("v1↔v2 MS4 aggregate-band divergence:\n  " + "\n  ".join(failures))
