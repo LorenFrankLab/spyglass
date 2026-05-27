@@ -270,13 +270,13 @@ for label, interval_data in results.groupby("interval_labels"):
         SpikeInterface `ValueError` caused by floating-point round-trip in the
         seconds-to-samples conversion #1564
     - Trigger recording recompute in `SpikeSortingRecording.populate` when
-        necessary #1588
-    - Fix `NwbfileHasher` to include HDF5 Dataset content in
-        `SpikeSortingRecording.hash`; previously only attrs/shape/dtype were
-        hashed so in-place Dataset edits were invisible to the hasher #1600
+        necessary #1588, #1599
     - Restrict `ImportedSpikeSorting.Annotations` to the current session in
         `make_df_from_annotations` so `fetch_nwb` works across multiple sessions
         with overlapping unit ids #1581, #1592
+    - Fix `NwbfileHasher` to include HDF5 Dataset content in
+        `SpikeSortingRecording.hash`; previously only attrs/shape/dtype were
+        hashed so in-place Dataset edits were invisible to the hasher #1600
 
 ## [0.5.5] (Aug 6, 2025)
 
