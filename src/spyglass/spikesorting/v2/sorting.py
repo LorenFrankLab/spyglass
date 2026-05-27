@@ -286,14 +286,23 @@ class SortingSelection(SpyglassMixin, dj.Manual):
             "sorter": key["sorter"],
             "sorter_params_name": key["sorter_params_name"],
         }
-        # artifact_id is optional; track whether the caller supplied it
-        # so the find-existing-or-insert is precise.
-        if "artifact_id" in key and key["artifact_id"] is not None:
+        # artifact_id is a nullable FK -- ``None`` is a real, distinct
+        # identity value, not "match anything." If the caller passes
+        # ``artifact_id=None`` (or omits the key), we must restrict to
+        # rows with NULL artifact_id so the find-existing path doesn't
+        # alias onto a pre-existing artifact-backed row for the same
+        # (recording_id, sorter, sorter_params_name) triple.
+        if key.get("artifact_id") is not None:
             master_restriction["artifact_id"] = key["artifact_id"]
+            null_artifact_filter = None
+        else:
+            null_artifact_filter = "artifact_id IS NULL"
         source_part = cls.RecordingSource
         source_restriction = {"recording_id": key["recording_id"]}
 
         joined = (cls * source_part) & master_restriction & source_restriction
+        if null_artifact_filter is not None:
+            joined = joined & null_artifact_filter
         existing = joined.fetch("KEY", as_dict=True)
         existing_master_keys = [
             {k: v for k, v in row.items() if k in cls.primary_key}

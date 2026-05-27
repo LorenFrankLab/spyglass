@@ -33,7 +33,6 @@ promise that v1 runtime code is modernized under SI 0.104.
 
 - v2 does not promise identical table names or primary keys.
 - v2 does not preserve v1's list-returning `insert_selection()` behavior.
-- v2 does not write artifact-derived intervals into `IntervalList`.
 - v2 does not auto-create default rows for every installed SpikeInterface sorter.
 - v2 does not migrate existing v1 curation rows into `CurationV2`.
 - v2 does not guarantee active v0/v1 runtime workflows under the SI 0.104 environment. Legacy runtime workflows require the SI 0.99 environment unless explicitly ported by Phase 0c.

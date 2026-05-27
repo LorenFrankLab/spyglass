@@ -1812,9 +1812,11 @@ def test_run_v2_pipeline_end_to_end_and_idempotent(polymer_smoke_session):
     """``run_v2_pipeline`` chains recording -> artifact -> sort -> curation
     in one call and is idempotent on rerun.
 
-    Tests the clusterless_thresholder preset (deterministic peak
-    detection) so the rerun assertion is robust against MS5's
-    randomness.
+    Uses the ``franklab_tetrode_mountainsort5`` preset (matches the
+    ``preset=`` argument below). Idempotency on rerun is verified
+    against MS5 by reusing the existing sorting_id rather than
+    re-running the sorter, so MS5's clustering randomness does not
+    affect the rerun assertion.
     """
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2.artifact import (
@@ -4129,6 +4131,72 @@ def test_sorting_selection_rejects_concat_source(dj_conn):
         )
 
 
+@pytest.mark.slow
+def test_sorting_selection_artifact_id_none_is_distinct_identity(
+    populated_sorting,
+):
+    """``artifact_id=None`` and ``artifact_id=<uuid>`` are distinct identities.
+
+    Regression guard: an earlier ``insert_selection`` lookup omitted
+    ``artifact_id`` from the master restriction whenever it was None,
+    which effectively meant "match any artifact_id." That caused a
+    no-artifact ``insert_selection`` call to alias onto a pre-existing
+    artifact-backed row for the same
+    ``(recording_id, sorter, sorter_params_name)`` triple. Since the
+    schema makes ``artifact_id`` a real nullable FK, None must be
+    treated as a real, distinct identity value (``artifact_id IS NULL``)
+    -- not as a wildcard.
+
+    The ``populated_sorting`` fixture creates an artifact-backed row;
+    we then request a no-artifact row with the same recording/sorter/
+    params and assert the helper creates a NEW ``sorting_id`` rather
+    than returning the artifact-backed one.
+    """
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    artifact_backed_pk = populated_sorting
+    # Reconstruct the recording_id (insert_selection's source side).
+    rec_row = (SortingSelection.RecordingSource & artifact_backed_pk).fetch1()
+    recording_id = rec_row["recording_id"]
+
+    no_artifact_pk = SortingSelection.insert_selection(
+        {
+            "recording_id": recording_id,
+            "sorter": "mountainsort5",
+            "sorter_params_name": (
+                "franklab_tetrode_hippocampus_30kHz_ms5"
+            ),
+            "artifact_id": None,
+        }
+    )
+    assert no_artifact_pk["sorting_id"] != artifact_backed_pk["sorting_id"], (
+        "insert_selection with artifact_id=None aliased onto the "
+        "artifact-backed row; None must restrict to NULL identity, "
+        "not match any artifact_id."
+    )
+    # The fresh row exists with NULL artifact_id.
+    row = (SortingSelection & no_artifact_pk).fetch1()
+    assert row["artifact_id"] is None, (
+        f"Expected artifact_id IS NULL on the new row, got "
+        f"{row['artifact_id']!r}."
+    )
+    # And it's idempotent: a second no-artifact call returns the same row.
+    repeat_pk = SortingSelection.insert_selection(
+        {
+            "recording_id": recording_id,
+            "sorter": "mountainsort5",
+            "sorter_params_name": (
+                "franklab_tetrode_hippocampus_30kHz_ms5"
+            ),
+            "artifact_id": None,
+        }
+    )
+    assert repeat_pk["sorting_id"] == no_artifact_pk["sorting_id"], (
+        "Repeat insert_selection(artifact_id=None) created a duplicate "
+        "row instead of returning the existing no-artifact row."
+    )
+
+
 # ---------- v1 / imported dispatch regression after v2 import ------------
 
 
@@ -5576,12 +5644,14 @@ def test_mountainsort5_ground_truth_neuropixels_60s(neuropixels_60s_session):
     # MS5 distribution this fixture produces; a failure here is a
     # signal that MS5 settings need tuning, not a license to relax
     # the gate.
+    import math
     n_well_detected = int((accuracies >= 0.7).sum())
-    threshold = max(1, (n_planted * 3) // 4)
+    threshold = max(1, math.ceil(n_planted * 0.75))
     assert n_well_detected >= threshold, (
         f"MS5 on the 60s Neuropixels fixture detected {n_well_detected} "
         f"of {n_planted} planted units at accuracy >= 0.7; "
-        f"plan threshold requires >= {threshold} (3/4 of planted)."
+        f"plan threshold requires >= {threshold} (3/4 of planted, "
+        f"ceil-rounded so non-multiples of 4 don't quietly pass below 75 %)."
         f"{summary}"
     )
 
@@ -5636,9 +5706,11 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
     under SI 0.104 as it did under SI 0.99. The test enforces a
     ±1.5-sample asymmetric per-spike contract: every v1 spike must
     match a v2 spike within 1.5 samples (``unmatched_v1 > 0`` FAILs);
-    v2 may have bounded extras (20% + 5 detections budget) attributed
-    to documented cross-SI-version ``detect_peaks`` drift. Both
-    ``unmatched_v1`` and ``unmatched_v2`` are reported per case.
+    v2 may have bounded extras (50 % + 5 detections budget; see the
+    in-test comment near ``extra_spike_ratio = 0.50`` for the SI
+    PR #4341 calibration evidence) attributed to documented cross-
+    SI-version ``detect_peaks`` drift. Both ``unmatched_v1`` and
+    ``unmatched_v2`` are reported per case.
 
     **Invariant fingerprint contract:** before any spike-time
     comparison runs, the v2 side reconstructs its own state and
@@ -7078,3 +7150,27 @@ def test_clusterless_thresholder_ground_truth(
         f"Clusterless mean time-recall {recall_values.mean():.3f} < 0.80 "
         f"on {session_label}; v2 detector missing planted spikes.{summary}"
     )
+
+    # Sanity bound on the false-positive side: clusterless emits
+    # unsorted peaks (not units), so SI's precision metric doesn't
+    # apply, but a regression that emits orders of magnitude more
+    # peaks than the planted population should not pass this gate by
+    # virtue of high recall alone. Empirically the polymer 60 s
+    # fixture produces ~1.5x as many v2 peaks as planted spikes
+    # (background MEArec activity + adjacent-channel duplicates per
+    # shank); 10x catches the historical ``noise_levels=[1.0]``
+    # 1,400x explosion (Phase 1b root cause) without flagging
+    # legitimate excess detections from non-planted background units.
+    total_planted_spikes = int(
+        sum(t.size for t in gt_units.values() if t.size)
+    )
+    if total_planted_spikes > 0:
+        extras_ratio = v2_times_s.size / total_planted_spikes
+        assert extras_ratio <= 10.0, (
+            f"Clusterless on {session_label} emitted "
+            f"{v2_times_s.size} peaks vs {total_planted_spikes} "
+            f"planted spikes (ratio={extras_ratio:.1f}, > 10x). "
+            f"Recall is met but the detector is firing far above "
+            f"the planted population -- possible noise_levels / "
+            f"threshold regression.{summary}"
+        )
