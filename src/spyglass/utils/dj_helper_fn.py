@@ -462,6 +462,40 @@ def get_child_tables(table):
     ]
 
 
+def _write_external_checksum(filepath, external_table, key):
+    """Write size + contents_hash for one external-table row.
+
+    Low-level helper. Callers are responsible for any access control
+    around mutating external metadata. ``_resolve_external_table``
+    layers an admin check + multi-table discovery on top of this;
+    callers that already know the exact row (e.g. retroactive
+    user-driven repairs) can call this directly.
+    """
+    key.update(
+        size=Path(filepath).stat().st_size,
+        contents_hash=dj.hash.uuid_from_file(filepath),
+    )
+    external_table.update1(key)
+
+
+def _update_analysis_file_checksum(abs_path):
+    """Update the analysis external-table checksum for one NWB file.
+
+    Single-row direct lookup against ``AnalysisNwbfile()._ext_tbl``
+    (no admin gate, no multi-external search). Sibling to
+    ``_resolve_external_table`` for user-driven retroactive repairs
+    that already know the exact file path on disk.
+    """
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+
+    abs_path = Path(abs_path)
+    anwb = AnalysisNwbfile()
+    rel_path = abs_path.relative_to(anwb._analysis_dir)
+    ext_tbl = anwb._ext_tbl
+    ext_key = (ext_tbl & f"filepath = '{str(rel_path)}'").fetch1()
+    _write_external_checksum(abs_path, ext_tbl, ext_key)
+
+
 def _resolve_external_table(
     filepath: str, file_name: str, location: str = "analysis"
 ):
@@ -526,14 +560,8 @@ def _resolve_external_table(
         )
         return
 
-    update_vals = dict(
-        size=Path(filepath).stat().st_size,
-        contents_hash=dj.hash.uuid_from_file(filepath),
-    )
     for to_update, table in zip(to_updates, tables_to_update):
-        key = to_update.fetch1()
-        key.update(update_vals)
-        table.update1(key)
+        _write_external_checksum(filepath, table, to_update.fetch1())
 
 
 def make_file_obj_id_unique(nwb_path: str):

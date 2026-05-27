@@ -1549,7 +1549,9 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
         nwb_file = key["nwb_file_name"]
         if nwb_file in self._perm_pass:
             return self._perm_pass[nwb_file]
-        if nwb_file in self._perm_fail:
+        # Skip the cached-fail short-circuit for admins so the admin
+        # bypass below can override a prior non-admin denial.
+        if not is_admin and nwb_file in self._perm_fail:
             raise PermissionError(
                 f"Permission denied for nwb_file_name='{nwb_file}' "
                 f"(cached). User '{user_name}' is not on a team with "
@@ -1686,19 +1688,18 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def _update_nwb_checksum(abs_path, verbose):
-        """Update the external-table checksum for the given NWB file."""
-        abs_path = Path(abs_path)
-        anwb = AnalysisNwbfile()
-        rel_path = abs_path.relative_to(anwb._analysis_dir)
-        ext_tbl = anwb._ext_tbl
-        ext_key = (ext_tbl & f"filepath = '{str(rel_path)}'").fetch1()
-        ext_key.update(
-            {
-                "contents_hash": dj.hash.uuid_from_file(abs_path),
-                "size": abs_path.stat().st_size,
-            }
+        """Update the external-table checksum for the given NWB file.
+
+        Delegates to ``dj_helper_fn._update_analysis_file_checksum``;
+        Fix1513 is a user-driven retroactive repair, so the admin gate
+        on the sibling ``_resolve_external_table`` is intentionally
+        skipped.
+        """
+        from spyglass.utils.dj_helper_fn import (
+            _update_analysis_file_checksum,
         )
-        ext_tbl.update1(ext_key)
+
+        _update_analysis_file_checksum(abs_path)
         if verbose:
             logger.info("  NWB: checksum updated")
 
@@ -1866,7 +1867,8 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
         -------
         str
             ``'A'`` — no reject-status change.
-            ``'B'`` — only newly-rejected units (update safe + NWB fix).
+            ``'B'`` — only newly-rejected units (must repopulate so
+              CuratedSpikeSorting drops them).
             ``'C'`` — any newly-accepted units (must repopulate).
         """
         if not reject_status_changed:
@@ -1900,16 +1902,15 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
             prompt = "(k)eep  (r)epopulate  (s)kip  [k/r/s]: "
             valid = {"k": "keep", "r": "repopulate", "s": "skip"}
         elif case == "B":
-            prompt = (
-                "(k)eep  (u)pdate [incl. NWB]  (r)epopulate  (s)kip"
-                "  [k/u/r/s]: "
+            warning = (
+                "WARNING: Some units are newly rejected.  'update' is "
+                "not available because CuratedSpikeSorting excludes "
+                "rejected units, so patching labels would leave stale "
+                "unit rows behind.  Use 'repopulate' to rebuild."
             )
-            valid = {
-                "k": "keep",
-                "u": "update",
-                "r": "repopulate",
-                "s": "skip",
-            }
+            print(warning)
+            prompt = "(k)eep  (r)epopulate  (s)kip  [k/r/s]: "
+            valid = {"k": "keep", "r": "repopulate", "s": "skip"}
         else:  # case A
             prompt = "(k)eep  (u)pdate  (s)kip  [k/u/s]: "
             valid = {"k": "keep", "u": "update", "s": "skip"}
@@ -2095,6 +2096,22 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
 
         from spyglass.common import LabMember
 
+        # --- Step 0: clusterless thresholder is out of scope for Bug A
+        # (no per-cluster curation), so auto-insert none_needed before
+        # computing any diff or checking permissions.
+        if key.get("sorter") == "clusterless_thresholder":
+            self.insert1(
+                {
+                    **key,
+                    "action": "none_needed",
+                    "reviewed_by": "system",
+                    "owner_member": "n/a",
+                    "reviewed_at": datetime.now(),
+                    "notes": "clusterless sorter — Bug A inapplicable",
+                }
+            )
+            return
+
         # --- Steps 1–3: cheap scope + diff check (no permission needed)
         diff = self._compute_label_diff(key)
         if diff is None:
@@ -2132,6 +2149,14 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
                 "action='update' is not safe for this entry: some units "
                 "that should now be accepted are absent from the NWB file "
                 "(spike data was never written). Use action='repopulate'."
+            )
+        elif action == "update" and case == "B":
+            raise ValueError(
+                "action='update' is not safe for this entry: some units "
+                "are newly rejected and CuratedSpikeSorting excludes "
+                "rejected units at populate time, so patching labels "
+                "would leave stale unit rows in the NWB/part-table. "
+                "Use action='repopulate'."
             )
 
         # --- Step 7: execute ---

@@ -1,5 +1,6 @@
 import subprocess
 import sys
+from pathlib import Path
 
 import datajoint as dj
 import pytest
@@ -91,3 +92,102 @@ def test_str_to_bool(str_to_bool, input_str, expected):
     assert (
         str_to_bool(input_str) == expected
     ), f"Expected {expected} for input '{input_str}'"
+
+
+# -- _write_external_checksum ----------------------------------------
+
+
+def test_write_external_checksum_updates_row(tmp_path):
+    """Helper writes size + contents_hash and calls update1 with the key."""
+    from unittest.mock import MagicMock, patch
+
+    from spyglass.utils.dj_helper_fn import _write_external_checksum
+
+    filepath = tmp_path / "stub.nwb"
+    filepath.write_bytes(b"abc")
+    ext_tbl = MagicMock()
+    key = {"hash": "old", "filepath": "stub.nwb"}
+
+    with patch(
+        "spyglass.utils.dj_helper_fn.dj.hash.uuid_from_file",
+        return_value="new_hash",
+    ):
+        _write_external_checksum(filepath, ext_tbl, key)
+
+    ext_tbl.update1.assert_called_once()
+    written = ext_tbl.update1.call_args[0][0]
+    assert written["size"] == 3
+    assert written["contents_hash"] == "new_hash"
+    assert written["filepath"] == "stub.nwb"
+
+
+def test_write_external_checksum_skips_admin_check(tmp_path):
+    """Helper does not call LabMember.check_admin_privilege."""
+    from unittest.mock import MagicMock, patch
+
+    from spyglass.utils.dj_helper_fn import _write_external_checksum
+
+    filepath = tmp_path / "stub.nwb"
+    filepath.write_bytes(b"x")
+    ext_tbl = MagicMock()
+
+    with (
+        patch("spyglass.common.LabMember") as mock_lm,
+        patch(
+            "spyglass.utils.dj_helper_fn.dj.hash.uuid_from_file",
+            return_value="h",
+        ),
+    ):
+        _write_external_checksum(filepath, ext_tbl, {"filepath": "stub.nwb"})
+
+    mock_lm.return_value.check_admin_privilege.assert_not_called()
+
+
+def test_resolve_external_table_still_requires_admin():
+    """_resolve_external_table must still gate on admin privilege."""
+    from unittest.mock import patch
+
+    from spyglass.utils.dj_helper_fn import _resolve_external_table
+
+    with patch("spyglass.common.LabMember") as mock_lm:
+        mock_lm.return_value.check_admin_privilege.side_effect = (
+            PermissionError("admin only")
+        )
+        with pytest.raises(PermissionError, match="admin only"):
+            _resolve_external_table("/tmp/x.nwb", "x.nwb", "analysis")
+
+
+def test_update_analysis_file_checksum_resolves_and_writes(tmp_path):
+    """Helper resolves rel_path against AnalysisNwbfile and writes via
+    _write_external_checksum (no admin gate)."""
+    from unittest.mock import MagicMock, patch
+
+    from spyglass.utils.dj_helper_fn import _update_analysis_file_checksum
+
+    real_file = tmp_path / "file.nwb"
+    real_file.write_bytes(b"payload")
+    ext_key = {"filepath": "file.nwb"}
+    ext_tbl = MagicMock()
+    ext_tbl.__and__ = MagicMock(
+        return_value=MagicMock(fetch1=MagicMock(return_value=ext_key))
+    )
+
+    with (
+        patch("spyglass.common.common_nwbfile.AnalysisNwbfile") as mock_anwb,
+        patch(
+            "spyglass.utils.dj_helper_fn._write_external_checksum"
+        ) as mock_write,
+        patch("spyglass.common.LabMember") as mock_lm,
+    ):
+        inst = mock_anwb.return_value
+        inst._analysis_dir = str(tmp_path)
+        inst._ext_tbl = ext_tbl
+
+        _update_analysis_file_checksum(str(real_file))
+
+    mock_write.assert_called_once()
+    args = mock_write.call_args[0]
+    assert Path(args[0]) == real_file
+    assert args[1] is ext_tbl
+    assert args[2] == ext_key
+    mock_lm.return_value.check_admin_privilege.assert_not_called()
