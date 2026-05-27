@@ -1102,6 +1102,23 @@ class Sorting(SpyglassMixin, dj.Computed):
             # Drop the key entirely so ``detect_peaks`` falls through to
             # SI's per-channel MAD estimation path.
             params.pop("noise_levels", None)
+            # Pin SI's random-chunk sampling inside
+            # ``get_noise_levels`` (the path detect_peaks takes when
+            # noise_levels is absent) to a deterministic seed.
+            # PR #3359 (merged 2024-10-25) changed SI's default from
+            # ``seed=0`` to ``seed=None``, making the per-channel MAD
+            # non-deterministic across runs on the same input --
+            # which at a 5σ threshold can flip ~10-20 borderline
+            # peaks per shank. Per PR #3359's stated principle
+            # (*"seed must be explicit and no implicit"*) Spyglass IS
+            # the explicit-seeder. Same fix + same user-override
+            # mechanism as the ``sip.whiten`` pin in
+            # ``_run_si_sorter`` -- set ``random_seed`` in the per-
+            # row ``SorterParameters.job_kwargs`` blob to override.
+            _random_seed = (job_kwargs or {}).get("random_seed", 0)
+            params.setdefault(
+                "random_slices_kwargs", {"seed": _random_seed}
+            )
         else:
             nl = _np.asarray(nl_in, dtype=_np.float64)
             if nl.size == 1:
@@ -1186,7 +1203,28 @@ class Sorting(SpyglassMixin, dj.Computed):
             if sorter_params.get("whiten", False):
                 import spikeinterface.preprocessing as sip
 
-                recording = sip.whiten(recording, dtype=_np.float64)
+                # Pin SI's random-chunk-based covariance estimate
+                # inside ``sip.whiten`` to a deterministic seed.
+                # PR #3359 (merged 2024-10-25) changed SI's default
+                # from ``seed=0`` to ``seed=None``, making the
+                # whitening matrix non-deterministic across runs on
+                # the same input. Per the PR author: *"seed must be
+                # explicit and no implicit"* -- so Spyglass IS the
+                # explicit-seeder. Empirically verified: 3 v2 MS4
+                # runs with seed=0 produce identical (n_units,
+                # median_fr); without the pin, 4 runs produced 4
+                # distinct states.
+                #
+                # User override: set ``random_seed`` in the per-row
+                # ``SorterParameters.job_kwargs`` blob to use a
+                # different seed (for robustness studies / variance
+                # characterization). Spyglass's default 0 matches v1
+                # SI 0.99 behavior so re-runs of a parameter row are
+                # reproducible by default.
+                _random_seed = (job_kwargs or {}).get("random_seed", 0)
+                recording = sip.whiten(
+                    recording, dtype=_np.float64, seed=_random_seed
+                )
                 sorter_params = {**sorter_params, "whiten": False}
 
             # Resolved job_kwargs (n_jobs, chunk_duration, progress_bar,
@@ -1200,6 +1238,12 @@ class Sorting(SpyglassMixin, dj.Computed):
             # for pool_engine / n_jobs / chunk_duration / progress_bar
             # / mp_context / max_threads_per_worker).
             sj_kwargs = dict(job_kwargs or {})
+            # ``random_seed`` is a Spyglass-side knob for SI's
+            # random-chunk sampling (consumed by the ``sip.whiten``
+            # call above and the clusterless ``random_slices_kwargs``
+            # pin); strip before installing as a job kwarg because
+            # SI's ``set_global_job_kwargs`` rejects unknown keys.
+            sj_kwargs.pop("random_seed", None)
             previous_global = dict(_si.get_global_job_kwargs())
             if sj_kwargs:
                 _si.set_global_job_kwargs(**sj_kwargs)

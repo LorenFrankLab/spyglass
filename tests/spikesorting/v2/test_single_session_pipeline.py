@@ -383,6 +383,9 @@ def test_recording_populates_and_round_trips(
 _POLYMER_60S_PATH = (
     Path(__file__).resolve().parent / "fixtures" / "mearec_polymer_128ch_60s.nwb"
 )
+_TETRODE_60S_PATH = (
+    Path(__file__).resolve().parent / "fixtures" / "mearec_tetrode_60s.nwb"
+)
 
 
 @pytest.fixture(scope="session")
@@ -405,6 +408,25 @@ def polymer_60s_session(dj_conn):
     # there is nothing for it to ingest from these synthetic
     # fixtures. The GT-accuracy test below reads the sidecar
     # directly via ``get_ground_truth_units_table``.
+    yield {"nwb_file_name": nwb_file_name}
+
+
+@pytest.fixture(scope="session")
+def tetrode_60s_session(dj_conn):
+    """Ingest the 60s tetrode MEArec fixture for the ground-truth tests.
+
+    Single-tetrode probe (Frank-lab ``tetrode_12.5`` metadata): 1 shank
+    × 4 contacts in a square at ±6.25 µm. Yields one sort group
+    (sort_group_id=0) with 4 channels. Skips cleanly if the fixture is
+    not on disk.
+    """
+    if not _TETRODE_60S_PATH.exists():
+        pytest.skip(
+            "60s tetrode fixture not on disk -- run "
+            "`python tests/spikesorting/v2/fixtures/generate_mearec.py` "
+            "(no --smoke) first."
+        )
+    nwb_file_name = copy_and_insert_nwb(_TETRODE_60S_PATH)
     yield {"nwb_file_name": nwb_file_name}
 
 
@@ -5703,6 +5725,24 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
 
     triple = (fixture_stem, "clusterless_thresholder", sort_group_id)
     if triple in EXPECTED_DEGENERATE_CASES:
+        # Under active matrix verification (ROOT set), require an
+        # operator-written DEGENERATE_MARKER file in the per-case
+        # baseline dir so a broken capture (no run, no marker)
+        # can't masquerade as an intentional skip. The marker must
+        # exist alongside the missing baseline files; absence is a
+        # FAIL not a SKIP.
+        if baseline_root_env:
+            marker = baseline_dir / "DEGENERATE_MARKER"
+            if not marker.exists():
+                pytest.fail(
+                    f"triple {triple} is in EXPECTED_DEGENERATE_CASES "
+                    "but no DEGENERATE_MARKER artifact at "
+                    f"{marker}. Operator must `touch` the marker after "
+                    "evidence-based capture-side triage so broken "
+                    "captures don't look like intentional skips. "
+                    f"Documented reason: "
+                    f"{EXPECTED_DEGENERATE_CASES[triple]}"
+                )
         pytest.skip(
             f"SKIP-expected-degenerate: {EXPECTED_DEGENERATE_CASES[triple]}"
         )
@@ -5925,11 +5965,19 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
     )
     missing_fp = sorted(set(_fingerprint_fields) - set(meta))
     if missing_fp:
-        pytest.skip(
+        msg = (
             f"v1 baseline meta at {meta_json} lacks fingerprint "
             f"field(s) {missing_fp}; baseline was captured before "
             f"the invariant-fingerprint schema landed. {regen_hint}"
         )
+        # Under SPIKESORTING_V2_BASELINE_ROOT (active matrix
+        # verification), a stale baseline is an invalid input -- not
+        # an acceptable skip. Match the missing-baseline-files
+        # policy: FAIL when ROOT is set, SKIP under the legacy
+        # BASELINE_DIR shim only.
+        if baseline_root_env:
+            pytest.fail(msg)
+        pytest.skip(msg)
 
     v2_valid_times_raw = (
         IntervalList
@@ -6286,6 +6334,17 @@ def test_v2_real_data_v1_parity_mountainsort4(
 
     triple = (fixture_stem, "mountainsort4", sort_group_id)
     if triple in EXPECTED_DEGENERATE_CASES:
+        # See clusterless test for marker-artifact rationale.
+        if baseline_root_env:
+            marker = baseline_dir / "DEGENERATE_MARKER"
+            if not marker.exists():
+                pytest.fail(
+                    f"triple {triple} is in EXPECTED_DEGENERATE_CASES "
+                    "but no DEGENERATE_MARKER artifact at "
+                    f"{marker}. Operator must `touch` the marker after "
+                    "evidence-based capture-side triage. Documented "
+                    f"reason: {EXPECTED_DEGENERATE_CASES[triple]}"
+                )
         pytest.skip(
             f"SKIP-expected-degenerate: {EXPECTED_DEGENERATE_CASES[triple]}"
         )
@@ -6425,11 +6484,14 @@ def test_v2_real_data_v1_parity_mountainsort4(
     )
     missing_fp = sorted(set(_fingerprint_fields) - set(meta))
     if missing_fp:
-        pytest.skip(
+        msg = (
             f"v1 MS4 baseline meta at {meta_json} lacks fingerprint "
             f"field(s) {missing_fp}; baseline was captured before the "
             "invariant-fingerprint schema landed."
         )
+        if baseline_root_env:
+            pytest.fail(msg)
+        pytest.skip(msg)
 
     v2_valid_times_raw = (
         IntervalList
@@ -6513,9 +6575,24 @@ def test_v2_real_data_v1_parity_mountainsort4(
         for uid, times in v1_spike_times.items()
     }
 
-    duration_s = float(meta["approx_last_spike_s"])
+    # Use ``artifact_valid_times`` duration (the interval the SORTER
+    # actually saw) as the firing-rate denominator. The pre-fix code
+    # used ``approx_last_spike_s`` from the v1 meta which is the
+    # last v1 spike time -- making both v1 and v2 firing rates
+    # NORMALIZED BY v1's OUTPUT (not the fixed input window). The
+    # fingerprint check above has already asserted v1's and v2's
+    # ``artifact_valid_times`` match, so using v1's stored array is
+    # equivalent to v2's reconstructed one.
+    v1_avt = meta["artifact_valid_times"]
+    v1_intervals = np.asarray(v1_avt["_array_data"]).reshape(
+        v1_avt["_array_meta"]["shape"]
+    )
+    duration_s = float(np.sum(v1_intervals[:, 1] - v1_intervals[:, 0]))
     if duration_s <= 0:
-        pytest.fail("v1 baseline approx_last_spike_s <= 0; non-comparable.")
+        pytest.fail(
+            "artifact_valid_times duration <= 0; non-comparable. "
+            f"intervals={v1_intervals.tolist()}"
+        )
 
     def _aggregate(spike_dict, dur):
         n_units = len(spike_dict)
@@ -6562,3 +6639,420 @@ def test_v2_real_data_v1_parity_mountainsort4(
         )
     if failures:
         pytest.fail("v1↔v2 MS4 aggregate-band divergence:\n  " + "\n  ".join(failures))
+
+
+_MS4_GT_CASES = [
+    ("polymer_60s", "franklab_probe_ctx_30kHz_ms4"),
+    ("tetrode_60s", "franklab_tetrode_hippocampus_30kHz_ms4"),
+]
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "session_label,ms4_param_name",
+    _MS4_GT_CASES,
+    ids=[case[0] for case in _MS4_GT_CASES],
+)
+def test_mountainsort4_ground_truth(
+    session_label, ms4_param_name, request, dj_conn
+):
+    """MS4 recovers planted units on polymer + tetrode MEArec fixtures.
+
+    Correctness gate independent of v1 parity. Uses SI's
+    ``compare_sorter_to_ground_truth`` against the sidecar GT units
+    table written by ``mearec_to_spyglass_nwb``.
+
+    Parametrization:
+      * ``polymer_60s`` -- 128-channel polymer probe (4 shanks),
+        ``franklab_probe_ctx_30kHz_ms4`` params (freq 300-6000).
+      * ``tetrode_60s`` -- single Frank-lab tetrode_12.5 probe
+        (1 shank × 4 contacts), ``franklab_tetrode_hippocampus_30kHz_ms4``
+        params (freq 600-6000).
+
+    Threshold: at least 1/2 of planted units detected at accuracy
+    >= 0.5 (looser than the MS5 polymer gate's 3/4 >= 0.7 because
+    MS4 is a less-accurate sorter and tetrode footprint is sparse).
+    """
+    import numpy as np
+    import pynwb
+    import spikeinterface as si
+    from spikeinterface import aggregate_units
+    from spikeinterface.comparison import compare_sorter_to_ground_truth
+
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.common.common_nwbfile import Nwbfile
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactDetectionParameters,
+        ArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        Sorting,
+        SortingSelection,
+    )
+
+    session = request.getfixturevalue(f"{session_label}_session")
+    nwb_file_name = session["nwb_file_name"]
+
+    PreprocessingParameters.insert_default()
+    ArtifactDetectionParameters.insert_default()
+    SorterParameters.insert_default()
+    if not (LabTeam & {"team_name": "v2_test_team"}):
+        LabTeam.insert1(
+            {
+                "team_name": "v2_test_team",
+                "team_description": "v2 pipeline tests",
+            },
+        )
+
+    if not (SortGroupV2 & session):
+        SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    sort_group_ids = sorted(
+        int(g) for g in (SortGroupV2 & session).fetch("sort_group_id")
+    )
+
+    sortings_by_shank = []
+    for sg_id in sort_group_ids:
+        rec_pk = RecordingSelection.insert_selection(
+            {
+                "nwb_file_name": nwb_file_name,
+                "sort_group_id": sg_id,
+                "interval_list_name": "raw data valid times",
+                "preproc_params_name": "default_franklab",
+                "team_name": "v2_test_team",
+            }
+        )
+        Recording.populate(rec_pk, reserve_jobs=False)
+        art_pk = ArtifactSelection.insert_selection(
+            {
+                "recording_id": rec_pk["recording_id"],
+                "artifact_params_name": "none",
+            }
+        )
+        ArtifactDetection.populate(art_pk, reserve_jobs=False)
+        sort_pk = SortingSelection.insert_selection(
+            {
+                "recording_id": rec_pk["recording_id"],
+                "sorter": "mountainsort4",
+                "sorter_params_name": ms4_param_name,
+                "artifact_id": art_pk["artifact_id"],
+            }
+        )
+        Sorting.populate(sort_pk, reserve_jobs=False)
+        sortings_by_shank.append(Sorting().get_sorting(sort_pk))
+
+    aggregated = aggregate_units(sortings_by_shank)
+    tested_sorting = aggregated.rename_units(
+        np.arange(len(aggregated.unit_ids), dtype=np.int64)
+    )
+
+    from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import (
+        get_ground_truth_units_table,
+    )
+
+    raw_nwb_path = Nwbfile().get_abs_path(nwb_file_name)
+    with pynwb.NWBHDF5IO(raw_nwb_path, "r", load_namespaces=True) as io:
+        gt_nwb = io.read()
+        es = gt_nwb.acquisition["e-series"]
+        fs = (
+            float(es.rate)
+            if es.rate is not None
+            else 1.0 / float(np.diff(es.timestamps[:2])[0])
+        )
+        gt_units_table = get_ground_truth_units_table(gt_nwb)
+        assert gt_units_table is not None, (
+            f"Fixture {nwb_file_name!r} has no sidecar ground-truth "
+            "units; regenerate via generate_mearec.py."
+        )
+        gt_units = {
+            int(uid): np.asarray(gt_units_table["spike_times"][idx])
+            for idx, uid in enumerate(gt_units_table.id[:])
+        }
+    gt_sorting = si.NumpySorting.from_unit_dict(
+        units_dict_list=[
+            {
+                int(uid): (times * fs).astype(np.int64)
+                for uid, times in gt_units.items()
+            }
+        ],
+        sampling_frequency=fs,
+    )
+
+    comparison = compare_sorter_to_ground_truth(
+        gt_sorting=gt_sorting,
+        tested_sorting=tested_sorting,
+        gt_name=f"{session_label}_planted",
+        tested_name="v2_mountainsort4",
+        delta_time=0.4,
+        match_score=0.5,
+        exhaustive_gt=True,
+    )
+
+    perf = comparison.get_performance(method="by_unit", output="pandas")
+    accuracies = perf["accuracy"].values
+    recall = perf["recall"].values
+    precision = perf["precision"].values
+    n_planted = len(accuracies)
+
+    summary = (
+        f"\n[MS4 vs {session_label} GT] n_planted={n_planted}, "
+        f"n_detected={len(tested_sorting.unit_ids)}\n"
+        f"  accuracy  mean={accuracies.mean():.3f} "
+        f"median={float(np.median(accuracies)):.3f} "
+        f"min={accuracies.min():.3f} max={accuracies.max():.3f}\n"
+        f"  recall    mean={recall.mean():.3f} "
+        f"median={float(np.median(recall)):.3f}\n"
+        f"  precision mean={precision.mean():.3f} "
+        f"median={float(np.median(precision)):.3f}"
+    )
+    print(summary)
+
+    assert n_planted >= 1, (
+        f"{session_label} fixture has only {n_planted} planted units; "
+        f"regenerate before trusting this gate.{summary}"
+    )
+
+    # Looser MS4 threshold (half of planted at acc >= 0.5) than the
+    # MS5 polymer gate (3/4 >= 0.7) because MS4 is a less-accurate
+    # sorter; tetrode footprint sparsity also limits per-unit accuracy.
+    # Tightening this threshold without committed calibration evidence
+    # is regression-prone.
+    n_well_detected = int((accuracies >= 0.5).sum())
+    threshold = max(1, n_planted // 2)
+    assert n_well_detected >= threshold, (
+        f"MS4 on {session_label} detected {n_well_detected} of "
+        f"{n_planted} planted units at accuracy >= 0.5; "
+        f"threshold requires >= {threshold} (1/2 of planted).{summary}"
+    )
+
+
+_CLUSTERLESS_GT_CASES = [
+    ("polymer_60s", "smoke_clusterless_5uv"),
+    ("tetrode_60s", "smoke_clusterless_5uv"),
+]
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "session_label,sorter_params_name",
+    _CLUSTERLESS_GT_CASES,
+    ids=[case[0] for case in _CLUSTERLESS_GT_CASES],
+)
+def test_clusterless_thresholder_ground_truth(
+    session_label, sorter_params_name, request, dj_conn
+):
+    """Clusterless detector recovers planted-unit spikes (time recall).
+
+    Correctness gate for the clusterless path. Unlike MS4/MS5, the
+    clusterless detector emits unsorted peaks (not units), so SI's
+    ``compare_sorter_to_ground_truth`` doesn't apply. We compute a
+    time-recall metric: for each planted spike across all units, is
+    there a v2 peak within ±1.5 samples (any channel)? Recall = matched
+    planted spikes / total planted spikes.
+
+    Channel-aware matching would be more rigorous but the sidecar GT
+    table only stores per-unit spike times (no per-spike channel), so
+    we use time-only matching here. The threshold is intentionally
+    conservative: clusterless's detect_threshold=5σ should catch ALL
+    well-isolated spikes, so recall ≥ 80 % of planted spikes is the
+    minimum bar. Higher recall thresholds risk regression-flake from
+    near-threshold borderline spikes (PR #4341 algorithm change).
+
+    Parametrization:
+      * ``polymer_60s`` -- 4 shanks aggregated
+      * ``tetrode_60s`` -- 1 shank, 4 channels
+    """
+    import numpy as np
+    import pynwb
+
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.common.common_nwbfile import Nwbfile
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactDetectionParameters,
+        ArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        Sorting,
+        SortingSelection,
+    )
+    from tests.spikesorting.v2._smoke_constants import (
+        SMOKE_CLUSTERLESS_PARAM_NAME,
+        SMOKE_CLUSTERLESS_PARAMS,
+    )
+
+    session = request.getfixturevalue(f"{session_label}_session")
+    nwb_file_name = session["nwb_file_name"]
+
+    PreprocessingParameters.insert_default()
+    ArtifactDetectionParameters.insert_default()
+    SorterParameters.insert_default()
+    if not (LabTeam & {"team_name": "v2_test_team"}):
+        LabTeam.insert1(
+            {
+                "team_name": "v2_test_team",
+                "team_description": "v2 pipeline tests",
+            },
+        )
+
+    # Pre-insert the smoke clusterless row (5 µV; doesn't ship as a v2
+    # default; needs delete-then-insert for the same noise_levels-
+    # semantics safety reason as the v1↔v2 parity test).
+    if sorter_params_name == SMOKE_CLUSTERLESS_PARAM_NAME:
+        (
+            SorterParameters
+            & {
+                "sorter": "clusterless_thresholder",
+                "sorter_params_name": sorter_params_name,
+            }
+        ).delete(safemode=False)
+        SorterParameters().insert1(
+            {
+                "sorter": "clusterless_thresholder",
+                "sorter_params_name": sorter_params_name,
+                "params": dict(SMOKE_CLUSTERLESS_PARAMS),
+                "params_schema_version": 3,
+                "job_kwargs": None,
+            },
+            skip_duplicates=False,
+        )
+
+    if not (SortGroupV2 & session):
+        SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    sort_group_ids = sorted(
+        int(g) for g in (SortGroupV2 & session).fetch("sort_group_id")
+    )
+
+    # Per-shank: populate clusterless sorting; collect all v2 peak times
+    # across shanks for the time-recall comparison.
+    v2_spike_samples_all_shanks: list[np.ndarray] = []
+    sampling_frequency = None
+    for sg_id in sort_group_ids:
+        rec_pk = RecordingSelection.insert_selection(
+            {
+                "nwb_file_name": nwb_file_name,
+                "sort_group_id": sg_id,
+                "interval_list_name": "raw data valid times",
+                "preproc_params_name": "default_franklab",
+                "team_name": "v2_test_team",
+            }
+        )
+        Recording.populate(rec_pk, reserve_jobs=False)
+        art_pk = ArtifactSelection.insert_selection(
+            {
+                "recording_id": rec_pk["recording_id"],
+                "artifact_params_name": "none",
+            }
+        )
+        ArtifactDetection.populate(art_pk, reserve_jobs=False)
+        sort_pk = SortingSelection.insert_selection(
+            {
+                "recording_id": rec_pk["recording_id"],
+                "sorter": "clusterless_thresholder",
+                "sorter_params_name": sorter_params_name,
+                "artifact_id": art_pk["artifact_id"],
+            }
+        )
+        Sorting.populate(sort_pk, reserve_jobs=False)
+        curation_pk = CurationV2.insert_curation(
+            sorting_key=sort_pk, labels={}
+        )
+        merge_id = (
+            SpikeSortingOutput.CurationV2 & curation_pk
+        ).fetch1("merge_id")
+        per_unit = SpikeSortingOutput().get_spike_times(
+            {"merge_id": merge_id}
+        )
+        # Clusterless collapses all peaks into one synthetic unit per shank.
+        for arr in per_unit:
+            arr = np.asarray(arr)
+            if arr.size:
+                v2_spike_samples_all_shanks.append(arr)
+        if sampling_frequency is None:
+            sampling_frequency = float(
+                Sorting().get_sorting(sort_pk).get_sampling_frequency()
+            )
+
+    if not v2_spike_samples_all_shanks:
+        pytest.fail(f"v2 clusterless produced no peaks on {session_label}.")
+    v2_times_s = np.sort(
+        np.concatenate(v2_spike_samples_all_shanks)
+    ).astype(np.float64)
+    assert sampling_frequency is not None and sampling_frequency > 0
+
+    from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import (
+        get_ground_truth_units_table,
+    )
+
+    raw_nwb_path = Nwbfile().get_abs_path(nwb_file_name)
+    with pynwb.NWBHDF5IO(raw_nwb_path, "r", load_namespaces=True) as io:
+        gt_nwb = io.read()
+        gt_units_table = get_ground_truth_units_table(gt_nwb)
+        assert gt_units_table is not None, (
+            f"{nwb_file_name!r} has no sidecar GT units; regenerate."
+        )
+        gt_units = {
+            int(uid): np.asarray(gt_units_table["spike_times"][idx])
+            for idx, uid in enumerate(gt_units_table.id[:])
+        }
+
+    # Time-recall: ±1.5 samples = 47 µs at 32 kHz. For each GT spike,
+    # nearest-neighbour match into v2's sorted peak times.
+    tol_s = 1.5 / sampling_frequency
+    per_unit_recall: dict[int, float] = {}
+    for uid, gt_times in gt_units.items():
+        if gt_times.size == 0:
+            continue
+        gt_sorted = np.sort(gt_times.astype(np.float64))
+        idx = np.searchsorted(v2_times_s, gt_sorted)
+        idx_left = np.clip(idx - 1, 0, v2_times_s.size - 1)
+        idx_right = np.clip(idx, 0, v2_times_s.size - 1)
+        nearest_diff = np.minimum(
+            np.abs(gt_sorted - v2_times_s[idx_left]),
+            np.abs(gt_sorted - v2_times_s[idx_right]),
+        )
+        per_unit_recall[uid] = float((nearest_diff <= tol_s).mean())
+
+    n_planted = len(per_unit_recall)
+    recall_values = np.array(list(per_unit_recall.values()))
+    summary = (
+        f"\n[Clusterless vs {session_label} GT] "
+        f"n_planted={n_planted}, "
+        f"n_v2_peaks={v2_times_s.size}\n"
+        f"  per-unit time-recall (±1.5 sample): "
+        f"mean={recall_values.mean():.3f} "
+        f"median={float(np.median(recall_values)):.3f} "
+        f"min={recall_values.min():.3f} max={recall_values.max():.3f}"
+    )
+    print(summary)
+
+    assert n_planted >= 1, (
+        f"{session_label} fixture has no planted GT units.{summary}"
+    )
+
+    # Threshold: mean recall >= 0.80 across planted units. Loosely
+    # justifiable: well-isolated spikes should always be detected
+    # by a 5σ threshold; missing some is expected for near-threshold
+    # planted units (especially on the sparse-coverage tetrode).
+    assert recall_values.mean() >= 0.80, (
+        f"Clusterless mean time-recall {recall_values.mean():.3f} < 0.80 "
+        f"on {session_label}; v2 detector missing planted spikes.{summary}"
+    )

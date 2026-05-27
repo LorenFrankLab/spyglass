@@ -283,6 +283,56 @@ def _read_spike_times(curation_key: dict) -> tuple[dict, float]:
     return spike_times, sampling_frequency
 
 
+def _capture_source_provenance() -> dict:
+    """Record the v1-spyglass source location + commit + harness commit.
+
+    Phase A's capture scripts run from the v2 checkout's repo root (the
+    pinned ``/tmp/spyglass-master`` worktree in the plan was aspirational
+    -- master doesn't carry the v2 test tree). The actual ``spyglass``
+    that imports is whichever ``site-packages`` Spyglass is dev-installed
+    against in the ``spyglass-v1-parity`` conda env. Stamping
+    (a) the resolved spyglass source path and (b) the git HEAD sha of
+    BOTH that path AND the test-harness checkout into baseline metadata
+    so reviewers can verify which sources the capture actually used.
+
+    No-op if either source isn't a git checkout (returns ``None`` for
+    those fields rather than crashing).
+    """
+    import subprocess
+
+    import spyglass
+
+    def _git_head_sha(repo_dir: Path) -> str | None:
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(repo_dir), "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=5,
+            )
+            return result.stdout.strip()
+        except (subprocess.SubprocessError, FileNotFoundError, OSError):
+            return None
+
+    spyglass_module_file = Path(spyglass.__file__).resolve()
+    # spyglass/__init__.py is under {repo}/src/spyglass/__init__.py
+    spyglass_src_root = spyglass_module_file.parent
+    spyglass_repo_root = (
+        spyglass_src_root.parent.parent
+        if spyglass_src_root.parent.name == "src"
+        else spyglass_src_root.parent
+    )
+    harness_repo_root = Path(__file__).resolve().parents[3]
+    return {
+        "spyglass_source_path": str(spyglass_module_file),
+        "spyglass_repo_path": str(spyglass_repo_root),
+        "spyglass_repo_sha": _git_head_sha(spyglass_repo_root),
+        "harness_repo_path": str(harness_repo_root),
+        "harness_repo_sha": _git_head_sha(harness_repo_root),
+    }
+
+
 def _compute_invariant_fingerprints(
     *,
     nwb_source: Path,
@@ -587,6 +637,7 @@ def run_baseline_capture(
         "artifact_param_name": artifact_param_name,
         "spikeinterface_version": _pkg_version("spikeinterface"),
         "spyglass_version": _pkg_version("spyglass-neuro"),
+        **_capture_source_provenance(),
         **fingerprints,
     }
     spikes_path, meta_path = _write_artifacts(

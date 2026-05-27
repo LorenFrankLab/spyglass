@@ -52,6 +52,16 @@ _NP_N_CONTACTS = 128
 _NP_COLUMN_X_UM = (0.0, 32.0)
 _NP_ROW_PITCH_UM = 20.0
 
+# Single-tetrode probe matching the Frank-lab ``tetrode_12.5`` metadata
+# at https://github.com/LorenFrankLab/trodes_to_nwb/blob/main/src/trodes_to_nwb/device_metadata/probe_metadata/tetrode_12.5.yml :
+# 4 wires in a square, ±6.25 µm in x and z (rel_y = 0). One shank,
+# one sort group, 4 channels. Used as the "sparse-probe sorter
+# coverage" axis (vs the polymer 128c-4s).
+TETRODE_PROBE_TYPE = "tetrode_12.5"
+_TETRODE_DESCRIPTION = "four wire electrode"
+_TETRODE_CONTACT_SIZE_UM = 12.5
+_TETRODE_HALF_PITCH_UM = 6.25
+
 # nwbinspector importance levels that block fixture use.
 _BLOCKING_INSPECTOR_LEVELS = frozenset({"ERROR", "PYNWB_VALIDATION", "CRITICAL"})
 
@@ -173,6 +183,53 @@ def neuropixels_probe_layout() -> ProbeLayout:
         contact_size_um=_NP_CONTACT_SIZE_UM,
         contact_side_numbering=True,
         contacts=tuple(contacts),
+    )
+
+
+def tetrode_probe_layout() -> ProbeLayout:
+    """Return the Frank-lab ``tetrode_12.5`` probe layout.
+
+    Mirrors the canonical metadata at
+    https://github.com/LorenFrankLab/trodes_to_nwb/blob/main/src/trodes_to_nwb/device_metadata/probe_metadata/tetrode_12.5.yml :
+    one shank with 4 wire-electrode contacts arranged in a square
+    at ±6.25 µm in x and z (rel_y = 0 for all). 12.5 µm contact size,
+    contact_side_numbering = true.
+
+    Single sort group (sort_group_id = 0), 4 channels. The narrow
+    spatial extent means only units within ~30 µm of the tetrode
+    contribute spikes, which is the realistic Frank-lab tetrode-
+    drive behavior.
+
+    Returns
+    -------
+    ProbeLayout
+        1 shank × 4 contacts, square geometry.
+    """
+    half = _TETRODE_HALF_PITCH_UM
+    # Order matches the YAML's id sequence: 0 (+x, +z), 1 (-x, +z),
+    # 2 (-x, -z), 3 (+x, -z).
+    positions = [
+        (+half, 0.0, +half),
+        (-half, 0.0, +half),
+        (-half, 0.0, -half),
+        (+half, 0.0, -half),
+    ]
+    contacts = tuple(
+        ProbeContact(
+            electrode_id=eid,
+            shank_id=0,
+            rel_x=rx,
+            rel_y=ry,
+            rel_z=rz,
+        )
+        for eid, (rx, ry, rz) in enumerate(positions)
+    )
+    return ProbeLayout(
+        probe_type=TETRODE_PROBE_TYPE,
+        description=_TETRODE_DESCRIPTION,
+        contact_size_um=_TETRODE_CONTACT_SIZE_UM,
+        contact_side_numbering=True,
+        contacts=contacts,
     )
 
 

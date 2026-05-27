@@ -25,11 +25,35 @@ BASE_ROOT=/tmp/spyglass-v1-base
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../../../.." && pwd)
 
-V1_PYTHON=${SPYGLASS_V1_PARITY_PYTHON:-/home/edeno/miniconda3/envs/spyglass-v1-parity/bin/python}
-if [ ! -x "$V1_PYTHON" ]; then
-  echo "ERROR: v1 python interpreter $V1_PYTHON not found or not executable." >&2
+# See capture_polymer_clusterless.sh for the rationale; mirror the
+# same resolver here so both scripts behave identically.
+_resolve_v1_python() {
+  if [ -n "${SPYGLASS_V1_PARITY_PYTHON:-}" ] && [ -x "$SPYGLASS_V1_PARITY_PYTHON" ]; then
+    echo "$SPYGLASS_V1_PARITY_PYTHON"; return 0
+  fi
+  if command -v conda >/dev/null 2>&1; then
+    local from_conda
+    from_conda=$(conda env list 2>/dev/null \
+      | awk '$1 == "spyglass-v1-parity" {print $NF "/bin/python"}' | head -1)
+    if [ -n "$from_conda" ] && [ -x "$from_conda" ]; then
+      echo "$from_conda"; return 0
+    fi
+  fi
+  for cand in \
+    "$HOME/miniconda3/envs/spyglass-v1-parity/bin/python" \
+    "$HOME/anaconda3/envs/spyglass-v1-parity/bin/python" \
+    "/opt/conda/envs/spyglass-v1-parity/bin/python"; do
+    if [ -x "$cand" ]; then echo "$cand"; return 0; fi
+  done
+  return 1
+}
+V1_PYTHON=$(_resolve_v1_python) || true
+if [ -z "${V1_PYTHON:-}" ] || [ ! -x "$V1_PYTHON" ]; then
+  echo "ERROR: cannot locate spyglass-v1-parity python interpreter." >&2
+  echo "       Set SPYGLASS_V1_PARITY_PYTHON=/path/to/env/bin/python and re-run." >&2
   exit 1
 fi
+echo "Using V1_PYTHON=$V1_PYTHON"
 
 FIX=mearec_polymer_128ch_60s
 ABV=p60

@@ -115,10 +115,12 @@ def _profiles() -> dict[str, tuple[GenProfile, tuple[FixtureSpec, ...]]]:
     from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import (
         neuropixels_probe_layout,
         polymer_probe_layout,
+        tetrode_probe_layout,
     )
 
     polymer = polymer_probe_layout()
     neuropixels = neuropixels_probe_layout()
+    tetrode = tetrode_probe_layout()
     return {
         "smoke": (
             GenProfile(
@@ -171,6 +173,22 @@ def _profiles() -> dict[str, tuple[GenProfile, tuple[FixtureSpec, ...]]]:
                     drifting=True,
                     drift_um_per_min=5.0,
                     seed=2,
+                ),
+                # Single-tetrode probe (Frank-lab tetrode_12.5 metadata).
+                # Few planted units because a single tetrode has a tiny
+                # spatial footprint -- only neurons within ~30 µm contribute
+                # detectable spikes. 4 exc + 1 inh is a realistic upper
+                # bound for what a single tetrode could record from in vivo;
+                # too many planted units would just stack noise.
+                FixtureSpec(
+                    name="mearec_tetrode_60s",
+                    layout=tetrode,
+                    duration_s=60.0,
+                    n_exc=4,
+                    n_inh=1,
+                    drifting=False,
+                    drift_um_per_min=0.0,
+                    seed=3,
                 ),
             ),
         ),
@@ -511,6 +529,7 @@ def generate_fixtures(
     *,
     profile_name: str,
     skip_ingestion: bool,
+    only: tuple[str, ...] = (),
 ) -> Path:
     """Generate every fixture for a run and write the provenance manifest.
 
@@ -522,6 +541,12 @@ def generate_fixtures(
         Key into ``_profiles()`` -- ``"smoke"`` or ``"full"``.
     skip_ingestion : bool
         Skip the Spyglass ingestion round-trip (geometry/conversion only).
+    only : tuple of str, optional
+        If non-empty, only generate fixtures whose ``name`` is in this
+        tuple. Useful for adding a new fixture without regenerating the
+        existing ones (saves ~30 min wall time on the polymer + np set).
+        The manifest is REPLACED, not merged, so callers using ``only``
+        must take care if they rely on the manifest for the other fixtures.
 
     Returns
     -------
@@ -531,6 +556,14 @@ def generate_fixtures(
     from importlib.metadata import version as _pkg_version
 
     profile, specs = _profiles()[profile_name]
+    if only:
+        specs = tuple(s for s in specs if s.name in only)
+        if not specs:
+            raise SystemExit(
+                f"--only filter {only} matched no fixtures in profile "
+                f"{profile_name!r}; available: "
+                f"{[s.name for s in _profiles()[profile_name][1]]}"
+            )
     fixtures_dir = _THIS_DIR
     work_dir = base_dir / "mearec_work"
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -542,6 +575,26 @@ def generate_fixtures(
         "spikeinterface_version": _pkg_version("spikeinterface"),
         "fixtures": {},
     }
+    # When ``--only`` filters to a subset of fixtures, preserve existing
+    # manifest entries for the other fixtures so we don't wipe their hashes
+    # just because we regenerated one fixture. New entries override existing
+    # ones with the same name (intentional -- the regen IS the new truth).
+    existing_manifest_path = fixtures_dir / "fixtures_manifest.json"
+    if only and existing_manifest_path.exists():
+        try:
+            existing = json.loads(existing_manifest_path.read_text())
+            if isinstance(existing.get("fixtures"), dict):
+                manifest["fixtures"] = dict(existing["fixtures"])
+                print(
+                    f"--only: preserving {len(manifest['fixtures'])} existing "
+                    "manifest entries from the previous run."
+                )
+        except (json.JSONDecodeError, OSError) as exc:
+            print(
+                f"--only: existing manifest at {existing_manifest_path} "
+                f"could not be loaded ({type(exc).__name__}: {exc}); "
+                "writing a fresh manifest with only the regenerated entries."
+            )
 
     from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import (
         mearec_to_spyglass_nwb,
@@ -634,6 +687,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Skip the Spyglass ingestion round-trip (geometry/conversion "
         "only; no database needed).",
     )
+    parser.add_argument(
+        "--only",
+        action="append",
+        default=[],
+        help="If given (repeatable), only generate fixtures whose ``name`` "
+        "matches. Use to add a new fixture without regenerating the existing "
+        "ones (saves ~30 min on the full set). The manifest is REPLACED on "
+        "write, so cross-reference the prior manifest if you need history.",
+    )
     return parser.parse_args(argv)
 
 
@@ -651,6 +713,7 @@ def main(argv: list[str] | None = None) -> int:
         Path(resolved_base_dir),
         profile_name="smoke" if args.smoke else "full",
         skip_ingestion=args.skip_ingestion,
+        only=tuple(args.only),
     )
     return 0
 
