@@ -84,7 +84,7 @@ bare `ValueError` / `RuntimeError` for these cases once runtime code lands.
 | `RecordingTruncatedError` | Saved `Recording` timestamp range does not cover requested `IntervalList.valid_times`. | Requested interval, saved interval, missing seconds, and source NWB. |
 | `NonIntegerUnitIDError` | SpikeInterface sorting returns non-integer unit IDs that cannot be written to `Sorting.Unit.unit_id`. | Offending unit IDs and instruction to remap before insertion. |
 | `SessionGroupDateError` | `SessionGroup.create_group()` receives caller-supplied `recording_date`, or members span multiple dates without `allow_multi_day=True`. | State that dates are derived from `Session.session_start_time`; for multi-day groups, list dates and point to sort-then-match as the recommended cross-day workflow. |
-| `ConcatBrainRegionAmbiguousError` | `Sorting.get_unit_brain_regions()` or `CurationV2.get_unit_brain_regions()` is called on concat-backed data without `allow_anchor_member=True`. | Explain anchor-member ambiguity; say to pass `allow_anchor_member=True` for anchor-only regions or use `TrackedUnit.get_unit_brain_regions()` for per-session regions. |
+| `ConcatBrainRegionAmbiguousError` | `Sorting.get_unit_brain_regions()` or `CurationV2.get_unit_brain_regions()` is called on concat-backed data without `allow_anchor_member=True`. | Explain anchor-member ambiguity; say to pass `allow_anchor_member=True` for anchor-only regions. **Per-session wording is build-dependent (review-fix Q2):** until cross-session matching exists, the message uses behavior wording with NO phase number and NO non-existent helper name, e.g. *"per-session resolution requires cross-session matching support, which is not available in this build."* (per [§ Code Artifact Naming](#code-artifact-naming), exception messages may not cite phase numbers). Once cross-session matching ships, the message names the concrete `TrackedUnit.get_unit_brain_regions()` resolver. |
 | `MissingRecordingForConcatError` | `ConcatenatedRecordingSelection.insert_selection()` or `ConcatenatedRecording.make()` cannot find a populated per-member `Recording` row with the shared `preproc_params_name`. | Missing member keys and instruction to populate `Recording` for those members first. |
 | `StaleEnvMatchedError` | Recompute deletion sees `matched=1` only in non-current `UserEnvironment` rows. | Current env ID, stale env IDs, and instruction to rerun recompute or pass `force_stale_env=True` with audit justification. |
 | `UnknownMatcherError` | `MatcherParameters.insert1()` receives an unregistered matcher name. | Unknown matcher, registered matcher names, and `register_matcher()`. |
@@ -148,6 +148,8 @@ analyzer.compute(
 
 **Loading convention**: every consumer uses the `Sorting.get_analyzer(key)` method, which checks for folder existence, recomputes if missing (delegating to `Sorting.make()` rerun), then returns the analyzer object. Do not load analyzer folders directly — go through the helper. This mirrors v1's `SpikeSortingRecording.get_recording` missing-file rebuild pattern at [`src/spyglass/spikesorting/v1/recording.py:407-427`](../../../../src/spyglass/spikesorting/v1/recording.py#L407-L427).
 
+**Zero-unit exception (review-fix C5):** a zero-unit sort has no buildable analyzer (SI cannot construct a `SortingAnalyzer` over zero units). `get_analyzer(key)` on such a sort MUST raise a clear zero-unit error (or return the documented sentinel) — it must NOT return a path to a non-existent analyzer folder. Every consumer of the loading convention (`AnalyzerCuration`, `FigPackCuration`, `CurationV2.get_sorting`) handles that signal explicitly rather than assuming a loadable analyzer. See [§ Empty / NaN / Boundary Invariants](#empty--nan--boundary-invariants) for the full zero-unit contract.
+
 **Invariant — do not weaken**: The analyzer folder is regeneratable from `Sorting` row's source recording + sort. Do not store user-edited content inside the folder. Curation edits live in `CurationV2` rows (NWB-backed), not in the analyzer.
 
 ---
@@ -194,7 +196,10 @@ class BandpassFilterParams(BaseModel):
 
 class CommonReferenceParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    reference: Literal["global", "single", "local"] = "global"
+    # NO `reference` field: review-fixes removed it as dead (no v1 workflow
+    # used it). The reference MODE (none / global_median / specific) lives on
+    # SortGroupV2.reference_mode + reference_electrode_id, not here. `operator`
+    # only selects median-vs-average for the global-median branch.
     operator: Literal["median", "average"] = "median"
 
 class WhitenParams(BaseModel):
@@ -216,16 +221,41 @@ class PreprocessingParamsSchema(BaseModel):
         `ConcatenatedRecording.make()` (concat path).
     """
     model_config = ConfigDict(extra="forbid")
-    schema_version: int = 1
-    bandpass_filter: BandpassFilterParams = Field(default_factory=BandpassFilterParams)
+    # schema_version 3 is the post-review-fixes baseline (see
+    # review-fixes/phase-2 T5+T6): bandpass made Optional and whiten
+    # default flipped to None. Versions 1/2 were the original Phase-1
+    # shapes superseded by the review-fixes checkpoint.
+    schema_version: int = 3
+    # bandpass_filter is Optional so the "no_filter" preset can set it
+    # to None (filtering SKIPPED — the real disable, not a wide-band
+    # passthrough). The DEFAULT still constructs a BandpassFilterParams,
+    # so PreprocessingParamsSchema() (and thus the default_franklab
+    # preset built from it) FILTERS. Only the explicit no_filter row
+    # passes bandpass_filter=None.
+    bandpass_filter: BandpassFilterParams | None = Field(
+        default_factory=BandpassFilterParams
+    )
     common_reference: CommonReferenceParams = Field(default_factory=CommonReferenceParams)
-    whiten: WhitenParams | None = Field(default_factory=WhitenParams)
-    # whiten=None for sorters that do their own whitening (Kilosort 4).
+    # whiten defaults to None to match the runtime, which defers
+    # whitening to the sorter stage; a non-None default would claim
+    # "whiten on" while the cached recording stays unwhitened.
+    whiten: WhitenParams | None = Field(default=None)
+    # Phase 1b field — drops sub-second slivers from the intersected
+    # sort interval before the sorter sees them. MUST persist through
+    # the v3 bump (review-fixes did not remove it).
+    min_segment_length: float = Field(default=1.0, ge=0.0)
 
     def to_pre_motion_dict(self) -> dict:
-        """Stage 1 dict for apply_preprocessing_pipeline(). Cached."""
+        """Stage 1 dict for apply_preprocessing_pipeline(). Cached.
+
+        ``bandpass_filter`` is None when filtering is disabled; the
+        recording stage skips the bandpass step in that case.
+        """
         return {
-            "bandpass_filter": self.bandpass_filter.model_dump(),
+            "bandpass_filter": (
+                None if self.bandpass_filter is None
+                else self.bandpass_filter.model_dump()
+            ),
             "common_reference": self.common_reference.model_dump(),
         }
 
@@ -552,7 +582,7 @@ source part tables instead of nullable source FKs on the master row:
 
 | Master table | Source parts | Meaning |
 | --- | --- | --- |
-| `SortingSelection` | `RecordingSource`, `ConcatenatedRecordingSource` | exactly one sort input source |
+| `SortingSelection` | `RecordingSource`, `ConcatenatedRecordingSource` | exactly one sort **input** source |
 | `ArtifactSelection` | `RecordingSource`, `SharedArtifactGroupSource` | exactly one artifact-detection input source |
 
 This is the selected design because source-specific queries remain explicit:
@@ -562,6 +592,24 @@ FK columns whose joins silently drop the other source type.
 
 DataJoint does not enforce "exactly one part row across two part tables", so
 the invariant still needs two runtime checks plus a small integrity test.
+
+**`SortingSelection.ArtifactSource` (post-review-fixes) is an optional
+*association* part, NOT an input source.** The review-fixes checkpoint replaced
+the nullable `-> ArtifactDetection` FK on the `SortingSelection` master with a
+zero-or-one `ArtifactSource` part (`-> master` / `-> ArtifactDetection`). It
+records "was an artifact pass applied to this sort." It is deliberately
+**excluded** from the "exactly one input source" invariant:
+
+- `resolve_source()` counts ONLY `RecordingSource` + `ConcatenatedRecordingSource`
+  (still exactly one). It MUST NOT count `ArtifactSource`, or every
+  artifact-backed sort would resolve as "two sources."
+- `prune_orphaned_selections()` checks ONLY the two input-source parts; a sort
+  with no `ArtifactSource` row is valid (it means "no artifact detection"), not
+  an orphan.
+- **Contract: "no `ArtifactSource` row" means "no artifact detection."** This
+  replaces the old "`artifact_id IS NULL`" contract — there is no nullable
+  `artifact_id` column on the master anymore. Read the artifact via the
+  `resolve_artifact(key) -> artifact_id | None` accessor, not `row["artifact_id"]`.
 
 ### Layer 1: transaction-wrapped insert helper
 
@@ -655,9 +703,11 @@ row has exactly one source part. The same test also asserts logical identities
 are unique within each source family:
 
 - `SortingSelection.RecordingSource`: source `recording_id` + sorter fields +
-  `artifact_id`.
+  presence/absence of an `ArtifactSource` row (an artifact-backed and a
+  no-artifact sort with otherwise identical fields are distinct identities).
 - `SortingSelection.ConcatenatedRecordingSource`: source `concat_recording_id`
-  + sorter fields + `artifact_id` (which must remain NULL for concat).
+  + sorter fields (concat sorts have **no** `ArtifactSource` row — see the
+  concat guard below).
 - `ArtifactSelection.RecordingSource`: source `recording_id` +
   `artifact_params_name`.
 - `ArtifactSelection.SharedArtifactGroupSource`: source
@@ -691,7 +741,8 @@ def prune_orphaned_selections(cls, *, dry_run: bool = True) -> list[dict]:
 ```
 
 `SortingSelection.prune_orphaned_selections()` checks
-`RecordingSource` + `ConcatenatedRecordingSource`.
+`RecordingSource` + `ConcatenatedRecordingSource` ONLY (not `ArtifactSource` —
+a sort with no `ArtifactSource` row is valid, not orphaned).
 `ArtifactSelection.prune_orphaned_selections()` checks
 `RecordingSource` + `SharedArtifactGroupSource`.
 
@@ -809,7 +860,7 @@ TrackedUnit.get_unit_brain_regions(tracked_unit_key) -> pd.DataFrame  # cols: so
 
 Returning the anchor region silently would be a wrong-answer footgun. Therefore:
 
-- `Sorting.get_unit_brain_regions(key)` and `CurationV2.get_unit_brain_regions(key)` MUST detect concat-backed sorts via `SortingSelection.ConcatenatedRecordingSource` and **raise `ConcatBrainRegionAmbiguousError`** by default, with a message pointing the caller at `TrackedUnit.get_unit_brain_regions` for per-session resolution.
+- `Sorting.get_unit_brain_regions(key)` and `CurationV2.get_unit_brain_regions(key)` MUST detect concat-backed sorts via `SortingSelection.ConcatenatedRecordingSource` and **raise `ConcatBrainRegionAmbiguousError`** by default. **Message wording is build-dependent (review-fix Q2):** until cross-session matching (`TrackedUnit`) exists, the runtime message uses behavior wording — e.g. *"per-session resolution requires cross-session matching support, which is not available in this build"* — with NO phase number (per [§ Code Artifact Naming](#code-artifact-naming)) and NOT naming the not-yet-existent `TrackedUnit.get_unit_brain_regions` helper. When cross-session matching ships, the message is updated to name the concrete `TrackedUnit.get_unit_brain_regions` resolver. (This doc-prose may reference "Phase 4" as the plan milestone; the *runtime message string* may not.)
 - Callers who explicitly want anchor-member resolution pass `allow_anchor_member=True`. The returned DataFrame in that case carries a `region_resolution` column whose value is `"anchor_member"` (vs `"single_session"` for non-concat sorts), so downstream code can detect and warn.
 - `SpikeSortingOutput.get_unit_brain_regions(merge_key)` passes `allow_anchor_member` through to the dispatched source class.
 - `TrackedUnit.get_unit_brain_regions` is the canonical per-session accessor for cross-session workflows and is not subject to the guard — it walks each pinned `CurationV2.Unit -> Electrode -> BrainRegion` and labels rows by `member_index`.
@@ -833,7 +884,22 @@ Single-session sorts return the same shape as before (no `region_resolution` col
 
 This contract enforces the user's binding constraint: every v2 table is designed in its final shape in the phase that introduces it. No `Table.alter()` calls across phases.
 
-**The forward-compatibility decisions baked into Phase 1**:
+**Review-fixes is the final pre-Phase-2 schema-correction checkpoint.** The
+review-fixes plan ([review-fixes/PLAN.md](review-fixes/PLAN.md)) is a one-time
+correction pass that lands schema-shape fixes BEFORE the zero-migration rule
+binds for the rest of the epic: it replaces the nullable `SortingSelection ->
+ArtifactDetection` FK with an optional `ArtifactSource` part, splits
+`SortGroupV2.sort_reference_electrode_id` into `reference_mode` +
+`reference_electrode_id`, adds `Recording.timestamps_adjusted` /
+`Recording.n_adjusted_samples`, makes `bandpass_filter` Optional, flips the
+`whiten` default to None, and adds `threshold_unit` to the clusterless schema
+(bumping `PreprocessingParamsSchema` to v3 and `ClusterlessThresholderSchema`
+to v4). v2 is pre-release, so these corrections are permitted. **The
+"final shape" the zero-migration invariant protects is the
+post-review-fixes baseline, not the original Phase-1 shape.** Phases 2–5 below
+build on the corrected baseline; the forward-compat table reflects it.
+
+**The forward-compatibility decisions baked into the (post-review-fixes) Phase 1 baseline**:
 
 | Phase 1 table | Forward-compat feature | What it anticipates |
 |---|---|---|
@@ -842,7 +908,9 @@ This contract enforces the user's binding constraint: every v2 table is designed
 | `ConcatenatedRecordingSelection` | Declared in Phase 1 (Manual, UUID PK) | Provides the UUID PK that `ConcatenatedRecording` (Computed) inherits. Needed so `SortingSelection` can FK `ConcatenatedRecording` from Phase 1. |
 | `ConcatenatedRecording` + `ConcatenatedRecording.MemberBoundary` | Declared in Phase 1; `make()` body raises `NotImplementedError("ConcatenatedRecording.make() is not implemented yet")` | Final schema; Phase 3 only fills in the `make()` body and writes member boundary rows. Test in Phase 1 asserts `populate()` raises. |
 | `SortingSelection` + source parts | `RecordingSource` and `ConcatenatedRecordingSource` part tables declared in Phase 1. Exactly one source part is enforced by `insert_selection()` and re-checked in `make()`. | Both source FK targets exist from Phase 1, so the schema is final. Phase 1's `insert_selection` rejects `ConcatenatedRecordingSource`; Phase 3 lifts that runtime gate without touching the schema. |
-| `SortingSelection` | Nullable `-> ArtifactDetection` FK (the inherited `artifact_id` is NOT a PK component) | Concat sorts skip artifact detection. |
+| `SortingSelection.ArtifactSource` | Optional `association` part (`-> master` / `-> ArtifactDetection`), zero-or-one per master; **replaces** the old nullable `-> ArtifactDetection` FK | "No `ArtifactSource` row" = no artifact detection. Concat sorts skip artifact detection by simply having no `ArtifactSource` row. Excluded from `resolve_source()` / orphan counts. |
+| `SortGroupV2` | `reference_mode: varchar(32)` (validated against a `ReferenceMode` Literal: `none`/`global_median`/`specific`) + nullable `reference_electrode_id` (**replaces** the `sort_reference_electrode_id` magic sentinels -1/-2/≥0) | Reference dispatch reads the validated mode + nullable FK; "specific iff `reference_electrode_id IS NOT NULL`" enforced in `insert1`. **varchar, not enum, on purpose** — the reference-mode set may grow (SI also has `global_average`/CAR and local/per-group referencing), so an enum would trap a future mode behind a forbidden `ALTER TABLE`. The `Literal` gives typo-protection without the migration risk (same rationale as `CurationLabel`; the closed `metrics_source` set is the contrasting enum case). A future reviewer must NOT "tighten" this to an enum. |
+| `Recording` | `timestamps_adjusted: bool` + `n_adjusted_samples: int` provenance columns | Records when the non-monotonic-timestamp repair fired, so a time-mutated recording is queryable instead of silently rewritten. |
 | `Sorting.Unit` | Part table present in Phase 1 | Phase 2 `AnalyzerCuration` reads brain regions from here; Phase 4 `TrackedUnit` per-session region lookup reads from here. |
 | `CurationV2.Unit` | Part table present in Phase 1 | Same downstream consumers; merges shrink `CurationV2.Unit` from `Sorting.Unit` row count. |
 | `CurationV2.UnitLabel` | Part table present in Phase 1 | Phase 2/5 label filtering and Phase 4 matchable-unit selection rely on queryable multi-label rows. No later label-table migration is allowed. |
@@ -861,7 +929,7 @@ This contract enforces the user's binding constraint: every v2 table is designed
 - Phase 4: `MatcherParameters`, `UnitMatchSelection`, `UnitMatchSelection.MemberCuration`, `UnitMatch`, `UnitMatch.Pair`, `TrackedUnit`, `TrackedUnit.Member`.
 - Phase 5: `FigPackCurationSelection`, `FigPackCuration`, plus all `_params/preset.py` registrations.
 
-**Invariant — do not weaken**: A reviewer of any implementation PR that includes a later checkpoint must check that NO existing v2 table from an earlier checkpoint is modified except by adding rows to its `contents` (for Lookup tables) or by adding rows via `make()` (for Computed tables). Adding columns, changing types, renaming columns, or altering FK structures is FORBIDDEN. Phase 1's forward-compatibility decisions above are the contract that lets this work.
+**Invariant — do not weaken (binds from the post-review-fixes baseline onward)**: A reviewer of any implementation PR **at or after Phase 2** must check that NO existing v2 table from an earlier checkpoint is modified except by adding rows to its `contents` (for Lookup tables) or by adding rows via `make()` (for Computed tables). Adding columns, changing types, renaming columns, or altering FK structures is FORBIDDEN. The corrected post-review-fixes baseline above is the contract that lets this work. (The review-fixes checkpoint itself is the sole, deliberate exception — it is the last pass that may alter table shape, precisely because it is pre-Phase-2 and v2 is unreleased.)
 
 ---
 
@@ -869,7 +937,7 @@ This contract enforces the user's binding constraint: every v2 table is designed
 
 Derived from a sweep of v1 spike-sorting issues (#1532, #1154, #1558, #1556, #1500, #1530, #1512). v2 handles these as ordinary input, not exception paths.
 
-1. **Zero-unit sortings are valid.** `Sorting.populate()` succeeds with `n_units=0`; `Sorting.Unit`, `CurationV2.Unit`, `CurationV2.UnitLabel` are empty; the analysis NWB units table exists with zero rows; `AnalyzerCuration` and `FigPackCuration` succeed (or `FigPackCuration` raises a clear `EmptySortingError` — never a missing-column `KeyError`).
+1. **Zero-unit sortings are valid (loud, but not an error by default).** `Sorting.populate()` succeeds with `n_units=0`; `Sorting.Unit`, `CurationV2.Unit`, `CurationV2.UnitLabel` are empty; the analysis NWB units table exists with zero rows; `AnalyzerCuration` and `FigPackCuration` succeed (or `FigPackCuration` raises a clear `EmptySortingError` — never a missing-column `KeyError`). Per review-fix C5, `run_v2_pipeline()` returns a partial manifest (`curation_id=None`, `merge_id=None`) with a loud warning by default; raising on zero units is **caller opt-in via `require_units=True`**, NOT the default. `Sorting.get_analyzer()` on a zero-unit sort must raise a clear zero-unit error (or return a documented sentinel), never a path to a non-existent analyzer folder.
 2. **NaN-bearing quality metrics are sanitized before serialization.** A single helper `_sanitize_for_json(df) -> df` coerces non-finite values to `None` for every serialized target (AnalysisNWB tables in Phase 2, FigPack URI payload in Phase 5). The in-memory metrics DataFrame keeps NaN semantics.
 3. **Spike at recording boundary is valid.** `Sorting.make()` runs `sic.remove_excess_spikes(sorting, recording)`; a boundary spike is either kept (within ±1 sample) or dropped with a logged warning — never a "spikes exceeding recording duration" raise.
 4. **`CurationV2.insert_curation` requires an explicit `labels` argument.** No default `None`; pass `{}` for unlabeled. The NWB writer still materializes the `curation_label` column (empty list per unlabeled unit); `CurationV2.UnitLabel` has zero rows when `labels={}`.

@@ -47,8 +47,22 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
     -> Session
     sort_group_id: int
     ---
-    sort_reference_electrode_id = -1: int  # -1 = none, -2 = global median, ≥0 = specific channel
+    reference_mode: varchar(32)  # post-review-fixes; replaces sort_reference_electrode_id sentinels
+    reference_electrode_id = null: int  # set iff reference_mode='specific'; NULL otherwise
     """
+    # `reference_mode` is varchar(32), NOT a MySQL enum, validated at
+    # insert against a Python `ReferenceMode` Literal
+    # ("none"|"global_median"|"specific"). varchar-for-flexibility is
+    # deliberate: SI also supports global_average (CAR) and local/
+    # per-group referencing, so the set may grow — an enum would trap a
+    # future mode behind a forbidden ALTER TABLE under the zero-migration
+    # policy. The Literal gives the same typo-protection without the
+    # migration risk (same rationale as CurationLabel; contrast
+    # metrics_source, whose set is closed). `insert1` enforces both the
+    # Literal membership AND "reference_electrode_id IS NOT NULL iff
+    # reference_mode='specific'". The preproc dispatch switches on
+    # reference_mode (no more -1/-2/≥0 magic-int arithmetic). See
+    # review-fixes/phase-2 T2.
 
     class SortGroupElectrode(SpyglassMixinPart):
         definition = """
@@ -87,7 +101,8 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         nwb_file_name: str,
         omit_ref_electrode_group: bool = False,
         omit_unitrode: bool = True,
-        sort_reference_electrode_id: int = -1,
+        reference_mode: str = "none",
+        reference_electrode_id: int | None = None,
         sort_group_ids: list[int] | None = None,
         delete_existing_entries: bool = False,
         confirm: bool = False,
@@ -95,9 +110,14 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         """Auto-group electrodes by shank.
 
         Uses the existing-entry-handling pattern from PR #1438; see the
-        class-level comment above. `sort_reference_electrode_id` is now
-        configurable per-call (Frank-lab default -1; Berke-lab default
-        -1 historically; other labs may set per-shank reference).
+        class-level comment above. Reference is configured per-call via
+        `reference_mode` ('none' | 'global_median' | 'specific') plus
+        `reference_electrode_id` (required iff `reference_mode='specific'`).
+        Frank-lab default is `reference_mode='none'`. (Post-review-fixes:
+        replaces the old `sort_reference_electrode_id` sentinel arg.)
+        Helpers that skip groups (unitrode, single-channel) MUST surface
+        the skipped-group list in the return value / a summary log, not
+        only per-group warnings (review-fix E2).
         """
         ...
 
@@ -108,7 +128,8 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         column: str,
         groups: list[list],
         sort_group_ids: list[int] | None = None,
-        sort_reference_electrode_id: int = -1,
+        reference_mode: str = "none",
+        reference_electrode_id: int | None = None,
         remove_bad_channels: bool = True,
         omit_unitrode: bool = True,
         delete_existing_entries: bool = False,
@@ -166,12 +187,19 @@ class PreprocessingParameters(SpyglassMixin, dj.Lookup):
     preproc_params_name: varchar(128)              # matches v1's varchar(200) ballpark
     ---
     params: blob                # SI PreprocessingPipeline dict, validated by PreprocessingParamsSchema
-    params_schema_version=1: int
+    params_schema_version=3: int   # post-review-fixes baseline (bandpass Optional + whiten=None); column default tracks the schema
     job_kwargs=null: blob       # optional per-row SI job kwargs override
     """
     contents = [
-        ("default_franklab", PreprocessingParamsSchema().model_dump(), 1, None),
-        # Additional presets inserted via Phase 1 task.
+        # default_franklab FILTERS: PreprocessingParamsSchema() builds a
+        # BandpassFilterParams by default (the field is Optional but
+        # default_factory'd, NOT default=None) and carries
+        # min_segment_length=1.0. Do NOT let the v3 Optional bump turn this
+        # preset into "no filter".
+        ("default_franklab", PreprocessingParamsSchema().model_dump(), 3, None),
+        # ONLY the "no_filter" preset passes bandpass_filter=None (filtering
+        # skipped — not a wide-band passthrough). Additional presets inserted
+        # via Phase 1 task.
     ]
 
     def insert1(self, row: dict, **kwargs):
@@ -233,6 +261,8 @@ class Recording(SpyglassMixin, dj.Computed):
     sampling_frequency: float
     duration_s: float
     cache_hash: char(64)                # SHA-256 over ElectricalSeries.data bytes
+    timestamps_adjusted=0: bool         # post-review-fixes C3: True if non-monotonic timestamps were repaired
+    n_adjusted_samples=0: int           # how many samples the repair touched (provenance for time-mutated recordings)
     """
 
     def make(self, key):
@@ -243,13 +273,21 @@ class Recording(SpyglassMixin, dj.Computed):
 
     def _rebuild_nwb_artifact(self, key) -> None:
         ...
+
+    @classmethod
+    def repair(cls, key) -> None:
+        # post-review-fixes C2: consciously recompute + rewrite the cache
+        # and update cache_hash. This is the SANCTIONED way to resolve a
+        # cache-hash drift; get_recording must NOT silently rebuild a
+        # drifted artifact.
+        ...
 ```
 
 **Binding behavior**:
 
-- `Recording.make()` loads the raw NWB, restricts to the selected sort group and interval, applies PRE-MOTION preprocessing only, writes one `ElectricalSeries` into `AnalysisNwbfile`, validates timestamp coverage, stores metadata, and records a SHA-256 `cache_hash`.
-- `Recording.get_recording(key)` loads that NWB-resident artifact; if the artifact is missing, it rebuilds the artifact without deleting the DataJoint row.
-- `_rebuild_nwb_artifact(key)` regenerates only the file payload and verifies the regenerated hash against the stored row.
+- `Recording.make()` loads the raw NWB, restricts to the selected sort group and interval, applies PRE-MOTION preprocessing only, writes one `ElectricalSeries` into `AnalysisNwbfile`, validates timestamp coverage, stores metadata, and records a SHA-256 `cache_hash`. If the source timestamps were non-monotonic and repaired, it sets `timestamps_adjusted=True` / `n_adjusted_samples` (review-fix C3 — the repair is recorded, never silent; gated by a `Recording`-level flag, NOT a `PreprocessingParamsSchema` field, to avoid a cross-phase schema-version collision).
+- `Recording.get_recording(key)` loads that NWB-resident artifact; if the artifact is **missing**, it rebuilds without deleting the DataJoint row.
+- **Cache-hash drift is fail-closed (review-fix C2).** `_rebuild_nwb_artifact(key)` regenerates the payload and compares the regenerated hash against the stored row. On mismatch it MUST raise `RecordingCacheDriftError` by default (opt out with `allow_drift=True`) AND must not leave the drifted file at the canonical path — because `get_recording` only rebuilds when the file is *absent*, a drifted file left on disk would be returned silently on the next call. Use an **atomic rebuild**: write to a temp path, hash it, `os.replace` onto the canonical path only on a hash match; on mismatch delete the temp file and raise. `Recording.repair()` is the conscious path to accept a new hash.
 
 **Storage decision is settled — see [shared-contracts.md § Recording Cache Format](shared-contracts.md#recording-cache-format)**. The canonical artifact lives in `AnalysisNwbfile` using the existing HDF5 builder path. Binary sidecar storage is explicitly out of MVP. Any future Zarr or binary-cache optimization must not change the schema above, which is final-shape under the zero-migration policy.
 
@@ -414,7 +452,14 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
     # extra-allowing schema is used only for explicit custom rows whose sorter
     # is present in spikeinterface.sorters.available_sorters().
     # Exception: clusterless_thresholder is a Spyglass special-case path built
-    # on SI peak detection, not an SI registered sorter.
+    # on SI peak detection, not an SI registered sorter. Post-review-fixes T3:
+    # ClusterlessThresholderSchema is at schema_version 4 — it carries an
+    # explicit `threshold_unit: Literal["uv","mad"]` knob; the shipped
+    # 'default' row uses threshold_unit='uv' (100 uV, v1 behavior), the
+    # 'smoke_clusterless_5uv' row uses 'mad'. The runtime strips
+    # threshold_unit before detect_peaks (it is not a detect_peaks kwarg).
+    # The SorterParameters column default `params_schema_version` stays
+    # sorter-agnostic (multi-sorter table); per-row values carry the truth.
     # Contents (Phase 1 default rows):
     #   ('mountainsort4', 'franklab_tetrode_hippocampus_30kHz_ms4', ...)  # MS4 stays in v2
     #   ('mountainsort5', 'franklab_tetrode_hippocampus_30kHz_ms5', ...)
@@ -433,47 +478,82 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
 
 @schema
 class SortingSelection(SpyglassMixin, dj.Manual):
-    """One row per (recording, sorter, artifact detection) tuple.
+    """One row per (recording, sorter, optional artifact detection) tuple.
 
     The final schema supports either a single-session recording source or
-    a concatenated recording source. Source part rows make that input
-    explicit, and runtime helpers enforce exactly one source.
+    a concatenated recording source. Input-source part rows make that input
+    explicit, and runtime helpers enforce exactly one INPUT source.
+
+    Post-review-fixes (T1): artifact detection is recorded by an OPTIONAL
+    `ArtifactSource` association part, not a nullable FK on the master.
+    "No `ArtifactSource` row" means "no artifact detection." `ArtifactSource`
+    is NOT an input source — it is excluded from `resolve_source()` and from
+    `prune_orphaned_selections()`.
     """
     definition = """
     sorting_id: uuid
     ---
     -> SorterParameters
-    -> [nullable] ArtifactDetection             # real DataJoint FK; NULL = no artifact detection
     """
 
     class RecordingSource(SpyglassMixinPart):
         definition = """
         -> master
         ---
-        -> Recording                            # single-session path
+        -> Recording                            # single-session INPUT source
         """
 
     class ConcatenatedRecordingSource(SpyglassMixinPart):
         definition = """
         -> master
         ---
-        -> ConcatenatedRecording                # concat path
+        -> ConcatenatedRecording                # concat INPUT source
+        """
+
+    class ArtifactSource(SpyglassMixinPart):
+        # Optional association part (zero-or-one). Presence = "an artifact
+        # pass was applied"; absence = "no artifact detection". NOT counted
+        # as an input source by resolve_source / prune_orphaned_selections.
+        definition = """
+        -> master
+        ---
+        -> ArtifactDetection
         """
 
     @classmethod
     def insert_selection(cls, key: dict) -> dict:
-        """Inserts the master row plus exactly one source part row.
+        """Inserts the master row, exactly one INPUT source part row, and
+        (if an artifact is supplied) one `ArtifactSource` row.
 
-        Finding existing rows joins the selected source part, so the
-        logical identity includes sorter params, optional artifact, and source.
+        Logical identity = sorter params + INPUT source + presence/absence
+        of an artifact. An artifact-backed and a no-artifact sort with
+        otherwise identical fields are DISTINCT rows (this is the bug-class
+        the old nullable `artifact_id` aliased — see review-fixes T1).
 
-        Single-session rows may reference artifact detection. Concatenated
-        rows reject artifact_id until concat-wide artifact masking has an
-        implemented semantic model.
-        Returns a single PK-only dict per shared-contracts.
+        Pseudocode:
+            input_kind, input_key = pop_input_source(key)   # recording XOR concat
+            artifact_id = key.pop("artifact_id", None)      # optional
+            existing = find_by(sorter_params, input_kind, input_key,
+                               has_artifact=(artifact_id is not None),
+                               artifact_id=artifact_id)
+            if exactly one existing: return its PK
+            if >1: raise DuplicateSelectionError
+            with transaction:
+                insert master (sorter params only)
+                insert <input>Source row
+                if artifact_id is not None:
+                    insert ArtifactSource row   # else: no row == no artifact
+            return PK-only dict
 
-        See shared-contracts.md § Source Part Pattern for the insert
-        helper, populate-time re-check, and parametrized integrity test.
+        Concat sorts MUST have NO `ArtifactSource` row until concat-wide
+        artifact masking has a semantic model (review-fixes; was
+        "artifact_id IS NULL").
+
+        Read the artifact downstream via `resolve_artifact(key) ->
+        artifact_id | None`, never `row["artifact_id"]` (the column is gone).
+
+        See shared-contracts.md § Source Part Pattern for the input-source
+        invariant, populate-time re-check, and parametrized integrity test.
         """
         ...
 
@@ -586,7 +666,7 @@ class Sorting(SpyglassMixin, dj.Computed):
 - `Sorting.make()` re-validates the source part rows, resolves either a single `Recording` or a `ConcatenatedRecording`, applies post-motion preprocessing exactly once, applies artifact masking only on the single-recording path, runs the sorter, removes excess spikes, builds the SortingAnalyzer, writes `/units` to `AnalysisNwbfile`, and populates `Sorting.Unit`.
 - `Sorting.Unit` rows must use integer-convertible unit IDs and the full `Electrode` FK from the selected sort group. Concat sorts use the first member as the deterministic Electrode anchor.
 - `get_unit_brain_regions()` raises on concat sorts unless `allow_anchor_member=True`; anchor-only output must be labeled with `region_resolution='anchor_member'`.
-- `get_analyzer()` rebuilds a missing analyzer folder without deleting or replacing the `Sorting` row.
+- `get_analyzer()` rebuilds a missing analyzer folder without deleting or replacing the `Sorting` row. **Zero-unit exception (review-fix C5):** on a zero-unit sort there is no buildable analyzer — `get_analyzer()` raises a clear zero-unit error (or returns the documented sentinel), never a path to a non-existent folder. Consumers (`AnalyzerCuration`, `FigPackCuration`, `CurationV2.get_sorting`) handle that signal explicitly. See [shared-contracts.md § SortingAnalyzer Storage Layout](shared-contracts.md#sortinganalyzer-storage-layout) and § Empty / NaN / Boundary Invariants.
 
 ---
 
@@ -648,10 +728,20 @@ class CurationV2(SpyglassMixin, dj.Manual):
         A separate part table preserves v1's multi-label semantics
         (`labels: dict[int, list[str]]`) without packing lists into a scalar
         column. Unlabeled units have no UnitLabel rows.
+
+        Post-review-fixes (T4): the column stays `varchar(32)` (NOT a MySQL
+        enum) for flexibility + the zero-migration policy (labs add custom
+        labels without an ALTER TABLE). Typo-protection is enforced at the
+        Python insert boundary: ALL insert paths — including a direct
+        `UnitLabel.insert1` — validate `curation_label` against the canonical
+        `CurationLabel` set; labels outside it are rejected unless the caller
+        passes `allow_custom_labels=True` (the explicit escape hatch). Do NOT
+        repeat the false "DataJoint cannot enforce enums on varchar" claim —
+        it can (see `metrics_source`); we choose varchar deliberately.
         """
         definition = """
         -> CurationV2.Unit
-        curation_label: varchar(32)  # one of CurationLabel enum
+        curation_label: varchar(32)  # validated against CurationLabel at insert time (all paths)
         """
 
     # Required methods to satisfy SpikeSortingOutput.source_class_dict dispatch
@@ -1515,6 +1605,7 @@ def run_v2_pipeline(
     skip_artifact: bool = False,
     auto_curate: bool = False,
     figpack: bool = False,
+    require_units: bool = False,
 ) -> dict:
     """Run the v2 spike-sorting pipeline and return a manifest.
 
@@ -1536,6 +1627,13 @@ def run_v2_pipeline(
     figpack
         When True, publish a FigPack view and return its URI without blocking
         for interactive edits.
+    require_units
+        Zero-unit policy (review-fix C5). Default False: a zero-unit sort is a
+        legitimate result (e.g. a quiet shank) — the pipeline returns a partial
+        manifest with `curation_id=None` and `merge_id=None` plus a loud
+        warning, and does NOT raise. Set True to instead raise
+        `ZeroUnitSortError`. Graceful-by-default is deliberate; raising is the
+        opt-in.
 
     Single-session mode requires `nwb_file_name`, `sort_group_id`,
     `interval_list_name`, and `team_name`; it runs recording, optional artifact
@@ -1557,12 +1655,17 @@ def run_v2_pipeline(
     -------
     dict
         Manifest containing each stage name and DataJoint key, plus the final
-        `merge_id`.
+        `merge_id`. On a zero-unit sort with `require_units=False`, the manifest
+        is partial: `curation_id` and `merge_id` are None (the `sorting` row is
+        still present and visible). Callers MUST check
+        `manifest["merge_id"] is not None` before passing it downstream.
 
     Raises
     ------
     PipelineInputError
         If the input mode is missing, partial, mixed, or a preset is unknown.
+    ZeroUnitSortError
+        Only when `require_units=True` and the sort produced zero units.
     """
     ...
 
@@ -1581,6 +1684,7 @@ def run_v2_unit_match(
 
 - `run_v2_pipeline()` accepts exactly one input mode: single-session inputs or concat session-group inputs. It returns a manifest of every DataJoint row touched. Mixed, missing, or partial input modes raise `PipelineInputError("run_v2_pipeline requires exactly one input mode: either single-session fields (nwb_file_name, sort_group_id, interval_list_name, team_name) or concat fields (concat_session_group_owner, concat_session_group_name)")`.
 - The helper is idempotent through each table's `insert_selection()` contract; rerunning the same call reuses existing rows.
+- **Zero-unit sorts (review-fix C5):** by default (`require_units=False`) a zero-unit sort returns a partial manifest (`curation_id=None`, `merge_id=None`) with a warning instead of raising — curation/merge are skipped because SI's `NwbSortingExtractor` cannot open an empty units NWB. `require_units=True` raises `ZeroUnitSortError`. This matches `shared-contracts.md § Empty / NaN / Boundary Invariants` (zero-unit is valid, loud, not an error by default).
 - `run_v2_unit_match()` is separate from concat sorting and always requires explicit `curation_choices`; it never selects latest curations implicitly.
 
 **Design points**:
@@ -1607,7 +1711,12 @@ PRESETS = {
     "franklab_tetrode_clusterless_thresholder": {...},
     "franklab_tetrode_mountainsort5_sameday_concat": {
         "preproc_params_name": "default_franklab",
-        "artifact_params_name": "default",
+        # artifact_params_name is None for concat presets: concat sorts run
+        # NO artifact detection (the concat SortingSelection has no
+        # ArtifactSource row), so a non-None value here would be silently
+        # ignored. The _Preset model makes the field Optional and the
+        # orchestrator forbids consuming it in concat mode.
+        "artifact_params_name": None,
         "sorter": "mountainsort5",
         "sorter_params_name": "franklab_tetrode_hippocampus_30kHz_ms5",
         "metric_params_name": "franklab_default",

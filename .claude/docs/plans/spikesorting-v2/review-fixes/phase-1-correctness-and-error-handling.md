@@ -1,0 +1,145 @@
+# Phase 1 — Correctness & error-handling fixes
+
+[← back to PLAN.md](PLAN.md) · [overview + finding ledger](overview.md)
+
+The merge-blocking PR. Every silent-wrong-output path (C1–C7) plus the
+runtime-contract bugs (R1–R4) and MEDIUM error-handling (E1–E5). Read the
+fix-type taxonomy in [overview.md](overview.md#fix-type-taxonomy) first — **C1
+is VERIFY-FIRST and C5/C6 are partly DOCUMENT; do not blind-fix them.**
+
+**Inputs to read first:**
+
+- [src/spyglass/spikesorting/v2/recording.py:935-1010](../../../../../src/spyglass/spikesorting/v2/recording.py#L935-L1010) — truncation guard (C1), already carries a comment claiming gap-exclusion.
+- [src/spyglass/spikesorting/v2/recording.py:1011-1090](../../../../../src/spyglass/spikesorting/v2/recording.py#L1011-L1090) — `get_recording` → `_rebuild_nwb_artifact` cache-hash path (C2).
+- [src/spyglass/spikesorting/v2/recording.py:1440-1520](../../../../../src/spyglass/spikesorting/v2/recording.py#L1440-L1520) — timestamp-repair (C3) + `_fetch_sort_group_probe_info` (R1).
+- [src/spyglass/spikesorting/v2/recording.py:1740-1776](../../../../../src/spyglass/spikesorting/v2/recording.py#L1740-L1776) — `_write_nwb_artifact` unlink (C7).
+- [src/spyglass/spikesorting/v2/sorting.py:1120-1290](../../../../../src/spyglass/spikesorting/v2/sorting.py#L1120-L1290) — clusterless seed/`detect_peaks` (R4) + `_run_si_sorter` job-kwargs (R3) + zero-unit analyzer (C5).
+- [src/spyglass/spikesorting/v2/pipeline.py:204-222](../../../../../src/spyglass/spikesorting/v2/pipeline.py#L204-L222) — zero-unit short-circuit (C5), confirmed.
+- [src/spyglass/spikesorting/v2/artifact.py:870-915](../../../../../src/spyglass/spikesorting/v2/artifact.py#L870-L915) — z-score detector (C6) + empty-frames warning (E1); [:1065-1085](../../../../../src/spyglass/spikesorting/v2/artifact.py#L1065-L1085) — `delete()` resolve_source (E3).
+- [src/spyglass/spikesorting/v2/curation.py:485-640](../../../../../src/spyglass/spikesorting/v2/curation.py#L485-L640) — `n_spikes` / `_build_curated_unit_rows` (R2); [:240-255](../../../../../src/spyglass/spikesorting/v2/curation.py#L240-L255) — idempotent insert (E5).
+- [src/spyglass/spikesorting/v2/_fixtures/mearec_to_nwb.py:275-340](../../../../../src/spyglass/spikesorting/v2/_fixtures/mearec_to_nwb.py#L275-L340) — gain fallback (C4). **C4's fixture-writer fix here; F1/F2 NaN-position + cell-type are Phase 2 (same file, grouped with type changes) — coordinate edits if both phases touch this file.**
+
+**Every line number above is from the review or a confirmed read; re-grep the
+exact site before editing (the codebase moves).**
+
+## Tasks
+
+### C1 — VERIFY-FIRST: multi-interval truncation guard
+1. Write a `@pytest.mark.slow` test that builds a **multi-interval** recording (≥2 disjoint sort intervals with a real inter-interval gap) whose middle chunk is deliberately truncated at write time, and asserts `RecordingTruncatedError` is raised. Use the existing `test_recording_truncation_caught` single-interval test as the template.
+2. Run it against current `recording.py:944-956`. **If it fails to raise** (guard is broken as the scientific reviewer claims), fix: compare saved duration to requested duration in a gap-independent way — e.g. compare *sample counts* (`saved_n_samples` vs `expected_n_samples = round(requested_total * fs)`) rather than wall-clock spans, since sample count is invariant to whether timestamps carry gaps. **If it raises** (guard already correct, comment at 944-950 is right), keep the code, and add the new multi-interval test permanently as the regression guard + a one-line note closing the finding.
+3. Either way the multi-interval truncation test ships.
+
+### C2 — BUG: cache-hash drift surfaced (raise AND remove the drifted file)
+- In `_rebuild_nwb_artifact` ([recording.py:1077-1085]), replace the `logger.warning`-then-return with: raise a new `RecordingCacheDriftError` (add to `exceptions.py`) by default. Add an `allow_drift: bool = False` parameter threaded from `get_recording`; when True, log + proceed. Add a `Recording.repair()` classmethod that consciously recomputes + rewrites the cache and updates `cache_hash`.
+- **Raising is NOT sufficient on its own.** `_rebuild_nwb_artifact` writes the file *before* comparing hashes, and `get_recording` ([recording.py:1022](../../../../../src/spyglass/spikesorting/v2/recording.py#L1022)) only rebuilds when the file is **absent** — so a drifted file left on disk by a failed rebuild is returned silently on the *next* `get_recording` call, never re-checked. The fix MUST ensure a drifted file never persists at the canonical path:
+  - **Atomic temp-write (preferred, shared with C7):** rebuild into a temp path, hash it, and `os.replace` onto the canonical path **only if the hash matches**. On mismatch, delete the temp file and raise — the canonical path still holds the last-good (or absent) file, never the drifted one.
+  - If the atomic refactor is deferred, at minimum `unlink(missing_ok=True)` the just-written drifted file before raising, so the next `get_recording` re-enters the rebuild path instead of returning poison.
+- The warning text already has the rebuilt-vs-stored hashes; reuse it in the exception message.
+
+### C3 — BUG: timestamp-repair provenance
+- Add two columns to the `Recording` table definition: `timestamps_adjusted=0: bool` and `n_adjusted_samples=0: int`. (Safe — v2 unreleased; "final from introduction" not yet binding. Note this in the PR description. **User confirmed C3 column additions are acceptable.**)
+- In the repair path ([recording.py:1478-1486]), set these from `n_changed` and persist them in the `make_insert` row.
+- **Gate the rewrite on a `Recording`-level flag, NOT a `PreprocessingParamsSchema` field.** Rationale: Phase 2 (T5, T6) already bumps `PreprocessingParamsSchema.schema_version` for the bandpass/whiten changes; adding `allow_timestamp_repair` to the *same* schema here would force two independent version bumps that collide. Keep the repair gate out of the params schema (e.g. a `Recording.make` kwarg / class attribute defaulting to True) so Phase 1 needs **no** `PreprocessingParamsSchema` bump. If a future need forces it onto the params schema, coordinate a single bump with T5/T6.
+- Update the warning to include `recording_id`.
+
+### C4 — BUG: fixture gain fallback
+- In `mearec_to_nwb.py:282-286`, remove the `except (TypeError, ValueError): traces = recording.get_traces()` fallback. Replace with an explicit check: if `recording.get_traces(return_in_uV=True)` raises, re-raise as a clear `RuntimeError` naming the missing `gain_to_uV` / conversion field and instructing the fixture author to fix the MEArec extractor. A GT fixture silently writing ADC counts mislabeled as µV poisons every downstream test.
+
+### C5 — DOCUMENT+BUG: zero-unit loud-but-graceful
+- Keep the graceful partial-manifest path in `pipeline.py:213-222` (it handles a legitimate quiet-shank case per the comment).
+- Add `require_units: bool = False` to `run_v2_pipeline`; when True, raise `ZeroUnitSortError` (new in `exceptions.py`) instead of returning the partial manifest.
+- Make the partial path loud: `logger.warning` with `recording_id` + "zero units; curation/merge skipped — check detect_threshold / artifact mask."
+- Document the caller contract in the `run_v2_pipeline` docstring: "callers MUST check `result['merge_id'] is not None` before passing downstream."
+- Mirror the same `require_units` semantics where `_build_analyzer` ([sorting.py:1338-1345]) returns the non-existent folder path: have it return a sentinel/`None` that `get_analyzer` refuses to load with a clear error, rather than a path that doesn't exist on disk.
+
+### C6 — DOCUMENT: z-score common-mode blindness (comment + schema, no detector change)
+- **Fix the actively false runtime comment first.** `artifact.py:865-877` currently claims the cross-channel z-score "Detects common-mode artifact events (chewing, head movement... that hit all channels at once)" and "A 50x common-mode spike on all channels surfaces." This is backwards: with per-frame cross-channel z-scoring, a *pure* common-mode event makes every channel equal to the frame mean → `traces - ch_mean ≈ 0` → z-score ≈ 0 → **suppressed, not detected**. Rewrite the comment to state the detector flags per-frame cross-channel **outliers** (a single channel deviating from its neighbors at one time) and is **blind to pure common-mode**; common-mode must be caught by `amplitude_thresh_uV`. Keep the `axis=1` math reference but drop the false "detects common-mode" / "50x surfaces" claims.
+- Add `Field(description=...)` to `zscore_thresh` ([artifact_detection.py:47]) with the same warning: "Cross-channel z-score per frame; pure common-mode events (every channel jumps together) produce ~0 z-score and are NOT detected — use `amplitude_thresh_uV` to catch common-mode (EMG) artifacts." Mirror in the `ArtifactDetectionParamsSchema` docstring.
+- **No change to the detector logic** — the behavior is intentional (matches v1); only the comment and docs are corrected.
+
+### C7 — BUG: unlink-on-failure guard
+- In `_write_nwb_artifact` ([recording.py:1760-1773]), add the same `existing_analysis_file_name is None` guard the outer caller (`_compute_recording_artifact:1184-1196`) uses, OR refactor to temp-path + `os.replace` on success so the rebuild slot is never destroyed mid-write. Prefer the atomic temp-write (obviates both unlink branches).
+
+### R1 — BUG: deterministic probe-info fetch
+- Add `order_by="electrode_id"` to the `fetch(...)` in `_fetch_sort_group_probe_info` ([recording.py:1505-1514]); document the ordering invariant in the docstring (DeepHash stability for tri-part dispatch). Sibling `artifact.py:653` is the reference.
+
+### R2 — BUG: n_spikes vs NWB agreement
+- In `_build_curated_unit_rows` ([curation.py:493]), when `apply_merge=False`, set `n_spikes` to the head unit's own count (matching what `_stage_curated_units_nwb` writes at ~599), not `sum(by_id[u]["n_spikes"] for u in contribs)`. Add a test asserting `CurationV2.Unit.n_spikes == len(get_sorting().get_unit_spike_train(uid))` for both `apply_merge` values.
+
+### R3 — BUG: job-kwargs leak
+- In `_run_si_sorter` ([sorting.py:1233,1278]), before re-installing `previous_global`, clear keys the sort added: `for k in set(sj_kwargs) - set(previous_global): <remove from global>` then `set_global_job_kwargs(**previous_global)`. Or call `reset_global_job_kwargs()` then re-install. Add a test that asserts global job-kwargs are byte-identical before and after a sort.
+
+### R4 — BUG: strip random_seed before detect_peaks
+- In `_run_clusterless_thresholder` ([sorting.py:1147]), pass `job_kwargs` to `detect_peaks` with `random_seed` removed (it's already extracted to `_random_seed` at 1127 and threaded via `random_slices_kwargs`). `dk = {k: v for k, v in (job_kwargs or {}).items() if k != "random_seed"}`.
+
+### E1–E5 — MEDIUM error-handling
+- **E1** [artifact.py:907-912]: add `artifact_id`, `recording_id`, and the active thresholds to the empty-frames warning.
+- **E2** [recording.py:261-265,276-282,444-447]: have `set_group_by_*` return (or log as a summary) the skipped-group list, not just per-group warnings.
+- **E3** [artifact.py:1070-1084]: narrow the `except Exception` around `resolve_source` to the documented exception type(s); on anything else, abort the delete so the operator sees the bug rather than orphaning an IntervalList.
+- **E4** [curation.py:602,761 ; sorting.py:499,558,841]: change truthy `artifact_id` / `.get(k, [])` to `["artifact_id"] is not None` and, after building `labels_by_unit`, warn on `set(labels) - set(sorting.unit_ids)`.
+- **E5** [curation.py:245-250]: when the caller passed non-default `labels`/`description`/`merge_groups` and a root curation already exists, raise (or require `reuse_existing=True`) so a parameter-change-without-effect can't pass silently.
+
+## Test scope for this phase (read before the "not in this phase" list)
+
+**Every fix in this phase ships with its own failing-then-passing regression
+test, listed in the Validation slice below.** That includes the zero-unit
+test (C5), the truncation test (C1), and all C/R/E tests — they are
+merge-blocking and land HERE, with the fix. This is the
+[overview "every BUG fix needs a test"](overview.md#metrics) contract.
+
+What goes to Phase 3 is the **broad coverage-gap work that is not a regression
+guard for a Phase-1 fix**: the V-series (multi-region attribution, tetrode
+geometry, `session_group` gates, `_assert_v2_db_safe`, `include_labels`) and
+the tautological-test cleanup (Q-series). Those surfaces are untested today but
+are not what any C/R/E fix changed, so they don't block this PR. The Phase-3
+zero-unit *coverage* additions (if any beyond C5's regression test) build on
+the C5 flag landed here.
+
+## Deliberately not in this phase
+
+- **F1/F2** (NaN positions, `"unknown"` cell-type) and **T10** (`cell_types` Literal) — same file as C4 but grouped with the Phase-2 type changes to keep one coherent `mearec_to_nwb.py` review. If Phase 1 and Phase 2 land out of order, whichever touches `mearec_to_nwb.py` second rebases.
+- All schema/table-shape changes (T1–T9) — Phase 2.
+- **V-series coverage gaps + Q-series tautological-test cleanup** — Phase 3 (these are not regression guards for any Phase-1 fix). The C/R/E regression tests themselves stay here, with their fixes.
+- Comment/doc fixes (D1–D8) — Phase 3.
+
+## Validation slice
+
+| Test | Asserts |
+| --- | --- |
+| `test_recording_truncation_multi_interval` (slow) | C1: middle-chunk-truncated multi-interval recording raises `RecordingTruncatedError` (or documents guard already fires). |
+| `test_recording_cache_drift_raises` (slow) | C2: hash mismatch raises `RecordingCacheDriftError`; `allow_drift=True` proceeds. |
+| `test_recording_cache_drift_leaves_no_poison` (slow) | C2: after a drift-raise, the canonical cache path does NOT hold the drifted file — the next `get_recording` re-enters rebuild rather than returning the poisoned file. |
+| `test_recording_timestamp_repair_recorded` (slow) | C3: a non-monotonic source sets `timestamps_adjusted=True`, `n_adjusted_samples>0` on the row. |
+| `test_mearec_fixture_gain_required` | C4: an extractor without µV gain raises (not silent ADC fallback). |
+| `test_run_v2_pipeline_zero_units_require_flag` (slow) | C5: `require_units=True` raises `ZeroUnitSortError`; default returns partial manifest with a warning. |
+| `test_build_analyzer_zero_units_no_phantom_folder` (slow) | C5 (analyzer half): a zero-unit sort does NOT return a non-existent analyzer folder path; `get_analyzer` refuses to load the sentinel with a clear error. |
+| `test_artifact_zscore_description_documents_common_mode` | C6: schema field description mentions common-mode + `amplitude_thresh_uV`. |
+| `test_write_nwb_artifact_failure_preserves_existing` (slow) | C7: a rebuild failure on an existing slot leaves the prior cache intact. |
+| `test_fetch_sort_group_probe_info_stable_order` | R1: two consecutive fetches return identical row order. |
+| `test_curation_n_spikes_matches_nwb` (slow) | R2: DB `n_spikes` == NWB spike-train length for `apply_merge` ∈ {True, False}. |
+| `test_run_si_sorter_restores_global_job_kwargs` (slow) | R3: global job-kwargs identical before/after a sort. |
+| `test_clusterless_detect_peaks_no_random_seed_kwarg` (slow) | R4: `detect_peaks` receives no `random_seed` key. |
+| `test_artifact_empty_warning_has_context` | E1: warning string contains `artifact_id`. |
+| `test_set_group_by_shank_surfaces_skips` (slow) | E2: a recording with a skipped (e.g. single-channel unitrode) group reports the skip in the return value / summary, not only a buried warning. |
+| `test_artifact_delete_aborts_on_unexpected_resolve_error` (slow) | E3: an unexpected `resolve_source` error during `delete()` aborts (no master delete + orphaned IntervalList); only the documented exception type is tolerated. |
+| `test_curation_labels_reject_stray_unit_ids` (slow) | E4: `artifact_id` lookups use `is not None` (no `0`/`None` conflation); label keys not in `sorting.unit_ids` warn rather than vanish. |
+| `test_curation_insert_idempotent_rejects_new_args` (slow) | E5: re-insert with new `labels` raises (or requires `reuse_existing`). |
+
+Mark all DB-touching tests `@pytest.mark.slow`.
+
+## Fixtures
+
+- Multi-interval truncated recording (C1): synthesize in `conftest.py` from the existing polymer fixture by writing an `ElectricalSeries` shorter than the requested disjoint `valid_times`. No new MEArec generation.
+- Cache-drift (C2): reuse `populated_recording`, mutate the stored `cache_hash` to force mismatch.
+- Gain-failure extractor (C4): a tiny in-memory SI recording with `gain_to_uV` unset.
+- Zero-unit sort (C5): the existing `mearec_polymer_smoke` clusterless-100µV row already produces zero units (it's the `EXPECTED_DEGENERATE_CASES` path).
+
+## Review
+
+Before opening the PR, dispatch `code-reviewer` against the diff. Confirm:
+- C1 was verified with a failing test before any code change (or documented as already-correct). No blind-fix.
+- C5/C6 preserved the intentional graceful/OR behavior; only added loudness/docs.
+- Every BUG fix has a failing-then-passing test in the slice.
+- New exceptions live in `exceptions.py`; no docstring/test name references this plan or "Phase 1".
+- `Recording` column additions (C3) are noted in the PR as pre-release schema changes.
+- v1↔v2 parity (MS4 4/4, clusterless 7+1-skip) and clusterless GT (2/2) still pass — see [../operations-runbook.md](../operations-runbook.md) for the capture/run sequence.
