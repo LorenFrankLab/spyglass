@@ -346,6 +346,10 @@ def test_recording_populates_and_round_trips(
 
     assert row["n_channels"] == expected_n_channels
     assert row["sampling_frequency"] == pytest.approx(32_000, rel=1e-3)
+    # The smoke fixture's timestamps are monotonic, so the repair never
+    # fires: provenance columns stay at their no-repair defaults.
+    assert int(row["timestamps_adjusted"]) == 0
+    assert int(row["n_adjusted_samples"]) == 0
     # The smoke fixture is 4 seconds of polymer data. Compare to the
     # IntervalList's actual valid_times span so a regression that
     # silently truncated to e.g. 0.1 s would surface (rather than
@@ -1414,18 +1418,118 @@ def test_recording_truncation_multi_interval(polymer_smoke_session):
 
 
 @pytest.mark.slow
-def test_fetch_sort_group_probe_info_stable_order(polymer_smoke_session):
+def test_recording_timestamp_repair_recorded(
+    polymer_smoke_session, monkeypatch
+):
+    """A non-monotonic source records repair provenance on the row.
+
+    The smoke fixture's timestamps are already monotonic, so the repair
+    never fires on real data. We instead force ``_repaired_timestamps``
+    to report a known adjusted-sample count (its array output stays the
+    real, monotonic vector so the rest of the write is unaffected). This
+    exercises the provenance THREADING: ``n_changed`` must flow from
+    ``_repaired_timestamps`` through ``_compute_recording_artifact`` and
+    ``RecordingComputed`` into the row's ``timestamps_adjusted`` /
+    ``n_adjusted_samples`` columns. The no-repair (False) case is
+    asserted by ``test_recording_populates_and_round_trips``.
+    """
+    from spyglass.common import IntervalList
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    PreprocessingParameters.insert_default()
+    LabTeam.insert1(
+        {"team_name": "v2_test_team", "team_description": "v2 pipeline tests"},
+        skip_duplicates=True,
+    )
+    if not (SortGroupV2 & polymer_smoke_session):
+        SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+
+    raw_vt = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": "raw data valid times",
+        }
+    ).fetch1("valid_times")
+    interval_name = "v2_test_repair_provenance"
+    IntervalList.insert1(
+        {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": interval_name,
+            "valid_times": raw_vt,
+            "pipeline": "v2_test_repair",
+        },
+        skip_duplicates=True,
+    )
+    sort_group_id = int(
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
+    )
+    pk = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+            "interval_list_name": interval_name,
+            "preproc_params_name": "default_franklab",
+            "team_name": "v2_test_team",
+        }
+    )
+
+    forced_n_changed = 7
+    original = Recording._repaired_timestamps
+
+    def _fake_repaired(recording, raw_path, recording_id=None):
+        # Real (monotonic) timestamps so the write succeeds; only the
+        # reported adjusted-sample count is forced.
+        timestamps, _ = original(
+            recording, raw_path, recording_id=recording_id
+        )
+        return timestamps, forced_n_changed
+
+    monkeypatch.setattr(
+        Recording, "_repaired_timestamps", staticmethod(_fake_repaired)
+    )
+
+    (Recording & pk).super_delete(warn=False)
+    try:
+        Recording.populate(pk, reserve_jobs=False)
+        row = (Recording & pk).fetch1()
+        assert bool(row["timestamps_adjusted"]) is True
+        assert int(row["n_adjusted_samples"]) == forced_n_changed
+    finally:
+        (Recording & pk).super_delete(warn=False)
+        (RecordingSelection & pk).super_delete(warn=False)
+        (
+            IntervalList
+            & {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": interval_name,
+            }
+        ).super_delete(warn=False)
+
+
+@pytest.mark.slow
+def test_fetch_sort_group_probe_info_stable_order(
+    polymer_smoke_session, monkeypatch
+):
     """``_fetch_sort_group_probe_info`` returns a deterministic,
     electrode_id-ordered result.
 
     The tri-part populate contract hashes the ``RecordingFetched`` tuple
     twice and raises if the two fetches differ; an unordered DB fetch can
     reorder rows between calls. The fetch must therefore pin
-    ``order_by="electrode_id"``. This guards that invariant: the result
-    is identical across calls AND equals the explicit electrode_id-ordered
-    reference (so dropping ``order_by`` regresses the test whenever MySQL's
-    default scan order differs from electrode_id order).
+    ``order_by="electrode_id"``. This guards that invariant directly by
+    spying on DataJoint's fetch call, so dropping the kwarg fails even if
+    the database happens to return primary-key/electrode order by default.
     """
+    from datajoint.fetch import Fetch
+
     from spyglass.common.common_device import Probe
     from spyglass.common.common_ephys import Electrode
     from spyglass.spikesorting.v2.recording import Recording, SortGroupV2
@@ -1449,8 +1553,18 @@ def test_fetch_sort_group_probe_info_stable_order(polymer_smoke_session):
     )
     assert len(channel_ids) > 1, "need a multi-channel sort group"
 
+    fetch_order_by = []
+    original_fetch_call = Fetch.__call__
+
+    def _spy_fetch(self, *attrs, **kwargs):
+        fetch_order_by.append(kwargs.get("order_by"))
+        return original_fetch_call(self, *attrs, **kwargs)
+
+    monkeypatch.setattr(Fetch, "__call__", _spy_fetch)
+
     first = Recording._fetch_sort_group_probe_info(nwb_file_name, channel_ids)
     second = Recording._fetch_sort_group_probe_info(nwb_file_name, channel_ids)
+    assert fetch_order_by == ["electrode_id", "electrode_id"]
     assert first == second, "probe-info fetch is not deterministic"
 
     ref_rows = (

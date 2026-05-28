@@ -398,10 +398,11 @@ def test_n50_repair_clean_increasing_passthrough():
             return 1
 
     rec = _FakeRecording()
-    # Inject through the helper directly; signature is
-    # (recording, raw_path).
-    out = Recording._repaired_timestamps(rec, "/fake.nwb")
+    # Inject through the helper directly; it returns
+    # ``(timestamps, n_changed)``.
+    out, n_changed = Recording._repaired_timestamps(rec, "/fake.nwb")
     np.testing.assert_array_equal(out, rec.get_times())
+    assert n_changed == 0
 
 
 def test_n50_chunked_monotonicity_count_matches_unchunked():
@@ -494,9 +495,10 @@ def test_n50_repair_non_monotonic_patterns(input_ts, expected):
     rec = _FakeRecording()
     rec._fs = fs
     rec._ts = input_ts
-    out = Recording._repaired_timestamps(rec, "/fake.nwb")
+    out, n_changed = Recording._repaired_timestamps(rec, "/fake.nwb")
     np.testing.assert_allclose(out, expected, atol=1e-9)
     assert np.all(np.diff(out) > 0)
+    assert n_changed > 0
 
 
 # ---------- CurationV2 accessor surface ------------------------------------

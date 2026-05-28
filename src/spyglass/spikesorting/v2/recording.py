@@ -686,6 +686,8 @@ class RecordingComputed(NamedTuple):
     duration_s: float
     sel: dict
     sort_valid_times: np.ndarray
+    timestamps_adjusted: bool
+    n_adjusted_samples: int
 
 
 @schema
@@ -721,6 +723,8 @@ class Recording(SpyglassMixin, dj.Computed):
     sampling_frequency: float
     duration_s: float
     cache_hash: char(64)
+    timestamps_adjusted=0: bool   # non-monotonic timestamps were repaired
+    n_adjusted_samples=0: int     # count of samples moved by the repair
     """
 
     # ``_parallel_make = True`` lets Spyglass's ``PopulateMixin``
@@ -874,6 +878,8 @@ class Recording(SpyglassMixin, dj.Computed):
             saved_end,
             n_channels,
             duration_s,
+            timestamps_adjusted,
+            n_adjusted_samples,
         ) = self._compute_recording_artifact(
             raw_path=raw_path,
             nwb_file_name=sel["nwb_file_name"],
@@ -885,6 +891,7 @@ class Recording(SpyglassMixin, dj.Computed):
             preproc_validated=preproc_validated,
             probe_types=probe_types,
             electrode_group_names=electrode_group_names,
+            recording_id=key["recording_id"],
         )
 
         return RecordingComputed(
@@ -898,6 +905,8 @@ class Recording(SpyglassMixin, dj.Computed):
             duration_s=duration_s,
             sel=sel,
             sort_valid_times=sort_valid_times,
+            timestamps_adjusted=timestamps_adjusted,
+            n_adjusted_samples=n_adjusted_samples,
         )
 
     def make_insert(
@@ -913,6 +922,8 @@ class Recording(SpyglassMixin, dj.Computed):
         duration_s,
         sel,
         sort_valid_times,
+        timestamps_adjusted,
+        n_adjusted_samples,
     ):
         """Truncation check + atomic registration inside the framework transaction.
 
@@ -924,12 +935,14 @@ class Recording(SpyglassMixin, dj.Computed):
         outside ``populate()``, the ``AnalysisNwbfile`` registration
         and the ``self.insert1`` still commit atomically.
 
-        The truncation check fires both when the user requests
-        timestamps outside the raw recording (#1585) and when the
-        written ElectricalSeries silently drops samples mid-write
-        (#1133). Tolerance is 1.5 sample intervals so the off-by-one
-        NWB boundary (``last_ts = (N-1)/fs``, not ``N/fs``) does not
-        trip the guard.
+        The truncation check fires when the requested valid_times exceed
+        the raw recording coverage (#1585), or when interval
+        intersection/filtering drops more than the tolerated boundary
+        slop. Persisted ``ElectricalSeries`` length parity is enforced
+        by the writer/PyNWB path; this guard compares requested chunk
+        duration against the in-memory recording surface. Tolerance is
+        1.5 sample intervals so the off-by-one NWB boundary
+        (``last_ts = (N-1)/fs``, not ``N/fs``) does not trip the guard.
         """
         import pathlib as _pathlib
 
@@ -993,6 +1006,8 @@ class Recording(SpyglassMixin, dj.Computed):
                         "sampling_frequency": sampling_frequency,
                         "duration_s": duration_s,
                         "cache_hash": cache_hash,
+                        "timestamps_adjusted": bool(timestamps_adjusted),
+                        "n_adjusted_samples": int(n_adjusted_samples),
                     }
                 )
         except Exception:
@@ -1073,6 +1088,7 @@ class Recording(SpyglassMixin, dj.Computed):
             probe_types=fetched.probe_types,
             electrode_group_names=fetched.electrode_group_names,
             existing_analysis_file_name=row["analysis_file_name"],
+            recording_id=row["recording_id"],
         )
         if rebuilt_hash != row["cache_hash"]:
             logger.warning(
@@ -1100,7 +1116,8 @@ class Recording(SpyglassMixin, dj.Computed):
         probe_types: tuple,
         electrode_group_names: tuple,
         existing_analysis_file_name: str | None = None,
-    ) -> tuple[str, str, str, float, float, float, int, float]:
+        recording_id: str | None = None,
+    ) -> tuple[str, str, str, float, float, float, int, float, bool, int]:
         """Open raw NWB, run preprocessing, stream to AnalysisNwbfile.
 
         Pipeline body shared between ``make_compute`` (fresh write,
@@ -1110,8 +1127,12 @@ class Recording(SpyglassMixin, dj.Computed):
 
         Returns ``(analysis_file_name, object_id, cache_hash,
         sampling_frequency, saved_start, saved_end, n_channels,
-        duration_s)`` -- the metadata needed for the
-        ``RecordingComputed`` boxing.
+        duration_s, timestamps_adjusted, n_adjusted_samples)`` -- the
+        metadata needed for the ``RecordingComputed`` boxing. The last
+        two are provenance for the non-monotonic-timestamp repair
+        (``timestamps_adjusted`` is ``n_adjusted_samples > 0``).
+        ``recording_id`` is threaded only so the repair warning names
+        the row; it does not affect the computation.
 
         Cleanup contract: ``_write_nwb_artifact`` either writes a
         full file or raises before any registration; if a later
@@ -1133,8 +1154,15 @@ class Recording(SpyglassMixin, dj.Computed):
         sampling_frequency = float(recording.get_sampling_frequency())
 
         # Non-monotonic timestamp repair. See ``_repaired_timestamps``
-        # for the rationale + algorithm.
-        all_timestamps = self._repaired_timestamps(recording, raw_path)
+        # for the rationale + algorithm. ``n_changed`` is the count of
+        # samples the repair moved (0 on the no-repair fast path); it is
+        # persisted as provenance so a time-mutated recording is
+        # queryable instead of silently rewritten.
+        all_timestamps, n_changed = self._repaired_timestamps(
+            recording, raw_path, recording_id=recording_id
+        )
+        timestamps_adjusted = n_changed > 0
+        n_adjusted_samples = int(n_changed)
 
         recording, timestamps_override = self._restrict_recording(
             recording=recording,
@@ -1205,6 +1233,8 @@ class Recording(SpyglassMixin, dj.Computed):
             saved_end,
             n_channels,
             duration_s,
+            timestamps_adjusted,
+            n_adjusted_samples,
         )
 
     @classmethod
@@ -1409,8 +1439,17 @@ class Recording(SpyglassMixin, dj.Computed):
         return total
 
     @staticmethod
-    def _repaired_timestamps(recording, raw_path):
-        """Return monotonicity-corrected timestamps for ``recording``.
+    def _repaired_timestamps(recording, raw_path, recording_id=None):
+        """Return ``(timestamps, n_changed)`` for ``recording``.
+
+        ``timestamps`` is the monotonicity-corrected vector and
+        ``n_changed`` is the number of samples the repair moved (0 on
+        the no-repair fast path). The caller persists ``n_changed`` as
+        ``Recording.n_adjusted_samples`` provenance so a time-mutated
+        recording is queryable rather than silently rewritten. The
+        repair is always-on and lives here, at the ``Recording`` level,
+        rather than in ``PreprocessingParamsSchema`` -- so toggling it
+        in the future would not force a params-schema version bump.
 
         Raw NWBs with floating-point precision artifacts at epoch
         stitch boundaries can have non-strictly-increasing
@@ -1452,7 +1491,7 @@ class Recording(SpyglassMixin, dj.Computed):
             all_timestamps, Recording._MONOTONICITY_CHECK_CHUNK_SIZE
         )
         if n_issues == 0:
-            return all_timestamps
+            return all_timestamps, 0
         sample_period = 1.0 / float(recording.get_sampling_frequency())
         # ``i_times_sp`` is the per-index shift; build once, mutate
         # in-place so we are not paying for two separate
@@ -1475,15 +1514,20 @@ class Recording(SpyglassMixin, dj.Computed):
         # diagnose epoch-stitching scope vs a one-off precision
         # blip.
         n_changed = int(np.count_nonzero(buffer != all_timestamps))
+        rec_id_note = (
+            f" (recording_id={recording_id})"
+            if recording_id is not None
+            else ""
+        )
         logger.warning(
-            f"Source recording {raw_path!r} has {n_issues} "
+            f"Source recording {raw_path!r}{rec_id_note} has {n_issues} "
             f"non-monotonic timestamp(s); adjusted {n_changed} "
             "sample(s) to strictly increasing (offsets of <= one "
             "sample_period). Likely floating-point precision or "
             "epoch-stitching artifacts; consider validating the "
             "source recording."
         )
-        return buffer
+        return buffer, n_changed
 
     @staticmethod
     def _fetch_sort_group_probe_info(
