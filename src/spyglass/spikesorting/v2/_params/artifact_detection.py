@@ -20,6 +20,14 @@ class ArtifactDetectionParamsSchema(BaseModel):
     than an absent-fields blob) and ``join_window_ms`` (artifact intervals
     closer than this are merged into one).
 
+    Detector note: ``zscore_thresh`` is a per-frame *cross-channel*
+    z-score (across channels within a frame), so it flags single-channel
+    outliers but is BLIND to pure common-mode events -- when every
+    channel jumps together the shift cancels in the across-channel mean
+    and the z-score stays ~0. Use ``amplitude_thresh_uV`` to catch
+    common-mode (e.g. EMG) artifacts; the two thresholds OR together
+    when both are set.
+
     Concurrency parameters (``n_jobs``, ``chunk_duration``, ``progress_bar``)
     are not part of this schema. They live in the per-row ``job_kwargs``
     blob and are resolved at populate time by ``_resolved_job_kwargs``.
@@ -44,7 +52,19 @@ class ArtifactDetectionParamsSchema(BaseModel):
     # value.
     detect: bool = True
     amplitude_thresh_uV: float | None = Field(default=500.0, ge=0.0)
-    zscore_thresh: float | None = Field(default=None, ge=0.0)
+    zscore_thresh: float | None = Field(
+        default=None,
+        ge=0.0,
+        description=(
+            "Per-frame cross-channel z-score threshold (z is computed "
+            "across channels within each frame, not per channel over "
+            "time). It flags single-channel outliers within a frame; "
+            "pure common-mode events (every channel jumps together) "
+            "produce a ~0 z-score and are NOT detected -- use "
+            "amplitude_thresh_uV to catch common-mode (e.g. EMG) "
+            "artifacts."
+        ),
+    )
     proportion_above_thresh: float = Field(default=1.0, gt=0.0, le=1.0)
     removal_window_ms: float = Field(default=1.0, gt=0.0)
     join_window_ms: float = Field(default=1.0, ge=0.0)

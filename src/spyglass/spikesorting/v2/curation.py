@@ -275,6 +275,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
             sorting_units=sorting_units,
             merge_groups=merge_groups or [],
             curation_id=curation_id,
+            apply_merge=apply_merge,
         )
 
         # Stage the curated-units NWB (filesystem side-effect; the DB
@@ -430,6 +431,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         sorting_units: list[dict],
         merge_groups: list[list[int]],
         curation_id: int,
+        apply_merge: bool,
     ) -> tuple[list[dict], dict[int, list[int]]]:
         """Resolve the post-merge ``CurationV2.Unit`` rows.
 
@@ -441,6 +443,15 @@ class CurationV2(SpyglassMixin, dj.Manual):
         ``sorting_units`` is the pre-fetched ``Sorting.Unit`` rows for
         ``sorting_id``; the caller fetches once and threads through to
         avoid re-querying.
+
+        ``n_spikes`` is computed to match what ``_stage_curated_units_nwb``
+        writes for the SAME ``apply_merge``: the merged sum only when the
+        merged spike train is actually staged (``apply_merge and
+        len(contribs) > 1``), otherwise the kept (head) unit's own count.
+        This keeps the invariant ``CurationV2.Unit.n_spikes ==
+        len(get_sorting().get_unit_spike_train(kept_uid))`` for BOTH
+        ``apply_merge`` values -- otherwise an ``apply_merge=False``
+        preview would store the merged sum against a head-only train.
         """
         if not sorting_units:
             return [], {}
@@ -490,7 +501,12 @@ class CurationV2(SpyglassMixin, dj.Manual):
             # Inherit peak channel from the highest-amplitude contributor.
             anchor = max(contribs, key=lambda u: by_id[u]["peak_amplitude_uv"])
             anchor_row = by_id[anchor]
-            n_spikes = sum(by_id[u]["n_spikes"] for u in contribs)
+            # Merged sum only when the merged train is actually staged;
+            # otherwise the head unit's own count (matches the NWB write).
+            if apply_merge and len(contribs) > 1:
+                n_spikes = sum(by_id[u]["n_spikes"] for u in contribs)
+            else:
+                n_spikes = by_id[int(kept_uid)]["n_spikes"]
             unit_rows.append(
                 {
                     "sorting_id": sorting_id,

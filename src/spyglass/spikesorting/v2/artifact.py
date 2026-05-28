@@ -862,19 +862,20 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         else:
             above_amp = _np.zeros_like(absolute, dtype=bool)
         if validated.zscore_thresh is not None:
-            # Z-score ACROSS channels per frame (not per channel over
-            # time). Detects common-mode artifact events (chewing,
-            # head movement, behavioral artifacts that hit all
-            # channels at once); per-channel-over-time z-score
-            # detects per-channel baseline drift, which is what an
-            # ``axis=0`` z-score would have computed.
-            # Matches v1's ``stats.zscore(traces, axis=1)`` at
-            # ``v1/utils.py:185,193``: ``axis=1`` is the channels
-            # axis (rows are time frames), so the same z-score value
-            # is computed for every channel within a single frame
-            # using THAT FRAME's across-channel statistics. A
-            # 50x common-mode spike on all channels surfaces; a
-            # per-channel baseline shift does not.
+            # Z-score ACROSS channels per frame (axis=1), NOT per
+            # channel over time. This flags per-frame cross-channel
+            # OUTLIERS -- a single channel (or a few) deviating from the
+            # rest of the channels at one time instant. It is BLIND to a
+            # pure common-mode event: when every channel jumps by the
+            # same amount, that amount cancels in ``traces_uv - ch_mean``
+            # (the per-frame across-channel mean shifts by the same
+            # amount), so the z-score stays ~0 and nothing is flagged.
+            # Catch common-mode artifacts (EMG / chewing / head movement
+            # that hit all channels together) with ``amplitude_thresh_uV``
+            # instead. Matches v1's ``stats.zscore(traces, axis=1)`` at
+            # ``v1/utils.py:185,193`` (``axis=1`` is the channels axis;
+            # rows are time frames), so each frame's z-scores use THAT
+            # FRAME's across-channel statistics.
             ch_mean = traces_uv.mean(axis=1, keepdims=True)
             ch_std = traces_uv.std(axis=1, keepdims=True) + 1e-12
             zscores = _np.abs((traces_uv - ch_mean) / ch_std)

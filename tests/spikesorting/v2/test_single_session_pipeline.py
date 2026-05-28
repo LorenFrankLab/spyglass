@@ -3067,7 +3067,9 @@ def test_curation_v2_stages_empty_units_nwb_on_zero_kept_units(
     # AttributeError at ``nwbf.units.object_id``.
     original = CurationV2._build_curated_unit_rows.__func__
 
-    def _empty_rows(cls, sorting_id, sorting_units, merge_groups, curation_id):
+    def _empty_rows(
+        cls, sorting_id, sorting_units, merge_groups, curation_id, apply_merge
+    ):
         return [], {}
 
     monkeypatch.setattr(
@@ -4320,11 +4322,63 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
     _np.testing.assert_array_equal(merged_times, expected_merged)
 
     # And the n_spikes column on CurationV2.Unit reflects the merge.
+    # (apply_merge=True end-to-end half of the R2 invariant: DB n_spikes
+    # == curated NWB spike-train length for the merged head.)
     head_row = (CurationV2.Unit & pk & {"unit_id": head}).fetch1()
     assert head_row["n_spikes"] == len(expected_merged), (
         f"CurationV2.Unit.n_spikes for merged head = "
         f"{head_row['n_spikes']}; expected {len(expected_merged)}."
     )
+    assert head_row["n_spikes"] == len(merged_times)
+
+
+def test_curation_n_spikes_matches_apply_merge(dj_conn):
+    """R2: ``_build_curated_unit_rows`` computes ``n_spikes`` to match
+    what ``_stage_curated_units_nwb`` writes for the SAME ``apply_merge``.
+
+    A merge-group head's curated spike train is the contributor sum only
+    when ``apply_merge=True`` (the staged train is the concatenation);
+    with ``apply_merge=False`` the staged train is head-only, so
+    ``n_spikes`` must be the head's own count -- NOT the merged sum.
+    Before the fix the count was always the merged sum, so an
+    ``apply_merge=False`` preview stored a count that disagreed with its
+    own head-only spike train. Synthetic ``Sorting.Unit`` rows isolate
+    the count logic (the ``apply_merge=True`` end-to-end half of the
+    invariant is covered by
+    ``test_curation_v2_insert_with_merge_groups_apply_merges``).
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    def _unit(uid, n_spikes, amp):
+        return {
+            "unit_id": uid,
+            "n_spikes": n_spikes,
+            "peak_amplitude_uv": amp,
+            "nwb_file_name": "x.nwb",
+            "electrode_group_name": "0",
+            "electrode_id": uid,
+        }
+
+    # head=0 (higher amplitude) absorbs 1; unit 2 passes through.
+    sorting_units = [_unit(0, 100, 50.0), _unit(1, 40, 30.0), _unit(2, 7, 20.0)]
+    merge_groups = [[0, 1]]
+
+    def n_spikes_by_unit(apply_merge):
+        rows, _ = CurationV2._build_curated_unit_rows(
+            sorting_id="s",
+            sorting_units=sorting_units,
+            merge_groups=merge_groups,
+            curation_id=0,
+            apply_merge=apply_merge,
+        )
+        return {r["unit_id"]: r["n_spikes"] for r in rows}
+
+    merged = n_spikes_by_unit(apply_merge=True)
+    preview = n_spikes_by_unit(apply_merge=False)
+
+    assert merged[0] == 140  # merged sum (matches concatenated train)
+    assert preview[0] == 100  # head-only (matches head-only train)
+    assert merged[2] == 7 and preview[2] == 7  # non-merged: unaffected
 
 
 # ---------- _detect_artifacts cross-channel proportion boundary ----------
