@@ -4155,17 +4155,24 @@ def test_sorting_selection_artifact_id_none_is_distinct_identity(
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
     artifact_backed_pk = populated_sorting
-    # Reconstruct the recording_id (insert_selection's source side).
+    # Derive recording_id + sorter + params from the fixture row so this
+    # test does not silently drift if ``populated_sorting`` changes its
+    # sorter/params choice (Finding #3 from review).
+    backed_row = (SortingSelection & artifact_backed_pk).fetch1()
     rec_row = (SortingSelection.RecordingSource & artifact_backed_pk).fetch1()
     recording_id = rec_row["recording_id"]
+    sorter = backed_row["sorter"]
+    sorter_params_name = backed_row["sorter_params_name"]
+    assert backed_row["artifact_id"] is not None, (
+        "populated_sorting must yield an artifact-backed row for this "
+        "test to be meaningful; got artifact_id IS NULL on the fixture."
+    )
 
     no_artifact_pk = SortingSelection.insert_selection(
         {
             "recording_id": recording_id,
-            "sorter": "mountainsort5",
-            "sorter_params_name": (
-                "franklab_tetrode_hippocampus_30kHz_ms5"
-            ),
+            "sorter": sorter,
+            "sorter_params_name": sorter_params_name,
             "artifact_id": None,
         }
     )
@@ -4184,10 +4191,8 @@ def test_sorting_selection_artifact_id_none_is_distinct_identity(
     repeat_pk = SortingSelection.insert_selection(
         {
             "recording_id": recording_id,
-            "sorter": "mountainsort5",
-            "sorter_params_name": (
-                "franklab_tetrode_hippocampus_30kHz_ms5"
-            ),
+            "sorter": sorter,
+            "sorter_params_name": sorter_params_name,
             "artifact_id": None,
         }
     )
@@ -6932,32 +6937,44 @@ _CLUSTERLESS_GT_CASES = [
 def test_clusterless_thresholder_ground_truth(
     session_label, sorter_params_name, request, dj_conn
 ):
-    """Clusterless detector recovers planted-unit spikes (time recall).
+    """Clusterless detector recovers planted-unit spikes (shank-aware recall).
 
     Correctness gate for the clusterless path. Unlike MS4/MS5, the
     clusterless detector emits unsorted peaks (not units), so SI's
     ``compare_sorter_to_ground_truth`` doesn't apply. We compute a
-    time-recall metric: for each planted spike across all units, is
-    there a v2 peak within ±0.4 ms (any channel)? Recall = matched
-    planted spikes / total planted spikes. ``delta_time = 0.4 ms``
-    matches SI's ``compare_sorter_to_ground_truth`` default and the
-    sibling MS4/MS5 GT gates; the natural physical offset between a
-    planted intracellular fire moment and the detected extracellular
-    trough (filter group delay + propagation) is empirically ~1-3
-    samples at 32 kHz, so a sub-sample tolerance would reject valid
+    shank-aware recall metric: per planted unit, compute the
+    ±0.4-ms time-recall against each shank's v2 peak stream
+    independently and take the max. The match constraint is "v2
+    peaks from a SINGLE shank must explain the planted spikes" --
+    cross-shank peaks can no longer satisfy a planted spike. Best-
+    shank-per-unit (rather than nearest-shank-by-soma-position) is
+    robust to cells placed between shanks or off the probe edge:
+    such cells fire most strongly on whichever shank actually picks
+    them up, which is an electrical question, not a Euclidean one.
+
+    Shank-aware matching closes the false-recall window that
+    time-only-across-all-shanks opens: with ~17 K peaks across
+    4 shanks and 60 s, uniform-cross-channel time-only matching at
+    a 0.4 ms tolerance could inflate recall by ~20 percentage points
+    from unrelated peaks. Best-shank routing eliminates that
+    inflation while keeping the rigorous time tolerance.
+
+    ``delta_time = 0.4 ms`` matches SI's
+    ``compare_sorter_to_ground_truth`` default and the sibling MS4/
+    MS5 GT gates; the natural physical offset between a planted
+    intracellular fire moment and the detected extracellular trough
+    (filter group delay + propagation) is empirically ~1-3 samples
+    at 32 kHz, so a sub-sample tolerance would reject valid
     detections.
 
-    Channel-aware matching would be more rigorous but the sidecar GT
-    table only stores per-unit spike times (no per-spike channel), so
-    we use time-only matching here. The threshold is intentionally
-    conservative: clusterless's detect_threshold=5σ should catch ALL
-    well-isolated spikes, so recall ≥ 80 % of planted spikes is the
-    minimum bar. Higher recall thresholds risk regression-flake from
-    near-threshold borderline spikes (PR #4341 algorithm change).
+    Threshold: mean recall ≥ 0.80 across planted units. Clusterless
+    detect_threshold = 5σ should catch all well-isolated spikes;
+    higher recall bars risk flake from near-threshold borderline
+    spikes (PR #4341 algorithm change).
 
     Parametrization:
-      * ``polymer_60s`` -- 4 shanks aggregated
-      * ``tetrode_60s`` -- 1 shank, 4 channels
+      * ``polymer_60s`` -- 4 shanks, planted units distributed across them
+      * ``tetrode_60s`` -- 1 shank, 4 channels (trivially per-shank)
     """
     import numpy as np
     import pynwb
@@ -7029,9 +7046,10 @@ def test_clusterless_thresholder_ground_truth(
         int(g) for g in (SortGroupV2 & session).fetch("sort_group_id")
     )
 
-    # Per-shank: populate clusterless sorting; collect all v2 peak times
-    # across shanks for the time-recall comparison.
-    v2_spike_samples_all_shanks: list[np.ndarray] = []
+    # Per-shank: populate clusterless sorting and keep v2 peak times
+    # separate per shank so the recall matcher below can constrain
+    # each planted unit's matches to a single shank's v2 peaks.
+    v2_times_s_by_shank: dict[int, np.ndarray] = {}
     sampling_frequency = None
     for sg_id in sort_group_ids:
         rec_pk = RecordingSelection.insert_selection(
@@ -7069,20 +7087,26 @@ def test_clusterless_thresholder_ground_truth(
         per_unit = SpikeSortingOutput().get_spike_times(
             {"merge_id": merge_id}
         )
-        # Clusterless collapses all peaks into one synthetic unit per shank.
-        for arr in per_unit:
-            arr = np.asarray(arr)
-            if arr.size:
-                v2_spike_samples_all_shanks.append(arr)
+        # Clusterless collapses all peaks into one synthetic unit per
+        # shank. Concatenate (in case > 1 entry from get_spike_times)
+        # and keep this shank's spike-times tagged by sort_group_id.
+        arrays = [np.asarray(a) for a in per_unit if np.asarray(a).size]
+        if arrays:
+            v2_times_s_by_shank[int(sg_id)] = np.sort(
+                np.concatenate(arrays).astype(np.float64)
+            )
+        else:
+            v2_times_s_by_shank[int(sg_id)] = np.empty(0, dtype=np.float64)
         if sampling_frequency is None:
             sampling_frequency = float(
                 Sorting().get_sorting(sort_pk).get_sampling_frequency()
             )
 
-    if not v2_spike_samples_all_shanks:
+    if not v2_times_s_by_shank or all(a.size == 0 for a in v2_times_s_by_shank.values()):
         pytest.fail(f"v2 clusterless produced no peaks on {session_label}.")
+    # Aggregate copy for the false-positive sanity bound (counts only).
     v2_times_s = np.sort(
-        np.concatenate(v2_spike_samples_all_shanks)
+        np.concatenate([a for a in v2_times_s_by_shank.values() if a.size])
     ).astype(np.float64)
     assert sampling_frequency is not None and sampling_frequency > 0
 
@@ -7102,45 +7126,84 @@ def test_clusterless_thresholder_ground_truth(
             for idx, uid in enumerate(gt_units_table.id[:])
         }
 
-    # Time-recall: ±0.4 ms tolerance (SI ``compare_sorter_to_ground_truth``
-    # default, also used by the MS4/MS5 GT gates in this file). At 32 kHz
-    # that is 12.8 samples; the empirical (detected_peak - planted_spike)
-    # distribution on the polymer 60s fixture has IQR ~1-2 samples and 90 %
-    # of detections fall within ±1 sample, so 0.4 ms accepts every
-    # physically valid detection without admitting unrelated noise peaks
-    # (false matches at 0.4 ms would have to occur within ~13 samples of a
-    # planted spike, which is well inside the refractory window).
+    sorted_sgs = sorted(v2_times_s_by_shank.keys())
+
+    # Shank-aware time-recall: for each planted unit, compute the
+    # ±0.4-ms time-recall against EACH shank's v2 peak stream
+    # separately, then take the max. The match constraint is "v2
+    # peaks from a single shank must explain the planted spikes" --
+    # cross-shank peaks no longer satisfy a planted spike. Compared
+    # to assigning each unit to its nearest shank by soma position,
+    # the max-over-shanks form is robust to cells placed between
+    # shanks or off the probe edge in the shank-spanning axis: such
+    # cells fire most strongly on whichever shank actually picks
+    # them up (which is an electrical question, not a Euclidean-
+    # nearest-shank question). Empirically on the polymer 60s
+    # fixture, soma-position routing mis-routed 18/24 cells (z
+    # extent [-570, +583] vs shanks at z=0/350/774/1124); empirical
+    # best-shank routing gives every unit its true assignment.
+    #
+    # ``delta_time = 0.4 ms`` matches SI's
+    # ``compare_sorter_to_ground_truth`` default (also used by the
+    # sibling MS4/MS5 GT gates). At 32 kHz that is 12.8 samples; the
+    # empirical (detected_peak - planted_spike) distribution on the
+    # polymer 60s fixture has IQR ~1-2 samples (post-PR-#4341), so
+    # 0.4 ms accepts every physically valid detection without
+    # admitting unrelated noise peaks.
     tol_s = 0.4 / 1000.0
+
+    def _recall_against(peaks_s: np.ndarray, gt_sorted: np.ndarray) -> float:
+        if peaks_s.size == 0:
+            return 0.0
+        idx = np.searchsorted(peaks_s, gt_sorted)
+        idx_left = np.clip(idx - 1, 0, peaks_s.size - 1)
+        idx_right = np.clip(idx, 0, peaks_s.size - 1)
+        nearest_diff = np.minimum(
+            np.abs(gt_sorted - peaks_s[idx_left]),
+            np.abs(gt_sorted - peaks_s[idx_right]),
+        )
+        return float((nearest_diff <= tol_s).mean())
+
     per_unit_recall: dict[int, float] = {}
+    gt_unit_to_shank: dict[int, int] = {}
     for uid, gt_times in gt_units.items():
         if gt_times.size == 0:
             continue
         gt_sorted = np.sort(gt_times.astype(np.float64))
-        idx = np.searchsorted(v2_times_s, gt_sorted)
-        idx_left = np.clip(idx - 1, 0, v2_times_s.size - 1)
-        idx_right = np.clip(idx, 0, v2_times_s.size - 1)
-        nearest_diff = np.minimum(
-            np.abs(gt_sorted - v2_times_s[idx_left]),
-            np.abs(gt_sorted - v2_times_s[idx_right]),
-        )
-        per_unit_recall[uid] = float((nearest_diff <= tol_s).mean())
+        per_shank = {
+            sg: _recall_against(v2_times_s_by_shank[sg], gt_sorted)
+            for sg in sorted_sgs
+        }
+        best_sg = max(per_shank, key=lambda sg: per_shank[sg])
+        per_unit_recall[uid] = per_shank[best_sg]
+        gt_unit_to_shank[uid] = best_sg
 
     n_planted = len(per_unit_recall)
+    # Non-vacuity check FIRST: with n_planted == 0 the recall_values
+    # array is empty and ``recall_values.mean()`` would raise inside
+    # the summary string, masking the intended "no planted GT units"
+    # error. Fail with a clear message before any aggregate stats.
+    assert n_planted >= 1, (
+        f"{session_label} clusterless GT: no planted units recovered "
+        "from sidecar (per_unit_recall is empty -- either the fixture "
+        "has zero GT units or every unit has zero spike times)."
+    )
     recall_values = np.array(list(per_unit_recall.values()))
+    shank_distribution = {
+        sg: sum(1 for s in gt_unit_to_shank.values() if s == sg)
+        for sg in sorted_sgs
+    }
     summary = (
         f"\n[Clusterless vs {session_label} GT] "
         f"n_planted={n_planted}, "
-        f"n_v2_peaks={v2_times_s.size}\n"
-        f"  per-unit time-recall (±0.4 ms): "
+        f"n_v2_peaks_total={v2_times_s.size}, "
+        f"units_per_shank={shank_distribution}\n"
+        f"  shank-aware time-recall (±0.4 ms, best-shank-per-unit): "
         f"mean={recall_values.mean():.3f} "
         f"median={float(np.median(recall_values)):.3f} "
         f"min={recall_values.min():.3f} max={recall_values.max():.3f}"
     )
     print(summary)
-
-    assert n_planted >= 1, (
-        f"{session_label} fixture has no planted GT units.{summary}"
-    )
 
     # Threshold: mean recall >= 0.80 across planted units. Loosely
     # justifiable: well-isolated spikes should always be detected
@@ -7151,26 +7214,45 @@ def test_clusterless_thresholder_ground_truth(
         f"on {session_label}; v2 detector missing planted spikes.{summary}"
     )
 
-    # Sanity bound on the false-positive side: clusterless emits
+    # Per-fixture calibrated false-positive bound: clusterless emits
     # unsorted peaks (not units), so SI's precision metric doesn't
-    # apply, but a regression that emits orders of magnitude more
-    # peaks than the planted population should not pass this gate by
-    # virtue of high recall alone. Empirically the polymer 60 s
-    # fixture produces ~1.5x as many v2 peaks as planted spikes
-    # (background MEArec activity + adjacent-channel duplicates per
-    # shank); 10x catches the historical ``noise_levels=[1.0]``
-    # 1,400x explosion (Phase 1b root cause) without flagging
-    # legitimate excess detections from non-planted background units.
+    # apply, but a regression that emits substantially more peaks than
+    # the planted population must not pass this gate by virtue of high
+    # recall alone. Bounds are set with ~2x headroom over empirical
+    # observation so SI minor-version drift does not cause flake, but
+    # tight enough to flag real false-positive regressions (the
+    # previous loose 10x bound would only catch the historical 1,400x
+    # ``noise_levels=[1.0]`` explosion, missing smaller regressions).
+    #
+    # Observed v2_peaks/planted_spike ratios (full GT gate runs):
+    #   * polymer_60s  -- ~1.5x (4 shanks aggregated)
+    #   * tetrode_60s  -- ~1.4x (single shank, 5 planted)
+    # Bound is ``3 x observed`` so legitimate background MEArec
+    # activity + adjacent-channel duplicates still pass.
+    extras_ratio_max = {
+        "polymer_60s": 3.0,
+        "tetrode_60s": 3.0,
+    }.get(session_label)
+    if extras_ratio_max is None:
+        # New fixture without committed calibration evidence; fall
+        # back to the smoke-guard 10x bound and surface the gap.
+        extras_ratio_max = 10.0
+        print(
+            f"WARNING: no per-fixture extras-ratio calibration for "
+            f"{session_label!r}; falling back to 10x. Add a "
+            f"committed observed ratio + 2-3x bound to extras_ratio_max."
+        )
     total_planted_spikes = int(
         sum(t.size for t in gt_units.values() if t.size)
     )
     if total_planted_spikes > 0:
         extras_ratio = v2_times_s.size / total_planted_spikes
-        assert extras_ratio <= 10.0, (
+        assert extras_ratio <= extras_ratio_max, (
             f"Clusterless on {session_label} emitted "
             f"{v2_times_s.size} peaks vs {total_planted_spikes} "
-            f"planted spikes (ratio={extras_ratio:.1f}, > 10x). "
-            f"Recall is met but the detector is firing far above "
+            f"planted spikes (ratio={extras_ratio:.2f}, > "
+            f"{extras_ratio_max:.1f}x calibrated bound). "
+            f"Recall is met but the detector is firing well above "
             f"the planted population -- possible noise_levels / "
             f"threshold regression.{summary}"
         )

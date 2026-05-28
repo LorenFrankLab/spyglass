@@ -303,10 +303,18 @@ def _read_ground_truth(mearec_h5_path: Path) -> _GroundTruth:
     """
     import MEArec
 
+    # ``templates`` brings in ``template_locations`` (the per-unit soma
+    # x/y/z) without loading the heavy waveform array (``load_waveforms=
+    # False``). Required so the GT sidecar can carry real position_x/y/z
+    # columns; loading only ``spiketrains`` leaves
+    # ``recgen.template_locations is None`` and all positions write as
+    # NaN. ``load_waveforms=False`` keeps memory bounded -- only the
+    # locations array is needed.
     recgen = MEArec.load_recordings(
         str(mearec_h5_path),
         return_h5_objects=False,
-        load=["spiketrains"],
+        load=["spiketrains", "templates"],
+        load_waveforms=False,
         verbose=False,
     )
 
