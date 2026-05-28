@@ -103,7 +103,7 @@ self-documenting knob:
 ### T4 — BUG: `CurationLabel` validation on all insert paths (varchar kept)
 - Per [decision #1](overview.md#settled-design-decisions): keep `curation_label: varchar(32)` ([curation.py:98]).
 - Route **all** `UnitLabel` inserts through validation against the canonical `CurationLabel` set, not just `insert_curation` — override `CurationV2.UnitLabel.insert1`/`insert` (or a shared `_validate_labels` call) so a direct `.insert1({"curation_label": "noies"})` is rejected.
-- Add `allow_custom_labels: bool = False`; when True, accept labels outside the canonical set (labs tagging units with custom semantics).
+- Add `allow_custom_labels: bool = False`; when True, accept labels outside the canonical set (labs tagging units with custom semantics). **Thread it through `CurationV2.insert_curation` — the primary insertion path — not only the direct part-table insert.** `insert_curation` already calls `_validate_labels(labels)` ([curation.py:214]) before staging `UnitLabel` rows; add `allow_custom_labels` to the `insert_curation` signature and forward it into `_validate_labels` (and into the `UnitLabel.insert` validation). Without this, `allow_custom_labels=True` only works for raw `UnitLabel.insert1` calls and the supported helper still rejects custom labels.
 - Fix the false docstring claim "DataJoint cannot enforce enums on varchar" (grep `utils.py` / `curation.py`) — DataJoint *can* (`metrics_source` is an enum at curation.py:62); we choose varchar for flexibility, and the docstring should say exactly that.
 
 ### T5 — RESTRUCTURE: real `"no_filter"`
@@ -160,7 +160,7 @@ shows the pattern). The semantic changes in this phase MUST bump them:
 | `test_sorting_selection_query_equivalence` (slow) | T1: pre/post-migration restriction returns the same logical selection. |
 | `test_sort_group_reference_mode_enforced` (slow) | T2: an invalid `reference_mode` string is rejected at insert (Literal validation, since the column is varchar not enum); `specific` requires `reference_electrode_id`; `global_median`/`none` reject it; preproc dispatches correctly per mode; **`specific` mode includes the reference electrode in the `_restrict_recording` channel slice and drops it after referencing** (the reference channel appears in `common_reference` input but not in the cached output). |
 | `test_clusterless_threshold_unit_explicit` | T3: the shipped row's unit (uv vs mad) is unambiguous from field/row name; `noise_levels` derives correctly. |
-| `test_curation_label_validation_all_paths` (slow) | T4: direct `UnitLabel.insert1` with a typo rejected; `allow_custom_labels=True` accepts a custom label. |
+| `test_curation_label_validation_all_paths` (slow) | T4: BOTH paths validate — direct `UnitLabel.insert1` AND `CurationV2.insert_curation(labels=...)` reject a typo'd label; `allow_custom_labels=True` accepts a custom label through **both** `insert_curation` and the direct insert. |
 | `test_preprocessing_no_filter_is_none` | T5: `"no_filter"` preset yields `bandpass_filter=None`; preproc skips the filter step. |
 | `test_whiten_default_is_none` | T6: `PreprocessingParamsSchema().whiten is None`. |
 | `test_artifact_thresholds_or_semantics` | T7: amplitude-only, zscore-only, and both-at-once all validate; `detect=True` with neither raises. |
