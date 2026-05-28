@@ -14,6 +14,7 @@ For agent invocation, **load only the slice you need**:
 4. **Need v1 feature parity boundaries?** [feature-parity.md](feature-parity.md).
 5. **Need broader scope / risks / dependency policy?** [overview.md](overview.md).
 6. **Need upstream-repo line refs / on-disk format details?** [appendix.md](appendix.md).
+7. **Running fixture regen, v1 captures, or touching the Docker/MySQL test setup?** [operations-runbook.md](operations-runbook.md) — distilled traps from prior sessions (anonymous-volume orphans, `--sorter-param-name` mismatches, MEArec axis convention, patch-vs-recapture decision, cheap-check-first reflexes). Read **before** kicking off a multi-hour recapture.
 
 For lab users deciding whether to use v2, start with the Phase 5 user-facing
 surface ([phase-5-ux-overhaul.md](phase-5-ux-overhaul.md)), then the
