@@ -279,11 +279,22 @@ def _read_recording_traces(mearec_h5_path: Path) -> tuple[np.ndarray, float]:
     interface = MEArecRecordingInterface(file_path=str(mearec_h5_path))
     recording = interface.recording_extractor
     sampling_frequency = float(recording.get_sampling_frequency())
+    # No silent fallback to native units. The old
+    # ``except (TypeError, ValueError): traces = recording.get_traces()``
+    # path wrote ADC counts mislabeled as microvolts when the extractor
+    # lacked a gain, silently poisoning every downstream GT test. Fail
+    # loudly instead, naming the missing conversion field.
     try:
         traces = recording.get_traces(return_in_uV=True)
-    except (TypeError, ValueError):
-        # Extractor without a uV gain: fall back to native units.
-        traces = recording.get_traces()
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(
+            f"MEArec extractor for {mearec_h5_path.name!r} cannot return "
+            "traces in microvolts (missing `gain_to_uV` / `offset_to_uV` "
+            "conversion), so the fixture would have written ADC counts "
+            "mislabeled as microvolts. Set the extractor's gain "
+            "(e.g. `recording.set_channel_gains(...)` / "
+            "`set_channel_offsets(...)`) before writing the fixture."
+        ) from exc
     if traces.dtype != np.float32:
         traces = traces.astype(np.float32, copy=False)
     return traces, sampling_frequency

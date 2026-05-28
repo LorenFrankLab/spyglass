@@ -24,11 +24,46 @@ exact site before editing (the codebase moves).**
 
 ## Tasks
 
-### C1 — VERIFY-FIRST: multi-interval truncation guard
-**Two distinct truncation modes — be explicit about which the guard catches.** The current guard compares `requested_total` against `saved_*` values that are derived from the **in-memory** `recording` object ([recording.py:1175]: `saved_times = _get_recording_timestamps(recording)`), NOT from the persisted NWB. So it can catch "interval intersection yielded fewer samples than requested" but **cannot** catch "the writer produced a short file" — the in-memory recording still reports the full sample count. A test that "simulates truncation at write time" must therefore drive the *persisted-file* path, and the comparison must read the persisted sample count.
-1. Write a `@pytest.mark.slow` test that builds a **multi-interval** recording (≥2 disjoint sort intervals with a real inter-interval gap) and forces a short **on-disk** NWB at write time (e.g. monkeypatch `_write_nwb_artifact` to write fewer frames), then asserts `RecordingTruncatedError` is raised. Use `test_recording_truncation_caught` as the template.
-2. Run it against current `recording.py:944-956`. **If it fails to raise** (guard blind to a short file, as expected from the in-memory derivation), fix by comparing against the **persisted** sample count, gap-independently: either re-open the written NWB and read its `ElectricalSeries` length, or have `_write_nwb_artifact` return the actual written `n_samples`; compare that `persisted_n_samples` vs `expected_n_samples = round(requested_total * fs)` (sample count is invariant to whether timestamps carry gaps). Do NOT compare `recording.get_num_samples()` / in-memory `saved_end - saved_start` — those won't see a short file. **If it raises** (guard already reads persisted data — verify by inspecting where `saved_*` come from), keep the code + add the test as a permanent regression guard + a one-line note closing the finding.
-3. Either way the multi-interval + persisted-truncation test ships.
+### C1 — VERIFY-FIRST: multi-interval truncation guard — **CLOSED (false positive, no code change)**
+
+**Outcome:** the VERIFY-FIRST test was written first and the finding was proven
+false. The guard is correct; only a regression test shipped.
+
+What the original concern claimed: the guard compares `requested_total` against
+`saved_*` derived from the **in-memory** `recording`
+([recording.py:1175]: `saved_times = _get_recording_timestamps(recording)`), so
+it allegedly (a) cannot catch "the writer produced a short on-disk file" and (b)
+on the multi-interval path measures a gap-spanning envelope → `missing<0` always.
+
+Why both are false (verified, not assumed):
+- **(b) is false.** The disjoint path builds the recording with
+  `concatenate_recordings(ignore_times=True)`, so the concat recording's
+  `get_times()` is a 0-based synthetic vector and `saved_end - saved_start` is
+  the gap-**excluded** sum of kept-frame durations — NOT the wall-clock
+  envelope. `requested_total` (sum of segment durations) is likewise
+  gap-excluded, so `missing = requested − saved = over-request`, and the guard
+  fires correctly on a multi-interval over-request. Proven: a disjoint
+  over-request test raises `RecordingTruncatedError` against the **unmodified**
+  guard. The in-code comment at 944-950 was correct.
+- **(a) is a non-issue.** A silent short on-disk write is structurally
+  impossible through this writer: pynwb rejects an `ElectricalSeries` whose
+  `data` length differs from its `timestamps` length at construction (verified by
+  the raised `ValueError`), and the data is streamed from the same `recording`
+  whose `get_num_frames()` is the coverage reference — so a successfully written
+  file always holds exactly the in-memory frame count. An aborted write raises in
+  `_write_nwb_artifact` (file unlinked, re-raised) rather than leaving a silent
+  short file. There is therefore nothing for a "persisted sample count" check to
+  catch that the existing comparison does not already cover.
+
+**Shipped:** `test_recording_truncation_multi_interval` (`@pytest.mark.slow`) — a
+disjoint request whose final segment extends past raw coverage; asserts
+`RecordingTruncatedError` and no inserted row. It passes against the unmodified
+guard and locks the verified-correct multi-interval behavior. **No change to
+`recording.py`'s guard, `make_insert`, or `_write_nwb_artifact`.**
+
+(Note: the original guard does flag an intentional `min_segment_length` sliver
+drop as "missing" — pre-existing, out of C1's scope, and not a regression; raise
+separately if it is ever deemed undesirable.)
 
 ### C2 — BUG: cache-hash drift surfaced (fail-closed; precise `allow_drift` semantics)
 - In `_rebuild_nwb_artifact` ([recording.py:1077-1085]), replace the `logger.warning`-then-return with a fail-closed flow: raise a new `RecordingCacheDriftError` (add to `exceptions.py`) by default. The warning text already has the rebuilt-vs-stored hashes; reuse it in the exception message.
@@ -126,7 +161,7 @@ the C5 flag landed here.
 
 | Test | Asserts |
 | --- | --- |
-| `test_recording_truncation_multi_interval` (slow) | C1: a multi-interval recording forced to write a short **on-disk** NWB raises `RecordingTruncatedError`; the guard compares the **persisted** sample count (not in-memory `recording.get_num_samples()`) against `round(requested_total * fs)`. |
+| `test_recording_truncation_multi_interval` (slow) | C1 (regression guard; finding closed as false positive): a **disjoint** multi-interval request whose final segment extends past raw coverage raises `RecordingTruncatedError` and inserts no row — passes against the **unmodified** guard, locking the verified-correct multi-interval over-request behavior (`concatenate_recordings(ignore_times=True)` makes `saved_total` gap-excluded). |
 | `test_recording_cache_drift_raises` (slow) | C2: hash mismatch raises `RecordingCacheDriftError`; `allow_drift=True` proceeds. |
 | `test_recording_cache_drift_leaves_no_poison` (slow) | C2: after a drift-raise, the canonical cache path does NOT hold the drifted file — the next `get_recording` re-enters rebuild rather than returning the poisoned file. |
 | `test_recording_repair_partial_failure_consistent` (slow) | C2: with a DB `cache_hash` update injected to fail AFTER the file replace, the next `get_recording` does not return mismatched content (rebuilds+raises or reads last-good). |

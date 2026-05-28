@@ -65,7 +65,7 @@ re-grepped by the executor before editing** (comments/line numbers drift).
 
 | ID | Sev | Type | Anchor | Finding | Phase |
 |----|-----|------|--------|---------|-------|
-| C1 | HIGH | VERIFY-FIRST | `recording.py:944-956` ✓ | Multi-interval truncation guard may measure wall-clock envelope (incl. gaps) → `missing<0` always. **In-code comment at 944-950 claims the opposite.** Prove with a truncated-middle-chunk multi-interval test before touching. | 1 |
+| C1 | HIGH | VERIFY-FIRST → **CLOSED (false positive)** | `recording.py:944-956` ✓ | Reviewer claimed the multi-interval truncation guard measures the wall-clock envelope (incl. gaps) → `missing<0` always. **Proven FALSE.** The disjoint path builds the recording with `concatenate_recordings(ignore_times=True)`, so the concat recording's `get_times()` is 0-based and `saved_total` is the gap-*excluded* sum of kept-frame durations; `missing = requested − saved = over-request`, so the guard fires correctly on multi-interval over-requests (verified: a multi-interval over-request test raises against the unmodified guard). The in-code comment at 944-950 was correct. The "short on-disk write" mode the guard cannot see is structurally impossible: pynwb rejects an `ElectricalSeries` whose `data`/`timestamps` lengths differ at construction, and the writer streams from the same recording whose frame count is the reference. **Resolution: no guard code change; added `test_recording_truncation_multi_interval` as a permanent regression guard.** | 1 |
 | C2 | HIGH | BUG | `recording.py:1077-1085,1022` | Cache-hash mismatch is `logger.warning` then returns the drifted file; worse, the drifted file is already on disk and the next `get_recording` (which only rebuilds when absent, never re-hashes an existing file) returns it silently. Fail-closed default: raise `RecordingCacheDriftError`; atomic temp-write + promote on match. `allow_drift=True`/`Recording.repair()` accepts the drift by promoting AND updating `cache_hash` — and must keep file/row consistent with the phase-1 repair-marker protocol (`<canonical>.repair.json`, fsynced before canonical mutation and reconciled by `get_recording`); in-process delete/restore cleanup is not crash-safe. See phase-1 C2 for the precise outcomes. | 1 |
 | C3 | HIGH | BUG | `recording.py:1478-1486` | Non-monotonic timestamps silently rewritten; no provenance. Add `timestamps_adjusted` + `n_adjusted_samples` columns (safe: v2 unreleased); thread `(timestamps, n_changed)` from `_repaired_timestamps` → `RecordingComputed` (+2 fields) → `make_insert`. Gate the rewrite on a **`Recording`-level** flag, NOT a `PreprocessingParamsSchema` field (avoids a v3 version-bump collision with T5/T6). | 1 |
 | C4 | HIGH | BUG | `mearec_to_nwb.py:282-286` | `except (TypeError, ValueError)` falls back to ADC counts vs µV; fixture mislabels units. Replace with explicit raise naming the missing gain field. | 1 |
@@ -154,9 +154,15 @@ so changes land in place.
 ## Open Questions
 
 1. **C1**: is the truncation guard actually broken on the multi-interval path?
-   Resolved by the VERIFY-FIRST test in Phase 1; current best guess is the
-   in-code comment (944-950) is correct and the finding is a false positive,
-   but it must be proven, not assumed.
+   **RESOLVED — false positive.** The VERIFY-FIRST test
+   (`test_recording_truncation_multi_interval`, a disjoint over-request) raises
+   against the *unmodified* guard, proving it is correct: the disjoint path uses
+   `concatenate_recordings(ignore_times=True)`, so `saved_total` is gap-excluded
+   and `missing` equals the over-request (not `<0`). The in-code comment at
+   944-950 was right. The only mode the guard cannot see — a short on-disk write
+   — is structurally impossible (pynwb enforces `data`/`timestamps` length parity
+   at construction; the writer streams the same recording the guard measures).
+   No guard code changed; the test was kept as a regression guard.
 2. **T3**: RESOLVED — option (a) `threshold_unit: Literal["uv","mad"]`. Option
    (b) (rename shipped rows) was rejected because the
    `franklab_tetrode_clusterless_thresholder` preset points at

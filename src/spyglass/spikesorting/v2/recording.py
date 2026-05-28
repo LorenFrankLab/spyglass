@@ -1498,6 +1498,15 @@ class Recording(SpyglassMixin, dj.Computed):
         (``make_fetch``) and the rebuild path
         (``_rebuild_nwb_artifact``) to feed
         ``_maybe_apply_tetrode_geometry``.
+
+        The fetch is ``order_by="electrode_id"`` so two successive
+        ``make_fetch`` calls return byte-identical tuples; without an
+        explicit ordering, DataJoint/MySQL row order is unspecified and
+        the tri-part DeepHash integrity check inside the populate
+        transaction can spuriously raise on reorder. This matches the
+        ordered-fetch pattern used by the other tri-part ``make_fetch``
+        paths in this package (e.g. ``ArtifactDetection.make_fetch`` in
+        artifact.py, which orders its member fetch by ``recording_id``).
         """
         from spyglass.common.common_ephys import Electrode as _Electrode
         from spyglass.common.common_device import Probe as _Probe
@@ -1506,7 +1515,12 @@ class Recording(SpyglassMixin, dj.Computed):
             _Electrode * _Probe
             & {"nwb_file_name": nwb_file_name}
             & [{"electrode_id": int(c)} for c in channel_ids]
-        ).fetch("probe_type", "electrode_group_name", as_dict=True)
+        ).fetch(
+            "probe_type",
+            "electrode_group_name",
+            as_dict=True,
+            order_by="electrode_id",
+        )
         probe_types = tuple(r["probe_type"] for r in probe_rows)
         electrode_group_names = tuple(
             r["electrode_group_name"] for r in probe_rows

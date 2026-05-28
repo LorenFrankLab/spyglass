@@ -1309,6 +1309,169 @@ def test_recording_truncation_caught(polymer_smoke_session):
 
 
 @pytest.mark.slow
+def test_recording_truncation_multi_interval(polymer_smoke_session):
+    """A disjoint multi-interval request that runs past raw coverage
+    raises ``RecordingTruncatedError`` and inserts no row.
+
+    The template ``test_recording_truncation_caught`` covers the
+    single-interval over-request case; this is the disjoint analogue, and
+    locks the truncation guard on the multi-interval/concat path. Two
+    sort intervals with a real inter-segment gap, where the final segment
+    extends 1 s past the raw recording's last valid time.
+
+    The guard is correct on this path because the concatenated recording
+    is built with ``ignore_times=True``, so its ``get_times()`` is 0-based
+    and the saved-duration reference EXCLUDES the inter-segment gap (it is
+    the sum of kept-frame durations, not the wall-clock envelope). The
+    requested total likewise excludes gaps, so ``missing`` equals the
+    over-request (here ~1 s) rather than collapsing to <= 0 -- a gap-
+    inclusive envelope would instead spuriously flag every disjoint sort.
+    """
+    import numpy as _np
+
+    from spyglass.common import IntervalList
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2.exceptions import RecordingTruncatedError
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    PreprocessingParameters.insert_default()
+    LabTeam.insert1(
+        {"team_name": "v2_test_team", "team_description": "v2 pipeline tests"},
+        skip_duplicates=True,
+    )
+    if not (SortGroupV2 & polymer_smoke_session):
+        SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+
+    raw_times = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": "raw data valid times",
+        }
+    ).fetch1("valid_times")
+    raw_start = float(raw_times[0][0])
+    raw_end = float(raw_times[-1][-1])
+    # First segment [raw_start, +1.5 s]; 1 s gap; second segment from
+    # +2.5 s extends 1 s PAST raw_end (the over-request). After clipping
+    # to raw_end the second segment is still > 1 s, so it survives the
+    # min_segment_length filter and both segments take the concat path.
+    assert raw_end - raw_start >= 3.5, (
+        f"fixture too short for multi-interval over-request test: raw "
+        f"span [{raw_start}, {raw_end}] needs >= 3.5 s"
+    )
+    seg1_end = raw_start + 1.5
+    seg2_start = seg1_end + 1.0
+    over_request_s = 1.0
+    multi_interval_name = "v2_test_multi_over_request"
+    IntervalList.insert1(
+        {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": multi_interval_name,
+            "valid_times": _np.asarray(
+                [[raw_start, seg1_end], [seg2_start, raw_end + over_request_s]]
+            ),
+            "pipeline": "v2_test_truncation",
+        },
+        skip_duplicates=True,
+    )
+
+    sort_group_id = int(
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
+    )
+    selection_key = {
+        "nwb_file_name": nwb_file_name,
+        "sort_group_id": sort_group_id,
+        "interval_list_name": multi_interval_name,
+        "preproc_params_name": "default_franklab",
+        "team_name": "v2_test_team",
+    }
+    pk = RecordingSelection.insert_selection(selection_key)
+
+    (Recording & pk).super_delete(warn=False)
+    try:
+        with pytest.raises(RecordingTruncatedError, match="Missing: \\d"):
+            Recording.populate(pk, reserve_jobs=False)
+        # No row may be inserted for an over-request -- otherwise a
+        # downstream consumer silently reads a window that does not cover
+        # what was requested.
+        assert not (Recording & pk)
+    finally:
+        (Recording & pk).super_delete(warn=False)
+        (RecordingSelection & pk).super_delete(warn=False)
+        (
+            IntervalList
+            & {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": multi_interval_name,
+            }
+        ).super_delete(warn=False)
+
+
+@pytest.mark.slow
+def test_fetch_sort_group_probe_info_stable_order(polymer_smoke_session):
+    """``_fetch_sort_group_probe_info`` returns a deterministic,
+    electrode_id-ordered result.
+
+    The tri-part populate contract hashes the ``RecordingFetched`` tuple
+    twice and raises if the two fetches differ; an unordered DB fetch can
+    reorder rows between calls. The fetch must therefore pin
+    ``order_by="electrode_id"``. This guards that invariant: the result
+    is identical across calls AND equals the explicit electrode_id-ordered
+    reference (so dropping ``order_by`` regresses the test whenever MySQL's
+    default scan order differs from electrode_id order).
+    """
+    from spyglass.common.common_device import Probe
+    from spyglass.common.common_ephys import Electrode
+    from spyglass.spikesorting.v2.recording import Recording, SortGroupV2
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    if not (SortGroupV2 & polymer_smoke_session):
+        SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+
+    sort_group_id = int(
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
+    )
+    channel_ids = sorted(
+        (
+            SortGroupV2.SortGroupElectrode
+            & {
+                "nwb_file_name": nwb_file_name,
+                "sort_group_id": sort_group_id,
+            }
+        ).fetch("electrode_id"),
+        key=int,
+    )
+    assert len(channel_ids) > 1, "need a multi-channel sort group"
+
+    first = Recording._fetch_sort_group_probe_info(nwb_file_name, channel_ids)
+    second = Recording._fetch_sort_group_probe_info(nwb_file_name, channel_ids)
+    assert first == second, "probe-info fetch is not deterministic"
+
+    ref_rows = (
+        Electrode * Probe
+        & {"nwb_file_name": nwb_file_name}
+        & [{"electrode_id": int(c)} for c in channel_ids]
+    ).fetch(
+        "probe_type",
+        "electrode_group_name",
+        as_dict=True,
+        order_by="electrode_id",
+    )
+    expected = (
+        tuple(r["probe_type"] for r in ref_rows),
+        tuple(r["electrode_group_name"] for r in ref_rows),
+    )
+    assert first == expected, "probe-info fetch is not electrode_id-ordered"
+    assert len(first[0]) == len(channel_ids)
+
+
+@pytest.mark.slow
 def test_prune_orphaned_selections_finds_and_cleans(populated_recording):
     """``prune_orphaned_selections`` finds master rows with no source
     part and removes them when called with ``dry_run=False``.

@@ -126,3 +126,38 @@ def test_mearec_fixture_writes_sidecar_ground_truth_units(mearec_smoke_ingested)
             assert col in gt_table.colnames, (
                 f"Sidecar units table missing expected column {col!r}."
             )
+
+
+@pytest.mark.fast
+def test_mearec_fixture_gain_required(monkeypatch):
+    """The fixture writer raises (does not silently fall back to ADC
+    counts) when the MEArec extractor lacks a microvolt gain.
+
+    A gainless extractor written as if its traces were microvolts would
+    mislabel ADC counts as uV and poison every downstream ground-truth
+    test. ``_read_recording_traces`` must surface that loudly. No DB or
+    real fixture needed: a tiny in-memory SI recording with no gain set
+    stands in for the extractor.
+    """
+    import neuroconv.datainterfaces as _ndi
+    import numpy as np
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._fixtures import mearec_to_nwb
+
+    # Fresh NumpyRecording has no gain_to_uV/offset_to_uV, so
+    # get_traces(return_in_uV=True) raises -- the exact precondition the
+    # silent fallback used to swallow.
+    gainless = si.NumpyRecording(
+        traces_list=[np.zeros((100, 4), dtype="int16")],
+        sampling_frequency=30_000.0,
+    )
+
+    class _FakeInterface:
+        def __init__(self, *args, **kwargs):
+            self.recording_extractor = gainless
+
+    monkeypatch.setattr(_ndi, "MEArecRecordingInterface", _FakeInterface)
+
+    with pytest.raises(RuntimeError, match="microvolts|gain_to_uV"):
+        mearec_to_nwb._read_recording_traces(Path("nonexistent_fixture.h5"))
