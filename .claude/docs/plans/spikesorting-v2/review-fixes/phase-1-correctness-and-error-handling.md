@@ -65,7 +65,31 @@ guard and locks the verified-correct multi-interval behavior. **No change to
 drop as "missing" — pre-existing, out of C1's scope, and not a regression; raise
 separately if it is ever deemed undesirable.)
 
-### C2 — BUG: cache-hash drift surfaced (fail-closed; precise `allow_drift` semantics)
+### C2 — BUG: cache-hash drift surfaced — **DEFERRED (main-epic `RecordingArtifactRecompute`)**
+
+> **Deferred (verify-first disproved the premise).** The two verify-first
+> tests (delete the cache file, then `get_recording`) showed the on-demand
+> rebuild path does NOT silently return a drifted file — it raises
+> `DataJointError: '<file>' downloaded but did not pass checksum` for ANY
+> rebuild (drift OR clean), because the recompute is not byte-deterministic
+> versus the external-store checksum (`source_script` env info / HDF5 layout;
+> NwbfileHasher includes volatile metadata — see Recording Cache Format).
+> Consequences: (1) the "silent drift consumption" bug as described does not
+> occur; (2) a fail-closed-on-hash-mismatch check would false-trip on EVERY
+> rebuild; (3) the atomic `fresh+os.replace` design would still fail
+> `get_recording`'s `from_schema=False` checksum-validated read. The whole
+> on-demand rebuild path is non-functional today and must be fixed together
+> with the **`RecordingArtifactRecompute*`** machinery (Phase 2), which is where
+> recompute byte-determinism / hash tolerance / external-checksum reconciliation
+> are designed. Open sub-question: should `get_recording` read via
+> `from_schema=True` (skip the external-store checksum, rely on v2 `cache_hash`)
+> or should the rebuild reconcile the external checksum? **C7 defers with C2**
+> (its atomic temp-write is C2's mechanism; C7 is not reachable standalone —
+> `_rebuild_nwb_artifact` only runs when the canonical file is already absent).
+> The verify-first tests + `RecordingCacheDriftError` were reverted to keep the
+> tree green; recreate them in Phase 2 from the repro above. The original spec
+> below is retained for Phase 2.
+
 - In `_rebuild_nwb_artifact` ([recording.py:1077-1085]), replace the `logger.warning`-then-return with a fail-closed flow: raise a new `RecordingCacheDriftError` (add to `exceptions.py`) by default. The warning text already has the rebuilt-vs-stored hashes; reuse it in the exception message.
 - **Atomic rebuild is mandatory, not optional.** `_rebuild_nwb_artifact` currently writes the file *before* comparing hashes, and `get_recording` ([recording.py:1022](../../../../../src/spyglass/spikesorting/v2/recording.py#L1022)) only rebuilds when the file is **absent** — so a drifted file left at the canonical path is returned silently on the *next* call, never re-checked. Therefore rebuild into a **temp path**, hash it, and `os.replace` onto the canonical path. The disposition of the temp file is what the three cases below decide; the canonical path is only ever written via that atomic replace.
 - **Three precise outcomes (the previous "log + proceed" was ambiguous — it would either leave NO file or re-create the poison cache):**
@@ -110,7 +134,18 @@ separately if it is ever deemed undesirable.)
 - Add `Field(description=...)` to `zscore_thresh` ([artifact_detection.py:47]) with the same warning: "Cross-channel z-score per frame; pure common-mode events (every channel jumps together) produce ~0 z-score and are NOT detected — use `amplitude_thresh_uV` to catch common-mode (EMG) artifacts." Mirror in the `ArtifactDetectionParamsSchema` docstring.
 - **No change to the detector logic** — the behavior is intentional (matches v1); only the comment and docs are corrected.
 
-### C7 — BUG: unlink-on-failure guard
+### C7 — BUG: unlink-on-failure guard — **DEFERRED (subsumed by C2)**
+
+> **Deferred — not reachable standalone.** `_rebuild_nwb_artifact` runs ONLY
+> when the canonical file is already absent (`get_recording` rebuilds on a
+> missing file only), so `_write_nwb_artifact`'s unlink-on-failure removes a
+> partial *failed rebuild* of an already-missing file, not a good cache copy.
+> The "destroys the only good copy" scenario needs a rebuild-on-*present*-file
+> path, which only C2's `Recording.repair()` / `allow_drift=True` introduces —
+> and C2's atomic temp-write (canonical never written in-place) is exactly the
+> fix. So C7 lands with C2 in Phase 2; no separate Phase-1 change. Original spec
+> below retained for Phase 2.
+
 - In `_write_nwb_artifact` ([recording.py:1760-1773]), add the same `existing_analysis_file_name is None` guard the outer caller (`_compute_recording_artifact:1184-1196`) uses, OR refactor to temp-path + `os.replace` on success so the rebuild slot is never destroyed mid-write. Prefer the atomic temp-write (obviates both unlink branches).
 
 ### R1 — BUG: deterministic probe-info fetch
@@ -162,10 +197,10 @@ the C5 flag landed here.
 | Test | Asserts |
 | --- | --- |
 | `test_recording_truncation_multi_interval` (slow) | C1 (regression guard; finding closed as false positive): a **disjoint** multi-interval request whose final segment extends past raw coverage raises `RecordingTruncatedError` and inserts no row — passes against the **unmodified** guard, locking the verified-correct multi-interval over-request behavior (`concatenate_recordings(ignore_times=True)` makes `saved_total` gap-excluded). |
-| `test_recording_cache_drift_raises` (slow) | C2: hash mismatch raises `RecordingCacheDriftError`; `allow_drift=True` proceeds. |
-| `test_recording_cache_drift_leaves_no_poison` (slow) | C2: after a drift-raise, the canonical cache path does NOT hold the drifted file — the next `get_recording` re-enters rebuild rather than returning the poisoned file. |
-| `test_recording_repair_partial_failure_consistent` (slow) | C2: with a DB `cache_hash` update injected to fail AFTER the file replace, the next `get_recording` does not return mismatched content (rebuilds+raises or reads last-good). |
-| `test_recording_repair_crash_marker_recovery` (slow) | C2: a stale repair marker + a deliberately hash-mismatched canonical file (simulated interrupted repair) is detected by `get_recording`'s marker hash-check — it does not return the poison file by existence alone. |
+| ~~`test_recording_cache_drift_raises`~~ | **C2 DEFERRED to Phase 2.** Verify-first showed the rebuild raises a `DataJointError` external-store checksum failure for ANY rebuild (clean or drifted) — the silent-return premise is false and a fail-closed hash check would false-trip every rebuild. Recreate in Phase 2 with `RecordingArtifactRecompute*`. |
+| ~~`test_recording_cache_drift_leaves_no_poison`~~ | **C2 DEFERRED to Phase 2.** (see above) |
+| ~~`test_recording_repair_partial_failure_consistent`~~ | **C2 DEFERRED to Phase 2** (repair-journal follow-on). |
+| ~~`test_recording_repair_crash_marker_recovery`~~ | **C2 DEFERRED to Phase 2** (repair-journal follow-on). |
 | `test_recording_timestamp_repair_recorded` (slow) | C3: a non-monotonic source sets `timestamps_adjusted=True`, `n_adjusted_samples>0` on the row. |
 | `test_mearec_fixture_gain_required` | C4: an extractor without µV gain raises (not silent ADC fallback). |
 | `test_run_v2_pipeline_zero_units_require_flag` (slow) | C5: `require_units=True` raises `ZeroUnitSortError`; default returns partial manifest with a warning. |
@@ -173,7 +208,7 @@ the C5 flag landed here.
 | `test_get_sorting_zero_units` (slow) | C5 (sorting loader): `Sorting.get_sorting(key)` on a zero-unit sort behaves per the documented choice (empty `NumpySorting` OR `ZeroUnitSortError`), guarded before `NwbSortingExtractor(...)`. |
 | `test_curation_get_sorting_zero_units` (slow) | C5: `CurationV2.get_sorting(key)` on a zero-unit curation applies the SAME guard (it builds its own extractor at curation.py:712-727 — does not delegate to `Sorting.get_sorting`). |
 | `test_artifact_zscore_description_documents_common_mode` | C6: schema field description mentions common-mode + `amplitude_thresh_uV`. |
-| `test_write_nwb_artifact_failure_preserves_existing` (slow) | C7: a rebuild failure on an existing slot leaves the prior cache intact. |
+| ~~`test_write_nwb_artifact_failure_preserves_existing`~~ | **C7 DEFERRED to Phase 2 (subsumed by C2).** Not reachable standalone — rebuild only runs on an already-absent file; lands with C2's atomic temp-write. |
 | `test_fetch_sort_group_probe_info_stable_order` | R1: two consecutive fetches return identical row order. |
 | `test_curation_n_spikes_matches_nwb` (slow) | R2: DB `n_spikes` == NWB spike-train length for `apply_merge` ∈ {True, False}. |
 | `test_run_si_sorter_restores_global_job_kwargs` (slow) | R3: global job-kwargs identical before/after a sort. |
