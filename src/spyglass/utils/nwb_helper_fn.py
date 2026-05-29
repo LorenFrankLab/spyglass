@@ -51,6 +51,7 @@ class NWBFileCache:
         self._cache[path] = (io, nwbfile, time.monotonic())
         return io, nwbfile
 
+
 def __setitem__(self, path, value):
     """Add *(io, nwbfile)*, evicting LRU entries if memory is tight."""
     io, nwbfile = value
@@ -111,17 +112,17 @@ def configure_nwb_cache(min_free_gb: float = None, min_free_pct: float = None):
     min_free_pct : float, optional
         Minimum free system RAM as a fraction of total (0–1).
     """
-global _NWB_CACHE_MIN_FREE_GB, _NWB_CACHE_MIN_FREE_PCT
-if min_free_gb is not None:
-    min_free_gb = float(min_free_gb)
-    if min_free_gb < 0:
-        raise ValueError("min_free_gb must be >= 0")
-    _NWB_CACHE_MIN_FREE_GB = min_free_gb
-if min_free_pct is not None:
-    min_free_pct = float(min_free_pct)
-    if not 0 <= min_free_pct <= 1:
-        raise ValueError("min_free_pct must be between 0 and 1")
-    _NWB_CACHE_MIN_FREE_PCT = min_free_pct
+    global _NWB_CACHE_MIN_FREE_GB, _NWB_CACHE_MIN_FREE_PCT
+    if min_free_gb is not None:
+        min_free_gb = float(min_free_gb)
+        if min_free_gb < 0:
+            raise ValueError("min_free_gb must be >= 0")
+        _NWB_CACHE_MIN_FREE_GB = min_free_gb
+    if min_free_pct is not None:
+        min_free_pct = float(min_free_pct)
+        if not 0 <= min_free_pct <= 1:
+            raise ValueError("min_free_pct must be between 0 and 1")
+        _NWB_CACHE_MIN_FREE_PCT = min_free_pct
 
 
 __open_nwb_files = NWBFileCache()
