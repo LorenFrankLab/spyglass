@@ -16,7 +16,7 @@ SpikeInterface objects.
 
 ## What
 
-Phase 1 of the rewrite ships the single-session sorting chain:
+v2 currently ships the single-session sorting chain:
 
 ```
 SortGroupV2
@@ -89,7 +89,7 @@ rows.
 ```python
 from spyglass.common.common_lab import LabTeam
 from spyglass.spikesorting.v2 import initialize_v2_defaults
-from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+from spyglass.spikesorting.v2.pipeline import list_presets, run_v2_pipeline
 from spyglass.spikesorting.v2.recording import SortGroupV2
 
 # Replace with the session you've already ingested via insert_sessions.
@@ -124,7 +124,7 @@ Available presets:
 - `franklab_tetrode_clusterless_thresholder` -- peak-detection only (no
     clustering), feeds the clusterless decoding pipeline
 
-`run_v2_pipeline.list_presets()` returns the same list at runtime.
+`list_presets()` returns the same list at runtime.
 
 ### Stage-by-stage (custom preset)
 
@@ -186,7 +186,7 @@ ripple detection, etc.) keeps working unchanged:
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 
 # v2 rows are dispatched alongside v1 rows
-SpikeSortingOutput.get_spike_times({"merge_id": merge_id})
+SpikeSortingOutput().get_spike_times({"merge_id": merge_id})
 SpikeSortingOutput.get_unit_brain_regions({"merge_id": merge_id})
 ```
 
@@ -205,18 +205,18 @@ calling them under SI 0.104 raises a clear `RuntimeError`.
 
 ## Status
 
-Phase 1 (single-session sort) is the first landed slice. Later phases extend
-the same tables with:
+The single-session sort chain (above) is available now. Not yet available:
 
-- metrics + auto-curation (Phase 2)
-- session-group sorting + cross-session unit matching (Phase 3)
+- metrics + auto-curation
+- session-group sorting + cross-session unit matching
 
-The Phase 3 tables are declared (final-shape) in Phase 1 with gated `make()`
-bodies, so there are no schema migrations between phases.
+The tables for those capabilities are already declared in their final shape
+with gated `make()` bodies, so enabling them later needs no schema migration.
 
 ## Streaming, parallel populate, and v1 parity
 
-The Phase 1 landing of v2 had two runtime gaps that Phase 1b closes:
+v2's `Recording` write path is built for production-scale data and
+concurrent use:
 
 - **Streaming Recording writes.** `Recording.make` now streams the
   preprocessed `ElectricalSeries` to NWB via HDMF's
@@ -237,13 +237,12 @@ The Phase 1 landing of v2 had two runtime gaps that Phase 1b closes:
   wired into Recording, ArtifactDetection, and Sorting; v1's pattern
   applied only on the sorter call).
 
-Phase 1b also restores v1-parity behavior on a long list of points
-where Phase 1 silently diverged (R-tag and N-tag items in the
-plan); see the v0.5.6 CHANGELOG for the full list. Key user-visible
-items:
+v2 also matches v1 behavior on a long list of points; see the v0.5.6
+CHANGELOG for the full list. Key user-visible items:
 
 - The `CurationV2.MergeGroup` part table records every merge group's
-  `(kept_unit_id, contributor_unit_id)` rows with FK validation;
+  `(kept_unit_id, contributor_unit_id)` rows (contributor ids are
+  validated against the sorting's units at insert time);
   `CurationV2.get_merge_groups(key)` returns a
   `{kept: [contributors]}` dict, and `CurationV2.get_merged_sorting`
   applies merges lazily at fetch regardless of the `merges_applied`
@@ -263,12 +262,12 @@ items:
 - `get_spiking_sorting_v2_merge_ids(restriction, as_dict=False)` in
   `spyglass.spikesorting.v2.utils` is the notebook-discoverable
   parallel of v1's `get_spiking_sorting_v1_merge_ids`.
-- `SpikeSortingOutput.get_restricted_merge_ids` now defaults to
-  `sources=["v0", "v1", "v2"]` so v2 users copying v1 notebook
-  patterns see v2 merge_ids without an explicit `sources=` arg.
-  Unknown restriction keys raise `ValueError` instead of silently
-  dropping (matches shared-contracts.md "Unknown restriction fields
-  should fail clearly").
+- `SpikeSortingOutput.get_restricted_merge_ids` defaults to every
+  available source (`v0`/`v1`, plus `v2` when the v2 module is
+  importable), so v2 users copying v1 notebook patterns see v2
+  merge_ids without an explicit `sources=` arg, while v0/v1-only
+  deployments are unaffected. Unknown restriction keys raise
+  `ValueError` instead of silently dropping.
 
 ## Rerunning fixtures + tests against an existing v2 database
 
