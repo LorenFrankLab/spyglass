@@ -296,6 +296,7 @@ class Skeleton(SpyglassMixin, dj.Lookup):
         name_similarity: float = 0.85,
         check_duplicates: bool = True,
         accept_default: bool = False,
+        accept_new_bodyparts: bool = False,
         **kwargs,
     ):
         """Insert the skeleton if no duplicate exists.
@@ -311,6 +312,11 @@ class Skeleton(SpyglassMixin, dj.Lookup):
             Fuzzy matching threshold for body part names [0..1], by default 0.85
         check_duplicates : bool, optional
             Whether to run duplicate detection, by default True
+        accept_new_bodyparts : bool, optional
+            When True, any bodypart names absent from the ``BodyPart`` reference
+            table are inserted automatically with a warning rather than raising
+            an error.  Intended for V1 model imports where project-specific
+            body part names may not yet be in the curated list.  Default False.
         """
         bodyparts: List[str] = key.get("bodyparts", [])
         edges: List[Tuple[str, str]] = key.get("edges") or key.get(
@@ -325,7 +331,25 @@ class Skeleton(SpyglassMixin, dj.Lookup):
         # Validate body parts against the reference table first so unknown-
         # bodypart errors surface before structural edge errors.
         labels_norm = [normalize_label(x) for x in bodyparts]
-        _ = self._validate_bodyparts(set(labels_norm))
+        if accept_new_bodyparts:
+            all_parts = {
+                normalize_label(x) for x in BodyPart().fetch("bodypart")
+            }
+            novel = sorted(
+                {normalize_label(bp) for bp in bodyparts} - all_parts
+            )
+            if novel:
+                self._warn_msg(
+                    f"Auto-inserting {len(novel)} novel bodypart(s) into "
+                    f"BodyPart: {novel}"
+                )
+                BodyPart().insert(
+                    [{"bodypart": bp} for bp in novel],
+                    skip_duplicates=True,
+                    allow_direct_insert=True,
+                )
+        else:
+            _ = self._validate_bodyparts(set(labels_norm))
 
         # Normalise edges: flatten nested groups, drop empty slots, normalize
         # labels.  norm_edges emits a warning when the input was non-standard.
@@ -2197,6 +2221,7 @@ class Model(SpyglassMixin, dj.Computed):
             skeleton_config,
             check_duplicates=True,
             skip_duplicates=True,
+            accept_new_bodyparts=False,  # TODO: discuss with team
         )
         self._info_msg(f"Skeleton: {skeleton_key['skeleton_id']}")
 

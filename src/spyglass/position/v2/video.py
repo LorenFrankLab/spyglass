@@ -19,7 +19,7 @@ Typical workflow
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Union
 
 import datajoint as dj
 from datajoint.hash import key_hash
@@ -560,27 +560,42 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
         config_path: Union[str, Path],
         description: str = None,
         vid_group_id: Union[str, None] = None,
+        vid_file_matches: Optional[Dict[str, Optional[Dict[str, str]]]] = None,
     ) -> dict:
         """Create a VidFileGroup from a DLC project config.yaml.
 
-        Reads the DLC config to extract project metadata and video paths.
-        Matches video paths against existing Spyglass Nwbfile names: if any
-        ``nwb_file_name`` prefix appears as a substring of a video path, that
-        session's ``VideoFile`` entries are linked to the new group.
-
-        If no Spyglass Session matches the DLC config's video paths, a
-        ``ValueError`` is raised. Register the session with
-        ``insert_sessions()`` before calling this method.
+        Matches each video path in the config against a Spyglass session via
+        three passes (subject+date → NWB stem → basename).  Any path that
+        cannot be resolved automatically must be supplied via
+        ``vid_file_matches``; a ``ValueError`` naming the unresolved paths and
+        a copy-paste re-run snippet is raised otherwise.
 
         Parameters
         ----------
         config_path : Union[str, Path]
             Path to the DLC config.yaml file.
         description : str, optional
-            Description for the VidFileGroup. Defaults to
-            ``"DLC project: <Task> (<date>)"``.
+            Description for the VidFileGroup.
+            Defaults to ``"DLC project: <Task> (<date>)"``.
         vid_group_id : str, optional
-            Video group ID. Auto-generated from description if None.
+            Video group ID.  Auto-generated from description when ``None``.
+        vid_file_matches : dict, optional
+            Explicit overrides for video paths that automatic matching cannot
+            resolve.  Keys are video path strings exactly as they appear in
+            ``video_sets`` of the DLC config; values are VideoFile primary-key
+            dicts (must include at least ``"nwb_file_name"``).  Paths already
+            resolved by automatic matching are ignored::
+
+                VidFileGroup.create_from_dlc_config(
+                    config_path="/path/to/config.yaml",
+                    vid_file_matches={
+                        "/nimbus/.../video_A.mp4": {
+                            "nwb_file_name": "SC38_20230606_.nwb",
+                            "epoch": 1,
+                            "video_file_num": 0,
+                        },
+                    },
+                )
 
         Returns
         -------
@@ -592,16 +607,8 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
         FileNotFoundError
             If config_path does not exist.
         ValueError
-            If no Spyglass Session matches the DLC config's video paths.
-
-        Examples
-        --------
-        >>> # Link DLC project videos to an existing Spyglass session
-        >>> group_key = VidFileGroup.create_from_dlc_config(
-        ...     config_path="/path/to/config.yaml",
-        ... )
-        >>> print(group_key)
-        {'vid_group_id': 'a1b2c3d4e5f67890...'}
+            If any video path could not be matched and no override was
+            supplied via ``vid_file_matches``.
         """
         from spyglass.position.utils.yaml_io import load_yaml
 
@@ -618,62 +625,112 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
         if description is None:
             description = f"DLC project: {task} ({date})"
 
-        # Match video paths against existing Spyglass Nwbfile names.
-        # Spyglass convention: nwb_file_name == "subject_date_time_.nwb"
-        from spyglass.common import Nwbfile
+        from spyglass.common import Nwbfile, Session
 
-        matched_nwb = None
+        # matched: video_path -> VideoFile PK dict
+        #   {"nwb_file_name": ..., "epoch": ..., "video_file_num": ...}
+        # None means not yet resolved.  Completeness = no None values remain.
+        matched: Dict[str, Optional[Dict[str, str]]] = {
+            vp: None for vp in video_paths
+        }
 
-        # Pass 1: NWB stem is a substring of the video path (standard).
-        # Only accept matches that have VideoFile entries — avoids short stems
-        # (e.g. "test_") spuriously matching unrelated video filenames.
-        for nwb_name in Nwbfile().fetch("nwb_file_name"):
-            if nwb_name.endswith("_.nwb"):
-                nwb_stem = nwb_name[:-5]  # strip "_.nwb"
-            elif nwb_name.endswith(".nwb"):
-                nwb_stem = nwb_name[:-4]
-            else:
-                nwb_stem = nwb_name
-            if any(nwb_stem in str(vp) for vp in video_paths):
-                if VideoFile() & {"nwb_file_name": nwb_name}:
-                    matched_nwb = nwb_name
-                    cls()._info_msg(
-                        f"DLC config matched Nwbfile: {matched_nwb}"
-                    )
+        # ambiguous: video_path -> list of VideoFile candidate rows.
+        # Set when the session (NWB) was found but narrowing could not pick one.
+        ambiguous: Dict[str, List[Dict]] = {}
+
+        # Pre-populate from caller-supplied overrides.
+        if vid_file_matches:
+            for vp, key_dict in vid_file_matches.items():
+                if vp in matched and key_dict is not None:
+                    matched[vp] = key_dict
+
+        unresolved: set = {vp for vp, m in matched.items() if m is None}
+
+        def _record_match(restriction, vp):
+            """Narrow VideoFile lookup for path, updating parent variables."""
+            key, cands = VideoFile()._narrow_key_lookup(vp, restriction)
+            matched[vp] = key
+            if not key:
+                ambiguous[vp] = cands
+            unresolved.discard(vp)
+
+        # ── Pass 1: subject_id + YYYYMMDD in the video path ─────────────────
+        if unresolved:
+            all_sessions = Session().with_date_str.fetch(as_dict=True)
+            for session in all_sessions:
+                if not unresolved:
                     break
+                for vp in list(unresolved):
+                    if (
+                        session["session_date_str"] in vp
+                        and session["subject_id"] in vp
+                    ):
+                        nwbf_dict = {"nwb_file_name": session["nwb_file_name"]}
+                        _record_match(nwbf_dict, vp)
 
-        # Pass 2: video basename match — handles copy_videos=True projects
-        # where DLC copies videos into a new directory, breaking path matching.
-        if not matched_nwb:
-            dlc_basenames = {Path(vp).name for vp in video_paths}
+        # ── Pass 2: NWB stem as substring ────────────────────────────────────
+        if unresolved:
+            for nwb_name in Nwbfile().fetch("nwb_file_name"):
+                if not unresolved:
+                    break
+                nwb_stem = nwb_name.removesuffix("_.nwb").removesuffix(".nwb")
+                for vp in list(unresolved):
+                    if nwb_stem in vp:
+                        _record_match({"nwb_file_name": nwb_name}, vp)
+
+        # ── Pass 3: video basename (copy_videos=True fallback) ───────────────
+        if unresolved:
+            basename_to_path = {Path(vp).name: vp for vp in unresolved}
             for row in VideoFile().fetch("nwb_file_name", "path", as_dict=True):
-                if row["path"] and Path(row["path"]).name in dlc_basenames:
-                    matched_nwb = row["nwb_file_name"]
-                    cls()._info_msg(
-                        "DLC config matched Nwbfile via video basename: "
-                        f"{matched_nwb}"
-                    )
+                if not basename_to_path:
                     break
+                if row["path"] and Path(row["path"]).name in basename_to_path:
+                    vp = basename_to_path.pop(Path(row["path"]).name)
+                    _record_match({"nwb_file_name": row["nwb_file_name"]}, vp)
 
-        if not matched_nwb:
+        # ── Resolve ambiguity ────────────────────────────────────────────────
+        # In test mode, accept the first candidate with a warning.
+        # Otherwise treat ambiguous paths the same as unresolved ones.
+        if ambiguous:
+            if cls()._test_mode:
+                for vp, cands in ambiguous.items():
+                    matched[vp] = {
+                        k: cands[0][k]
+                        for k in ("nwb_file_name", "epoch", "video_file_num")
+                        if k in cands[0]
+                    }
+                ambiguous.clear()
+            else:
+                unresolved.update(ambiguous.keys())
+
+        # ── Hard error on anything still unresolved ──────────────────────────
+        if unresolved:
+            unresolved_sorted = sorted(unresolved)
+            hint_lines = "".join(
+                f"            {vp!r}: {{\n"
+                f"                # 'nwb_file_name': '...', "
+                f"'epoch': ..., 'video_file_num': ...\n"
+                f"            }},\n"
+                for vp in unresolved_sorted
+            )
             raise ValueError(
-                "No Spyglass Session matched the DLC config video paths. "
-                "Register the session with insert_sessions() first.\n"
-                f"  config: {config_path}\n"
-                f"  video paths: {video_paths}"
+                f"{len(unresolved)}/{len(video_paths)} video path(s) could not "
+                "be unambiguously matched to a Spyglass VideoFile entry.\n\n"
+                "Re-run with explicit matches for the unresolved paths:\n\n"
+                f"    VidFileGroup.create_from_dlc_config(\n"
+                f"        config_path={str(config_path)!r},\n"
+                f"        vid_file_matches={{\n"
+                f"{hint_lines}"
+                f"        }},\n"
+                f"    )\n\n"
+                "To list VideoFile entries for a session, query:\n"
+                "    VideoFile().fetch(\n"
+                "        'nwb_file_name', 'epoch', 'video_file_num', 'path',\n"
+                "        as_dict=True,\n"
+                "    )"
             )
 
-        vid_file_keys = (VideoFile() & {"nwb_file_name": matched_nwb}).fetch(
-            "KEY", as_dict=True
-        )
-        if not vid_file_keys:
-            raise ValueError(
-                f"Session '{matched_nwb}' matched the DLC config but has no "
-                "VideoFile entries. Ensure videos are registered (via "
-                "insert_sessions()) before calling load().\n"
-                f"  config: {config_path}\n"
-                f"  video paths: {video_paths}"
-            )
+        vid_file_keys = list(matched.values())
         return cls().insert1(
             {
                 "description": description,
