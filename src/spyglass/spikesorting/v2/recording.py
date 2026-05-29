@@ -80,9 +80,11 @@ def _electrode_group_sort_key(name):
     key sorts all-numeric names numerically (and ahead of any non-numeric
     name), then non-numeric names lexically -- so purely numeric group
     names keep their natural order while arbitrary names no longer crash.
+    ``isdecimal`` (not ``isdigit``) is the gate so the predicate matches
+    exactly the strings ``int()`` accepts.
     """
     text = str(name)
-    return (0, int(text)) if text.isdigit() else (1, text)
+    return (0, int(text)) if text.isdecimal() else (1, text)
 
 
 @schema
