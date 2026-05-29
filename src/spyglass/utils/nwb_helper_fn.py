@@ -51,15 +51,14 @@ class NWBFileCache:
         self._cache[path] = (io, nwbfile, time.monotonic())
         return io, nwbfile
 
-
-def __setitem__(self, path, value):
-    """Add *(io, nwbfile)*, evicting LRU entries if memory is tight."""
-    io, nwbfile = value
-    if path in self._cache:
-        old_io, _, _ = self._cache[path]
-        old_io.close()
-    self._evict_if_needed()
-    self._cache[path] = (io, nwbfile, time.monotonic())
+    def __setitem__(self, path, value):
+        """Add *(io, nwbfile)*, evicting LRU entries if memory is tight."""
+        io, nwbfile = value
+        if path in self._cache:
+            old_io, _, _ = self._cache[path]
+            old_io.close()
+        self._evict_if_needed()
+        self._cache[path] = (io, nwbfile, time.monotonic())
 
     def __contains__(self, path):
         return path in self._cache
