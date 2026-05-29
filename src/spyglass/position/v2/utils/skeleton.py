@@ -6,6 +6,8 @@ from difflib import SequenceMatcher
 import datajoint as dj
 import networkx as nx
 
+from spyglass.utils import logger
+
 
 def normalize_label(s: str) -> str:
     """Normalize a body part label for matching/comparison.
@@ -59,23 +61,53 @@ def norm_edges(
 ) -> "list[tuple[str, str]] | None":
     """Return edges with normalized labels and sorted tuples.
 
+    Handles two non-standard forms found in DLC configs written by Position V1:
+
+    - **Nested groups**: an element is itself a list of pairs, e.g.
+      ``[['a','b'], [['c','c'],['d','d']]]``.  One level of nesting is
+      flattened and a warning is emitted.
+    - **Empty slots**: an element is ``[]`` or has fewer than 2 items.  These
+      are silently dropped.
+
     Parameters
     ----------
     edges : list[tuple[str, str]]
-        Raw edge pairs.
+        Raw edge pairs, possibly containing nested groups or empty slots.
 
     Returns
     -------
     list[tuple[str, str]] or None
         Sorted, deduplicated edge list with normalized labels, or None if
-        *edges* is empty/falsy.
+        *edges* is empty/falsy after cleaning.
     """
     if not edges:
         return None
+
+    flat: list = []
+    malformed: list = []
+    for edge in edges:
+        if not edge:  # drop empty slots []
+            continue
+        if isinstance(edge[0], (list, tuple)):  # nested group
+            malformed.append(edge)
+            flat.extend(e for e in edge if e)  # skip empty inner slots
+        else:
+            flat.append(edge)
+
+    if malformed:
+        logger.warning(
+            f"Skeleton edges contained {len(malformed)} nested group(s) that "
+            f"were flattened: {malformed}. "
+            "The source DLC config.yaml has a non-standard skeleton format."
+        )
+
+    if not flat:
+        return None
+
     return sorted(
         {
             tuple(sorted((normalize_label(u), normalize_label(v))))
-            for (u, v) in edges
+            for (u, v) in flat
         }
     )
 
@@ -196,7 +228,9 @@ def validate_skeleton_graph(
     """
     if not bodyparts:
         raise ValueError("bodyparts must not be empty")
-    bp_set = set(bodyparts)
+    # Normalize both sides so this check works whether edges carry original
+    # labels or have already been passed through norm_edges().
+    bp_set = {normalize_label(bp) for bp in bodyparts}
     for edge in edges:
         try:
             a, b = edge
@@ -204,10 +238,10 @@ def validate_skeleton_graph(
             raise ValueError(
                 f"Each edge must be a (bodypart, bodypart) pair, got: {edge!r}"
             ) from e
-        if a not in bp_set or b not in bp_set:
+        if normalize_label(a) not in bp_set or normalize_label(b) not in bp_set:
             raise ValueError(
                 f"Edge ({a!r}, {b!r}) references bodypart(s) "
-                + f"not in {sorted(bp_set)}"
+                + f"not in {sorted(bodyparts)}"
             )
 
 

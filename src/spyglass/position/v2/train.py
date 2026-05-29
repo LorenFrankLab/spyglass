@@ -322,12 +322,16 @@ class Skeleton(SpyglassMixin, dj.Lookup):
                 f"Key must include 'bodyparts' and 'edges' fields: {key}"
             )
 
-        # Validate body parts against the reference table
+        # Validate body parts against the reference table first so unknown-
+        # bodypart errors surface before structural edge errors.
         labels_norm = [normalize_label(x) for x in bodyparts]
         _ = self._validate_bodyparts(set(labels_norm))
 
-        # Validate edge structure (pure, no DB — runs after bodypart check so
-        # "unknown bodypart" errors surface before structural edge errors)
+        # Normalise edges: flatten nested groups, drop empty slots, normalize
+        # labels.  norm_edges emits a warning when the input was non-standard.
+        edges = norm_edges(edges) or []
+
+        # Validate edge structure against the (now normalized) bodypart set.
         validate_skeleton_graph(bodyparts, edges)
 
         shape_hash = shape_hash_from_edges(bodyparts, edges)

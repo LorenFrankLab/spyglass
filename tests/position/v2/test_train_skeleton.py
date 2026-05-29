@@ -155,6 +155,29 @@ class TestSkeletonEdgeCases:
                 type(e).__name__
             ) or "ValueError" in str(type(e).__name__)
 
+    def test_nested_edge_group_is_flattened(self, skeleton):
+        """Malformed DLC configs store groups of edges as a single nested list.
+
+        The real-world form is e.g.:
+            skeleton: [['a', 'b'], [['c', 'c'], ['d', 'd']]]
+        where the second element should have been three separate pairs.
+        insert1 must flatten one nesting level and warn, not raise.
+        """
+        config = {
+            "bodyparts": ["redLED_C", "greenLED", "tailBase", "tailMid"],
+            "skeleton": [
+                ["redLED_C", "greenLED"],
+                # Nested group — should be expanded to two individual edges:
+                [["tailBase", "tailBase"], ["tailMid", "tailMid"]],
+            ],
+        }
+        key = skeleton.insert1(config, **INSERT_KWARGS)
+        assert "skeleton_id" in key
+        row = (skeleton & key).fetch1()
+        # After flattening we expect 3 edges (including self-loops).
+        assert row["edges"] is not None
+        assert len(row["edges"]) == 3
+
     def test_disconnected_graph(self, skeleton):
         """Test skeleton with disconnected components."""
         config = {

@@ -122,44 +122,50 @@ class TestPoseEstimPopulation:
         skip_if_no_dlc,
         dlc_project_config,
         dlc_bootstrapped_session,
-        mock_dlc_inference_output,
-        mock_nwb_file_for_parent,
+        mini_restr,
     ):
-        """Test inserting PoseEstim entry after inference."""
+        """Test insert1 with a properly registered analysis_file_name.
+
+        Uses the minirec session NWB (registered by mini_insert, valid pynwb)
+        to create an AnalysisNwbfile entry, then calls insert1 with that key.
+        The DLC-bootstrapped VidFileGroup satisfies the FK chain.
+        """
+        from spyglass.common import AnalysisNwbfile, Nwbfile
+
         PoseEstim = position_v2.estim.PoseEstim
+        PoseEstimSelection = position_v2.estim.PoseEstimSelection
         VidFileGroup = position_v2.video.VidFileGroup
 
-        # Import model
-        model_key = model.load(
-            model_path=str(dlc_project_config),
+        model_key = model.load(model_path=str(dlc_project_config))
+
+        # Link VidFileGroup to the bootstrapped VideoFile entries.
+        vid_group_key = VidFileGroup.create_from_dlc_config(
+            str(dlc_project_config)
         )
 
-        # Create video group
-        vid_group_key = VidFileGroup().insert1(
-            {
-                "vid_group_id": "test_group_001",
-                "description": "Test video group",
-            },
+        # Use the minirec session NWB (already a valid pynwb file) as the
+        # parent for AnalysisNwbfile.create() — avoids touching the 0-byte
+        # bootstrap NWB whose checksum is already tracked by DataJoint.
+        mini_nwb = (Nwbfile & mini_restr).fetch1("nwb_file_name")
+        analysis_file_name = AnalysisNwbfile().create(mini_nwb)
+        AnalysisNwbfile().add(mini_nwb, analysis_file_name)
+
+        # Set up PoseEstimSelection so insert1 can reference it.
+        selection_key = {
+            "model_id": model_key["model_id"],
+            "vid_group_id": vid_group_key["vid_group_id"],
+            "pose_estim_params_id": "default",
+        }
+        PoseEstimSelection().insert1(
+            {**selection_key, "task_mode": "load", "output_dir": ""},
             skip_duplicates=True,
         )
 
-        # Load DLC output to NWB
-        PoseEstim.load_dlc_output(
-            dlc_output_path=str(mock_dlc_inference_output["h5"]),
-            nwb_file_name=mock_nwb_file_for_parent.name,
-        )
-
-        # Insert PoseEstim entry (only use primary keys from Model and VidFileGroup)
-        # Note: analysis_file_name is omitted since NWB file isn't registered in AnalysisNwbfile
-        estim_key = {
-            "model_id": model_key["model_id"],
-            "vid_group_id": vid_group_key["vid_group_id"],
-        }
-
+        # Insert with a proper analysis_file_name — this is the primary goal.
+        estim_key = {**selection_key, "analysis_file_name": analysis_file_name}
         PoseEstim().insert1(estim_key)
 
-        # Verify entry was created
-        assert len(PoseEstim() & estim_key) == 1
+        assert len(PoseEstim() & selection_key) == 1
 
     def test_pose_estim_fetch_dataframe(
         self,
@@ -304,12 +310,7 @@ class TestLoadFromNWB:
 
 
 class TestEndToEndInference:
-    """Test complete end-to-end inference workflow.
-
-    Note: Full E2E workflow requires a real DLC config.yaml and trained model.
-    The test below demonstrates the workflow conceptually, but actual DLC
-    inference can't be tested with mock data.
-    """
+    """Test complete end-to-end inference workflow via populate() in load mode."""
 
     def test_e2e_dlc_inference(
         self,
@@ -318,47 +319,62 @@ class TestEndToEndInference:
         skip_if_no_dlc,
         dlc_project_config,
         dlc_bootstrapped_session,
-        mock_video_file,
         mock_dlc_inference_output,
+        mini_restr,
     ):
-        """Test workflow: import model -> load existing results -> fetch data.
+        """Test workflow: import model -> populate(load mode) -> verify entry.
 
-        This test demonstrates the complete workflow using pre-computed DLC output
-        instead of running actual inference (which requires a real DLC model).
+        Uses a pre-computed DLC h5 as the output_dir source.
+        - VidFileGroup.get_nwb_file is patched to return minirec (valid pynwb)
+          so AnalysisNwbfile.create() can open it.
+        - _fetch_meters_per_pixel is patched since the test VideoFile NWB lacks
+          real CameraDevice metadata.
         """
+        from unittest.mock import patch
+
+        from spyglass.common import Nwbfile
+
         PoseEstim = position_v2.estim.PoseEstim
+        PoseEstimSelection = position_v2.estim.PoseEstimSelection
         VidFileGroup = position_v2.video.VidFileGroup
 
-        # Step 1: Import model
-        model_key = model.load(
-            model_path=str(dlc_project_config),
+        # Step 1: Import model.
+        model_key = model.load(model_path=str(dlc_project_config))
+
+        # Step 2: Link VidFileGroup to bootstrapped VideoFile entries.
+        vid_group_key = VidFileGroup.create_from_dlc_config(
+            str(dlc_project_config)
         )
 
-        # Step 2: Create video group
-        vid_group_key = VidFileGroup().insert1(
-            {
-                "vid_group_id": "test_e2e_group",
-                "description": "E2E test video group",
-            },
+        # Step 3: Register PoseEstimSelection in load mode.
+        h5_dir = str(mock_dlc_inference_output["h5"].parent)
+        selection_key = {
+            "model_id": model_key["model_id"],
+            "vid_group_id": vid_group_key["vid_group_id"],
+            "pose_estim_params_id": "default",
+        }
+        PoseEstimSelection().insert1(
+            {**selection_key, "task_mode": "load", "output_dir": h5_dir},
             skip_duplicates=True,
         )
 
-        # Step 3: Load pre-computed DLC results to NWB
-        # (In real workflow, this would come from Model.run_inference())
-        PoseEstim.load_dlc_output(
-            dlc_output_path=str(mock_dlc_inference_output["h5"]),
-            nwb_file_name=f"{mock_video_file.stem}_analysis.nwb",
-        )
+        # Step 4: populate() → make() → NWB creation + insert.
+        # Redirect the NWB parent to minirec (valid pynwb, already in Nwbfile)
+        # so AnalysisNwbfile.create() can open it.
+        mini_nwb = (Nwbfile & mini_restr).fetch1("nwb_file_name")
+        with (
+            patch.object(
+                VidFileGroup,
+                "get_nwb_file",
+                return_value={"nwb_file_name": mini_nwb},
+            ),
+            patch.object(
+                PoseEstim, "_fetch_meters_per_pixel", return_value=1.0
+            ),
+        ):
+            PoseEstim().populate(selection_key)
 
-        # Step 4: Insert PoseEstim entry (without AnalysisNwbfile registration)
-        estim_key = {
-            "model_id": model_key["model_id"],
-            "vid_group_id": vid_group_key["vid_group_id"],
-        }
-        PoseEstim().insert1(estim_key)
-
-        # Verify workflow completed
-        assert len(PoseEstim() & estim_key) == 1
+        assert len(PoseEstim() & selection_key) == 1
 
 
 class TestInsertEstimationTaskValidation:
