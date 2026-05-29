@@ -4622,34 +4622,26 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
     # against final unit_ids).
     merged_id = max(units) + 1
 
-    # MEDIUM-LOW guard: a label keyed on an absorbed contributor is
-    # stray under v1 parity (the contributor is gone post-merge), so the
-    # default insert raises before any rows are written.
-    with pytest.raises(ValueError, match=str(absorbed)):
-        CurationV2.insert_curation(
-            sorting_key=sort_pk,
-            labels={absorbed: ["noise"]},
-            merge_groups=merge_groups,
-            apply_merge=True,
-            description="absorbed-contributor label (must raise)",
-        )
-
+    # v1 parity (``v1/curation.py:391``): labels on the FRESH merged id
+    # (max+1) attach to the merged unit; labels on absorbed contributors
+    # are silently dropped (v1 writes labels by iterating final
+    # unit_ids and never visits absorbed ones -- a warning is logged
+    # for informativeness but the insert succeeds).
     pk = CurationV2.insert_curation(
         sorting_key=sort_pk,
-        # Label the FRESH merged id (max+1) -- v1 parity allows this
-        # because labels are applied against the post-merge unit set.
-        labels={merged_id: ["mua"]},
+        labels={merged_id: ["mua"], absorbed: ["noise"]},
         merge_groups=merge_groups,
         apply_merge=True,
         description="merge_groups regression",
     )
-
-    # The label on the fresh merged id survives into CurationV2.UnitLabel.
     label_pairs = {
         (int(r["unit_id"]), r["curation_label"])
         for r in (CurationV2.UnitLabel & pk).fetch(as_dict=True)
     }
+    # Label on the fresh merged id survives.
     assert (merged_id, "mua") in label_pairs, label_pairs
+    # Label on the absorbed contributor is silently dropped (v1 parity).
+    assert absorbed not in {uid for uid, _ in label_pairs}, label_pairs
 
     curated_unit_ids = set(int(u) for u in (CurationV2.Unit & pk).fetch("unit_id"))
     expected_curated = (set(units) - {head, absorbed}) | {merged_id}
@@ -4825,15 +4817,16 @@ def test_curation_n_spikes_matches_apply_merge(dj_conn):
     assert preview == {0: 100, 1: 40, 2: 7}, preview
 
 
-def test_curation_two_merge_groups_sorted_by_min_deterministic(dj_conn):
-    """``_build_curated_unit_rows`` orders multi-group merges by
-    ``min(group)`` so new-id assignment + head selection are deterministic
-    AND independent of user-given group order, AND match what
-    ``get_merge_groups`` returns from the ``order_by="unit_id"`` MergeGroup
-    fetch. With user input ``[[2, 3], [0, 1]]`` (groups NOT pre-sorted by
-    head), the smallest-min group ``[0, 1]`` is assigned the FIRST fresh
-    id (max+1), so applied (insert-time) and lazy
-    (``get_merged_sorting`` on a preview) produce identical merged ids.
+def test_curation_two_merge_groups_assign_ids_in_user_input_order(dj_conn):
+    """``_build_curated_unit_rows`` assigns fresh merged ids in
+    USER-PROVIDED group order (v1 parity, ``v1/curation.py:359``
+    iterates ``for merge_group in merge_groups:``). For user input
+    ``[[2, 3], [0, 1]]`` the FIRST group ``[2, 3]`` gets the first new
+    id ``max(source unit_ids) + 1``, and ``[0, 1]`` gets the next one --
+    matching v1. (NOTE: the lazy merge path -- ``get_merged_sorting`` on
+    an apply_merge=False preview -- iterates by kept-uid ascending and
+    can diverge here; v1 parity for the applied path is the explicit
+    goal.)
     """
     from spyglass.spikesorting.v2.curation import CurationV2
 
@@ -4854,8 +4847,8 @@ def test_curation_two_merge_groups_sorted_by_min_deterministic(dj_conn):
         _unit(3, 40, 25.0),
         _unit(4, 50, 20.0),
     ]
-    # User input puts the bigger-min group FIRST; sort-by-min must
-    # reorder before assigning new ids.
+    # User input: bigger-min group FIRST. v1 (and v2 now) iterate in
+    # this order; the FIRST group ``[2, 3]`` gets the first new id.
     merge_groups = [[2, 3], [0, 1]]
 
     rows, kept = CurationV2._build_curated_unit_rows(
@@ -4866,10 +4859,10 @@ def test_curation_two_merge_groups_sorted_by_min_deterministic(dj_conn):
         apply_merge=True,
     )
     n_spikes_by_unit = {r["unit_id"]: r["n_spikes"] for r in rows}
-    # max(0..4) + 1 = 5 -> the smallest-min group [0, 1] gets new_id 5
-    # carrying summed n_spikes 30; the next group [2, 3] gets new_id 6
-    # with n_spikes 70. Non-merged unit 4 passes through with own count.
-    assert n_spikes_by_unit == {4: 50, 5: 30, 6: 70}, n_spikes_by_unit
+    # max(0..4) + 1 = 5 -> the FIRST input group [2, 3] gets new_id 5
+    # carrying summed n_spikes 70; the second group [0, 1] gets new_id 6
+    # with n_spikes 30. Non-merged unit 4 passes through with own count.
+    assert n_spikes_by_unit == {4: 50, 5: 70, 6: 30}, n_spikes_by_unit
 
     # kept_to_contributors keys reflect v1 order: surviving source units
     # FIRST (in source order), then merged ids appended ascending.

@@ -174,7 +174,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
             For ``apply_merge=False`` (preview) every original unit --
             contributors included -- keeps its own id in
             ``CurationV2.Unit``; the proposed merge is recorded in
-            ``CurationV2.MergeGroup`` with the group's first id as the
+            ``CurationV2.MergeGroup`` with ``min(group)`` as the
             kept-unit leader. Non-listed units pass through 1:1.
         apply_merge
             If True, both the curated-units NWB and ``CurationV2.Unit``
@@ -194,11 +194,15 @@ class CurationV2(SpyglassMixin, dj.Manual):
             Provenance for any attached metrics blob. Must be one of
             'manual' (default), 'analyzer_curation', or 'figpack'.
         permissive_labels
-            If False (default), labels keyed by a unit_id not present in
-            the sorting raise ``ValueError`` -- a stray key (usually a
-            typo) would otherwise be dropped silently from the curated
-            result. Pass True for best-effort labeling that warns and
-            drops the stray keys instead.
+            Controls ONLY truly-stray label keys (ids that are neither
+            in ``Sorting.Unit`` nor in the curated unit set -- usually a
+            typo). If False (default), a truly-stray key raises
+            ``ValueError``; pass True for best-effort labeling that
+            warns and drops them instead. Labels on absorbed
+            contributors (present in the source sorting but merged away
+            for ``apply_merge=True``) are ALWAYS silently dropped with a
+            warning (v1 parity, ``v1/curation.py:391``); this flag does
+            not affect that path.
 
         Returns
         -------
@@ -318,24 +322,31 @@ class CurationV2(SpyglassMixin, dj.Manual):
             apply_merge=apply_merge,
         )
 
-        # Stray-label check against the WRITTEN unit set (v1 parity:
-        # ``v1/curation.py:391`` validates labels against the post-merge
-        # ids). For apply_merge=True the written set includes the fresh
-        # ``max(source unit_ids) + 1`` merged ids and EXCLUDES the
-        # absorbed contributors -- so labels keyed by the new merged id
-        # are accepted, and labels keyed by an absorbed contributor are
-        # rejected (the contributor no longer exists). For
-        # apply_merge=False every original unit is written, so any source
-        # id is valid. ``permissive_labels=True`` keeps the warn-and-drop
-        # back door for best-effort labeling.
+        # Validate labels against ``source_unit_ids ∪ written_unit_ids``
+        # (v1 parity, ``v1/curation.py:391``: v1 writes labels by
+        # iterating final unit_ids, silently dropping labels keyed on
+        # absorbed contributors). Two kinds of "stray":
+        #   - TRULY stray (typo): keys not in source AND not in written
+        #     -- nothing they could ever have referred to. Raise by
+        #     default (F8 typo protection); ``permissive_labels=True``
+        #     restores warn-and-drop.
+        #   - ABSORBED-source: keys that exist in source but are
+        #     contributors absorbed into a merge (so not in written).
+        #     Always warn and drop -- the label cannot attach to the
+        #     merged unit, but v1 callers passing original-id labels
+        #     should not break.
         written_unit_ids = {row["unit_id"] for row in unit_rows}
-        stray_label_ids = set(labels) - written_unit_ids
-        if stray_label_ids:
+        source_unit_ids = {int(r["unit_id"]) for r in sorting_units}
+        label_keys = set(labels)
+        truly_stray = label_keys - (source_unit_ids | written_unit_ids)
+        absorbed_label_ids = label_keys & (source_unit_ids - written_unit_ids)
+        if truly_stray:
             message = (
                 "CurationV2.insert_curation: labels reference unit_id(s) "
-                f"{sorted(stray_label_ids)} not in the curated unit set "
-                f"for sorting_id={sorting_id} (apply_merge={apply_merge}). "
-                f"Valid unit_ids: {sorted(written_unit_ids)}."
+                f"{sorted(truly_stray)} that are neither in Sorting.Unit "
+                "nor in the curated unit set for "
+                f"sorting_id={sorting_id} (apply_merge={apply_merge}). "
+                f"Curated unit_ids: {sorted(written_unit_ids)}."
             )
             if not permissive_labels:
                 raise ValueError(
@@ -343,6 +354,14 @@ class CurationV2(SpyglassMixin, dj.Manual):
                     "stray labels instead of raising."
                 )
             logger.warning(f"{message} Those labels are ignored.")
+        if absorbed_label_ids:
+            logger.warning(
+                "CurationV2.insert_curation: labels keyed on absorbed "
+                f"contributor unit(s) {sorted(absorbed_label_ids)} are "
+                "dropped -- they cannot attach to the merged unit (v1 "
+                "parity: v1 also silently ignored these). "
+                f"sorting_id={sorting_id}."
+            )
 
         # Stage the curated-units NWB (filesystem side-effect; the DB
         # row registration happens inside the transaction block below
@@ -540,15 +559,15 @@ class CurationV2(SpyglassMixin, dj.Manual):
         #   apply_merge=True multi-contributor group: kept id is a fresh
         #     ``max(source unit_ids) + 1`` (sequentially incremented per
         #     multi-merge group), matching v1's
-        #     ``np.max(units_dict.keys()) + 1`` pattern and aligning with
-        #     SI's MergeUnitsSorting default-appended ids on the lazy
-        #     path. The head (``group[0]``) is one of the contributors,
-        #     NOT the kept id.
+        #     ``np.max(units_dict.keys()) + 1`` pattern; assignment is
+        #     in USER-PROVIDED group order (v1's iteration order).
+        #     The user's order is one of the contributors, NOT the kept
+        #     id.
         #   apply_merge=False, or any single-element group: kept id is
-        #     the head (``group[0]``) -- for apply_merge=False the head
-        #     is the proposed merge leader recorded in MergeGroup until
-        #     the merge is actually applied via get_merged_sorting; for
-        #     a 1-element group the head IS the unit itself.
+        #     ``min(group)`` -- for apply_merge=False this is the
+        #     proposed merge leader recorded in MergeGroup until the
+        #     merge is applied via get_merged_sorting; for a 1-element
+        #     group ``min(group)`` IS the unit itself.
         # A unit may appear in at most one merge group: the overlap
         # check below would otherwise silently double-count spikes when
         # apply_merge=True and ambiguate the kept-unit choice.
@@ -560,18 +579,19 @@ class CurationV2(SpyglassMixin, dj.Manual):
         # (``v1/curation.py:359``) AND SI's lazy MergeUnitsSorting
         # (originals retained + merged appended), so unit-array consumers
         # comparing applied vs preview/lazy paths see the same order.
-        # Iterate merge groups in ascending-min order rather than the
-        # user-given order. This makes new-id assignment (for
-        # apply_merge=True) AND head selection (for apply_merge=False)
-        # deterministic + independent of input order, AND it matches the
-        # order get_merge_groups returns from the (``order_by="unit_id"``)
-        # MergeGroup fetch -- so applied (insert-time) and lazy
-        # (get_merged_sorting on a preview) produce identical merged ids
-        # regardless of how the user listed the groups.
+        # Iterate merge groups in USER-PROVIDED order so new-id
+        # assignment matches v1 (``v1/curation.py:359`` iterates
+        # ``for merge_group in merge_groups:`` and assigns the next
+        # ``max(unit_ids) + 1`` per group). NOTE: the lazy merge path
+        # (``get_merged_sorting`` on an apply_merge=False preview) reads
+        # MergeGroup ordered by ``unit_id`` and so iterates by
+        # kept-uid-ascending; when the user-given group order differs
+        # from kept-uid-ascending, applied (insert-time) and lazy paths
+        # produce different new ids for the same content groups. v1
+        # parity for the applied path is the explicit goal.
         normalized_groups: list[list[int]] = [
             [int(u) for u in g] for g in merge_groups if g
         ]
-        normalized_groups.sort(key=min)
         merged_ids: set[int] = set()
         merge_specs: list[tuple[int, list[int]]] = []
         next_merged_id = max(by_id) + 1
