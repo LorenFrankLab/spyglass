@@ -2,18 +2,120 @@
 
 import os
 import os.path
+import time
 from itertools import groupby
 from pathlib import Path
 from typing import List, Union
 
 import numpy as np
+import psutil
 import pynwb
 import yaml
 
 from spyglass.utils.logging import logger
 
-# dict mapping file path to an open NWBHDF5IO object in read mode and its NWBFile
-__open_nwb_files = dict()
+# Fallback thresholds used when spyglass.settings has not been loaded.
+# SpyglassConfig.load_config() overwrites these via configure_nwb_cache().
+_NWB_CACHE_MIN_FREE_GB = 2.0
+_NWB_CACHE_MIN_FREE_PCT = 0.1
+
+
+class NWBFileCache:
+    """LRU cache for open NWB files with memory-pressure eviction.
+
+    Evicts least-recently-used files when system free RAM falls below
+    either an absolute floor (_NWB_CACHE_MIN_FREE_GB) or a fractional
+    floor (_NWB_CACHE_MIN_FREE_PCT of total RAM), whichever is larger.
+    """
+
+    def __init__(self):
+        # path → (io, nwbfile, last_used_monotonic)
+        self._cache: dict = {}
+
+    # ------------------------------------------------------------------
+    # Public dict-compatible interface
+    # ------------------------------------------------------------------
+
+    def get(self, path, default=(None, None)):
+        """Return (io, nwbfile) and update last-used, or *default*."""
+        if path in self._cache:
+            io, nwbfile, _ = self._cache[path]
+            self._cache[path] = (io, nwbfile, time.monotonic())
+            return io, nwbfile
+        return default
+
+    def __getitem__(self, path):
+        if path not in self._cache:
+            raise KeyError(path)
+        io, nwbfile, _ = self._cache[path]
+        self._cache[path] = (io, nwbfile, time.monotonic())
+        return io, nwbfile
+
+    def __setitem__(self, path, value):
+        """Add *(io, nwbfile)*, evicting LRU entries if memory is tight."""
+        io, nwbfile = value
+        self._evict_if_needed()
+        self._cache[path] = (io, nwbfile, time.monotonic())
+
+    def __contains__(self, path):
+        return path in self._cache
+
+    def __len__(self):
+        return len(self._cache)
+
+    def values(self):
+        """Yield (io, nwbfile) pairs without updating last-used times."""
+        return ((io, nwbfile) for io, nwbfile, _ in self._cache.values())
+
+    def close_all(self):
+        """Close every open IO handle and clear the cache."""
+        for io, _, _ in self._cache.values():
+            io.close()
+        self._cache.clear()
+
+    # ------------------------------------------------------------------
+    # Memory helpers
+    # ------------------------------------------------------------------
+
+    def _free_ram_ok(self) -> bool:
+        vm = psutil.virtual_memory()
+        min_free_bytes = max(
+            _NWB_CACHE_MIN_FREE_GB * 1e9,
+            _NWB_CACHE_MIN_FREE_PCT * vm.total,
+        )
+        return vm.available >= min_free_bytes
+
+    def _evict_lru(self):
+        if not self._cache:
+            return
+        lru_path = min(self._cache, key=lambda p: self._cache[p][2])
+        io, _, _ = self._cache.pop(lru_path)
+        io.close()
+        logger.info(f"Closed LRU NWB file to free memory: {lru_path}")
+
+    def _evict_if_needed(self):
+        while self._cache and not self._free_ram_ok():
+            self._evict_lru()
+
+
+def configure_nwb_cache(min_free_gb: float = None, min_free_pct: float = None):
+    """Set memory thresholds for NWB file cache eviction.
+
+    Parameters
+    ----------
+    min_free_gb : float, optional
+        Minimum free system RAM in GB before LRU eviction triggers.
+    min_free_pct : float, optional
+        Minimum free system RAM as a fraction of total (0–1).
+    """
+    global _NWB_CACHE_MIN_FREE_GB, _NWB_CACHE_MIN_FREE_PCT
+    if min_free_gb is not None:
+        _NWB_CACHE_MIN_FREE_GB = float(min_free_gb)
+    if min_free_pct is not None:
+        _NWB_CACHE_MIN_FREE_PCT = float(min_free_pct)
+
+
+__open_nwb_files = NWBFileCache()
 
 # dict mapping NWB file path to config after it is loaded once
 __configs = dict()
@@ -196,9 +298,7 @@ def get_config(nwb_file_path: str, calling_table: str = None) -> dict:
 
 def close_nwb_files():
     """Close all open NWB files."""
-    for io, _ in __open_nwb_files.values():
-        io.close()
-    __open_nwb_files.clear()
+    __open_nwb_files.close_all()
 
 
 def get_data_interface(nwbfile, data_interface_name, data_interface_class=None):

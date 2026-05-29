@@ -58,6 +58,10 @@
       "project": "/your/base/path/moseq/projects",
       "video": "/your/base/path/moseq/video"
     },
-    "kachery_zone": "franklab.default"
+    "kachery_zone": "franklab.default",
+    "nwb_cache": {
+      "min_free_gb": 2.0,
+      "min_free_pct": 0.1
+    }
   }
 }

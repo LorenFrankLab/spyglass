@@ -100,6 +100,8 @@ class SpyglassConfig:
         self._test_mode = kwargs.get("test_mode", False)
         self._dlc_base = None
         self.load_failed = False
+        self._nwb_min_free_gb = 2.0
+        self._nwb_min_free_pct = 0.1
 
         # Load directory schema from JSON file (single source of truth)
         # {PREFIX}_{KEY}_DIR, default dir relative to base_dir
@@ -170,6 +172,16 @@ class SpyglassConfig:
         )
         self._test_mode = str_to_bool(self._test_mode)
         self._debug_mode = str_to_bool(self._debug_mode)
+
+        dj_nwb_cache = dj_custom.get("nwb_cache", {})
+        self._nwb_min_free_gb = float(dj_nwb_cache.get("min_free_gb", 2.0))
+        self._nwb_min_free_pct = float(dj_nwb_cache.get("min_free_pct", 0.1))
+        from spyglass.utils.nwb_helper_fn import configure_nwb_cache
+
+        configure_nwb_cache(
+            min_free_gb=self._nwb_min_free_gb,
+            min_free_pct=self._nwb_min_free_pct,
+        )
 
         resolved_base = (
             base_dir
@@ -540,6 +552,10 @@ class SpyglassConfig:
                 "kachery_zone": os.environ.get(
                     "KACHERY_ZONE", "franklab.default"
                 ),
+                "nwb_cache": {
+                    "min_free_gb": self._nwb_min_free_gb,
+                    "min_free_pct": self._nwb_min_free_pct,
+                },
             }
         }
 
@@ -634,6 +650,16 @@ class SpyglassConfig:
         """Moseq video directory as a string."""
         return self.config.get(self.dir_to_var("video", "moseq"))
 
+    @property
+    def nwb_min_free_gb(self) -> float:
+        """Minimum free system RAM in GB before LRU NWB file eviction."""
+        return self._nwb_min_free_gb
+
+    @property
+    def nwb_min_free_pct(self) -> float:
+        """Minimum free system RAM as a fraction of total before eviction."""
+        return self._nwb_min_free_pct
+
 
 sg_config = SpyglassConfig()
 sg_config.load_config(on_startup=True)
@@ -657,6 +683,8 @@ if sg_config.load_failed:  # Failed to load
     dlc_output_dir = None
     moseq_project_dir = None
     moseq_video_dir = None
+    nwb_min_free_gb = 2.0
+    nwb_min_free_pct = 0.1
 else:
     config = sg_config.config
     base_dir = sg_config.base_dir
@@ -676,3 +704,5 @@ else:
     dlc_output_dir = sg_config.dlc_output_dir
     moseq_project_dir = sg_config.moseq_project_dir
     moseq_video_dir = sg_config.moseq_video_dir
+    nwb_min_free_gb = sg_config.nwb_min_free_gb
+    nwb_min_free_pct = sg_config.nwb_min_free_pct
