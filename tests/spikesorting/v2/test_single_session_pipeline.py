@@ -2077,6 +2077,54 @@ def test_curation_v2_auto_registers_in_merge_table(populated_sorting):
     )
 
 
+def test_electrode_group_sort_key_tolerates_non_numeric(dj_conn):
+    """``set_group_by_shank``'s group ordering must not assume numeric
+    ``electrode_group_name`` values.
+
+    A plain ``int(name)`` raised ``ValueError`` on free-form NWB group
+    names (e.g. ``"probeA"``). The sort key now sorts numeric names
+    numerically (and ahead of non-numeric) and non-numeric names
+    lexically, so valid datasets no longer crash while purely numeric
+    names keep their natural order. (``dj_conn`` only because importing
+    the module declares its schema.)
+    """
+    from spyglass.spikesorting.v2.recording import _electrode_group_sort_key
+
+    # Numeric names keep NUMERIC (not lexical) order: "10" after "2".
+    assert sorted(["10", "2", "1"], key=_electrode_group_sort_key) == [
+        "1",
+        "2",
+        "10",
+    ]
+    # Non-numeric names do not raise and sort after the numeric ones.
+    assert sorted(
+        ["probeB", "2", "probeA", "1"], key=_electrode_group_sort_key
+    ) == ["1", "2", "probeA", "probeB"]
+
+
+def test_unit_brain_region_df_empty_keeps_full_schema(dj_conn):
+    """An empty unit-region lookup returns the full column schema.
+
+    ``pd.DataFrame([])`` would drop every column, leaving callers a frame
+    with only ``region_resolution``; the builder now pins ``columns=`` so
+    empty and non-empty results share a shape.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.utils import unit_brain_region_df
+
+    empty_units = CurationV2.Unit & "unit_id = -1"  # no unit has id -1
+    df = unit_brain_region_df(empty_units, "single_session")
+    assert len(df) == 0
+    assert {
+        "unit_id",
+        "electrode_id",
+        "region_name",
+        "subregion_name",
+        "subsubregion_name",
+        "region_resolution",
+    } <= set(df.columns)
+
+
 @pytest.mark.slow
 def test_spike_sorting_output_get_spike_times_v2_dispatch(populated_sorting):
     """``SpikeSortingOutput.get_spike_times`` dispatches to a v2 source.
@@ -7935,28 +7983,44 @@ def test_artifact_delete_aborts_on_unexpected_resolve_error(
 
 
 @pytest.mark.slow
-def test_curation_labels_warn_on_stray_unit_ids(
+def test_curation_labels_raise_on_stray_unit_ids(
     populated_sorting, monkeypatch
 ):
-    """``insert_curation`` warns when labels reference a unit_id not in
-    the sorting (the stray label would otherwise vanish silently).
+    """``insert_curation`` raises when labels reference a unit_id not in
+    the sorting (the stray label would otherwise vanish silently);
+    ``permissive_labels=True`` restores the warn-and-drop behavior.
     """
     from spyglass.spikesorting.v2 import curation as curation_mod
     from spyglass.spikesorting.v2.curation import CurationV2
 
     _clear_curations(populated_sorting)
+
+    # Default: a stray unit_id is a hard error (no DB rows written).
+    with pytest.raises(ValueError, match="999999"):
+        CurationV2.insert_curation(
+            sorting_key=populated_sorting,
+            labels={999999: ["noise"]},  # not a real unit_id
+            description="stray-label test",
+        )
+
+    # Opt-in permissive: warn and drop the stray label instead.
     captured = []
     monkeypatch.setattr(
         curation_mod.logger,
         "warning",
         lambda msg, *a, **k: captured.append(msg),
     )
-    CurationV2.insert_curation(
+    pk = CurationV2.insert_curation(
         sorting_key=populated_sorting,
-        labels={999999: ["noise"]},  # not a real unit_id
-        description="stray-label test",
+        labels={999999: ["noise"]},
+        description="stray-label permissive test",
+        permissive_labels=True,
     )
     assert any("999999" in m for m in captured), captured
+    # The stray label was dropped, not persisted.
+    assert 999999 not in {
+        int(u) for u in (CurationV2.UnitLabel & pk).fetch("unit_id")
+    }
 
 
 @pytest.mark.slow

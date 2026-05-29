@@ -72,6 +72,19 @@ class DeletionPreview(NamedTuple):
     cascade_summary: tuple
 
 
+def _electrode_group_sort_key(name):
+    """Sort key for ``electrode_group_name`` tolerant of non-numeric names.
+
+    NWB ``electrode_group_name`` is a free-form string. A plain
+    ``int(name)`` raises ``ValueError`` on names like ``"probeA"``; this
+    key sorts all-numeric names numerically (and ahead of any non-numeric
+    name), then non-numeric names lexically -- so purely numeric group
+    names keep their natural order while arbitrary names no longer crash.
+    """
+    text = str(name)
+    return (0, int(text)) if text.isdigit() else (1, text)
+
+
 @schema
 class SortGroupV2(SpyglassMixin, dj.Manual):
     """Electrode groupings used for spike sorting.
@@ -248,7 +261,7 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         # Enumerate (electrode_group, shank) groupings.
         e_groups = sorted(
             np.unique(electrodes["electrode_group_name"]).tolist(),
-            key=lambda x: int(x),
+            key=_electrode_group_sort_key,
         )
         proposed: list[tuple[str, np.ndarray]] = []
         skipped: list[dict] = []

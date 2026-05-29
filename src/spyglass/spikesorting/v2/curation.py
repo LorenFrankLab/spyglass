@@ -106,16 +106,15 @@ class CurationV2(SpyglassMixin, dj.Manual):
         kept-set. v1 stored merge groups as a single list-of-lists
         column on the units NWB; v2 stores them here as queryable
         part rows so bulk-audit queries ("show me every (kept_unit,
-        contributor) pair across sortings"), provenance retrieval
-        ("for this paper, list every merge decision"), and
-        DataJoint-level FK enforcement that contributor unit_ids
-        reference real ``Sorting.Unit`` rows are all easy.
+        contributor) pair across sortings") and provenance retrieval
+        ("for this paper, list every merge decision") are easy.
 
-        Schema choice (part table over the v1 NWB-column pattern)
-        is documented in ``overview.md`` Resolved Design Decision
-        #7 as the **one authorized exception** to the zero-
-        migration policy. Later phases must adhere strictly to
-        decision #5.
+        ``contributor_unit_id`` is a plain int, NOT a DataJoint FK:
+        the schema cannot express a nullable self-FK across the
+        renamed unit columns cleanly. ``insert_curation`` validates
+        every contributor id against the sorting's units, but a
+        direct part-table insert is NOT FK-checked -- treat this as
+        helper-maintained provenance, not a schema-enforced relation.
 
         One row per ``(kept_unit_id, contributor_unit_id)``. The
         kept unit appears as its own contributor for unmerged
@@ -141,6 +140,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         description: str = "",
         metrics_source: str | MetricsSource = "manual",
         reuse_existing: bool = False,
+        permissive_labels: bool = False,
     ) -> dict:
         """Insert master + Unit + UnitLabel rows; stage curated-units NWB.
 
@@ -182,6 +182,12 @@ class CurationV2(SpyglassMixin, dj.Manual):
         metrics_source
             Provenance for any attached metrics blob. Must be one of
             'manual' (default), 'analyzer_curation', or 'figpack'.
+        permissive_labels
+            If False (default), labels keyed by a unit_id not present in
+            the sorting raise ``ValueError`` -- a stray key (usually a
+            typo) would otherwise be dropped silently from the curated
+            result. Pass True for best-effort labeling that warns and
+            drops the stray keys instead.
 
         Returns
         -------
@@ -214,19 +220,27 @@ class CurationV2(SpyglassMixin, dj.Manual):
 
         cls._validate_labels(labels)
 
-        # Warn on labels keyed by unit_ids that are not in the sorting:
+        # Labels keyed by unit_ids not in the sorting are usually a typo.
         # ``_stage_curated_units_nwb`` only writes labels for kept units
-        # (``labels.get(kept_uid, [])``), so a stray key would vanish
-        # silently rather than surfacing the caller's mistake.
+        # (``labels.get(kept_uid, [])``), so a stray key would silently
+        # vanish from the curated result. Raise by default; callers who
+        # genuinely want best-effort labeling pass permissive_labels=True
+        # to restore the warn-and-drop behavior.
         valid_unit_ids = {int(r["unit_id"]) for r in sorting_units}
         stray_label_ids = set(labels) - valid_unit_ids
         if stray_label_ids:
-            logger.warning(
+            message = (
                 "CurationV2.insert_curation: labels reference unit_id(s) "
                 f"{sorted(stray_label_ids)} not in Sorting.Unit for "
-                f"sorting_id={sorting_id}; those labels are ignored. "
-                f"Valid unit_ids: {sorted(valid_unit_ids)}."
+                f"sorting_id={sorting_id}. Valid unit_ids: "
+                f"{sorted(valid_unit_ids)}."
             )
+            if not permissive_labels:
+                raise ValueError(
+                    f"{message} Pass permissive_labels=True to ignore "
+                    "stray labels instead of raising."
+                )
+            logger.warning(f"{message} Those labels are ignored.")
 
         if parent_curation_id != -1:
             if not (
@@ -371,11 +385,10 @@ class CurationV2(SpyglassMixin, dj.Manual):
             )
 
             # Persist per-unit merge provenance for queryable
-            # bulk-audit and FK enforcement. ``kept_unit_to_contributors``
-            # already includes 1-unit entries for unmerged units
-            # (built in ``_build_curated_unit_rows``), so every
-            # ``CurationV2.Unit`` row has at least one matching
-            # ``MergeGroup`` row.
+            # bulk-audit. ``kept_unit_to_contributors`` already includes
+            # 1-unit entries for unmerged units (built in
+            # ``_build_curated_unit_rows``), so every ``CurationV2.Unit``
+            # row has at least one matching ``MergeGroup`` row.
             merge_group_rows = [
                 {
                     "sorting_id": sorting_id,
@@ -919,9 +932,9 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 raise ConcatBrainRegionAmbiguousError(
                     f"CurationV2.get_unit_brain_regions: sorting_id "
                     f"{key['sorting_id']} is concat-backed; pass "
-                    "allow_anchor_member=True for anchor-only regions or "
-                    "use TrackedUnit.get_unit_brain_regions for per-"
-                    "session regions."
+                    "allow_anchor_member=True for anchor-only regions. "
+                    "Per-session regions require cross-session unit "
+                    "matching, which is not available in this build."
                 )
             resolution = "anchor_member"
         else:

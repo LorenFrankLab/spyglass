@@ -106,15 +106,20 @@ def unit_brain_region_df(unit_relation, resolution: str):
     from spyglass.common.common_ephys import Electrode as _Electrode
     from spyglass.common.common_region import BrainRegion
 
-    joined = (unit_relation * _Electrode * BrainRegion).fetch(
+    columns = [
         "unit_id",
         "electrode_id",
         "region_name",
         "subregion_name",
         "subsubregion_name",
-        as_dict=True,
+    ]
+    joined = (unit_relation * _Electrode * BrainRegion).fetch(
+        *columns, as_dict=True
     )
-    df = pd.DataFrame(joined)
+    # Pass ``columns=`` so an empty result still carries the full schema;
+    # ``pd.DataFrame([])`` would otherwise drop every column and leave
+    # callers a frame with only ``region_resolution``.
+    df = pd.DataFrame(joined, columns=columns)
     df["region_resolution"] = resolution
     return df
 
