@@ -4623,18 +4623,22 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
         description="merge_groups regression",
     )
 
-    # CurationV2.Unit has one row fewer than Sorting.Unit (the
-    # absorbed unit is no longer a distinct row).
+    # v1 parity (``v1/curation.py:361``): the merged unit gets a fresh
+    # id ``max(source unit_ids) + 1``; BOTH the head AND absorbed are
+    # replaced by it (one row fewer than Sorting.Unit; the merged id
+    # appears, the two contributors are gone).
+    merged_id = max(units) + 1
     curated_unit_ids = set(int(u) for u in (CurationV2.Unit & pk).fetch("unit_id"))
-    assert curated_unit_ids == set(units) - {absorbed}, (
+    expected_curated = (set(units) - {head, absorbed}) | {merged_id}
+    assert curated_unit_ids == expected_curated, (
         f"Curated unit ids = {sorted(curated_unit_ids)}; "
-        f"expected {sorted(set(units) - {absorbed})} (head kept, "
-        "absorbed removed)."
+        f"expected {sorted(expected_curated)} (merged_id={merged_id} "
+        "replaces both head and absorbed)."
     )
 
-    # The merged unit's spike train in the curated NWB is the
-    # sorted union of the contributors' spike trains. Use
-    # ``apply_merge=True`` writes concatenated spike trains.
+    # The merged unit's spike train in the curated NWB is the sorted
+    # union of the contributors' spike trains (apply_merge=True writes
+    # concatenated trains under the new merged id).
     src_sorting = Sorting().get_sorting(sort_pk)
     src_head = _np.asarray(
         src_sorting.get_unit_spike_train(unit_id=head, return_times=True)
@@ -4648,23 +4652,24 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
 
     curated_sorting = CurationV2().get_sorting(pk)
     merged_times = _np.asarray(
-        curated_sorting.get_unit_spike_train(unit_id=head, return_times=True)
+        curated_sorting.get_unit_spike_train(
+            unit_id=merged_id, return_times=True
+        )
     )
     assert len(merged_times) == len(expected_merged), (
-        f"Merged unit has {len(merged_times)} spikes; expected "
-        f"{len(expected_merged)} (head + absorbed concatenated)."
+        f"Merged unit ({merged_id}) has {len(merged_times)} spikes; "
+        f"expected {len(expected_merged)} (head + absorbed concatenated)."
     )
     _np.testing.assert_array_equal(merged_times, expected_merged)
 
-    # And the n_spikes column on CurationV2.Unit reflects the merge.
-    # (apply_merge=True end-to-end half of the n_spikes invariant: DB
-    # n_spikes == curated NWB spike-train length for the merged head.)
-    head_row = (CurationV2.Unit & pk & {"unit_id": head}).fetch1()
-    assert head_row["n_spikes"] == len(expected_merged), (
-        f"CurationV2.Unit.n_spikes for merged head = "
-        f"{head_row['n_spikes']}; expected {len(expected_merged)}."
+    # n_spikes on CurationV2.Unit for the merged id matches its train
+    # (end-to-end half of the n_spikes invariant under v1 parity).
+    merged_row = (CurationV2.Unit & pk & {"unit_id": merged_id}).fetch1()
+    assert merged_row["n_spikes"] == len(expected_merged), (
+        f"CurationV2.Unit.n_spikes for merged_id={merged_id} = "
+        f"{merged_row['n_spikes']}; expected {len(expected_merged)}."
     )
-    assert head_row["n_spikes"] == len(merged_times)
+    assert merged_row["n_spikes"] == len(merged_times)
 
     # --- v1-parity PREVIEW half (apply_merge=False), reusing the sort.
     # A preview curation keeps EVERY original unit (the contributor is
@@ -4695,9 +4700,25 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
     # The preview sorting still has the contributor as its own unit.
     preview_sorting = CurationV2().get_sorting(preview_pk)
     assert absorbed in set(int(u) for u in preview_sorting.get_unit_ids())
+    # Symmetric MergeGroup provenance: every CurationV2.Unit row has at
+    # least one MergeGroup row keyed by its OWN unit_id, so
+    # ``Unit * MergeGroup`` on ``unit_id`` does not silently drop the
+    # absorbed contributors. The proposed merge stays: (head,head),
+    # (head,absorbed); the absorbed contributor also carries
+    # (absorbed,absorbed) as a 1-element self-entry.
+    mg_unit_ids = {
+        int(r["unit_id"])
+        for r in (CurationV2.MergeGroup & preview_pk).fetch(as_dict=True)
+    }
+    assert preview_unit_ids <= mg_unit_ids, (
+        "Every CurationV2.Unit row should have >=1 MergeGroup row keyed "
+        f"by its own unit_id; missing {sorted(preview_unit_ids - mg_unit_ids)}."
+    )
     # get_merged_sorting applies the proposed merge lazily: two units
-    # collapse to one and the spike count is preserved (concatenation,
-    # delta_time_ms=0 -- no silent coincident-spike dedup).
+    # collapse to one and the spike count is preserved (concatenation;
+    # delta_time_ms=None disables SI's duplicate check entirely, so even
+    # exact same-sample contributor spikes are kept -- delta_time_ms=0
+    # would still drop them).
     merged_lazy = CurationV2().get_merged_sorting(preview_pk)
     assert merged_lazy.get_num_units() == len(units) - 1
     preview_total = sum(
@@ -4715,15 +4736,15 @@ def test_curation_n_spikes_matches_apply_merge(dj_conn):
     """``_build_curated_unit_rows`` writes the v1-parity unit set +
     ``n_spikes`` for each ``apply_merge`` mode.
 
-    ``apply_merge=True`` collapses a merge group to its head, whose
-    ``n_spikes`` is the summed contributor train (matching the
-    concatenated staged train); the absorbed contributor is dropped.
-    ``apply_merge=False`` is a v1-style preview (``v1/curation.py:359``):
-    EVERY original unit passes through 1:1 with its own ``n_spikes`` and
-    the proposed merge lives in MergeGroup for lazy application, so the
-    contributor is preserved -- not silently dropped. Synthetic
-    ``Sorting.Unit`` rows isolate the row logic (the ``apply_merge=True``
-    end-to-end half is covered by
+    ``apply_merge=True`` collapses a merge group to a fresh
+    ``max(source unit_ids) + 1`` id (v1 parity, ``v1/curation.py:361``)
+    carrying the summed contributor train; BOTH the head and the
+    absorbed contributors are dropped. ``apply_merge=False`` is a
+    v1-style preview (``v1/curation.py:359``): every original unit passes
+    through 1:1 with its own ``n_spikes`` and the proposed merge lives in
+    MergeGroup for lazy application, so the contributor is preserved --
+    not silently dropped. Synthetic ``Sorting.Unit`` rows isolate the row
+    logic (the ``apply_merge=True`` end-to-end half is covered by
     ``test_curation_v2_insert_with_merge_groups_apply_merges``).
     """
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -4755,13 +4776,67 @@ def test_curation_n_spikes_matches_apply_merge(dj_conn):
     merged = n_spikes_by_unit(apply_merge=True)
     preview = n_spikes_by_unit(apply_merge=False)
 
-    # apply_merge=True: head absorbs the contributor (summed train); the
-    # absorbed unit (1) is no longer a row.
-    assert merged == {0: 140, 2: 7}, merged
+    # apply_merge=True (v1 parity, ``v1/curation.py:361``): the merge
+    # group [0, 1] collapses to a fresh id ``max(0,1,2) + 1 = 3``
+    # carrying the summed train (140); BOTH the head (0) AND the absorbed
+    # (1) are gone. Unit 2 (non-merged) passes through.
+    assert merged == {3: 140, 2: 7}, merged
     # apply_merge=False (v1 preview parity): EVERY original unit is
-    # present with its OWN count -- the contributor (1) is preserved, not
-    # dropped.
+    # present with its OWN count -- both the head (0) and the contributor
+    # (1) are preserved as standalone units; the proposed merge lives in
+    # MergeGroup.
     assert preview == {0: 100, 1: 40, 2: 7}, preview
+
+
+def test_si_merge_units_drops_same_sample_unless_delta_is_none(dj_conn):
+    """SI 0.104's ``MergeUnitsSorting`` collapses exact same-sample
+    spikes from different merged units UNLESS ``delta_time_ms=None``.
+
+    ``delta_time_ms=0`` is NOT a "no duplicate check" knob -- SI still
+    drops contributors that fired on the same sample frame. Only
+    ``delta_time_ms=None`` disables the check entirely, which is the v1
+    ``np.concatenate`` semantic ``get_merged_sorting`` needs. Probe-test
+    that locks the SI contract our code depends on; if SI changes its
+    handling of ``delta_time_ms=0`` (or ``None``), this fails loudly.
+    """
+    import numpy as _np
+    import spikeinterface as si
+    import spikeinterface.curation as sc
+
+    ns = si.NumpySorting.from_unit_dict(
+        # Two contributors share sample 10 -- the exact-coincident case.
+        {0: _np.array([10]), 1: _np.array([10])},
+        sampling_frequency=30000.0,
+    )
+    new_id_none = list(
+        sc.MergeUnitsSorting(
+            ns, units_to_merge=[[0, 1]], delta_time_ms=None
+        ).get_unit_ids()
+    )[0]
+    n_none = len(
+        sc.MergeUnitsSorting(
+            ns, units_to_merge=[[0, 1]], delta_time_ms=None
+        ).get_unit_spike_train(unit_id=new_id_none)
+    )
+    new_id_zero = list(
+        sc.MergeUnitsSorting(
+            ns, units_to_merge=[[0, 1]], delta_time_ms=0
+        ).get_unit_ids()
+    )[0]
+    n_zero = len(
+        sc.MergeUnitsSorting(
+            ns, units_to_merge=[[0, 1]], delta_time_ms=0
+        ).get_unit_spike_train(unit_id=new_id_zero)
+    )
+    assert n_none == 2, (
+        "delta_time_ms=None must preserve both same-sample contributor "
+        f"spikes (got {n_none}); SI behavior has changed."
+    )
+    assert n_zero == 1, (
+        "delta_time_ms=0 should still drop the same-sample duplicate "
+        f"(got {n_zero}); SI behavior has changed, re-audit "
+        "get_merged_sorting."
+    )
 
 
 # ---------- _detect_artifacts cross-channel proportion boundary ----------

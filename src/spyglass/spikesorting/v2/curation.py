@@ -166,9 +166,16 @@ class CurationV2(SpyglassMixin, dj.Manual):
         merge_groups
             Optional list of merge groups, each a list of ``unit_id``
             ints. The merged unit inherits the peak channel + amplitude
-            of the highest-amplitude contributor; its ``unit_id`` is
-            the first id in the group. Non-listed units pass through
-            1:1.
+            of the highest-amplitude contributor. For ``apply_merge=True``
+            the merged unit gets a fresh id, ``max(source unit_ids) + 1``
+            (sequentially incremented per multi-merge group), matching
+            v1 (``v1/curation.py:361``) and aligning with SI's
+            ``MergeUnitsSorting`` default-appended ids on the lazy path.
+            For ``apply_merge=False`` (preview) every original unit --
+            contributors included -- keeps its own id in
+            ``CurationV2.Unit``; the proposed merge is recorded in
+            ``CurationV2.MergeGroup`` with the group's first id as the
+            kept-unit leader. Non-listed units pass through 1:1.
         apply_merge
             If True, both the curated-units NWB and ``CurationV2.Unit``
             store the MERGED unit set: each merged unit's spike train is
@@ -394,10 +401,14 @@ class CurationV2(SpyglassMixin, dj.Manual):
             )
 
             # Persist per-unit merge provenance for queryable
-            # bulk-audit. ``kept_unit_to_contributors`` already includes
-            # 1-unit entries for unmerged units (built in
-            # ``_build_curated_unit_rows``), so every ``CurationV2.Unit``
-            # row has at least one matching ``MergeGroup`` row.
+            # bulk-audit. ``kept_unit_to_contributors`` carries 1-element
+            # self-entries for every ``CurationV2.Unit`` row that is not
+            # itself a merge target (unmerged units always, and -- for
+            # apply_merge=False preview -- the absorbed contributors that
+            # remain in Unit), so every Unit row has at least one
+            # MergeGroup row keyed by its own ``unit_id``. Joining
+            # ``Unit * MergeGroup`` on unit_id therefore preserves every
+            # unit in both modes.
             merge_group_rows = [
                 {
                     "sorting_id": sorting_id,
@@ -491,8 +502,13 @@ class CurationV2(SpyglassMixin, dj.Manual):
 
         Returns ``(unit_rows, kept_unit_to_contributors)``. Each kept
         unit's Electrode FK + peak amplitude come from the contributor
-        with the largest ``peak_amplitude_uv``; merged-unit ``unit_id``
-        is the first id in the group, matching the v1 convention.
+        with the largest ``peak_amplitude_uv``. The merged-unit
+        ``unit_id`` depends on ``apply_merge``: a fresh
+        ``max(source unit_ids) + 1`` for ``apply_merge=True`` (v1 parity,
+        ``v1/curation.py:361``); the group's first id for
+        ``apply_merge=False`` (the proposed merge leader, kept as a
+        regular Unit row alongside the absorbed contributors so the
+        preview retains every original unit).
 
         ``sorting_units`` is the pre-fetched ``Sorting.Unit`` rows for
         ``sorting_id``; the caller fetches once and threads through to
@@ -511,12 +527,25 @@ class CurationV2(SpyglassMixin, dj.Manual):
             return [], {}
         by_id = {int(row["unit_id"]): row for row in sorting_units}
 
-        # Build mapping from contributor -> kept unit (head of group).
-        # A unit may only appear in ONE merge group: overlap across
-        # groups would silently double-count spikes when apply_merge
-        # is True and ambiguates the "kept unit" choice.
+        # Build mapping ``kept_unit_id -> contributors``:
+        #   apply_merge=True multi-contributor group: kept id is a fresh
+        #     ``max(source unit_ids) + 1`` (sequentially incremented per
+        #     multi-merge group), matching v1's
+        #     ``np.max(units_dict.keys()) + 1`` pattern and aligning with
+        #     SI's MergeUnitsSorting default-appended ids on the lazy
+        #     path. The head (``group[0]``) is one of the contributors,
+        #     NOT the kept id.
+        #   apply_merge=False, or any single-element group: kept id is
+        #     the head (``group[0]``) -- for apply_merge=False the head
+        #     is the proposed merge leader recorded in MergeGroup until
+        #     the merge is actually applied via get_merged_sorting; for
+        #     a 1-element group the head IS the unit itself.
+        # A unit may appear in at most one merge group: the overlap
+        # check below would otherwise silently double-count spikes when
+        # apply_merge=True and ambiguate the kept-unit choice.
         merged_ids: set[int] = set()
         kept_to_contributors: dict[int, list[int]] = {}
+        next_merged_id = max(by_id) + 1
         for group in merge_groups:
             if not group:
                 continue
@@ -535,20 +564,30 @@ class CurationV2(SpyglassMixin, dj.Manual):
                     f"on unit_ids {sorted(overlap)}. A unit can belong "
                     "to at most one merge group."
                 )
-            head = int_group[0]
-            if head in kept_to_contributors:
-                raise ValueError(
-                    f"CurationV2.insert_curation: merge_groups reuses "
-                    f"unit_id={head} as the head of two groups. Pick "
-                    "distinct heads."
-                )
-            kept_to_contributors[head] = int_group
+            if apply_merge and len(int_group) > 1:
+                key = next_merged_id
+                next_merged_id += 1
+            else:
+                key = int_group[0]
+            kept_to_contributors[key] = int_group
             merged_ids.update(int_group)
 
         # Non-merged units pass through 1:1.
         for uid in by_id:
             if uid not in merged_ids:
                 kept_to_contributors[uid] = [uid]
+
+        # Symmetric provenance for apply_merge=False: absorbed
+        # contributors still get a CurationV2.Unit row (preview parity),
+        # so give each a 1-element self-entry so every Unit row has at
+        # least one MergeGroup row with its own ``unit_id`` -- a
+        # ``Unit * MergeGroup`` join on unit_id no longer drops them.
+        # get_merged_sorting filters ``len(contribs) > 1`` so the
+        # self-entries are auto-skipped when reconstructing merges.
+        if not apply_merge:
+            for uid in by_id:
+                if uid not in kept_to_contributors:
+                    kept_to_contributors[uid] = [uid]
 
         # The written unit set depends on apply_merge:
         #   apply_merge=True  -> kept units only; a merged head absorbs
@@ -895,15 +934,18 @@ class CurationV2(SpyglassMixin, dj.Manual):
     def get_merge_groups(cls, key) -> dict[int, list[int]]:
         """Return ``{kept_unit_id: [contributor_unit_id, ...]}`` for a curation.
 
-        Reads the ``CurationV2.MergeGroup`` part rows and groups
-        them by kept unit. Every ``CurationV2.Unit`` row has at
-        least one ``MergeGroup`` entry -- unmerged units carry
-        themselves as their sole contributor. This makes "did unit
-        X involve a merge?" a simple ``len(merge_groups[X]) > 1``
-        check.
+        Reads the ``CurationV2.MergeGroup`` part rows and groups them by
+        kept unit. Every ``CurationV2.Unit`` row has at least one
+        ``MergeGroup`` entry keyed by its own ``unit_id`` -- unmerged
+        units and (in apply_merge=False preview) absorbed contributors
+        carry a 1-element self-entry. ``len(merge_groups[X]) > 1`` means
+        unit X is the kept-unit leader of a (proposed or applied) merge;
+        to find merges X is a contributor TO (preview mode), query
+        ``CurationV2.MergeGroup`` directly by ``contributor_unit_id``.
 
-        Used by ``get_merged_sorting`` and exposed publicly so
-        users can do bulk-audit queries directly.
+        Used by ``get_merged_sorting`` (which filters
+        ``len(contribs) > 1``, so self-entries are auto-skipped) and
+        exposed publicly so users can do bulk-audit queries directly.
         """
         rows = (cls.MergeGroup & key).fetch(
             "unit_id", "contributor_unit_id", as_dict=True
@@ -951,13 +993,15 @@ class CurationV2(SpyglassMixin, dj.Manual):
             return base
         # SI 0.104: MergeUnitsSorting(sorting, units_to_merge, ...) --
         # ``sorting`` is positional (no ``parent_sorting`` kwarg).
-        # ``delta_time_ms=0`` disables SI's near-coincident-spike
-        # deduplication so the merged train is the full concatenation of
-        # its contributors -- matching v1 (``np.concatenate``) and v2's
-        # own apply_merge=True staging. The default 0.4 ms would silently
-        # drop spikes that fire within 0.4 ms across the merged units.
+        # ``delta_time_ms=None`` is the ONLY value that disables SI's
+        # duplicate-spike check entirely (``delta_time_ms=0`` still drops
+        # exact same-sample duplicates -- see
+        # ``spikeinterface/curation/mergeunitssorting.py`` ``if
+        # delta_time_ms is None: do_not_check`` semantics). The merged
+        # train is the full concatenation of its contributors, matching
+        # v1's ``np.concatenate`` and v2's own apply_merge=True staging.
         return sc.MergeUnitsSorting(
-            base, units_to_merge=units_to_merge, delta_time_ms=0
+            base, units_to_merge=units_to_merge, delta_time_ms=None
         )
 
     def get_unit_brain_regions(
