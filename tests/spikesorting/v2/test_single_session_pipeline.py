@@ -3290,6 +3290,52 @@ def test_run_v2_pipeline_clusterless_default_handles_zero_units_gracefully(
         "insert zero rows."
     )
 
+    # ---- zero-unit loud-but-graceful loader contracts ----
+    # The sort/recording/artifact are already populated, so these reuse
+    # the one expensive clusterless sort above.
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.exceptions import (
+        ZeroUnitAnalyzerError,
+        ZeroUnitSortError,
+    )
+
+    # require_units=True turns the same zero-unit sort into a hard error.
+    with pytest.raises(ZeroUnitSortError):
+        run_v2_pipeline(
+            nwb_file_name=nwb_file_name,
+            sort_group_id=sort_group_id,
+            interval_list_name="raw data valid times",
+            team_name="v2_test_team",
+            preset="franklab_tetrode_clusterless_thresholder",
+            require_units=True,
+        )
+
+    # get_analyzer raises (no analyzer is buildable over zero units) --
+    # it must not try to load the never-built folder. The stored
+    # analyzer_folder column is still a real path string (guard lives in
+    # get_analyzer, not the schema).
+    assert (
+        isinstance(sort_row["analyzer_folder"], str)
+        and sort_row["analyzer_folder"]
+    )
+    with pytest.raises(ZeroUnitAnalyzerError):
+        Sorting().get_analyzer(sort_pk)
+
+    # get_sorting returns an EMPTY sorting (zero units is valid data),
+    # not a crash on the empty units NWB.
+    empty_sorting = Sorting().get_sorting(sort_pk)
+    assert empty_sorting.get_num_units() == 0
+
+    # CurationV2.get_sorting on a zero-unit curation also returns an
+    # empty sorting -- it builds its OWN extractor (does not delegate),
+    # so it needs the same guard.
+    curation_pk = CurationV2.insert_curation(
+        sorting_key=sort_pk, labels={}, description="zero-unit curation"
+    )
+    assert len(CurationV2.Unit & curation_pk) == 0
+    empty_curated = CurationV2().get_sorting(curation_pk)
+    assert empty_curated.get_num_units() == 0
+
 
 # ---------- Sorting.make rollback file cleanup ---------------------------
 

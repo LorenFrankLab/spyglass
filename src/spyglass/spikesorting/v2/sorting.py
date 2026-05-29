@@ -746,9 +746,27 @@ class Sorting(SpyglassMixin, dj.Computed):
         rec_row = (Recording & {"recording_id": recording_id}).fetch1()
         fs = float(rec_row["sampling_frequency"])
         t_start = self._recording_t_start(rec_row)
-        si_sorting = NwbSortingExtractor(
-            file_path=abs_path, sampling_frequency=fs, t_start=t_start
-        )
+        if int(row["n_units"]) == 0:
+            # Zero units is a valid result. ``NwbSortingExtractor``
+            # cannot open an empty units NWB (no ``spike_times`` column),
+            # so return an empty ``NumpySorting`` with the correct
+            # sampling frequency rather than crashing -- callers needing
+            # only the unit list get an empty list. (``get_analyzer`` on
+            # a zero-unit sort raises instead, since an analyzer is not
+            # representable over zero units.)
+            import spikeinterface as si
+
+            logger.warning(
+                f"Sorting.get_sorting: sorting_id={row['sorting_id']!r} "
+                "has zero units; returning an empty sorting."
+            )
+            si_sorting = si.NumpySorting.from_unit_dict(
+                {}, sampling_frequency=fs
+            )
+        else:
+            si_sorting = NwbSortingExtractor(
+                file_path=abs_path, sampling_frequency=fs, t_start=t_start
+            )
         if not as_dataframe:
             return si_sorting
 
@@ -805,10 +823,29 @@ class Sorting(SpyglassMixin, dj.Computed):
 
         Recompute is in-place; the DataJoint row is not deleted on a
         missing analyzer folder.
+
+        Raises ``ZeroUnitAnalyzerError`` for a zero-unit sort: SI cannot
+        build a ``SortingAnalyzer`` over zero units, so no folder was
+        written by ``_build_analyzer`` (it returns the would-be path).
+        Loading it would surface a confusing SI/file error; this raises
+        a clear signal instead. Use ``get_sorting()`` for the (empty)
+        unit list.
         """
         import spikeinterface as si
 
+        from spyglass.spikesorting.v2.exceptions import (
+            ZeroUnitAnalyzerError,
+        )
         from spyglass.spikesorting.v2.utils import _analyzer_path
+
+        if int((self & key).fetch1("n_units")) == 0:
+            raise ZeroUnitAnalyzerError(
+                "Sorting.get_analyzer: sorting_id="
+                f"{key['sorting_id']!r} has zero units; no "
+                "SortingAnalyzer exists (SI cannot build one over zero "
+                "units). Use get_sorting() if you only need the empty "
+                "unit list, or re-sort with a lower detect_threshold."
+            )
 
         folder = _analyzer_path({"sorting_id": key["sorting_id"]})
         if not folder.exists():

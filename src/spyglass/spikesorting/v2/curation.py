@@ -738,9 +738,27 @@ class CurationV2(SpyglassMixin, dj.Manual):
         fs = float(recording_row["sampling_frequency"])
         t_start = Sorting._recording_t_start(recording_row)
 
-        si_sorting = NwbSortingExtractor(
-            file_path=abs_path, sampling_frequency=fs, t_start=t_start
-        )
+        if len(cls.Unit & key) == 0:
+            # Zero-unit curations are valid (a user may curate a
+            # zero-unit sort; the Empty/Boundary invariant allows an
+            # empty ``CurationV2.Unit``). ``NwbSortingExtractor`` cannot
+            # open the empty curated-units NWB, so return an empty
+            # ``NumpySorting`` -- mirrors ``Sorting.get_sorting``. This
+            # accessor builds its OWN extractor (it does NOT delegate to
+            # ``Sorting.get_sorting``), so it needs the same guard.
+            import spikeinterface as si
+
+            logger.warning(
+                f"CurationV2.get_sorting: curation has zero units "
+                f"(key={key}); returning an empty sorting."
+            )
+            si_sorting = si.NumpySorting.from_unit_dict(
+                {}, sampling_frequency=fs
+            )
+        else:
+            si_sorting = NwbSortingExtractor(
+                file_path=abs_path, sampling_frequency=fs, t_start=t_start
+            )
         if not as_dataframe:
             return si_sorting
 

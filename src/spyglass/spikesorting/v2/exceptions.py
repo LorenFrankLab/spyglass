@@ -66,3 +66,23 @@ class PipelineInputError(ValueError):
     """``run_v2_pipeline()`` receives zero, partial, or mixed input
     modes. Message says exactly one input mode is required and lists
     the required fields for each mode."""
+
+
+class ZeroUnitSortError(RuntimeError):
+    """A sort produced zero units and the caller opted into treating
+    that as an error (``run_v2_pipeline(..., require_units=True)``). Zero
+    units is a legitimate result on a quiet shank, so it is graceful by
+    default (partial manifest with ``curation_id``/``merge_id`` None plus
+    a warning); this is raised only when the caller requires units.
+    Message names the recording/sort and suggests checking
+    ``detect_threshold`` / the artifact mask."""
+
+
+class ZeroUnitAnalyzerError(RuntimeError):
+    """``Sorting.get_analyzer()`` was called on a sort with zero units.
+    SpikeInterface cannot build a ``SortingAnalyzer`` over zero units
+    (``estimate_sparsity`` -> ``np.concatenate([])``), so no analyzer
+    folder was ever written. Raised instead of loading a phantom folder.
+    Message names the sort and points the caller at the zero-unit
+    result. Use ``get_sorting()`` (returns an empty sorting) if only the
+    unit list is needed."""

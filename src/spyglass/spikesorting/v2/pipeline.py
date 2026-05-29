@@ -90,6 +90,7 @@ def run_v2_pipeline(
     team_name: str,
     preset: str = "franklab_tetrode_mountainsort5",
     description: str = "",
+    require_units: bool = False,
 ) -> dict[str, Any]:
     """End-to-end single-session sort: recording -> artifact -> sort -> curation.
 
@@ -123,6 +124,12 @@ def run_v2_pipeline(
         ``franklab_tetrode_clusterless_thresholder``.
     description
         Free-text description passed to ``CurationV2.insert_curation``.
+    require_units
+        If False (default), a sort that finds zero units returns a
+        partial manifest (``curation_id``/``merge_id`` are ``None``) with
+        a loud warning -- zero units is a legitimate result on a quiet
+        shank. If True, a zero-unit sort raises ``ZeroUnitSortError``
+        instead (for callers that treat zero units as a hard error).
 
     Returns
     -------
@@ -132,14 +139,21 @@ def run_v2_pipeline(
             ``recording_id``          : RecordingSelection PK
             ``artifact_id``           : ArtifactSelection PK
             ``sorting_id``            : SortingSelection PK
-            ``curation_id``           : CurationV2 PK
+            ``curation_id``           : CurationV2 PK (``None`` if zero units)
             ``merge_id``              : SpikeSortingOutput master PK
-        Downstream consumers should key off ``merge_id``.
+                                        (``None`` if zero units)
+        Downstream consumers should key off ``merge_id``. **Callers MUST
+        check ``result['merge_id'] is not None`` before passing the
+        result downstream**: on a zero-unit sort ``curation_id`` and
+        ``merge_id`` are ``None`` (no curation/merge was created), and
+        passing ``None`` into a merge-keyed consumer would fail.
 
     Raises
     ------
     PipelineInputError
         If ``preset`` is not a known name.
+    ZeroUnitSortError
+        If the sort finds zero units and ``require_units=True``.
     ValueError
         If the upstream sort group / session / interval list / team
         do not exist (raised by the underlying insert helpers).
@@ -150,7 +164,10 @@ def run_v2_pipeline(
         ArtifactSelection,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+    from spyglass.spikesorting.v2.exceptions import (
+        PipelineInputError,
+        ZeroUnitSortError,
+    )
     from spyglass.spikesorting.v2.recording import (
         Recording,
         RecordingSelection,
@@ -159,6 +176,7 @@ def run_v2_pipeline(
         Sorting,
         SortingSelection,
     )
+    from spyglass.utils import logger
 
     if preset not in _PRESETS:
         raise PipelineInputError(
@@ -211,9 +229,26 @@ def run_v2_pipeline(
     # a lower ``detect_threshold`` or skip the merge step.
     n_units = int((Sorting & sort_pk).fetch1("n_units"))
     if n_units == 0:
+        recording_id = rec_pk["recording_id"]
+        if require_units:
+            raise ZeroUnitSortError(
+                "run_v2_pipeline: sort found zero units for "
+                f"recording_id={recording_id} (sorting_id="
+                f"{sort_pk['sorting_id']}); require_units=True. Check "
+                "detect_threshold / the artifact mask, or call with "
+                "require_units=False to accept the empty result."
+            )
+        logger.warning(
+            "run_v2_pipeline: zero units for recording_id="
+            f"{recording_id} (sorting_id={sort_pk['sorting_id']}); "
+            "curation/merge skipped -- returning a partial manifest with "
+            "curation_id=merge_id=None. Check detect_threshold / the "
+            "artifact mask. Callers MUST check merge_id is not None "
+            "before passing this result downstream."
+        )
         return {
             "preset": preset,
-            "recording_id": rec_pk["recording_id"],
+            "recording_id": recording_id,
             "artifact_id": art_pk["artifact_id"],
             "sorting_id": sort_pk["sorting_id"],
             "curation_id": None,
