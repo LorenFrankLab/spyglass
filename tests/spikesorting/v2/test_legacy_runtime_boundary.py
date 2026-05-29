@@ -179,6 +179,43 @@ def test_correct_motion_api_contract():
         )
 
 
+def test_default_merge_sources_skip_v2_when_unavailable(dj_conn, monkeypatch):
+    """``get_restricted_merge_ids`` must not force v2 in a v0/v1-only env.
+
+    A literal ``sources=["v0","v1","v2"]`` default made the no-argument
+    path raise wherever v2 is unavailable (the localhost DB guard) even
+    when the caller never requested v2. The default now resolves to only
+    the available sources; an explicit list is still honored verbatim.
+    (``dj_conn`` only because importing the merge module declares its
+    DataJoint schema; the assertions touch no table.)
+    """
+    from spyglass.spikesorting import spikesorting_merge as m
+
+    monkeypatch.setattr(m, "CurationV2", None)
+    assert m._available_merge_sources() == ["v0", "v1"]
+
+    monkeypatch.setattr(m, "CurationV2", object())
+    assert m._available_merge_sources() == ["v0", "v1", "v2"]
+
+
+def test_v2_artifact_restriction_warns_when_unresolved(dj_conn, monkeypatch):
+    """``restrict_by_artifact=True`` with a non-artifact interval name and
+    no ``artifact_id`` warns that v2 results are NOT artifact-restricted,
+    instead of silently returning unrestricted merge ids.
+    """
+    from spyglass.spikesorting import spikesorting_merge as m
+
+    captured = []
+    monkeypatch.setattr(
+        m.logger, "warning", lambda msg, *a, **k: captured.append(msg)
+    )
+    m.SpikeSortingOutput()._get_restricted_merge_ids_v2(
+        {"interval_list_name": "raw data valid times"},
+        restrict_by_artifact=True,
+    )
+    assert any("artifact-restricted" in msg for msg in captured), captured
+
+
 # ---------- Audit-listed imports load under SI 0.104 -----------------------
 
 _AUDIT_IMPORTS_TO_VERIFY = [

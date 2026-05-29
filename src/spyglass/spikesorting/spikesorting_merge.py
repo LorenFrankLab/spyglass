@@ -67,6 +67,21 @@ def _raise_v2_unavailable(caller: str) -> None:
         f"the documented risk caveat.{detail}"
     ) from cause
 
+
+def _available_merge_sources() -> list:
+    """Default ``sources`` for ``get_restricted_merge_ids``.
+
+    v0/v1 are always present; v2 is appended only when its module
+    imported. v2 is gated behind the localhost DB guard and is absent in
+    v0/v1-only deployments, so a literal ``["v0", "v1", "v2"]`` default
+    would make the no-argument path raise there even when the caller
+    never requested v2.
+    """
+    sources = ["v0", "v1"]
+    if CurationV2 is not None:
+        sources.append("v2")
+    return sources
+
 schema = dj.schema("spikesorting_merge")
 
 source_class_dict = {
@@ -197,6 +212,20 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             if artifact_id is not None:
                 key["artifact_id"] = artifact_id
                 key.pop("interval_list_name", None)
+            elif "artifact_id" not in key:
+                # The caller asked to restrict by artifact, but the
+                # interval name is not the ``artifact_{uuid}`` form and no
+                # artifact_id was supplied, so there is nothing to map.
+                # Warn instead of silently returning unrestricted ids.
+                logger.warning(
+                    "SpikeSortingOutput._get_restricted_merge_ids_v2: "
+                    "restrict_by_artifact=True but interval_list_name "
+                    f"{key['interval_list_name']!r} is not an "
+                    "'artifact_{uuid}' interval and no artifact_id was "
+                    "given; v2 results will NOT be artifact-restricted. "
+                    "Pass artifact_id=... or use the artifact-named "
+                    "interval to restrict."
+                )
 
         rec_restriction = {k: key[k] for k in rec_keys if k in key}
         rec_table = RecordingSelection & rec_restriction
@@ -269,7 +298,7 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
     def get_restricted_merge_ids(
         self,
         key: dict,
-        sources: list = ["v0", "v1", "v2"],
+        sources: list | None = None,
         restrict_by_artifact: bool = True,
         as_dict: bool = False,
     ) -> Union[None, list, dict]:
@@ -280,7 +309,12 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         key : dict
             restriction for any stage of the spikesorting pipeline
         sources : list, optional
-            list of sources to restrict to
+            list of sources to restrict to. Defaults to every AVAILABLE
+            source: ``["v0", "v1"]`` plus ``"v2"`` only when the v2 module
+            imported (it is gated behind the localhost DB guard and is
+            absent in v0/v1-only deployments). Pass an explicit list to
+            override; a list containing ``"v2"`` in an env where v2 did
+            not import raises a clear error.
         restrict_by_artifact : bool, optional
             whether to restrict by artifact rather than original interval name.
             Relevant to v1 pipeline, by default True
@@ -295,6 +329,9 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         """
         if not isinstance(key, dict):
             raise TypeError("key must be a dictionary")
+
+        if sources is None:
+            sources = _available_merge_sources()
 
         merge_ids = []
 
