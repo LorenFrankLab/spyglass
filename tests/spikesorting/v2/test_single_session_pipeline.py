@@ -4888,6 +4888,35 @@ def test_curation_two_merge_groups_assign_ids_in_user_input_order(dj_conn):
     assert 2 in kept_preview and kept_preview[2] == [2, 3]
 
 
+def test_curation_rejects_singleton_merge_group(dj_conn):
+    """A "merge group" with one unit isn't a merge. v1 would silently
+    rename the singleton to ``max + 1`` (a no-op spike-train-wise); v2
+    surfaces the likely typo instead, in both ``apply_merge`` modes.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    def _unit(uid):
+        return {
+            "unit_id": uid,
+            "n_spikes": 10,
+            "peak_amplitude_uv": 50.0,
+            "nwb_file_name": "x.nwb",
+            "electrode_group_name": "0",
+            "electrode_id": uid,
+        }
+
+    sorting_units = [_unit(0), _unit(1)]
+    for apply_merge in (True, False):
+        with pytest.raises(ValueError, match="single-unit"):
+            CurationV2._build_curated_unit_rows(
+                sorting_id="s",
+                sorting_units=sorting_units,
+                merge_groups=[[0]],
+                curation_id=0,
+                apply_merge=apply_merge,
+            )
+
+
 def test_si_merge_units_drops_same_sample_unless_delta_is_none(dj_conn):
     """SI 0.104's ``MergeUnitsSorting`` collapses exact same-sample
     spikes from different merged units UNLESS ``delta_time_ms=None``.

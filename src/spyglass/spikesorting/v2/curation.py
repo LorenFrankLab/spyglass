@@ -165,12 +165,18 @@ class CurationV2(SpyglassMixin, dj.Manual):
             existing CurationV2 row for the same sorting.
         merge_groups
             Optional list of merge groups, each a list of ``unit_id``
-            ints. The merged unit inherits the peak channel + amplitude
-            of the highest-amplitude contributor. For ``apply_merge=True``
-            the merged unit gets a fresh id, ``max(source unit_ids) + 1``
-            (sequentially incremented per multi-merge group), matching
-            v1 (``v1/curation.py:361``) and aligning with SI's
-            ``MergeUnitsSorting`` default-appended ids on the lazy path.
+            ints. Each group must have at least 2 members (a single-unit
+            group is rejected as a likely typo). The merged unit inherits
+            the peak channel + amplitude of the highest-amplitude
+            contributor. For ``apply_merge=True`` the merged unit gets a
+            fresh id, ``max(source unit_ids) + 1``, sequentially
+            incremented per group in USER-PROVIDED order -- v1 parity
+            (``v1/curation.py:359``). NOTE: the lazy merge path
+            (``get_merged_sorting`` on an apply_merge=False preview) reads
+            MergeGroup ordered by ``unit_id`` and so iterates by
+            kept-uid-ascending; when input order != kept-uid order,
+            applied and lazy paths assign the same fresh ids to different
+            content groups.
             For ``apply_merge=False`` (preview) every original unit --
             contributors included -- keeps its own id in
             ``CurationV2.Unit``; the proposed merge is recorded in
@@ -596,6 +602,15 @@ class CurationV2(SpyglassMixin, dj.Manual):
         merge_specs: list[tuple[int, list[int]]] = []
         next_merged_id = max(by_id) + 1
         for int_group in normalized_groups:
+            if len(int_group) < 2:
+                # A "merge group" of one unit isn't a merge. v1 would
+                # silently rename it to max+1 (a no-op spike-train-wise);
+                # surface the likely typo instead.
+                raise ValueError(
+                    f"CurationV2.insert_curation: merge_groups contains "
+                    f"a single-unit group {int_group}; merge groups must "
+                    "have at least 2 members."
+                )
             for uid in int_group:
                 if uid not in by_id:
                     raise ValueError(
@@ -692,13 +707,11 @@ class CurationV2(SpyglassMixin, dj.Manual):
 
         With ``apply_merge=True`` the kept unit's spike train is the
         sorted union of its contributors' spike trains and its id is a
-        fresh ``max(source unit_ids) + 1`` (v1 parity); the absorbed
-        contributors are dropped from both the NWB and ``CurationV2.Unit``.
-        Surviving source units are written first (in source order) and
-        merged ids are appended -- matching v1's pop-then-append and SI's
-        lazy ``MergeUnitsSorting`` order so unit-array consumers see the
-        same per-unit order whether the merge was applied or applied
-        lazily.
+        fresh ``max(source unit_ids) + 1`` assigned in USER-PROVIDED
+        group order (v1 parity); the absorbed contributors are dropped
+        from both the NWB and ``CurationV2.Unit``. Surviving source units
+        are written first (in source order) and merged ids are appended,
+        matching v1's pop-then-append per-unit layout.
 
         With ``apply_merge=False`` (preview) every original unit is
         written 1:1 -- contributors included -- so the proposed merge
