@@ -749,8 +749,10 @@ class CurationV2(SpyglassMixin, dj.Manual):
             import spikeinterface as si
 
             logger.warning(
-                f"CurationV2.get_sorting: curation has zero units "
-                f"(key={key}); returning an empty sorting."
+                "CurationV2.get_sorting: curation "
+                f"(sorting_id={row['sorting_id']}, "
+                f"curation_id={row['curation_id']}) has zero units; "
+                "returning an empty sorting."
             )
             si_sorting = si.NumpySorting.from_unit_dict(
                 {}, sampling_frequency=fs
