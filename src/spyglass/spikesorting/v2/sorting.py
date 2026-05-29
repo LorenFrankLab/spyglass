@@ -1390,8 +1390,9 @@ class Sorting(SpyglassMixin, dj.Computed):
         # for empty sortings. ``_populate_unit_part`` iterates an empty
         # ``sorting.unit_ids`` and writes zero Unit rows; the Sorting
         # master row commits with ``n_units=0``. Return the (not yet
-        # created) folder path -- ``Sorting.get_analyzer`` rebuilds
-        # on demand if a downstream consumer needs it.
+        # created) folder path for the row; ``Sorting.get_analyzer``
+        # raises ``ZeroUnitAnalyzerError`` for a zero-unit sort rather
+        # than trying to load this never-built folder.
         if sorting.get_num_units() == 0:
             logger.warning(
                 "Sorting._build_analyzer: sorting_id="

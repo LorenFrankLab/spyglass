@@ -3805,8 +3805,8 @@ def _build_synthetic_rec(traces, fs=30_000.0):
 
 
 def test_run_si_sorter_restores_global_job_kwargs(dj_conn, monkeypatch):
-    """R3: ``_run_si_sorter`` leaves SI's global job kwargs byte-identical
-    to their pre-sort state.
+    """``_run_si_sorter`` leaves SI's global job kwargs byte-identical to
+    their pre-sort state.
 
     ``set_global_job_kwargs`` UPDATES the global rather than replacing it,
     so a job kwarg the sort installs that is absent from the default
@@ -3846,7 +3846,7 @@ def test_run_si_sorter_restores_global_job_kwargs(dj_conn, monkeypatch):
 
 
 def test_clusterless_detect_peaks_strips_random_seed(dj_conn, monkeypatch):
-    """R4: ``_run_clusterless_thresholder`` strips ``random_seed`` from the
+    """``_run_clusterless_thresholder`` strips ``random_seed`` from the
     job kwargs before calling ``detect_peaks``.
 
     ``random_seed`` is a Spyglass-side knob (already threaded into
@@ -4449,8 +4449,8 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
     _np.testing.assert_array_equal(merged_times, expected_merged)
 
     # And the n_spikes column on CurationV2.Unit reflects the merge.
-    # (apply_merge=True end-to-end half of the R2 invariant: DB n_spikes
-    # == curated NWB spike-train length for the merged head.)
+    # (apply_merge=True end-to-end half of the n_spikes invariant: DB
+    # n_spikes == curated NWB spike-train length for the merged head.)
     head_row = (CurationV2.Unit & pk & {"unit_id": head}).fetch1()
     assert head_row["n_spikes"] == len(expected_merged), (
         f"CurationV2.Unit.n_spikes for merged head = "
@@ -4460,8 +4460,8 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
 
 
 def test_curation_n_spikes_matches_apply_merge(dj_conn):
-    """R2: ``_build_curated_unit_rows`` computes ``n_spikes`` to match
-    what ``_stage_curated_units_nwb`` writes for the SAME ``apply_merge``.
+    """``_build_curated_unit_rows`` computes ``n_spikes`` to match what
+    ``_stage_curated_units_nwb`` writes for the SAME ``apply_merge``.
 
     A merge-group head's curated spike train is the contributor sum only
     when ``apply_merge=True`` (the staged train is the concatenation);
