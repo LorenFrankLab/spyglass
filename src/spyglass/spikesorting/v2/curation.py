@@ -170,13 +170,17 @@ class CurationV2(SpyglassMixin, dj.Manual):
             the first id in the group. Non-listed units pass through
             1:1.
         apply_merge
-            If True, the curated-units NWB stores merged spike trains
-            (union of contributors); if False (default), it stores the
-            original Sorting spike trains 1:1 so merge edits can be
-            reviewed before committing. CurationV2.Unit always reflects
-            the post-merge unit set regardless. v1 spelling matches
-            ``CurationV1.insert_curation`` at ``v1/curation.py:50``
-            so existing v1 caller code keeps working unchanged.
+            If True, both the curated-units NWB and ``CurationV2.Unit``
+            store the MERGED unit set: each merged unit's spike train is
+            the union of its contributors, and the contributors are
+            absorbed. If False (default), every original unit passes
+            through 1:1 -- units, spike trains, AND labels are all
+            preserved -- and the proposed merges are recorded in
+            ``CurationV2.MergeGroup`` for lazy application via
+            ``get_merged_sorting()`` (so a preview can be reviewed before
+            committing). Matches v1's ``apply_merge`` semantics at
+            ``v1/curation.py:359`` so existing v1 caller code keeps
+            working unchanged.
         description
             Free-text curation description.
         metrics_source
@@ -355,6 +359,11 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 "metrics_source": metrics_source,
                 "description": description,
             }
+            # Labels attach to the units actually written. For
+            # apply_merge=False that is every original unit (v1 preview
+            # parity); for apply_merge=True it is the kept set, so a
+            # label on an absorbed contributor is dropped with the unit.
+            written_unit_ids = {row["unit_id"] for row in unit_rows}
             unit_label_rows = [
                 {
                     "sorting_id": sorting_id,
@@ -367,7 +376,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
                     ),
                 }
                 for unit_id, lbls in labels.items()
-                if unit_id in kept_unit_to_contributors
+                if unit_id in written_unit_ids
                 for label in lbls
             ]
             # Auto-register into SpikeSortingOutput.CurationV2 so
@@ -541,29 +550,45 @@ class CurationV2(SpyglassMixin, dj.Manual):
             if uid not in merged_ids:
                 kept_to_contributors[uid] = [uid]
 
-        unit_rows: list[dict] = []
-        for kept_uid, contribs in kept_to_contributors.items():
-            # Inherit peak channel from the highest-amplitude contributor.
-            anchor = max(contribs, key=lambda u: by_id[u]["peak_amplitude_uv"])
-            anchor_row = by_id[anchor]
-            # Merged sum only when the merged train is actually staged;
-            # otherwise the head unit's own count (matches the NWB write).
-            if apply_merge and len(contribs) > 1:
-                n_spikes = sum(by_id[u]["n_spikes"] for u in contribs)
-            else:
-                n_spikes = by_id[int(kept_uid)]["n_spikes"]
-            unit_rows.append(
-                {
-                    "sorting_id": sorting_id,
-                    "curation_id": curation_id,
-                    "unit_id": int(kept_uid),
-                    "nwb_file_name": anchor_row["nwb_file_name"],
-                    "electrode_group_name": anchor_row["electrode_group_name"],
-                    "electrode_id": int(anchor_row["electrode_id"]),
-                    "peak_amplitude_uv": float(anchor_row["peak_amplitude_uv"]),
-                    "n_spikes": int(n_spikes),
-                }
-            )
+        # The written unit set depends on apply_merge:
+        #   apply_merge=True  -> kept units only; a merged head absorbs
+        #     its contributors (peak channel inherited from the
+        #     highest-amplitude contributor, n_spikes = summed train).
+        #   apply_merge=False -> every original unit passes through 1:1
+        #     (v1 preview parity, ``v1/curation.py:359``); the proposed
+        #     merges live in MergeGroup for lazy application via
+        #     get_merged_sorting. n_spikes is each unit's own count,
+        #     matching the train _stage_curated_units_nwb writes.
+        if apply_merge:
+            specs = []
+            for kept_uid, contribs in kept_to_contributors.items():
+                anchor = max(
+                    contribs, key=lambda u: by_id[u]["peak_amplitude_uv"]
+                )
+                n_spikes = (
+                    sum(by_id[u]["n_spikes"] for u in contribs)
+                    if len(contribs) > 1
+                    else by_id[int(kept_uid)]["n_spikes"]
+                )
+                specs.append((int(kept_uid), by_id[anchor], int(n_spikes)))
+        else:
+            specs = [
+                (int(uid), row, int(row["n_spikes"]))
+                for uid, row in by_id.items()
+            ]
+        unit_rows = [
+            {
+                "sorting_id": sorting_id,
+                "curation_id": curation_id,
+                "unit_id": unit_id,
+                "nwb_file_name": src["nwb_file_name"],
+                "electrode_group_name": src["electrode_group_name"],
+                "electrode_id": int(src["electrode_id"]),
+                "peak_amplitude_uv": float(src["peak_amplitude_uv"]),
+                "n_spikes": n_spikes,
+            }
+            for unit_id, src, n_spikes in specs
+        ]
         return unit_rows, kept_to_contributors
 
     @classmethod
@@ -624,7 +649,42 @@ class CurationV2(SpyglassMixin, dj.Manual):
             # the contrived all-merged-away case) we initialize a
             # bare ``pynwb.misc.Units`` without the column so the
             # write succeeds.
-            if kept_unit_to_contributors:
+            # Resolve which units get written + their spike trains:
+            #   apply_merge=True  -> kept units; a merged head gets the
+            #     concatenated contributor trains.
+            #   apply_merge=False -> every original unit 1:1 (v1 preview
+            #     parity, ``v1/curation.py:359``); proposed merges stay in
+            #     MergeGroup for lazy application via get_merged_sorting.
+            if apply_merge:
+                write_specs = []
+                for kept_uid, contribs in kept_unit_to_contributors.items():
+                    if len(contribs) > 1:
+                        spike_times = _np.concatenate(
+                            [
+                                sorting.get_unit_spike_train(
+                                    unit_id=u, return_times=True
+                                )
+                                for u in contribs
+                            ]
+                        )
+                        spike_times.sort()
+                    else:
+                        spike_times = sorting.get_unit_spike_train(
+                            unit_id=kept_uid, return_times=True
+                        )
+                    write_specs.append((int(kept_uid), spike_times))
+            else:
+                write_specs = [
+                    (
+                        int(uid),
+                        sorting.get_unit_spike_train(
+                            unit_id=uid, return_times=True
+                        ),
+                    )
+                    for uid in sorting.get_unit_ids()
+                ]
+
+            if write_specs:
                 # ``curation_label`` is written as an ``index=True``
                 # (ragged) column with a per-unit list of label
                 # strings, matching v1's ``v1/curation.py:398-403``
@@ -645,22 +705,8 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 # all labels happen to be empty (the no-labels
                 # case).
                 all_labels: list[list[str]] = []
-                for kept_uid, contribs in kept_unit_to_contributors.items():
-                    if apply_merge and len(contribs) > 1:
-                        spike_times = _np.concatenate(
-                            [
-                                sorting.get_unit_spike_train(
-                                    unit_id=u, return_times=True
-                                )
-                                for u in contribs
-                            ]
-                        )
-                        spike_times.sort()
-                    else:
-                        spike_times = sorting.get_unit_spike_train(
-                            unit_id=kept_uid, return_times=True
-                        )
-                    lbl_list = labels.get(int(kept_uid), [])
+                for unit_id, spike_times in write_specs:
+                    lbl_list = labels.get(int(unit_id), [])
                     label_list = [
                         lbl.value
                         if isinstance(lbl, CurationLabel)
@@ -672,7 +718,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
                         spike_times=_np.asarray(
                             spike_times, dtype=_np.float64
                         ),
-                        id=int(kept_uid),
+                        id=int(unit_id),
                     )
                 # Only add the column when at least one unit
                 # carries a non-empty label list. pynwb's dtype
@@ -876,21 +922,25 @@ class CurationV2(SpyglassMixin, dj.Manual):
     def get_merged_sorting(cls, key):
         """Return the curated BaseSorting with merge groups applied.
 
-        Matches v1's semantic at ``v1/curation.py:228-266``: merges
-        are queried from ``CurationV2.MergeGroup`` and applied
-        lazily via ``spikeinterface.curation.MergeUnitsSorting``,
-        regardless of the ``merges_applied`` flag on the master
-        row. Code that built a curation with ``apply_merge=False``
-        (to preview) and then asked for the merged sorting now
-        actually gets the merged trains.
+        Matches v1's semantic at ``v1/curation.py:228-266``: a curation
+        built with ``apply_merge=False`` (preview) still carries every
+        original unit, so the proposed merges recorded in
+        ``CurationV2.MergeGroup`` are applied lazily here via
+        ``spikeinterface.curation.MergeUnitsSorting`` -- the caller gets
+        the merged trains without re-running the sort.
 
-        If no merge group has more than one contributor (i.e. no
-        merge was requested), returns the base sorting verbatim
-        without invoking ``MergeUnitsSorting``.
+        When the curation was created with ``apply_merge=True`` the base
+        sorting is ALREADY merged (contributors absorbed at insert), so
+        the MergeGroup contributors are no longer present in it; the base
+        is returned verbatim rather than re-applying merges over missing
+        units. Likewise returns the base unchanged when no merge group
+        has more than one contributor.
         """
         import spikeinterface.curation as sc
 
         base = cls.get_sorting(key)
+        if bool((cls & key).fetch1("merges_applied")):
+            return base
         merge_groups = cls.get_merge_groups(key)
         units_to_merge = [
             contribs
@@ -899,8 +949,15 @@ class CurationV2(SpyglassMixin, dj.Manual):
         ]
         if not units_to_merge:
             return base
+        # SI 0.104: MergeUnitsSorting(sorting, units_to_merge, ...) --
+        # ``sorting`` is positional (no ``parent_sorting`` kwarg).
+        # ``delta_time_ms=0`` disables SI's near-coincident-spike
+        # deduplication so the merged train is the full concatenation of
+        # its contributors -- matching v1 (``np.concatenate``) and v2's
+        # own apply_merge=True staging. The default 0.4 ms would silently
+        # drop spikes that fire within 0.4 ms across the merged units.
         return sc.MergeUnitsSorting(
-            parent_sorting=base, units_to_merge=units_to_merge
+            base, units_to_merge=units_to_merge, delta_time_ms=0
         )
 
     def get_unit_brain_regions(

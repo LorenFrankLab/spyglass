@@ -2312,10 +2312,8 @@ def test_run_v2_pipeline_end_to_end_and_idempotent(polymer_smoke_session):
     assert manifest["n_units"] >= 1
     # The smoke fixture's clusterless 100 uV default IS exercised in
     # ``test_run_v2_pipeline_clusterless_default_handles_zero_units_
-    # gracefully`` -- it confirms the orchestrator's zero-unit
-    # short-circuit returns a partial manifest with
-    # ``curation_id=None, merge_id=None`` instead of crashing inside
-    # CurationV2.insert_curation. MS5 here is the populated-units
+    # gracefully`` -- it confirms a zero-unit sort still yields an empty
+    # (but real) curation + merge row. MS5 here is the populated-units
     # path.
 
     # Idempotent: rerun returns the same manifest, no new rows.
@@ -3381,14 +3379,11 @@ def test_run_v2_pipeline_clusterless_default_handles_zero_units_gracefully(
     default (100 uV ``detect_threshold``) on the smoke fixture
     finds zero peaks AND completes without crashing.
 
-    On a zero-unit sort the orchestrator short-circuits curation
-    because SI's ``NwbSortingExtractor`` cannot open an empty
-    units NWB; the returned manifest is PARTIAL with
-    ``curation_id=None, merge_id=None, n_units=0`` instead of a
-    complete one. The alternative (forcing curation through)
-    crashes with an opaque KeyError. The partial-manifest contract
-    gives the user a clean signal that the sort ran and found
-    nothing.
+    A zero-unit sort yields an EMPTY (but real) curation + merge row --
+    matching v1's empty Units table -- so the manifest is complete
+    (``curation_id`` + ``merge_id`` present, ``n_units=0``) and downstream
+    code can treat it like any other ``SpikeSortingOutput`` row instead of
+    special-casing a ``None`` merge_id.
     """
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults
@@ -3422,22 +3417,21 @@ def test_run_v2_pipeline_clusterless_default_handles_zero_units_gracefully(
         preset="franklab_tetrode_clusterless_thresholder",
     )
 
-    # Recording / artifact / sorting IDs are populated; curation +
-    # merge are explicitly None because SI's NwbSortingExtractor
-    # cannot open an empty units NWB and the orchestrator short-
-    # circuits curation when n_units == 0.
+    # A zero-unit sort still produces a COMPLETE, merge-keyable manifest:
+    # an empty curation + merge row (v1 parity), not a partial None.
     for key in ("recording_id", "artifact_id", "sorting_id"):
         assert manifest.get(key) is not None, (
             f"Zero-unit manifest missing {key!r}; got {manifest}."
         )
     assert manifest["n_units"] == 0
-    assert manifest["curation_id"] is None, (
-        "Orchestrator should NOT run CurationV2.insert_curation on "
-        "a zero-unit sort -- SI cannot open the empty units NWB "
-        "and the curation step would crash. The partial-manifest "
-        "contract returns ``curation_id=None`` instead."
+    assert manifest["curation_id"] is not None, (
+        f"Zero-unit sort should still write an empty curation row; "
+        f"got {manifest}."
     )
-    assert manifest["merge_id"] is None
+    assert manifest["merge_id"] is not None, (
+        "Zero-unit sort should still write an empty merge row so the "
+        f"result is merge-keyable; got {manifest}."
+    )
 
     # Sorting row exists with ``n_units == 0``.
     sort_pk = {"sorting_id": manifest["sorting_id"]}
@@ -3491,12 +3485,14 @@ def test_run_v2_pipeline_clusterless_default_handles_zero_units_gracefully(
     empty_sorting = Sorting().get_sorting(sort_pk)
     assert empty_sorting.get_num_units() == 0
 
-    # CurationV2.get_sorting on a zero-unit curation also returns an
-    # empty sorting -- it builds its OWN extractor (does not delegate),
-    # so it needs the same guard.
-    curation_pk = CurationV2.insert_curation(
-        sorting_key=sort_pk, labels={}, description="zero-unit curation"
-    )
+    # The empty curation that run_v2_pipeline created is real and
+    # merge-keyable, with zero Unit rows; CurationV2.get_sorting on it
+    # returns an empty sorting (it builds its OWN extractor, so it needs
+    # the same zero-unit guard).
+    curation_pk = {
+        "sorting_id": manifest["sorting_id"],
+        "curation_id": manifest["curation_id"],
+    }
     assert len(CurationV2.Unit & curation_pk) == 0
     empty_curated = CurationV2().get_sorting(curation_pk)
     assert empty_curated.get_num_units() == 0
@@ -4048,6 +4044,53 @@ def test_clusterless_detect_peaks_strips_random_seed(dj_conn, monkeypatch):
         f"random_seed leaked into detect_peaks job kwargs: {jk}"
     )
     assert jk.get("n_jobs") == 1  # other kwargs preserved
+
+
+def test_build_analyzer_strips_random_seed(dj_conn, monkeypatch, tmp_path):
+    """``_build_analyzer`` strips ``random_seed`` before
+    ``SortingAnalyzer.compute``.
+
+    ``random_seed`` is a Spyglass-side knob (consumed by the sorter and
+    the whitening pin); SI's ``compute`` rejects it with
+    ``AssertionError: please remove {'random_seed'}``. The analyzer
+    factory + ``compute`` are stubbed to capture the kwargs without a
+    real sort.
+    """
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2 import utils as v2_utils
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    monkeypatch.setattr(
+        v2_utils, "_analyzer_path", lambda key: tmp_path / "analyzer"
+    )
+    captured = {}
+
+    class _FakeAnalyzer:
+        def compute(self, *args, **kwargs):
+            captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(
+        si, "create_sorting_analyzer", lambda **k: _FakeAnalyzer()
+    )
+
+    class _FakeSorting:
+        def get_num_units(self):
+            return 2
+
+    Sorting._build_analyzer(
+        _FakeSorting(),
+        None,
+        {"sorting_id": "test-sorting-id"},
+        sorter_row={"job_kwargs": {}},
+        job_kwargs={"random_seed": 7, "n_jobs": 1},
+    )
+
+    jk = captured["kwargs"]
+    assert "random_seed" not in jk, (
+        f"random_seed leaked into analyzer.compute kwargs: {jk}"
+    )
+    assert jk.get("n_jobs") == 1  # other job kwargs preserved
 
 
 def test_detect_artifacts_zscore_only_detection(dj_conn):
@@ -4623,20 +4666,64 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
     )
     assert head_row["n_spikes"] == len(merged_times)
 
+    # --- v1-parity PREVIEW half (apply_merge=False), reusing the sort.
+    # A preview curation keeps EVERY original unit (the contributor is
+    # NOT dropped) + the contributor's label, and records the proposed
+    # merge in MergeGroup; get_merged_sorting applies it lazily.
+    preview_pk = CurationV2.insert_curation(
+        sorting_key=sort_pk,
+        labels={absorbed: ["mua"]},
+        merge_groups=merge_groups,
+        apply_merge=False,
+        parent_curation_id=pk["curation_id"],
+        description="merge_groups preview (apply_merge=False)",
+    )
+    preview_unit_ids = set(
+        int(u) for u in (CurationV2.Unit & preview_pk).fetch("unit_id")
+    )
+    assert preview_unit_ids == set(units), (
+        f"apply_merge=False preview unit ids = {sorted(preview_unit_ids)}; "
+        f"expected ALL {sorted(units)} (contributor preserved, v1 parity)."
+    )
+    # The contributor's label survives (it would vanish if the unit were
+    # dropped from the preview).
+    preview_labels = {
+        (int(r["unit_id"]), r["curation_label"])
+        for r in (CurationV2.UnitLabel & preview_pk).fetch(as_dict=True)
+    }
+    assert (absorbed, "mua") in preview_labels, preview_labels
+    # The preview sorting still has the contributor as its own unit.
+    preview_sorting = CurationV2().get_sorting(preview_pk)
+    assert absorbed in set(int(u) for u in preview_sorting.get_unit_ids())
+    # get_merged_sorting applies the proposed merge lazily: two units
+    # collapse to one and the spike count is preserved (concatenation,
+    # delta_time_ms=0 -- no silent coincident-spike dedup).
+    merged_lazy = CurationV2().get_merged_sorting(preview_pk)
+    assert merged_lazy.get_num_units() == len(units) - 1
+    preview_total = sum(
+        len(preview_sorting.get_unit_spike_train(unit_id=u))
+        for u in preview_sorting.get_unit_ids()
+    )
+    merged_total = sum(
+        len(merged_lazy.get_unit_spike_train(unit_id=u))
+        for u in merged_lazy.get_unit_ids()
+    )
+    assert merged_total == preview_total, (merged_total, preview_total)
+
 
 def test_curation_n_spikes_matches_apply_merge(dj_conn):
-    """``_build_curated_unit_rows`` computes ``n_spikes`` to match what
-    ``_stage_curated_units_nwb`` writes for the SAME ``apply_merge``.
+    """``_build_curated_unit_rows`` writes the v1-parity unit set +
+    ``n_spikes`` for each ``apply_merge`` mode.
 
-    A merge-group head's curated spike train is the contributor sum only
-    when ``apply_merge=True`` (the staged train is the concatenation);
-    with ``apply_merge=False`` the staged train is head-only, so
-    ``n_spikes`` must be the head's own count -- NOT the merged sum.
-    Before the fix the count was always the merged sum, so an
-    ``apply_merge=False`` preview stored a count that disagreed with its
-    own head-only spike train. Synthetic ``Sorting.Unit`` rows isolate
-    the count logic (the ``apply_merge=True`` end-to-end half of the
-    invariant is covered by
+    ``apply_merge=True`` collapses a merge group to its head, whose
+    ``n_spikes`` is the summed contributor train (matching the
+    concatenated staged train); the absorbed contributor is dropped.
+    ``apply_merge=False`` is a v1-style preview (``v1/curation.py:359``):
+    EVERY original unit passes through 1:1 with its own ``n_spikes`` and
+    the proposed merge lives in MergeGroup for lazy application, so the
+    contributor is preserved -- not silently dropped. Synthetic
+    ``Sorting.Unit`` rows isolate the row logic (the ``apply_merge=True``
+    end-to-end half is covered by
     ``test_curation_v2_insert_with_merge_groups_apply_merges``).
     """
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -4668,9 +4755,13 @@ def test_curation_n_spikes_matches_apply_merge(dj_conn):
     merged = n_spikes_by_unit(apply_merge=True)
     preview = n_spikes_by_unit(apply_merge=False)
 
-    assert merged[0] == 140  # merged sum (matches concatenated train)
-    assert preview[0] == 100  # head-only (matches head-only train)
-    assert merged[2] == 7 and preview[2] == 7  # non-merged: unaffected
+    # apply_merge=True: head absorbs the contributor (summed train); the
+    # absorbed unit (1) is no longer a row.
+    assert merged == {0: 140, 2: 7}, merged
+    # apply_merge=False (v1 preview parity): EVERY original unit is
+    # present with its OWN count -- the contributor (1) is preserved, not
+    # dropped.
+    assert preview == {0: 100, 1: 40, 2: 7}, preview
 
 
 # ---------- _detect_artifacts cross-channel proportion boundary ----------

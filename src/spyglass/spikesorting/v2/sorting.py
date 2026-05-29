@@ -1425,6 +1425,15 @@ class Sorting(SpyglassMixin, dj.Computed):
             return_in_uV=True,
             overwrite=True,
         )
+        # ``random_seed`` is a Spyglass-side knob (consumed by the sorter
+        # and the whitening pin in ``_run_si_sorter``), not a valid
+        # ``SortingAnalyzer.compute`` keyword -- SI raises
+        # "please remove {'random_seed'}". Strip it here, mirroring the
+        # detect_peaks path. It stays in ``job_kwargs`` upstream so the
+        # sorter/whitening still read the seed.
+        analyzer_job_kwargs = {
+            k: v for k, v in job_kwargs.items() if k != "random_seed"
+        }
         analyzer.compute(
             ["random_spikes", "noise_levels", "templates", "waveforms"],
             extension_params={
@@ -1434,7 +1443,7 @@ class Sorting(SpyglassMixin, dj.Computed):
                 },
                 "waveforms": {"ms_before": 1.0, "ms_after": 2.0},
             },
-            **job_kwargs,
+            **analyzer_job_kwargs,
         )
         return folder
 

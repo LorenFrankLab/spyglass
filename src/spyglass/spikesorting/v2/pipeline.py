@@ -125,11 +125,13 @@ def run_v2_pipeline(
     description
         Free-text description passed to ``CurationV2.insert_curation``.
     require_units
-        If False (default), a sort that finds zero units returns a
-        partial manifest (``curation_id``/``merge_id`` are ``None``) with
-        a loud warning -- zero units is a legitimate result on a quiet
-        shank. If True, a zero-unit sort raises ``ZeroUnitSortError``
-        instead (for callers that treat zero units as a hard error).
+        If False (default), a sort that finds zero units still produces
+        an EMPTY (but real) curation + merge row, with a loud warning --
+        zero units is a legitimate result on a quiet shank, and the empty
+        row lets downstream code treat it like any other
+        ``SpikeSortingOutput`` row. If True, a zero-unit sort raises
+        ``ZeroUnitSortError`` instead (for callers that treat zero units
+        as a hard error).
 
     Returns
     -------
@@ -139,14 +141,12 @@ def run_v2_pipeline(
             ``recording_id``          : RecordingSelection PK
             ``artifact_id``           : ArtifactSelection PK
             ``sorting_id``            : SortingSelection PK
-            ``curation_id``           : CurationV2 PK (``None`` if zero units)
+            ``curation_id``           : CurationV2 PK
             ``merge_id``              : SpikeSortingOutput master PK
-                                        (``None`` if zero units)
-        Downstream consumers should key off ``merge_id``. **Callers MUST
-        check ``result['merge_id'] is not None`` before passing the
-        result downstream**: on a zero-unit sort ``curation_id`` and
-        ``merge_id`` are ``None`` (no curation/merge was created), and
-        passing ``None`` into a merge-keyed consumer would fail.
+        Downstream consumers should key off ``merge_id``. A zero-unit
+        sort yields an empty curation/merge row (matching v1's empty
+        Units table), not ``None``, so the result is always
+        merge-keyable.
 
     Raises
     ------
@@ -219,14 +219,9 @@ def run_v2_pipeline(
     )
     Sorting.populate(sort_pk, reserve_jobs=False)
 
-    # Zero-unit short-circuit: SI's ``NwbSortingExtractor`` cannot
-    # open an empty units NWB (no ``spike_times`` column to read),
-    # which makes ``CurationV2.insert_curation`` crash mid-stage on
-    # a sort that legitimately found no peaks. When the sort has
-    # zero units, return a partial manifest with
-    # ``curation_id``/``merge_id`` set to None. The Sorting row is
-    # still populated and visible to the user; they can re-run with
-    # a lower ``detect_threshold`` or skip the merge step.
+    # Zero units is a legitimate result on a quiet shank. Unless the
+    # caller set require_units=True, proceed to build an empty (but real)
+    # curation + merge row so the result is merge-keyable like any other.
     n_units = int((Sorting & sort_pk).fetch1("n_units"))
     if n_units == 0:
         recording_id = rec_pk["recording_id"]
@@ -238,23 +233,18 @@ def run_v2_pipeline(
                 "detect_threshold / the artifact mask, or call with "
                 "require_units=False to accept the empty result."
             )
+        # Fall through to the normal curation + merge insert. A
+        # zero-unit sort yields an EMPTY (but real) curation + merge row
+        # -- matching v1, which writes an empty Units table -- so
+        # downstream consumers treat it like any other
+        # SpikeSortingOutput row instead of special-casing a None
+        # merge_id.
         logger.warning(
             "run_v2_pipeline: zero units for recording_id="
             f"{recording_id} (sorting_id={sort_pk['sorting_id']}); "
-            "curation/merge skipped -- returning a partial manifest with "
-            "curation_id=merge_id=None. Check detect_threshold / the "
-            "artifact mask. Callers MUST check merge_id is not None "
-            "before passing this result downstream."
+            "writing an EMPTY curation + merge row. Check "
+            "detect_threshold / the artifact mask if you expected output."
         )
-        return {
-            "preset": preset,
-            "recording_id": recording_id,
-            "artifact_id": art_pk["artifact_id"],
-            "sorting_id": sort_pk["sorting_id"],
-            "curation_id": None,
-            "merge_id": None,
-            "n_units": 0,
-        }
 
     # Idempotent curation: if a root (parent_curation_id=-1) curation
     # already exists for this sorting, reuse it; otherwise insert a
