@@ -496,7 +496,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         # ``v1/sorting.py:597``. When ``artifact_id`` is unset the
         # caller (make_compute) falls back to the recording's
         # full timestamp envelope.
-        if sel_row.get("artifact_id"):
+        if sel_row.get("artifact_id") is not None:
             from spyglass.spikesorting.v2.utils import (
                 artifact_interval_list_name,
             )
@@ -555,7 +555,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         recording_id = source.key["recording_id"]
         recording = Recording().get_recording({"recording_id": recording_id})
 
-        if sel_row.get("artifact_id") and obs_intervals is not None:
+        if sel_row.get("artifact_id") is not None and obs_intervals is not None:
             recording = self._apply_artifact_mask(
                 recording=recording,
                 valid_times=obs_intervals,
@@ -875,7 +875,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         recording = Recording().get_recording(
             {"recording_id": source.key["recording_id"]}
         )
-        if sel_row.get("artifact_id"):
+        if sel_row.get("artifact_id") is not None:
             from spyglass.common.common_interval import IntervalList
             from spyglass.spikesorting.v2.recording import RecordingSelection
             from spyglass.spikesorting.v2.utils import (

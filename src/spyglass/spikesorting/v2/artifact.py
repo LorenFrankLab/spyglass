@@ -724,7 +724,14 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
             recording = Recording().get_recording(
                 {"recording_id": source.key["recording_id"]}
             )
-            valid_times = self._detect_artifacts(recording, validated)
+            valid_times = self._detect_artifacts(
+                recording,
+                validated,
+                context=(
+                    f" for artifact_id={key['artifact_id']}, "
+                    f"recording_id={source.key['recording_id']}"
+                ),
+            )
             return ArtifactComputed(
                 valid_times=valid_times,
                 nwb_file_name=nwb_file_name,
@@ -751,7 +758,15 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         # ``nwb_file_name`` so their time axes match by
         # construction.
         unioned = si.aggregate_channels(per_member_recordings)
-        valid_times = self._detect_artifacts(unioned, validated)
+        valid_times = self._detect_artifacts(
+            unioned,
+            validated,
+            context=(
+                f" for artifact_id={key['artifact_id']}, "
+                f"shared_artifact_group="
+                f"{source.key['shared_artifact_group_name']}"
+            ),
+        )
         # One IntervalList row per distinct member nwb_file_name;
         # ``insert_group`` enforces single-session, so the distinct
         # set has length 1 today, but keep the tuple shape so a
@@ -811,12 +826,19 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
             self.insert1(key)
 
     @staticmethod
-    def _detect_artifacts(recording, validated):
+    def _detect_artifacts(recording, validated, context=""):
         """Run amplitude / z-score artifact scan on a SI recording.
 
         Returns an ``ndarray`` of shape ``(n_intervals, 2)`` containing
         the artifact-removed valid times in seconds. When ``detect`` is
         False the full recording window is returned untouched.
+
+        ``context`` is an optional caller-supplied string (e.g.
+        ``" for artifact_id=... recording_id=..."``) appended to the
+        zero-frames warning so an operator can identify which selection
+        scanned empty. The active thresholds are added from
+        ``validated``; ``_detect_artifacts`` itself does not receive the
+        keys, so the caller passes the identity context.
         """
         import numpy as _np
 
@@ -906,9 +928,12 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
             # downstream consumer noticing "all valid times" can see
             # whether detection was attempted-and-empty vs skipped.
             logger.warning(
-                "ArtifactDetection: scan found zero artifact frames; "
-                "returning the full recording window as a single "
-                "valid interval."
+                "ArtifactDetection: scan found zero artifact frames"
+                f"{context} (amplitude_thresh_uV="
+                f"{validated.amplitude_thresh_uV}, zscore_thresh="
+                f"{validated.zscore_thresh}, proportion_above_thresh="
+                f"{validated.proportion_above_thresh}); returning the "
+                "full recording window as a single valid interval."
             )
             return _np.asarray([[timestamps[0], timestamps[-1]]])
 
@@ -1057,6 +1082,7 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         ``nwb_file_name``s) up front, delete the master row(s) via
         ``super().delete``, then drop the matching IntervalList rows.
         """
+        from spyglass.spikesorting.v2.exceptions import SchemaBypassError
         from spyglass.spikesorting.v2.recording import RecordingSelection
 
         from spyglass.spikesorting.v2.utils import (
@@ -1070,12 +1096,15 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         for row in self.fetch(as_dict=True):
             try:
                 source = ArtifactSelection.resolve_source(row)
-            except Exception as resolve_exc:
-                # Surface the swallow so a broken ``resolve_source``
-                # does not silently leave ``IntervalList`` rows
-                # behind. The row's master is still deleted by the
-                # cascade below; only the paired IntervalList cleanup
-                # is skipped here.
+            except SchemaBypassError as resolve_exc:
+                # A genuinely broken source (zero/multiple source part
+                # rows -- the only thing ``resolve_source`` raises) cannot
+                # be resolved to its IntervalList target. Log, skip ITS
+                # paired cleanup, and let the master delete proceed. Any
+                # OTHER exception is an unexpected bug: DO NOT swallow it
+                # (a broad ``except`` would silently orphan IntervalList
+                # rows). Let it propagate to abort the delete BEFORE the
+                # master is removed, so the operator sees the failure.
                 logger.error(
                     "ArtifactDetection.delete: resolve_source failed for "
                     f"{ {k: row[k] for k in ('artifact_id',)} }; leaving "

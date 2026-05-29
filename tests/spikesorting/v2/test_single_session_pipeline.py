@@ -7714,3 +7714,157 @@ def test_clusterless_thresholder_ground_truth(
             f"the planted population -- possible noise_levels / "
             f"threshold regression.{summary}"
         )
+
+
+# ---------- MEDIUM error-handling fixes ----------------------------------
+
+
+def test_artifact_empty_warning_has_context(dj_conn, monkeypatch):
+    """The zero-artifact-frames warning names the artifact_id and the
+    active thresholds, not just a bare 'zero frames' message.
+    """
+    import numpy as np
+
+    from spyglass.spikesorting.v2 import artifact as artifact_mod
+    from spyglass.spikesorting.v2._params.artifact_detection import (
+        ArtifactDetectionParamsSchema,
+    )
+
+    captured = []
+    monkeypatch.setattr(
+        artifact_mod.logger,
+        "warning",
+        lambda msg, *a, **k: captured.append(msg),
+    )
+
+    rec = _build_synthetic_rec(np.zeros((1000, 4), dtype=np.float32))
+    validated = ArtifactDetectionParamsSchema(
+        detect=True, amplitude_thresh_uV=500.0
+    )
+    out = artifact_mod.ArtifactDetection._detect_artifacts(
+        rec, validated, context=" for artifact_id=abc-123"
+    )
+    assert out.shape == (1, 2)  # full window returned on zero artifacts
+    assert any("abc-123" in m for m in captured), captured
+    assert any("amplitude_thresh_uV" in m for m in captured)
+
+
+@pytest.mark.slow
+def test_set_group_by_column_surfaces_unitrode_skip(polymer_smoke_session):
+    """``set_group_by_electrode_table_column`` returns a skip summary for
+    a single-channel (unitrode) group instead of silently succeeding.
+    """
+    from spyglass.common.common_ephys import Electrode
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    _clean_session_v2(polymer_smoke_session)
+    eids = sorted(
+        int(e)
+        for e in (
+            Electrode
+            & {"nwb_file_name": nwb_file_name, "bad_channel": "False"}
+        ).fetch("electrode_id")
+    )
+    assert len(eids) >= 3
+
+    skipped = SortGroupV2.set_group_by_electrode_table_column(
+        nwb_file_name=nwb_file_name,
+        column="electrode_id",
+        groups=[[eids[0]], [eids[1], eids[2]]],
+        omit_unitrode=True,
+    )
+    assert isinstance(skipped, list)
+    assert any(s["reason"] == "unitrode" for s in skipped), skipped
+    # The kept 2-channel group was still created.
+    assert len(SortGroupV2 & polymer_smoke_session) == 1
+
+
+@pytest.mark.slow
+def test_artifact_delete_aborts_on_unexpected_resolve_error(
+    populated_recording, monkeypatch
+):
+    """An UNEXPECTED resolve_source error during ``delete()`` aborts the
+    delete (master not removed) rather than swallowing it and orphaning
+    IntervalList rows. Only the documented SchemaBypassError is
+    tolerated.
+    """
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactDetectionParameters,
+        ArtifactSelection,
+    )
+
+    ArtifactDetectionParameters.insert_default()
+    art_pk = ArtifactSelection.insert_selection(
+        {
+            "recording_id": populated_recording["recording_id"],
+            "artifact_params_name": "default",
+        }
+    )
+    ArtifactDetection.populate(art_pk, reserve_jobs=False)
+    assert len(ArtifactDetection & art_pk) == 1
+
+    def _boom(cls, key):
+        raise RuntimeError("boom-unexpected-resolve")
+
+    monkeypatch.setattr(
+        ArtifactSelection, "resolve_source", classmethod(_boom)
+    )
+    with pytest.raises(RuntimeError, match="boom-unexpected-resolve"):
+        (ArtifactDetection & art_pk).delete(safemode=False)
+    # Aborted before super().delete(): the master row is still present.
+    assert len(ArtifactDetection & art_pk) == 1
+
+
+@pytest.mark.slow
+def test_curation_labels_warn_on_stray_unit_ids(
+    populated_sorting, monkeypatch
+):
+    """``insert_curation`` warns when labels reference a unit_id not in
+    the sorting (the stray label would otherwise vanish silently).
+    """
+    from spyglass.spikesorting.v2 import curation as curation_mod
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    _clear_curations(populated_sorting)
+    captured = []
+    monkeypatch.setattr(
+        curation_mod.logger,
+        "warning",
+        lambda msg, *a, **k: captured.append(msg),
+    )
+    CurationV2.insert_curation(
+        sorting_key=populated_sorting,
+        labels={999999: ["noise"]},  # not a real unit_id
+        description="stray-label test",
+    )
+    assert any("999999" in m for m in captured), captured
+
+
+@pytest.mark.slow
+def test_curation_insert_idempotent_rejects_new_args(populated_sorting):
+    """Re-inserting a root curation with non-default args raises (the
+    args would be silently ignored); ``reuse_existing=True`` allows it.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    _clear_curations(populated_sorting)
+    pk = CurationV2.insert_curation(sorting_key=populated_sorting, labels={})
+
+    # A non-default description on a second root insert would be silently
+    # dropped by the idempotent reuse -> raises. (Uses description rather
+    # than labels so the test does not depend on the smoke sort's
+    # non-deterministic unit count.)
+    with pytest.raises(ValueError, match="already exists"):
+        CurationV2.insert_curation(
+            sorting_key=populated_sorting, description="changed description"
+        )
+
+    # reuse_existing=True returns the existing root without raising.
+    reused = CurationV2.insert_curation(
+        sorting_key=populated_sorting,
+        description="changed description",
+        reuse_existing=True,
+    )
+    assert reused["curation_id"] == pk["curation_id"]

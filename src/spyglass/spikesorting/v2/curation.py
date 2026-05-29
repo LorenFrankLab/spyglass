@@ -140,6 +140,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         apply_merge: bool = False,
         description: str = "",
         metrics_source: str | MetricsSource = "manual",
+        reuse_existing: bool = False,
     ) -> dict:
         """Insert master + Unit + UnitLabel rows; stage curated-units NWB.
 
@@ -213,6 +214,20 @@ class CurationV2(SpyglassMixin, dj.Manual):
 
         cls._validate_labels(labels)
 
+        # Warn on labels keyed by unit_ids that are not in the sorting:
+        # ``_stage_curated_units_nwb`` only writes labels for kept units
+        # (``labels.get(kept_uid, [])``), so a stray key would vanish
+        # silently rather than surfacing the caller's mistake.
+        valid_unit_ids = {int(r["unit_id"]) for r in sorting_units}
+        stray_label_ids = set(labels) - valid_unit_ids
+        if stray_label_ids:
+            logger.warning(
+                "CurationV2.insert_curation: labels reference unit_id(s) "
+                f"{sorted(stray_label_ids)} not in Sorting.Unit for "
+                f"sorting_id={sorting_id}; those labels are ignored. "
+                f"Valid unit_ids: {sorted(valid_unit_ids)}."
+            )
+
         if parent_curation_id != -1:
             if not (
                 cls
@@ -242,6 +257,23 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 }
             ).fetch("KEY", as_dict=True)
             if existing_root:
+                # A root curation already exists. If the caller passed
+                # non-default labels / merge_groups / description, those
+                # would be SILENTLY ignored by returning the existing
+                # row -- a parameter-change-with-no-effect footgun. Raise
+                # unless the caller explicitly opts into reuse.
+                if (
+                    bool(labels) or bool(merge_groups) or bool(description)
+                ) and not reuse_existing:
+                    raise ValueError(
+                        "CurationV2.insert_curation: a root curation "
+                        f"already exists for sorting_id={sorting_id}, but "
+                        "you passed labels/merge_groups/description that "
+                        "would be silently ignored. Pass "
+                        "reuse_existing=True to reuse the existing root, "
+                        "or curate as a child with "
+                        "parent_curation_id=<existing root curation_id>."
+                    )
                 logger.warning(
                     "CurationV2.insert_curation: root curation already "
                     f"exists for sorting_id={sorting_id}; returning "

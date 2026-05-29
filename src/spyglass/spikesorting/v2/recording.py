@@ -201,7 +201,7 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         sort_group_ids: list[int] | None = None,
         delete_existing_entries: bool = False,
         confirm: bool = False,
-    ) -> None:
+    ) -> list[dict]:
         """Auto-group electrodes by probe shank.
 
         Tetrodes (one shank per probe) yield one sort group per
@@ -251,6 +251,7 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
             key=lambda x: int(x),
         )
         proposed: list[tuple[str, np.ndarray]] = []
+        skipped: list[dict] = []
         for e_group in e_groups:
             in_group = electrodes["electrode_group_name"] == e_group
             shanks = np.unique(electrodes["probe_shank"][in_group])
@@ -262,6 +263,13 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
                         f"set_group_by_shank: skipping {nwb_file_name!r} "
                         f"electrode group {e_group} shank {shank} -- "
                         "single-channel unitrode."
+                    )
+                    skipped.append(
+                        {
+                            "electrode_group_name": str(e_group),
+                            "shank": int(shank),
+                            "reason": "unitrode",
+                        }
                     )
                     continue
                 if omit_ref_electrode_group:
@@ -278,6 +286,13 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
                                 f"{nwb_file_name!r} electrode group "
                                 f"{e_group} -- contains the reference "
                                 f"electrode."
+                            )
+                            skipped.append(
+                                {
+                                    "electrode_group_name": str(e_group),
+                                    "shank": int(shank),
+                                    "reason": "reference_electrode_group",
+                                }
                             )
                             continue
                 proposed.append((e_group, group_elecs))
@@ -346,6 +361,18 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
             cls.insert(master_rows)
             cls.SortGroupElectrode.insert(part_rows)
 
+        # Surface the skips as a consolidated summary (not only buried
+        # per-group warnings) and return them so a caller can inspect
+        # what was dropped rather than silently trusting "success".
+        if skipped:
+            logger.warning(
+                f"set_group_by_shank: created {len(proposed)} sort "
+                f"group(s) for {nwb_file_name!r}; SKIPPED {len(skipped)} "
+                f"({skipped}). Set omit_unitrode=False / "
+                "omit_ref_electrode_group=False to include them."
+            )
+        return skipped
+
     @classmethod
     def set_group_by_electrode_table_column(
         cls,
@@ -358,7 +385,7 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         omit_unitrode: bool = True,
         delete_existing_entries: bool = False,
         confirm: bool = False,
-    ) -> None:
+    ) -> list[dict]:
         """Group electrodes by any column on the Electrode table.
 
         Generalizes ``set_group_by_shank`` for labs whose grouping is
@@ -431,6 +458,7 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
             )
 
         proposed: list[tuple[int, np.ndarray]] = []
+        skipped: list[dict] = []
         for sg_id, values in zip(sort_group_ids, groups):
             mask = np.isin(electrodes[resolved_column], values)
             group_elecs = electrodes[mask]
@@ -444,6 +472,9 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
                 logger.warning(
                     f"set_group_by_electrode_table_column: skipping sort "
                     f"group {sg_id} -- single-channel unitrode."
+                )
+                skipped.append(
+                    {"sort_group_id": int(sg_id), "reason": "unitrode"}
                 )
                 continue
             proposed.append((sg_id, group_elecs))
@@ -487,6 +518,15 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         with transaction_or_noop(cls.connection):
             cls.insert(master_rows)
             cls.SortGroupElectrode.insert(part_rows)
+
+        if skipped:
+            logger.warning(
+                f"set_group_by_electrode_table_column: created "
+                f"{len(proposed)} sort group(s) for {nwb_file_name!r}; "
+                f"SKIPPED {len(skipped)} ({skipped}). Set "
+                "omit_unitrode=False to include them."
+            )
+        return skipped
 
 
 @schema
