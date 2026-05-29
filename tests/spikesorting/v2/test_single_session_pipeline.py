@@ -4520,9 +4520,10 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
     polymer_60s_session,
 ):
     """``CurationV2.insert_curation`` with ``merge_groups`` +
-    ``apply_merge=True`` writes a curated NWB whose unit_ids are
-    the merge-group heads, and whose merged unit's spike train is
-    the sorted union of its contributors.
+    ``apply_merge=True`` writes a curated NWB whose merged-unit id is a
+    fresh ``max(source unit_ids) + 1`` (v1 parity, ``v1/curation.py:361``)
+    and whose merged spike train is the sorted union of its contributors.
+    Surviving source units are written first; merged ids are appended.
 
     Exercises ``_build_curated_unit_rows`` with a non-empty merge
     list (amplitude-inheritance: kept unit gets electrode/amplitude
@@ -4670,6 +4671,20 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
         f"{merged_row['n_spikes']}; expected {len(expected_merged)}."
     )
     assert merged_row["n_spikes"] == len(merged_times)
+
+    # v1-parity unit ORDER: surviving source units first (in original
+    # source order), then the appended merged id last. Matches v1's
+    # pop-then-append pattern AND SI's lazy MergeUnitsSorting (originals
+    # retained + merged appended), so unit-array consumers comparing
+    # applied vs preview/lazy paths see the same per-unit order.
+    expected_order = [u for u in units if u not in (head, absorbed)] + [
+        merged_id
+    ]
+    actual_order = [int(u) for u in curated_sorting.get_unit_ids()]
+    assert actual_order == expected_order, (
+        f"NWB unit order = {actual_order}; expected {expected_order} "
+        "(surviving source units first, merged_id appended last)."
+    )
 
     # --- v1-parity PREVIEW half (apply_merge=False), reusing the sort.
     # A preview curation keeps EVERY original unit (the contributor is

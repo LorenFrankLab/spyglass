@@ -543,8 +543,16 @@ class CurationV2(SpyglassMixin, dj.Manual):
         # A unit may appear in at most one merge group: the overlap
         # check below would otherwise silently double-count spikes when
         # apply_merge=True and ambiguate the kept-unit choice.
+        # Validate merge groups and stage their (key, contributors) pairs
+        # WITHOUT inserting them yet -- we want kept_to_contributors's
+        # insertion order to be "surviving source units first (in
+        # original source order), then merged kept ids appended in
+        # merge-group order." That matches v1's pop-then-append pattern
+        # (``v1/curation.py:359``) AND SI's lazy MergeUnitsSorting
+        # (originals retained + merged appended), so unit-array consumers
+        # comparing applied vs preview/lazy paths see the same order.
         merged_ids: set[int] = set()
-        kept_to_contributors: dict[int, list[int]] = {}
+        merge_specs: list[tuple[int, list[int]]] = []
         next_merged_id = max(by_id) + 1
         for group in merge_groups:
             if not group:
@@ -569,13 +577,17 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 next_merged_id += 1
             else:
                 key = int_group[0]
-            kept_to_contributors[key] = int_group
+            merge_specs.append((key, int_group))
             merged_ids.update(int_group)
 
-        # Non-merged units pass through 1:1.
+        kept_to_contributors: dict[int, list[int]] = {}
+        # Non-merged units FIRST, in original source order.
         for uid in by_id:
             if uid not in merged_ids:
                 kept_to_contributors[uid] = [uid]
+        # Then merge groups, appended in input order.
+        for key, int_group in merge_specs:
+            kept_to_contributors[key] = int_group
 
         # Symmetric provenance for apply_merge=False: absorbed
         # contributors still get a CurationV2.Unit row (preview parity),
@@ -641,12 +653,20 @@ class CurationV2(SpyglassMixin, dj.Manual):
         """Write the curated-units NWB. Returns (analysis_file_name, units_object_id).
 
         With ``apply_merge=True`` the kept unit's spike train is the
-        union of its contributors' spike trains. With
-        ``apply_merge=False`` only the non-merged units (and the
-        first/head id of each merge group, taken from the source) are
-        written 1:1 -- merge edits can still be reviewed before
-        committing. CurationV2.Unit reflects the post-merge set
-        regardless.
+        sorted union of its contributors' spike trains and its id is a
+        fresh ``max(source unit_ids) + 1`` (v1 parity); the absorbed
+        contributors are dropped from both the NWB and ``CurationV2.Unit``.
+        Surviving source units are written first (in source order) and
+        merged ids are appended -- matching v1's pop-then-append and SI's
+        lazy ``MergeUnitsSorting`` order so unit-array consumers see the
+        same per-unit order whether the merge was applied or applied
+        lazily.
+
+        With ``apply_merge=False`` (preview) every original unit is
+        written 1:1 -- contributors included -- so the proposed merge
+        can be reviewed before committing; the merge structure lives in
+        ``CurationV2.MergeGroup`` and is reconstructed by
+        ``get_merged_sorting`` on demand.
         """
         import numpy as _np
         import pynwb
