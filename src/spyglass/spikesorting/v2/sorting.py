@@ -1176,11 +1176,22 @@ class Sorting(SpyglassMixin, dj.Computed):
             params["noise_levels"] = nl
 
         method = params.pop("method", "locally_exclusive")
+        # ``random_seed`` is a Spyglass-side knob (already threaded into
+        # ``random_slices_kwargs`` above for the noise_levels=None path);
+        # it is NOT a valid SI job kwarg, so leaving it in ``job_kwargs``
+        # makes ``detect_peaks`` -> ``fix_job_kwargs`` raise
+        # ``AssertionError: random_seed is not a valid job keyword
+        # argument``. Strip it before the call.
+        detect_job_kwargs = {
+            k: v
+            for k, v in (job_kwargs or {}).items()
+            if k != "random_seed"
+        }
         detected = detect_peaks(
             recording,
             method=method,
             method_kwargs=params,
-            job_kwargs=(job_kwargs or None),
+            job_kwargs=(detect_job_kwargs or None),
         )
         # SI 0.104 renamed ``from_times_labels`` to
         # ``from_samples_and_labels`` (sample indices); ``detect_peaks``
@@ -1312,6 +1323,15 @@ class Sorting(SpyglassMixin, dj.Computed):
                 return sis.run_sorter(**run_kwargs, **effective_params)
             finally:
                 if sj_kwargs:
+                    # ``set_global_job_kwargs`` UPDATES (does not
+                    # replace) the global, so a job kwarg the sort
+                    # installed that was ABSENT from the prior global
+                    # (chunk_size / total_memory / chunk_memory are not
+                    # in SI's default global set) would leak into every
+                    # later populate. Reset to the baseline first, then
+                    # re-apply the captured prior global for an exact
+                    # restore.
+                    _si.reset_global_job_kwargs()
                     _si.set_global_job_kwargs(**previous_global)
         finally:
             # ``TemporaryDirectory`` auto-cleans on garbage collection,

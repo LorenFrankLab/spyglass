@@ -3804,6 +3804,87 @@ def _build_synthetic_rec(traces, fs=30_000.0):
     return rec
 
 
+def test_run_si_sorter_restores_global_job_kwargs(dj_conn, monkeypatch):
+    """R3: ``_run_si_sorter`` leaves SI's global job kwargs byte-identical
+    to their pre-sort state.
+
+    ``set_global_job_kwargs`` UPDATES the global rather than replacing it,
+    so a job kwarg the sort installs that is absent from the default
+    global set (``chunk_size``/``total_memory``/``chunk_memory``) would
+    otherwise leak into every later populate. The actual sort is stubbed
+    so only the save/restore is exercised.
+    """
+    import numpy as np
+    import spikeinterface as si
+    import spikeinterface.sorters as sis
+
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    si.reset_global_job_kwargs()
+    before = dict(si.get_global_job_kwargs())
+    assert "chunk_size" not in before  # the key we expect could leak
+
+    monkeypatch.setattr(sis, "run_sorter", lambda **kw: "DUMMY")
+
+    rec = _build_synthetic_rec(np.zeros((1000, 4), dtype=np.float32))
+    out = Sorting._run_si_sorter(
+        sorter="mountainsort5",
+        sorter_params={"whiten": False},
+        recording=rec,
+        sorting_id="r3_test",
+        job_kwargs={"n_jobs": 1, "chunk_size": 1000},
+    )
+    assert out == "DUMMY"
+
+    after = dict(si.get_global_job_kwargs())
+    assert after == before, (
+        f"global job kwargs leaked across the sort: before={before}, "
+        f"after={after}"
+    )
+    assert "chunk_size" not in after
+    si.reset_global_job_kwargs()
+
+
+def test_clusterless_detect_peaks_strips_random_seed(dj_conn, monkeypatch):
+    """R4: ``_run_clusterless_thresholder`` strips ``random_seed`` from the
+    job kwargs before calling ``detect_peaks``.
+
+    ``random_seed`` is a Spyglass-side knob (already threaded into
+    ``random_slices_kwargs``); it is not a valid SI job kwarg, so SI's
+    ``fix_job_kwargs`` raises ``AssertionError`` if it reaches
+    ``detect_peaks``. ``detect_peaks`` is stubbed to capture the job
+    kwargs it receives.
+    """
+    import numpy as np
+    import spikeinterface.sortingcomponents.peak_detection as pd_mod
+
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    captured = {}
+
+    def _fake_detect_peaks(
+        recording, method=None, method_kwargs=None, job_kwargs=None
+    ):
+        captured["job_kwargs"] = job_kwargs
+        return np.array([(10,)], dtype=[("sample_index", "<i8")])
+
+    monkeypatch.setattr(pd_mod, "detect_peaks", _fake_detect_peaks)
+
+    rec = _build_synthetic_rec(np.zeros((1000, 4), dtype=np.float32))
+    Sorting._run_clusterless_thresholder(
+        sorter_params={"detect_threshold": 5.0, "noise_levels": [1.0]},
+        recording=rec,
+        job_kwargs={"random_seed": 7, "n_jobs": 1},
+    )
+
+    jk = captured["job_kwargs"]
+    assert jk is not None, "detect_peaks was not called"
+    assert "random_seed" not in jk, (
+        f"random_seed leaked into detect_peaks job kwargs: {jk}"
+    )
+    assert jk.get("n_jobs") == 1  # other kwargs preserved
+
+
 def test_detect_artifacts_zscore_only_detection(dj_conn):
     """``_detect_artifacts`` runs the z-score-only branch when
     ``amplitude_thresh_uV is None``.
