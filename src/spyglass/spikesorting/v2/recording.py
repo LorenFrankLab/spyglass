@@ -763,8 +763,8 @@ class Recording(SpyglassMixin, dj.Computed):
     sampling_frequency: float
     duration_s: float
     cache_hash: char(64)
-    timestamps_adjusted=0: bool   # non-monotonic timestamps were repaired
-    n_adjusted_samples=0: int     # count of samples moved by the repair
+    timestamps_adjusted=0: bool   # source recording's timestamps were repaired
+    n_adjusted_samples=0: int     # source-wide count of repaired samples
     """
 
     # ``_parallel_make = True`` lets Spyglass's ``PopulateMixin``
@@ -1168,11 +1168,13 @@ class Recording(SpyglassMixin, dj.Computed):
         Returns ``(analysis_file_name, object_id, cache_hash,
         sampling_frequency, saved_start, saved_end, n_channels,
         duration_s, timestamps_adjusted, n_adjusted_samples)`` -- the
-        metadata needed for the ``RecordingComputed`` boxing. The last
-        two are provenance for the non-monotonic-timestamp repair
-        (``timestamps_adjusted`` is ``n_adjusted_samples > 0``).
-        ``recording_id`` is threaded only so the repair warning names
-        the row; it does not affect the computation.
+        metadata needed for the ``RecordingComputed`` boxing.
+        ``saved_start``/``saved_end``/``duration_s`` describe the
+        PERSISTED timestamps (the override when set). The last two are
+        SOURCE-WIDE repair provenance (``timestamps_adjusted`` is
+        ``n_adjusted_samples > 0``): the count is across the full source,
+        not this recording's selected window. ``recording_id`` is
+        threaded only so the repair warning names the row.
 
         Cleanup contract: ``_write_nwb_artifact`` either writes a
         full file or raises before any registration; if a later
@@ -1193,27 +1195,33 @@ class Recording(SpyglassMixin, dj.Computed):
         recording = se.read_nwb_recording(raw_path, load_time_vector=True)
         sampling_frequency = float(recording.get_sampling_frequency())
 
-        # Non-monotonic timestamp repair. See ``_repaired_timestamps``
-        # for the rationale + algorithm. ``n_changed`` is the count of
-        # samples the repair moved (0 on the no-repair fast path); it is
-        # persisted as provenance so a time-mutated recording is
-        # queryable instead of silently rewritten.
+        # Non-monotonic timestamp repair. See ``_repaired_timestamps``.
+        # ``n_changed`` counts repaired samples across the FULL SOURCE
+        # recording -- the repair runs before interval selection and
+        # informs the consolidation boundaries globally. The
+        # ``timestamps_adjusted`` / ``n_adjusted_samples`` columns are
+        # therefore SOURCE-WIDE provenance: they record that this
+        # recording's source needed repair, and the count may exceed the
+        # number of changed samples inside this recording's selected
+        # window (a repair entirely outside the window still sets them).
         all_timestamps, n_changed = self._repaired_timestamps(
             recording, raw_path, recording_id=recording_id
         )
         timestamps_adjusted = n_changed > 0
         n_adjusted_samples = int(n_changed)
 
-        recording, timestamps_override = self._restrict_recording(
-            recording=recording,
-            nwb_file_name=nwb_file_name,
-            interval_list_name=interval_list_name,
-            sort_group_channel_ids=channel_ids,
-            ref_channel_id=ref_channel_id,
-            sort_valid_times=sort_valid_times,
-            raw_valid_times=raw_valid_times,
-            min_segment_length=preproc_validated.min_segment_length,
-            corrected_timestamps=all_timestamps,
+        recording, timestamps_override, n_selected_intervals = (
+            self._restrict_recording(
+                recording=recording,
+                nwb_file_name=nwb_file_name,
+                interval_list_name=interval_list_name,
+                sort_group_channel_ids=channel_ids,
+                ref_channel_id=ref_channel_id,
+                sort_valid_times=sort_valid_times,
+                raw_valid_times=raw_valid_times,
+                min_segment_length=preproc_validated.min_segment_length,
+                corrected_timestamps=all_timestamps,
+            )
         )
         recording = self._apply_pre_motion_preprocessing(
             recording=recording,
@@ -1240,7 +1248,20 @@ class Recording(SpyglassMixin, dj.Computed):
                 existing_analysis_file_name=existing_analysis_file_name,
                 timestamps_override=timestamps_override,
             )
-            saved_times = _get_recording_timestamps(recording)
+            # For a single contiguous interval, derive saved
+            # start/end/duration from the persisted (repaired) override
+            # so the row matches the cached timestamps rather than the
+            # frame-slice's uncorrected ``get_times()``. For a
+            # multi-interval concat the override is the gap-spanning
+            # wall-clock envelope; its span would over-count by the gaps
+            # and break the truncation guard, so use the concat's own
+            # gap-excluded times there.
+            if n_selected_intervals == 1:
+                saved_times = _get_recording_timestamps(
+                    recording, override=timestamps_override
+                )
+            else:
+                saved_times = _get_recording_timestamps(recording)
             saved_start = float(saved_times[0])
             saved_end = float(saved_times[-1])
             n_channels = int(recording.get_num_channels())
@@ -1293,22 +1314,26 @@ class Recording(SpyglassMixin, dj.Computed):
     ):
         """Slice the SI recording in time and channels.
 
-        Returns ``(recording, timestamps_override)``:
+        Returns ``(recording, timestamps_override, n_selected_intervals)``:
 
         - ``recording`` is the time- and channel-restricted SI
-          recording. For a single-interval intersection it is a
-          ``frame_slice``; for a multi-interval intersection it is
+          recording. A single selected interval yields a
+          ``frame_slice``; several yield
           ``concatenate_recordings(sliced)``.
-        - ``timestamps_override`` is ``None`` for the single-interval
-          path (the recording's own ``get_times()`` returns the
-          right wall-clock values). For the multi-interval path it
-          is the concatenated per-interval timestamps array, which
-          the caller must pass through to ``_write_nwb_artifact``
-          as ``timestamps_override=`` -- otherwise SI's
-          ``concatenate_recordings`` (which defaults to
-          ``ignore_times=True``) strips the wall-clock timestamps
-          off each segment and the written ``ElectricalSeries``
-          timestamps would be a synthetic 0-based array.
+        - ``timestamps_override`` is the persisted wall-clock timestamp
+          vector -- ``times[s:e]`` for the single-interval path, the
+          concatenated per-interval slices for the multi-interval path.
+          It carries the monotonicity repair (and, for the concat, the
+          wall-clock gaps) that SI's ``frame_slice`` /
+          ``concatenate_recordings(ignore_times=True)`` drop from
+          ``recording.get_times()``. The caller passes it to
+          ``_write_nwb_artifact`` as ``timestamps_override=``.
+        - ``n_selected_intervals`` is the number of consolidated
+          intervals (1 ==> single contiguous ``frame_slice``; >1 ==>
+          gap-spanning concat). The caller derives the saved
+          start/end/duration from the override only when this is 1, so
+          the multi-interval gap envelope never feeds the truncation
+          guard (which needs the gap-excluded span).
 
         The reference channel is included in the slice when it is
         a positive electrode id so ``common_reference`` can
@@ -1421,7 +1446,7 @@ class Recording(SpyglassMixin, dj.Computed):
             channel_ids=si_ids,
             renamed_channel_ids=slice_ids,
         )
-        return recording, timestamps_override
+        return recording, timestamps_override, len(intervals_in_frames)
 
     @staticmethod
     def _spikeinterface_channel_ids(
@@ -1484,14 +1509,15 @@ class Recording(SpyglassMixin, dj.Computed):
     def _repaired_timestamps(recording, raw_path, recording_id=None):
         """Return ``(timestamps, n_changed)`` for ``recording``.
 
-        ``timestamps`` is the monotonicity-corrected vector and
-        ``n_changed`` is the number of samples the repair moved (0 on
-        the no-repair fast path). The caller persists ``n_changed`` as
-        ``Recording.n_adjusted_samples`` provenance so a time-mutated
-        recording is queryable rather than silently rewritten. The
-        repair is always-on and lives here, at the ``Recording`` level,
-        rather than in ``PreprocessingParamsSchema`` -- so toggling it
-        in the future would not force a params-schema version bump.
+        ``timestamps`` is the monotonicity-corrected full-source vector
+        and ``n_changed`` is the number of samples the repair moved
+        across the WHOLE source (0 on the no-repair fast path). The
+        caller persists it as ``Recording.n_adjusted_samples`` -- a
+        SOURCE-WIDE provenance count, not a per-selected-window count --
+        so a time-mutated source is queryable rather than silently
+        rewritten. The repair is always-on and lives here, at the
+        ``Recording`` level, rather than in ``PreprocessingParamsSchema``,
+        so a future toggle would not force a params-schema version bump.
 
         Raw NWBs with floating-point precision artifacts at epoch
         stitch boundaries can have non-strictly-increasing

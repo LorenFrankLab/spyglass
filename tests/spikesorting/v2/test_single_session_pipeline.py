@@ -1559,16 +1559,21 @@ def test_recording_single_interval_persists_repaired_timestamps(
         }
     )
 
-    # Return a corrected vector shifted by a tiny (consolidation-safe)
-    # delta so it is detectably distinct from the source's own times.
-    delta = 1e-7
+    # Return a corrected vector with a tiny ascending ramp: detectably
+    # distinct from the source's own times AND with a slightly larger
+    # span, so the row's duration_s (derived from the persisted vector)
+    # differs from the frame-slice's own span. The ramp end (~2e-5 s) is
+    # below both the sample spacing (no consolidation-boundary shift) and
+    # the truncation tolerance (no spurious RecordingTruncatedError).
     orig_repaired = Recording._repaired_timestamps
 
     def _shifted(recording, raw_path, recording_id=None):
         timestamps, _ = orig_repaired(
             recording, raw_path, recording_id=recording_id
         )
-        return _np.asarray(timestamps) + delta, 5
+        timestamps = _np.asarray(timestamps)
+        ramp = _np.linspace(0.0, 2e-5, len(timestamps))
+        return timestamps + ramp, 5
 
     monkeypatch.setattr(
         Recording, "_repaired_timestamps", staticmethod(_shifted)
@@ -1604,9 +1609,23 @@ def test_recording_single_interval_persists_repaired_timestamps(
             "single-interval write got timestamps_override=None; the "
             "repaired timestamps were not persisted"
         )
-        # The persisted vector is the repaired (shifted) one, distinct
-        # from the frame-slice's uncorrected get_times().
-        assert _np.allclose(override - captured["recording_own"], delta)
+        override = _np.asarray(override)
+        # The persisted vector is the repaired one, distinct from the
+        # frame-slice's uncorrected get_times().
+        assert not _np.array_equal(override, captured["recording_own"])
+        assert override[-1] > captured["recording_own"][-1]
+        # The row's duration_s tracks the PERSISTED (repaired) vector,
+        # not the frame-slice's own (uncorrected, slightly shorter) span.
+        # duration_s is stored single-precision, so assert relative
+        # closeness rather than an absolute float64 tolerance.
+        row_duration = float((Recording & pk).fetch1("duration_s"))
+        override_span = float(override[-1] - override[0])
+        uncorrected_span = float(
+            captured["recording_own"][-1] - captured["recording_own"][0]
+        )
+        assert abs(row_duration - override_span) < abs(
+            row_duration - uncorrected_span
+        )
     finally:
         (Recording & pk).super_delete(warn=False)
         (RecordingSelection & pk).super_delete(warn=False)
