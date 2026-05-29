@@ -211,9 +211,14 @@ class CurationV2(SpyglassMixin, dj.Manual):
         # Fetch the upstream Sorting.Unit rows once -- the parent
         # existence check and _build_curated_unit_rows would otherwise
         # query the same restriction twice.
+        # ``order_by="unit_id"`` makes the row order explicit -- DataJoint
+        # gives no order guarantee without it. _build_curated_unit_rows
+        # treats this iteration as the canonical "source order" that
+        # drives the NWB write order (surviving units first), so an
+        # unordered fetch would silently leak DB row-order quirks.
         sorting_units = (
             Sorting.Unit & {"sorting_id": sorting_id}
-        ).fetch(as_dict=True)
+        ).fetch(as_dict=True, order_by="unit_id")
         if not sorting_units and not (Sorting & {"sorting_id": sorting_id}):
             raise ValueError(
                 f"CurationV2.insert_curation: sorting_id {sorting_id} "
@@ -230,28 +235,6 @@ class CurationV2(SpyglassMixin, dj.Manual):
         labels = {int(uid): list(lbls) for uid, lbls in labels.items()}
 
         cls._validate_labels(labels)
-
-        # Labels keyed by unit_ids not in the sorting are usually a typo.
-        # ``_stage_curated_units_nwb`` only writes labels for kept units
-        # (``labels.get(kept_uid, [])``), so a stray key would silently
-        # vanish from the curated result. Raise by default; callers who
-        # genuinely want best-effort labeling pass permissive_labels=True
-        # to restore the warn-and-drop behavior.
-        valid_unit_ids = {int(r["unit_id"]) for r in sorting_units}
-        stray_label_ids = set(labels) - valid_unit_ids
-        if stray_label_ids:
-            message = (
-                "CurationV2.insert_curation: labels reference unit_id(s) "
-                f"{sorted(stray_label_ids)} not in Sorting.Unit for "
-                f"sorting_id={sorting_id}. Valid unit_ids: "
-                f"{sorted(valid_unit_ids)}."
-            )
-            if not permissive_labels:
-                raise ValueError(
-                    f"{message} Pass permissive_labels=True to ignore "
-                    "stray labels instead of raising."
-                )
-            logger.warning(f"{message} Those labels are ignored.")
 
         if parent_curation_id != -1:
             if not (
@@ -334,6 +317,32 @@ class CurationV2(SpyglassMixin, dj.Manual):
             curation_id=curation_id,
             apply_merge=apply_merge,
         )
+
+        # Stray-label check against the WRITTEN unit set (v1 parity:
+        # ``v1/curation.py:391`` validates labels against the post-merge
+        # ids). For apply_merge=True the written set includes the fresh
+        # ``max(source unit_ids) + 1`` merged ids and EXCLUDES the
+        # absorbed contributors -- so labels keyed by the new merged id
+        # are accepted, and labels keyed by an absorbed contributor are
+        # rejected (the contributor no longer exists). For
+        # apply_merge=False every original unit is written, so any source
+        # id is valid. ``permissive_labels=True`` keeps the warn-and-drop
+        # back door for best-effort labeling.
+        written_unit_ids = {row["unit_id"] for row in unit_rows}
+        stray_label_ids = set(labels) - written_unit_ids
+        if stray_label_ids:
+            message = (
+                "CurationV2.insert_curation: labels reference unit_id(s) "
+                f"{sorted(stray_label_ids)} not in the curated unit set "
+                f"for sorting_id={sorting_id} (apply_merge={apply_merge}). "
+                f"Valid unit_ids: {sorted(written_unit_ids)}."
+            )
+            if not permissive_labels:
+                raise ValueError(
+                    f"{message} Pass permissive_labels=True to ignore "
+                    "stray labels instead of raising."
+                )
+            logger.warning(f"{message} Those labels are ignored.")
 
         # Stage the curated-units NWB (filesystem side-effect; the DB
         # row registration happens inside the transaction block below
@@ -551,20 +560,29 @@ class CurationV2(SpyglassMixin, dj.Manual):
         # (``v1/curation.py:359``) AND SI's lazy MergeUnitsSorting
         # (originals retained + merged appended), so unit-array consumers
         # comparing applied vs preview/lazy paths see the same order.
+        # Iterate merge groups in ascending-min order rather than the
+        # user-given order. This makes new-id assignment (for
+        # apply_merge=True) AND head selection (for apply_merge=False)
+        # deterministic + independent of input order, AND it matches the
+        # order get_merge_groups returns from the (``order_by="unit_id"``)
+        # MergeGroup fetch -- so applied (insert-time) and lazy
+        # (get_merged_sorting on a preview) produce identical merged ids
+        # regardless of how the user listed the groups.
+        normalized_groups: list[list[int]] = [
+            [int(u) for u in g] for g in merge_groups if g
+        ]
+        normalized_groups.sort(key=min)
         merged_ids: set[int] = set()
         merge_specs: list[tuple[int, list[int]]] = []
         next_merged_id = max(by_id) + 1
-        for group in merge_groups:
-            if not group:
-                continue
-            for uid in group:
+        for int_group in normalized_groups:
+            for uid in int_group:
                 if uid not in by_id:
                     raise ValueError(
                         f"CurationV2.insert_curation: merge_groups "
                         f"references unit_id={uid} that is not in "
                         f"Sorting.Unit for sorting_id={sorting_id}."
                     )
-            int_group = [int(u) for u in group]
             overlap = merged_ids & set(int_group)
             if overlap:
                 raise ValueError(
@@ -576,7 +594,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 key = next_merged_id
                 next_merged_id += 1
             else:
-                key = int_group[0]
+                key = min(int_group)
             merge_specs.append((key, int_group))
             merged_ids.update(int_group)
 
@@ -967,8 +985,17 @@ class CurationV2(SpyglassMixin, dj.Manual):
         ``len(contribs) > 1``, so self-entries are auto-skipped) and
         exposed publicly so users can do bulk-audit queries directly.
         """
+        # ``order_by`` makes BOTH the outer dict key order and the
+        # contributor list order deterministic (DataJoint gives no
+        # ordering without it). ``units_to_merge`` -- and therefore the
+        # ids SI's MergeUnitsSorting assigns on the lazy merge path --
+        # depends on the dict insertion order; an unordered fetch would
+        # let DB row-order quirks leak into the lazy merged-unit ids.
         rows = (cls.MergeGroup & key).fetch(
-            "unit_id", "contributor_unit_id", as_dict=True
+            "unit_id",
+            "contributor_unit_id",
+            as_dict=True,
+            order_by=("unit_id", "contributor_unit_id"),
         )
         groups: dict[int, list[int]] = {}
         for row in rows:
