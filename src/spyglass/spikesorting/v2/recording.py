@@ -1399,10 +1399,12 @@ class Recording(SpyglassMixin, dj.Computed):
             recording = recording.frame_slice(
                 start_frame=int(s), end_frame=int(e)
             )
-            # Single-interval path: ``recording.get_times()`` on the
-            # frame-sliced recording returns the right timestamps
-            # natively; no override needed.
-            timestamps_override = None
+            # ``times`` is the repaired vector; the frame-sliced
+            # recording's own ``get_times()`` is the source's uncorrected
+            # one, so slicing ``times`` is what persists the repair (same
+            # as the multi-interval path). Equal to the source times when
+            # no repair fired -- a no-op on the common path.
+            timestamps_override = times[int(s):int(e)]
 
         if ref_channel_id >= 0:
             slice_ids = sorted(

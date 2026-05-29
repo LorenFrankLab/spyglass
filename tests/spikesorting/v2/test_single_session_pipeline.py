@@ -1515,6 +1515,104 @@ def test_recording_timestamp_repair_recorded(
 
 
 @pytest.mark.slow
+def test_recording_single_interval_persists_repaired_timestamps(
+    polymer_smoke_session, monkeypatch
+):
+    """A single-interval write caches the REPAIRED timestamps, not the
+    frame-slice's own (uncorrected) time vector.
+
+    Forces a detectable, consolidation-safe correction and captures what
+    ``_write_nwb_artifact`` writes: the persisted vector must be the
+    repaired one (``timestamps_override`` is not None on the
+    single-interval path), so a ``timestamps_adjusted=True`` row cannot
+    cache still-non-monotonic samples.
+    """
+    import numpy as _np
+
+    from spyglass.common import IntervalList
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    PreprocessingParameters.insert_default()
+    LabTeam.insert1(
+        {"team_name": "v2_test_team", "team_description": "v2 pipeline tests"},
+        skip_duplicates=True,
+    )
+    if not (SortGroupV2 & polymer_smoke_session):
+        SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    sort_group_id = int(
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
+    )
+    pk = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+            "interval_list_name": "raw data valid times",
+            "preproc_params_name": "default_franklab",
+            "team_name": "v2_test_team",
+        }
+    )
+
+    # Return a corrected vector shifted by a tiny (consolidation-safe)
+    # delta so it is detectably distinct from the source's own times.
+    delta = 1e-7
+    orig_repaired = Recording._repaired_timestamps
+
+    def _shifted(recording, raw_path, recording_id=None):
+        timestamps, _ = orig_repaired(
+            recording, raw_path, recording_id=recording_id
+        )
+        return _np.asarray(timestamps) + delta, 5
+
+    monkeypatch.setattr(
+        Recording, "_repaired_timestamps", staticmethod(_shifted)
+    )
+
+    captured = {}
+    orig_write = Recording._write_nwb_artifact
+
+    def _capture(
+        recording,
+        nwb_file_name,
+        existing_analysis_file_name=None,
+        timestamps_override=None,
+    ):
+        captured["override"] = timestamps_override
+        captured["recording_own"] = _np.asarray(recording.get_times())
+        return orig_write(
+            recording,
+            nwb_file_name,
+            existing_analysis_file_name,
+            timestamps_override,
+        )
+
+    monkeypatch.setattr(
+        Recording, "_write_nwb_artifact", staticmethod(_capture)
+    )
+
+    (Recording & pk).super_delete(warn=False)
+    try:
+        Recording.populate(pk, reserve_jobs=False)
+        override = captured["override"]
+        assert override is not None, (
+            "single-interval write got timestamps_override=None; the "
+            "repaired timestamps were not persisted"
+        )
+        # The persisted vector is the repaired (shifted) one, distinct
+        # from the frame-slice's uncorrected get_times().
+        assert _np.allclose(override - captured["recording_own"], delta)
+    finally:
+        (Recording & pk).super_delete(warn=False)
+        (RecordingSelection & pk).super_delete(warn=False)
+
+
+@pytest.mark.slow
 def test_fetch_sort_group_probe_info_stable_order(
     polymer_smoke_session, monkeypatch
 ):

@@ -279,22 +279,20 @@ def _read_recording_traces(mearec_h5_path: Path) -> tuple[np.ndarray, float]:
     interface = MEArecRecordingInterface(file_path=str(mearec_h5_path))
     recording = interface.recording_extractor
     sampling_frequency = float(recording.get_sampling_frequency())
-    # No silent fallback to native units. The old
-    # ``except (TypeError, ValueError): traces = recording.get_traces()``
-    # path wrote ADC counts mislabeled as microvolts when the extractor
-    # lacked a gain, silently poisoning every downstream GT test. Fail
-    # loudly instead, naming the missing conversion field.
-    try:
-        traces = recording.get_traces(return_in_uV=True)
-    except (TypeError, ValueError) as exc:
+    # ``has_scaleable_traces()`` is False exactly when neither gain_to_uV
+    # nor offset_to_uV is set. Check it explicitly: for a FLOAT extractor
+    # with no gain, ``get_traces(return_in_uV=True)`` does NOT raise (it
+    # returns the floats as if already microvolts), so relying on a raise
+    # would let gainless float fixtures through as mislabeled uV.
+    if not recording.has_scaleable_traces():
         raise RuntimeError(
-            f"MEArec extractor for {mearec_h5_path.name!r} cannot return "
-            "traces in microvolts (missing `gain_to_uV` / `offset_to_uV` "
-            "conversion), so the fixture would have written ADC counts "
-            "mislabeled as microvolts. Set the extractor's gain "
-            "(e.g. `recording.set_channel_gains(...)` / "
+            f"MEArec extractor for {mearec_h5_path.name!r} has no "
+            "microvolt conversion (`gain_to_uV` / `offset_to_uV` unset), "
+            "so its traces cannot be interpreted as microvolts. Set the "
+            "extractor's gain (e.g. `recording.set_channel_gains(...)` / "
             "`set_channel_offsets(...)`) before writing the fixture."
-        ) from exc
+        )
+    traces = recording.get_traces(return_in_uV=True)
     if traces.dtype != np.float32:
         traces = traces.astype(np.float32, copy=False)
     return traces, sampling_frequency

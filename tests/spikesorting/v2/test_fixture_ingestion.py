@@ -129,15 +129,18 @@ def test_mearec_fixture_writes_sidecar_ground_truth_units(mearec_smoke_ingested)
 
 
 @pytest.mark.fast
-def test_mearec_fixture_gain_required(monkeypatch):
-    """The fixture writer raises (does not silently fall back to ADC
-    counts) when the MEArec extractor lacks a microvolt gain.
+@pytest.mark.parametrize("dtype", ["int16", "float32"])
+def test_mearec_fixture_gain_required(monkeypatch, dtype):
+    """The fixture writer raises (does not silently write native units as
+    microvolts) when the MEArec extractor lacks a microvolt conversion.
 
-    A gainless extractor written as if its traces were microvolts would
-    mislabel ADC counts as uV and poison every downstream ground-truth
-    test. ``_read_recording_traces`` must surface that loudly. No DB or
-    real fixture needed: a tiny in-memory SI recording with no gain set
-    stands in for the extractor.
+    Covers BOTH dtypes: for ``int16`` SpikeInterface raises on
+    ``get_traces(return_in_uV=True)``, but for ``float32`` it does NOT --
+    it returns the native floats unchanged as if already-uV. The writer
+    must reject both via an explicit ``has_scaleable_traces()`` check, or
+    a gainless float fixture would silently poison downstream
+    ground-truth tests. No DB or real fixture needed: a tiny in-memory SI
+    recording with no gain set stands in for the extractor.
     """
     import neuroconv.datainterfaces as _ndi
     import numpy as np
@@ -145,13 +148,12 @@ def test_mearec_fixture_gain_required(monkeypatch):
 
     from spyglass.spikesorting.v2._fixtures import mearec_to_nwb
 
-    # Fresh NumpyRecording has no gain_to_uV/offset_to_uV, so
-    # get_traces(return_in_uV=True) raises -- the exact precondition the
-    # silent fallback used to swallow.
+    # Fresh NumpyRecording has no gain_to_uV/offset_to_uV.
     gainless = si.NumpyRecording(
-        traces_list=[np.zeros((100, 4), dtype="int16")],
+        traces_list=[np.zeros((100, 4), dtype=dtype)],
         sampling_frequency=30_000.0,
     )
+    assert not gainless.has_scaleable_traces()
 
     class _FakeInterface:
         def __init__(self, *args, **kwargs):
@@ -159,5 +161,5 @@ def test_mearec_fixture_gain_required(monkeypatch):
 
     monkeypatch.setattr(_ndi, "MEArecRecordingInterface", _FakeInterface)
 
-    with pytest.raises(RuntimeError, match="microvolts|gain_to_uV"):
+    with pytest.raises(RuntimeError, match="microvolt"):
         mearec_to_nwb._read_recording_traces(Path("nonexistent_fixture.h5"))
