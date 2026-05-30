@@ -13,7 +13,7 @@ flag has landed.
 - [src/spyglass/spikesorting/v2/utils.py:90-170](../../../../../src/spyglass/spikesorting/v2/utils.py#L90-L170) — `unit_brain_region_df` (V1) + `_assert_v2_db_safe` (V4).
 - [src/spyglass/spikesorting/v2/recording.py:1681-1722](../../../../../src/spyglass/spikesorting/v2/recording.py#L1681-L1722) ✓ — `_maybe_apply_tetrode_geometry` (V2).
 - [src/spyglass/spikesorting/v2/session_group.py:60-220](../../../../../src/spyglass/spikesorting/v2/session_group.py#L60-L220) — `NotImplementedError` gates + `MotionCorrectionParameters` (V3).
-- [src/spyglass/spikesorting/v2/curation.py:1149-1152](../../../../../src/spyglass/spikesorting/v2/curation.py#L1149-L1152) ✓ — `get_unit_brain_regions(include_labels=...)` `UnitLabel`-join branch (V5). `TrackedUnit` dangling ref (Q2) is elsewhere — re-grep before editing Q2.
+- [src/spyglass/spikesorting/v2/curation.py:1149-1152](../../../../../src/spyglass/spikesorting/v2/curation.py#L1149-L1152) ✓ — `get_unit_brain_regions(include_labels=...)` `UnitLabel`-join branch (V5). Q2 is closed as verify-grep no-op; the concat-error messages no longer name `TrackedUnit`.
 - [tests/spikesorting/v2/test_v1_parity.py:290-540](../../../../../tests/spikesorting/v2/test_v1_parity.py#L290-L540) — the 5 tautological tests (Q1).
 - [tests/spikesorting/v2/test_integrity.py:43](../../../../../tests/spikesorting/v2/test_integrity.py#L43) — cross-module fixture import (Q3).
 - [tests/spikesorting/v2/test_single_session_pipeline.py](../../../../../tests/spikesorting/v2/test_single_session_pipeline.py) — D1 (6248), D2 (6911-6912), D3 (6970, 2049), D4 (3553), D5 (various).
@@ -51,8 +51,9 @@ Grep the offending string, not the line number.**
 - Delete the pure signature/decoration/source-text checks where behavioral coverage already exists elsewhere; upgrade the rest to call the function with a real DB. Specifically: add a behavioral test for `get_merged_sorting` (only signature-checked today) and verify the heterogeneous-gain ValueError gate is actually exercised (not just its comment).
 - Keep the AST-purity guards (`test_make_compute_is_pure`, etc.) — they're useful defense-in-depth — but note in their docstrings that the behavioral counterparts (`test_*_rollback_cleans_units_nwb`) are the load-bearing tests.
 
-### Q2 — BUG: fix `TrackedUnit` dangling reference
-- Error messages at [curation.py:855] and [sorting.py:946] cite `TrackedUnit.get_unit_brain_regions` as the workaround for concat-backed sorts, but `TrackedUnit` doesn't exist (`unit_matching.py` is a stub). Reword to an existing, reachable workaround (or "not yet supported; concat path lands in a future phase"). Do **not** implement `TrackedUnit` here (out of scope — Phase 4 of the parent plan).
+### Q2 — VERIFY-GREP NO-OP: `TrackedUnit` dangling reference already resolved
+- **Closed as verify-first no-op.** The audit's premise was that `curation.py` and `sorting.py` concat-error messages named `TrackedUnit.get_unit_brain_regions` as the workaround, but `TrackedUnit` was never implemented. Re-grepping current source confirms `TrackedUnit` no longer appears in `src/spyglass/spikesorting/v2/` (or anywhere else in `src/` and `tests/`). The current messages at [curation.py:1138-1143](../../../../../src/spyglass/spikesorting/v2/curation.py#L1138-L1143) and [sorting.py:977](../../../../../src/spyglass/spikesorting/v2/sorting.py#L977) instead say "cross-session unit matching is not available in this build" — reachable wording, no dangling reference.
+- Verify step (do this once before declaring closed): run `grep -rn "TrackedUnit" src/spyglass/ tests/spikesorting/` and assert the result is empty. If the grep returns any hit the audit's original finding has resurfaced and Q2 reopens to its original BUG framing (reword to a reachable workaround; do NOT implement `TrackedUnit` here, that's parent-plan Phase 4 scope).
 
 ### Q3 — TEST-CLEANUP: move `populated_sorting` to conftest
 - `test_integrity.py:43` imports `populated_sorting` from `test_downstream_consumers.py`; a CI shard split makes the integrity tests pass vacuously. Move the fixture into `tests/spikesorting/v2/conftest.py`, package-scoped; drop the cross-module import.
@@ -69,7 +70,7 @@ Grep the offending string, not the line number.**
 
 ## Deliberately not in this phase
 
-- Implementing `TrackedUnit` / concat (Q2 only rewords the message).
+- Implementing `TrackedUnit` / concat. (Q2 is closed as verify-grep no-op — the dangling reference was already resolved upstream.)
 - Any source behavior change — this phase is tests + comments only. If a doc fix reveals a real behavior bug, file it against Phase 1/2, don't fix it here.
 - The C-series/T-series fixes themselves (Phases 1–2).
 
@@ -101,7 +102,7 @@ Before opening the PR, dispatch `code-reviewer` against the diff. Confirm:
 - V1 asserts region *correctness* per unit, not just row count (the gap the existing test left).
 - New tests exercise behavior, not signatures/decoration (the Q1 anti-pattern being removed) — see `testing-anti-patterns`.
 - Q1 deletions didn't drop real behavioral coverage (each deleted test's behavior is covered elsewhere; cite where).
-- Q2 reworded the message to a *reachable* workaround; `TrackedUnit` not implemented.
+- Q2 closed via verify-grep: `grep -rn "TrackedUnit" src/spyglass/ tests/spikesorting/` returns empty. No reword needed.
 - Every D-series fix was grep-verified (the corrected string present, the stale one gone) — no new line-number drift introduced.
 - No source behavior changed in this phase.
 - No test/module/docstring name references this plan or "Phase 3".
