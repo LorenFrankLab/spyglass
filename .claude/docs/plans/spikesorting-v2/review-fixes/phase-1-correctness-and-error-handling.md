@@ -81,31 +81,15 @@ separately if it is ever deemed undesirable.)
 > on-demand rebuild path is non-functional today and must be fixed together
 > with the **`RecordingArtifactRecompute*`** machinery (Phase 2), which is where
 > recompute byte-determinism / hash tolerance / external-checksum reconciliation
-> are designed. Open sub-question: should `get_recording` read via
+> are designed. Open sub-question for Phase 2: should `get_recording` read via
 > `from_schema=True` (skip the external-store checksum, rely on v2 `cache_hash`)
 > or should the rebuild reconcile the external checksum? **C7 defers with C2**
 > (its atomic temp-write is C2's mechanism; C7 is not reachable standalone —
 > `_rebuild_nwb_artifact` only runs when the canonical file is already absent).
 > The verify-first tests + `RecordingCacheDriftError` were reverted to keep the
-> tree green; recreate them in Phase 2 from the repro above. The original spec
-> below is retained for Phase 2.
+> tree green; recreate them in main-epic Phase 2 from the repro above.
 
-- In `_rebuild_nwb_artifact` ([recording.py:1077-1085]), replace the `logger.warning`-then-return with a fail-closed flow: raise a new `RecordingCacheDriftError` (add to `exceptions.py`) by default. The warning text already has the rebuilt-vs-stored hashes; reuse it in the exception message.
-- **Atomic rebuild is mandatory, not optional.** `_rebuild_nwb_artifact` currently writes the file *before* comparing hashes, and `get_recording` ([recording.py:1022](../../../../../src/spyglass/spikesorting/v2/recording.py#L1022)) only rebuilds when the file is **absent** — so a drifted file left at the canonical path is returned silently on the *next* call, never re-checked. Therefore rebuild into a **temp path**, hash it, and `os.replace` onto the canonical path. The disposition of the temp file is what the three cases below decide; the canonical path is only ever written via that atomic replace.
-- **Three precise outcomes (the previous "log + proceed" was ambiguous — it would either leave NO file or re-create the poison cache):**
-  - **hash matches** → `os.replace` temp → canonical; return normally.
-  - **hash mismatches, `allow_drift=False` (default)** → delete the temp file, leave the canonical path untouched (last-good or absent), and raise `RecordingCacheDriftError`. Next `get_recording` re-enters rebuild rather than returning poison.
-  - **hash mismatches, `allow_drift=True`** → this means "accept the new content as canonical": promote the rebuilt file AND update the stored `cache_hash` to the rebuilt hash. Promoting the file WITHOUT updating the row hash is forbidden — that just recreates the drift on the next read. (`allow_drift=True` is therefore the same operation as `Recording.repair()`; implement one in terms of the other.)
-- **The file-replace + DB-hash-update CANNOT be made jointly atomic, and *in-process* exception handling (try/except + delete-or-restore) is NOT crash-safe.** A DataJoint transaction guards only the DB write; `os.replace` is a separate filesystem op. A hard crash (SIGKILL, power loss, OOM) can land *between* the two with no chance to run cleanup — so both naive orderings leave a silently-consumed inconsistency:
-  - update-DB-then-replace: crash after the DB commit but before `os.replace` → **old bytes under the new hash**.
-  - backup-and-restore: crash after `os.replace` but before the DB update → **new bytes under the old hash**.
-  Because `get_recording` returns an existing canonical file by existence alone, without re-hashing ([recording.py:1022]), either state is read back as if valid. A try/except is not enough; the protocol must be **crash-recoverable by the reader**.
-- **Required: a repair journal/marker that `get_recording` reconciles.** Write a durable marker (e.g. `<canonical>.repair.json` containing `{recording_id, target_hash}`) and `fsync` it *before* mutating the canonical path; clear it only after BOTH the `os.replace` and the `cache_hash` update have succeeded. Then `get_recording`'s existing-file fast path stays cheap (no hashing) when no marker is present, but **if a marker exists it MUST verify the on-disk file's hash against the row's `cache_hash`** before trusting the file:
-  - file hash == row hash → repair completed (or the replace happened and the DB already matches); delete the marker and return the file.
-  - file hash != row hash → an interrupted repair left an inconsistent pair; delete the canonical file + marker so the next access rebuilds and fails closed (or re-run `repair()`).
-  This bounds the expensive full-file hash to the rare post-crash recovery path, while closing the window for both crash orderings above.
-- Add a `Recording.repair()` classmethod that recomputes + rewrites the cache and updates `cache_hash` via this marker-journaled protocol (the sanctioned drift-acceptance entry point; `get_recording(..., allow_drift=True)` delegates to it).
-- Tests: (a) inject a DB-update failure *after* the file replace and assert the next `get_recording` does not return mismatched content; (b) simulate a crash by leaving a stale marker + a deliberately mismatched file and assert `get_recording` detects it via the marker hash-check (rebuilds+raises or re-repairs) rather than returning poison.
+**Nothing to do for C2 / C7 in this review-fixes plan.** The fail-closed design, atomic rebuild, repair journal, and `Recording.repair()` classmethod all land in main-epic Phase 2 (`RecordingArtifactRecompute*`) alongside the recompute byte-determinism work. Do NOT implement any of those here — a fail-closed-on-hash-mismatch check before recompute determinism is fixed would false-trip on every rebuild. See the main-epic [phase-2-analyzer-curation.md](../phase-2-analyzer-curation.md) for the design landing site.
 
 ### C3 — BUG: timestamp-repair provenance
 - Add two columns to the `Recording` table definition: `timestamps_adjusted=0: bool` and `n_adjusted_samples=0: int`. (Safe — v2 unreleased; "final from introduction" not yet binding. Note this in the PR description. **User confirmed C3 column additions are acceptable.**)
@@ -143,10 +127,8 @@ separately if it is ever deemed undesirable.)
 > The "destroys the only good copy" scenario needs a rebuild-on-*present*-file
 > path, which only C2's `Recording.repair()` / `allow_drift=True` introduces —
 > and C2's atomic temp-write (canonical never written in-place) is exactly the
-> fix. So C7 lands with C2 in Phase 2; no separate Phase-1 change. Original spec
-> below retained for Phase 2.
-
-- In `_write_nwb_artifact` ([recording.py:1760-1773]), add the same `existing_analysis_file_name is None` guard the outer caller (`_compute_recording_artifact:1184-1196`) uses, OR refactor to temp-path + `os.replace` on success so the rebuild slot is never destroyed mid-write. Prefer the atomic temp-write (obviates both unlink branches).
+> fix. So C7 lands with C2 in main-epic Phase 2; **no Phase-1 change.** Do not
+> add the guard or the temp-write refactor here.
 
 ### R1 — BUG: deterministic probe-info fetch
 - Add `order_by="electrode_id"` to the `fetch(...)` in `_fetch_sort_group_probe_info` ([recording.py:1505-1514]); document the ordering invariant in the docstring (DeepHash stability for tri-part dispatch). Sibling `artifact.py:653` is the reference.

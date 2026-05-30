@@ -177,6 +177,11 @@ temp_nwb/*s
 *.npz
 *.xz
 *.zip
+
+# Plan-bundled audit artifacts (.claude/audits/*.json are referenced by the
+# spike-sorting-v2 review-fixes plan and must travel with the plan files).
+!.claude/audits/**/*.json
+!.claude/audits/*.json
 *.pb
 *.pem
 dj_local_conf*

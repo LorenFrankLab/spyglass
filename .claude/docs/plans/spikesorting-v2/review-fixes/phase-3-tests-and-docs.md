@@ -34,9 +34,10 @@ Grep the offending string, not the line number.**
 ### V2 — TEST: tetrode geometry attaches
 - `tetrode_60s_session` fixture exists ([test_single_session_pipeline.py:415]) but no test asserts the `_maybe_apply_tetrode_geometry` contract. Add a test that calls `Recording().get_recording(...)` on the tetrode fixture and asserts the SI recording carries the `tetrode_12.5` probe with the expected 4-contact geometry.
 
-### V3 — TEST: session_group gates + MotionCorrectionParameters
-- Add `pytest.raises(NotImplementedError)` tests for `SessionGroup.create_group`, `SessionGroup.is_multi_day`, `ConcatenatedRecordingSelection.insert_selection`, `ConcatenatedRecording.make` — mirroring `test_sorting_selection_rejects_concat_source` — so a premature implementation trips a test.
-- Add a DB test exercising `MotionCorrectionParameters.insert_default()` and one asserting table-level Pydantic rejection on a bogus `params` blob (the schema-only tests in `test_params_validation.py` don't cover the `insert1` wiring).
+### V3 — TEST: session_group invariants (NOT stub-raises tests)
+- **Do NOT add `pytest.raises(NotImplementedError)` tests** for `SessionGroup.create_group`, `SessionGroup.is_multi_day`, `ConcatenatedRecordingSelection.insert_selection`, or `ConcatenatedRecording.make`. Per [overview § Settled design decisions #4](overview.md#settled-design-decisions), stub-presence assertions are tautological (they duplicate the source line, don't pin behavior worth pinning, and force churn when parent-plan Phase 3 implements the consumer). They also do NOT catch the audit's real session_group bugs (A13, A14).
+- Cover the surrounding invariants instead, all listed and specified in [phase-6 § A31](phase-6-coverage-backfill.md): `Member.member_index` uniqueness within a master, `Member.LabTeam` FK consistency with the master's `session_group_owner`, `ConcatenatedRecording.total_duration_s` column-shape pin, `MotionCorrectionParameters.insert1` Pydantic validation (catches the audit's drift bug A14 once Phase 4 lands), and `initialize_v2_defaults()` ships `MotionCorrectionParameters` rows (catches A13).
+- **Net effect on Phase 3:** V3 collapses to a one-line cross-reference (link Phase 6 A31). Phase 3's V3 test files do not exist; Phase 6 owns them.
 
 ### V4 — TEST: `_assert_v2_db_safe`
 - Monkeypatch `dj.config['database.host']` to a non-local hostname → assert `_assert_v2_db_safe` raises. Second test: set `SPYGLASS_SPIKESORTING_V2_ALLOW_NONLOCAL_DB` → assert it succeeds. Hermetic, no real DB needed.
@@ -77,8 +78,7 @@ Grep the offending string, not the line number.**
 | --- | --- |
 | `test_multi_region_unit_attribution` (slow) | V1: a unit on a 2-region sort group reports the correct region per `unit_id`. |
 | `test_tetrode_geometry_attached` (slow) | V2: tetrode recording carries `tetrode_12.5` probe, 4 contacts at expected coords. |
-| `test_session_group_scaffold_raises` | V3: each scaffold method raises `NotImplementedError`. |
-| `test_motion_correction_parameters_validate` (slow) | V3: `insert_default()` works; bogus blob rejected at `insert1`. |
+| (deferred to Phase 6 A31) | V3: session_group invariants — see [phase-6 § A31](phase-6-coverage-backfill.md). Phase 3 ships no V3 tests. |
 | `test_assert_v2_db_safe_rejects_nonlocal` | V4: non-local host raises; override env var permits. |
 | `test_get_unit_brain_regions_include_labels` (slow) | V5: label filter returns only matching units. |
 | `test_get_merged_sorting_behavioral` (slow) | Q1: `get_merged_sorting` returns expected schema (replaces signature-only check). |
