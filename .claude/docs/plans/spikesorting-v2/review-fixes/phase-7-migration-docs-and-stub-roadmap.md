@@ -272,7 +272,7 @@ The stub `__getattr__` test is behavioral (asserts a specific error message); th
 
 Before opening the PR for this phase, dispatch `code-reviewer` against the diff. Confirm:
 - CHANGELOG entries (A32) cite source locations as clickable markdown links and are grouped under sub-headings matching the categories listed.
-- Stub modules (A33) raise on attribute access with messages naming v1 fallbacks where applicable; module-level docstrings name the parent-plan phase that delivers the real implementation.
+- Stub modules (A33) raise on attribute access with messages naming v1 fallbacks where applicable; module-level docstrings reference the project repository's spike-sorting-v2 documentation indirectly (NOT by phase number) — see the next checklist item for the rationale.
 - The `insert_default_legacy_si_sorters` helper (A34) is opt-in — `initialize_v2_defaults()` does NOT call it.
 - The migration guide (A35) is concise (1-2 pages); section 5 (v1↔v2 comparison expectations) is present.
 - A36's grep sweep found and fixed all stale v1 refs; no remaining `v1/utils.py:1?5` refs (the canonical staleness signal).
