@@ -2102,6 +2102,39 @@ def test_electrode_group_sort_key_tolerates_non_numeric(dj_conn):
     ) == ["1", "2", "probeA", "probeB"]
 
 
+def test_handle_existing_rejects_duplicate_sort_group_ids(dj_conn):
+    """Explicit ``sort_group_ids`` with intra-list duplicates raises up
+    front instead of failing late on a DataJoint duplicate-key error
+    when the master rows are inserted. Auto-allocated ranges
+    (``explicit_sort_group_ids=False``) are always unique, so the check
+    is gated on the explicit path. (Found by generalizing from the
+    merge-curation ``len(list)`` vs ``len(set)`` bug -- the same pattern
+    lived here.)
+    """
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    # Duplicates surface on a fresh session (no existing rows): the
+    # check runs BEFORE the ``len(existing) == 0`` early return so it
+    # fires either way.
+    with pytest.raises(ValueError, match="duplicate"):
+        SortGroupV2._handle_existing(
+            nwb_file_name="nonexistent.nwb",
+            new_sort_group_ids=[3, 3, 4],
+            explicit_sort_group_ids=True,
+            delete_existing_entries=False,
+            confirm=False,
+        )
+    # The auto-allocated path is exempt (range() is unique by
+    # construction); a same-shape list with no duplicate must NOT raise.
+    SortGroupV2._handle_existing(
+        nwb_file_name="nonexistent.nwb",
+        new_sort_group_ids=[3, 4, 5],
+        explicit_sort_group_ids=True,
+        delete_existing_entries=False,
+        confirm=False,
+    )
+
+
 def test_unit_brain_region_df_empty_keeps_full_schema(dj_conn):
     """An empty unit-region lookup returns the full column schema.
 
@@ -4888,11 +4921,12 @@ def test_curation_two_merge_groups_assign_ids_in_user_input_order(dj_conn):
     assert 2 in kept_preview and kept_preview[2] == [2, 3]
 
 
-def test_curation_rejects_empty_and_singleton_merge_groups(dj_conn):
-    """Empty and singleton "merge groups" aren't merges. v1 silently
-    accepted them (a no-op for empty, a max+1 rename for the singleton);
-    v2 raises so likely typos surface. Both apply_merge modes are
-    rejected, since neither shape carries useful provenance.
+def test_curation_rejects_invalid_merge_groups(dj_conn):
+    """All merge-group validation runs BEFORE any early return -- a
+    zero-unit sort with non-empty merge_groups, intra-group duplicates,
+    and references to nonexistent unit_ids all raise rather than
+    silently no-op or fall through to staging that would double-count
+    contributors. Covers the empty/singleton shape contract too.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
 
@@ -4906,14 +4940,32 @@ def test_curation_rejects_empty_and_singleton_merge_groups(dj_conn):
             "electrode_id": uid,
         }
 
-    sorting_units = [_unit(0), _unit(1)]
+    nonempty = [_unit(0), _unit(1)]
+    cases = [
+        # Shape (>= 2 members), regardless of apply_merge.
+        (nonempty, [[0]], "fewer than 2"),
+        (nonempty, [[]], "fewer than 2"),
+        (nonempty, [[0, 1], []], "fewer than 2"),
+        # Intra-group duplicates: list-length check alone would miss
+        # ``[0, 0]`` (would silently double-count contributor 0).
+        (nonempty, [[0, 0]], "duplicate members"),
+        (nonempty, [[0, 0, 1]], "duplicate members"),
+        # Zero-unit sort with non-empty merge_groups: the validation
+        # runs before the empty-by-id early return, so the id check
+        # fires.
+        ([], [[0, 1]], "not in Sorting.Unit"),
+        # Empty/singleton groups on a zero-unit sort still raise their
+        # shape error before the id check is reached.
+        ([], [[]], "fewer than 2"),
+        ([], [[0]], "fewer than 2"),
+    ]
     for apply_merge in (True, False):
-        for bad_groups in ([[0]], [[]], [[0, 1], []]):
-            with pytest.raises(ValueError, match="fewer than 2"):
+        for sorting_units, merge_groups, match in cases:
+            with pytest.raises(ValueError, match=match):
                 CurationV2._build_curated_unit_rows(
                     sorting_id="s",
                     sorting_units=sorting_units,
-                    merge_groups=bad_groups,
+                    merge_groups=merge_groups,
                     curation_id=0,
                     apply_merge=apply_merge,
                 )

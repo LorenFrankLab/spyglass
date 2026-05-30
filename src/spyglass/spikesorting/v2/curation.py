@@ -560,8 +560,6 @@ class CurationV2(SpyglassMixin, dj.Manual):
         ``apply_merge`` values -- otherwise an ``apply_merge=False``
         preview would store the merged sum against a head-only train.
         """
-        if not sorting_units:
-            return [], {}
         by_id = {int(row["unit_id"]): row for row in sorting_units}
 
         # Build mapping ``kept_unit_id -> contributors``:
@@ -583,9 +581,11 @@ class CurationV2(SpyglassMixin, dj.Manual):
         # insertion order to be "surviving source units first (in
         # original source order), then merged kept ids appended in
         # merge-group order." That matches v1's pop-then-append pattern
-        # (``v1/curation.py:359``) AND SI's lazy MergeUnitsSorting
-        # (originals retained + merged appended), so unit-array consumers
-        # comparing applied vs preview/lazy paths see the same order.
+        # (``v1/curation.py:359``) and SI's lazy MergeUnitsSorting
+        # (originals retained + merged appended) at the SHAPE level
+        # (survivor-then-appended). The content-to-id mapping can still
+        # diverge between applied and lazy when input order differs from
+        # kept-uid order -- see the NOTE in the next block.
         # Iterate merge groups in USER-PROVIDED order so new-id
         # assignment matches v1 (``v1/curation.py:359`` iterates
         # ``for merge_group in merge_groups:`` and assigns the next
@@ -599,9 +599,13 @@ class CurationV2(SpyglassMixin, dj.Manual):
         normalized_groups: list[list[int]] = [
             [int(u) for u in g] for g in merge_groups
         ]
+        # Validate ALL merge groups eagerly -- BEFORE any early return
+        # below -- so a zero-unit sort with non-empty merge_groups raises
+        # rather than silently no-op. Checks: shape (>=2 members),
+        # intra-group uniqueness (no double-counting), id membership in
+        # by_id, and across-group overlap. ``merged_ids`` is populated
+        # here and reused by the non-merged-units loop later.
         merged_ids: set[int] = set()
-        merge_specs: list[tuple[int, list[int]]] = []
-        next_merged_id = max(by_id) + 1
         for int_group in normalized_groups:
             if len(int_group) < 2:
                 # Empty or singleton "merge groups" aren't merges. v1
@@ -611,6 +615,15 @@ class CurationV2(SpyglassMixin, dj.Manual):
                     f"CurationV2.insert_curation: merge_groups contains "
                     f"a group with fewer than 2 members ({int_group}); "
                     "each merge group must have at least 2 units."
+                )
+            if len(set(int_group)) != len(int_group):
+                # ``len`` is list-length, not set-size: a group like
+                # [0, 0] passes the >=2 check but would double-count
+                # contributor 0 during staging.
+                raise ValueError(
+                    f"CurationV2.insert_curation: merge_groups contains "
+                    f"a group with duplicate members ({int_group}); "
+                    "each unit can appear at most once per merge group."
                 )
             for uid in int_group:
                 if uid not in by_id:
@@ -626,13 +639,23 @@ class CurationV2(SpyglassMixin, dj.Manual):
                     f"on unit_ids {sorted(overlap)}. A unit can belong "
                     "to at most one merge group."
                 )
+            merged_ids.update(int_group)
+
+        if not by_id:
+            # Zero-unit sort with no merge groups -> empty curation.
+            # (Non-empty merge groups already raised above.)
+            return [], {}
+
+        # All groups validated; assign keys.
+        merge_specs: list[tuple[int, list[int]]] = []
+        next_merged_id = max(by_id) + 1
+        for int_group in normalized_groups:
             if apply_merge and len(int_group) > 1:
                 key = next_merged_id
                 next_merged_id += 1
             else:
                 key = min(int_group)
             merge_specs.append((key, int_group))
-            merged_ids.update(int_group)
 
         kept_to_contributors: dict[int, list[int]] = {}
         # Non-merged units FIRST, in original source order.

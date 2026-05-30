@@ -166,6 +166,29 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         pad ``sort_group_id`` values, exactly the v1 regression this
         guard was added to fix.
         """
+        # Intra-list duplicate check: ``set(new_sort_group_ids)`` below
+        # loses the duplicate, and the ``zip`` in the caller would
+        # happily build two rows with the same sort_group_id, failing
+        # late on a DataJoint duplicate-key error. Catch the typo here
+        # for BOTH fresh and existing sessions (auto-allocated ranges
+        # are guaranteed unique, so the check only matters when the
+        # caller passed an explicit list).
+        if explicit_sort_group_ids and len(set(new_sort_group_ids)) != len(
+            new_sort_group_ids
+        ):
+            duplicates = sorted(
+                {
+                    int(s)
+                    for s in new_sort_group_ids
+                    if new_sort_group_ids.count(s) > 1
+                }
+            )
+            raise ValueError(
+                f"SortGroupV2: sort_group_ids contains duplicate id(s) "
+                f"{duplicates}; each sort_group_id can appear at most "
+                "once."
+            )
+
         existing = cls & {"nwb_file_name": nwb_file_name}
         if len(existing) == 0:
             return
