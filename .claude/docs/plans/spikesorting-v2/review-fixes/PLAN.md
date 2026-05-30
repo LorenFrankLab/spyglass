@@ -42,6 +42,6 @@ For agent invocation, **load only the slice you need**:
 
 The parent [.claude/docs/plans/spikesorting-v2/](../PLAN.md) is the epic this child plan extends. **Parent Phase 0a/0b/0c and Phase 1 are done** (per the project's `.remember/today-*.md` log). Parent Phases 2 (AnalyzerCuration), 3 (SessionGroup/ConcatenatedRecording), 4 (UnitMatch), and 5 (UX/FigPack) are pending.
 
-- **Parent Phase 1b** is the runtime-regressions layer that includes R1–R18 and B1–B7. Several review-fixes Phase 4–7 tasks coordinate with it; the sequencing notes per task are explicit. (Earlier drafts gated Phase 5 A18 on parent 1b R17; that dependency is satisfied — `_hash_nwb_recording` is wired at [recording.py:1923](../../../../../src/spyglass/spikesorting/v2/recording.py#L1923) — so A18 ships unconditionally.)
+- **Parent Phase 1b** is the runtime-regressions layer that includes R1–R18 and B1–B7. Several review-fixes Phase 4–7 tasks coordinate with it; the sequencing notes per task are explicit.
 - **Parent Phase 3** implements `ConcatenatedRecording.make` / `SessionGroup.create_group` / `is_multi_day` / `MotionCorrectionParameters` consumers. When it lands, Phase 6 A31's invariant tests stay valid; Phase 4 A11 (`Sorting.make` key_source antijoin) flips from "skip silently" to "process normally." Both are pinned with explicit `# TODO(parent-Phase-3)` markers in the test code.
 - **Parent Phase 4** implements `unit_matching` and `matcher_protocol`. When it lands, Phase 7 A33's `__getattr__` stub for those modules is deleted and replaced by real exports.

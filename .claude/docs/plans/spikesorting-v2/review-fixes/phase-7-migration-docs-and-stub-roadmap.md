@@ -147,19 +147,30 @@ Add to `SorterParameters` at [sorting.py](../../../../../src/spyglass/spikesorti
 ```python
 @classmethod
 def insert_default_legacy_si_sorters(cls):
-    """Insert ('sorter','default') rows for every installed SI sorter.
+    """Insert ('sorter','default') rows for every installed SI sorter
+    NOT already curated by ``insert_default()``.
 
     Replicates v1's auto-insert behavior at
     ``v1/sorting.py:184-189`` for users porting workflows that name a
     non-curated sorter via ``('kilosort2_5','default')`` or similar.
     Calls SpikeInterface's ``sis.get_default_sorter_params(sorter)``
-    for each entry of ``sis.available_sorters()``.
+    for each entry of ``sis.available_sorters()`` and validates
+    through ``GenericSorterParamsSchema`` (``extra='allow'``) so the
+    row passes ``insert1``'s gate without typo-rejection.
 
-    The curated rows (MS4 presets, MS5, KS4, SC2, TDC2, clusterless)
-    are already covered by ``insert_default()``; this helper only
-    inserts the legacy v1-style rows so a typo-prone v1 caller does
-    not silently get an empty restriction. Idempotent via
-    ``skip_duplicates=True``.
+    Curated sorters (mountainsort4, mountainsort5, kilosort4,
+    spykingcircus2, tridesclous2, clusterless_thresholder) are
+    SKIPPED -- they already have their own typed schemas with
+    ``extra='forbid'``, and SI's defaults for those sorters include
+    keys those schemas intentionally strip
+    (e.g. ``MountainSort5Schema`` strips ``filter``/``freq_min`` etc.
+    because the upstream recording is already filtered). Routing SI's
+    full default dict through the typed schema would either fail
+    validation or quietly drop keys -- neither is what a v1 caller
+    expects. The opt-in is targeted at the NON-curated escape-hatch
+    sorters that fall back to ``GenericSorterParamsSchema`` anyway.
+
+    Idempotent via ``skip_duplicates=True``.
 
     Examples
     --------
@@ -169,26 +180,33 @@ def insert_default_legacy_si_sorters(cls):
     """
     import spikeinterface.sorters as sis
 
+    from spyglass.spikesorting.v2._params.sorter import (
+        GenericSorterParamsSchema,
+        _SORTER_SCHEMAS,  # re-grep the actual name before editing
+    )
+    from spyglass.utils import logger
+
+    curated = set(_SORTER_SCHEMAS)  # sorters with their own typed schemas
     rows = []
     for sorter in sis.available_sorters():
+        if sorter in curated:
+            continue  # see docstring: would fail or drop keys
         try:
             params = sis.get_default_sorter_params(sorter)
         except Exception as exc:  # SI sometimes raises on metadata fetch
-            from spyglass.utils import logger
             logger.warning(
                 f"insert_default_legacy_si_sorters: skipping {sorter!r} "
                 f"({exc!r})."
             )
             continue
-        # Validate through the generic fallback schema (extra='allow')
-        # so the row passes insert1's gate without typo-rejection.
+        # Validate through the generic schema (extra='allow') so the
+        # row passes insert1's gate without typo-rejection.
         try:
-            validated = _validate_params(_get_sorter_schema(sorter), params)
+            validated = _validate_params(GenericSorterParamsSchema, params)
         except Exception as exc:
-            from spyglass.utils import logger
             logger.warning(
                 f"insert_default_legacy_si_sorters: {sorter!r} did "
-                f"not validate against the generic fallback schema "
+                f"not validate against GenericSorterParamsSchema "
                 f"({exc!r})."
             )
             continue

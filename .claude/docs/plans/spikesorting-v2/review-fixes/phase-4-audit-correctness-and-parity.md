@@ -29,7 +29,10 @@ Behavioral PR. Addresses the audit-derived A-series findings that did not appear
 - v1's behavior at [v1/artifact.py:325-330](../../../../../src/spyglass/spikesorting/v1/artifact.py#L325-L330) writes `artifact_removed_valid_times` to `IntervalList` and the sorter's `sip.remove_artifacts` consumes them; an empty `valid_times` either raises during interval intersection or the upstream `IntervalSet.subtract(min_length=1)` filters it out. Either way the user gets a loud failure, not a silent all-zero recording.
 - Fix: raise `RecordingTruncatedError` (or a new `EmptyArtifactValidTimesError` if you prefer a dedicated class — match the [Custom Exception Classes contract](../shared-contracts.md) if it spells out the precedent) before entering the walker, with the artifact_id and recording_id in the message. The message names the path the user should take: rerun `ArtifactDetection` with looser thresholds, or override the artifact selection.
 - Also: defensively sort `valid_times` by start time before walking — today the walker assumes monotonic input. The fetched `obs_intervals` come from `IntervalList.valid_times` which IS monotonic in practice, but a future caller passing a hand-built list (e.g. a curation-driven manual override) could pass unsorted intervals; the walker then under-masks. Sort + assert non-overlapping at function entry.
-- Add a regression test that constructs a `Sorting.make_compute` path with `obs_intervals = np.zeros((0, 2))` and asserts the error fires. Add a second test that passes a 2-row unsorted `valid_times` and asserts the function either raises (if you choose strict-input) or correctly merges (if you choose silent-sort).
+- Failing-then-passing test sequence (lock the pre-fix bug AND the post-fix raise):
+  - Write the failing test first: call `_apply_artifact_mask(recording, np.zeros((0, 2)))` against the unmodified function and assert the corollary — `result.get_traces()` returns an all-zeros array of shape `(n_samples, n_channels)`, i.e. the entire recording is silently masked. This pins the bug.
+  - Implement the raise. Re-run the test; it now fails because the function raises before producing a result. Update the test to assert the exception (with `artifact_id` and `recording_id` in the message) instead of the all-zeros output. Both stages of the failing-then-passing pattern are now locked in version control via the test's history.
+  - Add a second test that passes a 2-row unsorted `valid_times` and asserts the function either raises (if you choose strict-input) or correctly merges (if you choose silent-sort).
 
 ### A2 — DOCUMENT + back-compat shim: Franklab MS4 preset rename (`30KHz` → `30kHz_ms4`)
 
@@ -96,7 +99,20 @@ Behavioral PR. Addresses the audit-derived A-series findings that did not appear
           del np.Inf
   ```
 - Better: file a fix upstream (or vendor a tiny shim that monkey-patches the MS4 wrapper module instead of `numpy` itself). Pin the upstream fix as a TODO in the code comment; do not block this phase on it.
-- Add a regression test that asserts `hasattr(np, 'Inf') == hasattr(np_import_at_module_top, 'Inf')` before and after a MS4 `_run_si_sorter` call.
+- Add a regression test with a **deterministic baseline** (a naive `before == after` comparison is test-order-dependent — if an earlier test in the suite already ran MS4, the "before" already has `Inf` set globally). Use `monkeypatch` to lock both ends:
+  ```python
+  def test_run_si_sorter_does_not_leak_numpy_inf(monkeypatch):
+      import numpy as np
+      # Force a clean baseline regardless of test order. raising=False
+      # because numpy >= 2.0 already lacks the attribute.
+      monkeypatch.delattr(np, "Inf", raising=False)
+      assert not hasattr(np, "Inf")  # baseline locked
+      # ... call _run_si_sorter('mountainsort4', ...) ...
+      assert not hasattr(np, "Inf"), (
+          "MS4 path leaked np.Inf globally; the try/finally restore regressed."
+      )
+  ```
+  `monkeypatch` restores attributes it deleted (and removes attributes the SUT added) at teardown, so the test is hermetic regardless of suite order.
 
 ### A9 — BUG: `sorter_temp_dir.cleanup()` failure masks upstream sort exception
 
@@ -122,14 +138,14 @@ Behavioral PR. Addresses the audit-derived A-series findings that did not appear
 - Pin the guard with a regression test (Phase 6 A26 already lists one — verify it covers BOTH the `n_units == 0` short-circuit AND the no-folder-on-disk side; add if missing).
 - Phase 5 A22's disk-leak audit must treat rows with `n_units == 0` as expected absences (the folder was never written) rather than reporting them as DB-side orphans — document the carve-out in `find_orphaned_analyzer_folders`. **Already listed in Phase 5 A22's task body**; verify the carve-out is keyed on `n_units == 0`, not on a sentinel `analyzer_folder` value (which doesn't exist).
 
-### A11 — DRIFT: `ConcatenatedRecordingSource` has no `key_source` filter on `Sorting`
+### A11 — DRIFT: `Sorting` has no `key_source` filter excluding `ConcatenatedRecordingSource` rows
 
-- `Sorting.make` at [sorting.py:457-474](../../../../../src/spyglass/spikesorting/v2/sorting.py#L457-L474) declares `key_source` but does not filter out `ConcatenatedRecordingSource`-backed rows. `Sorting.make` immediately raises `NotImplementedError` for the concat path inside the dispatch ([sorting.py:262-276](../../../../../src/spyglass/spikesorting/v2/sorting.py#L262-L276)), but a `populate()` call still picks up the row, attempts the make, hits the raise, and prints a confusing error per concat row.
-- Fix: restrict `key_source` to exclude rows with a `ConcatenatedRecordingSource` part-table entry. Idiom: `key_source = SortingSelection - SortingSelection.ConcatenatedRecordingSource` (or the explicit subquery if DataJoint's antijoin doesn't propagate cleanly to a populated table). Verify against the SI / DataJoint version pinned in the parent plan.
+- `Sorting` ([sorting.py:410+](../../../../../src/spyglass/spikesorting/v2/sorting.py#L410)) defines no `key_source` attribute at all — `grep -n "key_source" src/spyglass/spikesorting/v2/sorting.py` returns nothing today (re-grep before editing). DataJoint's default `key_source` is the full upstream `SortingSelection` cross-product, which includes concat-source rows. `make_fetch` then raises `NotImplementedError` for the concat path inside the dispatch ([sorting.py:262-276](../../../../../src/spyglass/spikesorting/v2/sorting.py#L262-L276)), but `populate()` still picks up the row, attempts the make, hits the raise, and prints a confusing error per concat row.
+- Fix: ADD a `key_source` attribute on `Sorting` that excludes rows with a `ConcatenatedRecordingSource` part-table entry. Idiom: `key_source = SortingSelection - SortingSelection.ConcatenatedRecordingSource` (or the explicit subquery if DataJoint's antijoin doesn't propagate cleanly to a populated table). Verify the antijoin shape against the SI / DataJoint version pinned in the parent plan.
 - Restriction is a no-op today (no concat rows exist) but lands the contract before parent Phase 3 implements `ConcatenatedRecording.make` — when that phase lands, the executor knows to drop the antijoin restriction (the test in this phase pins the current behavior; parent Phase 3 updates the test).
 - Add a test inserting a concat-source SortingSelection row (which itself goes through `NotImplementedError` today, so use a `dj.insert` raw bypass) and asserting `Sorting.populate()` skips it without raising.
 
-### A12 — DOCUMENT: dropped `IntervalList` row keyed by `recording_id`
+### A12 — DOCUMENT (zero code change in Phase 4; doc lands in Phase 7): dropped `IntervalList` row keyed by `recording_id`
 
 - v1 `SpikeSortingRecording.make` at [v1/recording.py:212-216,255-257](../../../../../src/spyglass/spikesorting/v1/recording.py#L212-L216) inserted a public `IntervalList` row with `interval_list_name = recording_id` storing the sort-interval valid times. v2's `Recording.make_insert` body around [recording.py:990-1100](../../../../../src/spyglass/spikesorting/v2/recording.py#L990-L1100) stores the same range as `saved_start` / `saved_end` / `duration_s` on the `Recording` row only.
 - A v1 user querying `(IntervalList & {"interval_list_name": str(recording_id)})` returns empty on v2. The audit confirmed no internal v1 or v2 consumer issues this query, so the impact is on external/user-written code only.
@@ -163,11 +179,11 @@ Behavioral PR. Addresses the audit-derived A-series findings that did not appear
   ```
 - Phase 6 covers the regression test that asserts drifted versions raise.
 
-### A15 — DOCUMENT: artifact `IntervalList.pipeline` tag change (`spikesorting_artifact_v1` → `spikesorting_artifact_v2`)
+### A15 — DOCUMENT (zero code change in Phase 4; doc lands in Phase 7): artifact `IntervalList.pipeline` tag change (`spikesorting_artifact_v1` → `spikesorting_artifact_v2`)
 
 - At [artifact.py:818](../../../../../src/spyglass/spikesorting/v2/artifact.py#L818) the inserted `IntervalList` row carries `pipeline="spikesorting_artifact_v2"`. v1 wrote `"spikesorting_artifact_v1"`. The pipeline tag is queryable but no consumer in either version branches on it. Intentional and justified (the tag SHOULD differ across versions); fix is a Phase 7 CHANGELOG entry naming the tag change. No code change here — list to keep the inventory complete.
 
-### A16 — DOCUMENT: `obs_intervals=None` fallback semantics in `Sorting`
+### A16 — DOCUMENT (one-line code comment + Phase 6 test pin; no behavior change): `obs_intervals=None` fallback semantics in `Sorting`
 
 - v2 at [sorting.py:499-514,1480-1488](../../../../../src/spyglass/spikesorting/v2/sorting.py#L499-L514) handles `artifact_id=None` by falling back to the full timestamps envelope in `obs_intervals`. v1 at the equivalent path always passes the artifact-removed intervals because the FK was mandatory. The v2 behavior is intentional (Phase 0 `artifact_id=None` decision per [overview.md § Resolved Design Decisions](../overview.md#resolved-design-decisions)); the fallback envelope IS the right `obs_intervals` for the "no artifact pass" case.
 - Fix: confirm the docstring at `_obs_intervals_or_full_envelope` (or equivalent helper name — re-grep) is legible and includes the rationale. Add a one-line comment at [sorting.py:1480](../../../../../src/spyglass/spikesorting/v2/sorting.py#L1480) referencing the Phase 0 decision. No behavior change.
@@ -194,7 +210,7 @@ Behavioral PR. Addresses the audit-derived A-series findings that did not appear
 | `test_ms4_schema_accepts_adjacency_radius_minus_one` | A3: `MountainSort4Schema(adjacency_radius=-1).adjacency_radius == -1.0`; values in `(-1, 0)` raise. |
 | `test_sorter_parameters_skips_uninstalled_sorters` | A4: monkeypatch `sis.available_sorters()` to return `[]`; `SorterParameters.insert_default()` skips all SI-registered rows (still inserts clusterless), logs a summary. |
 | `test_sorter_parameters_rejects_missing_schema_version` | A5: inserting a clusterless row without `params_schema_version` raises with a message naming the sorter and expected version. |
-| `test_run_si_sorter_does_not_leak_numpy_inf` (slow) | A8: `hasattr(np, "Inf")` is the same after `_run_si_sorter('mountainsort4', ...)` as before. |
+| `test_run_si_sorter_does_not_leak_numpy_inf` (slow) | A8: with `monkeypatch.delattr(np, "Inf", raising=False)` locking a clean baseline, `hasattr(np, "Inf") is False` after `_run_si_sorter('mountainsort4', ...)` returns. Hermetic regardless of suite order. |
 | `test_sorter_tempdir_cleanup_does_not_mask_sort_exception` | A9: when both the sort AND the cleanup raise, the test sees the sort's exception; the cleanup's is in the log. |
 | `test_get_analyzer_zero_unit_raises_before_path_lookup` | A10: a zero-unit sort row has its `analyzer_folder` column populated with the would-be path (`varchar(255)` is NOT null); `Sorting.get_analyzer(key)` raises `ZeroUnitAnalyzerError` before computing `_analyzer_path` (no `FileNotFoundError` surfaces). Pinned at the existing guard, not a behavior change. |
 | `test_sorting_make_skips_concat_rows_silently` | A11: a concat-source row in `SortingSelection` is not picked up by `Sorting.populate()`; no NotImplementedError is raised at populate time. |

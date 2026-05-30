@@ -11,9 +11,9 @@ flag has landed.
 **Inputs to read first:**
 
 - [src/spyglass/spikesorting/v2/utils.py:90-170](../../../../../src/spyglass/spikesorting/v2/utils.py#L90-L170) — `unit_brain_region_df` (V1) + `_assert_v2_db_safe` (V4).
-- [src/spyglass/spikesorting/v2/recording.py:1517-1558](../../../../../src/spyglass/spikesorting/v2/recording.py#L1517-L1558) — `_maybe_apply_tetrode_geometry` (V2).
+- [src/spyglass/spikesorting/v2/recording.py:1681-1722](../../../../../src/spyglass/spikesorting/v2/recording.py#L1681-L1722) ✓ — `_maybe_apply_tetrode_geometry` (V2).
 - [src/spyglass/spikesorting/v2/session_group.py:60-220](../../../../../src/spyglass/spikesorting/v2/session_group.py#L60-L220) — `NotImplementedError` gates + `MotionCorrectionParameters` (V3).
-- [src/spyglass/spikesorting/v2/curation.py:825-875](../../../../../src/spyglass/spikesorting/v2/curation.py#L825-L875) — `get_unit_brain_regions(include_labels=...)` (V5) + `TrackedUnit` dangling ref (Q2).
+- [src/spyglass/spikesorting/v2/curation.py:1149-1152](../../../../../src/spyglass/spikesorting/v2/curation.py#L1149-L1152) ✓ — `get_unit_brain_regions(include_labels=...)` `UnitLabel`-join branch (V5). `TrackedUnit` dangling ref (Q2) is elsewhere — re-grep before editing Q2.
 - [tests/spikesorting/v2/test_v1_parity.py:290-540](../../../../../tests/spikesorting/v2/test_v1_parity.py#L290-L540) — the 5 tautological tests (Q1).
 - [tests/spikesorting/v2/test_integrity.py:43](../../../../../tests/spikesorting/v2/test_integrity.py#L43) — cross-module fixture import (Q3).
 - [tests/spikesorting/v2/test_single_session_pipeline.py](../../../../../tests/spikesorting/v2/test_single_session_pipeline.py) — D1 (6248), D2 (6911-6912), D3 (6970, 2049), D4 (3553), D5 (various).
@@ -32,7 +32,8 @@ Grep the offending string, not the line number.**
 - If mutating the ingested `common.Electrode`/`BrainRegion` rows for an existing fixture is cheaper than a new MEArec fixture, do that — no new recording numerics needed, so no baseline impact.
 
 ### V2 — TEST: tetrode geometry attaches
-- `tetrode_60s_session` fixture exists ([test_single_session_pipeline.py:415]) but no test asserts the `_maybe_apply_tetrode_geometry` contract. Add a test that calls `Recording().get_recording(...)` on the tetrode fixture and asserts the SI recording carries the `tetrode_12.5` probe with the expected 4-contact geometry.
+- `tetrode_60s_session` fixture exists ([test_single_session_pipeline.py:415]) but no test asserts the `_maybe_apply_tetrode_geometry` contract at [recording.py:1681-1722](../../../../../src/spyglass/spikesorting/v2/recording.py#L1681-L1722). Add a test that calls `Recording().get_recording(...)` on the tetrode fixture and asserts the SI recording carries the `tetrode_12.5` probe with the expected 4-contact geometry.
+- Phase 5 A20 owns the four negative-condition tests for the same gate (3-channel, mixed probe, renamed probe, multi-group); V2 owns the all-true happy path. Coordinate test names so the two PRs do not collide.
 
 ### V3 — TEST: session_group invariants (NOT stub-raises tests)
 - **Do NOT add `pytest.raises(NotImplementedError)` tests** for `SessionGroup.create_group`, `SessionGroup.is_multi_day`, `ConcatenatedRecordingSelection.insert_selection`, or `ConcatenatedRecording.make`. Per [overview § Settled design decisions #4](overview.md#settled-design-decisions), stub-presence assertions are tautological (they duplicate the source line, don't pin behavior worth pinning, and force churn when parent-plan Phase 3 implements the consumer). They also do NOT catch the audit's real session_group bugs (A13, A14).
@@ -43,7 +44,7 @@ Grep the offending string, not the line number.**
 - Monkeypatch `dj.config['database.host']` to a non-local hostname → assert `_assert_v2_db_safe` raises. Second test: set `SPYGLASS_SPIKESORTING_V2_ALLOW_NONLOCAL_DB` → assert it succeeds. Hermetic, no real DB needed.
 
 ### V5 — TEST: `include_labels` filter
-- Add a single-session behavioral test of `CurationV2.get_unit_brain_regions(include_labels=[...])` exercising the `UnitLabel`-join branch ([curation.py:868-873]).
+- Add a single-session behavioral test of `CurationV2.get_unit_brain_regions(include_labels=[...])` exercising the `UnitLabel`-join branch at [curation.py:1149-1152](../../../../../src/spyglass/spikesorting/v2/curation.py#L1149-L1152). Phase 6 A28 covers the same branch as part of the wider curation backfill — coordinate test names so the two PRs do not collide.
 
 ### Q1 — TEST-CLEANUP: remove/upgrade tautological tests
 - `test_v1_parity.py`: `test_v2_merge_ids_helper_exists` (294), `test_sorting_get_sorting_accepts_as_dataframe_flag` (531), `test_curation_v2_accessors_are_classmethod` (505), `test_heterogeneous_gain_rationale_comment_present` (305), `test_no_phase_label_leakage_in_runtime_code` (323).

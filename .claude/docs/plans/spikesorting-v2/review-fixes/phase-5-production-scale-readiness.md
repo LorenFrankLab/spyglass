@@ -15,7 +15,7 @@ Behavioral PR. Addresses the audit findings that surface only at production scal
 - [src/spyglass/spikesorting/v2/sorting.py:924-958](../../../../../src/spyglass/spikesorting/v2/sorting.py#L924-L958) — `Sorting.delete` analyzer-folder cleanup; pattern for the disk-leak audit.
 - [src/spyglass/spikesorting/v2/sorting.py:348-366](../../../../../src/spyglass/spikesorting/v2/sorting.py#L348-L366) — `prune_orphaned_selections` (existing pattern the disk-leak audit mirrors).
 - [pyproject.toml](../../../../../pyproject.toml) — SI version pin lives here. Confirm the current pin before editing.
-- Parent plan: [phase-1b-runtime-regressions.md § R17](../phase-1b-runtime-regressions.md) — `_hash_nwb_recording` contract. **R17 complete in current source** ([recording.py:1923](../../../../../src/spyglass/spikesorting/v2/recording.py#L1923) computes via `_hash_nwb_recording(analysis_file_name)`); A18 ships as ordinary tests, no skip annotation.
+- Parent plan: [phase-1b-runtime-regressions.md § R17](../phase-1b-runtime-regressions.md) — `_hash_nwb_recording` contract is the foundation A18's tests rely on. **Single source of truth on dependency status:** see A18's task body below for the resolution note (R17 complete; A18 ships unconditionally). PLAN.md's "Awareness of the parent plan" section and the Review checklist no longer repeat the claim.
 
 ## Tasks
 
@@ -147,5 +147,5 @@ Before opening the PR for this phase, dispatch `code-reviewer` against the diff.
 - Tests aren't trivial — A18's hash-mismatch test asserts the warning AND the row preservation; A19 covers both branches; A20's four tests each pin a distinct false condition.
 - The "Deliberately not in this phase" list is honored — no recompute-pipeline integration, no MS5 typed-field expansion, no auto-delete in A22.
 - Docstrings, test names, and module names do not reference this plan ("production-scale" is OK; "Phase 5" is not).
-- A18 ships without a `pytest.mark.skip` annotation. Parent-plan R17 is complete; the `_hash_nwb_recording` contract is in place at [recording.py:1923](../../../../../src/spyglass/spikesorting/v2/recording.py#L1923).
+- A18 ships without a `pytest.mark.skip` annotation (R17 dependency satisfied — see A18 task body).
 - Phase 7's CHANGELOG to-do list contains entries for A17 (chunked detection restored; default `job_kwargs` semantics now functional), A21 (SI version pin policy), and A22 (disk-leak audit job).
