@@ -192,8 +192,10 @@ class CurationV2(SpyglassMixin, dj.Manual):
             ``CurationV2.MergeGroup`` for lazy application via
             ``get_merged_sorting()`` (so a preview can be reviewed before
             committing). Matches v1's ``apply_merge`` semantics at
-            ``v1/curation.py:359`` so existing v1 caller code keeps
-            working unchanged.
+            ``v1/curation.py:359`` for non-degenerate input. (v2 rejects
+            empty and singleton merge groups, which v1 silently accepted
+            as no-ops/renames -- a deliberate deviation that surfaces
+            likely typos.)
         description
             Free-text curation description.
         metrics_source
@@ -539,10 +541,11 @@ class CurationV2(SpyglassMixin, dj.Manual):
         with the largest ``peak_amplitude_uv``. The merged-unit
         ``unit_id`` depends on ``apply_merge``: a fresh
         ``max(source unit_ids) + 1`` for ``apply_merge=True`` (v1 parity,
-        ``v1/curation.py:361``); the group's first id for
-        ``apply_merge=False`` (the proposed merge leader, kept as a
-        regular Unit row alongside the absorbed contributors so the
-        preview retains every original unit).
+        ``v1/curation.py:361``); ``min(group)`` for ``apply_merge=False``
+        (the proposed merge leader, kept as a regular Unit row alongside
+        the absorbed contributors so the preview retains every original
+        unit). Each merge group must have at least 2 members; empty or
+        singleton groups raise ``ValueError``.
 
         ``sorting_units`` is the pre-fetched ``Sorting.Unit`` rows for
         ``sorting_id``; the caller fetches once and threads through to
@@ -566,14 +569,12 @@ class CurationV2(SpyglassMixin, dj.Manual):
         #     ``max(source unit_ids) + 1`` (sequentially incremented per
         #     multi-merge group), matching v1's
         #     ``np.max(units_dict.keys()) + 1`` pattern; assignment is
-        #     in USER-PROVIDED group order (v1's iteration order).
-        #     The user's order is one of the contributors, NOT the kept
-        #     id.
-        #   apply_merge=False, or any single-element group: kept id is
-        #     ``min(group)`` -- for apply_merge=False this is the
-        #     proposed merge leader recorded in MergeGroup until the
-        #     merge is applied via get_merged_sorting; for a 1-element
-        #     group ``min(group)`` IS the unit itself.
+        #     in USER-PROVIDED group order (v1's iteration order). The
+        #     user's first element is one of the contributors, NOT the
+        #     kept id.
+        #   apply_merge=False: kept id is ``min(group)`` -- the proposed
+        #     merge leader recorded in MergeGroup until the merge is
+        #     applied via get_merged_sorting.
         # A unit may appear in at most one merge group: the overlap
         # check below would otherwise silently double-count spikes when
         # apply_merge=True and ambiguate the kept-unit choice.
@@ -596,20 +597,20 @@ class CurationV2(SpyglassMixin, dj.Manual):
         # produce different new ids for the same content groups. v1
         # parity for the applied path is the explicit goal.
         normalized_groups: list[list[int]] = [
-            [int(u) for u in g] for g in merge_groups if g
+            [int(u) for u in g] for g in merge_groups
         ]
         merged_ids: set[int] = set()
         merge_specs: list[tuple[int, list[int]]] = []
         next_merged_id = max(by_id) + 1
         for int_group in normalized_groups:
             if len(int_group) < 2:
-                # A "merge group" of one unit isn't a merge. v1 would
-                # silently rename it to max+1 (a no-op spike-train-wise);
-                # surface the likely typo instead.
+                # Empty or singleton "merge groups" aren't merges. v1
+                # would either no-op (empty) or silently rename the
+                # singleton to max+1; surface the likely typo instead.
                 raise ValueError(
                     f"CurationV2.insert_curation: merge_groups contains "
-                    f"a single-unit group {int_group}; merge groups must "
-                    "have at least 2 members."
+                    f"a group with fewer than 2 members ({int_group}); "
+                    "each merge group must have at least 2 units."
                 )
             for uid in int_group:
                 if uid not in by_id:

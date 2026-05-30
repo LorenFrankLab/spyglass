@@ -4888,10 +4888,11 @@ def test_curation_two_merge_groups_assign_ids_in_user_input_order(dj_conn):
     assert 2 in kept_preview and kept_preview[2] == [2, 3]
 
 
-def test_curation_rejects_singleton_merge_group(dj_conn):
-    """A "merge group" with one unit isn't a merge. v1 would silently
-    rename the singleton to ``max + 1`` (a no-op spike-train-wise); v2
-    surfaces the likely typo instead, in both ``apply_merge`` modes.
+def test_curation_rejects_empty_and_singleton_merge_groups(dj_conn):
+    """Empty and singleton "merge groups" aren't merges. v1 silently
+    accepted them (a no-op for empty, a max+1 rename for the singleton);
+    v2 raises so likely typos surface. Both apply_merge modes are
+    rejected, since neither shape carries useful provenance.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
 
@@ -4907,14 +4908,15 @@ def test_curation_rejects_singleton_merge_group(dj_conn):
 
     sorting_units = [_unit(0), _unit(1)]
     for apply_merge in (True, False):
-        with pytest.raises(ValueError, match="single-unit"):
-            CurationV2._build_curated_unit_rows(
-                sorting_id="s",
-                sorting_units=sorting_units,
-                merge_groups=[[0]],
-                curation_id=0,
-                apply_merge=apply_merge,
-            )
+        for bad_groups in ([[0]], [[]], [[0, 1], []]):
+            with pytest.raises(ValueError, match="fewer than 2"):
+                CurationV2._build_curated_unit_rows(
+                    sorting_id="s",
+                    sorting_units=sorting_units,
+                    merge_groups=bad_groups,
+                    curation_id=0,
+                    apply_merge=apply_merge,
+                )
 
 
 def test_si_merge_units_drops_same_sample_unless_delta_is_none(dj_conn):
