@@ -552,10 +552,6 @@ class SpyglassConfig:
                 "kachery_zone": os.environ.get(
                     "KACHERY_ZONE", "franklab.default"
                 ),
-                "nwb_cache": {
-                    "min_free_gb": self._nwb_min_free_gb,
-                    "min_free_pct": self._nwb_min_free_pct,
-                },
             }
         }
 
