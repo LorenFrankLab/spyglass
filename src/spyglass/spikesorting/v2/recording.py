@@ -579,31 +579,26 @@ class PreprocessingParameters(SpyglassMixin, dj.Lookup):
     preproc_params_name: varchar(128)
     ---
     params: blob
-    params_schema_version=2: int
+    params_schema_version=3: int
     job_kwargs=null: blob
     """
 
     # Row-level ``params_schema_version`` matches the inner
-    # ``PreprocessingParamsSchema.schema_version`` (bumped to 2 for
-    # ``min_segment_length`` + removal of the dead ``reference``
-    # field). The DataJoint column default also changed to 2 so a
-    # custom row that omits the column gets tagged as v2 instead of
-    # pretending to be v1.
+    # ``PreprocessingParamsSchema.schema_version`` (now 3: optional
+    # ``bandpass_filter`` so ``"no_filter"`` truly disables filtering,
+    # and a ``whiten`` default of None to match the runtime). The
+    # DataJoint column default tracks the schema (3) so a custom row
+    # that omits the column gets tagged as v3 instead of a stale v2.
     _DEFAULT_CONTENTS: tuple = (
         (
             "default_franklab",
-            # ``whiten=None`` mirrors the other two presets and the
-            # deferred-to-sorter reality: whitening happens
-            # externally inside ``Sorting._run_sorter`` (the float64
-            # path), not at the preprocessing stage. The
-            # ``WhitenParams`` schema is forward-compat scaffolding
-            # for motion correction; flipping the default to None
-            # here removes the schema/runtime mismatch where the
-            # saved blob said "whiten on" but no whitening happened.
-            PreprocessingParamsSchema.model_validate(
-                {"whiten": None}
-            ).model_dump(),
-            2,
+            # ``whiten`` is now None by schema default (whitening is
+            # deferred to the sorter -- the float64 path inside
+            # ``Sorting._run_sorter`` -- not applied at preprocessing),
+            # so the default-constructed schema already matches the
+            # production preset without an explicit override.
+            PreprocessingParamsSchema().model_dump(),
+            3,
             None,
         ),
         (
@@ -611,24 +606,20 @@ class PreprocessingParameters(SpyglassMixin, dj.Lookup):
             PreprocessingParamsSchema.model_validate(
                 {
                     "bandpass_filter": {"freq_min": 300.0, "freq_max": 6000.0},
-                    "whiten": None,
                 }
             ).model_dump(),
-            2,
+            3,
             None,
         ),
         (
             "no_filter",
+            # ``bandpass_filter=None`` is a real disable: the runtime
+            # skips the filter step entirely. (Previously this row used
+            # a 1-14999 Hz wide-band pass, which still filtered.)
             PreprocessingParamsSchema.model_validate(
-                {
-                    "bandpass_filter": {
-                        "freq_min": 1.0,
-                        "freq_max": 14999.0,
-                    },
-                    "whiten": None,
-                }
+                {"bandpass_filter": None}
             ).model_dump(),
-            2,
+            3,
             None,
         ),
     )
@@ -1769,12 +1760,16 @@ class Recording(SpyglassMixin, dj.Computed):
                 "median), or a positive electrode id."
             )
 
-        recording = sip.bandpass_filter(
-            recording,
-            freq_min=validated.bandpass_filter.freq_min,
-            freq_max=validated.bandpass_filter.freq_max,
-            dtype=_np.float64,
-        )
+        # bandpass_filter=None disables filtering (the "no_filter"
+        # preset); skip the step entirely rather than passing a
+        # wide-band that still filters.
+        if validated.bandpass_filter is not None:
+            recording = sip.bandpass_filter(
+                recording,
+                freq_min=validated.bandpass_filter.freq_min,
+                freq_max=validated.bandpass_filter.freq_max,
+                dtype=_np.float64,
+            )
         return recording
 
     @staticmethod

@@ -24,10 +24,10 @@ def test_preprocessing_params_schema_default():
     )
 
     assert PreprocessingParamsSchema().model_dump() == {
-        "schema_version": 2,
+        "schema_version": 3,
         "bandpass_filter": {"freq_min": 300.0, "freq_max": 6000.0},
         "common_reference": {"operator": "median"},
-        "whiten": {"dtype": "float32"},
+        "whiten": None,
         "min_segment_length": 1.0,
     }
 
@@ -59,11 +59,13 @@ def test_preprocessing_params_stage_split():
         "bandpass_filter": {"freq_min": 300.0, "freq_max": 6000.0},
         "common_reference": {"operator": "median"},
     }
-    assert params.to_post_motion_dict() == {"whiten": {"dtype": "float32"}}
+    # Whitening defaults to None (deferred to the sorter), so the
+    # post-motion stage is empty by default.
+    assert params.to_post_motion_dict() == {}
 
-    # Whitening disabled -> the post-motion stage is empty.
-    no_whiten = PreprocessingParamsSchema(whiten=None)
-    assert no_whiten.to_post_motion_dict() == {}
+    # Explicitly enabling whitening populates the post-motion stage.
+    whitened = PreprocessingParamsSchema(whiten={"dtype": "float32"})
+    assert whitened.to_post_motion_dict() == {"whiten": {"dtype": "float32"}}
 
 
 def test_resolved_job_kwargs_merge(restore_custom_config):

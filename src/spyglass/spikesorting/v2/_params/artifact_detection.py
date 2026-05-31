@@ -26,7 +26,14 @@ class ArtifactDetectionParamsSchema(BaseModel):
     channel jumps together the shift cancels in the across-channel mean
     and the z-score stays ~0. Use ``amplitude_thresh_uV`` to catch
     common-mode (e.g. EMG) artifacts; the two thresholds OR together
-    when both are set.
+    when both are set (a frame is flagged if it exceeds the amplitude
+    threshold OR the z-score threshold). This is an intentional mode,
+    not a configuration error -- setting both is supported.
+
+    ``detect=False`` skips detection entirely and ignores both
+    thresholds, so leaving stale threshold values on a ``detect=False``
+    row is harmless. When ``detect=True`` at least one threshold is
+    required (enforced by ``_check_thresholds``).
 
     Concurrency parameters (``n_jobs``, ``chunk_duration``, ``progress_bar``)
     are not part of this schema. They live in the per-row ``job_kwargs``

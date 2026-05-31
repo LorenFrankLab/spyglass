@@ -101,6 +101,11 @@ class Kilosort4Schema(BaseModel):
     KS4 is not a deterministic fallback (CPU/GPU runtime differences
     can change spike times) and may require GPU for non-trivial
     recordings.
+
+    Trade-off of ``extra="allow"``: typos in un-listed KS4 kwargs
+    surface at SI sort time, not at Lookup insert time -- this is the
+    accepted cost of not pinning KS4's large, fast-moving parameter
+    surface in the schema.
     """
 
     model_config = ConfigDict(extra="allow")

@@ -85,23 +85,31 @@ class PreprocessingParamsSchema(BaseModel):
         correction by the single-recording or concatenated-recording
         sorting path.
 
-    ``schema_version`` was bumped to 2 to mark the schema-
-    incompatible edits:
-    * added ``min_segment_length`` (drops sub-second slivers from
-      the intersected sort interval before the sorter sees them).
-    * removed ``CommonReferenceParams.reference`` (dead field).
+    ``schema_version`` history:
+    * 2 added ``min_segment_length`` (drops sub-second slivers from
+      the intersected sort interval before the sorter sees them) and
+      removed ``CommonReferenceParams.reference`` (dead field).
+    * 3 made ``bandpass_filter`` optional (``None`` = skip filtering,
+      so the ``"no_filter"`` preset is a real disable instead of a
+      wide-band pass) and flipped the ``whiten`` default to ``None``
+      to match the runtime (whitening is deferred to the sorter, so
+      the schema must not default to claiming it is configured).
     """
 
     model_config = ConfigDict(extra="forbid")
-    schema_version: int = 2
-    bandpass_filter: BandpassFilterParams = Field(
+    schema_version: int = 3
+    bandpass_filter: BandpassFilterParams | None = Field(
         default_factory=BandpassFilterParams
     )
+    # bandpass_filter=None disables filtering entirely (the "no_filter"
+    # preset); the default still ships v1's production bandpass.
     common_reference: CommonReferenceParams = Field(
         default_factory=CommonReferenceParams
     )
-    whiten: WhitenParams | None = Field(default_factory=WhitenParams)
-    # whiten=None for sorters that do their own whitening (Kilosort 4).
+    whiten: WhitenParams | None = Field(default=None)
+    # whiten defaults to None: whitening is deferred to the sorter
+    # (Kilosort 4 does its own; the external float64 whitening path
+    # handles the rest), so the schema does not claim it is on.
     min_segment_length: float = Field(default=1.0, ge=0.0)
     # Drop disjoint-interval slivers shorter than this many seconds
     # before the sorter sees them. Matches v1's default at
@@ -109,9 +117,17 @@ class PreprocessingParamsSchema(BaseModel):
     # to ``sort_interval.intersect(..., min_length=...)``.
 
     def to_pre_motion_dict(self) -> dict:
-        """Return the stage-1 dict (filter + reference). Cached."""
+        """Return the stage-1 dict (filter + reference). Cached.
+
+        ``bandpass_filter`` is ``None`` when filtering is disabled; the
+        runtime skips the filter step in that case.
+        """
         return {
-            "bandpass_filter": self.bandpass_filter.model_dump(),
+            "bandpass_filter": (
+                None
+                if self.bandpass_filter is None
+                else self.bandpass_filter.model_dump()
+            ),
             "common_reference": self.common_reference.model_dump(),
         }
 

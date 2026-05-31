@@ -61,6 +61,37 @@ def test_preprocessing_whiten_disabled_dumps_empty_post_motion():
     assert "common_reference" in schema.to_pre_motion_dict()
 
 
+def test_preprocessing_no_filter_is_none():
+    """``bandpass_filter=None`` disables filtering; the default keeps it.
+
+    A real "no filter" config is ``bandpass_filter=None`` (the
+    pre-motion dict carries ``None`` so the runtime skips the step),
+    not a wide-band filter that silently still filters.
+    """
+    disabled = PreprocessingParamsSchema(bandpass_filter=None)
+    assert disabled.bandpass_filter is None
+    assert disabled.to_pre_motion_dict()["bandpass_filter"] is None
+    # The default still ships a real bandpass.
+    assert PreprocessingParamsSchema().bandpass_filter is not None
+    assert (
+        PreprocessingParamsSchema().to_pre_motion_dict()["bandpass_filter"]
+        is not None
+    )
+
+
+def test_whiten_default_is_none():
+    """The default ``whiten`` is ``None`` to match the runtime.
+
+    Whitening is deferred to the sorter (the runtime applies it lazily
+    after motion correction), so a default-constructed schema must NOT
+    claim whitening is configured. ``to_post_motion_dict`` is empty by
+    default.
+    """
+    schema = PreprocessingParamsSchema()
+    assert schema.whiten is None
+    assert schema.to_post_motion_dict() == {}
+
+
 # ---------- artifact detection ---------------------------------------------
 
 
@@ -132,6 +163,30 @@ def test_artifact_zscore_description_documents_common_mode():
     assert "common-mode" in lowered
     assert "amplitude_thresh_uV" in desc
     assert "not detected" in lowered or "blind" in lowered
+
+
+def test_artifact_thresholds_or_semantics():
+    """The two thresholds are an intentional OR, not mutually exclusive.
+
+    Amplitude-only, z-score-only, and both-at-once all validate (the
+    detector ORs amplitude and z-score). ``detect=False`` ignores both
+    thresholds, so leaving stale thresholds set is not an error.
+    """
+    # amplitude-only
+    ArtifactDetectionParamsSchema(amplitude_thresh_uV=500.0, zscore_thresh=None)
+    # z-score-only
+    ArtifactDetectionParamsSchema(amplitude_thresh_uV=None, zscore_thresh=5.0)
+    # both thresholds at once -- the OR mode
+    both = ArtifactDetectionParamsSchema(
+        amplitude_thresh_uV=500.0, zscore_thresh=5.0
+    ).model_dump()
+    assert both["amplitude_thresh_uV"] == 500.0
+    assert both["zscore_thresh"] == 5.0
+    # detect=False ignores both thresholds even when they are still set
+    disabled = ArtifactDetectionParamsSchema(
+        detect=False, amplitude_thresh_uV=500.0, zscore_thresh=5.0
+    ).model_dump()
+    assert disabled["detect"] is False
 
 
 # ---------- motion correction ----------------------------------------------

@@ -73,6 +73,15 @@ class MotionCorrectionParamsSchema(BaseModel):
         ``overwrite``: the MVP concat path treats motion estimates as
         non-queryable, and the forbidden kwargs would either write
         untracked side artifacts or change the function's return type.
+
+        The forbidden-key check is the ONLY insert-time guard on
+        ``preset_kwargs``. The remaining keys are validated against
+        ``correct_motion``'s signature at the (future)
+        ``ConcatenatedRecording.make`` consumer, which is
+        ``NotImplementedError``-gated today, so an otherwise-bogus key
+        surfaces there rather than at insert time. Per-key Pydantic
+        modeling is deliberately not built against an unimplemented
+        consumer.
     """
 
     model_config = ConfigDict(extra="forbid")
