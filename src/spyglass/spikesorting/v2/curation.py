@@ -88,15 +88,42 @@ class CurationV2(SpyglassMixin, dj.Manual):
         A unit may carry multiple labels (e.g. ``mua`` + ``artifact``);
         unlabeled units have zero ``UnitLabel`` rows. The NWB units table
         still gets a ``curation_label`` indexed column so v1-style
-        consumers see empty lists for unlabeled units. Labels are
-        validated against the ``CurationLabel`` enum at insert time
-        (see shared-contracts ``Curation Label Enum``).
+        consumers see empty lists for unlabeled units.
+
+        ``curation_label`` is a ``varchar(32)`` validated against the
+        canonical ``CurationLabel`` set at insert time on EVERY insert
+        path -- including a direct ``UnitLabel.insert1`` / ``insert`` (the
+        overrides below), not only via ``CurationV2.insert_curation``.
+        DataJoint *can* declare an enum column (``metrics_source`` on the
+        master is one); v2 deliberately uses ``varchar`` + Python-side
+        validation because the label set is open-ended -- a lab adding a
+        custom label later would otherwise need a forbidden ``ALTER
+        TABLE`` under the zero-migration policy. Pass
+        ``allow_custom_labels=True`` to either override to insert a label
+        outside the canonical set.
         """
 
         definition = """
         -> CurationV2.Unit
         curation_label: varchar(32)
         """
+
+        def insert1(
+            self, row, *, allow_custom_labels: bool = False, **kwargs
+        ):
+            _validate_curation_label_rows(
+                [row], allow_custom_labels=allow_custom_labels
+            )
+            super().insert1(row, **kwargs)
+
+        def insert(
+            self, rows, *, allow_custom_labels: bool = False, **kwargs
+        ):
+            rows = list(rows)
+            _validate_curation_label_rows(
+                rows, allow_custom_labels=allow_custom_labels
+            )
+            super().insert(rows, **kwargs)
 
     class MergeGroup(SpyglassMixinPart):
         """Per-merge-group provenance: kept unit <- contributor units.
@@ -141,6 +168,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         metrics_source: str | MetricsSource = "manual",
         reuse_existing: bool = False,
         permissive_labels: bool = False,
+        allow_custom_labels: bool = False,
     ) -> dict:
         """Insert master + Unit + UnitLabel rows; stage curated-units NWB.
 
@@ -211,6 +239,15 @@ class CurationV2(SpyglassMixin, dj.Manual):
             for ``apply_merge=True``) are ALWAYS silently dropped with a
             warning (v1 parity, ``v1/curation.py:391``); this flag does
             not affect that path.
+        allow_custom_labels
+            If False (default), every label value must be in the
+            canonical ``CurationLabel`` set or ``ValueError`` is raised
+            (a typo guard). Pass True to accept labels outside the set
+            (labs tagging units with custom semantics); the flag is
+            forwarded to both ``_validate_labels`` and the
+            ``UnitLabel.insert`` part-table validation so a custom label
+            survives the whole path. Distinct from ``permissive_labels``,
+            which governs stray unit-id keys, not label values.
 
         Returns
         -------
@@ -246,7 +283,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         # can do straight ``labels.get(int_uid, [])`` lookups.
         labels = {int(uid): list(lbls) for uid, lbls in labels.items()}
 
-        cls._validate_labels(labels)
+        cls._validate_labels(labels, allow_custom_labels=allow_custom_labels)
 
         if parent_curation_id != -1:
             if not (
@@ -464,7 +501,14 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 cls.insert1(master_row)
                 cls.Unit.insert(unit_rows)
                 if unit_label_rows:
-                    cls.UnitLabel.insert(unit_label_rows)
+                    # Labels were already validated above via
+                    # ``_validate_labels``; forward ``allow_custom_labels``
+                    # so the part-table override does not re-reject the
+                    # custom labels the caller opted into.
+                    cls.UnitLabel.insert(
+                        unit_label_rows,
+                        allow_custom_labels=allow_custom_labels,
+                    )
                 if merge_group_rows:
                     cls.MergeGroup.insert(merge_group_rows)
                 SpikeSortingOutput._merge_insert(
@@ -497,12 +541,17 @@ class CurationV2(SpyglassMixin, dj.Manual):
     # ---- Validation helpers ---------------------------------------------
 
     @staticmethod
-    def _validate_labels(labels: dict) -> None:
-        """Validate that every value in ``labels`` is a recognized enum.
+    def _validate_labels(
+        labels: dict, allow_custom_labels: bool = False
+    ) -> None:
+        """Validate that every value in ``labels`` is a recognized label.
 
         Accepts ``CurationLabel`` instances OR their string values; any
         other label raises ``ValueError`` listing the offending entry
-        and the valid enum names.
+        and the valid label names. Pass ``allow_custom_labels=True`` to
+        accept labels outside the canonical ``CurationLabel`` set (labs
+        tagging units with custom semantics); the list-shape check on
+        each ``labels[unit_id]`` value still applies either way.
         """
         valid = {member.value for member in CurationLabel}
         for unit_id, lbls in labels.items():
@@ -512,6 +561,8 @@ class CurationV2(SpyglassMixin, dj.Manual):
                     f"a list of labels; got {type(lbls).__name__} for "
                     f"unit_id={unit_id}."
                 )
+            if allow_custom_labels:
+                continue
             for lbl in lbls:
                 label_value = (
                     lbl.value if isinstance(lbl, CurationLabel) else lbl
@@ -520,7 +571,9 @@ class CurationV2(SpyglassMixin, dj.Manual):
                     raise ValueError(
                         f"CurationV2.insert_curation: label {lbl!r} for "
                         f"unit_id={unit_id} is not in CurationLabel. "
-                        f"Valid labels: {sorted(valid)}."
+                        f"Valid labels: {sorted(valid)}. Pass "
+                        "allow_custom_labels=True to accept labels outside "
+                        "the canonical set."
                     )
 
     # ---- Curated-unit construction --------------------------------------

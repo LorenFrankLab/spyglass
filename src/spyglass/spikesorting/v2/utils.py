@@ -52,11 +52,17 @@ class CurationLabel(str, Enum):
 
     Members match the v1 convention list at
     ``src/spyglass/spikesorting/v1/curation.py``; v2 promotes the
-    list from a docstring to an enforced enum so a typo raises at
-    insert time. Free-form ``dj.Manual.insert1`` calls bypassing the
-    helper remain permitted (DataJoint cannot enforce enums on
-    varchar columns), and downstream filters fall back to the v1
-    list for any unrecognized label that slipped in.
+    list from a docstring to a validated set so a typo raises at
+    insert time. The backing ``CurationV2.UnitLabel.curation_label``
+    column is a ``varchar(32)``, not a MySQL enum: DataJoint *can*
+    declare an enum column (``metrics_source`` on ``CurationV2`` is
+    one), but v2 chooses varchar because the label set is open-ended --
+    a lab adding a custom label later would otherwise need a forbidden
+    ``ALTER TABLE`` under the zero-migration policy. The typo guard is
+    enforced in Python on every insert path instead: both
+    ``CurationV2.insert_curation`` and a direct
+    ``CurationV2.UnitLabel.insert1`` / ``insert`` validate against this
+    set (pass ``allow_custom_labels=True`` to opt out).
     """
 
     accept = "accept"
