@@ -182,20 +182,51 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
         ),
     )
 
+    # Sorter names in ``_DEFAULT_CONTENTS`` that are NOT SpikeInterface
+    # registered sorters and so must never be gated on
+    # ``sis.installed_sorters()``. ``clusterless_thresholder`` is a
+    # Spyglass-internal peak detector built on ``detect_peaks``.
+    _NON_SI_SORTERS: frozenset[str] = frozenset({"clusterless_thresholder"})
+
     @classmethod
     def insert_default(cls):
         """Insert v2 default sorter rows if missing.
 
-        The default-content list mirrors the designs.md
+        The default-content catalog mirrors the designs.md
         ``SorterParameters`` section and includes MS4, MS5, KS4, SC2,
-        TDC2, and clusterless_thresholder. MS4 + KS4 are not
-        deterministic and ``clusterless_thresholder`` is a Spyglass
-        peak-detection special case, not an SI registered sorter; see
-        the per-sorter Pydantic schemas in
+        TDC2, and clusterless_thresholder. Rows whose SpikeInterface
+        sorter is NOT in ``spikeinterface.sorters.installed_sorters()``
+        are skipped (logged at INFO), mirroring v1's availability gate
+        at ``v1/sorting.py:184-189`` -- otherwise a user who inserts an
+        uninstalled sorter's default row and then populates ``Sorting``
+        hits an unhelpful "sorter not registered" error from SI. MS4 and
+        KS4 are the common uninstalled cases (their Python wrappers exist
+        even when the runtime/binary is absent, so ``available_sorters``
+        is too lax -- ``installed_sorters`` is the right gate).
+
+        ``clusterless_thresholder`` is never gated (it is a Spyglass
+        peak-detection special case, not an SI registered sorter). The
+        full catalog stays in ``_DEFAULT_CONTENTS`` for introspection;
+        only the insert is gated. See the per-sorter Pydantic schemas in
         ``spyglass.spikesorting.v2._params.sorter`` for the validated
         field surface.
         """
-        cls.insert(cls._DEFAULT_CONTENTS, skip_duplicates=True)
+        import spikeinterface.sorters as sis
+
+        installed = set(sis.installed_sorters())
+        rows_to_insert = []
+        for row in cls._DEFAULT_CONTENTS:
+            sorter = row[0]
+            if sorter not in cls._NON_SI_SORTERS and sorter not in installed:
+                logger.info(
+                    "SorterParameters.insert_default: skipping default "
+                    f"row {row[1]!r} -- sorter {sorter!r} is not in "
+                    "spikeinterface.sorters.installed_sorters() on this "
+                    "platform."
+                )
+                continue
+            rows_to_insert.append(row)
+        cls.insert(rows_to_insert, skip_duplicates=True)
 
 
 @schema
