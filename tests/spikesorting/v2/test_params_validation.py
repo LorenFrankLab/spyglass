@@ -337,6 +337,49 @@ def test_clusterless_default_matches_v1():
     assert explicit["noise_levels"] == [1.0]
 
 
+def test_clusterless_threshold_unit_explicit():
+    """``threshold_unit`` makes the noise_levels unit a first-class knob.
+
+    The default is ``"mad"`` (threshold in MAD multiples; noise_levels
+    left None). ``"uv"`` is the raw-microvolt mode. Typos are rejected
+    (``extra="forbid"`` + Literal), and the schema is at version 4.
+    """
+    default = ClusterlessThresholderSchema()
+    assert default.threshold_unit == "mad"
+    assert default.noise_levels is None
+    assert default.schema_version == 4
+
+    uv = ClusterlessThresholderSchema(threshold_unit="uv")
+    assert uv.threshold_unit == "uv"
+
+    # An explicit noise_levels override coexists with threshold_unit.
+    override = ClusterlessThresholderSchema(
+        threshold_unit="mad", noise_levels=[2.0]
+    )
+    assert override.noise_levels == [2.0]
+
+    # Invalid unit is rejected by the Literal.
+    with pytest.raises(ValidationError):
+        ClusterlessThresholderSchema(threshold_unit="microvolts")
+
+
+def test_clusterless_noise_levels_derivation(dj_conn):
+    """The runtime derives noise_levels from threshold_unit correctly.
+
+    Precedence: an explicit noise_levels wins; otherwise ``"uv"`` derives
+    ``[1.0]`` (raw-uV threshold) and ``"mad"`` derives ``None`` (SI
+    estimates per-channel MAD).
+    """
+    from spyglass.spikesorting.v2.sorting import _clusterless_noise_levels
+
+    # explicit override wins regardless of unit
+    assert _clusterless_noise_levels([3.0], "uv") == [3.0]
+    assert _clusterless_noise_levels([3.0], "mad") == [3.0]
+    # derive from unit when unset
+    assert _clusterless_noise_levels(None, "uv") == [1.0]
+    assert _clusterless_noise_levels(None, "mad") is None
+
+
 def test_clusterless_default_row_ships_noise_levels_one(dj_conn):
     """The shipped ``clusterless_thresholder`` / ``default`` row has
     ``noise_levels=[1.0]`` baked into ``params``.

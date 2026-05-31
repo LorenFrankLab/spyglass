@@ -137,26 +137,36 @@ class ClusterlessThresholderSchema(BaseModel):
       v1 field had no effect in the prior strip-and-call path.
       Removed.
 
-    ``noise_levels`` defaults to ``None`` (omit from the
-    ``detect_peaks`` call), restoring SI's per-channel MAD
-    estimation as the default. Callers that want the user-facing
-    ``detect_threshold`` interpreted as raw microvolts must pass
-    ``noise_levels=[1.0]`` explicitly -- v1's ``default_clusterless``
-    row at ``src/spyglass/spikesorting/v1/sorting.py:177`` did
-    exactly this so its 100 uV threshold reads in microvolts. The
-    v2 shipping default mirrors that choice; rows tuned for
-    synthetic / low-amplitude fixtures (e.g. ``smoke_clusterless_5uv``)
-    leave ``noise_levels`` unset so the threshold is in MAD multiples
-    and tracks the recording's actual noise floor.
+    ``threshold_unit`` is the primary, self-documenting knob for how
+    ``detect_threshold`` is interpreted:
 
-    ``schema_version`` is 3: 2 dropped ``outputs`` /
-    ``random_chunk_kwargs``; 3 made ``noise_levels`` optional.
-    ``extra="forbid"`` enforces the field set at insert time.
+    * ``"mad"`` (default) -- the threshold is in MAD multiples; SI
+      estimates per-channel MAD (``noise_levels`` left unset). Tracks
+      the recording's actual noise floor; right for synthetic /
+      low-amplitude fixtures.
+    * ``"uv"`` -- the threshold is in raw microvolts; the runtime
+      derives ``noise_levels=[1.0]`` (broadcast across channels) so
+      ``detect_peaks`` reads ``detect_threshold`` directly in uV. This
+      reproduces v1's ``default_clusterless`` behavior at
+      ``src/spyglass/spikesorting/v1/sorting.py:177``.
+
+    ``noise_levels`` stays available as an ADVANCED explicit override.
+    Precedence: if ``noise_levels`` is set, the runtime uses it
+    verbatim; if ``noise_levels is None``, the runtime derives it from
+    ``threshold_unit`` as above. The runtime strips ``threshold_unit``
+    before the ``detect_peaks`` call (it is not a ``detect_peaks``
+    kwarg).
+
+    ``schema_version`` is 4: 2 dropped ``outputs`` /
+    ``random_chunk_kwargs``; 3 made ``noise_levels`` optional; 4 added
+    ``threshold_unit``. ``extra="forbid"`` enforces the field set at
+    insert time.
     """
 
     model_config = ConfigDict(extra="forbid")
-    schema_version: int = 3
+    schema_version: int = 4
     detect_threshold: float = Field(default=100.0, gt=0.0)
+    threshold_unit: Literal["uv", "mad"] = "mad"
     method: Literal["locally_exclusive", "global"] = "locally_exclusive"
     peak_sign: Literal["neg", "pos", "both"] = "neg"
     exclude_sweep_ms: float = Field(default=0.1, gt=0.0)

@@ -223,59 +223,45 @@ def test_optional_matching_extra_resolution():
     )
 
 
-def test_ms4_default_row_only_shipped_when_ms4_installed():
-    """MS4 runtime guard.
+def test_ms4_default_row_only_inserted_when_ms4_installed():
+    """MS4 runtime guard: the default row inserts iff MS4 is installed.
 
-    MS4 runtime status must be EXPLICIT: either MS4 is in
-    ``sis.installed_sorters()`` (and the default Lookup row is
-    safe to ship), or the missing-MS4 case must be documented
-    with a platform-specific guard. v2 ships an MS4 default row
-    at ``SorterParameters._DEFAULT_CONTENTS`` but the resolver
-    artifact at ``tests/spikesorting/v2/resolver/si0104-runtime.md``
-    shows MS4 is NOT in the installed-sorter set in the v2 test
-    image. This test pins the contract: if MS4 is not installed,
-    a v2 user attempting to ``Sorting.populate`` with the MS4
-    default row will hit ``sis.run_sorter`` with an unregistered
-    sorter and get an unhelpful SI error. The right behavior is to
-    SKIP the MS4 row at ``insert_default`` time when MS4 isn't
-    importable, OR to emit a clear deprecation warning. This test
-    skips cleanly when MS4 IS installed (so it doesn't block the
-    happy path) and FAILS with a clear message when MS4 is missing
-    but the default row is still in the contents tuple -- forcing
-    the install-guard issue to a head.
+    ``_DEFAULT_CONTENTS`` keeps the full catalog (MS4 rows included) for
+    introspection, but ``insert_default`` gates each SI sorter on
+    ``spikeinterface.sorters.installed_sorters()`` via
+    ``_gated_default_rows``. On a platform without MS4 (the v2 SI-0.104
+    test image) the MS4 rows are routed to "skipped"; on a platform with
+    MS4 they are routed to "insertable". Without the gate, a v2 user who
+    inserts an uninstalled sorter's default row and then populates
+    ``Sorting`` hits an unhelpful SI "sorter not registered" error.
     """
     import spikeinterface.sorters as sis
 
     from spyglass.spikesorting.v2.sorting import SorterParameters
 
-    ms4_installed = "mountainsort4" in sis.installed_sorters()
-    ms4_default_rows = [
-        row
-        for row in SorterParameters._DEFAULT_CONTENTS
-        if row[0] == "mountainsort4"
-    ]
-    if ms4_installed:
-        # Skip rather than bare-return so pytest reports
-        # SKIPPED visibly -- a bare ``return`` registers as a
-        # PASSED test with zero assertions, losing the "what was
-        # exercised" signal.
-        pytest.skip(
-            "mountainsort4 is in sis.installed_sorters(); the "
-            "default-row vs runtime guard is a non-issue on this "
-            "platform."
-        )
+    # Assert the gating DECISION (independent of the live table state,
+    # which other tests may have populated).
+    insertable, skipped = SorterParameters._gated_default_rows()
+    insertable_sorters = {row[0] for row in insertable}
+    skipped_sorters = {row[0] for row in skipped}
 
-    assert not ms4_default_rows, (
-        "SorterParameters._DEFAULT_CONTENTS ships MS4 default rows "
-        f"({[r[1] for r in ms4_default_rows]!r}) but MS4 is not in "
-        "sis.installed_sorters() on this platform. A v2 user "
-        "calling SorterParameters.insert_default() then "
-        "Sorting.populate(... sorter='mountainsort4' ...) will hit "
-        "an unhelpful SI 'sorter not registered' error. MS4 "
-        "runtime status must be explicit: either install MS4 "
-        "(Linux only, separate dep) OR gate the default row insert "
-        "behind ``if 'mountainsort4' in sis.installed_sorters()``."
+    # clusterless_thresholder is Spyglass-internal -> never gated.
+    assert "clusterless_thresholder" in insertable_sorters
+    assert "clusterless_thresholder" not in skipped_sorters
+
+    # The catalog always advertises MS4 (introspection), regardless of
+    # install status.
+    assert any(
+        row[0] == "mountainsort4"
+        for row in SorterParameters._DEFAULT_CONTENTS
     )
+
+    if "mountainsort4" in sis.installed_sorters():
+        assert "mountainsort4" in insertable_sorters
+        assert "mountainsort4" not in skipped_sorters
+    else:
+        assert "mountainsort4" in skipped_sorters
+        assert "mountainsort4" not in insertable_sorters
 
 
 def test_clusterless_schema_documents_dead_fields_or_drops_them():

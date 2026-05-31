@@ -95,11 +95,13 @@ def test_regenerate_phase1_baseline(dj_conn):
     # NOTE: the pre-refactor baseline was originally captured with
     # ``outputs="sorting"`` and ``params_schema_version=1``. The v2
     # tri-part refactor dropped that field from
-    # ``ClusterlessThresholderSchema`` (schema_version 2), and a
+    # ``ClusterlessThresholderSchema`` (schema_version 2), a
     # follow-up made ``noise_levels`` optional (schema_version 3,
-    # ``None`` -> SI computes per-channel MAD). The row below
-    # tracks the current schema_version (3) and intentionally
-    # OMITS ``noise_levels`` so the threshold is interpreted as a
+    # ``None`` -> SI computes per-channel MAD), and a later change
+    # added ``threshold_unit`` (schema_version 4). The row below
+    # tracks the current schema_version (4) and intentionally
+    # OMITS ``noise_levels`` (and leaves ``threshold_unit="mad"``)
+    # so the threshold is interpreted as a
     # MAD multiplier on this synthetic fixture; without that the
     # 5 uV raw threshold floods the detection with noise crossings.
     # ``update1`` (not ``insert1(replace=True)``) because the
@@ -124,7 +126,7 @@ def test_regenerate_phase1_baseline(dj_conn):
             "sorter": "clusterless_thresholder",
             "sorter_params_name": "default",
             "params": smoke_params,
-            "params_schema_version": 3,
+            "params_schema_version": 4,
             "job_kwargs": None,
         }
     )

@@ -68,6 +68,26 @@ class SortingComputed(NamedTuple):
     recording_id: str
     nwb_file_name: str
 
+
+def _clusterless_noise_levels(
+    noise_levels: list[float] | None, threshold_unit: str
+) -> list[float] | None:
+    """Resolve clusterless-thresholder ``noise_levels`` precedence.
+
+    An explicit ``noise_levels`` always wins. Otherwise ``threshold_unit``
+    governs how ``detect_threshold`` is interpreted:
+
+    * ``"uv"`` -> ``[1.0]`` so ``detect_peaks`` reads ``detect_threshold``
+      in raw microvolts (the value is broadcast across channels by the
+      caller).
+    * ``"mad"`` -> ``None`` so SpikeInterface estimates per-channel MAD
+      and ``detect_threshold`` is a MAD multiplier.
+    """
+    if noise_levels is not None:
+        return noise_levels
+    return [1.0] if threshold_unit == "uv" else None
+
+
 _assert_v2_db_safe()
 schema = dj.schema("spikesorting_v2_sorting")
 
@@ -163,21 +183,27 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
             "default",
             _validate_params(
                 _get_sorter_schema("clusterless_thresholder"),
-                # ``noise_levels=[1.0]`` mirrors v1's
-                # ``default_clusterless`` at
-                # ``src/spyglass/spikesorting/v1/sorting.py:177``,
-                # making the shipped ``detect_threshold=100`` read
-                # as microvolts (raw amplitude) rather than as a
-                # MAD multiplier. The smoke / synthetic-fixture
-                # rows OMIT ``noise_levels`` so SI computes
-                # per-channel MAD and the threshold tracks the
-                # recording's noise floor.
-                {"noise_levels": [1.0]},
+                # ``threshold_unit="uv"`` makes the shipped
+                # ``detect_threshold=100`` read as microvolts (raw
+                # amplitude) rather than as a MAD multiplier, matching
+                # v1's ``default_clusterless`` at
+                # ``src/spyglass/spikesorting/v1/sorting.py:177``. The
+                # explicit ``noise_levels=[1.0]`` is the equivalent
+                # advanced override and is kept as a belt-and-suspenders
+                # regression guard against the 1,400x noise_levels
+                # divergence; the runtime uses it verbatim (explicit
+                # noise_levels take precedence over ``threshold_unit``).
+                # The smoke / synthetic-fixture rows leave both at the
+                # defaults (``threshold_unit="mad"``, no noise_levels)
+                # so SI computes per-channel MAD and the threshold
+                # tracks the recording's noise floor.
+                {"threshold_unit": "uv", "noise_levels": [1.0]},
             ),
-            # ClusterlessThresholderSchema is at schema_version=3:
+            # ClusterlessThresholderSchema is at schema_version=4:
             # v2 dropped ``outputs`` / ``random_chunk_kwargs``;
-            # v3 made ``noise_levels`` optional (None -> SI MAD).
-            3,
+            # v3 made ``noise_levels`` optional (None -> SI MAD);
+            # v4 added ``threshold_unit``.
+            4,
             None,
         ),
     )
@@ -211,22 +237,39 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
         ``spyglass.spikesorting.v2._params.sorter`` for the validated
         field surface.
         """
+        insertable, skipped = cls._gated_default_rows()
+        for row in skipped:
+            logger.info(
+                "SorterParameters.insert_default: skipping default "
+                f"row {row[1]!r} -- sorter {row[0]!r} is not in "
+                "spikeinterface.sorters.installed_sorters() on this "
+                "platform."
+            )
+        cls.insert(insertable, skip_duplicates=True)
+
+    @classmethod
+    def _gated_default_rows(cls):
+        """Split ``_DEFAULT_CONTENTS`` into (insertable, skipped) by install.
+
+        A default row is insertable when its sorter is a Spyglass-internal
+        sorter (``_NON_SI_SORTERS``, never gated) or is in
+        ``spikeinterface.sorters.installed_sorters()``. Returns
+        ``(insertable, skipped)`` so ``insert_default`` can log the skips
+        and tests can assert the gating decision without depending on the
+        live ``SorterParameters`` table state.
+        """
         import spikeinterface.sorters as sis
 
         installed = set(sis.installed_sorters())
-        rows_to_insert = []
+        insertable: list = []
+        skipped: list = []
         for row in cls._DEFAULT_CONTENTS:
             sorter = row[0]
-            if sorter not in cls._NON_SI_SORTERS and sorter not in installed:
-                logger.info(
-                    "SorterParameters.insert_default: skipping default "
-                    f"row {row[1]!r} -- sorter {sorter!r} is not in "
-                    "spikeinterface.sorters.installed_sorters() on this "
-                    "platform."
-                )
-                continue
-            rows_to_insert.append(row)
-        cls.insert(rows_to_insert, skip_duplicates=True)
+            if sorter in cls._NON_SI_SORTERS or sorter in installed:
+                insertable.append(row)
+            else:
+                skipped.append(row)
+        return insertable, skipped
 
 
 @schema
@@ -1174,7 +1217,15 @@ class Sorting(SpyglassMixin, dj.Computed):
         for stale in ("outputs", "random_chunk_kwargs"):
             params.pop(stale, None)
 
-        nl_in = params.get("noise_levels")
+        # ``threshold_unit`` is a Spyglass-side knob, not a detect_peaks
+        # kwarg: strip it and use it to resolve the noise_levels
+        # precedence (explicit noise_levels win; otherwise "uv" -> [1.0]
+        # so detect_threshold reads in raw uV, "mad" -> None so SI
+        # estimates per-channel MAD).
+        threshold_unit = params.pop("threshold_unit", "mad")
+        nl_in = _clusterless_noise_levels(
+            params.get("noise_levels"), threshold_unit
+        )
         if nl_in is None:
             # Drop the key entirely so ``detect_peaks`` falls through to
             # SI's per-channel MAD estimation path.
