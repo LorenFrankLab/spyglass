@@ -33,6 +33,7 @@ from spyglass.spikesorting.v2.utils import (
     _assert_schema_version_matches,
     _assert_v2_db_safe,
     _validate_params,
+    _validate_reference_fields,
     transaction_or_noop,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger

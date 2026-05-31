@@ -72,6 +72,64 @@ class CurationLabel(str, Enum):
     reject = "reject"
 
 
+ReferenceMode = Literal["none", "global_median", "specific"]
+"""How a ``SortGroupV2`` references its channels before sorting.
+
+* ``"none"`` -- no re-referencing.
+* ``"global_median"`` -- common-median reference across the group.
+* ``"specific"`` -- subtract a single named reference electrode
+  (``reference_electrode_id``), then drop it from the sorted channel set.
+
+Stored as a ``varchar(32)`` on ``SortGroupV2`` validated against this
+Literal at insert time (NOT a MySQL enum). The set may grow --
+SpikeInterface also supports ``global_average`` / CAR and local per-group
+referencing -- and an enum would trap a future mode behind a forbidden
+``ALTER TABLE`` under the zero-migration policy. The Literal gives
+identical typo protection at the ``insert1`` boundary without the
+migration risk; same decision as ``CurationLabel``. It replaced a single
+``sort_reference_electrode_id`` int whose magic sentinels (-1 none, -2
+global median, >=0 specific) conflated the mode with the channel id.
+"""
+
+_VALID_REFERENCE_MODES: frozenset[str] = frozenset(
+    ("none", "global_median", "specific")
+)
+
+
+def _validate_reference_fields(row: dict) -> None:
+    """Validate a ``SortGroupV2`` row's reference fields before insert.
+
+    Enforces the two invariants the ``reference_mode`` /
+    ``reference_electrode_id`` split must hold:
+
+    1. ``reference_mode`` (defaulting to ``"none"`` when absent) is a
+       member of the ``ReferenceMode`` Literal -- the varchar's typo
+       guard, replacing what a MySQL enum would have done at the DB.
+    2. ``reference_electrode_id`` is non-null **iff**
+       ``reference_mode == 'specific'``: a specific reference needs a
+       channel to subtract, and a non-specific mode must not carry a
+       stray channel id the runtime would silently ignore.
+    """
+    mode = row.get("reference_mode", "none")
+    if mode not in _VALID_REFERENCE_MODES:
+        raise ValueError(
+            f"SortGroupV2: reference_mode {mode!r} is not a valid "
+            f"ReferenceMode. Valid modes: {sorted(_VALID_REFERENCE_MODES)}."
+        )
+    ref_id = row.get("reference_electrode_id")
+    if mode == "specific" and ref_id is None:
+        raise ValueError(
+            "SortGroupV2: reference_mode='specific' requires a non-null "
+            "reference_electrode_id (the channel to subtract)."
+        )
+    if mode != "specific" and ref_id is not None:
+        raise ValueError(
+            f"SortGroupV2: reference_mode={mode!r} must leave "
+            f"reference_electrode_id NULL; got {ref_id!r}. Only "
+            "reference_mode='specific' names a reference electrode."
+        )
+
+
 def find_orphaned_masters(master_table, part_tables: list) -> list[dict]:
     """Return master PKs whose source-part counts sum to zero.
 

@@ -8520,3 +8520,140 @@ def test_curation_insert_idempotent_rejects_new_args(populated_sorting):
         reuse_existing=True,
     )
     assert reused["curation_id"] == pk["curation_id"]
+
+
+# ---------- T2: SortGroupV2 reference-mode split ----------------------------
+
+
+@pytest.mark.slow
+def test_sort_group_reference_mode_enforced(polymer_smoke_session):
+    """SortGroupV2.insert1 enforces the reference_mode / electrode invariants.
+
+    ``reference_mode`` is validated against the ``ReferenceMode`` Literal
+    at insert time (a typo raises), ``"specific"`` requires a
+    ``reference_electrode_id``, and the non-specific modes reject one. A
+    valid ``"specific"`` row stores both fields; a default (mode omitted)
+    row stores ``"none"`` with a NULL electrode.
+    """
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    _clean_session_v2(polymer_smoke_session)
+
+    base = {"nwb_file_name": nwb_file_name, "sort_group_id": 900}
+
+    # Typo'd mode rejected by the Literal guard (varchar, not enum).
+    with pytest.raises(ValueError, match="reference_mode"):
+        SortGroupV2.insert1({**base, "reference_mode": "globalmedian"})
+
+    # specific requires an electrode id.
+    with pytest.raises(ValueError, match="requires a non-null"):
+        SortGroupV2.insert1({**base, "reference_mode": "specific"})
+
+    # non-specific must not carry an electrode id.
+    with pytest.raises(ValueError, match="must leave"):
+        SortGroupV2.insert1(
+            {
+                **base,
+                "reference_mode": "global_median",
+                "reference_electrode_id": 3,
+            }
+        )
+
+    # A valid specific row inserts and stores both fields.
+    SortGroupV2.insert1(
+        {**base, "reference_mode": "specific", "reference_electrode_id": 0}
+    )
+    stored = (SortGroupV2 & base).fetch1(
+        "reference_mode", "reference_electrode_id"
+    )
+    assert stored == ("specific", 0)
+
+    # A default (mode omitted) row stores "none" with NULL electrode.
+    default_base = {"nwb_file_name": nwb_file_name, "sort_group_id": 901}
+    SortGroupV2.insert1(default_base)
+    mode, eid = (SortGroupV2 & default_base).fetch1(
+        "reference_mode", "reference_electrode_id"
+    )
+    assert mode == "none"
+    assert eid is None
+
+
+@pytest.mark.slow
+def test_recording_specific_reference_drops_ref_channel(polymer_smoke_session):
+    """specific mode references then drops the reference electrode.
+
+    The reference electrode is included in the channel slice so
+    ``common_reference`` can subtract it, then removed -- the cached
+    recording must NOT carry it, while the sort group's own electrodes
+    remain. Uses a cross-group reference electrode so the dropped channel
+    is unambiguously distinct from the sorted set.
+    """
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    _clean_session_v2(polymer_smoke_session)
+    PreprocessingParameters.insert_default()
+    LabTeam.insert1(
+        {"team_name": "v2_test_team", "team_description": "v2 pipeline tests"},
+        skip_duplicates=True,
+    )
+
+    # Group by shank with NO reference so we can pick a reference electrode
+    # from a DIFFERENT group than the one we sort.
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    sg_ids = sorted(
+        int(s) for s in (SortGroupV2 & polymer_smoke_session).fetch("sort_group_id")
+    )
+    assert len(sg_ids) >= 2, "need >=2 shanks to isolate a cross-group ref"
+    target_sg, other_sg = sg_ids[0], sg_ids[1]
+    target_elecs = [
+        int(e)
+        for e in (
+            SortGroupV2.SortGroupElectrode
+            & {**polymer_smoke_session, "sort_group_id": target_sg}
+        ).fetch("electrode_id")
+    ]
+    ref_id = int(
+        (
+            SortGroupV2.SortGroupElectrode
+            & {**polymer_smoke_session, "sort_group_id": other_sg}
+        ).fetch("electrode_id")[0]
+    )
+    assert ref_id not in target_elecs
+
+    # Re-group with a specific cross-group reference electrode.
+    SortGroupV2.set_group_by_shank(
+        nwb_file_name=nwb_file_name,
+        reference_mode="specific",
+        reference_electrode_id=ref_id,
+        sort_group_ids=sg_ids,
+        delete_existing_entries=True,
+        confirm=True,
+    )
+
+    rec_pk = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": target_sg,
+            "interval_list_name": "raw data valid times",
+            "preproc_params_name": "default_franklab",
+            "team_name": "v2_test_team",
+        }
+    )
+    Recording.populate(rec_pk, reserve_jobs=False)
+    rec = Recording().get_recording(rec_pk)
+    cached_ids = {int(c) for c in rec.get_channel_ids()}
+    assert ref_id not in cached_ids, (
+        "specific-mode reference electrode leaked into the cached "
+        "recording; it must be dropped after referencing."
+    )
+    assert set(target_elecs) <= cached_ids, (
+        "sort-group electrodes missing from the cached recording."
+    )

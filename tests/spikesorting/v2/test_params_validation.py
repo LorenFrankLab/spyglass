@@ -511,3 +511,44 @@ def test_schema_version_present_and_positive(schema_cls):
     blob = schema_cls().model_dump()
     assert isinstance(blob["schema_version"], int)
     assert blob["schema_version"] >= 1
+
+
+# ---------- SortGroupV2 reference-mode validation ---------------------------
+
+
+def test_reference_fields_validation():
+    """``_validate_reference_fields`` enforces the reference-mode invariants.
+
+    The ``reference_mode`` varchar is typo-guarded against the
+    ``ReferenceMode`` Literal, and ``reference_electrode_id`` is non-null
+    iff the mode is ``"specific"``. (Validates the helper directly; the
+    same helper runs inside ``SortGroupV2.insert1`` / ``insert``.)
+    """
+    from spyglass.spikesorting.v2.utils import _validate_reference_fields
+
+    # Valid rows.
+    _validate_reference_fields({"reference_mode": "none"})
+    _validate_reference_fields({"reference_mode": "global_median"})
+    _validate_reference_fields(
+        {"reference_mode": "specific", "reference_electrode_id": 7}
+    )
+    # Absent mode defaults to "none".
+    _validate_reference_fields({})
+
+    # Typo'd mode is rejected.
+    with pytest.raises(ValueError, match="reference_mode"):
+        _validate_reference_fields({"reference_mode": "globalmedian"})
+
+    # specific requires an electrode id.
+    with pytest.raises(ValueError, match="requires a non-null"):
+        _validate_reference_fields({"reference_mode": "specific"})
+
+    # non-specific modes must NOT carry an electrode id.
+    with pytest.raises(ValueError, match="must leave"):
+        _validate_reference_fields(
+            {"reference_mode": "none", "reference_electrode_id": 3}
+        )
+    with pytest.raises(ValueError, match="must leave"):
+        _validate_reference_fields(
+            {"reference_mode": "global_median", "reference_electrode_id": 3}
+        )

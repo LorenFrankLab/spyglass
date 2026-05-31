@@ -35,13 +35,14 @@ class BandpassFilterParams(BaseModel):
 class CommonReferenceParams(BaseModel):
     """Common-reference re-referencing options.
 
-    v2 hardcodes the reference mode based on ``ref_channel_id`` in
-    ``Recording._apply_pre_motion_preprocessing`` (single if a
-    specific electrode is named, global if -2 is configured for
-    global median, none if -1). The ``reference`` field of v1's
-    preprocessing params is intentionally not exposed in v2 because
-    no production v1 workflow used it -- v1 hardcoded the same
-    dispatch (see ``src/spyglass/spikesorting/v1/recording.py:597-619``).
+    v2 selects the reference mode from the ``SortGroupV2.reference_mode``
+    column in ``Recording._apply_pre_motion_preprocessing`` (single for
+    ``"specific"`` -- subtract the named ``reference_electrode_id`` --
+    global for ``"global_median"``, none for ``"none"``). The
+    ``reference`` field of v1's preprocessing params is intentionally not
+    exposed in v2 because no production v1 workflow used it -- v1
+    hardcoded the same dispatch (see
+    ``src/spyglass/spikesorting/v1/recording.py:597-619``).
     Promoted from "silent runtime override" to "field removed" so
     the schema does not lie about what the runtime honors.
 
