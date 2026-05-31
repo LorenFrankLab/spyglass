@@ -13,7 +13,7 @@ mean a v0/v1 schema migration sneaked in alongside an SI bump.
 Regenerate (when a v0/v1 schema legitimately needs to change):
 
 ```bash
-source .venv-spikesorting-v2-si0104/bin/activate
+conda activate spyglass_spikesorting_v2
 python tests/spikesorting/v2/baselines/regen_legacy_schemas.py
 ```
 

@@ -180,6 +180,9 @@ jobs:
       github.event.action != 'closed' ||
       github.event.pull_request.merged == true
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -l {0}
     services:
       mysql:
         image: datajoint/mysql:8.0
@@ -196,30 +199,28 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@v4
-    - name: Set up Python
-      uses: actions/setup-python@v6
-      with:
-        python-version: '3.11'
-    - name: Set up uv
-      uses: astral-sh/setup-uv@v6
     - name: Install apt dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y libmysqlclient-dev
-    - name: Create isolated environment (SpikeInterface 0.104)
-      run: |
-        uv venv --python 3.11 .venv-spikesorting-v2
-        # Default v2 CI does NOT install ``spikesorting-v2-matching``
-        # because UnitMatchPy 3.3 transitively pulls torch + numpy<2,
-        # which DOWNGRADES the v2 numpy>=2 baseline and breaks the
-        # rest of the suite. ``test_optional_matching_extra_resolution``
-        # is designed to catch exactly this incompatibility: it
-        # asserts numpy major >= 2 after install. The matching extra
-        # is exercised in a separate dedicated job below where the
-        # env can be sacrificed.
-        uv pip install --python .venv-spikesorting-v2 -e ".[test,spikesorting-v2]"
-        uv pip install --python .venv-spikesorting-v2 \
-          "spikeinterface>=0.104,<0.105"
+    - name: Set up conda (SpikeInterface 0.104 environment)
+      # The v2 environment is conda-managed for consistency with the
+      # main suite (run-tests above), via the dedicated env file. The
+      # env pins Python 3.11 + SpikeInterface 0.104 and installs the
+      # test, spikesorting-v2, and spikesorting-v2-validation extras
+      # (the validation extra brings MEArec / neuroconv so the smoke
+      # fixture can be generated below). It deliberately does NOT
+      # install ``spikesorting-v2-matching``: UnitMatchPy 3.3
+      # transitively pulls torch + numpy<2, which DOWNGRADES the v2
+      # numpy>=2 baseline. ``test_optional_matching_extra_resolution``
+      # asserts numpy major >= 2; the matching extra is exercised in a
+      # separate sacrificial env in the step below.
+      uses: conda-incubator/setup-miniconda@v3
+      with:
+        activate-environment: spyglass_spikesorting_v2
+        environment-file: environments/environment_spikesorting_v2.yml
+        miniforge-version: latest
+        use-mamba: true
     - name: Generate MEArec smoke fixture
       # The smoke MEArec NWB (mearec_polymer_smoke.nwb, ~4s, small
       # template set) is required by the v2 integration tests in
@@ -236,17 +237,15 @@ jobs:
       # tests skip cleanly when absent and are intended for the
       # manual / scheduled full runs.
       run: |
-        .venv-spikesorting-v2/bin/python \
-          tests/spikesorting/v2/fixtures/generate_mearec.py --smoke
+        python tests/spikesorting/v2/fixtures/generate_mearec.py --smoke
     - name: Run modern spike-sorting tests
       run: |
-        .venv-spikesorting-v2/bin/pytest tests/spikesorting/v2/ \
-          --no-docker --no-dlc -q
+        pytest tests/spikesorting/v2/ --no-docker --no-dlc -q
     # --- Phase 0c plan-line 125 matching-extra resolver-evidence job.
-    # Runs in a SEPARATE throwaway venv so the numpy<2 downgrade
-    # UnitMatchPy 3.3 forces does not poison the default v2 env. The
-    # test logic is a single resolver assertion (numpy major >= 2)
-    # plus import gates -- when numpy<2 is forced, the assertion
+    # Runs in a SEPARATE, sacrificial conda env so the numpy<2
+    # downgrade UnitMatchPy 3.3 forces does not poison the default v2
+    # env. The test logic is a single resolver assertion (numpy major
+    # >= 2) plus import gates -- when numpy<2 is forced, the assertion
     # fires and the resolver-evidence ticket re-opens.
     - name: Phase 0c matching-extra resolver evidence (separate env)
       env:
@@ -258,7 +257,9 @@ jobs:
         # stays green.
         SPIKESORTING_V2_MATCHING_EXTRA_REQUIRED: "1"
       run: |
-        uv venv --python 3.11 .venv-spikesorting-v2-matching
+        # Sacrificial conda env: the matching extra downgrades numpy
+        # below the v2 baseline, so it must never share the env above.
+        conda create -y -n spyglass_v2_matching python=3.11
         # Install tolerates failure: upstream resolver breakages are
         # often transient (network, build-wheel) and NOT what this
         # gate measures. The resolver-evidence signal comes from the
@@ -267,8 +268,8 @@ jobs:
         # absent, so a permanent extra-declaration bug cannot pose as
         # a transient install hiccup. The pytest run itself must NOT
         # be masked by ``|| true``.
-        uv pip install --python .venv-spikesorting-v2-matching \
+        conda run -n spyglass_v2_matching pip install \
           -e ".[test,spikesorting-v2,spikesorting-v2-matching]" || true
-        .venv-spikesorting-v2-matching/bin/pytest \
+        conda run -n spyglass_v2_matching pytest \
           tests/spikesorting/v2/test_v1_parity.py::test_optional_matching_extra_resolution \
           --no-docker --no-dlc -q

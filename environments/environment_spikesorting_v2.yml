@@ -1,0 +1,48 @@
+# Isolated conda environment for the spikesorting v2 test suite.
+#
+# The v2 pipeline targets SpikeInterface 0.104 / Python 3.11, which is
+# incompatible with the SpikeInterface 0.99 baseline the rest of the repo
+# pins (see environments/environment.yml). CI keeps the two suites in
+# separate environments and runs v2 with `--ignore`d from the main suite
+# (.github/workflows/test-conda.yml: the `pytest-v2` job). This file is the
+# conda equivalent of that job's setup so the v2 suite can be reproduced
+# locally with conda.
+#
+# 1. Create:   `mamba env create -f environments/environment_spikesorting_v2.yml`
+#    (run from the repo root; the env file installs the package editable
+#    from the repo root via the `../` path in the pip section).
+# 2. Activate: `conda activate spyglass_spikesorting_v2`
+# 3. SpikeInterface is pinned to 0.104 by the pip section below. If you
+#    need to (re)install the package + extras by hand:
+#       pip install -e ".[test,spikesorting-v2,spikesorting-v2-validation]"
+#       pip install "spikeinterface>=0.104,<0.105"
+#    (The CI `pytest-v2` job installs only ".[test,spikesorting-v2]" and
+#    generates the MEArec smoke fixture instead of installing MEArec; the
+#    `spikesorting-v2-validation` extra is added here so a local FULL run
+#    has MEArec + neuroconv available for `_read_ground_truth` and
+#    `test_mearec_fixture_gain_required`. Note MEArec / elephant cap
+#    numpy < 2.)
+#
+# Do NOT install the `spikesorting-v2-matching` extra into this env:
+# UnitMatchPy pulls torch + numpy < 2 and downgrades the v2 numpy >= 2
+# baseline (`test_optional_matching_extra_resolution` guards this). CI
+# exercises that extra in a throwaway env.
+#
+# 4. Run the suite (Docker MySQL for DataJoint, or --no-docker null_server):
+#       pytest tests/spikesorting/v2/ --no-docker --no-dlc
+name: spyglass_spikesorting_v2
+channels:
+  - conda-forge
+  - franklab
+  - edeno
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      # Editable install of the repo root (this file lives in
+      # environments/, so the package root is one level up). The extras
+      # bring in the test deps, the v2 sorters, and the MEArec/neuroconv
+      # validation deps; the explicit SpikeInterface pin overrides the
+      # base dependency to the 0.104 line the v2 pipeline targets.
+      - --editable "..[test,spikesorting-v2,spikesorting-v2-validation]"
+      - "spikeinterface>=0.104,<0.105"

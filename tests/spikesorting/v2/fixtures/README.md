@@ -30,10 +30,11 @@ Fixture generation needs the validation extra **and** NEURON + LFPy (MEArec
 simulates templates biophysically):
 
 ```bash
-source .venv-spikesorting-v2/bin/activate
-uv pip install -e ".[test,spikesorting-v2-validation]"
-uv pip install "spikeinterface>=0.104,<0.105" "neuroconv[mearec]"
-uv pip install neuron LFPy
+conda activate spyglass_spikesorting_v2
+# The env (environments/environment_spikesorting_v2.yml) already installs
+# .[test,spikesorting-v2,spikesorting-v2-validation] + SpikeInterface 0.104.
+# Fixture GENERATION additionally needs NEURON + LFPy:
+pip install neuron LFPy
 ```
 
 `neuroconv` is overridden to a modern release because the project's pinned
