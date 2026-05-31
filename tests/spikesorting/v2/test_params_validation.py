@@ -552,3 +552,48 @@ def test_reference_fields_validation():
         _validate_reference_fields(
             {"reference_mode": "global_median", "reference_electrode_id": 3}
         )
+
+
+# ---------- schema-version bumps (this phase's field changes) ---------------
+
+
+def test_schema_versions_bumped():
+    """The schema-version markers reflect this phase's field changes.
+
+    ``ClusterlessThresholderSchema`` gained ``threshold_unit`` (3 -> 4)
+    and ``PreprocessingParamsSchema`` made ``bandpass_filter`` optional +
+    flipped the ``whiten`` default (2 -> 3). An un-bumped marker would let
+    a stale row validate against the new field set.
+    """
+    assert ClusterlessThresholderSchema().schema_version == 4
+    assert PreprocessingParamsSchema().schema_version == 3
+
+
+def test_shipped_rows_carry_current_params_schema_version(dj_conn):
+    """No shipped default row is left on a stale ``params_schema_version``.
+
+    Each shipped ``SorterParameters`` / ``PreprocessingParameters`` row's
+    ``params_schema_version`` must equal the inner schema's
+    ``schema_version`` so ``_assert_schema_version_matches`` (run on every
+    insert1) stays green. Pins the version-bump bookkeeping for the rows
+    touched this phase.
+    """
+    from spyglass.spikesorting.v2.recording import PreprocessingParameters
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    SorterParameters.insert_default()
+    PreprocessingParameters.insert_default()
+
+    clusterless = (
+        SorterParameters
+        & {"sorter": "clusterless_thresholder", "sorter_params_name": "default"}
+    ).fetch1()
+    assert clusterless["params_schema_version"] == 4
+    assert clusterless["params"]["schema_version"] == 4
+
+    for name in ("default_franklab", "default_neuropixels", "no_filter"):
+        row = (
+            PreprocessingParameters & {"preproc_params_name": name}
+        ).fetch1()
+        assert row["params_schema_version"] == 3, name
+        assert row["params"]["schema_version"] == 3, name
