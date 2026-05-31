@@ -372,12 +372,33 @@ def test_merge_dispatch_raises_on_unknown_restriction_keys():
 
 
 def test_get_restricted_merge_ids_default_sources_includes_v2():
-    """Default sources list includes v2 so v1 callers see v2 rows."""
-    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    """When ``sources`` is unspecified, v2 is among the resolved sources.
 
+    The ``sources`` parameter default is ``None`` (resolved at call time
+    to the available sources via ``_available_merge_sources``) rather
+    than a mutable ``["v0", "v1", "v2"]`` literal. That avoids the
+    mutable-default-argument antipattern and avoids forcing ``"v2"`` in
+    v0/v1-only deployments where the v2 module never imported. The
+    behavior that matters -- a caller who omits ``sources`` sees v2 rows
+    when v2 is importable -- is what this test pins, rather than the
+    signature literal.
+    """
+    from spyglass.spikesorting.spikesorting_merge import (
+        SpikeSortingOutput,
+        _available_merge_sources,
+    )
+
+    # The signature default is intentionally None (runtime-resolved),
+    # NOT a mutable list literal.
     sig = inspect.signature(SpikeSortingOutput.get_restricted_merge_ids)
-    default = sig.parameters["sources"].default
-    assert default == ["v0", "v1", "v2"]
+    assert sig.parameters["sources"].default is None
+
+    # In an environment where the v2 module imported, the resolved
+    # default sources include v2 (and always v0 + v1).
+    resolved = _available_merge_sources()
+    assert "v0" in resolved
+    assert "v1" in resolved
+    assert "v2" in resolved
 
 
 # ---------- timestamp repair (pure-numpy unit) ------------------------------
