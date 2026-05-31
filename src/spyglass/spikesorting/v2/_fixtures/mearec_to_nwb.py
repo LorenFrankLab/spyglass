@@ -27,6 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 
@@ -245,13 +246,44 @@ def tetrode_probe_layout() -> ProbeLayout:
     )
 
 
+CellType = Literal["E", "I"]
+"""MEArec's ground-truth ``cell_type`` annotation vocabulary.
+
+MEArec tags each ground-truth spiketrain with ``cell_type`` in
+``{"E", "I"}`` (excitatory / inhibitory; the single-letter codes are what
+MEArec writes into the recording ``.h5``, verified across every committed
+fixture). v2 types the ground-truth column against this set and normalizes
+case/whitespace drift via :func:`_normalize_cell_type` so a stray
+``"e "`` cannot silently become a distinct category.
+"""
+
+_VALID_CELL_TYPES: frozenset[str] = frozenset({"E", "I"})
+
+
+def _normalize_cell_type(raw: object) -> CellType:
+    """Normalize a MEArec ``cell_type`` annotation to the canonical set.
+
+    Strips surrounding whitespace and upper-cases (MEArec writes ``"E"`` /
+    ``"I"``), then validates against ``{"E", "I"}``. Raises ``ValueError``
+    on a value outside the set (annotation drift / typo) rather than
+    silently coercing it to a fallback.
+    """
+    normalized = str(raw).strip().upper()
+    if normalized not in _VALID_CELL_TYPES:
+        raise ValueError(
+            f"Unrecognized MEArec cell_type {raw!r} (normalized to "
+            f"{normalized!r}); expected one of {sorted(_VALID_CELL_TYPES)}."
+        )
+    return normalized  # type: ignore[return-value]
+
+
 @dataclass
 class _GroundTruth:
     """Ground-truth units extracted from a MEArec recording generator."""
 
     spike_times: list[np.ndarray]
     positions_um: np.ndarray  # (n_units, 3)
-    cell_types: list[str]
+    cell_types: list[CellType]
 
     @property
     def n_units(self) -> int:
@@ -328,25 +360,42 @@ def _read_ground_truth(mearec_h5_path: Path) -> _GroundTruth:
     )
 
     spike_times: list[np.ndarray] = []
-    cell_types: list[str] = []
-    for spiketrain in recgen.spiketrains:
+    cell_types: list[CellType] = []
+    for idx, spiketrain in enumerate(recgen.spiketrains):
         times_s = np.asarray(spiketrain.rescale("s").magnitude, dtype=float)
         spike_times.append(times_s)
         annotations = getattr(spiketrain, "annotations", {}) or {}
-        cell_types.append(str(annotations.get("cell_type", "unknown")))
+        if "cell_type" not in annotations:
+            raise ValueError(
+                f"MEArec ground-truth spiketrain {idx} in "
+                f"{mearec_h5_path.name!r} has no 'cell_type' annotation; a "
+                "MEArec GT fixture must carry it (no silent 'unknown' "
+                "fallback)."
+            )
+        cell_types.append(_normalize_cell_type(annotations["cell_type"]))
 
     n_units = len(spike_times)
     locations = getattr(recgen, "template_locations", None)
-    positions = np.full((n_units, 3), np.nan, dtype=float)
-    if locations is not None:
-        locations = np.asarray(locations, dtype=float)
-        # Drifting recordings carry a position per drift step; use the first.
-        if locations.ndim == 3:
-            locations = locations[:, 0, :]
-        if locations.ndim == 2 and locations.shape[0] == n_units:
-            positions[:, : locations.shape[1]] = locations[
-                :, : positions.shape[1]
-            ]
+    if locations is None:
+        raise ValueError(
+            f"MEArec recording {mearec_h5_path.name!r} has no "
+            "template_locations; per-unit ground-truth positions are "
+            "required. Load with load=['spiketrains', 'templates'] so the "
+            "locations array is present (got None)."
+        )
+    locations = np.asarray(locations, dtype=float)
+    # Drifting recordings carry a position per drift step; use the first.
+    if locations.ndim == 3:
+        locations = locations[:, 0, :]
+    if locations.ndim != 2 or locations.shape[0] != n_units:
+        raise ValueError(
+            f"MEArec template_locations for {mearec_h5_path.name!r} has "
+            f"shape {locations.shape}; expected a 2-D array whose first "
+            f"dimension equals n_units ({n_units}). Refusing to write "
+            "all-NaN ground-truth positions."
+        )
+    positions = np.zeros((n_units, 3), dtype=float)
+    positions[:, : locations.shape[1]] = locations[:, : positions.shape[1]]
 
     return _GroundTruth(
         spike_times=spike_times,

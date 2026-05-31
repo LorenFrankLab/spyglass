@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
@@ -163,3 +164,124 @@ def test_mearec_fixture_gain_required(monkeypatch, dtype):
 
     with pytest.raises(RuntimeError, match="microvolt"):
         mearec_to_nwb._read_recording_traces(Path("nonexistent_fixture.h5"))
+
+
+# ---------- ground-truth reader hardening (cell_type + positions) ----------
+
+
+class _FakeSpikeTrain:
+    """Minimal stand-in for a MEArec/neo spiketrain.
+
+    Carries the two attributes ``_read_ground_truth`` reads: an
+    ``annotations`` dict and a ``rescale("s").magnitude`` spike-time array.
+    """
+
+    def __init__(self, times_s, annotations):
+        self._times = np.asarray(times_s, dtype=float)
+        self.annotations = annotations
+
+    def rescale(self, unit):
+        assert unit == "s"
+        return self
+
+    @property
+    def magnitude(self):
+        return self._times
+
+
+class _FakeRecGen:
+    """Minimal stand-in for a MEArec recording generator."""
+
+    def __init__(self, spiketrains, template_locations):
+        self.spiketrains = spiketrains
+        self.template_locations = template_locations
+
+
+def _patch_load_recordings(monkeypatch, recgen):
+    """Make ``MEArec.load_recordings`` return ``recgen``.
+
+    ``_read_ground_truth`` does a lazy ``import MEArec`` inside the
+    function, so the patch must target the real ``MEArec`` module (what
+    that import binds to), not an attribute on ``mearec_to_nwb``.
+    """
+    import MEArec
+
+    from spyglass.spikesorting.v2._fixtures import mearec_to_nwb
+
+    monkeypatch.setattr(MEArec, "load_recordings", lambda *a, **k: recgen)
+    return mearec_to_nwb
+
+
+@pytest.mark.fast
+def test_normalize_cell_type_canonicalizes_and_rejects():
+    """``_normalize_cell_type`` strips/upper-cases and rejects drift."""
+    from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import (
+        _normalize_cell_type,
+    )
+
+    assert _normalize_cell_type("E") == "E"
+    assert _normalize_cell_type("  e  ") == "E"
+    assert _normalize_cell_type("i") == "I"
+    # Anything outside MEArec's vocabulary raises rather than coercing.
+    with pytest.raises(ValueError, match="cell_type"):
+        _normalize_cell_type("excitatory")
+
+
+@pytest.mark.fast
+def test_ground_truth_reads_cell_types_and_positions(monkeypatch):
+    """A well-formed recgen yields normalized cell types + real positions."""
+    recgen = _FakeRecGen(
+        spiketrains=[
+            _FakeSpikeTrain([1.0, 2.0], {"cell_type": "E"}),
+            _FakeSpikeTrain([3.0], {"cell_type": "I"}),
+        ],
+        template_locations=np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]),
+    )
+    mearec_to_nwb = _patch_load_recordings(monkeypatch, recgen)
+
+    gt = mearec_to_nwb._read_ground_truth(Path("x.h5"))
+    assert gt.n_units == 2
+    assert gt.cell_types == ["E", "I"]
+    np.testing.assert_allclose(gt.positions_um[0], [1.0, 2.0, 3.0])
+    np.testing.assert_allclose(gt.positions_um[1], [4.0, 5.0, 6.0])
+
+
+@pytest.mark.fast
+def test_ground_truth_requires_cell_type(monkeypatch):
+    """A spiketrain without a ``cell_type`` annotation raises (no default)."""
+    recgen = _FakeRecGen(
+        spiketrains=[
+            _FakeSpikeTrain([1.0], {"cell_type": "E"}),
+            _FakeSpikeTrain([2.0], {}),  # missing cell_type
+        ],
+        template_locations=np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]),
+    )
+    mearec_to_nwb = _patch_load_recordings(monkeypatch, recgen)
+
+    with pytest.raises(ValueError, match="cell_type"):
+        mearec_to_nwb._read_ground_truth(Path("x.h5"))
+
+
+@pytest.mark.fast
+def test_ground_truth_requires_positions(monkeypatch):
+    """Missing / mis-shaped ``template_locations`` raises (no NaN positions)."""
+    # template_locations is None
+    recgen_none = _FakeRecGen(
+        spiketrains=[_FakeSpikeTrain([1.0], {"cell_type": "E"})],
+        template_locations=None,
+    )
+    mearec_to_nwb = _patch_load_recordings(monkeypatch, recgen_none)
+    with pytest.raises(ValueError, match="template_locations"):
+        mearec_to_nwb._read_ground_truth(Path("x.h5"))
+
+    # row count disagrees with n_units
+    recgen_bad = _FakeRecGen(
+        spiketrains=[
+            _FakeSpikeTrain([1.0], {"cell_type": "E"}),
+            _FakeSpikeTrain([2.0], {"cell_type": "I"}),
+        ],
+        template_locations=np.array([[1.0, 2.0, 3.0]]),  # 1 row, 2 units
+    )
+    _patch_load_recordings(monkeypatch, recgen_bad)
+    with pytest.raises(ValueError, match="template_locations"):
+        mearec_to_nwb._read_ground_truth(Path("x.h5"))
