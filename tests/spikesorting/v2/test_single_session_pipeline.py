@@ -8657,3 +8657,60 @@ def test_recording_specific_reference_drops_ref_channel(polymer_smoke_session):
     assert set(target_elecs) <= cached_ids, (
         "sort-group electrodes missing from the cached recording."
     )
+
+
+@pytest.mark.slow
+def test_curation_label_validation_all_paths(populated_sorting):
+    """Curation labels are validated on EVERY insert path.
+
+    Both ``CurationV2.insert_curation(labels=...)`` and a direct
+    ``CurationV2.UnitLabel.insert1`` reject a typo'd label, and
+    ``allow_custom_labels=True`` accepts a label outside the canonical set
+    through both paths.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    _clear_curations(populated_sorting)
+    target_unit = int((Sorting.Unit & populated_sorting).fetch("unit_id")[0])
+
+    # Path 1: insert_curation rejects a typo'd label.
+    with pytest.raises(ValueError, match="not in CurationLabel"):
+        CurationV2.insert_curation(
+            sorting_key=populated_sorting,
+            labels={target_unit: ["noies"]},
+        )
+
+    # Path 1 with the escape hatch: a custom label is accepted.
+    pk_custom = CurationV2.insert_curation(
+        sorting_key=populated_sorting,
+        labels={target_unit: ["my_custom_tag"]},
+        allow_custom_labels=True,
+    )
+    custom_rows = {
+        r["curation_label"]
+        for r in (CurationV2.UnitLabel & pk_custom).fetch(as_dict=True)
+    }
+    assert "my_custom_tag" in custom_rows
+
+    # Path 2: a direct UnitLabel.insert1 rejects a typo'd label (the
+    # part-table override, not only insert_curation).
+    direct_row = {
+        **pk_custom,
+        "unit_id": target_unit,
+        "curation_label": "noies",
+    }
+    with pytest.raises(ValueError, match="not in CurationLabel"):
+        CurationV2.UnitLabel.insert1(direct_row)
+
+    # Path 2 with the escape hatch: the direct insert accepts a custom
+    # label when allow_custom_labels=True.
+    CurationV2.UnitLabel.insert1(
+        {**pk_custom, "unit_id": target_unit, "curation_label": "another_tag"},
+        allow_custom_labels=True,
+    )
+    assert (
+        CurationV2.UnitLabel
+        & pk_custom
+        & {"unit_id": target_unit, "curation_label": "another_tag"}
+    )
