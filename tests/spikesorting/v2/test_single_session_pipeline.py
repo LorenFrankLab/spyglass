@@ -5170,17 +5170,17 @@ def test_sorting_selection_rejects_concat_source(dj_conn):
 def test_sorting_selection_artifact_id_none_is_distinct_identity(
     populated_sorting,
 ):
-    """``artifact_id=None`` and ``artifact_id=<uuid>`` are distinct identities.
+    """No-artifact and artifact-backed selections are distinct identities.
 
     Regression guard: an earlier ``insert_selection`` lookup omitted
     ``artifact_id`` from the master restriction whenever it was None,
     which effectively meant "match any artifact_id." That caused a
     no-artifact ``insert_selection`` call to alias onto a pre-existing
     artifact-backed row for the same
-    ``(recording_id, sorter, sorter_params_name)`` triple. Since the
-    schema makes ``artifact_id`` a real nullable FK, None must be
-    treated as a real, distinct identity value (``artifact_id IS NULL``)
-    -- not as a wildcard.
+    ``(recording_id, sorter, sorter_params_name)`` triple. Under the
+    ``ArtifactSource`` part-table design, "no artifact pass" is "no
+    ``ArtifactSource`` row" and must stay a distinct identity from an
+    artifact-backed selection -- not a wildcard that aliases onto it.
 
     The ``populated_sorting`` fixture creates an artifact-backed row;
     we then request a no-artifact row with the same recording/sorter/
@@ -5198,9 +5198,11 @@ def test_sorting_selection_artifact_id_none_is_distinct_identity(
     recording_id = rec_row["recording_id"]
     sorter = backed_row["sorter"]
     sorter_params_name = backed_row["sorter_params_name"]
-    assert backed_row["artifact_id"] is not None, (
-        "populated_sorting must yield an artifact-backed row for this "
-        "test to be meaningful; got artifact_id IS NULL on the fixture."
+    assert (
+        SortingSelection.resolve_artifact(artifact_backed_pk) is not None
+    ), (
+        "populated_sorting must yield an artifact-backed row (an "
+        "ArtifactSource part row) for this test to be meaningful."
     )
 
     no_artifact_pk = SortingSelection.insert_selection(
@@ -5213,15 +5215,12 @@ def test_sorting_selection_artifact_id_none_is_distinct_identity(
     )
     assert no_artifact_pk["sorting_id"] != artifact_backed_pk["sorting_id"], (
         "insert_selection with artifact_id=None aliased onto the "
-        "artifact-backed row; None must restrict to NULL identity, "
+        "artifact-backed row; no-artifact must be a distinct identity, "
         "not match any artifact_id."
     )
-    # The fresh row exists with NULL artifact_id.
-    row = (SortingSelection & no_artifact_pk).fetch1()
-    assert row["artifact_id"] is None, (
-        f"Expected artifact_id IS NULL on the new row, got "
-        f"{row['artifact_id']!r}."
-    )
+    # The fresh row has no ArtifactSource part row.
+    assert SortingSelection.resolve_artifact(no_artifact_pk) is None
+    assert len(SortingSelection.ArtifactSource & no_artifact_pk) == 0
     # And it's idempotent: a second no-artifact call returns the same row.
     repeat_pk = SortingSelection.insert_selection(
         {
@@ -5235,6 +5234,66 @@ def test_sorting_selection_artifact_id_none_is_distinct_identity(
         "Repeat insert_selection(artifact_id=None) created a duplicate "
         "row instead of returning the existing no-artifact row."
     )
+
+
+@pytest.mark.slow
+def test_sorting_selection_artifact_source_part_shape(populated_recording):
+    """T1: artifact state lives on the ArtifactSource part, not a master FK.
+
+    A no-artifact selection has zero ArtifactSource rows; an
+    artifact-backed selection has exactly one whose artifact_id
+    ``resolve_artifact`` returns. The ArtifactSource part does NOT leak
+    into ``resolve_source`` -- an artifact-backed sort still resolves to
+    exactly one recording source.
+    """
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactDetectionParameters,
+        ArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        SortingSelection,
+    )
+
+    SorterParameters.insert_default()
+    ArtifactDetectionParameters.insert_default()
+    art_pk = ArtifactSelection.insert_selection(
+        {
+            "recording_id": populated_recording["recording_id"],
+            "artifact_params_name": "none",
+        }
+    )
+    if not (ArtifactDetection & art_pk):
+        ArtifactDetection.populate(art_pk, reserve_jobs=False)
+
+    sorter_kwargs = {
+        "recording_id": populated_recording["recording_id"],
+        "sorter": "mountainsort5",
+        "sorter_params_name": "franklab_tetrode_hippocampus_30kHz_ms5",
+    }
+
+    # No-artifact selection: zero ArtifactSource rows; resolve_artifact None.
+    no_art_pk = SortingSelection.insert_selection(dict(sorter_kwargs))
+    assert len(SortingSelection.ArtifactSource & no_art_pk) == 0
+    assert SortingSelection.resolve_artifact(no_art_pk) is None
+
+    # Artifact-backed selection: exactly one ArtifactSource row.
+    art_sort_pk = SortingSelection.insert_selection(
+        {**sorter_kwargs, "artifact_id": art_pk["artifact_id"]}
+    )
+    assert len(SortingSelection.ArtifactSource & art_sort_pk) == 1
+    assert (
+        SortingSelection.resolve_artifact(art_sort_pk)
+        == art_pk["artifact_id"]
+    )
+
+    # ArtifactSource did NOT leak into the recording-source resolution.
+    resolved = SortingSelection.resolve_source(art_sort_pk)
+    assert resolved.kind == "recording"
+    assert resolved.key == {
+        "recording_id": populated_recording["recording_id"]
+    }
 
 
 # ---------- v1 / imported dispatch regression after v2 import ------------

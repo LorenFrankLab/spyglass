@@ -152,7 +152,9 @@ def test_source_part_pattern_holds_for_artifact_and_sorting_selection(
     )
 
     # Artifact master reachable via SortingSelection -> artifact_id.
-    art_id = (SortingSelection & sort_master_pk).fetch1("artifact_id")
+    # The artifact pass is recorded on the zero-or-one ArtifactSource
+    # part now (the master no longer carries a nullable artifact_id FK).
+    art_id = SortingSelection.resolve_artifact(sort_master_pk)
     art_master_rows = ArtifactSelection & {"artifact_id": art_id}
     assert len(art_master_rows) == 1, (
         f"populated_sorting points at artifact_id={art_id!r} but no "

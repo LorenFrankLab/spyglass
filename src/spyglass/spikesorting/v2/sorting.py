@@ -281,16 +281,24 @@ class SortingSelection(SpyglassMixin, dj.Manual):
     each selection row. The runtime helper today rejects the concat
     path with a clear "not implemented yet" error; the schema is final
     so the validator can be relaxed without a migration once the concat
-    materializer lands. ``artifact_id`` is a real DataJoint nullable FK
-    to ``ArtifactDetection`` (not a loose UUID column) so DataJoint
-    enforces referential integrity.
+    materializer lands.
+
+    Whether an artifact pass was applied is recorded by the presence or
+    absence of an ``ArtifactSource`` part row (zero-or-one), NOT by a
+    nullable FK on the master. A nullable FK conflates "no artifact
+    pass" with "match anything" in a restriction and forces every reader
+    to special-case ``None``; the part row makes "no artifact pass" a
+    plain "no ``ArtifactSource`` row" that is queryable, joinable, and
+    impossible to alias. ``ArtifactSource`` is independent of the
+    recording-source parts -- it is NOT counted by ``resolve_source``
+    (a sort still has exactly one *recording* source) nor by
+    ``prune_orphaned_selections``.
     """
 
     definition = """
     sorting_id: uuid
     ---
     -> SorterParameters
-    -> [nullable] ArtifactDetection
     """
 
     class RecordingSource(SpyglassMixinPart):
@@ -307,6 +315,22 @@ class SortingSelection(SpyglassMixin, dj.Manual):
         -> ConcatenatedRecording
         """
 
+    class ArtifactSource(SpyglassMixinPart):
+        """Optional artifact pass for a sorting selection (zero-or-one).
+
+        Present iff an artifact detection was configured for the sort;
+        absent means "no artifact pass." Deliberately separate from the
+        recording-source parts so ``resolve_source``'s "exactly one
+        recording source" invariant is unaffected -- read it through
+        :meth:`SortingSelection.resolve_artifact`.
+        """
+
+        definition = """
+        -> master
+        ---
+        -> ArtifactDetection
+        """
+
     @classmethod
     def insert_selection(cls, key: dict) -> dict:
         """Insert master + exactly one source part; return PK-only dict.
@@ -315,8 +339,13 @@ class SortingSelection(SpyglassMixin, dj.Manual):
         ``concat_recording_id`` (concat) from ``key``; raises ValueError
         on zero or two sources. The concat path is rejected today with
         ``NotImplementedError`` because the concat materializer is gated.
-        ``artifact_id`` is optional (the FK is nullable); concat sorts
-        must leave it NULL.
+        ``artifact_id`` is optional: when supplied (non-None), an
+        ``ArtifactSource`` part row is inserted recording the artifact
+        pass; when omitted/None, no ``ArtifactSource`` row is created.
+        The find-existing path keys on the presence/absence and identity
+        of that part row, so an artifact-backed and an artifact-free
+        selection for the same ``(recording_id, sorter,
+        sorter_params_name)`` are distinct, idempotent rows.
 
         Raises
         ------
@@ -360,36 +389,35 @@ class SortingSelection(SpyglassMixin, dj.Manual):
             "sorter": key["sorter"],
             "sorter_params_name": key["sorter_params_name"],
         }
-        # artifact_id is a nullable FK -- ``None`` is a real, distinct
-        # identity value, not "match anything." If the caller passes
-        # ``artifact_id=None`` (or omits the key), we must restrict to
-        # rows with NULL artifact_id so the find-existing path doesn't
-        # alias onto a pre-existing artifact-backed row for the same
-        # (recording_id, sorter, sorter_params_name) triple.
-        if key.get("artifact_id") is not None:
-            master_restriction["artifact_id"] = key["artifact_id"]
-            null_artifact_filter = None
-        else:
-            null_artifact_filter = "artifact_id IS NULL"
-        source_part = cls.RecordingSource
         source_restriction = {"recording_id": key["recording_id"]}
+        artifact_id = key.get("artifact_id")
 
-        joined = (cls * source_part) & master_restriction & source_restriction
-        if null_artifact_filter is not None:
-            joined = joined & null_artifact_filter
-        existing = joined.fetch("KEY", as_dict=True)
-        existing_master_keys = [
-            {k: v for k, v in row.items() if k in cls.primary_key}
-            for row in existing
-        ]
-        unique = {tuple(sorted(d.items())) for d in existing_master_keys}
+        # Find existing: a master with the same sorter + recording source
+        # AND the same artifact-source state (present-with-this-artifact_id
+        # vs absent). "No artifact pass" is "no ArtifactSource row", so the
+        # two cases never alias onto each other.
+        candidates = (
+            (cls * cls.RecordingSource)
+            & master_restriction
+            & source_restriction
+        ).fetch("KEY", as_dict=True)
+        matches = []
+        for cand in candidates:
+            cand_master = {
+                k: v for k, v in cand.items() if k in cls.primary_key
+            }
+            existing_artifact = cls.resolve_artifact(cand_master)
+            if existing_artifact == artifact_id:
+                matches.append(cand_master)
+        unique = {tuple(sorted(d.items())) for d in matches}
         if len(unique) == 1:
             return dict(next(iter(unique)))
         if len(unique) > 1:
             raise DuplicateSelectionError(
                 f"SortingSelection has {len(unique)} master rows for "
-                f"{master_restriction | source_restriction}. v2 inserts "
-                "via this helper should not produce duplicates."
+                f"{master_restriction | source_restriction} with "
+                f"artifact_id={artifact_id}. v2 inserts via this helper "
+                "should not produce duplicates."
             )
 
         # Translate the would-be DataJoint FK IntegrityError into a
@@ -416,7 +444,14 @@ class SortingSelection(SpyglassMixin, dj.Manual):
         }
         with transaction_or_noop(cls.connection):
             cls.insert1(new_master_key)
-            source_part.insert1(new_part_key)
+            cls.RecordingSource.insert1(new_part_key)
+            if artifact_id is not None:
+                cls.ArtifactSource.insert1(
+                    {
+                        "sorting_id": new_master_key["sorting_id"],
+                        "artifact_id": artifact_id,
+                    }
+                )
         return {k: new_master_key[k] for k in cls.primary_key}
 
     @classmethod
@@ -478,6 +513,33 @@ class SortingSelection(SpyglassMixin, dj.Manual):
             kind="concatenated_recording",
             key={"concat_recording_id": concat_rows[0]["concat_recording_id"]},
         )
+
+    @classmethod
+    def resolve_artifact(cls, key: dict):
+        """Return the ``artifact_id`` for a selection, or ``None``.
+
+        Reads the optional ``ArtifactSource`` part row. Returns the
+        ``artifact_id`` when an artifact pass was configured, else
+        ``None`` (no ``ArtifactSource`` row = no artifact pass). This is
+        the single accessor every reader uses instead of a nullable-FK
+        column lookup.
+
+        Raises
+        ------
+        SchemaBypassError
+            If more than one ``ArtifactSource`` row exists for ``key``
+            (the part is zero-or-one by construction).
+        """
+        from spyglass.spikesorting.v2.exceptions import SchemaBypassError
+
+        master_key = {k: v for k, v in key.items() if k in cls.primary_key}
+        rows = (cls.ArtifactSource & master_key).fetch("artifact_id")
+        if len(rows) > 1:
+            raise SchemaBypassError(
+                f"SortingSelection {master_key} has {len(rows)} "
+                "ArtifactSource rows; expected zero or one."
+            )
+        return rows[0] if len(rows) == 1 else None
 
 
 @schema
