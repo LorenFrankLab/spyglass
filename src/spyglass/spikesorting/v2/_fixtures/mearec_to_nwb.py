@@ -473,6 +473,7 @@ def _add_probe_and_electrodes(
     nwbfile,
     layout: ProbeLayout,
     targeted_location: str,
+    channel_names: list[str] | None = None,
 ) -> None:
     """Add the novela probe, electrode group, and electrode table.
 
@@ -491,6 +492,14 @@ def _add_probe_and_electrodes(
         Brain region recorded as the electrode group ``location``; Spyglass
         ingestion turns this into the default ``BrainRegion`` for every
         electrode.
+    channel_names : list of str, optional
+        When given, inject a ``channel_name`` electrodes column with these
+        strings (one per contact, in electrode order). Production Frank-lab
+        NWBs carry this column and SpikeInterface 0.104's
+        ``read_nwb_recording`` then uses it as the channel id (see
+        ``Recording._spikeinterface_channel_ids``); the MEArec fixtures omit
+        it by default and fall through to the integer ``electrode_id`` path.
+        Must have exactly ``layout.n_contacts`` entries.
     """
     from ndx_franklab_novela import (
         NwbElectrodeGroup,
@@ -575,6 +584,21 @@ def _add_probe_and_electrodes(
         description="Experimenter selected reference electrode id",
         data=[-1] * layout.n_contacts,
     )
+
+    # Optional ``channel_name`` column: production Frank-lab NWBs carry it,
+    # so SI uses the string as the channel id; the default fixtures omit it.
+    if channel_names is not None:
+        if len(channel_names) != layout.n_contacts:
+            raise ValueError(
+                f"channel_names has {len(channel_names)} entries but the "
+                f"{layout.probe_type} layout has {layout.n_contacts} "
+                "contacts; supply exactly one name per contact."
+            )
+        nwbfile.electrodes.add_column(
+            name="channel_name",
+            description="Per-channel string name (Frank-lab production NWBs)",
+            data=list(channel_names),
+        )
 
 
 def _add_raw_ephys(nwbfile, traces: np.ndarray, sampling_frequency: float):
@@ -822,6 +846,7 @@ def mearec_to_spyglass_nwb(
     fixture_name: str,
     probe_layout: ProbeLayout,
     targeted_location: str = "Unknown",
+    channel_names: list[str] | None = None,
 ) -> None:
     """Convert a MEArec recording into a Spyglass-ingestible NWB file.
 
@@ -843,6 +868,12 @@ def mearec_to_spyglass_nwb(
         ``trodes_to_nwb``-compatible NWB cannot encode per-shank regions;
         multi-region tracing is set up after ingestion by overriding
         ``Electrode.region_id`` per ``probe_shank``.
+    channel_names : list of str, optional
+        Optional per-contact ``channel_name`` electrodes column (one per
+        contact). When set, SpikeInterface resolves channel ids from these
+        strings rather than the integer ``electrode_id`` fallback -- the shape
+        production Frank-lab NWBs carry. Passed through to
+        ``_add_probe_and_electrodes``.
 
     Raises
     ------
@@ -868,7 +899,9 @@ def mearec_to_spyglass_nwb(
         fixture_name=fixture_name,
         session_start=datetime(2023, 6, 22, 12, 0, 0, tzinfo=timezone.utc),
     )
-    _add_probe_and_electrodes(nwbfile, probe_layout, targeted_location)
+    _add_probe_and_electrodes(
+        nwbfile, probe_layout, targeted_location, channel_names=channel_names
+    )
     _add_raw_ephys(nwbfile, traces, sampling_frequency)
     _add_ground_truth_units(nwbfile, ground_truth)
     _add_behavior_stub(nwbfile, traces.shape[0], sampling_frequency)

@@ -1797,6 +1797,20 @@ class Recording(SpyglassMixin, dj.Computed):
         )
         return probe_types, electrode_group_names
 
+    # Human-readable explanation per gate condition, index-aligned to the
+    # four checks in ``_maybe_apply_tetrode_geometry`` below. Each false
+    # condition makes the patch a silent no-op (the geometry-aware sorter
+    # then receives whatever geometry SI inferred), so each branch logs the
+    # specific reason it skipped -- an operator debugging "Kilosort sees the
+    # wrong geometry" can grep the populate log for which condition failed.
+    _TETRODE_GATE_REASONS = (
+        "sort group spans multiple probe types "
+        "(expected a single tetrode_12.5)",
+        "single probe is not tetrode_12.5",
+        "sort group does not have exactly 4 channels",
+        "sort group spans multiple electrode groups",
+    )
+
     @staticmethod
     def _maybe_apply_tetrode_geometry(
         recording,
@@ -1815,31 +1829,48 @@ class Recording(SpyglassMixin, dj.Computed):
         Geometry-aware sorters (Kilosort, MountainSort5) on those
         recordings depend on this patch; clusterless_thresholder and
         MS4 are unaffected.
+
+        When any of the four gate conditions fails the recording is
+        returned untouched and an ``INFO`` log names the failed condition
+        (see ``_TETRODE_GATE_REASONS``).
         """
+        reasons = Recording._TETRODE_GATE_REASONS
         unique_probes = set(probe_types)
         unique_groups = set(electrode_group_names)
-        if (
-            len(unique_probes) == 1
-            and next(iter(unique_probes)) == "tetrode_12.5"
-            and len(sort_group_channel_ids) == 4
-            and len(unique_groups) == 1
-        ):
-            import numpy as _np
-            import probeinterface as pi
+        if len(unique_probes) != 1:
+            logger.info(
+                "_maybe_apply_tetrode_geometry skipped: %s", reasons[0]
+            )
+            return recording
+        if next(iter(unique_probes)) != "tetrode_12.5":
+            logger.info(
+                "_maybe_apply_tetrode_geometry skipped: %s", reasons[1]
+            )
+            return recording
+        if len(sort_group_channel_ids) != 4:
+            logger.info(
+                "_maybe_apply_tetrode_geometry skipped: %s", reasons[2]
+            )
+            return recording
+        if len(unique_groups) != 1:
+            logger.info(
+                "_maybe_apply_tetrode_geometry skipped: %s", reasons[3]
+            )
+            return recording
 
-            tetrode = pi.Probe(ndim=2)
-            position = [[0, 0], [0, 12.5], [12.5, 0], [12.5, 12.5]]
-            tetrode.set_contacts(
-                position,
-                shapes="circle",
-                shape_params={"radius": 6.25},
-            )
-            tetrode.set_contact_ids(
-                [str(c) for c in sort_group_channel_ids]
-            )
-            tetrode.set_device_channel_indices(_np.arange(4))
-            recording = recording.set_probe(tetrode, in_place=True)
-        return recording
+        import numpy as _np
+        import probeinterface as pi
+
+        tetrode = pi.Probe(ndim=2)
+        position = [[0, 0], [0, 12.5], [12.5, 0], [12.5, 12.5]]
+        tetrode.set_contacts(
+            position,
+            shapes="circle",
+            shape_params={"radius": 6.25},
+        )
+        tetrode.set_contact_ids([str(c) for c in sort_group_channel_ids])
+        tetrode.set_device_channel_indices(_np.arange(4))
+        return recording.set_probe(tetrode, in_place=True)
 
     @staticmethod
     def _apply_pre_motion_preprocessing(

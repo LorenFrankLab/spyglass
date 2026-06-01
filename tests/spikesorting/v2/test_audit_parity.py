@@ -881,3 +881,173 @@ def test_artifact_detection_peak_memory_bounded_by_chunk_size(dj_conn):
         f"(full-recording working set would be ~{full_working_set / 1e9:.1f} "
         "GB)."
     )
+
+
+# ---------- A20: tetrode-geometry gate negative cases ----------------------
+
+
+def _assert_tetrode_gate_noop(
+    caplog, probe_types, electrode_group_names, channel_ids, reason_substr
+):
+    """Call ``_maybe_apply_tetrode_geometry`` with a failing-gate setup and
+    assert (a) the recording geometry is untouched and (b) an INFO log names
+    the condition that failed.
+
+    The synthetic recording carries SI's default linear probe (contacts at
+    y=0,20,40,...); the tetrode patch would replace it with a 12.5 µm square,
+    so an unchanged ``get_channel_locations()`` proves the gate no-opped.
+    """
+    import logging
+
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2.recording import Recording
+
+    rec = si.generate_recording(
+        num_channels=len(channel_ids),
+        durations=[1.0],
+        sampling_frequency=30_000.0,
+    )
+    before = rec.get_channel_locations().copy()
+    with caplog.at_level(logging.INFO):
+        result = Recording._maybe_apply_tetrode_geometry(
+            rec, probe_types, electrode_group_names, channel_ids
+        )
+    after = result.get_channel_locations()
+    assert np.array_equal(before, after), (
+        "tetrode geometry was applied despite a failed gate condition; the "
+        "channel locations changed."
+    )
+    skip_msgs = [
+        r.getMessage()
+        for r in caplog.records
+        if "_maybe_apply_tetrode_geometry skipped" in r.getMessage()
+    ]
+    assert any(reason_substr in m for m in skip_msgs), (
+        f"expected an INFO log naming the failed condition "
+        f"({reason_substr!r}); got skip logs {skip_msgs}."
+    )
+
+
+def test_tetrode_geometry_gate_three_channel(dj_conn, caplog):
+    """A20: a 3-channel sort group (e.g. after a bad-channel drop) is not a
+    tetrode; the gate no-ops and logs the channel-count condition."""
+    _assert_tetrode_gate_noop(
+        caplog,
+        probe_types=("tetrode_12.5",) * 3,
+        electrode_group_names=("g",) * 3,
+        channel_ids=[0, 1, 2],
+        reason_substr="4 channel",
+    )
+
+
+def test_tetrode_geometry_gate_mixed_probe(dj_conn, caplog):
+    """A20: a sort group spanning two probe types is not a single tetrode;
+    the gate no-ops and logs the multiple-probe-types condition."""
+    _assert_tetrode_gate_noop(
+        caplog,
+        probe_types=(
+            "tetrode_12.5",
+            "tetrode_12.5",
+            "other_probe",
+            "other_probe",
+        ),
+        electrode_group_names=("g",) * 4,
+        channel_ids=[0, 1, 2, 3],
+        reason_substr="multiple probe type",
+    )
+
+
+def test_tetrode_geometry_gate_renamed_probe(dj_conn, caplog):
+    """A20: a single-probe group whose probe string is not exactly
+    ``tetrode_12.5`` (e.g. a renamed ``tetrode_12.5_v2``) is not patched; the
+    gate no-ops and logs the probe-type-mismatch condition."""
+    _assert_tetrode_gate_noop(
+        caplog,
+        probe_types=("tetrode_12.5_v2",) * 4,
+        electrode_group_names=("g",) * 4,
+        channel_ids=[0, 1, 2, 3],
+        reason_substr="not tetrode_12.5",
+    )
+
+
+def test_tetrode_geometry_gate_multi_group(dj_conn, caplog):
+    """A20: four channels split across two electrode groups is not a single
+    tetrode; the gate no-ops and logs the multiple-groups condition."""
+    _assert_tetrode_gate_noop(
+        caplog,
+        probe_types=("tetrode_12.5",) * 4,
+        electrode_group_names=("g1", "g1", "g2", "g2"),
+        channel_ids=[0, 1, 2, 3],
+        reason_substr="multiple electrode group",
+    )
+
+
+# ---------- A19: channel_name resolution on a real-NWB-shape fixture -------
+
+
+@pytest.mark.parametrize(
+    "channel_names", [None, ["ch_a", "ch_b", "ch_c", "ch_d"]]
+)
+def test_channel_name_resolution_path_real_nwb(
+    dj_conn, tmp_path, monkeypatch, channel_names
+):
+    """A19: ``_spikeinterface_channel_ids`` resolves channel ids from the raw
+    NWB ``channel_name`` column when present, and falls back to integer
+    ``electrode_id`` when absent.
+
+    The MEArec fixtures omit ``channel_name`` so only the integer-fallback
+    branch was exercised; production Frank-lab NWBs carry the column. This
+    test builds a 4-contact NWB via the fixture builder's new ``channel_names``
+    parameter (injecting the column) and via the default (no column), then
+    asserts the resolved SpikeInterface channel ids match each branch's
+    expected mapping.
+    """
+    from datetime import datetime, timezone
+
+    import pynwb
+
+    from spyglass.common import Nwbfile
+    from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import (
+        _add_probe_and_electrodes,
+        tetrode_probe_layout,
+    )
+    from spyglass.spikesorting.v2.recording import Recording
+
+    nwbfile = pynwb.NWBFile(
+        session_description="channel_name resolution fixture",
+        identifier="a19-chan-name",
+        session_start_time=datetime(2020, 1, 1, tzinfo=timezone.utc),
+    )
+    _add_probe_and_electrodes(
+        nwbfile,
+        tetrode_probe_layout(),
+        targeted_location="hpc",
+        channel_names=channel_names,
+    )
+    out = tmp_path / "a19_channel_name_fixture.nwb"
+    with pynwb.NWBHDF5IO(str(out), mode="w") as io:
+        io.write(nwbfile)
+
+    # _spikeinterface_channel_ids resolves the raw path via Nwbfile; redirect
+    # it to our standalone fixture (no ingestion needed for the lookup).
+    monkeypatch.setattr(
+        Nwbfile, "get_abs_path", staticmethod(lambda *a, **k: str(out))
+    )
+
+    spyglass_ids = [0, 1, 2, 3]
+    resolved = Recording._spikeinterface_channel_ids(
+        "a19_channel_name_fixture.nwb", spyglass_ids
+    )
+
+    if channel_names is None:
+        assert resolved == [0, 1, 2, 3], (
+            "integer-fallback branch must return int electrode_ids; got "
+            f"{resolved!r}"
+        )
+        assert all(isinstance(c, int) for c in resolved)
+    else:
+        assert resolved == channel_names, (
+            "channel_name branch must resolve to the injected string names "
+            f"in electrode order; got {resolved!r}"
+        )

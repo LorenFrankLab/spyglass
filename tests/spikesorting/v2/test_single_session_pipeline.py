@@ -1481,6 +1481,145 @@ def test_rebuild_raises_and_unlinks_on_provenance_mismatch(
 
 
 @pytest.mark.slow
+def test_get_recording_currently_raises_checksum_on_missing_cache(
+    populated_recording,
+):
+    """A18 Test 1 (verify-current-failure): ``get_recording`` raises a
+    checksum ``DataJointError`` when the cache file is missing and must be
+    rebuilt.
+
+    Pins TODAY's behavior: the on-demand rebuild is NOT byte-deterministic
+    versus the external-store checksum (the recompute byte-determinism work
+    is deferred to main-epic Phase 2 ``RecordingArtifactRecompute*`` -- see
+    overview decision 3 / the deferred C2 note). So when the canonical cache
+    is absent, ``get_recording`` rebuilds the file, then re-resolves it with
+    checksum validation, and DataJoint rejects the rebuilt-but-not-identical
+    bytes. This test locks that failure mode: a future regression that
+    silently returned the drifted rebuilt bytes (skipping the checksum) would
+    flip this assertion and be caught.
+
+    The happy-path "rebuild succeeds, hash matches" test cannot pass against
+    current source and is deliberately deferred to main-epic recompute (see
+    the module's "Deliberately deferred" note).
+    """
+    import shutil as _shutil
+
+    from datajoint.errors import DataJointError
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2.recording import Recording
+
+    row = (Recording & populated_recording).fetch1()
+    cache_hash = row["cache_hash"]
+    assert cache_hash, "populated_recording row must carry a cache_hash"
+    analysis_file_name = row["analysis_file_name"]
+
+    # Resolve via from_schema=True (skips checksum) to find the file we are
+    # about to remove; this is the same physical file get_recording's
+    # existence check (default resolution) will find absent.
+    abs_path = AnalysisNwbfile.get_abs_path(
+        analysis_file_name, from_schema=True
+    )
+    assert Path(abs_path).exists()
+    # Back up the valid cache: the rebuild overwrites it in place with
+    # non-identical bytes, so restore the original afterward or later tests
+    # reusing this shared row would themselves fail the checksum read.
+    backup = str(abs_path) + ".a18t1.bak"
+    _shutil.copy2(abs_path, backup)
+
+    try:
+        Path(abs_path).unlink()
+        with pytest.raises(DataJointError) as excinfo:
+            Recording().get_recording(populated_recording)
+        msg = str(excinfo.value)
+        assert "checksum" in msg.lower(), (
+            "expected a checksum DataJointError from the rebuilt-file "
+            f"re-read; got: {msg!r}"
+        )
+        assert analysis_file_name in msg, (
+            "checksum error should name the analysis_file_name "
+            f"{analysis_file_name!r}; got: {msg!r}"
+        )
+    finally:
+        _shutil.move(backup, abs_path)
+
+
+@pytest.mark.slow
+def test_rebuild_nwb_artifact_reaches_hash_then_raises_checksum(
+    populated_recording, monkeypatch
+):
+    """A18 Test 2 (verify-current-failure): ``_rebuild_nwb_artifact`` runs the
+    rebuild pipeline far enough to call ``_hash_nwb_recording`` on the rebuilt
+    artifact, then raises a checksum ``DataJointError``.
+
+    The plan anticipated the direct rebuild "running to completion" (only
+    ``get_recording``'s reader rejecting the bytes), but ground truth is
+    stronger evidence: ``_write_nwb_artifact`` finishes its write and then
+    calls ``_hash_nwb_recording`` to record the rebuilt ``cache_hash`` -- and
+    ``_hash_nwb_recording`` reads the file through the checksum-validated
+    ``get_abs_path``, which rejects the rebuilt-but-not-byte-identical file.
+    So the rebuild raises a checksum error from INSIDE its own hashing step,
+    not only at ``get_recording``'s re-read. (Confirmed by the call chain
+    ``_rebuild_nwb_artifact`` -> ``_compute_recording_artifact`` ->
+    ``_write_nwb_artifact`` -> ``_hash_nwb_recording`` -> ``get_abs_path`` ->
+    DataJoint external checksum.)
+
+    This pins TWO facts a future regression must not break silently:
+    (1) the rebuild machinery is exercised up to and including the
+    ``_hash_nwb_recording`` verification call (counter asserts it is reached),
+    and (2) the rebuild is non-functional versus the external-store checksum
+    today (it raises rather than persisting drifted bytes). When main-epic
+    Phase 2 ``RecordingArtifactRecompute*`` makes the rebuild byte-deterministic
+    (or reconciles the checksum), this test flips to the deferred happy path.
+    The skills directive for A18 is explicit that the verify-current-failure
+    tests must exercise the raising path -- this one does.
+    """
+    import shutil as _shutil
+
+    from datajoint.errors import DataJointError
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2 import utils as v2_utils
+    from spyglass.spikesorting.v2.recording import Recording
+
+    row = (Recording & populated_recording).fetch1()
+    abs_path = AnalysisNwbfile.get_abs_path(
+        row["analysis_file_name"], from_schema=True
+    )
+    # The rebuild overwrites the canonical file in place before it raises;
+    # back it up so later tests reusing this shared row read the original
+    # (checksum-valid) bytes.
+    backup = str(abs_path) + ".a18t2.bak"
+    _shutil.copy2(abs_path, backup)
+
+    calls = {"n": 0}
+    real_hash = v2_utils._hash_nwb_recording
+
+    def _counting_hash(*args, **kwargs):
+        calls["n"] += 1
+        return real_hash(*args, **kwargs)
+
+    # _write_nwb_artifact imports _hash_nwb_recording from this module at call
+    # time, so patching the source attribute is observed.
+    monkeypatch.setattr(v2_utils, "_hash_nwb_recording", _counting_hash)
+
+    try:
+        with pytest.raises(DataJointError) as excinfo:
+            Recording()._rebuild_nwb_artifact(populated_recording)
+        assert "checksum" in str(excinfo.value).lower(), (
+            "expected the rebuild's hash step to raise a checksum "
+            f"DataJointError; got: {str(excinfo.value)!r}"
+        )
+        assert calls["n"] >= 1, (
+            "_rebuild_nwb_artifact raised before reaching _hash_nwb_recording; "
+            "the rebuild's cache_hash verification path was not exercised, so "
+            "this does not pin the intended (rebuild-reached-hashing) state."
+        )
+    finally:
+        _shutil.move(backup, abs_path)
+
+
+@pytest.mark.slow
 def test_sorting_get_analyzer_loads_folder(populated_sorting):
     """``Sorting.get_analyzer`` loads the SortingAnalyzer from the folder.
 
