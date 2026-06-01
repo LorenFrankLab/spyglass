@@ -5335,18 +5335,18 @@ def test_imported_dispatch_survives_v2_module_loaded(populated_sorting):
     assert hasattr(SpikeSortingOutput, "ImportedSpikeSorting")
 
 
-# ---------- L5-A: global-median reference (ref_channel_id=-2) ------------
+# ---------- L5-A: global-median reference (reference_mode) ------------
 
 
 @pytest.mark.slow
 def test_recording_make_global_median_reference(polymer_smoke_session):
     """``Recording._apply_pre_motion_preprocessing`` applies the
-    global-median reference when ``ref_channel_id == -2``.
+    global-median reference when ``reference_mode == "global_median"``.
 
-    Every other recording test uses ``sort_reference_electrode_id =
-    -1`` (no reference), so the ``elif ref_channel_id == -2`` branch
-    in recording.py has never been exercised. This test populates a
-    Recording with ``sort_reference_electrode_id = -2`` and pins:
+    Every other recording test uses ``reference_mode = "none"``, so the
+    ``elif reference_mode == "global_median"`` branch in recording.py has
+    never been exercised. This test populates a Recording with
+    ``reference_mode = "global_median"`` and pins:
 
     1. The populate completes without raising (the cross-schema
        ``validated.common_reference.operator`` field resolution
@@ -5397,22 +5397,22 @@ def test_recording_make_global_median_reference(polymer_smoke_session):
     Recording.populate(rec_pk_unref, reserve_jobs=False)
     traces_unref = Recording().get_recording(rec_pk_unref).get_traces()
 
-    # Switch SortGroupV2 to global-median reference (-2) and
-    # repopulate. A new RecordingSelection gets minted because the
-    # cache_hash depends on input data.
+    # Switch SortGroupV2 to global-median reference and repopulate. A
+    # new RecordingSelection gets minted because the cache_hash depends
+    # on input data.
     SortGroupV2.update1(
         {
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
-            "sort_reference_electrode_id": -2,
+            "reference_mode": "global_median",
         }
     )
     assert (
         (
             SortGroupV2
             & {"nwb_file_name": nwb_file_name, "sort_group_id": sort_group_id}
-        ).fetch1("sort_reference_electrode_id")
-        == -2
+        ).fetch1("reference_mode")
+        == "global_median"
     )
     # Drop the unref Recording so the new selection materializes a
     # fresh global-median recording rather than reusing the cached
