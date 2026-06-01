@@ -2,6 +2,7 @@
 
 import os
 import os.path
+import resource
 import time
 from itertools import groupby
 from pathlib import Path
@@ -18,6 +19,7 @@ from spyglass.utils.logging import logger
 # SpyglassConfig.load_config() overwrites these via configure_nwb_cache().
 _NWB_CACHE_MIN_FREE_GB = 2.0
 _NWB_CACHE_MIN_FREE_PCT = 0.1
+_NWB_CACHE_MAX_FILE_FRACTION = 0.99
 
 
 class NWBFileCache:
@@ -25,7 +27,9 @@ class NWBFileCache:
 
     Evicts least-recently-used files when system free RAM falls below
     either an absolute floor (_NWB_CACHE_MIN_FREE_GB) or a fractional
-    floor (_NWB_CACHE_MIN_FREE_PCT of total RAM), whichever is larger.
+    floor (_NWB_CACHE_MIN_FREE_PCT of total RAM), whichever is larger,
+    or when the cache size exceeds _NWB_CACHE_MAX_FILE_FRACTION of the
+    OS soft limit on open file descriptors.
     """
 
     def __init__(self):
@@ -88,6 +92,10 @@ class NWBFileCache:
         )
         return vm.available >= min_free_bytes
 
+    def _num_open_ok(self) -> bool:
+        soft_limit, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
+        return len(self._cache) < _NWB_CACHE_MAX_FILE_FRACTION * soft_limit
+
     def _evict_lru(self):
         if not self._cache:
             return
@@ -97,12 +105,16 @@ class NWBFileCache:
         logger.info(f"Closed LRU NWB file to free memory: {lru_path}")
 
     def _evict_if_needed(self):
-        while self._cache and not self._free_ram_ok():
+        while self._cache and not (self._free_ram_ok() and self._num_open_ok()):
             self._evict_lru()
 
 
-def configure_nwb_cache(min_free_gb: float = None, min_free_pct: float = None):
-    """Set memory thresholds for NWB file cache eviction.
+def configure_nwb_cache(
+    min_free_gb: float = None,
+    min_free_pct: float = None,
+    max_file_fraction: float = None,
+):
+    """Set eviction thresholds for the NWB file cache.
 
     Parameters
     ----------
@@ -110,8 +122,12 @@ def configure_nwb_cache(min_free_gb: float = None, min_free_pct: float = None):
         Minimum free system RAM in GB before LRU eviction triggers.
     min_free_pct : float, optional
         Minimum free system RAM as a fraction of total (0–1).
+    max_file_fraction : float, optional
+        Maximum fraction of the OS soft limit on open file descriptors
+        the cache may occupy before LRU eviction triggers (0–1].
     """
     global _NWB_CACHE_MIN_FREE_GB, _NWB_CACHE_MIN_FREE_PCT
+    global _NWB_CACHE_MAX_FILE_FRACTION
     if min_free_gb is not None:
         min_free_gb = float(min_free_gb)
         if min_free_gb < 0:
@@ -122,6 +138,13 @@ def configure_nwb_cache(min_free_gb: float = None, min_free_pct: float = None):
         if not 0 <= min_free_pct <= 1:
             raise ValueError("min_free_pct must be between 0 and 1")
         _NWB_CACHE_MIN_FREE_PCT = min_free_pct
+    if max_file_fraction is not None:
+        max_file_fraction = float(max_file_fraction)
+        if not 0 < max_file_fraction <= 1:
+            raise ValueError(
+                "max_file_fraction must be between 0 (exclusive) and 1"
+            )
+        _NWB_CACHE_MAX_FILE_FRACTION = max_file_fraction
 
 
 __open_nwb_files = NWBFileCache()

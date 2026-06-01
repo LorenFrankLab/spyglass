@@ -102,6 +102,7 @@ class SpyglassConfig:
         self.load_failed = False
         self._nwb_min_free_gb = 2.0
         self._nwb_min_free_pct = 0.1
+        self._nwb_max_file_fraction = 0.99
 
         # Load directory schema from JSON file (single source of truth)
         # {PREFIX}_{KEY}_DIR, default dir relative to base_dir
@@ -176,11 +177,15 @@ class SpyglassConfig:
         dj_nwb_cache = dj_custom.get("nwb_cache", {})
         self._nwb_min_free_gb = float(dj_nwb_cache.get("min_free_gb", 2.0))
         self._nwb_min_free_pct = float(dj_nwb_cache.get("min_free_pct", 0.1))
+        self._nwb_max_file_fraction = float(
+            dj_nwb_cache.get("max_file_fraction", 0.99)
+        )
         from spyglass.utils.nwb_helper_fn import configure_nwb_cache
 
         configure_nwb_cache(
             min_free_gb=self._nwb_min_free_gb,
             min_free_pct=self._nwb_min_free_pct,
+            max_file_fraction=self._nwb_max_file_fraction,
         )
 
         resolved_base = (
@@ -656,6 +661,11 @@ class SpyglassConfig:
         """Minimum free system RAM as a fraction of total before eviction."""
         return self._nwb_min_free_pct
 
+    @property
+    def nwb_max_file_fraction(self) -> float:
+        """Max fraction of OS open-file-descriptor limit used by the cache."""
+        return self._nwb_max_file_fraction
+
 
 sg_config = SpyglassConfig()
 sg_config.load_config(on_startup=True)
@@ -681,6 +691,7 @@ if sg_config.load_failed:  # Failed to load
     moseq_video_dir = None
     nwb_min_free_gb = 2.0
     nwb_min_free_pct = 0.1
+    nwb_max_file_fraction = 0.99
 else:
     config = sg_config.config
     base_dir = sg_config.base_dir
@@ -702,3 +713,4 @@ else:
     moseq_video_dir = sg_config.moseq_video_dir
     nwb_min_free_gb = sg_config.nwb_min_free_gb
     nwb_min_free_pct = sg_config.nwb_min_free_pct
+    nwb_max_file_fraction = sg_config.nwb_max_file_fraction
