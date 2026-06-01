@@ -1263,8 +1263,15 @@ class Recording(SpyglassMixin, dj.Computed):
             # ``get_recording`` skip this very check and silently load the
             # stale file. Unlink it before raising so the next call
             # rebuilds from source instead.
+            # Resolve with ``from_schema=True`` (the file lives in the
+            # schema's recompute slot, as on every rebuild-path
+            # get_abs_path here): the default resolution validates the
+            # external-store checksum, which the just-rebuilt mismatched
+            # file may now fail -- and that would raise before unlink()
+            # runs, defeating the cleanup. Matches _write_nwb_artifact's
+            # rebuild-path cleanup.
             mismatched_path = AnalysisNwbfile.get_abs_path(
-                row["analysis_file_name"]
+                row["analysis_file_name"], from_schema=True
             )
             _pathlib.Path(mismatched_path).unlink(missing_ok=True)
 

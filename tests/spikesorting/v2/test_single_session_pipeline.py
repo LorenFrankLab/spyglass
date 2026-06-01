@@ -1269,13 +1269,17 @@ def test_rebuild_raises_and_unlinks_on_provenance_mismatch(
     the check, and ``get_recording`` only rebuilds when the file is
     ABSENT -- so a raise that left the mismatched file on disk would make
     the next ``get_recording`` skip this check and silently load the
-    stale artifact. This test forces a real rebuild with divergent
-    provenance (by patching ``_repaired_timestamps`` to report extra
-    adjusted samples), then asserts: the rebuild raises, the row is not
-    mutated, the mismatched file is unlinked, and a subsequent
-    ``get_recording`` (with the patch removed) rebuilds cleanly rather
-    than loading a stale file.
+    stale artifact. This test stubs the recompute to reach the provenance
+    branch, then asserts the rebuild raises, the row is not mutated, and
+    the file was unlinked.
+
+    Because the stub writes no new file, the unlinked file is the shared
+    ``populated_recording`` cache; the ``finally`` restores it (and the
+    fixture only checks the row, not the file) so later tests do not
+    inherit a row whose cache was deleted.
     """
+    import shutil as _shutil
+
     from spyglass.common.common_nwbfile import AnalysisNwbfile
     from spyglass.spikesorting.v2.exceptions import (
         RecordingProvenanceMismatchError,
@@ -1283,8 +1287,17 @@ def test_rebuild_raises_and_unlinks_on_provenance_mismatch(
     from spyglass.spikesorting.v2.recording import Recording
 
     row = (Recording & populated_recording).fetch1()
-    abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
+    # Resolve with from_schema=True to match the path the rebuild-path
+    # cleanup unlinks (the default resolution validates the external-store
+    # checksum).
+    abs_path = AnalysisNwbfile.get_abs_path(
+        row["analysis_file_name"], from_schema=True
+    )
     assert Path(abs_path).exists()
+    # Back up the shared cache file so the deletion this test asserts does
+    # not poison later tests that reuse the populated_recording row.
+    _backup = str(abs_path) + ".provtest.bak"
+    _shutil.copy2(abs_path, _backup)
 
     # Stub the (rebuild-non-deterministic, external-store-checksum-gated)
     # recompute so the provenance branch is reached directly: return the
@@ -1317,24 +1330,34 @@ def test_rebuild_raises_and_unlinks_on_provenance_mismatch(
         lambda self, **kw: fake_return,
     )
 
-    with pytest.raises(
-        RecordingProvenanceMismatchError, match="timestamp-repair provenance"
-    ):
-        Recording()._rebuild_nwb_artifact(populated_recording)
+    try:
+        with pytest.raises(
+            RecordingProvenanceMismatchError,
+            match="timestamp-repair provenance",
+        ):
+            Recording()._rebuild_nwb_artifact(populated_recording)
 
-    # Row provenance columns are not auto-modified by the failed rebuild.
-    after = (Recording & populated_recording).fetch1()
-    assert bool(after["timestamps_adjusted"]) == bool(
-        row["timestamps_adjusted"]
-    )
-    assert int(after["n_adjusted_samples"]) == int(row["n_adjusted_samples"])
-    # The mismatched canonical file was unlinked so the next
-    # ``get_recording`` (which rebuilds ONLY when the file is absent)
-    # cannot silently load the stale artifact -- it will rebuild instead.
-    assert not Path(abs_path).exists(), (
-        "provenance-mismatched rebuild left its file on disk; the next "
-        "get_recording would skip the check and load the stale artifact"
-    )
+        # Row provenance columns are not auto-modified by the failed
+        # rebuild.
+        after = (Recording & populated_recording).fetch1()
+        assert bool(after["timestamps_adjusted"]) == bool(
+            row["timestamps_adjusted"]
+        )
+        assert int(after["n_adjusted_samples"]) == int(
+            row["n_adjusted_samples"]
+        )
+        # The mismatched canonical file was unlinked so the next
+        # ``get_recording`` (which rebuilds ONLY when the file is absent)
+        # cannot silently load the stale artifact -- it will rebuild.
+        assert not Path(abs_path).exists(), (
+            "provenance-mismatched rebuild left its file on disk; the next "
+            "get_recording would skip the check and load the stale artifact"
+        )
+    finally:
+        # Restore the shared populated_recording cache file (the stub
+        # wrote nothing, so the unlinked file was the original valid
+        # cache; later tests reuse the row and expect the file present).
+        _shutil.move(_backup, abs_path)
 
 
 @pytest.mark.slow
