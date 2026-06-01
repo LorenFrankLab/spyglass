@@ -5600,6 +5600,80 @@ def test_recording_make_global_median_reference(polymer_smoke_session):
     )
 
 
+@pytest.mark.slow
+def test_recording_no_filter_preset_skips_bandpass(polymer_smoke_session):
+    """The ``no_filter`` preset materializes an UNfiltered recording.
+
+    T5 made ``bandpass_filter`` optional: the ``no_filter`` preset ships
+    ``bandpass_filter=None`` and ``_apply_pre_motion_preprocessing`` must
+    SKIP the bandpass step (not silently pass a wide-band that still
+    filters). This populates two recordings on the same data -- one with
+    the bandpassed ``default_franklab`` preset, one with ``no_filter`` --
+    and pins: (1) the no_filter populate completes (the ``None`` guard
+    does not crash), and (2) its traces differ materially from the
+    bandpassed version, which only holds if the filter was actually
+    skipped. If the ``if bandpass_filter is not None`` guard were missing
+    or inverted, no_filter would still bandpass and the two recordings
+    would be (nearly) identical.
+    """
+    import numpy as _np
+
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+
+    _clean_session_v2(polymer_smoke_session)
+    initialize_v2_defaults()
+    LabTeam.insert1(
+        {"team_name": "v2_test_team", "team_description": "v2 pipeline tests"},
+        skip_duplicates=True,
+    )
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    sort_group_id = int(
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
+    )
+
+    common = {
+        "nwb_file_name": nwb_file_name,
+        "sort_group_id": sort_group_id,
+        "interval_list_name": "raw data valid times",
+        "team_name": "v2_test_team",
+    }
+    # Bandpassed reference (default_franklab ships a real 300-6000 Hz band).
+    bp_pk = RecordingSelection.insert_selection(
+        {**common, "preproc_params_name": "default_franklab"}
+    )
+    Recording.populate(bp_pk, reserve_jobs=False)
+    traces_bp = Recording().get_recording(bp_pk).get_traces()
+
+    # no_filter ships bandpass_filter=None -> the filter step is skipped.
+    # Distinct preproc_params_name => distinct cache_hash => distinct row,
+    # so no delete/repopulate dance is needed.
+    nf_pk = RecordingSelection.insert_selection(
+        {**common, "preproc_params_name": "no_filter"}
+    )
+    Recording.populate(nf_pk, reserve_jobs=False)
+    traces_nf = Recording().get_recording(nf_pk).get_traces()
+
+    # (1) shapes match (no_filter still references the same channels).
+    assert traces_nf.shape == traces_bp.shape
+    # (2) skipping the bandpass leaves low-frequency / DC content the
+    # 300 Hz high-pass would have removed, so the unfiltered traces are
+    # materially different from the bandpassed ones.
+    delta = float(_np.abs(traces_nf - traces_bp).mean())
+    assert delta > 1e-6, (
+        "no_filter and default_franklab recordings are indistinguishable "
+        f"(mean |diff| = {delta:.2e}); the bandpass was NOT skipped for "
+        "no_filter. Check the `if bandpass_filter is not None` guard in "
+        "_apply_pre_motion_preprocessing."
+    )
+
+
 # ---------- L5-B: DuplicateSelectionError on insert_selection -----------
 
 
