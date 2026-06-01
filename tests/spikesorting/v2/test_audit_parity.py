@@ -1051,3 +1051,111 @@ def test_channel_name_resolution_path_real_nwb(
             "channel_name branch must resolve to the injected string names "
             f"in electrode order; got {resolved!r}"
         )
+
+
+# ---------- A21: SI version pin + sorter-default snapshot tests ------------
+#
+# SI is pinned to ==0.104.3 in pyproject.toml. The KS4/MS5/SC2/TDC2/Generic
+# v2 schemas use extra="allow" (overview decision #2 -- KS4 stays permissive,
+# NOT made strict), so every sorter field the schema does not type falls
+# through to SpikeInterface's per-version default at sort time. These
+# snapshot tests fail loudly when a SI bump shifts those defaults so the diff
+# can be audited against current sort outputs before the pin moves.
+
+
+# KS4's install-independent SI-wrapper defaults (Kilosort4Sorter
+# ._si_default_params). The kilosort-ALGORITHM defaults (Th_universal,
+# batch_size, nearest_chans, ...) live in kilosort.parameters.DEFAULT_SETTINGS
+# and require the kilosort4 package to be installed; the CI SI-0.104 image does
+# NOT install KS4 (get_default_sorter_params('kilosort4') then returns only the
+# global job-kwargs + a "not installed" warning -- verified), so the
+# algorithm-level defaults cannot be snapshotted here. This snapshot pins the
+# SI-controlled wrapper subset, which is exactly the surface a SI bump changes
+# for the KS4 wrapper independent of the kilosort package.
+EXPECTED_KS4_SI_DEFAULTS = {
+    "do_CAR": True,
+    "invert_sign": False,
+    "save_extra_vars": False,
+    "save_preprocessed_copy": False,
+    "torch_device": "auto",
+    "bad_channels": None,
+    "clear_cache": False,
+    "do_correction": True,
+    "skip_kilosort_preprocessing": False,
+    "keep_good_only": False,
+    "use_binary_file": True,
+    "delete_recording_dat": True,
+}
+
+
+# MS5's full default surface (minus the global job-kwargs), SI 0.104.3. The
+# v2 MS5 schema types only a subset; the remaining ~8 fields are silently
+# stripped/defaulted at sort time (documented in Phase 7's migration guide).
+# Snapshotting them here lets that guide name the actual hidden values.
+EXPECTED_MS5_DEFAULTS = {
+    "scheme": "2",
+    "detect_threshold": 5.5,
+    "detect_sign": -1,
+    "detect_time_radius_msec": 0.5,
+    "snippet_T1": 20,
+    "snippet_T2": 20,
+    "npca_per_channel": 3,
+    "npca_per_subdivision": 10,
+    "snippet_mask_radius": 250,
+    "scheme1_detect_channel_radius": 150,
+    "scheme2_phase1_detect_channel_radius": 200,
+    "scheme2_detect_channel_radius": 50,
+    "scheme2_max_num_snippets_per_training_batch": 200,
+    "scheme2_training_duration_sec": 300,
+    "scheme2_training_recording_sampling_mode": "uniform",
+    "scheme3_block_duration_sec": 1800,
+    "freq_min": 300,
+    "freq_max": 6000,
+    "filter": True,
+    "whiten": True,
+    "delete_temporary_recording": True,
+}
+
+
+def test_kilosort4_si_defaults_unchanged():
+    """A21: SI's install-independent KS4 wrapper defaults match the snapshot.
+
+    Pins ``Kilosort4Sorter._si_default_params`` (the SI-controlled overlay,
+    readable without the kilosort4 package). A SI bump that shifts any of these
+    surfaces as a test failure rather than a silent change to v2 KS4 sort
+    behavior. Diff against the pinned snapshot, decide whether v2's typed-5
+    KS4 subset still expresses the right knobs, then update the snapshot and
+    the CHANGELOG / SI pin together.
+    """
+    from spikeinterface.sorters.external.kilosort4 import Kilosort4Sorter
+
+    assert Kilosort4Sorter._si_default_params == EXPECTED_KS4_SI_DEFAULTS, (
+        "SI's KS4 wrapper defaults shifted. Diff the change against the "
+        "pinned EXPECTED_KS4_SI_DEFAULTS, confirm v2's typed KS4 subset still "
+        "covers the right knobs, then update the snapshot, the SI pin in "
+        "pyproject.toml, and the CHANGELOG together."
+    )
+
+
+def test_ms5_si_defaults_unchanged():
+    """A21: SI's MountainSort5 defaults match the snapshot.
+
+    MS5 is installed in the SI-0.104 env, so its full default surface is
+    readable. Excludes the global job-kwargs (``job_keys``) so the snapshot
+    is independent of any per-session job-kwargs config and reflects only the
+    MS5 algorithm defaults -- including the fields v2's MS5 schema silently
+    strips (Phase 7 migration guide names them from this snapshot).
+    """
+    import spikeinterface.sorters as sis
+    from spikeinterface.core.job_tools import job_keys
+
+    actual = {
+        k: v
+        for k, v in sis.get_default_sorter_params("mountainsort5").items()
+        if k not in job_keys
+    }
+    assert actual == EXPECTED_MS5_DEFAULTS, (
+        "SI's MountainSort5 defaults shifted. Diff against the pinned "
+        "EXPECTED_MS5_DEFAULTS, then update the snapshot, the SI pin in "
+        "pyproject.toml, and the CHANGELOG together."
+    )

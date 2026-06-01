@@ -66,7 +66,13 @@ dependencies = [
   "ripple-detection",
   "seaborn",
   "sortingview>=0.11",
-  "spikeinterface>=0.104,<0.105",
+  "spikeinterface==0.104.3",        # pinned: KS4/MS5/SC2/TDC2/Generic schemas
+                                    # use extra="allow", so a SI bump silently
+                                    # shifts untyped sorter defaults. Snapshot
+                                    # tests (test_*_si_defaults_unchanged) fail
+                                    # loudly on a bump; move the pin + audit the
+                                    # diff together. Loosen only after the
+                                    # parent plan's Phase 0c SI migration.
   "track-linearization>=2.3",
 ]
 
