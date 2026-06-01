@@ -339,3 +339,33 @@ def test_motion_correction_parameters_rejects_schema_version_drift():
         MotionCorrectionParameters
         & {"motion_correction_params_name": "audit_a14_ok"}
     )
+
+
+# ---------- A1: empty artifact valid_times must not silently zero ----------
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_apply_artifact_mask_empty_valid_times_silently_zeros_recording():
+    """A1 (pre-fix characterization): empty valid_times zeros everything.
+
+    When ``valid_times`` is empty (the artifact pass kept zero seconds),
+    the complement walker's for-loop never executes and the trailing
+    branch fires once with ``(0, len(timestamps))`` -- masking the WHOLE
+    recording to zeros. The sorter then runs over all-zeros and emits a
+    misleading "zero units / quiet recording" result instead of failing
+    loudly. This test pins that buggy behavior so the fix (raise) can be
+    shown to flip it.
+    """
+    import numpy as np_mod
+    import spikeinterface.core as sc
+
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    rec = sc.generate_recording(
+        num_channels=4, durations=[0.5], sampling_frequency=30000.0
+    )
+    masked = Sorting._apply_artifact_mask(rec, np_mod.zeros((0, 2)))
+    traces = masked.get_traces()
+    assert np_mod.array_equal(traces, np_mod.zeros_like(traces)), (
+        "expected the buggy all-zeros mask of the entire recording"
+    )
