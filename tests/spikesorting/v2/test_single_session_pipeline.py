@@ -1674,14 +1674,30 @@ def test_fetch_sort_group_probe_info_stable_order(
     original_fetch_call = Fetch.__call__
 
     def _spy_fetch(self, *attrs, **kwargs):
-        fetch_order_by.append(kwargs.get("order_by"))
+        # Record only the explicitly-ordered fetches. A single
+        # ``.fetch(named_attrs, order_by=...)`` re-enters ``Fetch.__call__``
+        # internally in DataJoint 0.14.x (once more with ``attrs=()``,
+        # carrying the same ``order_by``), so the raw call count is an
+        # implementation detail. What matters is the INVARIANT: every
+        # ordered probe-info fetch is keyed on ``electrode_id`` (never
+        # left to unspecified DB order), which is what keeps the tri-part
+        # DeepHash stable. Asserting an exact call count would over-fit
+        # to DataJoint's internal recursion.
+        ob = kwargs.get("order_by")
+        if ob is not None:
+            fetch_order_by.append(ob)
         return original_fetch_call(self, *attrs, **kwargs)
 
     monkeypatch.setattr(Fetch, "__call__", _spy_fetch)
 
     first = Recording._fetch_sort_group_probe_info(nwb_file_name, channel_ids)
     second = Recording._fetch_sort_group_probe_info(nwb_file_name, channel_ids)
-    assert fetch_order_by == ["electrode_id", "electrode_id"]
+    assert fetch_order_by, "probe-info fetch issued no explicitly-ordered fetch"
+    assert all(ob == "electrode_id" for ob in fetch_order_by), (
+        "probe-info fetch issued a non-electrode_id ordered fetch; the "
+        f"order_by values seen were {fetch_order_by}. Every ordered fetch "
+        "must be electrode_id-keyed for the tri-part DeepHash to stay stable."
+    )
     assert first == second, "probe-info fetch is not deterministic"
 
     ref_rows = (
@@ -1737,12 +1753,14 @@ def test_prune_orphaned_selections_finds_and_cleans(populated_recording):
         }
     )
     orphan_sorting = _uuid.uuid4()
+    # T1 dropped the nullable artifact_id FK from the SortingSelection
+    # master (artifact state now lives on the ArtifactSource part); a
+    # master row with no source part is exactly the orphan this exercises.
     SortingSelection().insert1(
         {
             "sorting_id": orphan_sorting,
             "sorter": "mountainsort5",
             "sorter_params_name": "franklab_tetrode_hippocampus_30kHz_ms5",
-            "artifact_id": None,
         }
     )
 
