@@ -18,6 +18,8 @@ staged file is cleaned up in the except path.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import datajoint as dj
 
 from spyglass.common.common_ephys import Electrode  # noqa: F401
@@ -51,10 +53,23 @@ def _validate_curation_label_rows(
     are left alone -- DataJoint raises its own missing-attribute error
     for those.
     """
-    if allow_custom_labels:
-        return
     valid = {member.value for member in CurationLabel}
     for row in rows:
+        # DataJoint accepts ordered (tuple/list) rows too, but this guard
+        # reads ``curation_label`` by key -- a membership test that is
+        # False for an ordered row, which would silently skip validation
+        # and let a bogus varchar label through. Require a mapping so the
+        # label is always inspected (validate on every insert path).
+        if not isinstance(row, Mapping):
+            raise ValueError(
+                "CurationV2.UnitLabel insert requires mapping (dict) rows "
+                "so curation_label can be validated; got an ordered "
+                f"{type(row).__name__}. Pass a dict like "
+                "{'sorting_id': ..., 'curation_id': ..., 'unit_id': ..., "
+                "'curation_label': ...}."
+            )
+        if allow_custom_labels:
+            continue
         if "curation_label" not in row:
             continue
         label = row["curation_label"]
@@ -318,6 +333,18 @@ class CurationV2(SpyglassMixin, dj.Manual):
             # ``v1/curation.py:49``. Normalize to ``{}`` so the rest
             # of the helper does not need an extra None check.
             labels = {}
+        # Reject a scalar string label value BEFORE coercing to list:
+        # ``list("custom_tag")`` would silently split into per-character
+        # labels (and ``allow_custom_labels=True`` would then write them).
+        # A label value must be an explicit list/tuple of labels.
+        for uid, lbls in labels.items():
+            if isinstance(lbls, str) or not isinstance(lbls, (list, tuple)):
+                raise ValueError(
+                    "CurationV2.insert_curation: labels[unit_id] must be a "
+                    f"list of labels; got {type(lbls).__name__} for "
+                    f"unit_id={uid}. Wrap a single label as a one-element "
+                    'list, e.g. {unit_id: ["mua"]}.'
+                )
         # Normalize label keys to int once so the rest of the helper
         # can do straight ``labels.get(int_uid, [])`` lookups.
         labels = {int(uid): list(lbls) for uid, lbls in labels.items()}
@@ -412,7 +439,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         # absorbed contributors). Two kinds of "stray":
         #   - TRULY stray (typo): keys not in source AND not in written
         #     -- nothing they could ever have referred to. Raise by
-        #     default (F8 typo protection); ``permissive_labels=True``
+        #     default (typo protection); ``permissive_labels=True``
         #     restores warn-and-drop.
         #   - ABSORBED-source: keys that exist in source but are
         #     contributors absorbed into a merge (so not in written).

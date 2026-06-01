@@ -610,10 +610,10 @@ class Sorting(SpyglassMixin, dj.Computed):
             )
 
         sel_row = (SortingSelection & key).fetch1()
-        # The artifact pass now lives on the zero-or-one ``ArtifactSource``
-        # part (T1 dropped the nullable ``artifact_id`` FK from the
-        # master), so ``sel_row`` no longer carries an ``artifact_id``
-        # key. Resolve it once here and stash it on ``sel_row`` so the
+        # The artifact pass lives on the zero-or-one ``ArtifactSource``
+        # part, not a nullable ``artifact_id`` FK on the master, so
+        # ``sel_row`` does not carry an ``artifact_id`` key. Resolve it
+        # once here and stash it on ``sel_row`` so the
         # downstream readers (obs_intervals derivation below,
         # make_compute's artifact-mask gate, _rebuild_analyzer_folder)
         # see the artifact id without re-querying. Without this the
@@ -1012,10 +1012,11 @@ class Sorting(SpyglassMixin, dj.Computed):
         from spyglass.spikesorting.v2.utils import _analyzer_path
 
         sel_row = (SortingSelection & key).fetch1()
-        # Resolve the artifact from the ArtifactSource part (T1 dropped
-        # the master FK); without this the artifact-mask gate below would
-        # never fire and a rebuilt analyzer for an artifact-backed sort
-        # would omit the mask, diverging from what Sorting.make wrote.
+        # Resolve the artifact from the ArtifactSource part (the master
+        # has no artifact_id FK); without this the artifact-mask gate
+        # below would never fire and a rebuilt analyzer for an
+        # artifact-backed sort would omit the mask, diverging from what
+        # Sorting.make wrote.
         sel_row["artifact_id"] = SortingSelection.resolve_artifact(key)
         source = SortingSelection.resolve_source(key)
         if source.kind != "recording":

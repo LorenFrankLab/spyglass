@@ -1196,7 +1196,18 @@ class Recording(SpyglassMixin, dj.Computed):
         fetched = self.make_fetch(key)
         row = (self & key).fetch1()
         raw_path = Nwbfile().get_abs_path(fetched.sel["nwb_file_name"])
-        (_, _, rebuilt_hash, *_) = self._compute_recording_artifact(
+        (
+            _,
+            _,
+            rebuilt_hash,
+            _,
+            _,
+            _,
+            _,
+            _,
+            rebuilt_adjusted,
+            rebuilt_n_adjusted,
+        ) = self._compute_recording_artifact(
             raw_path=raw_path,
             nwb_file_name=fetched.sel["nwb_file_name"],
             interval_list_name=fetched.sel["interval_list_name"],
@@ -1219,6 +1230,30 @@ class Recording(SpyglassMixin, dj.Computed):
                 f"{row['analysis_file_name']!r}. The DataJoint row was not "
                 "deleted; inspect upstream raw NWB / SI version before "
                 "rerunning."
+            )
+        # Timestamp-repair provenance must stay accurate after a rebuild:
+        # the row's timestamps_adjusted / n_adjusted_samples columns
+        # describe the artifact on disk, so a rebuild that repaired a
+        # different number
+        # of samples (e.g. the source NWB's timestamps changed) would
+        # leave those columns lying about the cached file. Warn loudly --
+        # the row is not auto-updated (same fail-soft contract as the
+        # hash check; the operator inspects before re-running).
+        if (
+            bool(rebuilt_adjusted) != bool(row["timestamps_adjusted"])
+            or int(rebuilt_n_adjusted) != int(row["n_adjusted_samples"])
+        ):
+            logger.warning(
+                "Recording._rebuild_nwb_artifact: rebuilt timestamp-repair "
+                f"provenance (timestamps_adjusted={bool(rebuilt_adjusted)}, "
+                f"n_adjusted_samples={int(rebuilt_n_adjusted)}) does not "
+                "match the stored row "
+                f"(timestamps_adjusted={bool(row['timestamps_adjusted'])}, "
+                f"n_adjusted_samples={int(row['n_adjusted_samples'])}) for "
+                f"analysis_file_name={row['analysis_file_name']!r}. The "
+                "row's provenance columns now describe a different repair "
+                "than the rebuilt artifact; inspect the upstream raw NWB "
+                "before relying on them."
             )
 
     # ---- Implementation helpers -----------------------------------------

@@ -1204,9 +1204,9 @@ def test_sorting_get_sorting_round_trips(populated_sorting):
 def test_sorting_make_fetch_resolves_artifact_obs_intervals(populated_sorting):
     """``make_fetch`` derives obs_intervals from the ArtifactSource part.
 
-    Regression guard for the T1 schema change: the artifact pass moved
-    from a nullable ``artifact_id`` FK on the ``SortingSelection`` master
-    to the zero-or-one ``ArtifactSource`` part. ``make_fetch`` /
+    Regression guard for the artifact-source schema: the artifact pass
+    lives on the zero-or-one ``ArtifactSource`` part, not a nullable
+    ``artifact_id`` FK on the ``SortingSelection`` master. ``make_fetch`` /
     ``make_compute`` / ``_rebuild_analyzer_folder`` gate artifact masking
     on ``sel_row["artifact_id"]``; after the column was dropped, that key
     is absent on the raw ``fetch1()`` row, so ``make_fetch`` must resolve
@@ -1240,6 +1240,63 @@ def test_sorting_make_fetch_resolves_artifact_obs_intervals(populated_sorting):
         "sort; the ArtifactSource artifact_id was not resolved, so "
         "artifact masking is silently skipped."
     )
+
+
+@pytest.mark.slow
+def test_rebuild_warns_on_timestamp_provenance_mismatch(
+    populated_recording, monkeypatch, caplog
+):
+    """Rebuild warns when recomputed timestamp-repair provenance drifts.
+
+    The Recording row's ``timestamps_adjusted`` / ``n_adjusted_samples``
+    columns describe the cached artifact. If a rebuild recomputes a
+    different repair (e.g. the source NWB's timestamps changed), those
+    columns would silently misdescribe the rebuilt file. The rebuild must
+    surface the drift. We force a divergent recompute by monkeypatching
+    ``_compute_recording_artifact`` to return provenance unequal to the
+    stored row, then assert the mismatch is logged (same fail-soft
+    contract as the cache-hash check: warn, do not auto-mutate the row).
+    """
+    import logging
+
+    from spyglass.spikesorting.v2.recording import Recording
+
+    row = (Recording & populated_recording).fetch1()
+
+    # Return the stored hash (so the hash check is silent) but flip the
+    # repair provenance so only the provenance comparison can fire.
+    flipped_adjusted = not bool(row["timestamps_adjusted"])
+    flipped_n = int(row["n_adjusted_samples"]) + 7
+    fake_return = (
+        row["analysis_file_name"],
+        "obj",
+        row["cache_hash"],
+        30000.0,
+        0.0,
+        1.0,
+        4,
+        1.0,
+        flipped_adjusted,
+        flipped_n,
+    )
+    monkeypatch.setattr(
+        Recording,
+        "_compute_recording_artifact",
+        lambda self, **kw: fake_return,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        Recording()._rebuild_nwb_artifact(populated_recording)
+
+    assert any(
+        "timestamp-repair provenance" in rec.message for rec in caplog.records
+    ), "rebuild did not warn on a timestamp-provenance mismatch"
+    # Fail-soft: the row's provenance columns are not auto-modified.
+    after = (Recording & populated_recording).fetch1()
+    assert bool(after["timestamps_adjusted"]) == bool(
+        row["timestamps_adjusted"]
+    )
+    assert int(after["n_adjusted_samples"]) == int(row["n_adjusted_samples"])
 
 
 @pytest.mark.slow
@@ -1795,9 +1852,9 @@ def test_prune_orphaned_selections_finds_and_cleans(populated_recording):
         }
     )
     orphan_sorting = _uuid.uuid4()
-    # T1 dropped the nullable artifact_id FK from the SortingSelection
-    # master (artifact state now lives on the ArtifactSource part); a
-    # master row with no source part is exactly the orphan this exercises.
+    # The SortingSelection master has no artifact_id FK (artifact state
+    # lives on the ArtifactSource part); a master row with no source part
+    # is exactly the orphan this exercises.
     SortingSelection().insert1(
         {
             "sorting_id": orphan_sorting,
@@ -5235,7 +5292,7 @@ def test_sorting_selection_artifact_id_none_is_distinct_identity(
 
 @pytest.mark.slow
 def test_sorting_selection_artifact_source_part_shape(populated_recording):
-    """T1: artifact state lives on the ArtifactSource part, not a master FK.
+    """Artifact state lives on the ArtifactSource part, not a master FK.
 
     A no-artifact selection has zero ArtifactSource rows; an
     artifact-backed selection has exactly one whose artifact_id
@@ -6245,9 +6302,9 @@ def test_merge_dispatch_restrict_by_artifact_honored_in_v2(populated_sorting):
     expected = (SpikeSortingOutput.CurationV2 & pk).fetch1("merge_id")
 
     # Resolve this sort's artifact_id (the "none" preset writes
-    # one IntervalList with the artifact-naming convention). T1 moved
-    # the artifact pass off the master onto the ArtifactSource part, so
-    # read it through the resolver, not the dropped master column.
+    # one IntervalList with the artifact-naming convention). The artifact
+    # pass lives on the ArtifactSource part, not the master, so read it
+    # through the resolver rather than a master column.
     artifact_id = SortingSelection.resolve_artifact(populated_sorting)
     artifact_name = artifact_interval_list_name(artifact_id)
 
@@ -8519,7 +8576,7 @@ def test_curation_insert_idempotent_rejects_new_args(populated_sorting):
     assert reused["curation_id"] == pk["curation_id"]
 
 
-# ---------- T2: SortGroupV2 reference-mode split ----------------------------
+# ---------- SortGroupV2 reference-mode split --------------------------------
 
 
 @pytest.mark.slow
@@ -8711,3 +8768,66 @@ def test_curation_label_validation_all_paths(populated_sorting):
         & pk_custom
         & {"unit_id": target_unit, "curation_label": "another_tag"}
     )
+
+
+@pytest.mark.slow
+def test_unit_label_insert_rejects_ordered_row(populated_sorting):
+    """A direct ordered-sequence (tuple) UnitLabel insert is validated.
+
+    DataJoint accepts positional/ordered rows, but the canonical-label
+    guard reads ``row["curation_label"]`` -- a membership test that is
+    False for a tuple, so an ordered row of
+    ``(sorting_id, curation_id, unit_id, "noies")`` could slip a bogus
+    label past validation, breaking the "validate on every insert path"
+    guarantee. The override must reject non-mapping rows (or validate
+    them) rather than silently passing them through.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    _clear_curations(populated_sorting)
+    target_unit = int((Sorting.Unit & populated_sorting).fetch("unit_id")[0])
+    pk = CurationV2.insert_curation(
+        sorting_key=populated_sorting, labels={target_unit: ["mua"]}
+    )
+
+    ordered = (
+        pk["sorting_id"],
+        pk["curation_id"],
+        target_unit,
+        "noies",  # not in CurationLabel
+    )
+    with pytest.raises(ValueError, match="requires mapping|not in CurationLabel"):
+        CurationV2.UnitLabel.insert1(ordered)
+    with pytest.raises(ValueError, match="requires mapping|not in CurationLabel"):
+        CurationV2.UnitLabel.insert([ordered])
+
+
+@pytest.mark.slow
+def test_insert_curation_rejects_scalar_string_label(populated_sorting):
+    """A scalar string label value is rejected, not split per-character.
+
+    ``labels={unit_id: "custom_tag"}`` (a bare string instead of a list
+    of labels) must raise -- NOT be coerced to
+    ``["c","u","s","t","o","m",...]`` and written as per-character labels.
+    The bug bites hardest with ``allow_custom_labels=True``, which skips
+    the per-value canonical check, so the test pins both the default and
+    the escape-hatch paths.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    _clear_curations(populated_sorting)
+    target_unit = int((Sorting.Unit & populated_sorting).fetch("unit_id")[0])
+
+    with pytest.raises(ValueError, match="must be a list of labels"):
+        CurationV2.insert_curation(
+            sorting_key=populated_sorting,
+            labels={target_unit: "mua"},  # scalar string, not ["mua"]
+        )
+    with pytest.raises(ValueError, match="must be a list of labels"):
+        CurationV2.insert_curation(
+            sorting_key=populated_sorting,
+            labels={target_unit: "custom_tag"},
+            allow_custom_labels=True,
+        )

@@ -554,11 +554,11 @@ def test_reference_fields_validation():
         )
 
 
-# ---------- schema-version bumps (this phase's field changes) ---------------
+# ---------- schema-version bumps -------------------------------------------
 
 
 def test_schema_versions_bumped():
-    """The schema-version markers reflect this phase's field changes.
+    """The schema-version markers reflect the current field sets.
 
     ``ClusterlessThresholderSchema`` gained ``threshold_unit`` (3 -> 4)
     and ``PreprocessingParamsSchema`` made ``bandpass_filter`` optional +
@@ -575,8 +575,8 @@ def test_shipped_rows_carry_current_params_schema_version(dj_conn):
     Each shipped ``SorterParameters`` / ``PreprocessingParameters`` row's
     ``params_schema_version`` must equal the inner schema's
     ``schema_version`` so ``_assert_schema_version_matches`` (run on every
-    insert1) stays green. Pins the version-bump bookkeeping for the rows
-    touched this phase.
+    insert1) stays green. Pins the version-bump bookkeeping for the
+    clusterless and preprocessing default rows.
     """
     from spyglass.spikesorting.v2.recording import PreprocessingParameters
     from spyglass.spikesorting.v2.sorting import SorterParameters
