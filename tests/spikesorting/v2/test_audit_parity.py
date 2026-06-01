@@ -483,3 +483,70 @@ def test_sorting_make_skips_concat_rows_silently():
         assert len(Sorting & {"sorting_id": sid}) == 0
     finally:
         (SortingSelection & {"sorting_id": sid}).delete(safemode=False)
+
+
+# ---------- A10: zero-unit get_analyzer guard fires before path lookup -----
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_get_analyzer_zero_unit_raises_before_path_lookup():
+    """A10: a zero-unit sort raises before any analyzer-folder lookup.
+
+    ``analyzer_folder`` is NOT-null ``varchar(255)``, so a zero-unit row
+    still stores its would-be path. ``get_analyzer`` checks ``n_units``
+    FIRST and raises ``ZeroUnitAnalyzerError`` before computing /
+    ``.exists()``-ing the path -- so a missing folder never surfaces as a
+    confusing ``FileNotFoundError``. (The audit's "phantom path" framing
+    was disproved on re-read; this pins the existing guard.)
+    """
+    import datetime as dt
+    import os
+    import uuid
+
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.exceptions import ZeroUnitAnalyzerError
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        Sorting,
+        SortingSelection,
+    )
+
+    SorterParameters.insert_default()
+    sid = uuid.uuid4()
+    SortingSelection.insert1(
+        {
+            "sorting_id": sid,
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": "default",
+        },
+        allow_direct_insert=True,
+    )
+
+    # A zero-unit Sorting row whose analyzer_folder holds a would-be path
+    # that does NOT exist on disk. The AnalysisNwbfile FK is bypassed --
+    # the zero-unit guard never reads the file or the folder.
+    fake_folder = "/nonexistent/analyzer/zero_unit_a10_pin"
+    assert not os.path.exists(fake_folder)
+    conn = dj.conn()
+    conn.query("SET FOREIGN_KEY_CHECKS=0")
+    try:
+        Sorting.insert1(
+            {
+                "sorting_id": sid,
+                "analysis_file_name": "a10_fake.nwb",
+                "object_id": "a10-fake-object-id",
+                "analyzer_folder": fake_folder,
+                "n_units": 0,
+                "time_of_sort": dt.datetime(2020, 1, 1, 0, 0, 0),
+            },
+            allow_direct_insert=True,
+        )
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+    try:
+        with pytest.raises(ZeroUnitAnalyzerError):
+            Sorting().get_analyzer({"sorting_id": sid})
+    finally:
+        (SortingSelection & {"sorting_id": sid}).delete(safemode=False)

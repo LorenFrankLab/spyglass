@@ -579,6 +579,13 @@ def artifact_interval_list_name(artifact_id) -> str:
     Centralizes the v2 convention ``f"artifact_{artifact_id}"`` so the
     prefix lives in one place; ``parse_artifact_interval_list_name``
     is its inverse.
+
+    NOTE: v2 prefixes the name with ``artifact_``; v1 wrote the bare
+    ``str(artifact_id)`` (``v1/artifact.py:200``). The prefix is
+    intentional -- it disambiguates artifact-derived IntervalList rows
+    from sort_valid_times / lfp / etc. rows when grepping by name. A
+    ported v1 query that looks rows up by the bare UUID returns empty;
+    use this helper (or its inverse) instead.
     """
     return f"{_ARTIFACT_INTERVAL_LIST_PREFIX}{artifact_id}"
 

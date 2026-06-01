@@ -611,7 +611,7 @@ class Sorting(SpyglassMixin, dj.Computed):
     object_id: varchar(72)
     analyzer_folder: varchar(255)
     n_units: int
-    time_of_sort: datetime
+    time_of_sort: datetime    # populate wall-clock; native DataJoint datetime (v1 stored a Unix-epoch int at v1/sorting.py:239 -- a DataJoint-type workaround no longer needed)
     """
 
     class Unit(SpyglassMixinPart):
@@ -1785,9 +1785,13 @@ class Sorting(SpyglassMixin, dj.Computed):
 
         timestamps = recording.get_times()
         if obs_intervals is None:
-            # Fall back to the full recording window when no artifact
-            # IntervalList was supplied; matches the no-mask sort
-            # semantics (the sort observed every sample).
+            # ``obs_intervals is None`` is the "no artifact pass" case:
+            # the artifact pass is optional (an ArtifactSource part is
+            # zero-or-one; no part / artifact_id=None means no masking),
+            # so there is no artifact-removed IntervalList to read. The
+            # full recording window IS the correct obs_intervals then --
+            # the sort observed every sample. (v1's FK was mandatory, so
+            # it always had artifact-removed intervals here.)
             obs_intervals_arr = _np.asarray(
                 [[float(timestamps[0]), float(timestamps[-1])]]
             )
