@@ -100,6 +100,74 @@ def test_franklab_ms4_v1_alias_rows_present():
             ), f"alias row {alias_name!r} did not insert with MS4 present"
 
 
+# ---------- A4: install-gating happens on the insert_default() path --------
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_sorter_parameters_skips_uninstalled_sorters(monkeypatch):
+    """A4: ``insert_default()`` skips uninstalled SI sorters at INSERT time.
+
+    The companion ``_gated_default_rows`` test pins the gating DECISION;
+    this one pins the INSERT PATH -- that ``insert_default`` actually
+    routes the decision into the table, not just computes it. A
+    regression that made ``insert_default`` insert the full
+    ``_DEFAULT_CONTENTS`` directly (bypassing the gate) would pass the
+    decision test but fail here.
+
+    With ``installed_sorters()`` forced empty, every SI-registered default
+    row is gated out while the Spyglass-internal ``clusterless_thresholder``
+    row (never gated) still inserts. The skip is asserted on default
+    sorters genuinely absent from the box, whose rows are therefore
+    guaranteed clean (no earlier test inserted them) -- if the gate
+    regressed, those rows would appear.
+    """
+    import spikeinterface.sorters as sis
+
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    real_installed = set(sis.installed_sorters())
+    si_default_sorters = {
+        row[0]
+        for row in SorterParameters._DEFAULT_CONTENTS
+        if row[0] not in SorterParameters._NON_SI_SORTERS
+    }
+    # Canaries: SI default sorters genuinely absent from this box. We
+    # delete their rows first (a clean slate the persistent test DB may
+    # not give us -- deleting a default Lookup row for an uninstalled,
+    # therefore unreferenced, sorter is safe) so that a row reappearing
+    # after insert_default unambiguously means the gate was bypassed.
+    clean_canaries = si_default_sorters - real_installed
+    if not clean_canaries:
+        pytest.skip(
+            "every SI default sorter is installed; no clean canary row to "
+            "verify the gated insert path against"
+        )
+    for sorter in clean_canaries:
+        (SorterParameters & {"sorter": sorter}).delete(safemode=False)
+
+    monkeypatch.setattr(sis, "installed_sorters", lambda: [])
+    SorterParameters.insert_default()
+
+    # Non-SI special case -> never gated -> always inserted.
+    assert (
+        SorterParameters
+        & {
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": "default",
+        }
+    ), "clusterless default row must insert even with no SI sorter installed"
+
+    # Every gated-out SI sorter stays absent: insert_default routed the
+    # gating DECISION into the INSERT, it did not insert _DEFAULT_CONTENTS
+    # wholesale.
+    for sorter in clean_canaries:
+        assert not (SorterParameters & {"sorter": sorter}), (
+            f"insert_default inserted uninstalled SI sorter {sorter!r} "
+            "despite installed_sorters()==[]; the install gate was "
+            "bypassed on the insert path."
+        )
+
+
 # ---------- A5: params_schema_version must be supplied ---------------------
 
 
