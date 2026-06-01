@@ -886,7 +886,10 @@ class VideoFile(SpyglassMixin, dj.Imported):
         if needs_path:
             # Source 1: external_file in the NWB ImageSeries — most direct.
             path_found = None
-            for ext in getattr(video_file, "external_file", None) or []:
+            ext_files = getattr(video_file, "external_file", None)
+            if not isinstance(ext_files, (list, tuple)):
+                ext_files = []
+            for ext in ext_files:
                 p = Path(ext)
                 if p.is_absolute() and p.exists():
                     path_found = p.as_posix()
@@ -906,13 +909,15 @@ class VideoFile(SpyglassMixin, dj.Imported):
         self.update1(row=row)
         return status
 
-    def update_entries(self, restrict=True, display_progress=True):
+    @classmethod
+    def update_entries(cls, restrict=True, display_progress=True):
         """Update the camera_name and path fields for all null entries.
 
         Delegates per-entry work to :meth:`_update_1_entry` and aggregates
         the results into a summary log.
         """
-        query = self & restrict & "camera_name IS NULL OR path IS NULL"
+        instance = cls()
+        query = instance & restrict & "camera_name IS NULL OR path IS NULL"
         existing_entries = query.fetch("KEY")
         total = len(existing_entries)
         updated_camera = updated_path = skipped_camera = skipped_path = 0
@@ -923,10 +928,10 @@ class VideoFile(SpyglassMixin, dj.Imported):
             desc="Updating VideoFile entries",
             disable=not display_progress,
         ):
-            s = self._update_1_entry(row)
+            s = instance._update_1_entry(row)
 
             if s["nwb_error"]:
-                self._warn_msg(
+                instance._warn_msg(
                     f"Could not fetch NWB for {row}: {s['nwb_error']}"
                 )
 

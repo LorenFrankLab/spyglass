@@ -10,21 +10,21 @@ class TestPoseParamsDefaults:
         """Test inserting default 2-LED params."""
         from spyglass.position.v2.estim import PoseParams
 
-        PoseParams.insert_default(skip_duplicates=True)
+        PoseParams.insert_default(replace=True)
 
         # Fetch and verify
         params = (PoseParams & {"pose_params_id": "default"}).fetch1()
 
         # Check orientation params
         assert params["orient"]["method"] == "two_pt"
-        assert params["orient"]["bodypart1"] == "greenLED"
-        assert params["orient"]["bodypart2"] == "redLED_C"
+        assert params["orient"]["bodypart1"] == "redLED_C"  # rear marker
+        assert params["orient"]["bodypart2"] == "greenLED"  # front marker
         assert params["orient"]["interpolate"] is True
         assert params["orient"]["smooth"] is True
 
         # Check centroid params
         assert params["centroid"]["method"] == "2pt"
-        assert params["centroid"]["max_LED_separation"] == 15.0
+        assert params["centroid"]["max_LED_separation"] == 12.0  # match V1
 
         # Check smoothing params
         assert params["smoothing"]["interpolate"] is True
