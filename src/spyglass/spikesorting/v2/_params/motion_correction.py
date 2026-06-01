@@ -74,8 +74,10 @@ class MotionCorrectionParamsSchema(BaseModel):
         non-queryable, and the forbidden kwargs would either write
         untracked side artifacts or change the function's return type.
 
-        The forbidden-key check is the ONLY insert-time guard on
-        ``preset_kwargs``. The remaining keys are validated against
+        The forbidden-key check is the only insert-time guard on the
+        *contents* of ``preset_kwargs`` (the ``preset='none'`` case also
+        requires ``preset_kwargs`` to be empty). The remaining keys are
+        validated against
         ``correct_motion``'s signature at the (future)
         ``ConcatenatedRecording.make`` consumer, which is
         ``NotImplementedError``-gated today, so an otherwise-bogus key

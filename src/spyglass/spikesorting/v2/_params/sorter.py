@@ -166,7 +166,20 @@ class ClusterlessThresholderSchema(BaseModel):
     model_config = ConfigDict(extra="forbid")
     schema_version: int = 4
     detect_threshold: float = Field(default=100.0, gt=0.0)
-    threshold_unit: Literal["uv", "mad"] = "mad"
+    threshold_unit: Literal["uv", "mad"] = Field(
+        default="mad",
+        description=(
+            "How detect_threshold is interpreted when noise_levels is "
+            "left unset: 'uv' derives noise_levels=[1.0] (raw microvolts) "
+            "and 'mad' lets SpikeInterface estimate per-channel MAD. When "
+            "noise_levels IS set explicitly it takes precedence and is "
+            "used verbatim -- threshold_unit is then descriptive only. The "
+            "two are NOT cross-validated because an explicit per-channel "
+            "noise_levels is a supported advanced override that no single "
+            "threshold_unit value can represent; keep them consistent "
+            "(the shipped 'default' row pairs 'uv' with [1.0])."
+        ),
+    )
     method: Literal["locally_exclusive", "global"] = "locally_exclusive"
     peak_sign: Literal["neg", "pos", "both"] = "neg"
     exclude_sweep_ms: float = Field(default=0.1, gt=0.0)

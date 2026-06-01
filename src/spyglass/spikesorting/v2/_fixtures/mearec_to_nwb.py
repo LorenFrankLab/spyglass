@@ -387,15 +387,20 @@ def _read_ground_truth(mearec_h5_path: Path) -> _GroundTruth:
     # Drifting recordings carry a position per drift step; use the first.
     if locations.ndim == 3:
         locations = locations[:, 0, :]
-    if locations.ndim != 2 or locations.shape[0] != n_units:
+    if (
+        locations.ndim != 2
+        or locations.shape[0] != n_units
+        or locations.shape[1] > 3
+    ):
         raise ValueError(
             f"MEArec template_locations for {mearec_h5_path.name!r} has "
             f"shape {locations.shape}; expected a 2-D array whose first "
-            f"dimension equals n_units ({n_units}). Refusing to write "
-            "all-NaN ground-truth positions."
+            f"dimension equals n_units ({n_units}) and at most 3 spatial "
+            "columns. Refusing to write all-NaN or silently-truncated "
+            "ground-truth positions."
         )
     positions = np.zeros((n_units, 3), dtype=float)
-    positions[:, : locations.shape[1]] = locations[:, : positions.shape[1]]
+    positions[:, : locations.shape[1]] = locations
 
     return _GroundTruth(
         spike_times=spike_times,

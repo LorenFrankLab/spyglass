@@ -133,7 +133,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         validation because the label set is open-ended -- a lab adding a
         custom label later would otherwise need a forbidden ``ALTER
         TABLE`` under the zero-migration policy. Pass
-        ``allow_custom_labels=True`` to either override to insert a label
+        ``allow_custom_labels=True`` on either path to insert a label
         outside the canonical set.
         """
 

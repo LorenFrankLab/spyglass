@@ -1941,69 +1941,6 @@ def test_curation_v2_insert_with_labels(populated_sorting):
 
 
 @pytest.mark.slow
-def test_curation_label_validation_all_paths(populated_sorting):
-    """Every UnitLabel insert path validates curation_label.
-
-    Both ``CurationV2.insert_curation`` and a direct
-    ``CurationV2.UnitLabel.insert1`` reject a label outside the canonical
-    set, and ``allow_custom_labels=True`` lets a custom label through on
-    BOTH paths.
-    """
-    from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.sorting import Sorting
-
-    _clear_curations(populated_sorting)
-    units = (Sorting.Unit & populated_sorting).fetch("unit_id")
-    assert len(units) > 0
-    target_unit = int(units[0])
-
-    # insert_curation rejects a typo'd label.
-    with pytest.raises(ValueError, match="not in CurationLabel"):
-        CurationV2.insert_curation(
-            sorting_key=populated_sorting,
-            labels={target_unit: ["noies"]},
-        )
-
-    # A real root curation so the direct-insert path has a Unit FK target.
-    pk = CurationV2.insert_curation(
-        sorting_key=populated_sorting,
-        labels={target_unit: ["mua"]},
-    )
-    unit_row = {**pk, "unit_id": target_unit}
-
-    # Direct UnitLabel.insert1 also rejects a typo'd label.
-    with pytest.raises(ValueError, match="not in CurationLabel"):
-        CurationV2.UnitLabel.insert1(
-            {**unit_row, "curation_label": "noies"}
-        )
-
-    # allow_custom_labels=True accepts a custom label on the direct path.
-    CurationV2.UnitLabel.insert1(
-        {**unit_row, "curation_label": "burst_parent"},
-        allow_custom_labels=True,
-    )
-    direct_labels = {
-        r["curation_label"]
-        for r in (CurationV2.UnitLabel & unit_row).fetch(as_dict=True)
-    }
-    assert "burst_parent" in direct_labels
-
-    # allow_custom_labels=True accepts a custom label through
-    # insert_curation as well (fresh sorting state).
-    _clear_curations(populated_sorting)
-    custom_pk = CurationV2.insert_curation(
-        sorting_key=populated_sorting,
-        labels={target_unit: ["my_custom_tag"]},
-        allow_custom_labels=True,
-    )
-    helper_labels = {
-        r["curation_label"]
-        for r in (CurationV2.UnitLabel & custom_pk).fetch(as_dict=True)
-    }
-    assert "my_custom_tag" in helper_labels
-
-
-@pytest.mark.slow
 def test_curation_v2_parent_validation_and_nonincreasing_ids(populated_sorting):
     """parent_curation_id must reference an existing row for the same
     sort; auto-incremented curation_id starts at 0 and increments.

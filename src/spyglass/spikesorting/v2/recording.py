@@ -876,6 +876,20 @@ class Recording(SpyglassMixin, dj.Computed):
             if reference_electrode_id is None
             else int(reference_electrode_id)
         )
+        # Re-validate the reference fields on the READ side. The
+        # mode-vs-id biconditional is enforced in SortGroupV2.insert1/
+        # insert, but a row written through a path that bypasses those
+        # overrides (e.g. raw update1) could carry a stray
+        # reference_electrode_id under a non-"specific" mode -- which the
+        # downstream dispatch silently ignores. Validate here so such a
+        # row fails loudly at populate instead of silently dropping the
+        # operator's intent.
+        _validate_reference_fields(
+            {
+                "reference_mode": reference_mode,
+                "reference_electrode_id": reference_electrode_id,
+            }
+        )
         sort_valid_times = (
             IntervalList
             & {
