@@ -1292,3 +1292,102 @@ def test_find_orphaned_analyzer_folders_zero_unit_carveout(dj_conn):
         )
     finally:
         (SortingSelection & {"sorting_id": sid}).delete(safemode=False)
+
+
+# ---------- A23: _run_si_sorter global job_kwargs restore ------------------
+
+
+def _run_si_sorter_with_patched_run_sorter(monkeypatch, run_sorter_impl):
+    """Drive Sorting._run_si_sorter with a cheap recording and a patched
+    sis.run_sorter, returning (before_global, after_global, result_or_exc).
+
+    Passes a non-empty job_kwargs ({"n_jobs": 2, ...}) so the global
+    set/restore path actually runs (it is gated on ``if sj_kwargs``), and
+    n_jobs=2 differs from SI's default n_jobs=1 so a missing restore would
+    leave the global changed.
+    """
+    import uuid
+
+    import spikeinterface as si
+    import spikeinterface.sorters as sis
+
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    rec = si.generate_recording(
+        num_channels=4, durations=[1.0], sampling_frequency=30_000.0
+    )
+    monkeypatch.setattr(sis, "run_sorter", run_sorter_impl)
+
+    before = dict(si.get_global_job_kwargs())
+    result = Sorting._run_si_sorter(
+        "mountainsort5",
+        {},
+        rec,
+        uuid.uuid4(),
+        {"n_jobs": 2, "chunk_duration": "2s"},
+    )
+    after = dict(si.get_global_job_kwargs())
+    return before, after, result
+
+
+def test_run_si_sorter_restores_global_job_kwargs_on_raise(
+    dj_conn, monkeypatch
+):
+    """A23: SI's global job_kwargs are restored after the sort raises.
+
+    ``_run_si_sorter`` installs the per-row job_kwargs into SI's process-global
+    state via ``set_global_job_kwargs`` and restores the prior global in a
+    ``finally`` (reset-then-reapply, so keys absent from the prior global do
+    not leak). A regression removing the restore would leak the mutated global
+    (here n_jobs=2 vs the default 1) into every later populate. Force the sort
+    to raise and assert the global is byte-for-byte the pre-call state.
+    """
+    import spikeinterface as si
+    import spikeinterface.sorters as sis
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("sorter blew up")
+
+    rec = si.generate_recording(
+        num_channels=4, durations=[1.0], sampling_frequency=30_000.0
+    )
+    monkeypatch.setattr(sis, "run_sorter", _boom)
+
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    before = dict(si.get_global_job_kwargs())
+    import uuid
+
+    with pytest.raises(RuntimeError, match="sorter blew up"):
+        Sorting._run_si_sorter(
+            "mountainsort5",
+            {},
+            rec,
+            uuid.uuid4(),
+            {"n_jobs": 2, "chunk_duration": "2s"},
+        )
+    after = dict(si.get_global_job_kwargs())
+    assert after == before, (
+        "global job_kwargs were not restored after the sort raised; the "
+        f"finally-restore leaked state. before={before} after={after}"
+    )
+
+
+def test_run_si_sorter_restores_global_job_kwargs_on_success(
+    dj_conn, monkeypatch
+):
+    """A23: SI's global job_kwargs are restored after a successful sort too."""
+    import spikeinterface.sorters as sis
+
+    sentinel = object()
+    before, after, result = _run_si_sorter_with_patched_run_sorter(
+        monkeypatch, lambda *a, **k: sentinel
+    )
+    assert result is sentinel
+    # n_jobs=2 differs from SI's default n_jobs=1, so the sort genuinely
+    # mutates the global mid-run; a removed restore would surface here as
+    # after != before (the leaked n_jobs=2).
+    assert after == before, (
+        "global job_kwargs were not restored after a successful sort; "
+        f"before={before} after={after}"
+    )
