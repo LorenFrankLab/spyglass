@@ -322,27 +322,40 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
 
     @classmethod
     def insert_default_legacy_si_sorters(cls):
-        """Insert ('sorter','default') rows for non-curated SI sorters.
+        """Insert ('sorter','default') rows for installed non-curated sorters.
 
         Opt-in back-compat helper for users porting v1 workflows that name
         a non-curated sorter via ``('kilosort2_5','default')`` or similar.
-        Replicates v1's auto-insert behavior at ``v1/sorting.py:184-189``:
-        calls SpikeInterface's ``sis.get_default_sorter_params(sorter)``
-        for each entry of ``sis.available_sorters()`` and validates the
-        result through ``GenericSorterParamsSchema`` (``extra='allow'``)
-        so the row passes without typo-rejection.
+        For each entry of ``sis.available_sorters()`` it calls
+        SpikeInterface's ``sis.get_default_sorter_params(sorter)`` and
+        validates the result through ``GenericSorterParamsSchema``
+        (``extra='allow'``) so the row passes without typo-rejection.
 
-        Curated sorters (mountainsort4, mountainsort5, kilosort4,
-        spykingcircus2, tridesclous2, clusterless_thresholder) are
-        SKIPPED -- they already have their own typed schemas with
-        ``extra='forbid'``, and SI's defaults for those sorters include
-        keys those schemas intentionally strip (e.g. ``MountainSort5Schema``
-        strips ``filter`` / ``freq_min`` because the upstream recording is
-        already filtered). Routing SI's full default dict through the typed
-        schema would either fail validation or quietly drop keys -- neither
-        is what a v1 caller expects. The opt-in targets the NON-curated
-        escape-hatch sorters that fall back to ``GenericSorterParamsSchema``
-        anyway.
+        Two classes of sorter are skipped (logged at INFO):
+
+        - **Not installed.** Gated on
+          ``spikeinterface.sorters.installed_sorters()`` -- the SAME gate
+          ``insert_default`` uses (see ``v1/sorting.py:184-189`` and the
+          A4 install-gate rationale at :meth:`insert_default`). v1 auto-
+          inserted for every ``available_sorters()`` entry, but
+          ``get_default_sorter_params`` succeeds for wrapper-only sorters
+          whose binary is absent (e.g. ``kilosort2_5``, ``ironclust``), so
+          enumerating ``available_sorters()`` alone would ship rows that
+          fail at ``Sorting.populate`` time with an unhelpful "sorter not
+          installed" error. Inserting only *installed* sorters keeps the
+          back-compat value (rows a user can actually run) without that
+          trap.
+        - **Curated** (mountainsort4, mountainsort5, kilosort4,
+          spykingcircus2, tridesclous2, clusterless_thresholder) -- they
+          already have their own typed schemas with ``extra='forbid'``,
+          and SI's defaults for those sorters include keys those schemas
+          intentionally strip (e.g. ``MountainSort5Schema`` strips
+          ``filter`` / ``freq_min`` because the upstream recording is
+          already filtered). Routing SI's full default dict through the
+          typed schema would either fail validation or quietly drop keys --
+          neither is what a v1 caller expects. The opt-in targets the
+          NON-curated escape-hatch sorters that fall back to
+          ``GenericSorterParamsSchema`` anyway.
 
         This helper is deliberately NOT called by ``initialize_v2_defaults``
         -- users who do not need v1 sorter names should not pay for the
@@ -362,10 +375,19 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
         )
 
         curated = set(_SORTER_SCHEMAS)  # sorters with their own schemas
+        installed = set(sis.installed_sorters())
         rows = []
+        skipped_not_installed = []
         for sorter in sis.available_sorters():
             if sorter in curated:
                 continue  # see docstring: would fail or drop keys
+            if sorter not in installed:
+                # Gate on installed_sorters() to match insert_default's A4
+                # gate -- get_default_sorter_params succeeds for
+                # wrapper-only sorters, so an available-but-not-installed
+                # row would only fail later at populate time.
+                skipped_not_installed.append(sorter)
+                continue
             try:
                 params = sis.get_default_sorter_params(sorter)
             except Exception as exc:  # SI may raise on metadata fetch
@@ -388,6 +410,13 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
                 )
                 continue
             rows.append((sorter, "default", validated, 1, None))
+        if skipped_not_installed:
+            logger.info(
+                "insert_default_legacy_si_sorters: skipping "
+                f"{sorted(skipped_not_installed)} -- available in "
+                "SpikeInterface but not in installed_sorters() on this "
+                "platform (a 'default' row would fail at populate time)."
+            )
         cls.insert(rows, skip_duplicates=True)
 
 

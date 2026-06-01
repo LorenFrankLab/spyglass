@@ -79,10 +79,19 @@ notebook. For the pipeline overview, see
 
 ## 4. What's not there yet
 
-Each unported feature raises an informative `ImportError` (or
-`NotImplementedError` for gated methods) naming the fallback. Use the v1
-chain in the interim; the parent-plan phase that delivers each v2 port is
-noted.
+Use the v1 chain in the interim; the parent-plan phase that delivers each
+v2 port is noted. How the gap surfaces depends on the feature:
+
+- **Stubbed v2 modules** — `metric_curation`, `figpack_curation`,
+  `unit_matching`, and `matcher_protocol` exist but raise an informative
+  `ImportError` on any public-name import, naming the v1 fallback where
+  one exists.
+- **No v2 module yet** — `BurstPair` and `RecordingRecompute` have no
+  `spikesorting.v2` counterpart; import them from `spyglass.spikesorting.v1`
+  directly (importing a `spikesorting.v2.*` path for them is a plain
+  `ModuleNotFoundError`).
+- **Gated methods** — `ConcatenatedRecording` / `SessionGroup` exist in
+  v2 but their unimplemented methods raise `NotImplementedError`.
 
 | Feature | v1 fallback | v2 delivery |
 | --- | --- | --- |
@@ -107,6 +116,11 @@ If you compare v1 and v2 outputs on the same input, expect these
   `n_channels`. v2 is the right answer.
 - **KS4 may differ after a SpikeInterface version bump** — caught by the
   pinned-version snapshot test rather than appearing silently.
-- **MS4 outputs are identical when seeds match.** v2 pins SI's whitening
-  and noise-level seeds; with the same `random_seed` the sort is
-  reproducible.
+- **Seed pinning improves preprocessing reproducibility, but MS4/MS5/KS4
+  are not exact oracles.** v2 pins SI's whitening and noise-level seeds,
+  which removes the run-to-run drift those steps introduced. The sorters
+  themselves (MS4's `isosplit`, MS5, KS4) remain non-deterministic and
+  must **not** be used as an exact rerun or v1↔v2 parity oracle — bound
+  any comparison by qualitative metrics (unit-count order, firing-rate
+  distribution shape), not spike-by-spike equality. The deterministic
+  `clusterless_thresholder` path is the tight parity reference.

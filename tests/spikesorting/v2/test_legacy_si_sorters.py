@@ -58,3 +58,32 @@ def test_insert_default_legacy_si_sorters_skip_on_missing_sorter(dj_conn):
     ).fetch1()
     assert row["params_schema_version"] == 1
     assert row["params"]["schema_version"] == 1
+
+
+def test_insert_default_legacy_si_sorters_skips_not_installed(
+    dj_conn, monkeypatch
+):
+    """A34: an available-but-not-installed sorter gets no 'default' row.
+
+    ``get_default_sorter_params`` succeeds for wrapper-only sorters whose
+    binary is absent, so the helper must gate on ``installed_sorters()``
+    (mirroring ``insert_default``) -- otherwise it would ship a row that
+    fails at ``Sorting.populate`` time. A fictitious sorter name proves
+    the gate fires *before* ``get_default_sorter_params`` is consulted
+    (a real call for that name would raise).
+    """
+    import spikeinterface.sorters as sis
+
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    fake = "definitely_not_installed_sorter_xyz"
+    monkeypatch.setattr(sis, "available_sorters", lambda: [fake])
+    monkeypatch.setattr(sis, "installed_sorters", lambda: [])
+
+    # Must not raise even though the sorter is available-but-not-installed.
+    SorterParameters.insert_default_legacy_si_sorters()
+
+    assert not (
+        SorterParameters
+        & {"sorter": fake, "sorter_params_name": "default"}
+    ), "available-but-not-installed sorter must not get a 'default' row"
