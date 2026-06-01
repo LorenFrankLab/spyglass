@@ -1234,11 +1234,11 @@ class Recording(SpyglassMixin, dj.Computed):
         # Timestamp-repair provenance must stay accurate after a rebuild:
         # the row's timestamps_adjusted / n_adjusted_samples columns
         # describe the artifact on disk, so a rebuild that repaired a
-        # different number
-        # of samples (e.g. the source NWB's timestamps changed) would
-        # leave those columns lying about the cached file. Warn loudly --
-        # the row is not auto-updated (same fail-soft contract as the
-        # hash check; the operator inspects before re-running).
+        # different number of samples (e.g. the source NWB's timestamps
+        # changed) would leave those columns lying about the cached file.
+        # Warn loudly -- the row is not auto-updated (same fail-soft
+        # contract as the hash check; the operator inspects before
+        # re-running).
         if (
             bool(rebuilt_adjusted) != bool(row["timestamps_adjusted"])
             or int(rebuilt_n_adjusted) != int(row["n_adjusted_samples"])

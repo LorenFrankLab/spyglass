@@ -8801,6 +8801,10 @@ def test_unit_label_insert_rejects_ordered_row(populated_sorting):
         CurationV2.UnitLabel.insert1(ordered)
     with pytest.raises(ValueError, match="requires mapping|not in CurationLabel"):
         CurationV2.UnitLabel.insert([ordered])
+    # allow_custom_labels=True must NOT let an ordered row bypass the
+    # mapping check (the type guard precedes the custom-label opt-out).
+    with pytest.raises(ValueError, match="requires mapping"):
+        CurationV2.UnitLabel.insert1(ordered, allow_custom_labels=True)
 
 
 @pytest.mark.slow

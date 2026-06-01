@@ -621,6 +621,10 @@ class CurationV2(SpyglassMixin, dj.Manual):
         """
         valid = {member.value for member in CurationLabel}
         for unit_id, lbls in labels.items():
+            # Defense-in-depth: ``insert_curation`` already rejects a
+            # non-list/tuple label value before coercing to list, so this
+            # branch is normally unreachable from that path -- it guards
+            # any future direct caller of ``_validate_labels``.
             if not isinstance(lbls, (list, tuple)):
                 raise ValueError(
                     "CurationV2.insert_curation: labels[unit_id] must be "
