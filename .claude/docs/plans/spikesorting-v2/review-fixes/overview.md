@@ -114,7 +114,7 @@ re-grepped by the executor before editing** (comments/line numbers drift).
 | D1 | HIGH | DOC | `test_single_session_pipeline.py:6248` | Internal comment "20%+5" vs code `extra_spike_ratio=0.50`. Fix to "50%+5". (Missed in commit 9379c085.) | 3 |
 | D2 | HIGH | DOC | `test_single_session_pipeline.py:6911-6912` | "MS5 polymer gate (3/4 ≥ 0.7)" wrong; actual 1/2 ≥ 0.7. | 3 |
 | D3 | HIGH | DOC | `test_single_session_pipeline.py:6970,2049` | `detect_threshold=5.0` called "5σ"/"5 µV"; it's a MAD multiplier (≈7σ). Fix both. | 3 |
-| D4 | HIGH | DOC | `artifact.py:872,886` ; `test:3553` | Cite `v1/utils.py:185,193,198`; file is 109 lines. Correct to `spikesorting/utils.py:179,186,198`. | 3 |
+| D4 | HIGH | DOC | `artifact.py:872,886` ; `test:3553` | Cite `v1/utils.py` lines 185/193/198; file is 109 lines. Correct to `spikesorting/utils.py:179,186,198`. | 3 |
 | D5 | MED | DOC | `artifact.py` 824/903/1071-1079/947 ; `recording.py` 622-635 ; `sorting.py` 1463-1471 | 6 stale file:line refs in test comments. Re-grep and correct. | 3 |
 | D6 | MED | DOC | `../parity-extensions.md:308-311` | Target band "±25%" but committed calibration is 10% (Phase B11). Update to measured. | 3 |
 | D7 | MED | DOC | `_smoke_constants.py:122-126` | Docstring arithmetic not reproducible without per-shank median_fr baseline. Add it. | 3 |

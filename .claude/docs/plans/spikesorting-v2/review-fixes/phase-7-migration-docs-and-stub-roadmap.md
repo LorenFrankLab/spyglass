@@ -237,7 +237,7 @@ Keep it ~1-2 pages. Long migration guides go unread. Each "what's not there yet"
 
 ### A36 — DOC: stale-reference / line-drift inventory
 
-Cross-cuts the audit's untested-branch list with the `D` series of existing Phase 3. The audit found numerous stale `# v1/utils.py:185-198` comments that are wrong because v1's `utils.py` is now 109 lines and the logic moved to `spikesorting/utils.py:179-198`. Existing Phase 3 D4 covers the artifact.py refs; this task generalizes:
+Cross-cuts the audit's untested-branch list with the `D` series of existing Phase 3. The audit found numerous stale comments citing `v1/utils.py` around lines 185-198 that are wrong because v1's `utils.py` is now 109 lines and the logic moved to `spikesorting/utils.py:179-198`. Existing Phase 3 D4 covers the artifact.py refs; this task generalizes:
 
 - Grep across `src/spyglass/spikesorting/v2/` for comments matching `v1/.*\.py:\d+` patterns. For each, verify the v1 line still contains the cited logic; if not, update to the correct path/line OR remove the cite if the logic moved into a v2-owned helper.
 - Same grep across `tests/spikesorting/v2/` — the audit's D5 covers a partial list; extend to every stale ref.
@@ -280,6 +280,6 @@ Before opening the PR for this phase, dispatch `code-reviewer` against the diff.
 - Stub modules (A33) raise on attribute access with messages naming v1 fallbacks where applicable; module-level docstrings reference the project repository's spike-sorting-v2 documentation indirectly (NOT by phase number) — see the next checklist item for the rationale.
 - The `insert_default_legacy_si_sorters` helper (A34) is opt-in — `initialize_v2_defaults()` does NOT call it.
 - The migration guide (A35) is concise (1-2 pages); section 5 (v1↔v2 comparison expectations) is present.
-- A36's grep sweep found and fixed all stale v1 refs; no remaining `v1/utils.py:1?5` refs (the canonical staleness signal).
+- A36's grep sweep found and fixed all stale v1 refs; no remaining `v1/utils.py` refs at line numbers beyond its current length (the canonical staleness signal — `v1/utils.py` is 109 lines, so any cited line above that is stale).
 - Docstrings in shipped code (A33) reference the project repository's plan directory indirectly, NOT by phase number.
 - Source changes are limited to: (a) A33's four `__getattr__` shims on the previously-empty stub modules, (b) A34's new opt-in classmethod on `SorterParameters`. If the executor's diff touches `make_compute`, `make_fetch`, existing schema definitions, runtime helpers, or any populated-table runtime path, it's out of scope for Phase 7 — file against an earlier phase and revert.

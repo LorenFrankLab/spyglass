@@ -62,7 +62,7 @@ Grep the offending string, not the line number.**
 - **D1**: `test_single_session_pipeline.py` internal comment "20%+5" → "50%+5" (matches `extra_spike_ratio=0.50`).
 - **D2**: "MS5 polymer gate (3/4 ≥ 0.7)" → "1/2 ≥ 0.7".
 - **D3**: two sites calling clusterless `detect_threshold=5.0` "5σ" / "5 µV" → "5 MAD multiplier (≈7σ)"; align with `_smoke_constants.py` wording.
-- **D4**: `artifact.py:872,886` + the test at ~3553 cite `v1/utils.py:185,193,198` → `spikesorting/utils.py:179,186,198`. Verify the actual lines in `spikesorting/utils.py` first.
+- **D4**: `artifact.py:872,886` + the test at ~3553 cite `v1/utils.py` lines 185/193/198 → `spikesorting/utils.py:179,186,198`. Verify the actual lines in `spikesorting/utils.py` first.
 - **D5**: 6 stale test-comment file:line refs → re-grep and correct (`artifact.py` 824/903/1071-1079/947; `recording.py` 622-635; `sorting.py` 1463-1471).
 - **D6**: `parity-extensions.md:308-311` target band "±25%" → the committed 10% calibration (Phase B11); note the target was superseded by measurement.
 - **D7**: `_smoke_constants.py:122-126` — add the per-shank `median_fr` baseline so the "3.04% rel drift" arithmetic is reproducible from the file alone.
