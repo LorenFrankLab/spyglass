@@ -122,8 +122,12 @@ MS4_VARIANCE_TABLE: dict[tuple[str, str, int], dict] = {
 #:   * n_units: max(0, 1) drift + 1-unit margin = 2 absolute (5% of
 #:     40-unit shank 0; 4.2% of 48-unit shank 2). The relative band
 #:     is set to 10% to absorb across-shank variation a bit.
-#:   * median_fr: max(0%, 3.04% rel drift on s0) + 5pp = 8.04% rel,
-#:     rounded up to 10% for headroom.
+#:   * median_fr: the shank-0 v2v2 drift is ``d_median_fr_hz=0.7416``
+#:     (see :data:`MS4_VARIANCE_TABLE`) against a shank-0 baseline
+#:     median_fr of ≈ 24.4 Hz, i.e. 0.7416 / 24.4 ≈ 3.04% rel drift;
+#:     max(0%, 3.04%) + 5pp = 8.04% rel, rounded up to 10% for
+#:     headroom. (Shank 2's drift is smaller at
+#:     ``d_median_fr_hz=0.2667``.)
 #:
 #: Substantially tighter than :data:`MS4_BROAD_TRIAGE` (was 50% / 30%);
 #: replaces it as the active MS4 contract.

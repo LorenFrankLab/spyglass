@@ -2820,8 +2820,9 @@ def test_clusterless_thresholder_end_to_end(polymer_smoke_session):
     assert unit_row["n_spikes"] >= 20, (
         f"Clusterless found only {unit_row['n_spikes']} peaks on the "
         "smoke fixture; expected at least 20 given the planted firing "
-        "rates and the 5 uV detect_threshold. A buggy detector that "
-        "returns a single false-positive would pass `n_spikes > 0`."
+        "rates and the detect_threshold of 5 (a MAD multiplier, not "
+        "µV -- see the note below). A buggy detector that returns a "
+        "single false-positive would pass `n_spikes > 0`."
     )
     # Peak amplitude sanity: must be a finite positive number.
     # NOTE: we cannot assert ``peak_amplitude_uv >= detect_threshold``
@@ -4151,7 +4152,7 @@ def test_detect_artifacts_finds_known_transient(dj_conn):
 
     Every existing artifact test uses the ``"none"`` preset which
     short-circuits at the ``if not validated.detect`` guard in
-    ``_detect_artifacts`` (artifact.py:584) and writes a single all-
+    ``_detect_artifacts`` (artifact.py:846) and writes a single all-
     valid interval. That left the entire amplitude-threshold
     detection body (~50 lines, the actual artifact-finding code) at
     0% coverage.
@@ -4252,7 +4253,7 @@ def test_detect_artifacts_no_threshold_crossings(dj_conn):
     single valid interval when no frame trips the threshold.
 
     Exercises the early-return branch at ``len(frames_above) == 0``
-    (artifact.py:603) without short-circuiting at the
+    (artifact.py:926) without short-circuiting at the
     ``detect=False`` guard. Complements the synthetic-transient
     test by covering the "detection ran but found nothing" path.
     """
@@ -4542,7 +4543,7 @@ def test_detect_artifacts_amplitude_and_zscore_combined(dj_conn):
     """``_detect_artifacts`` OR-combines thresholds when both are set.
 
     v2 matches v1's OR semantics (``np.logical_or(above_z,
-    above_a)`` at ``v1/utils.py:198``). Under OR a frame is flagged
+    above_a)`` at ``spikesorting/utils.py:198``). Under OR a frame is flagged
     if EITHER detector trips, so this test's synthetic 80 uV
     baseline (which clears the 50 uV amplitude threshold on every
     channel everywhere) flags the entire recording: the baseline
@@ -5808,7 +5809,7 @@ def test_recording_selection_raises_on_duplicate_logical_identity(
     caller bypasses it with raw ``insert``).
 
     Without this test the integrity guard at
-    ``recording.py:609-615`` is dead code that, if it silently
+    ``recording.py:727-730`` is dead code that, if it silently
     broke, would let downstream consumers index ``[0]`` on
     duplicate rows.
     """
@@ -5883,7 +5884,7 @@ def test_artifact_detection_delete_handles_orphan_source_part(
     """``ArtifactDetection.delete`` does not crash when an
     ArtifactSelection master row's source part fails to resolve.
 
-    The except branch at ``artifact.py:711-713`` catches
+    The except branch at ``artifact.py:1097-1099`` catches
     ``resolve_source`` failures during the IntervalList-cleanup
     loop. Without a test, a regression that re-raised the
     exception (instead of skipping the orphan) would surface only
@@ -5920,7 +5921,7 @@ def test_artifact_detection_delete_handles_orphan_source_part(
     )
 
     # The delete should complete without raising. The current
-    # implementation's except block (artifact.py:711-713) skips
+    # implementation's except block (artifact.py:1097-1099) skips
     # rows whose source can't be resolved.
     (ArtifactDetection & art_pk).delete(safemode=False)
     assert len(ArtifactDetection & art_pk) == 0, (
@@ -5938,7 +5939,7 @@ def test_write_units_nwb_handles_zero_unit_sorter(populated_recording):
     """``Sorting._write_units_nwb`` initializes an empty Units NWB
     when the sorter produces zero unit ids.
 
-    The guard at ``sorting.py:822-826`` is the sorting-layer analog
+    The guard at ``sorting.py:1690-1698`` is the sorting-layer analog
     of the curation-layer guard tested by
     ``test_curation_v2_stages_empty_units_nwb_on_zero_kept_units``.
     Without this test, a regression in the zero-unit handling at
@@ -6010,7 +6011,7 @@ def test_detect_artifacts_clamps_artifact_at_recording_end(dj_conn):
     that runs to the last sample.
 
     The clamp ``min(end_f + 1, len(timestamps) - 1)`` at
-    ``artifact.py:631`` ensures the saved interval doesn't index
+    ``artifact.py:973`` ensures the saved interval doesn't index
     out of bounds when the artifact reaches the recording end. No
     prior test puts a transient near the end of the recording, so
     this clamp branch was unexercised.
@@ -7695,7 +7696,7 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
 
         # v2 -> v1 nearest neighbor: each v2 spike's distance to the
         # closest v1 spike. ``unmatched_v2`` is a triage signal (the
-        # 20%+5 budget on v2_arr.size is the assertion that catches a
+        # 50%+5 budget on v2_arr.size is the assertion that catches a
         # blow-up; per-spike unmatched_v2 surfaces a quieter drift).
         idx2 = np.searchsorted(v1_arr, v2_arr)
         idx2_left = np.clip(idx2 - 1, 0, v1_arr.size - 1)
@@ -8209,7 +8210,7 @@ def test_mountainsort4_ground_truth(
     measuring a sorter limitation rather than v2 correctness.
 
     Threshold: at least 1/2 of planted units detected at accuracy
-    >= 0.5 (looser than the MS5 polymer gate's 3/4 >= 0.7 because
+    >= 0.5 (looser than the MS5 polymer gate's 1/2 >= 0.7 because
     MS4 is a less-accurate sorter).
     """
     import numpy as np
@@ -8359,7 +8360,7 @@ def test_mountainsort4_ground_truth(
     )
 
     # Looser MS4 threshold (half of planted at acc >= 0.5) than the
-    # MS5 polymer gate (3/4 >= 0.7) because MS4 is a less-accurate
+    # MS5 polymer gate (1/2 >= 0.7) because MS4 is a less-accurate
     # sorter. Tightening this threshold without committed calibration
     # evidence is regression-prone.
     n_well_detected = int((accuracies >= 0.5).sum())
@@ -8418,9 +8419,11 @@ def test_clusterless_thresholder_ground_truth(
     detections.
 
     Threshold: mean recall ≥ 0.80 across planted units. Clusterless
-    detect_threshold = 5σ should catch all well-isolated spikes;
-    higher recall bars risk flake from near-threshold borderline
-    spikes (PR #4341 algorithm change).
+    detect_threshold = 5 (a MAD multiplier, not 5σ or 5 µV -- with
+    ``noise_levels`` omitted SI scales the threshold by per-channel
+    MAD) should catch all well-isolated spikes; higher recall bars
+    risk flake from near-threshold borderline spikes (PR #4341
+    algorithm change).
 
     Parametrization:
       * ``polymer_60s`` -- 4 shanks, planted units distributed across them
@@ -8468,9 +8471,10 @@ def test_clusterless_thresholder_ground_truth(
             },
         )
 
-    # Pre-insert the smoke clusterless row (5 µV; doesn't ship as a v2
-    # default; needs delete-then-insert for the same noise_levels-
-    # semantics safety reason as the v1↔v2 parity test).
+    # Pre-insert the smoke clusterless row (detect_threshold=5, a MAD
+    # multiplier -- not µV; doesn't ship as a v2 default; needs
+    # delete-then-insert for the same noise_levels-semantics safety
+    # reason as the v1↔v2 parity test).
     if sorter_params_name == SMOKE_CLUSTERLESS_PARAM_NAME:
         (
             SorterParameters
@@ -8657,8 +8661,9 @@ def test_clusterless_thresholder_ground_truth(
 
     # Threshold: mean recall >= 0.80 across planted units. Loosely
     # justifiable: well-isolated spikes should always be detected
-    # by a 5σ threshold; missing some is expected for near-threshold
-    # planted units (especially on the sparse-coverage tetrode).
+    # by a detect_threshold of 5 (a MAD multiplier, not 5σ); missing
+    # some is expected for near-threshold planted units (especially on
+    # the sparse-coverage tetrode).
     assert recall_values.mean() >= 0.80, (
         f"Clusterless mean time-recall {recall_values.mean():.3f} < 0.80 "
         f"on {session_label}; v2 detector missing planted spikes.{summary}"

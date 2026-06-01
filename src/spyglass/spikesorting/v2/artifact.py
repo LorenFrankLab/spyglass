@@ -895,9 +895,9 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
             # Catch common-mode artifacts (EMG / chewing / head movement
             # that hit all channels together) with ``amplitude_thresh_uV``
             # instead. Matches v1's ``stats.zscore(traces, axis=1)`` at
-            # ``v1/utils.py:185,193`` (``axis=1`` is the channels axis;
-            # rows are time frames), so each frame's z-scores use THAT
-            # FRAME's across-channel statistics.
+            # ``spikesorting/utils.py:185,193`` (``axis=1`` is the channels
+            # axis; rows are time frames), so each frame's z-scores use
+            # THAT FRAME's across-channel statistics.
             ch_mean = traces_uv.mean(axis=1, keepdims=True)
             ch_std = traces_uv.std(axis=1, keepdims=True) + 1e-12
             zscores = _np.abs((traces_uv - ch_mean) / ch_std)
@@ -906,7 +906,7 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
             above_z = _np.zeros_like(absolute, dtype=bool)
 
         # OR combine logic (belt-and-suspenders): flag a frame if
-        # EITHER detector trips. v1 at ``v1/utils.py:198`` uses
+        # EITHER detector trips. v1 at ``spikesorting/utils.py:198`` uses
         # ``np.logical_or(above_z, above_a)``; an AND would make the
         # dual-threshold mode strictly less sensitive than either
         # single-threshold mode -- the opposite of the v1 intent.

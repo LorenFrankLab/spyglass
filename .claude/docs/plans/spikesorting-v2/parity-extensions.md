@@ -305,10 +305,14 @@ must FAIL.
    - **MS4** (stochastic clustering): two-stage. Initial triage
      bands `MS4_BROAD_TRIAGE` (n_units ± 50%, median FR ± 30%);
      calibrated bands after Phase B11 measures within-version
-     repeat-run variance. Target after calibration (subject to
-     measurement): n_units ± 25% or ± 2 absolute (whichever larger);
-     median FR ± 20%; boundary-zone (20–25% units, 15–20% FR)
-     triggers triage-note review, not silent acceptance.
+     repeat-run variance. The pre-calibration *target* (n_units ± 25%
+     or ± 2 absolute; median FR ± 20%) was SUPERSEDED by the Phase B11
+     measurement: the committed band
+     (`_smoke_constants.py::MS4_CALIBRATED`) is n_units ± 10%
+     (± 2 absolute) and median FR ± 10% — tighter than the target
+     because the measured within-version drift was small (≈0–1 unit,
+     3.04% FR on shank 0). Boundary-zone cases trigger triage-note
+     review, not silent acceptance.
 7. **MS4 availability is skip-not-fail by default**. Heavy local
    parity tests skip with `"MS4 not installed in this env; "
    "set SPIKESORTING_V2_REQUIRE_MS4=1 to make this a hard fail"`.

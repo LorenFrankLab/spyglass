@@ -130,10 +130,23 @@ class ProbeLayout:
 def polymer_probe_layout() -> ProbeLayout:
     """Return the 128-channel Frank-lab polymer probe layout.
 
+    **Axis convention note** (mirrors :func:`tetrode_probe_layout`):
+    the probe is laid out in the XY plane with ``rel_z=0`` for every
+    contact, the frame MEArec/MEAutility require (probe normal = +Z; a
+    contact with ``rel_z≠0`` raises ``TypeError: 'NoneType' object is
+    not subscriptable`` deep inside MEAutility because
+    ``electrode.normal`` is never computed). Within that plane the four
+    shanks are offset along ``rel_x`` (``_POLYMER_SHANK_X_UM``) and the
+    32 contacts of each shank run down ``rel_y`` at the 26 µm
+    within-shank pitch (negative-going so contact 0 is the most
+    superficial). Spyglass reads ``rel_x``/``rel_y``/``rel_z``
+    symmetrically, so the committed NWB stores these positions verbatim.
+
     Returns
     -------
     ProbeLayout
-        4 shanks x 32 contacts, 26 um within-shank pitch.
+        4 shanks x 32 contacts, 26 um within-shank pitch, in the XY
+        plane (``rel_z=0``).
     """
     contacts: list[ProbeContact] = []
     for shank_id in range(_POLYMER_N_SHANKS):
