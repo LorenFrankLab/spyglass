@@ -72,17 +72,16 @@ def _init_artifact_worker(
     Mirrors v1's ``spikesorting/utils.py:_init_artifact_worker`` (this is a
     self-contained v2 copy -- v2 must not import the v1 helper). On a
     multi-process pool the ``recording`` arrives as a ``to_dict()`` blob and is
-    re-hydrated with ``si.load_extractor``; on the single-process / thread path
-    the live recording object is passed straight through. ``n_required`` and the
-    per-channel ``gains`` are constant across chunks, so they are resolved once
-    here and cached in the worker context rather than recomputed per chunk.
+    re-hydrated with ``si.load`` (SI 0.104 renamed v1's ``load_extractor``);
+    on the single-process / thread path the live recording object is passed
+    straight through. ``n_required`` and the per-channel ``gains`` are constant
+    across chunks, so they are resolved once here and cached in the worker
+    context rather than recomputed per chunk.
     """
     import spikeinterface as si
 
     recording = (
-        si.load_extractor(recording)
-        if isinstance(recording, dict)
-        else recording
+        si.load(recording) if isinstance(recording, dict) else recording
     )
     n_channels = len(recording.get_channel_ids())
     return {

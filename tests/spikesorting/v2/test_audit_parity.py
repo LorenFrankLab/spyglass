@@ -869,6 +869,55 @@ def test_artifact_scan_chunked_by_default(dj_conn, monkeypatch):
 
 
 @pytest.mark.slow
+def test_artifact_scan_multiprocess_worker_path_runs(dj_conn, tmp_path):
+    """A17: the n_jobs>1 worker path actually EXECUTES and matches n_jobs=1.
+
+    For n_jobs>1 the recording is passed to each worker as a ``to_dict()`` blob
+    and re-hydrated inside ``_init_artifact_worker``. v1 used SI 0.99's
+    ``si.load_extractor``; SI 0.104 renamed it to ``si.load``, so the worker
+    would ``AttributeError`` if it still called the old name. The propagation
+    test only inspects constructor kwargs and returns before workers run, so it
+    cannot catch this. This test runs the multiprocess path end-to-end on a
+    serializable (saved-to-disk binary) recording and asserts the flagged
+    frames equal the n_jobs=1 result -- proving the worker rehydrates and the
+    chunked output is worker-count-invariant.
+    """
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._params.artifact_detection import (
+        ArtifactDetectionParamsSchema,
+    )
+    from spyglass.spikesorting.v2.artifact import ArtifactDetection
+
+    # _synthetic_artifact_recording is an in-memory NumpyRecording (not
+    # dict-serializable); save it to a binary folder so to_dict()/si.load()
+    # round-trips, the way a real cached preprocessed Recording does.
+    saved = _synthetic_artifact_recording().save(folder=tmp_path / "rec")
+    validated = ArtifactDetectionParamsSchema(
+        detect=True,
+        amplitude_thresh_uV=50.0,
+        zscore_thresh=None,
+        proportion_above_thresh=0.5,
+        removal_window_ms=1.0,
+        join_window_ms=0.0,
+        min_length_s=0.001,
+    )
+
+    single = ArtifactDetection._scan_artifact_frames(
+        saved, validated, job_kwargs={"n_jobs": 1, "chunk_duration": "0.5s"}
+    )
+    multi = ArtifactDetection._scan_artifact_frames(
+        saved, validated, job_kwargs={"n_jobs": 2, "chunk_duration": "0.5s"}
+    )
+    # The planted bursts must actually be detected, else "equal" is vacuous.
+    assert len(single) > 0
+    assert np.array_equal(single, multi), (
+        "n_jobs=2 worker path produced different frames than n_jobs=1 (or "
+        "failed to rehydrate the to_dict() recording via si.load)."
+    )
+
+
+@pytest.mark.slow
 def test_artifact_detection_peak_memory_bounded_by_chunk_size(dj_conn):
     """A17: peak memory of the chunked scan is bounded by chunk size, not by
     the full recording length.
