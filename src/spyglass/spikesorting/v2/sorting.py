@@ -754,6 +754,8 @@ class Sorting(SpyglassMixin, dj.Computed):
             recording = self._apply_artifact_mask(
                 recording=recording,
                 valid_times=obs_intervals,
+                artifact_id=sel_row.get("artifact_id"),
+                recording_id=recording_id,
             )
 
         sorter = sorter_row["sorter"]
@@ -1099,6 +1101,8 @@ class Sorting(SpyglassMixin, dj.Computed):
             recording = self._apply_artifact_mask(
                 recording=recording,
                 valid_times=valid_times,
+                artifact_id=sel_row["artifact_id"],
+                recording_id=source.key["recording_id"],
             )
         sorting_obj = self.get_sorting(key)
         # ``_build_analyzer`` writes a folder to disk; a mid-rebuild
@@ -1192,7 +1196,9 @@ class Sorting(SpyglassMixin, dj.Computed):
     # ---- Implementation helpers -----------------------------------------
 
     @staticmethod
-    def _apply_artifact_mask(recording, valid_times):
+    def _apply_artifact_mask(
+        recording, valid_times, *, artifact_id=None, recording_id=None
+    ):
         """Zero out the complement of ``valid_times`` on the recording.
 
         ``valid_times`` is the artifact-removed (start, end) seconds
@@ -1200,9 +1206,65 @@ class Sorting(SpyglassMixin, dj.Computed):
         already fetched it as ``obs_intervals`` so ``make_compute``
         passes it through here instead of re-issuing the DB lookup
         (the tri-part contract forbids DB I/O inside compute).
+
+        ``artifact_id`` / ``recording_id`` are used only to make the
+        empty-``valid_times`` error message actionable.
+
+        Raises
+        ------
+        EmptyArtifactValidTimesError
+            If ``valid_times`` is empty -- masking would zero the whole
+            recording, so the sort must fail loudly instead of running
+            over all-zeros.
+        ValueError
+            If ``valid_times`` is not an ``(n, 2)`` array, has an
+            interval with ``end < start``, or is not sorted-by-start and
+            non-overlapping. The complement walker assumes monotonic,
+            disjoint input; an unsorted/overlapping list would silently
+            under-mask. (The fetched ``obs_intervals`` are monotonic in
+            practice; this guards a hand-built curation override. Strict
+            input is intentional -- silent sort/merge is deferred.)
         """
         import numpy as _np
         import spikeinterface.preprocessing as sip
+
+        from spyglass.spikesorting.v2.exceptions import (
+            EmptyArtifactValidTimesError,
+        )
+
+        valid_times = _np.asarray(valid_times, dtype=float)
+        if valid_times.size == 0:
+            raise EmptyArtifactValidTimesError(
+                "Artifact-removed valid_times is empty for "
+                f"artifact_id={artifact_id!r}, "
+                f"recording_id={recording_id!r}: the artifact pass kept "
+                "zero seconds of the recording. Masking would zero the "
+                "entire recording and the sort would run over all-zeros. "
+                "Re-run ArtifactDetection with looser thresholds or "
+                "override the artifact selection."
+            )
+        if valid_times.ndim != 2 or valid_times.shape[1] != 2:
+            raise ValueError(
+                "_apply_artifact_mask: valid_times must be an (n, 2) array "
+                f"of (start, end) seconds; got shape {valid_times.shape}."
+            )
+        starts = valid_times[:, 0]
+        ends = valid_times[:, 1]
+        if _np.any(ends < starts):
+            raise ValueError(
+                "_apply_artifact_mask: valid_times has an interval whose "
+                "end precedes its start; each interval must be "
+                "(start <= end)."
+            )
+        if valid_times.shape[0] > 1 and (
+            _np.any(_np.diff(starts) < 0) or _np.any(starts[1:] < ends[:-1])
+        ):
+            raise ValueError(
+                "_apply_artifact_mask: valid_times must be sorted by start "
+                "time and non-overlapping (the complement walker assumes "
+                f"monotonic, disjoint input); got {valid_times.tolist()!r}. "
+                "Sort and merge the intervals before passing them."
+            )
 
         timestamps = recording.get_times()
         # Walk the valid intervals left-to-right, collecting the

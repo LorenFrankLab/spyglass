@@ -30,6 +30,16 @@ class RecordingTruncatedError(RuntimeError):
     timestamps manually."""
 
 
+class EmptyArtifactValidTimesError(RuntimeError):
+    """``_apply_artifact_mask`` received an empty ``valid_times`` array --
+    the artifact pass kept zero seconds of the recording. Masking would
+    zero the entire recording and the sort would run over all-zeros,
+    emitting a misleading "zero units" result. Message names the
+    ``artifact_id`` and ``recording_id`` and points the caller at
+    re-running ``ArtifactDetection`` with looser thresholds or overriding
+    the artifact selection."""
+
+
 class NonIntegerUnitIDError(ValueError):
     """SpikeInterface sorting returns non-integer unit IDs that cannot
     be written to ``Sorting.Unit.unit_id``. Message names the offending

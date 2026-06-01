@@ -345,16 +345,51 @@ def test_motion_correction_parameters_rejects_schema_version_drift():
 
 
 @pytest.mark.usefixtures("dj_conn")
-def test_apply_artifact_mask_empty_valid_times_silently_zeros_recording():
-    """A1 (pre-fix characterization): empty valid_times zeros everything.
+def test_apply_artifact_mask_empty_valid_times_raises():
+    """A1: empty valid_times raises instead of silently zeroing all.
 
-    When ``valid_times`` is empty (the artifact pass kept zero seconds),
-    the complement walker's for-loop never executes and the trailing
-    branch fires once with ``(0, len(timestamps))`` -- masking the WHOLE
-    recording to zeros. The sorter then runs over all-zeros and emits a
-    misleading "zero units / quiet recording" result instead of failing
-    loudly. This test pins that buggy behavior so the fix (raise) can be
-    shown to flip it.
+    When the artifact pass keeps zero seconds, the complement walker
+    would mask the WHOLE recording to zeros and the sort would run over
+    all-zeros, emitting a misleading "zero units" result. The fix raises
+    ``EmptyArtifactValidTimesError`` naming the ``artifact_id`` and
+    ``recording_id`` so the user re-runs detection or overrides the
+    selection -- a loud failure, not a silent blanked recording.
+    """
+    import numpy as np_mod
+    import spikeinterface.core as sc
+
+    from spyglass.spikesorting.v2.exceptions import (
+        EmptyArtifactValidTimesError,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    rec = sc.generate_recording(
+        num_channels=4, durations=[0.5], sampling_frequency=30000.0
+    )
+    with pytest.raises(EmptyArtifactValidTimesError) as excinfo:
+        Sorting._apply_artifact_mask(
+            rec,
+            np_mod.zeros((0, 2)),
+            artifact_id="art-123",
+            recording_id="rec-456",
+        )
+    msg = str(excinfo.value)
+    assert "art-123" in msg and "rec-456" in msg
+
+    # The recording is NOT zeroed -- the raise happens before any masking.
+    assert not np_mod.array_equal(
+        rec.get_traces(), np_mod.zeros_like(rec.get_traces())
+    )
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_apply_artifact_mask_unsorted_valid_times_raises():
+    """A1: unsorted / overlapping valid_times is rejected (strict input).
+
+    The complement walker assumes monotonic, disjoint intervals; an
+    unsorted or overlapping list would silently under-mask (leave
+    artifact frames in the recording). This phase chooses strict input +
+    a clear raise rather than silently sorting/merging.
     """
     import numpy as np_mod
     import spikeinterface.core as sc
@@ -362,10 +397,21 @@ def test_apply_artifact_mask_empty_valid_times_silently_zeros_recording():
     from spyglass.spikesorting.v2.sorting import Sorting
 
     rec = sc.generate_recording(
-        num_channels=4, durations=[0.5], sampling_frequency=30000.0
+        num_channels=4, durations=[1.0], sampling_frequency=30000.0
     )
-    masked = Sorting._apply_artifact_mask(rec, np_mod.zeros((0, 2)))
-    traces = masked.get_traces()
-    assert np_mod.array_equal(traces, np_mod.zeros_like(traces)), (
-        "expected the buggy all-zeros mask of the entire recording"
+
+    # Unsorted by start time.
+    with pytest.raises(ValueError, match="sorted by start"):
+        Sorting._apply_artifact_mask(
+            rec, np_mod.array([[0.6, 0.8], [0.1, 0.3]])
+        )
+    # Sorted by start but overlapping.
+    with pytest.raises(ValueError, match="non-overlapping"):
+        Sorting._apply_artifact_mask(
+            rec, np_mod.array([[0.1, 0.5], [0.3, 0.8]])
+        )
+    # A single well-formed interval still masks normally (no raise).
+    masked = Sorting._apply_artifact_mask(
+        rec, np_mod.array([[0.1, 0.9]])
     )
+    assert masked.get_num_samples() == rec.get_num_samples()
