@@ -33,7 +33,8 @@ import pytest
 # The ``populated_sorting`` fixture (a full Recording -> Artifact ->
 # Sorting populate on the smoke fixture) lives in conftest.py so the
 # integrity tests can resolve it directly instead of importing it from
-# this module; see Q3 in the phase notes.
+# this module (a cross-module import passes vacuously when a CI shard
+# split collects the two modules separately).
 
 
 def _make_v2_root_curation(populated_sorting):

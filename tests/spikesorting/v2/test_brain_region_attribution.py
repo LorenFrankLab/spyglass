@@ -135,17 +135,22 @@ def test_multi_region_unit_attribution(populated_sorting):
         key = (epk["electrode_group_name"], epk["electrode_id"])
         snapshot[key] = int((Electrode & epk).fetch1("region_id"))
 
-    # Assign every unit's peak electrode to region B and all other
-    # channels to region A. The sort group then spans {A, B} (a genuine
-    # multi-region group), and each unit's expected region is B (its own
-    # peak), NOT A (the distractor channels a buggy single-region fetch
-    # might return).
-    peak_keys = set(unit_peak.values())
+    # Spread the distinct peak electrodes ALTERNATELY across the two
+    # regions (and put every non-peak channel in region A). This makes
+    # the sort group genuinely multi-region AND, when more than one unit
+    # has a distinct peak, gives different units different expected
+    # regions -- so the assertion discriminates per-unit attribution,
+    # not just "single region vs correct region". With a single-unit
+    # sort the unit's peak lands in B and the distractor channels in A,
+    # so a buggy single-region fetch returning A would still be caught.
+    distinct_peaks = sorted(set(unit_peak.values()))
+    peak_region = {
+        pk: (region_b if i % 2 == 0 else region_a)
+        for i, pk in enumerate(distinct_peaks)
+    }
     assign = {
-        (epk["electrode_group_name"], epk["electrode_id"]): (
-            region_b
-            if (epk["electrode_group_name"], epk["electrode_id"]) in peak_keys
-            else region_a
+        (epk["electrode_group_name"], epk["electrode_id"]): peak_region.get(
+            (epk["electrode_group_name"], epk["electrode_id"]), region_a
         )
         for epk in sg_elec_pks
     }
