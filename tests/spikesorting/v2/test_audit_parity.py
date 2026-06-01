@@ -816,6 +816,58 @@ def test_artifact_job_kwargs_propagate_to_executor(dj_conn, monkeypatch):
     assert seen["chunk_duration"] == "0.5s"
 
 
+def test_artifact_scan_chunked_by_default(dj_conn, monkeypatch):
+    """A17: with NO job_kwargs the scan still chunks (chunk_duration='1s').
+
+    ChunkRecordingExecutor with no chunk-size key processes the whole
+    recording in a single chunk -- the exact full-traces memory profile the
+    restoration removed. Any direct ``_detect_artifacts`` caller (not just the
+    production ``make_compute`` path that merges SI's global job kwargs) must
+    still be bounded, so ``_scan_artifact_frames`` defaults to a 1 s chunk.
+    """
+    from spyglass.spikesorting.v2._params.artifact_detection import (
+        ArtifactDetectionParamsSchema,
+    )
+    from spyglass.spikesorting.v2.artifact import ArtifactDetection
+
+    rec = _synthetic_artifact_recording()
+    validated = ArtifactDetectionParamsSchema(
+        detect=True,
+        amplitude_thresh_uV=50.0,
+        zscore_thresh=None,
+        proportion_above_thresh=0.5,
+        removal_window_ms=1.0,
+        join_window_ms=0.0,
+        min_length_s=0.001,
+    )
+
+    seen = {}
+
+    import spikeinterface.core.job_tools as jt
+
+    real_executor = jt.ChunkRecordingExecutor
+
+    class _SpyExecutor(real_executor):
+        def __init__(self, *args, **kwargs):
+            seen["chunk_duration"] = kwargs.get("chunk_duration")
+            seen["chunk_size"] = kwargs.get("chunk_size")
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "spyglass.spikesorting.v2.artifact.ChunkRecordingExecutor",
+        _SpyExecutor,
+    )
+
+    # No job_kwargs at all -- the bare default path.
+    ArtifactDetection._scan_artifact_frames(rec, validated)
+    assert seen["chunk_duration"] == "1s", (
+        "default scan did not chunk: ChunkRecordingExecutor got "
+        f"chunk_duration={seen.get('chunk_duration')!r} / "
+        f"chunk_size={seen.get('chunk_size')!r}, so it would load the whole "
+        "recording in one chunk (the memory trap A17 removed)."
+    )
+
+
 @pytest.mark.slow
 def test_artifact_detection_peak_memory_bounded_by_chunk_size(dj_conn):
     """A17: peak memory of the chunked scan is bounded by chunk size, not by
@@ -1068,10 +1120,10 @@ def test_channel_name_resolution_path_real_nwb(
 # batch_size, nearest_chans, ...) live in kilosort.parameters.DEFAULT_SETTINGS
 # and require the kilosort4 package to be installed; the CI SI-0.104 image does
 # NOT install KS4 (get_default_sorter_params('kilosort4') then returns only the
-# global job-kwargs + a "not installed" warning -- verified), so the
-# algorithm-level defaults cannot be snapshotted here. This snapshot pins the
-# SI-controlled wrapper subset, which is exactly the surface a SI bump changes
-# for the KS4 wrapper independent of the kilosort package.
+# global job-kwargs + a "not installed" warning -- verified). This snapshot
+# pins the SI-controlled wrapper subset (always readable). The algorithm-level
+# knobs are pinned by the companion skipif test below, which runs only where
+# KS4 is installed.
 EXPECTED_KS4_SI_DEFAULTS = {
     "do_CAR": True,
     "invert_sign": False,
@@ -1134,6 +1186,60 @@ def test_kilosort4_si_defaults_unchanged():
         "pinned EXPECTED_KS4_SI_DEFAULTS, confirm v2's typed KS4 subset still "
         "covers the right knobs, then update the snapshot, the SI pin in "
         "pyproject.toml, and the CHANGELOG together."
+    )
+
+
+# The kilosort-ALGORITHM defaults the audit named as the silent-drift risk
+# ("a SI upgrade changing batch_size or nearest_chans defaults"). Values read
+# authoritatively from kilosort 4.1.7's parameters.py (MAIN_PARAMETERS) and
+# surfaced top-level by SI's KS4 wrapper. Asserted as a SUBSET (not full-dict
+# equality): KS4 is an optional, UNPINNED package, so the full default dict
+# varies harmlessly across kilosort patch releases -- pinning the full dict
+# would false-fail on unrelated version differences. The subset pins exactly
+# the knobs whose drift changes sort outputs.
+EXPECTED_KS4_ALGORITHM_DEFAULTS = {
+    "Th_universal": 9,
+    "Th_learned": 8,
+    "batch_size": 60000,
+    "nearest_chans": 10,
+}
+
+
+def _kilosort4_installed():
+    import spikeinterface.sorters as sis
+
+    return "kilosort4" in sis.installed_sorters()
+
+
+@pytest.mark.skipif(
+    not _kilosort4_installed(),
+    reason="kilosort4 not installed; algorithm defaults are unreadable "
+    "without the package (see test_kilosort4_si_defaults_unchanged for the "
+    "install-independent wrapper-overlay snapshot that always runs).",
+)
+def test_kilosort4_algorithm_defaults_unchanged():
+    """A21: KS4's algorithm-level defaults (the audit's drift risk) match.
+
+    Runs only where kilosort4 is installed (skipped on the CI SI-0.104 image).
+    Pins the specific knobs the audit named -- ``Th_universal`` / ``Th_learned``
+    / ``batch_size`` / ``nearest_chans`` -- whose silent drift across a SI/KS4
+    bump changes sort outputs. Subset assertion (not full-dict equality) so an
+    unrelated kilosort patch-version difference does not false-fail; a change
+    to ONE of these knobs surfaces loudly. Note: because this is skipped in the
+    KS4-less CI lane, continuous protection requires a KS4-enabled CI job
+    (infra follow-up, out of Phase 5 scope).
+    """
+    import spikeinterface.sorters as sis
+
+    actual = sis.get_default_sorter_params("kilosort4")
+    observed = {
+        k: actual[k] for k in EXPECTED_KS4_ALGORITHM_DEFAULTS if k in actual
+    }
+    assert observed == EXPECTED_KS4_ALGORITHM_DEFAULTS, (
+        "KS4 algorithm defaults shifted (or a knob was renamed/removed). "
+        f"expected (subset) {EXPECTED_KS4_ALGORITHM_DEFAULTS}, got {observed}. "
+        "Audit the change against current sort outputs, then update this "
+        "snapshot + the SI pin + the CHANGELOG together."
     )
 
 

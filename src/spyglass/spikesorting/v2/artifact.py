@@ -930,8 +930,11 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
     def _scan_artifact_frames(recording, validated, job_kwargs=None):
         """Flag artifact frame indices via a chunked ``ChunkRecordingExecutor``.
 
-        Scans the recording chunk by chunk (default chunk size is SI's global
-        ``chunk_duration='1s'``) and concatenates the per-chunk flagged frame
+        Scans the recording chunk by chunk (defaulting to
+        ``chunk_duration='1s'`` when ``job_kwargs`` carries no chunk-size key,
+        so the scan is bounded
+        for every caller, not only the production path that merges SI's global
+        job kwargs) and concatenates the per-chunk flagged frame
         indices into one ascending array. Peak working set is bounded by the
         chunk size -- roughly ``4 × chunk_frames × n_channels × 4 bytes`` (raw
         int slice + float32 µV copy + abs + z-score intermediate) -- rather than
@@ -951,6 +954,23 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         """
         resolved = dict(job_kwargs or {})
         exec_kwargs = {k: resolved[k] for k in job_keys if k in resolved}
+        # Chunk BY DEFAULT. ChunkRecordingExecutor with no chunk-size key
+        # processes the whole recording in a single chunk -- i.e. the exact
+        # full-traces memory profile this restoration removed. A caller that
+        # reaches here without a chunk key (any direct ``_detect_artifacts``
+        # call, not just the production ``make_compute`` path that merges SI's
+        # global ``chunk_duration='1s'``) must still be bounded, so default the
+        # chunk to 1 s of data. Callers can override via job_kwargs (and a
+        # single-pass-in-memory mode is still reachable with an explicit
+        # ``chunk_duration=-1`` / ``chunk_size`` spanning the recording).
+        _CHUNK_KEYS = (
+            "chunk_size",
+            "chunk_duration",
+            "chunk_memory",
+            "total_memory",
+        )
+        if not any(k in exec_kwargs for k in _CHUNK_KEYS):
+            exec_kwargs["chunk_duration"] = "1s"
         n_jobs = ensure_n_jobs(recording, n_jobs=exec_kwargs.get("n_jobs", 1))
         rec_arg = recording if n_jobs == 1 else recording.to_dict()
         init_args = (
