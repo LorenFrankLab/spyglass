@@ -36,6 +36,40 @@ _assert_v2_db_safe()
 schema = dj.schema("spikesorting_v2_curation")
 
 
+def _validate_curation_label_rows(
+    rows: list, allow_custom_labels: bool = False
+) -> None:
+    """Reject ``UnitLabel`` rows whose ``curation_label`` is not canonical.
+
+    Validates the ``curation_label`` on each row dict against the
+    ``CurationLabel`` set so a direct ``CurationV2.UnitLabel.insert1`` /
+    ``insert`` cannot slip a typo'd label past the Python-side guard the
+    way a bare ``varchar`` column would (DataJoint does not enforce the
+    open-ended label set at the DB; see ``CurationLabel``).
+    ``allow_custom_labels=True`` accepts labels outside the canonical set
+    (labs using custom semantics). Rows without a ``curation_label`` key
+    are left alone -- DataJoint raises its own missing-attribute error
+    for those.
+    """
+    if allow_custom_labels:
+        return
+    valid = {member.value for member in CurationLabel}
+    for row in rows:
+        if "curation_label" not in row:
+            continue
+        label = row["curation_label"]
+        label_value = (
+            label.value if isinstance(label, CurationLabel) else label
+        )
+        if label_value not in valid:
+            raise ValueError(
+                f"CurationV2.UnitLabel: curation_label {label!r} is not in "
+                f"CurationLabel. Valid labels: {sorted(valid)}. Pass "
+                "allow_custom_labels=True to accept labels outside the "
+                "canonical set."
+            )
+
+
 @schema
 class CurationV2(SpyglassMixin, dj.Manual):
     """Manual curation labels + merge groups for a sorted Sorting.
@@ -111,10 +145,15 @@ class CurationV2(SpyglassMixin, dj.Manual):
         def insert1(
             self, row, *, allow_custom_labels: bool = False, **kwargs
         ):
-            _validate_curation_label_rows(
-                [row], allow_custom_labels=allow_custom_labels
+            # Delegate to ``insert`` (as DataJoint's own ``insert1`` does:
+            # ``self.insert((row,))``) so the single validation happens in
+            # one place AND ``allow_custom_labels`` survives the dispatch.
+            # Validating here then calling ``super().insert1`` would lose
+            # the flag, because DataJoint's internal ``insert1 -> insert``
+            # hop re-enters this override with the default False.
+            self.insert(
+                [row], allow_custom_labels=allow_custom_labels, **kwargs
             )
-            super().insert1(row, **kwargs)
 
         def insert(
             self, rows, *, allow_custom_labels: bool = False, **kwargs
