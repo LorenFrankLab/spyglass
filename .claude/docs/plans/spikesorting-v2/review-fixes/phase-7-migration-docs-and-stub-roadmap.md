@@ -69,6 +69,11 @@ Add a `## Spike Sorting v2 — Breaking Changes` section to [CHANGELOG.md](../..
 **Tags**
 - Artifact `IntervalList.pipeline` tag `spikesorting_artifact_v1` → `spikesorting_artifact_v2`.
 
+**Production-scale (Phase 5: A17 / A21 / A22)**
+- Artifact detection restored to a chunked `ChunkRecordingExecutor` pass ([artifact.py `_scan_artifact_frames` / `_compute_artifact_chunk`](../../../../../src/spyglass/spikesorting/v2/artifact.py)). The in-memory full-`get_traces` scan (peaked at ~4 × n_samples × n_channels × 4 bytes — ~27 GB for a 1-hour 64-channel 30 kHz recording) is removed. The `ArtifactDetectionParameters.job_kwargs` blob is now **functional**: it controls the scan's `n_jobs` / `chunk_duration` (default `chunk_duration='1s'`, `n_jobs=1`) — previously dead weight. Output is frame-identical to the old in-memory path; no scientific change.
+- SpikeInterface pinned to `==0.104.3` in [pyproject.toml](../../../../../pyproject.toml). The KS4/MS5/SC2/TDC2/Generic schemas use `extra="allow"`, so untyped sorter fields fall through to SI's per-version defaults; the pin + snapshot tests (`test_kilosort4_si_defaults_unchanged`, `test_ms5_si_defaults_unchanged`) make a SI bump a deliberate, audited step. Loosen only after the parent plan's Phase 0c SI migration; move the pin and the snapshots together.
+- New ops helper `Sorting.find_orphaned_analyzer_folders(*, dry_run=True)` ([sorting.py](../../../../../src/spyglass/spikesorting/v2/sorting.py)) surfaces 5–50 GB analyzer-folder disk leaks from delete-override bypass (raw SQL delete / scripted `connection.query`). Reports DB-side orphans (row present, folder gone — never auto-deleted) and disk-side orphans (folder present, no row); `dry_run=False` deletes only disk-side orphans after interactive confirmation.
+
 **Per-finding citations**: each CHANGELOG bullet references a specific source location. Use the markdown link form `[file.py:LL-LL](path)` so a reader can click directly. Do not bury rationale in the bullet — keep bullets terse; the rationale lives in the audit JSON and in the stub-roadmap docstrings (next task).
 
 ### A33 — DOC: stub-module roadmap docstrings + informative `ImportError`
