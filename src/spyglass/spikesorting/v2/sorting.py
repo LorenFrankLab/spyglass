@@ -110,7 +110,7 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
     sorter_params_name: varchar(128)
     ---
     params: blob
-    params_schema_version=1: int
+    params_schema_version=0: int
     job_kwargs=null: blob
     """
 
@@ -118,6 +118,22 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
         row = dict(row)
         schema_cls = _get_sorter_schema(row["sorter"])
         row["params"] = _validate_params(schema_cls, row["params"])
+        # ``params_schema_version`` is per-row, not per-table: this Lookup
+        # is multi-sorter (MS4/MS5/KS4/clusterless each carry their own
+        # schema_version), so the column default cannot be pinned to any
+        # one sorter's version. It defaults to the sentinel 0
+        # ("unspecified"); a row that reached the DB with 0 would silently
+        # mis-tag the validated ``params`` blob's schema_version (e.g.
+        # clusterless ships schema_version=4). Require the caller to pass
+        # it explicitly and name the version they must use.
+        inner_version = int(row["params"]["schema_version"])
+        if int(row.get("params_schema_version", 0)) == 0:
+            raise ValueError(
+                "SorterParameters.insert1: params_schema_version is "
+                f"required for sorter {row['sorter']!r}; pass "
+                f"params_schema_version={inner_version} to match the "
+                "validated params blob's schema_version."
+            )
         _assert_schema_version_matches(
             row, schema_cls, table_name="SorterParameters"
         )
@@ -143,6 +159,39 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
             # Name normalized to v2's lowercase-k convention.
             "mountainsort4",
             "franklab_probe_ctx_30kHz_ms4",
+            _validate_params(
+                _get_sorter_schema("mountainsort4"),
+                {"freq_min": 300.0, "freq_max": 6000.0},
+            ),
+            1,
+            None,
+        ),
+        (
+            # Back-compat alias for v1's bare ``franklab_tetrode_hippocampus
+            # _30KHz`` row name at ``v1/sorting.py:158`` (uppercase K, no
+            # ``_ms4`` suffix). v2 normalized the name to lowercase-k +
+            # ``_ms4`` (to disambiguate the MS5 sibling), which silently
+            # broke ``(SorterParameters & {"sorter_params_name":
+            # "franklab_tetrode_hippocampus_30KHz"})`` for ported v1 code.
+            # Carries the IDENTICAL params blob as the ``_ms4`` row above
+            # so both names resolve to the same validated parameters. This
+            # is a one-release shim: a future v2.x release drops it after
+            # the CHANGELOG migration window passes.
+            "mountainsort4",
+            "franklab_tetrode_hippocampus_30KHz",
+            _validate_params(
+                _get_sorter_schema("mountainsort4"),
+                {"freq_min": 600.0, "freq_max": 6000.0},
+            ),
+            1,
+            None,
+        ),
+        (
+            # Back-compat alias for v1's bare ``franklab_probe_ctx_30KHz``
+            # row name at ``v1/sorting.py:163``. Same identical-params,
+            # one-release-shim rationale as the tetrode alias above.
+            "mountainsort4",
+            "franklab_probe_ctx_30KHz",
             _validate_params(
                 _get_sorter_schema("mountainsort4"),
                 {"freq_min": 300.0, "freq_max": 6000.0},

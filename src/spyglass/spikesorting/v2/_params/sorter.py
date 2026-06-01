@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class MountainSort4Schema(BaseModel):
@@ -54,7 +54,17 @@ class MountainSort4Schema(BaseModel):
     model_config = ConfigDict(extra="forbid")
     schema_version: int = 1
     detect_sign: Literal[-1, 0, 1] = -1
-    adjacency_radius: float = Field(default=100.0, ge=0.0)
+    adjacency_radius: float = Field(
+        default=100.0,
+        ge=-1.0,
+        description=(
+            "Channel adjacency radius in microns. SpikeInterface's "
+            "MountainSort4 wrapper documents -1 as the 'use all channels "
+            "in the adjacency graph' sentinel; any value >= 0 sets an "
+            "explicit radius. Values in the open interval (-1, 0) are "
+            "invalid."
+        ),
+    )
     freq_min: float = Field(default=600.0, gt=0.0, le=15000.0)
     freq_max: float = Field(default=6000.0, gt=0.0, le=15000.0)
     filter: bool = False
@@ -63,6 +73,18 @@ class MountainSort4Schema(BaseModel):
     clip_size: int = Field(default=40, ge=1)
     detect_threshold: float = Field(default=3.0, gt=0.0)
     detect_interval: int = Field(default=10, ge=1)
+
+    @field_validator("adjacency_radius")
+    @classmethod
+    def _reject_open_interval_radius(cls, value: float) -> float:
+        """Only -1 (sentinel) or >= 0 is meaningful; reject (-1, 0)."""
+        if -1.0 < value < 0.0:
+            raise ValueError(
+                "adjacency_radius must be -1 (use all channels) or >= 0; "
+                f"got {value}, which is in the invalid open interval "
+                "(-1, 0)."
+            )
+        return value
 
 
 class MountainSort5Schema(BaseModel):
