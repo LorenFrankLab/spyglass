@@ -1454,6 +1454,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             prefix=f"sort_{sorting_id}_",
             dir=_spyglass_temp_dir,
         )
+        patched_numpy_inf = False
         try:
             os.chmod(sorter_temp_dir.name, 0o777)
 
@@ -1461,11 +1462,17 @@ class Sorting(SpyglassMixin, dj.Computed):
             # wrapper at ``spikeinterface/sorters/external/mountainsort4.py``)
             # references the removed ``numpy.Inf`` alias at
             # ``spikeextractors/extraction_tools.py:766``; that crashes
-            # under numpy >= 2.0. Restore the alias for the duration
-            # of this call -- assignment is benign (``np.inf`` is what
-            # ``np.Inf`` always meant) and survives subsequent calls.
+            # under numpy >= 2.0. Restore the alias only for the duration
+            # of this call and delete it again in the ``finally`` -- a
+            # persistent global mutation would make every later module
+            # that probes ``hasattr(np, "Inf")`` (some scipy versions)
+            # see a different numpy than import time. ``np.inf`` is what
+            # ``np.Inf`` always aliased, so the patch is value-safe; only
+            # its lifetime is scoped. TODO: drop once SI's MS4 wrapper /
+            # spikeextractors stops referencing the removed alias.
             if sorter.lower() == "mountainsort4" and not hasattr(_np, "Inf"):
                 _np.Inf = _np.inf
+                patched_numpy_inf = True
 
             if sorter_params.get("whiten", False):
                 import spikeinterface.preprocessing as sip
@@ -1544,12 +1551,27 @@ class Sorting(SpyglassMixin, dj.Computed):
                     _si.reset_global_job_kwargs()
                     _si.set_global_job_kwargs(**previous_global)
         finally:
+            # Undo the scoped ``np.Inf`` patch (A8) so the global numpy
+            # module is left exactly as the rest of the process saw it.
+            if patched_numpy_inf and hasattr(_np, "Inf"):
+                del _np.Inf
             # ``TemporaryDirectory`` auto-cleans on garbage collection,
             # but the explicit ``.cleanup()`` in a ``finally`` makes
             # the cleanup point obvious and survives worker-process
             # exit predictably under the parallel-populate process
-            # pool.
-            sorter_temp_dir.cleanup()
+            # pool. Catch + log any cleanup error: if the sort itself
+            # raised, a cleanup failure (e.g. a stale lock on a network
+            # FS) must NOT replace the original sort exception -- that
+            # would hide the real failure behind a misleading
+            # PermissionError on the tempdir.
+            try:
+                sorter_temp_dir.cleanup()
+            except Exception as cleanup_exc:
+                logger.warning(
+                    "Sorting._run_si_sorter: sorter_temp_dir cleanup "
+                    f"failed for sorting_id={sorting_id}: {cleanup_exc!r}. "
+                    "Original sort exception (if any) preserved."
+                )
 
     @staticmethod
     def _remove_excess_spikes(sorting, recording):

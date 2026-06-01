@@ -159,3 +159,109 @@ def test_sorter_parameters_rejects_missing_schema_version():
     )
     with pytest.raises(ValueError, match="schema_version"):
         SorterParameters().insert1(drift, skip_duplicates=True)
+
+
+# ---------- A8: MS4 path must not leak the numpy.Inf global ----------------
+
+
+@pytest.mark.slow
+@pytest.mark.usefixtures("dj_conn")
+def test_run_si_sorter_does_not_leak_numpy_inf(monkeypatch):
+    """A8: the MS4 ``np.Inf`` shim is scoped and torn down.
+
+    The MS4 wrapper (via spikeextractors) references the numpy-2.0-removed
+    ``np.Inf`` alias, so ``_run_si_sorter`` restores it for the MS4 call.
+    The restore must be deleted afterward; a persistent global mutation
+    would leak a different numpy into every later module that probes
+    ``hasattr(np, "Inf")``.
+
+    The shim is set BEFORE ``run_sorter`` is invoked, so the leak is
+    observable whether or not MS4 itself is installed (on the CI SI-0.104
+    image it is not, and ``run_sorter`` raises -- which the test
+    tolerates). ``monkeypatch.delattr`` locks a clean ``np.Inf``-absent
+    baseline so the assertion is order-independent.
+    """
+    import numpy as np_mod
+    import spikeinterface.core as sc
+
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    monkeypatch.delattr(np_mod, "Inf", raising=False)
+    assert not hasattr(np_mod, "Inf"), "baseline not clean"
+
+    rec = sc.generate_recording(
+        num_channels=4, durations=[0.5], sampling_frequency=30000.0
+    )
+    try:
+        Sorting._run_si_sorter(
+            sorter="mountainsort4",
+            sorter_params={},
+            recording=rec,
+            sorting_id="audit-a8-leak-check",
+            job_kwargs=None,
+        )
+    except Exception:
+        # MS4 not installed (or sort failure) is fine -- the np.Inf shim
+        # already fired before run_sorter, so the leak invariant still
+        # applies.
+        pass
+
+    assert not hasattr(np_mod, "Inf"), (
+        "MS4 path leaked np.Inf globally; the try/finally restore "
+        "regressed."
+    )
+
+
+# ---------- A9: tempdir cleanup must not mask the sort exception -----------
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_sorter_tempdir_cleanup_does_not_mask_sort_exception(
+    monkeypatch, caplog
+):
+    """A9: a cleanup failure never replaces the real sort exception.
+
+    If the sort raises AND ``sorter_temp_dir.cleanup()`` also raises
+    (e.g. a stale lock on a network FS), the unguarded ``finally`` would
+    propagate the cleanup's ``PermissionError`` and hide the sort's
+    actual failure. The cleanup error must be caught + logged so the
+    caller sees the sort exception.
+    """
+    import tempfile
+
+    import spikeinterface.core as sc
+    import spikeinterface.sorters as sis
+
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    class _SortBoom(RuntimeError):
+        pass
+
+    def _boom_run_sorter(*args, **kwargs):
+        raise _SortBoom("the sort itself failed")
+
+    def _boom_cleanup(self):
+        raise PermissionError("stale lock on tempdir during cleanup")
+
+    monkeypatch.setattr(sis, "run_sorter", _boom_run_sorter)
+    monkeypatch.setattr(
+        tempfile.TemporaryDirectory, "cleanup", _boom_cleanup
+    )
+
+    rec = sc.generate_recording(
+        num_channels=4, durations=[0.5], sampling_frequency=30000.0
+    )
+    with caplog.at_level("WARNING"):
+        # tridesclous2: non-MS4 (no np.Inf patch), non-MATLAB sorter.
+        with pytest.raises(_SortBoom):
+            Sorting._run_si_sorter(
+                sorter="tridesclous2",
+                sorter_params={},
+                recording=rec,
+                sorting_id="audit-a9-cleanup",
+                job_kwargs=None,
+            )
+
+    assert any(
+        "cleanup failed" in record.getMessage() for record in caplog.records
+    ), "cleanup failure was not logged"
