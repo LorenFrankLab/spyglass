@@ -339,12 +339,16 @@ def test_recording_populates_and_round_trips(
     )
 
     # Clear any prior Recording row for this selection (subsequent module
-    # runs would otherwise short-circuit populate()). Drop downstream
-    # artifact/sorting selections first so the Recording cascade does not
-    # trip the source-part master-before-part rule when an earlier test
-    # left those rows behind.
-    _clear_recording_downstream(recording_selection_key["recording_id"])
-    (Recording & recording_selection_key).super_delete(warn=False)
+    # runs would otherwise short-circuit populate()). ``force_masters=True``
+    # mirrors what ``cautious_delete`` passes to DataJoint: it deletes the
+    # source-polymorphic ``ArtifactSelection`` / ``SortingSelection``
+    # MASTER when the Recording cascade reaches its ``RecordingSource``
+    # part (the part FKs Recording but the master does not, so a bare
+    # ``super_delete`` trips DataJoint's part-before-master rule whenever
+    # an earlier test attached selections to this recording_id).
+    (Recording & recording_selection_key).super_delete(
+        warn=False, force_masters=True
+    )
     Recording.populate(recording_selection_key, reserve_jobs=False)
     row = (Recording & recording_selection_key).fetch1()
 
@@ -555,51 +559,6 @@ def _clean_session_v2(session_key):
     (Recording & rec_keys).super_delete(warn=False) if rec_keys else None
     (RecordingSelection & session_key).super_delete(warn=False)
     (SortGroupV2 & session_key).super_delete(warn=False)
-
-
-def _clear_recording_downstream(recording_id) -> None:
-    """Delete the source-polymorphic selections that block a Recording delete.
-
-    A bare ``(Recording & key).super_delete()`` raises ``Attempt to
-    delete part table ... before deleting from its master`` whenever a
-    prior test left ``ArtifactSelection`` / ``SortingSelection`` rows
-    whose ``RecordingSource`` part FKs this ``recording_id`` (the
-    Recording cascade reaches the orphan part before its master -- the
-    same source-part cascade gap ``_clean_session_v2`` documents). This
-    clears those masters (master-first, with their downstream
-    ArtifactDetection / Sorting / CurationV2 / merge rows) so a test can
-    then ``super_delete`` the Recording WITHOUT also dropping the shared
-    ``SortGroupV2`` / ``RecordingSelection`` rows it still needs.
-    """
-    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
-    from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
-        ArtifactSelection,
-    )
-    from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
-
-    rec = [{"recording_id": recording_id}]
-
-    sorting_keys = (SortingSelection.RecordingSource & rec).fetch(
-        "KEY", as_dict=True
-    )
-    if sorting_keys:
-        merge_ids = (SpikeSortingOutput.CurationV2 & sorting_keys).fetch(
-            "merge_id"
-        )
-        for mid in merge_ids:
-            (SpikeSortingOutput & {"merge_id": mid}).super_delete(warn=False)
-        (CurationV2 & sorting_keys).super_delete(warn=False)
-        (Sorting & sorting_keys).super_delete(warn=False)
-        (SortingSelection & sorting_keys).super_delete(warn=False)
-
-    artifact_keys = (ArtifactSelection.RecordingSource & rec).fetch(
-        "KEY", as_dict=True
-    )
-    if artifact_keys:
-        (ArtifactDetection & artifact_keys).super_delete(warn=False)
-        (ArtifactSelection & artifact_keys).super_delete(warn=False)
 
 
 # ---------- ArtifactSelection source-part pattern -------------------------
@@ -1443,7 +1402,7 @@ def test_recording_truncation_caught(polymer_smoke_session):
     pk = RecordingSelection.insert_selection(selection_key)
 
     # Clear any prior Recording row so populate actually runs make().
-    (Recording & pk).super_delete(warn=False)
+    (Recording & pk).super_delete(warn=False, force_masters=True)
     try:
         with pytest.raises(
             RecordingTruncatedError, match="Missing: .* seconds|Missing: \\d"
@@ -1549,7 +1508,7 @@ def test_recording_truncation_multi_interval(polymer_smoke_session):
     }
     pk = RecordingSelection.insert_selection(selection_key)
 
-    (Recording & pk).super_delete(warn=False)
+    (Recording & pk).super_delete(warn=False, force_masters=True)
     try:
         with pytest.raises(RecordingTruncatedError, match="Missing: \\d"):
             Recording.populate(pk, reserve_jobs=False)
@@ -1558,7 +1517,7 @@ def test_recording_truncation_multi_interval(polymer_smoke_session):
         # what was requested.
         assert not (Recording & pk)
     finally:
-        (Recording & pk).super_delete(warn=False)
+        (Recording & pk).super_delete(warn=False, force_masters=True)
         (RecordingSelection & pk).super_delete(warn=False)
         (
             IntervalList
@@ -1648,14 +1607,14 @@ def test_recording_timestamp_repair_recorded(
         Recording, "_repaired_timestamps", staticmethod(_fake_repaired)
     )
 
-    (Recording & pk).super_delete(warn=False)
+    (Recording & pk).super_delete(warn=False, force_masters=True)
     try:
         Recording.populate(pk, reserve_jobs=False)
         row = (Recording & pk).fetch1()
         assert bool(row["timestamps_adjusted"]) is True
         assert int(row["n_adjusted_samples"]) == forced_n_changed
     finally:
-        (Recording & pk).super_delete(warn=False)
+        (Recording & pk).super_delete(warn=False, force_masters=True)
         (RecordingSelection & pk).super_delete(warn=False)
         (
             IntervalList
@@ -1753,7 +1712,7 @@ def test_recording_single_interval_persists_repaired_timestamps(
         Recording, "_write_nwb_artifact", staticmethod(_capture)
     )
 
-    (Recording & pk).super_delete(warn=False)
+    (Recording & pk).super_delete(warn=False, force_masters=True)
     try:
         Recording.populate(pk, reserve_jobs=False)
         override = captured["override"]
@@ -1779,7 +1738,7 @@ def test_recording_single_interval_persists_repaired_timestamps(
             row_duration - uncorrected_span
         )
     finally:
-        (Recording & pk).super_delete(warn=False)
+        (Recording & pk).super_delete(warn=False, force_masters=True)
         (RecordingSelection & pk).super_delete(warn=False)
 
 
@@ -4671,7 +4630,7 @@ def test_recording_make_rollback_cleans_analysis_nwb(
             "team_name": "v2_test_team",
         }
     )
-    (Recording & rec_pk).super_delete(warn=False)
+    (Recording & rec_pk).super_delete(warn=False, force_masters=True)
 
     from spyglass.settings import analysis_dir as _ad
 
@@ -5524,7 +5483,7 @@ def test_recording_make_global_median_reference(polymer_smoke_session):
     # Drop the unref Recording so the new selection materializes a
     # fresh global-median recording rather than reusing the cached
     # bytes.
-    (Recording & rec_pk_unref).super_delete(warn=False)
+    (Recording & rec_pk_unref).super_delete(warn=False, force_masters=True)
     Recording.populate(rec_pk_unref, reserve_jobs=False)
     traces_ref = Recording().get_recording(rec_pk_unref).get_traces()
 
