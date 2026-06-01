@@ -145,14 +145,16 @@ The `ImportError`-from-`__getattr__` shape works for BOTH usage forms:
 
 ### A34 — DOC: `insert_default_legacy_si_sorters()` opt-in helper
 
-The audit's recommendation #3 — replicate v1's auto-insert of `('sorter_name','default')` rows for every `sis.available_sorters()` entry, but as a separate opt-in helper rather than baked into `insert_default()`. v1 callers porting workflows that name a non-curated sorter via `('kilosort2_5','default')` etc. can call this once to populate the back-compat rows.
+The audit's recommendation #3 — replicate v1's auto-insert of `('sorter_name','default')` rows, but as a separate opt-in helper rather than baked into `insert_default()`. v1 callers porting workflows that name a non-curated sorter via `('kilosort2_5','default')` etc. can call this once to populate the back-compat rows.
+
+**Gate on `installed_sorters()`, not `available_sorters()`.** v1 auto-inserted for every `sis.available_sorters()` entry, but `sis.get_default_sorter_params(sorter)` SUCCEEDS for wrapper-only sorters whose binary is absent (verified: `kilosort2_5`, `ironclust`, `kilosort4`, … all return a default dict). Enumerating `available_sorters()` would therefore ship `('<sorter>','default')` rows that fail at `Sorting.populate` time — reintroducing exactly the trap Phase 4 A4 fixed for `insert_default()`. Gate on `sis.installed_sorters()` (the same gate A4 uses) and log the available-but-not-installed non-curated skips, so the helper only ships rows the user can actually run.
 
 Add to `SorterParameters` at [sorting.py](../../../../../src/spyglass/spikesorting/v2/sorting.py):
 
 ```python
 @classmethod
 def insert_default_legacy_si_sorters(cls):
-    """Insert ('sorter','default') rows for every installed SI sorter
+    """Insert ('sorter','default') rows for every INSTALLED SI sorter
     NOT already curated by ``insert_default()``.
 
     Replicates v1's auto-insert behavior at
@@ -160,20 +162,26 @@ def insert_default_legacy_si_sorters(cls):
     non-curated sorter via ``('kilosort2_5','default')`` or similar.
     Calls SpikeInterface's ``sis.get_default_sorter_params(sorter)``
     for each entry of ``sis.available_sorters()`` and validates
-    through ``GenericSorterParamsSchema`` (``extra='allow'``) so the
-    row passes ``insert1``'s gate without typo-rejection.
+    through ``GenericSorterParamsSchema`` (``extra='allow'``).
 
-    Curated sorters (mountainsort4, mountainsort5, kilosort4,
-    spykingcircus2, tridesclous2, clusterless_thresholder) are
-    SKIPPED -- they already have their own typed schemas with
-    ``extra='forbid'``, and SI's defaults for those sorters include
-    keys those schemas intentionally strip
-    (e.g. ``MountainSort5Schema`` strips ``filter``/``freq_min`` etc.
-    because the upstream recording is already filtered). Routing SI's
-    full default dict through the typed schema would either fail
-    validation or quietly drop keys -- neither is what a v1 caller
-    expects. The opt-in is targeted at the NON-curated escape-hatch
-    sorters that fall back to ``GenericSorterParamsSchema`` anyway.
+    Two classes of sorter are SKIPPED (logged):
+
+    - Not installed -- gated on ``sis.installed_sorters()`` (the same
+      gate ``insert_default`` uses). v1 enumerated
+      ``available_sorters()``, but ``get_default_sorter_params``
+      succeeds for wrapper-only sorters whose binary is absent, so an
+      available-but-not-installed row would only fail later at
+      ``Sorting.populate`` time.
+    - Curated (mountainsort4, mountainsort5, kilosort4,
+      spykingcircus2, tridesclous2, clusterless_thresholder) -- they
+      already have their own typed schemas with ``extra='forbid'``,
+      and SI's defaults for those sorters include keys those schemas
+      intentionally strip (e.g. ``MountainSort5Schema`` strips
+      ``filter``/``freq_min`` etc. because the upstream recording is
+      already filtered). Routing SI's full default dict through the
+      typed schema would either fail validation or quietly drop keys.
+      The opt-in is targeted at the NON-curated escape-hatch sorters
+      that fall back to ``GenericSorterParamsSchema`` anyway.
 
     Idempotent via ``skip_duplicates=True``.
 
@@ -192,10 +200,19 @@ def insert_default_legacy_si_sorters(cls):
     from spyglass.utils import logger
 
     curated = set(_SORTER_SCHEMAS)  # sorters with their own typed schemas
+    installed = set(sis.installed_sorters())
     rows = []
+    skipped_not_installed = []
     for sorter in sis.available_sorters():
         if sorter in curated:
             continue  # see docstring: would fail or drop keys
+        if sorter not in installed:
+            # get_default_sorter_params succeeds for wrapper-only
+            # sorters, so gate on installed_sorters() (mirroring
+            # insert_default's A4 gate) to avoid shipping a row that
+            # only fails at populate time.
+            skipped_not_installed.append(sorter)
+            continue
         try:
             params = sis.get_default_sorter_params(sorter)
         except Exception as exc:  # SI sometimes raises on metadata fetch
@@ -204,8 +221,7 @@ def insert_default_legacy_si_sorters(cls):
                 f"({exc!r})."
             )
             continue
-        # Validate through the generic schema (extra='allow') so the
-        # row passes insert1's gate without typo-rejection.
+        # Validate through the generic schema (extra='allow').
         try:
             validated = _validate_params(GenericSorterParamsSchema, params)
         except Exception as exc:
@@ -216,10 +232,16 @@ def insert_default_legacy_si_sorters(cls):
             )
             continue
         rows.append((sorter, "default", validated, 1, None))
+    if skipped_not_installed:
+        logger.info(
+            "insert_default_legacy_si_sorters: skipping "
+            f"{sorted(skipped_not_installed)} -- available in "
+            "SpikeInterface but not installed on this platform."
+        )
     cls.insert(rows, skip_duplicates=True)
 ```
 
-- Add a behavioral test in Phase 6 A30 (deferred — list under A34 here so executor knows the test pairs with this code change) asserting that after `insert_default_legacy_si_sorters()`, a v1-style key `{"sorter": "<installed-sorter>", "sorter_params_name": "default"}` resolves to exactly one row. Skip on environments without the relevant sorter installed.
+- Add a behavioral test (lands here with the code change, not in Phase 6) asserting that after `insert_default_legacy_si_sorters()`, a v1-style key `{"sorter": "<installed-sorter>", "sorter_params_name": "default"}` resolves to a row. Skip on environments without an installed non-curated sorter. Add a companion monkeypatch test pinning the gate: an available-but-not-installed sorter must get NO `('<sorter>','default')` row (and the call must not raise).
 - This is the only code change in Phase 7. It is small enough not to merit its own phase but large enough that adding it as a Phase 6 test-only entry would be a lie. Land it here with the doc PR.
 - Phase 4 A2 (preset-name aliases) is a different shim — A2 aliases the renamed Franklab presets; A34 covers all OTHER non-curated v1 sorter rows. They compose.
 
