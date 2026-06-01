@@ -830,7 +830,6 @@ class VideoFile(SpyglassMixin, dj.Imported):
 
         logger.warning("\n".join(msg_parts))
 
-    @classmethod
     def _update_1_entry(self, row: dict) -> dict:
         """Attempt to fill camera_name and/or path for a single VideoFile row.
 
