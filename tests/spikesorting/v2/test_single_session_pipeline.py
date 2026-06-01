@@ -1251,32 +1251,52 @@ def test_sorting_make_fetch_resolves_artifact_obs_intervals(populated_sorting):
 
 
 @pytest.mark.slow
-def test_rebuild_raises_on_timestamp_provenance_mismatch(
+def test_rebuild_raises_and_unlinks_on_provenance_mismatch(
     populated_recording, monkeypatch
 ):
-    """Rebuild RAISES when recomputed timestamp-repair provenance drifts.
+    """A provenance-mismatched rebuild raises AND removes the bad file.
 
-    The Recording row's ``timestamps_adjusted`` / ``n_adjusted_samples``
-    columns describe the cached artifact. The repair is a deterministic
-    function of the source timestamps, so a rebuild that recomputes
-    different provenance means the upstream raw NWB's timestamps changed
-    -- the row would then misdescribe the rebuilt file. Unlike the
+    The row's ``timestamps_adjusted`` / ``n_adjusted_samples`` columns
+    describe the cached artifact. The repair is a deterministic function
+    of the source timestamps, so a rebuild that recomputes different
+    provenance means the upstream raw NWB's timestamps changed -- the row
+    would then misdescribe the rebuilt file. Unlike the
     not-rebuild-deterministic ``cache_hash`` (warn only), this is a real
     integrity violation and must raise (C3: "columns stay accurate or
-    assert they match"). We force a divergent recompute by monkeypatching
-    ``_compute_recording_artifact`` to return provenance unequal to the
-    stored row, return the stored hash so only the provenance check can
-    fire, and assert the raise + that the row is not mutated.
+    assert they match").
+
+    Critically, the rebuild overwrites the canonical file in place before
+    the check, and ``get_recording`` only rebuilds when the file is
+    ABSENT -- so a raise that left the mismatched file on disk would make
+    the next ``get_recording`` skip this check and silently load the
+    stale artifact. This test forces a real rebuild with divergent
+    provenance (by patching ``_repaired_timestamps`` to report extra
+    adjusted samples), then asserts: the rebuild raises, the row is not
+    mutated, the mismatched file is unlinked, and a subsequent
+    ``get_recording`` (with the patch removed) rebuilds cleanly rather
+    than loading a stale file.
     """
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
     from spyglass.spikesorting.v2.exceptions import (
         RecordingProvenanceMismatchError,
     )
     from spyglass.spikesorting.v2.recording import Recording
 
     row = (Recording & populated_recording).fetch1()
+    abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
+    assert Path(abs_path).exists()
 
-    # Return the stored hash (so the hash check is silent) but flip the
-    # repair provenance so only the provenance comparison can fire.
+    # Stub the (rebuild-non-deterministic, external-store-checksum-gated)
+    # recompute so the provenance branch is reached directly: return the
+    # stored cache_hash (so the hash check stays silent) but flipped
+    # repair provenance so only the provenance mismatch fires. NOTE: the
+    # real ``_compute_recording_artifact`` rebuild path raises a
+    # DataJointError external-store checksum failure before reaching this
+    # check (the recompute is not byte-deterministic vs the stored
+    # checksum -- see overview decision 3 / the deferred C2 recompute
+    # work), so it cannot be exercised end-to-end here; the stub isolates
+    # the raise + unlink behavior this fix owns. The on-disk file the stub
+    # leaves in place stands in for the freshly-rebuilt canonical file.
     flipped_adjusted = not bool(row["timestamps_adjusted"])
     flipped_n = int(row["n_adjusted_samples"]) + 7
     fake_return = (
@@ -1302,13 +1322,19 @@ def test_rebuild_raises_on_timestamp_provenance_mismatch(
     ):
         Recording()._rebuild_nwb_artifact(populated_recording)
 
-    # The row's provenance columns are not auto-modified by the failed
-    # rebuild (re-derivation from the corrected source is the repair path).
+    # Row provenance columns are not auto-modified by the failed rebuild.
     after = (Recording & populated_recording).fetch1()
     assert bool(after["timestamps_adjusted"]) == bool(
         row["timestamps_adjusted"]
     )
     assert int(after["n_adjusted_samples"]) == int(row["n_adjusted_samples"])
+    # The mismatched canonical file was unlinked so the next
+    # ``get_recording`` (which rebuilds ONLY when the file is absent)
+    # cannot silently load the stale artifact -- it will rebuild instead.
+    assert not Path(abs_path).exists(), (
+        "provenance-mismatched rebuild left its file on disk; the next "
+        "get_recording would skip the check and load the stale artifact"
+    )
 
 
 @pytest.mark.slow

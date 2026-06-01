@@ -1248,9 +1248,25 @@ class Recording(SpyglassMixin, dj.Computed):
             bool(rebuilt_adjusted) != bool(row["timestamps_adjusted"])
             or int(rebuilt_n_adjusted) != int(row["n_adjusted_samples"])
         ):
+            import pathlib as _pathlib
+
             from spyglass.spikesorting.v2.exceptions import (
                 RecordingProvenanceMismatchError,
             )
+
+            # The rebuild already overwrote the canonical analysis file in
+            # place (existing_analysis_file_name path -> no temp staging;
+            # the atomic temp-write+replace design is deferred to the
+            # main-epic recompute work). That on-disk file is the
+            # mismatched artifact. ``get_recording`` rebuilds ONLY when the
+            # file is absent, so leaving it would make the next
+            # ``get_recording`` skip this very check and silently load the
+            # stale file. Unlink it before raising so the next call
+            # rebuilds from source instead.
+            mismatched_path = AnalysisNwbfile.get_abs_path(
+                row["analysis_file_name"]
+            )
+            _pathlib.Path(mismatched_path).unlink(missing_ok=True)
 
             raise RecordingProvenanceMismatchError(
                 "Recording._rebuild_nwb_artifact: rebuilt timestamp-repair "
@@ -1262,9 +1278,10 @@ class Recording(SpyglassMixin, dj.Computed):
                 f"analysis_file_name={row['analysis_file_name']!r}. The "
                 "stored provenance columns describe a different repair than "
                 "the rebuilt artifact -- the upstream raw NWB's timestamps "
-                "likely changed since the row was written. Re-derive the "
-                "recording from the corrected source instead of relying on "
-                "this row."
+                "likely changed since the row was written. The mismatched "
+                "rebuilt file was removed so it cannot be loaded silently; "
+                "re-derive the recording from the corrected source instead "
+                "of relying on this row."
             )
 
     # ---- Implementation helpers -----------------------------------------
