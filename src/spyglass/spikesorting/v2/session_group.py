@@ -26,7 +26,11 @@ from spyglass.spikesorting.v2.recording import (
     PreprocessingParameters,  # noqa: F401
     SortGroupV2,  # noqa: F401
 )
-from spyglass.spikesorting.v2.utils import _assert_v2_db_safe, _validate_params
+from spyglass.spikesorting.v2.utils import (
+    _assert_schema_version_matches,
+    _assert_v2_db_safe,
+    _validate_params,
+)
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart
 
 _assert_v2_db_safe()
@@ -140,6 +144,15 @@ class MotionCorrectionParameters(SpyglassMixin, dj.Lookup):
         row = dict(row)
         row["params"] = _validate_params(
             MotionCorrectionParamsSchema, row["params"]
+        )
+        # Catch outer-column vs inner-blob schema-version drift, mirroring
+        # SorterParameters.insert1: a row whose params_schema_version
+        # disagrees with the validated blob's schema_version would route
+        # downstream version-branching code to the wrong path.
+        _assert_schema_version_matches(
+            row,
+            MotionCorrectionParamsSchema,
+            table_name="MotionCorrectionParameters",
         )
         super().insert1(row, **kwargs)
 
