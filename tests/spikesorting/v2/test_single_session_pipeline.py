@@ -532,6 +532,36 @@ def test_tetrode_geometry_attached(tetrode_60s_session):
     }, f"tetrode contacts {sorted(locs)} do not form a 12.5 µm square."
 
 
+@pytest.mark.slow
+def test_write_nwb_artifact_rejects_heterogeneous_gains(
+    polymer_smoke_session,
+):
+    """``Recording._write_nwb_artifact`` raises on heterogeneous channel
+    gains instead of silently scaling every channel by ``gains[0]``.
+
+    Exercises the gain gate behaviorally (a recording whose channels
+    carry two distinct gains must abort the write), replacing the prior
+    source-comment-presence check. The aborted write unlinks its stub
+    analysis file, so no orphan outlives the call.
+    """
+    import numpy as np
+    import spikeinterface.core as si_core
+
+    from spyglass.spikesorting.v2.recording import Recording
+
+    rng = np.random.default_rng(0)
+    traces = rng.standard_normal((1000, 2)).astype("float32")
+    rec = si_core.NumpyRecording([traces], sampling_frequency=30_000.0)
+    # Two distinct channel gains -> the single-conversion-factor invariant
+    # is violated and the write must raise.
+    rec.set_channel_gains([1.0, 2.0])
+
+    with pytest.raises(ValueError, match="heterogeneous channel gains"):
+        Recording._write_nwb_artifact(
+            rec, polymer_smoke_session["nwb_file_name"]
+        )
+
+
 def _clear_curations(sorting_key):
     """Delete CurationV2 rows for a sorting + the corresponding
     SpikeSortingOutput merge master rows.

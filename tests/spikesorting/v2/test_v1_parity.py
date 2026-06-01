@@ -277,30 +277,50 @@ def test_clusterless_schema_documents_dead_fields_or_drops_them():
 # ---------- user-facing helpers ---------------------------------------------
 
 
-def test_v2_merge_ids_helper_exists():
-    """v2-side parallel of v1's ``get_spiking_sorting_v1_merge_ids``."""
+@pytest.mark.slow
+@pytest.mark.integration
+def test_get_spiking_sorting_v2_merge_ids_resolves_restriction(
+    populated_sorting,
+):
+    """The notebook helper resolves a restriction to its v2 merge_id(s).
+
+    Behavioral replacement for the prior signature-only check: a root
+    curation registers a ``SpikeSortingOutput.CurationV2`` merge row, and
+    the helper must return that merge_id for a restriction on the sorting
+    -- with ``as_dict`` toggling between a list of UUIDs and a list of
+    ``{"merge_id": ...}`` dicts (the v1-parity / enhancement contract).
+    """
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.utils import (
         get_spiking_sorting_v2_merge_ids,
     )
 
-    sig = inspect.signature(get_spiking_sorting_v2_merge_ids)
-    assert "restriction" in sig.parameters
-    assert "as_dict" in sig.parameters
+    # Clear any prior curation (master-before-part) then mint a root,
+    # which registers exactly one v2 merge row for this sorting.
+    curation_keys = (CurationV2 & populated_sorting).fetch(
+        "KEY", as_dict=True
+    )
+    if curation_keys:
+        for mid in (
+            SpikeSortingOutput.CurationV2 & curation_keys
+        ).fetch("merge_id"):
+            (SpikeSortingOutput & {"merge_id": mid}).super_delete(warn=False)
+    (CurationV2 & populated_sorting).super_delete(warn=False)
 
+    pk = CurationV2.insert_curation(sorting_key=populated_sorting, labels={})
+    expected = {
+        str(m) for m in (SpikeSortingOutput.CurationV2 & pk).fetch("merge_id")
+    }
+    assert expected, "insert_curation must register a v2 merge row"
 
-def test_heterogeneous_gain_rationale_comment_present():
-    """The v1 latent-bug rationale comment is durable in source.
+    restriction = {"sorting_id": populated_sorting["sorting_id"]}
+    ids = get_spiking_sorting_v2_merge_ids(restriction)
+    assert {str(m) for m in ids} == expected
 
-    The comment lives above the ``_np.unique(recording.get_channel_
-    gains())`` check inside ``Recording._write_nwb_artifact``.
-    A future ``cleanup`` pass that deletes it would silently lose
-    the "why we don't pick gains[0]" context.
-    """
-    from spyglass.spikesorting.v2 import recording as recording_mod
-
-    src = inspect.getsource(recording_mod.Recording._write_nwb_artifact)
-    assert "silently picking gains[0]" in src
-    assert "heterogeneous" in src.lower()
+    dicts = get_spiking_sorting_v2_merge_ids(restriction, as_dict=True)
+    assert all(set(d.keys()) == {"merge_id"} for d in dicts)
+    assert {str(d["merge_id"]) for d in dicts} == expected
 
 
 # ---------- phase-label leakage --------------------------------------------
@@ -508,42 +528,23 @@ def test_n50_repair_non_monotonic_patterns(input_ts, expected):
     assert n_changed > 0
 
 
-# ---------- CurationV2 accessor surface ------------------------------------
-
-
-def test_curation_v2_accessors_are_classmethod():
-    """All CurationV2 accessor methods are @classmethod.
-
-    Lets the merge dispatcher's
-    ``source_table.get_recording(merge_key)`` call (which binds
-    the class, not an instance) resolve correctly.
-    """
-    from spyglass.spikesorting.v2.curation import CurationV2
-
-    for name in (
-        "get_recording",
-        "get_sorting",
-        "get_sort_group_info",
-        "get_merged_sorting",
-        "get_merge_groups",
-    ):
-        attr = inspect.getattr_static(CurationV2, name)
-        assert isinstance(attr, classmethod), (
-            f"CurationV2.{name} must be @classmethod for merge dispatch; "
-            f"got {type(attr).__name__}"
-        )
-
-
-# ---------- Sorting.get_sorting as_dataframe -------------------------------
-
-
-def test_sorting_get_sorting_accepts_as_dataframe_flag():
-    """``Sorting.get_sorting`` accepts ``as_dataframe`` kwarg."""
-    from spyglass.spikesorting.v2.sorting import Sorting
-
-    sig = inspect.signature(Sorting.get_sorting)
-    assert "as_dataframe" in sig.parameters
-    assert sig.parameters["as_dataframe"].default is False
+# CurationV2 accessor surface: the prior decoration check
+# (``test_curation_v2_accessors_are_classmethod``) and the
+# ``Sorting.get_sorting`` ``as_dataframe`` signature check were removed as
+# tautological -- they asserted decoration/signature, not behavior. The
+# behavior they stood in for is covered behaviorally:
+#   * get_recording / get_sort_group_info dispatch through the merge table
+#     in test_downstream_consumers.py
+#     (test_get_recording_returns_filtered_recording,
+#     test_get_sort_group_info_returns_multi_electrode_relation); get_sorting
+#     via the same module's get_spike_times / consumer-API tests.
+#   * get_merged_sorting is exercised in
+#     test_single_session_pipeline.py::
+#     test_curation_v2_insert_with_merge_groups_apply_merges
+#     (``CurationV2().get_merged_sorting(preview_pk)``).
+#   * get_sorting(as_dataframe=True) returns a DataFrame in
+#     test_single_session_pipeline.py::
+#     test_get_sorting_dataframe_includes_curation_label.
 
 
 # ---------- Tri-part dispatch + make_compute purity ------------------------
@@ -568,6 +569,13 @@ def test_make_compute_is_pure():
     the function body. The previous narrow check only flagged
     direct ``IntervalList.insert1(...)`` calls; this widened
     version surfaces refactors that route through a local alias.
+
+    This is a defense-in-depth AST guard, not the load-bearing test:
+    the behavioral counterparts that actually prove a failed populate
+    leaves no orphaned NWB/DB state are
+    ``test_single_session_pipeline.py::test_sorting_make_rollback_cleans_units_nwb``
+    and its siblings (``test_recording_make_rollback_cleans_analysis_nwb``,
+    ``test_curation_v2_insert_rollback_cleans_units_nwb``).
     """
     from spyglass.spikesorting.v2 import artifact, recording, sorting
 
