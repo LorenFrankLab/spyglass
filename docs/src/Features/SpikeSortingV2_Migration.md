@@ -1,0 +1,112 @@
+# Spike Sorting v1 → v2 Migration Guide
+
+A short, task-oriented guide for notebook users porting a v1 spike-sorting
+workflow to `spyglass.spikesorting.v2`. For the exhaustive, source-linked
+list of every breaking change, see the
+[CHANGELOG](../CHANGELOG.md) "Spike Sorting v2 — v1→v2 migration
+reference" subsection; this page covers the deltas you actually touch in a
+notebook. For the pipeline overview, see
+[Spike Sorting v2](./SpikeSortingV2.md).
+
+## 1. What you call differently
+
+- **Sorter rows are named differently.** v1's
+  `franklab_tetrode_hippocampus_30KHz` (capital K) is now
+  `franklab_tetrode_hippocampus_30kHz_ms4` (lowercase k + sorter suffix),
+  with a sibling `_ms5` row. v1-name alias rows ship for one release, so
+  old strings keep resolving for now — but update to the canonical names.
+- **`apply_merge` is singular.** `CurationV2.insert_curation(...,
+  apply_merge=True)` (v1 used `apply_merges`).
+- **Filter fields are `freq_min` / `freq_max`** (v1:
+  `frequency_min` / `frequency_max`), nested under `bandpass_filter` in
+  the preprocessing schema.
+- **Porting a non-curated sorter by name?** Call the opt-in helper once:
+
+  ```python
+  from spyglass.spikesorting.v2.sorting import SorterParameters
+
+  SorterParameters.insert_default()                  # curated v2 rows
+  SorterParameters.insert_default_legacy_si_sorters()  # v1 back-compat rows
+  ```
+
+  This inserts `('<sorter>', 'default')` rows for installed SI sorters
+  outside v2's curated set (e.g. `kilosort2_5`), replicating v1's
+  auto-insert. It is **opt-in** — `initialize_v2_defaults()` does not call
+  it, so users who do not need v1 sorter names pay nothing.
+
+## 2. What you query differently
+
+- **No `recording_id`-keyed `IntervalList` row.** v2 stores the
+  valid-times range on the `Recording` row. Reconstruct the old shape
+  with:
+
+  ```python
+  row = (Recording & {"recording_id": rid}).fetch1()
+  valid_times = np.asarray([[row["saved_start"], row["saved_end"]]])
+  ```
+
+- **Artifact `IntervalList` names are prefixed `artifact_{uuid}`** (v1
+  used a bare UUID string). Use the helper instead of string-munging:
+
+  ```python
+  from spyglass.spikesorting.v2.utils import (
+      artifact_interval_list_name,
+      parse_artifact_interval_list_name,
+  )
+  ```
+
+- **`Sorting.time_of_sort` is a `datetime`**, not a Unix-epoch int.
+  Comparisons against `int(time.time())` must cast.
+
+## 3. What's faster, safer, or more reproducible
+
+- **Chunked artifact detection.** v2 runs a memory-bounded
+  `ChunkRecordingExecutor` pass (controlled by
+  `ArtifactDetectionParameters.job_kwargs`, default `chunk_duration='1s'`,
+  `n_jobs=1`) instead of loading the full trace array into RAM. Output is
+  frame-identical to the old path.
+- **Monotonicity-repair provenance.** Non-strictly-increasing NWB
+  timestamps are repaired with recorded provenance (`timestamps_adjusted`,
+  `n_adjusted_samples`) rather than silently rewritten.
+- **Hash-verifiable Recording rebuild.** The preprocessed `Recording`
+  cache carries an `NwbfileHasher` `cache_hash`.
+- **Pinned SpikeInterface (`==0.104.3`) + KS4/MS5 snapshot tests.** A SI
+  version bump that would change a sorter's `extra="allow"` defaults
+  surfaces as a deliberate, audited test failure.
+- **Analyzer-folder disk-leak audit.**
+  `Sorting.find_orphaned_analyzer_folders(dry_run=True)` surfaces 5–50 GB
+  on-disk leaks from delete-override bypass.
+
+## 4. What's not there yet
+
+Each unported feature raises an informative `ImportError` (or
+`NotImplementedError` for gated methods) naming the fallback. Use the v1
+chain in the interim; the parent-plan phase that delivers each v2 port is
+noted.
+
+| Feature | v1 fallback | v2 delivery |
+| --- | --- | --- |
+| Metric / auto-merge curation | `from spyglass.spikesorting.v1 import MetricCuration, MetricCurationParameters, WaveformParameters, MetricParameters` | parent plan Phase 2 (AnalyzerCuration) |
+| FigURL curation views | `from spyglass.spikesorting.v1 import FigURLCuration, FigURLCurationSelection` | parent plan Phase 5 (UX / FigPack) |
+| Burst-pair curation | `from spyglass.spikesorting.v1 import BurstPair, BurstPairParams, BurstPairSelection` | parent plan Phase 2 |
+| Recording recompute | `from spyglass.spikesorting.v1.recompute import RecordingRecompute, RecordingRecomputeSelection` | parent plan Phase 2 |
+| Concatenated recording / session group | (no v1 equivalent) | parent plan Phase 3 |
+| Cross-session unit matching (`UnitMatch`) | (no v1 equivalent) | parent plan Phase 4 |
+
+## 5. What v1↔v2 comparisons WILL show
+
+If you compare v1 and v2 outputs on the same input, expect these
+**intentional, correct** differences (each is documented in the
+[CHANGELOG](../CHANGELOG.md) v2 breaking-changes subsection):
+
+- **Small spike-count delta near artifact-mask edges.** v2 fixes v1's
+  off-by-one interval consolidation. A few spikes per disjoint interval
+  boundary differ; v2 is correct.
+- **Real differences on multi-channel clusterless sorts.** v1's
+  `noise_levels=[1.0]` silently misread channels; v2 broadcasts to
+  `n_channels`. v2 is the right answer.
+- **KS4 may differ after a SpikeInterface version bump** — caught by the
+  pinned-version snapshot test rather than appearing silently.
+- **MS4 outputs are identical when seeds match.** v2 pins SI's whitening
+  and noise-level seeds; with the same `random_seed` the sort is
+  reproducible.

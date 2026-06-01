@@ -84,6 +84,8 @@ nav:
     - Centralized Code: Features/Mixin.md
     - Recompute: Features/Recompute.md
     - Ingestion: Features/Ingestion.md
+    - Spike Sorting v2: Features/SpikeSortingV2.md
+    - Spike Sorting v1→v2 Migration: Features/SpikeSortingV2_Migration.md
   - For Developers:
     - Overview: ForDevelopers/index.md
     - How to Contribute: ForDevelopers/Contribute.md

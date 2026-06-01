@@ -285,6 +285,165 @@ in-flight v1 PR on `copilot/fix-populating-artifact-detection`.
   count-equivalent uV via `count × gain_uV_per_count`) until v2
   ships a gain-aware detection path.
 
+#### Spike Sorting v2 — v1→v2 migration reference (breaking changes)
+
+A consolidated, click-through enumeration of every user-visible v1→v2
+break, grouped by category. The narrative migration guide lives at
+[docs/src/Features/SpikeSortingV2_Migration.md](./docs/src/Features/SpikeSortingV2_Migration.md);
+the bullets below are the terse, source-linked index. The
+artifact-detection unit-conversion fix and the default-threshold change
+are documented above (see the first v2 subsection); they are
+cross-referenced here, not duplicated.
+
+**API renames**
+
+- `SpikeSorterParameters.sorter_param_name` → `SorterParameters.sorter_params_name`
+  (column gained an `s`):
+  [sorting.py:108-115](./src/spyglass/spikesorting/v2/sorting.py#L108-L115).
+  v1 code restricting `{"sorter_param_name": "..."}` returns empty on v2.
+- `apply_merges` kwarg → `apply_merge` (singular) on
+  `CurationV2.insert_curation`:
+  [curation.py:220](./src/spyglass/spikesorting/v2/curation.py#L220).
+- Preprocessing field renames `frequency_min`/`frequency_max` →
+  `freq_min`/`freq_max`:
+  [_params/preprocessing.py:22-23](./src/spyglass/spikesorting/v2/_params/preprocessing.py#L22-L23).
+- Franklab MS4 preset renamed
+  `franklab_tetrode_hippocampus_30KHz` → `franklab_tetrode_hippocampus_30kHz_ms4`
+  (and the cortex equivalent):
+  [sorting.py:142-201](./src/spyglass/spikesorting/v2/sorting.py#L142-L201).
+  v1-name alias rows ship for one release (lowercase-k + `_ms4` is the
+  canonical name); the aliases are dropped a release after this entry.
+
+**Dropped or relocated data**
+
+- The `IntervalList` row keyed by `recording_id` is no longer inserted;
+  the valid-times range lives on the `Recording` row instead
+  ([recording.py:781-782](./src/spyglass/spikesorting/v2/recording.py#L781-L782)).
+  Reconstruction recipe:
+  ```python
+  row = (Recording & {"recording_id": rid}).fetch1()
+  valid_times = np.asarray([[row["saved_start"], row["saved_end"]]])
+  ```
+- Artifact `IntervalList.interval_list_name` is now prefixed
+  `artifact_{uuid}` (was a bare `str(uuid)`); use
+  `parse_artifact_interval_list_name` for backward-compatible lookup
+  ([utils.py:576-611](./src/spyglass/spikesorting/v2/utils.py#L576-L611)).
+- `Sorting.time_of_sort` is a native `datetime`, not Unix int seconds
+  ([sorting.py:684](./src/spyglass/spikesorting/v2/sorting.py#L684)).
+  Consumers comparing against `int(time.time())` must cast.
+- Object-ID columns widened `varchar(40)` → `varchar(72)` on `Sorting`
+  ([sorting.py:681](./src/spyglass/spikesorting/v2/sorting.py#L681)) and
+  `CurationV2`
+  ([curation.py:109](./src/spyglass/spikesorting/v2/curation.py#L109)).
+- `description` widened `varchar(100)` → `varchar(255)` on `CurationV2`
+  ([curation.py:112](./src/spyglass/spikesorting/v2/curation.py#L112)).
+- `MetricCuration`, `FigURLCuration`, `BurstPair`, and
+  `RecordingRecompute` chains are not yet ported — see "Removed v1
+  features" below.
+
+**Schema-defaults flips (programmatic users only)**
+
+- `ClusterlessThresholderSchema().noise_levels` default changed from
+  `[1.0]` to `None` ("let SI compute per-channel MAD")
+  ([_params/sorter.py:142-184](./src/spyglass/spikesorting/v2/_params/sorter.py#L142-L184)).
+  The shipped `default` Lookup row still carries `noise_levels=[1.0]`
+  for v1 production parity
+  ([sorting.py:249](./src/spyglass/spikesorting/v2/sorting.py#L249));
+  only the schema field default flipped. Programmatic users constructing
+  the schema without args now get MAD semantics — pass
+  `noise_levels=[1.0]` to preserve v1 microvolt semantics. Fixes a real
+  1400× clusterless divergence.
+- `MountainSort4Schema().freq_min`/`freq_max` defaults are `600.0`/`6000.0`
+  (Frank-lab tetrode preset), not SI's wrapper defaults
+  ([_params/sorter.py:68-69](./src/spyglass/spikesorting/v2/_params/sorter.py#L68-L69)).
+- `WhitenParams` default flipped from "on" to `None` to match the
+  runtime (whitening is deferred to the sorter)
+  ([_params/preprocessing.py:110](./src/spyglass/spikesorting/v2/_params/preprocessing.py#L110)).
+
+**Boundary semantics — small spike-count delta near artifact edges**
+
+- v1's interval consolidation had an off-by-one bug (dropped the last
+  valid sample of each disjoint interval); v2 corrects it
+  ([utils.py:499-575](./src/spyglass/spikesorting/v2/utils.py#L499-L575)).
+  v1↔v2 spike counts can differ by a few spikes near artifact-mask
+  boundaries; a spike-by-spike comparison on the same input WILL differ
+  at those edges. This is correct behavior, not a regression.
+
+**Multi-channel clusterless `noise_levels` broadcast fix**
+
+- v1's `noise_levels=[1.0]` on a multi-channel recording silently
+  misread channels (singleton indexing in SI's `locally_exclusive` peak
+  detection); v2 broadcasts to `n_channels` at runtime
+  ([sorting.py:1605-1640](./src/spyglass/spikesorting/v2/sorting.py#L1605-L1640)).
+  v1↔v2 clusterless sorts on multi-channel recordings WILL show real,
+  correct differences — v2 is the right answer.
+
+**Determinism — random seeds pinned**
+
+- v2 explicitly pins SI's `seed` for `sip.whiten`
+  ([sorting.py:1733-1752](./src/spyglass/spikesorting/v2/sorting.py#L1733-L1752))
+  and for `get_noise_levels`
+  ([sorting.py:1605-1640](./src/spyglass/spikesorting/v2/sorting.py#L1605-L1640)),
+  after SI PR #3359 changed those defaults from `seed=0` to `seed=None`.
+  Per-row override via `SorterParameters.job_kwargs={'random_seed': N}`.
+
+**Default thresholds**
+
+- Artifact detection ships `amplitude_thresh_uV=500` (was `3000` in v1)
+  ([_params/artifact_detection.py:61](./src/spyglass/spikesorting/v2/_params/artifact_detection.py#L61));
+  see the artifact-detection unit-conversion subsection above for the
+  full rationale.
+
+**Removed v1 features (use the v1 fallback in the interim)**
+
+- `MetricCuration` chain (`MetricCuration`, `MetricCurationParameters`,
+  `WaveformParameters`, `MetricParameters`) — the v2 stub raises an
+  informative `ImportError` pointing at
+  `spyglass.spikesorting.v1.metric_curation`
+  ([metric_curation.py](./src/spyglass/spikesorting/v2/metric_curation.py)).
+- `FigURLCuration` chain — v2 stub points at
+  `spyglass.spikesorting.v1.figurl_curation`
+  ([figpack_curation.py](./src/spyglass/spikesorting/v2/figpack_curation.py)).
+- `BurstPair` chain — use `spyglass.spikesorting.v1` (`BurstPair`,
+  `BurstPairParams`, `BurstPairSelection`).
+- `RecordingRecompute` chain — use
+  `spyglass.spikesorting.v1.recompute`.
+- `recording_id`-keyed `IntervalList` row — see "Dropped or relocated
+  data" above.
+
+**Tags**
+
+- Artifact `IntervalList.pipeline` tag `spikesorting_artifact_v1` →
+  `spikesorting_artifact_v2`
+  ([artifact.py:918](./src/spyglass/spikesorting/v2/artifact.py#L918)).
+
+**Production-scale (chunking, version pin, disk-leak audit)**
+
+- Artifact detection runs a chunked `ChunkRecordingExecutor` pass
+  instead of a full in-memory `get_traces` scan
+  ([artifact.py:929](./src/spyglass/spikesorting/v2/artifact.py#L929),
+  [_compute_artifact_chunk](./src/spyglass/spikesorting/v2/artifact.py#L96)).
+  The `ArtifactDetectionParameters.job_kwargs` blob is now functional
+  (`n_jobs`/`chunk_duration`, default `chunk_duration='1s'`, `n_jobs=1`);
+  output is frame-identical to the old path.
+- SpikeInterface pinned to `==0.104.3`
+  ([pyproject.toml:69](./pyproject.toml#L69)); KS4/MS5/SC2/TDC2/Generic
+  schemas use `extra="allow"`, so SI-version drift is caught by the
+  snapshot tests rather than silently changing sorter defaults.
+- New ops helper `Sorting.find_orphaned_analyzer_folders(*, dry_run=True)`
+  ([sorting.py:1249-1354](./src/spyglass/spikesorting/v2/sorting.py#L1249-L1354))
+  surfaces 5–50 GB analyzer-folder disk leaks from delete-override
+  bypass.
+
+**Opt-in back-compat helper**
+
+- `SorterParameters.insert_default_legacy_si_sorters()`
+  ([sorting.py:323-393](./src/spyglass/spikesorting/v2/sorting.py#L323-L393))
+  inserts `('<sorter>', 'default')` rows for installed non-curated SI
+  sorters, replicating v1's auto-insert for ported workflows that name a
+  sorter via `('kilosort2_5', 'default')`. Opt-in — NOT called by
+  `initialize_v2_defaults()`.
+
 #### LFPBandV1 Fix
 
 If you were using a pre-release version of Spyglass 0.5.6 LFPBandV1 after April
