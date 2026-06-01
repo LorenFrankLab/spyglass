@@ -339,7 +339,11 @@ def test_recording_populates_and_round_trips(
     )
 
     # Clear any prior Recording row for this selection (subsequent module
-    # runs would otherwise short-circuit populate()).
+    # runs would otherwise short-circuit populate()). Drop downstream
+    # artifact/sorting selections first so the Recording cascade does not
+    # trip the source-part master-before-part rule when an earlier test
+    # left those rows behind.
+    _clear_recording_downstream(recording_selection_key["recording_id"])
     (Recording & recording_selection_key).super_delete(warn=False)
     Recording.populate(recording_selection_key, reserve_jobs=False)
     row = (Recording & recording_selection_key).fetch1()
@@ -551,6 +555,51 @@ def _clean_session_v2(session_key):
     (Recording & rec_keys).super_delete(warn=False) if rec_keys else None
     (RecordingSelection & session_key).super_delete(warn=False)
     (SortGroupV2 & session_key).super_delete(warn=False)
+
+
+def _clear_recording_downstream(recording_id) -> None:
+    """Delete the source-polymorphic selections that block a Recording delete.
+
+    A bare ``(Recording & key).super_delete()`` raises ``Attempt to
+    delete part table ... before deleting from its master`` whenever a
+    prior test left ``ArtifactSelection`` / ``SortingSelection`` rows
+    whose ``RecordingSource`` part FKs this ``recording_id`` (the
+    Recording cascade reaches the orphan part before its master -- the
+    same source-part cascade gap ``_clean_session_v2`` documents). This
+    clears those masters (master-first, with their downstream
+    ArtifactDetection / Sorting / CurationV2 / merge rows) so a test can
+    then ``super_delete`` the Recording WITHOUT also dropping the shared
+    ``SortGroupV2`` / ``RecordingSelection`` rows it still needs.
+    """
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    rec = [{"recording_id": recording_id}]
+
+    sorting_keys = (SortingSelection.RecordingSource & rec).fetch(
+        "KEY", as_dict=True
+    )
+    if sorting_keys:
+        merge_ids = (SpikeSortingOutput.CurationV2 & sorting_keys).fetch(
+            "merge_id"
+        )
+        for mid in merge_ids:
+            (SpikeSortingOutput & {"merge_id": mid}).super_delete(warn=False)
+        (CurationV2 & sorting_keys).super_delete(warn=False)
+        (Sorting & sorting_keys).super_delete(warn=False)
+        (SortingSelection & sorting_keys).super_delete(warn=False)
+
+    artifact_keys = (ArtifactSelection.RecordingSource & rec).fetch(
+        "KEY", as_dict=True
+    )
+    if artifact_keys:
+        (ArtifactDetection & artifact_keys).super_delete(warn=False)
+        (ArtifactSelection & artifact_keys).super_delete(warn=False)
 
 
 # ---------- ArtifactSelection source-part pattern -------------------------
@@ -1243,22 +1292,26 @@ def test_sorting_make_fetch_resolves_artifact_obs_intervals(populated_sorting):
 
 
 @pytest.mark.slow
-def test_rebuild_warns_on_timestamp_provenance_mismatch(
-    populated_recording, monkeypatch, caplog
+def test_rebuild_raises_on_timestamp_provenance_mismatch(
+    populated_recording, monkeypatch
 ):
-    """Rebuild warns when recomputed timestamp-repair provenance drifts.
+    """Rebuild RAISES when recomputed timestamp-repair provenance drifts.
 
     The Recording row's ``timestamps_adjusted`` / ``n_adjusted_samples``
-    columns describe the cached artifact. If a rebuild recomputes a
-    different repair (e.g. the source NWB's timestamps changed), those
-    columns would silently misdescribe the rebuilt file. The rebuild must
-    surface the drift. We force a divergent recompute by monkeypatching
+    columns describe the cached artifact. The repair is a deterministic
+    function of the source timestamps, so a rebuild that recomputes
+    different provenance means the upstream raw NWB's timestamps changed
+    -- the row would then misdescribe the rebuilt file. Unlike the
+    not-rebuild-deterministic ``cache_hash`` (warn only), this is a real
+    integrity violation and must raise (C3: "columns stay accurate or
+    assert they match"). We force a divergent recompute by monkeypatching
     ``_compute_recording_artifact`` to return provenance unequal to the
-    stored row, then assert the mismatch is logged (same fail-soft
-    contract as the cache-hash check: warn, do not auto-mutate the row).
+    stored row, return the stored hash so only the provenance check can
+    fire, and assert the raise + that the row is not mutated.
     """
-    import logging
-
+    from spyglass.spikesorting.v2.exceptions import (
+        RecordingProvenanceMismatchError,
+    )
     from spyglass.spikesorting.v2.recording import Recording
 
     row = (Recording & populated_recording).fetch1()
@@ -1285,13 +1338,13 @@ def test_rebuild_warns_on_timestamp_provenance_mismatch(
         lambda self, **kw: fake_return,
     )
 
-    with caplog.at_level(logging.WARNING):
+    with pytest.raises(
+        RecordingProvenanceMismatchError, match="timestamp-repair provenance"
+    ):
         Recording()._rebuild_nwb_artifact(populated_recording)
 
-    assert any(
-        "timestamp-repair provenance" in rec.message for rec in caplog.records
-    ), "rebuild did not warn on a timestamp-provenance mismatch"
-    # Fail-soft: the row's provenance columns are not auto-modified.
+    # The row's provenance columns are not auto-modified by the failed
+    # rebuild (re-derivation from the corrected source is the repair path).
     after = (Recording & populated_recording).fetch1()
     assert bool(after["timestamps_adjusted"]) == bool(
         row["timestamps_adjusted"]

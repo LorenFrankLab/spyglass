@@ -1231,19 +1231,28 @@ class Recording(SpyglassMixin, dj.Computed):
                 "deleted; inspect upstream raw NWB / SI version before "
                 "rerunning."
             )
-        # Timestamp-repair provenance must stay accurate after a rebuild:
-        # the row's timestamps_adjusted / n_adjusted_samples columns
-        # describe the artifact on disk, so a rebuild that repaired a
-        # different number of samples (e.g. the source NWB's timestamps
-        # changed) would leave those columns lying about the cached file.
-        # Warn loudly -- the row is not auto-updated (same fail-soft
-        # contract as the hash check; the operator inspects before
-        # re-running).
+        # Timestamp-repair provenance must stay accurate after a rebuild.
+        # Unlike ``cache_hash`` (not rebuild-deterministic -> warn only),
+        # the repair provenance is a DETERMINISTIC function of the source
+        # timestamps (see ``_repaired_timestamps``): a faithful rebuild of
+        # an unchanged source reproduces identical ``timestamps_adjusted``
+        # / ``n_adjusted_samples``. A mismatch therefore means the
+        # upstream raw NWB's timestamps genuinely changed, so the row's
+        # provenance columns now describe a different recording than the
+        # rebuilt artifact. RAISE rather than warn -- the stale row must
+        # not be silently relied on, and the columns are not auto-updated
+        # in place (re-derive from the corrected source via a deliberate
+        # repair path). Satisfies C3's "columns stay accurate or assert
+        # they match" contract.
         if (
             bool(rebuilt_adjusted) != bool(row["timestamps_adjusted"])
             or int(rebuilt_n_adjusted) != int(row["n_adjusted_samples"])
         ):
-            logger.warning(
+            from spyglass.spikesorting.v2.exceptions import (
+                RecordingProvenanceMismatchError,
+            )
+
+            raise RecordingProvenanceMismatchError(
                 "Recording._rebuild_nwb_artifact: rebuilt timestamp-repair "
                 f"provenance (timestamps_adjusted={bool(rebuilt_adjusted)}, "
                 f"n_adjusted_samples={int(rebuilt_n_adjusted)}) does not "
@@ -1251,9 +1260,11 @@ class Recording(SpyglassMixin, dj.Computed):
                 f"(timestamps_adjusted={bool(row['timestamps_adjusted'])}, "
                 f"n_adjusted_samples={int(row['n_adjusted_samples'])}) for "
                 f"analysis_file_name={row['analysis_file_name']!r}. The "
-                "row's provenance columns now describe a different repair "
-                "than the rebuilt artifact; inspect the upstream raw NWB "
-                "before relying on them."
+                "stored provenance columns describe a different repair than "
+                "the rebuilt artifact -- the upstream raw NWB's timestamps "
+                "likely changed since the row was written. Re-derive the "
+                "recording from the corrected source instead of relying on "
+                "this row."
             )
 
     # ---- Implementation helpers -----------------------------------------
