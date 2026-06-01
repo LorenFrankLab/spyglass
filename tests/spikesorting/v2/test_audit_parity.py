@@ -415,3 +415,71 @@ def test_apply_artifact_mask_unsorted_valid_times_raises():
         rec, np_mod.array([[0.1, 0.9]])
     )
     assert masked.get_num_samples() == rec.get_num_samples()
+
+
+# ---------- A11: Sorting.populate skips concat-source rows -----------------
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_sorting_make_skips_concat_rows_silently():
+    """A11: concat-source selections are excluded from ``populate()``.
+
+    ``make_fetch`` raises ``NotImplementedError`` for the concat path,
+    but without a ``key_source`` filter ``populate()`` would still pick up
+    concat rows and print that error per row. The antijoin key_source
+    drops any selection that has a ``ConcatenatedRecordingSource`` part.
+
+    The concat materializer (``ConcatenatedRecording.make``) is
+    NotImplementedError today, so a real concat chain cannot be built;
+    we create the ``ConcatenatedRecordingSource`` precondition via a raw
+    FK-checks-off bypass (the only way to land the row pre-Phase-3) and
+    pin the no-op skip.
+
+    TODO(parent-Phase-3): when ``ConcatenatedRecording.make`` lands,
+    remove the key_source antijoin and flip this test to assert the
+    concat row IS populated.
+    """
+    import uuid
+
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        Sorting,
+        SortingSelection,
+    )
+
+    # clusterless_thresholder/default is always inserted (non-SI, never
+    # install-gated) so the master's SorterParameters FK resolves.
+    SorterParameters.insert_default()
+
+    sid = uuid.uuid4()
+    SortingSelection.insert1(
+        {
+            "sorting_id": sid,
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": "default",
+        },
+        allow_direct_insert=True,
+    )
+    conn = dj.conn()
+    conn.query("SET FOREIGN_KEY_CHECKS=0")
+    try:
+        SortingSelection.ConcatenatedRecordingSource.insert1(
+            {"sorting_id": sid, "concat_recording_id": uuid.uuid4()},
+            allow_direct_insert=True,
+        )
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+    try:
+        # Excluded from key_source...
+        assert len(Sorting.key_source & {"sorting_id": sid}) == 0, (
+            "concat-source selection leaked into Sorting.key_source"
+        )
+        # ...and populate restricted to it is a silent no-op (make_fetch's
+        # NotImplementedError is never reached).
+        Sorting.populate({"sorting_id": sid}, reserve_jobs=False)
+        assert len(Sorting & {"sorting_id": sid}) == 0
+    finally:
+        (SortingSelection & {"sorting_id": sid}).delete(safemode=False)

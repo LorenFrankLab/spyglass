@@ -632,6 +632,19 @@ class Sorting(SpyglassMixin, dj.Computed):
         n_spikes: int
         """
 
+    # Exclude concat-source selections from populate. ``make_fetch``
+    # raises ``NotImplementedError`` for the concat path (the concat
+    # materializer is gated), but the DEFAULT key_source (the full
+    # ``SortingSelection``) would still hand concat rows to ``populate()``,
+    # which then prints a confusing per-row error. The antijoin drops any
+    # selection that has a ``ConcatenatedRecordingSource`` part. No-op
+    # today (no concat rows exist); the contract lands before parent
+    # Phase 3 implements ``ConcatenatedRecording.make``, at which point
+    # this restriction is removed so concat rows populate normally.
+    key_source = (
+        SortingSelection - SortingSelection.ConcatenatedRecordingSource
+    )
+
     # Tri-part dispatch + parallel populate. ``Sorting.make`` is the
     # longest of the three Computed stages (sorters routinely take
     # 5-20 minutes); moving the run outside the framework
