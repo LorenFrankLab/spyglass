@@ -116,14 +116,31 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
     -> Session
     sort_group_id: int
     ---
-    sort_reference_electrode_id = -1: int
+    reference_mode = 'none': varchar(32)
+    reference_electrode_id = null: int
     """
+    # ``reference_mode`` is validated against the ``ReferenceMode`` Literal
+    # in ``insert1`` / ``insert`` (varchar, not a MySQL enum -- the mode set
+    # may grow; see ``ReferenceMode``). ``reference_electrode_id`` is
+    # non-null iff ``reference_mode == 'specific'``. This replaced a single
+    # ``sort_reference_electrode_id`` int whose magic sentinels (-1 none,
+    # -2 global median, >=0 specific) conflated mode with channel id.
 
     class SortGroupElectrode(SpyglassMixinPart):
         definition = """
         -> master
         -> Electrode
         """
+
+    def insert1(self, row, **kwargs):
+        _validate_reference_fields(dict(row))
+        super().insert1(row, **kwargs)
+
+    def insert(self, rows, **kwargs):
+        rows = [dict(r) for r in rows]
+        for r in rows:
+            _validate_reference_fields(r)
+        super().insert(rows, **kwargs)
 
     # ---- Existing-entry safety ------------------------------------------
 
@@ -236,7 +253,8 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         nwb_file_name: str,
         omit_ref_electrode_group: bool = False,
         omit_unitrode: bool = True,
-        sort_reference_electrode_id: int = -1,
+        reference_mode: str = "none",
+        reference_electrode_id: int | None = None,
         sort_group_ids: list[int] | None = None,
         delete_existing_entries: bool = False,
         confirm: bool = False,
@@ -257,11 +275,15 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         omit_unitrode
             If True, sort groups with only one channel after filtering
             are skipped (a unitrode usually means a broken shank).
-        sort_reference_electrode_id
-            Reference electrode applied to every sort group this call
-            creates. ``-1`` = none; ``-2`` = global median; ``>=0`` =
-            specific channel id. Per-group references are not supported
-            in v2; if you need them, build the rows manually.
+        reference_mode
+            Referencing mode applied to every sort group this call
+            creates: ``"none"``, ``"global_median"``, or ``"specific"``
+            (subtract ``reference_electrode_id``). Per-group references
+            are not supported in v2; if you need them, build the rows
+            manually.
+        reference_electrode_id
+            Electrode id subtracted when ``reference_mode == "specific"``;
+            must be None for the other modes.
         sort_group_ids
             Optional custom sort-group IDs. If None, the next available
             integers starting from ``max(existing) + 1`` are used so
@@ -311,9 +333,12 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
                         }
                     )
                     continue
-                if omit_ref_electrode_group:
-                    ref_match = electrodes["electrode_id"] == (
-                        sort_reference_electrode_id
+                if (
+                    omit_ref_electrode_group
+                    and reference_mode == "specific"
+                ):
+                    ref_match = (
+                        electrodes["electrode_id"] == reference_electrode_id
                     )
                     if ref_match.any():
                         ref_group = electrodes["electrode_group_name"][
@@ -377,7 +402,8 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
                 {
                     "nwb_file_name": nwb_file_name,
                     "sort_group_id": sg_id,
-                    "sort_reference_electrode_id": sort_reference_electrode_id,
+                    "reference_mode": reference_mode,
+                    "reference_electrode_id": reference_electrode_id,
                 }
             )
             for elec in group_elecs:
@@ -419,7 +445,8 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         column: str,
         groups: list[list],
         sort_group_ids: list[int] | None = None,
-        sort_reference_electrode_id: int = -1,
+        reference_mode: str = "none",
+        reference_electrode_id: int | None = None,
         remove_bad_channels: bool = True,
         omit_unitrode: bool = True,
         delete_existing_entries: bool = False,
@@ -445,7 +472,7 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         sort_group_ids
             Optional explicit IDs, same length as ``groups``. Defaults
             to the next available integers.
-        sort_reference_electrode_id, remove_bad_channels, omit_unitrode
+        reference_mode, reference_electrode_id, remove_bad_channels, omit_unitrode
             See ``set_group_by_shank``. ``remove_bad_channels`` defaults
             to True; ``omit_unitrode`` defaults to True.
         delete_existing_entries, confirm
@@ -539,7 +566,8 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
                 {
                     "nwb_file_name": nwb_file_name,
                     "sort_group_id": sg_id,
-                    "sort_reference_electrode_id": sort_reference_electrode_id,
+                    "reference_mode": reference_mode,
+                    "reference_electrode_id": reference_electrode_id,
                 }
             )
             for elec_row in group_elecs:
@@ -731,7 +759,8 @@ class RecordingFetched(NamedTuple):
 
     sel: dict
     channel_ids: list
-    ref_channel_id: int
+    reference_mode: str
+    reference_electrode_id: int | None
     sort_valid_times: np.ndarray
     raw_valid_times: np.ndarray
     preproc_validated: PreprocessingParamsSchema
@@ -834,14 +863,18 @@ class Recording(SpyglassMixin, dj.Computed):
                 f"Recording.make: sort group {sort_group_id} for "
                 f"{nwb_file_name!r} has zero electrodes."
             )
-        ref_channel_id = int(
-            (
-                SortGroupV2
-                & {
-                    "nwb_file_name": nwb_file_name,
-                    "sort_group_id": sort_group_id,
-                }
-            ).fetch1("sort_reference_electrode_id")
+        reference_mode, reference_electrode_id = (
+            SortGroupV2
+            & {
+                "nwb_file_name": nwb_file_name,
+                "sort_group_id": sort_group_id,
+            }
+        ).fetch1("reference_mode", "reference_electrode_id")
+        reference_mode = str(reference_mode)
+        reference_electrode_id = (
+            None
+            if reference_electrode_id is None
+            else int(reference_electrode_id)
         )
         sort_valid_times = (
             IntervalList
@@ -890,7 +923,8 @@ class Recording(SpyglassMixin, dj.Computed):
         return RecordingFetched(
             sel=sel,
             channel_ids=channel_ids,
-            ref_channel_id=ref_channel_id,
+            reference_mode=reference_mode,
+            reference_electrode_id=reference_electrode_id,
             sort_valid_times=sort_valid_times,
             raw_valid_times=raw_valid_times,
             preproc_validated=preproc_validated,
@@ -904,7 +938,8 @@ class Recording(SpyglassMixin, dj.Computed):
         key,
         sel,
         channel_ids,
-        ref_channel_id,
+        reference_mode,
+        reference_electrode_id,
         sort_valid_times,
         raw_valid_times,
         preproc_validated,
@@ -955,7 +990,8 @@ class Recording(SpyglassMixin, dj.Computed):
             nwb_file_name=sel["nwb_file_name"],
             interval_list_name=sel["interval_list_name"],
             channel_ids=channel_ids,
-            ref_channel_id=ref_channel_id,
+            reference_mode=reference_mode,
+            reference_electrode_id=reference_electrode_id,
             sort_valid_times=sort_valid_times,
             raw_valid_times=raw_valid_times,
             preproc_validated=preproc_validated,
@@ -1151,7 +1187,8 @@ class Recording(SpyglassMixin, dj.Computed):
             nwb_file_name=fetched.sel["nwb_file_name"],
             interval_list_name=fetched.sel["interval_list_name"],
             channel_ids=fetched.channel_ids,
-            ref_channel_id=fetched.ref_channel_id,
+            reference_mode=fetched.reference_mode,
+            reference_electrode_id=fetched.reference_electrode_id,
             sort_valid_times=fetched.sort_valid_times,
             raw_valid_times=fetched.raw_valid_times,
             preproc_validated=fetched.preproc_validated,
@@ -1179,7 +1216,8 @@ class Recording(SpyglassMixin, dj.Computed):
         nwb_file_name: str,
         interval_list_name: str,
         channel_ids: list,
-        ref_channel_id: int,
+        reference_mode: str,
+        reference_electrode_id: int | None,
         sort_valid_times,
         raw_valid_times,
         preproc_validated: PreprocessingParamsSchema,
@@ -1246,7 +1284,8 @@ class Recording(SpyglassMixin, dj.Computed):
                 nwb_file_name=nwb_file_name,
                 interval_list_name=interval_list_name,
                 sort_group_channel_ids=channel_ids,
-                ref_channel_id=ref_channel_id,
+                reference_mode=reference_mode,
+                reference_electrode_id=reference_electrode_id,
                 sort_valid_times=sort_valid_times,
                 raw_valid_times=raw_valid_times,
                 min_segment_length=preproc_validated.min_segment_length,
@@ -1255,7 +1294,8 @@ class Recording(SpyglassMixin, dj.Computed):
         )
         recording = self._apply_pre_motion_preprocessing(
             recording=recording,
-            ref_channel_id=ref_channel_id,
+            reference_mode=reference_mode,
+            reference_electrode_id=reference_electrode_id,
             sort_group_channel_ids=channel_ids,
             validated=preproc_validated,
         )
@@ -1335,7 +1375,8 @@ class Recording(SpyglassMixin, dj.Computed):
         nwb_file_name: str,
         interval_list_name: str,
         sort_group_channel_ids: list,
-        ref_channel_id: int,
+        reference_mode: str,
+        reference_electrode_id: int | None,
         sort_valid_times,
         raw_valid_times,
         *,
@@ -1461,9 +1502,12 @@ class Recording(SpyglassMixin, dj.Computed):
             # no repair fired -- a no-op on the common path.
             timestamps_override = times[int(s):int(e)]
 
-        if ref_channel_id >= 0:
+        if reference_mode == "specific":
             slice_ids = sorted(
-                set([int(c) for c in sort_group_channel_ids] + [ref_channel_id])
+                set(
+                    [int(c) for c in sort_group_channel_ids]
+                    + [int(reference_electrode_id)]
+                )
             )
         else:
             slice_ids = [int(c) for c in sort_group_channel_ids]
@@ -1716,7 +1760,8 @@ class Recording(SpyglassMixin, dj.Computed):
     @staticmethod
     def _apply_pre_motion_preprocessing(
         recording,
-        ref_channel_id: int,
+        reference_mode: str,
+        reference_electrode_id: int | None,
         sort_group_channel_ids: list,
         validated: PreprocessingParamsSchema,
     ):
@@ -1734,31 +1779,33 @@ class Recording(SpyglassMixin, dj.Computed):
         import numpy as _np
         import spikeinterface.preprocessing as sip
 
-        if ref_channel_id >= 0:
+        if reference_mode == "specific":
             recording = sip.common_reference(
                 recording,
                 reference="single",
-                ref_channel_ids=[int(ref_channel_id)],
+                ref_channel_ids=[int(reference_electrode_id)],
                 dtype=_np.float64,
             )
             # Drop the reference channel from the recording surface so
             # the sorter only sees the actual sort-group channels.
-            if int(ref_channel_id) in [
+            if int(reference_electrode_id) in [
                 int(c) for c in recording.get_channel_ids()
             ]:
-                recording = recording.remove_channels([int(ref_channel_id)])
-        elif ref_channel_id == -2:
+                recording = recording.remove_channels(
+                    [int(reference_electrode_id)]
+                )
+        elif reference_mode == "global_median":
             recording = sip.common_reference(
                 recording,
                 reference="global",
                 operator=validated.common_reference.operator,
                 dtype=_np.float64,
             )
-        elif ref_channel_id != -1:
+        elif reference_mode != "none":
             raise ValueError(
-                "Recording.make: invalid sort_reference_electrode_id "
-                f"{ref_channel_id}. Use -1 (no reference), -2 (global "
-                "median), or a positive electrode id."
+                "Recording.make: invalid reference_mode "
+                f"{reference_mode!r}. Use 'none', 'global_median', or "
+                "'specific'."
             )
 
         # bandpass_filter=None disables filtering (the "no_filter"
