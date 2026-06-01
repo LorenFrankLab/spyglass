@@ -1175,6 +1175,113 @@ class Sorting(SpyglassMixin, dj.Computed):
             if folder.exists():
                 _shutil.rmtree(folder, ignore_errors=False)
 
+    @classmethod
+    def find_orphaned_analyzer_folders(cls, *, dry_run: bool = True) -> dict:
+        """Audit 5-50 GB analyzer-folder disk leaks; never auto-delete DB rows.
+
+        Each populated sort writes a 5-50 GB ``analyzer_folder`` of
+        regeneratable scratch outside the DataJoint-tracked store. The
+        ``Sorting.delete`` override cleans it up on row delete, but an external
+        path that bypasses the override (raw SQL delete, scripted
+        ``dj.Table.connection.query``) leaks the folder. This periodic audit
+        mirrors ``prune_orphaned_selections`` and reports two leak classes:
+
+        - **DB-side orphan**: a ``Sorting`` row whose ``analyzer_folder`` no
+          longer exists on disk (the regeneratable scratch was removed out of
+          band). Reported only -- deleting the *row* is a destructive DB
+          operation the human decides on (per the Spyglass destructive-op
+          contract); this method NEVER auto-deletes a row.
+        - **Disk-side orphan**: an on-disk folder under the analyzer root that
+          no ``Sorting`` row references (the row was deleted via a path that
+          bypassed the ``delete`` override). Safe to delete after inspection.
+
+        **Zero-unit carve-out.** Rows with ``n_units == 0`` are NOT DB-side
+        orphans: ``_build_analyzer`` short-circuits before writing a folder and
+        ``get_analyzer`` raises ``ZeroUnitAnalyzerError`` before reading the
+        path, so an absent folder is expected. The ``analyzer_folder`` column
+        is NOT-NULL ``varchar(255)`` and still carries the would-be path (there
+        is no None/sentinel value), so the carve-out is keyed on
+        ``(Sorting & {"n_units": 0})``, NOT a string match on the column.
+
+        Parameters
+        ----------
+        dry_run : bool, optional
+            When True (default) only report the two orphan lists. When False,
+            after interactive confirmation (``dj.utils.user_choice``), delete
+            the **disk-side** orphan folders only; DB-side rows are never
+            deleted.
+
+        Returns
+        -------
+        dict
+            ``{"db_side": [{"sorting_id", "analyzer_folder"}, ...],
+            "disk_side": [folder_path_str, ...]}``.
+        """
+        import shutil as _shutil
+
+        import datajoint as dj
+
+        from spyglass.spikesorting.v2.utils import _analyzer_path
+
+        # DB-side: units-bearing rows whose stored folder is gone on disk.
+        # The n_units==0 carve-out excludes legitimately folder-less rows.
+        db_side = [
+            row
+            for row in (cls & "n_units > 0").fetch(
+                "sorting_id", "analyzer_folder", as_dict=True
+            )
+            if not Path(row["analyzer_folder"]).exists()
+        ]
+
+        # Disk-side: folders under the analyzer root that no row (any n_units)
+        # references. The root is the shared parent of every _analyzer_path.
+        referenced = {str(p) for p in cls.fetch("analyzer_folder")}
+        analyzer_root = _analyzer_path({"sorting_id": "x"}).parent
+        disk_side = []
+        if analyzer_root.exists():
+            for child in sorted(analyzer_root.iterdir()):
+                if child.is_dir() and str(child) not in referenced:
+                    disk_side.append(str(child))
+
+        logger.info(
+            "Sorting.find_orphaned_analyzer_folders: "
+            f"{len(db_side)} DB-side orphan(s) (row present, folder missing), "
+            f"{len(disk_side)} disk-side orphan(s) (folder present, no row)."
+        )
+        for row in db_side:
+            logger.info(
+                "  DB-side orphan: sorting_id=%s analyzer_folder=%s",
+                row["sorting_id"],
+                row["analyzer_folder"],
+            )
+        for folder in disk_side:
+            logger.info("  disk-side orphan: %s", folder)
+
+        if dry_run or not disk_side:
+            return {"db_side": db_side, "disk_side": disk_side}
+
+        # dry_run=False: delete ONLY the disk-side orphan folders, and only
+        # after explicit interactive confirmation. DB-side rows are never
+        # auto-deleted -- removing a row is the human's decision.
+        msg = (
+            f"Delete {len(disk_side)} orphaned analyzer folder(s) on disk "
+            "(no referencing Sorting row)? This frees 5-50 GB each and cannot "
+            "be undone [yes/no]: "
+        )
+        if dj.utils.user_choice(msg).lower() in ("y", "yes"):
+            for folder in disk_side:
+                _shutil.rmtree(folder, ignore_errors=False)
+            logger.info(
+                "Sorting.find_orphaned_analyzer_folders: deleted "
+                f"{len(disk_side)} disk-side orphan folder(s)."
+            )
+        else:
+            logger.info(
+                "Sorting.find_orphaned_analyzer_folders: aborted; nothing "
+                "deleted."
+            )
+        return {"db_side": db_side, "disk_side": disk_side}
+
     def get_unit_brain_regions(
         self, key, *, allow_anchor_member: bool = False
     ):
