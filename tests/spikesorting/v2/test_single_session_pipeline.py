@@ -1201,6 +1201,48 @@ def test_sorting_get_sorting_round_trips(populated_sorting):
 
 
 @pytest.mark.slow
+def test_sorting_make_fetch_resolves_artifact_obs_intervals(populated_sorting):
+    """``make_fetch`` derives obs_intervals from the ArtifactSource part.
+
+    Regression guard for the T1 schema change: the artifact pass moved
+    from a nullable ``artifact_id`` FK on the ``SortingSelection`` master
+    to the zero-or-one ``ArtifactSource`` part. ``make_fetch`` /
+    ``make_compute`` / ``_rebuild_analyzer_folder`` gate artifact masking
+    on ``sel_row["artifact_id"]``; after the column was dropped, that key
+    is absent on the raw ``fetch1()`` row, so ``make_fetch`` must resolve
+    it via ``SortingSelection.resolve_artifact(key)`` and stash it. If it
+    does not, every artifact-backed sort silently skips masking and
+    writes ``obs_intervals=None`` (full-session envelope) -- a silent
+    scientific-correctness regression this test exists to catch.
+
+    ``populated_sorting`` is artifact-backed (it inserts an
+    ``ArtifactSelection`` + ``ArtifactDetection`` and threads the
+    ``artifact_id`` into the sorting selection), so ``resolve_artifact``
+    must be non-None and ``obs_intervals`` must be populated.
+    """
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    # The sort is artifact-backed: exactly one ArtifactSource part row.
+    artifact_id = SortingSelection.resolve_artifact(populated_sorting)
+    assert artifact_id is not None, (
+        "populated_sorting must be artifact-backed for this guard to be "
+        "meaningful (expected one ArtifactSource part row)."
+    )
+
+    fetched = Sorting().make_fetch(populated_sorting)
+    # make_fetch must have re-attached the resolved artifact_id onto
+    # sel_row (the dropped master column).
+    assert fetched.sel_row.get("artifact_id") == artifact_id
+    # ...and therefore derived the artifact-removed observation window,
+    # not the None full-session fallback.
+    assert fetched.obs_intervals is not None, (
+        "make_fetch returned obs_intervals=None for an artifact-backed "
+        "sort; the ArtifactSource artifact_id was not resolved, so "
+        "artifact masking is silently skipped."
+    )
+
+
+@pytest.mark.slow
 def test_sorting_get_analyzer_loads_folder(populated_sorting):
     """``Sorting.get_analyzer`` loads the SortingAnalyzer from the folder.
 
@@ -6266,10 +6308,10 @@ def test_merge_dispatch_restrict_by_artifact_honored_in_v2(populated_sorting):
     expected = (SpikeSortingOutput.CurationV2 & pk).fetch1("merge_id")
 
     # Resolve this sort's artifact_id (the "none" preset writes
-    # one IntervalList with the artifact-naming convention).
-    artifact_id = (
-        SortingSelection & populated_sorting
-    ).fetch1("artifact_id")
+    # one IntervalList with the artifact-naming convention). T1 moved
+    # the artifact pass off the master onto the ArtifactSource part, so
+    # read it through the resolver, not the dropped master column.
+    artifact_id = SortingSelection.resolve_artifact(populated_sorting)
     artifact_name = artifact_interval_list_name(artifact_id)
 
     merge_ids = SpikeSortingOutput().get_restricted_merge_ids(

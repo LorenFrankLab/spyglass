@@ -16,11 +16,10 @@
 #    need to (re)install the package + extras by hand:
 #       pip install -e ".[test,spikesorting-v2,spikesorting-v2-validation]"
 #       pip install "spikeinterface>=0.104,<0.105"
-#    (The CI `pytest-v2` job installs only ".[test,spikesorting-v2]" and
-#    generates the MEArec smoke fixture instead of installing MEArec; the
-#    `spikesorting-v2-validation` extra is added here so a local FULL run
-#    has MEArec + neuroconv available for `_read_ground_truth` and
-#    `test_mearec_fixture_gain_required`. Note MEArec / elephant cap
+#    (The CI `pytest-v2` job creates this same env from this file, so it
+#    also installs `spikesorting-v2-validation` -- MEArec + neuroconv are
+#    needed for `_read_ground_truth`, `test_mearec_fixture_gain_required`,
+#    and generating the MEArec smoke fixture. Note MEArec / elephant cap
 #    numpy < 2.)
 #
 # Do NOT install the `spikesorting-v2-matching` extra into this env:
