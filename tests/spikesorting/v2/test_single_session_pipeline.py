@@ -6020,18 +6020,72 @@ def test_recording_selection_raises_on_duplicate_logical_identity(
 def test_artifact_detection_delete_handles_orphan_source_part(
     populated_recording, monkeypatch
 ):
-    """``ArtifactDetection.delete`` does not crash when an
-    ArtifactSelection master row's source part fails to resolve.
+    """``ArtifactDetection.delete`` skips an orphan whose source part can no
+    longer be resolved, and still deletes the master.
 
-    The except branch at ``artifact.py:1097-1099`` catches
-    ``resolve_source`` failures during the IntervalList-cleanup
-    loop. Without a test, a regression that re-raised the
-    exception (instead of skipping the orphan) would surface only
-    in production. DataJoint refuses to delete a part table
-    directly, so we monkeypatch ``ArtifactSelection.resolve_source``
-    to raise -- this is the exact failure mode the except branch
-    was written to handle (an orphan master whose source part has
-    been cascade-deleted via some upstream path).
+    An orphan master (its source-part row cascade-deleted via some upstream
+    path) makes ``resolve_source`` raise ``SchemaBypassError`` -- zero source
+    rows. ``ArtifactDetection.delete``'s IntervalList-cleanup loop catches
+    exactly that (``except SchemaBypassError``, narrowed by Phase 1 E3), logs,
+    skips that row's paired IntervalList cleanup, and lets the master delete
+    proceed. We patch ``resolve_source`` to raise the real orphan exception so
+    a regression that re-raised it (instead of skipping) would fail here.
+
+    Companion ``test_artifact_detection_delete_aborts_on_unexpected_resolve_error``
+    pins the other side of E3's narrowed except: a NON-orphan (unexpected)
+    error must propagate and abort the delete rather than be swallowed.
+    """
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactDetectionParameters,
+        ArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.exceptions import SchemaBypassError
+
+    ArtifactDetectionParameters.insert_default()
+    art_pk = ArtifactSelection.insert_selection(
+        {
+            "recording_id": populated_recording["recording_id"],
+            "artifact_params_name": "none",
+        }
+    )
+    ArtifactDetection.populate(art_pk, reserve_jobs=False)
+
+    # An orphan source part is exactly what resolve_source reports as
+    # SchemaBypassError (zero/multiple source rows); simulate that shape.
+    def _orphan_resolve(cls, key):
+        raise SchemaBypassError("simulated orphan: zero source part rows")
+
+    monkeypatch.setattr(
+        ArtifactSelection,
+        "resolve_source",
+        classmethod(_orphan_resolve),
+    )
+
+    # The delete completes without raising; the orphan row's cleanup is
+    # skipped but the master delete proceeds.
+    (ArtifactDetection & art_pk).delete(safemode=False)
+    assert len(ArtifactDetection & art_pk) == 0, (
+        "ArtifactDetection row should be deleted even when resolve_source "
+        "reports an orphan; the SchemaBypassError branch must not "
+        "short-circuit the master delete."
+    )
+
+
+@pytest.mark.slow
+def test_artifact_detection_delete_aborts_on_unexpected_resolve_error(
+    populated_recording, monkeypatch
+):
+    """``ArtifactDetection.delete`` aborts (does NOT swallow) an UNEXPECTED
+    ``resolve_source`` error, leaving the master in place.
+
+    Phase 1 E3 narrowed the cleanup-loop except to ``SchemaBypassError`` (the
+    orphan shape). Any other exception is a genuine bug: swallowing it would
+    silently delete the master and orphan its IntervalList rows. The narrowed
+    except must let it propagate BEFORE ``super().delete()`` runs, so the
+    master survives and the operator sees the failure. ``SchemaBypassError``
+    subclasses ``RuntimeError``, so a bare ``RuntimeError`` is genuinely
+    outside the caught type.
     """
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetection,
@@ -6048,25 +6102,21 @@ def test_artifact_detection_delete_handles_orphan_source_part(
     )
     ArtifactDetection.populate(art_pk, reserve_jobs=False)
 
-    # Patch resolve_source to raise the same shape of exception an
-    # orphan master would produce (the source-part lookup fails).
-    def _broken_resolve(cls, key):
-        raise RuntimeError("simulated orphan: source part missing")
+    def _unexpected_resolve(cls, key):
+        raise RuntimeError("unexpected resolve_source bug")
 
     monkeypatch.setattr(
         ArtifactSelection,
         "resolve_source",
-        classmethod(_broken_resolve),
+        classmethod(_unexpected_resolve),
     )
 
-    # The delete should complete without raising. The current
-    # implementation's except block (artifact.py:1097-1099) skips
-    # rows whose source can't be resolved.
-    (ArtifactDetection & art_pk).delete(safemode=False)
-    assert len(ArtifactDetection & art_pk) == 0, (
-        "ArtifactDetection row should be deleted even when "
-        "resolve_source raises; the except branch must not "
-        "short-circuit the master delete."
+    with pytest.raises(RuntimeError, match="unexpected resolve_source bug"):
+        (ArtifactDetection & art_pk).delete(safemode=False)
+    # Abort happened before the master delete -- the row must still exist.
+    assert len(ArtifactDetection & art_pk) == 1, (
+        "an unexpected resolve_source error must abort the delete before the "
+        "master is removed, not silently orphan it"
     )
 
 
