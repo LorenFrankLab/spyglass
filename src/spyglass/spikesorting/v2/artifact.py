@@ -36,6 +36,11 @@ from typing import NamedTuple
 
 import datajoint as dj
 import numpy as np
+from spikeinterface.core.job_tools import (
+    ChunkRecordingExecutor,
+    ensure_n_jobs,
+    job_keys,
+)
 
 from spyglass.common import IntervalList, Session  # noqa: F401
 from spyglass.spikesorting.v2._params.artifact_detection import (
@@ -54,6 +59,93 @@ from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 
 _assert_v2_db_safe()
 schema = dj.schema("spikesorting_v2_artifact")
+
+
+def _init_artifact_worker(
+    recording,
+    zscore_thresh,
+    amplitude_thresh_uV,
+    proportion_above_thresh,
+):
+    """Per-worker initializer for the chunked artifact scan.
+
+    Mirrors v1's ``spikesorting/utils.py:_init_artifact_worker`` (this is a
+    self-contained v2 copy -- v2 must not import the v1 helper). On a
+    multi-process pool the ``recording`` arrives as a ``to_dict()`` blob and is
+    re-hydrated with ``si.load_extractor``; on the single-process / thread path
+    the live recording object is passed straight through. ``n_required`` and the
+    per-channel ``gains`` are constant across chunks, so they are resolved once
+    here and cached in the worker context rather than recomputed per chunk.
+    """
+    import spikeinterface as si
+
+    recording = (
+        si.load_extractor(recording)
+        if isinstance(recording, dict)
+        else recording
+    )
+    n_channels = len(recording.get_channel_ids())
+    return {
+        "recording": recording,
+        "zscore_thresh": zscore_thresh,
+        "amplitude_thresh_uV": amplitude_thresh_uV,
+        "n_required": int(np.ceil(proportion_above_thresh * n_channels)),
+        "gains": recording.get_channel_gains(),
+    }
+
+
+def _compute_artifact_chunk(segment_index, start_frame, end_frame, worker_ctx):
+    """Flag artifact frame indices within a ``[start_frame, end_frame)`` chunk.
+
+    Reproduces the EXACT per-frame detection math of the former full-in-memory
+    scan, applied to a single chunk: scale to µV with the stored per-channel
+    gains, then OR-combine the amplitude and across-channel z-score detectors.
+    The across-channel (``axis=1``) z-score uses only the chunk row's own
+    columns, so it is identical regardless of where the chunk boundaries fall --
+    this is what makes the chunked output frame-identical to the in-memory one.
+    Returns the GLOBAL (``+ start_frame``) ascending frame indices flagged in
+    this chunk.
+
+    Peak working set per chunk ≈ ``4 × (end_frame - start_frame) × n_channels ×
+    4 bytes`` (raw int slice + float32 µV copy + abs + z-score intermediate),
+    independent of the full recording length.
+    """
+    recording = worker_ctx["recording"]
+    zscore_thresh = worker_ctx["zscore_thresh"]
+    amplitude_thresh_uV = worker_ctx["amplitude_thresh_uV"]
+    n_required = worker_ctx["n_required"]
+    gains = worker_ctx["gains"]
+
+    traces = recording.get_traces(
+        segment_index=segment_index,
+        start_frame=start_frame,
+        end_frame=end_frame,
+        return_in_uV=False,
+    )
+    traces_uv = traces.astype(np.float32) * gains[None, :]
+    absolute = np.abs(traces_uv)
+
+    if amplitude_thresh_uV is not None:
+        above_amp = absolute > amplitude_thresh_uV
+    else:
+        above_amp = np.zeros_like(absolute, dtype=bool)
+    if zscore_thresh is not None:
+        ch_mean = traces_uv.mean(axis=1, keepdims=True)
+        ch_std = traces_uv.std(axis=1, keepdims=True) + 1e-12
+        zscores = np.abs((traces_uv - ch_mean) / ch_std)
+        above_z = zscores > zscore_thresh
+    else:
+        above_z = np.zeros_like(absolute, dtype=bool)
+
+    if amplitude_thresh_uV is not None and zscore_thresh is not None:
+        channel_hit = above_amp | above_z
+    elif amplitude_thresh_uV is not None:
+        channel_hit = above_amp
+    else:
+        channel_hit = above_z
+
+    local = (channel_hit.sum(axis=1) >= n_required).nonzero()[0]
+    return local + start_frame
 
 
 class ArtifactFetched(NamedTuple):
@@ -99,6 +191,16 @@ class ArtifactDetectionParameters(SpyglassMixin, dj.Lookup):
     :class:`ArtifactDetectionParamsSchema`. ``insert_default`` ships two
     presets: ``"none"`` (detect=False, skip artifact scanning) and
     ``"default"`` (amplitude threshold + proportion-above-thresh).
+
+    ``job_kwargs`` is the optional per-row SpikeInterface job-kwargs blob that
+    governs the chunked detection scan
+    (``ArtifactDetection._scan_artifact_frames``). It is merged over the
+    SI-global and ``dj.config['custom']
+    ['spikesorting_v2_job_kwargs']`` defaults by ``_resolved_job_kwargs``. The
+    memory-relevant key is the chunk size -- ``chunk_duration`` (e.g. ``"1s"``,
+    the default), ``chunk_size`` (frames), or ``chunk_memory`` -- which bounds
+    peak working set at ``~4 × chunk_frames × n_channels × 4 bytes``. ``n_jobs``
+    controls the worker-pool size (default 1, serial in-process, matching v1).
     """
 
     definition = """
@@ -106,7 +208,7 @@ class ArtifactDetectionParameters(SpyglassMixin, dj.Lookup):
     ---
     params: blob
     params_schema_version=2: int
-    job_kwargs=null: blob
+    job_kwargs=null: blob  # SI job-kwargs for chunked scan; see docstring
     """
 
     # Row-level ``params_schema_version`` matches the inner
@@ -709,16 +811,13 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         Returns ``valid_times`` plus the per-member-nwb-file
         target list ``make_insert`` writes to.
         """
-        # Resolve job_kwargs even though the in-memory
-        # ``_detect_artifacts`` scan does not consume them. The
-        # resolver call exercises the DataJoint-config and per-row
-        # override channels so tests can monkey-patch
-        # ``_resolved_job_kwargs`` and confirm the artifact compute
-        # stage was wired through. See the Recording.make_compute
-        # comment for the same pattern.
+        # Merge the SI-global, DataJoint-config, and per-row job_kwargs so
+        # the chunked ``_scan_artifact_frames`` pass honors ``n_jobs`` /
+        # ``chunk_duration`` overrides. The stored per-row blob (the audit's
+        # formerly-dead ``job_kwargs`` column) is now functional here.
         from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
 
-        _resolved_job_kwargs(artifact_job_kwargs)
+        resolved_job_kwargs = _resolved_job_kwargs(artifact_job_kwargs)
 
         if source.kind == "recording":
             recording = Recording().get_recording(
@@ -731,6 +830,7 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
                     f" for artifact_id={key['artifact_id']}, "
                     f"recording_id={source.key['recording_id']}"
                 ),
+                job_kwargs=resolved_job_kwargs,
             )
             return ArtifactComputed(
                 valid_times=valid_times,
@@ -766,6 +866,7 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
                 f"shared_artifact_group="
                 f"{source.key['shared_artifact_group_name']}"
             ),
+            job_kwargs=resolved_job_kwargs,
         )
         # One IntervalList row per distinct member nwb_file_name;
         # ``insert_group`` enforces single-session, so the distinct
@@ -826,19 +927,71 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
             self.insert1(key)
 
     @staticmethod
-    def _detect_artifacts(recording, validated, context=""):
+    def _scan_artifact_frames(recording, validated, job_kwargs=None):
+        """Flag artifact frame indices via a chunked ``ChunkRecordingExecutor``.
+
+        Scans the recording chunk by chunk (default chunk size is SI's global
+        ``chunk_duration='1s'``) and concatenates the per-chunk flagged frame
+        indices into one ascending array. Peak working set is bounded by the
+        chunk size -- roughly ``4 × chunk_frames × n_channels × 4 bytes`` (raw
+        int slice + float32 µV copy + abs + z-score intermediate) -- rather than
+        by the full recording, which the predecessor full-``get_traces`` load
+        materialized at ``~4 × n_samples × n_channels × 4 bytes`` (≈27 GB for a
+        1-hour 64-channel 30 kHz recording). Restores v1's chunked path
+        (``v1/artifact.py:_get_artifact_times`` +
+        ``spikesorting/utils.py:_compute_artifact_chunk``) self-contained in v2.
+
+        ``job_kwargs`` is the merged SI job-kwargs blob; only recognized
+        ``job_keys`` (``n_jobs``, ``chunk_duration``, ``pool_engine``, ...) are
+        forwarded to the executor. ``n_jobs=1`` (the default, matching v1) runs
+        serially in-process and passes the live recording to each worker; a
+        multi-process pool receives the ``to_dict()`` blob instead.
+
+        Returns the ascending ndarray of flagged frame indices.
+        """
+        resolved = dict(job_kwargs or {})
+        exec_kwargs = {k: resolved[k] for k in job_keys if k in resolved}
+        n_jobs = ensure_n_jobs(recording, n_jobs=exec_kwargs.get("n_jobs", 1))
+        rec_arg = recording if n_jobs == 1 else recording.to_dict()
+        init_args = (
+            rec_arg,
+            validated.zscore_thresh,
+            validated.amplitude_thresh_uV,
+            validated.proportion_above_thresh,
+        )
+        executor = ChunkRecordingExecutor(
+            recording=recording,
+            func=_compute_artifact_chunk,
+            init_func=_init_artifact_worker,
+            init_args=init_args,
+            handle_returns=True,
+            job_name="detect_artifact_frames",
+            **exec_kwargs,
+        )
+        per_chunk = executor.run()
+        if not per_chunk:
+            return np.empty(0, dtype=np.int64)
+        return np.concatenate(per_chunk)
+
+    @staticmethod
+    def _detect_artifacts(recording, validated, context="", job_kwargs=None):
         """Run amplitude / z-score artifact scan on a SI recording.
 
         Returns an ``ndarray`` of shape ``(n_intervals, 2)`` containing
         the artifact-removed valid times in seconds. When ``detect`` is
         False the full recording window is returned untouched.
 
-        ``context`` is an optional caller-supplied string (e.g.
-        ``" for artifact_id=... recording_id=..."``) appended to the
-        zero-frames warning so an operator can identify which selection
-        scanned empty. The active thresholds are added from
-        ``validated``; ``_detect_artifacts`` itself does not receive the
-        keys, so the caller passes the identity context.
+        The threshold scan runs chunk by chunk via ``_scan_artifact_frames``
+        (SpikeInterface's ``ChunkRecordingExecutor``) so peak memory is bounded
+        by the chunk size rather than the full recording -- see that method's
+        docstring for the per-chunk memory formula and the default chunk size.
+
+        ``job_kwargs`` is the merged per-row / config / global SI job-kwargs
+        blob; the caller resolves it via ``_resolved_job_kwargs`` and passes it
+        through to the executor. ``context`` is an optional caller-supplied
+        string (e.g. ``" for artifact_id=... recording_id=..."``) appended to
+        the zero-frames warning so an operator can identify which selection
+        scanned empty.
         """
         import numpy as _np
 
@@ -863,66 +1016,21 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
             f"min_length_s={validated.min_length_s}."
         )
 
-        # In-memory scan: acceptable for recordings up to a few minutes;
-        # the smoke / 60s polymer fixtures fit easily. Chunked iteration
-        # is follow-up work alongside the recompute pipeline. SI 0.104
-        # renamed the ``return_scaled`` kwarg to ``return_in_uV``.
-        traces = recording.get_traces(return_in_uV=False)
-        # Scale to microvolts using SI's stored gain so the threshold
-        # comparison is in physical units.
-        gains = recording.get_channel_gains()
-        traces_uv = traces.astype(_np.float32) * gains[None, :]
-        absolute = _np.abs(traces_uv)
-
-        n_channels = traces.shape[1]
-        n_required = int(
-            _np.ceil(validated.proportion_above_thresh * n_channels)
+        # Chunked scan via ChunkRecordingExecutor (see
+        # ``_scan_artifact_frames``). The per-frame detection math --
+        # µV scaling with the stored gains, amplitude threshold, and the
+        # across-channel (``axis=1``) z-score with its ``+1e-12`` std
+        # epsilon -- lives in the module-level ``_compute_artifact_chunk``
+        # worker. The z-score is computed on each frame's own columns, so
+        # chunk boundaries (which split the time axis) leave the flagged
+        # frame set unchanged; this is the equivalence the regression test
+        # pins. v1 OR-combined the two detectors at
+        # ``spikesorting/utils.py:198``; the worker preserves that (an AND
+        # would make the dual-threshold mode strictly less sensitive than
+        # either single-threshold mode).
+        frames_above = ArtifactDetection._scan_artifact_frames(
+            recording, validated, job_kwargs
         )
-
-        if validated.amplitude_thresh_uV is not None:
-            above_amp = absolute > validated.amplitude_thresh_uV
-        else:
-            above_amp = _np.zeros_like(absolute, dtype=bool)
-        if validated.zscore_thresh is not None:
-            # Z-score ACROSS channels per frame (axis=1), NOT per
-            # channel over time. This flags per-frame cross-channel
-            # OUTLIERS -- a single channel (or a few) deviating from the
-            # rest of the channels at one time instant. It is BLIND to a
-            # pure common-mode event: when every channel jumps by the
-            # same amount, that amount cancels in ``traces_uv - ch_mean``
-            # (the per-frame across-channel mean shifts by the same
-            # amount), so the z-score stays ~0 and nothing is flagged.
-            # Catch common-mode artifacts (EMG / chewing / head movement
-            # that hit all channels together) with ``amplitude_thresh_uV``
-            # instead. Matches v1's ``stats.zscore(traces, axis=1)`` at
-            # ``spikesorting/utils.py:185,193`` (``axis=1`` is the channels
-            # axis; rows are time frames), so each frame's z-scores use
-            # THAT FRAME's across-channel statistics.
-            ch_mean = traces_uv.mean(axis=1, keepdims=True)
-            ch_std = traces_uv.std(axis=1, keepdims=True) + 1e-12
-            zscores = _np.abs((traces_uv - ch_mean) / ch_std)
-            above_z = zscores > validated.zscore_thresh
-        else:
-            above_z = _np.zeros_like(absolute, dtype=bool)
-
-        # OR combine logic (belt-and-suspenders): flag a frame if
-        # EITHER detector trips. v1 at ``spikesorting/utils.py:198`` uses
-        # ``np.logical_or(above_z, above_a)``; an AND would make the
-        # dual-threshold mode strictly less sensitive than either
-        # single-threshold mode -- the opposite of the v1 intent.
-        # The single-threshold paths (only one of amplitude / zscore
-        # set) are unchanged because ``zeros | above_x == above_x``.
-        if (
-            validated.amplitude_thresh_uV is not None
-            and validated.zscore_thresh is not None
-        ):
-            channel_hit = above_amp | above_z
-        elif validated.amplitude_thresh_uV is not None:
-            channel_hit = above_amp
-        else:
-            channel_hit = above_z
-
-        frames_above = (channel_hit.sum(axis=1) >= n_required).nonzero()[0]
         if len(frames_above) == 0:
             # Matches v1's warning at v1/artifact.py:318 so a
             # downstream consumer noticing "all valid times" can see

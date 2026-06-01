@@ -618,3 +618,266 @@ def test_get_analyzer_zero_unit_raises_before_path_lookup():
             Sorting().get_analyzer({"sorting_id": sid})
     finally:
         (SortingSelection & {"sorting_id": sid}).delete(safemode=False)
+
+
+# ---------- A17: chunked artifact detection via ChunkRecordingExecutor -----
+
+
+def _in_memory_artifact_frames_reference(recording, validated):
+    """Frozen copy of the pre-port full-in-memory artifact-frame scan.
+
+    This reproduces, verbatim, the per-frame detection math that lived in
+    ``ArtifactDetection._detect_artifacts`` before A17 replaced the
+    full-recording ``get_traces`` load with a chunked
+    ``ChunkRecordingExecutor`` pass. It exists ONLY in the test suite as the
+    equivalence oracle: the chunked port must produce frame-identical output
+    to this reference on the same recording. It is intentionally NOT importable
+    from production -- the in-memory path is deleted there, not kept as a
+    fallback.
+
+    Returns the ascending ndarray of flagged frame indices (the
+    ``frames_above`` array the interval-building code consumes).
+    """
+    traces = recording.get_traces(return_in_uV=False)
+    gains = recording.get_channel_gains()
+    traces_uv = traces.astype(np.float32) * gains[None, :]
+    absolute = np.abs(traces_uv)
+
+    n_channels = traces.shape[1]
+    n_required = int(np.ceil(validated.proportion_above_thresh * n_channels))
+
+    if validated.amplitude_thresh_uV is not None:
+        above_amp = absolute > validated.amplitude_thresh_uV
+    else:
+        above_amp = np.zeros_like(absolute, dtype=bool)
+    if validated.zscore_thresh is not None:
+        ch_mean = traces_uv.mean(axis=1, keepdims=True)
+        ch_std = traces_uv.std(axis=1, keepdims=True) + 1e-12
+        zscores = np.abs((traces_uv - ch_mean) / ch_std)
+        above_z = zscores > validated.zscore_thresh
+    else:
+        above_z = np.zeros_like(absolute, dtype=bool)
+
+    if (
+        validated.amplitude_thresh_uV is not None
+        and validated.zscore_thresh is not None
+    ):
+        channel_hit = above_amp | above_z
+    elif validated.amplitude_thresh_uV is not None:
+        channel_hit = above_amp
+    else:
+        channel_hit = above_z
+
+    return (channel_hit.sum(axis=1) >= n_required).nonzero()[0]
+
+
+def _synthetic_artifact_recording():
+    """8-channel, 90 000-sample (3 s @ 30 kHz) recording with two planted
+    artifact runs -- one common-mode amplitude burst, one single-channel
+    z-score outlier -- plus heterogeneous gains so the µV scaling matters.
+    """
+    import spikeinterface as si
+
+    fs = 30_000.0
+    n_samples = 90_000
+    n_channels = 8
+    rng = np.random.default_rng(0)
+    # Small baseline noise that never trips either threshold.
+    traces = rng.normal(0.0, 2.0, size=(n_samples, n_channels)).astype(
+        np.float32
+    )
+    # Common-mode amplitude burst across all channels (trips amplitude).
+    traces[20_000:20_300, :] += 300.0
+    # Single-channel transient (trips the across-channel z-score).
+    traces[60_000:60_120, 3] += 400.0
+    rec = si.NumpyRecording(traces_list=[traces], sampling_frequency=fs)
+    # Heterogeneous gains: the chunk worker and the reference must apply the
+    # SAME per-channel gain, so a wrong gain broadcast surfaces as inequality.
+    rec.set_channel_gains([1.0, 0.5, 2.0, 0.25, 1.0, 1.5, 0.8, 1.2])
+    return rec
+
+
+@pytest.mark.parametrize(
+    "amplitude_thresh_uV,zscore_thresh",
+    [
+        (50.0, None),  # amplitude-only branch
+        (None, 6.0),  # z-score-only branch
+        (50.0, 6.0),  # OR-combined branch
+    ],
+)
+def test_chunked_artifact_matches_in_memory_reference(
+    dj_conn, amplitude_thresh_uV, zscore_thresh
+):
+    """A17: the chunked ``_scan_artifact_frames`` produces frame-identical
+    output to the frozen full-in-memory reference, and is invariant to chunk
+    boundaries.
+
+    This is the gating equivalence evidence: A17 replaced the single
+    full-recording ``get_traces`` call with a per-chunk
+    ``ChunkRecordingExecutor`` pass to bound peak memory. The port is correct
+    only if the flagged frame set is unchanged. The per-frame across-channel
+    z-score depends solely on that frame's columns, so chunk boundaries
+    (which split the time axis) cannot change which frames are flagged --
+    this test pins that property across all three detection branches.
+    """
+    from spyglass.spikesorting.v2._params.artifact_detection import (
+        ArtifactDetectionParamsSchema,
+    )
+    from spyglass.spikesorting.v2.artifact import ArtifactDetection
+
+    rec = _synthetic_artifact_recording()
+    validated = ArtifactDetectionParamsSchema(
+        detect=True,
+        amplitude_thresh_uV=amplitude_thresh_uV,
+        zscore_thresh=zscore_thresh,
+        proportion_above_thresh=0.5,
+        removal_window_ms=1.0,
+        join_window_ms=0.0,
+        min_length_s=0.001,
+    )
+
+    reference = _in_memory_artifact_frames_reference(rec, validated)
+
+    # Many small chunks (~0.1 s each → ~30 chunks) exercises chunk seams.
+    chunked = ArtifactDetection._scan_artifact_frames(
+        rec, validated, job_kwargs={"n_jobs": 1, "chunk_duration": "0.1s"}
+    )
+    # A single chunk spanning the whole recording == the in-memory path.
+    single = ArtifactDetection._scan_artifact_frames(
+        rec, validated, job_kwargs={"n_jobs": 1, "chunk_size": 90_000}
+    )
+
+    assert np.array_equal(chunked, reference), (
+        "Chunked artifact frames diverge from the in-memory reference; the "
+        "ChunkRecordingExecutor port changed which frames are flagged."
+    )
+    assert np.array_equal(single, reference), (
+        "Single-chunk pass should reproduce the in-memory reference exactly."
+    )
+
+
+def test_artifact_job_kwargs_propagate_to_executor(dj_conn, monkeypatch):
+    """A17: per-row ``job_kwargs`` reach ``ChunkRecordingExecutor``.
+
+    The audit found the stored ``job_kwargs`` blob was dead weight under the
+    in-memory scan. A17 wires it through ``_resolved_job_kwargs`` into the
+    executor. This test patches the executor constructor and asserts an
+    ``n_jobs=2`` override (a recognized SI job key) is observed.
+    """
+    from spyglass.spikesorting.v2._params.artifact_detection import (
+        ArtifactDetectionParamsSchema,
+    )
+    from spyglass.spikesorting.v2.artifact import ArtifactDetection
+
+    rec = _synthetic_artifact_recording()
+    validated = ArtifactDetectionParamsSchema(
+        detect=True,
+        amplitude_thresh_uV=50.0,
+        zscore_thresh=None,
+        proportion_above_thresh=0.5,
+        removal_window_ms=1.0,
+        join_window_ms=0.0,
+        min_length_s=0.001,
+    )
+
+    seen = {}
+
+    import spikeinterface.core.job_tools as jt
+
+    real_executor = jt.ChunkRecordingExecutor
+
+    class _SpyExecutor(real_executor):
+        def __init__(self, *args, **kwargs):
+            seen["n_jobs"] = kwargs.get("n_jobs")
+            seen["chunk_duration"] = kwargs.get("chunk_duration")
+            super().__init__(*args, **kwargs)
+
+        def run(self, *args, **kwargs):
+            # The test asserts the constructor received the row's
+            # job_kwargs; it does not need the worker pool to execute (an
+            # in-memory NumpyRecording cannot round-trip through
+            # ``to_dict()``/``load_extractor`` for a real multi-process pool).
+            return []
+
+    monkeypatch.setattr(
+        "spyglass.spikesorting.v2.artifact.ChunkRecordingExecutor",
+        _SpyExecutor,
+    )
+
+    ArtifactDetection._scan_artifact_frames(
+        rec,
+        validated,
+        job_kwargs={"n_jobs": 2, "chunk_duration": "0.5s"},
+    )
+    assert seen["n_jobs"] == 2, (
+        "Row job_kwargs n_jobs=2 did not reach ChunkRecordingExecutor; the "
+        "job_kwargs blob is still dead weight."
+    )
+    assert seen["chunk_duration"] == "0.5s"
+
+
+@pytest.mark.slow
+def test_artifact_detection_peak_memory_bounded_by_chunk_size(dj_conn):
+    """A17: peak memory of the chunked scan is bounded by chunk size, not by
+    the full recording length.
+
+    Builds a 5-minute, 32-channel recording (~1.15 GB if materialized in
+    float32 once; ~4.6 GB at the in-memory path's ~4× working-set factor) and
+    scans it with a 1-second chunk. Peak *additional* allocation measured by
+    ``tracemalloc`` must stay far below the full-recording working set -- it is
+    bounded by ``~4 × chunk_frames × n_channels × 4 bytes`` plus the flagged
+    frame-index arrays. Asserts the peak stays under a generous 256 MB ceiling
+    that the full-recording load would blow through.
+    """
+    import tracemalloc
+
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._params.artifact_detection import (
+        ArtifactDetectionParamsSchema,
+    )
+    from spyglass.spikesorting.v2.artifact import ArtifactDetection
+
+    fs = 30_000.0
+    n_channels = 32
+    n_samples = int(fs * 300)  # 5 minutes
+    # Memmap-backed traces so building the fixture itself does not dominate
+    # the measured peak; the scan reads it chunk by chunk.
+    import tempfile
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".raw", delete=False)
+    tmp.close()
+    arr = np.memmap(
+        tmp.name, dtype=np.float32, mode="w+", shape=(n_samples, n_channels)
+    )
+    arr[:] = 0.0
+    arr[1_000_000 : 1_000_300, :] = 300.0  # one planted burst
+    arr.flush()
+    rec = si.NumpyRecording(traces_list=[arr], sampling_frequency=fs)
+    rec.set_channel_gains([1.0] * n_channels)
+
+    validated = ArtifactDetectionParamsSchema(
+        detect=True,
+        amplitude_thresh_uV=50.0,
+        zscore_thresh=None,
+        proportion_above_thresh=0.5,
+        removal_window_ms=1.0,
+        join_window_ms=0.0,
+        min_length_s=0.001,
+    )
+
+    tracemalloc.start()
+    ArtifactDetection._scan_artifact_frames(
+        rec, validated, job_kwargs={"n_jobs": 1, "chunk_duration": "1s"}
+    )
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+
+    full_working_set = 4 * n_samples * n_channels * 4  # ~4.6 GB
+    ceiling = 256 * 1024 * 1024  # 256 MB
+    assert peak < ceiling, (
+        f"Chunked scan peaked at {peak / 1e6:.1f} MB, above the "
+        f"{ceiling / 1e6:.0f} MB ceiling; chunking is not bounding memory "
+        f"(full-recording working set would be ~{full_working_set / 1e9:.1f} "
+        "GB)."
+    )
