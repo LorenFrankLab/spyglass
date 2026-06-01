@@ -442,6 +442,96 @@ def tetrode_60s_session(dj_conn):
     yield {"nwb_file_name": nwb_file_name}
 
 
+@pytest.mark.slow
+def test_tetrode_geometry_attached(tetrode_60s_session):
+    """A 4-channel ``tetrode_12.5`` sort group gets the explicit tetrode
+    probe geometry, and it survives the NWB round-trip.
+
+    Exercises the all-true branch of ``_maybe_apply_tetrode_geometry``
+    (single ``tetrode_12.5`` probe, exactly 4 channels, single
+    electrode group) end-to-end: a geometry-aware sorter calling
+    ``get_recording`` must see the 4 contacts at the
+    ``(0,0)-(0,12.5)-(12.5,0)-(12.5,12.5)`` µm square the patch
+    installs. (Phase-5/6 owns the four negative-condition tests for the
+    same gate; this test owns the happy path.)
+    """
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+
+    nwb_file_name = tetrode_60s_session["nwb_file_name"]
+    from spyglass.common.common_lab import LabTeam
+
+    PreprocessingParameters.insert_default()
+    LabTeam.insert1(
+        {"team_name": "v2_test_team", "team_description": "v2 pipeline tests"},
+        skip_duplicates=True,
+    )
+    if not (SortGroupV2 & tetrode_60s_session):
+        SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    sort_group_id = int(
+        sorted((SortGroupV2 & tetrode_60s_session).fetch("sort_group_id"))[0]
+    )
+    # Precondition: the gate's all-true branch requires exactly 4
+    # channels in this single-tetrode sort group.
+    n_channels = len(
+        SortGroupV2.SortGroupElectrode
+        & {"nwb_file_name": nwb_file_name, "sort_group_id": sort_group_id}
+    )
+    assert n_channels == 4, (
+        "tetrode fixture sort group must have 4 channels for the "
+        f"geometry gate; got {n_channels}."
+    )
+
+    selection_key = {
+        "nwb_file_name": nwb_file_name,
+        "sort_group_id": sort_group_id,
+        "interval_list_name": "raw data valid times",
+        "preproc_params_name": "default_franklab",
+        "team_name": "v2_test_team",
+    }
+    rec_pk = RecordingSelection.insert_selection(selection_key)
+    # Clear any prior Recording row so populate re-materializes.
+    (Recording & rec_pk).super_delete(warn=False, force_masters=True)
+    Recording.populate(rec_pk, reserve_jobs=False)
+
+    rec = Recording().get_recording(rec_pk)
+    assert rec.get_num_channels() == 4
+
+    # The source electrode table for this legacy-style fixture carries no
+    # contact positions (all (0,0,0)); without the geometry patch all four
+    # contacts would collapse onto a single point and a geometry-aware
+    # sorter would be blind to the tetrode layout. Assert the patch
+    # installed a 4-corner 12.5 µm square: two distinct x values 12.5 µm
+    # apart, two distinct y values 12.5 µm apart, all four corners
+    # present. (The patch positions the square at (0,0)-(12.5,12.5), but
+    # probeinterface re-centers contacts on their centroid, so the
+    # absolute origin shifts to +/-6.25; the 12.5 µm geometry -- the only
+    # thing a sorter consumes -- is what we pin, not the origin.)
+    locs = [
+        (round(float(x), 3), round(float(y), 3))
+        for x, y in rec.get_channel_locations()
+    ]
+    xs = sorted({x for x, _ in locs})
+    ys = sorted({y for _, y in locs})
+    assert len(xs) == 2 and len(ys) == 2, (
+        f"tetrode contacts collapsed -- expected a 2x2 grid, got "
+        f"x={xs}, y={ys} (patch did not spread the degenerate "
+        "all-zero source positions)."
+    )
+    assert round(xs[1] - xs[0], 3) == 12.5
+    assert round(ys[1] - ys[0], 3) == 12.5
+    assert set(locs) == {
+        (xs[0], ys[0]),
+        (xs[0], ys[1]),
+        (xs[1], ys[0]),
+        (xs[1], ys[1]),
+    }, f"tetrode contacts {sorted(locs)} do not form a 12.5 µm square."
+
+
 def _clear_curations(sorting_key):
     """Delete CurationV2 rows for a sorting + the corresponding
     SpikeSortingOutput merge master rows.
