@@ -95,3 +95,42 @@ def test_resolved_job_kwargs_merge(restore_custom_config):
     assert _resolved_job_kwargs({})["n_jobs"] == 4
 
 
+def test_assert_v2_db_safe_rejects_nonlocal(monkeypatch):
+    """``_assert_v2_db_safe`` raises when the DB host is not local.
+
+    This guard is the last line of defense against registering or
+    writing v2 schemas on a production server; the host-allowlist
+    branch was previously untested. Hermetic -- monkeypatches
+    ``dj.config`` and the environment, touches no real DB.
+    """
+    from spyglass.spikesorting.v2.utils import (
+        _OVERRIDE_ENV,
+        _assert_v2_db_safe,
+    )
+
+    # Ensure the override escape hatch is not set, so the host check runs.
+    monkeypatch.delenv(_OVERRIDE_ENV, raising=False)
+    monkeypatch.setitem(dj.config, "database.host", "prod.example.org")
+
+    with pytest.raises(RuntimeError, match="refuses to register schemas"):
+        _assert_v2_db_safe()
+
+
+def test_assert_v2_db_safe_override_permits_nonlocal(monkeypatch):
+    """Setting the override env var to ``"1"`` bypasses the host guard.
+
+    The override returns before the host check, so a non-local host is
+    permitted only when the caller has deliberately opted in.
+    """
+    from spyglass.spikesorting.v2.utils import (
+        _OVERRIDE_ENV,
+        _assert_v2_db_safe,
+    )
+
+    monkeypatch.setitem(dj.config, "database.host", "prod.example.org")
+    monkeypatch.setenv(_OVERRIDE_ENV, "1")
+
+    # Returns None (does not raise) despite the non-local host.
+    assert _assert_v2_db_safe() is None
+
+

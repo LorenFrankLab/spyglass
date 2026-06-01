@@ -15,6 +15,7 @@ modules (their ``test_`` prefixes are coincidental component names).
 """
 
 import copy
+from pathlib import Path
 
 import datajoint as dj
 import pytest
@@ -117,6 +118,102 @@ def phase1_baseline_artifacts():
             + ". Regenerate or pin the dependency versions to the baseline."
         )
     yield bundle
+
+
+_DOWNSTREAM_FIXTURE_NAME = "mearec_polymer_smoke"
+_DOWNSTREAM_FIXTURE_PATH = (
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / f"{_DOWNSTREAM_FIXTURE_NAME}.nwb"
+)
+
+
+@pytest.fixture(scope="package")
+def populated_sorting(dj_conn):
+    """Populate Recording -> ArtifactDetection -> Sorting for the smoke
+    fixture. Package-scoped so the heavy populate is paid once and shared
+    across ``test_downstream_consumers.py`` and ``test_integrity.py``.
+
+    Lives in conftest (rather than in one module with a cross-module
+    import) so the integrity tests resolve it directly: an import from a
+    sibling test module passes vacuously when a CI shard split collects
+    the two modules separately, leaving the integrity loops iterating
+    over an empty DB.
+    """
+    from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
+
+    if not _DOWNSTREAM_FIXTURE_PATH.exists():
+        pytest.skip(
+            f"Generated MEArec fixture {_DOWNSTREAM_FIXTURE_PATH.name} "
+            "not found. Run "
+            "`python tests/spikesorting/v2/fixtures/generate_mearec.py "
+            "--smoke` first."
+        )
+
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactDetectionParameters,
+        ArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        Sorting,
+        SortingSelection,
+    )
+
+    nwb_file_name = copy_and_insert_nwb(_DOWNSTREAM_FIXTURE_PATH)
+    session_key = {"nwb_file_name": nwb_file_name}
+
+    PreprocessingParameters.insert_default()
+    ArtifactDetectionParameters.insert_default()
+    SorterParameters.insert_default()
+    LabTeam.insert1(
+        {"team_name": "v2_test_team", "team_description": "v2 downstream"},
+        skip_duplicates=True,
+    )
+
+    if not (SortGroupV2 & session_key):
+        SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    sort_group_id = int(
+        sorted((SortGroupV2 & session_key).fetch("sort_group_id"))[0]
+    )
+    rec_pk = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+            "interval_list_name": "raw data valid times",
+            "preproc_params_name": "default_franklab",
+            "team_name": "v2_test_team",
+        }
+    )
+    if not (Recording & rec_pk):
+        Recording.populate(rec_pk, reserve_jobs=False)
+    art_pk = ArtifactSelection.insert_selection(
+        {
+            "recording_id": rec_pk["recording_id"],
+            "artifact_params_name": "none",
+        }
+    )
+    if not (ArtifactDetection & art_pk):
+        ArtifactDetection.populate(art_pk, reserve_jobs=False)
+    sort_pk = SortingSelection.insert_selection(
+        {
+            "recording_id": rec_pk["recording_id"],
+            "sorter": "mountainsort5",
+            "sorter_params_name": "franklab_tetrode_hippocampus_30kHz_ms5",
+            "artifact_id": art_pk["artifact_id"],
+        }
+    )
+    if not (Sorting & sort_pk):
+        Sorting.populate(sort_pk, reserve_jobs=False)
+    yield sort_pk
 
 
 @pytest.fixture

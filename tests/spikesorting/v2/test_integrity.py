@@ -23,11 +23,14 @@ exercise as a focused gate:
   ``Sorting``, no ``SharedArtifactGroup.Member`` row without a
   parent ``SharedArtifactGroup``.
 
-The source-part and no-orphan tests share the module-scoped
-``populated_sorting`` fixture from ``test_downstream_consumers.py``
-so they have at least one master row to exercise; without the
-fixture an empty test DB would let the iteration loops pass
-vacuously.
+The source-part and no-orphan tests share the package-scoped
+``populated_sorting`` fixture from ``conftest.py`` so they have at
+least one master row to exercise; without the fixture an empty test DB
+would let the iteration loops pass vacuously. The fixture is resolved
+from conftest rather than imported from a sibling test module so a CI
+shard split that collects this module alone still gets the populated
+state (a cross-module import would silently leave the loops iterating
+over an empty DB).
 """
 
 from __future__ import annotations
@@ -35,14 +38,6 @@ from __future__ import annotations
 import inspect
 
 import pytest
-
-# Re-export ``populated_sorting`` so the source-part + no-orphan
-# tests below have at least one row to iterate -- otherwise the
-# loops execute zero times on an empty DB and the invariants are
-# never actually checked.
-from tests.spikesorting.v2.test_downstream_consumers import (  # noqa: F401
-    populated_sorting,
-)
 
 pytestmark = pytest.mark.usefixtures("dj_conn")
 
