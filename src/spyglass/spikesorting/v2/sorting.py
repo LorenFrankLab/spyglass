@@ -1314,8 +1314,9 @@ class Sorting(SpyglassMixin, dj.Computed):
             # PR #3359 (merged 2024-10-25) changed SI's default from
             # ``seed=0`` to ``seed=None``, making the per-channel MAD
             # non-deterministic across runs on the same input --
-            # which at a 5σ threshold can flip ~10-20 borderline
-            # peaks per shank. Per PR #3359's stated principle
+            # which at a detect_threshold of 5 (a MAD multiplier, not
+            # 5σ) can flip ~10-20 borderline peaks per shank. Per PR
+            # #3359's stated principle
             # (*"seed must be explicit and no implicit"*) Spyglass IS
             # the explicit-seeder. Same fix + same user-override
             # mechanism as the ``sip.whiten`` pin in

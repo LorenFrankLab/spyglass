@@ -727,8 +727,11 @@ B11. **Calibrate** final MS4 bands from B10 measurements.
     points FR)`. Replace `MS4_BROAD_TRIAGE` with `MS4_CALIBRATED`
     only if the calibrated band is *tighter* than the broad triage
     band; otherwise keep `MS4_BROAD_TRIAGE` and document why in
-    `_smoke_constants.py`. Target ranges (subject to measurement):
-    n_units ± 25% or ± 2 absolute, median FR ± 20%. Boundary-zone
+    `_smoke_constants.py`. Pre-measurement target ranges were
+    n_units ± 25% or ± 2 absolute, median FR ± 20%; the actual B11
+    measurement came in tighter, so the committed
+    `_smoke_constants.py::MS4_CALIBRATED` band is n_units ± 10%
+    (± 2 absolute) and median FR ± 10%. Boundary-zone
     passes (20–25% units, 15–20% FR) emit a triage-note in test
     output instead of silent PASS. If MS4 is observed deterministic
     in B7/B10 (zero v1v1 and v2v2 drift), bands can be tightened

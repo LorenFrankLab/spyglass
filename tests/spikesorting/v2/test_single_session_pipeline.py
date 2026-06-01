@@ -452,8 +452,8 @@ def test_tetrode_geometry_attached(tetrode_60s_session):
     electrode group) end-to-end: a geometry-aware sorter calling
     ``get_recording`` must see the 4 contacts at the
     ``(0,0)-(0,12.5)-(12.5,0)-(12.5,12.5)`` µm square the patch
-    installs. (Phase-5/6 owns the four negative-condition tests for the
-    same gate; this test owns the happy path.)
+    installs. (The four negative-condition tests for the same gate are
+    covered separately; this test owns the all-true happy path.)
     """
     from spyglass.spikesorting.v2.recording import (
         PreprocessingParameters,
