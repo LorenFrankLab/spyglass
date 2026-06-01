@@ -9281,3 +9281,1057 @@ def test_insert_curation_rejects_scalar_string_label(populated_sorting):
             labels={target_unit: "custom_tag"},
             allow_custom_labels=True,
         )
+
+
+# ===========================================================================
+# A27: recording.py untested branches.
+#
+# reference_mode validation (post-T2: the integer sentinel was replaced by a
+# ``reference_mode`` varchar validated against the ReferenceMode Literal),
+# the all-shanks-filtered guard, the omit_ref no-op under the default mode,
+# additive inserts, length-mismatch, and the empty-match guard on the
+# electrode-table-column constructor. The RecordingSelection duplicate guard
+# (test_recording_selection_raises_on_duplicate_logical_identity, len==2) and
+# _electrode_group_sort_key (test_electrode_group_sort_key_tolerates_non_numeric)
+# are already covered, so they are not re-added here.
+# ===========================================================================
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_sort_group_rejects_invalid_reference_mode():
+    """A27/T2: ``SortGroupV2.insert1`` rejects an unknown ``reference_mode``.
+
+    The integer ``sort_reference_electrode_id`` sentinel was replaced (T2) by
+    a ``reference_mode`` varchar validated against the ``ReferenceMode``
+    Literal at the insert boundary. An invalid mode (here ``"banana"``)
+    raises before any DB write -- the varchar's typo guard standing in for a
+    MySQL enum. The message names the valid modes.
+    """
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    with pytest.raises(ValueError, match="ReferenceMode"):
+        SortGroupV2().insert1(
+            {
+                "nwb_file_name": "a27_irrelevant_.nwb",
+                "sort_group_id": 0,
+                "reference_mode": "banana",
+            }
+        )
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_sort_group_reference_electrode_id_consistency():
+    """A27/T2: ``reference_electrode_id`` is non-null iff mode=='specific'.
+
+    The split's second invariant: a 'specific' reference needs a channel to
+    subtract, and a non-specific mode must not carry a stray channel id the
+    runtime would silently ignore. Both directions raise at insert.
+    """
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    base = {"nwb_file_name": "a27_irrelevant_.nwb", "sort_group_id": 0}
+    # 'specific' without a channel id.
+    with pytest.raises(ValueError, match="requires a non-null"):
+        SortGroupV2().insert1(
+            {**base, "reference_mode": "specific", "reference_electrode_id": None}
+        )
+    # non-specific WITH a stray channel id.
+    with pytest.raises(ValueError, match="must leave"):
+        SortGroupV2().insert1(
+            {
+                **base,
+                "reference_mode": "global_median",
+                "reference_electrode_id": 3,
+            }
+        )
+
+
+@pytest.mark.slow
+def test_set_group_by_shank_all_shanks_filtered_raises(polymer_smoke_session):
+    """A27: when every shank is filtered out, ``set_group_by_shank`` raises.
+
+    The smoke fixture's 4 shanks all live in one electrode group ("0"), so
+    ``omit_ref_electrode_group=True`` with ``reference_mode='specific'`` and a
+    reference electrode in that group skips ALL shanks (the skip is keyed on
+    the electrode group, and the whole probe is one group). No sort group
+    survives -> ValueError naming "no sort groups".
+    """
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    _clean_session_v2(polymer_smoke_session)
+
+    with pytest.raises(ValueError, match="no sort groups produced"):
+        SortGroupV2.set_group_by_shank(
+            nwb_file_name=nwb_file_name,
+            omit_ref_electrode_group=True,
+            reference_mode="specific",
+            reference_electrode_id=0,
+        )
+
+
+@pytest.mark.slow
+def test_set_group_by_shank_omit_ref_noop_under_default_mode(
+    polymer_smoke_session,
+):
+    """A27/T2: ``omit_ref_electrode_group=True`` is a no-op under the default
+    ``reference_mode='none'``.
+
+    Post-T2 the omit-reference-group skip is gated on
+    ``reference_mode == 'specific'`` (a 'none'/'global_median' reference names
+    no electrode to exclude). So with the default mode the flag drops nothing:
+    all 4 shanks become sort groups and the returned skip list has no
+    reference-group entries. (Pre-T2 this branch keyed off the integer
+    sentinel; the assertion now tracks the live reference_mode source.)
+    """
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    _clean_session_v2(polymer_smoke_session)
+
+    skipped = SortGroupV2.set_group_by_shank(
+        nwb_file_name=nwb_file_name,
+        omit_ref_electrode_group=True,  # no-op: mode defaults to "none"
+    )
+
+    assert len(SortGroupV2 & polymer_smoke_session) == 4, (
+        "omit_ref_electrode_group must not drop groups under reference_mode="
+        "'none'"
+    )
+    assert not any(
+        s.get("reason") == "reference_electrode_group" for s in skipped
+    ), "no group should be skipped for the reference-electrode reason"
+
+
+@pytest.mark.slow
+def test_set_group_by_shank_additive_insert_with_explicit_ids(
+    polymer_smoke_session,
+):
+    """A27: explicit non-overlapping ``sort_group_ids`` opt into an additive
+    insert that coexists with prior rows.
+
+    The default rerun refuses to silently extend (covered elsewhere); passing
+    explicit non-overlapping ids is the opt-in. After grouping once (ids
+    0-3), a second call with ids 10-13 leaves all eight groups present.
+    """
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    _clean_session_v2(polymer_smoke_session)
+
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    first_ids = set(
+        int(i) for i in (SortGroupV2 & polymer_smoke_session).fetch("sort_group_id")
+    )
+    assert first_ids == {0, 1, 2, 3}
+
+    SortGroupV2.set_group_by_shank(
+        nwb_file_name=nwb_file_name, sort_group_ids=[10, 11, 12, 13]
+    )
+    all_ids = set(
+        int(i) for i in (SortGroupV2 & polymer_smoke_session).fetch("sort_group_id")
+    )
+    assert all_ids == {0, 1, 2, 3, 10, 11, 12, 13}, (
+        "additive insert with explicit ids must coexist with prior rows"
+    )
+
+
+@pytest.mark.slow
+def test_set_group_by_shank_length_mismatch_raises(polymer_smoke_session):
+    """A27: ``sort_group_ids`` whose length differs from the derived group
+    count raises.
+
+    The fixture derives 4 groups from shank metadata; passing only two ids
+    is a mismatch the helper rejects before any insert.
+    """
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    _clean_session_v2(polymer_smoke_session)
+
+    with pytest.raises(ValueError, match="Lengths must match"):
+        SortGroupV2.set_group_by_shank(
+            nwb_file_name=nwb_file_name, sort_group_ids=[0, 1]
+        )
+
+
+@pytest.mark.slow
+def test_set_group_by_electrode_table_column_empty_match_raises(
+    polymer_smoke_session,
+):
+    """A27: a ``groups`` sublist matching zero electrodes raises.
+
+    ``set_group_by_electrode_table_column`` with a value that no electrode
+    carries produces an empty group, which is a user error (typo'd id) the
+    helper rejects with a message naming the offending sort group.
+    """
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    _clean_session_v2(polymer_smoke_session)
+
+    with pytest.raises(ValueError, match="matched no electrodes"):
+        SortGroupV2.set_group_by_electrode_table_column(
+            nwb_file_name=nwb_file_name,
+            column="electrode_id",
+            groups=[[10_000_000]],  # no electrode has this id
+        )
+
+
+@pytest.mark.slow
+def test_recording_multi_interval_saved_times_use_concat_path(
+    polymer_smoke_session,
+):
+    """A27: a multi-interval (disjoint) selection derives ``saved_times`` from
+    the gap-EXCLUDED concat path, not the gap-spanning override.
+
+    For ``n_selected_intervals > 1`` the recording is built with
+    ``concatenate_recordings(ignore_times=True)``, so ``saved_times`` is the
+    0-based concat times whose span excludes the inter-segment gap. The row's
+    ``duration_s`` must therefore equal the SUM of the kept-interval durations
+    (gap-excluded), clearly shorter than the wall-clock envelope
+    (last_end - first_start). This is the persisted half of the C1 guard
+    rationale.
+    """
+    import numpy as _np
+
+    from spyglass.common import IntervalList
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    _clean_session_v2(polymer_smoke_session)
+    PreprocessingParameters.insert_default()
+    LabTeam.insert1(
+        {"team_name": "v2_test_team", "team_description": "v2 pipeline tests"},
+        skip_duplicates=True,
+    )
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+
+    raw_times = (
+        IntervalList
+        & {"nwb_file_name": nwb_file_name, "interval_list_name": "raw data valid times"}
+    ).fetch1("valid_times")
+    raw_start = float(raw_times[0][0])
+    raw_end = float(raw_times[-1][-1])
+    total = raw_end - raw_start
+    # Each 0.3*total segment must clear min_segment_length (1.0 s), so the
+    # fixture needs >= ~3.5 s of raw coverage.
+    assert total >= 3.5, f"fixture too short ({total}s) for multi-interval test"
+
+    # Two disjoint segments, both well within raw coverage, separated by a
+    # real gap of ~0.3*total.
+    seg1 = [raw_start, raw_start + 0.3 * total]
+    seg2 = [raw_start + 0.6 * total, raw_start + 0.9 * total]
+    gap_excluded = (seg1[1] - seg1[0]) + (seg2[1] - seg2[0])
+    envelope = seg2[1] - seg1[0]
+
+    interval_name = "v2_a27_multi_valid"
+    IntervalList.insert1(
+        {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": interval_name,
+            "valid_times": _np.asarray([seg1, seg2]),
+            "pipeline": "v2_a27_multi",
+        },
+        skip_duplicates=True,
+    )
+    sort_group_id = int(
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
+    )
+    pk = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+            "interval_list_name": interval_name,
+            "preproc_params_name": "default_franklab",
+            "team_name": "v2_test_team",
+        }
+    )
+    try:
+        Recording.populate(pk, reserve_jobs=False)
+        duration_s = float((Recording & pk).fetch1("duration_s"))
+        # Concat path: duration ~= sum of kept durations (gap-excluded).
+        assert abs(duration_s - gap_excluded) < 0.1 * total, (
+            f"duration_s={duration_s} not close to the gap-excluded sum "
+            f"{gap_excluded} (concat path); total={total}"
+        )
+        # And clearly NOT the gap-spanning wall-clock envelope.
+        assert duration_s < envelope - 0.1 * total, (
+            f"duration_s={duration_s} looks like the gap-SPANNING envelope "
+            f"{envelope}; the override path was used instead of concat"
+        )
+    finally:
+        (Recording & pk).super_delete(warn=False, force_masters=True)
+        (RecordingSelection & pk).super_delete(warn=False)
+        (
+            IntervalList
+            & {"nwb_file_name": nwb_file_name, "interval_list_name": interval_name}
+        ).super_delete(warn=False)
+
+
+@pytest.mark.slow
+def test_recording_fresh_write_cleanup_unlinks_staged_file(
+    polymer_smoke_session, monkeypatch
+):
+    """A27: a failure AFTER the fresh ``_write_nwb_artifact`` unlinks the
+    staged file (no half-written artifact outlives a failed compute).
+
+    On the fresh-write path (``existing_analysis_file_name is None``), if a
+    later metadata step raises after the file is on disk, the staged file is
+    unlinked before the exception propagates. We wrap ``_write_nwb_artifact``
+    to record the staged name, then make the post-write
+    ``_get_recording_timestamps`` raise; afterwards the staged file must be
+    gone and no Recording row may exist.
+    """
+    from spyglass.common import IntervalList  # noqa: F401
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2 import recording as rec_mod
+    from spyglass.spikesorting.v2 import utils as utils_mod
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    _clean_session_v2(polymer_smoke_session)
+    PreprocessingParameters.insert_default()
+    LabTeam.insert1(
+        {"team_name": "v2_test_team", "team_description": "v2 pipeline tests"},
+        skip_duplicates=True,
+    )
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    sort_group_id = int(
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
+    )
+    pk = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+            "interval_list_name": "raw data valid times",
+            "preproc_params_name": "default_franklab",
+            "team_name": "v2_test_team",
+        }
+    )
+
+    captured = {}
+    real_write = Recording._write_nwb_artifact
+
+    def _capture_write(*args, **kwargs):
+        result = real_write(*args, **kwargs)
+        captured["analysis_file_name"] = result[0]
+        return result
+
+    real_ts = utils_mod._get_recording_timestamps
+
+    def _raise_after_write(*args, **kwargs):
+        # Earlier calls (restrict / repair) succeed; only the post-write
+        # saved-times derivation raises so we exercise the fresh-write
+        # cleanup branch rather than failing before the file is staged.
+        if "analysis_file_name" in captured:
+            raise RuntimeError("staged-file cleanup probe: post-write boom")
+        return real_ts(*args, **kwargs)
+
+    monkeypatch.setattr(
+        Recording, "_write_nwb_artifact", staticmethod(_capture_write)
+    )
+    monkeypatch.setattr(
+        utils_mod, "_get_recording_timestamps", _raise_after_write
+    )
+    # recording.py imports the symbol at call time from utils, so patching
+    # the utils module is sufficient; guard against a module-level rebind.
+    monkeypatch.setattr(
+        rec_mod, "_get_recording_timestamps", _raise_after_write, raising=False
+    )
+
+    try:
+        with pytest.raises(Exception, match="post-write boom"):
+            Recording.populate(pk, reserve_jobs=False)
+        assert "analysis_file_name" in captured, (
+            "precondition: _write_nwb_artifact must have run and staged a file"
+        )
+        staged = captured["analysis_file_name"]
+        abs_path = AnalysisNwbfile.get_abs_path(staged)
+        assert not Path(abs_path).exists(), (
+            f"fresh-write cleanup did not unlink the staged file {staged!r}"
+        )
+        assert not (Recording & pk), "no Recording row may be inserted"
+    finally:
+        (Recording & pk).super_delete(warn=False, force_masters=True)
+        (RecordingSelection & pk).super_delete(warn=False)
+
+
+@pytest.mark.slow
+def test_recording_rebuild_path_keeps_existing_file_on_failure(
+    populated_sorting, monkeypatch
+):
+    """A27 (complement): a post-write failure on the REBUILD path
+    (``existing_analysis_file_name`` set) does NOT unlink the file.
+
+    The fresh-write path unlinks a staged file on failure; the rebuild path
+    must not, because there the file IS the canonical cache (a mid-write
+    failure surfaces via the caller's hash-mismatch check, not by destroying
+    the only copy). We drive ``_compute_recording_artifact`` directly with an
+    ``existing_analysis_file_name`` and the same post-write
+    ``_get_recording_timestamps`` failure, then assert the file survives. This
+    pins the false branch of the ``existing_analysis_file_name is None`` guard.
+
+    Uses a freshly created AnalysisNwbfile as the stand-in cache so the shared
+    fixture's real recording file is never touched.
+    """
+    from spyglass.common.common_nwbfile import (
+        AnalysisNwbfile,
+        Nwbfile,
+    )
+    from spyglass.spikesorting.v2 import utils as utils_mod
+    from spyglass.spikesorting.v2.recording import Recording, RecordingSelection
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    recording_id = SortingSelection.resolve_source(populated_sorting).key[
+        "recording_id"
+    ]
+    fetched = Recording().make_fetch({"recording_id": recording_id})
+    nwb_file_name = fetched.sel["nwb_file_name"]
+
+    # A real on-disk file standing in for the canonical cache.
+    existing = AnalysisNwbfile().create(nwb_file_name)
+    existing_abs = AnalysisNwbfile.get_abs_path(existing)
+    assert Path(existing_abs).exists(), "precondition: cache file created"
+
+    captured = {}
+    real_write = Recording._write_nwb_artifact
+    real_ts = utils_mod._get_recording_timestamps
+
+    def _capture_write(*args, **kwargs):
+        result = real_write(*args, **kwargs)
+        captured["written"] = True
+        return result
+
+    def _raise_after_write(*args, **kwargs):
+        if "written" in captured:
+            raise RuntimeError("rebuild post-write boom")
+        return real_ts(*args, **kwargs)
+
+    monkeypatch.setattr(
+        Recording, "_write_nwb_artifact", staticmethod(_capture_write)
+    )
+    monkeypatch.setattr(
+        utils_mod, "_get_recording_timestamps", _raise_after_write
+    )
+
+    raw_path = Nwbfile().get_abs_path(nwb_file_name)
+    try:
+        with pytest.raises(Exception, match="rebuild post-write boom"):
+            Recording()._compute_recording_artifact(
+                raw_path=raw_path,
+                nwb_file_name=nwb_file_name,
+                interval_list_name=fetched.sel["interval_list_name"],
+                channel_ids=fetched.channel_ids,
+                reference_mode=fetched.reference_mode,
+                reference_electrode_id=fetched.reference_electrode_id,
+                sort_valid_times=fetched.sort_valid_times,
+                raw_valid_times=fetched.raw_valid_times,
+                preproc_validated=fetched.preproc_validated,
+                probe_types=fetched.probe_types,
+                electrode_group_names=fetched.electrode_group_names,
+                existing_analysis_file_name=existing,  # REBUILD path
+                recording_id=recording_id,
+            )
+        assert "written" in captured, (
+            "precondition: _write_nwb_artifact must have run before the failure"
+        )
+        # The rebuild path must NOT unlink the canonical cache file.
+        assert Path(existing_abs).exists(), (
+            "rebuild path unlinked the existing cache file -- it must only "
+            "unlink on the fresh-write (existing is None) path"
+        )
+    finally:
+        Path(existing_abs).unlink(missing_ok=True)
+        # The create() call may have registered an AnalysisNwbfile row.
+        if AnalysisNwbfile & {"analysis_file_name": existing}:
+            (
+                AnalysisNwbfile & {"analysis_file_name": existing}
+            ).delete(safemode=False)
+
+
+# ===========================================================================
+# A28: curation.py untested branches.
+#
+# Invalid metrics_source, the POST-E5 idempotent-root guard (now LIVE -- E5
+# merged), across-group merge overlap, the concat-source ambiguity guard on
+# the CurationV2 accessor, the missing-sorting_id guard, get_merged_sorting
+# early returns, the curation_label column-add gate, the empty-part guards,
+# and the singleton merge-group gate. The include_labels filter (V5) and the
+# scalar-string label guard are already covered, so they are not re-added.
+# ===========================================================================
+
+
+def test_insert_curation_rejects_invalid_metrics_source(populated_sorting):
+    """A28: an unknown ``metrics_source`` raises naming the valid options.
+
+    ``metrics_source`` is coerced through the ``MetricsSource`` enum so a typo
+    fails at the Python boundary (with the valid set) rather than at the
+    DataJoint enum-mismatch layer.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    _clear_curations(populated_sorting)
+    with pytest.raises(ValueError, match="MetricsSource"):
+        CurationV2.insert_curation(
+            sorting_key=populated_sorting,
+            metrics_source="not_a_real_source",
+        )
+
+
+def test_insert_curation_idempotent_root_rejects_nondefault_args(
+    populated_sorting_with_curation, populated_sorting
+):
+    """A28/E5 (LIVE): a second root insert with non-default args raises.
+
+    Post-E5, returning the existing root while silently dropping the caller's
+    new labels/merge_groups/description is a footgun, so it raises unless
+    ``reuse_existing=True``. The fixture already inserted a root; a second
+    call passing a description must raise, and ``reuse_existing=True`` must
+    return the existing key instead.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    existing = populated_sorting_with_curation
+    # Non-default args + no reuse -> raises (E5 footgun guard).
+    with pytest.raises(ValueError, match="already exists"):
+        CurationV2.insert_curation(
+            sorting_key=populated_sorting,
+            description="a second description that would be ignored",
+        )
+    # reuse_existing=True returns the existing root key unchanged.
+    reused = CurationV2.insert_curation(
+        sorting_key=populated_sorting,
+        description="ignored but explicitly tolerated",
+        reuse_existing=True,
+    )
+    assert reused["curation_id"] == existing["curation_id"]
+
+
+def test_insert_curation_rejects_merge_group_overlap(populated_sorting):
+    """A28: a unit appearing in two merge groups raises.
+
+    A unit can belong to at most one merge group; an overlap is a user error
+    the validator rejects (the overlap check runs against ``Sorting.Unit``
+    BEFORE any NWB staging). The MEArec smoke sort yields a single unit, so a
+    second ``Sorting.Unit`` row is planted (electrode FK copied from the real
+    unit) purely to satisfy the membership check -- the raise fires during
+    validation, before any spike train is read, and the planted row is removed
+    in the finally.
+    """
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    _clear_curations(populated_sorting)
+    real_unit = (Sorting.Unit & populated_sorting).fetch(as_dict=True)[0]
+    u0 = int(real_unit["unit_id"])
+    u1 = u0 + 1
+    planted = {**real_unit, "unit_id": u1}
+    conn = dj.conn()
+    conn.query("SET FOREIGN_KEY_CHECKS=0")
+    try:
+        Sorting.Unit.insert1(planted, allow_direct_insert=True)
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+    try:
+        # u0 (and u1) appear in both groups -> overlap.
+        with pytest.raises(ValueError, match="overlap"):
+            CurationV2.insert_curation(
+                sorting_key=populated_sorting,
+                merge_groups=[[u0, u1], [u1, u0]],
+                apply_merge=True,
+            )
+    finally:
+        (Sorting.Unit & {**populated_sorting, "unit_id": u1}).delete_quick()
+
+
+def test_insert_curation_rejects_singleton_merge_group(populated_sorting):
+    """A28: a singleton merge group is rejected upstream (layered defense).
+
+    A single-unit "merge group" is a likely typo (v1 silently renamed it);
+    v2 raises at the >=2-members gate before ``next_merged_id`` is reached, so
+    the singleton never produces a spurious fresh id.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    _clear_curations(populated_sorting)
+    uid = int((Sorting.Unit & populated_sorting).fetch("unit_id")[0])
+    with pytest.raises(ValueError, match="at least 2"):
+        CurationV2.insert_curation(
+            sorting_key=populated_sorting,
+            merge_groups=[[uid]],
+            apply_merge=True,
+        )
+
+
+def test_insert_curation_rejects_missing_sorting_id():
+    """A28: a ``sorting_id`` not in ``Sorting`` raises a clear ValueError.
+
+    Translates what would be a raw FK IntegrityError into a "populate Sorting
+    first" message.
+    """
+    import uuid
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    with pytest.raises(ValueError, match="not in Sorting"):
+        CurationV2.insert_curation(sorting_key={"sorting_id": uuid.uuid4()})
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_curation_get_unit_brain_regions_concat_raises():
+    """A28: the CurationV2 accessor raises ``ConcatBrainRegionAmbiguousError``
+    for a concat-backed sorting (mirror of the Sorting accessor).
+
+    The guard reads the sorting's source before touching ``CurationV2.Unit``,
+    so a concat ``SortingSelection`` (planted via the FK-checks-off bypass) is
+    enough to exercise the raise.
+    """
+    import uuid
+
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.exceptions import (
+        ConcatBrainRegionAmbiguousError,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        SortingSelection,
+    )
+
+    SorterParameters.insert_default()
+    sid = uuid.uuid4()
+    SortingSelection.insert1(
+        {
+            "sorting_id": sid,
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": "default",
+        },
+        allow_direct_insert=True,
+    )
+    conn = dj.conn()
+    conn.query("SET FOREIGN_KEY_CHECKS=0")
+    try:
+        SortingSelection.ConcatenatedRecordingSource.insert1(
+            {"sorting_id": sid, "concat_recording_id": uuid.uuid4()},
+            allow_direct_insert=True,
+        )
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+    try:
+        with pytest.raises(ConcatBrainRegionAmbiguousError):
+            CurationV2().get_unit_brain_regions(
+                {"sorting_id": sid, "curation_id": 0},
+                allow_anchor_member=False,
+            )
+    finally:
+        (SortingSelection & {"sorting_id": sid}).delete(safemode=False)
+
+
+def test_curation_get_unit_brain_regions_concat_anchor_member_df(
+    populated_sorting,
+):
+    """A28: ``CurationV2.get_unit_brain_regions(..., allow_anchor_member=True)``
+    returns the ``unit_brain_region_df`` DataFrame labeled ``anchor_member``.
+
+    The opt-in path returns the DataFrame (NOT a ``SourceResolution``), same
+    shape as the ``Sorting`` accessor. Non-vacuous: a ``CurationV2.Unit`` row
+    is planted with an Electrode FK copied from the populated fixture so the
+    BrainRegion join yields a real row carrying
+    ``region_resolution == 'anchor_member'``.
+    """
+    import datetime as dt
+    import uuid
+
+    import datajoint as dj
+    import pandas as pd
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        Sorting,
+        SortingSelection,
+    )
+    from spyglass.spikesorting.v2.utils import SourceResolution
+
+    template_unit = (Sorting.Unit & populated_sorting).fetch(as_dict=True)[0]
+    # CurationV2.Unit carries the same Electrode FK + amplitude/spike columns
+    # as Sorting.Unit; drop the Sorting PK and re-key onto the planted curation.
+    unit_fields = {
+        k: v for k, v in template_unit.items() if k != "sorting_id"
+    }
+
+    SorterParameters.insert_default()
+    sid = uuid.uuid4()
+    SortingSelection.insert1(
+        {
+            "sorting_id": sid,
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": "default",
+        },
+        allow_direct_insert=True,
+    )
+    conn = dj.conn()
+    conn.query("SET FOREIGN_KEY_CHECKS=0")
+    try:
+        SortingSelection.ConcatenatedRecordingSource.insert1(
+            {"sorting_id": sid, "concat_recording_id": uuid.uuid4()},
+            allow_direct_insert=True,
+        )
+        Sorting.insert1(
+            {
+                "sorting_id": sid,
+                "analysis_file_name": "a28_concat_fake.nwb",
+                "object_id": "a28-concat-object-id",
+                "analyzer_folder": "/nonexistent/a28_concat",
+                "n_units": 1,
+                "time_of_sort": dt.datetime(2020, 1, 1),
+            },
+            allow_direct_insert=True,
+        )
+        CurationV2.insert1(
+            {
+                "sorting_id": sid,
+                "curation_id": 0,
+                "analysis_file_name": "a28_concat_curation_fake.nwb",
+                "object_id": "a28-concat-curation-object-id",
+                "description": "a28 concat anchor probe",
+            },
+            allow_direct_insert=True,
+        )
+        CurationV2.Unit.insert1(
+            {**unit_fields, "sorting_id": sid, "curation_id": 0, "unit_id": 0},
+            allow_direct_insert=True,
+        )
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+    try:
+        result = CurationV2().get_unit_brain_regions(
+            {"sorting_id": sid, "curation_id": 0}, allow_anchor_member=True
+        )
+        assert isinstance(result, pd.DataFrame)
+        assert not isinstance(result, SourceResolution)
+        assert "region_resolution" in result.columns
+        assert len(result) == 1, "anchor-member df should carry the one unit"
+        assert (result["region_resolution"] == "anchor_member").all()
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=0")
+        try:
+            (CurationV2.Unit & {"sorting_id": sid}).delete_quick()
+            (CurationV2 & {"sorting_id": sid}).delete_quick()
+            (Sorting & {"sorting_id": sid}).delete_quick()
+        finally:
+            conn.query("SET FOREIGN_KEY_CHECKS=1")
+        (SortingSelection & {"sorting_id": sid}).delete(safemode=False)
+
+
+def test_get_merged_sorting_returns_base_when_no_merges(
+    populated_sorting_with_curation,
+):
+    """A28: ``get_merged_sorting`` returns the base sorting unchanged when no
+    merge group has more than one contributor.
+
+    The fixture's root curation has no merges, so the lazy-merge path
+    short-circuits and the returned sorting carries exactly the base
+    unit_ids.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    key = populated_sorting_with_curation
+    base = CurationV2().get_sorting(key)
+    merged = CurationV2().get_merged_sorting(key)
+    assert list(merged.unit_ids) == list(base.unit_ids)
+
+
+def test_get_merged_sorting_returns_base_when_merges_applied(
+    populated_sorting_with_curation,
+):
+    """A28: ``get_merged_sorting`` returns the base verbatim when
+    ``merges_applied`` is set (the base is already merged at insert).
+
+    The MEArec smoke sort has a single unit, so a real 2-unit merge cannot be
+    built; the short-circuit is keyed solely on the ``merges_applied`` flag,
+    so we flip it on the root curation and assert the accessor returns the
+    base sorting without attempting any lazy re-merge over absorbed
+    contributors. (Function-scoped fixture; the flag flip dies with it.)
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    key = populated_sorting_with_curation
+    CurationV2.update1({**key, "merges_applied": 1})
+
+    base = CurationV2().get_sorting(key)
+    merged = CurationV2().get_merged_sorting(key)
+    # merges_applied short-circuit: identical unit set, no re-merge attempt.
+    assert list(merged.unit_ids) == list(base.unit_ids)
+
+
+def test_insert_curation_empty_labels_skip_unit_label_insert(
+    populated_sorting_with_curation,
+):
+    """A28: with empty labels the ``UnitLabel`` insert is skipped, while the
+    ``MergeGroup`` self-entries are still written.
+
+    The ``if unit_label_rows:`` / ``if merge_group_rows:`` guards skip a
+    zero-row batch insert. With ``labels={}`` ``unit_label_rows`` is empty so
+    ``UnitLabel`` stays empty; but ``merge_group_rows`` is NOT empty even
+    without merges -- every ``CurationV2.Unit`` row gets a 1-element
+    self-entry so ``Unit * MergeGroup`` preserves all units. This pins both
+    guard branches: one skipped, one taken.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    key = populated_sorting_with_curation
+    n_units = len(CurationV2.Unit & key)
+    assert n_units >= 1, "fixture curation must have >= 1 unit"
+    # unit_label_rows empty -> guard skipped the UnitLabel insert.
+    assert len(CurationV2.UnitLabel & key) == 0
+    # merge_group_rows non-empty -> one self-entry per unit (guard taken).
+    assert len(CurationV2.MergeGroup & key) == n_units
+
+
+def test_curation_label_column_added_only_with_nonempty_labels(
+    populated_sorting,
+):
+    """A28: the units NWB carries a ``curation_label`` column iff at least one
+    unit has a non-empty label.
+
+    Adding the column for an all-empty curation would trip pynwb's empty-list
+    dtype inference, so it is gated on ``any(labels)``. We inspect the staged
+    units NWB column set directly for both cases.
+    """
+    import pynwb
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    def _units_colnames(curation_key):
+        analysis_file_name = (CurationV2 & curation_key).fetch1(
+            "analysis_file_name"
+        )
+        abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+        with pynwb.NWBHDF5IO(
+            path=abs_path, mode="r", load_namespaces=True
+        ) as io:
+            nwbf = io.read()
+            return list(nwbf.units.colnames) if nwbf.units is not None else []
+
+    # All-empty labels: no curation_label column.
+    _clear_curations(populated_sorting)
+    empty_key = CurationV2.insert_curation(sorting_key=populated_sorting)
+    assert "curation_label" not in _units_colnames(empty_key)
+
+    # At least one non-empty label: column present.
+    _clear_curations(populated_sorting)
+    uid = int((Sorting.Unit & populated_sorting).fetch("unit_id")[0])
+    labeled_key = CurationV2.insert_curation(
+        sorting_key=populated_sorting, labels={uid: ["mua"]}
+    )
+    try:
+        assert "curation_label" in _units_colnames(labeled_key)
+    finally:
+        _clear_curations(populated_sorting)
+
+
+# ===========================================================================
+# A29: pipeline.py untested branches.
+#
+# list_presets enumeration, run_v2_pipeline idempotency (existing-root
+# short-circuit), and preset -> manifest wiring. The franklab MS4 preset is
+# exercised end-to-end where MS4 is runnable (it ships in installed_sorters()
+# but its runtime is unavailable in the SI 0.104 image, so that test
+# self-skips); a runnable MS5 substitute pins the wiring unconditionally.
+# ===========================================================================
+
+
+def _prepare_pipeline_session(session):
+    """initialize defaults + team + a single sort group for the session.
+
+    Returns ``(nwb_file_name, sort_group_id, team_name)`` ready for
+    ``run_v2_pipeline``.
+    """
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    nwb_file_name = session["nwb_file_name"]
+    _clean_session_v2(session)
+    initialize_v2_defaults()
+    LabTeam.insert1(
+        {"team_name": "v2_test_team", "team_description": "v2 pipeline tests"},
+        skip_duplicates=True,
+    )
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    sort_group_id = int(
+        sorted((SortGroupV2 & session).fetch("sort_group_id"))[0]
+    )
+    return nwb_file_name, sort_group_id, "v2_test_team"
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_list_presets_enumerates_all_presets():
+    """A29: ``list_presets()`` returns exactly the names in ``_PRESETS``.
+
+    Behavioral (not a signature check): the helper must enumerate every
+    registered preset so a notebook user can discover them. A preset added to
+    ``_PRESETS`` but missing from ``list_presets()`` (or vice versa) fails
+    here.
+    """
+    from spyglass.spikesorting.v2.pipeline import _PRESETS, list_presets
+
+    presets = list_presets()
+    assert set(presets) == set(_PRESETS), (
+        "list_presets() must enumerate exactly the registered _PRESETS keys"
+    )
+    # The three shipped presets are present (guards an accidental rename).
+    for name in (
+        "franklab_tetrode_mountainsort4",
+        "franklab_tetrode_mountainsort5",
+        "franklab_tetrode_clusterless_thresholder",
+    ):
+        assert name in presets
+
+
+@pytest.mark.slow
+def test_run_v2_pipeline_idempotent_existing_root(polymer_smoke_session):
+    """A29: re-running ``run_v2_pipeline`` returns the same curation via the
+    existing-root short-circuit, and a child curation does not divert it.
+
+    The orchestrator looks for a root (``parent_curation_id=-1``) curation and
+    returns it rather than staging a duplicate. The clusterless preset is the
+    cheapest runnable path; require_units=False so a quiet-shank zero-unit
+    result still yields a (stable) curation row.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+
+    nwb_file_name, sort_group_id, team_name = _prepare_pipeline_session(
+        polymer_smoke_session
+    )
+    common = dict(
+        nwb_file_name=nwb_file_name,
+        sort_group_id=sort_group_id,
+        interval_list_name="raw data valid times",
+        team_name=team_name,
+        preset="franklab_tetrode_clusterless_thresholder",
+    )
+    try:
+        first = run_v2_pipeline(**common)
+        second = run_v2_pipeline(**common)
+        assert second["curation_id"] == first["curation_id"], (
+            "second run must return the existing root curation, not a duplicate"
+        )
+        assert second["merge_id"] == first["merge_id"]
+
+        # A child curation (parent != -1) must NOT divert the short-circuit.
+        CurationV2.insert_curation(
+            sorting_key={"sorting_id": first["sorting_id"]},
+            parent_curation_id=first["curation_id"],
+            description="child curation",
+        )
+        third = run_v2_pipeline(**common)
+        assert third["curation_id"] == first["curation_id"], (
+            "a non-root child must not divert the root short-circuit"
+        )
+    finally:
+        _clean_session_v2(polymer_smoke_session)
+
+
+@pytest.mark.slow
+def test_run_v2_pipeline_preset_wiring_to_manifest(polymer_smoke_session):
+    """A29: the chosen preset's sorter is the one recorded in the manifest's
+    SortingSelection.
+
+    Runs the MS5 preset (a runnable stand-in for the MS4 preset, whose runtime
+    is unavailable here) and asserts the manifest's ``sorting_id`` resolves to
+    a SortingSelection whose ``sorter`` / ``sorter_params_name`` match the
+    preset bundle -- the preset -> Lookup-row -> manifest wiring.
+    """
+    from spyglass.spikesorting.v2.pipeline import _PRESETS, run_v2_pipeline
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    nwb_file_name, sort_group_id, team_name = _prepare_pipeline_session(
+        polymer_smoke_session
+    )
+    preset_name = "franklab_tetrode_mountainsort5"
+    try:
+        manifest = run_v2_pipeline(
+            nwb_file_name=nwb_file_name,
+            sort_group_id=sort_group_id,
+            interval_list_name="raw data valid times",
+            team_name=team_name,
+            preset=preset_name,
+        )
+        assert manifest["preset"] == preset_name
+        sel = (
+            SortingSelection & {"sorting_id": manifest["sorting_id"]}
+        ).fetch1()
+        bundle = _PRESETS[preset_name]
+        assert sel["sorter"] == bundle.sorter
+        assert sel["sorter_params_name"] == bundle.sorter_params_name
+    finally:
+        _clean_session_v2(polymer_smoke_session)
+
+
+@pytest.mark.slow
+def test_run_v2_pipeline_mountainsort4_preset(polymer_smoke_session):
+    """A29: the franklab MS4 preset runs end-to-end where MS4 is runnable.
+
+    ``mountainsort4`` appears in ``installed_sorters()`` but its runtime is not
+    available in the SI 0.104 test image, so this self-skips on the sorter
+    failure. Where MS4 is runnable it asserts the manifest carries the MS4
+    sorter wiring.
+    """
+    from spikeinterface.sorters.utils import SpikeSortingError
+
+    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    nwb_file_name, sort_group_id, team_name = _prepare_pipeline_session(
+        polymer_smoke_session
+    )
+    try:
+        try:
+            manifest = run_v2_pipeline(
+                nwb_file_name=nwb_file_name,
+                sort_group_id=sort_group_id,
+                interval_list_name="raw data valid times",
+                team_name=team_name,
+                preset="franklab_tetrode_mountainsort4",
+            )
+        except SpikeSortingError as exc:
+            # Narrow to the sorter-RUNTIME failure only: mountainsort4 ships in
+            # installed_sorters() but its runtime is unavailable in some
+            # images. Preset-lookup / manifest / DB / wiring regressions raise
+            # other exception types and must FAIL, not skip.
+            pytest.skip(f"mountainsort4 runtime not available: {exc!r}")
+        sel = (
+            SortingSelection & {"sorting_id": manifest["sorting_id"]}
+        ).fetch1()
+        assert sel["sorter"] == "mountainsort4"
+        assert (
+            sel["sorter_params_name"]
+            == "franklab_tetrode_hippocampus_30kHz_ms4"
+        )
+    finally:
+        _clean_session_v2(polymer_smoke_session)

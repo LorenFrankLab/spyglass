@@ -216,6 +216,45 @@ def populated_sorting(dj_conn):
     yield sort_pk
 
 
+def _clear_curations_for(sorting_key):
+    """Delete every CurationV2 row for a sorting plus its merge masters.
+
+    DataJoint refuses to drop a part row whose master is still present, so
+    walk from the ``SpikeSortingOutput`` merge master down before dropping
+    the ``CurationV2`` rows. Mirrors the test-module helper of the same
+    shape; kept in conftest so the shared curation fixture is
+    self-contained (no cross-module import of a test helper).
+    """
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    for mid in (SpikeSortingOutput.CurationV2 & sorting_key).fetch("merge_id"):
+        (SpikeSortingOutput & {"merge_id": mid}).super_delete(warn=False)
+    (CurationV2 & sorting_key).super_delete(warn=False)
+
+
+@pytest.fixture
+def populated_sorting_with_curation(populated_sorting):
+    """A root ``CurationV2`` over the populated smoke sort.
+
+    Builds on the package-scoped ``populated_sorting`` and inserts one
+    root curation (``parent_curation_id=-1``, no labels, no merges) so the
+    curation-side read tests (``get_unit_brain_regions`` on ``CurationV2``,
+    ``get_merged_sorting`` early returns) have a known master to query.
+
+    Function-scoped and self-cleaning: the persistent test DB carries rows
+    across runs, so the fixture clears any pre-existing curations for this
+    sorting first, then removes the ones it created on teardown. Yields the
+    ``{"sorting_id", "curation_id"}`` PK dict.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    _clear_curations_for(populated_sorting)
+    curation_key = CurationV2.insert_curation(sorting_key=populated_sorting)
+    yield curation_key
+    _clear_curations_for(populated_sorting)
+
+
 @pytest.fixture
 def restore_custom_config():
     """Snapshot and restore ``dj.config['custom']`` around a test.

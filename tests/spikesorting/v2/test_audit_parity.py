@@ -1546,3 +1546,1352 @@ def test_run_si_sorter_restores_global_job_kwargs_on_success(
         "global job_kwargs were not restored after a successful sort; "
         f"before={before} after={after}"
     )
+
+
+# ===========================================================================
+# A25: artifact-detection invariant + lookup branches.
+#
+# SharedArtifactGroup.insert_group cross-session / cross-frequency guards,
+# ArtifactSelection.insert_selection duplicate + missing-Lookup-row
+# diagnostics, the empty sliver-filter return, and the already-gone
+# IntervalList cleanup. The insert_group session/frequency checks and the
+# duplicate check all fire BEFORE any recording load, so every
+# precondition is built via the contained FK-checks-off raw bypass (the
+# established A10/A11/A22 pattern) -- no real populate needed.
+# ===========================================================================
+
+
+def _plant_fake_recording(recording_id, nwb_file_name, sampling_frequency):
+    """Insert a minimal ``Recording`` + ``RecordingSelection`` pair via the
+    FK-checks-off bypass.
+
+    ``SharedArtifactGroup.insert_group`` reads ``RecordingSelection.
+    nwb_file_name`` (session check) and ``Recording.sampling_frequency``
+    (frequency check) and only requires the ``Recording`` row to *exist*
+    for the populated-check -- all before it ever loads the recording. So
+    a fake pair with the right two scalar fields is enough to drive both
+    guards without a real populate. Returns the ``recording_id``.
+    """
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.recording import Recording, RecordingSelection
+
+    conn = dj.conn()
+    conn.query("SET FOREIGN_KEY_CHECKS=0")
+    try:
+        RecordingSelection.insert1(
+            {
+                "recording_id": recording_id,
+                "nwb_file_name": nwb_file_name,
+                "sort_group_id": 0,
+                "interval_list_name": "raw data valid times",
+                "preproc_params_name": "default_franklab",
+                "team_name": "v2_a25_team",
+            },
+            allow_direct_insert=True,
+        )
+        Recording.insert1(
+            {
+                "recording_id": recording_id,
+                "analysis_file_name": "a25_fake.nwb",
+                "electrical_series_path": "/fake/es",
+                "object_id": "a25-fake-object-id",
+                "n_channels": 4,
+                "sampling_frequency": sampling_frequency,
+                "duration_s": 60.0,
+                "cache_hash": "0" * 64,
+            },
+            allow_direct_insert=True,
+        )
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=1")
+    return recording_id
+
+
+def _drop_fake_recording(recording_id):
+    """Tear down a ``_plant_fake_recording`` pair (parts-first)."""
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.recording import Recording, RecordingSelection
+
+    conn = dj.conn()
+    conn.query("SET FOREIGN_KEY_CHECKS=0")
+    try:
+        (Recording & {"recording_id": recording_id}).delete_quick()
+        (RecordingSelection & {"recording_id": recording_id}).delete_quick()
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_shared_artifact_group_rejects_cross_session_members():
+    """A25: members from two sessions raise, and no master row is left.
+
+    A shared artifact pass writes IntervalList rows keyed by
+    ``(nwb_file_name, interval_list_name)``, so mixing sessions makes the
+    artifact-removed valid times undefined. The guard fires before the
+    master insert, so the table must be empty for this group name after
+    the raise (transactional rollback / pre-insert raise).
+    """
+    import uuid
+
+    from spyglass.spikesorting.v2.artifact import SharedArtifactGroup
+
+    rid_a = _plant_fake_recording(uuid.uuid4(), "session_a_.nwb", 30000.0)
+    rid_b = _plant_fake_recording(uuid.uuid4(), "session_b_.nwb", 30000.0)
+    group_name = "v2_a25_cross_session"
+    try:
+        with pytest.raises(ValueError, match="members span 2 sessions"):
+            SharedArtifactGroup.insert_group(
+                group_name,
+                [{"recording_id": rid_a}, {"recording_id": rid_b}],
+            )
+        assert len(SharedArtifactGroup & {
+            "shared_artifact_group_name": group_name
+        }) == 0, "master row not rolled back after cross-session raise"
+    finally:
+        _drop_fake_recording(rid_a)
+        _drop_fake_recording(rid_b)
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_shared_artifact_group_rejects_frequency_mismatch():
+    """A25: members with differing sampling frequencies raise.
+
+    ``si.aggregate_channels`` requires identical fs; a typo in upstream
+    preproc could otherwise produce a mismatch that only crashes opaquely
+    deep inside SI at populate time. Both members share one session so the
+    session guard passes and the frequency guard is the one that fires.
+    """
+    import uuid
+
+    from spyglass.spikesorting.v2.artifact import SharedArtifactGroup
+
+    rid_a = _plant_fake_recording(uuid.uuid4(), "session_freq_.nwb", 30000.0)
+    rid_b = _plant_fake_recording(uuid.uuid4(), "session_freq_.nwb", 25000.0)
+    try:
+        with pytest.raises(ValueError, match="differing sampling frequencies"):
+            SharedArtifactGroup.insert_group(
+                "v2_a25_freq_mismatch",
+                [{"recording_id": rid_a}, {"recording_id": rid_b}],
+            )
+    finally:
+        _drop_fake_recording(rid_a)
+        _drop_fake_recording(rid_b)
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_artifact_selection_raises_duplicate_selection_error():
+    """A25: two master rows for one (params, source) raise
+    ``DuplicateSelectionError``.
+
+    ``insert_selection`` is find-existing-or-insert; if a prior direct
+    bypass left two masters sharing the same ``artifact_params_name`` and
+    ``recording_id``, the find step sees >1 and must raise the integrity
+    error rather than silently picking one. Plant the duplicate masters +
+    matching ``RecordingSource`` parts via the FK-checks-off bypass (the
+    only way to land the otherwise-impossible state).
+    """
+    import uuid
+
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.artifact import ArtifactSelection
+    from spyglass.spikesorting.v2.exceptions import DuplicateSelectionError
+
+    params_name = "v2_a25_dup_params"
+    rec_id = uuid.uuid4()
+    aid1, aid2 = uuid.uuid4(), uuid.uuid4()
+    conn = dj.conn()
+    conn.query("SET FOREIGN_KEY_CHECKS=0")
+    try:
+        for aid in (aid1, aid2):
+            ArtifactSelection.insert1(
+                {"artifact_id": aid, "artifact_params_name": params_name},
+                allow_direct_insert=True,
+            )
+            ArtifactSelection.RecordingSource.insert1(
+                {"artifact_id": aid, "recording_id": rec_id},
+                allow_direct_insert=True,
+            )
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+    try:
+        with pytest.raises(DuplicateSelectionError, match="master rows"):
+            ArtifactSelection.insert_selection(
+                {"recording_id": rec_id, "artifact_params_name": params_name}
+            )
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=0")
+        try:
+            (ArtifactSelection.RecordingSource & {
+                "recording_id": rec_id
+            }).delete_quick()
+            for aid in (aid1, aid2):
+                (ArtifactSelection & {"artifact_id": aid}).delete_quick()
+        finally:
+            conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_artifact_selection_requires_artifact_params_name():
+    """A25: a key without ``artifact_params_name`` raises naming the field.
+
+    The source key alone is insufficient -- the master row needs the
+    params FK. The guard names the missing field so the notebook user can
+    fix the call in one step.
+    """
+    import uuid
+
+    from spyglass.spikesorting.v2.artifact import ArtifactSelection
+
+    with pytest.raises(ValueError, match="artifact_params_name"):
+        ArtifactSelection.insert_selection({"recording_id": uuid.uuid4()})
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_artifact_selection_missing_lookup_row_diagnostic():
+    """A25: a missing ``ArtifactDetectionParameters`` row raises a
+    diagnostic ValueError, not an opaque FK IntegrityError.
+
+    ``_ensure_lookup_row_exists`` pre-checks the params FK target and, when
+    absent, names the Lookup table and the ``insert_default()`` path. The
+    source key has no matching master yet (find returns empty), so control
+    reaches the lookup pre-check.
+    """
+    import uuid
+
+    from spyglass.spikesorting.v2.artifact import ArtifactSelection
+
+    with pytest.raises(ValueError) as excinfo:
+        ArtifactSelection.insert_selection(
+            {
+                "recording_id": uuid.uuid4(),
+                "artifact_params_name": "v2_a25_no_such_params_row",
+            }
+        )
+    message = str(excinfo.value)
+    assert "ArtifactDetectionParameters" in message
+    assert "insert_default" in message
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_detect_artifacts_empty_sliver_filter_returns_empty():
+    """A25: when ``min_length_s`` filters out every kept interval,
+    ``_detect_artifacts`` returns ``np.empty((0, 2))``.
+
+    Detection finds artifact frames (so the early all-valid return at the
+    zero-frames branch is NOT taken), the complement is built, then a huge
+    ``min_length_s`` drops every surviving valid sliver. The return must be
+    a real (0, 2) float array -- the shape downstream ``_apply_artifact_
+    mask`` expects -- not an empty 1-D array. Pairs with Phase 4 A1, where
+    that empty array drives ``_apply_artifact_mask``'s raise.
+    """
+    from spyglass.spikesorting.v2._params.artifact_detection import (
+        ArtifactDetectionParamsSchema,
+    )
+    from spyglass.spikesorting.v2.artifact import ArtifactDetection
+
+    rec = _synthetic_artifact_recording()
+    validated = ArtifactDetectionParamsSchema(
+        detect=True,
+        amplitude_thresh_uV=50.0,  # trips on the planted 300 µV burst
+        zscore_thresh=None,
+        proportion_above_thresh=0.5,
+        removal_window_ms=1.0,
+        join_window_ms=0.0,
+        min_length_s=1e9,  # larger than the whole recording -> all filtered
+    )
+
+    out = ArtifactDetection._detect_artifacts(rec, validated)
+    assert out.shape == (0, 2), (
+        f"expected an empty (0, 2) array, got shape {out.shape}"
+    )
+    # dtype matches the recording's timestamp dtype (float64); a 1-D
+    # np.empty(0) or an int array would break the downstream mask walker.
+    assert out.dtype == rec.get_times().dtype
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_artifact_detection_delete_tolerates_already_gone_interval_list():
+    """A25: ``ArtifactDetection.delete`` does not raise when the paired
+    IntervalList rows were already removed.
+
+    The override deletes the master then cleans up the IntervalList rows it
+    resolved; the ``len(rows) == 0`` guard skips a restriction whose rows
+    are already gone. We pre-delete the IntervalList rows, then delete the
+    detection, and assert no raise + the master is gone.
+
+    Builds a DEDICATED selection on a planted recording (FK-off) and
+    inserts a zero-row ``ArtifactDetection`` master directly, so the shared
+    populated fixture's artifact row is untouched.
+    """
+    import uuid
+
+    import datajoint as dj
+
+    from spyglass.common import IntervalList
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.recording import RecordingSelection
+    from spyglass.spikesorting.v2.utils import artifact_interval_list_name
+
+    nwb = "a25_delete_session_.nwb"
+    rec_id = _plant_fake_recording(uuid.uuid4(), nwb, 30000.0)
+    aid = uuid.uuid4()
+    params_name = "v2_a25_delete_params"
+    ilist_name = artifact_interval_list_name(aid)
+    conn = dj.conn()
+    conn.query("SET FOREIGN_KEY_CHECKS=0")
+    try:
+        ArtifactSelection.insert1(
+            {"artifact_id": aid, "artifact_params_name": params_name},
+            allow_direct_insert=True,
+        )
+        ArtifactSelection.RecordingSource.insert1(
+            {"artifact_id": aid, "recording_id": rec_id},
+            allow_direct_insert=True,
+        )
+        ArtifactDetection.insert1(
+            {"artifact_id": aid}, allow_direct_insert=True
+        )
+        # The IntervalList row the delete would resolve and try to clean.
+        IntervalList.insert1(
+            {
+                "nwb_file_name": nwb,
+                "interval_list_name": ilist_name,
+                "valid_times": np.empty((0, 2)),
+            },
+            allow_direct_insert=True,
+        )
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+    try:
+        # Pre-delete the IntervalList row so delete() hits the already-gone
+        # (len == 0) branch.
+        (IntervalList & {
+            "nwb_file_name": nwb,
+            "interval_list_name": ilist_name,
+        }).delete_quick()
+
+        # Must not raise even though the cleanup target is already gone.
+        (ArtifactDetection & {"artifact_id": aid}).delete(safemode=False)
+        assert len(ArtifactDetection & {"artifact_id": aid}) == 0
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=0")
+        try:
+            (ArtifactDetection & {"artifact_id": aid}).delete_quick()
+            (ArtifactSelection.RecordingSource & {
+                "artifact_id": aid
+            }).delete_quick()
+            (ArtifactSelection & {"artifact_id": aid}).delete_quick()
+        finally:
+            conn.query("SET FOREIGN_KEY_CHECKS=1")
+        _drop_fake_recording(rec_id)
+
+
+# ===========================================================================
+# A26: sorting.py untested branches.
+#
+# Concat-source ambiguity, peak-channel mismatch, analyzer rebuild, zero-unit
+# get_sorting, unit-id int cast, make_compute Mode-A cleanup, the missing
+# SorterParameters diagnostic, the MATLAB-sorter carve-out, the empty
+# artifact-mask short-circuit, the singleton noise_levels broadcast, and the
+# delete-safemode passthrough. Excludes A1/A8/A9/A10/A11 (already in the
+# ledger). Light tests use raw bypass / cheap synthetic recordings; the few
+# that need a real analyzer reuse the shared ``populated_sorting`` fixture.
+# ===========================================================================
+
+
+def _plant_concat_sorting_selection(sid):
+    """Land a concat-source ``SortingSelection`` (no ``RecordingSource``).
+
+    Mirrors the A11 precondition: ``insert_selection`` rejects concat today,
+    so the only way to get a ``ConcatenatedRecordingSource`` part is the
+    FK-checks-off bypass. The caller cleans up ``SortingSelection & {sid}``.
+    """
+    import uuid
+
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.sorting import SorterParameters, SortingSelection
+
+    SorterParameters.insert_default()
+    SortingSelection.insert1(
+        {
+            "sorting_id": sid,
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": "default",
+        },
+        allow_direct_insert=True,
+    )
+    conn = dj.conn()
+    conn.query("SET FOREIGN_KEY_CHECKS=0")
+    try:
+        SortingSelection.ConcatenatedRecordingSource.insert1(
+            {"sorting_id": sid, "concat_recording_id": uuid.uuid4()},
+            allow_direct_insert=True,
+        )
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_sorting_get_unit_brain_regions_concat_raises_without_anchor():
+    """A26: a concat-backed sort raises ``ConcatBrainRegionAmbiguousError``
+    unless ``allow_anchor_member=True``.
+
+    A concat unit's peak channel maps to one Electrode row per member
+    session, so per-session regions are ambiguous without cross-session
+    matching (not in this build). The default refuses; the opt-in returns
+    anchor-member regions.
+    """
+    import uuid
+
+    from spyglass.spikesorting.v2.exceptions import (
+        ConcatBrainRegionAmbiguousError,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    sid = uuid.uuid4()
+    _plant_concat_sorting_selection(sid)
+    try:
+        with pytest.raises(ConcatBrainRegionAmbiguousError):
+            Sorting().get_unit_brain_regions(
+                {"sorting_id": sid}, allow_anchor_member=False
+            )
+    finally:
+        (SortingSelection & {"sorting_id": sid}).delete(safemode=False)
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_sorting_get_unit_brain_regions_concat_anchor_member_df(
+    populated_sorting,
+):
+    """A26: ``allow_anchor_member=True`` returns the
+    ``unit_brain_region_df`` DataFrame labeled ``anchor_member``.
+
+    The return is the DataFrame (NOT a ``SourceResolution`` dataclass --
+    that type lives inside ``make_fetch`` dispatch, not on this accessor).
+    Non-vacuous: one ``Sorting.Unit`` row is planted (copied from the
+    populated fixture so its Electrode FK resolves through BrainRegion), so
+    the frame has a real row carrying ``region_resolution == 'anchor_member'``.
+    """
+    import datetime as dt
+    import uuid
+
+    import datajoint as dj
+    import pandas as pd
+
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+    from spyglass.spikesorting.v2.utils import SourceResolution
+
+    template_unit = (Sorting.Unit & populated_sorting).fetch(
+        as_dict=True
+    )[0]
+
+    sid = uuid.uuid4()
+    _plant_concat_sorting_selection(sid)
+    conn = dj.conn()
+    conn.query("SET FOREIGN_KEY_CHECKS=0")
+    try:
+        Sorting.insert1(
+            {
+                "sorting_id": sid,
+                "analysis_file_name": "a26_concat_fake.nwb",
+                "object_id": "a26-concat-object-id",
+                "analyzer_folder": "/nonexistent/a26_concat",
+                "n_units": 1,
+                "time_of_sort": dt.datetime(2020, 1, 1),
+            },
+            allow_direct_insert=True,
+        )
+        unit_row = {**template_unit, "sorting_id": sid, "unit_id": 0}
+        Sorting.Unit.insert1(unit_row, allow_direct_insert=True)
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+    try:
+        result = Sorting().get_unit_brain_regions(
+            {"sorting_id": sid}, allow_anchor_member=True
+        )
+        assert isinstance(result, pd.DataFrame)
+        assert not isinstance(result, SourceResolution)
+        assert "region_resolution" in result.columns
+        assert len(result) == 1, "anchor-member df should carry the one unit"
+        assert (result["region_resolution"] == "anchor_member").all()
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=0")
+        try:
+            (Sorting.Unit & {"sorting_id": sid}).delete_quick()
+            (Sorting & {"sorting_id": sid}).delete_quick()
+        finally:
+            conn.query("SET FOREIGN_KEY_CHECKS=1")
+        (SortingSelection & {"sorting_id": sid}).delete(safemode=False)
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_sorting_selection_missing_sorter_params_diagnostic():
+    """A26: a missing ``SorterParameters`` row raises a diagnostic ValueError.
+
+    ``_ensure_lookup_row_exists`` translates the would-be FK IntegrityError
+    into a message naming ``SorterParameters`` and ``insert_default()``. The
+    recording source has no matching master, so control reaches the
+    lookup pre-check.
+    """
+    import uuid
+
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    with pytest.raises(ValueError) as excinfo:
+        SortingSelection.insert_selection(
+            {
+                "recording_id": uuid.uuid4(),
+                "sorter": "mountainsort5",
+                "sorter_params_name": "a26_no_such_sorter_row",
+            }
+        )
+    message = str(excinfo.value)
+    assert "SorterParameters" in message
+    assert "insert_default" in message
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_run_si_sorter_matlab_carveout(monkeypatch):
+    """A26: a MATLAB sorter gets ``singularity_image=True`` and the
+    container-incompatible kwargs stripped.
+
+    The MATLAB carve-out (``kilosort2_5`` / ``kilosort3`` / ``ironclust``)
+    forces Singularity containerization and removes the
+    ``_MATLAB_SORTER_STRIP_KWARGS`` (``tempdir`` / ``mp_context`` /
+    ``max_threads_per_process``) that the container rejects. We capture the
+    kwargs ``run_sorter`` actually receives.
+    """
+    import uuid
+
+    import spikeinterface as si
+    import spikeinterface.sorters as sis
+
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    captured = {}
+
+    def _capture(**kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(sis, "run_sorter", _capture)
+    rec = si.generate_recording(
+        num_channels=4, durations=[1.0], sampling_frequency=30_000.0
+    )
+    sorter_params = {
+        "tempdir": "/should/be/stripped",
+        "mp_context": "spawn",
+        "max_threads_per_process": 4,
+        "detect_threshold": 6.0,  # a real param that must survive
+    }
+    Sorting._run_si_sorter(
+        "kilosort2_5", sorter_params, rec, uuid.uuid4(), {}
+    )
+
+    assert captured.get("singularity_image") is True, (
+        "MATLAB sorter must run under Singularity"
+    )
+    for stripped in ("tempdir", "mp_context", "max_threads_per_process"):
+        assert stripped not in captured, (
+            f"{stripped!r} should be stripped for a MATLAB sorter"
+        )
+    assert captured.get("detect_threshold") == 6.0, (
+        "a non-stripped sorter param must reach run_sorter"
+    )
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_run_si_sorter_non_matlab_keeps_kwargs(monkeypatch):
+    """A26 (contrast): a non-MATLAB sorter keeps every param and gets no
+    Singularity flag -- proving the carve-out is sorter-name-gated."""
+    import uuid
+
+    import spikeinterface as si
+    import spikeinterface.sorters as sis
+
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    captured = {}
+    monkeypatch.setattr(
+        sis, "run_sorter", lambda **k: captured.update(k) or object()
+    )
+    rec = si.generate_recording(
+        num_channels=4, durations=[1.0], sampling_frequency=30_000.0
+    )
+    Sorting._run_si_sorter(
+        "mountainsort5", {"tempdir": "/keep/me"}, rec, uuid.uuid4(), {}
+    )
+    assert "singularity_image" not in captured
+    assert captured.get("tempdir") == "/keep/me"
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_clusterless_singleton_noise_levels_broadcast(monkeypatch):
+    """A26: a singleton ``noise_levels=[1.0]`` is broadcast to length
+    ``n_channels`` before ``detect_peaks``.
+
+    SI's ``locally_exclusive`` indexes ``noise_levels[chan] *
+    detect_threshold`` per channel, so a length-1 array would read only
+    channel 0 (the v1 multi-channel clusterless bug). The runtime broadcasts
+    the scalar to one value per channel. We capture the ``method_kwargs``
+    that reach ``detect_peaks`` and assert the length + fill.
+    """
+    import numpy as _np
+    import spikeinterface as si
+    import spikeinterface.sortingcomponents.peak_detection as pd_mod
+
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    n_channels = 6
+    rec = si.generate_recording(
+        num_channels=n_channels,
+        durations=[1.0],
+        sampling_frequency=30_000.0,
+    )
+
+    captured = {}
+
+    def _capture_detect(recording, *, method, method_kwargs, job_kwargs):
+        captured["noise_levels"] = method_kwargs.get("noise_levels")
+        # Return an empty detection so the wrapper builds an empty sorting.
+        return _np.zeros(
+            0, dtype=[("sample_index", "int64"), ("channel_index", "int64")]
+        )
+
+    monkeypatch.setattr(pd_mod, "detect_peaks", _capture_detect)
+    # The runtime imports detect_peaks at call time from this module path.
+    monkeypatch.setattr(
+        "spikeinterface.sortingcomponents.peak_detection.detect_peaks",
+        _capture_detect,
+    )
+
+    Sorting._run_clusterless_thresholder(
+        sorter_params={"noise_levels": [1.0], "threshold_unit": "uv"},
+        recording=rec,
+        job_kwargs=None,
+    )
+
+    nl = captured["noise_levels"]
+    assert nl is not None
+    nl = _np.asarray(nl)
+    assert nl.shape == (n_channels,), (
+        f"singleton noise_levels must broadcast to n_channels={n_channels}, "
+        f"got shape {nl.shape}"
+    )
+    assert _np.allclose(nl, 1.0)
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_apply_artifact_mask_full_coverage_short_circuits():
+    """A26: when ``valid_times`` covers the whole recording, the mask is a
+    no-op and the original recording object is returned unmodified.
+
+    ``frame_ranges`` ends up empty (no artifact gaps), so ``_apply_artifact_
+    mask`` returns ``recording`` itself -- no ``remove_artifacts`` wrapper.
+    The contrast call (valid_times dropping the second half) returns a
+    DIFFERENT object, proving the short-circuit is meaningful.
+    """
+    import numpy as _np
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    rec = si.generate_recording(
+        num_channels=4, durations=[1.0], sampling_frequency=30_000.0
+    )
+    ts = rec.get_times()
+
+    full = _np.asarray([[ts[0], ts[-1]]])
+    out_full = Sorting._apply_artifact_mask(rec, full)
+    assert out_full is rec, (
+        "full-coverage valid_times must short-circuit to the original "
+        "recording (no remove_artifacts wrapper)"
+    )
+
+    # Contrast: dropping the second half leaves an artifact gap -> a wrapped
+    # recording, not the original object.
+    partial = _np.asarray([[ts[0], ts[len(ts) // 2]]])
+    out_partial = Sorting._apply_artifact_mask(rec, partial)
+    assert out_partial is not rec
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_get_sorting_zero_unit_returns_empty_numpysorting(populated_sorting):
+    """A26: a zero-unit sort returns an empty single-segment ``NumpySorting``.
+
+    ``NwbSortingExtractor`` cannot open an empty units NWB, so the zero-unit
+    branch returns an empty ``NumpySorting`` at the recording's sampling
+    frequency. Built on the fixture's real recording (the branch still reads
+    ``sampling_frequency`` + ``t_start`` from it) via a planted zero-unit
+    Sorting row.
+    """
+    import datetime as dt
+    import uuid
+
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        Sorting,
+        SortingSelection,
+    )
+
+    recording_id = SortingSelection.resolve_source(populated_sorting).key[
+        "recording_id"
+    ]
+    SorterParameters.insert_default()
+    sid = uuid.uuid4()
+    SortingSelection.insert1(
+        {
+            "sorting_id": sid,
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": "default",
+        },
+        allow_direct_insert=True,
+    )
+    conn = dj.conn()
+    conn.query("SET FOREIGN_KEY_CHECKS=0")
+    try:
+        SortingSelection.RecordingSource.insert1(
+            {"sorting_id": sid, "recording_id": recording_id},
+            allow_direct_insert=True,
+        )
+        Sorting.insert1(
+            {
+                "sorting_id": sid,
+                "analysis_file_name": "a26_zero_fake.nwb",
+                "object_id": "a26-zero-object-id",
+                "analyzer_folder": "/nonexistent/a26_zero",
+                "n_units": 0,
+                "time_of_sort": dt.datetime(2020, 1, 1),
+            },
+            allow_direct_insert=True,
+        )
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+    try:
+        sorting = Sorting().get_sorting({"sorting_id": sid})
+        assert len(sorting.unit_ids) == 0
+        assert sorting.get_num_segments() == 1
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=0")
+        try:
+            (Sorting & {"sorting_id": sid}).delete_quick()
+        finally:
+            conn.query("SET FOREIGN_KEY_CHECKS=1")
+        (SortingSelection & {"sorting_id": sid}).delete(safemode=False)
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_get_sorting_dataframe_casts_unit_ids_to_python_int(populated_sorting):
+    """A26: ``get_sorting(as_dataframe=True)`` indexes by Python ``int``.
+
+    v2 writes integer unit_ids; the DataFrame path casts ``int(uid)`` so the
+    index matches v1's ``nwb.units.to_dataframe()`` shape (a numpy.int64
+    round-trips differently through ``NwbSortingExtractor`` in some SI
+    subpaths). Non-vacuous: the raw extractor yields numpy integers, so the
+    cast genuinely changes the type.
+    """
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    raw = Sorting().get_sorting(populated_sorting)
+    assert len(raw.unit_ids) >= 1, "fixture sort must have units"
+    # The raw extractor's unit_ids are numpy integers -- the cast is not a
+    # no-op.
+    assert all(
+        isinstance(uid, np.integer) for uid in raw.unit_ids
+    ), "precondition: NwbSortingExtractor yields numpy unit_ids"
+
+    df = Sorting().get_sorting(populated_sorting, as_dataframe=True)
+    assert all(type(uid) is int for uid in df.index), (
+        "DataFrame index unit_ids must be Python int, not numpy scalars"
+    )
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_populate_unit_part_peak_channel_not_in_sort_group(
+    populated_sorting, monkeypatch
+):
+    """A26: a peak channel absent from the sort group raises RuntimeError.
+
+    ``_populate_unit_part`` resolves each unit's peak channel to a
+    ``SortGroupV2.SortGroupElectrode`` row; a channel id outside the group
+    is a recording/sort-group mismatch and must fail loudly. We monkeypatch
+    the extremum-channel lookup to return an out-of-group id and call the
+    helper with the fixture's real analyzer.
+    """
+    from spikeinterface.core import template_tools
+
+    from spyglass.spikesorting.v2.recording import RecordingSelection
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+    from spyglass.spikesorting.v2.utils import _analyzer_path
+
+    recording_id = SortingSelection.resolve_source(populated_sorting).key[
+        "recording_id"
+    ]
+    nwb_file_name = (
+        RecordingSelection & {"recording_id": recording_id}
+    ).fetch1("nwb_file_name")
+    analyzer_folder = _analyzer_path(
+        {"sorting_id": populated_sorting["sorting_id"]}
+    )
+    sorting = Sorting().get_sorting(populated_sorting)
+
+    bad_channel = 10_000_000
+    original_extremum_channel = template_tools.get_template_extremum_channel
+
+    def _bad_peak_channels(analyzer, **kwargs):
+        # ``get_template_extremum_amplitude`` calls this internally with
+        # ``peak_sign``/``mode``; delegate that path to the real function so
+        # only ``_populate_unit_part``'s own ``outputs="id"`` call (no
+        # peak_sign) returns the planted out-of-group channel.
+        if "peak_sign" in kwargs:
+            return original_extremum_channel(analyzer, **kwargs)
+        return {uid: bad_channel for uid in sorting.unit_ids}
+
+    monkeypatch.setattr(
+        template_tools, "get_template_extremum_channel", _bad_peak_channels
+    )
+
+    with pytest.raises(RuntimeError, match=str(bad_channel)):
+        Sorting._populate_unit_part(
+            sorting,
+            recording_id,
+            nwb_file_name,
+            dict(populated_sorting),
+            analyzer_folder,
+        )
+
+
+@pytest.mark.slow
+@pytest.mark.usefixtures("dj_conn")
+def test_rebuild_analyzer_folder_recreates_on_missing(populated_sorting):
+    """A26: ``get_analyzer`` rebuilds the analyzer folder when it is gone.
+
+    The analyzer folder is regeneratable scratch; ``get_analyzer`` rebuilds
+    it in place (without deleting the DataJoint row) and the rebuilt analyzer
+    must carry the same ``unit_ids`` as the original. Reuses the fixture
+    (non-destructive -- the folder is restored by the rebuild).
+    """
+    import shutil
+
+    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2.utils import _analyzer_path
+
+    folder = _analyzer_path({"sorting_id": populated_sorting["sorting_id"]})
+    original = Sorting().get_analyzer(populated_sorting)
+    original_unit_ids = list(original.unit_ids)
+    del original  # release the handle before rmtree
+
+    shutil.rmtree(folder)
+    assert not folder.exists()
+
+    try:
+        rebuilt = Sorting().get_analyzer(populated_sorting)
+        assert folder.exists(), "rebuild did not recreate the analyzer folder"
+        assert list(rebuilt.unit_ids) == original_unit_ids, (
+            "rebuilt analyzer unit_ids diverge from the original sort"
+        )
+    finally:
+        # The folder belongs to the shared package fixture; if anything above
+        # failed after the rmtree, restore it so later fixture consumers do
+        # not cascade-fail on a missing analyzer.
+        if not folder.exists():
+            try:
+                Sorting().get_analyzer(populated_sorting)
+            except Exception:
+                pass
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_rebuild_analyzer_folder_concat_source_not_implemented():
+    """A26: ``_rebuild_analyzer_folder`` raises ``NotImplementedError`` for a
+    concat-source row.
+
+    The rebuild path resolves the sorting's source and delegates to the concat
+    stub, which is not implemented today. This pins the cross-method invariant
+    (the rebuild correctly routes to the concat path) rather than a generic
+    "method raises" -- the concat branch fires before any analyzer/folder I/O,
+    so a planted concat ``SortingSelection`` is sufficient.
+    """
+    import uuid
+
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    sid = uuid.uuid4()
+    _plant_concat_sorting_selection(sid)
+    try:
+        with pytest.raises(NotImplementedError):
+            Sorting()._rebuild_analyzer_folder({"sorting_id": sid})
+    finally:
+        (SortingSelection & {"sorting_id": sid}).delete(safemode=False)
+
+
+def _fresh_unit_producing_selection(populated_sorting):
+    """Build a fresh MS5 ``SortingSelection`` on the fixture's
+    recording+artifact (NOT yet populated); return its ``{"sorting_id"}``.
+
+    The destructive delete / Mode-A tests need a sort that actually yields
+    units so ``_build_analyzer`` writes an analyzer folder on disk -- the
+    clusterless ``default`` row finds zero peaks on the MEArec smoke fixture
+    (no folder, vacuous assertions). MS5 produces units.
+
+    The selection is ARTIFACT-FREE (no ``artifact_id``) so it is a DISTINCT
+    row from the package fixture's artifact-backed MS5 sort -- otherwise
+    ``insert_selection`` (find-existing-or-insert) would return the shared
+    fixture's sort and a destructive test would delete shared state. The
+    caller owns populate + teardown.
+    """
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        SortingSelection,
+    )
+
+    recording_id = SortingSelection.resolve_source(populated_sorting).key[
+        "recording_id"
+    ]
+    SorterParameters.insert_default()
+    return SortingSelection.insert_selection(
+        {
+            "recording_id": recording_id,
+            "sorter": "mountainsort5",
+            "sorter_params_name": "franklab_tetrode_hippocampus_30kHz_ms5",
+        }
+    )
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("safemode_arg", [None, False])
+@pytest.mark.usefixtures("dj_conn")
+def test_sorting_delete_removes_analyzer_folder(populated_sorting, safemode_arg):
+    """A26: ``Sorting.delete`` removes the on-disk analyzer folder for both
+    ``safemode=None`` (default) and ``safemode=False`` (explicit pass-through).
+
+    The ``analyzer_folder`` path is not DataJoint-tracked, so the override
+    must rmtree it after the cascade. Populates a dedicated MS5 sort per
+    parametrization so the shared fixture is untouched.
+    """
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+    from spyglass.spikesorting.v2.utils import _analyzer_path
+
+    sort_pk = _fresh_unit_producing_selection(populated_sorting)
+    Sorting.populate(sort_pk, reserve_jobs=False)
+    folder = _analyzer_path({"sorting_id": sort_pk["sorting_id"]})
+    try:
+        assert folder.exists(), "fresh sort should have an analyzer folder"
+        (Sorting & sort_pk).delete(safemode=safemode_arg)
+        assert not folder.exists(), (
+            f"analyzer folder not removed on delete(safemode={safemode_arg})"
+        )
+        assert len(Sorting & sort_pk) == 0
+    finally:
+        # Selection row is independent of the Sorting master; clean it up.
+        (SortingSelection & sort_pk).delete(safemode=False)
+        if folder.exists():
+            import shutil
+
+            shutil.rmtree(folder, ignore_errors=True)
+
+
+@pytest.mark.slow
+@pytest.mark.usefixtures("dj_conn")
+def test_make_compute_mode_a_cleanup_on_write_failure(
+    populated_sorting, monkeypatch
+):
+    """A26: a ``_write_units_nwb`` failure after ``_build_analyzer`` removes
+    the analyzer folder and inserts no row (make_compute Mode-A cleanup).
+
+    Once ``_build_analyzer`` has written the folder, any later failure in
+    ``make_compute`` must rmtree it (DataJoint never calls ``make_insert``
+    after the raise). We build a fresh unit-producing (MS5) selection with
+    ``_write_units_nwb`` patched to raise, then assert the folder is gone and
+    no Sorting row landed.
+    """
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+    from spyglass.spikesorting.v2.utils import _analyzer_path
+
+    sort_pk = _fresh_unit_producing_selection(populated_sorting)
+    folder = _analyzer_path({"sorting_id": sort_pk["sorting_id"]})
+
+    def _boom_write(self, **kwargs):
+        raise RuntimeError("units NWB write blew up")
+
+    monkeypatch.setattr(Sorting, "_write_units_nwb", _boom_write)
+
+    try:
+        with pytest.raises(Exception, match="units NWB write blew up"):
+            Sorting.populate(sort_pk, reserve_jobs=False)
+        assert not folder.exists(), (
+            "Mode-A cleanup did not remove the analyzer folder after the "
+            "units-NWB write failed"
+        )
+        assert len(Sorting & sort_pk) == 0, "no row should be inserted"
+    finally:
+        (SortingSelection & sort_pk).delete(safemode=False)
+        if folder.exists():
+            import shutil
+
+            shutil.rmtree(folder, ignore_errors=True)
+
+
+# ===========================================================================
+# A30: parity pins for intentional-justified divergences that lacked a test.
+#
+# Without these pins a future refactor "fixing" them as drift would silently
+# regress to v1 behavior. All behavioral: schema validation, shipped default
+# rows, table column shape, and the runtime defensive strip.
+# ===========================================================================
+
+
+def test_ms4_schema_freq_band_defaults():
+    """A30: MS4 schema ships ``freq_min=600`` / ``freq_max=6000``.
+
+    These match v1's tetrode preset; the docstring records the choice but no
+    test pinned it. A drift back to SI's bare MS4 defaults (no band) would
+    silently change the filtered band the sorter sees.
+    """
+    schema = MountainSort4Schema()
+    assert schema.freq_min == 600.0
+    assert schema.freq_max == 6000.0
+
+
+def test_ms4_schema_detect_threshold_float_and_positive():
+    """A30: MS4 ``detect_threshold`` is a positive float (int coerced, 0 rejected)."""
+    import pydantic
+
+    coerced = MountainSort4Schema(detect_threshold=3)
+    assert coerced.detect_threshold == 3.0
+    assert isinstance(coerced.detect_threshold, float)
+    with pytest.raises(pydantic.ValidationError):
+        MountainSort4Schema(detect_threshold=0)  # gt=0 floor
+
+
+def test_clusterless_schema_peak_sign_accepts_documented_values():
+    """A30: the clusterless schema accepts ``neg`` / ``pos`` / ``both`` and
+    rejects an unknown peak_sign."""
+    import pydantic
+
+    from spyglass.spikesorting.v2._params.sorter import (
+        ClusterlessThresholderSchema,
+    )
+
+    for sign in ("neg", "pos", "both"):
+        assert ClusterlessThresholderSchema(peak_sign=sign).peak_sign == sign
+    with pytest.raises(pydantic.ValidationError):
+        ClusterlessThresholderSchema(peak_sign="unknown")
+
+
+def test_clusterless_schema_rejects_stale_fields():
+    """A30: the clusterless schema forbids v1's stale ``outputs`` /
+    ``random_chunk_kwargs`` (extra='forbid')."""
+    import pydantic
+
+    from spyglass.spikesorting.v2._params.sorter import (
+        ClusterlessThresholderSchema,
+    )
+
+    for stale in ({"outputs": "sorting"}, {"random_chunk_kwargs": {}}):
+        with pytest.raises(pydantic.ValidationError):
+            ClusterlessThresholderSchema(**stale)
+
+
+def test_common_reference_params_operator_knob():
+    """A30: ``CommonReferenceParams.operator`` accepts both documented values."""
+    import pydantic
+
+    from spyglass.spikesorting.v2._params.preprocessing import (
+        CommonReferenceParams,
+    )
+
+    for op in ("median", "average"):
+        assert CommonReferenceParams(operator=op).operator == op
+    with pytest.raises(pydantic.ValidationError):
+        CommonReferenceParams(operator="rms")
+
+
+def test_metrics_source_enum_members():
+    """A30: ``MetricsSource`` carries ``manual`` / ``analyzer_curation`` /
+    ``figpack`` (the set ``insert_curation`` coerces against).
+
+    Today only ``manual`` is exercised end-to-end; pinning the other two
+    members guards against a refactor dropping them (which would make a valid
+    metrics_source raise at the insert boundary).
+    """
+    from spyglass.spikesorting.v2.utils import MetricsSource
+
+    for value in ("manual", "analyzer_curation", "figpack"):
+        assert MetricsSource(value).value == value
+    with pytest.raises(ValueError):
+        MetricsSource("not_a_member")
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_clusterless_default_row_ships_noise_levels_one():
+    """A30: the shipped ``clusterless_thresholder/default`` row carries
+    ``noise_levels=[1.0]``.
+
+    Regression guard for the 1,400x divergence bug: v1 read detect_threshold
+    in raw uV (noise_levels=[1.0]); a drift to None would reinterpret it as a
+    MAD multiplier.
+    """
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    SorterParameters.insert_default()
+    params = (
+        SorterParameters
+        & {"sorter": "clusterless_thresholder", "sorter_params_name": "default"}
+    ).fetch1("params")
+    assert params["noise_levels"] == [1.0]
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_sorting_master_ships_analyzer_folder_and_n_units_columns():
+    """A30: the ``Sorting`` master declares ``analyzer_folder`` and
+    ``n_units`` columns (semantic check via the heading, not a source match)."""
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    attrs = Sorting.heading.attributes
+    assert "analyzer_folder" in attrs
+    assert "n_units" in attrs
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_clusterless_runtime_strips_stale_fields(monkeypatch):
+    """A30: the clusterless runtime defensively strips ``outputs`` /
+    ``random_chunk_kwargs`` from a params row that slipped past the Pydantic
+    gate (e.g. a raw ``dj.insert1``).
+
+    ``detect_peaks`` rejects those keys; the runtime pops them before the call
+    so a stale row does not crash the sort. We capture ``method_kwargs`` and
+    assert the stale keys are gone.
+    """
+    import numpy as _np
+    import spikeinterface as si
+    import spikeinterface.sortingcomponents.peak_detection as pd_mod
+
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    rec = si.generate_recording(
+        num_channels=4, durations=[1.0], sampling_frequency=30_000.0
+    )
+    captured = {}
+
+    def _capture_detect(recording, *, method, method_kwargs, job_kwargs):
+        captured["method_kwargs"] = dict(method_kwargs)
+        return _np.zeros(
+            0, dtype=[("sample_index", "int64"), ("channel_index", "int64")]
+        )
+
+    monkeypatch.setattr(
+        "spikeinterface.sortingcomponents.peak_detection.detect_peaks",
+        _capture_detect,
+    )
+    monkeypatch.setattr(pd_mod, "detect_peaks", _capture_detect)
+
+    # Stale fields that the Pydantic schema would forbid, planted as if a raw
+    # insert bypassed validation.
+    Sorting._run_clusterless_thresholder(
+        sorter_params={
+            "detect_threshold": 100.0,
+            "threshold_unit": "uv",
+            "outputs": "sorting",
+            "random_chunk_kwargs": {"num_chunks_per_segment": 5},
+        },
+        recording=rec,
+        job_kwargs=None,
+    )
+    mk = captured["method_kwargs"]
+    assert "outputs" not in mk
+    assert "random_chunk_kwargs" not in mk
+
+
+@pytest.mark.slow
+@pytest.mark.usefixtures("dj_conn")
+def test_obs_intervals_full_envelope_fallback(populated_sorting):
+    """A30/A16: ``obs_intervals=None`` (no artifact pass) writes the full
+    recording envelope; an artifact-backed sort writes the artifact
+    IntervalList's valid_times.
+
+    The Units NWB carries ``obs_intervals`` per unit for downstream
+    firing-rate windows. When no artifact mask was applied the fallback is the
+    recording's full timestamp envelope; when an artifact pass exists the
+    obs_intervals come from its IntervalList (the make_fetch path), not the
+    fallback. We populate an artifact-FREE MS5 sort for the fallback and reuse
+    the artifact-backed fixture for the IntervalList path.
+    """
+    import pynwb
+
+    from spyglass.common import IntervalList
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+    from spyglass.spikesorting.v2.utils import artifact_interval_list_name
+
+    def _first_unit_obs_intervals(sort_pk):
+        analysis_file_name = (Sorting & sort_pk).fetch1("analysis_file_name")
+        abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+        with pynwb.NWBHDF5IO(
+            path=abs_path, mode="r", load_namespaces=True
+        ) as io:
+            nwbf = io.read()
+            return np.asarray(nwbf.units["obs_intervals"][0])
+
+    # --- artifact-FREE sort: full-envelope fallback -----------------------
+    free_pk = _fresh_unit_producing_selection(populated_sorting)
+    try:
+        Sorting.populate(free_pk, reserve_jobs=False)
+        recording_id = SortingSelection.resolve_source(free_pk).key[
+            "recording_id"
+        ]
+        rec = Recording().get_recording({"recording_id": recording_id})
+        times = rec.get_times()
+        obs = _first_unit_obs_intervals(free_pk)
+        assert obs.shape == (1, 2), (
+            "no-artifact sort must observe one full interval"
+        )
+        assert abs(obs[0][0] - float(times[0])) < 1e-6
+        assert abs(obs[0][1] - float(times[-1])) < 1e-6
+    finally:
+        (Sorting & free_pk).delete(safemode=False)
+        (SortingSelection & free_pk).delete(safemode=False)
+
+    # --- artifact-backed fixture: obs_intervals from the IntervalList -----
+    artifact_id = SortingSelection.resolve_artifact(populated_sorting)
+    assert artifact_id is not None, "fixture sort should be artifact-backed"
+    recording_id = SortingSelection.resolve_source(populated_sorting).key[
+        "recording_id"
+    ]
+    nwb_file_name = (
+        RecordingSelection & {"recording_id": recording_id}
+    ).fetch1("nwb_file_name")
+    valid_times = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": artifact_interval_list_name(artifact_id),
+        }
+    ).fetch1("valid_times")
+    obs = _first_unit_obs_intervals(populated_sorting)
+    np.testing.assert_allclose(obs, np.asarray(valid_times), rtol=0, atol=1e-6)
+
+
+# ===========================================================================
+# A31: session_group invariants (replaces the rejected NotImplementedError
+# stub tests, per the project decision). Behavioral / schema-shape only.
+# The A13/A14-dependent tests are LIVE here -- both merged in Phase 4.
+# (Member<->LabTeam consistency is deliberately NOT tested: the part FKs to
+# LabTeam and master independently, with no insert-time agreement check.)
+# ===========================================================================
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_session_group_member_index_unique_within_master():
+    """A31: two members sharing ``(group, member_index)`` collide.
+
+    ``member_index`` is part of the ``Member`` primary key, so a second row
+    with the same group + index raises a duplicate-key error regardless of the
+    other fields. Built via the FK-checks-off bypass (the upstream Session /
+    SortGroupV2 / IntervalList FKs are irrelevant to the PK uniqueness check).
+    """
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.session_group import SessionGroup
+
+    owner, group = "a31_team", "a31_group"
+    conn = dj.conn()
+    conn.query("SET FOREIGN_KEY_CHECKS=0")
+    try:
+        SessionGroup.insert1(
+            {
+                "session_group_owner": owner,
+                "session_group_name": group,
+                "description": "a31 uniqueness probe",
+            },
+            allow_direct_insert=True,
+        )
+        member = {
+            "session_group_owner": owner,
+            "session_group_name": group,
+            "member_index": 0,
+            "nwb_file_name": "a31_x_.nwb",
+            "sort_group_id": 0,
+            "interval_list_name": "raw data valid times",
+            "team_name": owner,
+        }
+        SessionGroup.Member.insert1(member, allow_direct_insert=True)
+        # Same (group, member_index), different downstream fields -> collision.
+        dup = {**member, "sort_group_id": 1}
+        with pytest.raises(dj.errors.DuplicateError):
+            SessionGroup.Member.insert1(dup, allow_direct_insert=True)
+    finally:
+        try:
+            (SessionGroup.Member & {
+                "session_group_owner": owner,
+                "session_group_name": group,
+            }).delete_quick()
+            (SessionGroup & {
+                "session_group_owner": owner,
+                "session_group_name": group,
+            }).delete_quick()
+        finally:
+            conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_concatenated_recording_has_total_duration_s_column():
+    """A31: ``ConcatenatedRecording`` declares ``total_duration_s``.
+
+    Semantic check via the heading (not a source-string match). Pairs with the
+    Phase 7 CHANGELOG entry naming the column-name divergence
+    (``total_duration_s`` vs ``Recording.duration_s``).
+    """
+    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
+
+    assert "total_duration_s" in ConcatenatedRecording.heading.attributes
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_motion_correction_parameters_validates_params_blob():
+    """A31: ``MotionCorrectionParameters.insert1`` Pydantic-validates ``params``.
+
+    The table-level wiring (not just the standalone schema tests) must reject a
+    bogus blob -- here an unknown ``preset`` against the ``MotionPreset``
+    Literal.
+    """
+    import pydantic
+
+    from spyglass.spikesorting.v2.session_group import (
+        MotionCorrectionParameters,
+    )
+
+    with pytest.raises(pydantic.ValidationError):
+        MotionCorrectionParameters().insert1(
+            {
+                "motion_correction_params_name": "a31_bogus_preset",
+                "params": {"preset": "not_a_real_preset"},
+                "params_schema_version": 1,
+                "job_kwargs": None,
+            }
+        )
+
+
+# A31's two remaining items -- the ``_assert_schema_version_matches`` drift
+# raise (A14) and ``initialize_v2_defaults`` shipping the motion presets (A13)
+# -- are already covered LIVE above by the Phase 4 tests
+# ``test_motion_correction_parameters_rejects_schema_version_drift`` and
+# ``test_initialize_v2_defaults_installs_motion_correction_presets``. They are
+# not duplicated here.
