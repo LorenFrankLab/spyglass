@@ -194,10 +194,9 @@ class MarksGroup(SpyglassMixin, dj.Manual):
             mark_times : np.ndarray
                 Array of shape (n_marks,) containing the times of each mark for the given key.
             """
-            spikes_list = sum(
-                SortedSpikesGroup().fetch_spike_data(k)
-                for k in (self & key).fetch("KEY")
-            )
+            spikes_list = []
+            for k in (self & key).fetch("KEY"):
+                spikes_list.extend(SortedSpikesGroup().fetch_spike_data(k))
 
             spike_times = np.concatenate(spikes_list)
             spike_ids = np.concatenate(
