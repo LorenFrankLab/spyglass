@@ -2649,7 +2649,7 @@ def test_clusterless_thresholder_end_to_end(polymer_smoke_session):
             "sorter": "clusterless_thresholder",
             "sorter_params_name": custom_params_name,
             "params": dict(SMOKE_CLUSTERLESS_PARAMS),
-            "params_schema_version": 3,
+            "params_schema_version": 4,
             "job_kwargs": None,
         },
         skip_duplicates=True,
@@ -3545,7 +3545,7 @@ def test_run_v2_pipeline_clusterless_preset(polymer_smoke_session):
             "sorter": "clusterless_thresholder",
             "sorter_params_name": "default",
             "params": dict(SMOKE_CLUSTERLESS_PARAMS),
-            "params_schema_version": 3,
+            "params_schema_version": 4,
             "job_kwargs": None,
         },
         skip_duplicates=False,
@@ -4255,6 +4255,53 @@ def test_clusterless_detect_peaks_strips_random_seed(dj_conn, monkeypatch):
         f"random_seed leaked into detect_peaks job kwargs: {jk}"
     )
     assert jk.get("n_jobs") == 1  # other kwargs preserved
+
+
+@pytest.mark.slow
+def test_clusterless_detect_peaks_strips_threshold_unit(dj_conn, monkeypatch):
+    """``_run_clusterless_thresholder`` strips ``threshold_unit`` before
+    calling ``detect_peaks``.
+
+    ``threshold_unit`` is a Spyglass-side knob (it selects how
+    ``noise_levels`` is derived); it is NOT a ``detect_peaks`` method
+    kwarg, so leaving it in the params dict would reach SI and raise an
+    unexpected-keyword error at sort time. ``detect_peaks`` is stubbed to
+    capture the method kwargs it receives; assert ``threshold_unit`` is
+    absent while the real detector knobs survive.
+    """
+    import numpy as np
+    import spikeinterface.sortingcomponents.peak_detection as pd_mod
+
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    captured = {}
+
+    def _fake_detect_peaks(
+        recording, method=None, method_kwargs=None, job_kwargs=None
+    ):
+        captured["method_kwargs"] = method_kwargs
+        return np.array([(10,)], dtype=[("sample_index", "<i8")])
+
+    monkeypatch.setattr(pd_mod, "detect_peaks", _fake_detect_peaks)
+
+    rec = _build_synthetic_rec(np.zeros((1000, 4), dtype=np.float32))
+    Sorting._run_clusterless_thresholder(
+        sorter_params={
+            "detect_threshold": 5.0,
+            "threshold_unit": "uv",
+            "noise_levels": [1.0],
+        },
+        recording=rec,
+        job_kwargs={"n_jobs": 1},
+    )
+
+    mk = captured["method_kwargs"]
+    assert mk is not None, "detect_peaks was not called"
+    assert "threshold_unit" not in mk, (
+        f"threshold_unit leaked into detect_peaks method kwargs: {mk}"
+    )
+    # The real detector knobs survive the strip.
+    assert mk.get("detect_threshold") == 5.0
 
 
 def test_build_analyzer_strips_random_seed(dj_conn, monkeypatch, tmp_path):
@@ -7169,7 +7216,7 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
                 # _smoke_constants; ``noise_levels`` is omitted so
                 # SI computes per-channel MAD on both sides.
                 "params": dict(SMOKE_CLUSTERLESS_PARAMS),
-                "params_schema_version": 3,
+                "params_schema_version": 4,
                 "job_kwargs": None,
             },
             skip_duplicates=False,
@@ -8243,7 +8290,7 @@ def test_clusterless_thresholder_ground_truth(
                 "sorter": "clusterless_thresholder",
                 "sorter_params_name": sorter_params_name,
                 "params": dict(SMOKE_CLUSTERLESS_PARAMS),
-                "params_schema_version": 3,
+                "params_schema_version": 4,
                 "job_kwargs": None,
             },
             skip_duplicates=False,
