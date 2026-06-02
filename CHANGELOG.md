@@ -371,6 +371,17 @@ cross-referenced here, not duplicated.
 - `WhitenParams` default flipped from "on" to `None` to match the
   runtime (whitening is deferred to the sorter)
   ([_params/preprocessing.py:110](./src/spyglass/spikesorting/v2/_params/preprocessing.py#L110)).
+- `MountainSort5Schema` gains `filter=False` / `whiten=True` toggles,
+  mirroring `MountainSort4Schema`
+  ([_params/sorter.py:111-112](./src/spyglass/spikesorting/v2/_params/sorter.py#L111-L112)).
+  This makes MS5 handled identically to MS4 by the runtime: the
+  recording is already bandpass-filtered upstream, so `filter=False`
+  stops MS5 double-filtering it, and a truthy `whiten` routes the
+  external float64 whitening pin in `Sorting._run_si_sorter` (disabling
+  MS5's internal whitening so the recording is whitened once). Previously
+  MS5 carried neither field, so SI's wrapper defaults ran internal filter
+  **and** internal whitening — MS5 sort outputs shift accordingly. No MS5
+  ground-truth baseline is pinned, so no baseline test changes.
 
 **Boundary semantics — small spike-count delta near artifact edges**
 

@@ -35,8 +35,10 @@ from spyglass.spikesorting.v2.session_group import (
 )
 from spyglass.spikesorting.v2.utils import (
     SourceResolution,
+    _assert_noise_levels_length,
     _assert_schema_version_matches,
     _assert_v2_db_safe,
+    _insert_row_to_dict,
     _validate_params,
     find_orphaned_masters,
     transaction_or_noop,
@@ -138,6 +140,29 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
             row, schema_cls, table_name="SorterParameters"
         )
         super().insert1(row, **kwargs)
+
+    def insert(self, rows, **kwargs):
+        # Mirror ``insert1``'s validation across a bulk insert so a
+        # ``insert([...])`` (including ``insert_default``'s positional
+        # rows) cannot bypass the per-sorter schema validation and the
+        # params_schema_version checks. Same logic as ``insert1`` applied
+        # per row before the single ``super().insert`` call.
+        rows = [_insert_row_to_dict(r, self.heading.names) for r in rows]
+        for row in rows:
+            schema_cls = _get_sorter_schema(row["sorter"])
+            row["params"] = _validate_params(schema_cls, row["params"])
+            inner_version = int(row["params"]["schema_version"])
+            if int(row.get("params_schema_version", 0)) == 0:
+                raise ValueError(
+                    "SorterParameters.insert: params_schema_version is "
+                    f"required for sorter {row['sorter']!r}; pass "
+                    f"params_schema_version={inner_version} to match the "
+                    "validated params blob's schema_version."
+                )
+            _assert_schema_version_matches(
+                row, schema_cls, table_name="SorterParameters"
+            )
+        super().insert(rows, **kwargs)
 
     _DEFAULT_CONTENTS: tuple = (
         (
@@ -1791,13 +1816,16 @@ class Sorting(SpyglassMixin, dj.Computed):
                 "random_slices_kwargs", {"seed": _random_seed}
             )
         else:
+            n_channels = recording.get_num_channels()
+            # Reject an explicit noise_levels of the wrong length BEFORE
+            # broadcasting / indexing it per channel: a singleton is
+            # broadcast, an n_channels-length array is used as-is, and
+            # any other explicit length is a configuration error (it
+            # would otherwise mis-index inside SI's ``locally_exclusive``).
+            _assert_noise_levels_length(nl_in, n_channels)
             nl = _np.asarray(nl_in, dtype=_np.float64)
             if nl.size == 1:
-                nl = _np.full(
-                    recording.get_num_channels(),
-                    float(nl[0]),
-                    dtype=_np.float64,
-                )
+                nl = _np.full(n_channels, float(nl[0]), dtype=_np.float64)
             params["noise_levels"] = nl
 
         method = params.pop("method", "locally_exclusive")
@@ -2090,6 +2118,25 @@ class Sorting(SpyglassMixin, dj.Computed):
                     "random_spikes": {
                         "max_spikes_per_unit": 500,
                         "method": "uniform",
+                        # Pin the stochastic spike subsampling. When a
+                        # unit has more than ``max_spikes_per_unit`` (500)
+                        # spikes, ``random_spikes`` draws a uniform random
+                        # subset; the SI 0.104 extension defaults
+                        # ``seed=None`` (verified against
+                        # ``ComputeRandomSpikes._set_params``), so an
+                        # unseeded build selects a different subset each
+                        # time -- and the persisted ``peak_amplitude_uv``
+                        # / peak channel (computed from the subset's
+                        # templates) drifts across rebuilds of the same
+                        # sort. Defaults to 0 but honors the per-row
+                        # ``job_kwargs={"random_seed": N}`` override, the
+                        # same knob the whitening / noise_levels pins read
+                        # in ``_run_si_sorter`` / ``_run_clusterless_
+                        # thresholder`` (lines using
+                        # ``(job_kwargs or {}).get("random_seed", 0)``) --
+                        # so a user changing the seed gets a consistent
+                        # seed across the sort AND the analyzer subsample.
+                        "seed": (job_kwargs or {}).get("random_seed", 0),
                     },
                     "waveforms": {"ms_before": 1.0, "ms_after": 2.0},
                 },

@@ -96,6 +96,20 @@ class MountainSort5Schema(BaseModel):
     has already been bandpass-filtered and whitened by the upstream
     recording stage. ``extra="forbid"`` catches typos against the
     documented MS5 field set.
+
+    ``filter`` / ``whiten`` mirror ``MountainSort4Schema`` so MS5 is
+    handled identically to MS4 by the runtime. The SI 0.104 MS5 wrapper
+    defaults both to ``True`` (verified against
+    ``Mountainsort5Sorter._default_params``); this schema overrides
+    ``filter`` to ``False`` because the v2 recording stage already
+    bandpass-filters the input (300-6000 Hz + median CAR) -- leaving MS5's
+    internal filter on would double-filter the recording, narrowing the
+    spike band twice. ``whiten`` stays ``True``: in the Spyglass runtime a
+    truthy ``whiten`` routes through the external float64 whitening pin in
+    ``Sorting._run_si_sorter`` (which then disables MS5's internal
+    whitening so the recording is whitened exactly once), matching v1 and
+    the MS4 path. Both toggles are exposed so a user feeding MS5 an
+    un-preprocessed recording can re-enable the internal filter.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -108,6 +122,8 @@ class MountainSort5Schema(BaseModel):
     snippet_T2: int = Field(default=20, ge=1)
     scheme2_phase1_detect_channel_radius: float = Field(default=200.0, gt=0.0)
     scheme2_detect_channel_radius: float = Field(default=50.0, gt=0.0)
+    filter: bool = False
+    whiten: bool = True
 
 
 class Kilosort4Schema(BaseModel):

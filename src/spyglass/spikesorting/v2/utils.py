@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
@@ -328,6 +329,90 @@ def _assert_schema_version_matches(
             f"not match the inner Pydantic schema_version={inner} on the "
             "validated params blob. Drop the column or align it with the "
             "blob's schema_version."
+        )
+
+
+def _insert_row_to_dict(row, attr_names) -> dict:
+    """Normalize a DataJoint insert row to a mutable dict.
+
+    A bulk ``insert`` accepts both mapping rows (``{"sorter": ...}``,
+    what user code passes) and positional sequences (``("mountainsort4",
+    name, params, 1, None)``, what each Lookup's ``_DEFAULT_CONTENTS``
+    ships to ``insert_default``). The ``insert`` validation overrides
+    need a dict in both cases so they can read/rewrite ``row["params"]``;
+    a positional tuple is zipped against the table heading's attribute
+    order to recover the dict form. A ``QueryExpression`` passed to
+    ``insert`` is fine -- iterating it yields per-row dicts, which hit the
+    mapping branch.
+
+    A bare ``str``/``bytes`` row is rejected loudly: it is the shape that
+    leaks through when a caller passes a ``pandas.DataFrame`` or a CSV
+    path to ``insert`` (iterating those yields column-name strings /
+    characters), neither of which these validated Lookups support.
+    ``zip``-ing a string against the heading would otherwise produce a
+    silently malformed row.
+
+    Parameters
+    ----------
+    row : Mapping | Sequence
+        One row from the iterable handed to ``insert``.
+    attr_names : Sequence[str]
+        The table heading's attribute names in definition order
+        (``self.heading.names``), used to label a positional sequence.
+
+    Returns
+    -------
+    dict
+        A shallow-copied dict suitable for in-place ``params`` rewrite.
+
+    Raises
+    ------
+    TypeError
+        If ``row`` is a ``str``/``bytes`` (an unsupported insert form
+        for these validated Lookups).
+    """
+    if isinstance(row, Mapping):
+        return dict(row)
+    if isinstance(row, (str, bytes)):
+        raise TypeError(
+            "validated Lookup insert expects each row to be a mapping or "
+            f"a positional sequence; got {type(row).__name__}. Pass a list "
+            "of dicts -- DataFrame / CSV-path inserts are not supported "
+            "on these Pydantic-validated parameter tables."
+        )
+    return dict(zip(attr_names, row))
+
+
+def _assert_noise_levels_length(
+    noise_levels: list[float] | None, n_channels: int
+) -> None:
+    """Reject an explicit ``noise_levels`` of an unusable length.
+
+    The clusterless-thresholder broadcasts a singleton ``noise_levels``
+    to ``n_channels`` and otherwise indexes it per channel
+    (``noise_levels[chan]``). An explicit array whose length is neither
+    1 (broadcast) nor ``n_channels`` would either silently truncate the
+    channel set or raise an opaque ``IndexError`` deep inside SI's
+    ``detect_peaks``. ``None`` is valid (SI estimates per-channel MAD).
+
+    Parameters
+    ----------
+    noise_levels : list[float] | None
+        The resolved noise levels (explicit user value or the
+        ``[1.0]`` raw-uV broadcast). ``None`` short-circuits to valid.
+    n_channels : int
+        Number of channels on the recording the detector runs over.
+
+    Raises
+    ------
+    ValueError
+        If ``noise_levels`` is non-``None`` and ``len(noise_levels)`` is
+        neither 1 nor ``n_channels``.
+    """
+    if noise_levels is not None and len(noise_levels) not in (1, n_channels):
+        raise ValueError(
+            "clusterless noise_levels must have length 1 (broadcast) or "
+            f"n_channels={n_channels}; got {len(noise_levels)}."
         )
 
 
