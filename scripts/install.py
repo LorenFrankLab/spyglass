@@ -647,11 +647,20 @@ class CondaManager:
                 f"  3. Check {env_file} for conflicts"
             ) from e
 
-    def install_package(self) -> None:
-        """Install spyglass package in development mode."""
+    def install_package(self, extras: List[str] = None) -> None:
+        """Install spyglass package in development mode.
+
+        Parameters
+        ----------
+        extras : list of str, optional
+            Optional dependency groups to install, e.g. ["kachery"].
+        """
         Console.progress("Installing spyglass package", 1)
 
         conda_cmd = self.get_command()
+        package_spec = str(REPO_ROOT)
+        if extras:
+            package_spec = f"{package_spec}[{','.join(extras)}]"
         try:
             subprocess.run(
                 [
@@ -662,7 +671,7 @@ class CondaManager:
                     "pip",
                     "install",
                     "-e",
-                    str(REPO_ROOT),
+                    package_spec,
                 ],
                 check=True,
                 capture_output=True,
@@ -1115,8 +1124,8 @@ def validate_schema(schema: Dict[str, Any]) -> None:
     if not dir_schema:
         raise ValueError("Schema 'directory_schema' is empty")
 
-    # Check for required prefixes
-    required_prefixes = {"spyglass", "kachery", "dlc", "moseq"}
+    # Check for required prefixes (kachery is optional)
+    required_prefixes = {"spyglass", "dlc", "moseq"}
     actual_prefixes = set(dir_schema.keys())
     missing_prefixes = required_prefixes - actual_prefixes
     if missing_prefixes:
@@ -2914,7 +2923,8 @@ def setup_environment(
     check_prerequisites(install_type, base_dir)
     conda = CondaManager(args.env_name)
     conda.create(env_file, force=args.force)
-    conda.install_package()
+    extras = ["kachery"] if getattr(args, "kachery", False) else []
+    conda.install_package(extras=extras or None)
 
 
 def setup_database(args: argparse.Namespace) -> None:
@@ -3308,6 +3318,11 @@ Environment Variables:
         "--config-only",
         action="store_true",
         help="Only generate .datajoint_config.json (skip environment setup)",
+    )
+    parser.add_argument(
+        "--kachery",
+        action="store_true",
+        help="Install optional kachery dependencies (pip install .[kachery])",
     )
 
     args = parser.parse_args()

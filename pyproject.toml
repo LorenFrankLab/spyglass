@@ -48,7 +48,7 @@ dependencies = [
   # "ghostipy", # removed from list bc M1 users need to install pyfftw first
   "hdmf>=3.4.6",
   "ipympl",
-  "kachery-cloud>=0.4",
+  # "kachery-cloud>=0.4",
   "matplotlib",
   "ndx-franklab-novela>=0.2.4",
   "ndx-optogenetics==0.3.0",
@@ -88,6 +88,11 @@ optional-dependencies.docs = [
   "mkdocs-mermaid2-plugin", # Docs mermaid diagrams
   "mkdocstrings[python]",   # Docs API docstrings
 ]
+optional-dependencies.kachery = [
+  "kachery",
+  "kachery-client",
+  "kachery-cloud>=0.4",
+]
 optional-dependencies.moseq-cpu = [
   "jax[cpu]",
   "jax-moseq",
@@ -104,6 +109,7 @@ optional-dependencies.test = [
   "ghostipy",
   "kachery",                # database access
   "kachery-client",
+  "kachery-cloud>=0.4",
   "netcdf4",                # for decoding mocking
   "opencv-python-headless", # for headless testing of Qt
   "pre-commit",             # linting

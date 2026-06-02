@@ -91,13 +91,22 @@ def get_nwb_file(nwb_file_path, query_expression=None):
         f"NWB file not found locally; checking kachery for {nwb_file_path}"
     )
 
-    from ..sharing.sharing_kachery import AnalysisNwbfileKachery
-
-    kachery_success = AnalysisNwbfileKachery.download_file(
-        os.path.basename(nwb_file_path), permit_fail=True
+    from ..sharing.sharing_kachery import (
+        AnalysisNwbfileKachery,
+        _kachery_available,
     )
-    if kachery_success:
-        return _open_nwb_file(nwb_file_path)
+
+    if _kachery_available:
+        kachery_success = AnalysisNwbfileKachery.download_file(
+            os.path.basename(nwb_file_path), permit_fail=True
+        )
+        if kachery_success:
+            return _open_nwb_file(nwb_file_path)
+    else:
+        logger.debug(
+            "kachery unavailable; skipping kachery check for %s",
+            nwb_file_path,
+        )
 
     logger.info(
         "NWB file not found in kachery; checking Dandi for "
