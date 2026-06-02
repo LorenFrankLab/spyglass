@@ -264,6 +264,50 @@ class TestCreateProjectUnit:
 
         assert saved_cfg.get("numframes2pick") == 42
 
+    def test_oversample_error_has_actionable_message(self, tmp_path):
+        """Surface a clear error when DLC cannot sample enough frames."""
+        cfg_path = self._make_fake_config(tmp_path)
+
+        fake_dlc = MagicMock()
+        fake_dlc.create_new_project.return_value = str(cfg_path)
+        fake_dlc.extract_frames.side_effect = ValueError(
+            "Cannot take a larger sample than population when 'replace=False'"
+        )
+
+        fake_vid_group = MagicMock()
+        fake_vid_group.create_from_files.return_value = {"vid_group_id": "vg"}
+        fake_skeleton = MagicMock()
+        fake_skeleton.return_value.insert1.return_value = {"skeleton_id": "sk"}
+
+        fake_vid_file = MagicMock()
+        fake_vid_file.get_abs_paths.return_value = [str(tmp_path / "vid.avi")]
+
+        with (
+            patch.dict("sys.modules", {"deeplabcut": fake_dlc}),
+            patch("spyglass.position.v2.train.VidFileGroup", fake_vid_group),
+            patch("spyglass.position.v2.train.Skeleton", fake_skeleton),
+            patch("spyglass.position.v2.train.VideoFile", fake_vid_file),
+            patch(
+                "spyglass.position.utils.dlc_io.read_yaml",
+                return_value=("config.yaml", {"numframes2pick": 5}),
+            ),
+            patch(
+                "spyglass.position.utils.dlc_io.save_yaml",
+                return_value=str(cfg_path),
+            ),
+        ):
+            with pytest.raises(
+                ValueError,
+                match=("DLC could not sample the requested number of frames"),
+            ):
+                self.model.create_project(
+                    project_name="test",
+                    bodyparts=["whiteLED"],
+                    video_list=[{"nwb_file_name": "test.nwb", "epoch": 1}],
+                    project_directory=str(tmp_path),
+                    frames_per_video=20,
+                )
+
     def test_skeleton_always_inserted(self, tmp_path):
         """Skeleton().insert1() is always called with the supplied bodyparts."""
         cfg_path = self._make_fake_config(tmp_path)
