@@ -1217,6 +1217,95 @@ EXPECTED_MS5_DEFAULTS = {
     "delete_temporary_recording": True,
 }
 
+# SpykingCircus2 / TridesClous2 ship with ``extra="allow"`` (untyped) v2
+# schemas and EMPTY default-row params, so their effective defaults float
+# with the installed SpikeInterface rather than being frozen into the row
+# (as v1 did). These snapshots pin SI 0.104.3's defaults so an SI bump
+# that would silently change either sorter's behavior surfaces as a test
+# failure -- the same guard A21 gives KS4/MS5.
+EXPECTED_SC2_DEFAULTS = {
+    "apply_motion_correction": True,
+    "apply_preprocessing": True,
+    "apply_whitening": True,
+    "cache_preprocessing": {"memory_limit": 0.5, "mode": "memory"},
+    "chunk_preprocessing": {"memory_limit": None},
+    "cleaning": {
+        "max_jitter_ms": 0.2,
+        "mean_sd_ratio_threshold": 3,
+        "min_snr": 5,
+        "sparsify_threshold": 1,
+    },
+    "clustering": {"method": "iterative-hdbscan", "method_kwargs": {}},
+    "debug": False,
+    "detection": {
+        "method": "matched_filtering",
+        "method_kwargs": {"detect_threshold": 5, "peak_sign": "neg"},
+        "pipeline_kwargs": {},
+    },
+    "deterministic_peaks_detection": False,
+    "filtering": {
+        "filter_order": 2,
+        "freq_max": 7000,
+        "freq_min": 150,
+        "ftype": "bessel",
+    },
+    "general": {"ms_after": 1.5, "ms_before": 0.5, "radius_um": 100.0},
+    "job_kwargs": {},
+    "matching": {
+        "method": "circus-omp",
+        "method_kwargs": {},
+        "pipeline_kwargs": {},
+    },
+    "merging": {"max_distance_um": 50},
+    "min_firing_rate": 0.1,
+    "motion_correction": {"preset": "dredge_fast"},
+    "multi_units_only": False,
+    "seed": 42,
+    "selection": {
+        "method": "uniform",
+        "method_kwargs": {
+            "min_n_peaks": 100000,
+            "n_peaks_per_channel": 5000,
+            "select_per_channel": False,
+        },
+    },
+    "whitening": {"mode": "local", "regularize": False},
+}
+
+EXPECTED_TDC2_DEFAULTS = {
+    "apply_motion_correction": False,
+    "apply_preprocessing": True,
+    "cache_preprocessing_mode": "auto",
+    "clustering_ms_after": 1.5,
+    "clustering_ms_before": 0.5,
+    "clustering_recursive_depth": 3,
+    "debug": False,
+    "detect_threshold": 5.0,
+    "detection_radius_um": 150.0,
+    "features_radius_um": 120.0,
+    "freq_max": 6000.0,
+    "freq_min": 150.0,
+    "gather_mode": "memory",
+    "job_kwargs": {},
+    "merge_similarity_lag_ms": 0.5,
+    "min_firing_rate": 0.1,
+    "motion_correction_preset": "dredge_fast",
+    "ms_after": 2.5,
+    "ms_before": 1.0,
+    "n_pca_features": 6,
+    "n_peaks_per_channel": 5000,
+    "n_svd_components_per_channel": 5,
+    "peak_sign": "neg",
+    "preprocessing_dict": None,
+    "save_array": True,
+    "seed": None,
+    "split_radius_um": 60.0,
+    "template_max_jitter_ms": 0.2,
+    "template_min_snr_ptp": 3.5,
+    "template_radius_um": 100.0,
+    "template_sparsify_threshold": 1.5,
+}
+
 
 def test_kilosort4_si_defaults_unchanged():
     """A21: SI's install-independent KS4 wrapper defaults match the snapshot.
@@ -1312,6 +1401,53 @@ def test_ms5_si_defaults_unchanged():
     assert actual == EXPECTED_MS5_DEFAULTS, (
         "SI's MountainSort5 defaults shifted. Diff against the pinned "
         "EXPECTED_MS5_DEFAULTS, then update the snapshot, the SI pin in "
+        "pyproject.toml, and the CHANGELOG together."
+    )
+
+
+def test_spykingcircus2_si_defaults_unchanged():
+    """A21 (extended): SI's SpykingCircus2 defaults match the snapshot.
+
+    SC2's v2 schema is ``extra="allow"`` and ships an EMPTY default-row
+    params blob, so its effective defaults come from the installed SI at
+    sort time. This pins SI 0.104.3's defaults so an SI bump that would
+    silently change SC2's behavior surfaces as a test failure (loosen only
+    alongside the SI pin in pyproject.toml + the CHANGELOG).
+    """
+    import spikeinterface.sorters as sis
+    from spikeinterface.core.job_tools import job_keys
+
+    actual = {
+        k: v
+        for k, v in sis.get_default_sorter_params("spykingcircus2").items()
+        if k not in job_keys
+    }
+    assert actual == EXPECTED_SC2_DEFAULTS, (
+        "SI's SpykingCircus2 defaults shifted. Diff against the pinned "
+        "EXPECTED_SC2_DEFAULTS, then update the snapshot, the SI pin in "
+        "pyproject.toml, and the CHANGELOG together."
+    )
+
+
+def test_tridesclous2_si_defaults_unchanged():
+    """A21 (extended): SI's TridesClous2 defaults match the snapshot.
+
+    Same rationale as SpykingCircus2: TDC2's v2 schema is ``extra="allow"``
+    with an empty default-row params blob, so the effective defaults float
+    with the installed SI. Pin SI 0.104.3 here so a bump is a deliberate,
+    audited change.
+    """
+    import spikeinterface.sorters as sis
+    from spikeinterface.core.job_tools import job_keys
+
+    actual = {
+        k: v
+        for k, v in sis.get_default_sorter_params("tridesclous2").items()
+        if k not in job_keys
+    }
+    assert actual == EXPECTED_TDC2_DEFAULTS, (
+        "SI's TridesClous2 defaults shifted. Diff against the pinned "
+        "EXPECTED_TDC2_DEFAULTS, then update the snapshot, the SI pin in "
         "pyproject.toml, and the CHANGELOG together."
     )
 
