@@ -1318,7 +1318,10 @@ def test_sorting_get_sorting_round_trips(populated_sorting):
         # recording timestamps recovers the stored ABSOLUTE spike times.
         abs_times = np.sort(np.asarray(df.loc[int(uid), "spike_times"]))
         recovered = np.sort(timestamps[frames])
-        assert np.allclose(recovered, abs_times, atol=1.0 / fs)
+        # Absolute (not relative) tolerance: spike times are seconds that
+        # can be large, so the default ``rtol=1e-5`` would silently allow
+        # ~ms slack on a late spike. Pin to one sample period, absolute.
+        assert np.allclose(recovered, abs_times, rtol=0.0, atol=1.0 / fs)
         # return_times=True is frame-relative (t_start=0), v1 shape --
         # NOT absolute wall-clock. Pins that get_sorting returns a
         # NumpySorting, not an absolute-t_start NwbSortingExtractor.
@@ -4452,6 +4455,129 @@ def test_get_sorting_recovers_frames_across_disjoint_gap(
         _np.sort(planted["samples"]),
         err_msg="CurationV2.get_sorting lost frames across the gap",
     )
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_obs_intervals_no_artifact_respects_disjoint_gap(
+    polymer_smoke_session, monkeypatch
+):
+    """No-artifact obs_intervals split at the gap on a disjoint recording.
+
+    When a sort has NO artifact pass (``artifact_id`` is None),
+    ``_write_units_nwb`` falls back to the recording's recorded window(s)
+    for each unit's ``obs_intervals``. On a DISJOINT recording that must
+    be one interval per recorded chunk, NOT a single envelope spanning the
+    wall-clock gap (which would inflate the observation duration /
+    firing-rate window). The artifact-backed path was already gap-split;
+    this pins the no-ArtifactSource fallback.
+    """
+    import uuid as _uuid
+
+    import numpy as _np
+    import pynwb
+
+    from spyglass.common.common_interval import IntervalList
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    _clean_session_v2(polymer_smoke_session)
+    initialize_v2_defaults()
+    LabTeam.insert1(
+        {"team_name": "v2_test_team", "team_description": "v2 pipeline tests"},
+        skip_duplicates=True,
+    )
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+
+    raw_times = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": "raw data valid times",
+        }
+    ).fetch1("valid_times")
+    t0 = float(raw_times[0][0])
+    t_end = float(raw_times[-1][-1])
+    assert (t_end - t0) >= 2.9, "smoke fixture too short for disjoint test"
+    chunk1_end, gap_end, chunk2_end = t0 + 1.2, t0 + 1.7, min(t0 + 2.9, t_end)
+    gap_mid = 0.5 * (chunk1_end + gap_end)
+    disjoint_times = _np.array([[t0, chunk1_end], [gap_end, chunk2_end]])
+
+    sort_group_id = int(
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
+    )
+    disjoint_name = f"v2_disjoint_obs_{_uuid.uuid4().hex[:8]}"
+    IntervalList.insert1(
+        {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": disjoint_name,
+            "valid_times": disjoint_times,
+            "pipeline": "v2_disjoint_test",
+        }
+    )
+    rec_pk = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+            "interval_list_name": disjoint_name,
+            "preproc_params_name": "default_franklab",
+            "team_name": "v2_test_team",
+        }
+    )
+    Recording.populate(rec_pk, reserve_jobs=False)
+
+    # SortingSelection with NO artifact_id -> obs_intervals=None fallback.
+    sort_pk = SortingSelection.insert_selection(
+        {
+            "recording_id": rec_pk["recording_id"],
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": "default",
+        }
+    )
+    (Sorting & sort_pk).super_delete(warn=False)
+
+    def _planted_run_sorter(
+        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None
+    ):
+        import spikeinterface as si
+
+        n_samples = int(recording.get_num_samples())
+        samples = _np.array([100, n_samples - 100], dtype=_np.int64)
+        labels = _np.zeros(samples.size, dtype=_np.int32)
+        return si.NumpySorting.from_samples_and_labels(
+            samples_list=[samples],
+            labels_list=[labels],
+            sampling_frequency=recording.get_sampling_frequency(),
+        )
+
+    monkeypatch.setattr(
+        Sorting, "_run_sorter", staticmethod(_planted_run_sorter)
+    )
+    Sorting.populate(sort_pk, reserve_jobs=False)
+    assert Sorting & sort_pk, "disjoint no-artifact Sorting.populate failed"
+
+    analysis_file_name = (Sorting & sort_pk).fetch1("analysis_file_name")
+    abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+    with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
+        obs = _np.asarray(io.read().units["obs_intervals"][0])
+
+    assert obs.shape == (2, 2), (
+        "no-artifact obs_intervals over a disjoint recording must be one "
+        f"interval per recorded chunk; got {obs.tolist()}"
+    )
+    for start, end in obs:
+        assert not (start < gap_mid < end), (
+            f"obs_interval [{start}, {end}] spans the inter-chunk gap "
+            f"(gap_mid={gap_mid}); the envelope fallback was used."
+        )
 
 
 # ---------- ArtifactDetection: signal-level _detect_artifacts ------------

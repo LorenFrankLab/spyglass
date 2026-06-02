@@ -2060,11 +2060,22 @@ class Sorting(SpyglassMixin, dj.Computed):
             # the artifact pass is optional (an ArtifactSource part is
             # zero-or-one; no part / artifact_id=None means no masking),
             # so there is no artifact-removed IntervalList to read. The
-            # full recording window IS the correct obs_intervals then --
-            # the sort observed every sample. (v1's FK was mandatory, so
-            # it always had artifact-removed intervals here.)
+            # recorded window(s) ARE the correct obs_intervals then -- the
+            # sort observed every recorded sample. Split at wall-clock
+            # discontinuities so a DISJOINT recording reports one interval
+            # per recorded chunk rather than a single envelope spanning the
+            # gaps (which would inflate the observation duration). For a
+            # contiguous recording this collapses to a single
+            # ``[t0, t_end]``, unchanged. (v1's FK was mandatory, so it
+            # always had artifact-removed intervals here.)
+            from spyglass.spikesorting.v2.utils import (
+                _base_intervals_from_timestamps,
+            )
+
             obs_intervals_arr = _np.asarray(
-                [[float(timestamps[0]), float(timestamps[-1])]]
+                _base_intervals_from_timestamps(
+                    timestamps, recording.get_sampling_frequency()
+                )
             )
         else:
             obs_intervals_arr = _np.asarray(obs_intervals)

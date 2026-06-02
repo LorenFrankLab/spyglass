@@ -2717,17 +2717,21 @@ def test_clusterless_runtime_strips_stale_fields(monkeypatch):
 
 @pytest.mark.slow
 @pytest.mark.usefixtures("dj_conn")
-def test_obs_intervals_full_envelope_fallback(populated_sorting):
-    """A30/A16: ``obs_intervals=None`` (no artifact pass) writes the full
-    recording envelope; an artifact-backed sort writes the artifact
+def test_obs_intervals_recorded_windows_fallback(populated_sorting):
+    """A30/A16: ``obs_intervals=None`` (no artifact pass) writes the
+    recorded window(s); an artifact-backed sort writes the artifact
     IntervalList's valid_times.
 
     The Units NWB carries ``obs_intervals`` per unit for downstream
-    firing-rate windows. When no artifact mask was applied the fallback is the
-    recording's full timestamp envelope; when an artifact pass exists the
-    obs_intervals come from its IntervalList (the make_fetch path), not the
-    fallback. We populate an artifact-FREE MS5 sort for the fallback and reuse
-    the artifact-backed fixture for the IntervalList path.
+    firing-rate windows. When no artifact mask was applied the fallback is
+    the recording's recorded window(s) -- split at wall-clock
+    discontinuities, so a contiguous recording yields a single interval
+    (asserted here) and a DISJOINT recording yields one per chunk (asserted
+    in ``test_obs_intervals_no_artifact_respects_disjoint_gap``). When an
+    artifact pass exists the obs_intervals come from its IntervalList (the
+    make_fetch path), not the fallback. We populate an artifact-FREE MS5
+    sort for the fallback and reuse the artifact-backed fixture for the
+    IntervalList path.
     """
     import pynwb
 
@@ -2760,7 +2764,8 @@ def test_obs_intervals_full_envelope_fallback(populated_sorting):
         times = rec.get_times()
         obs = _first_unit_obs_intervals(free_pk)
         assert obs.shape == (1, 2), (
-            "no-artifact sort must observe one full interval"
+            "no-artifact sort over a CONTIGUOUS recording must observe one "
+            "recorded interval (base intervals collapse to the envelope)"
         )
         assert abs(obs[0][0] - float(times[0])) < 1e-6
         assert abs(obs[0][1] - float(times[-1])) < 1e-6
