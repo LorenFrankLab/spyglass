@@ -581,6 +581,10 @@ class SortingSelection(SpyglassMixin, dj.Manual):
             helper_name="SortingSelection.insert_selection",
             insert_default_path="SorterParameters.insert_default()",
         )
+        cls._validate_artifact_source_for_recording(
+            recording_id=key["recording_id"],
+            artifact_id=artifact_id,
+        )
 
         new_master_key = {
             **master_restriction,
@@ -601,6 +605,71 @@ class SortingSelection(SpyglassMixin, dj.Manual):
                     }
                 )
         return {k: new_master_key[k] for k in cls.primary_key}
+
+    @classmethod
+    def _validate_artifact_source_for_recording(
+        cls,
+        *,
+        recording_id,
+        artifact_id,
+    ) -> None:
+        """Ensure an artifact pass is valid for a sorting recording.
+
+        Single-recording artifacts may only be linked to that exact
+        ``recording_id``. Shared-group artifacts may be linked to any member
+        recording in the group. This keeps artifact masks from one recording
+        in a session from being silently applied to a different recording.
+        """
+        if artifact_id is None:
+            return
+
+        from spyglass.spikesorting.v2.artifact import (
+            ArtifactSelection,
+            SharedArtifactGroup,
+        )
+
+        artifact_key = {"artifact_id": artifact_id}
+        if not (ArtifactDetection & artifact_key):
+            raise ValueError(
+                "SortingSelection.insert_selection: artifact_id "
+                f"{artifact_id!r} is not in ArtifactDetection. Populate "
+                "ArtifactDetection before linking an artifact pass to a sort."
+            )
+
+        source = ArtifactSelection.resolve_source(artifact_key)
+        target_recording_id = str(recording_id)
+        if source.kind == "recording":
+            artifact_recording_id = str(source.key["recording_id"])
+            if artifact_recording_id != target_recording_id:
+                raise ValueError(
+                    "SortingSelection.insert_selection: artifact_id "
+                    f"{artifact_id!r} belongs to recording_id="
+                    f"{artifact_recording_id!r}, not the requested "
+                    f"recording_id={target_recording_id!r}."
+                )
+            return
+
+        if source.kind == "shared_artifact_group":
+            group_name = source.key["shared_artifact_group_name"]
+            if not (
+                SharedArtifactGroup.Member
+                & {
+                    "shared_artifact_group_name": group_name,
+                    "recording_id": recording_id,
+                }
+            ):
+                raise ValueError(
+                    "SortingSelection.insert_selection: artifact_id "
+                    f"{artifact_id!r} belongs to shared artifact group "
+                    f"{group_name!r}, which does not include requested "
+                    f"recording_id={target_recording_id!r}."
+                )
+            return
+
+        raise ValueError(
+            "SortingSelection.insert_selection: artifact_id "
+            f"{artifact_id!r} has unsupported source kind {source.kind!r}."
+        )
 
     @classmethod
     def prune_orphaned_selections(cls, dry_run: bool = True) -> list[dict]:
@@ -1953,6 +2022,8 @@ class Sorting(SpyglassMixin, dj.Computed):
         path falls back to resolving locally (same DB-read tradeoff
         as ``sorter_row``).
         """
+        import shutil as _shutil
+
         import spikeinterface as si
 
         from spyglass.spikesorting.v2.utils import (
@@ -1994,35 +2065,46 @@ class Sorting(SpyglassMixin, dj.Computed):
         if job_kwargs is None:
             job_kwargs = _resolved_job_kwargs(sorter_row["job_kwargs"])
 
-        analyzer = si.create_sorting_analyzer(
-            sorting=sorting,
-            recording=recording,
-            sparse=True,
-            format="binary_folder",
-            folder=folder,
-            return_in_uV=True,
-            overwrite=True,
-        )
-        # ``random_seed`` is a Spyglass-side knob (consumed by the sorter
-        # and the whitening pin in ``_run_si_sorter``), not a valid
-        # ``SortingAnalyzer.compute`` keyword -- SI raises
-        # "please remove {'random_seed'}". Strip it here, mirroring the
-        # detect_peaks path. It stays in ``job_kwargs`` upstream so the
-        # sorter/whitening still read the seed.
-        analyzer_job_kwargs = {
-            k: v for k, v in job_kwargs.items() if k != "random_seed"
-        }
-        analyzer.compute(
-            ["random_spikes", "noise_levels", "templates", "waveforms"],
-            extension_params={
-                "random_spikes": {
-                    "max_spikes_per_unit": 500,
-                    "method": "uniform",
+        try:
+            analyzer = si.create_sorting_analyzer(
+                sorting=sorting,
+                recording=recording,
+                sparse=True,
+                format="binary_folder",
+                folder=folder,
+                return_in_uV=True,
+                overwrite=True,
+            )
+            # ``random_seed`` is a Spyglass-side knob (consumed by the sorter
+            # and the whitening pin in ``_run_si_sorter``), not a valid
+            # ``SortingAnalyzer.compute`` keyword -- SI raises
+            # "please remove {'random_seed'}". Strip it here, mirroring the
+            # detect_peaks path. It stays in ``job_kwargs`` upstream so the
+            # sorter/whitening still read the seed.
+            analyzer_job_kwargs = {
+                k: v for k, v in job_kwargs.items() if k != "random_seed"
+            }
+            analyzer.compute(
+                ["random_spikes", "noise_levels", "templates", "waveforms"],
+                extension_params={
+                    "random_spikes": {
+                        "max_spikes_per_unit": 500,
+                        "method": "uniform",
+                    },
+                    "waveforms": {"ms_before": 1.0, "ms_after": 2.0},
                 },
-                "waveforms": {"ms_before": 1.0, "ms_after": 2.0},
-            },
-            **analyzer_job_kwargs,
-        )
+                **analyzer_job_kwargs,
+            )
+        except Exception:
+            try:
+                if folder.exists():
+                    _shutil.rmtree(folder, ignore_errors=False)
+            except Exception as cleanup_exc:  # pragma: no cover -- defensive
+                logger.error(
+                    "Sorting._build_analyzer: failed to remove partial "
+                    f"analyzer folder {folder!r}: {cleanup_exc!r}"
+                )
+            raise
         return folder
 
     @staticmethod

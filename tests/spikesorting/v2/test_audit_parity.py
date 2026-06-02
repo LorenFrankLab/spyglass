@@ -2257,6 +2257,135 @@ def test_sorting_selection_missing_sorter_params_diagnostic():
 
 
 @pytest.mark.usefixtures("dj_conn")
+def test_sorting_selection_rejects_cross_recording_artifact_source():
+    """A26: a sort cannot link an artifact detected on another recording.
+
+    Both recordings are in the same session, so the old interval lookup by
+    ``nwb_file_name`` + artifact interval name could succeed and apply the
+    wrong artifact mask. ``insert_selection`` must reject the mismatch before
+    writing ``SortingSelection.ArtifactSource``.
+    """
+    import uuid
+
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        SortingSelection,
+    )
+
+    rid_sort = _plant_fake_recording(
+        uuid.uuid4(), "session_cross_artifact_.nwb", 30000.0
+    )
+    rid_artifact = _plant_fake_recording(
+        uuid.uuid4(), "session_cross_artifact_.nwb", 30000.0
+    )
+    artifact_id = uuid.uuid4()
+    conn = dj.conn()
+    conn.query("SET FOREIGN_KEY_CHECKS=0")
+    try:
+        ArtifactSelection.insert1(
+            {
+                "artifact_id": artifact_id,
+                "artifact_params_name": "v2_a26_cross_artifact_params",
+            },
+            allow_direct_insert=True,
+        )
+        ArtifactSelection.RecordingSource.insert1(
+            {"artifact_id": artifact_id, "recording_id": rid_artifact},
+            allow_direct_insert=True,
+        )
+        ArtifactDetection.insert1(
+            {"artifact_id": artifact_id}, allow_direct_insert=True
+        )
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+    try:
+        SorterParameters.insert_default()
+        with pytest.raises(ValueError, match="belongs to recording_id"):
+            SortingSelection.insert_selection(
+                {
+                    "recording_id": rid_sort,
+                    "sorter": "clusterless_thresholder",
+                    "sorter_params_name": "default",
+                    "artifact_id": artifact_id,
+                }
+            )
+        assert (
+            len(SortingSelection.ArtifactSource & {"artifact_id": artifact_id})
+            == 0
+        )
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=0")
+        try:
+            sort_keys = (
+                SortingSelection.RecordingSource & {"recording_id": rid_sort}
+            ).fetch("KEY", as_dict=True)
+            if sort_keys:
+                (SortingSelection.ArtifactSource & sort_keys).delete_quick()
+                (
+                    SortingSelection.RecordingSource
+                    & {"recording_id": rid_sort}
+                ).delete_quick()
+                (SortingSelection & sort_keys).delete_quick()
+            (ArtifactDetection & {"artifact_id": artifact_id}).delete_quick()
+            (
+                ArtifactSelection.RecordingSource & {"artifact_id": artifact_id}
+            ).delete_quick()
+            (ArtifactSelection & {"artifact_id": artifact_id}).delete_quick()
+        finally:
+            conn.query("SET FOREIGN_KEY_CHECKS=1")
+        _drop_fake_recording(rid_sort)
+        _drop_fake_recording(rid_artifact)
+
+
+def test_build_analyzer_cleans_partial_folder_when_create_fails(
+    monkeypatch, tmp_path
+):
+    """A26: partial SortingAnalyzer folders are removed on build failure."""
+    import uuid
+
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2 import utils as utils_mod
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    analyzer_folder = tmp_path / "partial.analyzer"
+    monkeypatch.setattr(
+        utils_mod, "_analyzer_path", lambda key: analyzer_folder
+    )
+
+    class _OneUnitSorting:
+        def get_num_units(self):
+            return 1
+
+    def _raise_after_creating_folder(**kwargs):
+        folder = kwargs["folder"]
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "partial.bin").write_bytes(b"partial")
+        raise RuntimeError("create_sorting_analyzer boom")
+
+    monkeypatch.setattr(
+        si, "create_sorting_analyzer", _raise_after_creating_folder
+    )
+
+    with pytest.raises(RuntimeError, match="create_sorting_analyzer boom"):
+        Sorting._build_analyzer(
+            sorting=_OneUnitSorting(),
+            recording=object(),
+            key={"sorting_id": uuid.uuid4()},
+            sorter_row={"job_kwargs": None},
+            job_kwargs={},
+        )
+    assert not analyzer_folder.exists()
+
+
+@pytest.mark.usefixtures("dj_conn")
 def test_run_si_sorter_matlab_carveout(monkeypatch):
     """A26: a MATLAB sorter gets ``singularity_image=True`` and the
     container-incompatible kwargs stripped.
