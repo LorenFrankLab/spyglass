@@ -885,7 +885,18 @@ class CurationV2(SpyglassMixin, dj.Manual):
             RecordingSelection & {"recording_id": recording_id}
         ).fetch1("nwb_file_name")
 
-        sorting = Sorting().get_sorting({"sorting_id": sorting_id})
+        # Source the pre-curation units' ABSOLUTE spike times straight
+        # from the Sorting units NWB. Reading absolute seconds (not a
+        # frame-based SI object) keeps the curated NWB's stored times
+        # exact and gap-correct for disjoint recordings -- a frame->time
+        # round-trip through a NumpySorting (t_start=0) would drop the
+        # absolute offset and the wall-clock gaps.
+        src_abs_path = AnalysisNwbfile.get_abs_path(
+            (Sorting & {"sorting_id": sorting_id}).fetch1(
+                "analysis_file_name"
+            )
+        )
+        abs_times_by_uid = Sorting._read_units_abs_spike_times(src_abs_path)
 
         analysis_file_name = AnalysisNwbfile().create(
             nwb_file_name=nwb_file_name
@@ -917,28 +928,16 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 for kept_uid, contribs in kept_unit_to_contributors.items():
                     if len(contribs) > 1:
                         spike_times = _np.concatenate(
-                            [
-                                sorting.get_unit_spike_train(
-                                    unit_id=u, return_times=True
-                                )
-                                for u in contribs
-                            ]
+                            [abs_times_by_uid[int(u)] for u in contribs]
                         )
                         spike_times.sort()
                     else:
-                        spike_times = sorting.get_unit_spike_train(
-                            unit_id=kept_uid, return_times=True
-                        )
+                        spike_times = abs_times_by_uid[int(kept_uid)]
                     write_specs.append((int(kept_uid), spike_times))
             else:
                 write_specs = [
-                    (
-                        int(uid),
-                        sorting.get_unit_spike_train(
-                            unit_id=uid, return_times=True
-                        ),
-                    )
-                    for uid in sorting.get_unit_ids()
+                    (int(uid), abs_times_by_uid[int(uid)])
+                    for uid in sorted(abs_times_by_uid)
                 ]
 
             if write_specs:
@@ -1072,45 +1071,48 @@ class CurationV2(SpyglassMixin, dj.Manual):
         ``@classmethod`` so the merge-table dispatcher binds
         correctly when called as
         ``source_table.get_sorting(merge_key)``.
+
+        Like ``Sorting.get_sorting``, the SI-object path maps the stored
+        ABSOLUTE spike times back to recording frames via
+        ``np.searchsorted`` (v1-parity) rather than SI's affine
+        ``NwbSortingExtractor``, so disjoint-interval sorts recover the
+        original frames. ``as_dataframe=True`` returns the absolute
+        seconds read straight from the curated units NWB plus the
+        ``curation_label`` lists joined from ``UnitLabel``.
         """
-        from spikeinterface.extractors import NwbSortingExtractor
+        import spikeinterface as si
 
         row = (cls & key).fetch1()
         abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
-
-        # CurationV2's units NWB does not carry an ElectricalSeries, so
-        # we must supply ``sampling_frequency`` and ``t_start`` directly
-        # (mirrors ``Sorting.get_sorting``). t_start is the recording's
-        # first wall-clock timestamp.
         recording_row = cls._upstream_recording_row(key)
         fs = float(recording_row["sampling_frequency"])
-        t_start = Sorting._recording_t_start(recording_row)
 
         if len(cls.Unit & key) == 0:
             # Zero-unit curations are valid (a user may curate a
             # zero-unit sort; the Empty/Boundary invariant allows an
-            # empty ``CurationV2.Unit``). ``NwbSortingExtractor`` cannot
-            # open the empty curated-units NWB, so return an empty
-            # ``NumpySorting`` -- mirrors ``Sorting.get_sorting``. This
-            # accessor builds its OWN extractor (it does NOT delegate to
-            # ``Sorting.get_sorting``), so it needs the same guard.
-            import spikeinterface as si
-
+            # empty ``CurationV2.Unit``).
             logger.warning(
                 "CurationV2.get_sorting: curation "
                 f"(sorting_id={row['sorting_id']}, "
                 f"curation_id={row['curation_id']}) has zero units; "
                 "returning an empty sorting."
             )
-            si_sorting = si.NumpySorting.from_unit_dict(
-                {}, sampling_frequency=fs
+            if not as_dataframe:
+                return si.NumpySorting.from_unit_dict(
+                    {}, sampling_frequency=fs
+                )
+            import pandas as pd
+
+            return pd.DataFrame(
+                {"spike_times": [], "curation_label": []},
+                index=pd.Index([], name="unit_id", dtype=int),
             )
-        else:
-            si_sorting = NwbSortingExtractor(
-                file_path=abs_path, sampling_frequency=fs, t_start=t_start
-            )
+
+        abs_times = Sorting._read_units_abs_spike_times(abs_path)
         if not as_dataframe:
-            return si_sorting
+            return Sorting._numpysorting_from_abs_times(
+                abs_times, recording_row, fs
+            )
 
         import pandas as pd
 
@@ -1120,7 +1122,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         # which carries the ``curation_label`` column). External
         # notebook code reading ``df["curation_label"]`` works on v2
         # rows without poking at the part table directly.
-        unit_ids = [int(uid) for uid in si_sorting.unit_ids]
+        unit_ids = list(abs_times)
         label_rows = (cls.UnitLabel & key).fetch(
             "unit_id", "curation_label", as_dict=True
         )
@@ -1129,20 +1131,14 @@ class CurationV2(SpyglassMixin, dj.Manual):
             labels_by_unit.setdefault(int(lr["unit_id"]), []).append(
                 str(lr["curation_label"])
             )
-        spike_times = [
-            si_sorting.get_unit_spike_train(
-                unit_id=uid, return_times=True
-            )
-            for uid in si_sorting.unit_ids
-        ]
         # Index by ``unit_id`` (matches v1's ``nwb.units.to_dataframe()``
         # shape, the same indexing Sorting.get_sorting(as_dataframe=True)
         # uses); see that method's docstring for the rationale.
         return pd.DataFrame(
             {
-                "spike_times": spike_times,
+                "spike_times": [abs_times[u] for u in unit_ids],
                 "curation_label": [
-                    labels_by_unit.get(uid, []) for uid in unit_ids
+                    labels_by_unit.get(u, []) for u in unit_ids
                 ],
             },
             index=pd.Index(unit_ids, name="unit_id"),

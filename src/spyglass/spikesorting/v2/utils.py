@@ -570,6 +570,61 @@ def _consolidate_intervals(intervals, timestamps):
     return _np.asarray(consolidated, dtype=_np.int64)
 
 
+def _spike_times_to_frames(recording_times, spike_times, n_samples, unit_id):
+    """Map absolute spike times (seconds) to recording frame indices.
+
+    Spike times are persisted in the recording's ABSOLUTE wall-clock
+    timeline (``timestamps[frame]``). For disjoint sort intervals that
+    timeline is non-uniform (it carries the wall-clock gaps that
+    ``concatenate_recordings(ignore_times=True)`` drops), so the inverse
+    map must be ``np.searchsorted`` against the actual timestamps -- NOT
+    an affine ``round((t - t_start) * fs)``, which would shift every
+    frame after a gap by the accumulated gap and can push frames past
+    ``n_samples``. This mirrors v1's ``spike_times_to_valid_samples``
+    (``v1/sorting.py:29``) so v2 ``get_sorting`` recovers the same frame
+    indices v1 did.
+
+    ``side='left'``: a spike exactly equal to ``recording_times[-1]``
+    maps to ``n_samples - 1`` (valid). Floating-point rounding can still
+    land a near-final spike at ``n_samples`` (one past the end), which
+    SpikeInterface rejects; those out-of-bounds frames are dropped with
+    a warning, matching v1.
+
+    Parameters
+    ----------
+    recording_times : np.ndarray, shape (n_samples,)
+        Recording timestamps in seconds, monotonically increasing.
+    spike_times : np.ndarray, shape (n_spikes,)
+        Spike times for a single unit in seconds.
+    n_samples : int
+        Total number of samples in the recording.
+    unit_id : int or str
+        Identifier of the unit, used only in the warning message.
+
+    Returns
+    -------
+    np.ndarray, shape (n_valid_spikes,)
+        Frame indices in ``[0, n_samples)``; out-of-bounds frames
+        removed (``n_valid_spikes <= n_spikes``).
+    """
+    import numpy as _np
+
+    from spyglass.utils import logger
+
+    spike_frames = _np.searchsorted(recording_times, spike_times)
+    excess_mask = spike_frames >= n_samples
+    n_excess = int(excess_mask.sum())
+    if n_excess > 0:
+        logger.warning(
+            f"Unit {unit_id} has {n_excess} spike(s) exceeding the "
+            "recording duration. Removing excess spikes. This may be "
+            "caused by floating-point rounding during the seconds-to-"
+            "samples conversion."
+        )
+        spike_frames = spike_frames[~excess_mask]
+    return spike_frames
+
+
 _ARTIFACT_INTERVAL_LIST_PREFIX = "artifact_"
 
 

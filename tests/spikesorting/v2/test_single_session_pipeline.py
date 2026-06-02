@@ -4273,6 +4273,178 @@ def test_boundary_spike_round_trip_does_not_raise(
     )
 
 
+@pytest.mark.slow
+@pytest.mark.integration
+def test_get_sorting_recovers_frames_across_disjoint_gap(
+    polymer_smoke_session, monkeypatch
+):
+    """``get_sorting`` recovers original frames across a wall-clock gap.
+
+    Builds a Recording over two DISJOINT sort intervals -- so the
+    persisted timeline is gap-preserving (non-uniform) -- and
+    monkeypatches ``_run_sorter`` to plant a spike near the start
+    (chunk 1) and one near the end (chunk 2, after the gap). Both
+    ``Sorting.get_sorting`` and ``CurationV2.get_sorting`` must read the
+    planted FRAME indices back exactly.
+
+    Regression for the v1-parity readback bug: the old
+    ``NwbSortingExtractor`` readback inverts the stored absolute spike
+    times affinely (``round((t - t_start) * fs)``), which shifts every
+    frame after the gap by ``gap * fs`` (here landing past the
+    gap-excluded sample count). v1 -- and now v2 -- map back with
+    ``np.searchsorted`` against the actual recording timestamps, which
+    recovers the original frame. The spike-TIME surfaces round-trip
+    correctly either way; only the FRAME indices expose the bug, so this
+    test asserts on frames.
+    """
+    import uuid as _uuid
+
+    import numpy as _np
+
+    from spyglass.common.common_interval import IntervalList
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    _clean_session_v2(polymer_smoke_session)
+    initialize_v2_defaults()
+    LabTeam.insert1(
+        {"team_name": "v2_test_team", "team_description": "v2 pipeline tests"},
+        skip_duplicates=True,
+    )
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+
+    raw_times = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": "raw data valid times",
+        }
+    ).fetch1("valid_times")
+    t0 = float(raw_times[0][0])
+    t_end = float(raw_times[-1][-1])
+    assert (t_end - t0) >= 2.9, "smoke fixture too short for disjoint test"
+    # Two 1.2 s chunks separated by a 0.5 s wall-clock gap.
+    chunk1_end, gap_end, chunk2_end = t0 + 1.2, t0 + 1.7, min(t0 + 2.9, t_end)
+    disjoint_times = _np.array([[t0, chunk1_end], [gap_end, chunk2_end]])
+
+    sort_group_id = int(
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
+    )
+    disjoint_name = f"v2_disjoint_readback_{_uuid.uuid4().hex[:8]}"
+    IntervalList.insert1(
+        {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": disjoint_name,
+            "valid_times": disjoint_times,
+            "pipeline": "v2_disjoint_test",
+        }
+    )
+
+    rec_pk = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+            "interval_list_name": disjoint_name,
+            "preproc_params_name": "default_franklab",
+            "team_name": "v2_test_team",
+        }
+    )
+    Recording.populate(rec_pk, reserve_jobs=False)
+
+    art_pk = ArtifactSelection.insert_selection(
+        {
+            "recording_id": rec_pk["recording_id"],
+            "artifact_params_name": "none",
+        }
+    )
+    ArtifactDetection.populate(art_pk, reserve_jobs=False)
+
+    sort_pk = SortingSelection.insert_selection(
+        {
+            "recording_id": rec_pk["recording_id"],
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": "default",
+            "artifact_id": art_pk["artifact_id"],
+        }
+    )
+    (Sorting & sort_pk).super_delete(warn=False)
+
+    planted: dict = {}
+
+    def _planted_run_sorter(
+        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None
+    ):
+        import spikeinterface as si
+
+        n_samples = int(recording.get_num_samples())
+        samples = _np.array([100, n_samples - 100], dtype=_np.int64)
+        rec_times = _np.asarray(recording.get_times())
+        planted["samples"] = samples
+        # The affine inverse of the post-gap frame's absolute time; if
+        # this still equals the original frame the gap is too small to
+        # expose the bug, so the assertion below would be vacuous.
+        planted["affine_post_gap"] = int(
+            round(
+                (rec_times[samples[1]] - rec_times[0])
+                * recording.get_sampling_frequency()
+            )
+        )
+        labels = _np.zeros(samples.size, dtype=_np.int32)
+        return si.NumpySorting.from_samples_and_labels(
+            samples_list=[samples],
+            labels_list=[labels],
+            sampling_frequency=recording.get_sampling_frequency(),
+        )
+
+    monkeypatch.setattr(
+        Sorting, "_run_sorter", staticmethod(_planted_run_sorter)
+    )
+    Sorting.populate(sort_pk, reserve_jobs=False)
+    assert Sorting & sort_pk, "disjoint Sorting.populate failed"
+    assert planted["affine_post_gap"] != int(planted["samples"][1]), (
+        "test setup: gap too small to expose the affine shift"
+    )
+
+    si_sorting = Sorting().get_sorting(sort_pk)
+    frames = _np.asarray(si_sorting.get_unit_spike_train(unit_id=0))
+    _np.testing.assert_array_equal(
+        _np.sort(frames),
+        _np.sort(planted["samples"]),
+        err_msg=(
+            "Sorting.get_sorting did not recover the original frames "
+            "across the wall-clock gap (affine readback shifts post-gap "
+            f"frames). got={frames.tolist()}, "
+            f"planted={planted['samples'].tolist()}"
+        ),
+    )
+
+    curation_pk = CurationV2.insert_curation(
+        sorting_key=sort_pk,
+        labels={},
+        parent_curation_id=-1,
+        description="disjoint frame-readback test",
+    )
+    cur_sorting = CurationV2().get_sorting(curation_pk)
+    cur_frames = _np.asarray(cur_sorting.get_unit_spike_train(unit_id=0))
+    _np.testing.assert_array_equal(
+        _np.sort(cur_frames),
+        _np.sort(planted["samples"]),
+        err_msg="CurationV2.get_sorting lost frames across the gap",
+    )
+
+
 # ---------- ArtifactDetection: signal-level _detect_artifacts ------------
 
 

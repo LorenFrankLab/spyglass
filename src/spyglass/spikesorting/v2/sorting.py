@@ -1018,33 +1018,36 @@ class Sorting(SpyglassMixin, dj.Computed):
     def get_sorting(self, key, as_dataframe: bool = False):
         """Return the SpikeInterface BaseSorting backed by the units NWB.
 
-        The v2 Units NWB does NOT carry an ``ElectricalSeries`` (the
-        canonical preprocessed recording lives in the Recording's
-        AnalysisNwbfile), so both ``sampling_frequency`` and ``t_start``
-        must be supplied explicitly to ``NwbSortingExtractor`` --
-        otherwise its auto-detection raises looking for a non-existent
-        ElectricalSeries in the units NWB.
+        Spike times are persisted by ``_write_units_nwb`` in the
+        recording's ABSOLUTE wall-clock timeline
+        (``spike_times = recording.get_times()[frame]``). For disjoint
+        sort intervals that timeline is non-uniform -- it carries the
+        wall-clock gaps that ``concatenate_recordings(ignore_times=True)``
+        drops -- so the inverse map (absolute time -> recording frame)
+        must use ``np.searchsorted`` against the actual recording
+        timestamps, exactly as v1 does
+        (``v1/sorting.py:spike_times_to_valid_samples`` +
+        ``v1/curation.py:get_sorting``). An affine
+        ``round((t - t_start) * fs)`` inverse (SI's ``NwbSortingExtractor``)
+        is correct only on a uniform grid and shifts every frame after a
+        gap by the accumulated gap (and can push frames past the
+        gap-excluded sample count), so it is NOT used here.
 
-        ``t_start`` is the recording's first wall-clock timestamp,
-        derived from the upstream Recording's AnalysisNwbfile via SI's
-        ``read_nwb_recording``. This matches the absolute spike-times
-        stored by ``_write_units_nwb`` (spike_times = timestamps[
-        sample_index]) so ``sorting.get_unit_spike_train(uid)`` returns
-        the original sample indices and ``return_times=True`` returns
-        the recording-timeline times.
+        Returns a ``NumpySorting`` (segment frame indices, ``t_start=0``)
+        matching v1's ``NumpySorting.from_unit_dict`` shape, so
+        ``get_unit_spike_train(uid)`` yields the original recording
+        frames and a downstream ``extract_waveforms`` / analyzer build
+        aligns to the right samples.
 
         ``as_dataframe=True`` returns a pandas DataFrame whose
-        **index is the unit_id** and which carries a
-        ``spike_times`` column (in seconds) -- mirrors v1's
-        ``nwb.units.to_dataframe()`` shape at
-        ``v1/curation.py:197-209``. Notebook code using
-        ``df.loc[uid]["spike_times"]`` works on both v1 and v2
-        outputs. The ``CurationV2.get_sorting`` accessor uses the
-        same ``as_dataframe`` flag with the same index + spike_times
-        column and adds a ``curation_label`` column joined from
-        ``CurationV2.UnitLabel``.
+        **index is the unit_id** and which carries a ``spike_times``
+        column (the stored ABSOLUTE seconds, read straight from the
+        units NWB) -- mirrors v1's ``nwb.units.to_dataframe()`` shape at
+        ``v1/curation.py:197-209``. The ``CurationV2.get_sorting``
+        accessor uses the same flag + index and adds a
+        ``curation_label`` column joined from ``CurationV2.UnitLabel``.
         """
-        from spikeinterface.extractors import NwbSortingExtractor
+        import spikeinterface as si
 
         from spyglass.spikesorting.v2.recording import Recording
 
@@ -1054,54 +1057,93 @@ class Sorting(SpyglassMixin, dj.Computed):
         recording_id = source.key["recording_id"]
         rec_row = (Recording & {"recording_id": recording_id}).fetch1()
         fs = float(rec_row["sampling_frequency"])
-        t_start = self._recording_t_start(rec_row)
-        if int(row["n_units"]) == 0:
-            # Zero units is a valid result. ``NwbSortingExtractor``
-            # cannot open an empty units NWB (no ``spike_times`` column),
-            # so return an empty ``NumpySorting`` with the correct
-            # sampling frequency rather than crashing -- callers needing
-            # only the unit list get an empty list. (``get_analyzer`` on
-            # a zero-unit sort raises instead, since an analyzer is not
-            # representable over zero units.)
-            import spikeinterface as si
 
+        if int(row["n_units"]) == 0:
+            # Zero units is a valid result; return an empty sorting /
+            # frame rather than crashing. (``get_analyzer`` on a
+            # zero-unit sort raises instead, since an analyzer is not
+            # representable over zero units.)
             logger.warning(
                 f"Sorting.get_sorting: sorting_id={row['sorting_id']!r} "
                 "has zero units; returning an empty sorting."
             )
-            si_sorting = si.NumpySorting.from_unit_dict(
-                {}, sampling_frequency=fs
-            )
-        else:
-            si_sorting = NwbSortingExtractor(
-                file_path=abs_path, sampling_frequency=fs, t_start=t_start
-            )
-        if not as_dataframe:
-            return si_sorting
+            if as_dataframe:
+                return self._empty_spike_times_dataframe()
+            return si.NumpySorting.from_unit_dict({}, sampling_frequency=fs)
 
+        abs_times = self._read_units_abs_spike_times(abs_path)
+        if as_dataframe:
+            return self._abs_spike_times_dataframe(abs_times)
+        return self._numpysorting_from_abs_times(abs_times, rec_row, fs)
+
+    @staticmethod
+    def _read_units_abs_spike_times(abs_path) -> dict:
+        """Return ``{unit_id(int): abs_spike_times(np.ndarray seconds)}``.
+
+        Reads the stored absolute spike times directly from a v2 units
+        NWB (``nwbf.units.to_dataframe()``), so callers get the persisted
+        wall-clock values exactly -- no affine round-trip. Returns ``{}``
+        for an empty/absent Units table.
+        """
+        import numpy as _np
+        import pynwb
+
+        with pynwb.NWBHDF5IO(
+            path=abs_path, mode="r", load_namespaces=True
+        ) as io:
+            nwbf = io.read()
+            if nwbf.units is None or len(nwbf.units) == 0:
+                return {}
+            units_df = nwbf.units.to_dataframe()
+        return {
+            int(uid): _np.asarray(st, dtype=float)
+            for uid, st in units_df["spike_times"].items()
+        }
+
+    @classmethod
+    def _numpysorting_from_abs_times(cls, abs_times, recording_row, fs):
+        """Build a ``NumpySorting`` from absolute spike times.
+
+        Maps each unit's absolute spike times to recording frame indices
+        with ``np.searchsorted`` against the recording's (possibly
+        gap-preserving) timestamps -- the v1-parity readback that an
+        affine inverse breaks across wall-clock gaps.
+        """
+        import spikeinterface as si
+
+        from spyglass.spikesorting.v2.utils import _spike_times_to_frames
+
+        recording_times = cls._recording_timestamps(recording_row)
+        n_samples = int(recording_times.size)
+        units_dict = {
+            uid: _spike_times_to_frames(
+                recording_times, st, n_samples, uid
+            )
+            for uid, st in abs_times.items()
+        }
+        return si.NumpySorting.from_unit_dict(
+            [units_dict], sampling_frequency=fs
+        )
+
+    @staticmethod
+    def _abs_spike_times_dataframe(abs_times):
+        """DataFrame (index=unit_id) of absolute spike-time arrays."""
         import pandas as pd
 
-        # v2's units NWB writer stores unit_ids as integers via
-        # ``add_unit(id=int(kept_uid), ...)`` -- the cast back to int
-        # here matches that contract. If SI ever returns string IDs
-        # (e.g., an externally-ingested NWB with string-typed unit
-        # IDs), this cast would raise; pre-curation NWBs written by
-        # v2 itself always pass.
-        unit_ids = [int(uid) for uid in si_sorting.unit_ids]
-        spike_times = [
-            si_sorting.get_unit_spike_train(
-                unit_id=uid, return_times=True
-            )
-            for uid in si_sorting.unit_ids
-        ]
-        # Index by ``unit_id`` (matches v1's
-        # ``nwb.units.to_dataframe()`` shape) so notebook code
-        # using ``df.loc[uid]`` reads the right row instead of a
-        # positional row that may not even exist on sparse-id
-        # post-merge sortings.
+        unit_ids = list(abs_times)
         return pd.DataFrame(
-            {"spike_times": spike_times},
+            {"spike_times": [abs_times[u] for u in unit_ids]},
             index=pd.Index(unit_ids, name="unit_id"),
+        )
+
+    @staticmethod
+    def _empty_spike_times_dataframe():
+        """Empty (index=unit_id) spike-times DataFrame for zero-unit sorts."""
+        import pandas as pd
+
+        return pd.DataFrame(
+            {"spike_times": []},
+            index=pd.Index([], name="unit_id", dtype=int),
         )
 
     @staticmethod
@@ -1126,6 +1168,32 @@ class Sorting(SpyglassMixin, dj.Computed):
             nwbf = io.read()
             series = nwbf.acquisition[series_name]
             return float(series.timestamps[0])
+
+    @staticmethod
+    def _recording_timestamps(recording_row):
+        """Return the full timestamp vector of the upstream Recording.
+
+        Reads the persisted ``ElectricalSeries`` timestamps -- which for
+        disjoint sort intervals are gap-preserving (non-uniform). The SI
+        readback in ``get_sorting`` maps absolute spike times back to
+        frames via ``np.searchsorted`` against this vector; the affine
+        ``t_start + i/fs`` assumption is wrong across wall-clock gaps.
+        Reads only the timestamps dataset (not the traces), so it is far
+        lighter than loading the full SI recording.
+        """
+        import numpy as _np
+        import pynwb
+
+        abs_path = AnalysisNwbfile.get_abs_path(
+            recording_row["analysis_file_name"]
+        )
+        series_name = recording_row["electrical_series_path"].rsplit(
+            "/", 1
+        )[-1]
+        with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
+            nwbf = io.read()
+            series = nwbf.acquisition[series_name]
+            return _np.asarray(series.timestamps[:], dtype=_np.float64)
 
     def get_analyzer(self, key):
         """Return the SortingAnalyzer; rebuild on missing folder.
