@@ -867,8 +867,14 @@ class CurationV2(SpyglassMixin, dj.Manual):
         kept_unit_to_contributors: dict,
         apply_merge: bool,
         labels: dict,
-    ) -> tuple[str, str]:
-        """Write the curated-units NWB. Returns (analysis_file_name, units_object_id).
+    ) -> tuple[str, str, str, dict]:
+        """Write the curated-units NWB.
+
+        Returns ``(analysis_file_name, units_object_id, nwb_file_name,
+        n_spikes_by_uid)`` where ``n_spikes_by_uid`` maps each written
+        unit_id to the length of its STORED (post cross-unit dedup) spike
+        train, so the caller can override ``CurationV2.Unit.n_spikes`` and
+        keep the ``n_spikes == len(get_sorting train)`` invariant.
 
         With ``apply_merge=True`` the kept unit's spike train is the
         sorted union of its contributors' spike trains and its id is a

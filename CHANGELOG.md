@@ -475,7 +475,7 @@ cross-referenced here, not duplicated.
 - **Overlapping merge groups are rejected.** v1 silently coalesced
   transitively-overlapping groups (`[[1,2],[2,3]]` → `[1,2,3]`) via
   `_union_intersecting_lists`; v2 raises `ValueError`
-  ([curation.py:758](./src/spyglass/spikesorting/v2/curation.py#L758)) —
+  ([curation.py:776](./src/spyglass/spikesorting/v2/curation.py#L776)) —
   a unit may belong to at most one merge group. Pass pre-unioned,
   disjoint groups.
 - **Curated NWB omits `curation_label` when no unit is labeled.** pynwb
