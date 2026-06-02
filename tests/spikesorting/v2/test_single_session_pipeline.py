@@ -1023,12 +1023,19 @@ def test_shared_artifact_group_insert_rejects_mismatched_dtypes(
         def __init__(self, n_samples, dtype_str):
             self._n = n_samples
             self._dtype = dtype_str
+            self._times = _np.arange(n_samples, dtype=_np.float64) / 30000.0
 
         def get_num_samples(self):
             return self._n
 
         def get_dtype(self):
             return self._dtype
+
+        def get_num_segments(self):
+            return 1
+
+        def get_times(self):
+            return self._times
 
     def _fake_get_recording(self, key):
         # Both stubs share ``n_samples`` so the dtype branch -- not

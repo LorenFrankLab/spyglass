@@ -1817,6 +1817,66 @@ def test_shared_artifact_group_rejects_frequency_mismatch():
 
 
 @pytest.mark.usefixtures("dj_conn")
+def test_shared_artifact_group_rejects_timestamp_mismatch(monkeypatch):
+    """A25: equal-length same-session members still need equal timestamps.
+
+    The two fake recordings share session, sampling frequency, sample count,
+    and dtype. Only their wall-clock vectors differ. Without the exact
+    timestamp guard, ``si.aggregate_channels`` would stack non-aligned frames
+    and the resulting artifact intervals could mask the wrong times.
+    """
+    import uuid
+
+    from spyglass.spikesorting.v2.artifact import SharedArtifactGroup
+    from spyglass.spikesorting.v2.recording import Recording
+
+    rid_a = _plant_fake_recording(uuid.uuid4(), "session_times_.nwb", 30000.0)
+    rid_b = _plant_fake_recording(uuid.uuid4(), "session_times_.nwb", 30000.0)
+
+    class _FakeRecording:
+        def __init__(self, times):
+            self._times = np.asarray(times, dtype=np.float64)
+
+        def get_num_samples(self):
+            return len(self._times)
+
+        def get_dtype(self):
+            return "float32"
+
+        def get_num_segments(self):
+            return 1
+
+        def get_times(self):
+            return self._times
+
+    base_times = np.arange(8, dtype=np.float64) / 30000.0
+
+    def _fake_get_recording(self, key):
+        if str(key["recording_id"]) == str(rid_a):
+            return _FakeRecording(base_times)
+        return _FakeRecording(base_times + 10.0)
+
+    monkeypatch.setattr(Recording, "get_recording", _fake_get_recording)
+
+    try:
+        with pytest.raises(ValueError, match="differing exact timestamps"):
+            SharedArtifactGroup.insert_group(
+                "v2_a25_timestamp_mismatch",
+                [{"recording_id": rid_a}, {"recording_id": rid_b}],
+            )
+        assert (
+            len(
+                SharedArtifactGroup
+                & {"shared_artifact_group_name": "v2_a25_timestamp_mismatch"}
+            )
+            == 0
+        )
+    finally:
+        _drop_fake_recording(rid_a)
+        _drop_fake_recording(rid_b)
+
+
+@pytest.mark.usefixtures("dj_conn")
 def test_artifact_selection_raises_duplicate_selection_error():
     """A25: two master rows for one (params, source) raise
     ``DuplicateSelectionError``.

@@ -51,6 +51,7 @@ from spyglass.spikesorting.v2.utils import (
     SourceResolution,
     _assert_schema_version_matches,
     _assert_v2_db_safe,
+    _get_recording_timestamps,
     _validate_params,
     find_orphaned_masters,
     transaction_or_noop,
@@ -400,16 +401,17 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
                 "``si.aggregate_channels`` requires identical fs."
             )
 
-        # Exact n_samples + dtype check. The earlier duration_s
-        # check (sampling_frequency * duration_s, with one-sample
-        # tolerance) still allowed a 1-sample mismatch through --
-        # which ``si.aggregate_channels`` rejects with an opaque
-        # shape-mismatch deep inside SI at populate time. Load each
-        # member's preprocessed recording through ``Recording.
-        # get_recording`` (the same path ``make_compute`` uses) and
-        # require EXACT ``get_num_samples()`` + ``get_dtype()``
-        # equality.
+        # Exact time-axis check. Equal sample counts alone are not enough:
+        # two interval selections from the same session can have the same
+        # length, sampling frequency, and dtype while starting at different
+        # wall-clock times. ``si.aggregate_channels`` stacks by frame index,
+        # so the full timestamp vector must match exactly for every member.
+        # Load each member's preprocessed recording through ``Recording.
+        # get_recording`` (the same path ``make_compute`` uses) and require
+        # EXACT ``get_num_samples()``, ``get_dtype()``, and timestamps.
         per_member_sizes: dict[str, tuple[int, str]] = {}
+        reference_timestamps = None
+        reference_rid = None
         for rid in member_recording_ids:
             try:
                 rec_obj = Recording().get_recording({"recording_id": rid})
@@ -421,8 +423,50 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
                     "n_samples / dtype check at insert time requires "
                     "every member recording to be readable."
                 ) from exc
+            n_samples = int(rec_obj.get_num_samples())
+            timestamps = np.asarray(
+                _get_recording_timestamps(rec_obj), dtype=np.float64
+            )
+            if len(timestamps) != n_samples:
+                raise ValueError(
+                    "SharedArtifactGroup.insert_group: recording_id="
+                    f"{rid!r} reports get_num_samples()={n_samples}, "
+                    f"but its timestamp vector has length "
+                    f"{len(timestamps)}. The preprocessed recording is "
+                    "internally inconsistent and cannot be used for a "
+                    "shared artifact group."
+                )
+            if reference_timestamps is None:
+                reference_timestamps = timestamps
+                reference_rid = rid
+            elif not np.array_equal(reference_timestamps, timestamps):
+                if reference_timestamps.shape != timestamps.shape:
+                    mismatch_detail = (
+                        "timestamp vector shapes differ: "
+                        f"recording_id={reference_rid!r} has "
+                        f"{reference_timestamps.shape}, recording_id="
+                        f"{rid!r} has {timestamps.shape}"
+                    )
+                else:
+                    mismatch_indices = np.flatnonzero(
+                        reference_timestamps != timestamps
+                    )
+                    first = int(mismatch_indices[0])
+                    mismatch_detail = (
+                        f"first mismatch at sample {first}: "
+                        f"recording_id={reference_rid!r} has "
+                        f"{reference_timestamps[first]!r}, "
+                        f"recording_id={rid!r} has {timestamps[first]!r}"
+                    )
+                raise ValueError(
+                    "SharedArtifactGroup.insert_group: members have "
+                    f"differing exact timestamps ({mismatch_detail}). "
+                    "Shared artifact detection requires time-aligned "
+                    "recordings; use recordings from the same interval "
+                    "identity or run separate artifact detections."
+                )
             per_member_sizes[str(rid)] = (
-                int(rec_obj.get_num_samples()),
+                n_samples,
                 str(rec_obj.get_dtype()),
             )
         distinct_n_samples = {n for (n, _) in per_member_sizes.values()}
