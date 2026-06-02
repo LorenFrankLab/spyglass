@@ -3262,20 +3262,23 @@ def test_mountainsort5_ground_truth_polymer_60s(polymer_60s_session):
 # =========================================================================
 
 
-# ---------- Non-zero t_start regression ----------------------------------
+# ---------- Persisted-timestamp readback regression ----------------------
 
 
 @pytest.mark.slow
-def test_recording_t_start_reads_first_timestamp(tmp_path, dj_conn):
-    """``Sorting._recording_t_start`` returns the actual first
-    timestamp of the upstream Recording's NWB, not a hardcoded 0.0.
+def test_recording_timestamps_reads_persisted_vector(tmp_path, dj_conn):
+    """``Sorting._recording_timestamps`` returns the upstream Recording's
+    actual persisted timestamp vector (first value non-zero), not a
+    hardcoded/affine grid from 0.0.
 
-    The previous t_start=0 bug went undetected because the smoke and
-    60s polymer fixtures both start at t=0. This regression test
-    writes a synthetic NWB with ``timestamps[0] = 12345.6`` and pins
-    that ``_recording_t_start`` returns that value (not 0.0) via the
-    ``electrical_series_path`` indirection. Stays out of the DB by
-    monkeypatching ``AnalysisNwbfile.get_abs_path``.
+    ``get_sorting`` maps absolute spike times back to frames via
+    ``np.searchsorted`` against this vector, so a wrong t_start (the
+    old v1-era 0.0 hardcode) or an affine reconstruction would
+    mis-map every frame. The smoke and 60s polymer fixtures both start
+    at t=0, which hid the bug; this writes a synthetic NWB with
+    ``timestamps[0] = 12345.6`` and pins that the full vector comes
+    back via the ``electrical_series_path`` indirection. Stays out of
+    the DB by monkeypatching ``AnalysisNwbfile.get_abs_path``.
     """
     import numpy as np
     import pynwb
@@ -3327,12 +3330,21 @@ def test_recording_t_start_reads_first_timestamp(tmp_path, dj_conn):
     with patch.object(
         AnalysisNwbfile, "get_abs_path", return_value=str(nwb_path)
     ):
-        recovered = Sorting._recording_t_start(fake_row)
+        recovered = Sorting._recording_timestamps(fake_row)
 
-    assert recovered == pytest.approx(t0, abs=1e-6), (
-        f"_recording_t_start returned {recovered}; expected {t0}. The "
-        "v1-era t_start=0 hardcode would silently pass on t=0 fixtures "
-        "but break on real session recordings that start mid-day."
+    assert len(recovered) == n_samples, (
+        f"_recording_timestamps returned {len(recovered)} samples; "
+        f"expected the full {n_samples}-sample vector."
+    )
+    assert recovered[0] == pytest.approx(t0, abs=1e-6), (
+        f"_recording_timestamps[0] returned {recovered[0]}; expected "
+        f"{t0}. The v1-era t_start=0 hardcode would silently pass on "
+        "t=0 fixtures but break on real session recordings that start "
+        "mid-day."
+    )
+    assert np.allclose(recovered, timestamps), (
+        "_recording_timestamps must return the persisted timestamp "
+        "vector verbatim (searchsorted readback depends on it)."
     )
 
 

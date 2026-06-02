@@ -1147,29 +1147,6 @@ class Sorting(SpyglassMixin, dj.Computed):
         )
 
     @staticmethod
-    def _recording_t_start(recording_row) -> float:
-        """Return the first timestamp of the upstream Recording.
-
-        Opens the Recording's ``AnalysisNwbfile`` ``ElectricalSeries``
-        and reads only the first timestamp value. Cheaper than loading
-        the full SI recording -- HDF5 lets us index timestamps[0]
-        without materializing the dataset.
-        """
-        import pynwb
-
-        abs_path = AnalysisNwbfile.get_abs_path(
-            recording_row["analysis_file_name"]
-        )
-        # electrical_series_path is "acquisition/ProcessedElectricalSeries"
-        series_name = recording_row["electrical_series_path"].rsplit(
-            "/", 1
-        )[-1]
-        with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
-            nwbf = io.read()
-            series = nwbf.acquisition[series_name]
-            return float(series.timestamps[0])
-
-    @staticmethod
     def _recording_timestamps(recording_row):
         """Return the full timestamp vector of the upstream Recording.
 
