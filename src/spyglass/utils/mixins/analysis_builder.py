@@ -201,6 +201,12 @@ class AnalysisFileBuilder:
             self._open_nwb = self._open_io.read()
         return self._open_io, self._open_nwb
 
+    def open_for_write(self):
+        raise NotImplementedError(
+            "Please use the open_nwb property to get the NWB file for writing."
+            + " See updated AnalysisTables documentation for examples."
+        )
+
     def register(self):
         """Register the analysis file in the database.
 
