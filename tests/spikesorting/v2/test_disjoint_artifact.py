@@ -216,3 +216,49 @@ def test_detect_artifacts_removal_window_does_not_spill_across_gap():
         f"window spilled across the gap. valid_times={valid_times.tolist()}, "
         f"expected a chunk-2 interval starting at {chunk2_start}."
     )
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_detect_artifacts_join_does_not_bridge_gap():
+    """Artifacts in different chunks must not join across the gap.
+
+    Frame indices are contiguous across the inter-chunk gap, so a
+    frame-space join (``f - cur_end <= join_window_frames``) can merge an
+    artifact near chunk 1's end with one near chunk 2's start even though
+    they are 0.5 s apart in wall-clock. The merged span then straddles
+    both chunks and over-masks chunk 1's valid tail. The join must not
+    bridge a timestamp gap.
+    """
+    from spyglass.spikesorting.v2._params.artifact_detection import (
+        ArtifactDetectionParamsSchema,
+    )
+    from spyglass.spikesorting.v2.artifact import ArtifactDetection
+
+    rec, traces, fs, chunk_len, gap_s = _disjoint_recording()
+    # Artifact 20 frames before chunk 1's end, and one at chunk 2's first
+    # frame: 20 frames apart, within the 30-frame (1 ms) join window, but
+    # 0.5 s apart in wall-clock.
+    traces[chunk_len - 20, :] = 5000.0
+    traces[chunk_len, :] = 5000.0
+    times = rec.get_times()
+
+    validated = ArtifactDetectionParamsSchema(
+        detect=True,
+        amplitude_thresh_uV=500.0,
+        zscore_thresh=None,
+        proportion_above_thresh=1.0,
+        removal_window_ms=1.0,  # half = 15 frames -> tail beyond 195 free
+        join_window_ms=1.0,  # 30 frames -> would bridge the 20-frame gap
+        min_length_s=1e-5,
+    )
+    valid_times = ArtifactDetection._detect_artifacts(rec, validated)
+
+    # The chunk-1 tail just before the gap (beyond artifact's own 15-frame
+    # window) must remain valid -- it must not be removed by a span that
+    # bridged to the chunk-2 artifact.
+    tail_t = times[chunk_len - 4]
+    covered = any(s <= tail_t < e for s, e in valid_times)
+    assert covered, (
+        f"chunk-1 valid tail near {tail_t} was removed: the frame-space "
+        f"join bridged the gap. valid_times={valid_times.tolist()}"
+    )

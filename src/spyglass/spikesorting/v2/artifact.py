@@ -1085,13 +1085,33 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
             _np.ceil(validated.join_window_ms * 1e-3 * fs)
         )
 
+        # Inter-chunk wall-clock gaps: frame index of the last sample
+        # before each gap (diff > 1.5 sample periods). Frame indices are
+        # contiguous across a gap, so BOTH the join below and the
+        # removal-window expansion further down must be gap-aware --
+        # otherwise an artifact near a chunk edge bridges/spills into the
+        # neighboring chunk across the gap.
+        n = len(timestamps)
+        gap_after = _np.flatnonzero(
+            _np.diff(timestamps) > 1.5 * (1.0 / fs)
+        )
+
         # Build artifact intervals in frame indices, then convert to
-        # seconds and subtract from the recording window.
+        # seconds and subtract per base chunk. Join nearby artifact frames
+        # into spans, but NEVER across a timestamp gap: two artifacts in
+        # different chunks are frame-adjacent yet seconds apart in
+        # wall-clock, so joining them would create a span straddling the
+        # gap that over-masks the earlier chunk's tail. v1's effective
+        # join is in timestamp space (after time-based window expansion),
+        # so a large disjoint gap is never bridged.
         spans = []
         cur_start = frames_above[0]
         cur_end = frames_above[0]
         for f in frames_above[1:]:
-            if f - cur_end <= join_window_frames:
+            crosses_gap = bool(
+                _np.any((gap_after >= cur_end) & (gap_after < f))
+            )
+            if f - cur_end <= join_window_frames and not crosses_gap:
                 cur_end = f
             else:
                 spans.append((cur_start, cur_end))
@@ -1100,18 +1120,13 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         spans.append((cur_start, cur_end))
 
         # Cap the removal-window expansion at the CHUNK boundary on each
-        # side. Frame indices are contiguous across an inter-chunk
-        # wall-clock gap, so a frame-space window (``end_f +
+        # side, for the same reason: a frame-space window (``end_f +
         # half_window_frames``) on an artifact near a chunk edge would
         # reach into the neighboring chunk's first samples across the gap
         # and -- after per-chunk clipping -- remove them. v1's window is
         # time-based (``timestamps[end] + half_win`` seconds), which
         # cannot cross a gap orders of magnitude larger than the window;
         # capping at the chunk frame bounds reproduces that.
-        n = len(timestamps)
-        gap_after = _np.flatnonzero(
-            _np.diff(timestamps) > 1.5 * (1.0 / fs)
-        )
         artifact_intervals = []
         for start_f, end_f in spans:
             left = gap_after[gap_after < start_f]
