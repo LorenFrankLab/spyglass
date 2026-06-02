@@ -198,7 +198,7 @@ class UnitMarks(SpyglassMixin, dj.Computed):
         recording = Curation.get_recording(key)
         if recording.get_num_segments() > 1:
             recording = si.concatenate_recordings([recording])
-        sorting = Curation.get_curated_sorting(key)
+        sorting = Curation().get_curated_sorting(key)
         waveform_extractor_name = (
             f'{key["nwb_file_name"]}_{str(uuid.uuid4())[0:8]}_'
             f'{key["curation_id"]}_clusterless_waveforms'

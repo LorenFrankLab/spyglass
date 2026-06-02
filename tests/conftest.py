@@ -653,8 +653,12 @@ def no_dlc(request):
     yield NO_DLC
 
 
+# String condition (evaluated lazily in pytest's namespace, where
+# ``pytest_configure`` sets ``pytest.NO_DLC``). A ``lambda`` here would be a
+# truthy callable that ``skipif`` never calls, so every DLC test skipped
+# unconditionally regardless of ``--no-dlc``.
 skip_if_no_dlc = pytest.mark.skipif(
-    condition=lambda: getattr(pytest, "NO_DLC", False),
+    "getattr(pytest, 'NO_DLC', False)",
     reason="Skipping DLC-dependent tests.",
 )
 

@@ -323,14 +323,31 @@ jobs:
           mysql-client libmysqlclient-dev ffmpeg libsm6 libxext6
     - name: Set up conda (legacy SpikeInterface 0.99 environment)
       # The legacy env is conda-managed via the dedicated env file, which
-      # installs the repo's ``test`` extra and then force-downgrades
-      # SpikeInterface to the 0.99 line the v0/v1 active runtime requires.
+      # installs the repo's ``test`` extra (and its pinned
+      # ``spikeinterface==0.104.3``). The 0.99 downgrade the v0/v1 runtime
+      # needs is applied in the next step -- the ``==0.104.3`` pin and
+      # ``>=0.99,<0.101`` cannot co-resolve in conda's single-pass pip
+      # section.
       uses: conda-incubator/setup-miniconda@v3
       with:
         activate-environment: spyglass_spikesorting_legacy
         environment-file: environments/environment_spikesorting_legacy.yml
         miniforge-version: latest
         use-mamba: true
+    - name: Downgrade to legacy SpikeInterface 0.99
+      # Separate pip pass (env create installs the 0.104 pin from the
+      # ``test`` extra; this re-resolves SpikeInterface and its transitive
+      # deps down to the 0.99 line the v0/v1 active runtime paths require,
+      # without touching the v2 ``spikeinterface==0.104.3`` pin in
+      # pyproject.toml). Mirrors the env file's post-create step.
+      run: |
+        pip install --force-reinstall "spikeinterface>=0.99,<0.101"
+        python - <<'PY'
+        from packaging.version import Version
+        import spikeinterface as si
+        print("SpikeInterface", si.__version__)
+        assert Version(si.__version__) < Version("0.101"), si.__version__
+        PY
     - name: Cache test data
       id: cache-test-data
       uses: actions/cache@v4

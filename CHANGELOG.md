@@ -620,6 +620,25 @@ for label, interval_data in results.groupby("interval_labels"):
     environment. The full audit + per-surface classification lives at
     `tests/spikesorting/v2/resolver/si0104-audit.md`; resolver / runtime
     evidence at `tests/spikesorting/v2/resolver/si0104-runtime.md`
+- **Restore the legacy (v0/v1) spike-sorting test environment.** The v0/v1
+    quality-metric imports now use a version shim
+    (`try: import spikeinterface.metrics except ModuleNotFoundError: import
+    spikeinterface.qualitymetrics`) so `spyglass.spikesorting.v1` imports
+    under both SpikeInterface 0.104 and the legacy 0.99 line. The 0.10x
+    `metrics` package is imported as a whole (not the `metrics.quality`
+    submodule) because the 0.10x reorg split the metrics v0/v1 call —
+    `compute_isi_violations` (metrics.quality) and `compute_num_spikes`
+    (metrics.spiketrain) — across submodules that the parent `metrics`
+    namespace re-exports; SI 0.99's `qualitymetrics` carries both. The
+    legacy conda env
+    (`environments/environment_spikesorting_legacy.yml`) now installs in two
+    passes: `mamba env create` brings the `test` extra and its pinned
+    `spikeinterface==0.104.3`, then a separate
+    `pip install --force-reinstall "spikeinterface>=0.99,<0.101"` downgrades
+    SpikeInterface (the two pins cannot co-resolve in conda's single-pass
+    pip section). The `pytest-legacy` CI job runs the downgrade as its own
+    step. The v2 `spikeinterface==0.104.3` pin in `pyproject.toml` is
+    unchanged
 
 ### Pipelines
 
