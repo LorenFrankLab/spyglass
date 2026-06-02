@@ -13,7 +13,7 @@ from hdmf.spec import NamespaceCatalog
 from pynwb.spec import NWBDatasetSpec, NWBGroupSpec, NWBNamespace
 from tqdm import tqdm
 
-DEFAULT_BATCH_SIZE = 4095
+DEFAULT_BATCH_SIZE = 32768
 IGNORED_KEYS = ["version", "source_script"]
 PRECISION_LOOKUP = dict(ProcessedElectricalSeries=4)
 
@@ -276,7 +276,9 @@ class NwbfileHasher:
             Serialized bytes of the attribute value.
         """
         if isinstance(value, np.ndarray):
-            return value.astype(str).tobytes()  # must be 'astype(str)'
+            if not self.legacy_mode and np.issubdtype(value.dtype, np.number):
+                return bytes(self._numeric_array_bytes(value))
+            return value.astype(str).tobytes()
         elif isinstance(value, (str, int, float, np.generic)):
             return str(value).encode()
         return repr(value).encode()  # For other, use repr
@@ -286,6 +288,18 @@ class NwbfileHasher:
         if isinstance(data, np.ndarray):
             return np.issubdtype(data.dtype, np.number)
         return isinstance(data, (float, int, np.number))
+
+    @staticmethod
+    def _numeric_array_bytes(data: np.ndarray) -> memoryview:
+        """Return raw little-endian bytes of a numeric array.
+
+        ~1000x faster than astype(str).tobytes(). Only valid for numeric
+        dtypes; object/string arrays must go through serialize_attr_value.
+        """
+        arr = np.ascontiguousarray(
+            data.astype(data.dtype.newbyteorder("<"), copy=False)
+        )
+        return memoryview(arr).cast("B")
 
     def hash_dataset(self, dataset: h5py.Dataset):
         # Legacy mode preserves the original (broken) full-path check so that
@@ -311,18 +325,30 @@ class NwbfileHasher:
         dataset_name = dataset.parent.name.split("/")[-1]
         precision = self.precision.get(dataset_name, None)
 
+        # Hoist dtype-dependent checks: dataset.dtype is constant across chunks.
+        is_numeric = np.issubdtype(dataset.dtype, np.number)
+        needs_normalize = not is_numeric and dataset.dtype.kind in ("O", "S")
+
         size = dataset.shape[0]
         start = 0
 
         while start < size:
             end = min(start + self.batch_size, size)
             data = dataset[start:end]
-            if not self.legacy_mode:
-                data = self._normalize_h5str(data)
-            if precision and self.is_roundable(data):
-                data = np.round(data, precision)
-            this_hash.update(self.serialize_attr_value(data))
             start = end
+
+            if self.legacy_mode:
+                this_hash.update(self.serialize_attr_value(data))
+                continue
+
+            if needs_normalize:
+                data = self._normalize_h5str(data)
+            if precision and is_numeric:
+                data = np.round(data, precision)
+            if is_numeric:
+                this_hash.update(self._numeric_array_bytes(data))
+            else:
+                this_hash.update(self.serialize_attr_value(data))
 
         return this_hash.hexdigest()
 
@@ -395,7 +421,6 @@ class NwbfileHasher:
 
             this_digest = this_hash.hexdigest()
             self.hashed.update(this_digest.encode())
-
             self.add_to_cache(name, obj, this_digest)
 
         return self.hashed.hexdigest()
