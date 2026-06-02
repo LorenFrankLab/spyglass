@@ -1099,10 +1099,27 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
                 cur_end = f
         spans.append((cur_start, cur_end))
 
+        # Cap the removal-window expansion at the CHUNK boundary on each
+        # side. Frame indices are contiguous across an inter-chunk
+        # wall-clock gap, so a frame-space window (``end_f +
+        # half_window_frames``) on an artifact near a chunk edge would
+        # reach into the neighboring chunk's first samples across the gap
+        # and -- after per-chunk clipping -- remove them. v1's window is
+        # time-based (``timestamps[end] + half_win`` seconds), which
+        # cannot cross a gap orders of magnitude larger than the window;
+        # capping at the chunk frame bounds reproduces that.
+        n = len(timestamps)
+        gap_after = _np.flatnonzero(
+            _np.diff(timestamps) > 1.5 * (1.0 / fs)
+        )
         artifact_intervals = []
         for start_f, end_f in spans:
-            start_f = max(0, start_f - half_window_frames)
-            end_f = min(len(timestamps) - 1, end_f + half_window_frames)
+            left = gap_after[gap_after < start_f]
+            chunk_start = int(left[-1]) + 1 if left.size else 0
+            right = gap_after[gap_after >= end_f]
+            chunk_end = int(right[0]) if right.size else n - 1
+            start_f = max(chunk_start, start_f - half_window_frames)
+            end_f = min(chunk_end, end_f + half_window_frames)
             # ``end_f`` is the INCLUSIVE last artifact sample, but the
             # interval is stored as a half-open ``[start, end)`` where
             # ``end`` is the first non-artifact sample. Otherwise the
@@ -1110,10 +1127,8 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
             # ``timestamps[end_f]`` -- an artifact sample -- in the
             # next valid interval, and ``Sorting._apply_artifact_mask``
             # would fail to mask that sample before the sort.
-            end_time = timestamps[min(end_f + 1, len(timestamps) - 1)]
-            artifact_intervals.append(
-                [timestamps[start_f], end_time]
-            )
+            end_time = timestamps[min(end_f + 1, n - 1)]
+            artifact_intervals.append([timestamps[start_f], end_time])
 
         # Subtract artifact intervals from each recorded base chunk
         # SEPARATELY so a kept valid interval never spans an inter-chunk

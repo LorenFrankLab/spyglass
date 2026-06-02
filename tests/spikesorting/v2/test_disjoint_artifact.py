@@ -171,3 +171,48 @@ def test_apply_artifact_mask_preserves_chunk_boundary_frame():
         "chunk-boundary frame must NOT be masked (pure-gap over-mask)"
     )
     assert np.all(mt[k + 1, :] == 8.0), "chunk 2's first frame must survive"
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_detect_artifacts_removal_window_does_not_spill_across_gap():
+    """Chunk 1's removal window must not reach across the gap into chunk 2.
+
+    The removal window expands the detected artifact; expanding it in
+    FRAME space (``end_f + half_window_frames``) lets an artifact near
+    chunk 1's end land in chunk 2's frames across a large wall-clock gap,
+    so chunk 2's first samples get removed. v1's window is time-based
+    (``timestamps[end] + half_win`` seconds), which cannot cross a gap
+    orders of magnitude larger than the window. Chunk 2 must stay fully
+    valid: a valid interval starts at ``times[chunk_len]`` (chunk 2's
+    first sample), NOT ``times[chunk_len + half_window_frames]``.
+    """
+    from spyglass.spikesorting.v2._params.artifact_detection import (
+        ArtifactDetectionParamsSchema,
+    )
+    from spyglass.spikesorting.v2.artifact import ArtifactDetection
+
+    rec, traces, fs, chunk_len, gap_s = _disjoint_recording()
+    # Transient on the 3rd-to-last frame of chunk 1; the 1 ms removal
+    # window (half = ceil(0.5 ms * fs) = 15 frames at 30 kHz) would, in
+    # frame space, reach ~12 frames into chunk 2.
+    traces[chunk_len - 3, :] = 5000.0
+    times = rec.get_times()
+    chunk2_start = times[chunk_len]
+
+    validated = ArtifactDetectionParamsSchema(
+        detect=True,
+        amplitude_thresh_uV=500.0,
+        zscore_thresh=None,
+        proportion_above_thresh=1.0,
+        removal_window_ms=1.0,
+        join_window_ms=0.0,
+        min_length_s=0.001,
+    )
+    valid_times = ArtifactDetection._detect_artifacts(rec, validated)
+
+    starts = [s for s, _ in valid_times]
+    assert any(abs(s - chunk2_start) <= 1.0 / fs for s in starts), (
+        "chunk 2's first sample was removed: chunk-1's artifact removal "
+        f"window spilled across the gap. valid_times={valid_times.tolist()}, "
+        f"expected a chunk-2 interval starting at {chunk2_start}."
+    )
