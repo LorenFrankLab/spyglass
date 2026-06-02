@@ -29,6 +29,7 @@ from spyglass.spikesorting.v2.utils import (
     CurationLabel,
     MetricsSource,
     _assert_v2_db_safe,
+    _dedup_merged_spike_times,
     transaction_or_noop,
     unit_brain_region_df,
 )
@@ -36,6 +37,14 @@ from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 
 _assert_v2_db_safe()
 schema = dj.schema("spikesorting_v2_curation")
+
+# Coincidence window (ms) for cross-unit duplicate-spike removal when
+# merging units. Matches SpikeInterface's ``MergeUnitsSorting`` default
+# (the value v1's lazy ``get_merged_sorting`` used). A neuron's
+# refractory period (~1-2 ms) means a genuine spike train never has a
+# sub-0.4 ms pair, so this only removes double-detections of one physical
+# event shared across merged contributors.
+_MERGE_DEDUP_DELTA_MS = 0.4
 
 
 def _validate_curation_label_rows(
@@ -481,12 +490,21 @@ class CurationV2(SpyglassMixin, dj.Manual):
             analysis_file_name,
             units_object_id,
             staged_parent_nwb,
+            n_spikes_by_uid,
         ) = cls._stage_curated_units_nwb(
             sorting_id=sorting_id,
             kept_unit_to_contributors=kept_unit_to_contributors,
             apply_merge=apply_merge,
             labels=labels,
         )
+        # ``n_spikes`` must equal the length of the STORED (post-dedup)
+        # train. ``_build_curated_unit_rows`` estimated it from the raw
+        # contributor sum; override with the staged train's actual length
+        # so cross-unit duplicate removal (apply_merge=True) keeps the
+        # ``Unit.n_spikes == len(get_sorting train)`` invariant.
+        for row in unit_rows:
+            if row["unit_id"] in n_spikes_by_uid:
+                row["n_spikes"] = n_spikes_by_uid[row["unit_id"]]
 
         try:
             master_row = {
@@ -927,10 +945,16 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 write_specs = []
                 for kept_uid, contribs in kept_unit_to_contributors.items():
                     if len(contribs) > 1:
-                        spike_times = _np.concatenate(
-                            [abs_times_by_uid[int(u)] for u in contribs]
+                        # Membership-aware 0.4 ms dedup of cross-unit
+                        # double-detections (a neuron's refractory period
+                        # makes any sub-0.4 ms cross-unit pair one physical
+                        # spike). Matches v1's lazy get_merged_sorting and
+                        # v2's own get_merged_sorting, so the stored
+                        # (apply_merge=True) train equals the previewed one.
+                        spike_times = _dedup_merged_spike_times(
+                            [abs_times_by_uid[int(u)] for u in contribs],
+                            _MERGE_DEDUP_DELTA_MS / 1000.0,
                         )
-                        spike_times.sort()
                     else:
                         spike_times = abs_times_by_uid[int(kept_uid)]
                     write_specs.append((int(kept_uid), spike_times))
@@ -939,6 +963,15 @@ class CurationV2(SpyglassMixin, dj.Manual):
                     (int(uid), abs_times_by_uid[int(uid)])
                     for uid in sorted(abs_times_by_uid)
                 ]
+            # ``n_spikes`` per written unit is the length of its STORED
+            # (post-dedup) train, so the invariant
+            # ``CurationV2.Unit.n_spikes == len(get_sorting train)`` holds
+            # even after cross-unit dedup removes double-detections. The
+            # caller overrides ``unit_rows`` with this map.
+            n_spikes_by_uid = {
+                int(uid): int(len(spike_times))
+                for uid, spike_times in write_specs
+            }
 
             if write_specs:
                 # ``curation_label`` is written as an ``index=True``
@@ -1015,7 +1048,12 @@ class CurationV2(SpyglassMixin, dj.Manual):
         # CurationV2 / Unit / UnitLabel / merge-insert steps fail.
         # The file on disk is the only side effect left to clean up on
         # rollback.
-        return analysis_file_name, units_object_id, nwb_file_name
+        return (
+            analysis_file_name,
+            units_object_id,
+            nwb_file_name,
+            n_spikes_by_uid,
+        )
 
     # ---- Accessors -------------------------------------------------------
 
@@ -1216,15 +1254,20 @@ class CurationV2(SpyglassMixin, dj.Manual):
             return base
         # SI 0.104: MergeUnitsSorting(sorting, units_to_merge, ...) --
         # ``sorting`` is positional (no ``parent_sorting`` kwarg).
-        # ``delta_time_ms=None`` is the ONLY value that disables SI's
-        # duplicate-spike check entirely (``delta_time_ms=0`` still drops
-        # exact same-sample duplicates -- see
-        # ``spikeinterface/curation/mergeunitssorting.py`` ``if
-        # delta_time_ms is None: do_not_check`` semantics). The merged
-        # train is the full concatenation of its contributors, matching
-        # v1's ``np.concatenate`` and v2's own apply_merge=True staging.
+        # ``delta_time_ms=0.4`` applies SI's membership-aware
+        # duplicate-spike removal (the SI default v1's lazy
+        # ``get_merged_sorting`` used): a sub-0.4 ms pair from DIFFERENT
+        # contributors is a cross-unit double-detection of one physical
+        # event (a neuron's refractory period forbids genuine sub-0.4 ms
+        # firing), so it is dropped; a single unit's own close spikes are
+        # kept. ``_stage_curated_units_nwb`` applies the SAME 0.4 ms dedup
+        # to the apply_merge=True staged train (via
+        # ``_dedup_merged_spike_times``), so the previewed and stored
+        # merged trains agree.
         return sc.MergeUnitsSorting(
-            base, units_to_merge=units_to_merge, delta_time_ms=None
+            base,
+            units_to_merge=units_to_merge,
+            delta_time_ms=_MERGE_DEDUP_DELTA_MS,
         )
 
     def get_unit_brain_regions(

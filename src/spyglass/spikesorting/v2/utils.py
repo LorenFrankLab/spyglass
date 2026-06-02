@@ -625,6 +625,61 @@ def _spike_times_to_frames(recording_times, spike_times, n_samples, unit_id):
     return spike_frames
 
 
+def _dedup_merged_spike_times(times_list, delta_s):
+    """Membership-aware duplicate-spike removal for a merged unit.
+
+    Faithful time-space port of SpikeInterface's
+    ``MergeUnitsSorting`` / ``get_non_duplicated_events``: concatenate the
+    contributor spike trains, sort, and drop a spike ONLY when it is
+    within ``delta_s`` seconds of the previous spike AND came from a
+    DIFFERENT contributor -- i.e. a cross-unit double-detection of one
+    physical event. A neuron's refractory period (~1-2 ms) guarantees a
+    single unit never fires twice within the ~0.4 ms window, so a
+    within-unit close pair is a genuine event and is never touched
+    (``diff(membership) == 0`` keeps it). The first spike is always kept.
+
+    v1's lazy ``get_merged_sorting`` applied this via SI's default
+    ``delta_time_ms=0.4``; v2 applies it on BOTH the lazy path and the
+    ``apply_merge=True`` staged path so the stored and previewed merged
+    trains agree and neither keeps the double-detection artifacts. v1's
+    *applied* (np.concatenate) path did NOT dedup -- v2 corrects that.
+
+    Parameters
+    ----------
+    times_list : list[array-like]
+        One spike-time array (seconds) per contributor unit.
+    delta_s : float
+        Coincidence window in seconds (e.g. ``0.4e-3``).
+
+    Returns
+    -------
+    np.ndarray
+        Sorted, deduplicated merged spike times (seconds).
+    """
+    import numpy as _np
+
+    arrays = [_np.asarray(t, dtype=float) for t in times_list]
+    concat = (
+        _np.concatenate(arrays) if arrays else _np.asarray([], dtype=float)
+    )
+    if concat.size == 0:
+        return concat
+    order = concat.argsort(kind="mergesort")
+    times_sorted = concat[order]
+    membership = _np.concatenate(
+        [_np.full(arr.shape, i) for i, arr in enumerate(arrays)]
+    )[order]
+    # Keep a spike iff it is far enough from the previous one OR shares
+    # the previous one's contributor (mirrors SI's
+    # ``(diff(times) > delta) | (diff(membership) == 0)``); always keep
+    # the first.
+    keep = _np.nonzero(
+        (_np.diff(times_sorted) > delta_s) | (_np.diff(membership) == 0)
+    )[0]
+    keep = _np.concatenate([[0], keep + 1])
+    return times_sorted[keep]
+
+
 def _base_intervals_from_timestamps(timestamps, fs):
     """Split a (possibly gap-preserving) timestamp vector into recorded chunks.
 

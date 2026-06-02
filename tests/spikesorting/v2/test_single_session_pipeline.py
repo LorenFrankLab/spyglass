@@ -5350,9 +5350,15 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
         "replaces both head and absorbed)."
     )
 
-    # The merged unit's spike train in the curated NWB is the sorted
-    # union of the contributors' spike trains (apply_merge=True writes
-    # concatenated trains under the new merged id).
+    # The merged unit's spike train in the curated NWB is the
+    # contributors' union with SI's 0.4 ms membership-aware cross-unit
+    # duplicate removal: a sub-0.4 ms pair from DIFFERENT contributors is
+    # one physical spike double-detected (a neuron's refractory period
+    # forbids genuine sub-0.4 ms firing), so it is dropped. v1's lazy
+    # get_merged_sorting did this; v2 applies it to the apply_merge=True
+    # stored train too (via _dedup_merged_spike_times).
+    from spyglass.spikesorting.v2.utils import _dedup_merged_spike_times
+
     src_sorting = Sorting().get_sorting(sort_pk)
     src_head = _np.asarray(
         src_sorting.get_unit_spike_train(unit_id=head, return_times=True)
@@ -5360,8 +5366,16 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
     src_absorbed = _np.asarray(
         src_sorting.get_unit_spike_train(unit_id=absorbed, return_times=True)
     )
-    expected_merged = _np.sort(
-        _np.concatenate([src_head, src_absorbed])
+    raw_concat = _np.sort(_np.concatenate([src_head, src_absorbed]))
+    expected_merged = _dedup_merged_spike_times(
+        [src_head, src_absorbed], 0.4e-3
+    )
+    # The smoke fixture's two merged units share at least one cross-unit
+    # double-detection, so dedup is genuinely exercised end-to-end.
+    assert len(expected_merged) < len(raw_concat), (
+        "fixture precondition: merged contributors should share a "
+        "sub-0.4 ms cross-unit double-detection so dedup fires "
+        f"(raw={len(raw_concat)}, deduped={len(expected_merged)})"
     )
 
     curated_sorting = CurationV2().get_sorting(pk)
@@ -5372,7 +5386,7 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
     )
     assert len(merged_times) == len(expected_merged), (
         f"Merged unit ({merged_id}) has {len(merged_times)} spikes; "
-        f"expected {len(expected_merged)} (head + absorbed concatenated)."
+        f"expected {len(expected_merged)} (0.4 ms-deduped union)."
     )
     _np.testing.assert_array_equal(merged_times, expected_merged)
 
@@ -5442,11 +5456,11 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
         "Every CurationV2.Unit row should have >=1 MergeGroup row keyed "
         f"by its own unit_id; missing {sorted(preview_unit_ids - mg_unit_ids)}."
     )
-    # get_merged_sorting applies the proposed merge lazily: two units
-    # collapse to one and the spike count is preserved (concatenation;
-    # delta_time_ms=None disables SI's duplicate check entirely, so even
-    # exact same-sample contributor spikes are kept -- delta_time_ms=0
-    # would still drop them).
+    # get_merged_sorting applies the proposed merge lazily AND, like v1's
+    # lazy path (SI default delta_time_ms=0.4), removes cross-unit
+    # double-detections. So two units collapse to one and the total spike
+    # count drops by exactly the number of duplicates the apply_merge=True
+    # path removed for the same [head, absorbed] group (n_duplicates).
     merged_lazy = CurationV2().get_merged_sorting(preview_pk)
     assert merged_lazy.get_num_units() == len(units) - 1
     preview_total = sum(
@@ -5457,7 +5471,12 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
         len(merged_lazy.get_unit_spike_train(unit_id=u))
         for u in merged_lazy.get_unit_ids()
     )
-    assert merged_total == preview_total, (merged_total, preview_total)
+    n_duplicates = len(raw_concat) - len(expected_merged)
+    assert merged_total == preview_total - n_duplicates, (
+        merged_total,
+        preview_total,
+        n_duplicates,
+    )
 
 
 def test_curation_n_spikes_matches_apply_merge(dj_conn):
