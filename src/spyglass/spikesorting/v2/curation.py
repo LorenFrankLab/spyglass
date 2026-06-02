@@ -1234,9 +1234,9 @@ class CurationV2(SpyglassMixin, dj.Manual):
         Matches v1's semantic at ``v1/curation.py:228-266``: a curation
         built with ``apply_merge=False`` (preview) still carries every
         original unit, so the proposed merges recorded in
-        ``CurationV2.MergeGroup`` are applied lazily here via
-        ``spikeinterface.curation.MergeUnitsSorting`` -- the caller gets
-        the merged trains without re-running the sort.
+        ``CurationV2.MergeGroup`` are applied lazily here without
+        re-running the sort. The lazy merge is rebuilt from absolute
+        spike times so disjoint-recording wall-clock gaps are respected.
 
         When the curation was created with ``apply_merge=True`` the base
         sorting is ALREADY merged (contributors absorbed at insert), so

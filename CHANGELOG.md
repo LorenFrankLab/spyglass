@@ -223,13 +223,11 @@ in-flight v1 PR on `copilot/fix-populating-artifact-detection`.
   the DataFrame.) v1 metric / `merge_groups` columns are NOT in v2's
   DataFrame; consult `CurationV2.Unit` + `CurationV2.MergeGroup` part
   tables for the equivalent data.
-- **Pre-curation NWB `curation_label` is `["uncurated"]` (list), not
-  the v1 scalar `"uncurated"`.** External NWB readers (FigURL, DANDI
-  export tooling) doing `nwb.units["curation_label"][i] ==
-  "uncurated"` must update to `"uncurated" in nwb.units[
-  "curation_label"][i]`. The list shape matches the post-curation
-  v2 indexed-column convention (Phase 1b N26) but is a regression
-  from v1's scalar at the pre-curation stage.
+- **Pre-curation NWB `curation_label` remains the v1 scalar
+  `"uncurated"`.** External NWB readers (FigURL, DANDI export tooling)
+  doing `nwb.units["curation_label"][i] == "uncurated"` continue to work
+  on v2 sort outputs. Post-curation NWBs use the curated label-list
+  representation when labels are present.
 - **`merge_groups` and per-metric unit columns no longer in the
   curated-units NWB.** v1 wrote both at NWB-write time
   (`v1/curation.py:404-428`). v2 stores merge provenance in the
@@ -464,7 +462,7 @@ cross-referenced here, not duplicated.
   `CurationV2.insert_curation(apply_merge=True)` (the stored curated NWB)
   and `CurationV2.get_merged_sorting` (the lazy preview) apply
   SpikeInterface's membership-aware 0.4 ms duplicate removal
-  ([curation.py `_dedup_merged_spike_times`](./src/spyglass/spikesorting/v2/utils.py)):
+  ([utils.py `_dedup_merged_spike_times`](./src/spyglass/spikesorting/v2/utils.py)):
   a sub-0.4 ms pair from two merged contributors is one physical spike
   double-detected (a neuron's refractory period forbids genuine sub-0.4 ms
   firing), so it is removed. v1's *lazy* `get_merged_sorting` did this
