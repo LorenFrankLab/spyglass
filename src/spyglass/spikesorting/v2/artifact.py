@@ -1014,13 +1014,27 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         """
         import numpy as _np
 
+        from spyglass.spikesorting.v2.utils import (
+            _base_intervals_from_timestamps,
+        )
+
         timestamps = recording.get_times()
+        fs = recording.get_sampling_frequency()
+        # Recorded chunks, split at wall-clock discontinuities. For a
+        # contiguous recording this is a single ``[t0, t_end]``; for
+        # disjoint sort intervals it is one interval per chunk, so the
+        # detect=False / zero-artifact returns AND the artifact complement
+        # below never span an inter-chunk gap (which would inflate
+        # obs_intervals duration and let sub-min_length slivers survive by
+        # borrowing gap time). v1 subtracts artifacts from the explicit
+        # ``sort_interval_valid_times`` (``v1/artifact.py:327``).
+        base_intervals = _base_intervals_from_timestamps(timestamps, fs)
         if not validated.detect:
             logger.info(
-                "ArtifactDetection: detect=False; returning full "
-                "recording window as a single valid interval."
+                "ArtifactDetection: detect=False; returning the recorded "
+                "window(s) as valid intervals."
             )
-            return _np.asarray([[timestamps[0], timestamps[-1]]])
+            return _np.asarray(base_intervals)
 
         # Log the threshold configuration so a population report can
         # audit which detection mode actually fired per row. Matches
@@ -1060,11 +1074,10 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
                 f"{validated.amplitude_thresh_uV}, zscore_thresh="
                 f"{validated.zscore_thresh}, proportion_above_thresh="
                 f"{validated.proportion_above_thresh}); returning the "
-                "full recording window as a single valid interval."
+                "recorded window(s) as valid intervals."
             )
-            return _np.asarray([[timestamps[0], timestamps[-1]]])
+            return _np.asarray(base_intervals)
 
-        fs = recording.get_sampling_frequency()
         half_window_frames = int(
             _np.ceil(validated.removal_window_ms * 1e-3 * fs / 2)
         )
@@ -1102,17 +1115,27 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
                 [timestamps[start_f], end_time]
             )
 
-        # Subtract artifact intervals from the recording window.
-        valid_start = timestamps[0]
-        valid_end = timestamps[-1]
+        # Subtract artifact intervals from each recorded base chunk
+        # SEPARATELY so a kept valid interval never spans an inter-chunk
+        # wall-clock gap. Subtracting from one envelope
+        # ``[timestamps[0], timestamps[-1]]`` would reintroduce the gaps
+        # ``Recording.make`` excluded -- inflating obs_intervals duration
+        # and letting a sub-min_length sliver survive by borrowing gap
+        # time. ``artifact_intervals`` is start-sorted; clip each to the
+        # current chunk and walk the complement within it.
         kept = []
-        cursor = valid_start
-        for art_start, art_end in artifact_intervals:
-            if art_start > cursor:
-                kept.append([cursor, art_start])
-            cursor = max(cursor, art_end)
-        if cursor < valid_end:
-            kept.append([cursor, valid_end])
+        for base_start, base_end in base_intervals:
+            cursor = base_start
+            for art_start, art_end in artifact_intervals:
+                clipped_start = max(art_start, base_start)
+                clipped_end = min(art_end, base_end)
+                if clipped_end <= clipped_start:
+                    continue  # artifact does not overlap this chunk
+                if clipped_start > cursor:
+                    kept.append([cursor, clipped_start])
+                cursor = max(cursor, clipped_end)
+            if cursor < base_end:
+                kept.append([cursor, base_end])
 
         # Drop valid-interval slivers shorter than ``min_length_s``
         # (default 1.0 s) before returning. Without this, a noisy

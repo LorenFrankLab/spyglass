@@ -1254,19 +1254,26 @@ def test_sorting_populates_with_mountainsort5(populated_recording):
 
 @pytest.mark.slow
 def test_sorting_get_sorting_round_trips(populated_sorting):
-    """``Sorting.get_sorting`` returns the same unit IDs as the row.
+    """``Sorting.get_sorting`` returns a v1-style frame-relative sorting.
 
-    Also asserts spike times are stored in the recording's absolute
-    timeline (v1 convention): the SI sorting's
-    ``get_unit_spike_train(uid, return_times=True)`` falls within
-    ``[recording.get_times()[0], recording.get_times()[-1]]``, which
-    only holds if ``_write_units_nwb`` stored absolute times and
-    ``get_sorting`` reconstructs the proper ``t_start``.
+    ``get_sorting`` returns a ``NumpySorting`` (segment frames,
+    ``t_start=0``), matching v1's ``NumpySorting.from_unit_dict`` shape:
+
+    - unit_ids match the row's ``n_units``;
+    - ``return_times=False`` yields the original recording FRAME indices
+      in ``[0, n_samples)`` -- recovered from the stored ABSOLUTE spike
+      times via ``np.searchsorted``, so ``timestamps[frame]`` recovers the
+      stored time (the ``as_dataframe=True`` ``spike_times`` column);
+    - ``return_times=True`` yields frame-relative seconds (``frame / fs``),
+      NOT absolute wall-clock. Absolute times live in the units NWB and
+      the DataFrame path; the SI object is frame-relative like v1's.
 
     Depends on ``populated_sorting`` (not ``populated_recording``)
     so the Sorting row this test inspects is guaranteed to exist
     regardless of test ordering or selection (``-k``, ``--lf``).
     """
+    import numpy as np
+
     from spyglass.spikesorting.v2.recording import (
         Recording,
         RecordingSelection,
@@ -1290,42 +1297,33 @@ def test_sorting_get_sorting_round_trips(populated_sorting):
     ).fetch1("recording_id")
     rec = Recording().get_recording({"recording_id": recording_id})
     timestamps = rec.get_times()
-    rec_start = float(timestamps[0])
-    rec_end = float(timestamps[-1])
+    n_samples = len(timestamps)
+    fs = rec.get_sampling_frequency()
 
-    # Spike times for every unit must lie inside the recording window.
-    for uid in si_sorting.unit_ids:
-        times = si_sorting.get_unit_spike_train(unit_id=uid, return_times=True)
-        if len(times) == 0:
-            continue
-        assert times.min() >= rec_start
-        assert times.max() <= rec_end
+    # The as_dataframe path carries the stored ABSOLUTE spike times
+    # (read straight from the units NWB), indexed by unit_id.
+    df = Sorting().get_sorting(populated_sorting, as_dataframe=True)
 
-    # Stronger absolute-timeline check: even on a recording starting at
-    # t=0 (the smoke fixture), the spike times read back must equal
-    # ``timestamps[sample_index]`` exactly. With the previous t_start=0.0
-    # hard-code AND relative-spike-time storage, ``return_times=True``
-    # also returned ``sample_index / fs``, which happened to match for
-    # t=0 recordings -- so we also check that
-    # ``get_unit_spike_train(return_times=False)`` returns valid sample
-    # indices that, when looked up in ``timestamps``, recover the
-    # original return_times array. That equivalence only holds when the
-    # absolute-timeline convention is implemented in BOTH write and
-    # read paths.
     for uid in si_sorting.unit_ids:
-        sample_idx = si_sorting.get_unit_spike_train(
+        frames = si_sorting.get_unit_spike_train(
             unit_id=uid, return_times=False
         )
-        wall_times = si_sorting.get_unit_spike_train(
-            unit_id=uid, return_times=True
-        )
-        if len(sample_idx) == 0:
+        if len(frames) == 0:
             continue
-        # Allow at most one-sample drift from any int-rounding inside
-        # SI's time/sample-index conversion.
-        recovered = timestamps[sample_idx.astype(int)]
-        max_drift = float(abs(recovered - wall_times).max())
-        assert max_drift <= 1.0 / rec.get_sampling_frequency()
+        frames = frames.astype(int)
+        # Frames are valid recording sample indices.
+        assert frames.min() >= 0
+        assert frames.max() < n_samples
+        # searchsorted round-trip: looking the frames up in the
+        # recording timestamps recovers the stored ABSOLUTE spike times.
+        abs_times = np.sort(np.asarray(df.loc[int(uid), "spike_times"]))
+        recovered = np.sort(timestamps[frames])
+        assert np.allclose(recovered, abs_times, atol=1.0 / fs)
+        # return_times=True is frame-relative (t_start=0), v1 shape --
+        # NOT absolute wall-clock. Pins that get_sorting returns a
+        # NumpySorting, not an absolute-t_start NwbSortingExtractor.
+        rel = si_sorting.get_unit_spike_train(unit_id=uid, return_times=True)
+        assert np.allclose(np.sort(rel), np.sort(frames / fs))
 
 
 @pytest.mark.slow
@@ -6689,6 +6687,108 @@ def test_disjoint_sort_intervals_concatenated(polymer_smoke_session):
         "_consolidate_intervals + concatenate_recordings split was "
         "bypassed."
     )
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_artifact_valid_times_respect_disjoint_gap(polymer_smoke_session):
+    """End-to-end: artifact-removed valid_times never span a gap.
+
+    Builds a disjoint Recording (two chunks separated by a wall-clock
+    gap), runs ``ArtifactDetection`` with the ``none`` preset
+    (detect=False), and asserts the persisted artifact ``IntervalList``
+    valid_times split at the gap rather than returning one envelope
+    spanning it. Subtracting/returning over a single
+    ``[timestamps[0], timestamps[-1]]`` envelope (the old behavior) would
+    reintroduce the gap -- inflating obs_intervals duration and letting
+    sub-min_length slivers survive. The artifact-detected (detect=True)
+    per-chunk subtraction is pinned by the synthetic ``_detect_artifacts``
+    test in ``test_disjoint_artifact.py``.
+    """
+    import uuid as _uuid
+
+    import numpy as _np
+
+    from spyglass.common.common_interval import IntervalList
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactDetectionParameters,
+        ArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    PreprocessingParameters.insert_default()
+    ArtifactDetectionParameters.insert_default()
+    LabTeam.insert1(
+        {"team_name": "v2_test_team", "team_description": "v2 pipeline tests"},
+        skip_duplicates=True,
+    )
+    if not (SortGroupV2 & polymer_smoke_session):
+        SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+
+    raw_times = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": "raw data valid times",
+        }
+    ).fetch1("valid_times")
+    t0 = float(raw_times[0][0])
+    t_end = float(raw_times[-1][-1])
+    assert (t_end - t0) >= 2.9, "smoke fixture too short for disjoint test"
+    chunk1_end, gap_end, chunk2_end = t0 + 1.2, t0 + 1.7, min(t0 + 2.9, t_end)
+    gap_mid = 0.5 * (chunk1_end + gap_end)
+    disjoint_times = _np.array([[t0, chunk1_end], [gap_end, chunk2_end]])
+
+    sort_group_id = int(
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
+    )
+    disjoint_name = f"v2_disjoint_artifact_{_uuid.uuid4().hex[:8]}"
+    IntervalList.insert1(
+        {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": disjoint_name,
+            "valid_times": disjoint_times,
+            "pipeline": "v2_disjoint_test",
+        }
+    )
+    rec_pk = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+            "interval_list_name": disjoint_name,
+            "preproc_params_name": "default_franklab",
+            "team_name": "v2_test_team",
+        }
+    )
+    Recording.populate(rec_pk, reserve_jobs=False)
+
+    art_pk = ArtifactSelection.insert_selection(
+        {
+            "recording_id": rec_pk["recording_id"],
+            "artifact_params_name": "none",
+        }
+    )
+    ArtifactDetection.populate(art_pk, reserve_jobs=False)
+
+    valid_times = ArtifactDetection().get_artifact_removed_intervals(art_pk)
+
+    assert len(valid_times) >= 2, (
+        "disjoint recording must yield >= 2 artifact valid intervals "
+        f"(one per chunk); got {valid_times.tolist()}"
+    )
+    for start, end in valid_times:
+        assert not (start < gap_mid < end), (
+            f"artifact valid interval [{start}, {end}] spans the "
+            f"inter-chunk gap (gap_mid={gap_mid})."
+        )
 
 
 # =========================================================================

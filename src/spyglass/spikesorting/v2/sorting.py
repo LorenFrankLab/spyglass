@@ -1553,6 +1553,26 @@ class Sorting(SpyglassMixin, dj.Computed):
             if end > start:
                 frame_ranges.append((start, end))
 
+        # Drop pure inter-chunk-gap ranges. For a DISJOINT recording the
+        # gap-respecting valid_times leave a single boundary frame between
+        # two chunks; the complement walk emits it as a width-1 range whose
+        # successor is a wall-clock discontinuity. That frame is the last
+        # real sample of the preceding chunk (valid) -- masking it would
+        # zero a good sample per gap. A genuine 1-frame artifact instead
+        # has ~1-sample spacing to its neighbor, so it is kept. (A 1-sample
+        # artifact landing exactly on a chunk's final sample is the lone
+        # uncovered edge; negligible at the chunk boundary.)
+        sample_period = 1.0 / float(recording.get_sampling_frequency())
+        frame_ranges = [
+            (s, e)
+            for (s, e) in frame_ranges
+            if not (
+                e - s == 1
+                and e < len(timestamps)
+                and (timestamps[e] - timestamps[s]) > 1.5 * sample_period
+            )
+        ]
+
         if not frame_ranges:
             return recording
 

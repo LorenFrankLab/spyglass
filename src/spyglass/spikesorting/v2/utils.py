@@ -625,6 +625,53 @@ def _spike_times_to_frames(recording_times, spike_times, n_samples, unit_id):
     return spike_frames
 
 
+def _base_intervals_from_timestamps(timestamps, fs):
+    """Split a (possibly gap-preserving) timestamp vector into recorded chunks.
+
+    A disjoint v2 recording persists the concatenated per-sort-interval
+    timestamp slices (``Recording._restrict_recording``'s
+    ``timestamps_override``), so consecutive samples WITHIN a chunk differ
+    by ~1 sample period while an inter-chunk wall-clock gap shows up as a
+    diff > 1.5 sample periods (a missing sample). Returns one
+    ``[start, end]`` (inclusive first/last sample times, seconds) per
+    chunk so an artifact complement built per chunk never spans a gap --
+    the v1-parity behavior (v1 subtracts artifacts from the explicit
+    ``sort_interval_valid_times`` at ``v1/artifact.py:327``). A contiguous
+    recording yields a single ``[t0, t_end]`` interval, so this is a no-op
+    for the common single-interval case.
+
+    The ``1.5 / fs`` threshold is robust against sub-sample timestamp
+    jitter (within-chunk diffs are ~1 sample period) and matches the
+    ±1.5-sample tolerance used in the spike-time readback; any genuine
+    disjoint gap is orders of magnitude larger.
+
+    Parameters
+    ----------
+    timestamps : array-like, shape (n_samples,)
+        Recording timestamps in seconds, monotonically increasing.
+    fs : float
+        Sampling frequency in Hz.
+
+    Returns
+    -------
+    list[list[float]]
+        ``[[start, end], ...]`` inclusive per-chunk bounds; ``[]`` for an
+        empty input.
+    """
+    import numpy as _np
+
+    ts = _np.asarray(timestamps, dtype=float)
+    if ts.size == 0:
+        return []
+    sample_period = 1.0 / float(fs)
+    # Index i marks a gap when ts[i+1] - ts[i] exceeds 1.5 sample periods
+    # (i.e. at least one sample of wall-clock time is missing).
+    gap_after = _np.flatnonzero(_np.diff(ts) > 1.5 * sample_period)
+    starts = [0, *(int(i) + 1 for i in gap_after)]
+    ends = [*(int(i) for i in gap_after), ts.size - 1]
+    return [[float(ts[s]), float(ts[e])] for s, e in zip(starts, ends)]
+
+
 _ARTIFACT_INTERVAL_LIST_PREFIX = "artifact_"
 
 
