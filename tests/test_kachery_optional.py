@@ -68,18 +68,11 @@ def test_get_nwb_file_skips_kachery_when_unavailable(tmp_path):
         patch.object(skm, "_kachery_available", False),
         patch("os.path.exists", return_value=False),
         patch(
-            "spyglass.utils.nwb_helper_fn.DandiPath", create=True
+            "spyglass.common.common_dandi.DandiPath", create=True
         ) as mock_dandi,
     ):
         mock_dandi.return_value.has_file_path.return_value = False
         mock_dandi.return_value.has_raw_path.return_value = False
 
-        try:
+        with pytest.raises(FileNotFoundError):
             helper.get_nwb_file(fake_path)
-        except ImportError as e:
-            if "kachery" in str(e).lower():
-                pytest.fail(
-                    f"get_nwb_file raised kachery ImportError unexpectedly: {e}"
-                )
-        except Exception:
-            pass  # other errors (missing file, etc.) are acceptable

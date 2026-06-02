@@ -647,7 +647,7 @@ class CondaManager:
                 f"  3. Check {env_file} for conflicts"
             ) from e
 
-    def install_package(self, extras: List[str] = None) -> None:
+    def install_package(self, extras: Optional[List[str]] = None) -> None:
         """Install spyglass package in development mode.
 
         Parameters

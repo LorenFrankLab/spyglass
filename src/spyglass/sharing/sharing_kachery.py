@@ -39,7 +39,7 @@ def _require_kachery():
     if not _kachery_available:
         raise ImportError(
             "kachery_cloud is not installed. Install it with:\n"
-            "  pip install kachery-cloud\n"
+            "  pip install spyglass-neuro[kachery]\n"
             "or remove kachery from your workflow and use the DANDI fallback "
             "in spyglass.utils.nwb_helper_fn.get_nwb_file instead."
         )
@@ -194,12 +194,7 @@ class AnalysisNwbfileKachery(SpyglassMixin, dj.Computed):
         if not _kachery_available:
             if permit_fail:
                 return False
-            raise ImportError(
-                "kachery_cloud is not installed. Install it with:\n"
-                "  pip install kachery-cloud\n"
-                "or remove kachery from your workflow and use the DANDI "
-                "fallback in spyglass.utils.nwb_helper_fn.get_nwb_file instead."
-            )
+            _require_kachery()
         fetched_list = (
             AnalysisNwbfileKachery & {"analysis_file_name": analysis_file_name}
         ).fetch("analysis_file_uri", "kachery_zone_name")
