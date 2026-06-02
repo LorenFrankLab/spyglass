@@ -1,5 +1,6 @@
 """Unit tests for NWBFileCache LRU memory management."""
 
+import resource
 import time
 from unittest.mock import MagicMock, patch
 
@@ -160,6 +161,54 @@ def test_lru_eviction_order(NWBFileCache):
     assert "/c.nwb" in cache
 
 
+# ── file descriptor limit eviction ───────────────────────────────────────────
+
+
+def test_eviction_on_fd_limit(NWBFileCache):
+    """LRU file is evicted when cache size reaches the OS fd soft limit."""
+    cache = NWBFileCache()
+    io_a, io_b = _make_io(), _make_io()
+
+    # Soft limit of 10 fds; fraction 0.99 → threshold is 9.9, so 10 entries
+    # would exceed it. Add two files: first with plenty of memory and a limit
+    # that allows it, then tighten the limit so the second insert evicts the first.
+    fake_limits = (10, 1024)  # (soft, hard)
+
+    with (
+        patch("psutil.virtual_memory", return_value=_fake_vm(16)),
+        patch("resource.getrlimit", return_value=fake_limits),
+    ):
+        cache["/a.nwb"] = (io_a, MagicMock())
+
+    # Drop soft limit to 1 so one open file already exceeds the fraction
+    with (
+        patch("psutil.virtual_memory", return_value=_fake_vm(16)),
+        patch("resource.getrlimit", return_value=(1, 1024)),
+    ):
+        cache["/b.nwb"] = (io_b, MagicMock())
+
+    io_a.close.assert_called_once()
+    assert "/a.nwb" not in cache
+    assert "/b.nwb" in cache
+
+
+def test_no_eviction_when_fd_ok(NWBFileCache):
+    """No eviction when cache is well within the OS fd limit."""
+    cache = NWBFileCache()
+    io_a = _make_io()
+    fake_limits = (1024, 4096)
+
+    with (
+        patch("psutil.virtual_memory", return_value=_fake_vm(16)),
+        patch("resource.getrlimit", return_value=fake_limits),
+    ):
+        cache["/a.nwb"] = (io_a, MagicMock())
+        cache["/b.nwb"] = (_make_io(), MagicMock())
+
+    assert len(cache) == 2
+    io_a.close.assert_not_called()
+
+
 # ── configure_nwb_cache ───────────────────────────────────────────────────────
 
 
@@ -188,3 +237,121 @@ def test_configure_partial_update(configure_nwb_cache):
         assert mod._NWB_CACHE_MIN_FREE_PCT == 0.1
     finally:
         mod._NWB_CACHE_MIN_FREE_GB = original_gb
+
+
+def test_configure_max_file_fraction(configure_nwb_cache):
+    import spyglass.utils.nwb_helper_fn as mod
+
+    original = mod._NWB_CACHE_MAX_FILE_FRACTION
+    try:
+        configure_nwb_cache(max_file_fraction=0.5)
+        assert mod._NWB_CACHE_MAX_FILE_FRACTION == 0.5
+    finally:
+        mod._NWB_CACHE_MAX_FILE_FRACTION = original
+
+
+def test_configure_max_file_fraction_invalid(configure_nwb_cache):
+    import pytest
+
+    with pytest.raises(ValueError):
+        configure_nwb_cache(max_file_fraction=0.0)
+    with pytest.raises(ValueError):
+        configure_nwb_cache(max_file_fraction=1.5)
+
+
+# ── hybrid eviction (idle time + ref count) ───────────────────────────────────
+
+
+def test_acquire_increments_refcount(NWBFileCache):
+    cache = NWBFileCache()
+    with patch("psutil.virtual_memory", return_value=_fake_vm(16)):
+        cache["/a.nwb"] = (_make_io(), MagicMock())
+    assert cache._cache["/a.nwb"][3] == 0
+    cache.acquire("/a.nwb")
+    assert cache._cache["/a.nwb"][3] == 1
+    cache.release("/a.nwb")
+    assert cache._cache["/a.nwb"][3] == 0
+
+
+def test_release_floors_at_zero(NWBFileCache):
+    cache = NWBFileCache()
+    with patch("psutil.virtual_memory", return_value=_fake_vm(16)):
+        cache["/a.nwb"] = (_make_io(), MagicMock())
+    cache.release("/a.nwb")  # release without prior acquire
+    assert cache._cache["/a.nwb"][3] == 0
+
+
+def test_released_evicted_before_active(NWBFileCache):
+    """A released (refcount=0) file is evicted before an active (refcount>0) one."""
+    cache = NWBFileCache()
+    io_a, io_b = _make_io(), _make_io()
+
+    with (
+        patch("psutil.virtual_memory", return_value=_fake_vm(16)),
+        patch("resource.getrlimit", return_value=(1024, 4096)),
+    ):
+        cache["/a.nwb"] = (io_a, MagicMock())
+        cache["/b.nwb"] = (io_b, MagicMock())
+
+    cache.acquire("/b.nwb")  # protect /b; /a stays at refcount=0
+
+    mem_responses = [_fake_vm(0.5), _fake_vm(16)]
+    with (
+        patch("psutil.virtual_memory", side_effect=mem_responses),
+        patch("resource.getrlimit", return_value=(1024, 4096)),
+    ):
+        cache["/c.nwb"] = (_make_io(), MagicMock())
+
+    io_a.close.assert_called_once()  # /a evicted (refcount=0)
+    io_b.close.assert_not_called()  # /b protected (refcount=1)
+    assert "/a.nwb" not in cache
+    assert "/b.nwb" in cache
+
+
+def test_tier3_eviction_warns(NWBFileCache):
+    """A warning is emitted when the only eviction candidate is an active file."""
+    cache = NWBFileCache()
+    io_a = _make_io()
+
+    with (
+        patch("psutil.virtual_memory", return_value=_fake_vm(16)),
+        patch("resource.getrlimit", return_value=(1024, 4096)),
+    ):
+        cache["/a.nwb"] = (io_a, MagicMock())
+
+    cache.acquire("/a.nwb")  # all files are now active
+
+    mem_responses = [_fake_vm(0.5), _fake_vm(16)]
+    with (
+        patch("psutil.virtual_memory", side_effect=mem_responses),
+        patch("resource.getrlimit", return_value=(1024, 4096)),
+        patch("spyglass.utils.nwb_helper_fn.logger") as mock_logger,
+    ):
+        cache["/b.nwb"] = (_make_io(), MagicMock())
+        warning_calls = [
+            str(call) for call in mock_logger.warning.call_args_list
+        ]
+        assert any("active" in w for w in warning_calls)
+
+
+def test_close_all_warns_on_active(NWBFileCache):
+    """close_all emits a warning when files have outstanding holds."""
+    cache = NWBFileCache()
+    io_a = _make_io()
+
+    with patch("psutil.virtual_memory", return_value=_fake_vm(16)):
+        cache["/a.nwb"] = (io_a, MagicMock())
+
+    cache.acquire("/a.nwb")
+
+    with patch("spyglass.utils.nwb_helper_fn.logger") as mock_logger:
+        cache.close_all()
+        warning_calls = [
+            str(call) for call in mock_logger.warning.call_args_list
+        ]
+        assert any(
+            "active" in w.lower() or "hold" in w.lower() for w in warning_calls
+        )
+
+    io_a.close.assert_called_once()
+    assert len(cache) == 0

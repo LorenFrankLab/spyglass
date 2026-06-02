@@ -23,17 +23,26 @@ _NWB_CACHE_MAX_FILE_FRACTION = 0.99
 
 
 class NWBFileCache:
-    """LRU cache for open NWB files with memory-pressure eviction.
+    """LRU cache for open NWB files with ref-count-aware eviction.
 
-    Evicts least-recently-used files when system free RAM falls below
-    either an absolute floor (_NWB_CACHE_MIN_FREE_GB) or a fractional
-    floor (_NWB_CACHE_MIN_FREE_PCT of total RAM), whichever is larger,
-    or when the cache size exceeds _NWB_CACHE_MAX_FILE_FRACTION of the
-    OS soft limit on open file descriptors.
+    Eviction priority when memory or file-descriptor limits are reached:
+
+    1. **Released files** — ``refcount == 0``; evict LRU among these first.
+    2. **Active files** — ``refcount > 0``; last resort, emits a warning.
+
+    Hold counts are managed by :class:`~spyglass.utils.mixins.fetch.FetchMixin`:
+    calling ``fetch_nwb()`` acquires each opened file; calling ``close_nwb()``
+    on the same table instance releases them.
+
+    Thresholds checked before each insert:
+
+    - Free RAM below ``_NWB_CACHE_MIN_FREE_GB`` GB *or*
+      ``_NWB_CACHE_MIN_FREE_PCT`` × total RAM, whichever is larger.
+    - Cache size ≥ ``_NWB_CACHE_MAX_FILE_FRACTION`` × OS fd soft limit.
     """
 
     def __init__(self):
-        # path → (io, nwbfile, last_used_monotonic)
+        # path → (io, nwbfile, last_used_monotonic, refcount)
         self._cache: dict = {}
 
     # ------------------------------------------------------------------
@@ -43,26 +52,26 @@ class NWBFileCache:
     def get(self, path, default=(None, None)):
         """Return (io, nwbfile) and update last-used, or *default*."""
         if path in self._cache:
-            io, nwbfile, _ = self._cache[path]
-            self._cache[path] = (io, nwbfile, time.monotonic())
+            io, nwbfile, _, rc = self._cache[path]
+            self._cache[path] = (io, nwbfile, time.monotonic(), rc)
             return io, nwbfile
         return default
 
     def __getitem__(self, path):
         if path not in self._cache:
             raise KeyError(path)
-        io, nwbfile, _ = self._cache[path]
-        self._cache[path] = (io, nwbfile, time.monotonic())
+        io, nwbfile, _, rc = self._cache[path]
+        self._cache[path] = (io, nwbfile, time.monotonic(), rc)
         return io, nwbfile
 
     def __setitem__(self, path, value):
         """Add *(io, nwbfile)*, evicting LRU entries if memory is tight."""
         io, nwbfile = value
         if path in self._cache:
-            old_io, _, _ = self._cache[path]
+            old_io, _, _, _ = self._cache[path]
             old_io.close()
         self._evict_if_needed()
-        self._cache[path] = (io, nwbfile, time.monotonic())
+        self._cache[path] = (io, nwbfile, time.monotonic(), 0)
 
     def __contains__(self, path):
         return path in self._cache
@@ -72,13 +81,32 @@ class NWBFileCache:
 
     def values(self):
         """Yield (io, nwbfile) pairs without updating last-used times."""
-        return ((io, nwbfile) for io, nwbfile, _ in self._cache.values())
+        return ((io, nwbfile) for io, nwbfile, _, _ in self._cache.values())
 
     def close_all(self):
         """Close every open IO handle and clear the cache."""
-        for io, _, _ in self._cache.values():
+        active = [p for p, (_, _, _, rc) in self._cache.items() if rc > 0]
+        if active:
+            logger.warning(
+                f"Closing {len(active)} NWB file(s) with active holds. "
+                "Lazy h5py reads from these files will fail: "
+                + ", ".join(active)
+            )
+        for io, _, _, _ in self._cache.values():
             io.close()
         self._cache.clear()
+
+    def acquire(self, path):
+        """Increment the hold count, protecting the file from LRU eviction."""
+        if path in self._cache:
+            io, nwb, last_used, rc = self._cache[path]
+            self._cache[path] = (io, nwb, last_used, rc + 1)
+
+    def release(self, path):
+        """Decrement the hold count, allowing LRU eviction again."""
+        if path in self._cache:
+            io, nwb, last_used, rc = self._cache[path]
+            self._cache[path] = (io, nwb, last_used, max(0, rc - 1))
 
     # ------------------------------------------------------------------
     # Memory helpers
@@ -99,10 +127,20 @@ class NWBFileCache:
     def _evict_lru(self):
         if not self._cache:
             return
-        lru_path = min(self._cache, key=lambda p: self._cache[p][2])
-        io, _, _ = self._cache.pop(lru_path)
+        released = {p for p, (_, _, _, rc) in self._cache.items() if rc == 0}
+        if released:
+            candidates = released
+        else:
+            candidates = set(self._cache.keys())
+            logger.warning(
+                "NWB cache must evict an active file under memory/fd pressure."
+                " Lazy h5py reads from the evicted file may fail."
+                " Call close_nwb() when finished with fetch_nwb() results."
+            )
+        lru_path = min(candidates, key=lambda p: self._cache[p][2])
+        io, _, _, _ = self._cache.pop(lru_path)
         io.close()
-        logger.info(f"Closed LRU NWB file to free memory: {lru_path}")
+        logger.info(f"Closed LRU NWB file: {lru_path}")
 
     def _evict_if_needed(self):
         while self._cache and not (self._free_ram_ok() and self._num_open_ok()):
@@ -331,6 +369,16 @@ def get_config(nwb_file_path: str, calling_table: str = None) -> dict:
 def close_nwb_files():
     """Close all open NWB files."""
     __open_nwb_files.close_all()
+
+
+def _acquire_nwb_file(nwb_file_path: str) -> None:
+    """Increment the hold count for a cached NWB file. Internal use only."""
+    __open_nwb_files.acquire(nwb_file_path)
+
+
+def _release_nwb_file(nwb_file_path: str) -> None:
+    """Decrement the hold count for a cached NWB file. Internal use only."""
+    __open_nwb_files.release(nwb_file_path)
 
 
 def get_data_interface(nwbfile, data_interface_name, data_interface_class=None):
