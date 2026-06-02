@@ -91,7 +91,7 @@ def get_nwb_file(nwb_file_path, query_expression=None):
         f"NWB file not found locally; checking kachery for {nwb_file_path}"
     )
 
-    from ..sharing.sharing_kachery import (
+    from spyglass.sharing.sharing_kachery import (
         AnalysisNwbfileKachery,
         _kachery_available,
     )
@@ -100,10 +100,10 @@ def get_nwb_file(nwb_file_path, query_expression=None):
         kachery_success = AnalysisNwbfileKachery.download_file(
             os.path.basename(nwb_file_path), permit_fail=True
         )
-        if kachery_success:
+        if kachery_success:  # pragma no cover
             return _open_nwb_file(nwb_file_path)
     else:
-        logger.debug(
+        logger.debug(  # pragma no cover
             "kachery unavailable; skipping kachery check for %s",
             nwb_file_path,
         )
