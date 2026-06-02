@@ -119,6 +119,11 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
             {"merge_id": merge_id}
             for merge_id in list(set(self.fetch("spikesorting_merge_id")))
         ]
+        # Left on the default (no multi_source) unlike SortedSpikesGroup: an
+        # annotation set comes from one analysis and is unlikely to span
+        # SpikeSortingOutput source parts. If one ever does, fetch_nwb raises a
+        # clear "pass multi_source=True" error rather than silently mixing
+        # sources.
         nwb_file_list, merge_ids = (SpikeSortingOutput & merge_keys).fetch_nwb(
             return_merge_ids=True
         )
