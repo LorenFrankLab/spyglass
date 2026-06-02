@@ -1326,7 +1326,9 @@ def test_sorting_get_sorting_round_trips(populated_sorting):
         # NOT absolute wall-clock. Pins that get_sorting returns a
         # NumpySorting, not an absolute-t_start NwbSortingExtractor.
         rel = si_sorting.get_unit_spike_train(unit_id=uid, return_times=True)
-        assert np.allclose(np.sort(rel), np.sort(frames / fs))
+        assert np.allclose(
+            np.sort(rel), np.sort(frames / fs), rtol=0.0, atol=1.0 / fs
+        )
 
 
 @pytest.mark.slow
@@ -4578,6 +4580,140 @@ def test_obs_intervals_no_artifact_respects_disjoint_gap(
             f"obs_interval [{start}, {end}] spans the inter-chunk gap "
             f"(gap_mid={gap_mid}); the envelope fallback was used."
         )
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_get_merged_sorting_keeps_cross_gap_pair(
+    polymer_smoke_session, monkeypatch
+):
+    """Lazy get_merged_sorting must not drop a cross-gap boundary pair.
+
+    On a DISJOINT recording the units NWB frames are contiguous across the
+    excluded wall-clock gap, so two merged contributors firing at chunk 1's
+    last frame and chunk 2's first frame are frame-ADJACENT but ~0.5 s apart
+    in real time. A frame-space 0.4 ms dedup (SI's MergeUnitsSorting) would
+    wrongly drop one; the abs-time dedup keeps both (and matches the
+    apply_merge=True stored train). Regression for the lazy-merge fix.
+    """
+    import uuid as _uuid
+
+    import numpy as _np
+
+    from spyglass.common.common_interval import IntervalList
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    _clean_session_v2(polymer_smoke_session)
+    initialize_v2_defaults()
+    LabTeam.insert1(
+        {"team_name": "v2_test_team", "team_description": "v2 pipeline tests"},
+        skip_duplicates=True,
+    )
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    raw_times = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": "raw data valid times",
+        }
+    ).fetch1("valid_times")
+    t0 = float(raw_times[0][0])
+    t_end = float(raw_times[-1][-1])
+    assert (t_end - t0) >= 2.9, "smoke fixture too short for disjoint test"
+    chunk1_end, gap_end, chunk2_end = t0 + 1.2, t0 + 1.7, min(t0 + 2.9, t_end)
+    disjoint_times = _np.array([[t0, chunk1_end], [gap_end, chunk2_end]])
+    sort_group_id = int(
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
+    )
+    disjoint_name = f"v2_disjoint_merge_{_uuid.uuid4().hex[:8]}"
+    IntervalList.insert1(
+        {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": disjoint_name,
+            "valid_times": disjoint_times,
+            "pipeline": "v2_disjoint_test",
+        }
+    )
+    rec_pk = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+            "interval_list_name": disjoint_name,
+            "preproc_params_name": "default_franklab",
+            "team_name": "v2_test_team",
+        }
+    )
+    Recording.populate(rec_pk, reserve_jobs=False)
+    sort_pk = SortingSelection.insert_selection(
+        {
+            "recording_id": rec_pk["recording_id"],
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": "default",
+        }
+    )
+    (Sorting & sort_pk).super_delete(warn=False)
+
+    planted = {}
+
+    def _two_unit_gap_boundary_sorter(
+        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None
+    ):
+        import spikeinterface as si
+
+        ts = _np.asarray(recording.get_times())
+        fs_local = recording.get_sampling_frequency()
+        k = int(_np.flatnonzero(_np.diff(ts) > 1.5 / fs_local)[0])  # chunk1 last
+        # unit 0: a chunk-1 spike + chunk-1's LAST frame; unit 1: chunk-2's
+        # FIRST frame + a later chunk-2 spike. Frames k and k+1 are adjacent
+        # but separated by the wall-clock gap.
+        planted["k"] = k
+        u0 = _np.array([100, k], dtype=_np.int64)
+        u1 = _np.array([k + 1, k + 1 + 100], dtype=_np.int64)
+        return si.NumpySorting.from_unit_dict(
+            [{0: u0, 1: u1}], sampling_frequency=fs_local
+        )
+
+    monkeypatch.setattr(
+        Sorting, "_run_sorter", staticmethod(_two_unit_gap_boundary_sorter)
+    )
+    Sorting.populate(sort_pk, reserve_jobs=False)
+    assert Sorting & sort_pk
+
+    # apply_merge=False preview curation merging the two units, then lazy.
+    pk = CurationV2.insert_curation(
+        sorting_key=sort_pk,
+        labels={},
+        merge_groups=[[0, 1]],
+        apply_merge=False,
+        parent_curation_id=-1,
+        description="disjoint cross-gap merge test",
+    )
+    merged = CurationV2().get_merged_sorting(pk)
+    assert merged.get_num_units() == 1, "the two units should merge into one"
+    merged_frames = set(
+        int(f)
+        for uid in merged.get_unit_ids()
+        for f in merged.get_unit_spike_train(unit_id=uid)
+    )
+    k = planted["k"]
+    # Both gap-boundary frames survive (frame-space dedup would drop one).
+    assert k in merged_frames and (k + 1) in merged_frames, (
+        f"cross-gap boundary pair (frames {k}, {k + 1}) was not preserved; "
+        f"merged frames={sorted(merged_frames)}"
+    )
+    assert len(merged_frames) == 4, (
+        f"all 4 planted spikes should survive (no cross-gap dedup); "
+        f"got {sorted(merged_frames)}"
+    )
 
 
 # ---------- ArtifactDetection: signal-level _detect_artifacts ------------
