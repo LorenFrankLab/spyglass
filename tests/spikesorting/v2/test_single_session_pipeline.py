@@ -4138,14 +4138,14 @@ def test_boundary_spike_round_trip_does_not_raise(
 ):
     """A spike at the recording's final sample survives the v2 NWB round-trip.
 
-    This test gates the decision on whether to fold in v1's
-    ``spike_times_to_valid_samples`` clip. SpikeInterface's
-    ``NwbSortingExtractor`` has historically been strict about
-    spikes that map back to a sample at or past ``n_samples`` after
-    the ``timestamps[sample_index] -> spike_times[]`` -> ``round((t
-    - t_start) * fs)`` round-trip. If SI 0.104 raises here, the v1
-    clip is required on read; if it does not raise, the clip is
-    unnecessary and the test is kept as a regression guard.
+    Regression guard for the final-sample boundary. ``_write_units_nwb``
+    stores ``timestamps[sample_index]`` as the absolute spike time;
+    ``get_sorting`` reads it back by mapping absolute time -> frame with
+    ``np.searchsorted`` (``_spike_times_to_frames``), which clips any
+    spike that floating-point-rounds to ``n_samples`` (one past the end)
+    -- the v1 ``spike_times_to_valid_samples`` clip, now folded in. This
+    test pins that a spike at ``n_samples - 1`` survives both read paths
+    without raising.
 
     Construction strategy
     ---------------------
@@ -4157,7 +4157,7 @@ def test_boundary_spike_round_trip_does_not_raise(
     ``_remove_excess_spikes`` should keep both samples
     (``n_samples - 1 < n_samples``), ``_write_units_nwb`` writes
     ``timestamps[sample_index]`` as the absolute time, and
-    ``Sorting().get_sorting`` reads back via ``NwbSortingExtractor``.
+    ``Sorting().get_sorting`` reads back via the searchsorted map.
     The round-trip is also exercised through
     ``CurationV2.insert_curation`` + ``CurationV2.get_sorting`` so
     both production read paths are covered.
@@ -4253,14 +4253,13 @@ def test_boundary_spike_round_trip_does_not_raise(
     Sorting.populate(sort_pk, reserve_jobs=False)
     assert Sorting & sort_pk, (
         "Sorting.populate failed when the synthetic sorter produced "
-        "a boundary spike; this is the failure mode the clip-decision "
-        "gate watches for but inside _write_units_nwb rather than at "
-        "read time."
+        "a boundary spike; this is the boundary failure mode, inside "
+        "_write_units_nwb rather than at read time."
     )
 
-    # First read path: Sorting.get_sorting -> NwbSortingExtractor
-    # must construct without raising. Unit set must include the one
-    # we planted.
+    # First read path: Sorting.get_sorting -> searchsorted frame map
+    # must build without raising. Unit set must include the one we
+    # planted.
     sorting_obj = Sorting().get_sorting(sort_pk)
     assert 0 in sorting_obj.get_unit_ids(), (
         "Boundary-spike sorting did not survive Sorting.get_sorting "
@@ -4270,7 +4269,7 @@ def test_boundary_spike_round_trip_does_not_raise(
     # Second read path: CurationV2 + CurationV2.get_sorting. The
     # curated NWB write goes through a different code path than
     # Sorting._write_units_nwb but reads back via the same
-    # NwbSortingExtractor pattern. Pass labels={} so insert_curation
+    # searchsorted frame map. Pass labels={} so insert_curation
     # accepts the call on the strict signature.
     curation_pk = CurationV2.insert_curation(
         sorting_key=sort_pk,

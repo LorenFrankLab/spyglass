@@ -2229,11 +2229,11 @@ def test_apply_artifact_mask_full_coverage_short_circuits():
 def test_get_sorting_zero_unit_returns_empty_numpysorting(populated_sorting):
     """A26: a zero-unit sort returns an empty single-segment ``NumpySorting``.
 
-    ``NwbSortingExtractor`` cannot open an empty units NWB, so the zero-unit
-    branch returns an empty ``NumpySorting`` at the recording's sampling
-    frequency. Built on the fixture's real recording (the branch still reads
-    ``sampling_frequency`` + ``t_start`` from it) via a planted zero-unit
-    Sorting row.
+    The zero-unit branch short-circuits before any NWB read and returns an
+    empty ``NumpySorting`` at the recording's sampling frequency (reading an
+    empty units table would otherwise fail). Built on the fixture's real
+    recording (the branch still reads ``sampling_frequency`` from it) via a
+    planted zero-unit Sorting row.
     """
     import datetime as dt
     import uuid
@@ -2298,20 +2298,19 @@ def test_get_sorting_dataframe_casts_unit_ids_to_python_int(populated_sorting):
     """A26: ``get_sorting(as_dataframe=True)`` indexes by Python ``int``.
 
     v2 writes integer unit_ids; the DataFrame path casts ``int(uid)`` so the
-    index matches v1's ``nwb.units.to_dataframe()`` shape (a numpy.int64
-    round-trips differently through ``NwbSortingExtractor`` in some SI
-    subpaths). Non-vacuous: the raw extractor yields numpy integers, so the
-    cast genuinely changes the type.
+    index matches v1's ``nwb.units.to_dataframe()`` shape. Non-vacuous: the
+    SI sorting object (a ``NumpySorting``) yields numpy integers, so the cast
+    genuinely changes the type.
     """
     from spyglass.spikesorting.v2.sorting import Sorting
 
     raw = Sorting().get_sorting(populated_sorting)
     assert len(raw.unit_ids) >= 1, "fixture sort must have units"
-    # The raw extractor's unit_ids are numpy integers -- the cast is not a
-    # no-op.
+    # The SI sorting object's unit_ids are numpy integers -- the cast is not
+    # a no-op.
     assert all(
         isinstance(uid, np.integer) for uid in raw.unit_ids
-    ), "precondition: NwbSortingExtractor yields numpy unit_ids"
+    ), "precondition: NumpySorting yields numpy unit_ids"
 
     df = Sorting().get_sorting(populated_sorting, as_dataframe=True)
     assert all(type(uid) is int for uid in df.index), (
