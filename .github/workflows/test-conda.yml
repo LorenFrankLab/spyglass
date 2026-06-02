@@ -153,11 +153,16 @@ jobs:
         # Cache test data step above). Without it, conftest.py now defaults
         # to a per-session temp directory for safety (issue #1573), which
         # would bypass the cache and re-download the NWB + video fixtures.
-        # tests/spikesorting/v2/ is excluded here -- it runs in the separate
-        # pytest-v2 job under SpikeInterface 0.104.
+        # tests/spikesorting/v*/ are excluded here. This job installs the
+        # project pin (SpikeInterface 0.104), which supports only the v2
+        # runtime; the v0/v1 active tests exercise guarded legacy
+        # SpikeInterface 0.99 paths and run in the separate pytest-legacy
+        # job, while v2 runs in the separate pytest-v2 job.
         pytest --no-docker --no-dlc --base-dir ./tests/_data/ \
           --cov-config=.coveragerc --cov=spyglass-neuro --cov-report=xml \
           ${{ steps.test_mode.outputs.marker_args }} \
+          --ignore=tests/spikesorting/v0 \
+          --ignore=tests/spikesorting/v1 \
           --ignore=tests/spikesorting/v2 \
           tests/
     - name: Upload coverage reports to Codecov
@@ -273,3 +278,98 @@ jobs:
         conda run -n spyglass_v2_matching pytest \
           tests/spikesorting/v2/test_v1_parity.py::test_optional_matching_extra_resolution \
           --no-docker --no-dlc -q
+
+  pytest-legacy:
+    # Legacy (v0/v1) spike-sorting tests run under SpikeInterface 0.99,
+    # isolated from the 0.104 pin the rest of the suite uses. The v0/v1
+    # active populate / curation / recompute paths are gated behind
+    # ``_require_legacy_si_environment`` (raises under SI >= 0.101), so
+    # they CANNOT run in the `run-tests` job (which installs the 0.104
+    # pin and ``--ignore``s tests/spikesorting/v0 and v1). This job runs
+    # them against the legacy SpikeInterface line instead, so the v0/v1
+    # runtime keeps CI coverage while it is deprecated in favor of v2.
+    name: pytest-legacy (SpikeInterface 0.99)
+    # Skip if PR is closed but not merged
+    if: |-
+      github.event_name != 'pull_request' ||
+      github.event.action != 'closed' ||
+      github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -l {0}
+    services:
+      mysql:
+        image: datajoint/mysql:8.0
+        env:
+          MYSQL_DATABASE: localhost
+          MYSQL_ROOT_PASSWORD: tutorial
+        ports:
+          - 3308:3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    - name: Install apt dependencies
+      run: |
+        sudo apt-get update
+        # mysql client for DataJoint; ffmpeg/libsm6/libxext6 for the
+        # video fixtures the minirec ingestion (mini_insert) pulls in.
+        sudo apt-get install -y \
+          mysql-client libmysqlclient-dev ffmpeg libsm6 libxext6
+    - name: Set up conda (legacy SpikeInterface 0.99 environment)
+      # The legacy env is conda-managed via the dedicated env file, which
+      # installs the repo's ``test`` extra and then force-downgrades
+      # SpikeInterface to the 0.99 line the v0/v1 active runtime requires.
+      uses: conda-incubator/setup-miniconda@v3
+      with:
+        activate-environment: spyglass_spikesorting_legacy
+        environment-file: environments/environment_spikesorting_legacy.yml
+        miniforge-version: latest
+        use-mamba: true
+    - name: Cache test data
+      id: cache-test-data
+      uses: actions/cache@v4
+      with:
+        # Shares the cache key with the run-tests job so the minirec NWB
+        # + video fixtures are downloaded at most once across both jobs.
+        path: |
+          tests/_data/raw/
+          tests/_data/video/
+        key: |-
+          test-data-${{ hashFiles('.github/workflows/test-conda.yml') }}-v1
+        restore-keys: |
+          test-data-
+    - name: Download data
+      if: steps.cache-test-data.outputs.cache-hit != 'true'
+      env:
+        BASEURL: https://ucsf.box.com/shared/static/
+        NWB_URL: k3sgql6z475oia848q1rgms4zdh4rkjn.nwb
+        VID1URL: ykep8ek4ogad20wz4p0vuyuqfo60cv3w.h264
+        VID2URL: d2jjk0y565ru75xqojio3hymmehzr5he.h264
+        NWBFILE: minirec20230622.nwb
+        VID_ONE: 20230622_minirec_01_s1.1.h264
+        VID_TWO: 20230622_minirec_02_s2.1.h264
+        RAW_DIR: /home/runner/work/spyglass/spyglass/tests/_data/raw/
+        VID_DIR: /home/runner/work/spyglass/spyglass/tests/_data/video/
+      run: |
+        mkdir -p $RAW_DIR $VID_DIR
+        curl_opts() { # Declare func with download options
+          curl -L --output "$1""$2" "$BASEURL""$3"
+        }
+        curl_opts $RAW_DIR $NWBFILE $NWB_URL
+        curl_opts $VID_DIR $VID_ONE $VID1URL
+        curl_opts $VID_DIR $VID_TWO $VID2URL
+    - name: Move actions coveragerc
+      run: mv tests/.coveragerc .coveragerc
+    - name: Run legacy spike-sorting tests
+      run: |
+        # --base-dir pins tests to the cached tests/_data/ path (see the
+        # run-tests job for the rationale). --no-docker uses the conftest
+        # null_server path against the MySQL service above.
+        pytest tests/spikesorting/v0 tests/spikesorting/v1 \
+          --no-docker --no-dlc --base-dir ./tests/_data/ -q

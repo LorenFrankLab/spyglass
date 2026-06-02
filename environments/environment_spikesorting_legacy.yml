@@ -1,0 +1,48 @@
+# Isolated conda environment for the legacy (v0/v1) spike-sorting tests.
+#
+# The repo now pins ``spikeinterface==0.104.3`` for the v2 pipeline (see
+# pyproject.toml), but the v0/v1 active populate / curation / recompute
+# paths call SpikeInterface APIs that were removed in 0.101+ and are gated
+# behind ``_require_legacy_si_environment`` (see
+# src/spyglass/spikesorting/_legacy_runtime.py), which raises under SI >=
+# 0.101. The main `run-tests` CI job installs the 0.104 pin and therefore
+# ``--ignore``s tests/spikesorting/v0 and v1; this file is the conda
+# equivalent of the dedicated `pytest-legacy` CI job that runs those
+# suites under the legacy SpikeInterface 0.99 line instead.
+#
+# 1. Create (from the repo root; the pip section installs the package
+#    editable from the repo root via the `..` path):
+#      mamba env create -f environments/environment_spikesorting_legacy.yml
+# 2. Activate: `conda activate spyglass_spikesorting_legacy`
+# 3. SpikeInterface is forced to the 0.99 line by the pip override below,
+#    overriding the repo's 0.104.3 pin. If you need to (re)install by hand:
+#       pip install -e "..[test]"
+#       pip install "spikeinterface>=0.99,<0.101"
+# 4. Run the legacy suites (Docker MySQL for DataJoint, or --no-docker
+#    null_server against an external MySQL as CI does):
+#       pytest tests/spikesorting/v0 tests/spikesorting/v1 --no-docker --no-dlc
+#
+# NOTE: the legacy SpikeInterface 0.99 line predates the repo's
+# ``probeinterface>=0.3.2`` / 0.104-era pins. The pip override below lets
+# the resolver settle SpikeInterface's own transitive constraints; if a
+# conflict surfaces in CI, pin the offending transitive dep (e.g.
+# probeinterface) here alongside the SpikeInterface override.
+name: spyglass_spikesorting_legacy
+channels:
+  - conda-forge
+  - franklab
+  - edeno
+dependencies:
+  - python=3.10
+  - pybind11  # req by mountainsort4 -> isosplit5
+  - pytorch<1.12.0
+  - pip
+  - pip:
+      # Editable install of the repo root (this file lives in
+      # environments/, so the package root is one level up). The ``test``
+      # extra brings the test deps; the explicit SpikeInterface override
+      # downgrades from the repo's 0.104.3 pin to the 0.99 line the v0/v1
+      # active runtime paths require.
+      - mountainsort4
+      - --editable "..[test]"
+      - "spikeinterface>=0.99,<0.101"
