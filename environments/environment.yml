@@ -4,7 +4,7 @@
 # 3. Activate: `conda activate spyglass`
 #
 # (lines intentionally left blank)
-#
+# (no-op modify this file to reset gh-action cache)
 #
 name: spyglass
 channels:
