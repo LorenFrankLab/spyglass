@@ -213,15 +213,16 @@ in-flight v1 PR on `copilot/fix-populating-artifact-detection`.
   "params_schema_version": 1, "job_kwargs": None})`.
 - **`Sorting.get_sorting(as_dataframe=True)` and
   `CurationV2.get_sorting(as_dataframe=True)` DataFrame shape.**
-  v1's `Curation.get_sorting(as_dataframe=True)` returned
-  `nwbf.units.to_dataframe()` whose **index is the unit_id**; v2
-  returns a DataFrame with `unit_id` as a **column** and a default
-  positional index. Notebook code doing `df.loc[uid]` silently
-  reads the wrong row. Recommend transitioning to `df.set_index(
-  "unit_id").loc[uid]` until v2's shape is aligned with v1 in a
-  follow-up. v1 metric / `merge_groups` columns are NOT in v2's
-  DataFrame either; consult `CurationV2.Unit` + `CurationV2.MergeGroup`
-  part tables for the equivalent data.
+  Like v1's `Curation.get_sorting(as_dataframe=True)`, v2 returns a
+  DataFrame **indexed by `unit_id`** (with a `spike_times` column in
+  absolute seconds; `CurationV2` adds a `curation_label` column), so
+  notebook code doing `df.loc[uid]` reads the right row on both v1 and
+  v2. (The SI-object form, `get_sorting()`, returns a frame-relative
+  `NumpySorting` with `t_start=0`, matching v1's
+  `NumpySorting.from_unit_dict` shape — absolute times live in the NWB /
+  the DataFrame.) v1 metric / `merge_groups` columns are NOT in v2's
+  DataFrame; consult `CurationV2.Unit` + `CurationV2.MergeGroup` part
+  tables for the equivalent data.
 - **Pre-curation NWB `curation_label` is `["uncurated"]` (list), not
   the v1 scalar `"uncurated"`.** External NWB readers (FigURL, DANDI
   export tooling) doing `nwb.units["curation_label"][i] ==
@@ -313,6 +314,19 @@ cross-referenced here, not duplicated.
   [sorting.py:142-201](./src/spyglass/spikesorting/v2/sorting.py#L142-L201).
   v1-name alias rows ship for one release (lowercase-k + `_ms4` is the
   canonical name); the aliases are dropped a release after this entry.
+- Other sorter default-row renames (NO alias row ships — update the
+  string): `clusterless_thresholder` row `default_clusterless` → `default`
+  (kept generic because the `franklab_tetrode_clusterless_thresholder`
+  pipeline preset points at `"default"`); `kilosort4` row `default` →
+  `franklab_neuropixels_default`. Select rows by the **(sorter,
+  sorter_params_name)** pair, so `"default"` is unambiguous per sorter.
+- `SorterParameters.insert_default()` ships fewer rows out of the box than
+  v1: it gates each default row on `spikeinterface.sorters.installed_sorters()`
+  ([sorting.py:266-321](./src/spyglass/spikesorting/v2/sorting.py#L266-L321))
+  rather than auto-inserting a `('<sorter>','default')` row for every
+  `available_sorters()` entry (v1) — uninstalled-wrapper rows would only
+  fail at populate. Use `insert_default_legacy_si_sorters()` (below) to
+  restore the v1 rows.
 
 **Dropped or relocated data**
 
@@ -443,6 +457,33 @@ cross-referenced here, not duplicated.
   sorters, replicating v1's auto-insert for ported workflows that name a
   sorter via `('kilosort2_5', 'default')`. Opt-in — NOT called by
   `initialize_v2_defaults()`.
+
+**Curation merge & label semantics**
+
+- **Merged units drop cross-unit double-detections (0.4 ms).** Both
+  `CurationV2.insert_curation(apply_merge=True)` (the stored curated NWB)
+  and `CurationV2.get_merged_sorting` (the lazy preview) apply
+  SpikeInterface's membership-aware 0.4 ms duplicate removal
+  ([curation.py `_dedup_merged_spike_times`](./src/spyglass/spikesorting/v2/utils.py)):
+  a sub-0.4 ms pair from two merged contributors is one physical spike
+  double-detected (a neuron's refractory period forbids genuine sub-0.4 ms
+  firing), so it is removed. v1's *lazy* `get_merged_sorting` did this
+  (SI default), but v1's *applied* path used a bare `np.concatenate` that
+  kept the duplicates — v2 makes both paths consistent and artifact-free,
+  so a v1↔v2 comparison of a merge with coincident contributor spikes
+  shows v2 with the (correct) lower count.
+- **Overlapping merge groups are rejected.** v1 silently coalesced
+  transitively-overlapping groups (`[[1,2],[2,3]]` → `[1,2,3]`) via
+  `_union_intersecting_lists`; v2 raises `ValueError`
+  ([curation.py:758](./src/spyglass/spikesorting/v2/curation.py#L758)) —
+  a unit may belong to at most one merge group. Pass pre-unioned,
+  disjoint groups.
+- **Curated NWB omits `curation_label` when no unit is labeled.** pynwb
+  cannot dtype-infer an all-empty ragged column, so a curation with zero
+  labels writes no `curation_label` column (v1 wrote an all-empty
+  column whenever a `labels` dict was passed). External readers should
+  use `nwb.units.get("curation_label", default)`, not direct
+  `nwb.units["curation_label"]`.
 
 #### LFPBandV1 Fix
 

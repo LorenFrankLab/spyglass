@@ -15,6 +15,11 @@ notebook. For the pipeline overview, see
   `franklab_tetrode_hippocampus_30kHz_ms4` (lowercase k + sorter suffix),
   with a sibling `_ms5` row. v1-name alias rows ship for one release, so
   old strings keep resolving for now — but update to the canonical names.
+  Two more renames have **no alias** (update the string): the
+  `clusterless_thresholder` params row `default_clusterless` → `default`,
+  and the `kilosort4` params row `default` → `franklab_neuropixels_default`.
+  Rows are keyed by the `(sorter, sorter_params_name)` pair, so a bare
+  `"default"` is unambiguous per sorter.
 - **`apply_merge` is singular.** `CurationV2.insert_curation(...,
   apply_merge=True)` (v1 used `apply_merges`).
 - **Filter fields are `freq_min` / `freq_max`** (v1:
@@ -114,6 +119,18 @@ If you compare v1 and v2 outputs on the same input, expect these
 - **Real differences on multi-channel clusterless sorts.** v1's
   `noise_levels=[1.0]` silently misread channels; v2 broadcasts to
   `n_channels`. v2 is the right answer.
+- **Merged units may have slightly fewer spikes.** Merging contributors
+  removes cross-unit double-detections within 0.4 ms (one physical spike
+  detected in two units; safe because a neuron's refractory period
+  forbids genuine sub-0.4 ms firing). v2 applies this on both the stored
+  (`apply_merge=True`) and previewed (`get_merged_sorting`) trains; v1
+  only deduped its lazy preview, so its *stored* merged trains kept the
+  duplicates. v2's lower count is correct.
+- **Disjoint (multi-interval) sorts: no obs/valid interval spans a gap.**
+  v2 splits artifact-removed valid_times and no-artifact obs_intervals at
+  the recorded-chunk boundaries, so observation durations and firing-rate
+  windows exclude the inter-interval wall-clock gaps (v1/early-v2 could
+  report a single gap-spanning envelope).
 - **KS4 may differ after a SpikeInterface version bump** — caught by the
   pinned-version snapshot test rather than appearing silently.
 - **Seed pinning improves preprocessing reproducibility, but MS4/MS5/KS4
