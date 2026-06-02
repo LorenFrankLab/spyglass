@@ -1,3 +1,4 @@
+import uuid
 from typing import Union
 
 import datajoint as dj
@@ -227,6 +228,14 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
                     "interval to restrict."
                 )
 
+        # ``parse_artifact_interval_list_name`` returns a str and a caller may
+        # pass either a str or a UUID, but ``artifact_id`` is a uuid column.
+        # Normalize to a ``uuid.UUID`` so the ArtifactSource intersection below
+        # is unambiguous and a malformed id fails fast here rather than
+        # silently matching nothing.
+        if key.get("artifact_id") is not None:
+            key["artifact_id"] = uuid.UUID(str(key["artifact_id"]))
+
         rec_restriction = {k: key[k] for k in rec_keys if k in key}
         rec_table = RecordingSelection & rec_restriction
 
@@ -234,8 +243,30 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             SortingSelection.RecordingSource * rec_table.proj()
         )
         sort_master = SortingSelection * sort_rec_source.proj()
-        sort_restriction = {k: key[k] for k in sort_keys if k in key}
+        # ``artifact_id`` lives on the optional ``SortingSelection.
+        # ArtifactSource`` part, NOT on ``SortingSelection`` -- it is absent
+        # from ``sort_master``'s heading, so a dict restriction with it is
+        # silently dropped (verified: the compiled SQL is identical with and
+        # without the key). Apply the non-artifact sort keys directly, then
+        # resolve ``artifact_id`` through the part. In the v2 design the
+        # presence/absence of an ``ArtifactSource`` row IS the artifact state,
+        # so ``artifact_id=None`` means "no artifact pass" (anti-join to sorts
+        # with no part row), NOT "match anything" -- only an absent key is a
+        # wildcard.
+        sort_restriction = {
+            k: key[k] for k in sort_keys if k in key and k != "artifact_id"
+        }
         sort_master = sort_master & sort_restriction
+        if "artifact_id" in key:
+            if key["artifact_id"] is None:
+                sort_master = (
+                    sort_master - SortingSelection.ArtifactSource.proj()
+                )
+            else:
+                artifact_source = SortingSelection.ArtifactSource & {
+                    "artifact_id": key["artifact_id"]
+                }
+                sort_master = sort_master & artifact_source.proj()
 
         curation_restriction = {
             k: key[k] for k in curation_keys if k in key

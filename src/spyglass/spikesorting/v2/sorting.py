@@ -564,6 +564,13 @@ class SortingSelection(SpyglassMixin, dj.Manual):
         }
         source_restriction = {"recording_id": key["recording_id"]}
         artifact_id = key.get("artifact_id")
+        # ``resolve_artifact`` reads the uuid column back as a ``uuid.UUID``;
+        # normalize a caller-supplied ``artifact_id`` (which may be a str) so
+        # the find-existing comparison below is UUID-vs-UUID. A str would
+        # otherwise never equal the stored UUID, so an idempotent re-insert
+        # would miss its match and create a duplicate sort.
+        if artifact_id is not None:
+            artifact_id = uuid.UUID(str(artifact_id))
 
         # Find existing: a master with the same sorter + recording source
         # AND the same artifact-source state (present-with-this-artifact_id
