@@ -297,6 +297,27 @@ def test_ms5_scheme_literal_enforced():
         MountainSort5Schema(scheme="4")
 
 
+def test_ms5_schema_accepts_and_defaults_filter_whiten():
+    """MS5 exposes ``filter`` / ``whiten`` with behavior-preserving defaults.
+
+    ``filter`` defaults to ``False`` (the v2 recording stage already
+    bandpass-filters the input, so MS5's internal filter must stay off to
+    avoid double-filtering) and ``whiten`` defaults to ``True`` (matching
+    the SI 0.104 ``Mountainsort5Sorter._default_params`` ``whiten=True``).
+    Both toggle, and ``extra="forbid"`` still rejects an unknown kwarg.
+    """
+    blob = MountainSort5Schema().model_dump()
+    assert blob["filter"] is False
+    assert blob["whiten"] is True
+    # Both toggles round-trip when set explicitly.
+    flipped = MountainSort5Schema(filter=True, whiten=False).model_dump()
+    assert flipped["filter"] is True
+    assert flipped["whiten"] is False
+    # Adding the toggles did not loosen the strict schema.
+    with pytest.raises(ValidationError):
+        MountainSort5Schema(filterr=True)
+
+
 def test_ks4_defaults_match_appendix():
     """KS4 defaults mirror the appendix's documented kwargs."""
     blob = Kilosort4Schema().model_dump()
@@ -361,6 +382,61 @@ def test_clusterless_threshold_unit_explicit():
     # Invalid unit is rejected by the Literal.
     with pytest.raises(ValidationError):
         ClusterlessThresholderSchema(threshold_unit="microvolts")
+
+
+def test_insert_row_to_dict_normalizes_and_rejects_bad_shapes():
+    """``_insert_row_to_dict`` handles the supported insert row shapes.
+
+    Mapping rows pass through (shallow-copied); positional sequences zip
+    against the heading order (the ``_DEFAULT_CONTENTS`` tuple form). A
+    bare ``str``/``bytes`` row -- the shape that leaks through a
+    ``DataFrame`` / CSV-path insert (iterating those yields column-name
+    strings / characters) -- is rejected loudly rather than silently
+    zipped into a malformed row.
+    """
+    from spyglass.spikesorting.v2.utils import _insert_row_to_dict
+
+    names = ("sorter", "sorter_params_name", "params")
+    # Mapping passes through as a shallow copy.
+    src = {"sorter": "mountainsort4", "params": {"x": 1}}
+    out = _insert_row_to_dict(src, names)
+    assert out == src and out is not src
+    # Positional tuple zips against the heading order.
+    assert _insert_row_to_dict(
+        ("mountainsort4", "name", {"x": 1}), names
+    ) == {
+        "sorter": "mountainsort4",
+        "sorter_params_name": "name",
+        "params": {"x": 1},
+    }
+    # A str/bytes row fails loudly (the DataFrame / CSV-path footgun).
+    for bad in ("params", b"params"):
+        with pytest.raises(TypeError, match="mapping or"):
+            _insert_row_to_dict(bad, names)
+
+
+def test_clusterless_noise_levels_length_guard():
+    """The clusterless noise_levels length guard rejects bad explicit arrays.
+
+    ``_assert_noise_levels_length`` lives in the import-pure ``utils``
+    module (no ``dj.schema``), so this is a pure unit test of the guard
+    the runtime applies at ``Sorting._run_clusterless_thresholder``
+    before broadcasting / indexing ``noise_levels`` per channel. An
+    explicit array must be length 1 (broadcast) or ``n_channels``; any
+    other explicit length is a configuration error; ``None`` is always
+    valid (SI estimates per-channel MAD).
+    """
+    from spyglass.spikesorting.v2.utils import _assert_noise_levels_length
+
+    n_channels = 4
+    # None and the two valid explicit lengths are accepted (no raise).
+    _assert_noise_levels_length(None, n_channels)
+    _assert_noise_levels_length([1.0], n_channels)  # broadcast
+    _assert_noise_levels_length([1.0, 2.0, 3.0, 4.0], n_channels)  # per-chan
+    # A wrong explicit length raises and names the expected lengths.
+    for bad in ([1.0, 2.0], [1.0, 2.0, 3.0], [1.0] * 5):
+        with pytest.raises(ValueError, match="length 1.*or.*n_channels=4"):
+            _assert_noise_levels_length(bad, n_channels)
 
 
 def test_clusterless_noise_levels_derivation(dj_conn):
@@ -597,3 +673,139 @@ def test_shipped_rows_carry_current_params_schema_version(dj_conn):
         ).fetch1()
         assert row["params_schema_version"] == 3, name
         assert row["params"]["schema_version"] == 3, name
+
+
+# ---------- bulk-insert validation -----------------------------------------
+
+# (module, class, valid_row_a, valid_row_b) for each param Lookup that
+# overrides ``insert``. The two valid rows differ only in their primary
+# key so a clean bulk insert lands two distinct rows. Table classes are
+# imported lazily inside the test because their modules evaluate
+# ``dj.schema(...)`` at import time (needs a DB connection).
+_BULK_INSERT_CASES = [
+    pytest.param(
+        "spyglass.spikesorting.v2.sorting",
+        "SorterParameters",
+        {
+            "sorter": "mountainsort4",
+            "sorter_params_name": "_pytest_bulk_a",
+            "params": MountainSort4Schema().model_dump(),
+            "params_schema_version": 1,
+        },
+        {
+            "sorter": "mountainsort4",
+            "sorter_params_name": "_pytest_bulk_b",
+            "params": MountainSort4Schema().model_dump(),
+            "params_schema_version": 1,
+        },
+        id="SorterParameters",
+    ),
+    pytest.param(
+        "spyglass.spikesorting.v2.artifact",
+        "ArtifactDetectionParameters",
+        {
+            "artifact_params_name": "_pytest_bulk_a",
+            "params": ArtifactDetectionParamsSchema().model_dump(),
+            "params_schema_version": 2,
+        },
+        {
+            "artifact_params_name": "_pytest_bulk_b",
+            "params": ArtifactDetectionParamsSchema().model_dump(),
+            "params_schema_version": 2,
+        },
+        id="ArtifactDetectionParameters",
+    ),
+    pytest.param(
+        "spyglass.spikesorting.v2.session_group",
+        "MotionCorrectionParameters",
+        {
+            "motion_correction_params_name": "_pytest_bulk_a",
+            "params": MotionCorrectionParamsSchema().model_dump(),
+            "params_schema_version": 1,
+        },
+        {
+            "motion_correction_params_name": "_pytest_bulk_b",
+            "params": MotionCorrectionParamsSchema().model_dump(),
+            "params_schema_version": 1,
+        },
+        id="MotionCorrectionParameters",
+    ),
+    pytest.param(
+        "spyglass.spikesorting.v2.recording",
+        "PreprocessingParameters",
+        {
+            "preproc_params_name": "_pytest_bulk_a",
+            "params": PreprocessingParamsSchema().model_dump(),
+            "params_schema_version": 3,
+        },
+        {
+            "preproc_params_name": "_pytest_bulk_b",
+            "params": PreprocessingParamsSchema().model_dump(),
+            "params_schema_version": 3,
+        },
+        id="PreprocessingParameters",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "module_path,cls_name,valid_a,valid_b", _BULK_INSERT_CASES
+)
+def test_param_lookup_bulk_insert_validates(
+    dj_conn, module_path, cls_name, valid_a, valid_b
+):
+    """Bulk ``insert`` validates every row, mirroring ``insert1``.
+
+    Before this fix a ``Table.insert([{bad params}, ...])`` bypassed the
+    per-table Pydantic validation that ``insert1`` runs, so an invalid
+    ``params`` blob reached the DB unchecked. Each of the four param
+    Lookups now overrides ``insert`` to map the same ``_validate_params``
+    over the batch. Asserts: (1) a batch containing an invalid blob
+    raises the same ``ValidationError`` and lands NO row (validation runs
+    ahead of the single ``super().insert``); (2) a fully-valid batch
+    lands every row. Parametrized across all four Lookups.
+    """
+    import copy
+    import importlib
+
+    Table = getattr(importlib.import_module(module_path), cls_name)
+    table = Table()
+    pk = table.primary_key
+
+    def restr(row):
+        return {k: row[k] for k in pk}
+
+    # Clear any residue from a prior aborted run so the assertions start
+    # from a known-empty state.
+    (table & [restr(valid_a), restr(valid_b)]).delete_quick()
+
+    # An invalid params blob: a stray key tripped by ``extra="forbid"``.
+    invalid = copy.deepcopy(valid_a)
+    invalid["params"] = {
+        **invalid["params"],
+        "definitely_not_a_real_field": 1,
+    }
+
+    # (1) A batch with one invalid row raises and commits nothing: the
+    #     override validates every row before the single super().insert,
+    #     so neither the valid sibling nor the invalid row should land.
+    with pytest.raises(ValidationError):
+        table.insert([valid_a, valid_b, invalid])
+    assert not (table & restr(valid_a)), (
+        f"{cls_name}.insert committed a valid row even though the batch "
+        "contained an invalid params blob -- validation must run before "
+        "super().insert (all-or-nothing)."
+    )
+    assert not (table & restr(valid_b)), (
+        f"{cls_name}.insert committed a valid row even though the batch "
+        "contained an invalid params blob -- validation must run before "
+        "super().insert (all-or-nothing)."
+    )
+
+    # (2) A fully-valid batch lands every row.
+    try:
+        table.insert([valid_a, valid_b])
+        assert len(table & restr(valid_a)) == 1
+        assert len(table & restr(valid_b)) == 1
+    finally:
+        (table & [restr(valid_a), restr(valid_b)]).delete_quick()

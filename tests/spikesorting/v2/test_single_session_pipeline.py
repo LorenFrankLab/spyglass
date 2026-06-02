@@ -2295,6 +2295,32 @@ def test_curation_v2_insert_root_unlabeled(populated_sorting):
 
 
 @pytest.mark.slow
+def test_metrics_source_invalid_preserves_cause(populated_sorting):
+    """A bogus ``metrics_source`` re-raise preserves the enum cause.
+
+    ``insert_curation`` coerces ``metrics_source`` through the
+    ``MetricsSource`` enum and re-raises a friendlier ``ValueError`` on a
+    typo. The re-raise uses ``from exc`` so the underlying enum
+    ``ValueError`` is preserved as ``__cause__`` -- without it the
+    original "'bogus' is not a valid MetricsSource" context is lost from
+    the traceback. (Reaching the enum check requires a real Sorting row;
+    the earlier "not in Sorting" guard fires first otherwise.)
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    _clear_curations(populated_sorting)
+    with pytest.raises(ValueError) as excinfo:
+        CurationV2.insert_curation(
+            sorting_key=populated_sorting, metrics_source="bogus"
+        )
+    # The friendly message names the offending value...
+    assert "metrics_source" in str(excinfo.value)
+    # ...and the underlying enum ValueError is preserved as the cause.
+    assert isinstance(excinfo.value.__cause__, ValueError)
+    assert excinfo.value.__cause__ is not excinfo.value
+
+
+@pytest.mark.slow
 def test_curation_v2_insert_with_labels(populated_sorting):
     """Labels round-trip into ``CurationV2.UnitLabel`` and unknown
     labels raise before any DB rows are written."""
@@ -5059,6 +5085,178 @@ def test_build_analyzer_strips_random_seed(dj_conn, monkeypatch, tmp_path):
         f"random_seed leaked into analyzer.compute kwargs: {jk}"
     )
     assert jk.get("n_jobs") == 1  # other job kwargs preserved
+
+
+@pytest.mark.slow
+def test_analyzer_rebuild_is_seeded_reproducible(
+    dj_conn, monkeypatch, tmp_path
+):
+    """``_build_analyzer`` seeds ``random_spikes`` so rebuilds are stable.
+
+    The ``random_spikes`` extension uniformly subsamples each unit's
+    spikes down to ``max_spikes_per_unit=500`` before computing
+    templates; the SI 0.104 default is ``seed=None`` (verified against
+    ``ComputeRandomSpikes._set_params``), so without a pinned seed two
+    builds of the same sort pick different subsets and the persisted
+    peak amplitude / peak channel drift. ``_build_analyzer`` now passes
+    ``seed=0``.
+
+    CRITICAL: the seed only changes anything for units with MORE than
+    500 spikes -- at or below 500 every spike is selected and the build
+    is deterministic regardless of the seed. The MEArec smoke fixture is
+    4 s (~tens of spikes/unit), so it would pass this test even with the
+    seed reverted (false confidence). This test therefore uses a
+    synthetic 40 s, 20 Hz recording whose every unit fires >500 spikes,
+    and asserts subsampling actually fired. It drives the real
+    ``Sorting._build_analyzer`` (not SI directly) so reverting the seed
+    line makes it fail.
+    """
+    import numpy as np
+
+    import spikeinterface as si
+    from spikeinterface.core import (
+        generate_ground_truth_recording,
+        template_tools,
+    )
+
+    from spyglass.spikesorting.v2 import utils as v2_utils
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    recording, sorting = generate_ground_truth_recording(
+        durations=[40.0],
+        num_channels=8,
+        num_units=3,
+        generate_sorting_kwargs={
+            "firing_rates": 20,
+            "refractory_period_ms": 4.0,
+        },
+        seed=0,
+    )
+    totals = {
+        int(u): len(sorting.get_unit_spike_train(unit_id=u))
+        for u in sorting.unit_ids
+    }
+    assert min(totals.values()) > 500, (
+        "fixture must exceed max_spikes_per_unit=500 so random_spikes "
+        f"actually subsamples; got per-unit totals {totals}"
+    )
+
+    def _build_and_read(folder):
+        # ``_build_analyzer`` imports ``_analyzer_path`` from utils at
+        # call time, so patching the utils symbol redirects the output
+        # folder for this build.
+        monkeypatch.setattr(v2_utils, "_analyzer_path", lambda key: folder)
+        Sorting._build_analyzer(
+            sorting,
+            recording,
+            {"sorting_id": "repro-test"},
+            sorter_row={"job_kwargs": {}},
+            job_kwargs={"n_jobs": 1},
+        )
+        analyzer = si.load_sorting_analyzer(folder)
+        selected = np.asarray(
+            analyzer.get_extension("random_spikes").get_data()
+        )
+        peak_channels = template_tools.get_template_extremum_channel(
+            analyzer, outputs="id"
+        )
+        peak_amplitudes = template_tools.get_template_extremum_amplitude(
+            analyzer
+        )
+        return selected, peak_channels, peak_amplitudes
+
+    sel1, chans1, amps1 = _build_and_read(tmp_path / "build_a")
+    sel2, chans2, amps2 = _build_and_read(tmp_path / "build_b")
+
+    # Subsampling actually fired: 500 selected per unit, strictly fewer
+    # than the total available -- otherwise the seed is a no-op and the
+    # test proves nothing.
+    assert len(sel1) == 500 * len(totals)
+    assert len(sel1) < sum(totals.values())
+
+    # The two seeded builds are bit-identical in the quantities the
+    # pipeline persists (peak channel + peak amplitude per unit) and in
+    # the underlying random_spikes selection itself.
+    np.testing.assert_array_equal(
+        sel1, sel2, err_msg="random_spikes selection differs across builds"
+    )
+    assert chans1 == chans2
+    assert amps1.keys() == amps2.keys()
+    for unit_id in amps1:
+        assert amps1[unit_id] == amps2[unit_id], (
+            f"peak amplitude for unit {unit_id} is not reproducible across "
+            "seeded analyzer rebuilds"
+        )
+
+
+@pytest.mark.slow
+def test_analyzer_random_seed_override_is_honored(
+    dj_conn, monkeypatch, tmp_path
+):
+    """``_build_analyzer`` honors the per-row ``random_seed`` override.
+
+    ``random_seed`` in ``job_kwargs`` is the established per-row knob that
+    the whitening / clusterless-noise pins read
+    (``(job_kwargs or {}).get("random_seed", 0)``). The analyzer's
+    ``random_spikes`` subsample must read the SAME knob, not a hardcoded
+    0 -- otherwise a user changing the seed gets a different sort but the
+    same analyzer subsample. Asserts: two builds with ``random_seed=7``
+    agree with each other, and differ from the default (seed 0) build --
+    proving the override flows through to the extension.
+    """
+    import numpy as np
+
+    import spikeinterface as si
+    from spikeinterface.core import generate_ground_truth_recording
+
+    from spyglass.spikesorting.v2 import utils as v2_utils
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    recording, sorting = generate_ground_truth_recording(
+        durations=[40.0],
+        num_channels=8,
+        num_units=3,
+        generate_sorting_kwargs={
+            "firing_rates": 20,
+            "refractory_period_ms": 4.0,
+        },
+        seed=0,
+    )
+    totals = sum(
+        len(sorting.get_unit_spike_train(unit_id=u)) for u in sorting.unit_ids
+    )
+
+    def _selection_for_seed(folder, random_seed):
+        monkeypatch.setattr(v2_utils, "_analyzer_path", lambda key: folder)
+        Sorting._build_analyzer(
+            sorting,
+            recording,
+            {"sorting_id": "seed-override-test"},
+            sorter_row={"job_kwargs": {}},
+            job_kwargs={"n_jobs": 1, "random_seed": random_seed},
+        )
+        analyzer = si.load_sorting_analyzer(folder)
+        return np.asarray(analyzer.get_extension("random_spikes").get_data())
+
+    seed7_a = _selection_for_seed(tmp_path / "seed7_a", 7)
+    seed7_b = _selection_for_seed(tmp_path / "seed7_b", 7)
+    seed0 = _selection_for_seed(tmp_path / "seed0", 0)
+
+    # Subsampling fired (otherwise the seed is a no-op and the override
+    # can't be observed).
+    assert len(seed7_a) < totals
+    # The override is deterministic for a fixed seed...
+    np.testing.assert_array_equal(
+        seed7_a,
+        seed7_b,
+        err_msg="random_seed=7 is not reproducible across builds",
+    )
+    # ...and a different seed selects a different subset, proving the
+    # override is read (not the hardcoded 0).
+    assert not np.array_equal(seed7_a, seed0), (
+        "random_seed override did not change the analyzer subsample -- the "
+        "extension seed is ignoring job_kwargs['random_seed']."
+    )
 
 
 def test_detect_artifacts_zscore_only_detection(dj_conn):

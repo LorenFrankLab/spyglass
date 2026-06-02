@@ -417,12 +417,12 @@ class CurationV2(SpyglassMixin, dj.Manual):
         # rather than at the DataJoint enum-mismatch layer.
         try:
             metrics_source = MetricsSource(metrics_source).value
-        except ValueError:
+        except ValueError as exc:
             raise ValueError(
                 f"CurationV2.insert_curation: metrics_source="
                 f"{metrics_source!r} is not a MetricsSource value. "
                 f"Valid: {[m.value for m in MetricsSource]}."
-            )
+            ) from exc
 
         # Resolve which curation_id to use (auto-increment within sort).
         existing_ids = (

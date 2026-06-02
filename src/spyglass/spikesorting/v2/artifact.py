@@ -52,6 +52,7 @@ from spyglass.spikesorting.v2.utils import (
     _assert_schema_version_matches,
     _assert_v2_db_safe,
     _get_recording_timestamps,
+    _insert_row_to_dict,
     _validate_params,
     find_orphaned_masters,
     transaction_or_noop,
@@ -242,6 +243,23 @@ class ArtifactDetectionParameters(SpyglassMixin, dj.Lookup):
             table_name="ArtifactDetectionParameters",
         )
         super().insert1(row, **kwargs)
+
+    def insert(self, rows, **kwargs):
+        # Mirror ``insert1``'s validation across a bulk insert so an
+        # ``insert([...])`` (including ``insert_default``'s positional
+        # rows) cannot bypass schema validation or the
+        # params_schema_version check.
+        rows = [_insert_row_to_dict(r, self.heading.names) for r in rows]
+        for row in rows:
+            row["params"] = _validate_params(
+                ArtifactDetectionParamsSchema, row["params"]
+            )
+            _assert_schema_version_matches(
+                row,
+                ArtifactDetectionParamsSchema,
+                table_name="ArtifactDetectionParameters",
+            )
+        super().insert(rows, **kwargs)
 
     @classmethod
     def insert_default(cls):
