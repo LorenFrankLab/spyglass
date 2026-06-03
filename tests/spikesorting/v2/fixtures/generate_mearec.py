@@ -185,7 +185,7 @@ def _profiles() -> dict[str, tuple[GenProfile, tuple[FixtureSpec, ...]]]:
                 # Single-tetrode probe (Frank-lab tetrode_12.5 metadata).
                 # Few planted units because a single tetrode has a tiny
                 # spatial footprint -- only neurons within ~30 µm contribute
-                # detectable spikes. 4 exc + 1 inh is a realistic upper
+                # detectable spikes. 4 excitatory + 1 inhibitory is a realistic upper
                 # bound for what a single tetrode could record from in vivo;
                 # too many planted units would just stack noise.
                 #

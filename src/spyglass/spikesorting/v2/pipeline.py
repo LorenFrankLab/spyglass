@@ -250,7 +250,7 @@ def run_v2_pipeline(
     # Idempotent curation: if a root (parent_curation_id=-1) curation
     # already exists for this sorting, reuse it; otherwise insert a
     # fresh one. The CurationV2 part on the merge table is auto-
-    # registered inside insert_curation, so re-using a row reuses its
+    # registered inside insert_curation, so reusing a row reuses its
     # merge_id.
     existing_root = (CurationV2 & sort_pk & {"parent_curation_id": -1}).fetch(
         "KEY", as_dict=True

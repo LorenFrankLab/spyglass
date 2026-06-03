@@ -157,7 +157,7 @@ lint.ignore = [ "E402", "E501", "F401" ]
 
 [tool.codespell]
 skip = '.git,*.pdf,*.svg,*.ipynb,./docs/site/**,temp*'
-ignore-words-list = 'nevers'
+ignore-words-list = 'nevers,sortings,trough'
 # Nevers - name in Citation
 
 [tool.pytest.ini_options]
