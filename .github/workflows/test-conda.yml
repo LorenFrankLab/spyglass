@@ -217,10 +217,12 @@ jobs:
       # needs NEURON + LFPy to simulate templates; those are installed
       # in the next step (generation-only, kept out of the env file so
       # the test env stays lean). It deliberately does NOT install
-      # ``spikesorting-v2-matching``: UnitMatchPy 3.3 transitively pulls
-      # torch + numpy<2, which DOWNGRADES the v2 numpy>=2 baseline.
-      # ``test_optional_matching_extra_resolution`` asserts numpy major
-      # >= 2; the matching extra is exercised in a separate sacrificial
+      # ``spikesorting-v2-matching``: it pulls torch + CUDA (heavy) and
+      # would bloat the env. The extra is pinned to UnitMatchPy 3.2.7 --
+      # the last release declaring numpy>=2 -- so it no longer forces the
+      # numpy<2 downgrade 3.3.x's reactive pin caused (upstream #134; see
+      # pyproject). ``test_optional_matching_extra_resolution`` asserts
+      # numpy major >= 2; the matching extra is exercised in a separate
       # env in the step below.
       uses: conda-incubator/setup-miniconda@v3
       with:
@@ -290,11 +292,11 @@ jobs:
       run: |
         pytest tests/spikesorting/v2/ --no-docker --no-dlc -q
     # --- Phase 0c plan-line 125 matching-extra resolver-evidence job.
-    # Runs in a SEPARATE, sacrificial conda env so the numpy<2
-    # downgrade UnitMatchPy 3.3 forces does not poison the default v2
-    # env. The test logic is a single resolver assertion (numpy major
-    # >= 2) plus import gates -- when numpy<2 is forced, the assertion
-    # fires and the resolver-evidence ticket re-opens.
+    # Runs in a SEPARATE conda env (the matching extra pulls torch +
+    # CUDA; kept out of the default v2 env for weight, not numpy). The
+    # test logic is a single resolver assertion (numpy major >= 2) plus
+    # import gates -- if a future UnitMatchPy re-forces numpy<2 (as
+    # 3.2.8+ did), the assertion fires and the resolver ticket re-opens.
     - name: Phase 0c matching-extra resolver evidence (separate env)
       env:
         # Promotes the test's "extras not importable" branch from

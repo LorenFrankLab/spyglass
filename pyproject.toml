@@ -109,8 +109,15 @@ optional-dependencies.spikesorting-v2 = [
   "mountainsort5>=0.5", # default v2 sorter; pulls isosplit6 + scikit-learn
 ]
 optional-dependencies.spikesorting-v2-matching = [
-  "UnitMatchPy>=3.3,<4", # cross-session unit tracking (Phase 4)
-  "mat73",               # UnitMatchPy reads MATLAB .mat exports
+  # cross-session unit tracking (Phase 4). Pinned to the 3.2.6/3.2.7 line,
+  # the last release that declares ``numpy<3.0,>=2.0`` and so coexists with
+  # the v2 numpy>=2 baseline. 3.2.8+ (incl. all 3.3.x) reactively flipped the
+  # dep to ``numpy<2.0`` per upstream issue #134 -- a single user's
+  # env-specific install report, not a code incompatibility (3.2.7 supports
+  # numpy 2 and SpikeInterface 0.100-0.120). Revisit when UnitMatchPy restores
+  # numpy>=2 support upstream.
+  "UnitMatchPy>=3.2.6,<3.2.8",
+  "mat73",                     # UnitMatchPy reads MATLAB .mat exports
 ]
 optional-dependencies.spikesorting-v2-validation = [
   "MEArec>=1.9",       # ground-truth simulated recordings

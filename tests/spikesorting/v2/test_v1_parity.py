@@ -127,7 +127,7 @@ def test_optional_matching_extra_resolution():
     fail loudly on the ``_tkinter`` import path that older
     versions trip on.
 
-    The extra ships ``UnitMatchPy>=3.3,<4`` + ``mat73``. The
+    The extra ships ``UnitMatchPy>=3.2.6,<3.2.8`` + ``mat73``. The
     test:
 
     1. If the extra is NOT installed (the default test
@@ -143,10 +143,11 @@ def test_optional_matching_extra_resolution():
           a bare ``ImportError`` without ``_tkinter`` in the
           message is the actual regression we guard against.
        c. NumPy version remains in the v2-supported range
-          (``>=2.0``) -- ``UnitMatchPy`` historically pinned
-          ``numpy<2`` which would force an environment downgrade.
-          The resolver-evidence contract requires this not to
-          happen.
+          (``>=2.0``). The extra is pinned to UnitMatchPy 3.2.7
+          (declares ``numpy<3,>=2``); 3.2.8+ reactively flipped to
+          ``numpy<2`` (upstream #134), which would force a
+          downgrade. The resolver-evidence contract requires the
+          pin to stay on a numpy>=2-compatible release.
     """
     import importlib
     import importlib.util
