@@ -143,6 +143,7 @@ def run_v2_pipeline(
             ``sorting_id``            : SortingSelection PK
             ``curation_id``           : CurationV2 PK
             ``merge_id``              : SpikeSortingOutput master PK
+            ``n_units``                : unit count (0 on a zero-unit sort)
         Downstream consumers should key off ``merge_id``. A zero-unit
         sort yields an empty curation/merge row (matching v1's empty
         Units table), not ``None``, so the result is always

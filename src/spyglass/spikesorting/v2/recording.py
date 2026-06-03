@@ -2031,6 +2031,9 @@ class Recording(SpyglassMixin, dj.Computed):
                     "requires a single conversion factor. Verify probe "
                     "metadata for the sort group."
                 )
+            # Traces are written unscaled (return_in_uV=False), so the
+            # ElectricalSeries ``conversion`` carries gain x (uV->V) to
+            # recover real volts on readback.
             conversion = float(gains[0]) * 1e-6
 
             # The data iterator drives ``recording.get_traces(...)``

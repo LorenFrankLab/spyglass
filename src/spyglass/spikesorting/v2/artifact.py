@@ -121,6 +121,9 @@ def _compute_artifact_chunk(segment_index, start_frame, end_frame, worker_ctx):
         end_frame=end_frame,
         return_in_uV=False,
     )
+    # ``gains`` is the recording's per-channel gain array (set by
+    # ``Recording`` preprocessing, so never None here); scale raw counts
+    # to uV before thresholding.
     traces_uv = traces.astype(np.float32) * gains[None, :]
     absolute = np.abs(traces_uv)
 
