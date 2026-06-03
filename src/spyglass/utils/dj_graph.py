@@ -618,7 +618,6 @@ class AbstractGraph(ABC):
                 + f" -> {self._camel(next_list)}"
             )
 
-        cascaded_leaves = []
         for next_table, data in next_tables.items():
             if next_table.isnumeric():  # Skip alias nodes
                 next_table, data = next_func(next_table).popitem()
