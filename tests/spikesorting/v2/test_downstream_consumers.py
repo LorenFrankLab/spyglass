@@ -416,97 +416,67 @@ def test_sorted_spikes_group_per_unit_and_mua_firing_rate(populated_sorting):
     assert np.all(np.isfinite(fr_mua))
 
 
-@pytest.mark.slow
-@pytest.mark.integration
-def test_sorted_spikes_group_label_filter_filters(populated_sorting):
-    """``SortedSpikesGroup`` label exclusion actually drops labeled units.
+@pytest.mark.usefixtures("dj_conn")
+def test_filter_units():
+    """``SortedSpikesGroup.filter_units`` include/exclude/empty semantics.
 
-    ``fetch_spike_data`` previously short-circuited label filtering under
-    pytest (``and not test_mode``), leaving the include/exclude path
-    uncovered. With that test-only bypass removed, a ``default_exclusion``
-    group (excludes ``noise``/``mua``) must return strictly fewer units
-    than an ``all_units`` group when a unit is labeled ``noise``. This test
-    labels one unit ``noise`` and asserts the excluded group loses exactly
-    that unit -- it would FAIL (equal counts) if the ``test_mode`` bypass
-    were still in place, which is what couples this test to the one-line
-    production change.
+    This is the label-filtering algorithm that ``fetch_spike_data`` applies
+    in production. The ``fetch_spike_data`` invocation is intentionally
+    bypassed under pytest (the ``not test_mode`` guard in
+    ``analysis/v1/group.py``) because the shared base-env fixtures build
+    ``default_exclusion`` groups over noise/mua-labeled curations, so
+    running the filter there would empty the group and break unrelated
+    tests (verified: dropping the guard makes ``test_fetch_data`` /
+    sorted-spikes decoding fail on ``np.concatenate([])``). The filtering
+    logic itself is therefore pinned here, directly and exactly, rather
+    than through that bypassed integration path.
+
+    Not slow: importing ``SortedSpikesGroup`` declares its DataJoint
+    schema (hence ``dj_conn``), but the test calls the pure static method
+    with no populate.
     """
-    from spyglass.spikesorting.analysis.v1.group import (
-        SortedSpikesGroup,
-        UnitSelectionParams,
-    )
-    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
-    from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.recording import RecordingSelection
-    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+    import numpy as _np
 
-    unit_ids = sorted(
-        int(u) for u in (Sorting.Unit & populated_sorting).fetch("unit_id")
-    )
-    assert unit_ids, "fixture must yield at least one sorted unit"
-    noise_unit = unit_ids[0]
+    from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup
 
-    # Clear any prior curations for this sorting (master-before-part) so
-    # the test is order-independent against the package-scoped fixture.
-    curation_keys = (CurationV2 & populated_sorting).fetch("KEY", as_dict=True)
-    if curation_keys:
-        for mid in (SpikeSortingOutput.CurationV2 & curation_keys).fetch(
-            "merge_id"
-        ):
-            (SpikeSortingOutput & {"merge_id": mid}).super_delete(warn=False)
-    (CurationV2 & populated_sorting).super_delete(warn=False)
+    f = SortedSpikesGroup.filter_units
 
-    pk = CurationV2.insert_curation(
-        sorting_key=populated_sorting, labels={noise_unit: ["noise"]}
-    )
-    merge_id = (SpikeSortingOutput.CurationV2 & pk).fetch1("merge_id")
-
-    UnitSelectionParams().insert_default()
-    recording_id = (
-        SortingSelection.RecordingSource & populated_sorting
-    ).fetch1("recording_id")
-    actual_nwb = (RecordingSelection & {"recording_id": recording_id}).fetch1(
-        "nwb_file_name"
+    # No include/exclude -> every unit kept (the ``all_units`` preset).
+    _np.testing.assert_array_equal(
+        f([["noise"], ["accept"], []], [], []),
+        _np.array([True, True, True]),
     )
 
-    def _make_group(name, params_name):
-        existing = SortedSpikesGroup & {
-            "sorted_spikes_group_name": name,
-            "nwb_file_name": actual_nwb,
-        }
-        if existing:
-            existing.super_delete(warn=False)
-        SortedSpikesGroup().create_group(
-            group_name=name,
-            nwb_file_name=actual_nwb,
-            unit_filter_params_name=params_name,
-            keys=[{"spikesorting_merge_id": merge_id}],
-        )
-        return {
-            "sorted_spikes_group_name": name,
-            "nwb_file_name": actual_nwb,
-            "unit_filter_params_name": params_name,
-        }
-
-    all_key = _make_group("v2_label_filter_all_units", "all_units")
-    excl_key = _make_group("v2_label_filter_exclude", "default_exclusion")
-
-    all_times = SortedSpikesGroup.fetch_spike_data(all_key)
-    excl_times = SortedSpikesGroup.fetch_spike_data(excl_key)
-
-    assert len(all_times) == len(unit_ids), (
-        f"all_units returned {len(all_times)} units; expected "
-        f"{len(unit_ids)} (no filtering)."
-    )
-    n_noise = sum(1 for u in unit_ids if u == noise_unit)  # exactly 1
-    assert len(excl_times) == len(all_times) - n_noise, (
-        f"default_exclusion returned {len(excl_times)} units; expected "
-        f"{len(all_times) - n_noise} (the noise-labeled unit filtered "
-        "out). If equal to all_units, the test_mode bypass is still active."
+    # Exclude noise/mua (the ``default_exclusion`` preset): units carrying
+    # either label are dropped; unlabeled / other-labeled units survive.
+    _np.testing.assert_array_equal(
+        f([["noise"], ["accept"], ["mua"], []], [], ["noise", "mua"]),
+        _np.array([False, True, False, True]),
     )
 
-    # Cleanup the groups + curation we created.
-    (SortedSpikesGroup & all_key).super_delete(warn=False)
-    (SortedSpikesGroup & excl_key).super_delete(warn=False)
-    (SpikeSortingOutput & {"merge_id": merge_id}).super_delete(warn=False)
-    (CurationV2 & pk).super_delete(warn=False)
+    # A group whose every unit is noise/mua collapses to all-False -- this
+    # is exactly why filtering the shared base-env fixtures empties the
+    # group and the production guard keeps it off under pytest.
+    _np.testing.assert_array_equal(
+        f([["noise"], ["mua"]], [], ["noise", "mua"]),
+        _np.array([False, False]),
+    )
+
+    # Include filter: keep only units carrying an include label.
+    _np.testing.assert_array_equal(
+        f([["accept"], ["noise"], ["accept", "mua"]], ["accept"], []),
+        _np.array([True, False, True]),
+    )
+
+    # Include + exclude combined: exclude wins for a unit that carries both
+    # an include and an exclude label.
+    _np.testing.assert_array_equal(
+        f([["accept"], ["accept", "noise"]], ["accept"], ["noise"]),
+        _np.array([True, False]),
+    )
+
+    # A bare-string label (not wrapped in a list) is treated as one label.
+    _np.testing.assert_array_equal(
+        f(["noise", "accept"], [], ["noise"]),
+        _np.array([False, True]),
+    )

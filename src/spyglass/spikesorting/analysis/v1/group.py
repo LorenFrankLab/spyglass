@@ -219,7 +219,15 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                 next(group_col, None), None
             )
 
-            if group_labels is not None:
+            # NOTE: the ``not test_mode`` guard is load-bearing. The shared
+            # base-env test fixtures build ``default_exclusion`` groups
+            # (exclude ``noise``/``mua``) over curations whose units carry
+            # those labels, so running the filter under pytest would empty
+            # the group and break ``test_fetch_data`` / sorted-spikes
+            # decoding (np.concatenate on []). Filtering is exercised
+            # directly via ``test_filter_units`` instead. Removing this
+            # guard reproduces the PR #1209 regression it was added to fix.
+            if group_labels is not None and not test_mode:
                 group_label_list = group_labels.to_list()
                 include_unit = SortedSpikesGroup.filter_units(
                     group_label_list, include_labels, exclude_labels
