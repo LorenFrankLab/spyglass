@@ -389,24 +389,36 @@ jobs:
       # timestamp handling (load_time_vector hits "'Group' object has no
       # attribute 'timestamps'") and is not a configuration v0/v1 support.
       #
-      # Also pin probeinterface < 0.3 (the env file installs >=0.3.2 for the
-      # SI 0.104 stack). SI 0.99.1's read builds a dummy probe from the NWB
-      # electrode locations via set_dummy_probe_from_locations; probeinterface
-      # 0.3.x added a strict "contact positions must be unique" check that
-      # rejects the tetrode test data (channels share (+/-6.25, 0)). SI 0.104
-      # does not build that dummy probe, so run-tests/pytest-v2 keep 0.3.2;
-      # only this SI-0.99.1 job needs the contemporary 0.2.x (what master and
-      # the legacy env actually run). neo/numpy stay as resolved.
+      # Restore the WHOLE coherent SI-0.99 stack, not just SpikeInterface. The
+      # env file installs the SI-0.104 stack (numpy 2, neo 0.13, probeinterface
+      # 0.3.x) via ``.[test]``; downgrading SI alone left numpy-2-era deps that
+      # the SI-0.99 line cannot use, surfacing in turn:
+      #   - probeinterface 0.3.x: strict "contact positions must be unique"
+      #     rejects the tetrode test data in SI 0.99.1's dummy-probe builder
+      #     (set_dummy_probe_from_locations); SI 0.104 does not build it, so
+      #     run-tests/pytest-v2 keep 0.3.2.
+      #   - numpy 2.x: SI 0.99.1 / neo / probeinterface 0.2.x call np.issctype,
+      #     removed in NumPy 2.0.
+      # Pin the full stack to match what master and the working legacy env run
+      # (SI 0.99.1 + probeinterface 0.2.x + neo 0.12 + numpy 1.26). numpy 1.26
+      # is ABI-forward-compatible with the already-installed pandas/scipy, so
+      # they are not renamed. SI is pinned <0.100 (NOT <0.101): 0.100.x changed
+      # NwbRecordingExtractor timestamp handling (load_time_vector hits
+      # "'Group' object has no attribute 'timestamps'").
       run: |
         pip install --force-reinstall \
-          "spikeinterface>=0.99.1,<0.100" "probeinterface>=0.2.19,<0.3"
+          "spikeinterface>=0.99.1,<0.100" "probeinterface>=0.2.19,<0.3" \
+          "neo>=0.12,<0.13" "numpy>=1.23,<2"
         python - <<'PY'
         from packaging.version import Version
         import spikeinterface as si
         import probeinterface as pi
-        print("SpikeInterface", si.__version__, "| probeinterface", pi.__version__)
+        import numpy as np
+        print("SI", si.__version__, "| probeinterface", pi.__version__,
+              "| numpy", np.__version__)
         assert Version(si.__version__) < Version("0.100"), si.__version__
         assert Version(pi.__version__) < Version("0.3"), pi.__version__
+        assert Version(np.__version__) < Version("2"), np.__version__
         PY
     - name: Cache test data
       id: cache-test-data
