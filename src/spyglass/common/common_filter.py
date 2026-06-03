@@ -10,6 +10,7 @@ import pynwb
 import scipy.signal as signal
 
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.compression import compressed_data
 from spyglass.utils.nwb_helper_fn import get_electrode_indices
 
 schema = dj.schema("common_filter")
@@ -372,9 +373,13 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
             )
             es = pynwb.ecephys.ElectricalSeries(
                 name="filtered data",
-                data=np.empty(tuple(output_shape_list), dtype=data_dtype),
+                data=compressed_data(
+                    np.empty(tuple(output_shape_list), dtype=data_dtype)
+                ),
                 electrodes=electrode_table_region,
-                timestamps=np.empty(output_shape_list[time_axis]),
+                timestamps=compressed_data(
+                    np.empty(output_shape_list[time_axis])
+                ),
                 description=description,
             )
             if data_type == "LFP":

@@ -1,5 +1,4 @@
 import warnings
-from collections import defaultdict
 
 import datajoint as dj
 import ndx_franklab_novela
@@ -16,6 +15,7 @@ from spyglass.common.common_region import BrainRegion  # noqa: F401
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.settings import test_mode
 from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
+from spyglass.utils.compression import compressed_data
 from spyglass.utils.nwb_helper_fn import (
     estimate_sampling_rate,
     get_config,
@@ -923,9 +923,9 @@ class LFPBand(SpyglassMixin, dj.Computed):
             # TODO: use datatype of data
             es = pynwb.ecephys.ElectricalSeries(
                 name="filtered data",
-                data=filtered_data,
+                data=compressed_data(filtered_data),
                 electrodes=electrode_table_region,
-                timestamps=new_timestamps,
+                timestamps=compressed_data(new_timestamps),
             )
             # Add the electrical series to the scratch area
             nwbf.add_scratch(es)

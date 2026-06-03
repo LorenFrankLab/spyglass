@@ -1,15 +1,15 @@
-"""Unit tests for file compression utility functions.
+"""Unit tests for dataset-level compression file tracking.
 
-These tests cover the compression utilities that don't require database access.
-Full integration tests with database are in test_file_tracking_integration.py
+These tests cover the compression tracking tables and utilities that
+don't require full database access.
 """
 
-import gzip
 import tempfile
 from pathlib import Path
 
+import h5py
+import numpy as np
 import pytest
-from datajoint.hash import uuid_from_file
 
 
 @pytest.fixture
@@ -20,126 +20,76 @@ def temp_dir():
 
 
 @pytest.fixture
-def sample_file(temp_dir):
-    """Create a sample file for testing."""
-    file_path = temp_dir / "test_file.nwb"
-    with open(file_path, "wb") as f:
-        f.write(b"Test data content " * 1000)  # ~18 KB
-    return file_path
+def sample_h5(temp_dir):
+    """Create a sample HDF5 file for testing."""
+    path = temp_dir / "test.h5"
+    with h5py.File(path, "w") as f:
+        f.create_dataset("data", data=np.zeros((10000, 16), dtype=np.int16))
+        f.create_dataset("timestamps", data=np.arange(10000.0))
+        f.create_dataset("small", data=np.array([1, 2, 3]))
+    return path
 
 
-class TestSafeCompress:
-    """Tests for _safe_compress context manager."""
+class TestRepackIntegrity:
+    """Tests for repack round-trip integrity."""
 
-    def test_temp_file_usage(self, sample_file, temp_dir):
-        """Test that temp file is used for atomic writes."""
-        # Import here to avoid module-level schema creation
-        from spyglass.common.common_file_tracking import _safe_compress
+    def test_repack_preserves_data(self, sample_h5, temp_dir):
+        from spyglass.utils.compression import repack_nwb
 
-        output_path = temp_dir / "output.gz"
+        with h5py.File(sample_h5, "r") as f:
+            orig_data = f["data"][:]
+            orig_ts = f["timestamps"][:]
 
-        with _safe_compress(str(sample_file), str(output_path)) as temp_path:
-            # Compress to temp file (not output_path)
-            with open(sample_file, "rb") as f_in:
-                with gzip.open(temp_path, "wb") as f_out:
-                    f_out.write(f_in.read())
+        output = temp_dir / "repacked.h5"
+        repack_nwb(sample_h5, output)
 
-        # After context, output file should exist (renamed from temp)
-        assert output_path.exists()
+        with h5py.File(output, "r") as f:
+            np.testing.assert_array_equal(f["data"][:], orig_data)
+            np.testing.assert_array_equal(f["timestamps"][:], orig_ts)
 
-        # Verify decompression produces correct data
-        with gzip.open(output_path, "rb") as f_in:
-            decompressed_data = f_in.read()
-        with open(sample_file, "rb") as f_in:
-            original_data = f_in.read()
-        assert decompressed_data == original_data
+    def test_repack_applies_compression(self, sample_h5, temp_dir):
+        from spyglass.utils.compression import repack_nwb
 
-    def test_lock_file_creation(self, sample_file, temp_dir):
-        """Test that lock file is created and removed."""
-        from spyglass.common.common_file_tracking import _safe_compress
+        output = temp_dir / "repacked.h5"
+        stats = repack_nwb(sample_h5, output)
 
-        output_path = temp_dir / "output.gz"
-        lock_path = Path(str(output_path) + ".lock")
+        assert stats["datasets_compressed"] >= 2  # data + timestamps
+        with h5py.File(output, "r") as f:
+            assert f["data"].compression == "gzip"
+            assert f["timestamps"].compression == "gzip"
 
-        with _safe_compress(str(sample_file), str(output_path)) as temp_path:
-            # Lock is removed in finally block
-            with open(sample_file, "rb") as f_in:
-                with gzip.open(temp_path, "wb") as f_out:
-                    f_out.write(f_in.read())
+    def test_repack_in_place(self, sample_h5):
+        from spyglass.utils.compression import repack_nwb
 
-        # Lock should be removed after
-        assert not lock_path.exists()
+        orig_size = sample_h5.stat().st_size
+        stats = repack_nwb(sample_h5)
 
-    def test_lock_file_prevents_concurrent(self, sample_file, temp_dir):
-        """Test that existing lock file prevents compression."""
-        from spyglass.common.common_file_tracking import _safe_compress
+        assert sample_h5.exists()
+        assert stats["original_size"] == orig_size
+        assert stats["repacked_size"] > 0
 
-        output_path = temp_dir / "output.gz"
-        lock_path = Path(str(output_path) + ".lock")
+    def test_repack_stats_keys(self, sample_h5, temp_dir):
+        from spyglass.utils.compression import repack_nwb
 
-        # Create lock file
-        lock_path.touch()
+        output = temp_dir / "repacked.h5"
+        stats = repack_nwb(sample_h5, output)
 
-        with pytest.raises(RuntimeError, match="file lock exists"):
-            with _safe_compress(str(sample_file), str(output_path)):
-                pass
+        expected_keys = {
+            "original_size",
+            "repacked_size",
+            "compression_ratio",
+            "datasets_compressed",
+            "datasets_skipped",
+        }
+        assert set(stats.keys()) == expected_keys
 
-        # Cleanup
-        lock_path.unlink()
+    def test_cleanup_on_failure(self, temp_dir):
+        """No temp files left after failed repack."""
+        from spyglass.utils.compression import repack_nwb
 
-    def test_cleanup_on_error(self, sample_file, temp_dir):
-        """Test that temp file is cleaned up on error."""
-        from spyglass.common.common_file_tracking import _safe_compress
+        fake_path = temp_dir / "nonexistent.h5"
+        with pytest.raises(FileNotFoundError):
+            repack_nwb(fake_path)
 
-        output_path = temp_dir / "output.gz"
-
-        with pytest.raises(ValueError):
-            with _safe_compress(str(sample_file), str(output_path)):
-                raise ValueError("Test error")
-
-        # Temp file should be cleaned up
-        temp_files = list(temp_dir.glob("*.tmp"))
-        assert len(temp_files) == 0
-
-
-class TestCompressionIntegrity:
-    """Tests for compression/decompression round trip."""
-
-    def test_checksum_verification(self, sample_file, temp_dir):
-        """Test that checksum verification catches corruption."""
-        # Compress file
-        compressed_path = temp_dir / "compressed.gz"
-        with gzip.open(compressed_path, "wb") as f_out:
-            with open(sample_file, "rb") as f_in:
-                f_out.write(f_in.read())
-
-        # Get original checksum
-        original_checksum = uuid_from_file(sample_file)
-
-        # Decompress
-        decompressed_path = temp_dir / "decompressed.nwb"
-        with gzip.open(compressed_path, "rb") as f_in:
-            with open(decompressed_path, "wb") as f_out:
-                f_out.write(f_in.read())
-
-        # Verify checksum matches
-        decompressed_checksum = uuid_from_file(decompressed_path)
-        assert original_checksum == decompressed_checksum
-
-    def test_concurrent_compression_prevention(self, sample_file, temp_dir):
-        """Test that lock files prevent concurrent compression."""
-        from spyglass.common.common_file_tracking import _safe_compress
-
-        output_path = temp_dir / "output.gz"
-        lock_path = Path(str(output_path) + ".lock")
-
-        # Start first compression
-        lock_path.touch()
-
-        # Try second compression
-        with pytest.raises(RuntimeError, match="file lock exists"):
-            with _safe_compress(str(sample_file), str(output_path)):
-                pass
-
-        # Cleanup
-        lock_path.unlink()
+        tmp_files = list(temp_dir.glob("*.nwb.tmp"))
+        assert len(tmp_files) == 0

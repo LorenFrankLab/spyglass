@@ -94,57 +94,33 @@ class Nwbfile(SpyglassMixin, dj.Manual):
         )
 
     def fetch_nwb(self):
-        """Fetch NWB files, decompressing if needed.
+        """Fetch NWB files.
 
-        Checks compression status and automatically decompresses compressed files
-        before opening. Logs all file access events with user tracking for usage
-        analysis and compression decisions.
+        Dataset-level compression is transparent — pynwb reads compressed
+        datasets without any explicit decompression step. Logs all file
+        access events for usage analysis.
 
         Returns
         -------
         list
             List of opened NWB file objects
         """
-        import time
-
-        from spyglass.common.common_file_tracking import CompressedNwbfile
-
-        # Get current DataJoint user
         dj_user = dj.config.get("database.user", "unknown")
 
         file_names = self.fetch("nwb_file_name")
         nwb_files = []
 
         for file_name in file_names:
-            decompression_time_ms = None
-
-            # Check if file is compressed and decompress if needed
-            comp_entry = CompressedNwbfile() & {"nwb_file_name": file_name}
-
-            if comp_entry:
-                is_compressed = comp_entry.fetch1("is_compressed")
-
-                if is_compressed:
-                    # Decompress and measure time
-                    logger.info(f"Decompressing {file_name} for access")
-                    start_time = time.time()
-                    CompressedNwbfile().decompress(file_name)
-                    decompression_time_ms = int(
-                        (time.time() - start_time) * 1000
-                    )
-
-            # Log access event for all files
             Nwbfile.AccessLog.insert1(
                 {
                     "nwb_file_name": file_name,
                     "dj_user": dj_user,
                     "access_method": "fetch_nwb",
-                    "decompression_time_ms": decompression_time_ms,
+                    "decompression_time_ms": None,
                 },
-                skip_duplicates=False,  # Allow multiple access logs
+                skip_duplicates=False,
             )
 
-            # Get path and open file
             file_path = self.get_abs_path(file_name)
             nwb_files.append(get_nwb_file(file_path))
 

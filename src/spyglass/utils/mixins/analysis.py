@@ -17,6 +17,7 @@ from datajoint.table import Table
 from hdmf.common import DynamicTable
 from pynwb.core import ScratchData
 
+from spyglass.utils.compression import compressed_data
 from spyglass.utils.dj_helper_fn import get_child_tables
 from spyglass.utils.mixins.base import BaseMixin
 from spyglass.utils.nwb_hash import NwbfileHasher
@@ -660,7 +661,7 @@ class AnalysisMixin(BaseMixin):
             elif isinstance(nwb_object, np.ndarray):
                 nwb_object = ScratchData(
                     name=table_name or "numpy_array",
-                    data=nwb_object,
+                    data=compressed_data(nwb_object),
                 )
             if nwb_object.name in nwbf.scratch:
                 raise ValueError(

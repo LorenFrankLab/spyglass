@@ -25,6 +25,7 @@ from spyglass.spikesorting.utils import (
     get_group_by_shank,
 )
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.compression import compressed_data
 from spyglass.utils.nwb_hash import NwbfileHasher
 
 schema = dj.schema("spikesorting_v1_recording")
@@ -807,9 +808,9 @@ def _write_recording_to_nwb(
         )
         processed_electrical_series = pynwb.ecephys.ElectricalSeries(
             name="ProcessedElectricalSeries",
-            data=data_iterator,
+            data=compressed_data(data_iterator),
             electrodes=table_region,
-            timestamps=timestamps_iterator,
+            timestamps=compressed_data(timestamps_iterator),
             filtering="Bandpass filtered for spike band",
             description="Referenced and filtered recording from "
             + f"{nwb_file_name} for spike sorting",
