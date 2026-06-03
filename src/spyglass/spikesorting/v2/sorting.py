@@ -365,7 +365,7 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
         - **Not installed.** Gated on
           ``spikeinterface.sorters.installed_sorters()`` -- the SAME gate
           ``insert_default`` uses (see ``v1/sorting.py:184-189`` and the
-          A4 install-gate rationale at :meth:`insert_default`). v1 auto-
+          install-gate rationale at :meth:`insert_default`). v1 auto-
           inserted for every ``available_sorters()`` entry, but
           ``get_default_sorter_params`` succeeds for wrapper-only sorters
           whose binary is absent (e.g. ``kilosort2_5``, ``ironclust``), so
@@ -411,7 +411,7 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
             if sorter in curated:
                 continue  # see docstring: would fail or drop keys
             if sorter not in installed:
-                # Gate on installed_sorters() to match insert_default's A4
+                # Gate on installed_sorters() to match insert_default's installed-sorters
                 # gate -- get_default_sorter_params succeeds for
                 # wrapper-only sorters, so an available-but-not-installed
                 # row would only fail later at populate time.
@@ -1998,7 +1998,7 @@ class Sorting(SpyglassMixin, dj.Computed):
                     _si.reset_global_job_kwargs()
                     _si.set_global_job_kwargs(**previous_global)
         finally:
-            # Undo the scoped ``np.Inf`` patch (A8) so the global numpy
+            # Undo the scoped ``np.Inf`` patch so the global numpy
             # module is left exactly as the rest of the process saw it.
             if patched_numpy_inf and hasattr(_np, "Inf"):
                 del _np.Inf

@@ -329,50 +329,72 @@ def test_get_spiking_sorting_v2_merge_ids_resolves_restriction(
 
 
 def test_no_phase_label_leakage_in_runtime_code():
-    """Zero plan-phase identifier hits in runtime v2 source.
+    """Zero plan-phase / review-code identifier hits in v2 artifacts.
 
     The shared-contracts "Code Artifact Naming" invariant forbids
-    plan-phase / plan-task identifiers (``Phase N``, ``phase-N``,
-    ``Task N``) in runtime code, including comments and docstrings.
-    The scan is a regex over the whole identifier family -- an earlier
-    fixed-literal list only matched ``Phase 1*`` and let a ``Phase 3``
-    reference slip through, so it is generalized here. Tests and
-    baseline-fixture machinery may still reference these labels because
-    they describe an immutable historical baseline that the test corpus
-    compares against.
+    plan-process identifiers in runtime code AND user-facing docs:
+      - plan-phase / plan-task labels (``Phase N``, ``phase-N``, ``Task N``)
+      - review/audit codes (``A4``, ``R5``, ``C3``, ``N19``, ``B3`` ...) --
+        a single uppercase letter from the review namespaces followed by a
+        number; an earlier version only caught ``Phase/Task N`` and let
+        these slip through.
+    The scan covers the v2 runtime source, the user-facing migration guide,
+    and the CHANGELOG (phase/task only there -- the audit-code regex would
+    false-positive on unrelated historical release entries). Tests and
+    baseline-fixture machinery may still reference these labels because they
+    describe an immutable historical baseline the test corpus compares
+    against, so only the surfaces above are scanned.
     """
     import re
 
-    # parents[3] = repo root (parents[2] is ``tests/``, NOT
-    # ``tests/src/``). The earlier ``parents[2]`` form resolved
-    # to a nonexistent ``tests/src/...`` path so ``rglob`` walked
-    # zero files and the test silently passed regardless of any
-    # leakage in real source. Verify the resolved root exists
-    # before scanning to keep this kind of typo loud.
-    v2_src = (
-        Path(__file__).resolve().parents[3]
-        / "src"
-        / "spyglass"
-        / "spikesorting"
-        / "v2"
+    # parents[3] = repo root (parents[2] is ``tests/``, NOT ``tests/src/``).
+    # The earlier ``parents[2]`` form resolved to a nonexistent
+    # ``tests/src/...`` path so ``rglob`` walked zero files and the test
+    # silently passed; verify the resolved roots exist before scanning.
+    repo_root = Path(__file__).resolve().parents[3]
+    v2_src = repo_root / "src" / "spyglass" / "spikesorting" / "v2"
+    migration_doc = (
+        repo_root / "docs" / "src" / "Features" / "SpikeSortingV2_Migration.md"
     )
+    changelog = repo_root / "CHANGELOG.md"
     assert v2_src.is_dir(), (
-        f"v1-parity phase-label scan resolved to {v2_src!r}, which "
-        "is not a directory; the test would scan zero files and "
-        "produce a vacuous pass. Check the parents[N] index."
+        f"phase-label scan resolved to {v2_src!r}, which is not a "
+        "directory; the test would scan zero files and produce a vacuous "
+        "pass. Check the parents[N] index."
     )
-    # ``Phase`` / ``Task`` followed by a number (any sub-label like
-    # ``1b``), or the plan-directory form ``phase-3``. Case-insensitive
-    # so ``phase 2`` is caught too.
-    label_re = re.compile(r"\b(?:phase|task)[\s-]+\d", re.IGNORECASE)
+
+    # ``Phase``/``Task`` + a number (any sub-label like ``1b``) or the
+    # plan-directory form ``phase-3``; case-insensitive.
+    phase_re = re.compile(r"\b(?:phase|task)[\s-]+\d", re.IGNORECASE)
+    # Review/audit codes: one uppercase letter from the review namespaces
+    # (A/B/C/D/N/Q/R/T) + 1-2 digits, as a standalone token. Narrow on
+    # purpose so it does not match sorter names (``MS5``, ``KS4``) or
+    # version tokens (``V1``). If a legitimate token ever trips this,
+    # reword it -- a review code in shipped code/docs is the thing we forbid.
+    audit_re = re.compile(r"\b[ABCDNQRT]\d{1,2}\b")
     offenders: list[str] = []
+
+    def _scan(path, label, patterns):
+        if not path.is_file():
+            return
+        text = path.read_text()
+        for pat in patterns:
+            for match in pat.finditer(text):
+                offenders.append(f"{label}: {match.group()!r}")
+
     for py_path in v2_src.rglob("*.py"):
-        text = py_path.read_text()
-        for match in label_re.finditer(text):
-            offenders.append(
-                f"{py_path.relative_to(v2_src)}: {match.group()!r}"
-            )
-    assert not offenders, f"Phase-label leakage in runtime v2: {offenders}"
+        _scan(
+            py_path,
+            str(py_path.relative_to(repo_root)),
+            (phase_re, audit_re),
+        )
+    _scan(migration_doc, "SpikeSortingV2_Migration.md", (phase_re, audit_re))
+    _scan(changelog, "CHANGELOG.md", (phase_re,))
+
+    assert not offenders, (
+        "plan-phase / review-code leakage in v2 runtime or user-facing "
+        f"docs (Code Artifact Naming invariant): {offenders}"
+    )
 
 
 # ---------- merge dispatch --------------------------------------------------

@@ -1093,7 +1093,7 @@ class Recording(SpyglassMixin, dj.Computed):
 
         # Truncation check: compare SAVED DURATION against the SUM of
         # requested chunk durations, not against the outer envelope.
-        # On the multi-interval (R5 disjoint) path the saved data
+        # On the multi-interval (disjoint) path the saved data
         # correctly excludes inter-chunk gaps, so its wall-clock
         # ``saved_end`` is shorter than ``sort_valid_times[-1][-1]``
         # by the gap total; a naive envelope comparison would
@@ -1259,7 +1259,7 @@ class Recording(SpyglassMixin, dj.Computed):
         # rebuilt artifact. RAISE rather than warn -- the stale row must
         # not be silently relied on, and the columns are not auto-updated
         # in place (re-derive from the corrected source via a deliberate
-        # repair path). Satisfies C3's "columns stay accurate or assert
+        # repair path). Satisfies the "columns stay accurate or assert
         # they match" contract.
         if bool(rebuilt_adjusted) != bool(row["timestamps_adjusted"]) or int(
             rebuilt_n_adjusted

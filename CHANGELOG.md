@@ -70,15 +70,15 @@ v1's nominal 3000 was effectively `3000 * 0.195 ≈ 585 µV` in v2 units).
 The Spyglass convention is `recording.get_channel_gains()` in µV/count,
 so no further unit conversion is needed. v2 also reverts
 `proportion_above_thresh` to v1's default of `1.0` ("all channels must
-exceed"); Phase 1 of v2 development had silently shipped 0.5 without
+exceed"); an earlier v2 development pass had silently shipped 0.5 without
 justification.
 
 Upstream issue filed on LorenFrankLab/spyglass to track v1's bug.
 
-#### Spike Sorting v2 Phase 1b: streaming Recording write, parallel populate, and v1-parity restorations
+#### Spike Sorting v2: streaming Recording write, parallel populate, and v1-parity restorations
 
-Phase 1b is a focused fix-up between Phase 1 (initial v2 landing) and
-Phase 2 (analyzer curation). It addresses two runtime regressions and
+This is a focused fix-up between the initial v2 landing and the
+analyzer-curation stage. It addresses two runtime regressions and
 47 v1-parity divergences found across multiple audit passes.
 
 **Two runtime regressions fixed:**
@@ -227,12 +227,12 @@ in-flight v1 PR on `copilot/fix-populating-artifact-detection`.
   (`v1/curation.py:404-428`). v2 stores merge provenance in the
   `CurationV2.MergeGroup` part table (queryable via
   `CurationV2.get_merge_groups(key)`) and defers metric columns to
-  Phase 2 `AnalyzerCuration`. Pure-NWB consumers (DANDI export,
+  the `AnalyzerCuration` stage. Pure-NWB consumers (DANDI export,
   external tools) lose these columns; DataJoint consumers gain the
   queryable + FK-validated shape.
 - **`SharedArtifactGroup` cross-recording artifact detection
-  activated** (was gated to `NotImplementedError` through Phase 1b).
-  Phase 1 plan-line 67 required this; Phase 1d code-review
+  activated** (was gated to `NotImplementedError` in the initial v2 landing).
+  The v2 design required this; a code-review
   followup activated it. `SharedArtifactGroup.insert_group(name,
   members)` validates session consistency + Recording existence;
   `ArtifactDetection.populate(...)` on a `SharedArtifactGroupSource`
@@ -247,7 +247,7 @@ in-flight v1 PR on `copilot/fix-populating-artifact-detection`.
   `Sorting._build_analyzer` previously crashed on a zero-unit
   sorting (SI's `random_spikes` extension can't sample from an
   empty unit set); the shipped 100 µV `clusterless_thresholder`
-  default on the 4 s smoke fixture finds zero peaks. Phase 1d
+  default on the 4 s smoke fixture finds zero peaks. A
   followup adds a zero-unit guard so the analyzer build short-
   circuits and the Sorting row still commits with `n_units=0`.
   `run_v2_pipeline` then writes an EMPTY (but real) curation + merge
@@ -259,7 +259,7 @@ in-flight v1 PR on `copilot/fix-populating-artifact-detection`.
   zero-unit sorts should lower `detect_threshold` or revisit artifact
   masking before retrying.
 - **`mountainsort4` is now in the `spikesorting-v2` extra.**
-  Phase 0c required MS4 runtime evidence before Phase 1 shipped
+  The v2 SI runtime bump required MS4 runtime evidence before v2 shipped
   the MS4 default Lookup rows; the runtime was previously a
   manual install. The MS4 package is now pinned via
   `pip install "spyglass-neuro[spikesorting-v2]"` and pulls
@@ -267,7 +267,7 @@ in-flight v1 PR on `copilot/fix-populating-artifact-detection`.
   Linux-only legacy runtime; same non-determinism caveat as
   MS5.
 - **`detect_threshold` units for `clusterless_thresholder` are NOT
-  truly microvolts.** The N19 docstring says "stays in microvolts"
+  truly microvolts.** The clusterless-detection docstring says "stays in microvolts"
   because the path forwards `noise_levels=[1.0]` to SI's
   `detect_peaks`, but this only puts the threshold in microvolts
   if the upstream recording is already gain-scaled. v2's
@@ -276,7 +276,7 @@ in-flight v1 PR on `copilot/fix-populating-artifact-detection`.
   user's `detect_threshold=100` is effectively "100 raw counts"
   (~20 uV on a 0.2 uV/count Intan probe), not 100 uV. This is a
   v1-inherited unit confusion; we did not introduce or fix it in
-  Phase 1b. Document threshold values in counts (or in
+  v2. Document threshold values in counts (or in
   count-equivalent uV via `count × gain_uV_per_count`) until v2
   ships a gain-aware detection path.
 
@@ -286,7 +286,7 @@ in-flight v1 PR on `copilot/fix-populating-artifact-detection`.
 clusterless-decoding input — previously raised on every source because it
 opened with the legacy-SI guard (`RuntimeError` under SpikeInterface ≥ 0.101)
 and extracted waveforms with the removed `si.extract_waveforms` /
-`WaveformExtractor`. The v2 dispatch branch added in Phase 1b was therefore
+`WaveformExtractor`. The v2 dispatch branch was therefore
 unreachable, so clusterless decoding (a primary v2 consumer) could not compute
 features for a v2 `merge_id`.
 
@@ -761,7 +761,7 @@ for label, interval_data in results.groupby("interval_labels"):
         seconds-to-samples conversion #1564
     - Trigger recording recompute in `SpikeSortingRecording.populate` when
         necessary #1588
-    - Add `spyglass.spikesorting.v2` Phase 1 single-session pipeline on
+    - Add `spyglass.spikesorting.v2` single-session pipeline on
         SpikeInterface 0.104's `SortingAnalyzer` API: `SortGroupV2`,
         `PreprocessingParameters` / `RecordingSelection` / `Recording`,
         `ArtifactDetectionParameters` / `SharedArtifactGroup` /

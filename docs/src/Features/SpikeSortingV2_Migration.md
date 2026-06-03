@@ -100,12 +100,12 @@ v2 port is noted. How the gap surfaces depends on the feature:
 
 | Feature | v1 fallback | v2 delivery |
 | --- | --- | --- |
-| Metric / auto-merge curation | `from spyglass.spikesorting.v1 import MetricCuration, MetricCurationParameters, WaveformParameters, MetricParameters` | parent plan Phase 2 (AnalyzerCuration) |
-| FigURL curation views | `from spyglass.spikesorting.v1 import FigURLCuration, FigURLCurationSelection` | parent plan Phase 5 (UX / FigPack) |
-| Burst-pair curation | `from spyglass.spikesorting.v1 import BurstPair, BurstPairParams, BurstPairSelection` | parent plan Phase 2 |
-| Recording recompute | `from spyglass.spikesorting.v1.recompute import RecordingRecompute, RecordingRecomputeSelection` | parent plan Phase 2 |
-| Concatenated recording / session group | (no v1 equivalent) | parent plan Phase 3 |
-| Cross-session unit matching (`UnitMatch`) | (no v1 equivalent) | parent plan Phase 4 |
+| Metric / auto-merge curation | `from spyglass.spikesorting.v1 import MetricCuration, MetricCurationParameters, WaveformParameters, MetricParameters` | AnalyzerCuration stage (roadmap) |
+| FigURL curation views | `from spyglass.spikesorting.v1 import FigURLCuration, FigURLCurationSelection` | FigPack curation views (roadmap) |
+| Burst-pair curation | `from spyglass.spikesorting.v1 import BurstPair, BurstPairParams, BurstPairSelection` | AnalyzerCuration stage (roadmap) |
+| Recording recompute | `from spyglass.spikesorting.v1.recompute import RecordingRecompute, RecordingRecomputeSelection` | AnalyzerCuration stage (roadmap) |
+| Concatenated recording / session group | (no v1 equivalent) | session-group concatenation (roadmap) |
+| Cross-session unit matching (`UnitMatch`) | (no v1 equivalent) | cross-session unit matching (roadmap) |
 
 ## 5. What v1↔v2 comparisons WILL show
 
