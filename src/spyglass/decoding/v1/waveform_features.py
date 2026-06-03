@@ -317,6 +317,21 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
         aligned 1:1 with the full ``spike_times``. ``sparse=False`` keeps the
         full per-channel mark for every unit.
 
+        Amplitudes are returned in microvolts (``return_in_uV=True``), unlike
+        the legacy v0/v1 path which reads raw ADC counts. Decoding is
+        scale-consistent as long as the encoding and decoding models use the
+        same pipeline version, but v2 feature magnitudes are NOT comparable to
+        v1 ones -- a model trained on v1 marks cannot be applied to v2 marks
+        without rescaling.
+
+        ``max_spikes_per_unit`` must stay ``None`` for clusterless decoding:
+        any finite value subsamples the waveforms so they no longer align 1:1
+        with ``spike_times`` (the write-time 1:1 check in
+        ``_write_waveform_features_to_nwb`` then fails loudly). The symmetric
+        default window (``ms_before == ms_after``) puts the spike at the centre
+        sample, which ``_get_peak_amplitude`` reads; an asymmetric window would
+        sample off-peak.
+
         Returns an empty accessor (no analyzer) for a zero-unit sort:
         ``create_sorting_analyzer`` cannot build over zero units, and a
         zero-unit curation must still yield an empty-but-valid features row.
@@ -398,8 +413,8 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
         # ``zip(*[])`` collapses to an empty tuple ``()``; consumers (e.g.
         # ``ClusterlessDecodingV1.fetch_spike_data``) unpack the result into
         # ``spike_times, spike_waveform_features``, which would raise on ``()``.
-        # An all-zero-unit feature set (now writable for v2 sorts) yields no
-        # per-unit rows, so return two empty sequences explicitly.
+        # An all-zero-unit feature set yields no per-unit rows, so return two
+        # empty sequences explicitly.
         if not per_unit:
             return [], []
         return tuple(zip(*per_unit))
@@ -437,7 +452,22 @@ class _AnalyzerWaveformAccessor:
     """
 
     def __init__(self, sorting, analyzer=None):
+        # ``analyzer=None`` is the zero-unit mode (no waveforms extension can
+        # be built over zero units). Pairing it with a non-empty sorting would
+        # make ``get_waveforms`` raise a misleading "zero-unit" error for a
+        # sort that actually has units, so reject that construction up front.
+        if analyzer is None and sorting.get_num_units() != 0:
+            raise ValueError(
+                "_AnalyzerWaveformAccessor built with analyzer=None requires "
+                f"a zero-unit sorting; got {sorting.get_num_units()} unit(s)."
+            )
         self.sorting = sorting
+        # Keep a strong reference to the analyzer. SI's ``waveforms`` extension
+        # holds only a *weakref* back to its SortingAnalyzer; once the builder
+        # (``_fetch_waveform_v2``) returns, this attribute is the only thing
+        # keeping the analyzer alive, so ``get_waveforms_one_unit`` does not
+        # fail with "extension has lost its SortingAnalyzer". Do NOT drop it
+        # as unused -- it is held for lifetime, not read.
         self._analyzer = analyzer
         self._waveforms = (
             analyzer.get_extension("waveforms")
@@ -460,13 +490,16 @@ class _AnalyzerWaveformAccessor:
 
 
 def _get_full_waveform(
-    waveform_extractor: si.WaveformExtractor, unit_id: int, **kwargs
+    waveform_extractor: "si.WaveformExtractor | _AnalyzerWaveformAccessor",
+    unit_id: int,
+    **kwargs,
 ) -> np.ndarray:
     """Returns the full waveform around each spike.
 
     Parameters
     ----------
-    waveform_extractor : si.WaveformExtractor
+    waveform_extractor : si.WaveformExtractor or _AnalyzerWaveformAccessor
+        Legacy WaveformExtractor (v0/v1) or the v2 SortingAnalyzer adapter.
     unit_id : int
 
     Returns
@@ -509,7 +542,7 @@ WAVEFORM_FEATURE_FUNCTIONS = {
 
 def _write_waveform_features_to_nwb(
     nwb_file_name: str,
-    waveforms: si.WaveformExtractor,
+    waveforms: "si.WaveformExtractor | _AnalyzerWaveformAccessor",
     spike_times: pd.DataFrame,
     waveform_features: dict,
 ) -> tuple[str, str]:
@@ -519,8 +552,9 @@ def _write_waveform_features_to_nwb(
     ----------
     nwb_file_name : str
         name of the NWB file containing the spike sorting information
-    waveforms : si.WaveformExtractor
-        waveform extractor object containing the waveforms
+    waveforms : si.WaveformExtractor or _AnalyzerWaveformAccessor
+        legacy WaveformExtractor (v0/v1) or the v2 SortingAnalyzer adapter
+        exposing ``.sorting`` and ``.get_waveforms(unit_id)``
     spike_times : pd.DataFrame
     waveform_features : dict
         dictionary of waveform_features to be saved in the NWB file
@@ -535,6 +569,30 @@ def _write_waveform_features_to_nwb(
     """
 
     unit_ids = [int(i) for i in waveforms.sorting.get_unit_ids()]
+
+    # On the v2 path the per-spike features come from a freshly built analyzer
+    # while ``spike_times`` come from the persisted units table -- two
+    # independent reads of the same sort. Clusterless decoding requires them
+    # 1:1 per unit; a mismatch (a border spike dropped during frame
+    # conversion, or ``max_spikes_per_unit`` subsampling) would silently write
+    # misaligned marks. Fail loud here. Scoped to the v2 adapter so the
+    # legacy v0/v1 WaveformExtractor path keeps its exact prior behavior.
+    if (
+        isinstance(waveforms, _AnalyzerWaveformAccessor)
+        and waveform_features is not None
+    ):
+        for metric, metric_dict in waveform_features.items():
+            for unit_id in unit_ids:
+                n_spikes = len(spike_times.loc[unit_id])
+                n_feat = (
+                    len(metric_dict[unit_id]) if unit_id in metric_dict else 0
+                )
+                if n_feat != n_spikes:
+                    raise ValueError(
+                        f"Unit {unit_id}: {metric} has {n_feat} rows but "
+                        f"spike_times has {n_spikes}; per-spike features must "
+                        "align 1:1 with spike_times for clusterless decoding."
+                    )
 
     # create new analysis nwb file
     analysis_nwb_file = AnalysisNwbfile().create(nwb_file_name)
