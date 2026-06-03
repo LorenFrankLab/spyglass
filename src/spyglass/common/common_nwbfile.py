@@ -1009,10 +1009,18 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                 try:
                     registry.unblock_new_inserts()
                 except Exception as unblock_err:
-                    self._logger.error(
-                        f"Failed to unblock inserts after cleanup: "
-                        f"{unblock_err}"
+                    # A failed unblock halts ALL inserts across the database
+                    # until manually cleared, so this must be loud regardless
+                    # of whether another exception is already propagating.
+                    self._logger.critical(
+                        "Failed to unblock inserts after cleanup: "
+                        f"{unblock_err}. Analysis inserts remain BLOCKED "
+                        "database-wide until restored; run "
+                        "AnalysisRegistry().unblock_new_inserts() manually."
                     )
+                    # Re-raise only when no other exception is already
+                    # propagating; otherwise we would mask the original
+                    # cleanup error (the critical log above is the signal).
                     if cleanup_exc is None:
                         raise
 
