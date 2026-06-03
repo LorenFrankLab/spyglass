@@ -72,112 +72,119 @@ def decode_v1(common, trodes_pos_v1):
     yield v1
 
 
-@pytest.fixture(scope="session")
-def recording_ids(spike_v1, mini_dict, pop_rec, pop_art):
-    _ = pop_rec  # set group by shank
-
-    recording_ids = (spike_v1.SpikeSortingRecordingSelection & mini_dict).fetch(
-        "recording_id"
-    )
-    group_keys = []
-    for recording_id in recording_ids:
-        key = {
-            "recording_id": recording_id,
-            "artifact_param_name": "none",
-        }
-        group_keys.append(key)
-        spike_v1.ArtifactDetectionSelection.insert_selection(key)
-    spike_v1.ArtifactDetection.populate(group_keys)
-
-    yield recording_ids
+# ============================================================================
+# Synthetic, SpikeInterface-version-agnostic spike fixtures
+# ============================================================================
+# The legacy v1 spikesorting pipeline (SpikeSorting -> CurationV1 -> waveform
+# extraction) uses SpikeInterface APIs removed in SI >= 0.101, which produces
+# setup ERRORs under the SI 0.104 CI job. These fixtures synthesize the
+# decoding inputs directly on the minirec session (which already carries Trodes
+# position) so the decoding tests run under ANY SI version. minirec supplies
+# position; we synthesize the spikes. Everything keys off the single minirec
+# ``nwb_file_name`` so the decoding selections' same-session FKs hold.
 
 
 @pytest.fixture(scope="session")
-def clusterless_params_insert(spike_v1):
-    """Low threshold for testing, otherwise no spikes with default."""
-    clusterless_params = {
-        "sorter": "clusterless_thresholder",
-        "sorter_param_name": "low_thresh",
-    }
-    spike_v1.SpikeSorterParameters.insert1(
+def synthetic_spike_window(common, mini_dict, pos_interval, decode_interval):
+    """Time window that lies inside BOTH the encoding and decoding intervals.
+
+    Synthetic spike times must fall inside the encoding interval
+    (``pos_interval``) and the decoding interval (``decode_interval``) so they
+    survive ``fetch_spike_data``'s interval filtering. Return the overlap
+    ``[max(starts), min(ends)]`` of the two intervals' valid_times.
+    """
+    enc = (
+        common.IntervalList & {**mini_dict, "interval_list_name": pos_interval}
+    ).fetch1("valid_times")
+    dec = (
+        common.IntervalList
+        & {**mini_dict, "interval_list_name": decode_interval}
+    ).fetch1("valid_times")
+    start = max(float(enc[0][0]), float(dec[0][0]))
+    end = min(float(enc[-1][-1]), float(dec[-1][-1]))
+    assert end > start, "Encoding/decoding intervals do not overlap."
+    yield (start, end)
+
+
+@pytest.fixture(scope="session")
+def imported_merge_id(common, mini_dict, mini_insert, synthetic_spike_window):
+    """Synthetic ImportedSpikeSorting -> SpikeSortingOutput merge_id on minirec.
+
+    Appends a single synthetic ``units`` table (one unit, id 0) to the
+    already-registered minirec ``_`` copy on disk, reconciles the DataJoint
+    ``filepath@raw`` external checksum to the modified file, then ingests it via
+    ``ImportedSpikeSorting.insert_from_nwbfile``. That method already runs
+    ``SpikeSortingOutput._merge_insert``, so the merge_id is available from the
+    merge part table.
+
+    The checksum landmine (resolved via the in-place + refresh fallback,
+    option 2): ``ImportedSpikeSorting.fetch_nwb`` resolves the raw file through
+    the external store (``download_filepath``), which checks the stored
+    ``size``/``contents_hash`` against the on-disk file. Appending units changes
+    both, so we update the external row to match. ``Nwbfile.get_abs_path``
+    (used by the position reads) builds the path from ``raw_dir + name`` and
+    never touches the external store, which is why position was unaffected and
+    writing units BEFORE registration (option 1) was unnecessary.
+    """
+    import pynwb
+    from datajoint.hash import uuid_from_file
+
+    from spyglass.common import Nwbfile
+    from spyglass.common.common_nwbfile import schema as nwbfile_schema
+    from spyglass.spikesorting.imported import ImportedSpikeSorting
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.utils.nwb_helper_fn import close_nwb_files
+
+    nwb_file_name = mini_dict["nwb_file_name"]
+    start, end = synthetic_spike_window
+
+    # 30 spikes evenly spaced inside the overlap window (margin off the edges)
+    margin = 0.05 * (end - start)
+    spike_times = np.linspace(start + margin, end - margin, 30)
+
+    abs_path = Nwbfile.get_abs_path(nwb_file_name)
+
+    # Spyglass caches open NWB handles (read-only) in a module-level dict; the
+    # minirec ``_`` copy is already cached by the time the position/ingest
+    # fixtures have run, so opening it ``mode="a"`` would raise "file is already
+    # open for read-only". Close cached handles first; the next reader re-opens
+    # a fresh handle that sees the appended units. (Position data is already
+    # materialized into PositionGroup/pos_merge, so subsequent re-reads are
+    # safe.) This mirrors the ``mini_insert`` teardown's ``close_nwb_files``.
+    close_nwb_files()
+
+    # Append a units table to the registered ``_`` copy in place, only if it
+    # does not already carry one (idempotent across --no-teardown reruns where
+    # the persistent raw file already carries the synthetic units).
+    with pynwb.NWBHDF5IO(path=abs_path, mode="a", load_namespaces=True) as io:
+        nwbf = io.read()
+        if getattr(nwbf, "units", None) is None:
+            nwbf.add_unit(spike_times=spike_times, id=0)
+            io.write(nwbf)
+    close_nwb_files()
+
+    # Reconcile the external ``filepath@raw`` row to the current on-disk file.
+    # Done unconditionally so a prior partial run (units appended but external
+    # row not yet refreshed) is also healed before ingestion reads the file.
+    ext = nwbfile_schema.external["raw"]
+    ext_key = (ext & 'filepath = "%s"' % Path(abs_path).name).fetch1("KEY")
+    ext.update1(
         {
-            **clusterless_params,
-            "sorter_params": {
-                "detect_threshold": 10.0,  # was 100
-                # Locally exclusive means one unit per spike detected
-                "method": "locally_exclusive",
-                "peak_sign": "neg",
-                "exclude_sweep_ms": 0.1,
-                "local_radius_um": 1000,  # was 100
-                # noise levels needs to be 1.0 so the units are in uV and not MAD
-                "noise_levels": np.asarray([1.0]),
-                "random_chunk_kwargs": {},
-                # output needs to be set to sorting for the rest of the pipeline
-                "outputs": "sorting",
-            },
-        },
-        skip_duplicates=True,
-    )
-    yield clusterless_params
-
-
-@pytest.fixture(scope="session")
-def clusterless_spikesort(
-    spike_v1, recording_ids, mini_dict, clusterless_params_insert
-):
-    group_keys = []
-    for recording_id in recording_ids:
-        key = {
-            **clusterless_params_insert,
-            **mini_dict,
-            "recording_id": recording_id,
-            "interval_list_name": str(
-                (
-                    spike_v1.ArtifactDetectionSelection
-                    & {
-                        "recording_id": recording_id,
-                        "artifact_param_name": "none",
-                    }
-                ).fetch1("artifact_id")
-            ),
+            **ext_key,
+            "size": Path(abs_path).stat().st_size,
+            "contents_hash": uuid_from_file(abs_path),
         }
-        group_keys.append(key)
-        spike_v1.SpikeSortingSelection.insert_selection(key)
-    spike_v1.SpikeSorting.populate()
-    yield clusterless_params_insert
-
-
-@pytest.fixture(scope="session")
-def clusterless_params(clusterless_spikesort):
-    yield clusterless_spikesort
-
-
-@pytest.fixture(scope="session")
-def clusterless_curate(spike_v1, clusterless_params, spike_merge):
-
-    sorting_ids = (spike_v1.SpikeSortingSelection & clusterless_params).fetch(
-        "sorting_id"
     )
 
-    fails = []
-    for sorting_id in sorting_ids:
-        try:
-            spike_v1.CurationV1.insert_curation(sorting_id=sorting_id)
-        except KeyError:
-            fails.append(sorting_id)
+    # Idempotent across --no-teardown reruns: ``insert_from_nwbfile`` inserts
+    # with ``skip_duplicates=False`` and would raise on a pre-existing row.
+    if not (ImportedSpikeSorting & mini_dict):
+        ImportedSpikeSorting().insert_from_nwbfile(nwb_file_name)
 
-    if len(fails) == len(sorting_ids):
-        (spike_v1.SpikeSorterParameters & clusterless_params).delete(
-            safemode=False
-        )
-        raise ValueError("All curation insertions failed.")
-
-    spike_merge.insert(
-        spike_v1.CurationV1().fetch("KEY"),
-        part_name="CurationV1",
-        skip_duplicates=True,
+    merge_id = (SpikeSortingOutput.ImportedSpikeSorting & mini_dict).fetch1(
+        "merge_id"
     )
-    yield
+    yield merge_id
 
 
 @pytest.fixture(scope="session")
@@ -215,32 +222,101 @@ def waveform_params(waveform_params_tbl):
 
 
 @pytest.fixture(scope="session")
-def clusterless_mergeids(
-    spike_merge, mini_dict, clusterless_curate, clusterless_params
-):
-    _ = clusterless_curate  # ensure populated
-    yield spike_merge.get_restricted_merge_ids(
-        {
-            **mini_dict,
-            **clusterless_params,
-        },
-        sources=["v1"],
-    )
+def clusterless_params():
+    """No-op restriction.
+
+    With the synthetic pipeline there is no sorter parameter set to restrict
+    on; the merge_id comes from ``imported_merge_id`` instead. Kept (yielding
+    ``{}``) so dependent fixtures/keys that spread it stay valid.
+    """
+    yield {}
 
 
 @pytest.fixture(scope="session")
-def pop_unitwave(decode_v1, waveform_params, clusterless_mergeids):
-    sel_keys = [
-        {
-            "spikesorting_merge_id": merge_id,
-            **waveform_params,
-        }
-        for merge_id in clusterless_mergeids
-    ]
+def clusterless_mergeids(imported_merge_id):
+    """Single synthetic SpikeSortingOutput merge_id (one unit total)."""
+    yield [imported_merge_id]
+
+
+@pytest.fixture(scope="session")
+def pop_unitwave(decode_v1, waveform_params, clusterless_mergeids, mini_dict):
+    """Direct-insert synthetic ``UnitWaveformFeatures`` rows (no populate).
+
+    Reuses the production writer ``_write_waveform_features_to_nwb`` to build a
+    units table carrying ``spike_times`` plus an ``amplitude`` feature of shape
+    ``(n_spikes, 3)``, then inserts the selection + computed rows directly (a
+    fixture shortcut for ``UnitWaveformFeatures.make``). Avoids all SI waveform
+    extraction so this works under any SI version. Exactly one merge_id, one
+    feature row, one unit (id 0) -> clusterless group resolves to a single unit.
+    """
+    import pandas as pd
+
+    from spyglass.common import AnalysisNwbfile
+    from spyglass.decoding.v1.waveform_features import (
+        _write_waveform_features_to_nwb,
+    )
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 
     wave = decode_v1.waveform_features
-    wave.UnitWaveformFeaturesSelection.insert(sel_keys, skip_duplicates=True)
-    wave.UnitWaveformFeatures.populate(sel_keys)
+    nwb_file_name = mini_dict["nwb_file_name"]
+
+    class _StubWaveforms:
+        """Minimal ``waveforms`` surface used by the writer when features are
+        supplied: only ``.sorting.get_unit_ids()`` is read (the SI waveform
+        extraction path is not entered)."""
+
+        class _Sorting:
+            @staticmethod
+            def get_unit_ids():
+                return np.array([0])
+
+        sorting = _Sorting()
+
+    sel_keys = []
+    for merge_id in clusterless_mergeids:
+        # Read this unit's spike_times back from the synthetic units table so
+        # the feature rows align 1:1 with the persisted spikes.
+        nwb_file = (SpikeSortingOutput & {"merge_id": merge_id}).fetch_nwb()[0]
+        unit_field = "object_id" if "object_id" in nwb_file else "units"
+        unit_spike_times = np.asarray(
+            nwb_file[unit_field]["spike_times"].iloc[0]
+        )
+        n_spikes = len(unit_spike_times)
+
+        # ``_write_waveform_features_to_nwb`` calls ``spike_times.loc[unit_id]``
+        # and expects the per-unit spike array back. Production passes
+        # ``units["spike_times"]`` -- a pandas *Series* indexed by unit_id whose
+        # cells are 1D arrays -- so mirror that (a DataFrame would yield a
+        # Series row and break ``add_unit``).
+        spike_times_df = pd.Series({0: unit_spike_times}, name="spike_times")
+        waveform_features = {
+            "amplitude": {
+                0: np.zeros((n_spikes, 3), dtype=np.float32),
+            }
+        }
+
+        analysis_file_name, object_id = _write_waveform_features_to_nwb(
+            nwb_file_name,
+            _StubWaveforms(),
+            spike_times_df,
+            waveform_features,
+        )
+        AnalysisNwbfile().add(nwb_file_name, analysis_file_name)
+
+        sel_key = {"spikesorting_merge_id": merge_id, **waveform_params}
+        wave.UnitWaveformFeaturesSelection.insert1(
+            sel_key, skip_duplicates=True
+        )
+        wave.UnitWaveformFeatures.insert1(
+            {
+                **sel_key,
+                "analysis_file_name": analysis_file_name,
+                "object_id": object_id,
+            },
+            skip_duplicates=True,
+            allow_direct_insert=True,  # dj.Computed; fixture bypasses make()
+        )
+        sel_keys.append(sel_key)
 
     yield wave.UnitWaveformFeatures & sel_keys
 
@@ -266,6 +342,28 @@ def group_unitwave(
     yield decode_v1.clusterless.UnitWaveformFeaturesGroup & {
         "waveform_features_group_name": group_name,
     }
+
+
+@pytest.fixture(scope="session")
+def pop_spikes_group(group_name, mini_dict, imported_merge_id):
+    """Build the sorted ``SortedSpikesGroup`` from the synthetic merge_id.
+
+    Shadows the root SI-pipeline ``pop_spikes_group`` (tests/conftest.py),
+    which is built on ``pop_spike_merge`` (CurationV1 -> SI waveform path) and
+    errors under SI >= 0.101. The root chain is left untouched for the
+    spikesorting suite; this override only changes how the decoding suite's
+    sorted group is sourced.
+    """
+    from spyglass.spikesorting.analysis.v1 import group as spike_v1_group
+
+    spike_v1_group.UnitSelectionParams().insert_default()
+    spike_v1_group.SortedSpikesGroup().create_group(
+        **mini_dict,
+        group_name=group_name,
+        keys=[{"spikesorting_merge_id": imported_merge_id}],
+        unit_filter_params_name="default_exclusion",
+    )
+    yield spike_v1_group.SortedSpikesGroup().fetch("KEY", as_dict=True)[0]
 
 
 @pytest.fixture(scope="session")
