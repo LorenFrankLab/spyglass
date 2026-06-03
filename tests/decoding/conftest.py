@@ -449,9 +449,14 @@ def decode_clusterless_params_insert(decode_v1, track_graph):
 @pytest.fixture(scope="session")
 def decode_interval(common, mini_dict):
     decode_interval_name = "decode"
-    raw_begin = (common.IntervalList & 'interval_list_name LIKE "raw%"').fetch1(
-        "valid_times"
-    )[0][0]
+    # Restrict to THIS session's NWB. A bare ``interval_list_name LIKE
+    # "raw%"`` matches every session's raw interval, so on a shared DB that
+    # also holds other suites' sessions (e.g. the spikesorting-v2 mearec
+    # smoke sessions) ``fetch1`` would see multiple ``raw data valid times``
+    # rows and raise "3 tuples found".
+    raw_begin = (
+        common.IntervalList & mini_dict & 'interval_list_name LIKE "raw%"'
+    ).fetch1("valid_times")[0][0]
     # Use a subset of the encoding interval (raw_begin+2 to raw_begin+13)
     # This creates gaps at start and end, ensuring that when
     # estimate_decoding_params=True, there are time points outside the
@@ -705,6 +710,7 @@ def create_fake_decoding_results(n_time=100, n_position_bins=50, n_states=2):
     so n_state_bins = n_position_bins * n_states. The posterior has shape
     (n_time, n_state_bins) in the flattened form.
     """
+    import pandas as pd
     import xarray as xr
 
     time = np.linspace(0, 10, n_time)
@@ -713,9 +719,16 @@ def create_fake_decoding_results(n_time=100, n_position_bins=50, n_states=2):
     # n_state_bins is the product of position bins and states
     n_state_bins = n_position_bins * n_states
 
-    # Create state_bins coordinate values (flattened position x state)
-    # This mimics the MultiIndex structure in non_local_detector
-    state_bins_values = np.arange(n_state_bins)
+    # ``state_bins`` is a ``(state, position)`` MultiIndex in
+    # non_local_detector output. Build it explicitly (state-major to match the
+    # posterior block layout below) so consumers that ``unstack("state_bins")``
+    # -- e.g. ``DecodingOutput.create_decoding_view`` -- get back ``state`` and
+    # ``position`` dimensions. A plain integer coordinate cannot be unstacked.
+    state_per_bin = np.repeat(state_names, n_position_bins)
+    position_per_bin = np.tile(np.arange(n_position_bins), n_states)
+    state_bins_index = pd.MultiIndex.from_arrays(
+        [state_per_bin, position_per_bin], names=("state", "position")
+    )
 
     # Create realistic-looking posterior probabilities
     # Shape: (n_time, n_state_bins) - flattened across position and state
@@ -741,19 +754,24 @@ def create_fake_decoding_results(n_time=100, n_position_bins=50, n_states=2):
         posterior[t] /= posterior[t].sum()
 
     # Create results matching non_local_detector output structure
-    # Primary dimensions: time, state_bins
+    # Primary dimensions: time, state_bins (a (state, position) MultiIndex).
     results = xr.Dataset(
         {
             "acausal_posterior": (["time", "state_bins"], posterior),
             "causal_posterior": (["time", "state_bins"], posterior * 0.9),
         },
-        coords={
-            "time": time,
-            "state_bins": state_bins_values,
-            # states coordinate with state names
-            "states": ("states", state_names),
-        },
+        coords={"time": time},
     )
+    # Attach the (state, position) MultiIndex on state_bins. Modern xarray
+    # requires building it via ``Coordinates.from_pandas_multiindex`` rather
+    # than passing a raw ``pd.MultiIndex`` into the coords dict.
+    results = results.assign_coords(
+        xr.Coordinates.from_pandas_multiindex(state_bins_index, "state_bins")
+    )
+    # Keep the separate ``states`` coordinate (state names) that the
+    # ``result_coordinates`` contract expects; ``state`` (singular) above is a
+    # MultiIndex level, distinct from this ``states`` dimension coord.
+    results = results.assign_coords(states=("states", state_names))
 
     return results
 

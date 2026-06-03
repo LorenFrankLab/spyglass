@@ -264,7 +264,7 @@ def _assert_legacy_guard(
     assert component in str(exc_info.value)
 
 
-def test_legacy_runtime_guard_raises_under_si_0104(dj_conn):
+def test_legacy_runtime_guard_raises_under_si_0104(dj_conn, monkeypatch):
     """Every guarded v0/v1 entry point raises the legacy-env guard at call."""
     import spikeinterface as si
 
@@ -272,7 +272,11 @@ def test_legacy_runtime_guard_raises_under_si_0104(dj_conn):
         pytest.skip("Guard intentionally inactive under legacy SI < 0.101")
 
     from spyglass.decoding.v0.clusterless import UnitMarks
-    from spyglass.decoding.v1.waveform_features import UnitWaveformFeatures
+    from spyglass.decoding.v1.waveform_features import (
+        UnitWaveformFeatures,
+        WaveformFeaturesParams,
+    )
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v0.spikesorting_artifact import (
         ArtifactDetection as V0ArtifactDetection,
     )
@@ -290,6 +294,57 @@ def test_legacy_runtime_guard_raises_under_si_0104(dj_conn):
         BurstPair as V1BurstPair,
     )
     from spyglass.spikesorting.v1.metric_curation import MetricCuration
+
+    # ``UnitWaveformFeatures.make`` is the only guarded entry point whose
+    # legacy-SI guard fires AFTER a source dispatch (waveform_features.py:217,
+    # on the non-v2 ``else`` branch) rather than at the top of ``make``. So
+    # ``make({})`` cannot reach the guard: the empty key matches all
+    # ``WaveformFeaturesParams`` rows and ``fetch1("params")`` raises first.
+    # To exercise the guard we must hand ``make`` a key resolving to exactly
+    # one param row and to a v0/v1 (non-``CurationV2``) merge source. We insert
+    # one param row and stub ``merge_get_parent`` to report a ``CurationV1``
+    # source so ``is_v2`` is False and the v0/v1 guard fires before any
+    # (removed) SI 0.104 waveform call.
+    WaveformFeaturesParams().insert1(
+        [
+            "legacy_guard_amplitude",
+            {
+                "waveform_features_params": {
+                    "amplitude": {
+                        "peak_sign": "neg",
+                        "estimate_peak_time": False,
+                    }
+                },
+                "waveform_extraction_params": {
+                    "ms_before": 0.5,
+                    "ms_after": 0.5,
+                    "max_spikes_per_unit": None,
+                    "n_jobs": 5,
+                    "chunk_duration": "1000s",
+                },
+            },
+        ],
+        skip_duplicates=True,
+    )
+
+    class _NonV2Source:
+        # ``to_camel_case("__curation_v1") == "CurationV1"`` (not CurationV2),
+        # so ``UnitWaveformFeatures.make`` takes the legacy ``else`` branch.
+        table_name = "__curation_v1"
+
+        def fetch1(self, *args, **kwargs):
+            return {}
+
+    monkeypatch.setattr(
+        SpikeSortingOutput,
+        "merge_get_parent",
+        lambda self, *a, **k: _NonV2Source(),
+    )
+
+    waveform_guard_key = {
+        "spikesorting_merge_id": "00000000-0000-0000-0000-000000000000",
+        "features_param_name": "legacy_guard_amplitude",
+    }
 
     cases = [
         (
@@ -332,11 +387,19 @@ def test_legacy_runtime_guard_raises_under_si_0104(dj_conn):
         ("v0 UnitMarks.make", lambda: UnitMarks().make({})),
         (
             "v1 UnitWaveformFeatures.make",
-            lambda: UnitWaveformFeatures().make({}),
+            lambda: UnitWaveformFeatures().make(waveform_guard_key),
         ),
     ]
-    for component, call in cases:
-        _assert_legacy_guard(component, call)
+    try:
+        for component, call in cases:
+            _assert_legacy_guard(component, call)
+    finally:
+        # Drop the param row inserted above so it doesn't linger in a shared
+        # DB. No FK consumers (the guard fires before any selection insert).
+        (
+            WaveformFeaturesParams
+            & {"features_param_name": "legacy_guard_amplitude"}
+        ).delete(safemode=False)
 
 
 # ---------- Merge-output query smoke (DB tier; skips if no Docker) ---------

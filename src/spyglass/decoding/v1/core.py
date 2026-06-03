@@ -70,13 +70,23 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
         cls.super().insert(cls.contents, skip_duplicates=True)
 
     def insert(self, rows, *args, **kwargs):
-        """Override insert to convert classes to dict before inserting"""
+        """Override insert to convert classes to dict before inserting.
+
+        Builds new row dicts rather than mutating ``rows`` in place so that
+        callers passing a shared/class-level list (e.g. ``cls.contents``)
+        are not left with already-converted dicts -- re-inserting such a
+        list would otherwise re-enter ``convert_classes_to_dict`` on an
+        already-dict ``decoding_params`` and raise.
+        """
+        converted_rows = []
         for row in rows:
+            row = dict(row)
             params = row["decoding_params"]
             if hasattr(params, "__dict__"):
                 params = vars(params)
             row["decoding_params"] = convert_classes_to_dict(params)
-        super().insert(rows, *args, **kwargs)
+            converted_rows.append(row)
+        super().insert(converted_rows, *args, **kwargs)
 
     def fetch(self, *args, **kwargs):
         """Return decoding parameters as a list of classes."""

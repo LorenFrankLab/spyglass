@@ -171,6 +171,9 @@ temp_nwb/*s
 *.csv
 *.pkl
 *.json
+# Tracked baseline snapshot for test_no_legacy_schema_changes; must be
+# committed despite the blanket *.json ignore so CI's fresh checkout has it.
+!tests/spikesorting/v2/baselines/legacy_schemas.json
 *.gz
 *.pdf
 *.lock

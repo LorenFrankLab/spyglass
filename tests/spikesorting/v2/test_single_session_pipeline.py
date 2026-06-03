@@ -869,18 +869,25 @@ def test_shared_artifact_group_insert_validates_inputs(populated_recording):
 def test_shared_artifact_group_insert_rejects_mismatched_durations(
     populated_recording, polymer_smoke_session
 ):
-    """``insert_group`` rejects members whose recordings have
-    different exact ``n_samples`` (different ``interval_list_name``
-    on the upstream selection).
+    """``insert_group`` rejects members whose recordings span
+    different time windows (different ``interval_list_name`` on the
+    upstream selection).
 
     Same NWB, same fs -- but two ``RecordingSelection`` rows
     pointing at different ``interval_list_name`` values can have
     different sample counts. ``si.aggregate_channels`` would
     crash with an opaque shape mismatch deep inside SI; the
     insert-time guard loads each member's preprocessed recording
-    and asserts EXACT ``get_num_samples()`` parity so a 1-sample
-    mismatch -- which the earlier duration-tolerance check let
-    through -- surfaces before the user pays the populate cost.
+    and requires EXACT time-axis parity. For two genuinely
+    different-duration members the exact-timestamp check
+    (``artifact.py`` ~460-485) trips first -- the timestamp
+    vectors have different shapes -- raising before the post-loop
+    ``distinct_n_samples`` check is reached; either way the
+    mismatch surfaces before the user pays the populate cost. (The
+    pure n_samples branch is only reachable when timestamp shapes
+    match but counts differ, which the per-member ``len(timestamps)
+    == n_samples`` assertion makes impossible for real recordings;
+    the dtype branch is covered by the companion stub test below.)
     """
     from spyglass.common.common_interval import IntervalList
     from spyglass.spikesorting.v2.artifact import SharedArtifactGroup
@@ -930,9 +937,11 @@ def test_shared_artifact_group_insert_rejects_mismatched_durations(
     Recording.populate(second_rec_pk, reserve_jobs=False)
 
     # Now attempt to group the full-window populated_recording AND
-    # the truncated second_rec_pk. The strict n_samples check at
-    # insert_group time MUST raise.
-    with pytest.raises(ValueError, match="differing exact n_samples"):
+    # the truncated second_rec_pk. The strict time-axis check at
+    # insert_group time MUST raise -- different durations give
+    # different-shape timestamp vectors, so the exact-timestamp
+    # check fires before the post-loop n_samples check.
+    with pytest.raises(ValueError, match="differing exact timestamps"):
         SharedArtifactGroup.insert_group(
             "v2_mismatched_durations",
             [
@@ -10568,7 +10577,6 @@ def test_recording_rebuild_path_keeps_existing_file_on_failure(
                 probe_types=fetched.probe_types,
                 electrode_group_names=fetched.electrode_group_names,
                 existing_analysis_file_name=existing,  # REBUILD path
-                recording_id=recording_id,
             )
         assert (
             "written" in captured
