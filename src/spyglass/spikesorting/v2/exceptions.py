@@ -83,10 +83,11 @@ class ZeroUnitSortError(RuntimeError):
     """A sort produced zero units and the caller opted into treating
     that as an error (``run_v2_pipeline(..., require_units=True)``). Zero
     units is a legitimate result on a quiet shank, so it is graceful by
-    default (partial manifest with ``curation_id``/``merge_id`` None plus
-    a warning); this is raised only when the caller requires units.
-    Message names the recording/sort and suggests checking
-    ``detect_threshold`` / the artifact mask."""
+    default: ``run_v2_pipeline`` writes an EMPTY (but real) curation +
+    merge row and returns a full manifest with real ``curation_id`` /
+    ``merge_id`` and ``n_units=0`` (plus a warning). This is raised only
+    when the caller requires units. Message names the recording/sort and
+    suggests checking ``detect_threshold`` / the artifact mask."""
 
 
 class ZeroUnitAnalyzerError(RuntimeError):

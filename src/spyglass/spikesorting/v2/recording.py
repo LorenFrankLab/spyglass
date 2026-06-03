@@ -25,7 +25,10 @@ import numpy as np
 
 from spyglass.common import IntervalList, LabTeam, Session  # noqa: F401
 from spyglass.common.common_ephys import Electrode, Raw  # noqa: F401
-from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile  # noqa: F401
+from spyglass.common.common_nwbfile import (
+    AnalysisNwbfile,
+    Nwbfile,
+)  # noqa: F401
 from spyglass.spikesorting.v2._params.preprocessing import (
     PreprocessingParamsSchema,
 )
@@ -146,9 +149,7 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
     # ---- Existing-entry safety ------------------------------------------
 
     @classmethod
-    def preview_existing_entries(
-        cls, nwb_file_name: str
-    ) -> DeletionPreview:
+    def preview_existing_entries(cls, nwb_file_name: str) -> DeletionPreview:
         """Read-only preview of what overwriting this session would delete.
 
         Mirrors the preview that ``set_group_by_*`` would produce when
@@ -157,7 +158,9 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         """
         existing = cls & {"nwb_file_name": nwb_file_name}
         sg_count = len(existing)
-        sge_count = len(cls.SortGroupElectrode & {"nwb_file_name": nwb_file_name})
+        sge_count = len(
+            cls.SortGroupElectrode & {"nwb_file_name": nwb_file_name}
+        )
         cascade = existing.cautious_delete(dry_run=True) if sg_count else None
         return DeletionPreview(
             nwb_file_name=nwb_file_name,
@@ -334,10 +337,7 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
                         }
                     )
                     continue
-                if (
-                    omit_ref_electrode_group
-                    and reference_mode == "specific"
-                ):
+                if omit_ref_electrode_group and reference_mode == "specific":
                     ref_match = (
                         electrodes["electrode_id"] == reference_electrode_id
                     )
@@ -495,9 +495,7 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
             )
 
         column_aliases = {"index", "id", "idx", "electrode_id"}
-        resolved_column = (
-            "electrode_id" if column in column_aliases else column
-        )
+        resolved_column = "electrode_id" if column in column_aliases else column
         if resolved_column not in electrodes.dtype.names:
             valid = sorted(electrodes.dtype.names)
             raise ValueError(
@@ -576,7 +574,9 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
                     {
                         "nwb_file_name": nwb_file_name,
                         "sort_group_id": sg_id,
-                        "electrode_group_name": elec_row["electrode_group_name"],
+                        "electrode_group_name": elec_row[
+                            "electrode_group_name"
+                        ],
                         "electrode_id": int(elec_row["electrode_id"]),
                     }
                 )
@@ -613,16 +613,15 @@ class PreprocessingParameters(SpyglassMixin, dj.Lookup):
     job_kwargs=null: blob
     """
 
-    # Row-level ``params_schema_version`` matches the inner
-    # ``PreprocessingParamsSchema.schema_version`` (now 3: optional
-    # ``bandpass_filter`` so ``"no_filter"`` truly disables filtering,
-    # and a ``whiten`` default of None to match the runtime). The
-    # DataJoint column default tracks the schema (3) so a custom row
-    # that omits the column gets tagged as v3 instead of a stale v2.
+    # Row-level ``params_schema_version`` must equal the inner
+    # ``PreprocessingParamsSchema.schema_version`` (3). The DataJoint
+    # column default tracks the schema version so a custom row that omits
+    # the column is tagged with the current schema version, not a
+    # mismatched one.
     _DEFAULT_CONTENTS: tuple = (
         (
             "default_franklab",
-            # ``whiten`` is now None by schema default (whitening is
+            # ``whiten`` defaults to None in the schema (whitening is
             # deferred to the sorter -- the float64 path inside
             # ``Sorting._run_sorter`` -- not applied at preprocessing),
             # so the default-constructed schema already matches the
@@ -644,8 +643,8 @@ class PreprocessingParameters(SpyglassMixin, dj.Lookup):
         (
             "no_filter",
             # ``bandpass_filter=None`` is a real disable: the runtime
-            # skips the filter step entirely. (Previously this row used
-            # a 1-14999 Hz wide-band pass, which still filtered.)
+            # skips the filter step entirely, so "no_filter" applies no
+            # bandpass at all.
             PreprocessingParamsSchema.model_validate(
                 {"bandpass_filter": None}
             ).model_dump(),
@@ -1262,10 +1261,9 @@ class Recording(SpyglassMixin, dj.Computed):
         # in place (re-derive from the corrected source via a deliberate
         # repair path). Satisfies C3's "columns stay accurate or assert
         # they match" contract.
-        if (
-            bool(rebuilt_adjusted) != bool(row["timestamps_adjusted"])
-            or int(rebuilt_n_adjusted) != int(row["n_adjusted_samples"])
-        ):
+        if bool(rebuilt_adjusted) != bool(row["timestamps_adjusted"]) or int(
+            rebuilt_n_adjusted
+        ) != int(row["n_adjusted_samples"]):
             import pathlib as _pathlib
 
             from spyglass.spikesorting.v2.exceptions import (
@@ -1449,7 +1447,9 @@ class Recording(SpyglassMixin, dj.Computed):
                 try:
                     abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
                     _pathlib.Path(abs_path).unlink(missing_ok=True)
-                except Exception as cleanup_exc:  # pragma: no cover -- defensive
+                except (
+                    Exception
+                ) as cleanup_exc:  # pragma: no cover -- defensive
                     logger.error(
                         "Recording._compute_recording_artifact: failed to "
                         "clean up staged analysis file "
@@ -1589,7 +1589,7 @@ class Recording(SpyglassMixin, dj.Computed):
                 for s, e in intervals_in_frames
             ]
             timestamps_override = np.concatenate(
-                [times[int(s):int(e)] for s, e in intervals_in_frames]
+                [times[int(s) : int(e)] for s, e in intervals_in_frames]
             )
             recording = concatenate_recordings(sliced)
         else:
@@ -1602,7 +1602,7 @@ class Recording(SpyglassMixin, dj.Computed):
             # one, so slicing ``times`` is what persists the repair (same
             # as the multi-interval path). Equal to the source times when
             # no repair fired -- a no-op on the common path.
-            timestamps_override = times[int(s):int(e)]
+            timestamps_override = times[int(s) : int(e)]
 
         if reference_mode == "specific":
             slice_ids = sorted(
@@ -1614,9 +1614,7 @@ class Recording(SpyglassMixin, dj.Computed):
         else:
             slice_ids = [int(c) for c in sort_group_channel_ids]
 
-        si_ids = cls._spikeinterface_channel_ids(
-            nwb_file_name, slice_ids
-        )
+        si_ids = cls._spikeinterface_channel_ids(nwb_file_name, slice_ids)
         recording = ChannelSliceRecording(
             recording,
             channel_ids=si_ids,
@@ -1625,9 +1623,7 @@ class Recording(SpyglassMixin, dj.Computed):
         return recording, timestamps_override, len(intervals_in_frames)
 
     @staticmethod
-    def _spikeinterface_channel_ids(
-        nwb_file_name: str, spyglass_ids
-    ):
+    def _spikeinterface_channel_ids(nwb_file_name: str, spyglass_ids):
         """Map Spyglass electrode_ids onto SpikeInterface channel ids.
 
         SpikeInterface 0.104's ``read_nwb_recording`` uses the raw NWB
@@ -1856,24 +1852,16 @@ class Recording(SpyglassMixin, dj.Computed):
         unique_probes = set(probe_types)
         unique_groups = set(electrode_group_names)
         if len(unique_probes) != 1:
-            logger.info(
-                "_maybe_apply_tetrode_geometry skipped: %s", reasons[0]
-            )
+            logger.info("_maybe_apply_tetrode_geometry skipped: %s", reasons[0])
             return recording
         if next(iter(unique_probes)) != "tetrode_12.5":
-            logger.info(
-                "_maybe_apply_tetrode_geometry skipped: %s", reasons[1]
-            )
+            logger.info("_maybe_apply_tetrode_geometry skipped: %s", reasons[1])
             return recording
         if len(sort_group_channel_ids) != 4:
-            logger.info(
-                "_maybe_apply_tetrode_geometry skipped: %s", reasons[2]
-            )
+            logger.info("_maybe_apply_tetrode_geometry skipped: %s", reasons[2])
             return recording
         if len(unique_groups) != 1:
-            logger.info(
-                "_maybe_apply_tetrode_geometry skipped: %s", reasons[3]
-            )
+            logger.info("_maybe_apply_tetrode_geometry skipped: %s", reasons[3])
             return recording
 
         import numpy as _np

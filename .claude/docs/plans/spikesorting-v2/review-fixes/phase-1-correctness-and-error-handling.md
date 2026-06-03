@@ -105,6 +105,9 @@ separately if it is ever deemed undesirable.)
 - In `mearec_to_nwb.py:282-286`, remove the `except (TypeError, ValueError): traces = recording.get_traces()` fallback. Replace with an explicit check: if `recording.get_traces(return_in_uV=True)` raises, re-raise as a clear `RuntimeError` naming the missing `gain_to_uV` / conversion field and instructing the fixture author to fix the MEArec extractor. A GT fixture silently writing ADC counts mislabeled as µV poisons every downstream test.
 
 ### C5 — DOCUMENT+BUG: zero-unit loud-but-graceful
+
+> **SHIPPED (supersedes the `None`-manifest plan below):** the implemented graceful path writes an EMPTY (but real) curation + merge row — matching v1's empty Units table — and returns a FULL manifest with real `curation_id` / `merge_id` and `n_units=0` (`pipeline.py:222-278`), NOT `curation_id=None` / `merge_id=None`. Downstream consumers treat it like any other `SpikeSortingOutput` row; there is no `merge_id is None` case to guard. `require_units=True` still raises `ZeroUnitSortError`. The original `None`-manifest bullets below are kept for historical context only.
+
 - Keep the graceful partial-manifest path in `pipeline.py:213-222` (it handles a legitimate quiet-shank case per the comment).
 - Add `require_units: bool = False` to `run_v2_pipeline`; when True, raise `ZeroUnitSortError` (new in `exceptions.py`) instead of returning the partial manifest.
 - Make the partial path loud: `logger.warning` with `recording_id` + "zero units; curation/merge skipped — check detect_threshold / artifact mask."

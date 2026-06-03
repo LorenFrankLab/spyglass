@@ -197,12 +197,6 @@ in-flight v1 PR on `copilot/fix-populating-artifact-detection`.
   (`[str(c) for c in sort_group_channel_ids]`) instead of v1's raw
   integers. probeinterface accepts both; flagged for users who
   introspect contact_id types.
-- **Artifact detection is not yet chunked.** v1 used
-  `ChunkRecordingExecutor` for memory-bounded artifact scans; v2's
-  current `_detect_artifacts` loads `recording.get_traces(...)`
-  fully into RAM (acceptable for <few-minute recordings, follow-up
-  work for chronic-scale). The `job_kwargs` resolver is wired but
-  not yet consumed at this stage.
 - **`franklab_probe_ctx_30KHz` cortex preset is not shipped on v2.**
   v1 had a `MountainSort4` Lookup row by this name; v2 ships only the
   hippocampus + Neuropixels presets. Cortex-probe users must insert
@@ -256,12 +250,14 @@ in-flight v1 PR on `copilot/fix-populating-artifact-detection`.
   default on the 4 s smoke fixture finds zero peaks. Phase 1d
   followup adds a zero-unit guard so the analyzer build short-
   circuits and the Sorting row still commits with `n_units=0`.
-  `run_v2_pipeline` returns a partial manifest
-  (`curation_id=None, merge_id=None, n_units=0`) instead of
-  crashing inside CurationV2.insert_curation -- SI's
-  NwbSortingExtractor cannot open an empty units NWB. Users
-  with zero-unit sorts should lower `detect_threshold` or
-  revisit artifact masking before retrying.
+  `run_v2_pipeline` then writes an EMPTY (but real) curation + merge
+  row -- matching v1, which writes an empty Units table -- and returns
+  a full manifest with real `curation_id` / `merge_id` and `n_units=0`,
+  so downstream consumers treat it like any other `SpikeSortingOutput`
+  row instead of special-casing a `None` merge_id. Pass
+  `require_units=True` to raise `ZeroUnitSortError` instead. Users with
+  zero-unit sorts should lower `detect_threshold` or revisit artifact
+  masking before retrying.
 - **`mountainsort4` is now in the `spikesorting-v2` extra.**
   Phase 0c required MS4 runtime evidence before Phase 1 shipped
   the MS4 default Lookup rows; the runtime was previously a
@@ -330,6 +326,15 @@ cross-referenced here, not duplicated.
 - `apply_merges` kwarg → `apply_merge` (singular) on
   `CurationV2.insert_curation`:
   [curation.py:220](./src/spyglass/spikesorting/v2/curation.py#L220).
+- **`insert_curation` raises on a re-passed root curation.** When a
+  root curation (`parent_curation_id=-1`) already exists for a sorting,
+  v2 still reuses it (idempotent, like v1), but if the caller ALSO
+  passes non-default `labels` / `merge_groups` / `description` those
+  would be silently ignored, so v2 raises `ValueError` instead of
+  returning the existing row (v1 silently returned)
+  ([curation.py:391-414](./src/spyglass/spikesorting/v2/curation.py#L391-L414)).
+  Pass `reuse_existing=True` to reuse the root anyway, or curate as a
+  child with `parent_curation_id=<existing root curation_id>`.
 - Preprocessing field renames `frequency_min`/`frequency_max` →
   `freq_min`/`freq_max`:
   [_params/preprocessing.py:22-23](./src/spyglass/spikesorting/v2/_params/preprocessing.py#L22-L23).

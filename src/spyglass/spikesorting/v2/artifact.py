@@ -82,9 +82,7 @@ def _init_artifact_worker(
     """
     import spikeinterface as si
 
-    recording = (
-        si.load(recording) if isinstance(recording, dict) else recording
-    )
+    recording = si.load(recording) if isinstance(recording, dict) else recording
     n_channels = len(recording.get_channel_ids())
     return {
         "recording": recording,
@@ -372,8 +370,7 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
         # Catch the invariant at insert time so the user gets a
         # clear diagnostic before populate.
         per_member_recording_rows = (
-            Recording
-            & [{"recording_id": rid} for rid in member_recording_ids]
+            Recording & [{"recording_id": rid} for rid in member_recording_ids]
         ).fetch("recording_id", "sampling_frequency", as_dict=True)
         per_member_selection_rows = (
             RecordingSelection
@@ -392,7 +389,9 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
             str(r["recording_id"]): r for r in per_member_selection_rows
         }
 
-        sessions = {sel_by_id[str(rid)]["nwb_file_name"] for rid in member_recording_ids}
+        sessions = {
+            sel_by_id[str(rid)]["nwb_file_name"] for rid in member_recording_ids
+        }
         if len(sessions) != 1:
             raise ValueError(
                 "SharedArtifactGroup.insert_group: members span "
@@ -611,9 +610,7 @@ class ArtifactSelection(SpyglassMixin, dj.Manual):
         else:
             source_part = cls.SharedArtifactGroupSource
             source_restriction = {
-                "shared_artifact_group_name": key[
-                    "shared_artifact_group_name"
-                ]
+                "shared_artifact_group_name": key["shared_artifact_group_name"]
             }
 
         # Find existing master+source rows by joining the master to the
@@ -806,14 +803,18 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
             # per-member ``nwb_file_name`` lookup is bulk-fetched
             # via a join.
             members = (
-                SharedArtifactGroup.Member
-                * RecordingSelection
+                SharedArtifactGroup.Member * RecordingSelection
                 & {
                     "shared_artifact_group_name": source.key[
                         "shared_artifact_group_name"
                     ]
                 }
-            ).fetch("recording_id", "nwb_file_name", as_dict=True, order_by="recording_id")
+            ).fetch(
+                "recording_id",
+                "nwb_file_name",
+                as_dict=True,
+                order_by="recording_id",
+            )
             if not members:
                 raise RuntimeError(
                     "ArtifactDetection.make: SharedArtifactGroup "
@@ -824,9 +825,7 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
             member_recording_ids = tuple(
                 str(m["recording_id"]) for m in members
             )
-            member_nwb_file_names = tuple(
-                m["nwb_file_name"] for m in members
-            )
+            member_nwb_file_names = tuple(m["nwb_file_name"] for m in members)
             # ``insert_group`` validated single-session, so the
             # ``nwb_file_name`` is unique; surface the canonical one
             # so callers that only need the master nwb_file_name
@@ -874,8 +873,8 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         """
         # Merge the SI-global, DataJoint-config, and per-row job_kwargs so
         # the chunked ``_scan_artifact_frames`` pass honors ``n_jobs`` /
-        # ``chunk_duration`` overrides. The stored per-row blob (the audit's
-        # formerly-dead ``job_kwargs`` column) is now functional here.
+        # ``chunk_duration`` overrides. The stored per-row ``job_kwargs``
+        # blob is honored here, merged over the global and config defaults.
         from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
 
         resolved_job_kwargs = _resolved_job_kwargs(artifact_job_kwargs)
@@ -1143,9 +1142,7 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         half_window_frames = int(
             _np.ceil(validated.removal_window_ms * 1e-3 * fs / 2)
         )
-        join_window_frames = int(
-            _np.ceil(validated.join_window_ms * 1e-3 * fs)
-        )
+        join_window_frames = int(_np.ceil(validated.join_window_ms * 1e-3 * fs))
 
         # Inter-chunk wall-clock gaps: frame index of the last sample
         # before each gap (diff > 1.5 sample periods). Frame indices are
@@ -1154,9 +1151,7 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         # otherwise an artifact near a chunk edge bridges/spills into the
         # neighboring chunk across the gap.
         n = len(timestamps)
-        gap_after = _np.flatnonzero(
-            _np.diff(timestamps) > 1.5 * (1.0 / fs)
-        )
+        gap_after = _np.flatnonzero(_np.diff(timestamps) > 1.5 * (1.0 / fs))
 
         # Build artifact intervals in frame indices, then convert to
         # seconds and subtract per base chunk. Join nearby artifact frames
@@ -1292,8 +1287,7 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         # join, fetch each member's IntervalList row, return a
         # name->valid_times dict.
         members = (
-            SharedArtifactGroup.Member
-            * RecordingSelection
+            SharedArtifactGroup.Member * RecordingSelection
             & {
                 "shared_artifact_group_name": source.key[
                     "shared_artifact_group_name"
@@ -1354,9 +1348,7 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
                     f"{resolve_exc!r}"
                 )
                 continue
-            interval_list_name = artifact_interval_list_name(
-                row["artifact_id"]
-            )
+            interval_list_name = artifact_interval_list_name(row["artifact_id"])
             if source.kind == "recording":
                 nwb_file_name = (
                     RecordingSelection
@@ -1374,8 +1366,7 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
                 # all for cleanup. The Member -> RecordingSelection
                 # join surfaces the per-member nwb_file_name set.
                 members = (
-                    SharedArtifactGroup.Member
-                    * RecordingSelection
+                    SharedArtifactGroup.Member * RecordingSelection
                     & {
                         "shared_artifact_group_name": source.key[
                             "shared_artifact_group_name"

@@ -182,10 +182,17 @@ class ClusterlessThresholderSchema(BaseModel):
       estimates per-channel MAD (``noise_levels`` left unset). Tracks
       the recording's actual noise floor; right for synthetic /
       low-amplitude fixtures.
-    * ``"uv"`` -- the threshold is in raw microvolts; the runtime
-      derives ``noise_levels=[1.0]`` (broadcast across channels) so
-      ``detect_peaks`` reads ``detect_threshold`` directly in uV. This
-      reproduces v1's ``default_clusterless`` behavior at
+    * ``"uv"`` -- the runtime derives ``noise_levels=[1.0]`` (broadcast
+      across channels) so ``detect_peaks`` reads ``detect_threshold``
+      directly in the recording's native amplitude units. NOTE: under
+      v2's default preprocessing (bandpass + common_reference at
+      float64, with NO gain scaling) the recording is in raw ADC
+      counts, so ``detect_threshold`` is effectively raw counts, not
+      true microvolts -- a v1-inherited unit labeling (see the
+      ``detect_threshold`` units note in CHANGELOG ``[0.5.6]``). It is
+      only true uV if the recording is already gain-scaled; convert via
+      ``count x gain_uV_per_count``. Reproduces v1's
+      ``default_clusterless`` behavior at
       ``src/spyglass/spikesorting/v1/sorting.py:177``.
 
     ``noise_levels`` stays available as an ADVANCED explicit override.

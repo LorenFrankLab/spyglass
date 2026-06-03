@@ -219,7 +219,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                 next(group_col, None), None
             )
 
-            if group_labels is not None and not test_mode:
+            if group_labels is not None:
                 group_label_list = group_labels.to_list()
                 include_unit = SortedSpikesGroup.filter_units(
                     group_label_list, include_labels, exclude_labels

@@ -424,9 +424,7 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
             # Validate through the generic schema (extra='allow') so the
             # row passes the insert gate without typo-rejection.
             try:
-                validated = _validate_params(
-                    GenericSorterParamsSchema, params
-                )
+                validated = _validate_params(GenericSorterParamsSchema, params)
             except Exception as exc:
                 logger.warning(
                     f"insert_default_legacy_si_sorters: {sorter!r} did "
@@ -838,12 +836,9 @@ class Sorting(SpyglassMixin, dj.Computed):
     # ``SortingSelection``) would still hand concat rows to ``populate()``,
     # which then prints a confusing per-row error. The antijoin drops any
     # selection that has a ``ConcatenatedRecordingSource`` part. No-op
-    # today (no concat rows exist); the contract lands before parent
-    # Phase 3 implements ``ConcatenatedRecording.make``, at which point
-    # this restriction is removed so concat rows populate normally.
-    key_source = (
-        SortingSelection - SortingSelection.ConcatenatedRecordingSource
-    )
+    # today (no concat rows exist). When ``ConcatenatedRecording.make`` is
+    # implemented this antijoin is removed so concat rows populate normally.
+    key_source = SortingSelection - SortingSelection.ConcatenatedRecordingSource
 
     # Tri-part dispatch + parallel populate. ``Sorting.make`` is the
     # longest of the three Computed stages (sorters routinely take
@@ -1217,9 +1212,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         recording_times = cls._recording_timestamps(recording_row)
         n_samples = int(recording_times.size)
         units_dict = {
-            uid: _spike_times_to_frames(
-                recording_times, st, n_samples, uid
-            )
+            uid: _spike_times_to_frames(recording_times, st, n_samples, uid)
             for uid, st in abs_times.items()
         }
         return si.NumpySorting.from_unit_dict(
@@ -1265,10 +1258,10 @@ class Sorting(SpyglassMixin, dj.Computed):
         abs_path = AnalysisNwbfile.get_abs_path(
             recording_row["analysis_file_name"]
         )
-        series_name = recording_row["electrical_series_path"].rsplit(
-            "/", 1
-        )[-1]
-        with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
+        series_name = recording_row["electrical_series_path"].rsplit("/", 1)[-1]
+        with pynwb.NWBHDF5IO(
+            path=abs_path, mode="r", load_namespaces=True
+        ) as io:
             nwbf = io.read()
             series = nwbf.acquisition[series_name]
             return _np.asarray(series.timestamps[:], dtype=_np.float64)
@@ -1527,9 +1520,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             )
         return {"db_side": db_side, "disk_side": disk_side}
 
-    def get_unit_brain_regions(
-        self, key, *, allow_anchor_member: bool = False
-    ):
+    def get_unit_brain_regions(self, key, *, allow_anchor_member: bool = False):
         """Per-unit brain regions via Sorting.Unit * Electrode * BrainRegion.
 
         Single-session sorts return ``region_resolution='single_session'``.
@@ -1760,11 +1751,15 @@ class Sorting(SpyglassMixin, dj.Computed):
         ``noise_levels`` handling: when the params row supplies a
         non-``None`` value (e.g. ``default_clusterless`` ships
         ``noise_levels=[1.0]``), SI's ``locally_exclusive`` interprets
-        ``detect_threshold`` in raw microvolts -- matching v1's choice
-        at ``v1/sorting.py:177``. A scalar (singleton list) is
-        broadcast to length ``n_channels`` because SI's
-        ``locally_exclusive`` indexes ``noise_levels[chan] *
-        detect_threshold`` per channel. When the params row omits
+        ``detect_threshold`` in the recording's native amplitude units
+        -- matching v1's choice at ``v1/sorting.py:177``. v1 labeled
+        this "microvolts", but under v2's default preprocessing (no
+        gain scaling) the recording is in raw ADC counts, so the
+        threshold is effectively raw counts, not true uV (see the
+        ``detect_threshold`` units note in CHANGELOG ``[0.5.6]``). A
+        scalar (singleton list) is broadcast to length ``n_channels``
+        because SI's ``locally_exclusive`` indexes ``noise_levels[chan]
+        * detect_threshold`` per channel. When the params row omits
         ``noise_levels`` (default in v2, and what the smoke /
         synthetic-fixture rows do), SI computes per-channel MAD
         internally and ``detect_threshold`` is interpreted as a MAD
@@ -1819,9 +1814,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             # ``_run_si_sorter`` -- set ``random_seed`` in the per-
             # row ``SorterParameters.job_kwargs`` blob to override.
             _random_seed = (job_kwargs or {}).get("random_seed", 0)
-            params.setdefault(
-                "random_slices_kwargs", {"seed": _random_seed}
-            )
+            params.setdefault("random_slices_kwargs", {"seed": _random_seed})
         else:
             n_channels = recording.get_num_channels()
             # Reject an explicit noise_levels of the wrong length BEFORE
@@ -1843,9 +1836,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         # ``AssertionError: random_seed is not a valid job keyword
         # argument``. Strip it before the call.
         detect_job_kwargs = {
-            k: v
-            for k, v in (job_kwargs or {}).items()
-            if k != "random_seed"
+            k: v for k, v in (job_kwargs or {}).items() if k != "random_seed"
         }
         detected = detect_peaks(
             recording,
@@ -2239,7 +2230,7 @@ class Sorting(SpyglassMixin, dj.Computed):
                 nwbf.add_unit_column(
                     name="curation_label",
                     description=(
-                        "Curation label scalar; ``\"uncurated\"`` at "
+                        'Curation label scalar; ``"uncurated"`` at '
                         "sort time, refined to a per-unit label list "
                         "by CurationV2.insert_curation."
                     ),
@@ -2319,9 +2310,9 @@ class Sorting(SpyglassMixin, dj.Computed):
         )
 
         sort_group_id = int(
-            (
-                RecordingSelection & {"recording_id": recording_id}
-            ).fetch1("sort_group_id")
+            (RecordingSelection & {"recording_id": recording_id}).fetch1(
+                "sort_group_id"
+            )
         )
         sg_electrodes = (
             SortGroupV2.SortGroupElectrode
@@ -2353,9 +2344,7 @@ class Sorting(SpyglassMixin, dj.Computed):
                     f"{sort_group_id} for {nwb_file_name!r}. Sort group "
                     "/ recording channel-id mismatch."
                 )
-            n_spikes = int(
-                len(sorting.get_unit_spike_train(unit_id=unit_id))
-            )
+            n_spikes = int(len(sorting.get_unit_spike_train(unit_id=unit_id)))
             rows.append(
                 {
                     **key,
