@@ -449,7 +449,15 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         for nwb_file in self.fetch_nwb(key):
             # V1 uses 'object_id', V0 uses 'units'
             file_loc = "object_id" if "object_id" in nwb_file else "units"
-            spike_times.extend(nwb_file[file_loc]["spike_times"].to_list())
+            units = nwb_file[file_loc]
+            # A zero-unit curation (v2 ``require_units=False`` path) writes an
+            # empty Units table with no ``spike_times`` column; indexing it
+            # would raise ``KeyError: 'spike_times'``. Such a row contributes
+            # no spike trains, so skip it. Populated v0/v1/v2 units tables
+            # always carry the column, so this never changes their behavior.
+            if "spike_times" not in units:
+                continue
+            spike_times.extend(units["spike_times"].to_list())
         return spike_times
 
     @classmethod

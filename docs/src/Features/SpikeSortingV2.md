@@ -190,6 +190,33 @@ SpikeSortingOutput().get_spike_times({"merge_id": merge_id})
 SpikeSortingOutput.get_unit_brain_regions({"merge_id": merge_id})
 ```
 
+### Paper export
+
+A v2 `merge_id` exports the same way a v1 one does — there is no v2-specific
+export step. Start an export, fetch the sort through `SpikeSortingOutput`,
+then populate the `Export`:
+
+```python
+from spyglass.common.common_usage import Export, ExportSelection
+from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+
+ExportSelection().start_export(paper_id="my_paper", analysis_id=1)
+SpikeSortingOutput().fetch_nwb({"merge_id": merge_id})
+ExportSelection().stop_export()
+
+Export().populate_paper(paper_id="my_paper")
+```
+
+The resulting `Export.File` contains **both** the curated units NWB and the
+upstream preprocessed-recording cache (plus the intermediate sort NWB),
+so the export is reproducible. The recording cache is pulled in
+automatically by `Export.populate_paper`'s foreign-key cascade — exactly
+as it is for v1 — so you do **not** need to call `get_recording` /
+`get_sorting` during the export to capture it. (Those accessors read their
+files directly and do not themselves log export events, matching v1's
+`CurationV1` accessors.) A zero-unit curation (the `require_units=False`
+path) exports the same way; its empty-but-real units NWB is captured.
+
 ### Environment
 
 The v2 pipeline requires SpikeInterface 0.104+ and (for MountainSort) the

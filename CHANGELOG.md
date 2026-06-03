@@ -746,6 +746,20 @@ for label, interval_data in results.groupby("interval_labels"):
         See [Spike Sorting v2](./Features/SpikeSortingV2.md). Active
         v0/v1 workflows continue to require the legacy SI 0.99
         environment
+    - Fix `SpikeSortingOutput.get_spike_times` raising
+        `KeyError: 'spike_times'` on a zero-unit v2 curation (the
+        `require_units=False` path writes an empty `Units` table with no
+        `spike_times` column); an empty curation now contributes no spike
+        trains instead of crashing. v0/v1 and populated v2 units tables are
+        unaffected.
+    - Verify v2 paper-export completeness: a `SpikeSortingOutput` export
+        over a v2 `merge_id` captures both the curated units NWB and the
+        upstream preprocessed-recording cache in `Export.File`, matching
+        v1. As in v1, the recording cache is captured by the
+        `Export.populate_paper` foreign-key cascade (not by per-fetch
+        accessor logging), so no change to the `get_recording` /
+        `get_sorting` accessors was needed. Covered by
+        `tests/spikesorting/v2/test_export_safety.py`.
 
 ## [0.5.5] (Aug 6, 2025)
 
