@@ -364,51 +364,44 @@ jobs:
         # video fixtures the minirec ingestion (mini_insert) pulls in.
         sudo apt-get install -y \
           mysql-client libmysqlclient-dev ffmpeg libsm6 libxext6
+    - name: Pin SpikeInterface to the legacy 0.99 line (coherent resolve)
+      # The repo's main dependencies pin spikeinterface==0.104.3 (+ a matching
+      # probeinterface>=0.3.2) for the v2 pipeline; the v0/v1 active runtime
+      # paths need the 0.99 line instead. Relax those two pins in the EPHEMERAL
+      # checkout so the env build below resolves a COHERENT SI-0.99 stack in
+      # one pass -- matching master's run-tests env (which pins 0.99.1 natively
+      # and lands on numpy 1.26 because pytorch<1.12 caps numpy<2). Installing
+      # the 0.104 stack and downgrading afterward instead left a numpy-2 /
+      # neo-0.14 set the SI-0.99 line cannot use, which surfaced in turn as the
+      # np.issctype, probeinterface-0.3.x contact-check, and recompute
+      # namespace-mismatch failures. This never touches the committed pin.
+      run: |
+        sed -i \
+          -e 's/"spikeinterface==0.104.3"/"spikeinterface>=0.99.1,<0.100"/' \
+          -e 's/"probeinterface>=0.3.2"/"probeinterface>=0.2.19,<0.3"/' \
+          -e 's/^  "numpy",/  "numpy>=1.23,<2",/' \
+          pyproject.toml
+        grep -nE '"(spikeinterface|probeinterface|numpy)' pyproject.toml
     - name: Set up conda (legacy SpikeInterface 0.99 environment)
-      # The legacy env is conda-managed via the dedicated env file, which
-      # installs the repo's ``test`` extra (and its pinned
-      # ``spikeinterface==0.104.3``). The 0.99 downgrade the v0/v1 runtime
-      # needs is applied in the next step -- the ``==0.104.3`` pin and
-      # ``>=0.99,<0.101`` cannot co-resolve in conda's single-pass pip
-      # section.
+      # Conda-managed via the dedicated env file. With the pins relaxed above,
+      # the env file's ``.[test]`` install resolves SpikeInterface 0.99.1 + a
+      # compatible probeinterface / neo / numpy / pynwb / hdmf set in a single
+      # pass -- no post-hoc downgrade needed.
       uses: conda-incubator/setup-miniconda@v3
       with:
         activate-environment: spyglass_spikesorting_legacy
         environment-file: environments/environment_spikesorting_legacy.yml
         miniforge-version: latest
         use-mamba: true
-    - name: Downgrade to legacy SpikeInterface 0.99
-      # Separate pip pass (env create installs the 0.104 pin from the
-      # ``test`` extra; this re-resolves SpikeInterface and its transitive
-      # deps down to the 0.99 line the v0/v1 active runtime paths require,
-      # without touching the v2 ``spikeinterface==0.104.3`` pin in
-      # pyproject.toml). Mirrors the env file's post-create step.
-      #
-      # Pin to the SAME range master ships for v0/v1 (>=0.99.1,<0.100 ->
-      # 0.99.1), NOT <0.101: 0.100.x changed NwbRecordingExtractor's
-      # timestamp handling (load_time_vector hits "'Group' object has no
-      # attribute 'timestamps'") and is not a configuration v0/v1 support.
-      #
-      # Restore the WHOLE coherent SI-0.99 stack, not just SpikeInterface. The
-      # env file installs the SI-0.104 stack (numpy 2, neo 0.13, probeinterface
-      # 0.3.x) via ``.[test]``; downgrading SI alone left numpy-2-era deps that
-      # the SI-0.99 line cannot use, surfacing in turn:
-      #   - probeinterface 0.3.x: strict "contact positions must be unique"
-      #     rejects the tetrode test data in SI 0.99.1's dummy-probe builder
-      #     (set_dummy_probe_from_locations); SI 0.104 does not build it, so
-      #     run-tests/pytest-v2 keep 0.3.2.
-      #   - numpy 2.x: SI 0.99.1 / neo / probeinterface 0.2.x call np.issctype,
-      #     removed in NumPy 2.0.
-      # Pin the full stack to match what master and the working legacy env run
-      # (SI 0.99.1 + probeinterface 0.2.x + neo 0.12 + numpy 1.26). numpy 1.26
-      # is ABI-forward-compatible with the already-installed pandas/scipy, so
-      # they are not renamed. SI is pinned <0.100 (NOT <0.101): 0.100.x changed
-      # NwbRecordingExtractor timestamp handling (load_time_vector hits
-      # "'Group' object has no attribute 'timestamps'").
+    - name: Verify the legacy SI-0.99 stack resolved coherently
+      # No install -- the relaxed-pin env build above already resolved the
+      # SI-0.99 stack. Assert the result so a future resolver change that
+      # silently drifts back to the 0.104 line (or numpy 2) fails loudly here
+      # rather than deep inside a test. SI must be < 0.100 (NOT <0.101): 0.100.x
+      # changed NwbRecordingExtractor timestamp handling ("'Group' object has
+      # no attribute 'timestamps'"). numpy < 2 (np.issctype) and probeinterface
+      # < 0.3 (strict contact-position check) follow from the coherent resolve.
       run: |
-        pip install --force-reinstall \
-          "spikeinterface>=0.99.1,<0.100" "probeinterface>=0.2.19,<0.3" \
-          "neo>=0.12,<0.13" "numpy>=1.23,<2"
         python - <<'PY'
         from packaging.version import Version
         import spikeinterface as si

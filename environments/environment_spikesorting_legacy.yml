@@ -10,28 +10,28 @@
 # equivalent of the dedicated `pytest-legacy` CI job that runs those
 # suites under the legacy SpikeInterface 0.99 line instead.
 #
-# 1. Create (from the repo root; the pip section installs the package
+# 1. Relax the SI-0.104 pins in pyproject so the package's deps resolve to
+#    the SI-0.99 line the v0/v1 active runtime paths need. pyproject's main
+#    dependencies hard-pin ``spikeinterface==0.104.3`` (+ ``probeinterface
+#    >=0.3.2`` + numpy 2 transitively) for the v2 pipeline; installing that
+#    stack and downgrading afterward leaves an inconsistent set (numpy 2 ->
+#    np.issctype, probeinterface 0.3.x contact-check, recompute namespace
+#    mismatch). Relaxing the pins FIRST lets the env build resolve a coherent
+#    SI-0.99 stack in one pass, matching master's run-tests env. The
+#    `pytest-legacy` CI job sed-edits its ephemeral checkout; locally:
+#       sed -i \
+#         -e 's/"spikeinterface==0.104.3"/"spikeinterface>=0.99.1,<0.100"/' \
+#         -e 's/"probeinterface>=0.3.2"/"probeinterface>=0.2.19,<0.3"/' \
+#         -e 's/^  "numpy",/  "numpy>=1.23,<2",/' pyproject.toml
+# 2. Create (from the repo root; the pip section installs the package
 #    editable from the repo root via the `..` path):
 #      mamba env create -f environments/environment_spikesorting_legacy.yml
-# 2. Activate: `conda activate spyglass_spikesorting_legacy`
-# 3. Apply the legacy SpikeInterface override (REQUIRED second step).
-#    The ``test`` extra hard-pins ``spikeinterface==0.104.3`` (pyproject),
-#    so the ``mamba env create`` above installs the 0.104 line; the v0/v1
-#    active runtime paths need the 0.99 line. The two SI constraints can
-#    NOT be resolved in conda's single-pass pip section (that was the
-#    ``ResolutionImpossible``), so the downgrade is a separate pip call
-#    after env creation (the `pytest-legacy` CI job runs it as its own
-#    step):
-#       pip install --force-reinstall "spikeinterface>=0.99.1,<0.100"
+# 3. Activate: `conda activate spyglass_spikesorting_legacy`
 # 4. Run the legacy suites (Docker MySQL for DataJoint, or --no-docker
 #    null_server against an external MySQL as CI does):
 #       pytest tests/spikesorting/v0 tests/spikesorting/v1 --no-docker --no-dlc
-#
-# NOTE: the legacy SpikeInterface 0.99 line predates the repo's
-# ``probeinterface>=0.3.2`` / 0.104-era pins. The post-create
-# ``--force-reinstall`` (header step 3) re-resolves SpikeInterface's own
-# transitive constraints; if a conflict surfaces in CI, pin the offending
-# transitive dep (e.g. probeinterface) into that step's install line.
+#    Restore pyproject afterward (`git checkout pyproject.toml`) -- the pin
+#    relaxation is a build-time-only edit, never committed.
 name: spyglass_spikesorting_legacy
 channels:
   - conda-forge
@@ -45,11 +45,9 @@ dependencies:
   - pip:
       # Editable install of the repo root (this file lives in
       # environments/, so the package root is one level up). The ``test``
-      # extra brings the test deps and its pinned ``spikeinterface==0.104.3``.
-      # The 0.99 downgrade the v0/v1 runtime needs is NOT applied here: the
-      # ``==0.104.3`` pin and ``>=0.99,<0.101`` cannot co-resolve in conda's
-      # single-pass pip section. Apply it as a separate post-create step
-      # (see header step 3; the `pytest-legacy` CI job runs it):
-      #   pip install --force-reinstall "spikeinterface>=0.99.1,<0.100"
+      # extra brings the test deps. With the pyproject pins relaxed first
+      # (header step 1), this resolves the SI-0.99 line + a compatible
+      # numpy/probeinterface/neo/pynwb/hdmf set in a single pass; without
+      # that edit it would install the v2 ``spikeinterface==0.104.3`` stack.
       - mountainsort4
       - --editable "..[test]"
