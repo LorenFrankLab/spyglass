@@ -327,7 +327,7 @@ class AbstractGraph(ABC):
             ft = FreeTable(self.connection, table)
             self._set_node(table, "ft", ft)
 
-        return ft & restr
+        return ft & self._coerce_to_condition(ft, restr)
 
     def _get_ft(self, table, with_restr=False, warn=True):
         """Get FreeTable from graph node. If one doesn't exist, create it."""
@@ -618,13 +618,13 @@ class AbstractGraph(ABC):
                 + f" -> {self._camel(next_list)}"
             )
 
+        cascaded_leaves = []
         for next_table, data in next_tables.items():
             if next_table.isnumeric():  # Skip alias nodes
                 next_table, data = next_func(next_table).popitem()
 
             if (
-                next_table in self.visited
-                or next_table in self.no_visit  # Subclasses can set this
+                next_table in self.no_visit  # Subclasses can set this
                 or table == next_table
             ):
                 reason = (
@@ -645,6 +645,32 @@ class AbstractGraph(ABC):
             if next_restr == ["False"]:  # Stop cascade if empty restriction
                 continue
 
+            if next_table in self.visited:
+                # check if new restriction contains entries not in existing restriction
+                # if so, need to cascade again and merge
+                if not bool(
+                    self._get_ft_with_restr(next_table, next_restr).proj()
+                    - self._get_ft(next_table, with_restr=True).proj()
+                ):
+                    self._log_truncate(
+                        f"Already cascaded: {self._camel(next_table)}"
+                    )
+                    continue
+
+                # trigger a new cascade from this node to ensure restrictions are merged across paths
+                leaf_graph = RestrGraph(
+                    seed_table=next_table,
+                    leaves=[
+                        {"table_name": next_table, "restriction": next_restr}
+                    ],
+                    include_files=False,
+                    direction=direction,
+                    verbose=self.verbose,
+                    cascade=True,
+                )
+                cascaded_leaves.append(leaf_graph)
+                continue
+
             self.cascade1(
                 table=next_table,
                 restriction=next_restr,
@@ -652,6 +678,12 @@ class AbstractGraph(ABC):
                 replace=replace,
                 count=count + 1,
             )
+
+        self.cascaded = True
+        self = (
+            self + cascaded_leaves
+        )  # Merge any new cascaded leaves from visited nodes
+        self.cascaded = False  # Reset cascaded to False after merge
 
     # ---------------------------- Graph Properties ----------------------------
 
