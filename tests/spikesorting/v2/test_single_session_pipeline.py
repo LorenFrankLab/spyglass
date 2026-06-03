@@ -2878,30 +2878,70 @@ def test_run_v2_pipeline_idempotent_row_counts(polymer_smoke_session):
     manifest2 = run_v2_pipeline(**kwargs)
     assert manifest2["merge_id"] == manifest["merge_id"]
 
+    # Count by LOGICAL identity, not by the generated UUID PK. The PKs
+    # (recording_id, artifact_id, sorting_id, merge_id) are fresh
+    # ``uuid.uuid4()`` values, so ``& {pk: <uuid>}`` is always 1 by
+    # construction and would NOT catch a second logical selection inserted
+    # with a different UUID, nor a second root curation for the sorting.
+    # Each count below uses the same logical key ``insert_selection``
+    # dedups on (and the root-curation identity the orchestrator reuses).
+    rec_row = (
+        RecordingSelection & {"recording_id": manifest["recording_id"]}
+    ).fetch1()
+    rec_logical = {k: v for k, v in rec_row.items() if k != "recording_id"}
+
+    art_row = (
+        ArtifactSelection * ArtifactSelection.RecordingSource
+        & {"artifact_id": manifest["artifact_id"]}
+    ).fetch1()
+
+    sort_row = (
+        SortingSelection
+        * SortingSelection.RecordingSource
+        * SortingSelection.ArtifactSource
+        & {"sorting_id": manifest["sorting_id"]}
+    ).fetch1()
+
     stage_counts = {
-        "RecordingSelection": len(
-            RecordingSelection & {"recording_id": manifest["recording_id"]}
-        ),
+        "RecordingSelection": len(RecordingSelection & rec_logical),
         "ArtifactSelection": len(
-            ArtifactSelection & {"artifact_id": manifest["artifact_id"]}
+            ArtifactSelection * ArtifactSelection.RecordingSource
+            & {
+                "recording_id": art_row["recording_id"],
+                "artifact_params_name": art_row["artifact_params_name"],
+            }
         ),
         "SortingSelection": len(
-            SortingSelection & {"sorting_id": manifest["sorting_id"]}
+            SortingSelection
+            * SortingSelection.RecordingSource
+            * SortingSelection.ArtifactSource
+            & {
+                "sorter": sort_row["sorter"],
+                "sorter_params_name": sort_row["sorter_params_name"],
+                "recording_id": sort_row["recording_id"],
+                "artifact_id": sort_row["artifact_id"],
+            }
         ),
-        "CurationV2": len(
+        # A re-run must NOT mint a second ROOT curation for the sorting.
+        "CurationV2_root": len(
             CurationV2
+            & {
+                "sorting_id": manifest["sorting_id"],
+                "parent_curation_id": -1,
+            }
+        ),
+        # ...nor a second merge entry for that curation.
+        "SpikeSortingOutput.CurationV2": len(
+            SpikeSortingOutput.CurationV2
             & {
                 "sorting_id": manifest["sorting_id"],
                 "curation_id": manifest["curation_id"],
             }
         ),
-        "SpikeSortingOutput": len(
-            SpikeSortingOutput & {"merge_id": manifest["merge_id"]}
-        ),
     }
     assert all(c == 1 for c in stage_counts.values()), (
-        "run_v2_pipeline rerun left duplicate rows (expected exactly 1 "
-        f"per stage): {stage_counts}"
+        "run_v2_pipeline rerun left duplicate LOGICAL rows (expected "
+        f"exactly 1 per stage): {stage_counts}"
     )
 
 
@@ -11726,72 +11766,84 @@ def test_shared_artifact_group_multi_member_union(
     )
 
     group_name = "v2_multi_member_union_group"
-    (
-        SharedArtifactGroup & {"shared_artifact_group_name": group_name}
-    ).super_delete(warn=False)
-    SharedArtifactGroup.insert_group(
-        group_name,
-        [{"recording_id": rid_a}, {"recording_id": rid_b}],
-    )
-    assert (
-        len(
-            SharedArtifactGroup.Member
+
+    def _clear_shared_group():
+        # Master-first cleanup: drop any ArtifactDetection +
+        # ArtifactSelection whose source part references this group BEFORE
+        # the group itself. An interrupted prior run can leave a
+        # SharedArtifactGroupSource part whose master must go first;
+        # deleting the group ahead of it would orphan/block on that part.
+        stale_art_ids = (
+            ArtifactSelection.SharedArtifactGroupSource
             & {"shared_artifact_group_name": group_name}
+        ).fetch("artifact_id")
+        for aid in stale_art_ids:
+            (ArtifactDetection & {"artifact_id": aid}).delete(safemode=False)
+            (ArtifactSelection & {"artifact_id": aid}).super_delete(warn=False)
+        (
+            SharedArtifactGroup & {"shared_artifact_group_name": group_name}
+        ).super_delete(warn=False)
+
+    _clear_shared_group()
+    try:
+        SharedArtifactGroup.insert_group(
+            group_name,
+            [{"recording_id": rid_a}, {"recording_id": rid_b}],
         )
-        == 2
-    )
-
-    art_pk = ArtifactSelection.insert_selection(
-        {
-            "shared_artifact_group_name": group_name,
-            "artifact_params_name": params_name,
-        }
-    )
-    ArtifactDetection.populate(art_pk, reserve_jobs=False)
-
-    interval_name = artifact_interval_list_name(art_pk["artifact_id"])
-    rows = (
-        IntervalList
-        & {
-            "nwb_file_name": nwb_file_name,
-            "interval_list_name": interval_name,
-        }
-    ).fetch(as_dict=True)
-    # Single session -> one shared row covering every member.
-    assert (
-        len(rows) == 1
-    ), f"expected one shared IntervalList row; got {len(rows)}"
-    valid_times = rows[0]["valid_times"]
-
-    # The union scan removed member A's artifact: the single base chunk is
-    # split into exactly two valid intervals around the 1.5 s transient,
-    # and no valid interval contains it. A clean-only (member B) scan would
-    # leave one full-window interval instead.
-    art_mid = 0.5 * (art_lo + art_hi) / fs  # ~1.5 s
-    assert valid_times.shape == (2, 2), (
-        f"union scan should split into 2 intervals at the artifact; got "
-        f"valid_times={valid_times.tolist()} (shape {valid_times.shape}). "
-        "A per-member scan of the clean member would leave a single "
-        "full-window interval -- the union channels were not combined."
-    )
-    for start, end in valid_times:
-        assert not (start < art_mid < end), (
-            f"a valid interval [{start}, {end}] spans the artifact at "
-            f"{art_mid}s; the union scan did not remove it."
+        assert (
+            len(
+                SharedArtifactGroup.Member
+                & {"shared_artifact_group_name": group_name}
+            )
+            == 2
         )
-    # Coverage survives on both sides of the artifact.
-    assert any(s <= 0.5 <= e for s, e in valid_times), "pre-artifact lost"
-    assert any(s <= 2.4 <= e for s, e in valid_times), "post-artifact lost"
 
-    # Every member resolves to the SAME artifact-removed times (single
-    # shared row; the per-member dict has one session entry equal to it).
-    shared = ArtifactDetection().get_artifact_removed_intervals(art_pk)
-    assert isinstance(shared, dict) and nwb_file_name in shared
-    _np.testing.assert_array_equal(shared[nwb_file_name], valid_times)
+        art_pk = ArtifactSelection.insert_selection(
+            {
+                "shared_artifact_group_name": group_name,
+                "artifact_params_name": params_name,
+            }
+        )
+        ArtifactDetection.populate(art_pk, reserve_jobs=False)
 
-    # Cleanup.
-    (ArtifactDetection & art_pk).delete(safemode=False)
-    (ArtifactSelection & art_pk).super_delete(warn=False)
-    (
-        SharedArtifactGroup & {"shared_artifact_group_name": group_name}
-    ).super_delete(warn=False)
+        interval_name = artifact_interval_list_name(art_pk["artifact_id"])
+        rows = (
+            IntervalList
+            & {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": interval_name,
+            }
+        ).fetch(as_dict=True)
+        # Single session -> one shared row covering every member.
+        assert (
+            len(rows) == 1
+        ), f"expected one shared IntervalList row; got {len(rows)}"
+        valid_times = rows[0]["valid_times"]
+
+        # The union scan removed member A's artifact: the single base chunk
+        # is split into exactly two valid intervals around the 1.5 s
+        # transient, and no valid interval contains it. A clean-only
+        # (member B) scan would leave one full-window interval instead.
+        art_mid = 0.5 * (art_lo + art_hi) / fs  # ~1.5 s
+        assert valid_times.shape == (2, 2), (
+            f"union scan should split into 2 intervals at the artifact; got "
+            f"valid_times={valid_times.tolist()} (shape {valid_times.shape}). "
+            "A per-member scan of the clean member would leave a single "
+            "full-window interval -- the union channels were not combined."
+        )
+        for start, end in valid_times:
+            assert not (start < art_mid < end), (
+                f"a valid interval [{start}, {end}] spans the artifact at "
+                f"{art_mid}s; the union scan did not remove it."
+            )
+        # Coverage survives on both sides of the artifact.
+        assert any(s <= 0.5 <= e for s, e in valid_times), "pre-artifact lost"
+        assert any(s <= 2.4 <= e for s, e in valid_times), "post-artifact lost"
+
+        # Every member resolves to the SAME artifact-removed times (single
+        # shared row; the per-member dict has one session entry equal to it).
+        shared = ArtifactDetection().get_artifact_removed_intervals(art_pk)
+        assert isinstance(shared, dict) and nwb_file_name in shared
+        _np.testing.assert_array_equal(shared[nwb_file_name], valid_times)
+    finally:
+        _clear_shared_group()

@@ -80,8 +80,10 @@ def _clusterless_noise_levels(
     governs how ``detect_threshold`` is interpreted:
 
     * ``"uv"`` -> ``[1.0]`` so ``detect_peaks`` reads ``detect_threshold``
-      in raw microvolts (the value is broadcast across channels by the
-      caller).
+      in the recording's native amplitude units (broadcast across channels
+      by the caller). Under v2's gain-free preprocessing those units are
+      raw ADC counts, not true microvolts unless the recording is already
+      gain-scaled -- see CHANGELOG ``[0.5.6]``.
     * ``"mad"`` -> ``None`` so SpikeInterface estimates per-channel MAD
       and ``detect_threshold`` is a MAD multiplier.
     """
@@ -258,8 +260,10 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
             _validate_params(
                 _get_sorter_schema("clusterless_thresholder"),
                 # ``threshold_unit="uv"`` makes the shipped
-                # ``detect_threshold=100`` read as microvolts (raw
-                # amplitude) rather than as a MAD multiplier, matching
+                # ``detect_threshold=100`` read in the recording's native
+                # amplitude units (raw ADC counts under v2's gain-free
+                # preprocessing, not true uV unless gain-scaled) rather
+                # than as a MAD multiplier, matching
                 # v1's ``default_clusterless`` at
                 # ``src/spyglass/spikesorting/v1/sorting.py:177``. The
                 # explicit ``noise_levels=[1.0]`` is the equivalent
@@ -1789,8 +1793,10 @@ class Sorting(SpyglassMixin, dj.Computed):
         # ``threshold_unit`` is a Spyglass-side knob, not a detect_peaks
         # kwarg: strip it and use it to resolve the noise_levels
         # precedence (explicit noise_levels win; otherwise "uv" -> [1.0]
-        # so detect_threshold reads in raw uV, "mad" -> None so SI
-        # estimates per-channel MAD).
+        # so detect_threshold reads in the recording's native units --
+        # raw ADC counts under v2's gain-free preprocessing, not true uV
+        # unless gain-scaled; "mad" -> None so SI estimates per-channel
+        # MAD).
         threshold_unit = params.pop("threshold_unit", "mad")
         nl_in = _clusterless_noise_levels(
             params.get("noise_levels"), threshold_unit

@@ -215,8 +215,11 @@ class ClusterlessThresholderSchema(BaseModel):
         default="mad",
         description=(
             "How detect_threshold is interpreted when noise_levels is "
-            "left unset: 'uv' derives noise_levels=[1.0] (raw microvolts) "
-            "and 'mad' lets SpikeInterface estimate per-channel MAD. When "
+            "left unset: 'uv' derives noise_levels=[1.0] so the threshold "
+            "is in the recording's native units (raw ADC counts under "
+            "v2's gain-free preprocessing, not true microvolts unless "
+            "gain-scaled) and 'mad' lets SpikeInterface estimate "
+            "per-channel MAD. When "
             "noise_levels IS set explicitly it takes precedence and is "
             "used verbatim -- threshold_unit is then descriptive only. The "
             "two are NOT cross-validated because an explicit per-channel "
