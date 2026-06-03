@@ -190,6 +190,16 @@ SpikeSortingOutput().get_spike_times({"merge_id": merge_id})
 SpikeSortingOutput.get_unit_brain_regions({"merge_id": merge_id})
 ```
 
+Clusterless decoding works for v2 sorts under SpikeInterface 0.104:
+`UnitWaveformFeatures` (the decoding input) extracts per-spike amplitudes for a
+v2 `merge_id` from a freshly built `SortingAnalyzer` — it no longer requires the
+legacy SI 0.99 environment or the removed `extract_waveforms`. The `amplitude`
+feature (used by clusterless decoding) and `full_waveform` are supported;
+`spike_location` is not yet wired for v2 sources. A zero-unit v2 curation yields
+an empty-but-valid features row. Note that v2 amplitudes are in microvolts,
+whereas the legacy v0/v1 path used raw ADC counts, so v2 and v1 feature
+magnitudes are not directly comparable — retrain decoders per pipeline version.
+
 ### Paper export
 
 A v2 `merge_id` exports the same way a v1 one does — there is no v2-specific

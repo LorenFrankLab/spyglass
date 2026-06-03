@@ -284,6 +284,33 @@ in-flight v1 PR on `copilot/fix-populating-artifact-detection`.
   count-equivalent uV via `count × gain_uV_per_count`) until v2
   ships a gain-aware detection path.
 
+#### Clusterless waveform-feature extraction works for v2 sorts under SpikeInterface 0.104
+
+`UnitWaveformFeatures.make` (`decoding/v1/waveform_features.py`) — the
+clusterless-decoding input — previously raised on every source because it
+opened with the legacy-SI guard (`RuntimeError` under SpikeInterface ≥ 0.101)
+and extracted waveforms with the removed `si.extract_waveforms` /
+`WaveformExtractor`. The v2 dispatch branch added in Phase 1b was therefore
+unreachable, so clusterless decoding (a primary v2 consumer) could not compute
+features for a v2 `merge_id`.
+
+The source is now dispatched **before** any SpikeInterface call: the legacy-SI
+guard applies only to the v0/v1 branches (unchanged under the legacy SI 0.99
+environment), while a v2 (`CurationV2`) source builds a fresh in-memory
+`SortingAnalyzer` from the merge source's recording + sorting and reads
+per-spike amplitudes from its `waveforms` extension (`random_spikes`
+`method="all"` so every spike is covered, not a 500-spike subsample). Features
+are keyed by the true NWB unit_id (correct for sparse merge-applied ids), and a
+zero-unit v2 curation yields an empty-but-valid features row instead of
+crashing. No `si.extract_waveforms` on the v2 path. Supported v2 features:
+`amplitude` (what clusterless decoding uses) and `full_waveform`;
+`spike_location` is not yet wired for v2 sources and raises a clear error.
+
+Note: v2 amplitudes are in microvolts (`return_in_uV=True`), whereas the
+legacy v0/v1 path read raw ADC counts. v2 and v1 feature magnitudes are
+therefore not directly comparable — retrain clusterless decoders per pipeline
+version rather than mixing v1 and v2 marks.
+
 #### Spike Sorting v2 — v1→v2 migration reference (breaking changes)
 
 A consolidated, click-through enumeration of every user-visible v1→v2
