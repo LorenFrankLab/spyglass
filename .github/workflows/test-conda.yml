@@ -388,13 +388,25 @@ jobs:
       # 0.99.1), NOT <0.101: 0.100.x changed NwbRecordingExtractor's
       # timestamp handling (load_time_vector hits "'Group' object has no
       # attribute 'timestamps'") and is not a configuration v0/v1 support.
+      #
+      # Also pin probeinterface < 0.3 (the env file installs >=0.3.2 for the
+      # SI 0.104 stack). SI 0.99.1's read builds a dummy probe from the NWB
+      # electrode locations via set_dummy_probe_from_locations; probeinterface
+      # 0.3.x added a strict "contact positions must be unique" check that
+      # rejects the tetrode test data (channels share (+/-6.25, 0)). SI 0.104
+      # does not build that dummy probe, so run-tests/pytest-v2 keep 0.3.2;
+      # only this SI-0.99.1 job needs the contemporary 0.2.x (what master and
+      # the legacy env actually run). neo/numpy stay as resolved.
       run: |
-        pip install --force-reinstall "spikeinterface>=0.99.1,<0.100"
+        pip install --force-reinstall \
+          "spikeinterface>=0.99.1,<0.100" "probeinterface>=0.2.19,<0.3"
         python - <<'PY'
         from packaging.version import Version
         import spikeinterface as si
-        print("SpikeInterface", si.__version__)
+        import probeinterface as pi
+        print("SpikeInterface", si.__version__, "| probeinterface", pi.__version__)
         assert Version(si.__version__) < Version("0.100"), si.__version__
+        assert Version(pi.__version__) < Version("0.3"), pi.__version__
         PY
     - name: Cache test data
       id: cache-test-data
