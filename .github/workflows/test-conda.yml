@@ -237,18 +237,36 @@ jobs:
       # so the output is deterministic; SHAs in
       # ``fixtures/fixtures_manifest.json`` pin the contract.
       #
-      # The 60s polymer / 60s Neuropixels / 120s drift fixtures
-      # are NOT generated here (too slow for default CI); their
-      # tests skip cleanly when absent and are intended for the
-      # manual / scheduled full runs.
+      # The 60s polymer / 60s Neuropixels / 120s drift fixtures are too
+      # slow to build on every PR, so they are NOT generated here; their
+      # tests skip cleanly when absent. The 60s polymer fixture IS built on
+      # the nightly schedule / manual dispatch (next step) so the tests
+      # that depend on it run regularly rather than only on a developer's
+      # local run.
       run: |
         python tests/spikesorting/v2/fixtures/generate_mearec.py --smoke
+    - name: Generate 60s polymer fixture (scheduled / manual full runs)
+      # Built only on the nightly cron and manual workflow_dispatch -- a
+      # single 60s MEArec recording is minutes of generation, too slow for
+      # per-PR runs. Generating just the 60s polymer fixture (``--only``)
+      # un-skips the tests that need it: the merge/apply_merge
+      # frame-equality check and the MS5 ground-truth accuracy gate
+      # (test_single_session_pipeline.py) plus the clusterless sparse-id
+      # case (test_clusterless_waveform_features.py). Per-PR runs still skip
+      # those; their guarded behavior is ALSO gated per-PR by smoke-fixture
+      # tests (e.g. test_lazy_vs_applied_merge_frames_equal runs the
+      # lazy-vs-applied merge on the smoke fixture), so nothing is silently
+      # uncovered -- the 60s fixture is the deeper real-MS5 confirmation.
+      if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      run: |
+        python tests/spikesorting/v2/fixtures/generate_mearec.py \
+          --only mearec_polymer_128ch_60s
     - name: Run modern spike-sorting tests
-      # Collects the whole v2 dir, including the clusterless waveform-feature
-      # tests (test_clusterless_waveform_features.py): the smoke fixture
-      # generated above drives the clusterless + zero-unit cases; the sparse-id
-      # case needs the 60s polymer fixture (not generated in default CI) and
-      # skips cleanly until a manual / scheduled full run.
+      # Collects the whole v2 dir. The smoke fixture drives the per-PR
+      # integration + clusterless + zero-unit cases; when the 60s polymer
+      # fixture is present (scheduled / manual runs) the merge, MS5
+      # ground-truth, and clusterless sparse-id cases run too -- otherwise
+      # they skip cleanly via their ``*_PATH.exists()`` / fixture guards.
       run: |
         pytest tests/spikesorting/v2/ --no-docker --no-dlc -q
     # --- Phase 0c plan-line 125 matching-extra resolver-evidence job.
