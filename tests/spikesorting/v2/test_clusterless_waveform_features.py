@@ -19,17 +19,22 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import datajoint as dj
 import numpy as np
 import pytest
 import spikeinterface as si
 from packaging.version import Version
 
+# The v2 conftest (tests/spikesorting/v2/conftest.py) provides the autouse
+# no-op ``mini_insert`` (skips the repo-wide minirec Box download/ingestion)
+# and the boolean ``safemode`` override this module's super_delete cleanup
+# relies on -- so this file lives here rather than under tests/decoding/.
+#
 # NOTE: imports of the v2 test infrastructure (``copy_and_insert_nwb``,
 # ``_clean_session_v2``) are deliberately LAZY (inside the helpers/fixtures
-# below). This module also runs in the legacy SI 0.99 job for the guard test;
-# importing the heavy v2 test modules at collection time could fail under the
-# legacy environment, whereas the legacy test itself touches none of them.
+# below). This module also runs in the legacy SI 0.99 job for the guard test
+# (collected as a single explicit path, NOT the whole v2 dir); importing the
+# heavy v2 test modules at collection time could fail under the legacy
+# environment, whereas the legacy test itself touches none of them.
 
 _SI_IS_LEGACY = Version(si.__version__) < Version("0.101")
 _skip_if_legacy = pytest.mark.skipif(
@@ -41,9 +46,7 @@ _skip_unless_legacy = pytest.mark.skipif(
     reason=f"legacy v0/v1 guard test needs SI<0.101 (have {si.__version__})",
 )
 
-_FIXTURE_DIR = (
-    Path(__file__).resolve().parents[1] / "spikesorting" / "v2" / "fixtures"
-)
+_FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
 _FIXTURE_PATH = _FIXTURE_DIR / "mearec_polymer_smoke.nwb"
 # 60s polymer fixture: same probe geometry as the smoke fixture (identical
 # probe_json in the fixtures manifest), so co-ingesting both in one module is
@@ -51,21 +54,6 @@ _FIXTURE_PATH = _FIXTURE_DIR / "mearec_polymer_smoke.nwb"
 _POLYMER_60S_PATH = _FIXTURE_DIR / "mearec_polymer_128ch_60s.nwb"
 _TEAM = "v2_wave_team"
 _AMP_PARAM = "v2_wave_amplitude"
-
-
-@pytest.fixture(autouse=True)
-def _disable_datajoint_safemode():
-    """Force ``dj.config['safemode']`` to boolean False.
-
-    The Docker MySQL credentials set ``safemode`` to the *string* ``"false"``
-    (truthy), so DataJoint prompts ``"Commit deletes?"`` on every non-empty
-    delete -- an ``EOFError`` under pytest's captured stdin. The v2 conftest
-    fixes this for ``tests/spikesorting/v2`` tests; this module lives under
-    ``tests/decoding`` and reuses the v2 ``super_delete`` cleanup pattern, so
-    it needs the same per-test override.
-    """
-    dj.config["safemode"] = False
-    yield
 
 
 @pytest.fixture(scope="module")
