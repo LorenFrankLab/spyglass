@@ -80,7 +80,12 @@ def test_default_franklab_whiten_none():
     # Locate the default_franklab row in _DEFAULT_CONTENTS.
     contents = {
         name: params
-        for (name, params, _ver, _job) in PreprocessingParameters._DEFAULT_CONTENTS
+        for (
+            name,
+            params,
+            _ver,
+            _job,
+        ) in PreprocessingParameters._DEFAULT_CONTENTS
     }
     assert "default_franklab" in contents
     assert contents["default_franklab"]["whiten"] is None
@@ -252,8 +257,7 @@ def test_ms4_default_row_only_inserted_when_ms4_installed():
     # The catalog always advertises MS4 (introspection), regardless of
     # install status.
     assert any(
-        row[0] == "mountainsort4"
-        for row in SorterParameters._DEFAULT_CONTENTS
+        row[0] == "mountainsort4" for row in SorterParameters._DEFAULT_CONTENTS
     )
 
     if "mountainsort4" in sis.installed_sorters():
@@ -298,13 +302,11 @@ def test_get_spiking_sorting_v2_merge_ids_resolves_restriction(
 
     # Clear any prior curation (master-before-part) then mint a root,
     # which registers exactly one v2 merge row for this sorting.
-    curation_keys = (CurationV2 & populated_sorting).fetch(
-        "KEY", as_dict=True
-    )
+    curation_keys = (CurationV2 & populated_sorting).fetch("KEY", as_dict=True)
     if curation_keys:
-        for mid in (
-            SpikeSortingOutput.CurationV2 & curation_keys
-        ).fetch("merge_id"):
+        for mid in (SpikeSortingOutput.CurationV2 & curation_keys).fetch(
+            "merge_id"
+        ):
             (SpikeSortingOutput & {"merge_id": mid}).super_delete(warn=False)
     (CurationV2 & populated_sorting).super_delete(warn=False)
 
@@ -330,12 +332,17 @@ def test_no_phase_label_leakage_in_runtime_code():
     """Zero plan-phase identifier hits in runtime v2 source.
 
     The shared-contracts "Code Artifact Naming" invariant forbids
-    plan-phase identifiers (the literal strings checked below) in
-    runtime code, including comments and docstrings. Tests and
-    baseline-fixture machinery may still reference these labels
-    because they describe an immutable historical baseline that the
-    test corpus compares against.
+    plan-phase / plan-task identifiers (``Phase N``, ``phase-N``,
+    ``Task N``) in runtime code, including comments and docstrings.
+    The scan is a regex over the whole identifier family -- an earlier
+    fixed-literal list only matched ``Phase 1*`` and let a ``Phase 3``
+    reference slip through, so it is generalized here. Tests and
+    baseline-fixture machinery may still reference these labels because
+    they describe an immutable historical baseline that the test corpus
+    compares against.
     """
+    import re
+
     # parents[3] = repo root (parents[2] is ``tests/``, NOT
     # ``tests/src/``). The earlier ``parents[2]`` form resolved
     # to a nonexistent ``tests/src/...`` path so ``rglob`` walked
@@ -354,13 +361,17 @@ def test_no_phase_label_leakage_in_runtime_code():
         "is not a directory; the test would scan zero files and "
         "produce a vacuous pass. Check the parents[N] index."
     )
+    # ``Phase`` / ``Task`` followed by a number (any sub-label like
+    # ``1b``), or the plan-directory form ``phase-3``. Case-insensitive
+    # so ``phase 2`` is caught too.
+    label_re = re.compile(r"\b(?:phase|task)[\s-]+\d", re.IGNORECASE)
     offenders: list[str] = []
     for py_path in v2_src.rglob("*.py"):
         text = py_path.read_text()
-        for literal in ("Phase 1 ", "Phase 1b ", "Phase 1c ", "Phase 1.", "Phase 1\n"):
-            if literal in text:
-                offenders.append(f"{py_path.relative_to(v2_src)}: {literal!r}")
-                break
+        for match in label_re.finditer(text):
+            offenders.append(
+                f"{py_path.relative_to(v2_src)}: {match.group()!r}"
+            )
     assert not offenders, f"Phase-label leakage in runtime v2: {offenders}"
 
 
@@ -621,10 +632,7 @@ def test_make_compute_is_pure():
             # local alias, or directly on a forbidden receiver type.
             if attr in forbidden_attrs:
                 # ``self.insert1``
-                if (
-                    isinstance(func.value, ast.Name)
-                    and func.value.id == "self"
-                ):
+                if isinstance(func.value, ast.Name) and func.value.id == "self":
                     pytest.fail(
                         f"{cls_name}.make_compute calls "
                         f"self.{attr}; make_compute must be pure "
@@ -745,7 +753,10 @@ def test_make_compute_purity_guard_actually_catches_regressions():
         for n in _ast.walk(tree):
             if isinstance(n, _ast.Assign) and isinstance(n.value, _ast.Call):
                 cf = n.value.func
-                if isinstance(cf, _ast.Name) and cf.id in forbidden_receiver_types:
+                if (
+                    isinstance(cf, _ast.Name)
+                    and cf.id in forbidden_receiver_types
+                ):
                     for tgt in n.targets:
                         if isinstance(tgt, _ast.Name):
                             tainted.add(tgt.id)

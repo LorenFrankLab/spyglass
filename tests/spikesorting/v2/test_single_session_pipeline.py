@@ -147,9 +147,7 @@ def test_set_group_by_column_matches_by_shank(polymer_smoke_session):
         groups=groups,
     )
     assert len(SortGroupV2 & polymer_smoke_session) == 4
-    assert (
-        len(SortGroupV2.SortGroupElectrode & polymer_smoke_session) == 128
-    )
+    assert len(SortGroupV2.SortGroupElectrode & polymer_smoke_session) == 128
 
 
 @pytest.mark.slow
@@ -372,9 +370,7 @@ def test_recording_populates_and_round_trips(
         }
     ).fetch1("valid_times")
     expected_duration = float(raw_times[-1][-1] - raw_times[0][0])
-    assert row["duration_s"] == pytest.approx(
-        expected_duration, rel=1e-3
-    ), (
+    assert row["duration_s"] == pytest.approx(expected_duration, rel=1e-3), (
         f"Recording.duration_s = {row['duration_s']}; expected "
         f"~{expected_duration} from IntervalList valid_times span."
     )
@@ -393,7 +389,9 @@ def test_recording_populates_and_round_trips(
 
 
 _POLYMER_60S_PATH = (
-    Path(__file__).resolve().parent / "fixtures" / "mearec_polymer_128ch_60s.nwb"
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "mearec_polymer_128ch_60s.nwb"
 )
 _TETRODE_60S_PATH = (
     Path(__file__).resolve().parent / "fixtures" / "mearec_tetrode_60s.nwb"
@@ -575,9 +573,7 @@ def _clear_curations(sorting_key):
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.curation import CurationV2
 
-    merge_ids = (
-        SpikeSortingOutput.CurationV2 & sorting_key
-    ).fetch("merge_id")
+    merge_ids = (SpikeSortingOutput.CurationV2 & sorting_key).fetch("merge_id")
     for mid in merge_ids:
         (SpikeSortingOutput & {"merge_id": mid}).super_delete(warn=False)
     (CurationV2 & sorting_key).super_delete(warn=False)
@@ -628,22 +624,20 @@ def _clean_session_v2(session_key):
     # to a sorting derived from this session. The merge insert wraps
     # the part FK in a transaction with the master, so cleanup must
     # take the master first to satisfy the master-before-part rule.
-    rec_keys = (
-        RecordingSelection & session_key
-    ).fetch("KEY", as_dict=True)
+    rec_keys = (RecordingSelection & session_key).fetch("KEY", as_dict=True)
     if rec_keys:
         sorting_keys = (
             SortingSelection.RecordingSource
             & [{"recording_id": r["recording_id"]} for r in rec_keys]
         ).fetch("KEY", as_dict=True)
         if sorting_keys:
-            merge_ids = (
-                SpikeSortingOutput.CurationV2 & sorting_keys
-            ).fetch("merge_id")
+            merge_ids = (SpikeSortingOutput.CurationV2 & sorting_keys).fetch(
+                "merge_id"
+            )
             for mid in merge_ids:
-                (
-                    SpikeSortingOutput & {"merge_id": mid}
-                ).super_delete(warn=False)
+                (SpikeSortingOutput & {"merge_id": mid}).super_delete(
+                    warn=False
+                )
             (CurationV2 & sorting_keys).super_delete(warn=False)
             (Sorting & sorting_keys).super_delete(warn=False)
             # Step 2: drop SortingSelection masters BEFORE removing
@@ -667,9 +661,9 @@ def _clean_session_v2(session_key):
     # cascade through the part-without-master constraint. Delete
     # master + Member explicitly (master first satisfies the
     # master-before-part rule).
-    shared_groups = (
-        SharedArtifactGroup & session_key
-    ).fetch("KEY", as_dict=True)
+    shared_groups = (SharedArtifactGroup & session_key).fetch(
+        "KEY", as_dict=True
+    )
     if shared_groups:
         (SharedArtifactGroup & shared_groups).super_delete(warn=False)
 
@@ -1100,9 +1094,9 @@ def test_artifact_detection_populates_and_writes_interval_list(
     ArtifactDetection.populate(pk, reserve_jobs=False)
     assert len(ArtifactDetection & pk) == 1
 
-    nwb_file_name = (
-        RecordingSelection & populated_recording
-    ).fetch1("nwb_file_name")
+    nwb_file_name = (RecordingSelection & populated_recording).fetch1(
+        "nwb_file_name"
+    )
     interval_list_name = f"artifact_{pk['artifact_id']}"
     saved = (
         IntervalList
@@ -1154,17 +1148,14 @@ def test_artifact_detection_delete_removes_interval_list_row(
     )
     ArtifactDetection.populate(pk, reserve_jobs=False)
 
-    nwb_file_name = (
-        RecordingSelection & populated_recording
-    ).fetch1("nwb_file_name")
-    interval_list_name = f"artifact_{pk['artifact_id']}"
-    assert (
-        IntervalList
-        & {
-            "nwb_file_name": nwb_file_name,
-            "interval_list_name": interval_list_name,
-        }
+    nwb_file_name = (RecordingSelection & populated_recording).fetch1(
+        "nwb_file_name"
     )
+    interval_list_name = f"artifact_{pk['artifact_id']}"
+    assert IntervalList & {
+        "nwb_file_name": nwb_file_name,
+        "interval_list_name": interval_list_name,
+    }
 
     (ArtifactDetection & pk).delete()
 
@@ -1213,9 +1204,7 @@ def test_sorting_populates_with_mountainsort5(populated_recording):
         {
             "recording_id": populated_recording["recording_id"],
             "sorter": "mountainsort5",
-            "sorter_params_name": (
-                "franklab_tetrode_hippocampus_30kHz_ms5"
-            ),
+            "sorter_params_name": ("franklab_tetrode_hippocampus_30kHz_ms5"),
             "artifact_id": art_pk["artifact_id"],
         }
     )
@@ -1916,9 +1905,7 @@ def test_recording_timestamp_repair_recorded(
     def _fake_repaired(recording, raw_path, recording_id=None):
         # Real (monotonic) timestamps so the write succeeds; only the
         # reported adjusted-sample count is forced.
-        timestamps, _ = original(
-            recording, raw_path, recording_id=recording_id
-        )
+        timestamps, _ = original(recording, raw_path, recording_id=recording_id)
         return timestamps, forced_n_changed
 
     monkeypatch.setattr(
@@ -2244,9 +2231,7 @@ def populated_sorting(populated_recording):
         {
             "recording_id": populated_recording["recording_id"],
             "sorter": "mountainsort5",
-            "sorter_params_name": (
-                "franklab_tetrode_hippocampus_30kHz_ms5"
-            ),
+            "sorter_params_name": ("franklab_tetrode_hippocampus_30kHz_ms5"),
             "artifact_id": art_pk["artifact_id"],
         }
     )
@@ -2266,9 +2251,7 @@ def test_curation_v2_insert_root_unlabeled(populated_sorting):
     # curation_id is stable.
     _clear_curations(populated_sorting)
 
-    pk = CurationV2.insert_curation(
-        sorting_key=populated_sorting, labels={}
-    )
+    pk = CurationV2.insert_curation(sorting_key=populated_sorting, labels={})
     assert pk == {**populated_sorting, "curation_id": 0}
     assert len(CurationV2 & pk) == 1
     # Pin not just the count but the actual unit_id set: a regression
@@ -2368,9 +2351,7 @@ def test_curation_v2_parent_validation_and_nonincreasing_ids(populated_sorting):
 
     _clear_curations(populated_sorting)
 
-    pk0 = CurationV2.insert_curation(
-        sorting_key=populated_sorting, labels={}
-    )
+    pk0 = CurationV2.insert_curation(sorting_key=populated_sorting, labels={})
     assert pk0["curation_id"] == 0
 
     # Child curation referencing pk0 succeeds.
@@ -2414,7 +2395,9 @@ def test_curation_v2_get_matchable_unit_ids_filters_labels(populated_sorting):
     from spyglass.spikesorting.v2.sorting import Sorting
 
     _clear_curations(populated_sorting)
-    units = sorted(int(u) for u in (Sorting.Unit & populated_sorting).fetch("unit_id"))
+    units = sorted(
+        int(u) for u in (Sorting.Unit & populated_sorting).fetch("unit_id")
+    )
     assert len(units) >= 1
     # Tag the first unit with BOTH an excluded label (artifact) and
     # an included label (mua). The "any excluded label wins" rule
@@ -2432,7 +2415,9 @@ def test_curation_v2_get_matchable_unit_ids_filters_labels(populated_sorting):
 
 
 @pytest.mark.slow
-def test_curation_v2_get_sort_group_info_returns_all_electrodes(populated_sorting):
+def test_curation_v2_get_sort_group_info_returns_all_electrodes(
+    populated_sorting,
+):
     """``get_sort_group_info`` returns a DataJoint relation covering
     every electrode in the sort group -- regression vs v1's
     ``fetch(limit=1)``."""
@@ -2444,9 +2429,7 @@ def test_curation_v2_get_sort_group_info_returns_all_electrodes(populated_sortin
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
     _clear_curations(populated_sorting)
-    pk = CurationV2.insert_curation(
-        sorting_key=populated_sorting, labels={}
-    )
+    pk = CurationV2.insert_curation(sorting_key=populated_sorting, labels={})
     rel = CurationV2().get_sort_group_info(pk)
     # The relation is a DataJoint object (not a DataFrame); we can
     # restrict it further. Just fetching its length proves it spans
@@ -2477,15 +2460,15 @@ def test_curation_v2_get_sorting_round_trips_spike_times(populated_sorting):
     from spyglass.spikesorting.v2.sorting import Sorting
 
     _clear_curations(populated_sorting)
-    pk = CurationV2.insert_curation(
-        sorting_key=populated_sorting, labels={}
-    )
+    pk = CurationV2.insert_curation(sorting_key=populated_sorting, labels={})
     src_sorting = Sorting().get_sorting(populated_sorting)
     cur_sorting = CurationV2().get_sorting(pk)
     assert set(cur_sorting.unit_ids) == set(src_sorting.unit_ids)
     for uid in src_sorting.unit_ids:
         src_times = src_sorting.get_unit_spike_train(uid, return_times=True)
-        cur_times = cur_sorting.get_unit_spike_train(int(uid), return_times=True)
+        cur_times = cur_sorting.get_unit_spike_train(
+            int(uid), return_times=True
+        )
         assert len(src_times) == len(cur_times)
         if len(src_times):
             assert np.allclose(np.sort(src_times), np.sort(cur_times))
@@ -2507,25 +2490,21 @@ def test_curation_v2_auto_registers_in_merge_table(populated_sorting):
 
     _clear_curations(populated_sorting)
     # Belt and suspenders: also clear any stale merge rows for this sort.
-    stale = (
-        SpikeSortingOutput.CurationV2 & populated_sorting
-    ).fetch("merge_id")
+    stale = (SpikeSortingOutput.CurationV2 & populated_sorting).fetch(
+        "merge_id"
+    )
     for mid in stale:
         (SpikeSortingOutput & {"merge_id": mid}).super_delete(warn=False)
 
-    pk = CurationV2.insert_curation(
-        sorting_key=populated_sorting, labels={}
-    )
+    pk = CurationV2.insert_curation(sorting_key=populated_sorting, labels={})
     # The merge part now has exactly one row for this curation.
-    merge_rows = (
-        SpikeSortingOutput.CurationV2 & pk
-    ).fetch(as_dict=True)
+    merge_rows = (SpikeSortingOutput.CurationV2 & pk).fetch(as_dict=True)
     assert len(merge_rows) == 1
     merge_id = merge_rows[0]["merge_id"]
     # And the master surfaces the v2 source enum.
-    assert (
-        SpikeSortingOutput & {"merge_id": merge_id}
-    ).fetch1("source") == "CurationV2"
+    assert (SpikeSortingOutput & {"merge_id": merge_id}).fetch1(
+        "source"
+    ) == "CurationV2"
 
     # Dispatch round-trip: get_unit_brain_regions resolves to
     # CurationV2's accessor and returns a DataFrame. Tighter than a
@@ -2649,17 +2628,13 @@ def test_spike_sorting_output_get_spike_times_v2_dispatch(populated_sorting):
     from spyglass.spikesorting.v2.sorting import Sorting
 
     _clear_curations(populated_sorting)
-    pk = CurationV2.insert_curation(
-        sorting_key=populated_sorting, labels={}
-    )
+    pk = CurationV2.insert_curation(sorting_key=populated_sorting, labels={})
     merge_id = (SpikeSortingOutput.CurationV2 & pk).fetch1("merge_id")
 
     # The consumer-facing API returns a list of per-unit spike-time
     # arrays. Pin shape (n_units arrays) + dtype (float seconds) +
     # value range (non-negative, within the recording duration).
-    spike_times = SpikeSortingOutput().get_spike_times(
-        {"merge_id": merge_id}
-    )
+    spike_times = SpikeSortingOutput().get_spike_times({"merge_id": merge_id})
     assert isinstance(spike_times, list)
     assert len(spike_times) > 0, (
         "get_spike_times returned no unit arrays for a v2 curation "
@@ -2727,9 +2702,7 @@ def test_get_restricted_merge_ids_v2_resolves_through_chain(populated_sorting):
     from spyglass.spikesorting.v2.curation import CurationV2
 
     _clear_curations(populated_sorting)
-    pk = CurationV2.insert_curation(
-        sorting_key=populated_sorting, labels={}
-    )
+    pk = CurationV2.insert_curation(sorting_key=populated_sorting, labels={})
     merge_ids = SpikeSortingOutput().get_restricted_merge_ids(
         {"sorting_id": pk["sorting_id"], "curation_id": pk["curation_id"]},
         sources=["v2"],
@@ -2845,6 +2818,91 @@ def test_run_v2_pipeline_end_to_end_and_idempotent(polymer_smoke_session):
             team_name="v2_test_team",
             preset="not_a_preset",
         )
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_run_v2_pipeline_idempotent_row_counts(polymer_smoke_session):
+    """A second ``run_v2_pipeline`` leaves exactly ONE row per stage.
+
+    ``test_run_v2_pipeline_end_to_end_and_idempotent`` checks that the
+    rerun returns the same PKs, but PK-equality alone does not prove the
+    second run inserted no duplicate rows -- a Selection whose insert
+    helper failed to dedup would return the same PK yet leave two rows.
+    This asserts ``len(... & pk) == 1`` on every stage table after the
+    second run, proving the rerun is a true no-op.
+    """
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetectionParameters,
+        ArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+        RecordingSelection,
+        SortGroupV2,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        SortingSelection,
+    )
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    PreprocessingParameters.insert_default()
+    ArtifactDetectionParameters.insert_default()
+    SorterParameters.insert_default()
+    LabTeam.insert1(
+        {"team_name": "v2_test_team", "team_description": "v2 pipeline tests"},
+        skip_duplicates=True,
+    )
+    if not (SortGroupV2 & polymer_smoke_session):
+        SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    sort_group_id = int(
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
+    )
+
+    kwargs = dict(
+        nwb_file_name=nwb_file_name,
+        sort_group_id=sort_group_id,
+        interval_list_name="raw data valid times",
+        team_name="v2_test_team",
+        preset="franklab_tetrode_mountainsort5",
+    )
+    manifest = run_v2_pipeline(**kwargs)
+    # Second run must be a pure no-op (MS5 reuses the existing sorting_id
+    # rather than re-clustering, so this does not depend on sorter
+    # determinism).
+    manifest2 = run_v2_pipeline(**kwargs)
+    assert manifest2["merge_id"] == manifest["merge_id"]
+
+    stage_counts = {
+        "RecordingSelection": len(
+            RecordingSelection & {"recording_id": manifest["recording_id"]}
+        ),
+        "ArtifactSelection": len(
+            ArtifactSelection & {"artifact_id": manifest["artifact_id"]}
+        ),
+        "SortingSelection": len(
+            SortingSelection & {"sorting_id": manifest["sorting_id"]}
+        ),
+        "CurationV2": len(
+            CurationV2
+            & {
+                "sorting_id": manifest["sorting_id"],
+                "curation_id": manifest["curation_id"],
+            }
+        ),
+        "SpikeSortingOutput": len(
+            SpikeSortingOutput & {"merge_id": manifest["merge_id"]}
+        ),
+    }
+    assert all(c == 1 for c in stage_counts.values()), (
+        "run_v2_pipeline rerun left duplicate rows (expected exactly 1 "
+        f"per stage): {stage_counts}"
+    )
 
 
 @pytest.mark.slow
@@ -3078,7 +3136,8 @@ def test_mountainsort5_ground_truth_polymer_60s(polymer_60s_session):
     # by shifting unit ids so MS5's overlapping local ids do not
     # collide across shanks.
     sort_group_ids = sorted(
-        int(g) for g in (SortGroupV2 & polymer_60s_session).fetch("sort_group_id")
+        int(g)
+        for g in (SortGroupV2 & polymer_60s_session).fetch("sort_group_id")
     )
     sortings_by_shank = []
     for sg_id in sort_group_ids:
@@ -3532,14 +3591,10 @@ def test_fetch_nwb_v2_dispatch(populated_sorting):
     from spyglass.spikesorting.v2.curation import CurationV2
 
     _clear_curations(populated_sorting)
-    pk = CurationV2.insert_curation(
-        sorting_key=populated_sorting, labels={}
-    )
+    pk = CurationV2.insert_curation(sorting_key=populated_sorting, labels={})
     merge_id = (SpikeSortingOutput.CurationV2 & pk).fetch1("merge_id")
 
-    nwb_results = SpikeSortingOutput().fetch_nwb(
-        {"merge_id": merge_id}
-    )
+    nwb_results = SpikeSortingOutput().fetch_nwb({"merge_id": merge_id})
     assert isinstance(nwb_results, list)
     assert len(nwb_results) == 1, (
         f"fetch_nwb returned {len(nwb_results)} dicts for a single "
@@ -3613,9 +3668,9 @@ def test_initialize_v2_defaults_is_idempotent(dj_conn):
         f"post={post_counts}."
     )
     # Counts must be > 0 (the defaults actually loaded something).
-    assert all(c > 0 for c in post_counts), (
-        f"initialize_v2_defaults produced zero rows: {post_counts}."
-    )
+    assert all(
+        c > 0 for c in post_counts
+    ), f"initialize_v2_defaults produced zero rows: {post_counts}."
 
 
 # ---------- Heterogeneous gain rejection ---------------------------------
@@ -3876,9 +3931,9 @@ def test_run_v2_pipeline_clusterless_preset(polymer_smoke_session):
             "curation_id",
             "merge_id",
         ):
-            assert manifest.get(key) is not None, (
-                f"Manifest missing {key!r}; got {manifest}."
-            )
+            assert (
+                manifest.get(key) is not None
+            ), f"Manifest missing {key!r}; got {manifest}."
     finally:
         # Restore the original 100 uV default row so subsequent
         # tests / sessions are not poisoned by the 5 uV value.
@@ -3939,9 +3994,9 @@ def test_run_v2_pipeline_clusterless_default_handles_zero_units_gracefully(
     # A zero-unit sort still produces a COMPLETE, merge-keyable manifest:
     # an empty curation + merge row (v1 parity), not a partial None.
     for key in ("recording_id", "artifact_id", "sorting_id"):
-        assert manifest.get(key) is not None, (
-            f"Zero-unit manifest missing {key!r}; got {manifest}."
-        )
+        assert (
+            manifest.get(key) is not None
+        ), f"Zero-unit manifest missing {key!r}; got {manifest}."
     assert manifest["n_units"] == 0
     assert manifest["curation_id"] is not None, (
         f"Zero-unit sort should still write an empty curation row; "
@@ -4070,9 +4125,7 @@ def test_sorting_make_rollback_cleans_units_nwb(
     nwb_file_name = polymer_smoke_session["nwb_file_name"]
     SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
     sort_group_id = int(
-        sorted(
-            (SortGroupV2 & polymer_smoke_session).fetch("sort_group_id")
-        )[0]
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
     )
     rec_pk = RecordingSelection.insert_selection(
         {
@@ -4124,9 +4177,7 @@ def test_sorting_make_rollback_cleans_units_nwb(
     ):
         raise RuntimeError("simulated unit-part failure")
 
-    monkeypatch.setattr(
-        Sorting, "_populate_unit_part", _broken_unit_part
-    )
+    monkeypatch.setattr(Sorting, "_populate_unit_part", _broken_unit_part)
 
     # populate swallows the exception into DataJoint's error
     # machinery via suppress_errors; assert by checking the
@@ -4229,9 +4280,7 @@ def test_boundary_spike_round_trip_does_not_raise(
     nwb_file_name = polymer_smoke_session["nwb_file_name"]
     SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
     sort_group_id = int(
-        sorted(
-            (SortGroupV2 & polymer_smoke_session).fetch("sort_group_id")
-        )[0]
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
     )
     rec_pk = RecordingSelection.insert_selection(
         {
@@ -4284,7 +4333,9 @@ def test_boundary_spike_round_trip_does_not_raise(
             sampling_frequency=recording.get_sampling_frequency(),
         )
 
-    monkeypatch.setattr(Sorting, "_run_sorter", staticmethod(_boundary_run_sorter))
+    monkeypatch.setattr(
+        Sorting, "_run_sorter", staticmethod(_boundary_run_sorter)
+    )
 
     Sorting.populate(sort_pk, reserve_jobs=False)
     assert Sorting & sort_pk, (
@@ -4460,9 +4511,9 @@ def test_get_sorting_recovers_frames_across_disjoint_gap(
     )
     Sorting.populate(sort_pk, reserve_jobs=False)
     assert Sorting & sort_pk, "disjoint Sorting.populate failed"
-    assert planted["affine_post_gap"] != int(planted["samples"][1]), (
-        "test setup: gap too small to expose the affine shift"
-    )
+    assert planted["affine_post_gap"] != int(
+        planted["samples"][1]
+    ), "test setup: gap too small to expose the affine shift"
 
     si_sorting = Sorting().get_sorting(sort_pk)
     frames = _np.asarray(si_sorting.get_unit_spike_train(unit_id=0))
@@ -4704,7 +4755,9 @@ def test_get_merged_sorting_keeps_cross_gap_pair(
 
         ts = _np.asarray(recording.get_times())
         fs_local = recording.get_sampling_frequency()
-        k = int(_np.flatnonzero(_np.diff(ts) > 1.5 / fs_local)[0])  # chunk1 last
+        k = int(
+            _np.flatnonzero(_np.diff(ts) > 1.5 / fs_local)[0]
+        )  # chunk1 last
         # unit 0: a chunk-1 spike + chunk-1's LAST frame; unit 1: chunk-2's
         # FIRST frame + a later chunk-2 spike. Frames k and k+1 are adjacent
         # but separated by the wall-clock gap.
@@ -4796,9 +4849,7 @@ def test_detect_artifacts_finds_known_transient(dj_conn):
     n_channels = 4
     traces = _np.zeros((n_samples, n_channels), dtype=_np.float32)
     traces[1000:1200, :] = 200.0
-    rec = si.NumpyRecording(
-        traces_list=[traces], sampling_frequency=fs
-    )
+    rec = si.NumpyRecording(traces_list=[traces], sampling_frequency=fs)
     rec.set_channel_gains([1.0] * n_channels)
 
     # detect=True, 50 uV threshold, 50% of channels (= 2 of 4)
@@ -4816,7 +4867,6 @@ def test_detect_artifacts_finds_known_transient(dj_conn):
         proportion_above_thresh=0.5,
         removal_window_ms=0.05,
         join_window_ms=0.0,
-
         min_length_s=0.001,  # default 1.0 would wipe synthetic-recording intervals
     )
 
@@ -4987,9 +5037,9 @@ def test_clusterless_detect_peaks_strips_random_seed(dj_conn, monkeypatch):
 
     jk = captured["job_kwargs"]
     assert jk is not None, "detect_peaks was not called"
-    assert "random_seed" not in jk, (
-        f"random_seed leaked into detect_peaks job kwargs: {jk}"
-    )
+    assert (
+        "random_seed" not in jk
+    ), f"random_seed leaked into detect_peaks job kwargs: {jk}"
     assert jk.get("n_jobs") == 1  # other kwargs preserved
 
 
@@ -5033,9 +5083,9 @@ def test_clusterless_detect_peaks_strips_threshold_unit(dj_conn, monkeypatch):
 
     mk = captured["method_kwargs"]
     assert mk is not None, "detect_peaks was not called"
-    assert "threshold_unit" not in mk, (
-        f"threshold_unit leaked into detect_peaks method kwargs: {mk}"
-    )
+    assert (
+        "threshold_unit" not in mk
+    ), f"threshold_unit leaked into detect_peaks method kwargs: {mk}"
     # The real detector knobs survive the strip.
     assert mk.get("detect_threshold") == 5.0
 
@@ -5081,10 +5131,88 @@ def test_build_analyzer_strips_random_seed(dj_conn, monkeypatch, tmp_path):
     )
 
     jk = captured["kwargs"]
-    assert "random_seed" not in jk, (
-        f"random_seed leaked into analyzer.compute kwargs: {jk}"
-    )
+    assert (
+        "random_seed" not in jk
+    ), f"random_seed leaked into analyzer.compute kwargs: {jk}"
     assert jk.get("n_jobs") == 1  # other job kwargs preserved
+
+
+def test_build_analyzer_compute_args(dj_conn, monkeypatch, tmp_path):
+    """``_build_analyzer`` requests the right extensions + analyzer kwargs.
+
+    ``test_build_analyzer_strips_random_seed`` captures only the
+    ``compute`` job-kwargs; the analyzer factory kwargs and the extension
+    set it computes are unasserted. A regression dropping ``sparse=True``
+    (dense templates -> wrong peak-channel attribution) or
+    ``return_in_uV=True`` (peak amplitudes in raw counts, not µV) would
+    pass that test. This pins both the ``create_sorting_analyzer`` kwargs
+    and the exact ``analyzer.compute`` extension list + per-extension
+    params (the persisted ``peak_amplitude_uv`` / peak channel depend on
+    every one of them).
+    """
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2 import utils as v2_utils
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    monkeypatch.setattr(
+        v2_utils, "_analyzer_path", lambda key: tmp_path / "analyzer"
+    )
+    captured = {}
+
+    class _FakeAnalyzer:
+        def compute(self, *args, **kwargs):
+            captured["compute_args"] = args
+            captured["compute_kwargs"] = kwargs
+
+    def _fake_create(**kwargs):
+        captured["create_kwargs"] = kwargs
+        return _FakeAnalyzer()
+
+    monkeypatch.setattr(si, "create_sorting_analyzer", _fake_create)
+
+    class _FakeSorting:
+        def get_num_units(self):
+            return 2
+
+    Sorting._build_analyzer(
+        _FakeSorting(),
+        None,
+        {"sorting_id": "test-sorting-id"},
+        sorter_row={"job_kwargs": {}},
+        job_kwargs={"random_seed": 3, "n_jobs": 1},
+    )
+
+    # ``create_sorting_analyzer`` kwargs: sparse + µV-return are
+    # correctness-critical for the persisted peak amplitude / channel.
+    ck = captured["create_kwargs"]
+    assert ck.get("sparse") is True, f"expected sparse=True, got {ck}"
+    assert (
+        ck.get("return_in_uV") is True
+    ), f"expected return_in_uV=True, got {ck}"
+    assert ck.get("format") == "binary_folder"
+
+    # ``compute`` extension set (positional first arg).
+    ca = captured["compute_args"]
+    assert ca, "analyzer.compute was called with no positional extension list"
+    assert set(ca[0]) == {
+        "random_spikes",
+        "noise_levels",
+        "templates",
+        "waveforms",
+    }, f"unexpected extension set: {ca[0]}"
+
+    # Per-extension params: the seeded random-spikes subsample (honoring
+    # the per-row random_seed) and the waveform window.
+    ext_params = captured["compute_kwargs"]["extension_params"]
+    assert (
+        ext_params["random_spikes"]["seed"] == 3
+    ), "random_spikes seed must honor the job_kwargs random_seed override"
+    assert ext_params["random_spikes"]["max_spikes_per_unit"] == 500
+    assert ext_params["waveforms"] == {"ms_before": 1.0, "ms_after": 2.0}
+    # The Spyglass-only random_seed knob is still stripped from the
+    # forwarded job kwargs (SI.compute would reject it).
+    assert "random_seed" not in captured["compute_kwargs"]
 
 
 @pytest.mark.slow
@@ -5290,9 +5418,8 @@ def test_detect_artifacts_zscore_only_detection(dj_conn):
     # channels caps at ~5.6 so a threshold of 4.0 sits inside
     # the achievable range with headroom.
     n_samples, n_channels = 5000, 32
-    traces = (
-        rng.normal(0.0, 0.5, size=(n_samples, n_channels))
-        .astype(_np.float32)
+    traces = rng.normal(0.0, 0.5, size=(n_samples, n_channels)).astype(
+        _np.float32
     )
     # Single-channel artifact: channel 0 spikes to 500 uV at frames
     # 2000-2009; the other 31 channels stay quiet.
@@ -5306,7 +5433,6 @@ def test_detect_artifacts_zscore_only_detection(dj_conn):
         proportion_above_thresh=1.0 / n_channels,  # any-1-channel triggers
         removal_window_ms=0.05,
         join_window_ms=0.0,
-
         min_length_s=0.001,  # default 1.0 would wipe synthetic-recording intervals
     )
     valid_times = ArtifactDetection._detect_artifacts(rec, params)
@@ -5318,12 +5444,8 @@ def test_detect_artifacts_zscore_only_detection(dj_conn):
     )
     # Pinpoint the artifact run via the expanded boundaries
     # (half_window_frames=1).
-    assert valid_times[0][1] == pytest.approx(
-        timestamps[1999], abs=1e-9
-    )
-    assert valid_times[1][0] == pytest.approx(
-        timestamps[2011], abs=1e-9
-    )
+    assert valid_times[0][1] == pytest.approx(timestamps[1999], abs=1e-9)
+    assert valid_times[1][0] == pytest.approx(timestamps[2011], abs=1e-9)
 
 
 def test_detect_artifacts_amplitude_and_zscore_combined(dj_conn):
@@ -5372,7 +5494,6 @@ def test_detect_artifacts_amplitude_and_zscore_combined(dj_conn):
         proportion_above_thresh=0.5,
         removal_window_ms=0.05,
         join_window_ms=0.0,
-
         min_length_s=0.001,  # default 1.0 would wipe synthetic-recording intervals
     )
     valid_times = ArtifactDetection._detect_artifacts(rec, params)
@@ -5426,7 +5547,6 @@ def test_detect_artifacts_join_window_merges_runs(dj_conn):
             proportion_above_thresh=0.5,
             removal_window_ms=0.05,
             join_window_ms=1.0,
-
             min_length_s=0.001,  # default 1.0 would wipe synthetic-recording intervals
         ),
     )
@@ -5494,9 +5614,7 @@ def test_artifact_detection_parameters_validates_via_insert1(dj_conn):
     assert (
         len(
             ArtifactDetectionParameters
-            & {
-                "artifact_params_name": "params_validates_unit_test"
-            }
+            & {"artifact_params_name": "params_validates_unit_test"}
         )
         == 0
     ), "Failed validation should not have written a row."
@@ -5621,9 +5739,7 @@ def test_recording_make_rollback_cleans_analysis_nwb(
     nwb_file_name = polymer_smoke_session["nwb_file_name"]
     SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
     sort_group_id = int(
-        sorted(
-            (SortGroupV2 & polymer_smoke_session).fetch("sort_group_id")
-        )[0]
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
     )
     rec_pk = RecordingSelection.insert_selection(
         {
@@ -5737,9 +5853,7 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
     nwb_file_name = polymer_60s_session["nwb_file_name"]
     SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
     sort_group_id = int(
-        sorted(
-            (SortGroupV2 & polymer_60s_session).fetch("sort_group_id")
-        )[0]
+        sorted((SortGroupV2 & polymer_60s_session).fetch("sort_group_id"))[0]
     )
     rec_pk = RecordingSelection.insert_selection(
         {
@@ -5762,17 +5876,13 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
         {
             "recording_id": rec_pk["recording_id"],
             "sorter": "mountainsort5",
-            "sorter_params_name": (
-                "franklab_tetrode_hippocampus_30kHz_ms5"
-            ),
+            "sorter_params_name": ("franklab_tetrode_hippocampus_30kHz_ms5"),
             "artifact_id": art_pk["artifact_id"],
         }
     )
     Sorting.populate(sort_pk, reserve_jobs=False)
 
-    units = sorted(
-        int(u) for u in (Sorting.Unit & sort_pk).fetch("unit_id")
-    )
+    units = sorted(int(u) for u in (Sorting.Unit & sort_pk).fetch("unit_id"))
     assert len(units) >= 2, (
         f"Sorting on the 60s polymer fixture yielded {len(units)} units; "
         "need >= 2 to test merging. (MS5 typically finds 5+ per shank "
@@ -5809,7 +5919,9 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
     # Label on the absorbed contributor is silently dropped (v1 parity).
     assert absorbed not in {uid for uid, _ in label_pairs}, label_pairs
 
-    curated_unit_ids = set(int(u) for u in (CurationV2.Unit & pk).fetch("unit_id"))
+    curated_unit_ids = set(
+        int(u) for u in (CurationV2.Unit & pk).fetch("unit_id")
+    )
     expected_curated = (set(units) - {head, absorbed}) | {merged_id}
     assert curated_unit_ids == expected_curated, (
         f"Curated unit ids = {sorted(curated_unit_ids)}; "
@@ -5837,7 +5949,7 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
     expected_merged = _dedup_merged_spike_times(
         [src_head, src_absorbed], 0.4e-3
     )
-    # The smoke fixture's two merged units share at least one cross-unit
+    # The 60s fixture's two merged units share at least one cross-unit
     # double-detection, so dedup is genuinely exercised end-to-end.
     assert len(expected_merged) < len(raw_concat), (
         "fixture precondition: merged contributors should share a "
@@ -5944,6 +6056,212 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
         preview_total,
         n_duplicates,
     )
+    # Frame-level equality (not just counts): the lazy preview's merged
+    # train must equal the apply_merge=True stored train sample-for-sample
+    # -- both ids are ``max(units) + 1`` (= merged_id). A count-only check
+    # would pass even if the two paths binned spikes to different frames.
+    lazy_merged_frames = _np.sort(
+        _np.asarray(merged_lazy.get_unit_spike_train(unit_id=merged_id))
+    )
+    applied_merged_frames = _np.sort(
+        _np.asarray(curated_sorting.get_unit_spike_train(unit_id=merged_id))
+    )
+    _np.testing.assert_array_equal(lazy_merged_frames, applied_merged_frames)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_lazy_vs_applied_merge_frames_equal(polymer_smoke_session, monkeypatch):
+    """Lazy ``get_merged_sorting`` preview == ``apply_merge=True`` stored
+    train, frame-for-frame, on a CONTIGUOUS and a DISJOINT 2-unit sort.
+
+    A planted 2-unit sorter gives deterministic, known spike frames so the
+    merged train is computed by hand. Two contributor spikes 1 frame apart
+    WITHIN a chunk (cross-unit) are a coincident double-detection -> the
+    0.4 ms dedup drops one; two spikes 1 frame apart ACROSS the wall-clock
+    gap are seconds apart in real time -> NOT deduped (the gap-correctness
+    the absolute-time dedup guarantees). The disjoint applied-merge path is
+    otherwise untested. Both the lazy and the stored paths must produce the
+    same frames, and that frame set must equal the hand-computed merge.
+    """
+    import uuid as _uuid
+
+    import numpy as _np
+    import spikeinterface as si
+
+    from spyglass.common.common_interval import IntervalList
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    _clean_session_v2(polymer_smoke_session)
+    initialize_v2_defaults()
+    LabTeam.insert1(
+        {"team_name": "v2_test_team", "team_description": "v2 pipeline tests"},
+        skip_duplicates=True,
+    )
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    sort_group_id = int(
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
+    )
+
+    # The planted sorter reads its target frames from this closure so the
+    # same monkeypatch serves both the contiguous and the disjoint sort.
+    state: dict = {}
+
+    def _planted_two_unit_sorter(
+        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None
+    ):
+        u0, u1 = state["u0"], state["u1"]
+        samples = _np.concatenate([u0, u1]).astype(_np.int64)
+        labels = _np.concatenate(
+            [_np.zeros(len(u0)), _np.ones(len(u1))]
+        ).astype(_np.int32)
+        order = _np.argsort(samples)
+        return si.NumpySorting.from_samples_and_labels(
+            samples_list=[samples[order]],
+            labels_list=[labels[order]],
+            sampling_frequency=recording.get_sampling_frequency(),
+        )
+
+    monkeypatch.setattr(
+        Sorting, "_run_sorter", staticmethod(_planted_two_unit_sorter)
+    )
+
+    def _build_sort(interval_name, valid_times):
+        IntervalList.insert1(
+            {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": interval_name,
+                "valid_times": valid_times,
+                "pipeline": "v2_lazy_applied_merge_test",
+            },
+            skip_duplicates=True,
+        )
+        rec_pk = RecordingSelection.insert_selection(
+            {
+                "nwb_file_name": nwb_file_name,
+                "sort_group_id": sort_group_id,
+                "interval_list_name": interval_name,
+                "preproc_params_name": "default_franklab",
+                "team_name": "v2_test_team",
+            }
+        )
+        Recording.populate(rec_pk, reserve_jobs=False)
+        art_pk = ArtifactSelection.insert_selection(
+            {
+                "recording_id": rec_pk["recording_id"],
+                "artifact_params_name": "none",
+            }
+        )
+        ArtifactDetection.populate(art_pk, reserve_jobs=False)
+        sort_pk = SortingSelection.insert_selection(
+            {
+                "recording_id": rec_pk["recording_id"],
+                "sorter": "clusterless_thresholder",
+                "sorter_params_name": "default",
+                "artifact_id": art_pk["artifact_id"],
+            }
+        )
+        return rec_pk, sort_pk
+
+    def _assert_lazy_equals_applied(sort_pk, expected_frames):
+        root_pk = CurationV2.insert_curation(sorting_key=sort_pk, labels={})
+        preview_pk = CurationV2.insert_curation(
+            sorting_key=sort_pk,
+            merge_groups=[[0, 1]],
+            apply_merge=False,
+            parent_curation_id=root_pk["curation_id"],
+            description="lazy preview",
+        )
+        applied_pk = CurationV2.insert_curation(
+            sorting_key=sort_pk,
+            merge_groups=[[0, 1]],
+            apply_merge=True,
+            parent_curation_id=root_pk["curation_id"],
+            description="applied merge",
+        )
+        merged_id = 2  # max(0, 1) + 1
+        lazy_frames = _np.sort(
+            _np.asarray(
+                CurationV2()
+                .get_merged_sorting(preview_pk)
+                .get_unit_spike_train(unit_id=merged_id)
+            )
+        )
+        applied_frames = _np.sort(
+            _np.asarray(
+                CurationV2()
+                .get_sorting(applied_pk)
+                .get_unit_spike_train(unit_id=merged_id)
+            )
+        )
+        _np.testing.assert_array_equal(
+            lazy_frames,
+            applied_frames,
+            err_msg="lazy preview merged frames != apply_merge=True stored",
+        )
+        _np.testing.assert_array_equal(
+            lazy_frames,
+            _np.asarray(expected_frames, dtype=lazy_frames.dtype),
+            err_msg="merged frames do not match the hand-computed merge",
+        )
+
+    raw_times = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": "raw data valid times",
+        }
+    ).fetch1("valid_times")
+    t0 = float(raw_times[0][0])
+    t_end = float(raw_times[-1][-1])
+    assert (t_end - t0) >= 2.9, "smoke fixture too short for disjoint half"
+
+    # --- Contiguous half: one interval, uniform timeline. Plant u0/u1
+    # with a within-chunk cross-unit coincidence (100 & 101) that dedups,
+    # plus distinct spikes; merged = [100, 500, 600, 900].
+    state["u0"] = _np.array([100, 500, 900])
+    state["u1"] = _np.array([101, 600])
+    contig_name = f"v2_lvam_contig_{_uuid.uuid4().hex[:8]}"
+    _, contig_sort_pk = _build_sort(
+        contig_name, _np.array([[t0, min(t0 + 2.9, t_end)]])
+    )
+    Sorting.populate(contig_sort_pk, reserve_jobs=False)
+    _assert_lazy_equals_applied(contig_sort_pk, [100, 500, 600, 900])
+
+    # --- Disjoint half: two chunks, 0.5 s gap. Recover the chunk-1/chunk-2
+    # boundary frame ``k`` from the populated timeline, then plant a
+    # within-chunk coincidence (100 & 101 -> dedup) AND a frame-adjacent
+    # but cross-gap pair (k & k+1 -> NOT deduped). merged = [100, k, k+1].
+    chunk1_end, gap_end, chunk2_end = t0 + 1.2, t0 + 1.7, min(t0 + 2.9, t_end)
+    disjoint_name = f"v2_lvam_disjoint_{_uuid.uuid4().hex[:8]}"
+    disjoint_rec_pk, disjoint_sort_pk = _build_sort(
+        disjoint_name,
+        _np.array([[t0, chunk1_end], [gap_end, chunk2_end]]),
+    )
+    rec = Recording().get_recording(disjoint_rec_pk)
+    times = _np.asarray(rec.get_times())
+    fs = rec.get_sampling_frequency()
+    gaps = _np.flatnonzero(_np.diff(times) > 1.5 / fs)
+    assert len(gaps) == 1, f"expected one gap, found {len(gaps)}"
+    k = int(gaps[0])  # chunk-1's last frame
+    assert k >= 200, "chunk 1 too short to plant frame 100/101"
+    state["u0"] = _np.array([100, k])
+    state["u1"] = _np.array([101, k + 1])
+    Sorting.populate(disjoint_sort_pk, reserve_jobs=False)
+    _assert_lazy_equals_applied(disjoint_sort_pk, [100, k, k + 1])
 
 
 def test_curation_n_spikes_matches_apply_merge(dj_conn):
@@ -6212,7 +6530,6 @@ def test_detect_artifacts_below_proportion_threshold_ignored(dj_conn):
         proportion_above_thresh=0.5,
         removal_window_ms=0.05,
         join_window_ms=0.0,
-
         min_length_s=0.001,  # default 1.0 would wipe synthetic-recording intervals
     )
     valid_times = ArtifactDetection._detect_artifacts(rec, params)
@@ -6287,9 +6604,7 @@ def test_sorting_selection_artifact_id_none_is_distinct_identity(
     recording_id = rec_row["recording_id"]
     sorter = backed_row["sorter"]
     sorter_params_name = backed_row["sorter_params_name"]
-    assert (
-        SortingSelection.resolve_artifact(artifact_backed_pk) is not None
-    ), (
+    assert SortingSelection.resolve_artifact(artifact_backed_pk) is not None, (
         "populated_sorting must yield an artifact-backed row (an "
         "ArtifactSource part row) for this test to be meaningful."
     )
@@ -6373,16 +6688,13 @@ def test_sorting_selection_artifact_source_part_shape(populated_recording):
     )
     assert len(SortingSelection.ArtifactSource & art_sort_pk) == 1
     assert (
-        SortingSelection.resolve_artifact(art_sort_pk)
-        == art_pk["artifact_id"]
+        SortingSelection.resolve_artifact(art_sort_pk) == art_pk["artifact_id"]
     )
 
     # ArtifactSource did NOT leak into the recording-source resolution.
     resolved = SortingSelection.resolve_source(art_sort_pk)
     assert resolved.kind == "recording"
-    assert resolved.key == {
-        "recording_id": populated_recording["recording_id"]
-    }
+    assert resolved.key == {"recording_id": populated_recording["recording_id"]}
 
 
 # ---------- v1 / imported dispatch regression after v2 import ------------
@@ -6414,12 +6726,11 @@ def test_imported_dispatch_survives_v2_module_loaded(populated_sorting):
     assert "CurationV2" in source_class_dict
     assert "ImportedSpikeSorting" in source_class_dict
     # The Merge class also resolves both via merge_get_parent_class.
-    assert SpikeSortingOutput().merge_get_parent_class(
-        "CurationV2"
-    ) is not None
-    assert SpikeSortingOutput().merge_get_parent_class(
-        "ImportedSpikeSorting"
-    ) is not None
+    assert SpikeSortingOutput().merge_get_parent_class("CurationV2") is not None
+    assert (
+        SpikeSortingOutput().merge_get_parent_class("ImportedSpikeSorting")
+        is not None
+    )
     # And the Imported part table is reachable through the master.
     assert hasattr(SpikeSortingOutput, "ImportedSpikeSorting")
 
@@ -6468,9 +6779,7 @@ def test_recording_make_global_median_reference(polymer_smoke_session):
     nwb_file_name = polymer_smoke_session["nwb_file_name"]
     SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
     sort_group_id = int(
-        sorted(
-            (SortGroupV2 & polymer_smoke_session).fetch("sort_group_id")
-        )[0]
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
     )
 
     # No-reference baseline (-1).
@@ -6497,12 +6806,9 @@ def test_recording_make_global_median_reference(polymer_smoke_session):
         }
     )
     assert (
-        (
-            SortGroupV2
-            & {"nwb_file_name": nwb_file_name, "sort_group_id": sort_group_id}
-        ).fetch1("reference_mode")
-        == "global_median"
-    )
+        SortGroupV2
+        & {"nwb_file_name": nwb_file_name, "sort_group_id": sort_group_id}
+    ).fetch1("reference_mode") == "global_median"
     # Drop the unref Recording so the new selection materializes a
     # fresh global-median recording rather than reusing the cached
     # bytes.
@@ -6641,9 +6947,7 @@ def test_recording_selection_raises_on_duplicate_logical_identity(
     nwb_file_name = polymer_smoke_session["nwb_file_name"]
     SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
     sort_group_id = int(
-        sorted(
-            (SortGroupV2 & polymer_smoke_session).fetch("sort_group_id")
-        )[0]
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
     )
     logical_identity = {
         "nwb_file_name": nwb_file_name,
@@ -6675,9 +6979,9 @@ def test_recording_selection_raises_on_duplicate_logical_identity(
         # populated_recording fixture (whose body calls
         # insert_selection) would fail in every subsequent test.
         for rid in planted_ids:
-            (
-                RecordingSelection & {"recording_id": rid}
-            ).super_delete(warn=False)
+            (RecordingSelection & {"recording_id": rid}).super_delete(
+                warn=False
+            )
 
 
 # ---------- L5-C: ArtifactDetection.delete handles orphans ---------------
@@ -6841,7 +7145,9 @@ def test_write_units_nwb_handles_zero_unit_sorter(populated_recording):
         # The staged NWB on disk is readable and has an empty Units
         # table.
         abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
-        with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
+        with pynwb.NWBHDF5IO(
+            path=abs_path, mode="r", load_namespaces=True
+        ) as io:
             nwbf = io.read()
             assert nwbf.units is not None
             assert len(nwbf.units.id[:]) == 0, (
@@ -6892,7 +7198,6 @@ def test_detect_artifacts_clamps_artifact_at_recording_end(dj_conn):
         proportion_above_thresh=0.5,
         removal_window_ms=0.05,
         join_window_ms=0.0,
-
         min_length_s=0.001,  # default 1.0 would wipe synthetic-recording intervals
     )
     valid_times = ArtifactDetection._detect_artifacts(rec, params)
@@ -6976,9 +7281,7 @@ def test_merge_dispatch_get_recording_works_for_v2(populated_sorting):
     from spyglass.spikesorting.v2.curation import CurationV2
 
     _clear_curations(populated_sorting)
-    pk = CurationV2.insert_curation(
-        sorting_key=populated_sorting, labels={}
-    )
+    pk = CurationV2.insert_curation(sorting_key=populated_sorting, labels={})
     merge_id = (SpikeSortingOutput.CurationV2 & pk).fetch1("merge_id")
 
     rec = SpikeSortingOutput().get_recording({"merge_id": merge_id})
@@ -7012,9 +7315,7 @@ def test_merge_dispatch_get_sort_group_info_works_for_v2(populated_sorting):
     from spyglass.spikesorting.v2.curation import CurationV2
 
     _clear_curations(populated_sorting)
-    pk = CurationV2.insert_curation(
-        sorting_key=populated_sorting, labels={}
-    )
+    pk = CurationV2.insert_curation(sorting_key=populated_sorting, labels={})
     merge_id = (SpikeSortingOutput.CurationV2 & pk).fetch1("merge_id")
 
     info = SpikeSortingOutput.get_sort_group_info({"merge_id": merge_id})
@@ -7107,9 +7408,7 @@ def test_disjoint_sort_intervals_concatenated(polymer_smoke_session):
     chunk1_end = t0 + 1.2
     gap_end = t0 + 1.7
     chunk2_end = min(t0 + 2.9, t_end)
-    disjoint_times = _np.array(
-        [[t0, chunk1_end], [gap_end, chunk2_end]]
-    )
+    disjoint_times = _np.array([[t0, chunk1_end], [gap_end, chunk2_end]])
 
     sort_group_id = int(
         sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
@@ -7137,9 +7436,7 @@ def test_disjoint_sort_intervals_concatenated(polymer_smoke_session):
     row = (Recording & rec_pk).fetch1()
     abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
 
-    with pynwb.NWBHDF5IO(
-        path=abs_path, mode="r", load_namespaces=True
-    ) as io:
+    with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
         nwbf = io.read()
         series_path = row["electrical_series_path"]
         series_name = series_path.rsplit("/", 1)[-1]
@@ -7151,12 +7448,8 @@ def test_disjoint_sort_intervals_concatenated(polymer_smoke_session):
     # envelope. Allow 5% slack for fs jitter and boundary
     # rounding.
     fs = float(row["sampling_frequency"])
-    expected_n = int(
-        ((chunk1_end - t0) + (chunk2_end - gap_end)) * fs
-    )
-    assert (
-        0.95 * expected_n <= len(written_times) <= 1.05 * expected_n
-    ), (
+    expected_n = int(((chunk1_end - t0) + (chunk2_end - gap_end)) * fs)
+    assert 0.95 * expected_n <= len(written_times) <= 1.05 * expected_n, (
         f"Written timestamps length {len(written_times)} differs "
         f"from expected ~{expected_n} (sum of disjoint chunks). "
         "Disjoint-interval concat regression."
@@ -7335,8 +7628,7 @@ def test_get_sorting_dataframe_includes_curation_label(populated_sorting):
     )
     df = CurationV2().get_sorting(pk, as_dataframe=True)
     assert "curation_label" in df.columns, (
-        "DataFrame missing the curation_label column joined from "
-        "UnitLabel."
+        "DataFrame missing the curation_label column joined from " "UnitLabel."
     )
     # The labeled unit carries ["mua"]; any other unit carries [].
     assert df.loc[units[0], "curation_label"] == ["mua"]
@@ -7375,9 +7667,9 @@ def test_recording_get_recording_honors_electrical_series_path(
     monkeypatch.setattr(se, "read_nwb_recording", _capture)
     Recording().get_recording(populated_recording)
 
-    expected = (
-        Recording & populated_recording
-    ).fetch1("electrical_series_path")
+    expected = (Recording & populated_recording).fetch1(
+        "electrical_series_path"
+    )
     assert captured_kwargs.get("electrical_series_path") == expected, (
         f"se.read_nwb_recording called without electrical_series_path"
         f"={expected!r}; got {captured_kwargs.get('electrical_series_path')!r}. "
@@ -7407,25 +7699,23 @@ def test_sorting_nwb_writes_obs_intervals_and_curation_label_placeholder(
 
     row = (Sorting & populated_sorting).fetch1()
     abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
-    with pynwb.NWBHDF5IO(
-        path=abs_path, mode="r", load_namespaces=True
-    ) as io:
+    with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
         nwbf = io.read()
         df = nwbf.units.to_dataframe()
 
     assert len(df) > 0, "populated_sorting yielded zero units"
-    assert "obs_intervals" in df.columns, (
-        "Units NWB missing per-unit obs_intervals column."
-    )
+    assert (
+        "obs_intervals" in df.columns
+    ), "Units NWB missing per-unit obs_intervals column."
     # obs_intervals should be a non-empty (n_intervals, 2) array
     # per unit. Each row should have a valid window.
     for uid, obs in df["obs_intervals"].items():
-        assert obs is not None and len(obs) >= 1, (
-            f"Unit {uid} has empty obs_intervals."
-        )
-    assert "curation_label" in df.columns, (
-        "Units NWB missing curation_label placeholder column."
-    )
+        assert (
+            obs is not None and len(obs) >= 1
+        ), f"Unit {uid} has empty obs_intervals."
+    assert (
+        "curation_label" in df.columns
+    ), "Units NWB missing curation_label placeholder column."
     # Scalar shape: every unit carries the string ``"uncurated"``
     # -- NOT a list (a list shape would break v1-style equality
     # checks).
@@ -7464,15 +7754,13 @@ def test_curation_label_post_curation_is_indexed_ragged_list(populated_sorting):
     )
     row = (CurationV2 & pk).fetch1()
     abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
-    with pynwb.NWBHDF5IO(
-        path=abs_path, mode="r", load_namespaces=True
-    ) as io:
+    with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
         nwbf = io.read()
         df = nwbf.units.to_dataframe()
 
-    assert "curation_label" in df.columns, (
-        "Curated NWB missing curation_label column."
-    )
+    assert (
+        "curation_label" in df.columns
+    ), "Curated NWB missing curation_label column."
     # The labeled unit's column value is iterable-of-labels (the
     # ragged ``index=True`` column). pynwb's ``to_dataframe`` may
     # surface this as either ``list`` or ``np.ndarray(dtype=object)``;
@@ -7513,9 +7801,18 @@ def test_sorting_delete_removes_analyzer_folder(populated_sorting):
         from spyglass.spikesorting.v2.recording import Recording
 
         sorting = Sorting().get_sorting(populated_sorting)
-        recording = Recording().get_recording(
-            {"recording_id": (Sorting * Sorting.RecordingSource if False else None) or {}}
-        ) if False else None  # fallback below
+        recording = (
+            Recording().get_recording(
+                {
+                    "recording_id": (
+                        Sorting * Sorting.RecordingSource if False else None
+                    )
+                    or {}
+                }
+            )
+            if False
+            else None
+        )  # fallback below
         # If we cannot rebuild, skip rather than test nothing.
         if not folder.exists():
             import pytest as _pytest
@@ -7557,9 +7854,7 @@ def test_merge_dispatch_restrict_by_artifact_honored_in_v2(populated_sorting):
     )
 
     _clear_curations(populated_sorting)
-    pk = CurationV2.insert_curation(
-        sorting_key=populated_sorting, labels={}
-    )
+    pk = CurationV2.insert_curation(sorting_key=populated_sorting, labels={})
     expected = (SpikeSortingOutput.CurationV2 & pk).fetch1("merge_id")
 
     # Resolve this sort's artifact_id (the "none" preset writes
@@ -7609,9 +7904,7 @@ def test_merge_dispatch_consumer_api_works_on_v2_merge_id(
     from spyglass.spikesorting.v2.sorting import Sorting
 
     _clear_curations(populated_sorting)
-    pk = CurationV2.insert_curation(
-        sorting_key=populated_sorting, labels={}
-    )
+    pk = CurationV2.insert_curation(sorting_key=populated_sorting, labels={})
     merge_id = (SpikeSortingOutput.CurationV2 & pk).fetch1("merge_id")
 
     n_units = int((Sorting & populated_sorting).fetch1("n_units"))
@@ -7657,9 +7950,7 @@ def test_sorted_spikes_group_works_with_v2_merge_id(populated_sorting):
     from spyglass.spikesorting.v2.sorting import Sorting
 
     _clear_curations(populated_sorting)
-    pk = CurationV2.insert_curation(
-        sorting_key=populated_sorting, labels={}
-    )
+    pk = CurationV2.insert_curation(sorting_key=populated_sorting, labels={})
     merge_id = (SpikeSortingOutput.CurationV2 & pk).fetch1("merge_id")
 
     # Use the default ``all_units`` UnitSelectionParams that ships
@@ -7671,9 +7962,9 @@ def test_sorted_spikes_group_works_with_v2_merge_id(populated_sorting):
     recording_id = (
         SortingSelection.RecordingSource & populated_sorting
     ).fetch1("recording_id")
-    actual_nwb = (
-        RecordingSelection & {"recording_id": recording_id}
-    ).fetch1("nwb_file_name")
+    actual_nwb = (RecordingSelection & {"recording_id": recording_id}).fetch1(
+        "nwb_file_name"
+    )
 
     group_name = "v2_test_sorted_spikes_group"
     # Idempotent: drop any prior group from earlier test runs.
@@ -7763,8 +8054,7 @@ def test_shared_artifact_group_populate_end_to_end(
 
     # Clean up any prior group from earlier test runs.
     (
-        SharedArtifactGroup
-        & {"shared_artifact_group_name": group_name}
+        SharedArtifactGroup & {"shared_artifact_group_name": group_name}
     ).super_delete(warn=False)
 
     SharedArtifactGroup.insert_group(
@@ -7842,9 +8132,7 @@ def test_shared_artifact_group_populate_end_to_end(
 
 
 _NEUROPIXELS_60S_PATH = (
-    Path(__file__).resolve().parent
-    / "fixtures"
-    / "mearec_neuropixels_60s.nwb"
+    Path(__file__).resolve().parent / "fixtures" / "mearec_neuropixels_60s.nwb"
 )
 
 
@@ -7933,9 +8221,7 @@ def test_mountainsort5_ground_truth_neuropixels_60s(neuropixels_60s_session):
         SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
     sort_group_ids = sorted(
         int(g)
-        for g in (SortGroupV2 & neuropixels_60s_session).fetch(
-            "sort_group_id"
-        )
+        for g in (SortGroupV2 & neuropixels_60s_session).fetch("sort_group_id")
     )
 
     sortings_by_shank = []
@@ -8059,6 +8345,7 @@ def test_mountainsort5_ground_truth_neuropixels_60s(neuropixels_60s_session):
     # signal that MS5 settings need tuning, not a license to relax
     # the gate.
     import math
+
     n_well_detected = int((accuracies >= 0.7).sum())
     threshold = max(1, math.ceil(n_planted * 0.75))
     assert n_well_detected >= threshold, (
@@ -8176,9 +8463,7 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
     # meta under SPIKESORTING_V2_BASELINE_ROOT, so the v2 test reads
     # from the v2 fixture directly and verifies sha256 against the
     # baseline meta below.
-    fixture_path = (
-        _Path(__file__).parent / "fixtures" / f"{fixture_stem}.nwb"
-    )
+    fixture_path = _Path(__file__).parent / "fixtures" / f"{fixture_stem}.nwb"
     if not fixture_path.exists():
         pytest.skip(
             f"NWB fixture {fixture_path} missing; generate via "
@@ -8495,9 +8780,9 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
         ),
         "bad_channel_by_electrode_id": {
             str(int(row["electrode_id"])): bool(row["bad_channel"] == "True")
-            for row in (
-                Electrode & {"nwb_file_name": nwb_file_name}
-            ).fetch("KEY", "electrode_id", "bad_channel", as_dict=True)
+            for row in (Electrode & {"nwb_file_name": nwb_file_name}).fetch(
+                "KEY", "electrode_id", "bad_channel", as_dict=True
+            )
         },
         "canonical_preproc_params": canonical_preproc(
             (
@@ -8529,9 +8814,7 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
             ).fetch1("params"),
         ),
     }
-    v1_fingerprints = {
-        field: meta[field] for field in _fingerprint_fields
-    }
+    v1_fingerprints = {field: meta[field] for field in _fingerprint_fields}
     assert_canonical_dict_equal(
         v1_fingerprints, v2_fingerprints, path="fingerprints"
     )
@@ -8545,25 +8828,16 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
         }
     )
     Sorting.populate(sort_pk, reserve_jobs=False)
-    curation_pk = CurationV2.insert_curation(
-        sorting_key=sort_pk, labels={}
-    )
-    merge_id = (SpikeSortingOutput.CurationV2 & curation_pk).fetch1(
-        "merge_id"
-    )
+    curation_pk = CurationV2.insert_curation(sorting_key=sort_pk, labels={})
+    merge_id = (SpikeSortingOutput.CurationV2 & curation_pk).fetch1("merge_id")
 
     # Pull v2 spike times in seconds via the merge dispatcher --
     # same surface a v1 consumer would hit; if v1 and v2 use the
     # same units list the per-unit arrays line up by index.
-    v2_per_unit = SpikeSortingOutput().get_spike_times(
-        {"merge_id": merge_id}
-    )
-    v2_unit_ids = (Sorting.Unit & sort_pk).fetch(
-        "unit_id", order_by="unit_id"
-    )
+    v2_per_unit = SpikeSortingOutput().get_spike_times({"merge_id": merge_id})
+    v2_unit_ids = (Sorting.Unit & sort_pk).fetch("unit_id", order_by="unit_id")
     v2_spike_times = {
-        int(uid): np.asarray(arr)
-        for uid, arr in zip(v2_unit_ids, v2_per_unit)
+        int(uid): np.asarray(arr) for uid, arr in zip(v2_unit_ids, v2_per_unit)
     }
 
     fs = float(meta["sampling_frequency_hz"])
@@ -8706,27 +8980,20 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
     # Diagnostic block: one line per unit, then a summary line.
     # Printed unconditionally so a passing run still records the
     # per-unit unmatched counts for the next reviewer.
-    print(
-        f"\n[parity] {fixture_stem} shank{sort_group_id} clusterless"
-    )
+    print(f"\n[parity] {fixture_stem} shank{sort_group_id} clusterless")
     print(
         f"  {'unit':>5} {'v1_n':>6} {'v2_n':>6} {'matched':>8} "
         f"{'unmatched_v1':>13} {'unmatched_v2':>13}"
     )
     for row in diagnostic_rows:
         uid, v1n, v2n, nm, um1, um2 = row
-        print(
-            f"  {uid:>5} {v1n:>6} {v2n:>6} {nm:>8} "
-            f"{um1:>13} {um2:>13}"
-        )
+        print(f"  {uid:>5} {v1n:>6} {v2n:>6} {nm:>8} " f"{um1:>13} {um2:>13}")
 
     if failures:
         pytest.fail("v1↔v2 spike-time divergence:\n  " + "\n  ".join(failures))
 
 
-_MS4_PARITY_CASES = [
-    ("mearec_polymer_128ch_60s", sg) for sg in (0, 1, 2, 3)
-]
+_MS4_PARITY_CASES = [("mearec_polymer_128ch_60s", sg) for sg in (0, 1, 2, 3)]
 
 
 @pytest.mark.slow
@@ -8781,6 +9048,7 @@ def test_v2_real_data_v1_parity_mountainsort4(
 
     # MS4 install gate (v2 side; v1 install is checked at capture time).
     import spikeinterface.sorters as _ss
+
     if "mountainsort4" not in _ss.installed_sorters():
         msg = (
             "mountainsort4 not in spikeinterface.sorters.installed_sorters(); "
@@ -8791,9 +9059,7 @@ def test_v2_real_data_v1_parity_mountainsort4(
             pytest.fail(msg)
         pytest.skip(msg)
 
-    fixture_path = (
-        _Path(__file__).parent / "fixtures" / f"{fixture_stem}.nwb"
-    )
+    fixture_path = _Path(__file__).parent / "fixtures" / f"{fixture_stem}.nwb"
     if not fixture_path.exists():
         pytest.skip(
             f"NWB fixture {fixture_path} missing; generate via "
@@ -8921,6 +9187,7 @@ def test_v2_real_data_v1_parity_mountainsort4(
     from tests.spikesorting.v2._smoke_constants import (
         v2_preproc_name_for_v1,
     )
+
     preproc_name_v2 = v2_preproc_name_for_v1(
         meta.get("preproc_param_name", "default")
     )
@@ -9006,9 +9273,9 @@ def test_v2_real_data_v1_parity_mountainsort4(
         ),
         "bad_channel_by_electrode_id": {
             str(int(row["electrode_id"])): bool(row["bad_channel"] == "True")
-            for row in (
-                Electrode & {"nwb_file_name": nwb_file_name}
-            ).fetch("KEY", "electrode_id", "bad_channel", as_dict=True)
+            for row in (Electrode & {"nwb_file_name": nwb_file_name}).fetch(
+                "KEY", "electrode_id", "bad_channel", as_dict=True
+            )
         },
         "canonical_preproc_params": canonical_preproc(
             (
@@ -9053,12 +9320,9 @@ def test_v2_real_data_v1_parity_mountainsort4(
     merge_id = (SpikeSortingOutput.CurationV2 & curation_pk).fetch1("merge_id")
 
     v2_per_unit = SpikeSortingOutput().get_spike_times({"merge_id": merge_id})
-    v2_spike_times = {
-        i: np.asarray(arr) for i, arr in enumerate(v2_per_unit)
-    }
+    v2_spike_times = {i: np.asarray(arr) for i, arr in enumerate(v2_per_unit)}
     v1_spike_times_arrs = {
-        int(uid): np.asarray(times)
-        for uid, times in v1_spike_times.items()
+        int(uid): np.asarray(times) for uid, times in v1_spike_times.items()
     }
 
     # Use ``artifact_valid_times`` duration (the interval the SORTER
@@ -9124,7 +9388,9 @@ def test_v2_real_data_v1_parity_mountainsort4(
             f"{MS4_BANDS['median_fr_rel_band']:.0%} ({fr_band_abs:.3f} Hz)."
         )
     if failures:
-        pytest.fail("v1↔v2 MS4 aggregate-band divergence:\n  " + "\n  ".join(failures))
+        pytest.fail(
+            "v1↔v2 MS4 aggregate-band divergence:\n  " + "\n  ".join(failures)
+        )
 
 
 # MS4 GT is polymer-only. A tetrode case was tried and removed: MS4 with
@@ -9490,15 +9756,11 @@ def test_clusterless_thresholder_ground_truth(
             }
         )
         Sorting.populate(sort_pk, reserve_jobs=False)
-        curation_pk = CurationV2.insert_curation(
-            sorting_key=sort_pk, labels={}
+        curation_pk = CurationV2.insert_curation(sorting_key=sort_pk, labels={})
+        merge_id = (SpikeSortingOutput.CurationV2 & curation_pk).fetch1(
+            "merge_id"
         )
-        merge_id = (
-            SpikeSortingOutput.CurationV2 & curation_pk
-        ).fetch1("merge_id")
-        per_unit = SpikeSortingOutput().get_spike_times(
-            {"merge_id": merge_id}
-        )
+        per_unit = SpikeSortingOutput().get_spike_times({"merge_id": merge_id})
         # Clusterless collapses all peaks into one synthetic unit per
         # shank. Concatenate (in case > 1 entry from get_spike_times)
         # and keep this shank's spike-times tagged by sort_group_id.
@@ -9514,7 +9776,9 @@ def test_clusterless_thresholder_ground_truth(
                 Sorting().get_sorting(sort_pk).get_sampling_frequency()
             )
 
-    if not v2_times_s_by_shank or all(a.size == 0 for a in v2_times_s_by_shank.values()):
+    if not v2_times_s_by_shank or all(
+        a.size == 0 for a in v2_times_s_by_shank.values()
+    ):
         pytest.fail(f"v2 clusterless produced no peaks on {session_label}.")
     # Aggregate copy for the false-positive sanity bound (counts only).
     v2_times_s = np.sort(
@@ -9530,9 +9794,9 @@ def test_clusterless_thresholder_ground_truth(
     with pynwb.NWBHDF5IO(raw_nwb_path, "r", load_namespaces=True) as io:
         gt_nwb = io.read()
         gt_units_table = get_ground_truth_units_table(gt_nwb)
-        assert gt_units_table is not None, (
-            f"{nwb_file_name!r} has no sidecar GT units; regenerate."
-        )
+        assert (
+            gt_units_table is not None
+        ), f"{nwb_file_name!r} has no sidecar GT units; regenerate."
         gt_units = {
             int(uid): np.asarray(gt_units_table["spike_times"][idx])
             for idx, uid in enumerate(gt_units_table.id[:])
@@ -9655,9 +9919,7 @@ def test_clusterless_thresholder_ground_truth(
             f"{session_label!r}; falling back to 10x. Add a "
             f"committed observed ratio + 2-3x bound to extras_ratio_max."
         )
-    total_planted_spikes = int(
-        sum(t.size for t in gt_units.values() if t.size)
-    )
+    total_planted_spikes = int(sum(t.size for t in gt_units.values() if t.size))
     if total_planted_spikes > 0:
         extras_ratio = v2_times_s.size / total_planted_spikes
         assert extras_ratio <= extras_ratio_max, (
@@ -9717,8 +9979,7 @@ def test_set_group_by_column_surfaces_unitrode_skip(polymer_smoke_session):
     eids = sorted(
         int(e)
         for e in (
-            Electrode
-            & {"nwb_file_name": nwb_file_name, "bad_channel": "False"}
+            Electrode & {"nwb_file_name": nwb_file_name, "bad_channel": "False"}
         ).fetch("electrode_id")
     )
     assert len(eids) >= 3
@@ -9763,9 +10024,7 @@ def test_artifact_delete_aborts_on_unexpected_resolve_error(
     def _boom(cls, key):
         raise RuntimeError("boom-unexpected-resolve")
 
-    monkeypatch.setattr(
-        ArtifactSelection, "resolve_source", classmethod(_boom)
-    )
+    monkeypatch.setattr(ArtifactSelection, "resolve_source", classmethod(_boom))
     with pytest.raises(RuntimeError, match="boom-unexpected-resolve"):
         (ArtifactDetection & art_pk).delete(safemode=False)
     # Aborted before super().delete(): the master row is still present.
@@ -9928,7 +10187,8 @@ def test_recording_specific_reference_drops_ref_channel(polymer_smoke_session):
     # from a DIFFERENT group than the one we sort.
     SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
     sg_ids = sorted(
-        int(s) for s in (SortGroupV2 & polymer_smoke_session).fetch("sort_group_id")
+        int(s)
+        for s in (SortGroupV2 & polymer_smoke_session).fetch("sort_group_id")
     )
     assert len(sg_ids) >= 2, "need >=2 shanks to isolate a cross-group ref"
     target_sg, other_sg = sg_ids[0], sg_ids[1]
@@ -9973,9 +10233,9 @@ def test_recording_specific_reference_drops_ref_channel(polymer_smoke_session):
         "specific-mode reference electrode leaked into the cached "
         "recording; it must be dropped after referencing."
     )
-    assert set(target_elecs) <= cached_ids, (
-        "sort-group electrodes missing from the cached recording."
-    )
+    assert (
+        set(target_elecs) <= cached_ids
+    ), "sort-group electrodes missing from the cached recording."
 
 
 @pytest.mark.slow
@@ -10062,9 +10322,13 @@ def test_unit_label_insert_rejects_ordered_row(populated_sorting):
         target_unit,
         "noies",  # not in CurationLabel
     )
-    with pytest.raises(ValueError, match="requires mapping|not in CurationLabel"):
+    with pytest.raises(
+        ValueError, match="requires mapping|not in CurationLabel"
+    ):
         CurationV2.UnitLabel.insert1(ordered)
-    with pytest.raises(ValueError, match="requires mapping|not in CurationLabel"):
+    with pytest.raises(
+        ValueError, match="requires mapping|not in CurationLabel"
+    ):
         CurationV2.UnitLabel.insert([ordered])
     # allow_custom_labels=True must NOT let an ordered row bypass the
     # mapping check (the type guard precedes the custom-label opt-out).
@@ -10152,7 +10416,11 @@ def test_sort_group_reference_electrode_id_consistency():
     # 'specific' without a channel id.
     with pytest.raises(ValueError, match="requires a non-null"):
         SortGroupV2().insert1(
-            {**base, "reference_mode": "specific", "reference_electrode_id": None}
+            {
+                **base,
+                "reference_mode": "specific",
+                "reference_electrode_id": None,
+            }
         )
     # non-specific WITH a stray channel id.
     with pytest.raises(ValueError, match="must leave"):
@@ -10240,7 +10508,8 @@ def test_set_group_by_shank_additive_insert_with_explicit_ids(
 
     SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
     first_ids = set(
-        int(i) for i in (SortGroupV2 & polymer_smoke_session).fetch("sort_group_id")
+        int(i)
+        for i in (SortGroupV2 & polymer_smoke_session).fetch("sort_group_id")
     )
     assert first_ids == {0, 1, 2, 3}
 
@@ -10248,11 +10517,19 @@ def test_set_group_by_shank_additive_insert_with_explicit_ids(
         nwb_file_name=nwb_file_name, sort_group_ids=[10, 11, 12, 13]
     )
     all_ids = set(
-        int(i) for i in (SortGroupV2 & polymer_smoke_session).fetch("sort_group_id")
+        int(i)
+        for i in (SortGroupV2 & polymer_smoke_session).fetch("sort_group_id")
     )
-    assert all_ids == {0, 1, 2, 3, 10, 11, 12, 13}, (
-        "additive insert with explicit ids must coexist with prior rows"
-    )
+    assert all_ids == {
+        0,
+        1,
+        2,
+        3,
+        10,
+        11,
+        12,
+        13,
+    }, "additive insert with explicit ids must coexist with prior rows"
 
 
 @pytest.mark.slow
@@ -10334,7 +10611,10 @@ def test_recording_multi_interval_saved_times_use_concat_path(
 
     raw_times = (
         IntervalList
-        & {"nwb_file_name": nwb_file_name, "interval_list_name": "raw data valid times"}
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": "raw data valid times",
+        }
     ).fetch1("valid_times")
     raw_start = float(raw_times[0][0])
     raw_end = float(raw_times[-1][-1])
@@ -10390,7 +10670,10 @@ def test_recording_multi_interval_saved_times_use_concat_path(
         (RecordingSelection & pk).super_delete(warn=False)
         (
             IntervalList
-            & {"nwb_file_name": nwb_file_name, "interval_list_name": interval_name}
+            & {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": interval_name,
+            }
         ).super_delete(warn=False)
 
 
@@ -10474,12 +10757,14 @@ def test_recording_fresh_write_cleanup_unlinks_staged_file(
     try:
         with pytest.raises(Exception, match="post-write boom"):
             Recording.populate(pk, reserve_jobs=False)
-        assert "analysis_file_name" in captured, (
-            "precondition: _write_nwb_artifact must have run and staged a file"
-        )
+        assert (
+            "analysis_file_name" in captured
+        ), "precondition: _write_nwb_artifact must have run and staged a file"
         staged = captured["analysis_file_name"]
         abs_path = AnalysisNwbfile.get_abs_path(staged)
-        assert not Path(abs_path).exists(), (
+        assert not Path(
+            abs_path
+        ).exists(), (
             f"fresh-write cleanup did not unlink the staged file {staged!r}"
         )
         assert not (Recording & pk), "no Recording row may be inserted"
@@ -10564,9 +10849,9 @@ def test_recording_rebuild_path_keeps_existing_file_on_failure(
                 existing_analysis_file_name=existing,  # REBUILD path
                 recording_id=recording_id,
             )
-        assert "written" in captured, (
-            "precondition: _write_nwb_artifact must have run before the failure"
-        )
+        assert (
+            "written" in captured
+        ), "precondition: _write_nwb_artifact must have run before the failure"
         # The rebuild path must NOT unlink the canonical cache file.
         assert Path(existing_abs).exists(), (
             "rebuild path unlinked the existing cache file -- it must only "
@@ -10576,9 +10861,9 @@ def test_recording_rebuild_path_keeps_existing_file_on_failure(
         Path(existing_abs).unlink(missing_ok=True)
         # The create() call may have registered an AnalysisNwbfile row.
         if AnalysisNwbfile & {"analysis_file_name": existing}:
-            (
-                AnalysisNwbfile & {"analysis_file_name": existing}
-            ).delete(safemode=False)
+            (AnalysisNwbfile & {"analysis_file_name": existing}).delete(
+                safemode=False
+            )
 
 
 # ===========================================================================
@@ -10794,9 +11079,7 @@ def test_curation_get_unit_brain_regions_concat_anchor_member_df(
     template_unit = (Sorting.Unit & populated_sorting).fetch(as_dict=True)[0]
     # CurationV2.Unit carries the same Electrode FK + amplitude/spike columns
     # as Sorting.Unit; drop the Sorting PK and re-key onto the planted curation.
-    unit_fields = {
-        k: v for k, v in template_unit.items() if k != "sorting_id"
-    }
+    unit_fields = {k: v for k, v in template_unit.items() if k != "sorting_id"}
 
     SorterParameters.insert_default()
     sid = uuid.uuid4()
@@ -11019,9 +11302,9 @@ def test_list_presets_enumerates_all_presets():
     from spyglass.spikesorting.v2.pipeline import _PRESETS, list_presets
 
     presets = list_presets()
-    assert set(presets) == set(_PRESETS), (
-        "list_presets() must enumerate exactly the registered _PRESETS keys"
-    )
+    assert set(presets) == set(
+        _PRESETS
+    ), "list_presets() must enumerate exactly the registered _PRESETS keys"
     # The three shipped presets are present (guards an accidental rename).
     for name in (
         "franklab_tetrode_mountainsort4",
@@ -11057,9 +11340,9 @@ def test_run_v2_pipeline_idempotent_existing_root(polymer_smoke_session):
     try:
         first = run_v2_pipeline(**common)
         second = run_v2_pipeline(**common)
-        assert second["curation_id"] == first["curation_id"], (
-            "second run must return the existing root curation, not a duplicate"
-        )
+        assert (
+            second["curation_id"] == first["curation_id"]
+        ), "second run must return the existing root curation, not a duplicate"
         assert second["merge_id"] == first["merge_id"]
 
         # A child curation (parent != -1) must NOT divert the short-circuit.
@@ -11069,9 +11352,9 @@ def test_run_v2_pipeline_idempotent_existing_root(polymer_smoke_session):
             description="child curation",
         )
         third = run_v2_pipeline(**common)
-        assert third["curation_id"] == first["curation_id"], (
-            "a non-root child must not divert the root short-circuit"
-        )
+        assert (
+            third["curation_id"] == first["curation_id"]
+        ), "a non-root child must not divert the root short-circuit"
     finally:
         _clean_session_v2(polymer_smoke_session)
 
@@ -11154,3 +11437,361 @@ def test_run_v2_pipeline_mountainsort4_preset(polymer_smoke_session):
         )
     finally:
         _clean_session_v2(polymer_smoke_session)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_disjoint_multi_gap_readback_and_artifact(
+    polymer_smoke_session, monkeypatch
+):
+    """Spike readback + artifact valid_times are gap-correct across MULTIPLE
+    gaps (3 chunks, 2 gaps), not just the first.
+
+    Every other disjoint DB test is single-gap (two chunks). This builds a
+    three-chunk recording and asserts: ``_base_intervals_from_timestamps``
+    (exercised via the populated timeline) yields one valid interval per
+    chunk -- none spanning either gap -- and ``get_sorting`` recovers a
+    spike planted in EACH chunk exactly (the per-chunk ``searchsorted``
+    readback must stay correct past the second gap, not only the first).
+    Closes review "not-checked" item #6.
+    """
+    import uuid as _uuid
+
+    from spyglass.common.common_interval import IntervalList
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    _clean_session_v2(polymer_smoke_session)
+    initialize_v2_defaults()
+    LabTeam.insert1(
+        {"team_name": "v2_test_team", "team_description": "v2 pipeline tests"},
+        skip_duplicates=True,
+    )
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    sort_group_id = int(
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
+    )
+
+    raw_times = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": "raw data valid times",
+        }
+    ).fetch1("valid_times")
+    t0 = float(raw_times[0][0])
+    t_end = float(raw_times[-1][-1])
+    # Three 1.05 s chunks separated by two 0.25 s gaps (3.65 s total).
+    if (t_end - t0) < 3.7:
+        pytest.skip(
+            f"smoke fixture window {t_end - t0:.2f}s too short for a "
+            "3-chunk (2-gap) disjoint test (need >= 3.7s)."
+        )
+    c1 = (t0, t0 + 1.05)
+    c2 = (t0 + 1.30, t0 + 2.35)
+    c3 = (t0 + 2.60, t0 + 3.65)
+    disjoint_times = _np.array([list(c1), list(c2), list(c3)])
+
+    disjoint_name = f"v2_multigap_{_uuid.uuid4().hex[:8]}"
+    IntervalList.insert1(
+        {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": disjoint_name,
+            "valid_times": disjoint_times,
+            "pipeline": "v2_multi_gap_test",
+        }
+    )
+    rec_pk = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+            "interval_list_name": disjoint_name,
+            "preproc_params_name": "default_franklab",
+            "team_name": "v2_test_team",
+        }
+    )
+    Recording.populate(rec_pk, reserve_jobs=False)
+
+    art_pk = ArtifactSelection.insert_selection(
+        {
+            "recording_id": rec_pk["recording_id"],
+            "artifact_params_name": "none",
+        }
+    )
+    ArtifactDetection.populate(art_pk, reserve_jobs=False)
+
+    # Artifact valid_times: detect=False ("none") returns the recorded
+    # window(s) split per chunk -> exactly 3 intervals, none spanning a gap.
+    interval_name = f"artifact_{art_pk['artifact_id']}"
+    saved = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": interval_name,
+        }
+    ).fetch1("valid_times")
+    assert saved.shape == (3, 2), (
+        f"expected one valid interval per chunk (3, 2); got {saved.shape}. "
+        "_base_intervals_from_timestamps mis-split a multi-gap timeline."
+    )
+    gap1_mid = 0.5 * (c1[1] + c2[0])
+    gap2_mid = 0.5 * (c2[1] + c3[0])
+    for start, end in saved:
+        assert not (start < gap1_mid < end), "valid interval spans gap 1"
+        assert not (start < gap2_mid < end), "valid interval spans gap 2"
+
+    # Plant one spike in EACH chunk, recover the boundary frames from the
+    # populated timeline, then assert get_sorting reads all three back
+    # exactly (past BOTH gaps).
+    sort_pk = SortingSelection.insert_selection(
+        {
+            "recording_id": rec_pk["recording_id"],
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": "default",
+            "artifact_id": art_pk["artifact_id"],
+        }
+    )
+    rec = Recording().get_recording(rec_pk)
+    times = _np.asarray(rec.get_times())
+    fs = rec.get_sampling_frequency()
+    gaps = _np.flatnonzero(_np.diff(times) > 1.5 / fs)
+    assert len(gaps) == 2, f"expected two gaps, found {len(gaps)}"
+    k1, k2 = int(gaps[0]), int(gaps[1])  # last frame of chunks 1, 2
+    planted_frames = _np.sort(
+        _np.array([50, k1 + 10, k2 + 10], dtype=_np.int64)
+    )
+    # Sanity: one frame in each chunk.
+    assert 50 < k1 and k1 + 10 < k2 and k2 + 10 < times.size
+
+    def _planted_run_sorter(
+        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None
+    ):
+        import spikeinterface as si
+
+        labels = _np.zeros(planted_frames.size, dtype=_np.int32)
+        return si.NumpySorting.from_samples_and_labels(
+            samples_list=[planted_frames],
+            labels_list=[labels],
+            sampling_frequency=recording.get_sampling_frequency(),
+        )
+
+    monkeypatch.setattr(
+        Sorting, "_run_sorter", staticmethod(_planted_run_sorter)
+    )
+    Sorting.populate(sort_pk, reserve_jobs=False)
+    si_sorting = Sorting().get_sorting(sort_pk)
+    frames = _np.sort(_np.asarray(si_sorting.get_unit_spike_train(unit_id=0)))
+    _np.testing.assert_array_equal(
+        frames,
+        planted_frames,
+        err_msg=(
+            "get_sorting did not recover all planted frames across two "
+            f"gaps. got={frames.tolist()}, planted={planted_frames.tolist()}"
+        ),
+    )
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_shared_artifact_group_multi_member_union(
+    populated_recording, polymer_smoke_session, monkeypatch
+):
+    """Two-member ``SharedArtifactGroup``: the union scan sees an artifact
+    on ONE member's channels, and every member shares the written times.
+
+    Every existing shared-group populate test has a single member, so the
+    ``si.aggregate_channels`` union-scan branch of ``make_compute`` is
+    untested. Here two time-aligned members are grouped; a supra-threshold
+    transient is planted on member A's channels only, member B is clean.
+    With ``proportion_above_thresh=0.4`` over the 8-channel union, A's 4
+    channels alone exceed the required count, so the union scan removes the
+    artifact window -- a per-member scan of the CLEAN member B would not.
+    The single session writes one shared ``IntervalList`` row that every
+    member resolves to, so all members see identical artifact-removed times.
+
+    The two member recordings are loaded as synthetic SI recordings via a
+    monkeypatched ``Recording.get_recording`` (planting a real artifact in
+    fixture data is not otherwise possible); the DB rows / FK chain are
+    real.
+    """
+    import spikeinterface as si
+
+    from spyglass.common.common_interval import IntervalList
+    from spyglass.spikesorting.v2._params.artifact_detection import (
+        ArtifactDetectionParamsSchema,
+    )
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactDetectionParameters,
+        ArtifactSelection,
+        SharedArtifactGroup,
+    )
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+    from spyglass.spikesorting.v2.utils import artifact_interval_list_name
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    fs = 30000.0
+    n_samples = 90000  # 3 s
+    n_ch = 4
+    art_lo, art_hi = 45000, 45050  # transient at 1.5 s
+
+    def _synth_recording(with_artifact):
+        traces = _np.zeros((n_samples, n_ch), dtype=_np.int16)
+        if with_artifact:
+            traces[art_lo:art_hi, :] = 5000
+        rec = si.NumpyRecording([traces], sampling_frequency=fs)
+        rec.set_channel_gains([1.0] * n_ch)  # µV == counts
+        rec.set_channel_offsets([0.0] * n_ch)
+        return rec
+
+    # Second Recording row in the SAME session (a distinct recording_id to
+    # group). Its loaded SI object is replaced below; only the DB row /
+    # FK matters here.
+    raw_times = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": "raw data valid times",
+        }
+    ).fetch1("valid_times")
+    t0 = float(raw_times[0][0])
+    second_interval = "v2_shared_union_window"
+    IntervalList.insert1(
+        {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": second_interval,
+            "valid_times": _np.asarray([[t0, t0 + 2.5]]),
+            "pipeline": "shared_group_union_test",
+        },
+        skip_duplicates=True,
+    )
+    sort_group_id = int(
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
+    )
+    second_rec_pk = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+            "interval_list_name": second_interval,
+            "preproc_params_name": "default_franklab",
+            "team_name": "v2_test_team",
+        }
+    )
+    Recording.populate(second_rec_pk, reserve_jobs=False)
+
+    rid_a = populated_recording["recording_id"]  # member A: artifact
+    rid_b = second_rec_pk["recording_id"]  # member B: clean
+
+    def _fake_get_recording(self, key):
+        return _synth_recording(
+            with_artifact=str(key["recording_id"]) == str(rid_a)
+        )
+
+    monkeypatch.setattr(Recording, "get_recording", _fake_get_recording)
+
+    # Custom param: detect with proportion 0.4 so 4 of 8 union channels
+    # (member A's) suffice to flag a frame; min_length 0.1 s so both
+    # post-split halves survive.
+    params_name = "phase4_union_test"
+    ArtifactDetectionParameters.insert1(
+        {
+            "artifact_params_name": params_name,
+            "params": ArtifactDetectionParamsSchema(
+                detect=True,
+                amplitude_thresh_uV=1000.0,
+                zscore_thresh=None,
+                proportion_above_thresh=0.4,
+                removal_window_ms=1.0,
+                join_window_ms=1.0,
+                min_length_s=0.1,
+            ).model_dump(),
+            "params_schema_version": 2,
+        },
+        skip_duplicates=True,
+    )
+
+    group_name = "v2_multi_member_union_group"
+    (
+        SharedArtifactGroup & {"shared_artifact_group_name": group_name}
+    ).super_delete(warn=False)
+    SharedArtifactGroup.insert_group(
+        group_name,
+        [{"recording_id": rid_a}, {"recording_id": rid_b}],
+    )
+    assert (
+        len(
+            SharedArtifactGroup.Member
+            & {"shared_artifact_group_name": group_name}
+        )
+        == 2
+    )
+
+    art_pk = ArtifactSelection.insert_selection(
+        {
+            "shared_artifact_group_name": group_name,
+            "artifact_params_name": params_name,
+        }
+    )
+    ArtifactDetection.populate(art_pk, reserve_jobs=False)
+
+    interval_name = artifact_interval_list_name(art_pk["artifact_id"])
+    rows = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": interval_name,
+        }
+    ).fetch(as_dict=True)
+    # Single session -> one shared row covering every member.
+    assert (
+        len(rows) == 1
+    ), f"expected one shared IntervalList row; got {len(rows)}"
+    valid_times = rows[0]["valid_times"]
+
+    # The union scan removed member A's artifact: the single base chunk is
+    # split into exactly two valid intervals around the 1.5 s transient,
+    # and no valid interval contains it. A clean-only (member B) scan would
+    # leave one full-window interval instead.
+    art_mid = 0.5 * (art_lo + art_hi) / fs  # ~1.5 s
+    assert valid_times.shape == (2, 2), (
+        f"union scan should split into 2 intervals at the artifact; got "
+        f"valid_times={valid_times.tolist()} (shape {valid_times.shape}). "
+        "A per-member scan of the clean member would leave a single "
+        "full-window interval -- the union channels were not combined."
+    )
+    for start, end in valid_times:
+        assert not (start < art_mid < end), (
+            f"a valid interval [{start}, {end}] spans the artifact at "
+            f"{art_mid}s; the union scan did not remove it."
+        )
+    # Coverage survives on both sides of the artifact.
+    assert any(s <= 0.5 <= e for s, e in valid_times), "pre-artifact lost"
+    assert any(s <= 2.4 <= e for s, e in valid_times), "post-artifact lost"
+
+    # Every member resolves to the SAME artifact-removed times (single
+    # shared row; the per-member dict has one session entry equal to it).
+    shared = ArtifactDetection().get_artifact_removed_intervals(art_pk)
+    assert isinstance(shared, dict) and nwb_file_name in shared
+    _np.testing.assert_array_equal(shared[nwb_file_name], valid_times)
+
+    # Cleanup.
+    (ArtifactDetection & art_pk).delete(safemode=False)
+    (ArtifactSelection & art_pk).super_delete(warn=False)
+    (
+        SharedArtifactGroup & {"shared_artifact_group_name": group_name}
+    ).super_delete(warn=False)

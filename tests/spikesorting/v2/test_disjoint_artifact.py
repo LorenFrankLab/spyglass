@@ -60,9 +60,9 @@ def test_base_intervals_from_timestamps_splits_at_gap():
     assert intervals[1][1] == pytest.approx(ts[-1])
     # No base interval spans the gap.
     for start, end in intervals:
-        assert not (start < ts[99] + gap / 2 < end), (
-            "a base interval must not span the inter-chunk gap"
-        )
+        assert not (
+            start < ts[99] + gap / 2 < end
+        ), "a base interval must not span the inter-chunk gap"
 
 
 def test_base_intervals_from_timestamps_empty():
@@ -70,6 +70,84 @@ def test_base_intervals_from_timestamps_empty():
     from spyglass.spikesorting.v2.utils import _base_intervals_from_timestamps
 
     assert _base_intervals_from_timestamps(np.asarray([]), 30000.0) == []
+
+
+def test_base_intervals_from_timestamps_three_chunks_two_gaps():
+    """Three chunks separated by TWO gaps yield three correct intervals.
+
+    Every existing disjoint fixture is a single gap (two chunks); this
+    pins the ``zip(starts, ends)`` indexing on the multi-gap path. With
+    chunk lengths 80 / 120 / 100 the per-chunk bounds must come from the
+    correct sample offsets, not a hard-coded 2-chunk assumption. (Closes
+    review "not-checked" item #6.)
+    """
+    from spyglass.spikesorting.v2.utils import _base_intervals_from_timestamps
+
+    fs = 30000.0
+    dt = 1.0 / fs
+    n1, n2, n3 = 80, 120, 100
+    t0 = 7.0
+    c1 = t0 + np.arange(n1) * dt
+    c2_start = c1[-1] + 0.5 + dt  # 0.5 s gap after chunk 1
+    c2 = c2_start + np.arange(n2) * dt
+    c3_start = c2[-1] + 0.3 + dt  # 0.3 s gap after chunk 2
+    c3 = c3_start + np.arange(n3) * dt
+    ts = np.concatenate([c1, c2, c3])
+
+    intervals = _base_intervals_from_timestamps(ts, fs)
+    assert len(intervals) == 3
+    # Per-chunk inclusive [first, last] sample times, by absolute index.
+    expected = [
+        (ts[0], ts[n1 - 1]),
+        (ts[n1], ts[n1 + n2 - 1]),
+        (ts[n1 + n2], ts[-1]),
+    ]
+    for (got_s, got_e), (exp_s, exp_e) in zip(intervals, expected):
+        assert got_s == pytest.approx(exp_s)
+        assert got_e == pytest.approx(exp_e)
+    # Neither gap is spanned by any base interval.
+    gap1_mid = 0.5 * (ts[n1 - 1] + ts[n1])
+    gap2_mid = 0.5 * (ts[n1 + n2 - 1] + ts[n1 + n2])
+    for start, end in intervals:
+        assert not (start < gap1_mid < end)
+        assert not (start < gap2_mid < end)
+
+
+def test_base_intervals_gap_threshold_robust_to_subsample_jitter():
+    """The ``1.5 / fs`` split threshold straddles the decision boundary.
+
+    Within-chunk timestamp jitter (a diff of ``1.4 / fs`` -- below the
+    1.5-sample threshold) must NOT spuriously split a chunk, while a
+    genuine missing-sample gap (a diff of ``1.6 / fs`` -- just above the
+    threshold) MUST split. Pins both sides of the boundary so a future
+    threshold change (e.g. to ``1.0 / fs``) is caught.
+    """
+    from spyglass.spikesorting.v2.utils import _base_intervals_from_timestamps
+
+    fs = 30000.0
+    dt = 1.0 / fs
+
+    # Jitter just BELOW the boundary: one within-chunk diff is 1.4/fs.
+    # Build cumulative times so only that one diff is enlarged.
+    diffs_no_split = np.full(50, dt)
+    diffs_no_split[25] = 1.4 * dt
+    ts_no_split = 3.0 + np.concatenate([[0.0], np.cumsum(diffs_no_split)])
+    assert (
+        len(_base_intervals_from_timestamps(ts_no_split, fs)) == 1
+    ), "a 1.4/fs sub-threshold jitter must not split a chunk"
+
+    # Gap just ABOVE the boundary: one diff is 1.6/fs -> split into two.
+    diffs_split = np.full(50, dt)
+    diffs_split[25] = 1.6 * dt
+    ts_split = 3.0 + np.concatenate([[0.0], np.cumsum(diffs_split)])
+    intervals = _base_intervals_from_timestamps(ts_split, fs)
+    assert (
+        len(intervals) == 2
+    ), "a 1.6/fs supra-threshold gap must split the chunk"
+    # The split lands exactly at the enlarged diff (between sample 25 and
+    # 26 of the cumulative vector).
+    assert intervals[0][1] == pytest.approx(ts_split[25])
+    assert intervals[1][0] == pytest.approx(ts_split[26])
 
 
 def _disjoint_recording(chunk_len=200, n_ch=4, fs=30000.0, gap_s=0.5):
@@ -129,9 +207,9 @@ def test_detect_artifacts_valid_times_never_cross_gap():
             f"(gap_mid={gap_mid}); per-chunk subtraction should prevent it."
         )
     # Chunk 2 (artifact-free) survives as its own interval past the gap.
-    assert any(start >= times[chunk_len] for start, end in valid_times), (
-        "expected a valid interval inside chunk 2 (after the gap)"
-    )
+    assert any(
+        start >= times[chunk_len] for start, end in valid_times
+    ), "expected a valid interval inside chunk 2 (after the gap)"
 
 
 @pytest.mark.usefixtures("dj_conn")
@@ -167,9 +245,9 @@ def test_apply_artifact_mask_preserves_chunk_boundary_frame():
     mt = masked.get_traces(return_in_uV=False)
 
     assert np.all(mt[50:60, :] == 0), "artifact frames must be zeroed"
-    assert np.all(mt[k, :] == 7.0), (
-        "chunk-boundary frame must NOT be masked (pure-gap over-mask)"
-    )
+    assert np.all(
+        mt[k, :] == 7.0
+    ), "chunk-boundary frame must NOT be masked (pure-gap over-mask)"
     assert np.all(mt[k + 1, :] == 8.0), "chunk 2's first frame must survive"
 
 

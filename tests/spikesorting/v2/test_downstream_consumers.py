@@ -53,23 +53,17 @@ def _make_v2_root_curation(populated_sorting):
     # Step 1: drop the SpikeSortingOutput master rows whose
     # ``CurationV2`` part points at any curation derived from this
     # sorting. Master-first.
-    curation_keys = (CurationV2 & populated_sorting).fetch(
-        "KEY", as_dict=True
-    )
+    curation_keys = (CurationV2 & populated_sorting).fetch("KEY", as_dict=True)
     if curation_keys:
-        merge_ids = (
-            SpikeSortingOutput.CurationV2 & curation_keys
-        ).fetch("merge_id")
+        merge_ids = (SpikeSortingOutput.CurationV2 & curation_keys).fetch(
+            "merge_id"
+        )
         for mid in merge_ids:
-            (SpikeSortingOutput & {"merge_id": mid}).super_delete(
-                warn=False
-            )
+            (SpikeSortingOutput & {"merge_id": mid}).super_delete(warn=False)
     # Step 2: drop the curation rows.
     (CurationV2 & populated_sorting).super_delete(warn=False)
 
-    pk = CurationV2.insert_curation(
-        sorting_key=populated_sorting, labels={}
-    )
+    pk = CurationV2.insert_curation(sorting_key=populated_sorting, labels={})
     merge_id = (SpikeSortingOutput.CurationV2 & pk).fetch1("merge_id")
     return pk, merge_id
 
@@ -98,7 +92,9 @@ def test_get_recording_returns_filtered_recording(populated_sorting):
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_get_sort_group_info_returns_multi_electrode_relation(populated_sorting):
+def test_get_sort_group_info_returns_multi_electrode_relation(
+    populated_sorting,
+):
     """``SpikeSortingOutput.get_sort_group_info`` returns a relation
     with rows for EVERY electrode in the sort group (not the v1
     ``fetch(limit=1)`` single-row bug).
@@ -125,9 +121,7 @@ def test_get_spike_times_returns_per_unit_arrays(populated_sorting):
     from spyglass.spikesorting.v2.sorting import Sorting
 
     _, merge_id = _make_v2_root_curation(populated_sorting)
-    spike_times = SpikeSortingOutput().get_spike_times(
-        {"merge_id": merge_id}
-    )
+    spike_times = SpikeSortingOutput().get_spike_times({"merge_id": merge_id})
     assert isinstance(spike_times, list)
     n_units = int((Sorting & populated_sorting).fetch1("n_units"))
     assert len(spike_times) == n_units
@@ -166,7 +160,54 @@ def test_consumer_api_shape_contract(populated_sorting, method_name):
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_sorted_spikes_decoding_selection_accepts_v2_merge_id(populated_sorting):
+def test_consumer_spike_indicator_count_alignment(populated_sorting):
+    """Per-unit ``get_spike_indicator`` column sums equal each unit's
+    in-window ``get_spike_times`` count.
+
+    The shape/sign/finite contract in ``test_consumer_api_shape_contract``
+    passes even if column ``j`` of the indicator is wired to a DIFFERENT
+    unit than ``get_spike_times()[j]`` (a sparse-unit_id misalignment that
+    silently corrupts clusterless decoding). This pins the exact per-unit
+    correspondence: ``get_spike_indicator`` bins each unit's spikes that
+    fall in ``[time[0], time[-1]]``, so the column sum MUST equal the
+    count of that same unit's spike times inside the window.
+    """
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+
+    _, merge_id = _make_v2_root_curation(populated_sorting)
+    spike_times = SpikeSortingOutput().get_spike_times({"merge_id": merge_id})
+    assert len(spike_times) >= 1, "fixture must yield at least one unit"
+
+    time_array = np.arange(0.0, 4.0, 0.1)
+    indicator = SpikeSortingOutput().get_spike_indicator(
+        {"merge_id": merge_id}, time_array
+    )
+    assert indicator.shape == (len(time_array), len(spike_times))
+
+    min_t, max_t = time_array[0], time_array[-1]
+    column_sums = indicator.sum(axis=0)
+    for j, arr in enumerate(spike_times):
+        in_window = int(np.count_nonzero((arr >= min_t) & (arr <= max_t)))
+        assert int(column_sums[j]) == in_window, (
+            f"unit {j}: indicator column sum {int(column_sums[j])} != "
+            f"in-window spike count {in_window}; the per-unit indicator "
+            "is misaligned with get_spike_times (sparse-unit_id bug)."
+        )
+    # Total spikes in-window across all units must also agree (catches a
+    # misalignment that happens to permute counts between equal-count
+    # units).
+    total_in_window = sum(
+        int(np.count_nonzero((arr >= min_t) & (arr <= max_t)))
+        for arr in spike_times
+    )
+    assert int(column_sums.sum()) == total_in_window
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_sorted_spikes_decoding_selection_accepts_v2_merge_id(
+    populated_sorting,
+):
     """A ``SortedSpikesDecodingSelection`` row keyed on a v2 ``merge_id``
     can be INSERTED -- the FK chain resolves end-to-end.
 
@@ -218,9 +259,9 @@ def test_sorted_spikes_decoding_selection_accepts_v2_merge_id(populated_sorting)
     recording_id = (
         SortingSelection.RecordingSource & populated_sorting
     ).fetch1("recording_id")
-    actual_nwb = (
-        RecordingSelection & {"recording_id": recording_id}
-    ).fetch1("nwb_file_name")
+    actual_nwb = (RecordingSelection & {"recording_id": recording_id}).fetch1(
+        "nwb_file_name"
+    )
 
     sorted_group_name = "v2_decoding_fk_test_sorted_spikes_group"
     existing_group = SortedSpikesGroup & {
@@ -299,9 +340,7 @@ def test_sorted_spikes_decoding_selection_accepts_v2_merge_id(populated_sorting)
     full_chain = (
         SortedSpikesDecodingSelection
         * SortedSpikesGroup.Units
-        * SpikeSortingOutput.CurationV2.proj(
-            spikesorting_merge_id="merge_id"
-        )
+        * SpikeSortingOutput.CurationV2.proj(spikesorting_merge_id="merge_id")
         * CurationV2
         & selection_key
         & {"spikesorting_merge_id": merge_id}
@@ -338,9 +377,9 @@ def test_sorted_spikes_group_per_unit_and_mua_firing_rate(populated_sorting):
     recording_id = (
         SortingSelection.RecordingSource & populated_sorting
     ).fetch1("recording_id")
-    actual_nwb = (
-        RecordingSelection & {"recording_id": recording_id}
-    ).fetch1("nwb_file_name")
+    actual_nwb = (RecordingSelection & {"recording_id": recording_id}).fetch1(
+        "nwb_file_name"
+    )
 
     group_name = "v2_downstream_consumers_sorted_spikes_group"
     existing = SortedSpikesGroup & {
@@ -375,3 +414,99 @@ def test_sorted_spikes_group_per_unit_and_mua_firing_rate(populated_sorting):
     assert fr_mua.shape == (len(time_array), 1)
     assert np.all(fr_mua >= 0)
     assert np.all(np.isfinite(fr_mua))
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_sorted_spikes_group_label_filter_filters(populated_sorting):
+    """``SortedSpikesGroup`` label exclusion actually drops labeled units.
+
+    ``fetch_spike_data`` previously short-circuited label filtering under
+    pytest (``and not test_mode``), leaving the include/exclude path
+    uncovered. With that test-only bypass removed, a ``default_exclusion``
+    group (excludes ``noise``/``mua``) must return strictly fewer units
+    than an ``all_units`` group when a unit is labeled ``noise``. This test
+    labels one unit ``noise`` and asserts the excluded group loses exactly
+    that unit -- it would FAIL (equal counts) if the ``test_mode`` bypass
+    were still in place, which is what couples this test to the one-line
+    production change.
+    """
+    from spyglass.spikesorting.analysis.v1.group import (
+        SortedSpikesGroup,
+        UnitSelectionParams,
+    )
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.recording import RecordingSelection
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    unit_ids = sorted(
+        int(u) for u in (Sorting.Unit & populated_sorting).fetch("unit_id")
+    )
+    assert unit_ids, "fixture must yield at least one sorted unit"
+    noise_unit = unit_ids[0]
+
+    # Clear any prior curations for this sorting (master-before-part) so
+    # the test is order-independent against the package-scoped fixture.
+    curation_keys = (CurationV2 & populated_sorting).fetch("KEY", as_dict=True)
+    if curation_keys:
+        for mid in (SpikeSortingOutput.CurationV2 & curation_keys).fetch(
+            "merge_id"
+        ):
+            (SpikeSortingOutput & {"merge_id": mid}).super_delete(warn=False)
+    (CurationV2 & populated_sorting).super_delete(warn=False)
+
+    pk = CurationV2.insert_curation(
+        sorting_key=populated_sorting, labels={noise_unit: ["noise"]}
+    )
+    merge_id = (SpikeSortingOutput.CurationV2 & pk).fetch1("merge_id")
+
+    UnitSelectionParams().insert_default()
+    recording_id = (
+        SortingSelection.RecordingSource & populated_sorting
+    ).fetch1("recording_id")
+    actual_nwb = (RecordingSelection & {"recording_id": recording_id}).fetch1(
+        "nwb_file_name"
+    )
+
+    def _make_group(name, params_name):
+        existing = SortedSpikesGroup & {
+            "sorted_spikes_group_name": name,
+            "nwb_file_name": actual_nwb,
+        }
+        if existing:
+            existing.super_delete(warn=False)
+        SortedSpikesGroup().create_group(
+            group_name=name,
+            nwb_file_name=actual_nwb,
+            unit_filter_params_name=params_name,
+            keys=[{"spikesorting_merge_id": merge_id}],
+        )
+        return {
+            "sorted_spikes_group_name": name,
+            "nwb_file_name": actual_nwb,
+            "unit_filter_params_name": params_name,
+        }
+
+    all_key = _make_group("v2_label_filter_all_units", "all_units")
+    excl_key = _make_group("v2_label_filter_exclude", "default_exclusion")
+
+    all_times = SortedSpikesGroup.fetch_spike_data(all_key)
+    excl_times = SortedSpikesGroup.fetch_spike_data(excl_key)
+
+    assert len(all_times) == len(unit_ids), (
+        f"all_units returned {len(all_times)} units; expected "
+        f"{len(unit_ids)} (no filtering)."
+    )
+    n_noise = sum(1 for u in unit_ids if u == noise_unit)  # exactly 1
+    assert len(excl_times) == len(all_times) - n_noise, (
+        f"default_exclusion returned {len(excl_times)} units; expected "
+        f"{len(all_times) - n_noise} (the noise-labeled unit filtered "
+        "out). If equal to all_units, the test_mode bypass is still active."
+    )
+
+    # Cleanup the groups + curation we created.
+    (SortedSpikesGroup & all_key).super_delete(warn=False)
+    (SortedSpikesGroup & excl_key).super_delete(warn=False)
+    (SpikeSortingOutput & {"merge_id": merge_id}).super_delete(warn=False)
+    (CurationV2 & pk).super_delete(warn=False)
