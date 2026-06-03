@@ -1506,10 +1506,10 @@ class Recording(SpyglassMixin, dj.Computed):
             recording = recording.frame_slice(
                 start_frame=int(s), end_frame=int(e)
             )
-            # ``times`` is the full-source wall-clock vector; the
-            # frame-sliced recording's own ``get_times()`` resets to a
-            # 0-based grid, so slicing ``times`` persists the real
-            # per-interval timestamps (same as the multi-interval path).
+            # ``times`` is the full-source wall-clock vector; slice it
+            # explicitly (rather than reading the frame-sliced
+            # recording's ``get_times()``) so the persisted per-interval
+            # timestamps match the multi-interval path above.
             timestamps_override = times[int(s) : int(e)]
 
         if reference_mode == "specific":

@@ -2356,6 +2356,9 @@ class Sorting(SpyglassMixin, dj.Computed):
         peak_channels = template_tools.get_template_extremum_channel(
             analyzer, outputs="id"
         )
+        # ``abs_value=True`` is the SI default, so the returned extremum
+        # amplitudes are already non-negative magnitudes (the unit
+        # ``peak_amplitude_uv`` stores); no extra ``abs`` is needed below.
         peak_amplitudes = template_tools.get_template_extremum_amplitude(
             analyzer
         )
@@ -2408,9 +2411,7 @@ class Sorting(SpyglassMixin, dj.Computed):
                             "electrode_id",
                         )
                     },
-                    "peak_amplitude_uv": float(
-                        _np.abs(peak_amplitudes[unit_id])
-                    ),
+                    "peak_amplitude_uv": float(peak_amplitudes[unit_id]),
                     "n_spikes": n_spikes,
                 }
             )
