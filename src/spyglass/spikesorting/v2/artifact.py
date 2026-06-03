@@ -76,9 +76,9 @@ def _init_artifact_worker(
     multi-process pool the ``recording`` arrives as a ``to_dict()`` blob and is
     re-hydrated with ``si.load`` (SI 0.104 renamed v1's ``load_extractor``);
     on the single-process / thread path the live recording object is passed
-    straight through. ``n_required`` and the per-channel ``gains`` are constant
-    across chunks, so they are resolved once here and cached in the worker
-    context rather than recomputed per chunk.
+    straight through. ``n_required`` is constant across chunks, so it is
+    resolved once here and cached in the worker context rather than
+    recomputed per chunk.
     """
     import spikeinterface as si
 
@@ -89,7 +89,6 @@ def _init_artifact_worker(
         "zscore_thresh": zscore_thresh,
         "amplitude_thresh_uV": amplitude_thresh_uV,
         "n_required": int(np.ceil(proportion_above_thresh * n_channels)),
-        "gains": recording.get_channel_gains(),
     }
 
 
@@ -97,8 +96,8 @@ def _compute_artifact_chunk(segment_index, start_frame, end_frame, worker_ctx):
     """Flag artifact frame indices within a ``[start_frame, end_frame)`` chunk.
 
     Reproduces the EXACT per-frame detection math of the former full-in-memory
-    scan, applied to a single chunk: scale to µV with the stored per-channel
-    gains, then OR-combine the amplitude and across-channel z-score detectors.
+    scan, applied to a single chunk: read traces already in µV, then
+    OR-combine the amplitude and across-channel z-score detectors.
     The across-channel (``axis=1``) z-score uses only the chunk row's own
     columns, so it is identical regardless of where the chunk boundaries fall --
     this is what makes the chunked output frame-identical to the in-memory one.
@@ -106,25 +105,24 @@ def _compute_artifact_chunk(segment_index, start_frame, end_frame, worker_ctx):
     this chunk.
 
     Peak working set per chunk ≈ ``4 × (end_frame - start_frame) × n_channels ×
-    4 bytes`` (raw int slice + float32 µV copy + abs + z-score intermediate),
+    4 bytes`` (µV float32 slice + abs + z-score intermediate),
     independent of the full recording length.
     """
     recording = worker_ctx["recording"]
     zscore_thresh = worker_ctx["zscore_thresh"]
     amplitude_thresh_uV = worker_ctx["amplitude_thresh_uV"]
     n_required = worker_ctx["n_required"]
-    gains = worker_ctx["gains"]
 
-    traces = recording.get_traces(
+    # ``return_in_uV=True`` lets SpikeInterface apply the recording's stored
+    # per-channel gain AND offset, returning microvolts directly. This is the
+    # threshold's unit, and it avoids re-implementing the count->µV conversion
+    # (a gain-only scaling would silently ignore any non-zero channel offset).
+    traces_uv = recording.get_traces(
         segment_index=segment_index,
         start_frame=start_frame,
         end_frame=end_frame,
-        return_in_uV=False,
-    )
-    # ``gains`` is the recording's per-channel gain array (set by
-    # ``Recording`` preprocessing, so never None here); scale raw counts
-    # to uV before thresholding.
-    traces_uv = traces.astype(np.float32) * gains[None, :]
+        return_in_uV=True,
+    ).astype(np.float32)
     absolute = np.abs(traces_uv)
 
     if amplitude_thresh_uV is not None:
@@ -1025,7 +1023,7 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         # global ``chunk_duration='1s'``) must still be bounded, so default the
         # chunk to 1 s of data. Callers can override via job_kwargs (and a
         # single-pass-in-memory mode is still reachable with an explicit
-        # ``chunk_duration=-1`` / ``chunk_size`` spanning the recording).
+        # ``chunk_size`` spanning the recording).
         _CHUNK_KEYS = (
             "chunk_size",
             "chunk_duration",
@@ -1115,7 +1113,8 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
 
         # Chunked scan via ChunkRecordingExecutor (see
         # ``_scan_artifact_frames``). The per-frame detection math --
-        # µV scaling with the stored gains, amplitude threshold, and the
+        # µV traces (gain+offset applied by SpikeInterface), amplitude
+        # threshold, and the
         # across-channel (``axis=1``) z-score with its ``+1e-12`` std
         # epsilon -- lives in the module-level ``_compute_artifact_chunk``
         # worker. The z-score is computed on each frame's own columns, so

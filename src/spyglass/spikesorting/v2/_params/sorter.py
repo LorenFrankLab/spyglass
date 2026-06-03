@@ -228,7 +228,12 @@ class ClusterlessThresholderSchema(BaseModel):
             "(the shipped 'default' row pairs 'uv' with [1.0])."
         ),
     )
-    method: Literal["locally_exclusive", "global"] = "locally_exclusive"
+    # Only ``locally_exclusive`` is wired: the runtime always builds
+    # ``radius_um`` into ``method_kwargs`` (spatial exclusion), which the
+    # other SI ``detect_peaks`` methods (e.g. ``by_channel``) reject. v1
+    # advertised a ``"global"`` option that was never a valid SI method --
+    # it would fail at ``detect_peaks`` time -- so it is not offered here.
+    method: Literal["locally_exclusive"] = "locally_exclusive"
     peak_sign: Literal["neg", "pos", "both"] = "neg"
     exclude_sweep_ms: float = Field(default=0.1, gt=0.0)
     local_radius_um: float = Field(default=100.0, gt=0.0)
