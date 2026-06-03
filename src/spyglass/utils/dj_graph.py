@@ -34,6 +34,8 @@ from spyglass.utils.database_settings import SHARED_MODULES
 from spyglass.utils.dj_helper_fn import PERIPHERAL_TABLES  # is_nonempty,
 from spyglass.utils.dj_helper_fn import ensure_names, fuzzy_get, unique_dicts
 
+RESTR_PLACEHOLDER = "__RESTR_PLACEHOLDER__"
+
 
 def dj_topo_sort(graph: DiGraph) -> List[str]:
     """Topologically sort graph.
@@ -241,6 +243,18 @@ class AbstractGraph(ABC):
 
     def _get_restr(self, table):
         """Get restriction from graph node."""
+        if (
+            restr := self._get_node(ensure_names(table)).get("restr")
+        ) is RESTR_PLACEHOLDER:
+            restr_list = self._get_restr_list(table)
+            if not restr_list:
+                return None
+            ft = self._get_ft(table)
+            self._set_node(
+                table,
+                "restr",
+                self._coerce_to_condition(ft, ft & restr_list),
+            )
         return self._get_node(ensure_names(table)).get("restr")
 
     def _get_restr_list(self, table):
@@ -312,8 +326,10 @@ class AbstractGraph(ABC):
         # Merge restrictions
         restr_list = self._get_restr_list(table) + [restriction]
         self._set_node(table, "restr_list", restr_list)
-        restriction = self._coerce_to_condition(ft, ft & restr_list)
-        self._set_node(table, "restr", restriction)
+        # restriction = self._coerce_to_condition(ft, ft & restr_list)
+        self._set_node(
+            table, "restr", RESTR_PLACEHOLDER
+        )  # Placeholder to avoid redundant coercion
         return restriction
 
     @lru_cache(maxsize=128)
