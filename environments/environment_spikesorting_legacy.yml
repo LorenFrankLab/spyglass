@@ -22,7 +22,7 @@
 #    ``ResolutionImpossible``), so the downgrade is a separate pip call
 #    after env creation (the `pytest-legacy` CI job runs it as its own
 #    step):
-#       pip install --force-reinstall "spikeinterface>=0.99,<0.101"
+#       pip install --force-reinstall "spikeinterface>=0.99.1,<0.100"
 # 4. Run the legacy suites (Docker MySQL for DataJoint, or --no-docker
 #    null_server against an external MySQL as CI does):
 #       pytest tests/spikesorting/v0 tests/spikesorting/v1 --no-docker --no-dlc
@@ -50,6 +50,6 @@ dependencies:
       # ``==0.104.3`` pin and ``>=0.99,<0.101`` cannot co-resolve in conda's
       # single-pass pip section. Apply it as a separate post-create step
       # (see header step 3; the `pytest-legacy` CI job runs it):
-      #   pip install --force-reinstall "spikeinterface>=0.99,<0.101"
+      #   pip install --force-reinstall "spikeinterface>=0.99.1,<0.100"
       - mountainsort4
       - --editable "..[test]"

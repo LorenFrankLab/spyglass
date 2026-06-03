@@ -383,13 +383,18 @@ jobs:
       # deps down to the 0.99 line the v0/v1 active runtime paths require,
       # without touching the v2 ``spikeinterface==0.104.3`` pin in
       # pyproject.toml). Mirrors the env file's post-create step.
+      #
+      # Pin to the SAME range master ships for v0/v1 (>=0.99.1,<0.100 ->
+      # 0.99.1), NOT <0.101: 0.100.x changed NwbRecordingExtractor's
+      # timestamp handling (load_time_vector hits "'Group' object has no
+      # attribute 'timestamps'") and is not a configuration v0/v1 support.
       run: |
-        pip install --force-reinstall "spikeinterface>=0.99,<0.101"
+        pip install --force-reinstall "spikeinterface>=0.99.1,<0.100"
         python - <<'PY'
         from packaging.version import Version
         import spikeinterface as si
         print("SpikeInterface", si.__version__)
-        assert Version(si.__version__) < Version("0.101"), si.__version__
+        assert Version(si.__version__) < Version("0.100"), si.__version__
         PY
     - name: Cache test data
       id: cache-test-data

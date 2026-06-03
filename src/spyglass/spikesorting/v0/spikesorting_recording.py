@@ -785,7 +785,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         """
 
         nwb_file_abs_path = Nwbfile().get_abs_path(key["nwb_file_name"])
-        recording = se.read_nwb_recording(
+        recording = read_raw_nwb_recording(
             nwb_file_abs_path, load_time_vector=True
         )
 
