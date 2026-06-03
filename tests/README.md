@@ -20,7 +20,8 @@ pytest tests/position/v1/test_trodes.py
 pytest --cov=spyglass --cov-report term-missing
 
 # Debug mode (preserve database, verbose output)
-pytest --no-teardown --base-dir ./tests/_data/ -v
+# --base-dir defaults to ./tests/_data/, so it can be omitted
+pytest --no-teardown -v
 ```
 
 ______________________________________________________________________
@@ -209,7 +210,7 @@ pytest tests/position/v1/test_trodes.py
 **Combine for maximum speed:**
 
 ```bash
-pytest tests/common/test_session.py --no-teardown --base-dir ./tests/_data/ --quiet-spy
+pytest tests/common/test_session.py --no-teardown --quiet-spy
 ```
 
 ### For CI/CD
@@ -293,7 +294,7 @@ tests/path/file.py  # Run specific test file
 pytest tests/common/test_session.py::test_insert -s --pdb
 
 # Fast development cycle
-pytest -m "not slow" --no-teardown --base-dir ./tests/_data/ --quiet-spy -v
+pytest -m "not slow" --no-teardown --quiet-spy -v
 
 # Full coverage analysis
 pytest --cov=spyglass --cov-report html --cov-report term-missing
@@ -375,7 +376,7 @@ ______________________________________________________________________
 docker ps | grep spyglass
 
 # Manually start container
-pytest --no-teardown --base-dir ./tests/_data/  # Run once to start container
+pytest --no-teardown  # Run once to start container
 # Container persists for subsequent runs
 ```
 
@@ -389,7 +390,7 @@ suffix. If your branch name has special characters, consider renaming.
 pytest -m "not slow and not very_slow"
 
 # 2. Check if database is being recreated
-pytest --no-teardown --base-dir ./tests/_data/  # Preserve database between runs
+pytest --no-teardown  # Preserve database between runs
 
 # 3. Check test data cache
 ls -lh tests/_data/  # Should see cached files
