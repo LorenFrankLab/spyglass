@@ -392,15 +392,17 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
             List of features for each unit
 
         """
-        return tuple(
-            zip(
-                *list(
-                    chain(
-                        *[self._convert_data(data) for data in self.fetch_nwb()]
-                    )
-                )
-            )
+        per_unit = list(
+            chain(*[self._convert_data(data) for data in self.fetch_nwb()])
         )
+        # ``zip(*[])`` collapses to an empty tuple ``()``; consumers (e.g.
+        # ``ClusterlessDecodingV1.fetch_spike_data``) unpack the result into
+        # ``spike_times, spike_waveform_features``, which would raise on ``()``.
+        # An all-zero-unit feature set (now writable for v2 sorts) yields no
+        # per-unit rows, so return two empty sequences explicitly.
+        if not per_unit:
+            return [], []
+        return tuple(zip(*per_unit))
 
     @staticmethod
     def _convert_data(nwb_data) -> list[tuple[np.ndarray, np.ndarray]]:

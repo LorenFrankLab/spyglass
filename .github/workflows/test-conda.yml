@@ -244,8 +244,15 @@ jobs:
       run: |
         python tests/spikesorting/v2/fixtures/generate_mearec.py --smoke
     - name: Run modern spike-sorting tests
+      # Includes the v2 clusterless waveform-feature tests (kept in
+      # tests/decoding/ beside their ClusterlessDecodingV1 consumer): the smoke
+      # fixture generated above drives the clusterless + zero-unit cases; the
+      # sparse-id case needs the 60s polymer fixture (not generated in default
+      # CI) and skips cleanly until a manual / scheduled full run.
       run: |
-        pytest tests/spikesorting/v2/ --no-docker --no-dlc -q
+        pytest tests/spikesorting/v2/ \
+          tests/decoding/test_unit_waveform_features_v2.py \
+          --no-docker --no-dlc -q
     # --- Phase 0c plan-line 125 matching-extra resolver-evidence job.
     # Runs in a SEPARATE, sacrificial conda env so the numpy<2
     # downgrade UnitMatchPy 3.3 forces does not poison the default v2
@@ -388,5 +395,10 @@ jobs:
         # --base-dir pins tests to the cached tests/_data/ path (see the
         # run-tests job for the rationale). --no-docker uses the conftest
         # null_server path against the MySQL service above.
+        # The v2 clusterless waveform-feature file also carries the
+        # legacy-environment guard test, which must run under SI 0.99 (its v2
+        # cases skip via the SI-version marker). Its v2-infra imports are lazy
+        # so collection here does not pull the SI-0.104 test modules.
         pytest tests/spikesorting/v0 tests/spikesorting/v1 \
+          tests/decoding/test_unit_waveform_features_v2.py \
           --no-docker --no-dlc --base-dir ./tests/_data/ -q

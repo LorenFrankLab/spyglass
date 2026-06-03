@@ -25,10 +25,11 @@ import pytest
 import spikeinterface as si
 from packaging.version import Version
 
-from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
-from tests.spikesorting.v2.test_single_session_pipeline import (
-    _clean_session_v2,
-)
+# NOTE: imports of the v2 test infrastructure (``copy_and_insert_nwb``,
+# ``_clean_session_v2``) are deliberately LAZY (inside the helpers/fixtures
+# below). This module also runs in the legacy SI 0.99 job for the guard test;
+# importing the heavy v2 test modules at collection time could fail under the
+# legacy environment, whereas the legacy test itself touches none of them.
 
 _SI_IS_LEGACY = Version(si.__version__) < Version("0.101")
 _skip_if_legacy = pytest.mark.skipif(
@@ -70,6 +71,8 @@ def _disable_datajoint_safemode():
 @pytest.fixture(scope="module")
 def wave_session(dj_conn):
     """Ingest the MEArec polymer smoke fixture (fast clusterless cases)."""
+    from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
+
     if not _FIXTURE_PATH.exists():
         pytest.skip(f"Fixture {_FIXTURE_PATH.name} not found.")
     nwb_file_name = copy_and_insert_nwb(_FIXTURE_PATH)
@@ -85,6 +88,8 @@ def polymer_60s_session(dj_conn):
     60s shank reliably yields several. Shares the smoke fixture's probe, so
     co-ingestion does not collide on the probe/electrode tables.
     """
+    from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
+
     if not _POLYMER_60S_PATH.exists():
         pytest.skip(f"Fixture {_POLYMER_60S_PATH.name} not found.")
     nwb_file_name = copy_and_insert_nwb(_POLYMER_60S_PATH)
@@ -140,6 +145,10 @@ def _drop_feature_rows():
 
 def _reset(session):
     """Drop feature rows then every v2 row for the session (prompt-free)."""
+    from tests.spikesorting.v2.test_single_session_pipeline import (
+        _clean_session_v2,
+    )
+
     _drop_feature_rows()
     _clean_session_v2(session)
 
@@ -424,6 +433,17 @@ def test_unit_waveform_features_zero_unit_v2(wave_session):
     assert len(feature_df) == 0, (
         "zero-unit curation must write an empty units feature table; got "
         f"{len(feature_df)} rows"
+    )
+
+    # ``fetch_data`` must return two empty sequences (not the bare ``()`` that
+    # ``zip(*[])`` produces), so the public consumer
+    # ``ClusterlessDecodingV1.fetch_spike_data`` -- which unpacks the result
+    # into ``spike_times, spike_waveform_features`` -- does not raise on an
+    # all-zero-unit feature set.
+    spike_times, spike_features = tbl.fetch_data()
+    assert spike_times == [] and spike_features == [], (
+        "zero-unit fetch_data must yield ([], []); got "
+        f"({spike_times!r}, {spike_features!r})"
     )
     _reset(wave_session)
 
