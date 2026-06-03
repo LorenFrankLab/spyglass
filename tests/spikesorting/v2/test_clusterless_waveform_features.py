@@ -286,6 +286,55 @@ def _units_dataframe(nwb_row):
     return nwb_row["object_id"]
 
 
+@pytest.mark.usefixtures("dj_conn")
+def test_analyzer_waveform_accessor_zero_unit_contract():
+    """The empty (``analyzer=None``) accessor only accepts a zero-unit sorting.
+
+    Constructing it with a non-empty sorting is rejected up front -- otherwise
+    ``get_waveforms`` would raise a misleading "zero-unit" error for a sort that
+    actually has units. The legitimate zero-unit accessor refuses
+    ``get_waveforms`` with a clear ``RuntimeError`` (never reached in normal
+    flow because there are no units to iterate).
+    """
+    from spyglass.decoding.v1.waveform_features import (
+        _AnalyzerWaveformAccessor,
+    )
+
+    class _FakeSorting:
+        def __init__(self, n_units):
+            self._n = n_units
+
+        def get_num_units(self):
+            return self._n
+
+        def get_unit_ids(self):
+            return list(range(self._n))
+
+    acc = _AnalyzerWaveformAccessor(sorting=_FakeSorting(0))
+    with pytest.raises(RuntimeError, match="zero-unit accessor"):
+        acc.get_waveforms(0)
+
+    with pytest.raises(ValueError, match="zero-unit sorting"):
+        _AnalyzerWaveformAccessor(sorting=_FakeSorting(3))
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_v2_dispatch_table_name_resolution():
+    """``make`` routes only a ``CurationV2`` source to the v2 (non-legacy) path.
+
+    Pins the ``to_camel_case(table_name) == "CurationV2"`` dispatch contract in
+    ``waveform_features.py``: the tier prefix is stripped (``curation_v2`` ->
+    ``CurationV2``) and the match is exact, so a legacy (``CurationV1``) source
+    or a hypothetical ``MetricCurationV2`` source does not collide onto the v2
+    branch.
+    """
+    from datajoint.utils import to_camel_case
+
+    assert to_camel_case("curation_v2") == "CurationV2"
+    for non_v2 in ("curation_v1", "metric_curation_v2"):
+        assert to_camel_case(non_v2) != "CurationV2", non_v2
+
+
 @_skip_if_legacy
 @pytest.mark.slow
 def test_unit_waveform_features_v2_clusterless_runs_under_si0104(wave_session):
@@ -298,37 +347,48 @@ def test_unit_waveform_features_v2_clusterless_runs_under_si0104(wave_session):
     """
     param_pk = _amplitude_param()
     sort_pk, _ = _run_clusterless(wave_session, tuned=True)
+    try:
+        from spyglass.spikesorting.v2.sorting import Sorting
 
-    from spyglass.spikesorting.v2.sorting import Sorting
+        n_units = int((Sorting & sort_pk).fetch1("n_units"))
+        assert (
+            n_units == 1
+        ), f"tuned clusterless should find one unit; got {n_units}"
 
-    n_units = int((Sorting & sort_pk).fetch1("n_units"))
-    assert n_units == 1, (
-        f"tuned clusterless should find one unit; got {n_units}"
-    )
+        merge_id = _curation_merge_id(sort_pk, parent_curation_id=-1)
+        _, nwb_row = _populate_features(merge_id, param_pk)
+        feature_df = _units_dataframe(nwb_row)
 
-    merge_id = _curation_merge_id(sort_pk, parent_curation_id=-1)
-    _, nwb_row = _populate_features(merge_id, param_pk)
-    feature_df = _units_dataframe(nwb_row)
-
-    assert "amplitude" in feature_df.columns, "amplitude column missing"
-    assert list(feature_df.index) == [0], (
-        "clusterless writes a single unit_id=0; got "
-        f"{list(feature_df.index)}"
-    )
-    unit = feature_df.loc[0]
-    amps = np.asarray(unit["amplitude"])
-    spike_times = np.asarray(unit["spike_times"])
-    assert amps.ndim == 2, (
-        f"amplitude must be (n_spikes, n_ch); got {amps.shape}"
-    )
-    assert amps.shape[0] == spike_times.shape[0], (
-        "amplitude rows must align 1:1 with spike_times: "
-        f"{amps.shape[0]} amps vs {spike_times.shape[0]} spikes"
-    )
-    assert amps.shape[0] > 0 and np.isfinite(amps).all(), (
-        "expected finite per-spike amplitudes for a populated clusterless unit"
-    )
-    _reset(wave_session)
+        assert "amplitude" in feature_df.columns, "amplitude column missing"
+        assert list(feature_df.index) == [0], (
+            "clusterless writes a single unit_id=0; got "
+            f"{list(feature_df.index)}"
+        )
+        unit = feature_df.loc[0]
+        amps = np.asarray(unit["amplitude"])
+        spike_times = np.asarray(unit["spike_times"])
+        assert (
+            amps.ndim == 2
+        ), f"amplitude must be (n_spikes, n_ch); got {amps.shape}"
+        assert amps.shape[0] == spike_times.shape[0], (
+            "amplitude rows must align 1:1 with spike_times: "
+            f"{amps.shape[0]} amps vs {spike_times.shape[0]} spikes"
+        )
+        assert amps.shape[0] > 0 and np.isfinite(amps).all(), (
+            "expected finite per-spike amplitudes for a populated "
+            "clusterless unit"
+        )
+        # ``peak_sign="neg"`` + ``return_in_uV=True``: a real detected spike
+        # has a negative peak on its detection channel, so some amplitudes
+        # must be negative. An all-nonnegative result signals a sign flip,
+        # an ``abs()``, or a broken uV scaling -- none caught by shape /
+        # finiteness alone.
+        assert (amps < 0).any(), (
+            "neg peak_sign should yield some negative (uV) amplitudes; "
+            "all-nonnegative suggests a sign/scale error"
+        )
+    finally:
+        _reset(wave_session)
 
 
 @_skip_if_legacy
@@ -347,58 +407,64 @@ def test_unit_waveform_features_v2_sparse_unit_ids(polymer_60s_session):
     """
     param_pk = _amplitude_param()
     manifest = _run_ms5(polymer_60s_session)
-    if manifest["n_units"] < 2:
-        pytest.skip(
-            f"MS5 produced {manifest['n_units']} unit(s) on the 60s polymer "
-            "fixture; need >=2 to merge into a non-positional survivor id."
+    try:
+        if manifest["n_units"] < 2:
+            pytest.skip(
+                f"MS5 produced {manifest['n_units']} unit(s) on the 60s "
+                "polymer fixture; need >=2 to merge into a non-positional "
+                "survivor id."
+            )
+
+        from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+        from spyglass.spikesorting.v2.sorting import Sorting
+
+        sort_pk = {"sorting_id": manifest["sorting_id"]}
+        source_ids = sorted(
+            int(u) for u in (Sorting.Unit & sort_pk).fetch("unit_id")
+        )
+        merged_id = max(source_ids) + 1  # CurationV2 apply_merge convention
+
+        # Merge ALL source units into one. ``run_v2_pipeline`` already inserted
+        # the root (parent_curation_id=-1) curation; this merge-applied curation
+        # is a child of it. The single survivor carries the fresh
+        # non-positional id.
+        merge_id = _curation_merge_id(
+            sort_pk,
+            parent_curation_id=manifest["curation_id"],
+            merge_groups=[source_ids],
+            apply_merge=True,
         )
 
-    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
-    from spyglass.spikesorting.v2.sorting import Sorting
+        applied_ids = sorted(
+            int(u)
+            for u in SpikeSortingOutput()
+            .get_sorting({"merge_id": merge_id})
+            .get_unit_ids()
+        )
+        assert applied_ids == [merged_id], (
+            f"expected single merged survivor id [{merged_id}]; got "
+            f"{applied_ids}"
+        )
+        assert (
+            merged_id != 0
+        ), "test is only meaningful if the surviving id is non-positional"
 
-    sort_pk = {"sorting_id": manifest["sorting_id"]}
-    source_ids = sorted(
-        int(u) for u in (Sorting.Unit & sort_pk).fetch("unit_id")
-    )
-    merged_id = max(source_ids) + 1  # CurationV2 apply_merge convention
+        _, nwb_row = _populate_features(merge_id, param_pk)
+        feature_df = _units_dataframe(nwb_row)
 
-    # Merge ALL source units into one. ``run_v2_pipeline`` already inserted the
-    # root (parent_curation_id=-1) curation; this merge-applied curation is a
-    # child of it. The single survivor carries the fresh non-positional id.
-    merge_id = _curation_merge_id(
-        sort_pk,
-        parent_curation_id=manifest["curation_id"],
-        merge_groups=[source_ids],
-        apply_merge=True,
-    )
-
-    applied_ids = sorted(
-        int(u) for u in SpikeSortingOutput().get_sorting(
-            {"merge_id": merge_id}
-        ).get_unit_ids()
-    )
-    assert applied_ids == [merged_id], (
-        f"expected single merged survivor id [{merged_id}]; got {applied_ids}"
-    )
-    assert merged_id != 0, (
-        "test is only meaningful if the surviving id is non-positional"
-    )
-
-    _, nwb_row = _populate_features(merge_id, param_pk)
-    feature_df = _units_dataframe(nwb_row)
-
-    assert sorted(feature_df.index) == [merged_id], (
-        "feature row must be keyed by the true (non-positional) unit_id; got "
-        f"{sorted(feature_df.index)} vs [{merged_id}]"
-    )
-    row = feature_df.loc[merged_id]
-    amps = np.asarray(row["amplitude"])
-    spikes = np.asarray(row["spike_times"])
-    assert amps.ndim == 2 and amps.shape[0] == spikes.shape[0], (
-        f"unit {merged_id}: amplitude {amps.shape} must align 1:1 with "
-        f"{spikes.shape[0]} spikes -- positional mis-keying would break this"
-    )
-    _reset(polymer_60s_session)
+        assert sorted(feature_df.index) == [merged_id], (
+            "feature row must be keyed by the true (non-positional) unit_id; "
+            f"got {sorted(feature_df.index)} vs [{merged_id}]"
+        )
+        row = feature_df.loc[merged_id]
+        amps = np.asarray(row["amplitude"])
+        spikes = np.asarray(row["spike_times"])
+        assert amps.ndim == 2 and amps.shape[0] == spikes.shape[0], (
+            f"unit {merged_id}: amplitude {amps.shape} must align 1:1 with "
+            f"{spikes.shape[0]} spikes -- positional mis-keying breaks this"
+        )
+    finally:
+        _reset(polymer_60s_session)
 
 
 @_skip_if_legacy
@@ -407,33 +473,136 @@ def test_unit_waveform_features_zero_unit_v2(wave_session):
     """A zero-unit v2 curation yields an empty-but-valid features row."""
     param_pk = _amplitude_param()
     sort_pk, _ = _run_clusterless(wave_session, tuned=False)
+    try:
+        from spyglass.spikesorting.v2.sorting import Sorting
 
-    from spyglass.spikesorting.v2.sorting import Sorting
+        n_units = int((Sorting & sort_pk).fetch1("n_units"))
+        assert n_units == 0, (
+            "shipped clusterless default should find zero units; got "
+            f"{n_units}"
+        )
 
-    n_units = int((Sorting & sort_pk).fetch1("n_units"))
-    assert n_units == 0, (
-        f"shipped clusterless default should find zero units; got {n_units}"
+        merge_id = _curation_merge_id(sort_pk, parent_curation_id=-1)
+        tbl, nwb_row = _populate_features(merge_id, param_pk)
+        feature_df = _units_dataframe(nwb_row)
+        assert len(feature_df) == 0, (
+            "zero-unit curation must write an empty units feature table; got "
+            f"{len(feature_df)} rows"
+        )
+
+        # ``fetch_data`` must return two empty sequences (not the bare ``()``
+        # that ``zip(*[])`` produces), so the public consumer
+        # ``ClusterlessDecodingV1.fetch_spike_data`` -- which unpacks the
+        # result into ``spike_times, spike_waveform_features`` -- does not
+        # raise on an all-zero-unit feature set.
+        spike_times, spike_features = tbl.fetch_data()
+        assert spike_times == [] and spike_features == [], (
+            "zero-unit fetch_data must yield ([], []); got "
+            f"({spike_times!r}, {spike_features!r})"
+        )
+    finally:
+        _reset(wave_session)
+
+
+@_skip_if_legacy
+@pytest.mark.slow
+def test_unit_waveform_features_v2_full_waveform_and_rejects_spike_location(
+    wave_session,
+):
+    """v2 supports ``full_waveform`` and rejects ``spike_location``.
+
+    Shares one tuned clusterless sort. ``full_waveform`` writes a
+    ``(n_spikes, n_time*n_channels)`` column aligned 1:1 with ``spike_times``.
+    ``spike_location`` -- which ships in a default ``WaveformFeaturesParams``
+    row, so a v2 user can easily select it -- is not wired for v2; ``make``
+    must raise ``NotImplementedError`` before building an analyzer rather than
+    crashing deep in SpikeInterface.
+    """
+    from spyglass.decoding.v1.waveform_features import (
+        UnitWaveformFeatures,
+        UnitWaveformFeaturesSelection,
+        WaveformFeaturesParams,
     )
 
-    merge_id = _curation_merge_id(sort_pk, parent_curation_id=-1)
-    tbl, nwb_row = _populate_features(merge_id, param_pk)
-    feature_df = _units_dataframe(nwb_row)
-    assert len(feature_df) == 0, (
-        "zero-unit curation must write an empty units feature table; got "
-        f"{len(feature_df)} rows"
+    fw_param = "v2_wave_full_waveform"
+    loc_param = "v2_wave_spike_location"
+    _extract = {
+        "ms_before": 0.5,
+        "ms_after": 0.5,
+        "max_spikes_per_unit": None,
+        "n_jobs": 1,
+        "chunk_duration": "1000s",
+    }
+    WaveformFeaturesParams().insert(
+        [
+            {
+                "features_param_name": fw_param,
+                "params": {
+                    "waveform_extraction_params": _extract,
+                    "waveform_features_params": {"full_waveform": {}},
+                },
+            },
+            {
+                "features_param_name": loc_param,
+                "params": {
+                    "waveform_extraction_params": _extract,
+                    "waveform_features_params": {
+                        "amplitude": {
+                            "peak_sign": "neg",
+                            "estimate_peak_time": False,
+                        },
+                        "spike_location": {},
+                    },
+                },
+            },
+        ],
+        skip_duplicates=True,
     )
 
-    # ``fetch_data`` must return two empty sequences (not the bare ``()`` that
-    # ``zip(*[])`` produces), so the public consumer
-    # ``ClusterlessDecodingV1.fetch_spike_data`` -- which unpacks the result
-    # into ``spike_times, spike_waveform_features`` -- does not raise on an
-    # all-zero-unit feature set.
-    spike_times, spike_features = tbl.fetch_data()
-    assert spike_times == [] and spike_features == [], (
-        "zero-unit fetch_data must yield ([], []); got "
-        f"({spike_times!r}, {spike_features!r})"
-    )
-    _reset(wave_session)
+    sort_pk, _ = _run_clusterless(wave_session, tuned=True)
+    try:
+        merge_id = _curation_merge_id(sort_pk, parent_curation_id=-1)
+
+        # full_waveform: supported, shape (n_spikes, n_time*n_channels)
+        fw_sel = {
+            "spikesorting_merge_id": merge_id,
+            "features_param_name": fw_param,
+        }
+        UnitWaveformFeaturesSelection().insert1(fw_sel, skip_duplicates=True)
+        UnitWaveformFeatures.populate(fw_sel, reserve_jobs=False)
+        feature_df = _units_dataframe(
+            (UnitWaveformFeatures & fw_sel).fetch_nwb()[0]
+        )
+        assert (
+            "full_waveform" in feature_df.columns
+        ), "full_waveform column missing"
+        row = feature_df.loc[0]
+        fw = np.asarray(row["full_waveform"])
+        spikes = np.asarray(row["spike_times"])
+        assert fw.ndim == 2 and fw.shape[0] == spikes.shape[0], (
+            f"full_waveform {fw.shape} must align 1:1 with "
+            f"{spikes.shape[0]} spikes"
+        )
+        assert fw.shape[1] > 1, (
+            "full_waveform should flatten n_time*n_channels into axis 1; got "
+            f"{fw.shape}"
+        )
+
+        # spike_location: unsupported for v2; make() raises before SI work
+        loc_sel = {
+            "spikesorting_merge_id": merge_id,
+            "features_param_name": loc_param,
+        }
+        UnitWaveformFeaturesSelection().insert1(loc_sel, skip_duplicates=True)
+        with pytest.raises(NotImplementedError, match="spike_location"):
+            UnitWaveformFeatures().make(loc_sel)
+    finally:
+        for p in (fw_param, loc_param):
+            (UnitWaveformFeatures & {"features_param_name": p}).delete_quick()
+            (
+                UnitWaveformFeaturesSelection & {"features_param_name": p}
+            ).delete_quick()
+        _reset(wave_session)
 
 
 @_skip_unless_legacy
