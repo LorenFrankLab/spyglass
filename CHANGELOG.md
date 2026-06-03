@@ -786,6 +786,15 @@ for label, interval_data in results.groupby("interval_labels"):
         accessor logging), so no change to the `get_recording` /
         `get_sorting` accessors was needed. Covered by
         `tests/spikesorting/v2/test_export_safety.py`.
+    - Name the raw acquisition `ElectricalSeries` when reading a source NWB
+        for sorting (v0/v1 `Recording` + recompute paths). SpikeInterface
+        >= 0.100 raises on a file that holds more than one `ElectricalSeries`
+        (e.g. raw + LFP) unless the series is named, where 0.99.x silently
+        picked the first. New `utils.read_raw_nwb_recording` helper selects
+        the acquisition series via `nwb_helper_fn.get_raw_eseries_path` and
+        passes the version-correct keyword (`electrical_series_name` on
+        0.99.x, `electrical_series_path` on >= 0.100). Covered by
+        `tests/utils/test_nwb_helper_fn.py`.
 
 ## [0.5.5] (Aug 6, 2025)
 

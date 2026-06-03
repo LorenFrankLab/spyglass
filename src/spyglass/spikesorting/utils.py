@@ -257,6 +257,48 @@ def _check_artifact_thresholds(
     return amplitude_thresh, zscore_thresh, proportion_above_thresh
 
 
+def read_raw_nwb_recording(nwb_file_abs_path, load_time_vector=False):
+    """Read the raw acquisition ElectricalSeries as a SpikeInterface recording.
+
+    A version-agnostic wrapper over
+    ``spikeinterface.extractors.read_nwb_recording`` that explicitly selects
+    the raw acquisition ``ElectricalSeries``. NWB files may store additional
+    ``ElectricalSeries`` (e.g. LFP under ``processing``): SpikeInterface >=
+    0.100 raises when asked to read such a file without naming the series,
+    while 0.99.x silently picks the first. Naming the raw acquisition series
+    makes the read deterministic across SpikeInterface versions -- and the
+    parameter that carries the name was renamed from ``electrical_series_name``
+    (SI 0.99.x) to ``electrical_series_path`` (SI >= 0.100), so the right one
+    is chosen by inspecting the installed signature.
+
+    Parameters
+    ----------
+    nwb_file_abs_path : str
+        Absolute path to the NWB file to read.
+    load_time_vector : bool, optional
+        Passed through to ``read_nwb_recording``. Defaults to False.
+
+    Returns
+    -------
+    si.BaseRecording
+        The raw acquisition recording.
+    """
+    import inspect
+
+    import spikeinterface.extractors as se
+
+    from spyglass.utils.nwb_helper_fn import get_raw_eseries_path
+
+    series_path = get_raw_eseries_path(nwb_file_abs_path)
+    params = inspect.signature(se.read_nwb_recording).parameters
+    kwargs = {"load_time_vector": load_time_vector}
+    if "electrical_series_path" in params:  # SpikeInterface >= 0.100
+        kwargs["electrical_series_path"] = series_path
+    else:  # SpikeInterface 0.99.x
+        kwargs["electrical_series_name"] = series_path.rsplit("/", 1)[-1]
+    return se.read_nwb_recording(nwb_file_abs_path, **kwargs)
+
+
 def _get_recording_timestamps(recording):
     num_segments = recording.get_num_segments()
 
