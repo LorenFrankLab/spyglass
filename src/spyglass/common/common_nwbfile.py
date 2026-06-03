@@ -726,17 +726,25 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         *,
         max_delete_fraction: float = 0.9,
         max_delete_to_tracked_ratio: float = 10.0,
-    ) -> None:
-        """Refuse suspicious destructive filesystem cleanup plans."""
+    ) -> tuple[bool, str | None]:
+        """Check a cleanup plan against destructive-cleanup safety limits.
+
+        Returns
+        -------
+        tuple[bool, str | None]
+            ``(True, None)`` when the plan is safe to apply, otherwise
+            ``(False, reason)`` where ``reason`` explains the refusal. Callers
+            decide whether to raise (real run) or warn (dry run).
+        """
         scanned_count = len(plan.scanned_files)
         tracked_count = len(plan.tracked_files)
         delete_count = len(plan.files_to_delete)
 
         if delete_count == 0:
-            return
+            return True, None
 
         if tracked_count == 0:
-            raise RuntimeError(
+            return False, (
                 "Analysis cleanup would delete "
                 f"{delete_count} files after scanning {scanned_count} files, "
                 "but no tracked analysis files were found. Refusing "
@@ -746,7 +754,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
 
         delete_fraction = delete_count / max(scanned_count, 1)
         if delete_fraction > max_delete_fraction:
-            raise RuntimeError(
+            return False, (
                 "Analysis cleanup would delete "
                 f"{delete_count}/{scanned_count} scanned analysis files "
                 f"({delete_fraction:.1%}), above the safety limit "
@@ -756,7 +764,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
 
         delete_ratio = delete_count / tracked_count
         if delete_ratio > max_delete_to_tracked_ratio:
-            raise RuntimeError(
+            return False, (
                 "Analysis cleanup would delete "
                 f"{delete_count} files with only {tracked_count} tracked "
                 f"analysis files ({delete_ratio:.1f}x), above the safety "
@@ -764,6 +772,8 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                 "destructive cleanup; run with dry_run=True and verify the "
                 "configured analysis directory."
             )
+
+        return True, None
 
     def _remove_untracked_files(
         self,
@@ -943,20 +953,19 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
 
         try:
             untracked_file_plan = self._build_untracked_file_plan(custom_tables)
-            try:
-                self._validate_cleanup_plan(
-                    untracked_file_plan,
-                    max_delete_fraction=max_delete_fraction,
-                    max_delete_to_tracked_ratio=max_delete_to_tracked_ratio,
-                )
-            except RuntimeError as plan_err:
+            plan_ok, plan_err = self._validate_cleanup_plan(
+                untracked_file_plan,
+                max_delete_fraction=max_delete_fraction,
+                max_delete_to_tracked_ratio=max_delete_to_tracked_ratio,
+            )
+            if not plan_ok:
                 # Dry-run previews must surface refusal; real runs must abort.
                 if dry_run:
                     self._logger.warning(
                         f"Cleanup plan would be refused: {plan_err}"
                     )
                 else:
-                    raise
+                    raise RuntimeError(plan_err)
 
             # Process each custom analysis table.
             # Subtract valid entries from common_orphans

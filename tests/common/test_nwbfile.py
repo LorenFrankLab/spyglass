@@ -123,19 +123,21 @@ def test_analysis_cleanup_plan_rejects_delete_without_tracked_files(
 ):
     plan = _cleanup_plan(common_nwbfile, scanned=1, tracked=0, delete=1)
 
-    with pytest.raises(RuntimeError, match="no tracked analysis files"):
-        common_nwbfile.AnalysisNwbfile._validate_cleanup_plan(plan)
+    ok, msg = common_nwbfile.AnalysisNwbfile._validate_cleanup_plan(plan)
+    assert ok is False
+    assert "no tracked analysis files" in msg
 
 
 def test_analysis_cleanup_plan_rejects_high_delete_fraction(common_nwbfile):
     plan = _cleanup_plan(common_nwbfile, scanned=4, tracked=3, delete=2)
 
-    with pytest.raises(RuntimeError, match="above the safety limit"):
-        common_nwbfile.AnalysisNwbfile._validate_cleanup_plan(
-            plan,
-            max_delete_fraction=0.25,
-            max_delete_to_tracked_ratio=10.0,
-        )
+    ok, msg = common_nwbfile.AnalysisNwbfile._validate_cleanup_plan(
+        plan,
+        max_delete_fraction=0.25,
+        max_delete_to_tracked_ratio=10.0,
+    )
+    assert ok is False
+    assert "above the safety limit" in msg
 
 
 def test_analysis_cleanup_plan_rejects_high_delete_to_tracked_ratio(
@@ -143,18 +145,22 @@ def test_analysis_cleanup_plan_rejects_high_delete_to_tracked_ratio(
 ):
     plan = _cleanup_plan(common_nwbfile, scanned=100, tracked=1, delete=11)
 
-    with pytest.raises(RuntimeError, match="11.0x"):
-        common_nwbfile.AnalysisNwbfile._validate_cleanup_plan(
-            plan,
-            max_delete_fraction=1.0,
-            max_delete_to_tracked_ratio=10.0,
-        )
+    ok, msg = common_nwbfile.AnalysisNwbfile._validate_cleanup_plan(
+        plan,
+        max_delete_fraction=1.0,
+        max_delete_to_tracked_ratio=10.0,
+    )
+    assert ok is False
+    assert "11.0x" in msg
 
 
 def test_analysis_cleanup_plan_accepts_plausible_delete_plan(common_nwbfile):
     plan = _cleanup_plan(common_nwbfile, scanned=8, tracked=6, delete=1)
 
-    common_nwbfile.AnalysisNwbfile._validate_cleanup_plan(plan)
+    assert common_nwbfile.AnalysisNwbfile._validate_cleanup_plan(plan) == (
+        True,
+        None,
+    )
 
 
 def test_analysis_cleanup_plan_accepts_empty_delete(common_nwbfile):
@@ -163,37 +169,43 @@ def test_analysis_cleanup_plan_accepts_empty_delete(common_nwbfile):
     # delete plan must return before that check.
     plan = _cleanup_plan(common_nwbfile, scanned=3, tracked=0, delete=0)
 
-    common_nwbfile.AnalysisNwbfile._validate_cleanup_plan(plan)
+    assert common_nwbfile.AnalysisNwbfile._validate_cleanup_plan(plan) == (
+        True,
+        None,
+    )
 
 
 def test_analysis_cleanup_plan_accepts_fraction_at_threshold(common_nwbfile):
     """Fraction exactly at max_delete_fraction must pass (strict > guard)."""
     plan = _cleanup_plan(common_nwbfile, scanned=10, tracked=10, delete=9)
 
-    common_nwbfile.AnalysisNwbfile._validate_cleanup_plan(
+    ok, msg = common_nwbfile.AnalysisNwbfile._validate_cleanup_plan(
         plan, max_delete_fraction=0.9, max_delete_to_tracked_ratio=10.0
     )
+    assert (ok, msg) == (True, None)
 
 
 def test_analysis_cleanup_plan_rejects_fraction_just_above_threshold(
     common_nwbfile,
 ):
-    """Fraction just above max_delete_fraction must raise."""
+    """Fraction just above max_delete_fraction must be refused."""
     plan = _cleanup_plan(common_nwbfile, scanned=11, tracked=10, delete=10)
 
-    with pytest.raises(RuntimeError, match="above the safety limit"):
-        common_nwbfile.AnalysisNwbfile._validate_cleanup_plan(
-            plan, max_delete_fraction=0.9, max_delete_to_tracked_ratio=100.0
-        )
+    ok, msg = common_nwbfile.AnalysisNwbfile._validate_cleanup_plan(
+        plan, max_delete_fraction=0.9, max_delete_to_tracked_ratio=100.0
+    )
+    assert ok is False
+    assert "above the safety limit" in msg
 
 
 def test_analysis_cleanup_plan_accepts_ratio_at_threshold(common_nwbfile):
     """Ratio exactly at max_delete_to_tracked_ratio must pass."""
     plan = _cleanup_plan(common_nwbfile, scanned=100, tracked=1, delete=10)
 
-    common_nwbfile.AnalysisNwbfile._validate_cleanup_plan(
+    ok, msg = common_nwbfile.AnalysisNwbfile._validate_cleanup_plan(
         plan, max_delete_fraction=1.0, max_delete_to_tracked_ratio=10.0
     )
+    assert (ok, msg) == (True, None)
 
 
 def test_build_untracked_file_plan_skips_symlinks(
