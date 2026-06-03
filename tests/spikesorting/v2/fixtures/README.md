@@ -34,8 +34,15 @@ conda activate spyglass_spikesorting_v2
 # The env (environments/environment_spikesorting_v2.yml) already installs
 # .[test,spikesorting-v2,spikesorting-v2-validation] + SpikeInterface 0.104.
 # Fixture GENERATION additionally needs NEURON + LFPy:
-pip install neuron LFPy
+pip install "neuron<9" "LFPy<2.3.7"
 ```
+
+The version caps are load-bearing: NEURON 9 dropped the legacy random API
+(`scop_random` / `nrn_random_arg`) that MEArec's bundled BBP `.mod`
+mechanisms still use, so `nrnivmodl` cannot compile them under 9.x. LFPy
+2.3.7 requires `neuron>=9.0.1`, so the last working pair is LFPy 2.3.6
+(`neuron>=7.7.2`) with NEURON 8.2.x. The same pins are applied in the
+`pytest-v2` CI job (`.github/workflows/test-conda.yml`).
 
 `neuroconv` is overridden to a modern release because the project's pinned
 `spikeinterface` would otherwise drag it down to a version with no `mearec`

@@ -213,19 +213,39 @@ jobs:
       # main suite (run-tests above), via the dedicated env file. The
       # env pins Python 3.11 + SpikeInterface 0.104 and installs the
       # test, spikesorting-v2, and spikesorting-v2-validation extras
-      # (the validation extra brings MEArec / neuroconv so the smoke
-      # fixture can be generated below). It deliberately does NOT
-      # install ``spikesorting-v2-matching``: UnitMatchPy 3.3
-      # transitively pulls torch + numpy<2, which DOWNGRADES the v2
-      # numpy>=2 baseline. ``test_optional_matching_extra_resolution``
-      # asserts numpy major >= 2; the matching extra is exercised in a
-      # separate sacrificial env in the step below.
+      # (the validation extra brings MEArec / neuroconv). MEArec also
+      # needs NEURON + LFPy to simulate templates; those are installed
+      # in the next step (generation-only, kept out of the env file so
+      # the test env stays lean). It deliberately does NOT install
+      # ``spikesorting-v2-matching``: UnitMatchPy 3.3 transitively pulls
+      # torch + numpy<2, which DOWNGRADES the v2 numpy>=2 baseline.
+      # ``test_optional_matching_extra_resolution`` asserts numpy major
+      # >= 2; the matching extra is exercised in a separate sacrificial
+      # env in the step below.
       uses: conda-incubator/setup-miniconda@v3
       with:
         activate-environment: spyglass_spikesorting_v2
         environment-file: environments/environment_spikesorting_v2.yml
         miniforge-version: latest
         use-mamba: true
+    - name: Install MEArec template-generation deps (NEURON + LFPy)
+      # MEArec generates its templates from biophysical (BBP) cell models
+      # via NEURON + LFPy; without them ``MEArec.gen_templates`` fails in
+      # ``import_LFPy_neuron`` ("No module named 'LFPy'") and the fixture
+      # build below dies. These are generation-only (the tests themselves
+      # read the produced NWB and do not import NEURON/LFPy), so they live
+      # here rather than in the env file. Both require only numpy>=1.9, so
+      # they do not perturb the numpy>=2 baseline.
+      #
+      # Pins are load-bearing: NEURON 9 dropped the legacy random API
+      # (``scop_random`` / ``nrn_random_arg``) that MEArec's bundled BBP
+      # ``.mod`` mechanisms (ProbAMPANMDA_EMS, ProbGABAAB_EMS) still use, so
+      # ``nrnivmodl`` fails to compile them under 9.x. LFPy 2.3.7 in turn
+      # *requires* neuron>=9.0.1, so the last compatible pair is
+      # LFPy 2.3.6 (neuron>=7.7.2) + neuron 8.2.x. See
+      # tests/spikesorting/v2/fixtures/README.md.
+      run: |
+        pip install "neuron<9" "LFPy<2.3.7"
     - name: Generate MEArec smoke fixture
       # The smoke MEArec NWB (mearec_polymer_smoke.nwb, ~4s, small
       # template set) is required by the v2 integration tests in

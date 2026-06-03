@@ -114,7 +114,8 @@ optional-dependencies.spikesorting-v2-matching = [
 ]
 optional-dependencies.spikesorting-v2-validation = [
   "MEArec>=1.9",       # ground-truth simulated recordings
-  "neuroconv[mearec]", # MEArec -> NWB conversion + NWBInspector validation
+  "neuroconv[mearec]", # MEArec -> NWB conversion
+  "nwbinspector",      # NWBInspector validation of the generated fixture NWB
 ]
 optional-dependencies.test = [
   "codecov",                # for code coverage badge
