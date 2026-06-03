@@ -19,6 +19,7 @@ staged file is cleaned up in the except path.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
 import datajoint as dj
 
@@ -34,6 +35,13 @@ from spyglass.spikesorting.v2.utils import (
     unit_brain_region_df,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    import numpy as np
+    import pandas as pd
+    import spikeinterface as si
 
 _assert_v2_db_safe()
 schema = dj.schema("spikesorting_v2_curation")
@@ -1054,7 +1062,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
     # ---- Accessors -------------------------------------------------------
 
     @classmethod
-    def get_recording(cls, key):
+    def get_recording(cls, key: dict) -> "si.BaseRecording":
         """Return the cached preprocessed recording for a CurationV2 row.
 
         Mirrors ``CurationV1.get_recording`` at
@@ -1077,6 +1085,17 @@ class CurationV2(SpyglassMixin, dj.Manual):
         and the list-of-dict form the merge dispatcher passes
         (``query.fetch("KEY")``). Both forms are valid DataJoint
         restrictions; ``fetch1`` raises if more than one row matches.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``CurationV2`` row.
+
+        Returns
+        -------
+        si.BaseRecording
+            The cached preprocessed recording, annotated
+            ``is_filtered=True``.
         """
         from spyglass.spikesorting.v2.recording import Recording
 
@@ -1092,7 +1111,9 @@ class CurationV2(SpyglassMixin, dj.Manual):
         return recording
 
     @classmethod
-    def get_sorting(cls, key, as_dataframe: bool = False):
+    def get_sorting(
+        cls, key: dict, as_dataframe: bool = False
+    ) -> "si.BaseSorting | pd.DataFrame":
         """Return the curated SpikeInterface BaseSorting (or DataFrame).
 
         With ``as_dataframe=True`` returns a pandas DataFrame mirroring
@@ -1111,6 +1132,22 @@ class CurationV2(SpyglassMixin, dj.Manual):
         original frames. ``as_dataframe=True`` returns the absolute
         seconds read straight from the curated units NWB plus the
         ``curation_label`` lists joined from ``UnitLabel``.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``CurationV2`` row.
+        as_dataframe : bool, optional
+            If ``True``, return a per-unit DataFrame instead of an SI
+            sorting object. Defaults to ``False``.
+
+        Returns
+        -------
+        si.BaseSorting or pd.DataFrame
+            The curated sorting (a ``NumpySorting``) when
+            ``as_dataframe`` is ``False``; otherwise a DataFrame indexed
+            by ``unit_id`` with ``spike_times`` and ``curation_label``
+            columns.
         """
         import spikeinterface as si
 
@@ -1212,7 +1249,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         return groups
 
     @classmethod
-    def get_merged_sorting(cls, key):
+    def get_merged_sorting(cls, key: dict) -> "si.BaseSorting":
         """Return the curated BaseSorting with merge groups applied.
 
         Matches v1's semantic at ``v1/curation.py:228-266``: a curation
@@ -1228,6 +1265,19 @@ class CurationV2(SpyglassMixin, dj.Manual):
         is returned verbatim rather than re-applying merges over missing
         units. Likewise returns the base unchanged when no merge group
         has more than one contributor.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``CurationV2`` row.
+
+        Returns
+        -------
+        si.BaseSorting
+            The curated sorting with proposed merge groups applied
+            lazily (a ``NumpySorting``), or the unmodified base sorting
+            when merges were already applied or no group has more than
+            one contributor.
         """
         import numpy as _np
         import spikeinterface as si
@@ -1291,11 +1341,11 @@ class CurationV2(SpyglassMixin, dj.Manual):
 
     def get_unit_brain_regions(
         self,
-        key,
+        key: dict,
         *,
-        include_labels=None,
+        include_labels: "Iterable | None" = None,
         allow_anchor_member: bool = False,
-    ):
+    ) -> "pd.DataFrame":
         """Per-unit brain regions via CurationV2.Unit * Electrode * BrainRegion.
 
         If ``include_labels`` is provided (iterable of strings or
@@ -1305,6 +1355,23 @@ class CurationV2(SpyglassMixin, dj.Manual):
         ``Sorting.get_unit_brain_regions``: raises
         ``ConcatBrainRegionAmbiguousError`` for concat-backed
         sortings unless ``allow_anchor_member=True``.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``CurationV2`` row.
+        include_labels : iterable of str or CurationLabel, optional
+            If provided, restrict to units carrying at least one of
+            these labels. Defaults to ``None`` (all units).
+        allow_anchor_member : bool, optional
+            If ``True``, return anchor-member regions for concat-backed
+            sortings instead of raising. Defaults to ``False``.
+
+        Returns
+        -------
+        pd.DataFrame
+            One row per (unit, electrode) with the brain-region columns
+            and a ``region_resolution`` label.
         """
         from spyglass.spikesorting.v2.exceptions import (
             ConcatBrainRegionAmbiguousError,
@@ -1344,15 +1411,29 @@ class CurationV2(SpyglassMixin, dj.Manual):
 
     def get_matchable_unit_ids(
         self,
-        key,
-        exclude_labels=frozenset({"reject", "noise", "artifact"}),
-    ):
+        key: dict,
+        exclude_labels: "Iterable" = frozenset({"reject", "noise", "artifact"}),
+    ) -> "np.ndarray":
         """Curated unit IDs with no excluded labels.
 
         Unlabeled units AND units labeled only ``accept`` / ``mua`` are
         included. A unit with ANY excluded label is excluded even if it
         also carries an included label (e.g., a ``mua`` + ``artifact``
         unit is excluded).
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``CurationV2`` row.
+        exclude_labels : iterable of str or CurationLabel, optional
+            Labels that disqualify a unit. Defaults to
+            ``{"reject", "noise", "artifact"}``.
+
+        Returns
+        -------
+        np.ndarray
+            Sorted 1-D integer array ``(n_units,)`` of unit IDs carrying
+            no excluded label.
         """
         import numpy as np
 
@@ -1374,7 +1455,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         return np.asarray(sorted(kept), dtype=int)
 
     @classmethod
-    def get_sort_group_info(cls, key):
+    def get_sort_group_info(cls, key: dict) -> "dj.Table":
         """Return ALL electrodes in the sort group joined to BrainRegion.
 
         Fix for the v1 ``fetch(limit=1)`` multi-region under-reporting
@@ -1388,6 +1469,17 @@ class CurationV2(SpyglassMixin, dj.Manual):
         ``source_table.get_sort_group_info(merge_key)`` with the
         bound part *class*, not an instance) does not raise
         ``TypeError`` on v2 ``merge_id``s.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``CurationV2`` row.
+
+        Returns
+        -------
+        dj.Table
+            A DataJoint relation (``SortGroupElectrode * Electrode *
+            BrainRegion``) covering every electrode in the sort group.
         """
         from spyglass.common.common_ephys import Electrode as _Electrode
         from spyglass.common.common_region import BrainRegion

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import uuid
 from pathlib import Path
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 import datajoint as dj
 import numpy as np
@@ -41,6 +41,9 @@ from spyglass.spikesorting.v2.utils import (
     transaction_or_noop,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
+
+if TYPE_CHECKING:
+    import spikeinterface as si
 
 _assert_v2_db_safe()
 schema = dj.schema("spikesorting_v2_recording")
@@ -1160,12 +1163,23 @@ class Recording(SpyglassMixin, dj.Computed):
 
     # ---- Public accessors ------------------------------------------------
 
-    def get_recording(self, key):
+    def get_recording(self, key: dict) -> "si.BaseRecording":
         """Return the preprocessed SpikeInterface recording.
 
         Rebuilds the NWB artifact on demand if missing; the DataJoint
         row is never deleted by this path -- the cache_hash on the row
         is the source of truth for re-verification.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``Recording`` row.
+
+        Returns
+        -------
+        si.BaseRecording
+            The preprocessed (bandpass-filtered, common-referenced)
+            recording, annotated ``is_filtered=True``.
         """
         import spikeinterface.extractors as se
 

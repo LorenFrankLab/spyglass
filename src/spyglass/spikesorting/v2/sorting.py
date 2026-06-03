@@ -47,6 +47,7 @@ from spyglass.spikesorting.v2.utils import (
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 
 if TYPE_CHECKING:
+    import pandas as pd
     import spikeinterface as si
 
 
@@ -1115,7 +1116,9 @@ class Sorting(SpyglassMixin, dj.Computed):
 
     # ---- Accessors -------------------------------------------------------
 
-    def get_sorting(self, key, as_dataframe: bool = False):
+    def get_sorting(
+        self, key: dict, as_dataframe: bool = False
+    ) -> "si.BaseSorting | pd.DataFrame":
         """Return the SpikeInterface BaseSorting backed by the units NWB.
 
         Spike times are persisted by ``_write_units_nwb`` in the
@@ -1146,6 +1149,21 @@ class Sorting(SpyglassMixin, dj.Computed):
         ``v1/curation.py:197-209``. The ``CurationV2.get_sorting``
         accessor uses the same flag + index and adds a
         ``curation_label`` column joined from ``CurationV2.UnitLabel``.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``Sorting`` row.
+        as_dataframe : bool, optional
+            If ``True``, return a per-unit DataFrame instead of an SI
+            sorting object. Defaults to ``False``.
+
+        Returns
+        -------
+        si.BaseSorting or pd.DataFrame
+            The sorting (a ``NumpySorting``) when ``as_dataframe`` is
+            ``False``; otherwise a DataFrame indexed by ``unit_id`` with
+            a ``spike_times`` column.
         """
         import spikeinterface as si
 
@@ -1270,7 +1288,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             series = nwbf.acquisition[series_name]
             return _np.asarray(series.timestamps[:], dtype=_np.float64)
 
-    def get_analyzer(self, key):
+    def get_analyzer(self, key: dict) -> "si.SortingAnalyzer":
         """Return the SortingAnalyzer; rebuild on missing folder.
 
         Recompute is in-place; the DataJoint row is not deleted on a
@@ -1282,6 +1300,17 @@ class Sorting(SpyglassMixin, dj.Computed):
         Loading it would surface a confusing SI/file error; this raises
         a clear signal instead. Use ``get_sorting()`` for the (empty)
         unit list.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``Sorting`` row.
+
+        Returns
+        -------
+        si.SortingAnalyzer
+            The loaded ``SortingAnalyzer`` for the sort, rebuilt in
+            place if its folder was missing.
         """
         import spikeinterface as si
 
@@ -1524,13 +1553,29 @@ class Sorting(SpyglassMixin, dj.Computed):
             )
         return {"db_side": db_side, "disk_side": disk_side}
 
-    def get_unit_brain_regions(self, key, *, allow_anchor_member: bool = False):
+    def get_unit_brain_regions(
+        self, key: dict, *, allow_anchor_member: bool = False
+    ) -> "pd.DataFrame":
         """Per-unit brain regions via Sorting.Unit * Electrode * BrainRegion.
 
         Single-session sorts return ``region_resolution='single_session'``.
         Concat sorts raise ``ConcatBrainRegionAmbiguousError`` unless
         ``allow_anchor_member=True``; the anchor-member output is
         labeled ``region_resolution='anchor_member'``.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``Sorting`` row.
+        allow_anchor_member : bool, optional
+            If ``True``, return anchor-member regions for concat-backed
+            sortings instead of raising. Defaults to ``False``.
+
+        Returns
+        -------
+        pd.DataFrame
+            One row per (unit, electrode) with the brain-region columns
+            and a ``region_resolution`` label.
         """
         from spyglass.spikesorting.v2.exceptions import (
             ConcatBrainRegionAmbiguousError,

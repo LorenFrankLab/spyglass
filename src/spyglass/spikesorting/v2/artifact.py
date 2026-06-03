@@ -1243,7 +1243,9 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
             ]
         return _np.asarray(kept) if kept else _np.empty((0, 2))
 
-    def get_artifact_removed_intervals(self, key):
+    def get_artifact_removed_intervals(
+        self, key: dict
+    ) -> "np.ndarray | dict[str, np.ndarray]":
         """Return the artifact-removed ``valid_times`` for ``key``.
 
         Single-recording source: one ``IntervalList`` row keyed by
@@ -1258,6 +1260,20 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         (the detection ran ONCE over the unioned channels and
         ``make_insert`` wrote the same array per member), so a
         caller that wants a single array can ``next(iter(d.values()))``.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``ArtifactDetection`` row;
+            must include ``artifact_id``.
+
+        Returns
+        -------
+        np.ndarray or dict[str, np.ndarray]
+            For a single-recording source, the ``(n_intervals, 2)``
+            artifact-removed ``valid_times`` array. For a shared-
+            artifact-group source, a dict mapping each member
+            ``nwb_file_name`` to its ``(n_intervals, 2)`` array.
         """
         from spyglass.spikesorting.v2.recording import RecordingSelection
         from spyglass.spikesorting.v2.utils import (
