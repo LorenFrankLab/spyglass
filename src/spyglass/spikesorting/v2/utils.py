@@ -527,14 +527,13 @@ def _get_recording_timestamps(
        per-segment timestamps into one ``(total_frames,)`` array so
        downstream code sees the whole-session timeline.
 
-    2. **Caller-supplied corrected vector.** The non-monotonic
-       timestamp repair (Spyglass v1 in-flight on
-       ``copilot/fix-populating-artifact-detection``; ported here as
-       a defensive measure) computes a corrected timestamps array
-       once at the top of ``Recording.make`` and threads it through
-       to subsequent helpers. ``override`` is that hook: when not
-       ``None``, return it verbatim. ``Recording.make`` passes the
-       repaired array; helpers called outside the make path (e.g.
+    2. **Caller-supplied persisted-timestamps override.** The make
+       path persists the source's actual wall-clock timestamps (which
+       SI's ``frame_slice`` / ``concatenate_recordings`` drop);
+       ``_restrict_recording`` derives that vector and threads it back
+       here so the saved start/end and the NWB write use the persisted
+       times. ``override`` is that hook: when not ``None``, return it
+       verbatim. Helpers called outside the make path (e.g.
        ``get_recording``) leave ``override=None`` and get the
        segment-aware ``get_times()`` concatenation.
 
@@ -547,10 +546,9 @@ def _get_recording_timestamps(
     recording : si.BaseRecording
         Source recording whose timestamps are needed.
     override : numpy.ndarray, optional
-        Pre-computed timestamps (already monotonicity-corrected, if
-        applicable) to return verbatim. Callers that have a
-        corrected timestamp array pass it here so this helper does
-        not re-derive it from the recording.
+        Pre-computed persisted timestamps to return verbatim. Callers
+        that have the persisted timestamp vector pass it here so this
+        helper does not re-derive it from the recording.
 
     Returns
     -------

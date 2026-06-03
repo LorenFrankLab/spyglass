@@ -98,17 +98,3 @@ class ZeroUnitAnalyzerError(RuntimeError):
     Message names the sort and points the caller at the zero-unit
     result. Use ``get_sorting()`` (returns an empty sorting) if only the
     unit list is needed."""
-
-
-class RecordingProvenanceMismatchError(RuntimeError):
-    """``Recording._rebuild_nwb_artifact`` recomputed timestamp-repair
-    provenance (``timestamps_adjusted`` / ``n_adjusted_samples``) that
-    disagrees with the stored row. Unlike the byte-level ``cache_hash``
-    (which is not rebuild-deterministic and so only warns), the repair
-    provenance IS a deterministic function of the source timestamps, so
-    a mismatch means the upstream raw NWB's timestamps genuinely changed
-    since the row was written -- the cached artifact would describe a
-    different recording than the row claims. Raised (not warned) so the
-    stale row cannot be relied on; message names the file and both
-    provenance values. Resolve by re-deriving the recording from the
-    corrected source (a deliberate repair path, not an in-place rebuild)."""

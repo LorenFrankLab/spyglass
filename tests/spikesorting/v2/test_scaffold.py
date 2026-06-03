@@ -177,13 +177,13 @@ def test_get_recording_timestamps_concatenates_multi_segment():
 
 
 def test_get_recording_timestamps_override_returned_verbatim():
-    """A caller-supplied corrected vector is returned untouched.
+    """A caller-supplied persisted-timestamps vector is returned untouched.
 
-    ``Recording.make`` threads a monotonicity-repaired timestamp array through
-    ``override``; the helper must return it verbatim rather than re-deriving
-    from the recording (which would discard the repair). The override differs
-    from the recording's native single-segment times, so a regression that
-    ignored ``override`` would be caught.
+    ``Recording.make`` threads the persisted wall-clock timestamps through
+    ``override`` (the real per-interval times SI's ``frame_slice`` drops);
+    the helper must return it verbatim rather than re-deriving from the
+    recording. The override differs from the recording's native single-
+    segment times, so a regression that ignored ``override`` would be caught.
     """
     import numpy as np
     import spikeinterface.core as sc
@@ -193,9 +193,9 @@ def test_get_recording_timestamps_override_returned_verbatim():
     rec = sc.NumpyRecording(
         [np.zeros((50, 4), dtype="float32")], sampling_frequency=1000.0
     )
-    corrected = np.linspace(10.0, 20.0, 50)
-    out = _get_recording_timestamps(rec, override=corrected)
-    np.testing.assert_array_equal(out, corrected)
+    persisted = np.linspace(10.0, 20.0, 50)
+    out = _get_recording_timestamps(rec, override=persisted)
+    np.testing.assert_array_equal(out, persisted)
     # Not the native times (which start at 0.0), confirming override wins.
     assert not np.array_equal(out, rec.get_times())
 

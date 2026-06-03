@@ -15,7 +15,7 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
 
 **Prerequisite — review-fixes baseline (do this first):**
 
-- The review-fixes checkpoint Phases 1 and 2 MUST be merged before starting AnalyzerCuration work. This phase builds on the corrected schema baseline: optional `SortingSelection.ArtifactSource` (not nullable `artifact_id`), `SortGroupV2.reference_mode`, `Recording.timestamps_adjusted`/`n_adjusted_samples`, `PreprocessingParamsSchema` v3, `ClusterlessThresholderSchema` v4, `Recording.repair()`, and loud-but-valid zero-unit behavior (`require_units` is caller opt-in). Starting AnalyzerCuration before review-fixes lands would build on the to-be-corrected nullable-FK / sentinel schema and force rework.
+- The review-fixes checkpoint Phases 1 and 2 MUST be merged before starting AnalyzerCuration work. This phase builds on the corrected schema baseline: optional `SortingSelection.ArtifactSource` (not nullable `artifact_id`), `SortGroupV2.reference_mode`, `PreprocessingParamsSchema` v3, `ClusterlessThresholderSchema` v4, `Recording.repair()`, and loud-but-valid zero-unit behavior (`require_units` is caller opt-in). Starting AnalyzerCuration before review-fixes lands would build on the to-be-corrected nullable-FK / sentinel schema and force rework.
 
 **Prerequisites for parity validation:**
 

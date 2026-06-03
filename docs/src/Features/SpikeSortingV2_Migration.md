@@ -70,9 +70,6 @@ notebook. For the pipeline overview, see
   `ArtifactDetectionParameters.job_kwargs`, default `chunk_duration='1s'`,
   `n_jobs=1`) instead of loading the full trace array into RAM. Output is
   frame-identical to the old path.
-- **Monotonicity-repair provenance.** Non-strictly-increasing NWB
-  timestamps are repaired with recorded provenance (`timestamps_adjusted`,
-  `n_adjusted_samples`) rather than silently rewritten.
 - **Hash-verifiable Recording rebuild.** The preprocessed `Recording`
   cache carries an `NwbfileHasher` `cache_hash`.
 - **Pinned SpikeInterface (`==0.104.3`) + KS4/MS5 snapshot tests.** A SI

@@ -261,8 +261,6 @@ class Recording(SpyglassMixin, dj.Computed):
     sampling_frequency: float
     duration_s: float
     cache_hash: char(64)                # SHA-256 over ElectricalSeries.data bytes
-    timestamps_adjusted=0: bool         # post-review-fixes C3: True if non-monotonic timestamps were repaired
-    n_adjusted_samples=0: int           # how many samples the repair touched (provenance for time-mutated recordings)
     """
 
     def make(self, key):
@@ -285,7 +283,7 @@ class Recording(SpyglassMixin, dj.Computed):
 
 **Binding behavior**:
 
-- `Recording.make()` loads the raw NWB, restricts to the selected sort group and interval, applies PRE-MOTION preprocessing only, writes one `ElectricalSeries` into `AnalysisNwbfile`, validates timestamp coverage, stores metadata, and records a SHA-256 `cache_hash`. If the source timestamps were non-monotonic and repaired, it sets `timestamps_adjusted=True` / `n_adjusted_samples` (review-fix C3 — the repair is recorded, never silent; gated by a `Recording`-level flag, NOT a `PreprocessingParamsSchema` field, to avoid a cross-phase schema-version collision).
+- `Recording.make()` loads the raw NWB, restricts to the selected sort group and interval, applies PRE-MOTION preprocessing only, writes one `ElectricalSeries` into `AnalysisNwbfile`, validates timestamp coverage, stores metadata, and records a SHA-256 `cache_hash`.
 - `Recording.get_recording(key)` loads that NWB-resident artifact; if the artifact is **missing**, it rebuilds without deleting the DataJoint row.
 - **Cache-hash drift is fail-closed (review-fix C2).** `_rebuild_nwb_artifact(key)` regenerates the payload and compares the regenerated hash against the stored row. On mismatch it MUST raise `RecordingCacheDriftError` by default (opt out with `allow_drift=True`) AND must not leave the drifted file at the canonical path — because `get_recording` only rebuilds when the file is *absent*, a drifted file left on disk would be returned silently on the next call. Use an **atomic rebuild**: write to a temp path, hash it, `os.replace` onto the canonical path only on a hash match; on mismatch delete the temp file and raise. `Recording.repair()` is the conscious path to accept a new hash.
 

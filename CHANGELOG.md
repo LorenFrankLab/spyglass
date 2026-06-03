@@ -147,17 +147,6 @@ unknown restriction keys raise `ValueError` instead of silently
 dropping; `restrict_by_artifact=True` now honors the v2
 `f"artifact_{artifact_id}"` IntervalList convention.
 
-**Defensive port from v1's in-flight fix:** non-monotonic timestamp
-repair in `Recording.make`. Raw NWBs with floating-point precision
-artifacts or epoch stitching can have non-strictly-increasing
-timestamps; downstream `np.searchsorted` then returns wrong frame
-indices, silently shifting sort-interval windows. The repair
-enforces `adjusted[i] >= adjusted[i-1] + sample_period` via a
-vectorized cumulative-max in shifted coordinates (`u[i] = ts[i] -
-i*sample_period`), correctly handling backslide-and-return
-patterns that plain cumulative-max would miss. Cross-references the
-in-flight v1 PR on `copilot/fix-populating-artifact-detection`.
-
 **Migration notes for v1 users porting workflows to v2:**
 
 - **Default Lookup row names changed.** v1 shipped a single

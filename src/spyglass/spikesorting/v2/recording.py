@@ -805,8 +805,6 @@ class RecordingComputed(NamedTuple):
     duration_s: float
     sel: dict
     sort_valid_times: np.ndarray
-    timestamps_adjusted: bool
-    n_adjusted_samples: int
 
 
 @schema
@@ -842,8 +840,6 @@ class Recording(SpyglassMixin, dj.Computed):
     sampling_frequency: float
     duration_s: float
     cache_hash: char(64)
-    timestamps_adjusted=0: bool   # source recording's timestamps were repaired
-    n_adjusted_samples=0: int     # source-wide count of repaired samples
     """
 
     # ``_parallel_make = True`` lets Spyglass's ``PopulateMixin``
@@ -1017,8 +1013,6 @@ class Recording(SpyglassMixin, dj.Computed):
             saved_end,
             n_channels,
             duration_s,
-            timestamps_adjusted,
-            n_adjusted_samples,
         ) = self._compute_recording_artifact(
             raw_path=raw_path,
             nwb_file_name=sel["nwb_file_name"],
@@ -1031,7 +1025,6 @@ class Recording(SpyglassMixin, dj.Computed):
             preproc_validated=preproc_validated,
             probe_types=probe_types,
             electrode_group_names=electrode_group_names,
-            recording_id=key["recording_id"],
         )
 
         return RecordingComputed(
@@ -1045,8 +1038,6 @@ class Recording(SpyglassMixin, dj.Computed):
             duration_s=duration_s,
             sel=sel,
             sort_valid_times=sort_valid_times,
-            timestamps_adjusted=timestamps_adjusted,
-            n_adjusted_samples=n_adjusted_samples,
         )
 
     def make_insert(
@@ -1062,8 +1053,6 @@ class Recording(SpyglassMixin, dj.Computed):
         duration_s,
         sel,
         sort_valid_times,
-        timestamps_adjusted,
-        n_adjusted_samples,
     ):
         """Truncation check + atomic registration inside the framework transaction.
 
@@ -1146,8 +1135,6 @@ class Recording(SpyglassMixin, dj.Computed):
                         "sampling_frequency": sampling_frequency,
                         "duration_s": duration_s,
                         "cache_hash": cache_hash,
-                        "timestamps_adjusted": bool(timestamps_adjusted),
-                        "n_adjusted_samples": int(n_adjusted_samples),
                     }
                 )
         except Exception:
@@ -1236,8 +1223,6 @@ class Recording(SpyglassMixin, dj.Computed):
             _,
             _,
             _,
-            rebuilt_adjusted,
-            rebuilt_n_adjusted,
         ) = self._compute_recording_artifact(
             raw_path=raw_path,
             nwb_file_name=fetched.sel["nwb_file_name"],
@@ -1251,7 +1236,6 @@ class Recording(SpyglassMixin, dj.Computed):
             probe_types=fetched.probe_types,
             electrode_group_names=fetched.electrode_group_names,
             existing_analysis_file_name=row["analysis_file_name"],
-            recording_id=row["recording_id"],
         )
         if rebuilt_hash != row["cache_hash"]:
             logger.warning(
@@ -1261,64 +1245,6 @@ class Recording(SpyglassMixin, dj.Computed):
                 f"{row['analysis_file_name']!r}. The DataJoint row was not "
                 "deleted; inspect upstream raw NWB / SI version before "
                 "rerunning."
-            )
-        # Timestamp-repair provenance must stay accurate after a rebuild.
-        # Unlike ``cache_hash`` (not rebuild-deterministic -> warn only),
-        # the repair provenance is a DETERMINISTIC function of the source
-        # timestamps (see ``_repaired_timestamps``): a faithful rebuild of
-        # an unchanged source reproduces identical ``timestamps_adjusted``
-        # / ``n_adjusted_samples``. A mismatch therefore means the
-        # upstream raw NWB's timestamps genuinely changed, so the row's
-        # provenance columns now describe a different recording than the
-        # rebuilt artifact. RAISE rather than warn -- the stale row must
-        # not be silently relied on, and the columns are not auto-updated
-        # in place (re-derive from the corrected source via a deliberate
-        # repair path). Satisfies the "columns stay accurate or assert
-        # they match" contract.
-        if bool(rebuilt_adjusted) != bool(row["timestamps_adjusted"]) or int(
-            rebuilt_n_adjusted
-        ) != int(row["n_adjusted_samples"]):
-            import pathlib as _pathlib
-
-            from spyglass.spikesorting.v2.exceptions import (
-                RecordingProvenanceMismatchError,
-            )
-
-            # The rebuild already overwrote the canonical analysis file in
-            # place (existing_analysis_file_name path -> no temp staging;
-            # the atomic temp-write+replace design is deferred to the
-            # main-epic recompute work). That on-disk file is the
-            # mismatched artifact. ``get_recording`` rebuilds ONLY when the
-            # file is absent, so leaving it would make the next
-            # ``get_recording`` skip this very check and silently load the
-            # stale file. Unlink it before raising so the next call
-            # rebuilds from source instead.
-            # Resolve with ``from_schema=True`` (the file lives in the
-            # schema's recompute slot, as on every rebuild-path
-            # get_abs_path here): the default resolution validates the
-            # external-store checksum, which the just-rebuilt mismatched
-            # file may now fail -- and that would raise before unlink()
-            # runs, defeating the cleanup. Matches _write_nwb_artifact's
-            # rebuild-path cleanup.
-            mismatched_path = AnalysisNwbfile.get_abs_path(
-                row["analysis_file_name"], from_schema=True
-            )
-            _pathlib.Path(mismatched_path).unlink(missing_ok=True)
-
-            raise RecordingProvenanceMismatchError(
-                "Recording._rebuild_nwb_artifact: rebuilt timestamp-repair "
-                f"provenance (timestamps_adjusted={bool(rebuilt_adjusted)}, "
-                f"n_adjusted_samples={int(rebuilt_n_adjusted)}) does not "
-                "match the stored row "
-                f"(timestamps_adjusted={bool(row['timestamps_adjusted'])}, "
-                f"n_adjusted_samples={int(row['n_adjusted_samples'])}) for "
-                f"analysis_file_name={row['analysis_file_name']!r}. The "
-                "stored provenance columns describe a different repair than "
-                "the rebuilt artifact -- the upstream raw NWB's timestamps "
-                "likely changed since the row was written. The mismatched "
-                "rebuilt file was removed so it cannot be loaded silently; "
-                "re-derive the recording from the corrected source instead "
-                "of relying on this row."
             )
 
     # ---- Implementation helpers -----------------------------------------
@@ -1338,8 +1264,7 @@ class Recording(SpyglassMixin, dj.Computed):
         probe_types: tuple,
         electrode_group_names: tuple,
         existing_analysis_file_name: str | None = None,
-        recording_id: str | None = None,
-    ) -> tuple[str, str, str, float, float, float, int, float, bool, int]:
+    ) -> tuple[str, str, str, float, float, float, int, float]:
         """Open raw NWB, run preprocessing, stream to AnalysisNwbfile.
 
         Pipeline body shared between ``make_compute`` (fresh write,
@@ -1349,14 +1274,10 @@ class Recording(SpyglassMixin, dj.Computed):
 
         Returns ``(analysis_file_name, object_id, cache_hash,
         sampling_frequency, saved_start, saved_end, n_channels,
-        duration_s, timestamps_adjusted, n_adjusted_samples)`` -- the
-        metadata needed for the ``RecordingComputed`` boxing.
+        duration_s)`` -- the metadata needed for the
+        ``RecordingComputed`` boxing.
         ``saved_start``/``saved_end``/``duration_s`` describe the
-        PERSISTED timestamps (the override when set). The last two are
-        SOURCE-WIDE repair provenance (``timestamps_adjusted`` is
-        ``n_adjusted_samples > 0``): the count is across the full source,
-        not this recording's selected window. ``recording_id`` is
-        threaded only so the repair warning names the row.
+        PERSISTED timestamps (the override when set).
 
         Cleanup contract: ``_write_nwb_artifact`` either writes a
         full file or raises before any registration; if a later
@@ -1377,21 +1298,6 @@ class Recording(SpyglassMixin, dj.Computed):
         recording = se.read_nwb_recording(raw_path, load_time_vector=True)
         sampling_frequency = float(recording.get_sampling_frequency())
 
-        # Non-monotonic timestamp repair. See ``_repaired_timestamps``.
-        # ``n_changed`` counts repaired samples across the FULL SOURCE
-        # recording -- the repair runs before interval selection and
-        # informs the consolidation boundaries globally. The
-        # ``timestamps_adjusted`` / ``n_adjusted_samples`` columns are
-        # therefore SOURCE-WIDE provenance: they record that this
-        # recording's source needed repair, and the count may exceed the
-        # number of changed samples inside this recording's selected
-        # window (a repair entirely outside the window still sets them).
-        all_timestamps, n_changed = self._repaired_timestamps(
-            recording, raw_path, recording_id=recording_id
-        )
-        timestamps_adjusted = n_changed > 0
-        n_adjusted_samples = int(n_changed)
-
         recording, timestamps_override, n_selected_intervals = (
             self._restrict_recording(
                 recording=recording,
@@ -1403,7 +1309,6 @@ class Recording(SpyglassMixin, dj.Computed):
                 sort_valid_times=sort_valid_times,
                 raw_valid_times=raw_valid_times,
                 min_segment_length=preproc_validated.min_segment_length,
-                corrected_timestamps=all_timestamps,
             )
         )
         recording = self._apply_pre_motion_preprocessing(
@@ -1433,7 +1338,7 @@ class Recording(SpyglassMixin, dj.Computed):
                 timestamps_override=timestamps_override,
             )
             # For a single contiguous interval, derive saved
-            # start/end/duration from the persisted (repaired) override
+            # start/end/duration from the persisted override
             # so the row matches the cached timestamps rather than the
             # frame-slice's uncorrected ``get_times()``. For a
             # multi-interval concat the override is the gap-spanning
@@ -1480,8 +1385,6 @@ class Recording(SpyglassMixin, dj.Computed):
             saved_end,
             n_channels,
             duration_s,
-            timestamps_adjusted,
-            n_adjusted_samples,
         )
 
     @classmethod
@@ -1497,7 +1400,6 @@ class Recording(SpyglassMixin, dj.Computed):
         raw_valid_times,
         *,
         min_segment_length: float = 1.0,
-        corrected_timestamps=None,
     ):
         """Slice the SI recording in time and channels.
 
@@ -1510,8 +1412,8 @@ class Recording(SpyglassMixin, dj.Computed):
         - ``timestamps_override`` is the persisted wall-clock timestamp
           vector -- ``times[s:e]`` for the single-interval path, the
           concatenated per-interval slices for the multi-interval path.
-          It carries the monotonicity repair (and, for the concat, the
-          wall-clock gaps) that SI's ``frame_slice`` /
+          It carries the wall-clock gaps (for the concat) that SI's
+          ``frame_slice`` /
           ``concatenate_recordings(ignore_times=True)`` drop from
           ``recording.get_times()``. The caller passes it to
           ``_write_nwb_artifact`` as ``timestamps_override=``.
@@ -1552,14 +1454,7 @@ class Recording(SpyglassMixin, dj.Computed):
         # Route through ``_get_recording_timestamps`` so multi-segment
         # NWBs concatenate correctly. The single-segment path is
         # identical to ``recording.get_times()`` (delegation).
-        # ``corrected_timestamps`` overrides the helper output --
-        # ``Recording.make`` passes the monotonicity-repaired array
-        # so ``_consolidate_intervals`` sees strictly-increasing
-        # timestamps even when the raw NWB had floating-point
-        # precision artifacts at epoch boundaries.
-        times = _get_recording_timestamps(
-            recording, override=corrected_timestamps
-        )
+        times = _get_recording_timestamps(recording)
 
         # When the requested sort interval is disjoint (e.g., a
         # run+sleep+run epoch group), frame-slice each chunk
@@ -1611,11 +1506,10 @@ class Recording(SpyglassMixin, dj.Computed):
             recording = recording.frame_slice(
                 start_frame=int(s), end_frame=int(e)
             )
-            # ``times`` is the repaired vector; the frame-sliced
-            # recording's own ``get_times()`` is the source's uncorrected
-            # one, so slicing ``times`` is what persists the repair (same
-            # as the multi-interval path). Equal to the source times when
-            # no repair fired -- a no-op on the common path.
+            # ``times`` is the full-source wall-clock vector; the
+            # frame-sliced recording's own ``get_times()`` resets to a
+            # 0-based grid, so slicing ``times`` persists the real
+            # per-interval timestamps (same as the multi-interval path).
             timestamps_override = times[int(s) : int(e)]
 
         if reference_mode == "specific":
@@ -1659,129 +1553,6 @@ class Recording(SpyglassMixin, dj.Computed):
                 return [int(c) for c in spyglass_ids]
             channel_names = electrodes_table["channel_name"]
             return [channel_names[int(c)] for c in spyglass_ids]
-
-    # 10M float64 timestamps -> ~80 MB diff buffer per chunk; fits
-    # comfortably under per-process memory budgets. A 24 h x 30 kHz
-    # session is ~2.6e9 samples -> ~260 chunks, each iteration's
-    # Python overhead negligible vs the chunk math.
-    _MONOTONICITY_CHECK_CHUNK_SIZE = 10_000_000
-
-    @staticmethod
-    def _count_non_monotonic_chunked(timestamps, chunk_size) -> int:
-        """Memory-bounded count of ``i`` where ``ts[i] <= ts[i-1]``.
-
-        ``np.diff(timestamps) <= 0`` allocates two full-length
-        arrays (the diff and the bool mask) -- ~16N bytes peak.
-        For 24 h x 30 kHz that's ~40 GB transient. Chunking with a
-        one-sample overlap keeps peak at ``chunk_size * 16`` bytes
-        regardless of N, at the cost of a Python-level loop over
-        ``ceil(N / chunk_size)`` iterations (~260 for the 24 h
-        case -- negligible vs the chunk work).
-        """
-        n = len(timestamps)
-        if n < 2:
-            return 0
-        total = 0
-        # Use ``chunk_size + 1`` window so adjacent chunks overlap by
-        # one sample; the diff at every boundary is computed exactly
-        # once.
-        for start in range(0, n - 1, chunk_size):
-            end = min(start + chunk_size + 1, n)
-            window_diffs = np.diff(timestamps[start:end])
-            total += int(np.count_nonzero(window_diffs <= 0))
-        return total
-
-    @staticmethod
-    def _repaired_timestamps(recording, raw_path, recording_id=None):
-        """Return ``(timestamps, n_changed)`` for ``recording``.
-
-        ``timestamps`` is the monotonicity-corrected full-source vector
-        and ``n_changed`` is the number of samples the repair moved
-        across the WHOLE source (0 on the no-repair fast path). The
-        caller persists it as ``Recording.n_adjusted_samples`` -- a
-        SOURCE-WIDE provenance count, not a per-selected-window count --
-        so a time-mutated source is queryable rather than silently
-        rewritten. The repair is always-on and lives here, at the
-        ``Recording`` level, rather than in ``PreprocessingParamsSchema``,
-        so a future toggle would not force a params-schema version bump.
-
-        Raw NWBs with floating-point precision artifacts at epoch
-        stitch boundaries can have non-strictly-increasing
-        timestamps; downstream ``np.searchsorted`` in
-        ``_consolidate_intervals`` then returns wrong frame indices,
-        silently shifting sort-interval windows;
-        ``ArtifactDetection.add_removal_window`` can crash with
-        ``start > stop``. Compute the canonical
-        corrected-timestamps array once and thread it through the
-        helpers so they all see the same vector. Defensive port of
-        the in-flight v1 fix from the upstream
-        ``copilot/fix-populating-artifact-detection`` branch
-        (commits d5079a8e / 963aa915).
-
-        Algorithm: enforce ``adjusted[i] >= adjusted[i-1] +
-        sample_period`` everywhere. The substitution ``u[i] =
-        ts[i] - i * sample_period`` reduces this to ``u[i] >=
-        u[i-1]`` (a standard monotone-envelope constraint), which
-        is handled by a single ``np.maximum.accumulate`` pass.
-        Transform back to ts-space afterwards. This correctly
-        repairs the "backslide and exact-return"
-        ``[T, T-eps, T]`` pattern that a plain cumulative-max
-        on the raw timestamps misses.
-
-        Memory: the no-repair fast path uses a chunked monotonicity
-        check (bounded peak regardless of N -- see
-        ``_count_non_monotonic_chunked``) so a 24 h x 30 kHz
-        chronic recording does not allocate ~40 GB just to verify
-        timestamps are already monotonic. The repair path reuses
-        the ``indices`` buffer for both the shift and unshift,
-        cutting peak from ~32 N to ~16 N bytes.
-        """
-        from spyglass.spikesorting.v2.utils import (
-            _get_recording_timestamps,
-        )
-
-        all_timestamps = _get_recording_timestamps(recording)
-        n_issues = Recording._count_non_monotonic_chunked(
-            all_timestamps, Recording._MONOTONICITY_CHECK_CHUNK_SIZE
-        )
-        if n_issues == 0:
-            return all_timestamps, 0
-        sample_period = 1.0 / float(recording.get_sampling_frequency())
-        # ``i_times_sp`` is the per-index shift; build once, mutate
-        # in-place so we are not paying for two separate
-        # ``np.arange * sample_period`` allocations on the
-        # subtract/add round-trip.
-        i_times_sp = np.arange(len(all_timestamps), dtype=np.float64)
-        i_times_sp *= sample_period
-        # ``buffer`` holds the shifted timestamps; ``cummax`` is
-        # applied in-place and the unshift is in-place too. Total
-        # peak: ``i_times_sp`` + ``buffer`` = ~16 N bytes (vs
-        # ~32 N for the prior 4-array version).
-        buffer = np.subtract(all_timestamps, i_times_sp)
-        np.maximum.accumulate(buffer, out=buffer)
-        np.add(buffer, i_times_sp, out=buffer)
-        # ``n_changed`` is the count of samples whose value moved
-        # after the cummax round-trip -- typically larger than
-        # ``n_issues`` because a single backslide cascades up to its
-        # cummax peak. Affordable (one bool array ~N bytes vs the
-        # ~16 N-byte working set) and the cascade count helps
-        # diagnose epoch-stitching scope vs a one-off precision
-        # blip.
-        n_changed = int(np.count_nonzero(buffer != all_timestamps))
-        rec_id_note = (
-            f" (recording_id={recording_id})"
-            if recording_id is not None
-            else ""
-        )
-        logger.warning(
-            f"Source recording {raw_path!r}{rec_id_note} has {n_issues} "
-            f"non-monotonic timestamp(s); adjusted {n_changed} "
-            "sample(s) to strictly increasing (offsets of <= one "
-            "sample_period). Likely floating-point precision or "
-            "epoch-stitching artifacts; consider validating the "
-            "source recording."
-        )
-        return buffer, n_changed
 
     @staticmethod
     def _fetch_sort_group_probe_info(
@@ -1994,8 +1765,8 @@ class Recording(SpyglassMixin, dj.Computed):
             When set, write into the existing slot (the recompute /
             rebuild path) rather than minting a new analysis file.
         timestamps_override : numpy.ndarray, optional
-            Pre-computed timestamps (e.g. monotonicity-corrected).
-            ``None`` lets the helper concatenate per-segment
+            Pre-computed persisted timestamps. ``None`` lets the helper
+            concatenate per-segment
             ``recording.get_times()`` via
             :func:`_get_recording_timestamps`.
         """
@@ -2054,8 +1825,7 @@ class Recording(SpyglassMixin, dj.Computed):
             # per chunk and never materializes the whole array. The
             # timestamps iterator wraps a 1D vector; resolve through
             # ``_get_recording_timestamps`` so multi-segment NWBs and
-            # monotonicity-corrected overrides both flow through
-            # correctly.
+            # persisted-timestamps overrides both flow through correctly.
             sampling_frequency = float(recording.get_sampling_frequency())
             timestamps = _get_recording_timestamps(
                 recording, override=timestamps_override

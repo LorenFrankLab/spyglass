@@ -890,8 +890,7 @@ correction pass that lands schema-shape fixes BEFORE the zero-migration rule
 binds for the rest of the epic: it replaces the nullable `SortingSelection ->
 ArtifactDetection` FK with an optional `ArtifactSource` part, splits
 `SortGroupV2.sort_reference_electrode_id` into `reference_mode` +
-`reference_electrode_id`, adds `Recording.timestamps_adjusted` /
-`Recording.n_adjusted_samples`, makes `bandpass_filter` Optional, flips the
+`reference_electrode_id`, makes `bandpass_filter` Optional, flips the
 `whiten` default to None, and adds `threshold_unit` to the clusterless schema
 (bumping `PreprocessingParamsSchema` to v3 and `ClusterlessThresholderSchema`
 to v4). v2 is pre-release, so these corrections are permitted. **The
@@ -910,7 +909,6 @@ build on the corrected baseline; the forward-compat table reflects it.
 | `SortingSelection` + source parts | `RecordingSource` and `ConcatenatedRecordingSource` part tables declared in Phase 1. Exactly one source part is enforced by `insert_selection()` and re-checked in `make()`. | Both source FK targets exist from Phase 1, so the schema is final. Phase 1's `insert_selection` rejects `ConcatenatedRecordingSource`; Phase 3 lifts that runtime gate without touching the schema. |
 | `SortingSelection.ArtifactSource` | Optional `association` part (`-> master` / `-> ArtifactDetection`), zero-or-one per master; **replaces** the old nullable `-> ArtifactDetection` FK | "No `ArtifactSource` row" = no artifact detection. Concat sorts skip artifact detection by simply having no `ArtifactSource` row. Excluded from `resolve_source()` / orphan counts. |
 | `SortGroupV2` | `reference_mode: varchar(32)` (validated against a `ReferenceMode` Literal: `none`/`global_median`/`specific`) + nullable `reference_electrode_id` (**replaces** the `sort_reference_electrode_id` magic sentinels -1/-2/≥0) | Reference dispatch reads the validated mode + nullable FK; "specific iff `reference_electrode_id IS NOT NULL`" enforced in `insert1`. **varchar, not enum, on purpose** — the reference-mode set may grow (SI also has `global_average`/CAR and local/per-group referencing), so an enum would trap a future mode behind a forbidden `ALTER TABLE`. The `Literal` gives typo-protection without the migration risk (same rationale as `CurationLabel`; the closed `metrics_source` set is the contrasting enum case). A future reviewer must NOT "tighten" this to an enum. |
-| `Recording` | `timestamps_adjusted: bool` + `n_adjusted_samples: int` provenance columns | Records when the non-monotonic-timestamp repair fired, so a time-mutated recording is queryable instead of silently rewritten. |
 | `Sorting.Unit` | Part table present in Phase 1 | Phase 2 `AnalyzerCuration` reads brain regions from here; Phase 4 `TrackedUnit` per-session region lookup reads from here. |
 | `CurationV2.Unit` | Part table present in Phase 1 | Same downstream consumers; merges shrink `CurationV2.Unit` from `Sorting.Unit` row count. |
 | `CurationV2.UnitLabel` | Part table present in Phase 1 | Phase 2/5 label filtering and Phase 4 matchable-unit selection rely on queryable multi-label rows. No later label-table migration is allowed. |
