@@ -653,7 +653,7 @@ class AnalysisMixin(BaseMixin):
         self,
         analysis_file_name: str,
         nwb_object: pynwb.core.NWBDataInterface,
-        table_name: Optional[str] = "pandas_table",
+        table_name: Optional[str] = None,
     ):
         """Add an NWB object to the analysis file and return the NWB object ID
 

@@ -250,17 +250,17 @@ class AnalysisFileBuilder:
         self._open_io = None
         self._open_nwb = None
 
-    def add_nwb_object(
-        self, nwb_object, table_name: str = "pandas_table"
-    ) -> str:
+    def add_nwb_object(self, nwb_object, table_name: str = None) -> str:
         """Add NWB object to analysis file (POPULATE phase).
 
         Parameters
         ----------
         nwb_object : pynwb object, DataFrame, or ndarray
             Object to add to file scratch space
-        table_name : str, default="pandas_table"
-            Name for object in scratch space
+        table_name : str, default=None
+            The name of the pynwb object made from a passed dataframe or array.
+            Defaults to "pandas_table" or "numpy_array" for dataframes and arrays
+            respectively.
 
         Returns
         -------
@@ -272,6 +272,7 @@ class AnalysisFileBuilder:
         ValueError
             If called before create or after registration
         """
+
         self._ensure_created("add_nwb_object")
         nwbf = self.open_nwb[1]
         return self._table._add_nwb_object_to_open_nwb(
