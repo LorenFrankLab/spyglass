@@ -1903,6 +1903,9 @@ class Model(SpyglassMixin, dj.Computed):
         extract_kwargs.setdefault("algo", "uniform")
         extract_kwargs.setdefault("userfeedback", False)
 
+        if frames_per_video < 1:
+            raise ValueError("frames_per_video must be >= 1")
+
         # ── 1. Resolve video paths via VideoFile; build a VidFileGroup ────────
         # Each dict in video_list is a partial VideoFile key; get_abs_paths
         # expands multi-camera epochs automatically.
@@ -1924,6 +1927,37 @@ class Model(SpyglassMixin, dj.Computed):
                 "(check that the relevant network mounts are accessible):\n"
                 + "\n".join(f"  {p}" for p in missing)
             )
+
+        # Try to infer a safe frame budget from the shortest video.  If this
+        # fails (e.g., codec issues), we keep the user's requested value and
+        # rely on DLC's own validation below.
+        effective_frames_per_video = frames_per_video
+        try:
+            import cv2
+
+            frame_counts = []
+            for video_path in resolved_videos:
+                cap = cv2.VideoCapture(str(video_path))
+                if not cap.isOpened():
+                    continue
+                frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                cap.release()
+                if frame_count > 0:
+                    frame_counts.append(frame_count)
+
+            if frame_counts:
+                shortest_video = min(frame_counts)
+                if frames_per_video > shortest_video:
+                    effective_frames_per_video = shortest_video
+                    self._warn_msg(
+                        "Requested "
+                        + f"{frames_per_video} frames/video, but shortest "
+                        + f"video has {shortest_video} frames. Using "
+                        + f"{effective_frames_per_video}."
+                    )
+        except Exception:
+            # Non-fatal; DLC may still be able to read and sample frames.
+            pass
 
         vid_group_key = VidFileGroup.create_from_files(
             video_files=resolved_videos,
@@ -1979,7 +2013,7 @@ class Model(SpyglassMixin, dj.Computed):
 
         # ── 3. Patch numframes2pick via dlc_io utilities ──────────────────────
         _, cfg = read_yaml(config_path.parent)
-        cfg["numframes2pick"] = frames_per_video
+        cfg["numframes2pick"] = effective_frames_per_video
         cfg["bodyparts"] = bodyparts
         config_path = Path(
             save_yaml(config_path.parent, cfg, filename="config")
@@ -2002,9 +2036,21 @@ class Model(SpyglassMixin, dj.Computed):
         else:
             algo = extract_kwargs["algo"]
             self._info_msg(
-                f"Extracting {frames_per_video} frames/video (algo='{algo}')…"
+                "Extracting "
+                + f"{effective_frames_per_video} frames/video "
+                + f"(algo='{algo}')…"
             )
-            extract_frames(str(config_path), **extract_kwargs)
+            try:
+                extract_frames(str(config_path), **extract_kwargs)
+            except ValueError as exc:
+                if "larger sample than population" in str(exc):
+                    raise ValueError(
+                        "DLC could not sample the requested number of frames "
+                        + "from at least one training video. Try reducing "
+                        + "frames_per_video (or use longer videos). "
+                        + f"Requested: {effective_frames_per_video}."
+                    ) from exc
+                raise
             self._info_msg("Frame extraction complete.")
 
         # ── 5. Insert (or retrieve) Skeleton ──────────────────────────────────
