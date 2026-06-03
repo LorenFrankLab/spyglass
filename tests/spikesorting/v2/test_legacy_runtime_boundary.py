@@ -82,7 +82,9 @@ def _extract_definition_blocks(path: Path) -> dict[str, str]:
         r"^\s*class\s+(\w+).*?\n\s+definition\s*=\s*\"\"\"\n(.*?)\"\"\"",
         re.DOTALL | re.MULTILINE,
     )
-    return {match.group(1): match.group(2) for match in pattern.finditer(source)}
+    return {
+        match.group(1): match.group(2) for match in pattern.finditer(source)
+    }
 
 
 def test_no_legacy_schema_changes():
@@ -255,7 +257,9 @@ def _assert_legacy_guard(
     Captures the raised exception once so a guard that fails to raise on the
     second invocation cannot silently pass the component-name assertion.
     """
-    with pytest.raises(RuntimeError, match="legacy SpikeInterface 0.99") as exc_info:
+    with pytest.raises(
+        RuntimeError, match="legacy SpikeInterface 0.99"
+    ) as exc_info:
         callable_()
     assert component in str(exc_info.value)
 
@@ -288,29 +292,48 @@ def test_legacy_runtime_guard_raises_under_si_0104(dj_conn):
     from spyglass.spikesorting.v1.metric_curation import MetricCuration
 
     cases = [
-        ("v0 Waveforms.make", lambda: V0Waveforms().make_compute(
-            key={}, waveform_params={}, waveform_extractor_path="",
-            recording_path="", sorting_path="", merge_groups=[],
-        )),
-        ("v0 Waveforms.load_waveforms",
-         lambda: V0Waveforms().load_waveforms({})),
-        ("v0 QualityMetrics.make", lambda: V0QualityMetrics().make_compute(
-            key={}, wf_path="", params={}, qm_name="",
-            quality_metrics_path="",
-        )),
+        (
+            "v0 Waveforms.make",
+            lambda: V0Waveforms().make_compute(
+                key={},
+                waveform_params={},
+                waveform_extractor_path="",
+                recording_path="",
+                sorting_path="",
+                merge_groups=[],
+            ),
+        ),
+        (
+            "v0 Waveforms.load_waveforms",
+            lambda: V0Waveforms().load_waveforms({}),
+        ),
+        (
+            "v0 QualityMetrics.make",
+            lambda: V0QualityMetrics().make_compute(
+                key={},
+                wf_path="",
+                params={},
+                qm_name="",
+                quality_metrics_path="",
+            ),
+        ),
         ("v0 BurstPair.make", lambda: V0BurstPair().make({})),
-        ("v0 ArtifactDetection.make",
-         lambda: V0ArtifactDetection().make({})),
-        ("v1 MetricCuration.make",
-         lambda: MetricCuration().make_compute({}, {})),
-        ("v1 MetricCuration.get_waveforms",
-         lambda: MetricCuration().get_waveforms({})),
-        ("v1 ArtifactDetection.make",
-         lambda: V1ArtifactDetection().make({})),
+        ("v0 ArtifactDetection.make", lambda: V0ArtifactDetection().make({})),
+        (
+            "v1 MetricCuration.make",
+            lambda: MetricCuration().make_compute({}, {}),
+        ),
+        (
+            "v1 MetricCuration.get_waveforms",
+            lambda: MetricCuration().get_waveforms({}),
+        ),
+        ("v1 ArtifactDetection.make", lambda: V1ArtifactDetection().make({})),
         ("v1 BurstPair.make", lambda: V1BurstPair().make({})),
         ("v0 UnitMarks.make", lambda: UnitMarks().make({})),
-        ("v1 UnitWaveformFeatures.make",
-         lambda: UnitWaveformFeatures().make({})),
+        (
+            "v1 UnitWaveformFeatures.make",
+            lambda: UnitWaveformFeatures().make({}),
+        ),
     ]
     for component, call in cases:
         _assert_legacy_guard(component, call)

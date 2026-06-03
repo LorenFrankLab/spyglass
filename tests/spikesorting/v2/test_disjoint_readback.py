@@ -40,9 +40,7 @@ def test_spike_times_to_frames_recovers_frames_on_gap_timeline():
     chunk = np.arange(100) * dt
     t0 = 10.0
     gap = 5.0
-    timestamps = np.concatenate(
-        [t0 + chunk, t0 + chunk[-1] + gap + dt + chunk]
-    )
+    timestamps = np.concatenate([t0 + chunk, t0 + chunk[-1] + gap + dt + chunk])
     n_samples = timestamps.size  # 200, gap-excluded
     planted_frames = np.array([10, 150], dtype=np.int64)
     stored_spike_times = timestamps[planted_frames]

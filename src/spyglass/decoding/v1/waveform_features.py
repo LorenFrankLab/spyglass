@@ -225,9 +225,9 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
                 analysis_nwb_key = "units"
             # v1 pipeline
             else:
-                sorting_id = (
-                    SpikeSortingOutput.CurationV1 & merge_key
-                ).fetch1("sorting_id")
+                sorting_id = (SpikeSortingOutput.CurationV1 & merge_key).fetch1(
+                    "sorting_id"
+                )
                 sorter, nwb_file_name = (
                     SpikeSortingSelection & {"sorting_id": sorting_id}
                 ).fetch1("sorter", "nwb_file_name")

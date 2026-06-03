@@ -62,9 +62,9 @@ def two_sorts_one_recording(populated_sorting):
     ]
     artifact_id = SortingSelection.resolve_artifact(sort_artifact)
     assert artifact_id is not None, "fixture sort must be artifact-backed"
-    sorter, sorter_params_name = (
-        SortingSelection & sort_artifact
-    ).fetch1("sorter", "sorter_params_name")
+    sorter, sorter_params_name = (SortingSelection & sort_artifact).fetch1(
+        "sorter", "sorter_params_name"
+    )
 
     sort_no_artifact = SortingSelection.insert_selection(
         {
@@ -81,9 +81,9 @@ def two_sorts_one_recording(populated_sorting):
     _clear_curations_for(sort_no_artifact)
     cur_artifact = CurationV2.insert_curation(sorting_key=sort_artifact)
     cur_no_artifact = CurationV2.insert_curation(sorting_key=sort_no_artifact)
-    merge_id_artifact = (
-        SpikeSortingOutput.CurationV2 & cur_artifact
-    ).fetch1("merge_id")
+    merge_id_artifact = (SpikeSortingOutput.CurationV2 & cur_artifact).fetch1(
+        "merge_id"
+    )
     merge_id_no_artifact = (
         SpikeSortingOutput.CurationV2 & cur_no_artifact
     ).fetch1("merge_id")
@@ -210,9 +210,9 @@ def test_insert_selection_dedup_accepts_str_artifact_id(populated_sorting):
         "recording_id"
     ]
     artifact_id = SortingSelection.resolve_artifact(populated_sorting)
-    sorter, sorter_params_name = (
-        SortingSelection & populated_sorting
-    ).fetch1("sorter", "sorter_params_name")
+    sorter, sorter_params_name = (SortingSelection & populated_sorting).fetch1(
+        "sorter", "sorter_params_name"
+    )
 
     before = {
         str(sid)

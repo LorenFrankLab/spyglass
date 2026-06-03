@@ -251,9 +251,9 @@ def run_v2_pipeline(
     # fresh one. The CurationV2 part on the merge table is auto-
     # registered inside insert_curation, so re-using a row reuses its
     # merge_id.
-    existing_root = (
-        CurationV2 & sort_pk & {"parent_curation_id": -1}
-    ).fetch("KEY", as_dict=True)
+    existing_root = (CurationV2 & sort_pk & {"parent_curation_id": -1}).fetch(
+        "KEY", as_dict=True
+    )
     if existing_root:
         curation_pk = existing_root[0]
     else:
@@ -264,9 +264,7 @@ def run_v2_pipeline(
             description=description or f"run_v2_pipeline preset={preset}",
         )
 
-    merge_id = (
-        SpikeSortingOutput.CurationV2 & curation_pk
-    ).fetch1("merge_id")
+    merge_id = (SpikeSortingOutput.CurationV2 & curation_pk).fetch1("merge_id")
 
     return {
         "preset": preset,

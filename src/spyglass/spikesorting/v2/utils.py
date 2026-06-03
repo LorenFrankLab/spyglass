@@ -567,8 +567,7 @@ def _get_recording_timestamps(
         return recording.get_times()
 
     frames_per_segment = [0] + [
-        recording.get_num_frames(segment_index=i)
-        for i in range(num_segments)
+        recording.get_num_frames(segment_index=i) for i in range(num_segments)
     ]
     cumsum_frames = _np.cumsum(frames_per_segment)
     total_frames = int(cumsum_frames[-1])
@@ -626,15 +625,11 @@ def _consolidate_intervals(intervals, timestamps):
     if not _np.all(intervals[:-1] <= intervals[1:]):
         intervals = intervals[_np.argsort(intervals[:, 0])]
 
-    start_indices = _np.searchsorted(
-        timestamps, intervals[:, 0], side="left"
-    )
+    start_indices = _np.searchsorted(timestamps, intervals[:, 0], side="left")
     # Exclusive end -- ``side="right"`` returns the count of
     # timestamps <= value, which is exactly the half-open end SI's
     # ``frame_slice`` expects. v1 subtracted 1 here (bug).
-    stop_indices = _np.searchsorted(
-        timestamps, intervals[:, 1], side="right"
-    )
+    stop_indices = _np.searchsorted(timestamps, intervals[:, 1], side="right")
 
     consolidated = []
     start, stop = int(start_indices[0]), int(stop_indices[0])
@@ -744,9 +739,7 @@ def _dedup_merged_spike_times(times_list, delta_s):
     import numpy as _np
 
     arrays = [_np.asarray(t, dtype=float) for t in times_list]
-    concat = (
-        _np.concatenate(arrays) if arrays else _np.asarray([], dtype=float)
-    )
+    concat = _np.concatenate(arrays) if arrays else _np.asarray([], dtype=float)
     if concat.size == 0:
         return concat
     order = concat.argsort(kind="mergesort")

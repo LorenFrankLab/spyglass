@@ -98,9 +98,9 @@ def two_source_output(populated_sorting, dj_conn, tmp_path_factory):
         tmp_path_factory.mktemp("imported") / "mearec_imported_smoke.nwb"
     )
     imported_name = copy_and_insert_nwb(units_nwb)
-    imp_rows = (
-        ImportedSpikeSorting & {"nwb_file_name": imported_name}
-    ).fetch("KEY", as_dict=True)
+    imp_rows = (ImportedSpikeSorting & {"nwb_file_name": imported_name}).fetch(
+        "KEY", as_dict=True
+    )
     assert imp_rows, "ImportedSpikeSorting was not auto-populated"
     SpikeSortingOutput.insert(
         imp_rows, part_name="ImportedSpikeSorting", skip_duplicates=True

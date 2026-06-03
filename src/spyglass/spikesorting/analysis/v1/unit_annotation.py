@@ -77,10 +77,7 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
             # count -- v2 sparse-id sortings break the count-as-bound
             # heuristic.
             nwb_unit_ids = set(_get_nwb_unit_ids(nwb_file, nwb_field_name))
-            if (
-                int(key["unit_id"]) not in nwb_unit_ids
-                and not self._test_mode
-            ):
+            if int(key["unit_id"]) not in nwb_unit_ids and not self._test_mode:
                 raise ValueError(
                     f"unit_id {key['unit_id']} is not present in "
                     f"{key['spikesorting_merge_id']} "

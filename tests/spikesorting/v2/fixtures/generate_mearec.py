@@ -491,9 +491,9 @@ def _verify_ingestion(nwb_path: Path, spec: FixtureSpec) -> dict:
     assert len(Session & session_key) == 1, "Session row missing"
     assert len(Raw & session_key) == 1, "Raw row missing"
     n_electrodes = len(Electrode & session_key)
-    assert n_electrodes == spec.layout.n_contacts, (
-        f"Electrode count {n_electrodes} != {spec.layout.n_contacts}"
-    )
+    assert (
+        n_electrodes == spec.layout.n_contacts
+    ), f"Electrode count {n_electrodes} != {spec.layout.n_contacts}"
     n_intervals = len(IntervalList & session_key)
     assert n_intervals > 0, "no IntervalList rows"
 
@@ -509,9 +509,9 @@ def _verify_ingestion(nwb_path: Path, spec: FixtureSpec) -> dict:
     num_shanks = (ProbeType & {"probe_type": spec.layout.probe_type}).fetch1(
         "num_shanks"
     )
-    assert num_shanks == spec.layout.n_shanks, (
-        f"ProbeType.num_shanks {num_shanks} != {spec.layout.n_shanks}"
-    )
+    assert (
+        num_shanks == spec.layout.n_shanks
+    ), f"ProbeType.num_shanks {num_shanks} != {spec.layout.n_shanks}"
 
     # Planted ground-truth units live in a sidecar
     # ``ProcessingModule("ground_truth")["units"]`` table (NOT
@@ -533,9 +533,9 @@ def _verify_ingestion(nwb_path: Path, spec: FixtureSpec) -> dict:
             "baseline-capture path can write to nwbfile.units freely."
         )
         gt_table = get_ground_truth_units_table(nwb)
-        assert gt_table is not None, (
-            "Source NWB missing sidecar ground-truth units table."
-        )
+        assert (
+            gt_table is not None
+        ), "Source NWB missing sidecar ground-truth units table."
         n_planted = int(len(gt_table.id[:]))
         assert n_planted >= 1, (
             "Sidecar ground-truth units table is empty; MEArec "

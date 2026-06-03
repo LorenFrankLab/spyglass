@@ -35,9 +35,9 @@ def _clear_curations(sorting_key):
 
     curation_keys = (CurationV2 & sorting_key).fetch("KEY", as_dict=True)
     if curation_keys:
-        merge_ids = (
-            SpikeSortingOutput.CurationV2 & curation_keys
-        ).fetch("merge_id")
+        merge_ids = (SpikeSortingOutput.CurationV2 & curation_keys).fetch(
+            "merge_id"
+        )
         for mid in merge_ids:
             (SpikeSortingOutput & {"merge_id": mid}).super_delete(warn=False)
     (CurationV2 & sorting_key).super_delete(warn=False)
@@ -110,9 +110,7 @@ def test_multi_region_unit_attribution(populated_sorting):
     )
     nwb, _sgid, sg_elec_pks = _sort_group_electrodes(populated_sorting)
     if len(sg_elec_pks) < 2:
-        pytest.skip(
-            "need >=2 channels in the sort group to span two regions"
-        )
+        pytest.skip("need >=2 channels in the sort group to span two regions")
 
     # Each curated unit maps to exactly one peak electrode (its FK). Key
     # by the (electrode_group_name, electrode_id) pair to match sg PKs.
@@ -163,14 +161,13 @@ def test_multi_region_unit_attribution(populated_sorting):
         # Verify the precondition: the sort group genuinely spans two
         # regions after the mutation.
         sg_regions = {
-            (
-                Electrode * BrainRegion & epk
-            ).fetch1("region_name")
+            (Electrode * BrainRegion & epk).fetch1("region_name")
             for epk in sg_elec_pks
         }
-        assert sg_regions == {"v1test_region_A", "v1test_region_B"}, (
-            f"sort group should span both regions; got {sg_regions}."
-        )
+        assert sg_regions == {
+            "v1test_region_A",
+            "v1test_region_B",
+        }, f"sort group should span both regions; got {sg_regions}."
 
         expected = {
             uid: name_by_id[assign[peak]] for uid, peak in unit_peak.items()

@@ -55,8 +55,6 @@ def copy_and_insert_nwb(nwb_source: Path | str) -> str:
         from spyglass.common.common_nwbfile import Nwbfile
 
         target_copy = get_nwb_copy_filename(nwb_source.name)
-        (Nwbfile() & {"nwb_file_name": target_copy}).delete(
-            safemode=False
-        )
+        (Nwbfile() & {"nwb_file_name": target_copy}).delete(safemode=False)
     insert_sessions(nwb_source.name, **kwargs)
     return get_nwb_copy_filename(nwb_source.name)

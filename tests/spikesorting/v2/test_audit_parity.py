@@ -19,7 +19,6 @@ import pytest
 
 from spyglass.spikesorting.v2._params.sorter import MountainSort4Schema
 
-
 # ---------- A3: MS4 adjacency_radius -1 sentinel ---------------------------
 
 
@@ -79,9 +78,9 @@ def test_franklab_ms4_v1_alias_rows_present():
         ms4_row = catalog[("mountainsort4", ms4_name)]
         alias_row = catalog[("mountainsort4", alias_name)]
         # params blob (index 2) and schema_version (index 3) identical.
-        assert alias_row[2] == ms4_row[2], (
-            f"alias {alias_name!r} params blob diverged from {ms4_name!r}"
-        )
+        assert (
+            alias_row[2] == ms4_row[2]
+        ), f"alias {alias_name!r} params blob diverged from {ms4_name!r}"
         assert alias_row[3] == ms4_row[3]
 
     # When MS4 is installed the aliases actually land in the table, so a
@@ -91,13 +90,10 @@ def test_franklab_ms4_v1_alias_rows_present():
     if "mountainsort4" in sis.installed_sorters():
         SorterParameters().insert_default()
         for _, alias_name in pairs:
-            assert (
-                SorterParameters
-                & {
-                    "sorter": "mountainsort4",
-                    "sorter_params_name": alias_name,
-                }
-            ), f"alias row {alias_name!r} did not insert with MS4 present"
+            assert SorterParameters & {
+                "sorter": "mountainsort4",
+                "sorter_params_name": alias_name,
+            }, f"alias row {alias_name!r} did not insert with MS4 present"
 
 
 # ---------- A4: install-gating happens on the insert_default() path --------
@@ -149,13 +145,10 @@ def test_sorter_parameters_skips_uninstalled_sorters(monkeypatch):
     SorterParameters.insert_default()
 
     # Non-SI special case -> never gated -> always inserted.
-    assert (
-        SorterParameters
-        & {
-            "sorter": "clusterless_thresholder",
-            "sorter_params_name": "default",
-        }
-    ), "clusterless default row must insert even with no SI sorter installed"
+    assert SorterParameters & {
+        "sorter": "clusterless_thresholder",
+        "sorter_params_name": "default",
+    }, "clusterless default row must insert even with no SI sorter installed"
 
     # Every gated-out SI sorter stays absent: insert_default routed the
     # gating DECISION into the INSERT, it did not insert _DEFAULT_CONTENTS
@@ -208,17 +201,12 @@ def test_sorter_parameters_rejects_missing_schema_version():
         SorterParameters().insert1(sentinel, skip_duplicates=True)
 
     # The correct explicit version inserts cleanly.
-    ok = dict(
-        base, sorter_params_name="audit_a5_ok", params_schema_version=4
-    )
+    ok = dict(base, sorter_params_name="audit_a5_ok", params_schema_version=4)
     SorterParameters().insert1(ok, skip_duplicates=True)
-    assert (
-        SorterParameters
-        & {
-            "sorter": "clusterless_thresholder",
-            "sorter_params_name": "audit_a5_ok",
-        }
-    )
+    assert SorterParameters & {
+        "sorter": "clusterless_thresholder",
+        "sorter_params_name": "audit_a5_ok",
+    }
 
     # A wrong (non-sentinel) version that disagrees with the blob still
     # trips the existing drift check.
@@ -275,8 +263,7 @@ def test_run_si_sorter_does_not_leak_numpy_inf(monkeypatch):
         pass
 
     assert not hasattr(np_mod, "Inf"), (
-        "MS4 path leaked np.Inf globally; the try/finally restore "
-        "regressed."
+        "MS4 path leaked np.Inf globally; the try/finally restore " "regressed."
     )
 
 
@@ -312,9 +299,7 @@ def test_sorter_tempdir_cleanup_does_not_mask_sort_exception(
         raise PermissionError("stale lock on tempdir during cleanup")
 
     monkeypatch.setattr(sis, "run_sorter", _boom_run_sorter)
-    monkeypatch.setattr(
-        tempfile.TemporaryDirectory, "cleanup", _boom_cleanup
-    )
+    monkeypatch.setattr(tempfile.TemporaryDirectory, "cleanup", _boom_cleanup)
 
     rec = sc.generate_recording(
         num_channels=4, durations=[0.5], sampling_frequency=30000.0
@@ -403,10 +388,9 @@ def test_motion_correction_parameters_rejects_schema_version_drift():
         "job_kwargs": None,
     }
     MotionCorrectionParameters().insert1(ok_row, skip_duplicates=True)
-    assert (
-        MotionCorrectionParameters
-        & {"motion_correction_params_name": "audit_a14_ok"}
-    )
+    assert MotionCorrectionParameters & {
+        "motion_correction_params_name": "audit_a14_ok"
+    }
 
 
 # ---------- A1: empty artifact valid_times must not silently zero ----------
@@ -479,9 +463,7 @@ def test_apply_artifact_mask_unsorted_valid_times_raises():
             rec, np_mod.array([[0.1, 0.5], [0.3, 0.8]])
         )
     # A single well-formed interval still masks normally (no raise).
-    masked = Sorting._apply_artifact_mask(
-        rec, np_mod.array([[0.1, 0.9]])
-    )
+    masked = Sorting._apply_artifact_mask(rec, np_mod.array([[0.1, 0.9]]))
     assert masked.get_num_samples() == rec.get_num_samples()
 
 
@@ -542,9 +524,9 @@ def test_sorting_make_skips_concat_rows_silently():
 
     try:
         # Excluded from key_source...
-        assert len(Sorting.key_source & {"sorting_id": sid}) == 0, (
-            "concat-source selection leaked into Sorting.key_source"
-        )
+        assert (
+            len(Sorting.key_source & {"sorting_id": sid}) == 0
+        ), "concat-source selection leaked into Sorting.key_source"
         # ...and populate restricted to it is a silent no-op (make_fetch's
         # NotImplementedError is never reached).
         Sorting.populate({"sorting_id": sid}, reserve_jobs=False)
@@ -751,9 +733,9 @@ def test_chunked_artifact_matches_in_memory_reference(
         "Chunked artifact frames diverge from the in-memory reference; the "
         "ChunkRecordingExecutor port changed which frames are flagged."
     )
-    assert np.array_equal(single, reference), (
-        "Single-chunk pass should reproduce the in-memory reference exactly."
-    )
+    assert np.array_equal(
+        single, reference
+    ), "Single-chunk pass should reproduce the in-memory reference exactly."
 
 
 def test_artifact_job_kwargs_propagate_to_executor(dj_conn, monkeypatch):
@@ -952,7 +934,7 @@ def test_artifact_detection_peak_memory_bounded_by_chunk_size(dj_conn):
         tmp.name, dtype=np.float32, mode="w+", shape=(n_samples, n_channels)
     )
     arr[:] = 0.0
-    arr[1_000_000 : 1_000_300, :] = 300.0  # one planted burst
+    arr[1_000_000:1_000_300, :] = 300.0  # one planted burst
     arr.flush()
     rec = si.NumpyRecording(traces_list=[arr], sampling_frequency=fs)
     rec.set_channel_gains([1.0] * n_channels)
@@ -1521,7 +1503,7 @@ def test_find_orphaned_analyzer_folders_db_side(dj_conn):
             "reported as a DB-side orphan"
         )
         # dry_run must not delete the row.
-        assert (Sorting & {"sorting_id": sid}), (
+        assert Sorting & {"sorting_id": sid}, (
             "find_orphaned_analyzer_folders(dry_run=True) deleted a DB row; "
             "it must only report"
         )
@@ -1782,9 +1764,12 @@ def test_shared_artifact_group_rejects_cross_session_members():
                 group_name,
                 [{"recording_id": rid_a}, {"recording_id": rid_b}],
             )
-        assert len(SharedArtifactGroup & {
-            "shared_artifact_group_name": group_name
-        }) == 0, "master row not rolled back after cross-session raise"
+        assert (
+            len(
+                SharedArtifactGroup & {"shared_artifact_group_name": group_name}
+            )
+            == 0
+        ), "master row not rolled back after cross-session raise"
     finally:
         _drop_fake_recording(rid_a)
         _drop_fake_recording(rid_b)
@@ -1921,9 +1906,9 @@ def test_artifact_selection_raises_duplicate_selection_error():
     finally:
         conn.query("SET FOREIGN_KEY_CHECKS=0")
         try:
-            (ArtifactSelection.RecordingSource & {
-                "recording_id": rec_id
-            }).delete_quick()
+            (
+                ArtifactSelection.RecordingSource & {"recording_id": rec_id}
+            ).delete_quick()
             for aid in (aid1, aid2):
                 (ArtifactSelection & {"artifact_id": aid}).delete_quick()
         finally:
@@ -2001,9 +1986,10 @@ def test_detect_artifacts_empty_sliver_filter_returns_empty():
     )
 
     out = ArtifactDetection._detect_artifacts(rec, validated)
-    assert out.shape == (0, 2), (
-        f"expected an empty (0, 2) array, got shape {out.shape}"
-    )
+    assert out.shape == (
+        0,
+        2,
+    ), f"expected an empty (0, 2) array, got shape {out.shape}"
     # dtype matches the recording's timestamp dtype (float64); a 1-D
     # np.empty(0) or an int array would break the downstream mask walker.
     assert out.dtype == rec.get_times().dtype
@@ -2069,10 +2055,13 @@ def test_artifact_detection_delete_tolerates_already_gone_interval_list():
     try:
         # Pre-delete the IntervalList row so delete() hits the already-gone
         # (len == 0) branch.
-        (IntervalList & {
-            "nwb_file_name": nwb,
-            "interval_list_name": ilist_name,
-        }).delete_quick()
+        (
+            IntervalList
+            & {
+                "nwb_file_name": nwb,
+                "interval_list_name": ilist_name,
+            }
+        ).delete_quick()
 
         # Must not raise even though the cleanup target is already gone.
         (ArtifactDetection & {"artifact_id": aid}).delete(safemode=False)
@@ -2081,9 +2070,9 @@ def test_artifact_detection_delete_tolerates_already_gone_interval_list():
         conn.query("SET FOREIGN_KEY_CHECKS=0")
         try:
             (ArtifactDetection & {"artifact_id": aid}).delete_quick()
-            (ArtifactSelection.RecordingSource & {
-                "artifact_id": aid
-            }).delete_quick()
+            (
+                ArtifactSelection.RecordingSource & {"artifact_id": aid}
+            ).delete_quick()
             (ArtifactSelection & {"artifact_id": aid}).delete_quick()
         finally:
             conn.query("SET FOREIGN_KEY_CHECKS=1")
@@ -2114,7 +2103,10 @@ def _plant_concat_sorting_selection(sid):
 
     import datajoint as dj
 
-    from spyglass.spikesorting.v2.sorting import SorterParameters, SortingSelection
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        SortingSelection,
+    )
 
     SorterParameters.insert_default()
     SortingSelection.insert1(
@@ -2186,9 +2178,7 @@ def test_sorting_get_unit_brain_regions_concat_anchor_member_df(
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
     from spyglass.spikesorting.v2.utils import SourceResolution
 
-    template_unit = (Sorting.Unit & populated_sorting).fetch(
-        as_dict=True
-    )[0]
+    template_unit = (Sorting.Unit & populated_sorting).fetch(as_dict=True)[0]
 
     sid = uuid.uuid4()
     _plant_concat_sorting_selection(sid)
@@ -2419,20 +2409,18 @@ def test_run_si_sorter_matlab_carveout(monkeypatch):
         "max_threads_per_process": 4,
         "detect_threshold": 6.0,  # a real param that must survive
     }
-    Sorting._run_si_sorter(
-        "kilosort2_5", sorter_params, rec, uuid.uuid4(), {}
-    )
+    Sorting._run_si_sorter("kilosort2_5", sorter_params, rec, uuid.uuid4(), {})
 
-    assert captured.get("singularity_image") is True, (
-        "MATLAB sorter must run under Singularity"
-    )
+    assert (
+        captured.get("singularity_image") is True
+    ), "MATLAB sorter must run under Singularity"
     for stripped in ("tempdir", "mp_context", "max_threads_per_process"):
-        assert stripped not in captured, (
-            f"{stripped!r} should be stripped for a MATLAB sorter"
-        )
-    assert captured.get("detect_threshold") == 6.0, (
-        "a non-stripped sorter param must reach run_sorter"
-    )
+        assert (
+            stripped not in captured
+        ), f"{stripped!r} should be stripped for a MATLAB sorter"
+    assert (
+        captured.get("detect_threshold") == 6.0
+    ), "a non-stripped sorter param must reach run_sorter"
 
 
 @pytest.mark.usefixtures("dj_conn")
@@ -2638,9 +2626,9 @@ def test_get_sorting_dataframe_casts_unit_ids_to_python_int(populated_sorting):
     ), "precondition: NumpySorting yields numpy unit_ids"
 
     df = Sorting().get_sorting(populated_sorting, as_dataframe=True)
-    assert all(type(uid) is int for uid in df.index), (
-        "DataFrame index unit_ids must be Python int, not numpy scalars"
-    )
+    assert all(
+        type(uid) is int for uid in df.index
+    ), "DataFrame index unit_ids must be Python int, not numpy scalars"
 
 
 @pytest.mark.usefixtures("dj_conn")
@@ -2724,9 +2712,9 @@ def test_rebuild_analyzer_folder_recreates_on_missing(populated_sorting):
     try:
         rebuilt = Sorting().get_analyzer(populated_sorting)
         assert folder.exists(), "rebuild did not recreate the analyzer folder"
-        assert list(rebuilt.unit_ids) == original_unit_ids, (
-            "rebuilt analyzer unit_ids diverge from the original sort"
-        )
+        assert (
+            list(rebuilt.unit_ids) == original_unit_ids
+        ), "rebuilt analyzer unit_ids diverge from the original sort"
     finally:
         # The folder belongs to the shared package fixture; if anything above
         # failed after the rmtree, restore it so later fixture consumers do
@@ -2798,7 +2786,9 @@ def _fresh_unit_producing_selection(populated_sorting):
 @pytest.mark.slow
 @pytest.mark.parametrize("safemode_arg", [None, False])
 @pytest.mark.usefixtures("dj_conn")
-def test_sorting_delete_removes_analyzer_folder(populated_sorting, safemode_arg):
+def test_sorting_delete_removes_analyzer_folder(
+    populated_sorting, safemode_arg
+):
     """A26: ``Sorting.delete`` removes the on-disk analyzer folder for both
     ``safemode=None`` (default) and ``safemode=False`` (explicit pass-through).
 
@@ -2815,9 +2805,9 @@ def test_sorting_delete_removes_analyzer_folder(populated_sorting, safemode_arg)
     try:
         assert folder.exists(), "fresh sort should have an analyzer folder"
         (Sorting & sort_pk).delete(safemode=safemode_arg)
-        assert not folder.exists(), (
-            f"analyzer folder not removed on delete(safemode={safemode_arg})"
-        )
+        assert (
+            not folder.exists()
+        ), f"analyzer folder not removed on delete(safemode={safemode_arg})"
         assert len(Sorting & sort_pk) == 0
     finally:
         # Selection row is independent of the Sorting master; clean it up.
@@ -3168,14 +3158,20 @@ def test_session_group_member_index_unique_within_master():
             SessionGroup.Member.insert1(dup, allow_direct_insert=True)
     finally:
         try:
-            (SessionGroup.Member & {
-                "session_group_owner": owner,
-                "session_group_name": group,
-            }).delete_quick()
-            (SessionGroup & {
-                "session_group_owner": owner,
-                "session_group_name": group,
-            }).delete_quick()
+            (
+                SessionGroup.Member
+                & {
+                    "session_group_owner": owner,
+                    "session_group_name": group,
+                }
+            ).delete_quick()
+            (
+                SessionGroup
+                & {
+                    "session_group_owner": owner,
+                    "session_group_name": group,
+                }
+            ).delete_quick()
         finally:
             conn.query("SET FOREIGN_KEY_CHECKS=1")
 

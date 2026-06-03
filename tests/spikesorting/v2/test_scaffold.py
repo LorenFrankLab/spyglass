@@ -134,8 +134,6 @@ def test_assert_v2_db_safe_override_permits_nonlocal(monkeypatch):
     assert _assert_v2_db_safe() is None
 
 
-
-
 # ---------------------------------------------------------------------------
 # A24: the two CRITICAL untested branches (utils.py). Hermetic -- they touch
 # only in-memory SI objects and monkeypatched config, so they live here (no
@@ -219,9 +217,9 @@ def test_assert_v2_db_safe_localhost_passes(monkeypatch):
     monkeypatch.delenv(_OVERRIDE_ENV, raising=False)
     for safe_host in sorted(_SAFE_DB_HOSTS):
         monkeypatch.setitem(dj.config, "database.host", safe_host)
-        assert _assert_v2_db_safe() is None, (
-            f"safe host {safe_host!r} should pass the DB-safety guard"
-        )
+        assert (
+            _assert_v2_db_safe() is None
+        ), f"safe host {safe_host!r} should pass the DB-safety guard"
 
 
 def test_assert_v2_db_safe_override_non_one_value_still_raises(monkeypatch):
@@ -245,9 +243,9 @@ def test_assert_v2_db_safe_override_non_one_value_still_raises(monkeypatch):
         with pytest.raises(RuntimeError) as excinfo:
             _assert_v2_db_safe()
         message = str(excinfo.value)
-        assert bad_host in message, (
-            f"raised message must name the offending host {bad_host!r}"
-        )
+        assert (
+            bad_host in message
+        ), f"raised message must name the offending host {bad_host!r}"
         assert _OVERRIDE_ENV in message, (
             "raised message must name the override env var so an operator "
             "knows how to bypass deliberately"

@@ -21,7 +21,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-
 _SI_NATIVE_PRESETS = (
     "dredge",
     "medicine",

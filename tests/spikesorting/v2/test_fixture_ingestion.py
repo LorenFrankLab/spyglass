@@ -82,13 +82,13 @@ def test_mearec_fixture_registers_probe_with_correct_shanks(
     assert (ProbeType & {"probe_type": layout.probe_type}).fetch1(
         "num_shanks"
     ) == layout.n_shanks
-    assert (
-        len(Probe.Electrode & probe_key) == layout.n_contacts
-    )
+    assert len(Probe.Electrode & probe_key) == layout.n_contacts
 
 
 @pytest.mark.slow
-def test_mearec_fixture_writes_sidecar_ground_truth_units(mearec_smoke_ingested):
+def test_mearec_fixture_writes_sidecar_ground_truth_units(
+    mearec_smoke_ingested,
+):
     """Planted ground-truth units land in the sidecar processing module.
 
     Re-opens the source NWB and verifies the sidecar
@@ -103,7 +103,9 @@ def test_mearec_fixture_writes_sidecar_ground_truth_units(mearec_smoke_ingested)
         get_ground_truth_units_table,
     )
 
-    raw_nwb_path = Nwbfile().get_abs_path(mearec_smoke_ingested["nwb_file_name"])
+    raw_nwb_path = Nwbfile().get_abs_path(
+        mearec_smoke_ingested["nwb_file_name"]
+    )
     with pynwb.NWBHDF5IO(raw_nwb_path, "r", load_namespaces=True) as io:
         nwb = io.read()
         assert nwb.units is None, (
@@ -124,9 +126,9 @@ def test_mearec_fixture_writes_sidecar_ground_truth_units(mearec_smoke_ingested)
             "cell_type",
             "is_ground_truth",
         ):
-            assert col in gt_table.colnames, (
-                f"Sidecar units table missing expected column {col!r}."
-            )
+            assert (
+                col in gt_table.colnames
+            ), f"Sidecar units table missing expected column {col!r}."
 
 
 @pytest.mark.fast

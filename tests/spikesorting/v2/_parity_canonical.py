@@ -31,7 +31,6 @@ from typing import Any
 
 import numpy as np
 
-
 # ---------------------------------------------------------------------------
 # Internal normalization
 # ---------------------------------------------------------------------------
@@ -162,7 +161,9 @@ def assert_canonical_dict_equal(
     if isinstance(left, float) or isinstance(right, float):
         # Mixed int/float compare numerically via isclose; pure int/int
         # falls through to the strict equality branch below.
-        if not (isinstance(left, (int, float)) and isinstance(right, (int, float))):
+        if not (
+            isinstance(left, (int, float)) and isinstance(right, (int, float))
+        ):
             raise AssertionError(
                 f"{path}: type mismatch -- left={type(left).__name__} "
                 f"right={type(right).__name__}"
@@ -221,7 +222,9 @@ def canonical_sorter(sorter: str, params: dict) -> dict:
     future sorter added to the parity matrix degrades gracefully
     until the canonical rules are extended.
     """
-    drop = _LEGACY_SORTER_KEYS.get(sorter, frozenset()) | _SCHEMA_ONLY_SORTER_KEYS
+    drop = (
+        _LEGACY_SORTER_KEYS.get(sorter, frozenset()) | _SCHEMA_ONLY_SORTER_KEYS
+    )
     cleaned = {k: v for k, v in params.items() if k not in drop}
     if sorter == "clusterless_thresholder":
         if cleaned.get("noise_levels", "__sentinel__") is None:

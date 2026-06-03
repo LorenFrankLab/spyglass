@@ -86,7 +86,9 @@ def _file_names(manifest):
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.recording import Recording
 
-    cur_part = SpikeSortingOutput.CurationV2 & {"merge_id": manifest["merge_id"]}
+    cur_part = SpikeSortingOutput.CurationV2 & {
+        "merge_id": manifest["merge_id"]
+    }
     cur_key = (CurationV2 & cur_part).fetch1("KEY")
     units_nwb = (CurationV2 & cur_key).fetch1("analysis_file_name")
     recording_nwb = (
@@ -197,7 +199,9 @@ def test_v2_zero_unit_export_path(export_smoke_session):
         "shipped clusterless default should find zero units on the smoke "
         f"fixture; got {manifest['n_units']}"
     )
-    assert manifest["merge_id"] is not None, "zero-unit sort must be merge-keyable"
+    assert (
+        manifest["merge_id"] is not None
+    ), "zero-unit sort must be merge-keyable"
     units_nwb, recording_nwb = _file_names(manifest)
 
     try:

@@ -64,7 +64,9 @@ _TETRODE_CONTACT_SIZE_UM = 12.5
 _TETRODE_HALF_PITCH_UM = 6.25
 
 # nwbinspector importance levels that block fixture use.
-_BLOCKING_INSPECTOR_LEVELS = frozenset({"ERROR", "PYNWB_VALIDATION", "CRITICAL"})
+_BLOCKING_INSPECTOR_LEVELS = frozenset(
+    {"ERROR", "PYNWB_VALIDATION", "CRITICAL"}
+)
 
 
 @dataclass(frozen=True)

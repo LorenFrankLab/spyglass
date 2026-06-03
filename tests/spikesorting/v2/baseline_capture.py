@@ -165,9 +165,7 @@ def _populate_artifact_detection(
     }
     ArtifactDetectionSelection.insert_selection(selection_key)
     ArtifactDetection.populate(selection_key)
-    art_pk = (
-        (ArtifactDetectionSelection & selection_key).proj().fetch1("KEY")
-    )
+    art_pk = (ArtifactDetectionSelection & selection_key).proj().fetch1("KEY")
     return art_pk
 
 
@@ -227,8 +225,7 @@ def _insert_curation(sorting_id: str) -> dict:
         parent_curation_id=-1,
     )
     return (
-        CurationV1
-        & {"sorting_id": sorting_id, "parent_curation_id": -1}
+        CurationV1 & {"sorting_id": sorting_id, "parent_curation_id": -1}
     ).fetch1("KEY")
 
 
@@ -391,9 +388,9 @@ def _compute_invariant_fingerprints(
     # and let the v2 reader re-canonicalize via ``{int(k): v for k, v in ...}``.
     bad_channel_by_electrode_id = {
         str(int(row["electrode_id"])): bool(row["bad_channel"] == "True")
-        for row in (
-            Electrode & {"nwb_file_name": nwb_file_name}
-        ).fetch("KEY", "electrode_id", "bad_channel", as_dict=True)
+        for row in (Electrode & {"nwb_file_name": nwb_file_name}).fetch(
+            "KEY", "electrode_id", "bad_channel", as_dict=True
+        )
     }
 
     canonical_preproc_params = canonical_preproc(
@@ -640,9 +637,7 @@ def run_baseline_capture(
         **_capture_source_provenance(),
         **fingerprints,
     }
-    spikes_path, meta_path = _write_artifacts(
-        output_dir, spike_times, metadata
-    )
+    spikes_path, meta_path = _write_artifacts(output_dir, spike_times, metadata)
 
     print(f"baseline spikes -> {spikes_path}")
     print(f"baseline meta   -> {meta_path}")
@@ -665,8 +660,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--nwb-file",
         default=None,
-        help="Path to a real NWB file (falls back to "
-        f"{_NWB_PATH_ENV}).",
+        help="Path to a real NWB file (falls back to " f"{_NWB_PATH_ENV}).",
     )
     parser.add_argument(
         "--sort-group-id",

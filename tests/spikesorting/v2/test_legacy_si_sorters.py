@@ -84,6 +84,5 @@ def test_insert_default_legacy_si_sorters_skips_not_installed(
     SorterParameters.insert_default_legacy_si_sorters()
 
     assert not (
-        SorterParameters
-        & {"sorter": fake, "sorter_params_name": "default"}
+        SorterParameters & {"sorter": fake, "sorter_params_name": "default"}
     ), "available-but-not-installed sorter must not get a 'default' row"

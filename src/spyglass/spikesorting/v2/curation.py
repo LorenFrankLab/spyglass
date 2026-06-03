@@ -82,9 +82,7 @@ def _validate_curation_label_rows(
         if "curation_label" not in row:
             continue
         label = row["curation_label"]
-        label_value = (
-            label.value if isinstance(label, CurationLabel) else label
-        )
+        label_value = label.value if isinstance(label, CurationLabel) else label
         if label_value not in valid:
             raise ValueError(
                 f"CurationV2.UnitLabel: curation_label {label!r} is not in "
@@ -166,9 +164,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         curation_label: varchar(32)
         """
 
-        def insert1(
-            self, row, *, allow_custom_labels: bool = False, **kwargs
-        ):
+        def insert1(self, row, *, allow_custom_labels: bool = False, **kwargs):
             # Delegate to ``insert`` (as DataJoint's own ``insert1`` does:
             # ``self.insert((row,))``) so the single validation happens in
             # one place AND ``allow_custom_labels`` survives the dispatch.
@@ -179,9 +175,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 [row], allow_custom_labels=allow_custom_labels, **kwargs
             )
 
-        def insert(
-            self, rows, *, allow_custom_labels: bool = False, **kwargs
-        ):
+        def insert(self, rows, *, allow_custom_labels: bool = False, **kwargs):
             rows = list(rows)
             _validate_curation_label_rows(
                 rows, allow_custom_labels=allow_custom_labels
@@ -328,9 +322,9 @@ class CurationV2(SpyglassMixin, dj.Manual):
         # treats this iteration as the canonical "source order" that
         # drives the NWB write order (surviving units first), so an
         # unordered fetch would silently leak DB row-order quirks.
-        sorting_units = (
-            Sorting.Unit & {"sorting_id": sorting_id}
-        ).fetch(as_dict=True, order_by="unit_id")
+        sorting_units = (Sorting.Unit & {"sorting_id": sorting_id}).fetch(
+            as_dict=True, order_by="unit_id"
+        )
         if not sorting_units and not (Sorting & {"sorting_id": sorting_id}):
             raise ValueError(
                 f"CurationV2.insert_curation: sorting_id {sorting_id} "
@@ -425,9 +419,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
             ) from exc
 
         # Resolve which curation_id to use (auto-increment within sort).
-        existing_ids = (
-            cls & {"sorting_id": sorting_id}
-        ).fetch("curation_id")
+        existing_ids = (cls & {"sorting_id": sorting_id}).fetch("curation_id")
         curation_id = int(max(existing_ids)) + 1 if len(existing_ids) else 0
 
         # Resolve the post-merge unit set. For every "kept" unit, we
@@ -895,9 +887,9 @@ class CurationV2(SpyglassMixin, dj.Manual):
 
         from spyglass.spikesorting.v2.recording import RecordingSelection
 
-        rec_source = (
-            SortingSelection.RecordingSource & {"sorting_id": sorting_id}
-        )
+        rec_source = SortingSelection.RecordingSource & {
+            "sorting_id": sorting_id
+        }
         if not rec_source:
             raise NotImplementedError(
                 "CurationV2.insert_curation: only RecordingSource sorts "
@@ -916,9 +908,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         # round-trip through a NumpySorting (t_start=0) would drop the
         # absolute offset and the wall-clock gaps.
         src_abs_path = AnalysisNwbfile.get_abs_path(
-            (Sorting & {"sorting_id": sorting_id}).fetch1(
-                "analysis_file_name"
-            )
+            (Sorting & {"sorting_id": sorting_id}).fetch1("analysis_file_name")
         )
         abs_times_by_uid = Sorting._read_units_abs_spike_times(src_abs_path)
 
@@ -1003,16 +993,16 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 for unit_id, spike_times in write_specs:
                     lbl_list = labels.get(int(unit_id), [])
                     label_list = [
-                        lbl.value
-                        if isinstance(lbl, CurationLabel)
-                        else str(lbl)
+                        (
+                            lbl.value
+                            if isinstance(lbl, CurationLabel)
+                            else str(lbl)
+                        )
                         for lbl in lbl_list
                     ]
                     all_labels.append(label_list)
                     nwbf.add_unit(
-                        spike_times=_np.asarray(
-                            spike_times, dtype=_np.float64
-                        ),
+                        spike_times=_np.asarray(spike_times, dtype=_np.float64),
                         id=int(unit_id),
                     )
                 # Only add the column when at least one unit
@@ -1091,9 +1081,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         from spyglass.spikesorting.v2.recording import Recording
 
         sorting_id = (cls & key).fetch1("sorting_id")
-        source = SortingSelection.resolve_source(
-            {"sorting_id": sorting_id}
-        )
+        source = SortingSelection.resolve_source({"sorting_id": sorting_id})
         if source.kind != "recording":
             raise NotImplementedError(
                 "CurationV2.get_recording: concat-source sorts are not "
@@ -1142,9 +1130,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 "returning an empty sorting."
             )
             if not as_dataframe:
-                return si.NumpySorting.from_unit_dict(
-                    {}, sampling_frequency=fs
-                )
+                return si.NumpySorting.from_unit_dict({}, sampling_frequency=fs)
             import pandas as pd
 
             return pd.DataFrame(
@@ -1181,9 +1167,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         return pd.DataFrame(
             {
                 "spike_times": [abs_times[u] for u in unit_ids],
-                "curation_label": [
-                    labels_by_unit.get(u, []) for u in unit_ids
-                ],
+                "curation_label": [labels_by_unit.get(u, []) for u in unit_ids],
             },
             index=pd.Index(unit_ids, name="unit_id"),
         )
@@ -1288,9 +1272,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         # Non-merged units keep their frames verbatim.
         for uid in base.get_unit_ids():
             if int(uid) not in merged_members:
-                units_dict[int(uid)] = base.get_unit_spike_train(
-                    unit_id=uid
-                )
+                units_dict[int(uid)] = base.get_unit_spike_train(unit_id=uid)
         # Each merge group -> abs-time-deduped train mapped to frames,
         # under a fresh ``max(unit_ids) + 1`` id (in get_merge_groups
         # order -- matches the prior SI MergeUnitsSorting id assignment).
@@ -1351,7 +1333,9 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 for lbl in include_labels
             }
             labeled = (
-                self.UnitLabel & key & [{"curation_label": v} for v in include_values]
+                self.UnitLabel
+                & key
+                & [{"curation_label": v} for v in include_values]
             ).fetch("unit_id")
             unit_restriction = unit_restriction & [
                 {"unit_id": int(uid)} for uid in labeled
@@ -1431,8 +1415,10 @@ class CurationV2(SpyglassMixin, dj.Manual):
             "sort_group_id": sort_group_id,
         }
         return (
-            SortGroupV2.SortGroupElectrode & sg_restriction
-        ) * _Electrode * BrainRegion
+            (SortGroupV2.SortGroupElectrode & sg_restriction)
+            * _Electrode
+            * BrainRegion
+        )
 
     @classmethod
     def _upstream_recording_row(cls, key) -> dict:

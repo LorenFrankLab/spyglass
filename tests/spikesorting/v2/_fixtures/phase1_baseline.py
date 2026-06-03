@@ -66,7 +66,6 @@ from pathlib import Path
 
 import numpy as np
 
-
 # Layout of the on-disk bundle. Keep names short and stable; rename-or-move
 # is a breaking change that requires re-regeneration.
 PHASE1_BASELINE_DIR = Path(__file__).resolve().parent / "phase1_baseline"
@@ -343,7 +342,9 @@ def regenerate(
     # here indicates the writer or reader is broken before any
     # validation test even runs.
     reloaded = load(output_dir=output_dir)
-    _assert_round_trip(reloaded, recording_baseline, sorting_baseline, curation_baseline)
+    _assert_round_trip(
+        reloaded, recording_baseline, sorting_baseline, curation_baseline
+    )
     return reloaded
 
 
@@ -422,7 +423,9 @@ def _capture_curation_baseline(*, curation_pk) -> CurationBaseline:
         nwbfile = io.read()
         units = nwbfile.units
         unit_ids = list(np.asarray(units["id"][:], dtype=np.int64))
-        spike_times = [np.asarray(units["spike_times"][i]) for i in range(len(unit_ids))]
+        spike_times = [
+            np.asarray(units["spike_times"][i]) for i in range(len(unit_ids))
+        ]
     by_unit = {int(uid): st for uid, st in zip(unit_ids, spike_times)}
     return CurationBaseline(
         object_id=str(row["object_id"]),
@@ -438,7 +441,9 @@ def _curation_sampling_frequency(curation_pk: dict) -> float:
     """Resolve the upstream Sorting's sampling frequency from the curation PK."""
     from spyglass.spikesorting.v2.sorting import Sorting
 
-    sorting_obj = Sorting().get_sorting({"sorting_id": curation_pk["sorting_id"]})
+    sorting_obj = Sorting().get_sorting(
+        {"sorting_id": curation_pk["sorting_id"]}
+    )
     return float(sorting_obj.get_sampling_frequency())
 
 
@@ -458,7 +463,9 @@ def _write_bundle(
     CURATION_PICKLE_LOCAL = output_dir / CURATION_PICKLE.name
     STAGE_METRICS_LOCAL = output_dir / STAGE_METRICS_PATH.name
 
-    MANIFEST_PATH_LOCAL.write_text(json.dumps(manifest_blob, indent=2, sort_keys=True))
+    MANIFEST_PATH_LOCAL.write_text(
+        json.dumps(manifest_blob, indent=2, sort_keys=True)
+    )
     np.savez_compressed(
         RECORDING_NPZ_LOCAL,
         traces=recording.traces,
@@ -609,19 +616,33 @@ def _assert_round_trip(
 ) -> None:
     """Sanity-check that what was written matches what we just held in RAM."""
     if reloaded.recording.cache_hash != recording.cache_hash:
-        raise RuntimeError("Pre-refactor baseline round-trip: cache_hash drifted.")
+        raise RuntimeError(
+            "Pre-refactor baseline round-trip: cache_hash drifted."
+        )
     if not np.array_equal(reloaded.recording.traces, recording.traces):
         raise RuntimeError("Pre-refactor baseline round-trip: traces differ.")
     if not np.array_equal(reloaded.recording.timestamps, recording.timestamps):
-        raise RuntimeError("Pre-refactor baseline round-trip: timestamps differ.")
-    if reloaded.sorting.spike_samples_per_unit.keys() != sorting.spike_samples_per_unit.keys():
-        raise RuntimeError("Pre-refactor baseline round-trip: unit_id sets differ.")
+        raise RuntimeError(
+            "Pre-refactor baseline round-trip: timestamps differ."
+        )
+    if (
+        reloaded.sorting.spike_samples_per_unit.keys()
+        != sorting.spike_samples_per_unit.keys()
+    ):
+        raise RuntimeError(
+            "Pre-refactor baseline round-trip: unit_id sets differ."
+        )
     for uid, arr in sorting.spike_samples_per_unit.items():
-        if not np.array_equal(reloaded.sorting.spike_samples_per_unit[uid], arr):
+        if not np.array_equal(
+            reloaded.sorting.spike_samples_per_unit[uid], arr
+        ):
             raise RuntimeError(
                 f"Pre-refactor baseline round-trip: unit {uid} spike samples differ."
             )
-    if reloaded.curation.spike_times_per_unit.keys() != curation.spike_times_per_unit.keys():
+    if (
+        reloaded.curation.spike_times_per_unit.keys()
+        != curation.spike_times_per_unit.keys()
+    ):
         raise RuntimeError(
             "Pre-refactor baseline round-trip: curation unit_id sets differ."
         )

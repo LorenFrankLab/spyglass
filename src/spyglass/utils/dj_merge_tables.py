@@ -649,9 +649,7 @@ class Merge(ExportMixin, dj.Manual):
             # of all of them.)
             merge_restriction = self.extract_merge_id(restriction)
             sources = set(
-                (self & restriction).fetch(
-                    self._reserved_sk, log_export=False
-                )
+                (self & restriction).fetch(self._reserved_sk, log_export=False)
             )
             if len(sources) > 1 and not multi_source:
                 self._raise_multi_source(sources)
@@ -745,9 +743,9 @@ class Merge(ExportMixin, dj.Manual):
                     # merge_id; ``fetch1`` would raise (not mis-pick) if that
                     # invariant were ever violated.
                     merge_ids.extend(
-                        (
-                            matched & {k: file[k] for k in parent_pk}
-                        ).fetch1(self._reserved_pk)
+                        (matched & {k: file[k] for k in parent_pk}).fetch1(
+                            self._reserved_pk
+                        )
                         for file in source_nwb
                     )
         if return_merge_ids:

@@ -79,7 +79,11 @@ class ArtifactDetectionParamsSchema(BaseModel):
 
     @model_validator(mode="after")
     def _check_thresholds(self) -> "ArtifactDetectionParamsSchema":
-        if self.detect and self.amplitude_thresh_uV is None and self.zscore_thresh is None:
+        if (
+            self.detect
+            and self.amplitude_thresh_uV is None
+            and self.zscore_thresh is None
+        ):
             raise ValueError(
                 "ArtifactDetectionParamsSchema requires at least one of "
                 "amplitude_thresh_uV or zscore_thresh when detect=True"

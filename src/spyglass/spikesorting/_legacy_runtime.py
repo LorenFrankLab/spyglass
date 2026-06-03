@@ -25,7 +25,6 @@ from __future__ import annotations
 
 from packaging.version import Version
 
-
 _LEGACY_BOUNDARY = Version("0.101")
 
 

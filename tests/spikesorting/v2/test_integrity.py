@@ -137,9 +137,9 @@ def test_source_part_pattern_holds_for_artifact_and_sorting_selection(
     )
     sid = sort_master_pk["sorting_id"]
     rec_parts = SortingSelection.RecordingSource & {"sorting_id": sid}
-    concat_parts = (
-        SortingSelection.ConcatenatedRecordingSource & {"sorting_id": sid}
-    )
+    concat_parts = SortingSelection.ConcatenatedRecordingSource & {
+        "sorting_id": sid
+    }
     total = len(rec_parts) + len(concat_parts)
     assert total == 1, (
         f"SortingSelection sorting_id={sid!r} has {total} source-"
@@ -155,13 +155,10 @@ def test_source_part_pattern_holds_for_artifact_and_sorting_selection(
         f"populated_sorting points at artifact_id={art_id!r} but no "
         "ArtifactSelection master row exists for it; FK chain broken."
     )
-    rec_parts = (
-        ArtifactSelection.RecordingSource & {"artifact_id": art_id}
-    )
-    shared_parts = (
-        ArtifactSelection.SharedArtifactGroupSource
-        & {"artifact_id": art_id}
-    )
+    rec_parts = ArtifactSelection.RecordingSource & {"artifact_id": art_id}
+    shared_parts = ArtifactSelection.SharedArtifactGroupSource & {
+        "artifact_id": art_id
+    }
     total = len(rec_parts) + len(shared_parts)
     assert total == 1, (
         f"ArtifactSelection artifact_id={art_id!r} has {total} source-"
@@ -200,9 +197,9 @@ def test_no_orphan_part_rows_in_v2_tables(populated_sorting):
     )
     sorting_master_pks = {r["sorting_id"] for r in sorting_unit_keys}
     for sid in sorting_master_pks:
-        assert len(Sorting & {"sorting_id": sid}) == 1, (
-            f"Sorting.Unit references missing master sorting_id={sid!r}"
-        )
+        assert (
+            len(Sorting & {"sorting_id": sid}) == 1
+        ), f"Sorting.Unit references missing master sorting_id={sid!r}"
 
     # CurationV2.Unit -> CurationV2 master. May be empty if no
     # curation has been inserted; the FK check still runs on any
@@ -210,9 +207,7 @@ def test_no_orphan_part_rows_in_v2_tables(populated_sorting):
     unit_keys = (CurationV2.Unit).fetch("KEY", as_dict=True)
     master_pks = {(r["sorting_id"], r["curation_id"]) for r in unit_keys}
     for sid, cid in master_pks:
-        assert len(
-            CurationV2 & {"sorting_id": sid, "curation_id": cid}
-        ) == 1, (
+        assert len(CurationV2 & {"sorting_id": sid, "curation_id": cid}) == 1, (
             f"CurationV2.Unit references missing master "
             f"sorting_id={sid!r}, curation_id={cid!r}"
         )
@@ -221,13 +216,11 @@ def test_no_orphan_part_rows_in_v2_tables(populated_sorting):
     # Same: may be empty in fixtures that don't exercise the
     # shared-artifact path.
     member_keys = (SharedArtifactGroup.Member).fetch("KEY", as_dict=True)
-    group_master_pks = {
-        r["shared_artifact_group_name"] for r in member_keys
-    }
+    group_master_pks = {r["shared_artifact_group_name"] for r in member_keys}
     for name in group_master_pks:
-        assert len(
-            SharedArtifactGroup & {"shared_artifact_group_name": name}
-        ) == 1, (
+        assert (
+            len(SharedArtifactGroup & {"shared_artifact_group_name": name}) == 1
+        ), (
             f"SharedArtifactGroup.Member references missing master "
             f"shared_artifact_group_name={name!r}"
         )

@@ -83,6 +83,7 @@ def _available_merge_sources() -> list:
         sources.append("v2")
     return sources
 
+
 schema = dj.schema("spikesorting_merge")
 
 source_class_dict = {
@@ -239,9 +240,7 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         rec_restriction = {k: key[k] for k in rec_keys if k in key}
         rec_table = RecordingSelection & rec_restriction
 
-        sort_rec_source = (
-            SortingSelection.RecordingSource * rec_table.proj()
-        )
+        sort_rec_source = SortingSelection.RecordingSource * rec_table.proj()
         sort_master = SortingSelection * sort_rec_source.proj()
         # ``artifact_id`` lives on the optional ``SortingSelection.
         # ArtifactSource`` part, NOT on ``SortingSelection`` -- it is absent
@@ -268,9 +267,7 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
                 }
                 sort_master = sort_master & artifact_source.proj()
 
-        curation_restriction = {
-            k: key[k] for k in curation_keys if k in key
-        }
+        curation_restriction = {k: key[k] for k in curation_keys if k in key}
         curation_table = (
             CurationV2 * sort_master.proj("sorting_id")
         ) & curation_restriction

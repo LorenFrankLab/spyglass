@@ -34,7 +34,6 @@ from spyglass.spikesorting.v2._params.sorter import (
     _get_sorter_schema,
 )
 
-
 # ---------- preprocessing ---------------------------------------------------
 
 
@@ -225,7 +224,12 @@ def test_motion_accepts_si_native_preset():
 
 def test_motion_rejects_forbidden_kwargs():
     """Forbidden kwargs change return type or write untracked artifacts."""
-    for forbidden in ("output_motion", "output_motion_info", "folder", "overwrite"):
+    for forbidden in (
+        "output_motion",
+        "output_motion_info",
+        "folder",
+        "overwrite",
+    ):
         with pytest.raises(ValidationError):
             MotionCorrectionParamsSchema(
                 preset="rigid_fast", preset_kwargs={forbidden: True}
@@ -402,9 +406,7 @@ def test_insert_row_to_dict_normalizes_and_rejects_bad_shapes():
     out = _insert_row_to_dict(src, names)
     assert out == src and out is not src
     # Positional tuple zips against the heading order.
-    assert _insert_row_to_dict(
-        ("mountainsort4", "name", {"x": 1}), names
-    ) == {
+    assert _insert_row_to_dict(("mountainsort4", "name", {"x": 1}), names) == {
         "sorter": "mountainsort4",
         "sorter_params_name": "name",
         "params": {"x": 1},
@@ -668,9 +670,7 @@ def test_shipped_rows_carry_current_params_schema_version(dj_conn):
     assert clusterless["params"]["schema_version"] == 4
 
     for name in ("default_franklab", "default_neuropixels", "no_filter"):
-        row = (
-            PreprocessingParameters & {"preproc_params_name": name}
-        ).fetch1()
+        row = (PreprocessingParameters & {"preproc_params_name": name}).fetch1()
         assert row["params_schema_version"] == 3, name
         assert row["params"]["schema_version"] == 3, name
 

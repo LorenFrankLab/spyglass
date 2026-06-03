@@ -24,7 +24,6 @@ from tests.spikesorting.v2._parity_canonical import (
     canonical_sorter,
 )
 
-
 # ---------------------------------------------------------------------------
 # _normalize
 # ---------------------------------------------------------------------------
@@ -290,7 +289,11 @@ def test_canonical_preproc_freq_min_mismatch_diverges():
 def test_canonical_preproc_reference_operator_carries_through():
     """v2-only ``operator="average"`` is NOT a silent equivalence -- it
     must surface as a canonical divergence so the parity test fails."""
-    v1_flat = {"frequency_min": 300, "frequency_max": 6000, "min_segment_length": 1}
+    v1_flat = {
+        "frequency_min": 300,
+        "frequency_max": 6000,
+        "min_segment_length": 1,
+    }
     v2_avg = {
         "schema_version": 2,
         "bandpass_filter": {"freq_min": 300.0, "freq_max": 6000.0},
@@ -335,7 +338,9 @@ def test_canonical_artifact_strips_v1_job_kwargs():
     # v1 lacks the v2-only ``join_window_ms`` and ``min_length_s``;
     # canonical_artifact treats absent as the v2 default so the two
     # sides agree on the "v1 default + v2 schema defaults" reading.
-    assert canonical_artifact(v1_with_job_kwargs) == canonical_artifact(v2_clean)
+    assert canonical_artifact(v1_with_job_kwargs) == canonical_artifact(
+        v2_clean
+    )
 
 
 def test_canonical_artifact_amplitude_thresh_mismatch_diverges():
@@ -356,7 +361,9 @@ def test_canonical_artifact_amplitude_thresh_mismatch_diverges():
         "min_length_s": 1.0,
     }
     with pytest.raises(AssertionError):
-        assert_canonical_dict_equal(canonical_artifact(v1), canonical_artifact(v2))
+        assert_canonical_dict_equal(
+            canonical_artifact(v1), canonical_artifact(v2)
+        )
 
 
 def test_canonical_artifact_none_preset_disables_detect():

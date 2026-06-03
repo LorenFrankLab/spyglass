@@ -36,7 +36,9 @@ from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
 from tests.spikesorting.v2._fixtures import phase1_baseline as _baseline
 
 _POLYMER_60S_PATH = (
-    Path(__file__).resolve().parent / "fixtures" / "mearec_polymer_128ch_60s.nwb"
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "mearec_polymer_128ch_60s.nwb"
 )
 
 
@@ -145,9 +147,9 @@ def test_regenerate_phase1_baseline(dj_conn):
         # the row we mutated.
         SorterParameters.update1(original_default)
 
-    assert _baseline.baseline_present(), (
-        "regenerate() returned but the on-disk bundle is incomplete."
-    )
+    assert (
+        _baseline.baseline_present()
+    ), "regenerate() returned but the on-disk bundle is incomplete."
     assert bundle.recording.traces.size > 0
     assert bundle.recording.timestamps.size > 0
     assert bundle.sorting.spike_samples_per_unit, (

@@ -47,16 +47,18 @@ def test_phase1_baseline_bundle_loads_with_plausible_shape(
     # Recording: non-empty traces + matching timestamps + non-empty
     # cache hash.
     rec = bundle.recording
-    assert rec.traces.ndim == 2 and rec.traces.size > 0, (
-        "Baseline Recording traces are empty or non-2D."
-    )
-    assert rec.timestamps.ndim == 1 and rec.timestamps.size == rec.traces.shape[0], (
+    assert (
+        rec.traces.ndim == 2 and rec.traces.size > 0
+    ), "Baseline Recording traces are empty or non-2D."
+    assert (
+        rec.timestamps.ndim == 1 and rec.timestamps.size == rec.traces.shape[0]
+    ), (
         f"Baseline timestamps shape {rec.timestamps.shape} does not "
         f"match traces row count {rec.traces.shape[0]}."
     )
-    assert isinstance(rec.cache_hash, str) and rec.cache_hash, (
-        "Baseline Recording.cache_hash is empty -- regen never wrote it."
-    )
+    assert (
+        isinstance(rec.cache_hash, str) and rec.cache_hash
+    ), "Baseline Recording.cache_hash is empty -- regen never wrote it."
 
     # Sorting: at least one unit, each unit has at least one
     # spike-sample, sampling frequency is a positive float.
@@ -65,9 +67,9 @@ def test_phase1_baseline_bundle_loads_with_plausible_shape(
         f"Baseline Sorting.sampling_frequency={sort.sampling_frequency} "
         "is not a positive float."
     )
-    assert len(sort.spike_samples_per_unit) >= 1, (
-        "Baseline Sorting has zero units -- regen wrote a vacuous bundle."
-    )
+    assert (
+        len(sort.spike_samples_per_unit) >= 1
+    ), "Baseline Sorting has zero units -- regen wrote a vacuous bundle."
     for uid, samples in sort.spike_samples_per_unit.items():
         assert samples.dtype.kind in ("i", "u"), (
             f"Sorting unit {uid} spike samples are dtype "
