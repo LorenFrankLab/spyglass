@@ -160,35 +160,31 @@ class FetchMixin(BaseMixin):
         return nwb_files, file_path_fn
 
     def _nwb_paths(self) -> list:
-        """Return absolute NWB file paths for the current table restriction.
+        """Return resolved absolute NWB file paths for the current restriction.
 
         Shared infrastructure used by both ``fetch_nwb`` and ``close_nwb``.
-        Performs the same projection join used in ``_execute_nwb_query`` so
-        the returned paths are guaranteed to match the cache keys.
+        Uses ``file_path_fn`` (``SpyglassAnalysis.get_abs_path``) with
+        ``from_schema=True`` so that ``filepath@store`` columns are resolved
+        correctly regardless of table type.
         """
-        from spyglass.utils.dj_mixin import SpyglassMixin
-
         table, tbl_attr = self._nwb_table_tuple
-        tbl_inst = instance_table(table)
-        inst = instance_table(self)
-        log_exp = (
-            dict(log_export=False) if isinstance(inst, SpyglassMixin) else {}
+        nwb_files, file_path_fn = self._get_nwb_files_and_path_fn(
+            table, tbl_attr
         )
-        return list(
-            self.join(
-                tbl_inst.proj(nwb2load_filepath=tbl_attr), **log_exp
-            ).fetch("nwb2load_filepath")
-        )
+        return [file_path_fn(f, from_schema=True) for f in nwb_files]
 
-    def _download_missing_files(self, abs_paths):
+    def _download_missing_files(self, nwb_files, file_path_fn):
         """Download missing NWB files from kachery/dandi or recompute.
 
         Parameters
         ----------
-        abs_paths : list
-            Absolute paths to NWB files that should be present locally.
+        nwb_files : list
+            List of NWB file names.
+        file_path_fn : callable
+            Function to resolve a file name to its absolute path.
         """
-        for file_path in abs_paths:
+        for file_name in nwb_files:
+            file_path = file_path_fn(file_name, from_schema=True)
             if not os.path.exists(file_path):
                 # get from kachery/dandi or recompute, store in cache
                 get_nwb_file(file_path, self)
@@ -344,19 +340,21 @@ class FetchMixin(BaseMixin):
         if not attrs:
             attrs = self.heading.names
 
-        # Resolve paths for the current restriction (shared with close_nwb)
-        paths = self._nwb_paths()
+        # Resolve file names and path function for this restriction
+        nwb_files, file_path_fn = self._get_nwb_files_and_path_fn(
+            table, tbl_attr, *attrs, **kwargs
+        )
 
         # Download any missing files
-        self._download_missing_files(paths)
+        self._download_missing_files(nwb_files, file_path_fn)
 
         # Execute query and get records
         rec_dicts = self._execute_nwb_query(table, tbl_attr, *attrs, **kwargs)
 
         # Protect each file from LRU eviction while caller holds lazy handles.
         # Release by calling close_nwb() on the same restriction.
-        for path in paths:
-            _acquire_nwb_file(path)
+        for f in nwb_files:
+            _acquire_nwb_file(file_path_fn(f, from_schema=True))
 
         # Process object_id fields if present
         return self._process_object_ids(rec_dicts, *attrs)
