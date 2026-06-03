@@ -168,7 +168,14 @@ def populated_sorting(dj_conn):
         SortingSelection,
     )
 
-    nwb_file_name = copy_and_insert_nwb(_DOWNSTREAM_FIXTURE_PATH)
+    # Ingest under a session name UNIQUE to this shared fixture. Other v2
+    # test modules ingest the same smoke fixture under its own basename and
+    # run ``_clean_session_v2`` / ``reinsert`` on that session; isolating this
+    # one keeps the package-scoped rows (cached as ``sort_pk`` below) from
+    # being cascade-deleted out from under the downstream/integrity tests.
+    nwb_file_name = copy_and_insert_nwb(
+        _DOWNSTREAM_FIXTURE_PATH, dest_name="mearec_downstream_smoke.nwb"
+    )
     session_key = {"nwb_file_name": nwb_file_name}
 
     PreprocessingParameters.insert_default()

@@ -20,13 +20,21 @@ import shutil
 from pathlib import Path
 
 
-def copy_and_insert_nwb(nwb_source: Path | str) -> str:
+def copy_and_insert_nwb(
+    nwb_source: Path | str, dest_name: str | None = None
+) -> str:
     """Copy an NWB file into the test raw directory and ingest it.
 
     Parameters
     ----------
     nwb_source : pathlib.Path or str
         Source NWB file. Copied (not linked) into ``$SPYGLASS_RAW_DIR``.
+    dest_name : str, optional
+        Basename to copy the source to (and ingest under) instead of the
+        source's own basename. Use this to ingest the same fixture under a
+        DISTINCT ``nwb_file_name`` so that one module's session cleanup /
+        ``reinsert`` cannot cascade-delete rows another fixture depends on.
+        Must end in ``.nwb``.
 
     Returns
     -------
@@ -40,7 +48,8 @@ def copy_and_insert_nwb(nwb_source: Path | str) -> str:
     from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
 
     nwb_source = Path(nwb_source)
-    raw_target = Path(raw_dir) / nwb_source.name
+    ingest_name = dest_name or nwb_source.name
+    raw_target = Path(raw_dir) / ingest_name
     if not raw_target.exists():
         shutil.copy(nwb_source, raw_target)
     kwargs = {"raise_err": True}
@@ -54,7 +63,7 @@ def copy_and_insert_nwb(nwb_source: Path | str) -> str:
         # ``populate_all_common`` actually runs.
         from spyglass.common.common_nwbfile import Nwbfile
 
-        target_copy = get_nwb_copy_filename(nwb_source.name)
+        target_copy = get_nwb_copy_filename(ingest_name)
         (Nwbfile() & {"nwb_file_name": target_copy}).delete(safemode=False)
-    insert_sessions(nwb_source.name, **kwargs)
-    return get_nwb_copy_filename(nwb_source.name)
+    insert_sessions(ingest_name, **kwargs)
+    return get_nwb_copy_filename(ingest_name)

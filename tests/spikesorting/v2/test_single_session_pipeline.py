@@ -661,7 +661,14 @@ def _clean_session_v2(session_key):
         "KEY", as_dict=True
     )
     if shared_groups:
-        (SharedArtifactGroup & shared_groups).super_delete(warn=False)
+        # force_masters=True: the cascade reaches the source-polymorphic
+        # ``ArtifactSelection.SharedArtifactGroupSource`` part, whose master
+        # is ``ArtifactSelection`` (not ``SharedArtifactGroup``); without it
+        # DataJoint raises "delete part before master". Mirrors every other
+        # super_delete in this file (Recording/RecordingSource analog).
+        (SharedArtifactGroup & shared_groups).super_delete(
+            warn=False, force_masters=True
+        )
 
     # Step 5: now the cascade is unblocked -- Recording, SortGroupV2
     # can be deleted normally. We super_delete each so a leftover
