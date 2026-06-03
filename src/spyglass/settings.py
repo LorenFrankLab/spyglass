@@ -216,21 +216,22 @@ class SpyglassConfig:
             self.load_failed = True
             return
 
+        def env_or_none(var: str) -> str | None:
+            """Read an env var, ignored in test_mode to keep the sandbox."""
+            return None if self._test_mode else os.environ.get(var)
+
+        dlc_project = env_or_none("DLC_PROJECT_PATH")
         self._dlc_base = (
             dj_dlc.get("base")
-            or (None if self._test_mode else os.environ.get("DLC_BASE_DIR"))
-            or (
-                None
-                if self._test_mode
-                else os.environ.get("DLC_PROJECT_PATH", "").split("projects")[0]
-            )
+            or env_or_none("DLC_BASE_DIR")
+            or (dlc_project.split("projects")[0] if dlc_project else None)
             or str(Path(resolved_base) / "deeplabcut")
         )
         Path(self._dlc_base).mkdir(parents=True, exist_ok=True)
 
         self._moseq_base = (
             dj_moseq.get("base")
-            or (None if self._test_mode else os.environ.get("MOSEQ_BASE_DIR"))
+            or env_or_none("MOSEQ_BASE_DIR")
             or str(Path(resolved_base) / "moseq")
         )
         Path(self._moseq_base).mkdir(parents=True, exist_ok=True)
@@ -263,7 +264,7 @@ class SpyglassConfig:
 
         kachery_zone_dict = {
             "KACHERY_ZONE": (
-                (None if self._test_mode else os.environ.get("KACHERY_ZONE"))
+                env_or_none("KACHERY_ZONE")
                 or dj.config.get("custom", {}).get("kachery_zone")
                 or "franklab.default"
             )
