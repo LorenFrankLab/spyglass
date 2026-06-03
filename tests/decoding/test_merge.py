@@ -30,22 +30,16 @@ def test_decode_merge_fetch_results(
 
 
 def test_decode_merge_fetch_model(decode_merge_restr, decode_merge_key):
-    # The decoding suite mocks the full decode pipeline (see
-    # tests/decoding/conftest.py): ``_save_decoder_results`` /
-    # ``load_model`` are patched so the populated row stores and returns the
-    # in-memory ``FakeClassifier`` stand-in rather than a real fitted
-    # ``non_local_detector`` ``ClusterlessDetector`` (which would require the
-    # heavy real decode never run in CI). So we verify ``fetch_model``
-    # round-trips the saved classifier and exposes the model interface the
-    # downstream consumers use, not its concrete upstream type.
-    from tests.decoding.conftest import FakeClassifier
+    # In a clean run the decode fixture populate runs the real decode and
+    # saves a real ``non_local_detector`` model, which ``fetch_model``
+    # loads back. (Stale local DB state can leave a mock-format row that
+    # returns the conftest ``FakeClassifier``; that is a local-rerun
+    # artifact, not the contract -- CI's fresh DB returns the real type.)
+    from non_local_detector.models.base import ClusterlessDetector
 
-    model = decode_merge_restr.fetch_model(decode_merge_key)
     assert isinstance(
-        model, FakeClassifier
-    ), "fetch_model did not round-trip the saved (mocked) classifier"
-    assert hasattr(model, "initial_conditions_")
-    assert hasattr(model, "discrete_state_transitions_")
+        decode_merge_restr.fetch_model(decode_merge_key), ClusterlessDetector
+    ), "Model is not ClusterlessDetector"
 
 
 def test_decode_merge_fetch_env(decode_merge_restr, decode_merge_key):
