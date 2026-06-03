@@ -885,7 +885,7 @@ Single-session sorts return the same shape as before (no `region_resolution` col
 This contract enforces the user's binding constraint: every v2 table is designed in its final shape in the phase that introduces it. No `Table.alter()` calls across phases.
 
 **Review-fixes is the final pre-Phase-2 schema-correction checkpoint.** The
-review-fixes plan ([review-fixes/PLAN.md](review-fixes/PLAN.md)) is a one-time
+review-fixes plan is a one-time
 correction pass that lands schema-shape fixes BEFORE the zero-migration rule
 binds for the rest of the epic: it replaces the nullable `SortingSelection ->
 ArtifactDetection` FK with an optional `ArtifactSource` part, splits
