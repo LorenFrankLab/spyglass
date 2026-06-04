@@ -15,7 +15,12 @@ from tqdm import tqdm
 
 from spyglass import __version__ as sg_version
 from spyglass.settings import analysis_dir, raw_dir
-from spyglass.utils import SpyglassAnalysis, SpyglassMixin, logger
+from spyglass.utils import (
+    SpyglassAnalysis,
+    SpyglassMixin,
+    logger,
+    SpyglassMixinPart,
+)
 from spyglass.utils.dj_helper_fn import get_child_tables
 from spyglass.utils.nwb_hash import NwbfileHasher
 from spyglass.utils.nwb_helper_fn import get_electrode_indices, get_nwb_file
@@ -55,7 +60,7 @@ class Nwbfile(SpyglassMixin, dj.Manual):
 
     # NOTE: See #630, #664. Excessive key length.
 
-    class AccessLog(dj.Part):
+    class AccessLog(SpyglassMixinPart):
         """Log file access events for empirical access-pattern analysis.
 
         Collected prior to compression implementation to inform scheduling
