@@ -332,6 +332,8 @@ class AnalysisFileIssues(dj.Manual):
             "analysis_file_name": analysis_file_name,
         }
 
+        print(".", end="")  # Progress indicator for single-file checks
+
         try:
             fname = analysis_tbl.get_abs_path(analysis_file_name)
             # Check if file exists on disk
