@@ -87,20 +87,22 @@ def revisit_graph_tables(dj_conn, SpyglassMixin):
         leaf_b_id: int
         ---
         -> Parent
-        leaf_b_attr: int
         """
-        contents = [(0, 0, 20), (1, 1, 21)]
+        contents = [
+            (
+                0,
+                0,
+            ),
+        ]
 
     @schema
     class LeafA(SpyglassMixin, dj.Lookup):
         definition = """
-        leaf_a_id: int
+        -> LeafB
         ---
         -> Parent
-        -> LeafB
-        leaf_a_attr: int
         """
-        contents = [(0, 0, 0, 30), (1, 1, 0, 31)]
+        contents = [(0, 1)]
 
     schema.activate("test_revisit_graph", connection=dj_conn)
     yield {"Parent": Parent(), "LeafA": LeafA(), "LeafB": LeafB()}
@@ -164,22 +166,27 @@ def test_rg_revisits_with_expanded_restriction(revisit_graph_tables):
 
     tables = revisit_graph_tables
     graph = RestrGraph(
-        seed_table=tables["Parent"],
-        leaves={
-            tables["LeafA"].full_table_name: {"leaf_a_id": 0},
-            tables["LeafB"].full_table_name: {"leaf_b_id": 1},
-        },
+        seed_table=tables["LeafA"],
+        leaves=[
+            {
+                "table_name": tables["LeafA"].full_table_name,
+                "restriction": "leaf_b_id = 0",
+            }
+        ],
         direction="up",
         cascade=True,
         verbose=False,
     )
 
     parent_ids = set(
-        graph._get_ft(
-            tables["Parent"].full_table_name, with_restr=True
-        ).fetch("parent_id")
+        graph._get_ft(tables["Parent"].full_table_name, with_restr=True).fetch(
+            "parent_id"
+        )
     )
-    assert parent_ids == {0, 1}, "Parent restriction should union both leaves."
+    assert parent_ids == {
+        0,
+        1,
+    }, "Parent restriction should union from both sources."
 
 
 def test_rg_repr(restr_graph, leaf):
