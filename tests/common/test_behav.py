@@ -359,12 +359,13 @@ def test_validate_video_timestamps_single_file(common):
     with patch.object(video_file, "_prepare_video_entry") as mock_prepare:
         mock_prepare.return_value = {"test": "entry"}
 
-        entries, failure = video_file._validate_video_timestamps(
+        entries, failure, overlap_pct = video_file._validate_video_timestamps(
             mock_video, valid_times, {"key": "value"}
         )
 
         assert len(entries) == 1
         assert failure is None
+        assert overlap_pct == 1.0
         mock_prepare.assert_called_once()
 
 
@@ -385,12 +386,13 @@ def test_validate_video_timestamps_single_file_poor_overlap(common):
 
     video_file = common.VideoFile()
 
-    entries, failure = video_file._validate_video_timestamps(
+    entries, failure, overlap_pct = video_file._validate_video_timestamps(
         mock_video, valid_times, {"key": "value"}
     )
 
     assert len(entries) == 0
     assert "Only 20.0%" in failure
+    assert overlap_pct == pytest.approx(0.2)
 
 
 def test_validate_multifile_timestamps(common):
@@ -418,7 +420,7 @@ def test_validate_multifile_timestamps(common):
     with patch.object(video_file, "_prepare_video_entry") as mock_prepare:
         mock_prepare.return_value = {"test": "entry"}
 
-        entries = video_file._validate_multifile_timestamps(
+        entries, max_overlap = video_file._validate_multifile_timestamps(
             mock_video,
             timestamps,
             starting_frame,
@@ -426,8 +428,9 @@ def test_validate_multifile_timestamps(common):
             {"key": "value"},
         )
 
-        # Should only return entry for file 1
+        # Should only return entry for file 1; max overlap is 100% from file 1
         assert len(entries) == 1
+        assert max_overlap == pytest.approx(1.0)
         mock_prepare.assert_called_once_with(
             {"key": "value"}, mock_video, file_idx=0
         )
@@ -452,11 +455,12 @@ def test_validate_multifile_timestamps_no_valid_segments(common):
 
     video_file = common.VideoFile()
 
-    entries = video_file._validate_multifile_timestamps(
+    entries, max_overlap = video_file._validate_multifile_timestamps(
         mock_video, timestamps, starting_frame, valid_times, {"key": "value"}
     )
 
     assert len(entries) == 0
+    assert max_overlap == pytest.approx(1 / 3)
 
 
 def test_videofile_make_no_videos(common):
@@ -566,7 +570,7 @@ def test_videofile_report_partial_import(common, caplog):
 
     failed_videos = defaultdict(list)
     failed_videos["timestamp_mismatch"].append(
-        {"name": "video1", "reason": "Poor overlap"}
+        {"name": "video1", "reason": "Poor overlap", "overlap_percent": 20.0}
     )
     failed_videos["missing_camera"].append(
         {"name": "video2", "camera": "cam1", "error": "Not found"}
