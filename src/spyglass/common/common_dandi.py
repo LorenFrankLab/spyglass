@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 from spyglass.common.common_usage import Export, ExportSelection
 from spyglass.settings import export_dir, raw_dir
-from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
+from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.sql_helper_fn import SQLDumpHelper
 
 try:
