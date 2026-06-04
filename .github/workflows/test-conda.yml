@@ -255,9 +255,11 @@ jobs:
       # core test_single_session_pipeline.py paths. Without this
       # step those tests skip via the ``_FIXTURE_PATH.exists()``
       # guard and CI passes vacuously even when the pipeline has
-      # regressed. The fixture is regenerated from a fixed seed
-      # so the output is deterministic; SHAs in
-      # ``fixtures/fixtures_manifest.json`` pin the contract.
+      # regressed. The fixture is regenerated from a fixed seed; the
+      # DETERMINISTIC upstream (recording_h5_sha256 + structural fields)
+      # is pinned by ``fixtures/fixtures_manifest.json`` and checked in the
+      # next step. (The neuroconv NWB write is NOT byte-deterministic --
+      # UUIDs/timestamps -- so nwb_sha256 is a snapshot, not a gate.)
       #
       # The 60s polymer / 60s Neuropixels / 120s drift fixtures are too
       # slow to build on every PR, so they are NOT generated here; their
@@ -267,6 +269,32 @@ jobs:
       # local run.
       run: |
         python tests/spikesorting/v2/fixtures/generate_mearec.py --smoke
+    - name: Verify the smoke fixture did not drift from the committed manifest
+      # generate_mearec rewrites fixtures_manifest.json. The MEArec>=1.9 /
+      # neuroconv[mearec] deps are loose, so a version bump can silently
+      # change the recording bytes and CI would just test the drifted fixture.
+      # Fail loudly if the DETERMINISTIC recording_h5_sha256 / n_units / probe
+      # drift from the committed values (nwb_sha256 is non-deterministic and
+      # intentionally not checked).
+      run: |
+        python - <<'PY'
+        import json, subprocess
+        path = "tests/spikesorting/v2/fixtures/fixtures_manifest.json"
+        new = json.load(open(path))["fixtures"]["mearec_polymer_smoke"]
+        old = json.loads(
+            subprocess.check_output(["git", "show", f"HEAD:{path}"])
+        )["fixtures"]["mearec_polymer_smoke"]
+        for k in ("recording_h5_sha256", "n_units", "probe_json_sha256"):
+            assert new[k] == old[k], (
+                f"smoke fixture drift: {k}={new[k]!r} != committed {old[k]!r}. "
+                "A MEArec/dep bump changed the deterministic fixture; "
+                "re-verify and re-commit fixtures_manifest.json."
+            )
+        print(
+            "smoke fixture matches committed manifest "
+            "(recording_h5 / n_units / probe)."
+        )
+        PY
     - name: Generate 60s polymer fixture (scheduled / manual full runs)
       # Built only on the nightly cron and manual workflow_dispatch -- a
       # single 60s MEArec recording is minutes of generation, too slow for

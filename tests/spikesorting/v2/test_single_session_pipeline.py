@@ -7524,34 +7524,15 @@ def test_sorting_delete_removes_analyzer_folder(populated_sorting):
     from spyglass.spikesorting.v2.utils import _analyzer_path
 
     folder = _analyzer_path({"sorting_id": populated_sorting["sorting_id"]})
-    if not folder.exists():
-        # _build_analyzer runs at populate time; on rare retry paths
-        # the fixture may have populated without writing the folder.
-        # Build it explicitly so the deletion is meaningful.
-        from spyglass.spikesorting.v2.recording import Recording
-
-        sorting = Sorting().get_sorting(populated_sorting)
-        recording = (
-            Recording().get_recording(
-                {
-                    "recording_id": (
-                        Sorting * Sorting.RecordingSource if False else None
-                    )
-                    or {}
-                }
-            )
-            if False
-            else None
-        )  # fallback below
-        # If we cannot rebuild, skip rather than test nothing.
-        if not folder.exists():
-            import pytest as _pytest
-
-            _pytest.skip(
-                f"analyzer_folder {folder} not present; skipping the "
-                "delete cleanup check (the populate path may have "
-                "short-circuited)."
-            )
+    # ``_build_analyzer`` runs at populate time, so the folder is a
+    # precondition of this test. Treat absence as a FAILURE rather than a
+    # vacuous skip: if it is missing, the populate path is broken and the
+    # delete-cleanup assertion below would pass without exercising the
+    # rmtree it is meant to verify.
+    assert folder.exists(), (
+        f"precondition: analyzer_folder {folder} should exist after the "
+        "populated_sorting fixture; the populate path did not write it."
+    )
 
     # Use cautious_delete with safemode=False so the test runs
     # non-interactively. Sorting.delete() override is the unit
@@ -8132,6 +8113,13 @@ _PARITY_FIXTURE_CASES = [
 )
 def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
     """v1 ↔ v2 ``clusterless_thresholder`` parity on the polymer matrix.
+
+    **NOT a per-PR CI gate.** This is a manual / nightly baseline-verification
+    matrix: all parametrized cases SKIP unless ``SPIKESORTING_V2_BASELINE_ROOT``
+    (or the legacy single-case ``SPIKESORTING_V2_BASELINE_DIR``) points at
+    operator-captured v1 baselines. The ``pytest-v2`` workflow does not set
+    either, so reviewers should not count these cases as per-PR coverage --
+    they activate only under the capture workflow described in "Env vars" below.
 
     The deterministic threshold sorter SHOULD detect the same peaks
     under SI 0.104 as it did under SI 0.99. The test enforces a
@@ -10670,9 +10658,16 @@ def test_insert_curation_rejects_merge_group_overlap(populated_sorting):
     from spyglass.spikesorting.v2.sorting import Sorting
 
     _clear_curations(populated_sorting)
+    existing = [
+        int(u) for u in (Sorting.Unit & populated_sorting).fetch("unit_id")
+    ]
     real_unit = (Sorting.Unit & populated_sorting).fetch(as_dict=True)[0]
     u0 = int(real_unit["unit_id"])
-    u1 = u0 + 1
+    # ``max(existing) + 1`` guarantees a non-colliding planted id even if the
+    # sorter ever returns contiguous unit ids -- ``u0 + 1`` would duplicate an
+    # existing Sorting.Unit row and fail the insert before the overlap
+    # validator (the actual unit under test) ever runs.
+    u1 = max(existing) + 1
     planted = {**real_unit, "unit_id": u1}
     conn = dj.conn()
     conn.query("SET FOREIGN_KEY_CHECKS=0")
