@@ -8,6 +8,10 @@ The -m 1 flag is required — without it, zero-shape datasets (video
 placeholders) are silently dropped. h5repack -f NONE returns rc=1
 even on success; verification gates on pynwb readability and dataset
 count, not on rc.
+
+Nwbfile always stores the copy ({session}_.nwb). CompressedNwbfile is
+keyed by Nwbfile and has a File part table with one row per physical
+file — 'copy' ({session}_.nwb) and 'raw' ({session}.nwb).
 """
 
 import os
@@ -29,33 +33,42 @@ _DEFAULT_GZIP_LEVEL = 6  # benchmarked default
 
 @schema
 class CompressedNwbfile(dj.Manual):
-    """Tracks NWB files repacked with h5repack dataset-level compression.
+    """Session-level record that both NWB files in a pair have been repacked.
 
-    After repacking, the file is readable by pynwb/h5py without any
-    decompression step; only the chunks actually accessed are decompressed.
+    Keyed by Nwbfile (always the copy, {session}_.nwb). The File part
+    table holds per-file stats for both 'copy' and 'raw'.
     """
 
     definition = """
     -> Nwbfile
     ---
-    gzip_level: tinyint unsigned        # GZIP level passed to h5repack (1-9)
-    original_size_bytes: bigint unsigned
-    repacked_size_bytes: bigint unsigned
-    compression_ratio: float
-    datasets_total: int unsigned
-    datasets_compressed: int unsigned   # datasets that gained compression
     repacked_at=CURRENT_TIMESTAMP: timestamp
     """
 
-    def make(self, key, gzip_level=_DEFAULT_GZIP_LEVEL):
-        """Repack a raw NWB file with h5repack and record the result.
+    class File(dj.Part):
+        """Per-file compression stats for one file in the session pair."""
 
-        Requires admin privileges — modifies the source file in place.
+        definition = """
+        -> master
+        file_role: enum('copy', 'raw')
+        ---
+        gzip_level: tinyint unsigned # level passed to h5repack; 0=pre-existing
+        original_size_bytes: bigint unsigned
+        repacked_size_bytes: bigint unsigned
+        compression_ratio: float
+        datasets_total: int unsigned
+        datasets_compressed: int unsigned
+        """
+
+    def make(self, key, gzip_level=_DEFAULT_GZIP_LEVEL):
+        """Repack both files in a session pair and record results.
+
+        Requires admin privileges — modifies source files in place.
 
         Parameters
         ----------
         key : dict
-            Must contain 'nwb_file_name'.
+            Must contain 'nwb_file_name' for the copy ({session}_.nwb).
         gzip_level : int, optional
             GZIP compression level (1-9). Default: 6 (benchmarked).
         """
@@ -71,73 +84,106 @@ class CompressedNwbfile(dj.Manual):
             )
             return
 
-        src = Path(Nwbfile.get_abs_path(key["nwb_file_name"]))
-        if not src.exists():
-            raise FileNotFoundError(src)
+        copy_name = key["nwb_file_name"]
+        raw_name = copy_name[:-5] + ".nwb"  # strip trailing _ before .nwb
 
-        original_size = src.stat().st_size
-        n_datasets = _count_datasets(src)
-        n_already_compressed = _count_compressed_datasets(src)
+        copy_stats = _repack_file(Nwbfile.get_abs_path(copy_name), gzip_level)
+        raw_stats = _repack_file(Nwbfile.get_abs_path(raw_name), gzip_level)
 
-        if n_already_compressed == n_datasets:
-            logger.info(
-                f"{src.name} already fully compressed "
-                f"({n_datasets} datasets), recording without repacking"
-            )
-            self.insert1(
-                {
-                    **key,
-                    "gzip_level": 0,  # 0 = pre-existing, not applied by make()
-                    "original_size_bytes": original_size,
-                    "repacked_size_bytes": original_size,
-                    "compression_ratio": 1.0,
-                    "datasets_total": n_datasets,
-                    "datasets_compressed": n_already_compressed,
-                }
-            )
-            return
-
-        tmp_fd, tmp_str = tempfile.mkstemp(suffix=".nwb.tmp", dir=src.parent)
-        os.close(tmp_fd)
-        tmp = Path(tmp_str)
-
-        try:
-            _h5repack(src, tmp, gzip_level)
-            _verify(src, tmp, n_datasets)
-            n_compressed = _count_compressed_datasets(tmp)
-            repacked_size = tmp.stat().st_size
-            tmp.rename(src)  # atomic on POSIX within same filesystem
-        except Exception:
-            if tmp.exists():
-                tmp.unlink()
-            raise
-
-        from spyglass.utils.dj_helper_fn import _resolve_external_table
-
-        _resolve_external_table(str(src), src.name, location="raw")
-
-        ratio = original_size / repacked_size if repacked_size else 0.0
-        self.insert1(
-            {
-                **key,
-                "gzip_level": gzip_level,
-                "original_size_bytes": original_size,
-                "repacked_size_bytes": repacked_size,
-                "compression_ratio": round(ratio, 4),
-                "datasets_total": n_datasets,
-                "datasets_compressed": n_compressed,
-            }
+        self.insert1(key)
+        self.File.insert(
+            [
+                {**key, "file_role": "copy", **copy_stats},
+                {**key, "file_role": "raw", **raw_stats},
+            ]
         )
 
         logger.info(
-            f"Repacked {src.name}: {ratio:.2f}x ratio, "
-            f"{n_compressed}/{n_datasets} datasets compressed"
+            f"Repacked {copy_name}: "
+            f"copy {copy_stats['compression_ratio']:.2f}x, "
+            f"raw {raw_stats['compression_ratio']:.2f}x"
         )
 
 
 # ---------------------------------------------------------------------------
 # h5repack helpers
 # ---------------------------------------------------------------------------
+
+
+def _repack_file(path: str, gzip_level: int) -> dict:
+    """Repack a single file and return per-file stats for File part table.
+
+    If the file is already fully compressed, records it without repacking
+    (gzip_level=0 in the returned stats).
+
+    Parameters
+    ----------
+    path : str
+        Absolute path to the NWB file.
+    gzip_level : int
+        GZIP level to pass to h5repack.
+
+    Returns
+    -------
+    dict
+        Keys: gzip_level, original_size_bytes, repacked_size_bytes,
+        compression_ratio, datasets_total, datasets_compressed.
+    """
+    src = Path(path)
+    if not src.exists():
+        raise FileNotFoundError(src)
+
+    original_size = src.stat().st_size
+    n_datasets = _count_datasets(path=src)
+    n_already_compressed = _count_compressed_datasets(path=src)
+
+    shared = {
+        "original_size_bytes": original_size,
+        "datasets_total": n_datasets,
+    }
+
+    if n_already_compressed == n_datasets:
+        logger.info(
+            f"{src.name} already fully compressed, recording without repacking"
+        )
+        return {
+            "gzip_level": 0,
+            "repacked_size_bytes": original_size,
+            "compression_ratio": 1.0,
+            "datasets_compressed": n_already_compressed,
+            **shared,
+        }
+
+    tmp_fd, tmp_str = tempfile.mkstemp(suffix=".nwb.tmp", dir=src.parent)
+    os.close(tmp_fd)
+    tmp = Path(tmp_str)
+
+    try:
+        _h5repack(src=src, dst=tmp, level=gzip_level)
+        _verify(src=src, dst=tmp, expected_count=n_datasets)
+        n_compressed = _count_compressed_datasets(path=tmp)
+        repacked_size = tmp.stat().st_size
+        tmp.rename(src)
+    except Exception:
+        if tmp.exists():
+            tmp.unlink()
+        raise
+
+    from spyglass.utils.dj_helper_fn import _resolve_external_table
+
+    _resolve_external_table(
+        filepath=str(src), file_name=src.name, location="raw"
+    )
+
+    ratio = original_size / repacked_size if repacked_size else 0.0
+
+    return {
+        "gzip_level": gzip_level,
+        "repacked_size_bytes": repacked_size,
+        "compression_ratio": round(ratio, 4),
+        "datasets_compressed": n_compressed,
+        **shared,
+    }
 
 
 def _h5repack(src: Path, dst: Path, level: int) -> None:
