@@ -3212,7 +3212,6 @@ def test_apply_artifact_mask_zeroes_artifact_frames(populated_recording):
         {"recording_id": populated_recording["recording_id"]}
     )
     timestamps = recording.get_times()
-    fs = recording.get_sampling_frequency()
     n_frames = len(timestamps)
     assert n_frames > 400, "fixture too short for boundary test"
 
@@ -5264,7 +5263,6 @@ def test_detect_artifacts_join_window_merges_runs(dj_conn):
     traces[1000:1100, :] = 100.0  # artifact A
     traces[1110:1210, :] = 100.0  # artifact B; 10 frames after A
     rec = _build_synthetic_rec(traces)
-    fs = rec.get_sampling_frequency()
 
     # join_window_ms = 1.0 -> join_window_frames = ceil(1 * 30 / 1) =
     # 30 frames. Gap between A and B is 10 frames, so they merge.

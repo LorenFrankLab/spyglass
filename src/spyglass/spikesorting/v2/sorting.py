@@ -958,8 +958,6 @@ class Sorting(SpyglassMixin, dj.Computed):
         """
         import shutil as _shutil
 
-        from spyglass.spikesorting.v2.recording import Recording
-
         recording_id = source.key["recording_id"]
         recording = Recording().get_recording({"recording_id": recording_id})
 
@@ -1167,8 +1165,6 @@ class Sorting(SpyglassMixin, dj.Computed):
         """
         import spikeinterface as si
 
-        from spyglass.spikesorting.v2.recording import Recording
-
         row = (self & key).fetch1()
         abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
         source = SortingSelection.resolve_source(key)
@@ -1340,8 +1336,6 @@ class Sorting(SpyglassMixin, dj.Computed):
         rebuilt analyzer is bit-equivalent to the one Sorting.make
         wrote -- not a fresh, possibly nondeterministic, sort.
         """
-        from spyglass.spikesorting.v2.recording import Recording
-
         import shutil as _shutil
 
         from spyglass.spikesorting.v2.utils import _analyzer_path

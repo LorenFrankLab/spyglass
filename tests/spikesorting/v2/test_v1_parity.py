@@ -218,8 +218,6 @@ def test_optional_matching_extra_resolution():
 
     # NumPy compatibility: the v2 supported pin is ``>=2.0``. A
     # matching-extra install MUST NOT have forced a downgrade.
-    import numpy as np
-
     np_major = int(np.__version__.split(".")[0])
     assert np_major >= 2, (
         f"NumPy {np.__version__} is below the v2-supported >=2.0 "
@@ -709,12 +707,6 @@ def test_curation_v2_nwb_write_outside_transaction():
     tree = ast.parse(inspect.cleandoc(src))
 
     NWB_WRITE_NAMES = {"_stage_curated_units_nwb"}
-    NWB_CREATE_PATTERNS = {
-        # ``AnalysisNwbfile().create``: Call -> Attribute "create"
-        # on a Call whose func.id is "AnalysisNwbfile"
-        "AnalysisNwbfile_create",
-        "pynwb_NWBHDF5IO",
-    }
 
     def _is_forbidden_call(node):
         """True if node is a Call that writes NWB or stages units."""
