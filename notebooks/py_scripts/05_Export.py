@@ -258,7 +258,7 @@ Export().populate_paper(**paper_key)
 #
 # First, The `DandiViolations` table provides a tool to easily scan for standard violations
 # within the published files. Issues are organized and searchable by both file and
-# violation id, making it easier to identify shared issues and aplly fixes:
+# violation id, making it easier to identify shared issues and apply fixes:
 
 # +
 from spyglass.common.common_dandi import (
