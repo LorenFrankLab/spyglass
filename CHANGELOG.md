@@ -185,6 +185,7 @@ for label, interval_data in results.groupby("interval_labels"):
     `HDF5_USE_FILE_LOCKING` so the HDF5 library actually sees the intended
     `FALSE` default #1575
 - Warn on no-operation restrictions #1586
+- Improved efficiency for writing multiple objects to analysis file #1594
 - Fix `NwbfileHasher` to include HDF5 Dataset content in file hash; add
     `SPYGLASS_LEGACY_HASHES` env var to `RecordingRecompute` for backward
     compatibility with pre-fix hashes #1600
