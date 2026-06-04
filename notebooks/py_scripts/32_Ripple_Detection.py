@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.17.0
+#       jupytext_version: 1.17.2
 #   kernelspec:
 #     display_name: spyglass
 #     language: python
@@ -40,11 +40,6 @@ import os
 import datajoint as dj
 import numpy as np
 import pandas as pd
-
-# change to the upper level folder to detect dj_local_conf.json
-if os.path.basename(os.getcwd()) == "notebooks":
-    os.chdir("..")
-dj.config.load("dj_local_conf.json")  # load config for database connection info
 
 import spyglass.common as sgc
 import spyglass.position.v1 as sgp
@@ -361,7 +356,7 @@ sgp.TrodesPosV1.populate(pos_key, display_progress=True)
 sgp.TrodesPosV1 & pos_key
 
 # +
-from spyglass.position import PositionOutput
+from spyglass.position import PositionOutput  # noqa: F401, F403
 
 pos_key = PositionOutput.merge_get_part(pos_key).fetch1("KEY")
 (PositionOutput & pos_key).fetch1_dataframe()

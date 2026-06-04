@@ -1,0 +1,68 @@
+# Spyglass Database Setup with Docker Compose
+#
+# Quick start (no setup needed - defaults work for most users):
+#   docker compose up -d
+#
+# This starts a MySQL database for Spyglass with:
+#   - Persistent data storage (survives container restart)
+#   - Health checks (ensures database is ready)
+#   - Standard configuration (matches manual Docker setup)
+#
+# Common tasks:
+#   Start:    docker compose up -d
+#   Stop:     docker compose stop
+#   Logs:     docker compose logs mysql
+#   Restart:  docker compose restart
+#   Remove:   docker compose down -v  # WARNING: Deletes all data!
+#
+# Customization (optional):
+#   Create .env file from example.env to customize settings
+#   See example.env for available configuration options
+#
+# Troubleshooting:
+#   Port 3306 in use: Create .env file and change MYSQL_PORT
+#   Services won't start: Run 'docker compose logs' to see errors
+#   Can't connect: Ensure Docker Desktop is running
+
+services:
+  mysql:
+    image: ${MYSQL_IMAGE:-datajoint/mysql:8.0}
+
+    # Container name MUST be 'spyglass-db' to match existing code
+    container_name: spyglass-db
+
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-tutorial}
+      # Optional: Create database on startup
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-}
+
+    volumes:
+      # Named volume for persistent storage
+      # Data survives 'docker compose down' but is removed by 'down -v'
+      - spyglass-db-data:/var/lib/mysql
+
+    healthcheck:
+      # Check if MySQL is ready without exposing password in process list
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "--silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+    restart: unless-stopped
+
+    networks:
+      - spyglass-network
+
+volumes:
+  spyglass-db-data:
+    # Explicit name for predictability
+    name: spyglass-db-data
+
+networks:
+  spyglass-network:
+    name: spyglass-network
+    driver: bridge

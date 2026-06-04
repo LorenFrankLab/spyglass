@@ -20,7 +20,7 @@ from position_tools import get_distance
 
 from spyglass.common.common_behav import VideoFile
 from spyglass.common.common_usage import ActivityLog
-from spyglass.settings import dlc_output_dir, dlc_video_dir, raw_dir
+from spyglass.settings import dlc_output_dir, dlc_video_dir, raw_dir, test_mode
 from spyglass.utils.logging import logger, stream_handler
 
 
@@ -610,11 +610,13 @@ def interp_pos(dlc_df, spans_to_interp, **kwargs):
 
         if (span_stop + 1) >= len(dlc_df):
             dlc_df.loc[idx_span, idx[["x", "y"]]] = np.nan
-            logger.info(no_x_msg.format(ind=ind, coord="end"))
+            if not test_mode:
+                logger.info(no_x_msg.format(ind=ind, coord="end"))
             continue
         if span_start < 1:
             dlc_df.loc[idx_span, idx[["x", "y"]]] = np.nan
-            logger.info(no_x_msg.format(ind=ind, coord="start"))
+            if not test_mode:
+                logger.info(no_x_msg.format(ind=ind, coord="start"))
             continue
 
         x = [dlc_df["x"].iloc[span_start - 1], dlc_df["x"].iloc[span_stop + 1]]
@@ -627,7 +629,10 @@ def interp_pos(dlc_df, spans_to_interp, **kwargs):
 
         if span_len > max_pts_to_interp or change > max_cm_to_interp:
             dlc_df.loc[idx_span, idx[["x", "y"]]] = np.nan
-            logger.info(no_interp_msg.format(start=span_start, stop=span_stop))
+            if not test_mode:
+                logger.info(
+                    no_interp_msg.format(start=span_start, stop=span_stop)
+                )
             if change > max_cm_to_interp:
                 continue
 
@@ -650,11 +655,13 @@ def interp_orientation(df, spans_to_interp, **kwargs):
         idx_span = idx[span_start:span_stop]
         if (span_stop + 1) >= len(df):
             df.loc[idx_span, idx["orientation"]] = np.nan
-            logger.info(no_x_msg.format(ind=ind, x="stop"))
+            if not test_mode:
+                logger.info(no_x_msg.format(ind=ind, x="stop"))
             continue
         if span_start < 1:
             df.loc[idx_span, idx["orientation"]] = np.nan
-            logger.info(no_x_msg.format(ind=ind, x="start"))
+            if not test_mode:
+                logger.info(no_x_msg.format(ind=ind, x="start"))
             continue
 
         orient = [df_orient.iloc[span_start - 1], df_orient.iloc[span_stop + 1]]

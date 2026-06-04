@@ -166,7 +166,7 @@ def mock_spike_sorter():
 
     def _mock_run_sorter(
         self,
-        recording_analysis_nwb_file_abs_path,
+        recording_key,
         artifact_removed_intervals,
         sorter,
         sorter_params,

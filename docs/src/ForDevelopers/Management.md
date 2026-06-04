@@ -224,9 +224,9 @@ disk. There are several tables that retain lists of files that have been
 generated during analyses. If someone deletes analysis entries, files will still
 be on disk.
 
-**NOTE**: This means that directories like analysis and recording are
-managed resources. Adding files to these directories outside of Spyglass
-will not automatically register them in the database, and they will be deleted.
+**NOTE**: This means that directories like analysis and recording are managed
+resources. Adding files to these directories outside of Spyglass will not
+automatically register them in the database, and they will be deleted.
 
 Additionally, there are key tables such as `IntervalList` and `AnalysisNwbfile`,
 which are used to store entries created by downstream tables. These entries are
@@ -247,47 +247,48 @@ Similar orphan cleanups for `Nwbfile`, `AnalysisNwbfile`, `SpikeSorting`, and
 
 ### Automated Cleanup (Admin)
 
-For database administrators, Spyglass provides automated cleanup scripts designed
-to run as cron jobs. These scripts handle all cleanup operations including orphan
-detection, external file deletion, and temp directory cleanup.
+For database administrators, Spyglass provides automated cleanup scripts
+designed to run as cron jobs. These scripts handle all cleanup operations
+including orphan detection, external file deletion, and temp directory cleanup.
 
 **Location**: `maintenance_scripts/`
 
 **Key Scripts**:
 
 - `cleanup.py` - Main cleanup script that performs:
-  - Table cleanups (`Nwbfile`, `AnalysisNwbfile`, `SpikeSorting`, `DecodingOutput`, `SpikeSortingRecording`)
-  - External file deletion (unreferenced files)
-  - Temp directory cleanup (files older than 7 days)
-  - Version table updates (fetches latest from PyPI)
+    - Table cleanups (`Nwbfile`, `AnalysisNwbfile`, `SpikeSorting`,
+        `DecodingOutput`, `SpikeSortingRecording`)
+    - External file deletion (unreferenced files)
+    - Temp directory cleanup (files older than 7 days)
+    - Version table updates (fetches latest from PyPI)
 - `run_jobs.sh` - Orchestration script that:
-  - Updates Spyglass repository from master branch
-  - Runs database connection check
-  - Executes `cleanup.py`
-  - Manages logging and notifications
+    - Updates Spyglass repository from master branch
+    - Runs database connection check
+    - Executes `cleanup.py`
+    - Manages logging and notifications
 - `check_disk_space.sh` - Monitors disk usage and sends alerts
 
 **Setup**:
 
 1. Configure environment variables in `maintenance_scripts/.env`:
 
-   ```bash
-   SPYGLASS_BASE_PATH=/path/to/data
-   SPYGLASS_CONDA_ENV=spyglass
-   SPYGLASS_REPO_PATH=/path/to/spyglass
-   SPYGLASS_LOG=/path/to/cleanup.log
-   # Optional: email/slack notifications
-   ```
+    ```bash
+    SPYGLASS_BASE_PATH=/path/to/data
+    SPYGLASS_CONDA_ENV=spyglass
+    SPYGLASS_REPO_PATH=/path/to/spyglass
+    SPYGLASS_LOG=/path/to/cleanup.log
+    # Optional: email/slack notifications
+    ```
 
 2. Set up cron jobs (edit with `crontab -e`):
 
-   ```bash
-   # Run cleanup every Monday at 4:00 AM
-   0 4 * * 1 /path/to/spyglass/maintenance_scripts/run_jobs.sh
+    ```bash
+    # Run cleanup every Monday at 4:00 AM
+    0 4 * * 1 /path/to/spyglass/maintenance_scripts/run_jobs.sh
 
-   # Check disk space daily at 8:00 AM
-   0 8 * * * /path/to/spyglass/maintenance_scripts/check_disk_space.sh
-   ```
+    # Check disk space daily at 8:00 AM
+    0 8 * * * /path/to/spyglass/maintenance_scripts/check_disk_space.sh
+    ```
 
 **Email/Slack Notifications**: The scripts can send notifications on errors or
 disk space issues. See
@@ -313,10 +314,10 @@ SpikeSortingRecording().cleanup(verbose=False)  # Remove untracked folders
 DecodingOutput().cleanup()  # Remove unreferenced .nc and .pkl files
 ```
 
-**Analysis File Cleanup**: See dedicated section below for details on coordinated
-cleanup across common and custom `AnalysisNwbfile` tables.
+**Analysis File Cleanup**: See dedicated section below for details on
+coordinated cleanup across common and custom `AnalysisNwbfile` tables.
 
----
+______________________________________________________________________
 
 ## Analysis File Cleanup
 
@@ -335,7 +336,8 @@ The cleanup system handles:
 
 - **Orphaned files**: Files with no downstream foreign key references
 - **Uninserted files**: Files created but never added to tables
-- **Multi-table coordination**: Works across common and all custom `AnalysisNwbfile` tables
+- **Multi-table coordination**: Works across common and all custom
+    `AnalysisNwbfile` tables
 - **Empty files**: Files with 0 bytes are automatically removed
 
 ### Running Cleanup
@@ -353,14 +355,16 @@ AnalysisNwbfile().cleanup()
 `AnalysisNwbfile` tables. A file is only deleted if it's not referenced by ANY
 table (common or custom).
 
-**Warning**: This is a destructive operation that permanently deletes files. Ensure
-you have backups before running cleanup on production databases. This operation
-treats the analysis directory as a managed resource.
+**Warning**: This is a destructive operation that permanently deletes files.
+Ensure you have backups before running cleanup on production databases. This
+operation treats the analysis directory as a managed resource.
 
 ### How It Works
 
-1. **Discovery**: Finds all custom `AnalysisNwbfile` tables via `AnalysisRegistry`
-2. **Orphan Detection**: For each table, identifies entries with no downstream references
+1. **Discovery**: Finds all custom `AnalysisNwbfile` tables via
+    `AnalysisRegistry`
+2. **Orphan Detection**: For each table, identifies entries with no downstream
+    references
 3. **File Tracking**: Collects all tracked files from all tables
 4. **Cleanup**: Removes database entries and deletes untracked files
 
@@ -372,13 +376,16 @@ The cleanup process checks:
 
 ### Safety Features
 
-- **Multi-table check**: Verifies file is unused across ALL tables before deletion
+- **Multi-table check**: Verifies file is unused across ALL tables before
+    deletion
 - **Logging**: Reports all actions taken during cleanup
 - **Foreign key protection**: Respects downstream table dependencies
-- **Registry blocking**: Temporarily blocks new table registrations during cleanup
+- **Registry blocking**: Temporarily blocks new table registrations during
+    cleanup
 
 ### Custom Tables
 
-If you've created custom `AnalysisNwbfile` tables (see [Custom Analysis Files](./CustomAnalysisFiles.md)),
-cleanup works automatically. No special configuration needed - just run cleanup
-on the common table and it handles all custom tables.
+If you've created custom `AnalysisNwbfile` tables (see
+[Custom Analysis Files](./CustomAnalysisFiles.md)), cleanup works automatically.
+No special configuration needed - just run cleanup on the common table and it
+handles all custom tables.

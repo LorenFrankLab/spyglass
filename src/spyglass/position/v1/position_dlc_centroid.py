@@ -179,7 +179,7 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
         output_dir = infer_output_dir(key=key, makedir=False)
         self.log_path = Path(output_dir, "log.log")
         self._logged_make(key)
-        logger.info("inserted entry into DLCCentroid")
+        self._info_msg("inserted entry into DLCCentroid")
 
     def _fetch_pos_df(self, key, bodyparts_to_use):
         return pd.concat(
@@ -200,7 +200,7 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
     def _logged_make(self, key):
         METERS_PER_CM = 0.01
         idx = pd.IndexSlice
-        logger.info("Centroid Calculation")
+        self._info_msg("Centroid Calculation")
 
         # Get labels to smooth from Parameters table
         params = (DLCCentroidParams() & key).fetch1("params")
@@ -241,7 +241,9 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
 
         pos_df = self._fetch_pos_df(key=key, bodyparts_to_use=bodyparts_to_use)
 
-        logger.info("Calculating centroid")  # now done using number of points
+        self._info_msg(
+            "Calculating centroid"
+        )  # now done using number of points
         centroid = Centroid(
             pos_df=pos_df,
             points=params.get("points"),
@@ -255,7 +257,7 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
 
         if params.get("interpolate"):
             if np.any(np.isnan(centroid)):
-                logger.info("interpolating over NaNs")
+                self._info_msg("interpolating over NaNs")
                 nan_inds = (
                     pd.isnull(centroid_df.loc[:, idx[("x", "y")]])
                     .any(axis=1)
@@ -279,7 +281,7 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
             smooth_func = _key_to_smooth_func_dict[
                 smooth_params["smooth_method"]
             ]
-            logger.info(
+            self._info_msg(
                 f"Smoothing using method: {smooth_func.__name__}",
             )
             final_df = smooth_func(
@@ -288,7 +290,7 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
         else:
             final_df = interp_df.copy()
 
-        logger.info("getting velocity")
+        self._info_msg("getting velocity")
         velocity = get_velocity(
             final_df.loc[:, idx[("x", "y")]].to_numpy(),
             time=pos_df.index.to_numpy(),
@@ -303,7 +305,7 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
         )
         total_nan = np.sum(final_df.loc[:, idx[("x", "y")]].isna().any(axis=1))
 
-        logger.info(f"total NaNs in centroid dataset: {total_nan}")
+        self._info_msg(f"total NaNs in centroid dataset: {total_nan}")
         position = pynwb.behavior.Position()
         velocity = pynwb.behavior.BehavioralTimeSeries()
         if query := (RawPosition() & key):

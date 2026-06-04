@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.17.0
+#       jupytext_version: 1.17.2
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
 #     language: python
@@ -38,7 +38,7 @@
 # - processing the pose estimation output to extract a centroid and orientation
 # - inserting the resulting information into the `PositionOutput` table
 #
-# **Note 2: Make sure you are running this within the spyglass-dlc Conda environment (instructions for install are in the environment_dlc.yml)**
+# **Note 2: Make sure you are running this within the spyglass-dlc Conda environment (instructions for install are in the environments/environment_dlc.yml)**
 #
 
 # Here is a schematic showing the tables used in this pipeline.
@@ -80,11 +80,6 @@ import numpy as np
 import pandas as pd
 import pynwb
 from spyglass.position import PositionOutput
-
-# change to the upper level folder to detect dj_local_conf.json
-if os.path.basename(os.getcwd()) == "notebooks":
-    os.chdir("..")
-dj.config.load("dj_local_conf.json")  # load config for database connection info
 
 # ignore datajoint+jupyter async warnings
 import warnings

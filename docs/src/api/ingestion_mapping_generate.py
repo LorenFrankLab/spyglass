@@ -13,16 +13,13 @@ Example:
 
 from __future__ import annotations
 
-import argparse
 import importlib
 import inspect
 import io
-import json
 import pkgutil
-import sys
 import types
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Tuple
 
 import datajoint as dj
 

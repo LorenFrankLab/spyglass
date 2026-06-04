@@ -4,7 +4,7 @@ exclude: (^.github/|^docs/site/|^images/)
 repos:
   - repo: https://github.com/executablebooks/mdformat
     # Do this before other tools "fixing" the line endings
-    rev: 0.7.17
+    rev: 1.0.0
     hooks:
       - id: mdformat
         name: Format Markdown
@@ -22,7 +22,7 @@ repos:
           - mdformat-gfm
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
+    rev: v6.0.0
     hooks:
       - id: check-toml
       - id: check-yaml
@@ -32,6 +32,8 @@ repos:
         args: ["--fix=lf"]
         description: Forces to replace line ending by the UNIX 'lf' character.
       - id: trailing-whitespace
+        args: ["--markdown-linebreak-ext=md"]
+        exclude: \.md$
       - id: debug-statements
       - id: check-added-large-files # prevent giant files from being committed
       # - id: check-builtin-literals
@@ -43,7 +45,7 @@ repos:
       - id: fix-byte-order-marker
 
   - repo: https://github.com/adrienverge/yamllint.git
-    rev: v1.33.0
+    rev: v1.38.0
     hooks:
       - id: yamllint
         args:
@@ -52,7 +54,7 @@ repos:
           - "{extends: relaxed, rules: {line-length: {max: 80}}}"
 
   - repo: https://github.com/charliermarsh/ruff-pre-commit
-    rev: v0.1.6
+    rev: v0.14.13
     hooks:
       - id: ruff
         args: [
@@ -64,12 +66,12 @@ repos:
         # E501: Line too long - Allow longer lines in table definitions
 
   - repo: https://github.com/PyCQA/autoflake
-    rev: v2.2.1
+    rev: v2.3.1
     hooks:
       - id: autoflake
 
   - repo: https://github.com/codespell-project/codespell
-    rev: v2.2.6
+    rev: v2.4.1
     hooks:
       - id: codespell
         args: [--toml, pyproject.toml]
@@ -77,7 +79,7 @@ repos:
           - tomli
 
   - repo: https://github.com/ambv/black
-    rev: 25.1.0
+    rev: 26.1.0
     hooks:
       - id: black
         language_version: python3

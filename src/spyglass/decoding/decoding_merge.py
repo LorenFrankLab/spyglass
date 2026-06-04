@@ -1,4 +1,3 @@
-from itertools import chain
 from pathlib import Path
 
 import datajoint as dj
@@ -38,44 +37,33 @@ class DecodingOutput(_Merge, SpyglassMixin):
         -> SortedSpikesDecodingV1
         """
 
+    def _fetch_registered_paths(self, attr):
+        """Fetch a filepath attribute from all part parents, skipping missing."""
+        paths = []
+        for tbl in self.merge_get_parent(multi_source=True):
+            paths.extend(tbl.fetch(attr).tolist())
+        return paths
+
     def cleanup(self, dry_run=False):
         """Remove any decoding outputs that are not in the merge table"""
         if dry_run:
-            logger.info("Dry run, not removing any files")
+            self._info_msg("Dry run, not removing any files")
         else:
-            logger.info("Cleaning up decoding outputs")
-        table_results_paths = list(
-            chain(
-                *[
-                    part_parent_table.fetch("results_path").tolist()
-                    for part_parent_table in self.merge_get_parent(
-                        multi_source=True
-                    )
-                ]
-            )
-        )
+            self._info_msg("Cleaning up decoding outputs")
+        table_results_paths = self._fetch_registered_paths("results_path")
         for path in Path(config["SPYGLASS_ANALYSIS_DIR"]).glob("**/*.nc"):
             if str(path) not in table_results_paths:
-                logger.info(f"Removing {path}")
+                self._info_msg(f"Removing {path}")
                 if not dry_run:
                     try:
                         path.unlink(missing_ok=True)  # Ignore FileNotFoundError
                     except PermissionError:
                         logger.warning(f"Unable to remove {path}, skipping")
 
-        table_model_paths = list(
-            chain(
-                *[
-                    part_parent_table.fetch("classifier_path").tolist()
-                    for part_parent_table in self.merge_get_parent(
-                        multi_source=True
-                    )
-                ]
-            )
-        )
+        table_model_paths = self._fetch_registered_paths("classifier_path")
         for path in Path(config["SPYGLASS_ANALYSIS_DIR"]).glob("**/*.pkl"):
             if str(path) not in table_model_paths:
-                logger.info(f"Removing {path}")
+                self._info_msg(f"Removing {path}")
                 if not dry_run:
                     try:
                         path.unlink()
@@ -123,12 +111,42 @@ class DecodingOutput(_Merge, SpyglassMixin):
         )
 
     @classmethod
-    def create_decoding_view(cls, key, head_direction_name="head_orientation"):
-        """Create a decoding view for a given key."""
+    def create_decoding_view(
+        cls, key, head_direction_name="head_orientation", interval_idx=None
+    ):
+        """Create a decoding view for a given key.
+
+        Parameters
+        ----------
+        key : dict
+            Key identifying the decoding output
+        head_direction_name : str, optional
+            Name of head direction column, by default "head_orientation"
+        interval_idx : int, optional
+            If specified, only visualize this interval (0-indexed).
+            If None (default), visualize all intervals together.
+
+        Returns
+        -------
+        view
+            Figurl visualization view (1D or 2D depending on decoder)
+        """
         results = cls.fetch_results(key)
+
+        # Filter to specific interval if requested
+        if interval_idx is not None:
+            if "interval_labels" in results.coords:
+                results = results.where(
+                    results.interval_labels == interval_idx, drop=True
+                )
+            else:
+                logger.warning(
+                    f"interval_idx={interval_idx} specified but results do not "
+                    "have 'interval_labels' coordinate. Ignoring interval_idx."
+                )
+
         posterior = (
-            results.squeeze()
-            .acausal_posterior.unstack("state_bins")
+            results.acausal_posterior.unstack("state_bins")
             .drop_sel(state=["Local", "No-Spike"], errors="ignore")
             .sum("state")
         )

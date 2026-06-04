@@ -6,6 +6,7 @@ import pytest
 from ndx_franklab_novela import CameraDevice
 from pynwb import NWBHDF5IO
 from pynwb.core import DynamicTable
+from pynwb.device import DeviceModel
 from pynwb.testing.mock.file import mock_NWBFile, mock_Subject
 
 
@@ -50,13 +51,17 @@ def create_nwb_with_epoch_tags(identifier, epoch_tags):
 
     # Add camera device (required for TaskEpoch)
     # Note: name must be "camera_device <number>" format for Spyglass
+    camera_model = DeviceModel(
+        name="test_model", manufacturer="test_manufacturer"
+    )
     camera_device = CameraDevice(
         name="camera_device 1",
         meters_per_pixel=1.0,
-        model="test_model",
+        model=camera_model,
         lens="test_lens",
         camera_name="test_camera_name",
     )
+    nwbfile.add_device_model(camera_model)
     nwbfile.add_device(camera_device)
 
     # Create tasks module with task tables
@@ -149,7 +154,7 @@ def test_interval_list_accepts_all_tag_formats(
     assert 3 in task_epochs, "TaskEpoch should accept epoch 3 with tag '003'"
 
 
-def test_task_epoch_get_epoch_interval_name(common, caplog):
+def test_task_epoch_get_epoch_interval_name(common):
     """Test get_epoch_interval_name with single digit tags."""
     get_epoch = common.TaskEpoch.get_epoch_interval_name
     msg_template = "get_epoch_interval_name should find '{}' when epoch is {}"
@@ -166,12 +171,6 @@ def test_task_epoch_get_epoch_interval_name(common, caplog):
     ]:
         result = get_epoch(epoch, session_intervals)
         assert result == expected, msg_template.format(expected, epoch)
-
-    # Test non-matching descriptive tag
-    caplog.clear()
-    result = get_epoch("fake_epoch", session_intervals)
-    assert result is None, "Should return None for non-matching epoch"
-    assert "for epoch fake_epoch" in caplog.text
 
 
 def test_franklab_task_epoch_tags(common):

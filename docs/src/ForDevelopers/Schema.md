@@ -293,7 +293,6 @@ Each table can have a docstring that describes the table, and must have a
 - `field : datatype` defines a column using a
     [SQL datatype](https://datajoint.com/docs/core/datajoint-python/0.14/design/tables/attributes/)
 
-
 - `->` indicates a foreign key reference to another table.
 
 ```python

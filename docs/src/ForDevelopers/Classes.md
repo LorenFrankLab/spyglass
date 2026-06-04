@@ -1,16 +1,18 @@
 # Spyglass Mixin Architecture
 
-This document explains the mixin-based class architecture in Spyglass,
-including the goals of the design, how mixins are organized, and how to use
-them in custom pipelines.
+This document explains the mixin-based class architecture in Spyglass, including
+the goals of the design, how mixins are organized, and how to use them in custom
+pipelines.
 
 **Related Documentation:**
 
-- [Spyglass Mixin Features](../Features/Mixin.md) - User guide for mixin functionality
+- [Spyglass Mixin Features](../Features/Mixin.md) - User guide for mixin
+    functionality
 - [Custom Pipelines](./CustomPipelines.md) - Guide for creating custom schemas
-- [Analysis File Tables](../Features/AnalysisTables.md) - Working with AnalysisNwbfile
+- [Analysis File Tables](../Features/AnalysisTables.md) - Working with
+    AnalysisNwbfile
 
----
+______________________________________________________________________
 
 ## Table of Contents
 
@@ -20,7 +22,7 @@ them in custom pipelines.
 4. [Usage Patterns](#usage-patterns)
 5. [Class Hierarchy Reference](#class-hierarchy-reference)
 
----
+______________________________________________________________________
 
 ## Design Goals
 
@@ -49,17 +51,17 @@ related functionality:
 ### Special Case: Analysis File Management
 
 The **AnalysisMixin** provides specialized functionality for `AnalysisNwbfile`
-tables. When combined with **SpyglassAnalysis**, it enables custom
-user-specific analysis file tables for transaction lock isolation in multi-user
-environments.
+tables. When combined with **SpyglassAnalysis**, it enables custom user-specific
+analysis file tables for transaction lock isolation in multi-user environments.
 
 **See also:** [Custom Analysis Tables](./Management.md#custom-analysis-tables)
 
----
+______________________________________________________________________
 
 ## Mixin Organization
 
-Spyglass mixins are organized in `src/spyglass/utils/mixins/` with the following structure:
+Spyglass mixins are organized in `src/spyglass/utils/mixins/` with the following
+structure:
 
 ### Base Layer
 
@@ -77,7 +79,8 @@ These mixins inherit from `BaseMixin` and provide focused functionality:
 
 - Permission checks before deletion
 - Validates user is on same team as session experimenter
-- See [Mixin Features: Delete Permission](../Features/Mixin.md#delete-permission-checks)
+- See
+    [Mixin Features: Delete Permission](../Features/Mixin.md#delete-permission-checks)
 
 **PopulateMixin** (`mixins/populate.py`)
 
@@ -89,7 +92,8 @@ These mixins inherit from `BaseMixin` and provide focused functionality:
 
 - Long-distance restrictions with `<<` and `>>` operators
 - Navigate complex foreign key relationships
-- See [Mixin Features: Long-Distance Restrictions](../Features/Mixin.md#long-distance-restrictions)
+- See
+    [Mixin Features: Long-Distance Restrictions](../Features/Mixin.md#long-distance-restrictions)
 
 **HelperMixin** (`mixins/helpers.py`)
 
@@ -122,14 +126,14 @@ These mixins form a dependency chain for NWB file fetching and export logging:
 - Handles copy-to-common for custom AnalysisNwbfile tables
 - See [Export Guide](../Features/Export.md)
 
-***IngestionMixin* (`mixins/ingestion.py`)
+\*\**IngestionMixin* (`mixins/ingestion.py`)
 
 - Defines a protocol for populating table entries from the raw nwb file
 - Provides `insert_from_nwbfile()` which identifies relevant objects within the
-  nwb file and creates table entries
+    nwb file and creates table entries
 - See [Ingestion Guide](../Features/Ingestion.md)
 
----
+______________________________________________________________________
 
 ## Core Composite Classes
 
@@ -160,6 +164,7 @@ import datajoint as dj
 from spyglass.utils import SpyglassMixin
 
 schema = dj.schema("myteam_pipeline")
+
 
 @schema
 class MyTable(SpyglassMixin, dj.Manual):
@@ -254,17 +259,17 @@ blocking each other.
 
 **Additional Functionality**:
 
-- Defines `insert_from_nwbfile()` which identifies source data in the nwb file and
-  translates into table entries. Depends on defining the following properties for
-  each class:
-    - `_source_nwb_object_type`: The `pynwb` type of object(s) in the file containing
-        data for the given table.
+- Defines `insert_from_nwbfile()` which identifies source data in the nwb file
+    and translates into table entries. Depends on defining the following
+    properties for each class:
+    - `_source_nwb_object_type`: The `pynwb` type of object(s) in the file
+        containing data for the given table.
     - `_source_nwb_object_name`: OPtional property which further limits ingestion
         to nwb_objects with this name attribute
     - `table_key_to_obj_attr`: A dictionary which defines a mapping from spyglass
         table column to the name of the nwb object attribute to be stored.
-        Optionally, a callable function which generates the value to be stored from
-        the nwb object can be used instead of the attribute name.
+        Optionally, a callable function which generates the value to be stored
+        from the nwb object can be used instead of the attribute name.
 
 **Usage**:
 
@@ -276,6 +281,7 @@ class MyIngestionTable(SpyglassIngestion, dj.Manual):
         ----
         lfp_obj_id: varchar(32)
     """
+
     @property
     def _source_nwb_object_type(self):
         return pynwb.ecephys.LFP
@@ -285,7 +291,7 @@ class MyIngestionTable(SpyglassIngestion, dj.Manual):
         return {"self": {"lfp_obj_id": "object_id"}}
 ```
 
----
+______________________________________________________________________
 
 ## Usage Patterns
 
@@ -298,6 +304,7 @@ from spyglass.utils import SpyglassMixin
 import datajoint as dj
 
 schema = dj.schema("myteam_analysis")
+
 
 @schema
 class MyAnalysis(SpyglassMixin, dj.Computed):
@@ -353,6 +360,7 @@ import datajoint as dj
 
 schema = dj.schema("myteam_results")
 
+
 @schema
 class MyResults(SpyglassMixin, dj.Manual):
     definition = """
@@ -366,7 +374,7 @@ class MyResults(SpyglassMixin, dj.Manual):
 **NOTE**: Tables should only reference ONE `AnalysisNwbfile` table (either
 common or custom, not both). Spyglass validates this on table declaration.
 
----
+______________________________________________________________________
 
 ## Class Hierarchy Reference
 
@@ -418,39 +426,44 @@ SpyglassAnalysis
 → object
 ```
 
-**Key insight**: `BaseMixin` appears in most paths, but only initialized once due to Python's C3 linearization.
+**Key insight**: `BaseMixin` appears in most paths, but only initialized once
+due to Python's C3 linearization.
 
 ### File Locations
 
-| Class | File Path |
-|-------|-----------|
-| BaseMixin | `src/spyglass/utils/mixins/base.py` |
+| Class               | File Path                                      |
+| ------------------- | ---------------------------------------------- |
+| BaseMixin           | `src/spyglass/utils/mixins/base.py`            |
 | CautiousDeleteMixin | `src/spyglass/utils/mixins/cautious_delete.py` |
-| PopulateMixin | `src/spyglass/utils/mixins/populate.py` |
-| RestrictByMixin | `src/spyglass/utils/mixins/restrict_by.py` |
-| HelperMixin | `src/spyglass/utils/mixins/helpers.py` |
-| AnalysisMixin | `src/spyglass/utils/mixins/analysis.py` |
-| FetchMixin | `src/spyglass/utils/mixins/fetch.py` |
-| ExportMixin | `src/spyglass/utils/mixins/export.py` |
-| SpyglassMixin | `src/spyglass/utils/dj_mixin.py` |
-| SpyglassMixinPart | `src/spyglass/utils/dj_mixin.py` |
-| SpyglassAnalysis | `src/spyglass/utils/dj_mixin.py` |
+| PopulateMixin       | `src/spyglass/utils/mixins/populate.py`        |
+| RestrictByMixin     | `src/spyglass/utils/mixins/restrict_by.py`     |
+| HelperMixin         | `src/spyglass/utils/mixins/helpers.py`         |
+| AnalysisMixin       | `src/spyglass/utils/mixins/analysis.py`        |
+| FetchMixin          | `src/spyglass/utils/mixins/fetch.py`           |
+| ExportMixin         | `src/spyglass/utils/mixins/export.py`          |
+| SpyglassMixin       | `src/spyglass/utils/dj_mixin.py`               |
+| SpyglassMixinPart   | `src/spyglass/utils/dj_mixin.py`               |
+| SpyglassAnalysis    | `src/spyglass/utils/dj_mixin.py`               |
 
----
+______________________________________________________________________
 
 ## Related Documentation
 
 - **User Guides**:
-    - [Spyglass Mixin Features](../Features/Mixin.md) - How to use mixin functionality
-    - [Analysis File Tables](../Features/AnalysisTables.md) - Working with AnalysisNwbfile
+
+    - [Spyglass Mixin Features](../Features/Mixin.md) - How to use mixin
+        functionality
+    - [Analysis File Tables](../Features/AnalysisTables.md) - Working with
+        AnalysisNwbfile
     - [Export Guide](../Features/Export.md) - Exporting data for publication
 
 - **Developer Guides**:
+
     - [Custom Pipelines](./CustomPipelines.md) - Creating custom schemas
     - [Database Management](./Management.md) - Admin tasks including custom tables
     - [Schema Design](./Schema.md) - Understanding schema structure
 
----
+______________________________________________________________________
 
 For questions about mixin architecture or extending Spyglass functionality,
 please open a discussion on

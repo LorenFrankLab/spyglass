@@ -141,6 +141,15 @@ class SpyglassMixin(
             logger.warning("No key passed, using default")
         return (self & {pk: passed_key or default}).fetch1(blob_attr)
 
+    @property
+    def analysis_table(self):
+        """Return the AnalysisNwbfile table linked to this table, if any."""
+        table_class = self._nwb_table_tuple[0]
+        if table_class.full_table_name.endswith("`analysis_nwbfile`"):
+            return table_class()
+        logger.warning(f"No AnalysisNwbfile linked to {self.full_table_name}")
+        return None
+
 
 class SpyglassMixinPart(SpyglassMixin, dj.Part):
     """

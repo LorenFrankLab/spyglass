@@ -16,7 +16,7 @@ from tqdm import tqdm
 from spyglass.common import Session  # noqa: F401
 from spyglass.common.common_device import Probe
 from spyglass.common.common_ephys import Electrode, Raw  # noqa: F401
-from spyglass.common.common_interval import IntervalList
+from spyglass.common.common_interval import IntervalLike, IntervalList
 from spyglass.common.common_lab import LabTeam
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 from spyglass.settings import analysis_dir, test_mode
@@ -195,9 +195,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
     hash=null: varchar(32) # Hash of the NWB file
     """
 
-    _use_transaction, _allow_insert = False, True
-
-    def make(self, key):
+    def make_fetch(self, key):
         """Populate SpikeSortingRecording.
 
         1. Get valid times for sort interval from IntervalList
@@ -211,26 +209,57 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         nwb_file_name = (SpikeSortingRecordingSelection & key).fetch1(
             "nwb_file_name"
         )
-
-        key.update(self._make_file(key))
-
-        # INSERT:
-        # - valid times into IntervalList
-        # - analysis NWB file holding processed recording into AnalysisNwbfile
-        # - entry into SpikeSortingRecording
         sort_interval_valid_times = self._get_sort_interval_valid_times(key)
         sort_interval_valid_times.set_key(
             nwb_file_name=nwb_file_name,
             interval_list_name=key["recording_id"],
             pipeline="spikesorting_recording_v1",
         )
+        return [nwb_file_name, sort_interval_valid_times]
+
+    def make_compute(
+        self, key, nwb_file_name, sort_interval_valid_times
+    ) -> list:
+        """Compute/save SpikeSortingRecording
+
+        Returns
+        -------
+        list containing:
+           nwb_file_name: str
+               same as input nwb_file_name, preventing fetch in _make_file
+           file_dict: dict
+               Result of _make_file, containing:
+                   analysis_file_name: str
+                   object_id: UUID
+                   electrodes_id: str
+                   hash: str
+           sort_interval_valid_times: IntervalList
+        """
+        file_dict = self._make_file(key, parent_file_name=nwb_file_name)
+
+        return [nwb_file_name, file_dict, sort_interval_valid_times]
+
+    def make_insert(
+        self,
+        key: dict,
+        nwb_file_name: str,
+        file_dict: dict,
+        sort_interval_valid_times: IntervalLike,
+    ) -> None:
+        insert_key = dict(key, **file_dict)
+
+        # INSERT:
+        # - valid times into IntervalList
+        # - analysis NWB file holding processed recording into AnalysisNwbfile
+        # - entry into SpikeSortingRecording
+
         IntervalList.insert1(
             sort_interval_valid_times.as_dict, skip_duplicates=True
         )
-        AnalysisNwbfile().add(nwb_file_name, key["analysis_file_name"])
+        AnalysisNwbfile().add(nwb_file_name, insert_key["analysis_file_name"])
 
-        self.insert1(key)
-        self._record_environment(key)
+        self.insert1(insert_key)
+        self._record_environment(insert_key)
 
     def _record_environment(self, key):
         """Record environment details for this recording."""
@@ -245,7 +274,8 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         recompute_file_name: str = None,
         save_to: Union[str, Path] = None,
         rounding: int = 4,
-    ):
+        parent_file_name: str = None,
+    ) -> dict:
         """Preprocess recording and write to NWB file.
 
         All `_make_file` methods should exit early if the file already exists.
@@ -265,6 +295,15 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         save_to : Union[str,Path], Optional
             Default None, save to analysis directory. If provided, save to
             specified path. Used for recomputation prior to deletion.
+        rounding : int, Optional
+            Decimal places to round to when hashing. Default 4, which is typical
+            for microvolt precision. Only used for hash computation, does not
+            affect data written to NWB file.
+        parent_file_name : str, Optional
+            If specified, use this NWB file as the source of the recording to be
+            preprocessed and written to the new NWB file. If none, fetch source
+            NWB file from SpikeSortingRecordingSelection. Used avoiding fetch
+            during tri-part make.
         """
         if not key and not recompute_file_name:
             raise ValueError(
@@ -296,11 +335,18 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         else:
             recompute_object_id, recompute_electrodes_id = None, None
 
-        parent = SpikeSortingRecordingSelection & key
-        (recording_nwb_file_name, recording_object_id, electrodes_id) = (
+        if not parent_file_name:
+            parent = SpikeSortingRecordingSelection & key
+            parent_file_name = parent.fetch1("nwb_file_name")
+
+        cls._check_recompute_args(
+            recompute_file_name, recompute_object_id, recompute_electrodes_id
+        )
+
+        recording_nwb_file_name, recording_object_id, electrodes_id = (
             _write_recording_to_nwb(
                 **cls()._get_preprocessed_recording(key),
-                nwb_file_name=parent.fetch1("nwb_file_name"),
+                nwb_file_name=parent_file_name,
                 recompute_file_name=recompute_file_name,
                 recompute_object_id=recompute_object_id,
                 recompute_electrodes_id=recompute_electrodes_id,
@@ -377,7 +423,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         )
 
         if not Path(analysis_file_abs_path).exists():
-            cls._make_file(key, recompute_file_name=analysis_file_name)
+            cls._make_file(key=None, recompute_file_name=analysis_file_name)
 
         recording = se.read_nwb_recording(
             analysis_file_abs_path, load_time_vector=True
@@ -670,6 +716,24 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             channel_names = electrodes_table["channel_name"]
             return [channel_names[ch] for ch in channel_ids]
 
+    @staticmethod
+    def _check_recompute_args(
+        recompute_file_name: str = None,
+        recompute_object_id: str = None,
+        recompute_electrodes_id: str = None,
+    ):
+        """Check that if any recompute args are specified, all are specified."""
+        recompute_args = (
+            recompute_file_name,
+            recompute_object_id,
+            recompute_electrodes_id,
+        )
+        if any(recompute_args) and not all(recompute_args):
+            raise ValueError(
+                "If recomputing, must specify all of recompute_file_name, "
+                "recompute_object_id, and recompute_electrodes_id."
+            )
+
 
 def _consolidate_intervals(intervals, timestamps):
     """Convert a list of intervals (start_time, stop_time)
@@ -765,11 +829,7 @@ def _write_recording_to_nwb(
         recompute_electrodes_id,
     )
     recompute = any(recompute_args)
-    if recompute and not all(recompute_args):
-        raise ValueError(
-            "If recomputing, must specify all of recompute_file_name, "
-            "recompute_object_id, and recompute_electrodes_id."
-        )
+    SpikeSortingRecording._check_recompute_args(*recompute_args)
 
     series_name = "ProcessedElectricalSeries"
     series_attr = "acquisition/" + series_name

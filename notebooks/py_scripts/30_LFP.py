@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.17.0
+#       jupytext_version: 1.17.2
 #   kernelspec:
 #     display_name: Python 3.10.5 64-bit
 #     language: python
@@ -39,11 +39,6 @@ import copy
 import datajoint as dj
 import numpy as np
 import pandas as pd
-
-# change to the upper level folder to detect dj_local_conf.json
-if os.path.basename(os.getcwd()) == "notebooks":
-    os.chdir("..")
-dj.config.load("dj_local_conf.json")  # load config for database connection info
 
 import spyglass.common as sgc
 import spyglass.lfp as lfp

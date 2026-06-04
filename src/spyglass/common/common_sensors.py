@@ -54,7 +54,9 @@ class SensorData(SpyglassMixin, dj.Imported):
 
         # Validate the sensor data
         if sensor is None:
-            logger.info(f"No conforming sensor data found in {nwb_file_name}\n")
+            self._info_msg(
+                f"No conforming sensor data found in {nwb_file_name}\n"
+            )
             return
 
         columns = sensor.time_series["analog"].description.split()

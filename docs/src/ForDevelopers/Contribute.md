@@ -28,8 +28,7 @@ The local version is dynamically managed via `hatch`, so be sure to run
 - The _common_ module
     - In principle, contains schema that are shared across all projects.
     - In practice, contains shared tables (e.g., Session) and the first draft of
-        schemas that have since been split into their own
-        modality-specific\
+        schemas that have since been split into their own modality-specific\
         modules (e.g., `lfp`)
     - Should not be added to without discussion.
 - A pipeline

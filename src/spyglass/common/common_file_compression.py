@@ -77,6 +77,25 @@ class CompressedNwbfile(dj.Manual):
 
         original_size = src.stat().st_size
         n_datasets = _count_datasets(src)
+        n_already_compressed = _count_compressed_datasets(src)
+
+        if n_already_compressed == n_datasets:
+            logger.info(
+                f"{src.name} already fully compressed "
+                f"({n_datasets} datasets), recording without repacking"
+            )
+            self.insert1(
+                {
+                    **key,
+                    "gzip_level": 0,  # 0 = pre-existing, not applied by make()
+                    "original_size_bytes": original_size,
+                    "repacked_size_bytes": original_size,
+                    "compression_ratio": 1.0,
+                    "datasets_total": n_datasets,
+                    "datasets_compressed": n_already_compressed,
+                }
+            )
+            return
 
         tmp_fd, tmp_str = tempfile.mkstemp(suffix=".nwb.tmp", dir=src.parent)
         os.close(tmp_fd)

@@ -14,7 +14,11 @@ from spyglass.spikesorting.v1.recording import (
     SpikeSortingRecording,
     SpikeSortingRecordingSelection,
 )
-from spyglass.spikesorting.v1.sorting import SpikeSorting, SpikeSortingSelection
+from spyglass.spikesorting.v1.sorting import (
+    SpikeSorting,
+    SpikeSortingSelection,
+    spike_times_to_valid_samples,
+)
 from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("spikesorting_v1_curation")
@@ -165,18 +169,13 @@ class CurationV1(SpyglassMixin, dj.Manual):
         key : dict
             primary key of CurationV1 table
         """
-
-        analysis_file_name = (
+        recording_id = (
             SpikeSortingRecording * SpikeSortingSelection & key
-        ).fetch1("analysis_file_name")
-        analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
-            analysis_file_name
-        )
-        recording = se.read_nwb_recording(
-            analysis_file_abs_path, load_time_vector=True
+        ).fetch1("recording_id")
+        recording = SpikeSortingRecording.get_recording(
+            {"recording_id": recording_id}
         )
         recording.annotate(is_filtered=True)
-
         return recording
 
     @classmethod
@@ -213,8 +212,11 @@ class CurationV1(SpyglassMixin, dj.Manual):
         sampling_frequency = recording.get_sampling_frequency()
 
         recording_times = recording.get_times()
+        n_samples = recording.get_num_samples()
         units_dict = {
-            unit.Index: np.searchsorted(recording_times, unit.spike_times)
+            unit.Index: spike_times_to_valid_samples(
+                recording_times, unit.spike_times, n_samples, unit.Index
+            )
             for unit in units.itertuples()
         }
 
@@ -346,12 +348,15 @@ def _write_sorting_to_nwb_with_curation(
     ) as io:
         nwbf = io.read()
         units = nwbf.units.to_dataframe()
-    units_dict = {
-        unit_id: spike_times
-        for unit_id, spike_times in zip(units.index, units["spike_times"])
-    }
+    if "spike_times" in units.columns:
+        units_dict = {
+            unit_id: spike_times
+            for unit_id, spike_times in zip(units.index, units["spike_times"])
+        }
+    else:
+        units_dict = {}
 
-    if apply_merge:
+    if apply_merge and units_dict:
         for merge_group in merge_groups:
             new_unit_id = np.max(list(units_dict.keys())) + 1
             units_dict[new_unit_id] = np.concatenate(
@@ -372,12 +377,16 @@ def _write_sorting_to_nwb_with_curation(
     ) as io:
         nwbf = io.read()
         # write sorting to the nwb file
-        for unit_id in unit_ids:
-            # spike_times = sorting.get_unit_spike_train(unit_id)
-            nwbf.add_unit(
-                spike_times=units_dict[unit_id],
-                id=unit_id,
+        if not unit_ids:
+            nwbf.units = pynwb.misc.Units(
+                name="units", description="Empty units table."
             )
+        else:
+            for unit_id in unit_ids:
+                nwbf.add_unit(
+                    spike_times=units_dict[unit_id],
+                    id=unit_id,
+                )
         # add labels, merge groups, metrics
         if labels is not None:
             label_values = []

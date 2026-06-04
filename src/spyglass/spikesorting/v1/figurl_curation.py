@@ -70,6 +70,8 @@ class FigURLCurationSelection(SpyglassMixin, dj.Manual):
         analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
             curation_key["analysis_file_name"]
         )
+        has_labels = False
+
         with pynwb.NWBHDF5IO(
             analysis_file_abs_path, "r", load_namespaces=True
         ) as io:
@@ -78,8 +80,17 @@ class FigURLCurationSelection(SpyglassMixin, dj.Manual):
                 curation_key["object_id"]
             ].to_dataframe()
             unit_ids = list(nwb_sorting.index)
-            labels = list(nwb_sorting["curation_label"])
-            merge_groups = list(nwb_sorting["merge_groups"])
+            has_labels = "curation_label" in nwb_sorting.columns
+            labels = list(nwb_sorting.get("curation_label", []))
+            merge_groups = list(nwb_sorting.get("merge_groups", []))
+
+        if not has_labels:
+            raise ValueError(
+                "Sorting object must have a 'curation_label' column in order to"
+                " generate a curation URI. Please add label(s) during "
+                "'CurationV1.insert_curation'.\n\n"
+                "If you need a URI without labels, please reopen issue #1530"
+            )
 
         unit_ids = [str(unit_id) for unit_id in unit_ids]
 
@@ -136,18 +147,15 @@ class FigURLCuration(SpyglassMixin, dj.Computed):
         sel_query = FigURLCurationSelection & key
         sel_key = sel_query.fetch1()
         sorting_fpath = AnalysisNwbfile.get_abs_path(sorting_fname)
-        recording = CurationV1.get_recording(sel_key)
-        sorting = CurationV1.get_sorting(sel_key)
         sorting_label, curation_uri = sel_query.fetch1(
             "sorting_id", "curation_uri"
         )
 
         return [
+            object_id,
+            sel_key,
             sorting_fpath,
             metrics_figurl,
-            unit_ids,
-            recording,
-            sorting,
             curation_uri,
             recording_label,
             sorting_label,
@@ -156,15 +164,25 @@ class FigURLCuration(SpyglassMixin, dj.Computed):
     def make_compute(
         self,
         key: dict,
+        object_id,
+        sel_key,
         sorting_fpath,
         metrics_figurl,
-        unit_ids,
-        recording,
-        sorting,
         curation_uri,
         recording_label,
         sorting_label,
     ):
+        # Can't be hashed by datajoint, needs to be inside make_compute
+        recording = CurationV1.get_recording(sel_key)
+        sorting = CurationV1.get_sorting(sel_key)
+
+        # Some versions of sortingview expect `_file_path` attribute
+        # which may not be present in all recording objects
+        if not hasattr(recording, "_file_path") and hasattr(
+            recording, "file_path"
+        ):
+            recording._file_path = recording.file_path
+
         metric_dict = {}
         with pynwb.NWBHDF5IO(sorting_fpath, "r", load_namespaces=True) as io:
             nwbf = io.read()

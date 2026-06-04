@@ -14,6 +14,7 @@ SHARED_MODULES = [
     "behavior",
     "common",
     "decoding",
+    "figurl",
     "lfp",
     "linearization",
     "mua",
@@ -239,4 +240,8 @@ class DatabaseSettings:
             + f"{self.exec_user} --password={self.exec_pass} < {file.name}"
         )
 
+        # Suppress mysql's "Using a password on the command line interface"
+        # warning that fires when -p<pass> or --password=<pass> is used.
+        # Redirect stderr through grep to drop only that warning line.
+        cmd += " 2>&1 | { grep -v 'mysql: \\[Warning\\]' || true; }"
         os.system(cmd)

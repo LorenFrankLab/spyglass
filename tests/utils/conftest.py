@@ -23,7 +23,7 @@ def schema_test(teardown, dj_conn):
     Adapted from datajoint/conftest.py.
     """
     schema_test = dj.Schema("test_conftest", {}, connection=dj_conn)
-    # schema_any(TTest) # Declare table using schema_any as func
+    # schema_any(Test) # Declare table using schema_any as func
     yield schema_test
     if teardown:
         schema_test.drop(force=True)
@@ -33,8 +33,8 @@ def schema_test(teardown, dj_conn):
 def chain(Nwbfile):
     """Return example TableChain object from chains."""
     from spyglass.linearization.merge import (
-        LinearizedPositionOutput,
-    )  # noqa: F401
+        LinearizedPositionOutput,  # noqa: F401
+    )
     from spyglass.utils.dj_graph import TableChain
 
     yield TableChain(Nwbfile, LinearizedPositionOutput)
@@ -285,3 +285,41 @@ def graph_tables_many_to_one(graph_tables):
     PkSkNode.insert(new_inserts, **insert_kwargs)
 
     yield graph_tables
+
+
+@pytest.fixture(scope="module")
+def add_graph_tables(SpyglassMixin):
+    schema = dj.Schema("test_add_graphs")
+
+    @schema
+    class A(SpyglassMixin, dj.Lookup):
+        definition = """
+        a_id: int
+        ---
+        a_attr: int
+        """
+        contents = [(i, i + 10) for i in range(5)]
+
+    @schema
+    class B1(SpyglassMixin, dj.Lookup):
+        definition = """
+        -> A
+        ---
+        b_attr: int
+        """
+        contents = [(i, i + 20) for i in range(5)]
+
+    @schema
+    class B2(SpyglassMixin, dj.Lookup):
+        definition = """
+        -> A
+        ---
+        b_attr: int
+        """
+        contents = [(i, i + 30) for i in range(5)]
+
+    return {
+        "A": A(),
+        "B1": B1(),
+        "B2": B2(),
+    }

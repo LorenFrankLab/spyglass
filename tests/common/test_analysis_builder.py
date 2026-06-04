@@ -232,7 +232,7 @@ class TestHelperMethods:
             entry.delete_quick()
             Path(table.get_abs_path(analysis_file)).unlink(missing_ok=True)
 
-    def test_open_for_write_before_registration(
+    def test_open_nwb_before_registration(
         self,
         master_analysis_table,
         mini_copy_name,
@@ -240,17 +240,15 @@ class TestHelperMethods:
         load_config,
         teardown,
     ):
-        """Test open_for_write() works before registration."""
+        """Test open_nwb property works before registration."""
         table = master_analysis_table
 
         with table.build(mini_copy_name) as builder:
             analysis_file = builder.analysis_file_name
 
             # Open file for writing
-            with builder.open_for_write() as io:
-                nwbf = io.read()
-                # Should be able to read the NWB file
-                assert nwbf is not None
+            io, nwbf = builder.open_nwb
+            assert nwbf is not None
 
         # File should be registered after exit
         entry = table & {"analysis_file_name": analysis_file}
@@ -318,10 +316,10 @@ class TestStateEnforcement:
             (table & {"analysis_file_name": analysis_file}).delete_quick()
             Path(table.get_abs_path(analysis_file)).unlink(missing_ok=True)
 
-    def test_error_on_open_for_write_after_registration(
+    def test_error_on_open_nwb_after_registration(
         self, master_analysis_table, mini_copy_name, mock_create, teardown
     ):
-        """Test that open_for_write() fails after registration."""
+        """Test that open_nwb property fails after registration."""
         table = master_analysis_table
         mock_create(table)
 
@@ -333,8 +331,7 @@ class TestStateEnforcement:
 
             # Try to open file after registration
             with pytest.raises(ValueError, match="REGISTERED"):
-                with builder.open_for_write() as io:
-                    pass
+                builder.open_nwb
 
         # Cleanup
         if teardown:
@@ -388,7 +385,7 @@ class TestStateEnforcement:
 
 
 class TestExceptionHandling:
-    """Test exception handling and cleanup logging."""
+    """Test exception handling and cleanup."""
 
     def test_file_not_registered_on_exception(
         self, master_analysis_table, mini_copy_name, mock_create, teardown
@@ -423,17 +420,12 @@ class TestExceptionHandling:
         mini_copy_name,
         mock_create,
         teardown,
-        caplog,
     ):
         """Test that failed files are logged for cleanup detection."""
         table = master_analysis_table
         mock_create(table)
 
         analysis_file = None
-
-        import logging
-
-        caplog.set_level(logging.WARNING)
 
         try:
             with table.build(mini_copy_name) as builder:
@@ -444,11 +436,12 @@ class TestExceptionHandling:
         except RuntimeError:
             pass  # Expected
 
-        # Check that warning was logged
-        assert any(
-            "not registered due to exception" in record.message
-            for record in caplog.records
-        ), "Should log warning about unregistered file"
+        assert (
+            builder._exception_occurred
+        ), "Builder should have recorded that an exception occurred"
+
+        err_type = builder._exception_log[analysis_file]
+        assert err_type is RuntimeError, "Failed to log exception type"
 
         # Cleanup
         if teardown and analysis_file:

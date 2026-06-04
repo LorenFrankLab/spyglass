@@ -6,6 +6,21 @@ from re import match as re_match
 
 class BaseMixin:
 
+    def restrict(self, restriction, *args, **kwargs):
+        """Intercept no-op restrict calls to throw warning.
+
+        DataJoint returns the same object (ret is self) only when make_condition
+        evaluates the restriction to True — i.e. no shared attributes were found
+        and the restriction had no effect.
+        """
+        ret = super().restrict(restriction, *args, **kwargs)
+        if ret is self and restriction is not True and restriction is not False:
+            self._warn_msg(
+                "Restriction had no effect — no shared attributes found. "
+                "Please check your restrict() call."
+            )
+        return ret
+
     @cached_property
     def _logger(self):
         """Lazy import of logger to avoid circular imports.
@@ -16,6 +31,7 @@ class BaseMixin:
         - RestrictByMixin
         - ExportMixin
         - AnalysisMixin
+        - Merge
         """
 
         from spyglass.utils import logger
@@ -36,19 +52,53 @@ class BaseMixin:
 
         return [TableChain, RestrGraph]
 
+    def _info_msg(self, msg: str) -> None:
+        """Log info message, but debug if in test mode.
+
+        Quiets logs during testing, but preserves user experience during use.
+
+        Used by ...
+        - AnalysisMixin.copy and .create
+        - IngestionMixin._insert_logline
+        - Merge._merge_repr
+        """
+        log = self._logger.debug if self._test_mode else self._logger.info
+        log(msg)
+
+    def _warn_msg(self, msg: str) -> None:
+        """Log warning message, but debug if in test mode.
+
+        Quiets logs during testing, but preserves user experience during use.
+        """
+        log = self._logger.debug if self._test_mode else self._logger.warning
+        log(msg)
+
+    def _err_msg(self, msg: str) -> None:
+        """Log error message, but debug if in test mode.
+
+        Quiets logs during testing, but preserves user experience during use.
+        """
+        log = self._logger.debug if self._test_mode else self._logger.error
+        log(msg)
+
     @cached_property
     def _test_mode(self) -> bool:
         """Return True if in test mode.
 
         Avoids circular import. Prevents prompt on delete.
 
+        Note: Using cached property b/c we don't expect test_mode to change
+        during runtime, and it avoids repeated lookups. Changing to @property
+        wouldn't reload the config. It would just re-fetch from the settings
+        module.
+
         Used by ...
         - BaseMixin._spyglass_version
         - HelpersMixin
         """
-        from spyglass.settings import test_mode
+        from spyglass.settings import config as sg_config
 
-        return test_mode
+        return sg_config.get("test_mode", False)
 
     @cached_property
     def _spyglass_version(self):

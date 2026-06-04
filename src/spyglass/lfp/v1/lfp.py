@@ -97,7 +97,7 @@ class LFPV1(SpyglassMixin, dj.Computed):
             raw_valid_times, min_length=MIN_LFP_INTERVAL_DURATION
         )
 
-        logger.info(
+        self._info_msg(
             f"LFP: found {len(valid_times)} intervals > "
             + f"{MIN_LFP_INTERVAL_DURATION} sec long."
         )

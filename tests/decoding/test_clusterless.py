@@ -75,9 +75,9 @@ def test_get_ahead(clusterless_pop):
     assert dist is not None, "Distance is None"
 
 
-def test_insert_existing_group(caplog, group_unitwave):
+def test_insert_existing_group(group_unitwave):
     file, group = group_unitwave.fetch1(
         "nwb_file_name", "waveform_features_group_name"
     )
-    group_unitwave.create_group(file, group, ["dummy_data"])
-    assert "already exists" in caplog.text, "No warning issued."
+    ret = group_unitwave.create_group(file, group, ["dummy_data"])
+    assert ret is None, "Duplicate create_group should return None."

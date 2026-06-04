@@ -179,7 +179,7 @@ files before importing them into the new database.
 #!/bin/bash
 
 for file in ./_Pop*sql; do \
-    echo $file
+        echo $file
     sed -i 's/ DEFAULT CHARSET=[^ ]\w*//g' "$file"
     sed -i 's/ DEFAULT COLLATE [^ ]\w*//g' "$file"
     sed -i 's/ `nwb_file_name` varchar(255)/ `nwb_file_name` varchar(64)/g' "$file"

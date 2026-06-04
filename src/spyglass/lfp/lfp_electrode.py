@@ -5,6 +5,7 @@ import numpy as np
 
 from spyglass.common.common_ephys import Electrode
 from spyglass.common.common_session import Session  # noqa: F401
+from spyglass.settings import test_mode
 from spyglass.utils import logger
 from spyglass.utils.dj_mixin import SpyglassMixin
 
@@ -120,10 +121,12 @@ class LFPElectrodeGroup(SpyglassMixin, dj.Manual):
             # Insert part table entries
             LFPElectrodeGroup.LFPElectrode.insert(part_keys, **kwargs)
 
-        logger.info(
-            f"Successfully created/updated LFPElectrodeGroup {nwb_file_name}, {group_name} "
-            f"with {len(electrode_list)} electrodes."
-        )
+        if not test_mode:
+            logger.info(
+                "Successfully created/updated LFPElectrodeGroup "
+                + f"{nwb_file_name}, {group_name} with {len(electrode_list)} "
+                + "electrodes."
+            )
 
     def cautious_insert(
         self, session_key: dict, electrode_ids: List[int], group_name: str

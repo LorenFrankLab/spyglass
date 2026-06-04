@@ -1,5 +1,3 @@
-import copy
-
 import datajoint as dj
 import pandas as pd
 import pynwb
@@ -47,7 +45,7 @@ class ImportedSpikeSorting(SpyglassIngestion, dj.Imported):
     def get_nwb_objects(self, nwb_file, nwb_file_name=None):
         """Override to get units from nwb_file.units."""
         if not getattr(nwb_file, "units", None):
-            logger.warn("No units found in NWB file")
+            self._warn_msg("No units found in NWB file")
             return []
         return [nwb_file.units]
 
@@ -67,9 +65,9 @@ class ImportedSpikeSorting(SpyglassIngestion, dj.Imported):
         # Add merge table integration
         orig_key = {"nwb_file_name": nwb_file_name}
 
-        from spyglass.spikesorting.spikesorting_merge import (  # noqa: F401
+        from spyglass.spikesorting.spikesorting_merge import (
             SpikeSortingOutput,
-        )
+        )  # noqa: F401
 
         part_name = SpikeSortingOutput._part_name(self.table_name)
         SpikeSortingOutput._merge_insert(
@@ -87,7 +85,7 @@ class ImportedSpikeSorting(SpyglassIngestion, dj.Imported):
         from spyglass.common.common_usage import ActivityLog
 
         ActivityLog().deprecate_log(
-            self, "ImportedSpikesorting.make", alt="insert_from_nwbfile"
+            name="ImportedSpikesorting.make", alt="insert_from_nwbfile"
         )
 
         return self.insert_from_nwbfile(key["nwb_file_name"])
@@ -153,9 +151,10 @@ class ImportedSpikeSorting(SpyglassIngestion, dj.Imported):
     def make_df_from_annotations(self):
         """Convert the annotations part table into a dataframe that can be
         concatenated to the spikes dataframe in the nwb file."""
+        annotation_query = self.Annotations & self.fetch("KEY")
         df = []
         for id, label, annotations in zip(
-            *self.Annotations.fetch("id", "label", "annotations")
+            *annotation_query.fetch("id", "label", "annotations")
         ):
             df.append(
                 dict(

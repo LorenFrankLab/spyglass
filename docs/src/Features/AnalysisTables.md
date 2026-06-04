@@ -40,6 +40,11 @@ ______________________________________________________________________
 
 ## How to Use (Recommended)
 
+Use the `analysis_table` property of the spyglass table class to access the analysis
+table linked to the compute table you are working with. This property is equivalent
+to `AnalysisNwbfile()` for whichever shared or custom `AnalysisNwbfile` table is
+linked in the database
+
 Use the `.build()` method which provides a context manager that handles the
 CREATE → POPULATE → REGISTER lifecycle automatically.
 
@@ -47,6 +52,7 @@ CREATE → POPULATE → REGISTER lifecycle automatically.
 
 ```python
 from spyglass.common import AnalysisNwbfile
+from spyglass.utils import SpyglassMixin
 import datajoint as dj
 import pandas as pd
 
@@ -54,7 +60,7 @@ schema = dj.schema("my_schema")
 
 
 @schema
-class MyAnalysis(dj.Computed):
+class MyAnalysis(SpyglassMixin, dj.Computed):
     definition = """
     -> SomeOtherTable
     ---
@@ -67,7 +73,7 @@ class MyAnalysis(dj.Computed):
         my_data = ...  # Your analysis data here
 
         nwb_file_name = key["nwb_file_name"]
-        with AnalysisNwbfile().build(nwb_file_name) as builder:
+        with self.analysis_table.build(nwb_file_name) as builder:
             # Add your data using helper methods
             # add_nwb_object returns the object_id
             object_id = builder.add_nwb_object(pd.DataFrame(my_data), "results")
@@ -113,10 +119,9 @@ with AnalysisNwbfile().build("session.nwb") as builder:
 
 ```python
 with AnalysisNwbfile().build("session.nwb") as builder:
-    with builder.open_for_write() as io:
-        nwbf = io.read()
-        nwbf.add_unit(spike_times=[0.1, 0.5, 1.2], id=1)
-        io.write(nwbf)
+    io, nwbf = builder.open_nwb
+    nwbf.add_unit(spike_times=[0.1, 0.5, 1.2], id=1)
+    # io closing and file write handled at exit
 ```
 
 **What happens on exception**:
@@ -191,7 +196,7 @@ result = (MyAnalysis & key).fetch_nwb()[0]
 
 ```python
 def make(self, key):
-    with AnalysisNwbfile().build(nwb_file_name) as builder:
+    with self.analysis_table.build(nwb_file_name) as builder:
         # add_nwb_object returns the unique object ID
         position_id = builder.add_nwb_object(position_data, "position")
         velocity_id = builder.add_nwb_object(velocity_data, "velocity")
@@ -382,7 +387,7 @@ def make(self, key):
 **New way** (automatic):
 
 ```python
-with AnalysisNwbfile().build("session.nwb") as builder:
+with self.analysis_table.build("session.nwb") as builder:
     builder.add_nwb_object(data, "results")
     # Auto-registered on exit
 ```
@@ -452,9 +457,10 @@ Even with direct I/O, you can still use the builder:
 
 ```python
 with AnalysisNwbfile().build("session.nwb") as builder:
-    with builder.open_for_write() as io:
-        # Direct PyNWB operations here
-        pass
+    io, nwbf = builder.open_nwb
+    # Direct PyNWB operations here
+    ...
+    # io close and file write handled at exit
 ```
 
 ______________________________________________________________________

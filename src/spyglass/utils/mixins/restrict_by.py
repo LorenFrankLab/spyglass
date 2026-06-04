@@ -26,7 +26,7 @@ class RestrictByMixin(BaseMixin):
 
     def see_banned_tables(self):
         """Print banned tables."""
-        self._logger.info(f"Banned tables: {self._banned_search_tables}")
+        self._info_msg(f"Banned tables: {self._banned_search_tables}")
 
     def restrict_by(
         self,
@@ -77,9 +77,7 @@ class RestrictByMixin(BaseMixin):
             if len(ret) < len(self):
                 # If it actually restricts, if not it might by a dict that
                 # is not a valid restriction, returned as True
-                self._logger.warning(
-                    "Restriction valid for this table. Using as is."
-                )
+                self._warn_msg("Restriction valid for this table. Using as is.")
                 return ret
         except DataJointError:  # need assert_join_compatible return bool
             self._logger.debug("Restriction not valid. Attempting to cascade.")
@@ -114,9 +112,9 @@ class RestrictByMixin(BaseMixin):
             + "See `help(YourTable.restrict_by)`"
         )
         if len(ret) == len(self):
-            self._logger.warning("Same length" + warn_text)
+            self._warn_msg("Same length" + warn_text)
         elif len(ret) == 0:
-            self._logger.warning("No entries" + warn_text)
+            self._warn_msg("No entries" + warn_text)
 
         return ret
 
