@@ -1,3 +1,4 @@
+import datajoint as dj
 import pytest
 from datajoint.utils import to_camel_case
 
@@ -67,6 +68,45 @@ def add_graph_rgs(add_graph_tables):
     yield rg_1, rg_2, rg_3
 
 
+@pytest.fixture(scope="module")
+def revisit_graph_tables(dj_conn, SpyglassMixin):
+    schema = dj.Schema(context={})
+
+    @schema
+    class Parent(SpyglassMixin, dj.Lookup):
+        definition = """
+        parent_id: int
+        ---
+        parent_attr: int
+        """
+        contents = [(0, 10), (1, 11)]
+
+    @schema
+    class LeafB(SpyglassMixin, dj.Lookup):
+        definition = """
+        leaf_b_id: int
+        ---
+        -> Parent
+        leaf_b_attr: int
+        """
+        contents = [(0, 0, 20), (1, 1, 21)]
+
+    @schema
+    class LeafA(SpyglassMixin, dj.Lookup):
+        definition = """
+        leaf_a_id: int
+        ---
+        -> Parent
+        -> LeafB
+        leaf_a_attr: int
+        """
+        contents = [(0, 0, 0, 30), (1, 1, 0, 31)]
+
+    schema.activate("test_revisit_graph", connection=dj_conn)
+    yield {"Parent": Parent(), "LeafA": LeafA(), "LeafB": LeafB()}
+    schema.drop(force=True)
+
+
 def test_rg_add(add_graph_rgs, add_graph_tables):
     """Test adding tables to RestrGraph."""
     tables = add_graph_tables
@@ -117,6 +157,29 @@ def test_rg_add_list(add_graph_rgs, add_graph_tables):
         len(rg_union._get_ft(tables["B1"].full_table_name, with_restr=True))
         == 2
     ), "Unexpected child restricted table length for union of rg_1 and rg_2."
+
+
+def test_rg_revisits_with_expanded_restriction(revisit_graph_tables):
+    from spyglass.utils.dj_graph import RestrGraph
+
+    tables = revisit_graph_tables
+    graph = RestrGraph(
+        seed_table=tables["Parent"],
+        leaves={
+            tables["LeafA"].full_table_name: {"leaf_a_id": 0},
+            tables["LeafB"].full_table_name: {"leaf_b_id": 1},
+        },
+        direction="up",
+        cascade=True,
+        verbose=False,
+    )
+
+    parent_ids = set(
+        graph._get_ft(
+            tables["Parent"].full_table_name, with_restr=True
+        ).fetch("parent_id")
+    )
+    assert parent_ids == {0, 1}, "Parent restriction should union both leaves."
 
 
 def test_rg_repr(restr_graph, leaf):
