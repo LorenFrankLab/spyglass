@@ -213,7 +213,9 @@ class FetchMixin(BaseMixin):
                     "access_method": caller,
                     "nwb_file_name": file_name,
                 }
-                row = Nwbfile._auto_increment(row, "access_count")
+                row = Nwbfile.AccessLog()._auto_increment(
+                    key=row, pk="access_count"
+                )
                 Nwbfile.AccessLog.insert1(row, skip_duplicates=True)
 
         # logging arg only if instanced table inherits Mixin
