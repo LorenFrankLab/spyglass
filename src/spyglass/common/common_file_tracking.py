@@ -300,7 +300,13 @@ class AnalysisFileIssues(dj.Manual):
 
         return updated
 
-    def check1_file(self, analysis_tbl, analysis_file_name, deleted_files=None):
+    def check1_file(
+        self,
+        analysis_tbl,
+        analysis_file_name,
+        deleted_files=None,
+        verbose=False,
+    ):
         """Check a single file and insert only if there's an issue.
 
         Parameters
@@ -332,7 +338,8 @@ class AnalysisFileIssues(dj.Manual):
             "analysis_file_name": analysis_file_name,
         }
 
-        print(".", end="")  # Progress indicator for single-file checks
+        if verbose:
+            print(".", end="")
 
         try:
             fname = analysis_tbl.get_abs_path(analysis_file_name)

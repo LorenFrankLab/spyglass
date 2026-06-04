@@ -25,7 +25,7 @@ if [[ -z "${SPYGLASS_BASE_PATH}"
   exit 1
 fi
 
-source $SPYGLASS_CONDA_PATH
+source "$SPYGLASS_CONDA_PATH"
 source "$SCRIPT_DIR/script_utils.sh"
 SLACK_LOG="$SPYGLASS_LOG"
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Predict when a drive will run out of space based on recent usage trend.
 
-Reads the structured CSV produced by check_disk_space.sh (or migrate_log_to_csv.py),
-fits a linear trend to `used_bytes` over a rolling window, and prints a one-line
-runway estimate suitable for appending to Slack / email alerts.
+Reads the structured CSV produced by check_disk_space.sh, fits a linear trend
+to `used_bytes` over a rolling window, and prints a one-line runway estimate
+suitable for appending to Slack / email alerts.
 
 Usage:
     python predict_runway.py [CSV_PATH [DRIVE_PATH]]
@@ -63,6 +63,7 @@ def predict(csv_path: Path, drive: str, window_days: int, min_days: int) -> str:
     if len(rows) < 2:
         return "N/A"
 
+    rows.sort(key=lambda r: r[0])
     last_ts, last_avail, _ = rows[-1]
 
     # Try discrete fallback windows (longest first) to avoid landing on a
@@ -90,13 +91,20 @@ def predict(csv_path: Path, drive: str, window_days: int, min_days: int) -> str:
 def main() -> None:
     args = sys.argv[1:]
 
-    csv_path = Path(
-        args[0] if args else os.environ.get("SPACE_CSV_LOG", "")
-    ).expanduser()
-    if not csv_path or not csv_path.exists():
+    raw = args[0] if args else os.environ.get("SPACE_CSV_LOG", "")
+    if not raw:
         print("data runway: N/A", end="")
         print(
-            f"\nError: CSV not found ({csv_path or 'unset'}). "
+            "\nError: CSV path unset. "
+            "Set SPACE_CSV_LOG or pass path as argument.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    csv_path = Path(raw).expanduser()
+    if not csv_path.is_file():
+        print("data runway: N/A", end="")
+        print(
+            f"\nError: CSV not found ({csv_path}). "
             "Set SPACE_CSV_LOG or pass path as argument.",
             file=sys.stderr,
         )

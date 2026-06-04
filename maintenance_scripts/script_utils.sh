@@ -21,6 +21,7 @@ send_email_message() {
   local RECIPIENT="$1"
   local SUBJECT="$2"
   local BODY="$3"
+  local EMAIL
   EMAIL=$(printf "$EMAIL_TEMPLATE" "$RECIPIENT" "$SUBJECT" "$BODY")
   curl -sS --url "smtps://smtp.gmail.com:465" \
       --ssl-reqd \
