@@ -146,6 +146,23 @@ class DirectoryHasher:
             return data
 
 
+def _require_h5py_v3():
+    """Raise EnvironmentError if h5py < 3.
+
+    Non-legacy hashing relies on _normalize_h5str to produce version-stable
+    hashes. That normalization is only necessary (and meaningful) with h5py 3+,
+    which changed variable-length string attributes from str to bytes. Running
+    non-legacy hashing under h5py 2.x would produce a different hash for the
+    same file.
+    """
+    major = int(h5py.__version__.split(".")[0])
+    if major < 3:
+        raise EnvironmentError(
+            f"Non-legacy hashing requires h5py >= 3.0 (found {h5py.__version__}). "
+            "Update h5py to use the new hashing mode."
+        )
+
+
 class NwbfileHasher:
     def __init__(
         self,
@@ -194,6 +211,9 @@ class NwbfileHasher:
             Use only for comparing regenerated files against hashes computed
             before the bug fix. Default False.
         """
+        if not legacy_mode:
+            _require_h5py_v3()
+
         self.path = Path(path)
         self.file = h5py.File(path, "r")
         atexit.register(self.cleanup)
@@ -279,7 +299,9 @@ class NwbfileHasher:
             if not self.legacy_mode and np.issubdtype(value.dtype, np.number):
                 return bytes(self._numeric_array_bytes(value))
             return value.astype(str).tobytes()
-        elif isinstance(value, (str, int, float, np.generic)):
+        elif isinstance(value, (str, int, float)):
+            return str(value).encode()
+        elif isinstance(value, np.generic):
             return str(value).encode()
         return repr(value).encode()  # For other, use repr
 
@@ -302,47 +324,30 @@ class NwbfileHasher:
         return memoryview(arr).cast("B")
 
     def hash_dataset(self, dataset: h5py.Dataset):
-        # Legacy mode preserves the original (broken) full-path check so that
-        # stored hashes remain reproducible. Non-legacy uses the basename so
-        # source_script and version datasets are actually skipped as intended.
-        check_name = (
-            dataset.name.split("/")[-1]
-            if not self.legacy_mode
-            else dataset.name
-        )
-        if check_name in IGNORED_KEYS:
+        if dataset.name.split("/")[-1] in IGNORED_KEYS:
             return
 
         this_hash = md5(self.hash_shape_dtype(dataset))
 
         if dataset.shape == ():
-            raw = dataset[()]
-            if not self.legacy_mode:
-                raw = self._normalize_h5str(raw)
+            raw = self._normalize_h5str(dataset[()])
             this_hash.update(self.serialize_attr_value(str(raw)))
             return this_hash.hexdigest()
 
         dataset_name = dataset.parent.name.split("/")[-1]
         precision = self.precision.get(dataset_name, None)
 
-        # Hoist dtype-dependent checks: dataset.dtype is constant across chunks.
+        # Hoist dtype check: dataset.dtype is constant across chunks.
         is_numeric = np.issubdtype(dataset.dtype, np.number)
-        needs_normalize = not is_numeric and dataset.dtype.kind in ("O", "S")
 
         size = dataset.shape[0]
         start = 0
 
         while start < size:
             end = min(start + self.batch_size, size)
-            data = dataset[start:end]
+            data = self._normalize_h5str(dataset[start:end])
             start = end
 
-            if self.legacy_mode:
-                this_hash.update(self.serialize_attr_value(data))
-                continue
-
-            if needs_normalize:
-                data = self._normalize_h5str(data)
             if precision and is_numeric:
                 data = np.round(data, precision)
             if is_numeric:

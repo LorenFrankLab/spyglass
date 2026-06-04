@@ -753,11 +753,21 @@ class AnalysisMixin(BaseMixin):
         file_path = path or self.get_abs_path(
             analysis_file_name, from_schema=from_schema
         )
-        hasher = NwbfileHasher(
-            file_path,
-            precision_lookup=precision_lookup,
-            legacy_mode=legacy_mode,
-        )
+        try:
+            hasher = NwbfileHasher(
+                file_path,
+                precision_lookup=precision_lookup,
+                legacy_mode=legacy_mode,
+            )
+        except EnvironmentError as e:
+            self._logger.warning(
+                "Cannot compute hash for %s: %s. "
+                "File will be created without a stored hash; "
+                "logged_at_creation will be set to False.",
+                analysis_file_name,
+                e,
+            )
+            return None
         if stored_hash and hasher.hash != stored_hash:
             if not legacy_mode:
                 self._logger.warning(

@@ -264,7 +264,9 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         """Record environment details for this recording."""
         from spyglass.spikesorting.v1 import recompute as rcp
 
-        rcp.RecordingRecomputeSelection().insert(key, at_creation=True)
+        rcp.RecordingRecomputeSelection().insert(
+            key, at_creation=key.get("hash") is not None
+        )
 
     @classmethod
     def _make_file(
