@@ -164,6 +164,8 @@ for label, interval_data in results.groupby("interval_labels"):
 - Fix typo in `env_defaults` key: `HD5_USE_FILE_LOCKING` →
     `HDF5_USE_FILE_LOCKING` so the HDF5 library actually sees the intended
     `FALSE` default #1575
+- Warn on no-operation restrictions #1586
+- Improved efficiency for writing multiple objects to analysis file #1594
 
 ### Pipelines
 
@@ -171,6 +173,7 @@ for label, interval_data in results.groupby("interval_labels"):
 
     - Add methods for calling moseq visualization functions #1374
     - Ensure latent moseq dimension is compatible with dataset #1511
+    - Add option to normalize keypoint spacing by body length #1569
 
 - Common
 
@@ -241,6 +244,11 @@ for label, interval_data in results.groupby("interval_labels"):
         `CurationV1.get_sorting` and `SpikeSorting.get_sorting`, fixing a
         SpikeInterface `ValueError` caused by floating-point round-trip in the
         seconds-to-samples conversion #1564
+    - Trigger recording recompute in `SpikeSortingRecording.populate` when
+        necessary #1588, #1599
+    - Restrict `ImportedSpikeSorting.Annotations` to the current session in
+        `make_df_from_annotations` so `fetch_nwb` works across multiple sessions
+        with overlapping unit ids #1581, #1592
 
 ## [0.5.5] (Aug 6, 2025)
 
@@ -289,6 +297,7 @@ for label, interval_data in results.groupby("interval_labels"):
     - Prompt user to verify compatibility between new insert and existing table
         entries # 1318, #1350
     - Skip empty timeseries ingestion (`PositionSource`, `DioEvents`) #1347
+    - Reduce excess warnings/errors #1589
 - Position
     - Allow population of missing `PositionIntervalMap` entries during population
         of `DLCPoseEstimation` #1208
