@@ -335,8 +335,12 @@ jobs:
         # stays green.
         SPIKESORTING_V2_MATCHING_EXTRA_REQUIRED: "1"
       run: |
-        # Sacrificial conda env: the matching extra downgrades numpy
-        # below the v2 baseline, so it must never share the env above.
+        # Separate conda env, kept off the default v2 env above for
+        # dependency weight (the matching extra pulls torch + CUDA),
+        # NOT for a numpy downgrade: the pinned UnitMatchPy 3.2.6/3.2.7
+        # line declares numpy>=2 and so coexists with the v2 baseline.
+        # The resolver assertion below is what catches a future
+        # numpy<2 re-pin (as 3.2.8+ introduced).
         conda create -y -n spyglass_v2_matching python=3.11
         # Install tolerates failure: upstream resolver breakages are
         # often transient (network, build-wheel) and NOT what this
