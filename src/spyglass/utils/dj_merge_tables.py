@@ -631,7 +631,7 @@ class Merge(ExportMixin, dj.Manual):
             )
         ]
 
-        if not multi_source and len(sources) != 1:
+        if not multi_source and len(sources) > 1:
             raise ValueError(
                 f"Found {len(sources)} potential parts: {sources}\n\t"
                 + "Try adding a restriction before invoking `get_part`.\n\t"

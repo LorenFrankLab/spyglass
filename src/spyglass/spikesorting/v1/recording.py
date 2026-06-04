@@ -338,6 +338,10 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             parent = SpikeSortingRecordingSelection & key
             parent_file_name = parent.fetch1("nwb_file_name")
 
+        cls._check_recompute_args(
+            recompute_file_name, recompute_object_id, recompute_electrodes_id
+        )
+
         recording_nwb_file_name, recording_object_id, electrodes_id = (
             _write_recording_to_nwb(
                 **cls()._get_preprocessed_recording(key),
@@ -418,7 +422,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         )
 
         if not Path(analysis_file_abs_path).exists():
-            cls._make_file(key, recompute_file_name=analysis_file_name)
+            cls._make_file(key=None, recompute_file_name=analysis_file_name)
 
         recording = se.read_nwb_recording(
             analysis_file_abs_path, load_time_vector=True
@@ -711,6 +715,24 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             channel_names = electrodes_table["channel_name"]
             return [channel_names[ch] for ch in channel_ids]
 
+    @staticmethod
+    def _check_recompute_args(
+        recompute_file_name: str = None,
+        recompute_object_id: str = None,
+        recompute_electrodes_id: str = None,
+    ):
+        """Check that if any recompute args are specified, all are specified."""
+        recompute_args = (
+            recompute_file_name,
+            recompute_object_id,
+            recompute_electrodes_id,
+        )
+        if any(recompute_args) and not all(recompute_args):
+            raise ValueError(
+                "If recomputing, must specify all of recompute_file_name, "
+                "recompute_object_id, and recompute_electrodes_id."
+            )
+
 
 def _consolidate_intervals(intervals, timestamps):
     """Convert a list of intervals (start_time, stop_time)
@@ -806,11 +828,7 @@ def _write_recording_to_nwb(
         recompute_electrodes_id,
     )
     recompute = any(recompute_args)
-    if recompute and not all(recompute_args):
-        raise ValueError(
-            "If recomputing, must specify all of recompute_file_name, "
-            "recompute_object_id, and recompute_electrodes_id."
-        )
+    SpikeSortingRecording._check_recompute_args(*recompute_args)
 
     series_name = "ProcessedElectricalSeries"
     series_attr = "acquisition/" + series_name
