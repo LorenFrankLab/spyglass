@@ -18,7 +18,7 @@ from hdmf.common import DynamicTable
 from pynwb.core import ScratchData
 
 from spyglass.utils.dj_helper_fn import get_child_tables
-from spyglass.utils.h5_helper_fn import compressed_data
+from spyglass.utils.h5py_helper_fn import compressed_data
 from spyglass.utils.mixins.base import BaseMixin
 from spyglass.utils.nwb_hash import NwbfileHasher
 from spyglass.utils.nwb_helper_fn import get_electrode_indices, get_nwb_file

@@ -56,20 +56,20 @@ class Nwbfile(SpyglassMixin, dj.Manual):
     # NOTE: See #630, #664. Excessive key length.
 
     class AccessLog(dj.Part):
-        """Track file access for usage analysis and compression decisions.
+        """Log file access events for empirical access-pattern analysis.
 
-        Logs all file access events to help identify compression candidates
-        and monitor usage patterns.
+        Collected prior to compression implementation to inform scheduling
+        decisions. access_count is managed via HelperMixin._auto_increment
+        and counts accesses per file.
         """
 
         definition = """
-        access_id: int auto_increment
         -> master
+        access_count: int unsigned        # per-file access sequence number
         ---
-        dj_user: varchar(64)  # DataJoint user who accessed the file
+        dj_user: varchar(64)              # DataJoint user
         access_time=CURRENT_TIMESTAMP: timestamp
-        access_method: varchar(32)  # Method used (fetch_nwb, direct, etc)
-        decompression_time_ms=null: int unsigned  # Decompression duration
+        access_method: varchar(32)        # e.g. fetch_nwb, direct
         """
 
     @classmethod
@@ -94,37 +94,10 @@ class Nwbfile(SpyglassMixin, dj.Manual):
         )
 
     def fetch_nwb(self):
-        """Fetch NWB files.
-
-        Dataset-level compression is transparent — pynwb reads compressed
-        datasets without any explicit decompression step. Logs all file
-        access events for usage analysis.
-
-        Returns
-        -------
-        list
-            List of opened NWB file objects
-        """
-        dj_user = dj.config.get("database.user", "unknown")
-
-        file_names = self.fetch("nwb_file_name")
-        nwb_files = []
-
-        for file_name in file_names:
-            Nwbfile.AccessLog.insert1(
-                {
-                    "nwb_file_name": file_name,
-                    "dj_user": dj_user,
-                    "access_method": "fetch_nwb",
-                    "decompression_time_ms": None,
-                },
-                skip_duplicates=False,
-            )
-
-            file_path = self.get_abs_path(file_name)
-            nwb_files.append(get_nwb_file(file_path))
-
-        return nwb_files
+        return [
+            get_nwb_file(self.get_abs_path(file))
+            for file in self.fetch("nwb_file_name")
+        ]
 
     @classmethod
     def get_abs_path(
