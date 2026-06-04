@@ -886,7 +886,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             self._info_msg(f"  [{i}/{num_tables}] Checking {tbl_name} files")
 
             issue_count = file_checker.check_files(
-                analysis_tbl, deleted_files=deleted_files
+                analysis_tbl, deleted_files=deleted_files, verbose=True
             )
             results[tbl_name] = issue_count
 
