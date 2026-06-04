@@ -17,7 +17,7 @@ from datajoint.table import Table
 from hdmf.common import DynamicTable
 from pynwb.core import ScratchData
 
-from spyglass.utils.compression import compressed_data
+from spyglass.utils.h5_helper_fn import compressed_data
 from spyglass.utils.dj_helper_fn import get_child_tables
 from spyglass.utils.mixins.base import BaseMixin
 from spyglass.utils.nwb_hash import NwbfileHasher

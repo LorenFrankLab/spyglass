@@ -15,7 +15,7 @@ from spyglass.common.common_region import BrainRegion  # noqa: F401
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.settings import test_mode
 from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
-from spyglass.utils.compression import compressed_data
+from spyglass.utils.h5_helper_fn import compressed_data
 from spyglass.utils.nwb_helper_fn import (
     estimate_sampling_rate,
     get_config,

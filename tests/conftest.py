@@ -330,7 +330,7 @@ def mini_insert(
 ):
     # CompressedNwbfile schema needs to be declared before insert_sessions
     from spyglass.common import LabMember, Nwbfile, Session
-    from spyglass.common.common_file_tracking import (
+    from spyglass.common.common_file_compression import (
         CompressedNwbfile,
     )  # noqa: E402
     from spyglass.data_import import insert_sessions  # noqa: E402
