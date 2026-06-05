@@ -159,6 +159,7 @@ for label, interval_data in results.groupby("interval_labels"):
     `FALSE` default #1575
 - Warn on no-operation restrictions #1586
 - Improved efficiency for writing multiple objects to analysis file #1594
+- Pin `scipy<1.13` for `spikeinterface==0.99.1` compatibility #1612
 
 ### Pipelines
 
