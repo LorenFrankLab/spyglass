@@ -88,7 +88,7 @@ optional-dependencies.docs = [
   "mkdocs-mermaid2-plugin", # Docs mermaid diagrams
   "mkdocstrings[python]",   # Docs API docstrings
 ]
-optional-dependencies.kachery = [
+optional-dependencies.kachery-cloud = [
   "kachery",
   "kachery-client",
   "kachery-cloud>=0.4",

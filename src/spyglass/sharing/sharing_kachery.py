@@ -39,7 +39,7 @@ def _require_kachery():
     if not _kachery_available:
         raise ImportError(
             "kachery_cloud is not installed. Install it with:\n"
-            "  pip install spyglass-neuro[kachery]\n"
+            "  pip install spyglass-neuro[kachery-cloud]\n"
             "or remove kachery from your workflow and use the DANDI fallback "
             "in spyglass.utils.nwb_helper_fn.get_nwb_file instead."
         )

@@ -37,7 +37,7 @@ Features of Spyglass include:
     decentralized content addressable data sharing platform. Kachery Cloud
     allows users to access the database and pull data and analysis results
     directly to their local machine. Kachery is an optional dependency; install
-    it with `pip install spyglass-neuro[kachery]`.
+    it with `pip install spyglass-neuro[kachery-cloud]`.
 - **Pipeline versioning** - Processing and analysis of data in neuroscience is
     often dynamic, requiring new features. Spyglass uses *Merge tables* to
     ensure that analysis pipelines can be versioned. This allows users to easily

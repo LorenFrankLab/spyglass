@@ -2923,7 +2923,7 @@ def setup_environment(
     check_prerequisites(install_type, base_dir)
     conda = CondaManager(args.env_name)
     conda.create(env_file, force=args.force)
-    extras = ["kachery"] if getattr(args, "kachery", False) else []
+    extras = ["kachery-cloud"] if getattr(args, "kachery", False) else []
     conda.install_package(extras=extras or None)
 
 
@@ -3322,7 +3322,7 @@ Environment Variables:
     parser.add_argument(
         "--kachery",
         action="store_true",
-        help="Install optional kachery dependencies (pip install .[kachery])",
+        help="Install optional kachery dependencies (pip install .[kachery-cloud])",
     )
 
     args = parser.parse_args()
