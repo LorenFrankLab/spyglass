@@ -1,6 +1,7 @@
 """Mixin class for fetching NWB files and pynapple objects."""
 
 import os
+import datajoint as dj
 from functools import cached_property
 from typing import Tuple
 
@@ -199,6 +200,23 @@ class FetchMixin(BaseMixin):
         nwb_files, file_path_fn = self._get_nwb_files_and_path_fn(
             tbl, attr_name, *attrs, **kwargs
         )
+
+        # Log raw NWB file access for empirical access-pattern analysis
+        if file_name_attr == "nwb_file_name" and len(nwb_files):
+            from spyglass.common.common_nwbfile import Nwbfile
+
+            dj_user = dj.config.get("database.user", "unknown")
+            caller = getattr(self, "full_table_name", "unknown")
+            for file_name in nwb_files:
+                row = {
+                    "dj_user": dj_user,
+                    "caller_table": caller,
+                    "nwb_file_name": file_name,
+                }
+                row = Nwbfile.AccessLog()._auto_increment(
+                    key=row, pk="access_count"
+                )
+                Nwbfile.AccessLog.insert1(row, skip_duplicates=True)
 
         # logging arg only if instanced table inherits Mixin
         inst = instance_table(self)

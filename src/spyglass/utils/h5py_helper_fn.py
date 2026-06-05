@@ -5,8 +5,35 @@ from typing import List, Optional
 
 import h5py
 import numpy as np
+from hdmf.backends.hdf5.h5_utils import H5DataIO
 
 from spyglass.utils.logging import logger
+
+
+def compressed_data(data, compression="gzip", compression_opts=6):
+    """Wrap data in H5DataIO for compressed NWB dataset writes.
+
+    Parameters
+    ----------
+    data : array-like
+        Data to wrap (numpy array, DataChunkIterator, etc.)
+    compression : str
+        HDF5 filter name. 'gzip' (default) or 'lzf'.
+    compression_opts : int or None
+        Level for gzip (1-9); ignored for lzf.
+
+    Returns
+    -------
+    H5DataIO
+        Wrapped object that pynwb will write with the requested filter.
+    """
+    if compression == "lzf":
+        compression_opts = None
+    return H5DataIO(
+        data=data,
+        compression=compression,
+        compression_opts=compression_opts,
+    )
 
 
 def is_float16_dtype(

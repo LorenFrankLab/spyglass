@@ -4,7 +4,7 @@ import string
 import subprocess
 from functools import cached_property
 from pathlib import Path
-from typing import Dict, Optional, Union, Tuple
+from typing import Dict, Optional, Tuple, Union
 from uuid import uuid4
 
 import datajoint as dj
@@ -18,6 +18,7 @@ from hdmf.common import DynamicTable
 from pynwb.core import ScratchData
 
 from spyglass.utils.dj_helper_fn import get_child_tables
+from spyglass.utils.h5py_helper_fn import compressed_data
 from spyglass.utils.mixins.base import BaseMixin
 from spyglass.utils.nwb_hash import NwbfileHasher
 from spyglass.utils.nwb_helper_fn import get_electrode_indices, get_nwb_file
@@ -721,7 +722,7 @@ class AnalysisMixin(BaseMixin):
         elif isinstance(nwb_object, np.ndarray):
             nwb_object = ScratchData(
                 name=table_name or "numpy_array",
-                data=nwb_object,
+                data=compressed_data(nwb_object),
                 description="Numpy array stored in scratch space",
             )
         if nwb_object.name in nwbf.scratch:
