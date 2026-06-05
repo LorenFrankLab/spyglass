@@ -703,6 +703,38 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
             else:
                 unresolved.update(ambiguous.keys())
 
+        # ── Pass 4: exact basename -> unique full VideoFile PK ──────────────
+        # This catches cases where earlier narrowing cannot disambiguate, but
+        # the basename uniquely identifies a single VideoFile row.
+        if unresolved:
+            rows = VideoFile().fetch(
+                "nwb_file_name",
+                "epoch",
+                "video_file_num",
+                "path",
+                as_dict=True,
+            )
+            by_basename = {}
+            for row in rows:
+                path = row.get("path")
+                if not path:
+                    continue
+                basename = Path(path).name
+                by_basename.setdefault(basename, []).append(row)
+
+            for vp in list(unresolved):
+                basename = Path(vp).name
+                candidates = by_basename.get(basename, [])
+                if len(candidates) != 1:
+                    continue
+                chosen = candidates[0]
+                matched[vp] = {
+                    "nwb_file_name": chosen["nwb_file_name"],
+                    "epoch": chosen["epoch"],
+                    "video_file_num": chosen["video_file_num"],
+                }
+                unresolved.discard(vp)
+
         # ── Hard error on anything still unresolved ──────────────────────────
         if unresolved:
             unresolved_sorted = sorted(unresolved)

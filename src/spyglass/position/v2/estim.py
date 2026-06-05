@@ -2020,10 +2020,51 @@ class PoseV2(SpyglassMixin, dj.Computed):
 
         centroid_data = centroid_series.data[:]  # (n, 2) or (n, 3)
         orientation_data = orient_series.data[:]  # (n,)
-        velocity_data = velocity_series.data[
-            :
-        ]  # (n, 3): vx,vy,speed  OR (n, 4): vx,vy,vz,speed
+        velocity_data = np.asarray(velocity_series.data[:])
+        # Supported velocity layouts:
+        # - 2D current: (n, 3) -> vx, vy, speed
+        # - 3D current: (n, 4) -> vx, vy, vz, speed
+        # - legacy: (n,) -> speed only
+        # - partially populated: (n, 1|2|3)
         is_3d = centroid_data.shape[1] == 3
+
+        n_timestamps = len(timestamps)
+
+        if velocity_data.ndim == 1:
+            speed = velocity_data.astype(float)
+            velocity_x = np.full(n_timestamps, np.nan, dtype=float)
+            velocity_y = np.full(n_timestamps, np.nan, dtype=float)
+            velocity_z = np.full(n_timestamps, np.nan, dtype=float)
+        else:
+            n_cols = velocity_data.shape[1]
+            velocity_x = velocity_data[:, 0].astype(float)
+            velocity_y = (
+                velocity_data[:, 1].astype(float)
+                if n_cols >= 2
+                else np.full(n_timestamps, np.nan, dtype=float)
+            )
+            velocity_z = (
+                velocity_data[:, 2].astype(float)
+                if is_3d and n_cols >= 3
+                else np.full(n_timestamps, np.nan, dtype=float)
+            )
+
+            if is_3d:
+                if n_cols >= 4:
+                    speed = velocity_data[:, 3].astype(float)
+                elif n_cols >= 3:
+                    speed = np.sqrt(
+                        velocity_x**2 + velocity_y**2 + velocity_z**2
+                    )
+                else:
+                    speed = np.full(n_timestamps, np.nan, dtype=float)
+            else:
+                if n_cols >= 3:
+                    speed = velocity_data[:, 2].astype(float)
+                elif n_cols >= 2:
+                    speed = np.sqrt(velocity_x**2 + velocity_y**2)
+                else:
+                    speed = velocity_data[:, 0].astype(float)
 
         if is_3d:
             df = pd.DataFrame(
@@ -2032,10 +2073,10 @@ class PoseV2(SpyglassMixin, dj.Computed):
                     "position_y": centroid_data[:, 1],
                     "position_z": centroid_data[:, 2],
                     "orientation": orientation_data,
-                    "velocity_x": velocity_data[:, 0],
-                    "velocity_y": velocity_data[:, 1],
-                    "velocity_z": velocity_data[:, 2],
-                    "speed": velocity_data[:, 3],
+                    "velocity_x": velocity_x,
+                    "velocity_y": velocity_y,
+                    "velocity_z": velocity_z,
+                    "speed": speed,
                 },
                 index=pd.Index(timestamps, name="time"),
             )
@@ -2045,9 +2086,9 @@ class PoseV2(SpyglassMixin, dj.Computed):
                     "position_x": centroid_data[:, 0],
                     "position_y": centroid_data[:, 1],
                     "orientation": orientation_data,
-                    "velocity_x": velocity_data[:, 0],
-                    "velocity_y": velocity_data[:, 1],
-                    "speed": velocity_data[:, 2],
+                    "velocity_x": velocity_x,
+                    "velocity_y": velocity_y,
+                    "speed": speed,
                 },
                 index=pd.Index(timestamps, name="time"),
             )

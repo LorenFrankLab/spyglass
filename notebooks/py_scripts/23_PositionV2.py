@@ -5,11 +5,11 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.17.0
+#       jupytext_version: 1.19.3
 #   kernelspec:
 #     display_name: pv2
 #     language: python
-#     name: python3
+#     name: pv2
 # ---
 
 # %% [markdown]
@@ -135,10 +135,11 @@ os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
 os.environ.setdefault("TF_USE_LEGACY_KERAS", "1")
 
-# dj.config.load("../dj_local_conf.json")
-dj.config.load("dj_local_conf.json")
+dj.config.load("../dj_local_conf_prod.json")
+# dj.config.load("dj_local_conf.json")
 print(dj.conn(reset=True))
 
+# %%
 from spyglass.common import Session, VideoFile
 from spyglass.position.v2 import (
     BodyPart,
@@ -361,7 +362,8 @@ project_info = Model().create_project(
     project_name="tutorial_dlc",
     bodyparts=training_bodyparts,
     video_list=training_video_list,
-    frames_per_video=20,
+    # Keep this modest for short tutorial videos to avoid oversampling.
+    frames_per_video=5,
 )
 
 config_path = Path(project_info["config_path"])
@@ -378,7 +380,7 @@ print("Next: label the extracted frames, then return to train below.")
 from make_example_dlc_project import seed_labeled_data  # noqa: E402
 
 seed_labeled_data(config_path)
-print("Synthetic labels written (tutorial only — replace with real labels).")
+print("Synthetic labels written (tutorial only - replace with real labels).")
 
 # %% [markdown]
 # <details>
@@ -445,7 +447,8 @@ ModelParams.insert1(
     skip_duplicates=True,
 )
 
-# Create a VidFileGroup from the DLC config so ModelSelection can reference it
+# Create a VidFileGroup from the DLC config so ModelSelection can reference it.
+# Package-level matching now includes explicit basename->full-key fallback.
 training_vid_group_key = VidFileGroup.create_from_dlc_config(config_path)
 training_vid_group_id = training_vid_group_key["vid_group_id"]
 
@@ -1225,7 +1228,7 @@ if processed_df is None:
         "❌ No processed data - ensure PoseV2.populate() completed"
     )
 
-required = ["position_x", "position_y", "orientation", "velocity"]
+required = ["position_x", "position_y", "orientation", "speed"]
 missing = [col for col in required if col not in processed_df.columns]
 
 if missing:
@@ -1233,13 +1236,13 @@ if missing:
 
 # Data summary
 time_range = processed_df.index[-1] - processed_df.index[0]
-mean_vel = processed_df["velocity"].mean()
+mean_speed = processed_df["speed"].mean()
 
 if not pose_selection_key or not (PoseV2() & pose_selection_key).fetch1("KEY"):
     raise ValueError("❌ PoseV2 entry not found for selection key")
 
 print("✅ Validation passed")
-print(f"Duration: {time_range:.1f}s, Mean velocity: {mean_vel:.1f} cm/s")
+print(f"Duration: {time_range:.1f}s, Mean speed: {mean_speed:.1f} cm/s")
 
 # %% [markdown]
 # ## Data Analysis & Retrieval <a id="FetchData"></a>
@@ -1275,7 +1278,7 @@ fig, ax = plt.subplots(figsize=(10, 10))
 scatter = ax.scatter(
     processed_df["position_x"],
     processed_df["position_y"],
-    c=processed_df["velocity"],
+    c=processed_df["speed"],
     cmap="viridis",
     s=5,
     alpha=0.6,
@@ -1316,7 +1319,7 @@ axes[1].set_ylabel("Orientation (degrees)")
 axes[1].grid(True, alpha=0.3)
 
 # Speed over time
-axes[2].plot(processed_df.index, processed_df["velocity"])
+axes[2].plot(processed_df.index, processed_df["speed"])
 axes[2].set_ylabel("Speed (cm/s)")
 axes[2].set_xlabel("Time (s)")
 axes[2].grid(True, alpha=0.3)
