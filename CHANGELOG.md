@@ -186,6 +186,7 @@ for label, interval_data in results.groupby("interval_labels"):
     `FALSE` default #1575
 - Warn on no-operation restrictions #1586
 - Improved efficiency for writing multiple objects to analysis file #1594
+- Pin `scipy<1.13` for `spikeinterface==0.99.1` compatibility #1612
 - Fix `NwbfileHasher` to include HDF5 Dataset content in file hash; add
     `SPYGLASS_LEGACY_HASHES` env var to `RecordingRecompute` for backward
     compatibility with pre-fix hashes #1600
