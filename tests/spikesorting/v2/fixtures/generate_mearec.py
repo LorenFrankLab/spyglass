@@ -391,6 +391,15 @@ def _generate_recording(
         return
 
     params = MEArec.get_default_recordings_params()
+    # Pin the recording to 30 kHz (Hz). MEArec's default leaves
+    # recordings ``fs`` unset, so the recording inherits the template
+    # rate (dt=0.03125 ms = 32 kHz). 30 kHz is the Frank-lab-standard
+    # rate: it matches the real minirec test data and the filters
+    # ``FirFilterParameters.create_standard_filters`` builds (30 kHz /
+    # 20 kHz only), so downstream LFP/filter code finds a matching
+    # filter without a custom 32 kHz entry. MEArec resamples the
+    # cached 32 kHz templates to this rate at recording time.
+    params["recordings"]["fs"] = 30000
     params["spiketrains"]["n_exc"] = spec.n_exc
     params["spiketrains"]["n_inh"] = spec.n_inh
     params["spiketrains"]["duration"] = spec.duration_s

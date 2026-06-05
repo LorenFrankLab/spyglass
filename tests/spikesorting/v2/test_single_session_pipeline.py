@@ -351,7 +351,7 @@ def test_recording_populates_and_round_trips(
     row = (Recording & recording_selection_key).fetch1()
 
     assert row["n_channels"] == expected_n_channels
-    assert row["sampling_frequency"] == pytest.approx(32_000, rel=1e-3)
+    assert row["sampling_frequency"] == pytest.approx(30_000, rel=1e-3)
     # The smoke fixture is 4 seconds of polymer data. Compare to the
     # IntervalList's actual valid_times span so a regression that
     # silently truncated to e.g. 0.1 s would surface (rather than
