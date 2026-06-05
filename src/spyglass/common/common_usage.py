@@ -69,7 +69,7 @@ class ActivityLog(dj.Manual):
     """
 
     @classmethod
-    def deprecate_log(cls, name, alt=None, doc=None, warning=True) -> None:
+    def deprecate_log(cls, name, alt=None, warning=True, doc=None) -> None:
         """Log a deprecation warning for a feature.
 
         Parameters
@@ -78,10 +78,10 @@ class ActivityLog(dj.Manual):
             The name of the feature to deprecate.
         alt : str, optional
             Exact replacement call to display. Default no such message.
-        doc : str, optional
-            URL of the migration guide. Default no such message.
         warning : bool, optional
             Whether to log a warning. Default is True.
+        doc : str, optional
+            URL of the migration guide. Default no such message.
         """
         if warning and name not in _warned_functions:
             _warned_functions.add(name)

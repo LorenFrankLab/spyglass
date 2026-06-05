@@ -219,8 +219,8 @@ ______________________________________________________________________
 
 Older Spyglass code used standalone functions like `interval_list_intersect`,
 `interval_list_contains`, and `interval_list_complement`. These are now
-deprecated wrappers around `Interval` and emit a warning on every call. They
-continue to work but will be removed in a future release.
+deprecated wrappers around `Interval` and emit a warning once per Python
+process. They continue to work but will be removed in a future release.
 
 All replacements produce identical output. The only change is that intermediate
 results are `Interval` objects rather than raw arrays — call `.times` at the end

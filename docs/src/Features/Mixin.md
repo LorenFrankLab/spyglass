@@ -61,7 +61,7 @@ for details on using custom analysis file tables.
 
 Older Spyglass code used two standalone functions from
 `spyglass.utils.dj_helper_fn` that required passing the NWB table and attribute
-explicitly. Both are deprecated and emit a warning on every call.
+explicitly. Both are deprecated and emit a warning once per Python process.
 
 #### `fetch_nwb` (helper function)
 

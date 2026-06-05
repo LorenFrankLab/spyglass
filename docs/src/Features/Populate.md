@@ -79,7 +79,7 @@ For a detailed walkthrough with a real Spyglass table, see
 ## Migration from `_use_transaction = False`
 
 If your table currently sets `_use_transaction = False`, Spyglass emits a
-deprecation warning on every `populate` call and falls back to the old
+deprecation warning once per table per Python process and falls back to the old
 no-transaction behavior. Migrate by removing the attribute and splitting your
 `make` into three methods.
 
@@ -134,7 +134,9 @@ class MyHeavyTable(SpyglassMixin, dj.Computed):
         self.insert1(dict(key, **insert_dict))
 ```
 
-**NOTE:** The `no_transaction_make` deprecation warning is triggered by the
-`_use_transaction = False` class attribute — not by calling `populate` with
-`use_transaction=False` as a keyword argument. The keyword argument is still a
-supported way to override transaction behavior at call time.
+**NOTE:** The deprecation warning is triggered by the `_use_transaction = False`
+class attribute — not by calling `populate` with `use_transaction=False` as a
+keyword argument. The keyword argument is still a supported way to override
+transaction behavior at call time. The warning is logged once per table per
+Python process; the logged identifier in `ActivityLog` takes the form
+`no_transact:<full_table_name>` (truncated to 64 characters).
