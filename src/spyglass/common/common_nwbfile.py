@@ -74,7 +74,7 @@ class Nwbfile(SpyglassMixin, dj.Manual):
         ---
         dj_user: varchar(64)              # DataJoint user
         access_time=CURRENT_TIMESTAMP: timestamp
-        access_method: varchar(32)        # e.g. fetch_nwb, direct
+        caller_table: varchar(255)        # full_table_name of calling table
         """
 
     @classmethod

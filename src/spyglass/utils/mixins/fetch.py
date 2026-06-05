@@ -210,7 +210,7 @@ class FetchMixin(BaseMixin):
             for file_name in nwb_files:
                 row = {
                     "dj_user": dj_user,
-                    "access_method": caller,
+                    "caller_table": caller,
                     "nwb_file_name": file_name,
                 }
                 row = Nwbfile.AccessLog()._auto_increment(
