@@ -1,3 +1,22 @@
+"""PositionOutput merge table — unified interface to all position sources.
+
+This module exposes ``PositionOutput``, a DataJoint merge table that collects
+position results from every upstream pipeline behind a single fetch interface:
+
+- ``IntervalPositionInfo`` (common/Trodes-based)
+- ``TrodesPosV1``
+- ``DLCPosV1`` / ``DLCPoseEstimation`` (DeepLabCut V1)
+- ``PoseV2`` (position V2 — ndx-pose / multi-tool)
+- ``ImportedPose``
+
+Typical usage
+-------------
+::
+
+    # After populating any upstream table, fetch position::
+    (PositionOutput & {"nwb_file_name": ..., "epoch": 1}).fetch1_dataframe()
+"""
+
 import datajoint as dj
 from datajoint.utils import to_camel_case
 from pandas import DataFrame
@@ -7,6 +26,7 @@ from spyglass.position.v1.imported_pose import ImportedPose
 from spyglass.position.v1.position_dlc_pose_estimation import DLCPoseEstimation
 from spyglass.position.v1.position_dlc_selection import DLCPosV1
 from spyglass.position.v1.position_trodes_position import TrodesPosV1
+from spyglass.position.v2.estim import PoseV2
 from spyglass.utils import SpyglassMixin, _Merge
 
 schema = dj.schema("position_merge")
@@ -14,6 +34,7 @@ schema = dj.schema("position_merge")
 source_class_dict = {
     "IntervalPositionInfo": CommonPos,
     "DLCPosV1": DLCPosV1,
+    "PoseV2": PoseV2,
     "TrodesPosV1": TrodesPosV1,
     "ImportedPose": ImportedPose,
     "DLCPoseEstimation": DLCPoseEstimation,
@@ -67,10 +88,17 @@ class PositionOutput(_Merge, SpyglassMixin):
         -> CommonPos
         """
 
+    class PoseV2(SpyglassMixin, dj.Part):
+        """Link to PoseV2: centroid, orientation, and velocity from the V2 pipeline."""
+
+        definition = """
+        -> PositionOutput
+        ---
+        -> PoseV2
+        """
+
     class ImportedPose(SpyglassMixin, dj.Part):
-        """
-        Table to pass-through upstream Pose information from NWB file
-        """
+        """Link to ImportedPose: pose keypoints ingested from externally-created NWB files."""
 
         definition = """
         -> PositionOutput
@@ -96,24 +124,17 @@ class PositionOutput(_Merge, SpyglassMixin):
 
         This will work only for sources that have pose information.
         """
-        key = self.merge_restrict(self.fetch("KEY", as_dict=True)).fetch(
-            "KEY", as_dict=True
-        )  # fetch the key from the merged table
-        query = (
-            source_class_dict[
-                to_camel_case(self.merge_get_parent(self.proj()).table_name)
-            ]
-            & key
-        )
+        restr_self = self.merge_restrict(self.fetch("KEY", as_dict=True))
+        query = source_class_dict[
+            to_camel_case(self.merge_get_parent(self.proj()).table_name)
+        ] & restr_self.fetch("KEY", as_dict=True)
         return query.fetch_pose_dataframe()
 
     def fetch_video_path(self, key=dict()):
         """Fetch the video path associated with the position information."""
-        key = self.merge_restrict((self & key).proj()).proj()
-        query = (
+        return (
             source_class_dict[
                 to_camel_case(self.merge_get_parent(self.proj()).table_name)
             ]
-            & key
-        )
-        return query.fetch_video_path()
+            & self.merge_restrict((self & key).proj()).proj()
+        ).fetch_video_path()

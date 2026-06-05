@@ -1,7 +1,8 @@
-import pathlib
 import re
+from tqdm import tqdm
 from collections import defaultdict
 from functools import reduce
+from pathlib import Path
 from typing import Dict, List, Union
 
 import datajoint as dj
@@ -469,13 +470,18 @@ class VideoFile(SpyglassMixin, dj.Imported):
     ---
     camera_name: varchar(80)
     video_file_object_id: varchar(40)  # the object id of the file object
+    path = NULL: varchar(512)  # path to video file (if extracted)
     """
 
     _nwb_table = Nwbfile
     _timestamp_overlap_threshold = 0.9  # Min fraction of timestamps in epoch
 
     def _prepare_video_entry(
-        self, key, video_obj, cam_device_regex: str = r"camera_device (\d+)"
+        self,
+        key,
+        video_obj,
+        cam_device_regex: str = r"camera_device (\d+)",
+        file_idx=None,
     ):
         """Prepare a VideoFile entry dict for a given video object.
 
@@ -488,6 +494,9 @@ class VideoFile(SpyglassMixin, dj.Imported):
         cam_device_regex : str, optional
             Regular expression pattern to extract camera device number.
             Default: r"camera_device (\\d+)"
+        file_idx : int, optional
+            Index of which external file to use for multi-file ImageSeries.
+            If None, uses the first file (index 0). Default: None
 
         Returns
         -------
@@ -515,11 +524,34 @@ class VideoFile(SpyglassMixin, dj.Imported):
                 f"expected pattern '{cam_device_regex}'"
             )
 
+        # Resolve the on-disk path.
+        # Priority: absolute external_file path (stored at ingestion, most
+        # reliable) > video_dir / basename (fallback for older NWB files or
+        # those written without external_file populated).
+        ext_files = getattr(video_obj, "external_file", None) or []
+        resolved_path = None
+        if ext_files:
+            file_to_use = file_idx if file_idx is not None else 0
+            if file_to_use < len(ext_files):
+                selected_ext = Path(ext_files[file_to_use])
+                if selected_ext.is_absolute() and selected_ext.exists():
+                    # Use the stored absolute path directly.
+                    resolved_path = selected_ext.as_posix()
+                video_filename = selected_ext.name
+            else:  # pragma: no cover
+                video_filename = video_obj.name
+        else:  # pragma: no cover
+            video_filename = video_obj.name
+
+        if resolved_path is None:
+            resolved_path = (Path(video_dir) / video_filename).as_posix()
+
         return dict(
             key,
             video_file_num=int(match[1]),
             camera_name=camera_name,
             video_file_object_id=video_obj.object_id,
+            path=resolved_path,
         )
 
     def _validate_video_timestamps(self, video_obj, valid_times, key):
@@ -658,7 +690,9 @@ class VideoFile(SpyglassMixin, dj.Imported):
                 continue
 
             # This file segment matches the epoch - prepare VideoFile entry
-            entry = self._prepare_video_entry(key.copy(), video_obj)
+            entry = self._prepare_video_entry(
+                key.copy(), video_obj, file_idx=file_idx
+            )
             entries.append(entry)
 
         return entries, max_overlap_pct
@@ -818,20 +852,134 @@ class VideoFile(SpyglassMixin, dj.Imported):
 
         logger.warning("\n".join(msg_parts))
 
+    def _update_1_entry(self, row: dict) -> dict:
+        """Attempt to fill camera_name and/or path for a single VideoFile row.
+
+        Opens the NWB once and uses the result for both fields.  Path
+        resolution tries ``ImageSeries.external_file`` first, then falls back
+        to ``get_abs_path``.
+
+        Parameters
+        ----------
+        row : dict
+            VideoFile primary-key dict, possibly containing pre-fetched
+            ``camera_name`` and ``path`` values (null fields are the ones
+            that need updating).
+
+        Returns
+        -------
+        dict with keys:
+            ``needs_camera``, ``needs_path`` : bool — what was missing.
+            ``camera_updated``, ``path_updated`` : bool — what was filled.
+            ``nwb_error`` : str | None — NWB fetch failure message.
+            ``path_error`` : str | None — path lookup failure message.
+        """
+        needs_camera = not row.get("camera_name")
+        needs_path = not row.get("path")
+        status = dict(
+            needs_camera=needs_camera,
+            needs_path=needs_path,
+            camera_updated=False,
+            path_updated=False,
+            nwb_error=None,
+            path_error=None,
+        )
+
+        if not (needs_camera or needs_path):
+            return status
+
+        try:
+            video_nwb = (self & row).fetch_nwb()
+        except (FileNotFoundError, ValueError, dj.DataJointError) as e:
+            status["nwb_error"] = str(e)
+            return status
+
+        if len(video_nwb) != 1:
+            raise ValueError(
+                f"Expected 1 video file per entry, got {len(video_nwb)}"
+            )
+        video_file = video_nwb[0]["video_file"]
+
+        if needs_camera:
+            row["camera_name"] = video_file.device.camera_name
+            status["camera_updated"] = True
+
+        if needs_path:
+            # Source 1: external_file in the NWB ImageSeries — most direct.
+            path_found = None
+            ext_files = getattr(video_file, "external_file", None)
+            if not isinstance(ext_files, (list, tuple)):
+                ext_files = []
+            for ext in ext_files:
+                p = Path(ext)
+                if p.is_absolute() and p.exists():
+                    path_found = p.as_posix()
+                    break
+
+            # Source 2: SPYGLASS_VIDEO_DIR lookup.
+            if path_found is None:
+                try:
+                    path_found = self.get_abs_path(row)
+                except FileNotFoundError as e:
+                    status["path_error"] = str(e)
+
+            if path_found is not None:
+                row["path"] = path_found
+                status["path_updated"] = True
+
+        self.update1(row=row)
+        return status
+
     @classmethod
-    def update_entries(cls, restrict=True):
-        """Update the camera_name field for all entries in the table."""
-        existing_entries = (cls & restrict).fetch("KEY")
-        for row in existing_entries:
-            if (cls & row).fetch1("camera_name"):
-                continue
-            video_nwb = (cls & row).fetch_nwb()[0]
-            if len(video_nwb) != 1:
-                raise ValueError(
-                    f"Expecting 1 video file per entry. {len(video_nwb)} found"
+    def update_entries(cls, restrict=True, display_progress=True):
+        """Update the camera_name and path fields for all null entries.
+
+        Delegates per-entry work to :meth:`_update_1_entry` and aggregates
+        the results into a summary log.
+        """
+        instance = cls()
+        query = instance & restrict & "camera_name IS NULL OR path IS NULL"
+        existing_entries = query.fetch("KEY")
+        total = len(existing_entries)
+        updated_camera = updated_path = skipped_camera = skipped_path = 0
+        failed_path = []
+
+        for row in tqdm(
+            existing_entries,
+            desc="Updating VideoFile entries",
+            disable=not display_progress,
+        ):
+            s = instance._update_1_entry(row)
+
+            if s["nwb_error"]:
+                instance._warn_msg(
+                    f"Could not fetch NWB for {row}: {s['nwb_error']}"
                 )
-            row["camera_name"] = video_nwb[0]["video_file"].device.camera_name
-            cls.update1(row=row)
+
+            updated_camera += s["camera_updated"]
+            skipped_camera += s["needs_camera"] and not s["camera_updated"]
+
+            updated_path += s["path_updated"]
+            skipped_path += (
+                s["needs_path"]
+                and not s["path_updated"]
+                and not s["path_error"]
+            )
+            if s["path_error"]:
+                failed_path.append((row, s["path_error"]))
+
+        msg = [
+            "VideoFile.update_entries:",
+            f"  entries checked: {total}",
+            f"  updated/skipped camera_name: {updated_camera}/{skipped_camera}",
+            f"  updated/skipped/failed path: {updated_path}/{skipped_path}/"
+            + f"{len(failed_path)}",
+        ]
+        if failed_path:
+            msg.append("  Failed path lookups:")
+            for row, err in failed_path:
+                msg.append(f"    {row}: {err}")
+        logger.info("\n".join(msg))
 
     @classmethod
     def get_abs_path(cls, key: Dict):
@@ -850,21 +998,201 @@ class VideoFile(SpyglassMixin, dj.Imported):
         nwb_video_file_abspath : str
             The absolute path for the given file name.
         """
-        video_path_obj = pathlib.Path(video_dir)
+        video_path_obj = Path(video_dir)
         video_info = (cls & key).fetch1()
+
+        # If the path was stored during make(), use it directly.
+        if stored_path := video_info.get("path"):
+            stored = Path(stored_path)
+            if stored.exists():
+                return stored.as_posix()
+
         nwb_path = Nwbfile.get_abs_path(key["nwb_file_name"])
         nwbf = get_nwb_file(nwb_path)
         nwb_video = nwbf.objects[video_info["video_file_object_id"]]
+
+        # If the stored object ID resolves to a non-ImageSeries (e.g. a stale
+        # reference to a ProcessingModule), search the NWB for ImageSeries.
+        if not isinstance(nwb_video, pynwb.image.ImageSeries):
+            image_series = [
+                obj
+                for obj in nwbf.objects.values()
+                if isinstance(obj, pynwb.image.ImageSeries)
+            ]
+            if not image_series:
+                raise FileNotFoundError(
+                    f"No ImageSeries found in {key['nwb_file_name']}"
+                )
+            nwb_video = image_series[0]
+
         video_filename = nwb_video.name
-        # see if the file exists and is stored in the base analysis dir
-        nwb_video_file_abspath = pathlib.Path(video_path_obj / video_filename)
+
+        # Try the NWB object name first (often equals the real filename)
+        nwb_video_file_abspath = Path(video_path_obj / video_filename)
         if nwb_video_file_abspath.exists():
             return nwb_video_file_abspath.as_posix()
-        else:
-            raise FileNotFoundError(
-                f"video file with filename: {video_filename} "
-                f"does not exist in {video_path_obj}/"
+
+        # Fallback: check external_file entries (actual on-disk video paths)
+        for ext_file in getattr(nwb_video, "external_file", None) or []:
+            ext = Path(ext_file)
+            if ext.is_absolute() and ext.exists():
+                return ext.as_posix()
+            abs_ext = video_path_obj / ext.name
+            if abs_ext.exists():
+                return abs_ext.as_posix()
+
+        raise FileNotFoundError(
+            f"video file with filename: {video_filename} "
+            f"does not exist in {video_path_obj}/"
+        )
+
+    @classmethod
+    def get_abs_paths(cls, key: Dict) -> list:
+        """Return absolute paths for all VideoFile rows matching *key*.
+
+        Unlike :meth:`get_abs_path`, *key* may be a partial primary key
+        (e.g. ``{nwb_file_name, epoch}`` without ``video_file_num``).  Every
+        matching row is resolved and returned as a list, which handles
+        multi-camera epochs gracefully.
+
+        Parameters
+        ----------
+        key : dict
+            Partial or full primary key for VideoFile.
+
+        Returns
+        -------
+        list of str
+            Absolute paths for all matching video files.
+
+        Raises
+        ------
+        ValueError
+            If no VideoFile rows match *key*.
+        """
+        row_keys = (cls & key).fetch("KEY")
+        if not row_keys:
+            raise ValueError(f"No VideoFile rows found for key: {key}")
+        return [cls.get_abs_path(k) for k in row_keys]
+
+    def _narrow_key_lookup(self, video_path: str, restriction=None) -> tuple:
+        """Select a single VideoFile PK for *video_path* under *restriction*.
+
+        Fetches ``(KEY, path)`` rows from ``VideoFile & restriction``, then
+        tries two strategies in order of decreasing reliability:
+
+        1. Only one candidate row — trivially unambiguous.
+        2. ``VideoFile.path`` basename matches the video filename.  Requires
+           ``VideoFile.path`` to be populated; call
+           ``VideoFile.update_entries()`` first if paths are null.
+
+        Parameters
+        ----------
+        video_path : str
+            Path to the video file as it appears in the DLC config's
+            ``video_sets`` dict.
+        restriction : any, optional
+            DataJoint restriction applied to ``VideoFile`` before fetching
+            candidates.  Defaults to no restriction — all rows.
+            Pass a dict such as ``{"nwb_file_name": "SC38_20230606_.nwb"}``
+            to scope the search to a specific session.
+
+        Returns
+        -------
+        tuple[dict | None, list[dict]]
+            ``(pk_dict, [])`` when exactly one match is found;
+            ``(None, candidates)`` when the result is ambiguous or no rows
+            were fetched.  The pk_dict contains only the primary-key fields
+            (``nwb_file_name``, ``epoch``, ``video_file_num``).
+        """
+        restriction = restriction or self.restriction or True
+
+        vf_rows = (self & restriction).fetch("KEY", "path", as_dict=True)
+        if not vf_rows:
+            return None, []
+
+        _pk_fields = ("nwb_file_name", "epoch", "video_file_num")
+        _pk = lambda r: {k: r[k] for k in _pk_fields if k in r}  # noqa: E731
+
+        def _fill_path(row):
+            """Backfill VideoFile.path with video_path when currently null."""
+            if not row.get("path") and video_path:
+                # update1 requires the full PK in the dict; call on the base
+                # table (self), not on a restricted expression.
+                self.update1({**_pk(row), "path": video_path})
+
+        # Strategy 1 — only one VideoFile for this session: nothing to decide.
+        if len(vf_rows) == 1:
+            _fill_path(vf_rows[0])
+            return _pk(vf_rows[0]), []
+
+        vp_name = Path(video_path).name
+        vp_stem = Path(video_path).stem  # e.g. "20231007_SC1002_10_r5"
+
+        # Strategy 2 — basename match, with extension-agnostic fallback.
+        # V1 NWB ingestion stored raw paths (e.g. "file.1.h264") while DLC
+        # worked from mp4 conversions ("file.mp4").  The stems match but the
+        # suffixes differ.  Accept a VideoFile when its basename equals the DLC
+        # name exactly OR when it starts with the DLC stem followed by "." —
+        # i.e. "file.1.h264".startswith("file.") is True.
+        # Requires VideoFile.path to be populated; call update_entries() first
+        # if paths are null.
+        by_name = [
+            r
+            for r in vf_rows
+            if r.get("path")
+            and (
+                Path(r["path"]).name == vp_name
+                or Path(r["path"]).name.startswith(vp_stem + ".")
             )
+        ]
+        if len(by_name) == 1:
+            return _pk(by_name[0]), []
+
+        # All strategies exhausted — caller decides how to handle ambiguity.
+        # If ambiguity persists, run VideoFile.update_entries() to populate
+        # null path fields, then retry.
+        return None, vf_rows
+
+    def fetch_key_from_path(
+        self, video_file_path: str, update_on_miss: bool = False
+    ) -> Dict:
+        """Return the primary key for a given video file path.
+
+        Parameters
+        ----------
+        video_file_path : str
+            The path to the video file.
+        update_on_miss : bool
+            If True and the path is not found in the table, call
+            ``update_entries()`` to refresh null-path rows, then retry.
+            Defaults to False to avoid the O(N) scan on every read. Call
+            ``VideoFile.update_entries()`` explicitly before this method if
+            you expect newly-ingested paths to be present.
+
+        Returns
+        -------
+        key : dict
+            The primary key for the given video file path.
+        """
+        video_path = Path(video_file_path).resolve()
+
+        if not video_path.exists():
+            raise FileNotFoundError(f"File {video_path} does not exist.")
+
+        query = self & {"path": video_path.as_posix()}
+
+        if not query and update_on_miss:
+            # Caller opted in — refresh null-path entries then retry once
+            self.update_entries()
+            query = self & {"path": video_path.as_posix()}
+
+        if len(query) != 1:
+            raise ValueError(
+                f"No unique entry in VideoFile for {video_path}: \n{query}"
+            )
+
+        return query.fetch1("KEY")
 
 
 @schema
@@ -878,10 +1206,6 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
     # #849 - Insert null to avoid rerun
 
     def make(self, key):
-        """Make without transaction"""
-        self._no_transaction_make(key)
-
-    def _no_transaction_make(self, key):
         # Find correspondence between pos valid times names and epochs. Use
         # epsilon to tolerate small differences in epoch boundaries across
         # epoch/pos intervals
@@ -1007,7 +1331,7 @@ def convert_epoch_interval_name_to_position_interval_name(
     if populate_missing and (no_entries or null_entry):
         if null_entry:
             pos_query.delete(safemode=False)  # no prompt
-        PositionIntervalMap()._no_transaction_make(key)
+        PositionIntervalMap().make(key)
         pos_query = PositionIntervalMap & key
 
     if pos_query.fetch(pos_str)[0] == "":

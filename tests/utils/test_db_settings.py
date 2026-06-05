@@ -51,3 +51,10 @@ def test_add_roles(add_roles, role):
         exp_user.add(f"GRANT ALL PRIVILEGES ON `{user}\\_%`.* TO `{user}`")
     act_user = grants_act(f"user_{role}")
     assert exp_user == act_user, f"Unexpected grants on user {role}."
+
+
+def test_migrated_database_settings_validation():
+    from spyglass.utils.database_settings import DatabaseSettings
+
+    settings = DatabaseSettings()
+    assert settings is not None

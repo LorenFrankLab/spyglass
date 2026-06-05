@@ -47,7 +47,7 @@
       "storage": "/your/base/path/kachery_storage",
       "temp": "/your/base/path/tmp"
     },
-    "dlc_dirs": {
+    "pose_dirs": {
       "base": "/your/base/path/deeplabcut",
       "project": "/your/base/path/deeplabcut/projects",
       "video": "/your/base/path/deeplabcut/video",

@@ -1,0 +1,44 @@
+# Position pipeline environment (DLC 3.0+ / PyTorch backend)
+#
+# 1. Install the correct GPU driver for your machine.
+#    See https://stackoverflow.com/a/30820690
+# 2. Create the environment:
+#      mamba env create -f environments/environment_position.yml
+#    Update an existing install:
+#      mamba env update -f environments/environment_position.yml
+# 3. Activate and configure:
+#      conda activate spyglass-position
+#      mamba env config vars set LD_LIBRARY_PATH=~/path/to/mambaforge/envs/spyglass-position/lib/
+#
+# Note: environment_dlc.yml (DLC 2.x / TensorFlow) is deprecated.
+#       Use this file for all new installs.
+name: spyglass-position
+channels:
+  - conda-forge
+  - pytorch
+  - franklab
+  - edeno
+dependencies:
+  - bottleneck
+  - ffmpeg
+  - ipympl
+  - jupyterlab>=3.*
+  - matplotlib
+  - non_local_detector
+  - numpy
+  - pip>=20.2.*
+  - position_tools
+  - pybind11
+  - pydotplus>=2.0.*
+  - pyfftw<=0.12.0
+  - python>=3.10,<3.13
+  - pytorch>=2.0
+  - ripple_detection
+  - seaborn
+  - torchvision
+  - track_linearization>=2.3
+  - pip:
+      - ghostipy
+      - mountainsort4
+      - ndx-pose>=0.2.0
+      - ..[dlc]

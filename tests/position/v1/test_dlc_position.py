@@ -116,7 +116,8 @@ def test_all_nans(populate_pose_estimation, sgp):
     restr_tbl = pose_est_tbl.BodyPart & dj.Top()
     df = restr_tbl.fetch1_dataframe()
     with pytest.raises(ValueError):
-        sgp.v1.position_dlc_position.nan_inds(df, 10, 0.99, 10)
+        # Use likelihood threshold of 1.1 (impossible) to force all points below threshold
+        sgp.v1.position_dlc_position.nan_inds(df, 10, 1.1, 10)
 
 
 # Parameterized test cases using pytest.mark.parametrize

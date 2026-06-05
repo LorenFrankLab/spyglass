@@ -1,12 +1,20 @@
-from .dlc_reader import do_pose_estimation, read_yaml, save_yaml
-from .dlc_utils import (
+# Import only remaining V1-specific utilities from dlc_utils
+# Import shared utilities from utils modules
+from spyglass.position.utils.centroid import Centroid
+from spyglass.position.utils.interpolation import _key_to_smooth_func_dict
+from spyglass.position.utils.validation import validate_list, validate_option
+
+from spyglass.position.utils.general import (
     _convert_mp4,
-    find_full_path,
     find_mp4,
+    get_video_info,
+)
+
+from .dlc_utils import (
+    find_full_path,
     find_root_directory,
     get_dlc_processed_data_dir,
     get_dlc_root_data_dir,
-    get_video_info,
 )
 from .position_dlc_centroid import (
     DLCCentroid,

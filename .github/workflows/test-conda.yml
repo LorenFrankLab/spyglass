@@ -116,9 +116,9 @@ jobs:
       run: |
         # Determine which tests to run based on trigger
         if [[ "${{ github.event_name }}" == "push" ]]; then
-          # Fast tests on push
+          # Fast tests on push - exclude slow but include position
           echo "mode=fast" >> $GITHUB_OUTPUT
-          echo "marker_args=-m 'not slow and not very_slow'" \
+          echo "marker_args=-m 'not very_slow'" \
             >> $GITHUB_OUTPUT
           echo "description=Fast tests" >> $GITHUB_OUTPUT
         elif [[ "${{ github.event_name }}" == "pull_request" ]] \
@@ -132,7 +132,7 @@ jobs:
           # Manual trigger - use input
           if [[ "${{ github.event.inputs.test_mode }}" == "fast" ]]; then
             echo "mode=fast" >> $GITHUB_OUTPUT
-            echo "marker_args=-m 'not slow and not very_slow'" \
+            echo "marker_args=-m 'not very_slow'" \
               >> $GITHUB_OUTPUT
             echo "description=Fast tests (manual)" >> $GITHUB_OUTPUT
           else
@@ -141,15 +141,15 @@ jobs:
             echo "description=Full suite (manual)" >> $GITHUB_OUTPUT
           fi
         else
-          # Full suite for schedule and other PR events
+          # PR events - fast tests but include position for coverage
           # (synchronize, opened, etc.)
-          echo "mode=full" >> $GITHUB_OUTPUT
-          echo "marker_args=" >> $GITHUB_OUTPUT
-          echo "description=Full test suite" >> $GITHUB_OUTPUT
+          echo "mode=pr" >> $GITHUB_OUTPUT
+          echo "marker_args=-m 'not slow and not very_slow'" >> $GITHUB_OUTPUT
+          echo "description=PR test suite with position coverage" >> $GITHUB_OUTPUT
         fi
     - name: Run tests (${{ steps.test_mode.outputs.description }})
       run: |
-        pytest --no-docker --no-dlc \
+        pytest --no-docker --no-pose \
           --cov-config=.coveragerc --cov=spyglass-neuro --cov-report=xml \
           ${{ steps.test_mode.outputs.marker_args }} \
           tests/

@@ -782,7 +782,7 @@ class TestBuildDirectoryStructure:
         base_dir = tmp_path / "spyglass_data"
         dirs = build_directory_structure(base_dir, create=True, verbose=False)
 
-        prefixes = {"spyglass", "kachery", "dlc", "moseq"}
+        prefixes = {"spyglass", "kachery", "pose", "moseq"}
         for prefix in prefixes:
             matching = [k for k in dirs.keys() if k.startswith(f"{prefix}_")]
             assert len(matching) > 0, f"No directories for prefix {prefix}"
@@ -815,7 +815,7 @@ class TestValidateSchema:
                     "storage": "kachery_storage",
                     "temp": "tmp",
                 },
-                "dlc": {
+                "pose": {
                     "project": "projects",
                     "video": "video",
                     "output": "output",
@@ -837,7 +837,7 @@ class TestValidateSchema:
             "directory_schema": {
                 "spyglass": {"raw": "raw"},
                 "kachery": {"cloud": ".kachery-cloud"},
-                # Missing dlc and moseq
+                # Missing pose and moseq
             }
         }
         with pytest.raises(ValueError, match="Missing prefixes"):
@@ -1321,7 +1321,7 @@ class TestLoadDirectorySchema:
     def test_has_all_prefixes(self):
         """Has all four required prefixes."""
         schema = load_directory_schema()
-        assert set(schema.keys()) == {"spyglass", "kachery", "dlc", "moseq"}
+        assert set(schema.keys()) == {"spyglass", "kachery", "pose", "moseq"}
 
     def test_spyglass_has_expected_keys(self):
         """spyglass prefix has expected directory keys."""
@@ -1344,11 +1344,11 @@ class TestLoadDirectorySchema:
         expected = {"cloud", "storage", "temp"}
         assert set(schema["kachery"].keys()) == expected
 
-    def test_dlc_has_expected_keys(self):
-        """dlc prefix has expected directory keys."""
+    def test_pose_has_expected_keys(self):
+        """pose prefix has expected directory keys."""
         schema = load_directory_schema()
         expected = {"project", "video", "output"}
-        assert set(schema["dlc"].keys()) == expected
+        assert set(schema["pose"].keys()) == expected
 
     def test_moseq_has_expected_keys(self):
         """moseq prefix has expected directory keys."""
@@ -1522,7 +1522,7 @@ class TestCreateDatabaseConfig:
         expected_keys = {"cloud", "storage", "temp"}
         assert set(kachery_dirs.keys()) == expected_keys
 
-    def test_config_has_dlc_dirs(self, tmp_path, monkeypatch):
+    def test_config_has_pose_dirs(self, tmp_path, monkeypatch):
         """Config file has DeepLabCut directory paths."""
         import json
 
@@ -1541,9 +1541,9 @@ class TestCreateDatabaseConfig:
         with config_file.open() as f:
             config = json.load(f)
 
-        dlc_dirs = config["custom"]["dlc_dirs"]
+        pose_dirs = config["custom"]["pose_dirs"]
         expected_keys = {"base", "project", "video", "output"}
-        assert set(dlc_dirs.keys()) == expected_keys
+        assert set(pose_dirs.keys()) == expected_keys
 
     def test_config_has_moseq_dirs(self, tmp_path, monkeypatch):
         """Config file has MoSeq directory paths."""
@@ -1793,7 +1793,7 @@ class TestFrankLabConfig:
         custom = config["custom"]
         assert "spyglass_dirs" in custom
         assert "kachery_dirs" in custom
-        assert "dlc_dirs" in custom
+        assert "pose_dirs" in custom
         assert "moseq_dirs" in custom
 
     def test_franklab_config_directories_match_schema(
@@ -2113,11 +2113,11 @@ class TestConfigCompatibility:
                     "storage": str(dirs["kachery_storage"]),
                     "temp": str(dirs["kachery_temp"]),
                 },
-                "dlc_dirs": {
+                "pose_dirs": {
                     "base": str(base_dir / "deeplabcut"),
-                    "project": str(dirs["dlc_project"]),
-                    "video": str(dirs["dlc_video"]),
-                    "output": str(dirs["dlc_output"]),
+                    "project": str(dirs["pose_project"]),
+                    "video": str(dirs["pose_video"]),
+                    "output": str(dirs["pose_output"]),
                 },
                 "moseq_dirs": {
                     "base": str(base_dir / "moseq"),

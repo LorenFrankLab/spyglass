@@ -1,0 +1,428 @@
+"""Orientation calculation utilities for pose estimation.
+
+This module provides tool-agnostic methods for calculating animal orientation
+from tracked bodyparts. Supports multiple strategies depending on marker
+configuration.
+
+Functions
+---------
+two_pt_orientation
+    Calculate orientation from vector between two points
+bisector_orientation
+    Calculate orientation from perpendicular bisector of two markers
+no_orientation
+    Return NaN array (no orientation calculated)
+interp_orientation
+    Interpolate orientation over NaN spans
+smooth_orientation
+    Complete orientation processing pipeline with unwrap-smooth-wrap
+"""
+
+from itertools import groupby
+from operator import itemgetter
+from typing import List, Tuple
+
+import numpy as np
+import pandas as pd
+
+from spyglass.utils.logging import logger
+
+try:
+    from position_tools.core import gaussian_smooth
+except ImportError:
+    gaussian_smooth = None
+
+
+def get_span_start_stop(indices: np.ndarray) -> List[Tuple[int, int]]:
+    """Find start and stop indices of consecutive index spans.
+
+    Parameters
+    ----------
+    indices : np.ndarray
+        Array of indices to group into consecutive spans
+
+    Returns
+    -------
+    List[Tuple[int, int]]
+        List of (start, stop) tuples for each consecutive span
+
+    Examples
+    --------
+    >>> indices = np.array([0, 1, 2, 5, 6, 10])
+    >>> get_span_start_stop(indices)
+    [(0, 2), (5, 6), (10, 10)]
+    """
+    span_inds = []
+    for k, g in groupby(enumerate(indices), lambda x: x[1] - x[0]):
+        group = list(map(itemgetter(1), g))
+        span_inds.append((group[0], group[-1]))
+    return span_inds
+
+
+def two_pt_orientation(
+    pos_df: pd.DataFrame,
+    point1: str = None,
+    point2: str = None,
+    bodypart1: str = None,
+    bodypart2: str = None,
+    **kwargs,
+) -> np.ndarray:
+    """Calculate orientation from vector between two bodyparts.
+
+    Orientation is defined as the angle from point2 to point1, measured
+    counter-clockwise from the positive x-axis. Result is in radians [-π, π].
+
+    Parameters
+    ----------
+    pos_df : pd.DataFrame
+        Position data with MultiIndex columns: (bodypart, coord)
+        where coord is 'x' or 'y'
+    point1 : str, optional
+        Rear/tail marker — the vector originates here.
+    point2 : str, optional
+        Front/head marker — the vector points away from here.
+    bodypart1 : str, optional
+        V1 alias for ``point1``.
+    bodypart2 : str, optional
+        V1 alias for ``point2``.
+    **kwargs
+        Additional keyword arguments (ignored).
+
+    Returns
+    -------
+    np.ndarray
+        Orientation in radians, shape (n_frames,)
+        NaN where either point is NaN
+    """
+    point1 = point1 or bodypart1
+    point2 = point2 or bodypart2
+    orientation = np.arctan2(
+        pos_df[point1]["y"] - pos_df[point2]["y"],
+        pos_df[point1]["x"] - pos_df[point2]["x"],
+    )
+    return orientation.values
+
+
+def no_orientation(
+    pos_df: pd.DataFrame,
+    fill_with: float = np.nan,
+    **kwargs,
+) -> np.ndarray:
+    """Return array of constant values (typically NaN) for orientation.
+
+    Used when orientation calculation is not needed or not possible.
+
+    Parameters
+    ----------
+    pos_df : pd.DataFrame
+        Position data (only used for length)
+    fill_with : float, optional
+        Value to fill array with, by default np.nan
+    **kwargs
+        Additional keyword arguments (ignored, for compatibility)
+
+    Returns
+    -------
+    np.ndarray
+        Array of shape (n_frames,) filled with fill_with
+
+    Examples
+    --------
+    >>> orientation = no_orientation(pos_df)  # All NaN
+    >>> orientation = no_orientation(pos_df, fill_with=0.0)  # All zeros
+    """
+    n_frames = len(pos_df)
+    orientation = np.full(
+        shape=(n_frames,), fill_value=fill_with, dtype=np.float32
+    )
+    return orientation
+
+
+def bisector_orientation(
+    pos_df: pd.DataFrame,
+    led1: str,
+    led2: str,
+    led3: str,
+    **kwargs,
+) -> np.ndarray:
+    """Calculate orientation from perpendicular bisector of two markers.
+
+    This method uses two markers (led1, led2) assumed to be perpendicular to
+    the orientation direction, plus a third marker (led3) to determine
+    forward/backward direction.
+
+    The orientation is the perpendicular bisector of the line connecting
+    led1 and led2, with direction determined by led3.
+
+    Parameters
+    ----------
+    pos_df : pd.DataFrame
+        Position data with MultiIndex columns: (bodypart, coord)
+    led1 : str
+        Name of first perpendicular marker
+    led2 : str
+        Name of second perpendicular marker (opposite side)
+    led3 : str
+        Name of forward/backward marker (determines direction)
+    **kwargs
+        Additional keyword arguments (ignored, for compatibility)
+
+    Returns
+    -------
+    np.ndarray
+        Orientation in radians, shape (n_frames,)
+        Range: [-π, π]
+
+    Raises
+    ------
+    ValueError
+        If all three markers are collinear (cannot determine direction)
+
+    Examples
+    --------
+    >>> # Three LEDs: two on sides, one on head
+    >>> orientation = bisector_orientation(
+    ...     pos_df, led1='left_led', led2='right_led', led3='head_led'
+    ... )
+
+    Notes
+    -----
+    Algorithm:
+    1. Compute vector from led2 to led1: (x_vec, y_vec)
+    2. Perpendicular vector: (-y_vec, x_vec) / |vector|
+    3. Use led3 position to determine sign of orientation
+    4. Special handling when y_vec ≈ 0 (horizontal alignment)
+    """
+    orient = np.full(len(pos_df), np.nan)  # Initialize with NaNs
+
+    # Vector from led2 to led1
+    x_vec = pos_df[led1]["x"] - pos_df[led2]["x"]
+    y_vec = pos_df[led1]["y"] - pos_df[led2]["y"]
+    length = np.sqrt(x_vec**2 + y_vec**2)
+    y_eq0 = np.isclose(y_vec, 0)
+    zero_length = np.isclose(length, 0)  # led1 == led2 → leave as NaN
+
+    # Forward direction: led3 relative to midpoint of led1/led2
+    mid_x = (pos_df[led1]["x"] + pos_df[led2]["x"]) / 2
+    mid_y = (pos_df[led1]["y"] + pos_df[led2]["y"]) / 2
+    fwd_x = pos_df[led3]["x"] - mid_x
+    fwd_y = pos_df[led3]["y"] - mid_y
+
+    # Special case: led1 and led2 are horizontally aligned; perpendicular is vertical
+    horiz = y_eq0 & ~zero_length
+    orient[horiz & (fwd_y.values > 0)] = np.pi / 2
+    orient[horiz & (fwd_y.values < 0)] = -np.pi / 2
+
+    # Error case: all three markers collinear
+    y_1, y_2, y_3 = pos_df[led1]["y"], pos_df[led2]["y"], pos_df[led3]["y"]
+    if np.any(y_eq0 & np.isclose(y_1, y_2) & np.isclose(y_2, y_3)):
+        raise ValueError(
+            "Cannot determine orientation from bisector: "
+            "all three markers are collinear. "
+            f"Markers: {led1}, {led2}, {led3}"
+        )
+
+    # Dot of candidate perpendicular (-y_vec, x_vec) with forward vector;
+    # negative dot → flip sign so orientation points toward led3.
+    # NaN dot (led3 unknown) → keep default sign=1 (preserves pre-fix behavior).
+    gen_mask = ~y_eq0 & ~zero_length
+    dot = (-y_vec * fwd_x + x_vec * fwd_y).values[gen_mask]
+    sign = np.where(np.isnan(dot) | (dot >= 0), 1.0, -1.0)
+    norm_x = sign * (-y_vec.values[gen_mask]) / length.values[gen_mask]
+    norm_y = sign * x_vec.values[gen_mask] / length.values[gen_mask]
+    orient[gen_mask] = np.arctan2(norm_y, norm_x)
+
+    return orient
+
+
+def interp_orientation(
+    df: pd.DataFrame,
+    spans_to_interp: List[Tuple[int, int]],
+    **kwargs,
+) -> pd.DataFrame:
+    """Linearly interpolate orientation over NaN spans.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame with 'orientation' column and time index
+    spans_to_interp : List[Tuple[int, int]]
+        List of (start_idx, stop_idx) tuples indicating NaN spans
+    **kwargs
+        Additional keyword arguments (ignored, for compatibility)
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with interpolated orientation values
+
+    Notes
+    -----
+    - Spans at the beginning or end of data are left as NaN
+    - Interpolation is linear between bounding points
+    - Input orientation should be unwrapped before calling
+    """
+    from spyglass.position.utils.interpolation import _interpolate_spans_generic
+
+    # Handle boundary spans by explicitly setting them to NaN
+    for span_start, span_stop in spans_to_interp:
+        span_times = df.index[span_start : span_stop + 1]
+
+        # Set NaN for spans at beginning or end (can't interpolate)
+        if span_start < 1 or (span_stop + 1) >= len(df):
+            df.loc[span_times, "orientation"] = np.nan
+
+    # Filter out boundary spans for the consolidated interpolation
+    valid_spans = [
+        (start, stop)
+        for start, stop in spans_to_interp
+        if start >= 1 and (stop + 1) < len(df)
+    ]
+
+    if not valid_spans:
+        return df
+
+    def get_boundary_values(df, span_start, span_stop):
+        """Extract orientation boundary values for interpolation."""
+        return {
+            "orientation": [
+                df["orientation"].iloc[span_start - 1],
+                df["orientation"].iloc[span_stop + 1],
+            ]
+        }
+
+    def apply_interpolated_values(
+        df,
+        span_start,
+        span_stop,
+        boundary_values,
+        span_times,
+        time_before,
+        time_after,
+        idx,
+    ):
+        """Apply interpolated orientation values to dataframe."""
+        # Interpolate orientation
+        orient_new = np.interp(
+            x=span_times,
+            xp=[time_before, time_after],
+            fp=[
+                boundary_values["orientation"][0],
+                boundary_values["orientation"][1],
+            ],
+        )
+
+        # Apply interpolated values
+        df.loc[idx[span_times[0] : span_times[-1]], "orientation"] = orient_new
+
+    def get_error_context(ind, error_type):
+        """Generate error messages for orientation interpolation."""
+        return f"Index {ind} has no {error_type}point with which to interpolate"
+
+    return _interpolate_spans_generic(
+        df,
+        valid_spans,
+        get_boundary_values,
+        apply_interpolated_values,
+        None,
+        get_error_context,
+    )
+
+
+def smooth_orientation(
+    orientation: np.ndarray,
+    timestamps: np.ndarray,
+    std_dev: float,
+    interpolate: bool = True,
+) -> np.ndarray:
+    """Complete orientation processing pipeline with unwrap-smooth-wrap.
+
+    This function performs the standard orientation processing workflow:
+    1. Unwrap orientation (handle -π/π discontinuities)
+    2. Interpolate over NaN spans (if requested)
+    3. Gaussian smooth
+    4. Wrap back to [-π, π]
+
+    Parameters
+    ----------
+    orientation : np.ndarray
+        Raw orientation in radians, shape (n_frames,)
+        May contain NaN values
+    timestamps : np.ndarray
+        Timestamps for each frame, shape (n_frames,)
+    std_dev : float
+        Standard deviation for Gaussian smoothing (in seconds)
+    interpolate : bool, optional
+        Whether to interpolate over NaN spans before smoothing,
+        by default True
+
+    Returns
+    -------
+    np.ndarray
+        Smoothed orientation in radians [-π, π], shape (n_frames,)
+
+    Raises
+    ------
+    ImportError
+        If position_tools is not installed (required for gaussian_smooth)
+
+    Examples
+    --------
+    >>> orientation_smooth = smooth_orientation(
+    ...     orientation=raw_orientation,
+    ...     timestamps=timestamps,
+    ...     std_dev=0.001,  # 1 ms smoothing
+    ...     interpolate=True
+    ... )
+
+    Notes
+    -----
+    - Unwrapping prevents smoothing artifacts at -π/π boundary
+    - Gaussian smoothing uses position_tools.core.gaussian_smooth
+    - Final wrapping ensures result is in standard range [-π, π]
+    """
+    if gaussian_smooth is None:
+        raise ImportError(
+            "position_tools is required for orientation smoothing. "
+            "Install with: pip install position-tools"
+        )
+
+    # Identify NaN locations
+    is_nan = np.isnan(orientation)
+
+    # 1. Unwrap orientation (handle -π/π discontinuities)
+    unwrap_orientation = orientation.copy()
+    # Only unwrap non-NaN values
+    unwrap_orientation[~is_nan] = np.unwrap(orientation[~is_nan])
+
+    # 2. Interpolate over NaN spans (if requested)
+    if interpolate and np.any(is_nan):
+        # Find NaN spans
+        nan_indices = np.where(is_nan)[0]
+        nan_spans = get_span_start_stop(nan_indices)
+
+        # Create DataFrame for interpolation
+        unwrap_df = pd.DataFrame(
+            unwrap_orientation,
+            columns=["orientation"],
+            index=timestamps,
+        )
+
+        # Interpolate
+        unwrap_df = interp_orientation(unwrap_df, nan_spans)
+        unwrap_orientation = unwrap_df["orientation"].to_numpy()
+
+    # 3. Gaussian smooth
+    sampling_rate = 1 / np.median(np.diff(timestamps))
+    smooth_orient = gaussian_smooth(
+        unwrap_orientation,
+        std_dev,
+        sampling_rate,
+        axis=0,
+        truncate=8,
+    )
+
+    # 4. Wrap back to [-π, π]
+    orientation_final = np.angle(np.exp(1j * smooth_orient))
+
+    return orientation_final
