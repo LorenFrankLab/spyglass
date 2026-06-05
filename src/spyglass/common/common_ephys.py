@@ -66,9 +66,7 @@ class ElectrodeGroup(SpyglassIngestion, dj.Imported):
         key = dict(
             base_key,
             electrode_group_name=nwb_obj.name,
-            region_id=BrainRegion.fetch_add(
-                region_name=nwb_obj.location
-            ),
+            region_id=BrainRegion.fetch_add(region_name=nwb_obj.location),
             description=nwb_obj.description,
         )
 
