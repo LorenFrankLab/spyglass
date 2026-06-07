@@ -194,6 +194,53 @@ def resolve_peak_sign(params) -> str:
     return "neg"
 
 
+def resolve_conversion_and_offset(recording) -> tuple[float, float]:
+    """Resolve the ElectricalSeries ``(conversion, offset)`` for a recording.
+
+    v2 writes traces UNSCALED (``return_in_uV=False``), so the persisted
+    ElectricalSeries must carry BOTH the gain (as ``conversion``) and the
+    per-channel offset (as ``offset``) to recover physical volts on readback:
+    ``volts = raw * conversion + offset``. SpikeInterface stores per-channel
+    gain/offset in microvolts (``uV = raw*gain + offset``); a single NWB
+    ``conversion``/``offset`` scalar can only represent a UNIFORM gain/offset,
+    so heterogeneous values are rejected rather than silently mis-scaled.
+
+    Dropping the offset (the prior behavior, inherited from v1) silently biased
+    every channel by ``offset`` uV on readback for recordings with a non-zero
+    DC offset (e.g. Intan / Open Ephys). A non-positive gain (``0`` ->
+    all-zero recording, negative -> sign flip) is also rejected.
+
+    Returns
+    -------
+    (conversion, offset) : tuple of float
+        Volts-per-count and volts, for the ElectricalSeries.
+    """
+    import numpy as np
+
+    gains = np.unique(recording.get_channel_gains())
+    if len(gains) != 1:
+        raise ValueError(
+            "resolve_conversion_and_offset: recording has heterogeneous "
+            f"channel gains {gains.tolist()}; v2 ElectricalSeries write "
+            "requires a single conversion factor. Verify probe metadata for "
+            "the sort group."
+        )
+    if gains[0] <= 0:
+        raise ValueError(
+            "resolve_conversion_and_offset: recording has a non-positive "
+            f"channel gain {float(gains[0])}; cannot scale to volts. Verify "
+            "probe metadata for the sort group."
+        )
+    offsets = np.unique(recording.get_channel_offsets())
+    if len(offsets) != 1:
+        raise ValueError(
+            "resolve_conversion_and_offset: recording has heterogeneous "
+            f"channel offsets {offsets.tolist()}; a single ElectricalSeries "
+            "offset cannot represent them."
+        )
+    return float(gains[0]) * 1e-6, float(offsets[0]) * 1e-6
+
+
 def electrode_table_region(nwbf, electrode_ids, description: str):
     """Build an ElectricalSeries electrode-table region from electrode ids.
 

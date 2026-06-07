@@ -1805,6 +1805,7 @@ class Recording(SpyglassMixin, dj.Computed):
             _get_recording_timestamps,
             _hash_nwb_recording,
             electrode_table_region,
+            resolve_conversion_and_offset,
         )
 
         import pathlib as _pathlib
@@ -1824,27 +1825,13 @@ class Recording(SpyglassMixin, dj.Computed):
                 from_schema=bool(existing_analysis_file_name),
             )
 
-            # v2 raises instead of silently picking gains[0] (v1's
-            # behavior at v1/recording.py:858). The "pick first"
-            # approach is a latent correctness bug: the chosen gain
-            # becomes the universal conversion factor on the
-            # ElectricalSeries, so signals on channels with
-            # heterogeneous gains are scaled by the wrong factor.
-            # Catching the input invariant at populate time is
-            # preferred to silently producing incorrectly-scaled
-            # data (see shared-contracts.md).
-            gains = _np.unique(recording.get_channel_gains())
-            if len(gains) != 1:
-                raise ValueError(
-                    "Recording.make: recording has heterogeneous channel "
-                    f"gains {gains.tolist()}; v2 ElectricalSeries write "
-                    "requires a single conversion factor. Verify probe "
-                    "metadata for the sort group."
-                )
             # Traces are written unscaled (return_in_uV=False), so the
-            # ElectricalSeries ``conversion`` carries gain x (uV->V) to
-            # recover real volts on readback.
-            conversion = float(gains[0]) * 1e-6
+            # ElectricalSeries must carry gain (as ``conversion``) AND offset
+            # (as ``offset``) to recover real volts on readback:
+            # ``volts = raw * conversion + offset``. The resolver rejects
+            # heterogeneous gain/offset and non-positive gain (v1 silently
+            # picked gains[0] and dropped offset entirely).
+            conversion, es_offset = resolve_conversion_and_offset(recording)
 
             # The data iterator drives ``recording.get_traces(...)``
             # per chunk and never materializes the whole array. The
@@ -1888,6 +1875,7 @@ class Recording(SpyglassMixin, dj.Computed):
                         f"{nwb_file_name} for spike sorting"
                     ),
                     conversion=conversion,
+                    offset=es_offset,
                 )
                 nwbfile.add_acquisition(series)
                 object_id = nwbfile.acquisition[
