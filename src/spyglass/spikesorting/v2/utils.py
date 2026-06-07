@@ -796,8 +796,11 @@ def _spike_times_to_frames(recording_times, spike_times, n_samples, unit_id):
     ``side='left'``: a spike exactly equal to ``recording_times[-1]``
     maps to ``n_samples - 1`` (valid). Floating-point rounding can still
     land a near-final spike at ``n_samples`` (one past the end), which
-    SpikeInterface rejects; those out-of-bounds frames are dropped with
-    a warning, matching v1.
+    SpikeInterface rejects; those out-of-bounds frames are CLAMPED to the
+    last sample (with a warning) rather than dropped, so the returned
+    frame count always matches ``spike_times`` -- dropping them desyncs
+    downstream per-spike features (v1 dropped, but v1's consumer path did
+    not have the v2 analyzer 1:1 alignment check).
 
     Parameters
     ----------
@@ -825,12 +828,15 @@ def _spike_times_to_frames(recording_times, spike_times, n_samples, unit_id):
     n_excess = int(excess_mask.sum())
     if n_excess > 0:
         logger.warning(
-            f"Unit {unit_id} has {n_excess} spike(s) exceeding the "
-            "recording duration. Removing excess spikes. This may be "
-            "caused by floating-point rounding during the seconds-to-"
-            "samples conversion."
+            f"Unit {unit_id} has {n_excess} spike(s) whose searchsorted "
+            "frame landed at n_samples (floating-point rounding of the final "
+            "spike's absolute time). Clamping to the last sample to keep the "
+            "frame count aligned with the persisted spike_times -- dropping "
+            "them would desync downstream per-spike features (the "
+            "UnitWaveformFeatures n_feat==n_spikes check)."
         )
-        spike_frames = spike_frames[~excess_mask]
+        spike_frames = spike_frames.copy()
+        spike_frames[excess_mask] = n_samples - 1
     return spike_frames
 
 

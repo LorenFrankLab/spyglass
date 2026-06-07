@@ -61,13 +61,16 @@ def test_spike_times_to_frames_recovers_frames_on_gap_timeline():
     np.testing.assert_array_equal(frames, planted_frames)
 
 
-def test_spike_times_to_frames_drops_out_of_bounds():
-    """A spike rounding to ``n_samples`` (one past the end) is dropped.
+def test_spike_times_to_frames_clamps_out_of_bounds():
+    """A spike rounding to ``n_samples`` (one past the end) is CLAMPED to the
+    last sample, not dropped.
 
-    Mirrors v1's ``spike_times_to_valid_samples`` clip: floating-point
-    round-trip at the final sample can land at ``n_samples``; SI rejects
-    such a sorting, so the helper drops it (with a warning) rather than
-    emitting an out-of-bounds frame.
+    Floating-point round-trip at the final sample can land searchsorted at
+    ``n_samples``. Dropping it (the prior behavior, and v1's) desyncs the v2
+    analyzer's per-spike features from the persisted ``spike_times`` and trips
+    ``UnitWaveformFeatures``'s ``n_feat == n_spikes`` guard. Clamping to the
+    last valid sample keeps the count aligned (the spike is at ~the final
+    sample anyway).
     """
     from spyglass.spikesorting.v2.utils import _spike_times_to_frames
 
@@ -79,7 +82,7 @@ def test_spike_times_to_frames_drops_out_of_bounds():
     frames = _spike_times_to_frames(
         timestamps, spike_times, n_samples, unit_id=7
     )
-    assert frames.tolist() == [50], (
-        "out-of-bounds spike (frame == n_samples) must be dropped; "
-        f"got {frames.tolist()}"
+    assert frames.tolist() == [50, 99], (
+        "out-of-bounds spike (frame == n_samples) must be clamped to "
+        f"n_samples-1 (count preserved), not dropped; got {frames.tolist()}"
     )
