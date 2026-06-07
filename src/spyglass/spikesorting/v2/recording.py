@@ -805,6 +805,7 @@ class RecordingComputed(NamedTuple):
     duration_s: float
     sel: dict
     sort_valid_times: np.ndarray
+    expected_saved_total: float
 
 
 @schema
@@ -1027,6 +1028,27 @@ class Recording(SpyglassMixin, dj.Computed):
             electrode_group_names=electrode_group_names,
         )
 
+        # The duration we INTENDED to save: the sort interval intersected
+        # with the raw valid times AND filtered by ``min_segment_length`` --
+        # the SAME filtering ``_restrict_recording`` applies to build the
+        # recording. The truncation check in ``make_insert`` compares the
+        # actually-saved duration against this (not against the raw requested
+        # chunks) so intentionally-dropped sub-``min_segment_length`` slivers
+        # are not mis-flagged as truncation.
+        from spyglass.common.common_interval import Interval
+
+        intended_intervals = (
+            Interval(sort_valid_times)
+            .intersect(
+                Interval(raw_valid_times),
+                min_length=preproc_validated.min_segment_length,
+            )
+            .times
+        )
+        expected_saved_total = float(
+            sum(end - start for start, end in intended_intervals)
+        )
+
         return RecordingComputed(
             analysis_file_name=analysis_file_name,
             object_id=object_id,
@@ -1038,6 +1060,7 @@ class Recording(SpyglassMixin, dj.Computed):
             duration_s=duration_s,
             sel=sel,
             sort_valid_times=sort_valid_times,
+            expected_saved_total=expected_saved_total,
         )
 
     def make_insert(
@@ -1053,6 +1076,7 @@ class Recording(SpyglassMixin, dj.Computed):
         duration_s,
         sel,
         sort_valid_times,
+        expected_saved_total,
     ):
         """Truncation check + atomic registration inside the framework transaction.
 
@@ -1083,19 +1107,18 @@ class Recording(SpyglassMixin, dj.Computed):
         nwb_file_name = sel["nwb_file_name"]
         interval_list_name = sel["interval_list_name"]
 
-        # Truncation check: compare SAVED DURATION against the SUM of
-        # requested chunk durations, not against the outer envelope.
-        # On the multi-interval (disjoint) path the saved data
-        # correctly excludes inter-chunk gaps, so its wall-clock
-        # ``saved_end`` is shorter than ``sort_valid_times[-1][-1]``
-        # by the gap total; a naive envelope comparison would
-        # spuriously flag every disjoint sort as truncated.
-        requested_total = float(
-            sum(end - start for start, end in sort_valid_times)
-        )
+        # Truncation check: compare the SAVED duration against the duration
+        # we INTENDED to save -- the sort interval intersected with the raw
+        # valid times AND filtered by ``min_segment_length`` (computed in
+        # ``make_compute`` the same way ``_restrict_recording`` filters).
+        # Comparing against the raw requested chunks instead would
+        # spuriously flag (a) inter-chunk gaps on the disjoint path and
+        # (b) intentionally-dropped sub-``min_segment_length`` slivers as
+        # truncation. Using ``expected_saved_total`` leaves the guard
+        # firing only on genuine packet loss / interval misalignment.
         saved_total = float(saved_end - saved_start)
         tolerance = 1.5 / sampling_frequency
-        missing = requested_total - saved_total
+        missing = expected_saved_total - saved_total
         if missing > tolerance:
             # File written but never registered: clean it up before
             # raising so the AnalysisNwbfile cleanup tooling does not
@@ -1109,10 +1132,11 @@ class Recording(SpyglassMixin, dj.Computed):
                     f"analysis file {analysis_file_name!r}: {cleanup_exc!r}"
                 )
             raise RecordingTruncatedError(
-                "Recording.make wrote a shorter recording than requested. "
-                f"Requested IntervalList valid_times for {interval_list_name!r} "
-                f"in {nwb_file_name!r}: total {requested_total:.6f}s across "
-                f"{len(sort_valid_times)} chunk(s). Saved duration: "
+                "Recording.make wrote a shorter recording than expected. "
+                f"After min_segment_length filtering, IntervalList "
+                f"{interval_list_name!r} in {nwb_file_name!r} should yield "
+                f"{expected_saved_total:.6f}s across "
+                f"{len(sort_valid_times)} requested chunk(s); saved "
                 f"{saved_total:.6f}s (range {saved_start} -> {saved_end}). "
                 f"Missing: {missing:.6f}s. Check the raw NWB for dropped "
                 "packets or interval misalignment."
