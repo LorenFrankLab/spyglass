@@ -1810,6 +1810,7 @@ class Recording(SpyglassMixin, dj.Computed):
             _hash_nwb_recording,
             electrode_table_region,
             resolve_conversion_and_offset,
+            write_buffer_gb,
         )
 
         import pathlib as _pathlib
@@ -1846,13 +1847,20 @@ class Recording(SpyglassMixin, dj.Computed):
             timestamps = _get_recording_timestamps(
                 recording, override=timestamps_override
             )
+            # Bound the buffers to ~a fixed duration of data so a narrow sort
+            # group (e.g. a 4-ch tetrode) does not buffer the whole recording
+            # in one 5 GB chunk; wide groups stay capped at 5 GB.
             data_iterator = SpikeInterfaceRecordingDataChunkIterator(
-                recording=recording, return_in_uV=False, buffer_gb=5
+                recording=recording,
+                return_in_uV=False,
+                buffer_gb=write_buffer_gb(
+                    recording.get_num_channels(), sampling_frequency
+                ),
             )
             timestamps_iterator = TimestampsDataChunkIterator(
                 timestamps=timestamps,
                 sampling_frequency=sampling_frequency,
-                buffer_gb=5,
+                buffer_gb=write_buffer_gb(1, sampling_frequency),
             )
 
             with pynwb.NWBHDF5IO(

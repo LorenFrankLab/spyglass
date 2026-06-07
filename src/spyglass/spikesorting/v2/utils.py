@@ -194,6 +194,36 @@ def resolve_peak_sign(params) -> str:
     return "neg"
 
 
+def write_buffer_gb(
+    n_channels: int,
+    sampling_frequency: float,
+    max_seconds: float = 30.0,
+    itemsize: int = 8,
+    cap_gb: float = 5.0,
+) -> float:
+    """Streaming-write buffer size (GB) bounded to ~``max_seconds`` of data.
+
+    A fixed buffer (the prior 5 GB) buffers the WHOLE recording for narrow
+    sort groups -- a 4-channel tetrode is ~87 min in 5 GB -- defeating the
+    HDMF streaming write and spiking RAM under parallel per-group workers.
+    Scale the buffer with channel count so every group buffers ~the same
+    bounded duration, capped at ``cap_gb`` so wide groups are unchanged.
+
+    Returns
+    -------
+    float
+        Buffer size in GB, in ``(0, cap_gb]``.
+    """
+    seconds_gb = (
+        float(n_channels)
+        * float(sampling_frequency)
+        * float(max_seconds)
+        * itemsize
+        / 1e9
+    )
+    return min(cap_gb, seconds_gb)
+
+
 def assert_reference_not_member(
     reference_mode, reference_electrode_id, sort_group_channel_ids
 ) -> None:
