@@ -204,6 +204,32 @@ region; the per-unit dict assertion must fail.
 All CI-runnable (no real-data/baseline dependency). Env: conda
 `spyglass_spikesorting_v2` (SI 0.104.3, py3.11) + Docker MySQL. ~3.5 days total.
 
+## Ground-truth oracle calibration findings (2026-06-07)
+
+Building the GT-physical oracles, two empirical results shaped what shipped:
+
+- **Amplitude (A):** the MEArec GT sidecar carries `spike_times`, soma
+  `position_x/y/z`, and `cell_type` but **no template waveforms/amplitudes**.
+  So A's value oracle recomputes the center-sample amplitude from the *recording
+  trace* at each spike frame (an independent artifact vs the analyzer) rather
+  than a stored template. Interior spikes match exactly (rtol 1e-3); edge spikes
+  whose +/-0.5ms window runs off the recording are SI-zero-padded and asserted as
+  such. Shipped in `test_clusterless_waveform_features.py` + hermetic
+  `test_waveform_features_amplitude.py`.
+
+- **Peak-channel vs soma (B):** a one-shot calibration on the 60s polymer
+  (shank 0: 6 sorted units, 6 matched to GT, 5 distinct peak electrodes) tested
+  whether a unit's peak electrode is the contact nearest its matched GT soma,
+  across all soma-axis -> probe-plane mappings. Best mapping: median rank 3.5,
+  top-1 0.17, **top-3 0.50**, with a rank-28 outlier. The relationship does NOT
+  hold reliably on this polymer geometry (volume conduction + near-1D shank
+  layout make "nearest" ambiguous), so the GT-soma physical assertion was **not
+  adopted** -- it would be flaky/false. B instead ships the synthetic
+  self-guarded `test_multi_region_attribution_through_merge_dispatch` (60s sort,
+  >=2 distinct-peak guard, alternating region remap, asserted via BOTH
+  `CurationV2.get_unit_brain_regions` and the merge dispatcher). A reliable
+  GT-soma oracle would need accuracy + soma-proximity filtering; deferred.
+
 ## Follow-up (separate work item)
 
 After this phase: discuss broader ground-truth-driven pipeline testing (using the
