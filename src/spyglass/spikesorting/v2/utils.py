@@ -156,6 +156,44 @@ def find_orphaned_masters(master_table, part_tables: list) -> list[dict]:
     return orphans
 
 
+def resolve_peak_sign(params) -> str:
+    """Map a validated sorter params blob to a SpikeInterface ``peak_sign``.
+
+    Used by ``Sorting._populate_unit_part`` so per-unit peak channel and
+    amplitude attribution honor the sorter's configured detection polarity
+    instead of hardcoding ``"neg"`` (SpikeInterface's default). Sorters
+    express polarity differently:
+
+    * ``clusterless_thresholder`` carries ``peak_sign`` directly
+      (``"neg"`` / ``"pos"`` / ``"both"``).
+    * MountainSort 4/5 carry ``detect_sign`` (``-1`` neg, ``1`` pos,
+      ``0`` both).
+    * Kilosort4 / SpykingCircus2 / Tridesclous2 / the generic schema
+      carry neither; fall back to ``"neg"`` (SI's default, matching the
+      prior behavior for those sorters).
+
+    Parameters
+    ----------
+    params : Mapping or None
+        The validated ``SorterParameters.params`` blob. A non-mapping /
+        ``None`` returns ``"neg"`` rather than raising.
+
+    Returns
+    -------
+    str
+        One of ``"neg"`` / ``"pos"`` / ``"both"``.
+    """
+    if not isinstance(params, Mapping):
+        return "neg"
+    if params.get("peak_sign") is not None:
+        return str(params["peak_sign"])
+    if params.get("detect_sign") is not None:
+        return {-1: "neg", 0: "both", 1: "pos"}.get(
+            int(params["detect_sign"]), "neg"
+        )
+    return "neg"
+
+
 def unit_brain_region_df(unit_relation, resolution: str):
     """Join a Unit-part relation against Electrode * BrainRegion.
 

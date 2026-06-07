@@ -2345,16 +2345,28 @@ class Sorting(SpyglassMixin, dj.Computed):
             RecordingSelection,
             SortGroupV2,
         )
+        from spyglass.spikesorting.v2.utils import resolve_peak_sign
 
         analyzer = si.load_sorting_analyzer(analyzer_folder)
+        # Honor the sorter's configured detection polarity (clusterless
+        # ``peak_sign`` / MountainSort ``detect_sign``) rather than
+        # SpikeInterface's ``"neg"`` default, so a positive-going detection
+        # attributes each unit to its true peak channel instead of the
+        # most-negative one. v1 makes this configurable via the
+        # ``peak_channel`` metric params; v2 threads it here at sort time.
+        sorter_params = (
+            SortingSelection * SorterParameters
+            & {"sorting_id": key["sorting_id"]}
+        ).fetch1("params")
+        peak_sign = resolve_peak_sign(sorter_params)
         peak_channels = template_tools.get_template_extremum_channel(
-            analyzer, outputs="id"
+            analyzer, peak_sign=peak_sign, outputs="id"
         )
-        # ``abs_value=True`` is the SI default, so the returned extremum
-        # amplitudes are already non-negative magnitudes (the unit
-        # ``peak_amplitude_uv`` stores); no extra ``abs`` is needed below.
+        # ``abs_value=True`` is the SI default, so the returned amplitudes
+        # are already non-negative magnitudes (what ``peak_amplitude_uv``
+        # stores); no extra ``abs`` is needed below.
         peak_amplitudes = template_tools.get_template_extremum_amplitude(
-            analyzer
+            analyzer, peak_sign=peak_sign
         )
 
         sort_group_id = int(
