@@ -1473,6 +1473,7 @@ class Recording(SpyglassMixin, dj.Computed):
         from spyglass.spikesorting.v2.utils import (
             _consolidate_intervals,
             _get_recording_timestamps,
+            assert_reference_not_member,
         )
 
         # Route through ``_get_recording_timestamps`` so multi-segment
@@ -1536,6 +1537,9 @@ class Recording(SpyglassMixin, dj.Computed):
             # timestamps match the multi-interval path above.
             timestamps_override = times[int(s) : int(e)]
 
+        assert_reference_not_member(
+            reference_mode, reference_electrode_id, sort_group_channel_ids
+        )
         if reference_mode == "specific":
             slice_ids = sorted(
                 set(

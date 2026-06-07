@@ -194,6 +194,31 @@ def resolve_peak_sign(params) -> str:
     return "neg"
 
 
+def assert_reference_not_member(
+    reference_mode, reference_electrode_id, sort_group_channel_ids
+) -> None:
+    """Reject a ``'specific'`` reference that is also a sort-group channel.
+
+    The write path subtracts the specific reference from every channel and then
+    REMOVES it from the recording. If the reference electrode is itself a member
+    of the sort group, that silently drops a channel the user meant to sort
+    (a 4-wire tetrode would sort on 3). v1 silently dropped it via
+    ``setdiff1d``; v2 fails loud. No-op for non-``'specific'`` modes (which
+    carry no reference electrode).
+    """
+    if reference_mode != "specific":
+        return
+    group = {int(c) for c in sort_group_channel_ids}
+    if int(reference_electrode_id) in group:
+        raise ValueError(
+            "SortGroupV2: reference_electrode_id "
+            f"{int(reference_electrode_id)} is also a sort-group channel; a "
+            "'specific' reference is subtracted from every channel and then "
+            "removed, which would silently drop that channel from the sort. "
+            "Choose a reference electrode outside the sort group."
+        )
+
+
 def resolve_conversion_and_offset(recording) -> tuple[float, float]:
     """Resolve the ElectricalSeries ``(conversion, offset)`` for a recording.
 
