@@ -5,8 +5,9 @@ per-channel amplitude that clusterless decoding consumes. The existing
 clusterless feature tests check shape / 1:1 alignment / sign of the
 extracted feature, but never a specific value, and they only ever run the
 ``estimate_peak_time=False`` (center-sample) path -- the
-``estimate_peak_time=True`` branch (argmin/argmax peak finding + mode across
-spikes), which holds the only nontrivial numerical logic, is uncovered.
+``estimate_peak_time=True`` branch (argmin/argmax over the across-channel
+reduction to find each spike's peak time, then the mode across spikes), which
+holds the only nontrivial numerical logic, is uncovered.
 
 These are hermetic unit tests: a tiny stub supplies a known waveform array
 as the *input*, and the assertions pin the *output* of the function under

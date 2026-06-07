@@ -26,7 +26,7 @@ This test closes that seam with the minimum synthetic surface:
   full-window interval and fail this.
 * A real ``Sorting.populate`` whose ``_run_sorter`` is monkeypatched only
   to CAPTURE the recording handed to it (masking happens in
-  ``make_compute`` *before* ``_run_sorter``, sorting.py:964).
+  ``Sorting.make_compute`` *before* the ``_run_sorter`` dispatch).
 * Assertion (b): the captured recording's transient frames are zeroed and a
   far-away background window is untouched -- proving the *detected* valid
   times propagated into the recording the sorter sees.
@@ -475,6 +475,8 @@ def test_artifact_masking_preserves_clean_gt_spikes(
         f"max|val|={np.abs(masked_traces[in_art, :]).max()}"
     )
     # (b) GT spikes far from artifacts keep their original (non-zero) signal.
+    # Exact equality holds because inj_rec has gain==1.0, so masked raw traces
+    # are in the same uV units as ``injected``.
     np.testing.assert_array_equal(
         masked_traces[out_art, :], injected[out_art, :]
     )
