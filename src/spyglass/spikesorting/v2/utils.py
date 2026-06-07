@@ -194,6 +194,52 @@ def resolve_peak_sign(params) -> str:
     return "neg"
 
 
+def electrode_table_region(nwbf, electrode_ids, description: str):
+    """Build an ElectricalSeries electrode-table region from electrode ids.
+
+    ``pynwb.NWBFile.create_electrode_table_region(region=...)`` interprets
+    ``region`` as ROW INDICES into the electrodes table, NOT electrode ids.
+    Passing spyglass ``electrode_id`` values directly is correct only when
+    ``electrode.id == row position``; for an electrodes table whose ids are
+    non-contiguous or reordered it silently points the ElectricalSeries at the
+    wrong electrode rows -- wrong channel locations and brain-region
+    attribution on readback. Map ids -> row indices via
+    ``get_electrode_indices`` so the region is correct for any electrodes
+    table, and fail loud on an unknown id rather than aliasing it.
+
+    Parameters
+    ----------
+    nwbf : pynwb.NWBFile
+        File whose ``electrodes`` table the region indexes into.
+    electrode_ids : iterable of int
+        Spyglass electrode ids (e.g. the recording's channel ids).
+    description : str
+        Region description.
+
+    Returns
+    -------
+    hdmf.common.table.DynamicTableRegion
+    """
+    from spyglass.utils.nwb_helper_fn import (
+        get_electrode_indices,
+        invalid_electrode_index,
+    )
+
+    ids = [int(e) for e in electrode_ids]
+    indices = get_electrode_indices(nwbf, ids)
+    missing = [
+        eid for eid, idx in zip(ids, indices) if idx == invalid_electrode_index
+    ]
+    if missing:
+        raise ValueError(
+            "electrode_table_region: electrode ids "
+            f"{missing} are not in the NWB electrodes table"
+        )
+    return nwbf.create_electrode_table_region(
+        region=[int(i) for i in indices], description=description
+    )
+
+
 def unit_brain_region_df(unit_relation, resolution: str):
     """Join a Unit-part relation against Electrode * BrainRegion.
 

@@ -1804,6 +1804,7 @@ class Recording(SpyglassMixin, dj.Computed):
         from spyglass.spikesorting.v2.utils import (
             _get_recording_timestamps,
             _hash_nwb_recording,
+            electrode_table_region,
         )
 
         import pathlib as _pathlib
@@ -1867,9 +1868,14 @@ class Recording(SpyglassMixin, dj.Computed):
                 path=analysis_abs_path, mode="a", load_namespaces=True
             ) as io:
                 nwbfile = io.read()
-                table_region = nwbfile.create_electrode_table_region(
-                    region=[int(c) for c in recording.get_channel_ids()],
-                    description="Sort group electrodes",
+                # ``recording.get_channel_ids()`` are spyglass electrode ids;
+                # map them to electrodes-table ROW INDICES (not raw ids) so a
+                # non-contiguous / reordered electrodes table does not silently
+                # mis-point the ElectricalSeries at the wrong electrodes.
+                table_region = electrode_table_region(
+                    nwbfile,
+                    recording.get_channel_ids(),
+                    "Sort group electrodes",
                 )
                 series = pynwb.ecephys.ElectricalSeries(
                     name=_ELECTRICAL_SERIES_NAME,
