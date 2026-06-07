@@ -351,9 +351,9 @@ def test_unit_waveform_features_v2_clusterless_runs_under_si0104(wave_session):
         from spyglass.spikesorting.v2.sorting import Sorting
 
         n_units = int((Sorting & sort_pk).fetch1("n_units"))
-        assert (
-            n_units == 1
-        ), f"tuned clusterless should find one unit; got {n_units}"
+        assert n_units == 1, (
+            f"tuned clusterless should find one unit; got {n_units}"
+        )
 
         merge_id = _curation_merge_id(sort_pk, parent_curation_id=-1)
         _, nwb_row = _populate_features(merge_id, param_pk)
@@ -367,9 +367,9 @@ def test_unit_waveform_features_v2_clusterless_runs_under_si0104(wave_session):
         unit = feature_df.loc[0]
         amps = np.asarray(unit["amplitude"])
         spike_times = np.asarray(unit["spike_times"])
-        assert (
-            amps.ndim == 2
-        ), f"amplitude must be (n_spikes, n_ch); got {amps.shape}"
+        assert amps.ndim == 2, (
+            f"amplitude must be (n_spikes, n_ch); got {amps.shape}"
+        )
         assert amps.shape[0] == spike_times.shape[0], (
             "amplitude rows must align 1:1 with spike_times: "
             f"{amps.shape[0]} amps vs {spike_times.shape[0]} spikes"
@@ -387,6 +387,68 @@ def test_unit_waveform_features_v2_clusterless_runs_under_si0104(wave_session):
             "neg peak_sign should yield some negative (uV) amplitudes; "
             "all-nonnegative suggests a sign/scale error"
         )
+
+        # Independent value oracle: with estimate_peak_time=False the stored
+        # amplitude for each spike is the CENTER sample of the extracted
+        # waveform, which equals the recording trace at that spike's frame.
+        # Recompute it from the recording (a different artifact than the
+        # analyzer the feature came from) and require an exact-ish match.
+        # This catches channel-order, uV-scaling, and spike<->amplitude
+        # misalignment bugs in make() that shape/sign/finiteness miss.
+        from spyglass.spikesorting.spikesorting_merge import (
+            SpikeSortingOutput,
+        )
+
+        recording = SpikeSortingOutput.get_recording({"merge_id": merge_id})
+        sorting = SpikeSortingOutput.get_sorting({"merge_id": merge_id})
+        # The oracle indexes segment-0 traces directly; make() concatenates
+        # multi-segment recordings before extraction. Fail loudly if a future
+        # fixture is multi-segment so the frame<->trace mapping can't silently
+        # diverge. The MEArec fixtures are single-segment.
+        assert recording.get_num_segments() == 1, (
+            "amplitude oracle assumes a single-segment recording; got "
+            f"{recording.get_num_segments()} segments"
+        )
+        unit_id = sorting.get_unit_ids()[0]
+        frames = np.asarray(sorting.get_unit_spike_train(unit_id))
+        traces = recording.get_traces(return_in_uV=True)
+        expected_center = traces[frames, :]
+        assert expected_center.shape == amps.shape, (
+            "recomputed center samples must match the stored amplitude shape: "
+            f"{expected_center.shape} vs {amps.shape}"
+        )
+        # A spike whose [ms_before, ms_after] window runs off the recording
+        # edge gets a zero-padded snippet from SI (here all-zero), so its
+        # extracted amplitude is 0 rather than the raw trace. Compare exact
+        # values only for INTERIOR spikes whose full window fits; assert the
+        # edge spikes are the documented zero-padded case. _AMP_PARAM uses
+        # ms_before == ms_after == 0.5 ms.
+        n_samples = traces.shape[0]
+        fs = recording.get_sampling_frequency()
+        margin = int(np.ceil(0.5e-3 * fs))
+        interior = (frames >= margin) & (frames < n_samples - margin)
+        assert interior.sum() >= 0.8 * frames.size, (
+            f"too few interior spikes ({int(interior.sum())}/{frames.size}) "
+            "to validate the amplitude oracle"
+        )
+        np.testing.assert_allclose(
+            amps[interior],
+            expected_center[interior],
+            rtol=1e-3,
+            atol=1e-2,
+            err_msg=(
+                "stored clusterless amplitude does not equal the recording "
+                "trace at interior spike frames; make() mis-scales, reorders "
+                "channels, or misaligns spikes vs amplitudes"
+            ),
+        )
+        boundary = ~interior
+        if boundary.any():
+            assert np.all(amps[boundary] == 0.0), (
+                "a near-edge spike whose waveform window runs off the "
+                "recording was expected to be zero-padded by SI; got a "
+                f"nonzero amplitude at frames {frames[boundary].tolist()}"
+            )
     finally:
         _reset(wave_session)
 
@@ -445,9 +507,9 @@ def test_unit_waveform_features_v2_sparse_unit_ids(polymer_60s_session):
             f"expected single merged survivor id [{merged_id}]; got "
             f"{applied_ids}"
         )
-        assert (
-            merged_id != 0
-        ), "test is only meaningful if the surviving id is non-positional"
+        assert merged_id != 0, (
+            "test is only meaningful if the surviving id is non-positional"
+        )
 
         _, nwb_row = _populate_features(merge_id, param_pk)
         feature_df = _units_dataframe(nwb_row)
@@ -478,8 +540,7 @@ def test_unit_waveform_features_zero_unit_v2(wave_session):
 
         n_units = int((Sorting & sort_pk).fetch1("n_units"))
         assert n_units == 0, (
-            "shipped clusterless default should find zero units; got "
-            f"{n_units}"
+            f"shipped clusterless default should find zero units; got {n_units}"
         )
 
         merge_id = _curation_merge_id(sort_pk, parent_curation_id=-1)
@@ -573,9 +634,9 @@ def test_unit_waveform_features_v2_full_waveform_and_rejects_spike_location(
         feature_df = _units_dataframe(
             (UnitWaveformFeatures & fw_sel).fetch_nwb()[0]
         )
-        assert (
-            "full_waveform" in feature_df.columns
-        ), "full_waveform column missing"
+        assert "full_waveform" in feature_df.columns, (
+            "full_waveform column missing"
+        )
         row = feature_df.loc[0]
         fw = np.asarray(row["full_waveform"])
         spikes = np.asarray(row["spike_times"])
