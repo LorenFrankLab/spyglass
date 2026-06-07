@@ -337,7 +337,14 @@ class DockerMySQLManager:
         logline = f"Container {container_name} stopped"
 
         if remove:
-            self.container.remove()
-            logline += " and removed"
+            # ``v=True`` removes the container's ANONYMOUS volumes. The
+            # datajoint/mysql image declares ``VOLUME /var/lib/mysql``, so
+            # the default (no ``SPYGLASS_TEST_MYSQL_DATA_DIR`` bind mount)
+            # run() creates a ~4 GB anonymous volume per container. Without
+            # ``v=True`` every test-suite run leaks one, eventually filling
+            # the Docker root partition. A bind mount (when configured) is
+            # not a managed volume, so ``v=True`` leaves it untouched.
+            self.container.remove(v=True)
+            logline += " and removed (with volumes)"
 
         print(f"{logline}.")
