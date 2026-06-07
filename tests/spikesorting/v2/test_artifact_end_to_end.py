@@ -273,3 +273,211 @@ def test_detected_artifact_is_masked_out_of_the_sorted_recording(
         "a far-from-artifact background window was altered; masking zeroed "
         f"more than the detected window. sample values={bg_traces[0].tolist()}"
     )
+
+
+_P60_PATH = (
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "mearec_polymer_128ch_60s.nwb"
+)
+
+
+def _read_gt_spike_frames(nwb_file_name, fs):
+    """All ground-truth spike frames (across units) for a session, sorted."""
+    import pynwb
+
+    from spyglass.common.common_nwbfile import Nwbfile
+    from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import (
+        get_ground_truth_units_table,
+    )
+
+    raw = Nwbfile().get_abs_path(nwb_file_name)
+    times = []
+    with pynwb.NWBHDF5IO(raw, "r", load_namespaces=True) as io:
+        gt = get_ground_truth_units_table(io.read())
+        assert gt is not None, "60s fixture must carry ground-truth units"
+        for i in range(len(gt.id[:])):
+            times.append(np.asarray(gt["spike_times"][i]))
+    all_times = np.concatenate(times)
+    return np.sort(np.round(all_times * fs).astype(np.int64))
+
+
+@pytest.fixture(scope="module")
+def gt60_recording(dj_conn):
+    """Ingest the 60s polymer GT fixture + populate a real shank-0 Recording.
+
+    Yields (session_key, recording_id). Cleaned on teardown.
+    """
+    from tests.spikesorting.v2.test_single_session_pipeline import (
+        _clean_session_v2,
+    )
+
+    if not _P60_PATH.exists():
+        pytest.skip(f"60s GT fixture {_P60_PATH.name} not found.")
+
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+
+    nwb = copy_and_insert_nwb(_P60_PATH, dest_name="mearec_artifact_gt60.nwb")
+    session = {"nwb_file_name": nwb}
+    _clean_session_v2(session)
+    initialize_v2_defaults()
+    LabTeam.insert1(
+        {"team_name": "v2_test_team", "team_description": "v2 artifact gt"},
+        skip_duplicates=True,
+    )
+    if not (SortGroupV2 & session):
+        SortGroupV2.set_group_by_shank(nwb_file_name=nwb)
+    sg = int(sorted((SortGroupV2 & session).fetch("sort_group_id"))[0])
+    rec_pk = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb,
+            "sort_group_id": sg,
+            "interval_list_name": "raw data valid times",
+            "preproc_params_name": "default_franklab",
+            "team_name": "v2_test_team",
+        }
+    )
+    if not (Recording & rec_pk):
+        Recording.populate(rec_pk, reserve_jobs=False)
+    yield session, rec_pk["recording_id"]
+    _clean_session_v2(session)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_artifact_masking_preserves_clean_gt_spikes(
+    gt60_recording, monkeypatch
+):
+    """Artifacts injected at known GT-spike times are removed from the
+    recording, while GT spikes outside the artifact windows are preserved.
+
+    Uses the MEArec ground-truth spike times to probe the detect->mask path:
+    inject large transients into the real recording at windows centered on a
+    handful of GT spikes, run real detect=True + persist, apply the real
+    mask, then assert (a) GT spikes well inside an artifact window are zeroed,
+    and (b) GT spikes far from any window keep their original signal. This is
+    the deterministic core of "masking removes corrupted spikes without
+    destroying clean ones" -- no stochastic sort involved.
+    """
+    from spyglass.common import IntervalList
+    from spyglass.spikesorting.v2._params.artifact_detection import (
+        ArtifactDetectionParamsSchema,
+    )
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactDetectionParameters,
+        ArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    session, recording_id = gt60_recording
+    nwb_file_name = session["nwb_file_name"]
+    transient_uv = 5000.0
+    amp_thresh_uv = 1500.0  # above real spikes, below the injected transient
+
+    # Real preprocessed traces (uV); build an injected copy with transients.
+    orig = Recording().get_recording({"recording_id": recording_id})
+    fs = float(orig.get_sampling_frequency())
+    traces = np.asarray(orig.get_traces(return_in_uV=True), dtype=np.float32)
+    n_samples, n_ch = traces.shape
+
+    gt_frames = _read_gt_spike_frames(nwb_file_name, fs)
+    gt_frames = gt_frames[(gt_frames >= 0) & (gt_frames < n_samples)]
+    assert gt_frames.size >= 20, f"too few GT spikes ({gt_frames.size})"
+
+    # Center a few artifact windows on well-separated GT spikes.
+    half = int(round(0.002 * fs))  # +/-2 ms window
+    centers = gt_frames[:: max(1, gt_frames.size // 5)][:5]
+    injected = traces.copy()
+    windows = []
+    for c in centers:
+        lo, hi = max(0, c - half), min(n_samples, c + half)
+        injected[lo:hi, :] = transient_uv
+        windows.append((lo, hi))
+
+    # GT spikes well inside a window (zeroed) vs far from every window.
+    near = int(round(0.001 * fs))  # within 1 ms of a center -> inside
+    far = int(round(0.005 * fs))  # >5 ms from every center -> preserved
+    in_art = np.array(
+        [f for f in gt_frames if any(abs(f - c) <= near for c in centers)]
+    )
+    out_art = np.array(
+        [f for f in gt_frames if all(abs(f - c) > far for c in centers)]
+    )
+    assert in_art.size >= 1, "need >=1 GT spike inside an artifact window"
+    assert out_art.size >= 5, "need several GT spikes outside artifact windows"
+
+    import spikeinterface as si
+
+    inj_rec = si.NumpyRecording([injected], sampling_frequency=fs)
+    inj_rec.set_channel_gains([1.0] * n_ch)
+    inj_rec.set_channel_offsets([0.0] * n_ch)
+    inj_rec = inj_rec.set_probe(orig.get_probe())
+
+    monkeypatch.setattr(Recording, "get_recording", lambda self, key: inj_rec)
+
+    params_name = "v2_gt_artifact_1500"
+    ArtifactDetectionParameters().insert1(
+        {
+            "artifact_params_name": params_name,
+            "params": ArtifactDetectionParamsSchema(
+                detect=True,
+                amplitude_thresh_uV=amp_thresh_uv,
+                zscore_thresh=None,
+                proportion_above_thresh=1.0,
+                removal_window_ms=1.0,
+                min_length_s=0.001,
+            ).model_dump(),
+            "params_schema_version": 2,
+            "job_kwargs": None,
+        },
+        skip_duplicates=True,
+    )
+    art_pk = ArtifactSelection.insert_selection(
+        {"recording_id": recording_id, "artifact_params_name": params_name}
+    )
+    ArtifactDetection.populate(art_pk, reserve_jobs=False)
+
+    valid_times = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": f"artifact_{art_pk['artifact_id']}",
+        }
+    ).fetch1("valid_times")
+    # Detection fired on every injected window: each window's center time is
+    # excluded from valid_times. (Asserting on the centers rather than the
+    # interval count is robust to a center landing near a recording edge,
+    # where a window contributes no leading/trailing valid interval.)
+    for c in centers:
+        ct = c / fs
+        covered = any(s <= ct <= e for s, e in valid_times)
+        assert not covered, (
+            f"injected artifact at {ct:.3f}s was not detected (still inside a "
+            "valid interval)"
+        )
+
+    masked = Sorting._apply_artifact_mask(
+        recording=inj_rec, valid_times=valid_times
+    )
+    masked_traces = np.asarray(masked.get_traces())
+
+    # (a) GT spikes inside artifact windows are zeroed.
+    assert np.allclose(masked_traces[in_art, :], 0.0), (
+        "GT spikes inside artifact windows were not masked out: "
+        f"max|val|={np.abs(masked_traces[in_art, :]).max()}"
+    )
+    # (b) GT spikes far from artifacts keep their original (non-zero) signal.
+    np.testing.assert_array_equal(
+        masked_traces[out_art, :], injected[out_art, :]
+    )
+    assert np.abs(injected[out_art, :]).max() > 0, (
+        "preservation check is vacuous: out-of-artifact signal is all zero"
+    )
