@@ -2362,11 +2362,14 @@ class Sorting(SpyglassMixin, dj.Computed):
         peak_channels = template_tools.get_template_extremum_channel(
             analyzer, peak_sign=peak_sign, outputs="id"
         )
-        # ``abs_value=True`` is the SI default, so the returned amplitudes
-        # are already non-negative magnitudes (what ``peak_amplitude_uv``
-        # stores); no extra ``abs`` is needed below.
+        # ``mode="extremum"`` measures the amplitude at the template PEAK
+        # (matching ``get_template_extremum_channel`` above), not SI's
+        # ``mode="at_index"`` default which reads the alignment-sample value
+        # -- that under-reports the peak AND can land on a different channel
+        # than the attributed electrode. ``abs_value=True`` (SI default)
+        # returns the non-negative magnitude ``peak_amplitude_uv`` stores.
         peak_amplitudes = template_tools.get_template_extremum_amplitude(
-            analyzer, peak_sign=peak_sign
+            analyzer, peak_sign=peak_sign, mode="extremum"
         )
 
         sort_group_id = int(
