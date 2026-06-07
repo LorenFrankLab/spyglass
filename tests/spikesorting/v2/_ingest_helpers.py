@@ -67,3 +67,26 @@ def copy_and_insert_nwb(
         (Nwbfile() & {"nwb_file_name": target_copy}).delete(safemode=False)
     insert_sessions(ingest_name, **kwargs)
     return get_nwb_copy_filename(ingest_name)
+
+
+def clear_curations_for(sorting_key) -> None:
+    """Delete every ``CurationV2`` row for a sorting plus its merge masters.
+
+    DataJoint refuses to drop a part row whose master is still present, so
+    walk from the ``SpikeSortingOutput`` merge master down before dropping
+    the ``CurationV2`` rows. Shared single implementation for conftest's
+    curation fixture and the v2 test modules (previously copied -- and
+    drifted -- across several of them).
+
+    Parameters
+    ----------
+    sorting_key : dict
+        Restriction selecting the sorting whose curations to drop (e.g.
+        ``{"sorting_id": ...}`` or a full curation PK).
+    """
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    for mid in (SpikeSortingOutput.CurationV2 & sorting_key).fetch("merge_id"):
+        (SpikeSortingOutput & {"merge_id": mid}).super_delete(warn=False)
+    (CurationV2 & sorting_key).super_delete(warn=False)

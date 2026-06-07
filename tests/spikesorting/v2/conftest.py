@@ -224,20 +224,10 @@ def populated_sorting(dj_conn):
 
 
 def _clear_curations_for(sorting_key):
-    """Delete every CurationV2 row for a sorting plus its merge masters.
+    """Drop a sorting's CurationV2 rows + merge masters (shared helper)."""
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
-    DataJoint refuses to drop a part row whose master is still present, so
-    walk from the ``SpikeSortingOutput`` merge master down before dropping
-    the ``CurationV2`` rows. Mirrors the test-module helper of the same
-    shape; kept in conftest so the shared curation fixture is
-    self-contained (no cross-module import of a test helper).
-    """
-    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
-    from spyglass.spikesorting.v2.curation import CurationV2
-
-    for mid in (SpikeSortingOutput.CurationV2 & sorting_key).fetch("merge_id"):
-        (SpikeSortingOutput & {"merge_id": mid}).super_delete(warn=False)
-    (CurationV2 & sorting_key).super_delete(warn=False)
+    clear_curations_for(sorting_key)
 
 
 @pytest.fixture

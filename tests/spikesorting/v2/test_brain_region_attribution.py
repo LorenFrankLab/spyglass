@@ -32,23 +32,10 @@ _P60_PATH = (
 
 
 def _clear_curations(sorting_key):
-    """Drop CurationV2 rows for a sorting + their merge-table masters.
+    """Drop a sorting's CurationV2 rows + merge masters (shared helper)."""
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
-    Master-before-part: the merge insert wraps the ``CurationV2`` part FK
-    in a transaction with the ``SpikeSortingOutput`` master, so the
-    master must go first or DataJoint refuses the part delete.
-    """
-    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
-    from spyglass.spikesorting.v2.curation import CurationV2
-
-    curation_keys = (CurationV2 & sorting_key).fetch("KEY", as_dict=True)
-    if curation_keys:
-        merge_ids = (SpikeSortingOutput.CurationV2 & curation_keys).fetch(
-            "merge_id"
-        )
-        for mid in merge_ids:
-            (SpikeSortingOutput & {"merge_id": mid}).super_delete(warn=False)
-    (CurationV2 & sorting_key).super_delete(warn=False)
+    clear_curations_for(sorting_key)
 
 
 def _sort_group_electrodes(sorting_key):

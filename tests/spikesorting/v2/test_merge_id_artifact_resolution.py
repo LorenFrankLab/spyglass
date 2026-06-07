@@ -28,13 +28,10 @@ import pytest
 
 
 def _clear_curations_for(sorting_key):
-    """Drop CurationV2 rows + their merge masters for a sorting (master-first)."""
-    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
-    from spyglass.spikesorting.v2.curation import CurationV2
+    """Drop a sorting's CurationV2 rows + merge masters (shared helper)."""
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
-    for mid in (SpikeSortingOutput.CurationV2 & sorting_key).fetch("merge_id"):
-        (SpikeSortingOutput & {"merge_id": mid}).super_delete(warn=False)
-    (CurationV2 & sorting_key).super_delete(warn=False)
+    clear_curations_for(sorting_key)
 
 
 @pytest.fixture(scope="module")

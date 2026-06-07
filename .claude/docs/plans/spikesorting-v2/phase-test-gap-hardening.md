@@ -64,14 +64,14 @@ separately.
 ## Dispatch resolution facts (verified in source)
 
 - `SpikeSortingOutput.get_recording/get_sorting/get_sort_group_info` resolve via
-  `merge_get_parent(key)` + `merge_get_part(key)` (spikesorting_merge.py:404-441).
-- `get_unit_brain_regions` fetches the full part row and **raises if
-  `len(part_rows) != 1`** (spikesorting_merge.py:531). This guard fires
-  meaningfully ONLY when >=2 merge_ids exist; with one row it passes vacuously.
-- `get_restricted_merge_ids` fans out over available sources
-  (spikesorting_merge.py:326-402); v0/v1 are import-incompatible under SI 0.104,
-  so cross-version multi-source is out of reach in this env (document, don't fake).
-- `_get_peak_amplitude` (src/spyglass/utils/waveforms.py:9-54): `False` branch =
+  `merge_get_parent(key)` + `merge_get_part(key)`.
+- `SpikeSortingOutput.get_unit_brain_regions` fetches the full part row and
+  **raises if `len(part_rows) != 1`**. This guard fires meaningfully ONLY when
+  >=2 merge_ids exist; with one row it passes vacuously.
+- `SpikeSortingOutput.get_restricted_merge_ids` fans out over available sources;
+  v0/v1 are import-incompatible under SI 0.104, so cross-version multi-source is
+  out of reach in this env (document, don't fake).
+- `spyglass.utils.waveforms._get_peak_amplitude`: `False` branch =
   center slice `waveforms[:, n_time//2]`; `True` branch = argmin/argmax peak +
   mode across spikes.
 
@@ -129,8 +129,8 @@ Module-scope the populate (heavy). `_clear_curations_for` on setup+teardown.
 - **Assert (a):** persisted `IntervalList` `valid_times` excludes `[art_lo, art_hi)`
   (boundaries + shape) — the detect=True persist path that currently never fires.
 - Run `Sorting.populate` with `_run_sorter` monkeypatched to CAPTURE its
-  `recording` arg (masking happens in make_compute before _run_sorter,
-  sorting.py:964).
+  `recording` arg (masking happens in `Sorting.make_compute` before the
+  `_run_sorter` dispatch).
 - **Assert (b):** captured recording's `[art_lo, art_hi)` frames are all zero; a
   non-artifact window is unchanged.
 

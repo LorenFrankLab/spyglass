@@ -557,22 +557,10 @@ def test_write_nwb_artifact_rejects_heterogeneous_gains(
 
 
 def _clear_curations(sorting_key):
-    """Delete CurationV2 rows for a sorting + the corresponding
-    SpikeSortingOutput merge master rows.
+    """Drop a sorting's CurationV2 rows + merge masters (shared helper)."""
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
-    DataJoint refuses to delete a part table row whose master is still
-    present, so the cleanup walks from the merge master down: first
-    drop the SpikeSortingOutput master rows that point at any
-    CurationV2 part rows for this sorting (cascades the part), then
-    drop the CurationV2 rows themselves.
-    """
-    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
-    from spyglass.spikesorting.v2.curation import CurationV2
-
-    merge_ids = (SpikeSortingOutput.CurationV2 & sorting_key).fetch("merge_id")
-    for mid in merge_ids:
-        (SpikeSortingOutput & {"merge_id": mid}).super_delete(warn=False)
-    (CurationV2 & sorting_key).super_delete(warn=False)
+    clear_curations_for(sorting_key)
 
 
 def _clean_session_v2(session_key):
@@ -3397,9 +3385,9 @@ def test_initialize_v2_defaults_is_idempotent(dj_conn):
         f"post={post_counts}."
     )
     # Counts must be > 0 (the defaults actually loaded something).
-    assert all(
-        c > 0 for c in post_counts
-    ), f"initialize_v2_defaults produced zero rows: {post_counts}."
+    assert all(c > 0 for c in post_counts), (
+        f"initialize_v2_defaults produced zero rows: {post_counts}."
+    )
 
 
 # ---------- Heterogeneous gain rejection ---------------------------------
@@ -3660,9 +3648,9 @@ def test_run_v2_pipeline_clusterless_preset(polymer_smoke_session):
             "curation_id",
             "merge_id",
         ):
-            assert (
-                manifest.get(key) is not None
-            ), f"Manifest missing {key!r}; got {manifest}."
+            assert manifest.get(key) is not None, (
+                f"Manifest missing {key!r}; got {manifest}."
+            )
     finally:
         # Restore the original 100 uV default row so subsequent
         # tests / sessions are not poisoned by the 5 uV value.
@@ -3723,9 +3711,9 @@ def test_run_v2_pipeline_clusterless_default_handles_zero_units_gracefully(
     # A zero-unit sort still produces a COMPLETE, merge-keyable manifest:
     # an empty curation + merge row (v1 parity), not a partial None.
     for key in ("recording_id", "artifact_id", "sorting_id"):
-        assert (
-            manifest.get(key) is not None
-        ), f"Zero-unit manifest missing {key!r}; got {manifest}."
+        assert manifest.get(key) is not None, (
+            f"Zero-unit manifest missing {key!r}; got {manifest}."
+        )
     assert manifest["n_units"] == 0
     assert manifest["curation_id"] is not None, (
         f"Zero-unit sort should still write an empty curation row; "
@@ -4240,9 +4228,9 @@ def test_get_sorting_recovers_frames_across_disjoint_gap(
     )
     Sorting.populate(sort_pk, reserve_jobs=False)
     assert Sorting & sort_pk, "disjoint Sorting.populate failed"
-    assert planted["affine_post_gap"] != int(
-        planted["samples"][1]
-    ), "test setup: gap too small to expose the affine shift"
+    assert planted["affine_post_gap"] != int(planted["samples"][1]), (
+        "test setup: gap too small to expose the affine shift"
+    )
 
     si_sorting = Sorting().get_sorting(sort_pk)
     frames = _np.asarray(si_sorting.get_unit_spike_train(unit_id=0))
@@ -4766,9 +4754,9 @@ def test_clusterless_detect_peaks_strips_random_seed(dj_conn, monkeypatch):
 
     jk = captured["job_kwargs"]
     assert jk is not None, "detect_peaks was not called"
-    assert (
-        "random_seed" not in jk
-    ), f"random_seed leaked into detect_peaks job kwargs: {jk}"
+    assert "random_seed" not in jk, (
+        f"random_seed leaked into detect_peaks job kwargs: {jk}"
+    )
     assert jk.get("n_jobs") == 1  # other kwargs preserved
 
 
@@ -4812,9 +4800,9 @@ def test_clusterless_detect_peaks_strips_threshold_unit(dj_conn, monkeypatch):
 
     mk = captured["method_kwargs"]
     assert mk is not None, "detect_peaks was not called"
-    assert (
-        "threshold_unit" not in mk
-    ), f"threshold_unit leaked into detect_peaks method kwargs: {mk}"
+    assert "threshold_unit" not in mk, (
+        f"threshold_unit leaked into detect_peaks method kwargs: {mk}"
+    )
     # The real detector knobs survive the strip.
     assert mk.get("detect_threshold") == 5.0
 
@@ -4860,9 +4848,9 @@ def test_build_analyzer_strips_random_seed(dj_conn, monkeypatch, tmp_path):
     )
 
     jk = captured["kwargs"]
-    assert (
-        "random_seed" not in jk
-    ), f"random_seed leaked into analyzer.compute kwargs: {jk}"
+    assert "random_seed" not in jk, (
+        f"random_seed leaked into analyzer.compute kwargs: {jk}"
+    )
     assert jk.get("n_jobs") == 1  # other job kwargs preserved
 
 
@@ -4916,9 +4904,9 @@ def test_build_analyzer_compute_args(dj_conn, monkeypatch, tmp_path):
     # correctness-critical for the persisted peak amplitude / channel.
     ck = captured["create_kwargs"]
     assert ck.get("sparse") is True, f"expected sparse=True, got {ck}"
-    assert (
-        ck.get("return_in_uV") is True
-    ), f"expected return_in_uV=True, got {ck}"
+    assert ck.get("return_in_uV") is True, (
+        f"expected return_in_uV=True, got {ck}"
+    )
     assert ck.get("format") == "binary_folder"
 
     # ``compute`` extension set (positional first arg).
@@ -4934,9 +4922,9 @@ def test_build_analyzer_compute_args(dj_conn, monkeypatch, tmp_path):
     # Per-extension params: the seeded random-spikes subsample (honoring
     # the per-row random_seed) and the waveform window.
     ext_params = captured["compute_kwargs"]["extension_params"]
-    assert (
-        ext_params["random_spikes"]["seed"] == 3
-    ), "random_spikes seed must honor the job_kwargs random_seed override"
+    assert ext_params["random_spikes"]["seed"] == 3, (
+        "random_spikes seed must honor the job_kwargs random_seed override"
+    )
     assert ext_params["random_spikes"]["max_spikes_per_unit"] == 500
     assert ext_params["waveforms"] == {"ms_before": 1.0, "ms_after": 2.0}
     # The Spyglass-only random_seed knob is still stripped from the
@@ -5507,8 +5495,7 @@ def test_recording_make_rollback_cleans_analysis_nwb(
 
     # No Recording row, no orphan NWB file.
     assert len(Recording & rec_pk) == 0, (
-        "Recording row present after rollback; transaction did not "
-        "roll back."
+        "Recording row present after rollback; transaction did not roll back."
     )
     after = (
         {p.name for p in analysis_dir.rglob("*.nwb")}
@@ -6879,8 +6866,7 @@ def test_write_units_nwb_handles_zero_unit_sorter(populated_recording):
             nwbf = io.read()
             assert nwbf.units is not None
             assert len(nwbf.units.id[:]) == 0, (
-                f"Expected empty Units table; got "
-                f"{len(nwbf.units.id[:])} rows."
+                f"Expected empty Units table; got {len(nwbf.units.id[:])} rows."
             )
     finally:
         # Tidy up the staged file. _write_units_nwb does not register
@@ -7356,7 +7342,7 @@ def test_get_sorting_dataframe_includes_curation_label(populated_sorting):
     )
     df = CurationV2().get_sorting(pk, as_dataframe=True)
     assert "curation_label" in df.columns, (
-        "DataFrame missing the curation_label column joined from " "UnitLabel."
+        "DataFrame missing the curation_label column joined from UnitLabel."
     )
     # The labeled unit carries ["mua"]; any other unit carries [].
     assert df.loc[units[0], "curation_label"] == ["mua"]
@@ -7432,18 +7418,18 @@ def test_sorting_nwb_writes_obs_intervals_and_curation_label_placeholder(
         df = nwbf.units.to_dataframe()
 
     assert len(df) > 0, "populated_sorting yielded zero units"
-    assert (
-        "obs_intervals" in df.columns
-    ), "Units NWB missing per-unit obs_intervals column."
+    assert "obs_intervals" in df.columns, (
+        "Units NWB missing per-unit obs_intervals column."
+    )
     # obs_intervals should be a non-empty (n_intervals, 2) array
     # per unit. Each row should have a valid window.
     for uid, obs in df["obs_intervals"].items():
-        assert (
-            obs is not None and len(obs) >= 1
-        ), f"Unit {uid} has empty obs_intervals."
-    assert (
-        "curation_label" in df.columns
-    ), "Units NWB missing curation_label placeholder column."
+        assert obs is not None and len(obs) >= 1, (
+            f"Unit {uid} has empty obs_intervals."
+        )
+    assert "curation_label" in df.columns, (
+        "Units NWB missing curation_label placeholder column."
+    )
     # Scalar shape: every unit carries the string ``"uncurated"``
     # -- NOT a list (a list shape would break v1-style equality
     # checks).
@@ -7486,9 +7472,9 @@ def test_curation_label_post_curation_is_indexed_ragged_list(populated_sorting):
         nwbf = io.read()
         df = nwbf.units.to_dataframe()
 
-    assert (
-        "curation_label" in df.columns
-    ), "Curated NWB missing curation_label column."
+    assert "curation_label" in df.columns, (
+        "Curated NWB missing curation_label column."
+    )
     # The labeled unit's column value is iterable-of-labels (the
     # ragged ``index=True`` column). pynwb's ``to_dataframe`` may
     # surface this as either ``list`` or ``np.ndarray(dtype=object)``;
@@ -8703,7 +8689,7 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
     )
     for row in diagnostic_rows:
         uid, v1n, v2n, nm, um1, um2 = row
-        print(f"  {uid:>5} {v1n:>6} {v2n:>6} {nm:>8} " f"{um1:>13} {um2:>13}")
+        print(f"  {uid:>5} {v1n:>6} {v2n:>6} {nm:>8} {um1:>13} {um2:>13}")
 
     if failures:
         pytest.fail("v1↔v2 spike-time divergence:\n  " + "\n  ".join(failures))
@@ -9510,9 +9496,9 @@ def test_clusterless_thresholder_ground_truth(
     with pynwb.NWBHDF5IO(raw_nwb_path, "r", load_namespaces=True) as io:
         gt_nwb = io.read()
         gt_units_table = get_ground_truth_units_table(gt_nwb)
-        assert (
-            gt_units_table is not None
-        ), f"{nwb_file_name!r} has no sidecar GT units; regenerate."
+        assert gt_units_table is not None, (
+            f"{nwb_file_name!r} has no sidecar GT units; regenerate."
+        )
         gt_units = {
             int(uid): np.asarray(gt_units_table["spike_times"][idx])
             for idx, uid in enumerate(gt_units_table.id[:])
@@ -9949,9 +9935,9 @@ def test_recording_specific_reference_drops_ref_channel(polymer_smoke_session):
         "specific-mode reference electrode leaked into the cached "
         "recording; it must be dropped after referencing."
     )
-    assert (
-        set(target_elecs) <= cached_ids
-    ), "sort-group electrodes missing from the cached recording."
+    assert set(target_elecs) <= cached_ids, (
+        "sort-group electrodes missing from the cached recording."
+    )
 
 
 @pytest.mark.slow
@@ -10473,14 +10459,12 @@ def test_recording_fresh_write_cleanup_unlinks_staged_file(
     try:
         with pytest.raises(Exception, match="post-write boom"):
             Recording.populate(pk, reserve_jobs=False)
-        assert (
-            "analysis_file_name" in captured
-        ), "precondition: _write_nwb_artifact must have run and staged a file"
+        assert "analysis_file_name" in captured, (
+            "precondition: _write_nwb_artifact must have run and staged a file"
+        )
         staged = captured["analysis_file_name"]
         abs_path = AnalysisNwbfile.get_abs_path(staged)
-        assert not Path(
-            abs_path
-        ).exists(), (
+        assert not Path(abs_path).exists(), (
             f"fresh-write cleanup did not unlink the staged file {staged!r}"
         )
         assert not (Recording & pk), "no Recording row may be inserted"
@@ -10564,9 +10548,9 @@ def test_recording_rebuild_path_keeps_existing_file_on_failure(
                 electrode_group_names=fetched.electrode_group_names,
                 existing_analysis_file_name=existing,  # REBUILD path
             )
-        assert (
-            "written" in captured
-        ), "precondition: _write_nwb_artifact must have run before the failure"
+        assert "written" in captured, (
+            "precondition: _write_nwb_artifact must have run before the failure"
+        )
         # The rebuild path must NOT unlink the canonical cache file.
         assert Path(existing_abs).exists(), (
             "rebuild path unlinked the existing cache file -- it must only "
@@ -11024,9 +11008,9 @@ def test_list_presets_enumerates_all_presets():
     from spyglass.spikesorting.v2.pipeline import _PRESETS, list_presets
 
     presets = list_presets()
-    assert set(presets) == set(
-        _PRESETS
-    ), "list_presets() must enumerate exactly the registered _PRESETS keys"
+    assert set(presets) == set(_PRESETS), (
+        "list_presets() must enumerate exactly the registered _PRESETS keys"
+    )
     # The three shipped presets are present (guards an accidental rename).
     for name in (
         "franklab_tetrode_mountainsort4",
@@ -11062,9 +11046,9 @@ def test_run_v2_pipeline_idempotent_existing_root(polymer_smoke_session):
     try:
         first = run_v2_pipeline(**common)
         second = run_v2_pipeline(**common)
-        assert (
-            second["curation_id"] == first["curation_id"]
-        ), "second run must return the existing root curation, not a duplicate"
+        assert second["curation_id"] == first["curation_id"], (
+            "second run must return the existing root curation, not a duplicate"
+        )
         assert second["merge_id"] == first["merge_id"]
 
         # A child curation (parent != -1) must NOT divert the short-circuit.
@@ -11074,9 +11058,9 @@ def test_run_v2_pipeline_idempotent_existing_root(polymer_smoke_session):
             description="child curation",
         )
         third = run_v2_pipeline(**common)
-        assert (
-            third["curation_id"] == first["curation_id"]
-        ), "a non-root child must not divert the root short-circuit"
+        assert third["curation_id"] == first["curation_id"], (
+            "a non-root child must not divert the root short-circuit"
+        )
     finally:
         _clean_session_v2(polymer_smoke_session)
 
@@ -11497,9 +11481,9 @@ def test_shared_artifact_group_multi_member_union(
             }
         ).fetch(as_dict=True)
         # Single session -> one shared row covering every member.
-        assert (
-            len(rows) == 1
-        ), f"expected one shared IntervalList row; got {len(rows)}"
+        assert len(rows) == 1, (
+            f"expected one shared IntervalList row; got {len(rows)}"
+        )
         valid_times = rows[0]["valid_times"]
 
         # The union scan removed member A's artifact: the single base chunk
