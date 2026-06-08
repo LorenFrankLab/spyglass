@@ -489,7 +489,7 @@ si_params_name = "just_nan"  # could also use "default"
 #     "max_plausible_speed": 0,
 #     "speed_smoothing_std_dev": 0.000,
 #     "set_boundary": True, # set a boundary around ROI to exclude points outside of bounds
-#     "boundary": boundary # an ordered (n,2) shape array of the nodes of the bounding region
+#     "boundary": boundary # an ordered (n,2) shape array of the nodes of the bounding region in cm.
 # }
 # sgp.DLCSmoothInterpParams().insert1(
 #     {"dlc_si_params_name": si_params_name, "params": params},

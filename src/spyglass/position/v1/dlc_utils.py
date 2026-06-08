@@ -6,6 +6,7 @@ import os
 import pwd
 import subprocess
 import sys
+import matplotlib.path
 from collections.abc import Sequence
 from functools import reduce
 from itertools import combinations, groupby
@@ -599,45 +600,45 @@ def cross_product(a, b):
 
 
 # To check if only one bodypart's points are within bounds
-def check_bounds_single(xy_loc, bounds):
-    """Return a mask of points inside a convex polygon.
+# def check_bounds_single(xy_loc, bounds):
+#     """Return a mask of points inside a convex polygon.
 
-    `bounds` must define a convex polygon. Vertex winding may be either
-    clockwise or counterclockwise.
-    """
-    inside = np.ones(
-        len(xy_loc), dtype=bool
-    )  # Set all points as inside initially
+#     `bounds` must define a convex polygon. Vertex winding may be either
+#     clockwise or counterclockwise.
+#     """
+#     inside = np.ones(
+#         len(xy_loc), dtype=bool
+#     )  # Set all points as inside initially
 
-    for j in range(len(xy_loc)):
-        has_positive_cp = False
-        has_negative_cp = False
+#     for j in range(len(xy_loc)):
+#         has_positive_cp = False
+#         has_negative_cp = False
 
-        for i in range(len(bounds)):
-            A = bounds[i]
-            B = bounds[
-                (i + 1) % len(bounds)
-            ]  # Loop around the boundary, A->B, B->C, C->D, D->A
-            edge = B - A  # computes the vector around boundary points
-            vector = xy_loc[j] - A  # Vector from A to animal's position
+#         for i in range(len(bounds)):
+#             A = bounds[i]
+#             B = bounds[
+#                 (i + 1) % len(bounds)
+#             ]  # Loop around the boundary, A->B, B->C, C->D, D->A
+#             edge = B - A  # computes the vector around boundary points
+#             vector = xy_loc[j] - A  # Vector from A to animal's position
 
-            # Compute the cross product for the current animal's position
-            cp = cross_product(edge, vector)
+#             # Compute the cross product for the current animal's position
+#             cp = cross_product(edge, vector)
 
-            if cp is None:
-                inside[j] = False
-                break
-            if cp > 0:
-                has_positive_cp = True
-            elif cp < 0:
-                has_negative_cp = True
+#             if cp is None:
+#                 inside[j] = False
+#                 break
+#             if cp > 0:
+#                 has_positive_cp = True
+#             elif cp < 0:
+#                 has_negative_cp = True
 
-            # For a convex polygon, points inside have cross products with a
-            # consistent sign for every edge, regardless of vertex winding.
-            if has_positive_cp and has_negative_cp:
-                inside[j] = False
-                break
-    return inside
+#             # For a convex polygon, points inside have cross products with a
+#             # consistent sign for every edge, regardless of vertex winding.
+#             if has_positive_cp and has_negative_cp:
+#                 inside[j] = False
+#                 break
+#     return inside
 
 
 def check_bounds_all_bodyparts(df, bounds):
@@ -645,11 +646,10 @@ def check_bounds_all_bodyparts(df, bounds):
     df_copy = df.copy()
 
     xy_loc = df_copy[["x", "y"]].to_numpy()
-    inside = check_bounds_single(xy_loc, bounds)
-    logger.debug("Inside bounds mask: %s", inside)
+    inside = matplotlib.path.Path(bounds).contains_points(xy_loc)
+    logger.debug(f"Inside bounds mask: {inside.sum()}/{len(inside)}")
     outside = ~inside
-    df_copy.loc[outside, ("x")] = np.nan
-    df_copy.loc[outside, ("y")] = np.nan
+    df_copy.loc[outside, ["x", "y"]] = np.nan
     return df_copy
 
 

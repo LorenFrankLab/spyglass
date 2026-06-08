@@ -219,7 +219,7 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
         )
 
         if params.get("set_boundary"):
-            if bounds := params.get("boundary") is None:
+            if (bounds := params.get("boundary")) is None:
                 raise ValueError(
                     "Parameter 'boundary' must be provided when 'set_boundary' is True."
                 )
@@ -235,7 +235,7 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
                 )
             df_w_nans = check_bounds_all_bodyparts(df_w_nans, bounds)
 
-        nan_mask = df_w_nans.isna().any(axis=1).to_numpy()
+        nan_mask = df_w_nans[["x", "y"]].isna().any(axis=1).to_numpy()
         nan_spans = get_span_start_stop(np.where(nan_mask)[0])
         if params.get("interpolate"):
             interp_params = params.get("interp_params", dict())
