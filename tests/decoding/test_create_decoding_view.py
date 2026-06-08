@@ -110,9 +110,7 @@ class TestCreateDecodingView2D:
         results = _make_2d_results()
         pos_info = _make_position_info(orientation_cols=("orientation",))
         with (
-            patch.object(
-                DecodingOutput, "fetch_results", return_value=results
-            ),
+            patch.object(DecodingOutput, "fetch_results", return_value=results),
             patch.object(
                 DecodingOutput,
                 "fetch_environments",
@@ -158,9 +156,7 @@ class TestCreateDecodingView2D:
         results = _make_2d_results()
         pos_info = _make_position_info(orientation_cols=orientation_cols)
         with (
-            patch.object(
-                DecodingOutput, "fetch_results", return_value=results
-            ),
+            patch.object(DecodingOutput, "fetch_results", return_value=results),
             patch.object(
                 DecodingOutput,
                 "fetch_environments",
@@ -194,9 +190,7 @@ class TestCreateDecodingView2D:
             orientation_cols=("orientation", "head_orientation")
         )
         with (
-            patch.object(
-                DecodingOutput, "fetch_results", return_value=results
-            ),
+            patch.object(DecodingOutput, "fetch_results", return_value=results),
             patch.object(
                 DecodingOutput,
                 "fetch_environments",
@@ -224,9 +218,7 @@ class TestCreateDecodingView2D:
         results = _make_2d_results()
         pos_info = _make_position_info(orientation_cols=("orientation",))
         with (
-            patch.object(
-                DecodingOutput, "fetch_results", return_value=results
-            ),
+            patch.object(DecodingOutput, "fetch_results", return_value=results),
             patch.object(
                 DecodingOutput,
                 "fetch_environments",
@@ -253,9 +245,7 @@ class TestCreateDecodingView2D:
         results = _make_2d_results()
         pos_info = _make_position_info(orientation_cols=())
         with (
-            patch.object(
-                DecodingOutput, "fetch_results", return_value=results
-            ),
+            patch.object(DecodingOutput, "fetch_results", return_value=results),
             patch.object(
                 DecodingOutput,
                 "fetch_environments",
@@ -280,9 +270,7 @@ class TestCreateDecodingView2D:
         results = _make_2d_results()
         pos_info = _make_position_info(orientation_cols=("orientation",))
         with (
-            patch.object(
-                DecodingOutput, "fetch_results", return_value=results
-            ),
+            patch.object(DecodingOutput, "fetch_results", return_value=results),
             patch.object(
                 DecodingOutput,
                 "fetch_environments",
@@ -312,9 +300,7 @@ class TestCreateDecodingView1D:
 
         results = _make_1d_results()
         with (
-            patch.object(
-                DecodingOutput, "fetch_results", return_value=results
-            ),
+            patch.object(DecodingOutput, "fetch_results", return_value=results),
             patch.object(
                 DecodingOutput,
                 "fetch_environments",
