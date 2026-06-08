@@ -54,7 +54,7 @@ class ElectrodeGroup(SpyglassIngestion, dj.Imported):
                 "electrode_group_name": "name",
                 "description": "description",
                 "region_id": self.fetch_add_brain_region,
-                "hemisphere": self.hemisphere_from_targeted_x,
+                "target_hemisphere": self.hemisphere_from_targeted_x,
             },
             "device": {
                 "probe_id": "probe_type",
