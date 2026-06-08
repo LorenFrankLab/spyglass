@@ -182,18 +182,17 @@ class ClusterlessThresholderSchema(BaseModel):
       estimates per-channel MAD (``noise_levels`` left unset). Tracks
       the recording's actual noise floor; right for synthetic /
       low-amplitude fixtures.
-    * ``"uv"`` -- the runtime derives ``noise_levels=[1.0]`` (broadcast
-      across channels) so ``detect_peaks`` reads ``detect_threshold``
-      directly in the recording's native amplitude units. NOTE: under
-      v2's default preprocessing (bandpass + common_reference at
-      float64, with NO gain scaling) the recording is in raw ADC
-      counts, so ``detect_threshold`` is effectively raw counts, not
-      true microvolts -- a v1-inherited unit labeling (see the
-      ``detect_threshold`` units note in CHANGELOG ``[0.5.6]``). It is
-      only true uV if the recording is already gain-scaled; convert via
-      ``count x gain_uV_per_count``. Reproduces v1's
-      ``default_clusterless`` behavior at
-      ``src/spyglass/spikesorting/v1/sorting.py:177``.
+    * ``"uv"`` -- ``detect_threshold`` is a TRUE microvolt threshold. The
+      runtime derives ``noise_levels=[1.0]`` (broadcast across channels)
+      AND scales the recording to microvolts (``scale_to_uV``, using the
+      stored NWB gain) before ``detect_peaks``, so a value of ``100``
+      means 100 uV. For Frank-lab data (gain == 1 uV/count) this equals
+      the raw-count value; for non-unity-gain rigs (e.g. Intan ~0.195
+      uV/count) it is the corrected behavior. This honors the label v1
+      used at ``src/spyglass/spikesorting/v1/sorting.py:177`` but never
+      enforced (v1 thresholded in raw counts -- v2 diverges here). Requires
+      the recording to carry channel gains (it always does after the v2
+      ElectricalSeries write); otherwise the runtime raises.
 
     ``noise_levels`` stays available as an ADVANCED explicit override.
     Precedence: if ``noise_levels`` is set, the runtime uses it

@@ -80,13 +80,14 @@ def _clusterless_noise_levels(
     An explicit ``noise_levels`` always wins. Otherwise ``threshold_unit``
     governs how ``detect_threshold`` is interpreted:
 
-    * ``"uv"`` -> ``[1.0]`` so ``detect_peaks`` reads ``detect_threshold``
-      in the recording's native amplitude units (broadcast across channels
-      by the caller). Under v2's gain-free preprocessing those units are
-      raw ADC counts, not true microvolts unless the recording is already
-      gain-scaled -- see CHANGELOG ``[0.5.6]``.
+    * ``"uv"`` -> ``[1.0]``; the caller (``_run_clusterless_thresholder``)
+      scales the recording to microvolts (``scale_to_uV``) before
+      ``detect_peaks``, so ``detect_threshold`` is a genuine microvolt
+      threshold. (For Frank-lab data gain==1 uV/count, so this matches the
+      old raw-count behavior; for non-unity-gain rigs it is the fix.)
     * ``"mad"`` -> ``None`` so SpikeInterface estimates per-channel MAD
-      and ``detect_threshold`` is a MAD multiplier.
+      and ``detect_threshold`` is a MAD multiplier (scale-relative, so the
+      recording is NOT uV-scaled on this path).
     """
     if noise_levels is not None:
         return noise_levels
@@ -261,12 +262,14 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
             _validate_params(
                 _get_sorter_schema("clusterless_thresholder"),
                 # ``threshold_unit="uv"`` makes the shipped
-                # ``detect_threshold=100`` read in the recording's native
-                # amplitude units (raw ADC counts under v2's gain-free
-                # preprocessing, not true uV unless gain-scaled) rather
-                # than as a MAD multiplier, matching
-                # v1's ``default_clusterless`` at
-                # ``src/spyglass/spikesorting/v1/sorting.py:177``. The
+                # ``detect_threshold=100`` a TRUE 100 microvolt threshold:
+                # the runtime scales the recording to uV (via the stored
+                # NWB gain) before detection, rather than treating it as a
+                # MAD multiplier. (For Frank-lab data gain==1 uV/count so
+                # 100 "uv" == 100 counts == 100 uV either way.) This
+                # honors the label v1 used at
+                # ``src/spyglass/spikesorting/v1/sorting.py:177`` but never
+                # enforced (v1 thresholded in raw counts). The
                 # explicit ``noise_levels=[1.0]`` is the equivalent
                 # advanced override and is kept as a belt-and-suspenders
                 # regression guard against the 1,400x noise_levels
@@ -1799,13 +1802,15 @@ class Sorting(SpyglassMixin, dj.Computed):
         ``noise_levels`` handling: when the params row supplies a
         non-``None`` value (e.g. ``default_clusterless`` ships
         ``noise_levels=[1.0]``), SI's ``locally_exclusive`` interprets
-        ``detect_threshold`` in the recording's native amplitude units
-        -- matching v1's choice at ``v1/sorting.py:177``. v1 labeled
-        this "microvolts", but under v2's default preprocessing (no
-        gain scaling) the recording is in raw ADC counts, so the
-        threshold is effectively raw counts, not true uV (see the
-        ``detect_threshold`` units note in CHANGELOG ``[0.5.6]``). A
-        scalar (singleton list) is broadcast to length ``n_channels``
+        ``detect_threshold`` in the recording's amplitude units. With
+        ``threshold_unit="uv"`` this method scales the recording to
+        microvolts (``scale_to_uV``, using the stored NWB gain) before
+        ``detect_peaks``, so ``detect_threshold`` is a TRUE microvolt
+        threshold -- honoring the label v1 used at ``v1/sorting.py:177``
+        but never actually enforced (v1 thresholded in raw counts). For
+        Frank-lab data gain==1 uV/count so this is a no-op; for
+        non-unity-gain rigs it is the fix. A scalar (singleton list) is
+        broadcast to length ``n_channels``
         because SI's ``locally_exclusive`` indexes ``noise_levels[chan]
         * detect_threshold`` per channel. When the params row omits
         ``noise_levels`` (default in v2, and what the smoke /
@@ -1888,6 +1893,26 @@ class Sorting(SpyglassMixin, dj.Computed):
         detect_job_kwargs = {
             k: v for k, v in (job_kwargs or {}).items() if k != "random_seed"
         }
+        if threshold_unit == "uv":
+            # Honor the "uv" label: scale the detector's input from raw ADC
+            # counts to microvolts using the recording's STORED gain/offset
+            # (the NWB ElectricalSeries conversion/offset, reloaded onto the
+            # recording's channel gains by se.read_nwb_recording). With
+            # noise_levels=[1.0], detect_threshold is then a genuine
+            # microvolt threshold. For Frank-lab data (gain==1 uV/count) this
+            # is a no-op; for non-unity-gain rigs (e.g. Intan ~0.195) it
+            # converts a previously raw-count threshold into true uV.
+            # Diverges from v1, which always thresholded in raw counts.
+            import spikeinterface.preprocessing as sip
+
+            if recording.get_channel_gains() is None:
+                raise ValueError(
+                    "clusterless_thresholder threshold_unit='uv' requires the "
+                    "recording to carry channel gains (the NWB ElectricalSeries "
+                    "conversion); none are set. Use threshold_unit='mad' for a "
+                    "gain-free relative threshold."
+                )
+            recording = sip.scale_to_uV(recording)
         detected = detect_peaks(
             recording,
             method=method,

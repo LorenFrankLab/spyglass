@@ -255,19 +255,25 @@ dropping; `restrict_by_artifact=True` now honors the v2
   `ml_ms4alg` + `isosplit5` + `pybind11` + `spikeextractors`.
   Linux-only legacy runtime; same non-determinism caveat as
   MS5.
-- **`detect_threshold` units for `clusterless_thresholder` are NOT
-  truly microvolts.** The clusterless-detection docstring says "stays in microvolts"
-  because the path forwards `noise_levels=[1.0]` to SI's
-  `detect_peaks`, but this only puts the threshold in microvolts
-  if the upstream recording is already gain-scaled. v2's
-  preprocessing (bandpass + common_reference at float64) does NOT
-  apply gains; the recording remains in raw count space. So a
-  user's `detect_threshold=100` is effectively "100 raw counts"
-  (~20 uV on a 0.2 uV/count Intan probe), not 100 uV. This is a
-  v1-inherited unit confusion; we did not introduce or fix it in
-  v2. Document threshold values in counts (or in
-  count-equivalent uV via `count × gain_uV_per_count`) until v2
-  ships a gain-aware detection path.
+- **`clusterless_thresholder` `threshold_unit="uv"` now means TRUE
+  microvolts (diverges from v1).** Previously the `"uv"` path forwarded
+  `noise_levels=[1.0]` to SI's `detect_peaks` against a recording that
+  v2's preprocessing leaves in raw ADC counts (bandpass +
+  common_reference at float64, no gain applied), so `detect_threshold=100`
+  was really "100 counts" -- only true microvolts if the recording was
+  already gain-scaled. v2 now scales the detection input to microvolts
+  (`scale_to_uV`, using the recording's stored NWB gain) before
+  `detect_peaks` whenever `threshold_unit="uv"`, so `detect_threshold=100`
+  is a genuine 100 uV threshold. **For Frank-lab data (gain == 1
+  uV/count) this is a no-op** (100 counts == 100 uV); for non-unity-gain
+  rigs (e.g. Intan ~0.195 uV/count) it corrects a previously misleading
+  threshold. This honors the microvolt label v1 used
+  (`v1/sorting.py:177`) but never enforced -- v1 thresholded in raw
+  counts, so v2 clusterless detection diverges from v1 on non-unity-gain
+  recordings. `threshold_unit="mad"` is unaffected (MAD is scale-relative;
+  the recording is not uV-scaled on that path). A `"uv"` request on a
+  recording with no channel gains now raises rather than silently
+  thresholding in counts.
 
 #### Clusterless waveform-feature extraction works for v2 sorts under SpikeInterface 0.104
 

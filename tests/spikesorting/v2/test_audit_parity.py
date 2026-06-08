@@ -2471,6 +2471,10 @@ def test_clusterless_singleton_noise_levels_broadcast(monkeypatch):
         durations=[1.0],
         sampling_frequency=30_000.0,
     )
+    # threshold_unit="uv" now scales the recording to uV (scale_to_uV),
+    # which requires channel gains/offsets to be set.
+    rec.set_channel_gains([1.0] * n_channels)
+    rec.set_channel_offsets([0.0] * n_channels)
 
     captured = {}
 

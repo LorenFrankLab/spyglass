@@ -4676,6 +4676,9 @@ def _build_synthetic_rec(traces, fs=30_000.0):
 
     rec = si.NumpyRecording(traces_list=[traces], sampling_frequency=fs)
     rec.set_channel_gains([1.0] * traces.shape[1])
+    # Offsets too: threshold_unit="uv" scales to uV (scale_to_uV), which
+    # requires both gains AND offsets to be set.
+    rec.set_channel_offsets([0.0] * traces.shape[1])
     return rec
 
 
