@@ -126,9 +126,6 @@ class Electrode(SpyglassIngestion, dj.Imported):
                 "z": "z",
                 "filtering": self.get_filtering_default_unfiltered,
                 "impedance": "imp",
-                "bad_channel": lambda obj: (
-                    "True" if obj.bad_channel else "False"
-                ),
                 "x_warped": self.fixed_to_zero,
                 "y_warped": self.fixed_to_zero,
                 "z_warped": self.fixed_to_zero,
