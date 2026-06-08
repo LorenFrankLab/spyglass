@@ -1133,6 +1133,12 @@ class CurationV2(SpyglassMixin, dj.Manual):
         seconds read straight from the curated units NWB plus the
         ``curation_label`` lists joined from ``UnitLabel``.
 
+        A curation created with ``apply_merge=False`` returns its UNMERGED
+        preview units here -- the proposed merges live in ``MergeGroup`` and
+        are applied only by ``get_merged_sorting``. Because consumers
+        (SortedSpikesGroup / decoding) read through this method, a warning is
+        emitted in that case so the proposed merges are not silently ignored.
+
         Parameters
         ----------
         key : dict
@@ -1155,6 +1161,28 @@ class CurationV2(SpyglassMixin, dj.Manual):
         abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
         recording_row = cls._upstream_recording_row(key)
         fs = float(recording_row["sampling_frequency"])
+
+        # A curation created with apply_merge=False records PROPOSED merges in
+        # MergeGroup but does NOT apply them: get_sorting (what consumers such
+        # as SortedSpikesGroup / decoding read via SpikeSortingOutput) returns
+        # the UNMERGED preview units. Warn so a consumer does not silently
+        # decode on oversplit units -- get_merged_sorting applies the proposal,
+        # or re-curate with apply_merge=True to commit it. A real merge is a
+        # group with >1 contributor; every unit carries a 1-element self-entry,
+        # so a plain root curation (all self-entries) does NOT warn.
+        has_proposed_merge = any(
+            len(contribs) > 1
+            for contribs in cls.get_merge_groups(key).values()
+        )
+        if not bool(row["merges_applied"]) and has_proposed_merge:
+            logger.warning(
+                "CurationV2.get_sorting: curation "
+                f"(sorting_id={row['sorting_id']}, "
+                f"curation_id={row['curation_id']}) has proposed merges that "
+                "are NOT applied (apply_merge=False); this returns the "
+                "UNMERGED units. Use get_merged_sorting to apply the proposal, "
+                "or re-curate with apply_merge=True to commit it."
+            )
 
         if len(cls.Unit & key) == 0:
             # Zero-unit curations are valid (a user may curate a
