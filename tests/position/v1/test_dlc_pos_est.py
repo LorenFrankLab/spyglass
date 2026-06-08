@@ -78,7 +78,6 @@ def test_fetch_video_path(sgp):
     assert Path(path).exists(), f"Video path {path} does not exist."
 
 
-@skip_if_no_dlc
 def test_check_bounds_all_bodyparts_all_inside(check_bounds_all_bodyparts):
     head_x = [1, 2, 3]
     head_y = [1, 2, 3]
@@ -90,7 +89,6 @@ def test_check_bounds_all_bodyparts_all_inside(check_bounds_all_bodyparts):
     ).all(), "check_bounds_all_bodyparts incorrectly labeled part as outside"
 
 
-@skip_if_no_dlc
 def test_check_bounds_all_bodyparts_one_outside(check_bounds_all_bodyparts):
     head_x = [1, 20, 3]
     head_y = [1, 2, 3]
