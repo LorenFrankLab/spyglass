@@ -88,7 +88,9 @@ def planted_sort(dj_conn):
     )
     (Sorting & sort_pk).super_delete(warn=False)
 
-    def _plant(sorter, sorter_params, recording, sorting_id, *, job_kwargs=None):
+    def _plant(
+        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None
+    ):
         samples = np.array([500, 1500, 2500, 3500, 4500], dtype=np.int64)
         labels = np.zeros(samples.size, dtype=np.int32)
         return si.NumpySorting.from_samples_and_labels(
@@ -124,9 +126,7 @@ def test_cancelled_delete_preserves_analyzer_folder_and_row(
     # user_choice is imported into datajoint.table, so patch it there (the
     # call site), not datajoint.utils. A clean "no" makes dj cancel the
     # transaction properly (no EOF, no leaked transaction state).
-    monkeypatch.setattr(
-        "datajoint.table.user_choice", lambda *a, **k: "no"
-    )
+    monkeypatch.setattr("datajoint.table.user_choice", lambda *a, **k: "no")
 
     (Sorting & planted_sort).delete(safemode=True)
 
@@ -135,4 +135,43 @@ def test_cancelled_delete_preserves_analyzer_folder_and_row(
     assert folder.exists(), (
         "cancelled delete destroyed the analyzer folder for a row the user "
         "chose to keep"
+    )
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_cancelled_artifact_delete_preserves_interval_list(
+    planted_sort, monkeypatch
+):
+    """A cancelled ArtifactDetection.delete must NOT remove the artifact
+    IntervalList rows (the twin of the Sorting.delete cancel guard)."""
+    from spyglass.common import IntervalList
+    from spyglass.spikesorting.v2.artifact import ArtifactDetection
+    from spyglass.spikesorting.v2.recording import RecordingSelection
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+    from spyglass.spikesorting.v2.utils import artifact_interval_list_name
+
+    art_id = SortingSelection.resolve_artifact(planted_sort)
+    assert art_id is not None, "planted sort must be artifact-backed"
+    rec_id = SortingSelection.resolve_source(planted_sort).key["recording_id"]
+    nwb = (RecordingSelection & {"recording_id": rec_id}).fetch1(
+        "nwb_file_name"
+    )
+    il_restr = {
+        "nwb_file_name": nwb,
+        "interval_list_name": artifact_interval_list_name(art_id),
+    }
+    assert IntervalList & il_restr, (
+        "fixture should have an artifact IntervalList"
+    )
+
+    monkeypatch.setattr("datajoint.table.user_choice", lambda *a, **k: "no")
+    (ArtifactDetection & {"artifact_id": art_id}).delete(safemode=True)
+
+    assert ArtifactDetection & {"artifact_id": art_id}, (
+        "cancelled delete removed the ArtifactDetection master row"
+    )
+    assert IntervalList & il_restr, (
+        "cancelled artifact delete removed the IntervalList row for a master "
+        "the user chose to keep"
     )

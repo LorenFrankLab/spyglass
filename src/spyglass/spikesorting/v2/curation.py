@@ -1170,11 +1170,13 @@ class CurationV2(SpyglassMixin, dj.Manual):
         # or re-curate with apply_merge=True to commit it. A real merge is a
         # group with >1 contributor; every unit carries a 1-element self-entry,
         # so a plain root curation (all self-entries) does NOT warn.
-        has_proposed_merge = any(
+        # Short-circuit on ``merges_applied`` first so the extra MergeGroup
+        # fetch is skipped on the common already-applied / root path (the
+        # warning can only fire when merges are NOT applied).
+        if not bool(row["merges_applied"]) and any(
             len(contribs) > 1
             for contribs in cls.get_merge_groups(key).values()
-        )
-        if not bool(row["merges_applied"]) and has_proposed_merge:
+        ):
             logger.warning(
                 "CurationV2.get_sorting: curation "
                 f"(sorting_id={row['sorting_id']}, "

@@ -283,3 +283,36 @@ def test_v2_merge_ids_warn_on_multi_curation_fanout(
         )
     finally:
         _clear_curations_for(populated_sorting)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_v2_merge_ids_single_curation_does_not_warn(
+    populated_sorting, monkeypatch
+):
+    """A sorting with exactly ONE curation must NOT emit the fan-out warning
+    (negative control for test_v2_merge_ids_warn_on_multi_curation_fanout)."""
+    import spyglass.spikesorting.spikesorting_merge as merge_mod
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    _clear_curations_for(populated_sorting)
+    CurationV2.insert_curation(sorting_key=populated_sorting)
+    sid = populated_sorting["sorting_id"]
+
+    seen: list[str] = []
+    monkeypatch.setattr(
+        merge_mod.logger,
+        "warning",
+        lambda msg, *a, **k: seen.append(str(msg)),
+    )
+    merge_ids = SpikeSortingOutput().get_restricted_merge_ids(
+        {"sorting_id": sid}, sources=["v2"]
+    )
+    try:
+        assert len(merge_ids) == 1
+        assert not any("multiple CurationV2 curations" in s for s in seen), (
+            f"single-curation sort must not warn about fan-out; got {seen}"
+        )
+    finally:
+        _clear_curations_for(populated_sorting)

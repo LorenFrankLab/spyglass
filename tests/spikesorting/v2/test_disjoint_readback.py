@@ -86,3 +86,22 @@ def test_spike_times_to_frames_clamps_out_of_bounds():
         "out-of-bounds spike (frame == n_samples) must be clamped to "
         f"n_samples-1 (count preserved), not dropped; got {frames.tolist()}"
     )
+
+
+def test_spike_times_to_frames_raises_on_far_out_of_bounds():
+    """A spike genuinely seconds past the recording end RAISES, not clamped.
+
+    The clamp only covers floating-point rounding at the final sample. A spike
+    far beyond the end (a frame of n_samples in searchsorted space, but seconds
+    past in time) is an upstream alignment/units bug and must surface rather
+    than be silently absorbed into the last sample.
+    """
+    from spyglass.spikesorting.v2.utils import _spike_times_to_frames
+
+    fs = 30000.0
+    timestamps = np.arange(100) / fs + 5.0
+    n_samples = timestamps.size
+    # A spike 1 second past the end -> far beyond FP-rounding tolerance.
+    spike_times = np.array([timestamps[50], timestamps[-1] + 1.0])
+    with pytest.raises(ValueError, match="alignment/units error"):
+        _spike_times_to_frames(timestamps, spike_times, n_samples, unit_id=9)

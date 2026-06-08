@@ -212,7 +212,8 @@ def write_buffer_gb(
     Returns
     -------
     float
-        Buffer size in GB, in ``(0, cap_gb]``.
+        Buffer size in GB, in ``[0, cap_gb]`` (``0`` only for the degenerate
+        ``n_channels == 0``; ``> 0`` for any real recording).
     """
     seconds_gb = (
         float(n_channels)
@@ -870,18 +871,49 @@ def _spike_times_to_frames(recording_times, spike_times, n_samples, unit_id):
 
     Returns
     -------
-    np.ndarray, shape (n_valid_spikes,)
-        Frame indices in ``[0, n_samples)``; out-of-bounds frames
-        removed (``n_valid_spikes <= n_spikes``).
+    np.ndarray, shape (n_spikes,)
+        Frame indices in ``[0, n_samples)``. A near-final spike whose absolute
+        time floating-point-rounds just past the last timestamp is clamped to
+        ``n_samples - 1`` (count preserved, so downstream per-spike features
+        stay aligned). A spike genuinely beyond the recording raises.
+
+    Raises
+    ------
+    ValueError
+        If a spike time is more than a couple of sample periods past the final
+        timestamp -- an upstream alignment/units error, not FP rounding.
     """
     import numpy as _np
 
     from spyglass.utils import logger
 
+    spike_times = _np.asarray(spike_times)
     spike_frames = _np.searchsorted(recording_times, spike_times)
     excess_mask = spike_frames >= n_samples
     n_excess = int(excess_mask.sum())
     if n_excess > 0:
+        # ``searchsorted`` caps frames at ``n_samples`` (one past the end), so
+        # an excess frame is ALWAYS exactly ``n_samples`` regardless of how far
+        # past the end the spike time is. Discriminate in SECONDS: a spike a
+        # hair past the last timestamp is floating-point rounding (safe to
+        # clamp), but a spike genuinely seconds beyond the recording is an
+        # alignment/units bug that must surface, not be silently absorbed into
+        # the last sample.
+        last_t = float(recording_times[-1])
+        dt = (
+            float(recording_times[-1] - recording_times[-2])
+            if recording_times.size >= 2
+            else 0.0
+        )
+        tol = 2.0 * dt  # a couple of sample periods covers FP rounding
+        max_excess_s = float(_np.max(spike_times[excess_mask])) - last_t
+        if max_excess_s > tol:
+            raise ValueError(
+                f"Unit {unit_id} has spike time(s) {max_excess_s:.6g}s beyond "
+                f"the recording end ({last_t:.6g}s) -- more than {tol:.6g}s "
+                "past the final sample, so this is an alignment/units error, "
+                "not floating-point rounding. Inspect the upstream spike times."
+            )
         logger.warning(
             f"Unit {unit_id} has {n_excess} spike(s) whose searchsorted "
             "frame landed at n_samples (floating-point rounding of the final "

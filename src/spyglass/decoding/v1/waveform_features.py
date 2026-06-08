@@ -355,9 +355,10 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
         # legacy default carries ``max_spikes_per_unit=None``, already popped).
         job_kwargs = {k: v for k, v in params.items() if v is not None}
 
-        # Disk-backed (``binary_folder``) rather than ``format="memory"``:
-        # clusterless decoding extracts EVERY spike's full multi-channel
-        # waveform (``method="all"``, ``sparse=False``, mandated for the 1:1
+        # Disk-backed (``binary_folder``) rather than ``format="memory"``: on
+        # the default clusterless path (``max_spikes_per_unit is None``) the
+        # analyzer extracts EVERY spike's full multi-channel waveform
+        # (``method="all"``, ``sparse=False`` -- mandated for the 1:1
         # spike<->feature alignment), which for a noisy 1 h tetrode is millions
         # of crossings -> several GB held entirely in RAM, OOM under parallel
         # workers. binary_folder keeps the waveforms on disk and reads them
@@ -367,28 +368,35 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
         from pathlib import Path as _Path
 
         tmpdir = tempfile.TemporaryDirectory(prefix="v2_clusterless_wf_")
-        analyzer = si.create_sorting_analyzer(
-            sorting=sorting,
-            recording=recording,
-            sparse=False,
-            format="binary_folder",
-            folder=str(_Path(tmpdir.name) / "analyzer"),
-            return_in_uV=True,
-        )
-        if max_spikes_per_unit is None:
-            analyzer.compute("random_spikes", method="all")
-        else:
-            analyzer.compute(
-                "random_spikes",
-                method="uniform",
-                max_spikes_per_unit=int(max_spikes_per_unit),
+        # Until the accessor takes ownership (below), an exception during
+        # build/compute would leave the on-disk scratch folder orphaned until
+        # GC; clean it up deterministically and re-raise.
+        try:
+            analyzer = si.create_sorting_analyzer(
+                sorting=sorting,
+                recording=recording,
+                sparse=False,
+                format="binary_folder",
+                folder=str(_Path(tmpdir.name) / "analyzer"),
+                return_in_uV=True,
             )
-        analyzer.compute(
-            "waveforms",
-            ms_before=ms_before,
-            ms_after=ms_after,
-            **job_kwargs,
-        )
+            if max_spikes_per_unit is None:
+                analyzer.compute("random_spikes", method="all")
+            else:
+                analyzer.compute(
+                    "random_spikes",
+                    method="uniform",
+                    max_spikes_per_unit=int(max_spikes_per_unit),
+                )
+            analyzer.compute(
+                "waveforms",
+                ms_before=ms_before,
+                ms_after=ms_after,
+                **job_kwargs,
+            )
+        except BaseException:
+            tmpdir.cleanup()
+            raise
         return _AnalyzerWaveformAccessor(
             sorting=analyzer.sorting, analyzer=analyzer, tmpdir=tmpdir
         )
