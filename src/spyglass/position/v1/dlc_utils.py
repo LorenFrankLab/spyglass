@@ -590,15 +590,6 @@ def get_span_start_stop(indices):
     return span_inds
 
 
-# ROI/bounds filtering helpers for DLC position
-
-
-def cross_product(a, b):
-    if np.isnan(a).any() or np.isnan(b).any():
-        return np.nan
-    return a[0] * b[1] - a[1] * b[0]
-
-
 def check_bounds_all_bodyparts(df, bounds):
     """Checks if (x,y) position of each labeled body part in ROI"""
     df_copy = df.copy()
