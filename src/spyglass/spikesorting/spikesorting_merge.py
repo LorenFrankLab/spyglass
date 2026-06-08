@@ -437,6 +437,61 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         return query.get_recording(query.fetch("KEY"))
 
     @classmethod
+    def assert_decoding_merge_ids_ok(cls, merge_ids) -> None:
+        """Validate merge_ids destined for a decoding group/consumer.
+
+        Raises (rather than the softer warnings on ``get_restricted_merge_ids``
+        / ``CurationV2.get_sorting``) at the CONSUMER boundary -- where the
+        units actually enter a decode -- so the query helpers stay usable for
+        ad-hoc inspection while a dangerous set never reaches a decoder:
+
+        * a v2 ``CurationV2`` created with ``apply_merge=False`` whose proposed
+          merges are NOT applied -> decoding would run on oversplit units;
+        * two merge_ids resolving to the SAME sorting (different curations of
+          one sort) -> the same physical units counted more than once.
+
+        v0/v1 sources are skipped: the preview / multi-curation-per-sort
+        concepts are specific to v2 ``CurationV2``.
+
+        Parameters
+        ----------
+        merge_ids : iterable
+            ``merge_id`` values (or anything ``& {"merge_id": ...}`` accepts).
+        """
+        if CurationV2 is None:
+            return
+        sorting_to_merges: dict = {}
+        for mid in merge_ids:
+            part = cls.CurationV2 & {"merge_id": mid}
+            if not part:
+                continue  # v0/v1 source -- preview/multi-curation are v2 only
+            # The merge part's PK is ``merge_id``; the CurationV2 PK
+            # (sorting_id, curation_id) lives as secondary FK columns.
+            sorting_id, curation_id = part.fetch1("sorting_id", "curation_id")
+            cur_key = {"sorting_id": sorting_id, "curation_id": curation_id}
+            sorting_to_merges.setdefault(str(sorting_id), []).append(mid)
+            if CurationV2.has_unapplied_proposed_merges(cur_key):
+                raise ValueError(
+                    f"merge_id {mid} is a CurationV2 curation "
+                    f"(sorting_id={cur_key['sorting_id']}, "
+                    f"curation_id={cur_key['curation_id']}) created with "
+                    "apply_merge=False whose proposed merges are NOT applied; "
+                    "decoding would run on oversplit units. Re-curate with "
+                    "apply_merge=True (or pick a curation whose merges are "
+                    "applied) before adding it to a decoding group."
+                )
+        duplicated = {
+            sid: m for sid, m in sorting_to_merges.items() if len(m) > 1
+        }
+        if duplicated:
+            raise ValueError(
+                "Multiple merge_ids resolve to the same sorting (different "
+                "curations of one sort), so the same units would be counted "
+                f"more than once in decoding: {duplicated}. Restrict to one "
+                "curation per sorting (pass curation_id)."
+            )
+
+    @classmethod
     def get_sorting(cls, key):
         """get the sorting associated with a spike sorting output"""
         source_table = source_class_dict[

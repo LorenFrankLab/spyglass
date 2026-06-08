@@ -275,12 +275,12 @@ def test_v2_merge_ids_warn_on_multi_curation_fanout(
         {"sorting_id": sid}, sources=["v2"]
     )
     try:
-        assert len(merge_ids) == 2, (
-            f"two curations should fan out to two merge_ids; got {merge_ids}"
-        )
-        assert any("multiple CurationV2 curations" in s for s in seen), (
-            f"expected a multi-curation fan-out warning; got {seen}"
-        )
+        assert (
+            len(merge_ids) == 2
+        ), f"two curations should fan out to two merge_ids; got {merge_ids}"
+        assert any(
+            "multiple CurationV2 curations" in s for s in seen
+        ), f"expected a multi-curation fan-out warning; got {seen}"
     finally:
         _clear_curations_for(populated_sorting)
 
@@ -311,8 +311,46 @@ def test_v2_merge_ids_single_curation_does_not_warn(
     )
     try:
         assert len(merge_ids) == 1
-        assert not any("multiple CurationV2 curations" in s for s in seen), (
-            f"single-curation sort must not warn about fan-out; got {seen}"
+        assert not any(
+            "multiple CurationV2 curations" in s for s in seen
+        ), f"single-curation sort must not warn about fan-out; got {seen}"
+    finally:
+        _clear_curations_for(populated_sorting)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_assert_decoding_merge_ids_raises_on_fanout(populated_sorting):
+    """The consumer-boundary validator RAISES when >1 merge_id maps to one
+    sorting (the fan-out get_restricted_merge_ids only warns about)."""
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    unit_ids = sorted(
+        int(u) for u in (Sorting.Unit & populated_sorting).fetch("unit_id")
+    )
+    if not unit_ids:
+        pytest.skip("need >=1 unit for a distinct child curation")
+
+    _clear_curations_for(populated_sorting)
+    CurationV2.insert_curation(sorting_key=populated_sorting)
+    CurationV2.insert_curation(
+        sorting_key=populated_sorting,
+        parent_curation_id=0,
+        labels={unit_ids[0]: ["mua"]},
+    )
+    sid = populated_sorting["sorting_id"]
+    merge_ids = list(
+        SpikeSortingOutput().get_restricted_merge_ids(
+            {"sorting_id": sid}, sources=["v2"]
         )
+    )
+    try:
+        assert len(merge_ids) == 2
+        with pytest.raises(ValueError, match="same sorting"):
+            SpikeSortingOutput.assert_decoding_merge_ids_ok(merge_ids)
+        # A single (one-curation) merge_id is accepted.
+        SpikeSortingOutput.assert_decoding_merge_ids_ok([merge_ids[0]])
     finally:
         _clear_curations_for(populated_sorting)

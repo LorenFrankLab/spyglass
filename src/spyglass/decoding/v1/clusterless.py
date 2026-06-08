@@ -58,6 +58,17 @@ class UnitWaveformFeaturesGroup(SpyglassMixin, dj.Manual):
         self, nwb_file_name: str, group_name: str, keys: list[dict]
     ):
         """Create a group of waveform features for a given session"""
+        from spyglass.spikesorting.spikesorting_merge import (
+            SpikeSortingOutput,
+        )
+
+        # Consumer-boundary guard: refuse to group multiple curations of one
+        # sort (the same units would be counted more than once in the decode).
+        # No-op for v0/v1 sources. Each UnitWaveformFeatures key carries the
+        # source's ``spikesorting_merge_id``.
+        SpikeSortingOutput.assert_decoding_merge_ids_ok(
+            [k.get("spikesorting_merge_id") for k in keys]
+        )
         group_key = {
             "nwb_file_name": nwb_file_name,
             "waveform_features_group_name": group_name,
@@ -626,15 +637,13 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         )
 
         waveform_keys = (
-            (
-                UnitWaveformFeaturesGroup.UnitFeatures
-                & {
-                    "nwb_file_name": key["nwb_file_name"],
-                    "waveform_features_group_name": key[
-                        "waveform_features_group_name"
-                    ],
-                }
-            )
+            UnitWaveformFeaturesGroup.UnitFeatures
+            & {
+                "nwb_file_name": key["nwb_file_name"],
+                "waveform_features_group_name": key[
+                    "waveform_features_group_name"
+                ],
+            }
         ).fetch("KEY")
         spike_times, spike_waveform_features = (
             UnitWaveformFeatures & waveform_keys

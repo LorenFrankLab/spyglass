@@ -161,16 +161,16 @@ def test_cancelled_artifact_delete_preserves_interval_list(
         "nwb_file_name": nwb,
         "interval_list_name": artifact_interval_list_name(art_id),
     }
-    assert IntervalList & il_restr, (
-        "fixture should have an artifact IntervalList"
-    )
+    assert (
+        IntervalList & il_restr
+    ), "fixture should have an artifact IntervalList"
 
     monkeypatch.setattr("datajoint.table.user_choice", lambda *a, **k: "no")
     (ArtifactDetection & {"artifact_id": art_id}).delete(safemode=True)
 
-    assert ArtifactDetection & {"artifact_id": art_id}, (
-        "cancelled delete removed the ArtifactDetection master row"
-    )
+    assert ArtifactDetection & {
+        "artifact_id": art_id
+    }, "cancelled delete removed the ArtifactDetection master row"
     assert IntervalList & il_restr, (
         "cancelled artifact delete removed the IntervalList row for a master "
         "the user chose to keep"

@@ -1165,18 +1165,11 @@ class CurationV2(SpyglassMixin, dj.Manual):
         # A curation created with apply_merge=False records PROPOSED merges in
         # MergeGroup but does NOT apply them: get_sorting (what consumers such
         # as SortedSpikesGroup / decoding read via SpikeSortingOutput) returns
-        # the UNMERGED preview units. Warn so a consumer does not silently
-        # decode on oversplit units -- get_merged_sorting applies the proposal,
-        # or re-curate with apply_merge=True to commit it. A real merge is a
-        # group with >1 contributor; every unit carries a 1-element self-entry,
-        # so a plain root curation (all self-entries) does NOT warn.
-        # Short-circuit on ``merges_applied`` first so the extra MergeGroup
-        # fetch is skipped on the common already-applied / root path (the
-        # warning can only fire when merges are NOT applied).
-        if not bool(row["merges_applied"]) and any(
-            len(contribs) > 1
-            for contribs in cls.get_merge_groups(key).values()
-        ):
+        # the UNMERGED preview units. Warn here so ad-hoc inspection is not
+        # silently misled; the decoding CONSUMERS additionally RAISE via
+        # SpikeSortingOutput.assert_decoding_merge_ids_ok so a preview curation
+        # never reaches a decode.
+        if cls.has_unapplied_proposed_merges(key):
             logger.warning(
                 "CurationV2.get_sorting: curation "
                 f"(sorting_id={row['sorting_id']}, "
@@ -1237,6 +1230,23 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 "curation_label": [labels_by_unit.get(u, []) for u in unit_ids],
             },
             index=pd.Index(unit_ids, name="unit_id"),
+        )
+
+    @classmethod
+    def has_unapplied_proposed_merges(cls, key) -> bool:
+        """True if a curation has a proposed merge that was NOT applied.
+
+        A curation created with ``apply_merge=False`` records proposed merges in
+        ``MergeGroup`` without applying them. A real merge is a group with more
+        than one contributor; every unit also carries a 1-element self-entry, so
+        a plain root curation (all self-entries) returns ``False``. Short-
+        circuits on ``merges_applied`` so the ``MergeGroup`` fetch is skipped on
+        the common already-applied / root path.
+        """
+        if bool((cls & key).fetch1("merges_applied")):
+            return False
+        return any(
+            len(contribs) > 1 for contribs in cls.get_merge_groups(key).values()
         )
 
     @classmethod

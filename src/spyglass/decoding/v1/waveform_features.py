@@ -148,6 +148,13 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
 
         merge_key = {"merge_id": key["spikesorting_merge_id"]}
 
+        # Consumer-boundary guard: refuse to build clusterless marks from a v2
+        # preview (apply_merge=False) curation, whose oversplit units would
+        # silently corrupt the decode. No-op for v0/v1 sources.
+        SpikeSortingOutput.assert_decoding_merge_ids_ok(
+            [key["spikesorting_merge_id"]]
+        )
+
         # Dispatch the source BEFORE any SpikeInterface call so the v2 branch
         # runs under SI 0.104. ``merge_get_parent`` / ``fetch1`` are pure DB
         # reads. The legacy-SI guard is applied only on the v0/v1 branches
@@ -325,9 +332,10 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
         without rescaling.
 
         ``max_spikes_per_unit`` must stay ``None`` for clusterless decoding:
-        any finite value subsamples the waveforms so they no longer align 1:1
-        with ``spike_times`` (the write-time 1:1 check in
-        ``_write_waveform_features_to_nwb`` then fails loudly). The symmetric
+        any finite value would subsample the waveforms so they no longer align
+        1:1 with ``spike_times``, so it is rejected up front here (rather than
+        doing the full analyzer build and only failing at the write-time 1:1
+        check in ``_write_waveform_features_to_nwb``). The symmetric
         default window (``ms_before == ms_after``) puts the spike at the centre
         sample, which ``_get_peak_amplitude`` reads; an asymmetric window would
         sample off-peak.
@@ -350,20 +358,31 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
         ms_before = params.pop("ms_before", 0.5)
         ms_after = params.pop("ms_after", 0.5)
         max_spikes_per_unit = params.pop("max_spikes_per_unit", None)
+        # Clusterless decoding needs EVERY spike's waveform aligned 1:1 with
+        # spike_times. A finite max_spikes_per_unit would subsample, breaking
+        # that alignment -- and previously did all the analyzer work only to
+        # fail at the write-time 1:1 check. Fail fast with an actionable error.
+        if max_spikes_per_unit is not None:
+            raise ValueError(
+                "WaveformFeaturesParams['waveform_extraction_params']"
+                f"['max_spikes_per_unit'] = {max_spikes_per_unit}; it must be "
+                "None for clusterless decoding so every spike's waveform "
+                "aligns 1:1 with spike_times. Remove it (or set None)."
+            )
         # Remaining keys (n_jobs, chunk_duration, total_memory, ...) are SI
         # job kwargs forwarded to ``compute``. Drop ``None`` values (the
         # legacy default carries ``max_spikes_per_unit=None``, already popped).
         job_kwargs = {k: v for k, v in params.items() if v is not None}
 
-        # Disk-backed (``binary_folder``) rather than ``format="memory"``: on
-        # the default clusterless path (``max_spikes_per_unit is None``) the
+        # Disk-backed (``binary_folder``) rather than ``format="memory"``: the
         # analyzer extracts EVERY spike's full multi-channel waveform
         # (``method="all"``, ``sparse=False`` -- mandated for the 1:1
-        # spike<->feature alignment), which for a noisy 1 h tetrode is millions
-        # of crossings -> several GB held entirely in RAM, OOM under parallel
-        # workers. binary_folder keeps the waveforms on disk and reads them
-        # lazily; the accessor holds the TemporaryDirectory so it survives
-        # feature extraction and is removed when the accessor is collected.
+        # spike<->feature alignment, see the max_spikes_per_unit guard above),
+        # which for a noisy 1 h tetrode is millions of crossings -> several GB
+        # held entirely in RAM, OOM under parallel workers. binary_folder keeps
+        # the waveforms on disk and reads them lazily; the accessor holds the
+        # TemporaryDirectory so it survives feature extraction and is removed
+        # when the accessor is collected.
         import tempfile
         from pathlib import Path as _Path
 
@@ -380,14 +399,7 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
                 folder=str(_Path(tmpdir.name) / "analyzer"),
                 return_in_uV=True,
             )
-            if max_spikes_per_unit is None:
-                analyzer.compute("random_spikes", method="all")
-            else:
-                analyzer.compute(
-                    "random_spikes",
-                    method="uniform",
-                    max_spikes_per_unit=int(max_spikes_per_unit),
-                )
+            analyzer.compute("random_spikes", method="all")
             analyzer.compute(
                 "waveforms",
                 ms_before=ms_before,

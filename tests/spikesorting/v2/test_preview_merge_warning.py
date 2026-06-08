@@ -144,9 +144,9 @@ def test_get_sorting_warns_on_unapplied_preview_merge(
         sorting = CurationV2.get_sorting(cur)
         # Preview path returns the UNMERGED units (every original unit kept).
         assert sorting.get_num_units() == len(unit_ids)
-        assert any("proposed merges that are NOT applied" in s for s in seen), (
-            f"expected an unapplied-preview-merge warning; got {seen}"
-        )
+        assert any(
+            "proposed merges that are NOT applied" in s for s in seen
+        ), f"expected an unapplied-preview-merge warning; got {seen}"
     finally:
         clear_curations_for(planted_two_unit_sort)
 
@@ -174,5 +174,33 @@ def test_get_sorting_no_warning_without_proposed_merges(
         assert not any(
             "proposed merges that are NOT applied" in s for s in seen
         ), f"root curation should not warn about preview merges; got {seen}"
+    finally:
+        clear_curations_for(planted_two_unit_sort)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_assert_decoding_merge_ids_raises_on_preview_merge(
+    planted_two_unit_sort,
+):
+    """The consumer-boundary validator RAISES on an apply_merge=False curation
+    with proposed merges (the preview get_sorting only warns about)."""
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    unit_ids = sorted(
+        int(u) for u in (Sorting.Unit & planted_two_unit_sort).fetch("unit_id")
+    )
+    clear_curations_for(planted_two_unit_sort)
+    cur = CurationV2.insert_curation(
+        sorting_key=planted_two_unit_sort,
+        merge_groups=[[unit_ids[0], unit_ids[1]]],
+        apply_merge=False,
+    )
+    merge_id = (SpikeSortingOutput.CurationV2 & cur).fetch1("merge_id")
+    try:
+        with pytest.raises(ValueError, match="apply_merge=False"):
+            SpikeSortingOutput.assert_decoding_merge_ids_ok([merge_id])
     finally:
         clear_curations_for(planted_two_unit_sort)

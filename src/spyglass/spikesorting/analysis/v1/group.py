@@ -81,6 +81,12 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         keys: list[dict] = [],
     ):
         """Create a new group of sorted spikes"""
+        # Consumer-boundary guard: refuse to build a group from v2 preview
+        # (apply_merge=False) curations or from multiple curations of one sort
+        # (which would double-count units in the decode). No-op for v0/v1.
+        SpikeSortingOutput.assert_decoding_merge_ids_ok(
+            [k.get("merge_id", k.get("spikesorting_merge_id")) for k in keys]
+        )
         group_key = {
             "sorted_spikes_group_name": group_name,
             "nwb_file_name": nwb_file_name,
@@ -169,13 +175,11 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
 
         # get merge_ids for SpikeSortingOutput
         merge_ids = (
-            (
-                SortedSpikesGroup.Units
-                & {
-                    "nwb_file_name": key["nwb_file_name"],
-                    "sorted_spikes_group_name": key["sorted_spikes_group_name"],
-                }
-            )
+            SortedSpikesGroup.Units
+            & {
+                "nwb_file_name": key["nwb_file_name"],
+                "sorted_spikes_group_name": key["sorted_spikes_group_name"],
+            }
         ).fetch("spikesorting_merge_id")
 
         # get the filtering parameters

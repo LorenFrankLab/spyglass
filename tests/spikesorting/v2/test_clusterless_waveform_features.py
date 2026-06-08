@@ -351,9 +351,9 @@ def test_unit_waveform_features_v2_clusterless_runs_under_si0104(wave_session):
         from spyglass.spikesorting.v2.sorting import Sorting
 
         n_units = int((Sorting & sort_pk).fetch1("n_units"))
-        assert n_units == 1, (
-            f"tuned clusterless should find one unit; got {n_units}"
-        )
+        assert (
+            n_units == 1
+        ), f"tuned clusterless should find one unit; got {n_units}"
 
         merge_id = _curation_merge_id(sort_pk, parent_curation_id=-1)
         _, nwb_row = _populate_features(merge_id, param_pk)
@@ -367,9 +367,9 @@ def test_unit_waveform_features_v2_clusterless_runs_under_si0104(wave_session):
         unit = feature_df.loc[0]
         amps = np.asarray(unit["amplitude"])
         spike_times = np.asarray(unit["spike_times"])
-        assert amps.ndim == 2, (
-            f"amplitude must be (n_spikes, n_ch); got {amps.shape}"
-        )
+        assert (
+            amps.ndim == 2
+        ), f"amplitude must be (n_spikes, n_ch); got {amps.shape}"
         assert amps.shape[0] == spike_times.shape[0], (
             "amplitude rows must align 1:1 with spike_times: "
             f"{amps.shape[0]} amps vs {spike_times.shape[0]} spikes"
@@ -507,9 +507,9 @@ def test_unit_waveform_features_v2_sparse_unit_ids(polymer_60s_session):
             f"expected single merged survivor id [{merged_id}]; got "
             f"{applied_ids}"
         )
-        assert merged_id != 0, (
-            "test is only meaningful if the surviving id is non-positional"
-        )
+        assert (
+            merged_id != 0
+        ), "test is only meaningful if the surviving id is non-positional"
 
         _, nwb_row = _populate_features(merge_id, param_pk)
         feature_df = _units_dataframe(nwb_row)
@@ -539,9 +539,9 @@ def test_unit_waveform_features_zero_unit_v2(wave_session):
         from spyglass.spikesorting.v2.sorting import Sorting
 
         n_units = int((Sorting & sort_pk).fetch1("n_units"))
-        assert n_units == 0, (
-            f"shipped clusterless default should find zero units; got {n_units}"
-        )
+        assert (
+            n_units == 0
+        ), f"shipped clusterless default should find zero units; got {n_units}"
 
         merge_id = _curation_merge_id(sort_pk, parent_curation_id=-1)
         tbl, nwb_row = _populate_features(merge_id, param_pk)
@@ -634,9 +634,9 @@ def test_unit_waveform_features_v2_full_waveform_and_rejects_spike_location(
         feature_df = _units_dataframe(
             (UnitWaveformFeatures & fw_sel).fetch_nwb()[0]
         )
-        assert "full_waveform" in feature_df.columns, (
-            "full_waveform column missing"
-        )
+        assert (
+            "full_waveform" in feature_df.columns
+        ), "full_waveform column missing"
         row = feature_df.loc[0]
         fw = np.asarray(row["full_waveform"])
         spikes = np.asarray(row["spike_times"])
@@ -684,4 +684,55 @@ def test_unit_waveform_features_v0v1_unchanged_under_legacy():
     # No raise under SI < 0.101 -> v0/v1 make() proceeds exactly as before.
     assert (
         _require_legacy_si_environment("v1 UnitWaveformFeatures.make") is None
+    )
+
+
+@_skip_if_legacy
+@pytest.mark.slow
+@pytest.mark.integration
+def test_fetch_waveform_v2_rejects_max_spikes_per_unit(wave_session):
+    """A finite ``max_spikes_per_unit`` fails FAST (clusterless needs every
+    spike 1:1) rather than building the whole analyzer and only tripping the
+    write-time 1:1 check."""
+    from spyglass.decoding.v1.waveform_features import UnitWaveformFeatures
+
+    sort_pk, _ = _run_clusterless(wave_session, tuned=True)
+    merge_id = _curation_merge_id(sort_pk, parent_curation_id=-1)
+    with pytest.raises(ValueError, match="max_spikes_per_unit"):
+        UnitWaveformFeatures._fetch_waveform_v2(
+            {"merge_id": merge_id}, {"max_spikes_per_unit": 10}
+        )
+
+
+@_skip_if_legacy
+@pytest.mark.slow
+@pytest.mark.integration
+def test_fetch_waveform_v2_is_disk_backed_and_cleaned(wave_session):
+    """The clusterless analyzer is disk-backed (``binary_folder`` -> bounded
+    RAM) and its TemporaryDirectory is removed once the accessor is dropped."""
+    import gc
+    from pathlib import Path
+
+    from spyglass.decoding.v1.waveform_features import UnitWaveformFeatures
+
+    sort_pk, _ = _run_clusterless(wave_session, tuned=True)
+    merge_id = _curation_merge_id(sort_pk, parent_curation_id=-1)
+
+    acc = UnitWaveformFeatures._fetch_waveform_v2({"merge_id": merge_id}, {})
+    tmp_path = acc._tmpdir.name
+    assert (
+        acc._analyzer.format == "binary_folder"
+    ), f"clusterless analyzer must be disk-backed; got {acc._analyzer.format}"
+    assert Path(tmp_path).exists()
+    # Waveforms are readable from disk during the accessor's lifetime.
+    uid = acc.sorting.get_unit_ids()[0]
+    assert acc.get_waveforms(uid).shape[0] > 0
+    # Dropping the accessor cleans the scratch folder (TemporaryDirectory
+    # finalizer) -- the lifetime contract the perf fix depends on.
+    del acc
+    gc.collect()
+    assert not Path(
+        tmp_path
+    ).exists(), (
+        "TemporaryDirectory should be removed after the accessor is collected"
     )
