@@ -174,6 +174,10 @@ temp_nwb/*s
 # Tracked baseline snapshot for test_no_legacy_schema_changes; must be
 # committed despite the blanket *.json ignore so CI's fresh checkout has it.
 !tests/spikesorting/v2/baselines/legacy_schemas.json
+# Fixture provenance manifest: the pytest-v2 "smoke fixture did not drift"
+# step reads it via `git show HEAD:...` to compare deterministic hashes, so it
+# must be committed despite the blanket *.json ignore.
+!tests/spikesorting/v2/fixtures/fixtures_manifest.json
 *.gz
 *.pdf
 *.lock
