@@ -355,11 +355,24 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
         # legacy default carries ``max_spikes_per_unit=None``, already popped).
         job_kwargs = {k: v for k, v in params.items() if v is not None}
 
+        # Disk-backed (``binary_folder``) rather than ``format="memory"``:
+        # clusterless decoding extracts EVERY spike's full multi-channel
+        # waveform (``method="all"``, ``sparse=False``, mandated for the 1:1
+        # spike<->feature alignment), which for a noisy 1 h tetrode is millions
+        # of crossings -> several GB held entirely in RAM, OOM under parallel
+        # workers. binary_folder keeps the waveforms on disk and reads them
+        # lazily; the accessor holds the TemporaryDirectory so it survives
+        # feature extraction and is removed when the accessor is collected.
+        import tempfile
+        from pathlib import Path as _Path
+
+        tmpdir = tempfile.TemporaryDirectory(prefix="v2_clusterless_wf_")
         analyzer = si.create_sorting_analyzer(
             sorting=sorting,
             recording=recording,
             sparse=False,
-            format="memory",
+            format="binary_folder",
+            folder=str(_Path(tmpdir.name) / "analyzer"),
             return_in_uV=True,
         )
         if max_spikes_per_unit is None:
@@ -377,7 +390,7 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
             **job_kwargs,
         )
         return _AnalyzerWaveformAccessor(
-            sorting=analyzer.sorting, analyzer=analyzer
+            sorting=analyzer.sorting, analyzer=analyzer, tmpdir=tmpdir
         )
 
     @staticmethod
@@ -451,7 +464,7 @@ class _AnalyzerWaveformAccessor:
     units to iterate.
     """
 
-    def __init__(self, sorting, analyzer=None):
+    def __init__(self, sorting, analyzer=None, tmpdir=None):
         # ``analyzer=None`` is the zero-unit mode (no waveforms extension can
         # be built over zero units). Pairing it with a non-empty sorting would
         # make ``get_waveforms`` raise a misleading "zero-unit" error for a
@@ -469,6 +482,12 @@ class _AnalyzerWaveformAccessor:
         # fail with "extension has lost its SortingAnalyzer". Do NOT drop it
         # as unused -- it is held for lifetime, not read.
         self._analyzer = analyzer
+        # Keep a strong reference to the binary_folder TemporaryDirectory (if
+        # the analyzer is disk-backed) so it is not cleaned up while the
+        # analyzer still reads waveforms from it. Cleaned when this accessor is
+        # garbage-collected (TemporaryDirectory finalizer) -- i.e. after make()
+        # has written the features and returns.
+        self._tmpdir = tmpdir
         self._waveforms = (
             analyzer.get_extension("waveforms")
             if analyzer is not None
