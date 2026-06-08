@@ -261,16 +261,15 @@ def tetrode_probe_layout() -> ProbeLayout:
     )
 
 
+# MEArec's ground-truth ``cell_type`` annotation vocabulary.
+#
+# MEArec tags each ground-truth spiketrain with ``cell_type`` in
+# ``{"E", "I"}`` (excitatory / inhibitory; the single-letter codes are what
+# MEArec writes into the recording ``.h5``, verified across every committed
+# fixture). v2 types the ground-truth column against this set and normalizes
+# case/whitespace drift via :func:`_normalize_cell_type` so a stray
+# ``"e "`` cannot silently become a distinct category.
 CellType = Literal["E", "I"]
-"""MEArec's ground-truth ``cell_type`` annotation vocabulary.
-
-MEArec tags each ground-truth spiketrain with ``cell_type`` in
-``{"E", "I"}`` (excitatory / inhibitory; the single-letter codes are what
-MEArec writes into the recording ``.h5``, verified across every committed
-fixture). v2 types the ground-truth column against this set and normalizes
-case/whitespace drift via :func:`_normalize_cell_type` so a stray
-``"e "`` cannot silently become a distinct category.
-"""
 
 _VALID_CELL_TYPES: frozenset[str] = frozenset({"E", "I"})
 

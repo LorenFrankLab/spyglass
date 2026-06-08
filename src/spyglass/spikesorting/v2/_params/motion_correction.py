@@ -21,6 +21,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+# ``correct_motion`` presets exposed by SpikeInterface 0.104.
+#
+# The pinned signature was recorded at
+# ``tests/spikesorting/v2/resolver/si0104-runtime.md``. Any drift in the
+# upstream signature should re-trigger that resolver check; this tuple is the
+# binding list this schema validates against.
 _SI_NATIVE_PRESETS = (
     "dredge",
     "medicine",
@@ -30,13 +36,6 @@ _SI_NATIVE_PRESETS = (
     "rigid_fast",
     "kilosort_like",
 )
-"""``correct_motion`` presets exposed by SpikeInterface 0.104.
-
-The pinned signature was recorded at
-``tests/spikesorting/v2/resolver/si0104-runtime.md``. Any drift in the
-upstream signature should re-trigger that resolver check; this tuple is
-the binding list this schema validates against.
-"""
 
 
 MotionPreset = Literal[

@@ -73,24 +73,22 @@ class CurationLabel(str, Enum):
     reject = "reject"
 
 
+# How a ``SortGroupV2`` references its channels before sorting:
+#   * ``"none"`` -- no re-referencing.
+#   * ``"global_median"`` -- common-median reference across the group.
+#   * ``"specific"`` -- subtract a single named reference electrode
+#     (``reference_electrode_id``), then drop it from the sorted channel set.
+#
+# Stored as a ``varchar(32)`` on ``SortGroupV2`` validated against this
+# Literal at insert time (NOT a MySQL enum). The set may grow --
+# SpikeInterface also supports ``global_average`` / CAR and local per-group
+# referencing -- and an enum would trap a future mode behind a forbidden
+# ``ALTER TABLE`` under the zero-migration policy. The Literal gives
+# identical typo protection at the ``insert1`` boundary without the migration
+# risk; same decision as ``CurationLabel``. It replaced a single
+# ``sort_reference_electrode_id`` int whose magic sentinels (-1 none, -2
+# global median, >=0 specific) conflated the mode with the channel id.
 ReferenceMode = Literal["none", "global_median", "specific"]
-"""How a ``SortGroupV2`` references its channels before sorting.
-
-* ``"none"`` -- no re-referencing.
-* ``"global_median"`` -- common-median reference across the group.
-* ``"specific"`` -- subtract a single named reference electrode
-  (``reference_electrode_id``), then drop it from the sorted channel set.
-
-Stored as a ``varchar(32)`` on ``SortGroupV2`` validated against this
-Literal at insert time (NOT a MySQL enum). The set may grow --
-SpikeInterface also supports ``global_average`` / CAR and local per-group
-referencing -- and an enum would trap a future mode behind a forbidden
-``ALTER TABLE`` under the zero-migration policy. The Literal gives
-identical typo protection at the ``insert1`` boundary without the
-migration risk; same decision as ``CurationLabel``. It replaced a single
-``sort_reference_electrode_id`` int whose magic sentinels (-1 none, -2
-global median, >=0 specific) conflated the mode with the channel id.
-"""
 
 _VALID_REFERENCE_MODES: frozenset[str] = frozenset(
     ("none", "global_median", "specific")
