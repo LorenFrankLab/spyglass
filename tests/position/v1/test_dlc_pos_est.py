@@ -2,6 +2,8 @@ from pathlib import Path
 
 import datajoint as dj
 import pytest
+import numpy as np
+import pandas as pd
 
 from tests.conftest import skip_if_no_dlc
 
@@ -9,6 +11,13 @@ from tests.conftest import skip_if_no_dlc
 @pytest.fixture(scope="session")
 def pos_est_sel(sgp):
     yield sgp.v1.position_dlc_pose_estimation.DLCPoseEstimationSelection()
+
+
+@pytest.fixture(scope="session")
+def check_bounds_all_bodyparts():
+    from spyglass.position.v1.dlc_utils import check_bounds_all_bodyparts
+
+    return check_bounds_all_bodyparts
 
 
 @pytest.fixture(scope="session")
@@ -67,3 +76,30 @@ def test_fetch_video_path(sgp):
 
     path = (pose_tbl & dj.Top(limit=1)).fetch_video_path()
     assert Path(path).exists(), f"Video path {path} does not exist."
+
+
+@skip_if_no_dlc
+def test_check_bounds_all_bodyparts_all_inside(check_bounds_all_bodyparts):
+    head_x = [1, 2, 3]
+    head_y = [1, 2, 3]
+    bodyparts = pd.DataFrame({"x": head_x, "y": head_y})
+    bounds = np.array([[0, 0], [0, 5], [5, 5], [5, 0]])
+    inside_df = check_bounds_all_bodyparts(bodyparts, bounds)
+    assert (
+        ~np.isnan(inside_df.values)
+    ).all(), "check_bounds_all_bodyparts incorrectly labeled part as outside"
+
+
+@skip_if_no_dlc
+def test_check_bounds_all_bodyparts_one_outside(check_bounds_all_bodyparts):
+    head_x = [1, 20, 3]
+    head_y = [1, 2, 3]
+    bodyparts = pd.DataFrame({"x": head_x, "y": head_y})
+    bounds = np.array([[0, 0], [0, 5], [5, 5], [5, 0]])
+    inside_df = check_bounds_all_bodyparts(bodyparts, bounds)
+    assert np.isnan(
+        inside_df.values[1, :]
+    ).all(), "check_bounds_all_bodyparts incorrectly labeled part as inside"
+    assert (
+        ~np.isnan(inside_df.values[(0, 2), :])
+    ).all(), "check_bounds_all_bodyparts incorrectly labeled part as inside"
