@@ -480,6 +480,6 @@ def test_artifact_masking_preserves_clean_gt_spikes(
     np.testing.assert_array_equal(
         masked_traces[out_art, :], injected[out_art, :]
     )
-    assert np.abs(injected[out_art, :]).max() > 0, (
-        "preservation check is vacuous: out-of-artifact signal is all zero"
-    )
+    assert (
+        np.abs(injected[out_art, :]).max() > 0
+    ), "preservation check is vacuous: out-of-artifact signal is all zero"

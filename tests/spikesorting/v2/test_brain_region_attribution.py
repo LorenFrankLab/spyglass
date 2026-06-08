@@ -404,9 +404,9 @@ def test_multi_region_attribution_through_merge_dispatch(region_60s_sort):
         # Path 2: the consumer-facing merge dispatcher.
         df2 = SpikeSortingOutput.get_unit_brain_regions({"merge_id": merge_id})
         got2 = {int(u): r for u, r in zip(df2["unit_id"], df2["region_name"])}
-        assert got2 == expected, (
-            f"merge-dispatch path: got {got2}, want {expected}"
-        )
+        assert (
+            got2 == expected
+        ), f"merge-dispatch path: got {got2}, want {expected}"
     finally:
         # Restore every electrode even if one update raises, so a teardown
         # hiccup can't strand the shared common.Electrode mid-mutation.

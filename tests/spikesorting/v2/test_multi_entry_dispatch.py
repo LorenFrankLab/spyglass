@@ -348,9 +348,9 @@ def test_get_sort_group_info_returns_target_electrodes(two_v2_merge_ids):
     got_a = {int(e) for e in info_a.fetch("electrode_id")}
     got_b = {int(e) for e in info_b.fetch("electrode_id")}
 
-    assert got_a == ctx["elec_a"], (
-        "merge_id A's sort-group info returned the wrong electrode set"
-    )
+    assert (
+        got_a == ctx["elec_a"]
+    ), "merge_id A's sort-group info returned the wrong electrode set"
     assert got_b == ctx["elec_b"]
     assert got_a.isdisjoint(got_b)
 
@@ -405,9 +405,9 @@ def test_get_unit_brain_regions_selects_target_units(two_v2_merge_ids):
     assert df_b["unit_id"].nunique() == ctx["n_units_b"]
 
     elec_in_a = {int(e) for e in df_a["electrode_id"]}
-    assert elec_in_a <= ctx["elec_a"], (
-        "A's units are attributed to electrodes outside sort group A"
-    )
+    assert (
+        elec_in_a <= ctx["elec_a"]
+    ), "A's units are attributed to electrodes outside sort group A"
 
 
 @pytest.mark.slow
