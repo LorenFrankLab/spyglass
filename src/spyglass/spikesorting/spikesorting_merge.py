@@ -272,6 +272,32 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             CurationV2 * sort_master.proj("sorting_id")
         ) & curation_restriction
 
+        # Multi-curation fan-out warning. When no ``curation_id`` is given and
+        # a sorting carries more than one CurationV2 curation (the v2-supported
+        # "multiple curations per sort" workflow), this returns one merge_id
+        # PER curation. Feeding all of them into e.g. SortedSpikesGroup /
+        # decoding would include the same physical units more than once. Warn
+        # so the caller restricts by curation_id rather than silently
+        # double-counting. (Only inspects when curation_id is unspecified.)
+        if "curation_id" not in key:
+            per_sort: dict = {}
+            for c_row in curation_table.fetch(
+                "sorting_id", "curation_id", as_dict=True
+            ):
+                sid = str(c_row["sorting_id"])
+                per_sort[sid] = per_sort.get(sid, 0) + 1
+            multi = sorted(sid for sid, n in per_sort.items() if n > 1)
+            if multi:
+                logger.warning(
+                    "SpikeSortingOutput._get_restricted_merge_ids_v2: "
+                    f"{len(multi)} sorting(s) carry multiple CurationV2 "
+                    "curations and no curation_id was given, so the result "
+                    "includes one merge_id PER curation. Feeding all of them "
+                    "into SortedSpikesGroup / decoding would include the same "
+                    "units more than once -- pass curation_id to select one. "
+                    f"Affected sorting_id(s): {multi}."
+                )
+
         joined = SpikeSortingOutput.CurationV2 * curation_table.proj()
         return joined.fetch("merge_id", as_dict=as_dict)
 

@@ -232,3 +232,54 @@ def test_insert_selection_dedup_accepts_str_artifact_id(populated_sorting):
     # Idempotent: resolved to the existing sort, created no new row.
     assert found == populated_sorting
     assert after == before
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_v2_merge_ids_warn_on_multi_curation_fanout(
+    populated_sorting, monkeypatch
+):
+    """When a sorting has >1 CurationV2 curation and no curation_id is given,
+    get_restricted_merge_ids returns one merge_id PER curation AND warns -- so
+    a caller does not silently double-count the same units in a
+    SortedSpikesGroup / decode."""
+    import spyglass.spikesorting.spikesorting_merge as merge_mod
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    _clear_curations_for(populated_sorting)
+    unit_ids = sorted(
+        int(u) for u in (Sorting.Unit & populated_sorting).fetch("unit_id")
+    )
+    if not unit_ids:
+        pytest.skip("need >=1 unit to build a distinct child curation")
+
+    # Two curations on ONE sorting: a root + a labeled child.
+    CurationV2.insert_curation(sorting_key=populated_sorting)
+    CurationV2.insert_curation(
+        sorting_key=populated_sorting,
+        parent_curation_id=0,
+        labels={unit_ids[0]: ["mua"]},
+    )
+    sid = populated_sorting["sorting_id"]
+
+    seen: list[str] = []
+    monkeypatch.setattr(
+        merge_mod.logger,
+        "warning",
+        lambda msg, *a, **k: seen.append(str(msg)),
+    )
+
+    merge_ids = SpikeSortingOutput().get_restricted_merge_ids(
+        {"sorting_id": sid}, sources=["v2"]
+    )
+    try:
+        assert len(merge_ids) == 2, (
+            f"two curations should fan out to two merge_ids; got {merge_ids}"
+        )
+        assert any("multiple CurationV2 curations" in s for s in seen), (
+            f"expected a multi-curation fan-out warning; got {seen}"
+        )
+    finally:
+        _clear_curations_for(populated_sorting)
