@@ -32,6 +32,7 @@ dependencies:
   - python>=3.10,<3.13
   - pytorch<1.12.0
   - ripple_detection
+  - scipy<1.13  # spikeinterface 0.99.x uses scipy.linalg.tril, removed in 1.13
   - seaborn
   - torchaudio  # dlc-only
   - torchvision  # dlc-only
