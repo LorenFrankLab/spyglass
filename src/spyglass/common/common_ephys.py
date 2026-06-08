@@ -137,7 +137,10 @@ class Electrode(SpyglassIngestion, dj.Imported):
                 "probe_electrode": "probe_electrode",
                 "original_reference_electrode": "ref_elect_id",
                 "bad_channel": self.bad_channel_default_false,
-            }
+            },
+            "group": {
+                "probe_id": self.device_probe_type,
+            },
         }
 
     def fixed_to_zero(self, nwb_obj):
@@ -162,6 +165,12 @@ class Electrode(SpyglassIngestion, dj.Imported):
 
     def bad_channel_default_false(self, nwb_obj):
         return "True" if getattr(nwb_obj, "bad_channel", False) else "False"
+
+    def device_probe_type(self, nwb_obj):
+        """Fetch the probe type from the NWB object."""
+        if not (device := getattr(nwb_obj, "device")):
+            return None
+        return getattr(device, "probe_type", None)
 
     def get_nwb_objects(self, nwb_file, nwb_file_name=None):
         """Return the electrodes DynamicTable from the NWB file."""
