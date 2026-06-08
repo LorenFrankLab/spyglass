@@ -164,7 +164,7 @@ line-length = 80
 lint.ignore = [ "E402", "E501", "F401" ]
 
 [tool.codespell]
-skip = '.git,*.pdf,*.svg,*.ipynb,./docs/site/**,temp*'
+skip = '.git,*.pdf,*.svg,*.ipynb,./docs/site/**,temp*,.claude,.claude/*'
 ignore-words-list = 'nevers,sortings,trough'
 # Nevers - name in Citation
 
