@@ -191,7 +191,7 @@ class Electrode(SpyglassIngestion, dj.Imported):
     ) -> IngestionEntries:
         """Generates a list of table entries from an NWB object.
 
-        Overides Base to allow integrating info from config YAML for non-default columns.
+        Overrides Base to allow integrating info from config YAML for non-default columns.
         """
         entries = super().generate_entries_from_nwb_object(nwb_obj, base_key)
 
