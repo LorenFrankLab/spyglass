@@ -1409,6 +1409,13 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         else:
             super().delete(*args, safemode=safemode, **kwargs)
 
+        # If the cascade was cancelled (user answered "no" to the prompt) or
+        # the restriction matched nothing, the master rows remain in place --
+        # the delete is atomic, so a single check suffices. Do NOT orphan the
+        # artifact IntervalList rows for masters the user chose to keep.
+        if len(self) > 0:
+            return
+
         # Clean up the matching IntervalList rows through cautious_delete
         # (the user already passed the same team-permission check on the
         # parent ArtifactDetection rows above keyed by the same

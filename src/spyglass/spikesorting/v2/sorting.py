@@ -1428,16 +1428,21 @@ class Sorting(SpyglassMixin, dj.Computed):
 
         from spyglass.spikesorting.v2.utils import _analyzer_path
 
-        folders_to_remove = [
-            _analyzer_path({"sorting_id": row["sorting_id"]})
+        keyed_folders = [
+            (row, _analyzer_path({"sorting_id": row["sorting_id"]}))
             for row in self.fetch("KEY", as_dict=True)
         ]
         if safemode is None:
             super().delete(*args, **kwargs)
         else:
             super().delete(*args, safemode=safemode, **kwargs)
-        for folder in folders_to_remove:
-            if folder.exists():
+        # Only remove a folder whose DB row was ACTUALLY deleted. A cancelled
+        # confirmation prompt (user answers "no") or an empty restriction
+        # leaves the rows in place and returns normally -- removing their
+        # 5-50 GB analyzer scratch then would destroy data for a row the user
+        # chose to keep.
+        for row, folder in keyed_folders:
+            if folder.exists() and not (Sorting & row):
                 _shutil.rmtree(folder, ignore_errors=False)
 
     @classmethod
