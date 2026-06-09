@@ -123,7 +123,7 @@ for label, interval_data in results.groupby("interval_labels"):
 - Default to globally saved config #1430
 - Allow rechecking of recomputes #1380, #1413
 - Add `SpyglassIngestion` class to centralize functionality #1377, #1423, #1465,
-    #1484, #1489, #1507
+    #1484, #1489, #1507, #1614
 - Pin `ndx-optogenetics` to 0.2.0 #1458
 - Cleanup bug when fetching raw files from DANDI #1469
 - Refactor pytests for speed, run fast tests on push #1440
