@@ -76,6 +76,7 @@ from spyglass.common.prepopulate import populate_from_yaml, prepopulate_default
 from spyglass.settings import prepopulate
 from spyglass.utils.nwb_helper_fn import (
     close_nwb_files,
+    configure_nwb_cache,
     estimate_sampling_rate,
     get_data_interface,
     get_electrode_indices,
@@ -115,6 +116,7 @@ __all__ = [
     "UserEnvironment",
     "VideoFile",
     "close_nwb_files",
+    "configure_nwb_cache",
     "convert_epoch_interval_name_to_position_interval_name",
     "estimate_sampling_rate",
     "get_data_interface",

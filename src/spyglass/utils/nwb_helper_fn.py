@@ -2,18 +2,190 @@
 
 import os
 import os.path
+import resource
+import time
 from itertools import groupby
 from pathlib import Path
 from typing import List, Union
 
 import numpy as np
+import psutil
 import pynwb
 import yaml
 
 from spyglass.utils.logging import logger
 
-# dict mapping file path to an open NWBHDF5IO object in read mode and its NWBFile
-__open_nwb_files = dict()
+# Fallback thresholds used when spyglass.settings has not been loaded.
+# SpyglassConfig.load_config() overwrites these via configure_nwb_cache().
+_NWB_CACHE_MIN_FREE_GB = 2.0
+_NWB_CACHE_MIN_FREE_PCT = 0.1
+_NWB_CACHE_MAX_FILE_FRACTION = 0.99
+
+
+class NWBFileCache:
+    """LRU cache for open NWB files with ref-count-aware eviction.
+
+    Eviction priority when memory or file-descriptor limits are reached:
+
+    1. **Released files** — ``refcount == 0``; evict LRU among these first.
+    2. **Active files** — ``refcount > 0``; last resort, emits a warning.
+
+    Hold counts are managed by :class:`~spyglass.utils.mixins.fetch.FetchMixin`:
+    calling ``fetch_nwb()`` acquires each opened file; calling ``close_nwb()``
+    on the same table instance releases them.
+
+    Thresholds checked before each insert:
+
+    - Free RAM below ``_NWB_CACHE_MIN_FREE_GB`` GB *or*
+      ``_NWB_CACHE_MIN_FREE_PCT`` × total RAM, whichever is larger.
+    - Cache size ≥ ``_NWB_CACHE_MAX_FILE_FRACTION`` × OS fd soft limit.
+    """
+
+    def __init__(self):
+        # path → (io, nwbfile, last_used_monotonic, refcount)
+        self._cache: dict = {}
+
+    # ------------------------------------------------------------------
+    # Public dict-compatible interface
+    # ------------------------------------------------------------------
+
+    def get(self, path, default=(None, None)):
+        """Return (io, nwbfile) and update last-used, or *default*."""
+        if path in self._cache:
+            io, nwbfile, _, rc = self._cache[path]
+            self._cache[path] = (io, nwbfile, time.monotonic(), rc)
+            return io, nwbfile
+        return default
+
+    def __getitem__(self, path):
+        if path not in self._cache:
+            raise KeyError(path)
+        io, nwbfile, _, rc = self._cache[path]
+        self._cache[path] = (io, nwbfile, time.monotonic(), rc)
+        return io, nwbfile
+
+    def __setitem__(self, path, value):
+        """Add *(io, nwbfile)*, evicting LRU entries if memory is tight."""
+        io, nwbfile = value
+        if path in self._cache:
+            old_io, _, _, _ = self._cache[path]
+            old_io.close()
+        self._evict_if_needed()
+        self._cache[path] = (io, nwbfile, time.monotonic(), 0)
+
+    def __contains__(self, path):
+        return path in self._cache
+
+    def __len__(self):
+        return len(self._cache)
+
+    def values(self):
+        """Yield (io, nwbfile) pairs without updating last-used times."""
+        return ((io, nwbfile) for io, nwbfile, _, _ in self._cache.values())
+
+    def close_all(self):
+        """Close every open IO handle and clear the cache."""
+        active = [p for p, (_, _, _, rc) in self._cache.items() if rc > 0]
+        if active:
+            logger.warning(
+                f"Closing {len(active)} NWB file(s) with active holds. "
+                "Lazy h5py reads from these files will fail: "
+                + ", ".join(active)
+            )
+        for io, _, _, _ in self._cache.values():
+            io.close()
+        self._cache.clear()
+
+    def acquire(self, path):
+        """Increment the hold count, protecting the file from LRU eviction."""
+        if path in self._cache:
+            io, nwb, last_used, rc = self._cache[path]
+            self._cache[path] = (io, nwb, last_used, rc + 1)
+
+    def release(self, path):
+        """Decrement the hold count, allowing LRU eviction again."""
+        if path in self._cache:
+            io, nwb, last_used, rc = self._cache[path]
+            self._cache[path] = (io, nwb, last_used, max(0, rc - 1))
+
+    # ------------------------------------------------------------------
+    # Memory helpers
+    # ------------------------------------------------------------------
+
+    def _free_ram_ok(self) -> bool:
+        vm = psutil.virtual_memory()
+        min_free_bytes = max(
+            _NWB_CACHE_MIN_FREE_GB * 1e9,
+            _NWB_CACHE_MIN_FREE_PCT * vm.total,
+        )
+        return vm.available >= min_free_bytes
+
+    def _num_open_ok(self) -> bool:
+        soft_limit, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
+        return len(self._cache) < _NWB_CACHE_MAX_FILE_FRACTION * soft_limit
+
+    def _evict_lru(self):
+        if not self._cache:
+            return
+        released = {p for p, (_, _, _, rc) in self._cache.items() if rc == 0}
+        if released:
+            candidates = released
+        else:
+            candidates = set(self._cache.keys())
+            logger.warning(
+                "NWB cache must evict an active file under memory/fd pressure."
+                " Lazy h5py reads from the evicted file may fail."
+                " Call close_nwb() when finished with fetch_nwb() results."
+            )
+        lru_path = min(candidates, key=lambda p: self._cache[p][2])
+        io, _, _, _ = self._cache.pop(lru_path)
+        io.close()
+        logger.info(f"Closed LRU NWB file: {lru_path}")
+
+    def _evict_if_needed(self):
+        while self._cache and not (self._free_ram_ok() and self._num_open_ok()):
+            self._evict_lru()
+
+
+def configure_nwb_cache(
+    min_free_gb: float = None,
+    min_free_pct: float = None,
+    max_file_fraction: float = None,
+):
+    """Set eviction thresholds for the NWB file cache.
+
+    Parameters
+    ----------
+    min_free_gb : float, optional
+        Minimum free system RAM in GB before LRU eviction triggers.
+    min_free_pct : float, optional
+        Minimum free system RAM as a fraction of total (0–1).
+    max_file_fraction : float, optional
+        Maximum fraction of the OS soft limit on open file descriptors
+        the cache may occupy before LRU eviction triggers (0–1].
+    """
+    global _NWB_CACHE_MIN_FREE_GB, _NWB_CACHE_MIN_FREE_PCT
+    global _NWB_CACHE_MAX_FILE_FRACTION
+    if min_free_gb is not None:
+        min_free_gb = float(min_free_gb)
+        if min_free_gb < 0:
+            raise ValueError("min_free_gb must be >= 0")
+        _NWB_CACHE_MIN_FREE_GB = min_free_gb
+    if min_free_pct is not None:
+        min_free_pct = float(min_free_pct)
+        if not 0 <= min_free_pct <= 1:
+            raise ValueError("min_free_pct must be between 0 and 1")
+        _NWB_CACHE_MIN_FREE_PCT = min_free_pct
+    if max_file_fraction is not None:
+        max_file_fraction = float(max_file_fraction)
+        if not 0 < max_file_fraction <= 1:
+            raise ValueError(
+                "max_file_fraction must be between 0 (exclusive) and 1"
+            )
+        _NWB_CACHE_MAX_FILE_FRACTION = max_file_fraction
+
+
+__open_nwb_files = NWBFileCache()
 
 # dict mapping NWB file path to config after it is loaded once
 __configs = dict()
@@ -196,9 +368,17 @@ def get_config(nwb_file_path: str, calling_table: str = None) -> dict:
 
 def close_nwb_files():
     """Close all open NWB files."""
-    for io, _ in __open_nwb_files.values():
-        io.close()
-    __open_nwb_files.clear()
+    __open_nwb_files.close_all()
+
+
+def _acquire_nwb_file(nwb_file_path: str) -> None:
+    """Increment the hold count for a cached NWB file. Internal use only."""
+    __open_nwb_files.acquire(nwb_file_path)
+
+
+def _release_nwb_file(nwb_file_path: str) -> None:
+    """Decrement the hold count for a cached NWB file. Internal use only."""
+    __open_nwb_files.release(nwb_file_path)
 
 
 def get_data_interface(nwbfile, data_interface_name, data_interface_class=None):

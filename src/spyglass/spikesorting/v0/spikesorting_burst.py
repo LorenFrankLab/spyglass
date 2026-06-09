@@ -209,8 +209,10 @@ class BurstPair(SpyglassMixin, dj.Computed):
 
         waves = self._get_waves(key)
 
-        nwb_units = (CuratedSpikeSorting & key).fetch_nwb()[0].get("units")
+        _ss_query = CuratedSpikeSorting & key
+        nwb_units = _ss_query.fetch_nwb()[0].get("units")
         if nwb_units is None or nwb_units.index.size < 1:
+            _ss_query.close_nwb()
             self._peak_amp_cache[key_hash] = {}, {}
             return {}, {}
 
@@ -223,6 +225,7 @@ class BurstPair(SpyglassMixin, dj.Computed):
             )
             peak_timestamps[unit_idx] = timestamp[timestamp_ind]
 
+        _ss_query.close_nwb()
         self._peak_amp_cache[key_hash] = peak_amps, peak_timestamps
 
         return peak_amps, peak_timestamps

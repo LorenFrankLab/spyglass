@@ -9,7 +9,12 @@ from datajoint import Table
 
 from spyglass.utils.dj_helper_fn import instance_table
 from spyglass.utils.mixins.base import BaseMixin
-from spyglass.utils.nwb_helper_fn import file_from_dandi, get_nwb_file
+from spyglass.utils.nwb_helper_fn import (
+    _acquire_nwb_file,
+    _release_nwb_file,
+    file_from_dandi,
+    get_nwb_file,
+)
 
 try:
     import pynapple  # noqa F401
@@ -154,6 +159,20 @@ class FetchMixin(BaseMixin):
 
         return nwb_files, file_path_fn
 
+    def _nwb_paths(self) -> list:
+        """Return resolved absolute NWB file paths for the current restriction.
+
+        Shared infrastructure used by both ``fetch_nwb`` and ``close_nwb``.
+        Uses ``file_path_fn`` (``SpyglassAnalysis.get_abs_path``) with
+        ``from_schema=True`` so that ``filepath@store`` columns are resolved
+        correctly regardless of table type.
+        """
+        table, tbl_attr = self._nwb_table_tuple
+        nwb_files, file_path_fn = self._get_nwb_files_and_path_fn(
+            table, tbl_attr
+        )
+        return [file_path_fn(f, from_schema=True) for f in nwb_files]
+
     def _download_missing_files(self, nwb_files, file_path_fn):
         """Download missing NWB files from kachery/dandi or recompute.
 
@@ -161,8 +180,8 @@ class FetchMixin(BaseMixin):
         ----------
         nwb_files : list
             List of NWB file names.
-        file_path_fn : function
-            Function to get the absolute path to the NWB file.
+        file_path_fn : callable
+            Function to resolve a file name to its absolute path.
         """
         for file_name in nwb_files:
             file_path = file_path_fn(file_name, from_schema=True)
@@ -321,7 +340,7 @@ class FetchMixin(BaseMixin):
         if not attrs:
             attrs = self.heading.names
 
-        # Get file names and path resolution function
+        # Resolve file names and path function for this restriction
         nwb_files, file_path_fn = self._get_nwb_files_and_path_fn(
             table, tbl_attr, *attrs, **kwargs
         )
@@ -332,8 +351,34 @@ class FetchMixin(BaseMixin):
         # Execute query and get records
         rec_dicts = self._execute_nwb_query(table, tbl_attr, *attrs, **kwargs)
 
+        # Protect each file from LRU eviction while caller holds lazy handles.
+        # Release by calling close_nwb() on the same restriction.
+        for f in nwb_files:
+            _acquire_nwb_file(file_path_fn(f, from_schema=True))
+
         # Process object_id fields if present
         return self._process_object_ids(rec_dicts, *attrs)
+
+    def close_nwb(self) -> bool:
+        """Release NWB file holds for the files relevant to this restriction.
+
+        ``fetch_nwb()`` marks each opened NWB file as active so the LRU cache
+        will not evict it while the caller holds lazy h5py dataset references.
+        Call ``close_nwb()`` with the **same restriction** once you have
+        finished reading data, to allow those files to be reclaimed.
+
+        Both methods resolve file paths from the current table restriction, so
+        the restriction in the ``close_nwb()`` call must match the one used in
+        ``fetch_nwb()``::
+
+            restricted = SomeTable & {"nwb_file_name": "sub-xyz.nwb"}
+            nwb_objects = restricted.fetch_nwb()
+            arr = nwb_objects[0]["lfp"].data[:]   # read lazy handle into RAM
+            restricted.close_nwb()                # release — same restriction
+        """
+        for path in self._nwb_paths():
+            _release_nwb_file(path)
+        return True  # for potential use in context manager or chaining
 
     def fetch_pynapple(self, *attrs, **kwargs):
         """Get a pynapple object from the given DataJoint query.

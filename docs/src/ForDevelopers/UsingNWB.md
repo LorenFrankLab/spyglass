@@ -39,6 +39,43 @@ tables, these can become out of sync. You can 'equalize' the database table
 lists and the set of files on disk by running `cleanup` method, which deletes
 any files not listed in the table from disk.
 
+## Fetching NWB data
+
+Any Spyglass table that links to an NWB file inherits `fetch_nwb()` from
+`FetchMixin`. It returns a list of dicts, one per row in the restriction, with
+NWB objects resolved from the file:
+
+```python
+nwb_data = (SomeTable & key).fetch_nwb()
+lfp = nwb_data[0]["lfp"]  # h5py.Dataset — not yet in RAM
+arr = lfp.data[:]  # data loaded here
+```
+
+### Memory management
+
+NWB files are backed by HDF5 and use *lazy loading*: objects like `lfp.data` are
+`h5py.Dataset` handles that only read from disk when indexed. Spyglass keeps
+files open between calls to avoid redundant reopening, and evicts
+least-recently-used files when free RAM or file-descriptor limits are reached.
+
+Call `close_nwb()` on the **same restriction** once all lazy reads are complete.
+This releases the cache's hold on those files so they become eligible for
+eviction:
+
+```python
+restricted = SomeTable & key
+nwb_data = restricted.fetch_nwb()
+arr = nwb_data[0]["lfp"].data[:]  # read lazy handle into RAM first
+restricted.close_nwb()  # then release the hold
+```
+
+`close_nwb()` does not close the file immediately — it decrements the hold count
+and leaves eviction to the cache. Omitting it is safe but means the file stays
+pinned until another file's insertion forces eviction.
+
+The pattern is most important for high-RAM operations such as raw recordings,
+LFP, and spike-sorting waveform fetches.
+
 ## Reading and writing recordings
 
 Recordings start out as an NWB file, which is opened as a
