@@ -14,14 +14,16 @@ The iterators are direct ports of v1's
 the trace iterator is the SpikeInterface 0.104 kwarg rename
 ``return_scaled`` -> ``return_in_uV``, propagated through ``_get_data``.
 
-The timestamps iterator is **redesigned, not ported verbatim**. v1
-wraps a 1D timestamps vector in a ``BaseRecording`` subclass
-(``TimestampsExtractor``) purely to satisfy its
-``TimestampsDataChunkIterator`` constructor signature, then immediately
-delegates back to the wrapped vector. v2 collapses that indirection by
-accepting ``timestamps`` and ``sampling_frequency`` directly. The
-underlying chunked output shape and semantics are unchanged; the call
-surface is just smaller.
+The timestamps iterator **narrows the public call surface, but keeps the
+internal shim**. v1 makes the *caller* wrap a 1D timestamps vector in a
+``BaseRecording`` subclass (``TimestampsExtractor``) purely to satisfy the
+``TimestampsDataChunkIterator`` constructor signature. v2's constructor
+takes ``timestamps`` and ``sampling_frequency`` directly and builds the
+wrapper itself: the ``_TimestampsExtractor`` / ``_TimestampsSegment``
+indirection is retained as a private detail (HDMF's base iterator hooks
+still expect a recording-segment-like object), it is just no longer the
+caller's responsibility. The underlying chunked output shape and
+semantics are unchanged; only the call surface is smaller.
 """
 
 from __future__ import annotations

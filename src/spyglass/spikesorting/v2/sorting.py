@@ -1300,6 +1300,16 @@ class Sorting(SpyglassMixin, dj.Computed):
         a clear signal instead. Use ``get_sorting()`` for the (empty)
         unit list.
 
+        This raise-vs-degrade split with ``get_sorting`` is intentional,
+        not an inconsistency: a zero-unit *sorting* is a valid (empty)
+        object SI represents natively, so ``get_sorting`` returns it and
+        downstream consumers handle a quiet shank uniformly; a zero-unit
+        *analyzer* has no valid representation, so there is nothing to
+        return and a typed error is the honest contract (returning ``None``
+        or a phantom folder would only defer the failure). Callers that
+        want to branch without catching can precheck
+        ``(Sorting & key).fetch1("n_units") > 0``.
+
         Parameters
         ----------
         key : dict
