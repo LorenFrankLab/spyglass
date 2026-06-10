@@ -1404,6 +1404,27 @@ class CurationV2(SpyglassMixin, dj.Manual):
         return (cls * sort_master.proj("sorting_id")) & curation_restriction
 
     @classmethod
+    def get_sort_metadata(cls, key) -> tuple:
+        """Return ``(sorter, nwb_file_name)`` for a curation's underlying sort.
+
+        Owns the v2 source-part walk (``SortingSelection`` ->
+        ``SortingSelection.RecordingSource`` -> ``RecordingSelection``) so
+        consumers -- e.g. decoding's ``UnitWaveformFeatures`` -- don't
+        re-implement v2's join topology. ``key`` must carry ``sorting_id``
+        (sorter and nwb_file_name are fixed per sort, independent of
+        ``curation_id``).
+        """
+        from spyglass.spikesorting.v2.recording import RecordingSelection
+        from spyglass.spikesorting.v2.sorting import SortingSelection
+
+        joined = (
+            SortingSelection
+            * SortingSelection.RecordingSource
+            * RecordingSelection
+        ) & {"sorting_id": key["sorting_id"]}
+        return joined.fetch1("sorter", "nwb_file_name")
+
+    @classmethod
     def get_merge_groups(cls, key) -> dict[int, list[int]]:
         """Return ``{kept_unit_id: [contributor_unit_id, ...]}`` for a curation.
 

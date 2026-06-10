@@ -174,19 +174,11 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
         is_v2 = to_camel_case(source_parent.table_name) == "CurationV2"
 
         if is_v2:
-            # v2 pipeline: resolve sorter + nwb_file_name through the
-            # v2 SortingSelection.RecordingSource part + v2's
-            # RecordingSelection. v2 has no CurationV1/SpikeSortingSelection.
-            # Unit-id indexing below uses NWB ``.id`` (the true unit_id);
-            # v2 merge-applied sortings produce sparse unit_ids, so any
-            # callsite that mapped a positional index back to a unit_id
+            # v2 pipeline. Unit-id indexing below uses NWB ``.id`` (the true
+            # unit_id); v2 merge-applied sortings produce sparse unit_ids, so
+            # any callsite that mapped a positional index back to a unit_id
             # would mis-index here.
-            from spyglass.spikesorting.v2.recording import (
-                RecordingSelection as _V2RecordingSelection,
-            )
-            from spyglass.spikesorting.v2.sorting import (
-                SortingSelection as _V2SortingSelection,
-            )
+            from spyglass.spikesorting.v2.curation import CurationV2
 
             # The v2 SortingAnalyzer path serves only the
             # ``get_waveforms``-based features (amplitude, full_waveform).
@@ -205,17 +197,9 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
                     "uses 'amplitude'."
                 )
 
-            # Single chained join across CurationV2 -> SortingSelection
-            # (+ RecordingSource part) -> RecordingSelection. Avoids
-            # four separate round-trips for what is one
-            # join-resolvable record.
-            joined = (
-                SpikeSortingOutput.CurationV2
-                * _V2SortingSelection
-                * _V2SortingSelection.RecordingSource
-                * _V2RecordingSelection
-            ) & merge_key
-            sorter, nwb_file_name = joined.fetch1("sorter", "nwb_file_name")
+            # CurationV2 owns the v2 source-part walk (sorter + nwb_file_name);
+            # delegate instead of re-implementing v2's join topology here.
+            sorter, nwb_file_name = CurationV2.get_sort_metadata(source_key)
             analysis_nwb_key = "object_id"
             waveform_extractor = self._fetch_waveform_v2(
                 merge_key, params["waveform_extraction_params"]
