@@ -1528,22 +1528,23 @@ def test_sorting_get_analyzer_loads_folder(populated_sorting):
 
 
 @pytest.mark.slow
-def test_recording_truncation_caught(polymer_smoke_session):
-    """Validation goal #5: ``RecordingTruncatedError`` fires at populate
-    time when the IntervalList valid_times request more than the raw NWB
-    actually covers.
+def test_recording_over_request_clips_with_warning(
+    polymer_smoke_session, caplog
+):
+    """A sort interval whose valid_times run PAST the raw recording is clipped
+    to raw coverage and a warning is emitted -- it is NOT a hard error (lab
+    decision: clip-with-warning, not raise; #1133/#1585). The clip must be
+    surfaced (not silent), the Recording row IS inserted, and its saved
+    duration reflects the clipped raw coverage, not the over-request.
 
-    Synthesizes a sort interval that extends past the raw recording's
-    last timestamp by far more than ``1.5 / sampling_frequency`` and
-    asserts ``Recording.populate`` raises before any partial artifact
-    is written. The check is the regression fix for silent-truncation
-    bugs (#1133, #1585).
+    Genuine truncation (saved < the raw-clipped expectation, i.e. dropped
+    packets) still raises ``RecordingTruncatedError`` in ``make_insert``; that
+    path is distinct from this over-request clip.
     """
     import numpy as _np
 
     from spyglass.common import IntervalList
     from spyglass.common.common_lab import LabTeam
-    from spyglass.spikesorting.v2.exceptions import RecordingTruncatedError
     from spyglass.spikesorting.v2.recording import (
         PreprocessingParameters,
         Recording,
@@ -1563,25 +1564,25 @@ def test_recording_truncation_caught(polymer_smoke_session):
     if not (SortGroupV2 & polymer_smoke_session):
         SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
 
-    # Write a synthetic IntervalList row whose end-time exceeds the
-    # raw recording's last timestamp by 1.0 second -- well past the
-    # 1.5 / fs tolerance that absorbs the off-by-one boundary.
-    truncated_interval_name = "v2_test_truncated"
-    raw_end = float(
-        (
-            IntervalList
-            & {
-                "nwb_file_name": nwb_file_name,
-                "interval_list_name": "raw data valid times",
-            }
-        ).fetch1("valid_times")[-1][-1]
-    )
+    # Write a synthetic IntervalList row whose end-time exceeds the raw
+    # recording's last timestamp by 1.0 second -- well past the 1.5 / fs
+    # tolerance that absorbs the off-by-one boundary.
+    over_request_interval_name = "v2_test_over_request"
+    raw_valid_times = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": "raw data valid times",
+        }
+    ).fetch1("valid_times")
+    raw_end = float(raw_valid_times[-1][-1])
+    raw_coverage = float(sum(end - start for start, end in raw_valid_times))
     IntervalList.insert1(
         {
             "nwb_file_name": nwb_file_name,
-            "interval_list_name": truncated_interval_name,
+            "interval_list_name": over_request_interval_name,
             "valid_times": _np.asarray([[0.0, raw_end + 1.0]]),
-            "pipeline": "v2_test_truncation",
+            "pipeline": "v2_test_over_request",
         },
         skip_duplicates=True,
     )
@@ -1592,7 +1593,7 @@ def test_recording_truncation_caught(polymer_smoke_session):
     selection_key = {
         "nwb_file_name": nwb_file_name,
         "sort_group_id": sort_group_id,
-        "interval_list_name": truncated_interval_name,
+        "interval_list_name": over_request_interval_name,
         "preproc_params_name": "default_franklab",
         "team_name": "v2_test_team",
     }
@@ -1601,49 +1602,57 @@ def test_recording_truncation_caught(polymer_smoke_session):
     # Clear any prior Recording row so populate actually runs make().
     (Recording & pk).super_delete(warn=False, force_masters=True)
     try:
-        with pytest.raises(
-            RecordingTruncatedError, match="Missing: .* seconds|Missing: \\d"
-        ):
+        with caplog.at_level("WARNING"):
             Recording.populate(pk, reserve_jobs=False)
-        # The truncation guard must fire BEFORE the row is inserted --
-        # otherwise downstream consumers would silently see a short
-        # recording.
-        assert not (Recording & pk)
+        # Over-request is clipped, not rejected: the row IS inserted.
+        assert (
+            Recording & pk
+        ), "an over-request should be clipped and inserted, not rejected"
+        # The clip is surfaced via a warning -- not silent.
+        assert any(
+            "clipping to raw coverage" in record.getMessage()
+            for record in caplog.records
+        ), "over-request clip should emit a warning"
+        # Saved duration equals the raw coverage (clipped), not the +1 s
+        # over-request the IntervalList asked for.
+        duration_s = float((Recording & pk).fetch1("duration_s"))
+        assert abs(duration_s - raw_coverage) < 0.1, (
+            f"saved duration {duration_s:.3f}s should be clipped to raw "
+            f"coverage {raw_coverage:.3f}s, not the over-request"
+        )
     finally:
+        (Recording & pk).super_delete(warn=False, force_masters=True)
         (RecordingSelection & pk).super_delete(warn=False)
         (
             IntervalList
             & {
                 "nwb_file_name": nwb_file_name,
-                "interval_list_name": truncated_interval_name,
+                "interval_list_name": over_request_interval_name,
             }
         ).super_delete(warn=False)
 
 
 @pytest.mark.slow
-def test_recording_truncation_multi_interval(polymer_smoke_session):
-    """A disjoint multi-interval request that runs past raw coverage
-    raises ``RecordingTruncatedError`` and inserts no row.
+def test_recording_over_request_multi_interval_clips_with_warning(
+    polymer_smoke_session, caplog
+):
+    """The disjoint multi-interval analogue of
+    ``test_recording_over_request_clips_with_warning``: two sort intervals with
+    a real inter-segment gap, where the final segment runs 1 s PAST the raw
+    recording. The over-request is clipped (not an error) and a warning is
+    emitted; the row is inserted with the gap- and over-request-excluded
+    duration.
 
-    The template ``test_recording_truncation_caught`` covers the
-    single-interval over-request case; this is the disjoint analogue, and
-    locks the truncation guard on the multi-interval/concat path. Two
-    sort intervals with a real inter-segment gap, where the final segment
-    extends 1 s past the raw recording's last valid time.
-
-    The guard is correct on this path because the concatenated recording
-    is built with ``ignore_times=True``, so its ``get_times()`` is 0-based
-    and the saved-duration reference EXCLUDES the inter-segment gap (it is
-    the sum of kept-frame durations, not the wall-clock envelope). The
-    requested total likewise excludes gaps, so ``missing`` equals the
-    over-request (here ~1 s) rather than collapsing to <= 0 -- a gap-
-    inclusive envelope would instead spuriously flag every disjoint sort.
+    The concatenated recording is built with ``ignore_times=True``, so its
+    ``get_times()`` is 0-based and the saved duration is the sum of kept-frame
+    durations -- it EXCLUDES the inter-segment gap. The over-request detection
+    likewise excludes gaps (both sides do), so the warning fires on the ~1 s
+    past-coverage span, not on the gap.
     """
     import numpy as _np
 
     from spyglass.common import IntervalList
     from spyglass.common.common_lab import LabTeam
-    from spyglass.spikesorting.v2.exceptions import RecordingTruncatedError
     from spyglass.spikesorting.v2.recording import (
         PreprocessingParameters,
         Recording,
@@ -1688,7 +1697,7 @@ def test_recording_truncation_multi_interval(polymer_smoke_session):
             "valid_times": _np.asarray(
                 [[raw_start, seg1_end], [seg2_start, raw_end + over_request_s]]
             ),
-            "pipeline": "v2_test_truncation",
+            "pipeline": "v2_test_over_request",
         },
         skip_duplicates=True,
     )
@@ -1707,12 +1716,25 @@ def test_recording_truncation_multi_interval(polymer_smoke_session):
 
     (Recording & pk).super_delete(warn=False, force_masters=True)
     try:
-        with pytest.raises(RecordingTruncatedError, match="Missing: \\d"):
+        with caplog.at_level("WARNING"):
             Recording.populate(pk, reserve_jobs=False)
-        # No row may be inserted for an over-request -- otherwise a
-        # downstream consumer silently reads a window that does not cover
-        # what was requested.
-        assert not (Recording & pk)
+        # Over-request is clipped, not rejected: the row IS inserted.
+        assert (
+            Recording & pk
+        ), "a multi-interval over-request should be clipped and inserted"
+        # The clip is surfaced via a warning -- not silent.
+        assert any(
+            "clipping to raw coverage" in record.getMessage()
+            for record in caplog.records
+        ), "over-request clip should emit a warning"
+        # Saved duration = seg1 + (seg2 clipped to raw_end), with the
+        # inter-segment gap excluded and the +1 s over-request dropped.
+        expected_clipped = (seg1_end - raw_start) + (raw_end - seg2_start)
+        duration_s = float((Recording & pk).fetch1("duration_s"))
+        assert abs(duration_s - expected_clipped) < 0.15, (
+            f"saved duration {duration_s:.3f}s should be the clipped, "
+            f"gap-excluded total {expected_clipped:.3f}s"
+        )
     finally:
         (Recording & pk).super_delete(warn=False, force_masters=True)
         (RecordingSelection & pk).super_delete(warn=False)

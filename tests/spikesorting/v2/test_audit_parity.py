@@ -2668,11 +2668,13 @@ def test_populate_unit_part_peak_channel_not_in_sort_group(
     original_extremum_channel = template_tools.get_template_extremum_channel
 
     def _bad_peak_channels(analyzer, **kwargs):
-        # ``get_template_extremum_amplitude`` calls this internally with
-        # ``peak_sign``/``mode``; delegate that path to the real function so
-        # only ``_populate_unit_part``'s own ``outputs="id"`` call (no
-        # peak_sign) returns the planted out-of-group channel.
-        if "peak_sign" in kwargs:
+        # ``_populate_unit_part`` resolves peak channels with ``outputs="id"``
+        # (and a configured ``peak_sign``); ``get_template_extremum_amplitude``
+        # calls this internally with ``peak_sign``/``mode`` but NOT
+        # ``outputs="id"``. Both carry ``peak_sign``, so discriminate on
+        # ``outputs`` -- only the unit-attribution call returns the planted
+        # out-of-group channel; delegate the amplitude path to the real fn.
+        if kwargs.get("outputs") != "id":
             return original_extremum_channel(analyzer, **kwargs)
         return {uid: bad_channel for uid in sorting.unit_ids}
 
@@ -3003,6 +3005,12 @@ def test_clusterless_runtime_strips_stale_fields(monkeypatch):
     rec = si.generate_recording(
         num_channels=4, durations=[1.0], sampling_frequency=30_000.0
     )
+    # threshold_unit="uv" requires the recording to carry channel gains
+    # (it scales to uV); generate_recording has none. Unity gain/offset make
+    # the uv scaling a no-op, so this test exercises field-stripping (its
+    # actual purpose) rather than the gains precondition.
+    rec.set_channel_gains(1.0)
+    rec.set_channel_offsets(0.0)
     captured = {}
 
     def _capture_detect(recording, *, method, method_kwargs, job_kwargs):

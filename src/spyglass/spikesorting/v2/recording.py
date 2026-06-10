@@ -1049,6 +1049,34 @@ class Recording(SpyglassMixin, dj.Computed):
             sum(end - start for start, end in intended_intervals)
         )
 
+        # A sort interval that runs PAST the raw recording's coverage is clipped
+        # to what exists (the intersect above) rather than erroring -- but the
+        # clip must be surfaced, not silent (#1585). Compare the
+        # min_segment_length-filtered REQUEST against the raw-clipped
+        # expectation; a positive gap is the over-requested span that was
+        # dropped. Inter-segment gaps and sub-min_segment slivers cancel out
+        # (both are excluded from each side), so this fires only on a genuine
+        # request-past-coverage. ``make_insert`` still raises
+        # RecordingTruncatedError for TRUE truncation (saved < this expectation,
+        # i.e. dropped packets), which this warning does not mask.
+        requested_saved_total = float(
+            sum(
+                end - start
+                for start, end in sort_valid_times
+                if (end - start) >= preproc_validated.min_segment_length
+            )
+        )
+        over_request = requested_saved_total - expected_saved_total
+        if over_request > 1.5 / sampling_frequency:
+            logger.warning(
+                f"Recording.make: IntervalList {sel['interval_list_name']!r} in "
+                f"{sel['nwb_file_name']!r} requests "
+                f"{requested_saved_total:.6f}s but the raw recording covers "
+                f"only {expected_saved_total:.6f}s after min_segment_length "
+                f"filtering; clipping to raw coverage "
+                f"({over_request:.6f}s past the recording dropped)."
+            )
+
         return RecordingComputed(
             analysis_file_name=analysis_file_name,
             object_id=object_id,
