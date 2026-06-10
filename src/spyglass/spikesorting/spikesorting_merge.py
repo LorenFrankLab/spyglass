@@ -138,6 +138,7 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         key: dict,
         restrict_by_artifact: bool = True,
         as_dict: bool = False,
+        strict: bool = True,
     ) -> Union[None, list, dict]:
         """Resolve v2-source merge ids for a restriction key.
 
@@ -148,7 +149,9 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         ``SpikeSortingOutput.CurationV2``, warning on multi-curation
         fan-out. See ``CurationV2.resolve_restriction`` for the full
         restriction surface, the unknown-key guard, and the
-        ``restrict_by_artifact`` / ``artifact_id`` handling.
+        ``restrict_by_artifact`` / ``artifact_id`` handling. ``strict`` is
+        forwarded: ``False`` (the multi-source auto-default path) makes an
+        unknown key yield no v2 rows instead of raising.
         """
         if CurationV2 is None:
             _raise_v2_unavailable(
@@ -160,7 +163,7 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         # resolved curations to merge ids and warns on multi-curation
         # fan-out, so v2 schema knowledge stays in v2.
         curation_table = CurationV2.resolve_restriction(
-            key, restrict_by_artifact=restrict_by_artifact
+            key, restrict_by_artifact=restrict_by_artifact, strict=strict
         )
 
         # Multi-curation fan-out warning. When no ``curation_id`` is given and
@@ -275,6 +278,12 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         if not isinstance(key, dict):
             raise TypeError("key must be a dictionary")
 
+        # When the caller did not name ``sources`` (auto-default to ALL
+        # available), the v2 resolver must be LENIENT: a key meant for v0/v1
+        # is not a v2 typo, so v2 contributes no rows rather than raising on
+        # it. An explicit ``sources`` list means a deliberate query -> keep
+        # v2 strict so a real typo still surfaces.
+        v2_strict = sources is not None
         if sources is None:
             sources = _available_merge_sources()
 
@@ -313,6 +322,7 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
                     key.copy(),
                     restrict_by_artifact=restrict_by_artifact,
                     as_dict=as_dict,
+                    strict=v2_strict,
                 )
             )
 

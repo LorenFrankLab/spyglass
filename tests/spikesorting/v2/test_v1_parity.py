@@ -400,12 +400,40 @@ def test_no_phase_label_leakage_in_runtime_code():
 
 
 def test_merge_dispatch_raises_on_unknown_restriction_keys():
-    """Unknown restriction keys raise instead of silently dropping."""
+    """A deliberate v2 query (strict) raises on unknown keys instead of
+    silently dropping them."""
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 
     with pytest.raises(ValueError, match="bogus_field"):
         SpikeSortingOutput()._get_restricted_merge_ids_v2(
             {"nwb_file_name": "x.nwb", "bogus_field": "y"}
+        )
+
+
+def test_merge_dispatch_lenient_on_non_v2_keys_in_default_path(dj_conn):
+    """The v2 resolver is lenient in the multi-source DEFAULT path: a key it
+    doesn't recognize yields no v2 rows instead of raising. So when
+    ``get_restricted_merge_ids`` auto-defaults its sources, a key handled by
+    v1 (which the dispatcher runs first) no longer trips the v2 branch's
+    'unknown key' ValueError. The strict raise is preserved for a deliberate
+    v2 query (sources=['v2'] / a direct strict resolve).
+    """
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+
+    # Lenient (what the auto-default dispatch passes to the v2 branch):
+    # no raise, no v2 rows (an empty fetch result).
+    assert (
+        len(
+            SpikeSortingOutput()._get_restricted_merge_ids_v2(
+                {"nwb_file_name": "x.nwb", "bogus_field": "y"}, strict=False
+            )
+        )
+        == 0
+    )
+    # Strict (an explicit v2 query) still raises on the unknown key.
+    with pytest.raises(ValueError, match="bogus_field"):
+        SpikeSortingOutput()._get_restricted_merge_ids_v2(
+            {"nwb_file_name": "x.nwb", "bogus_field": "y"}, strict=True
         )
 
 

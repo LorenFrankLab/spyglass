@@ -1256,7 +1256,11 @@ class CurationV2(SpyglassMixin, dj.Manual):
 
     @classmethod
     def resolve_restriction(
-        cls, key: dict, *, restrict_by_artifact: bool = True
+        cls,
+        key: dict,
+        *,
+        restrict_by_artifact: bool = True,
+        strict: bool = True,
     ):
         """Resolve an interpretable restriction to the matching CurationV2 rows.
 
@@ -1276,9 +1280,13 @@ class CurationV2(SpyglassMixin, dj.Manual):
         place. Returns a ``CurationV2`` query; callers map it to merge ids
         via ``SpikeSortingOutput.CurationV2``.
 
-        Unknown restriction keys raise ``ValueError`` rather than silently
-        dropping through (v1 dropped bad keys quietly, so typos returned
-        wrong-but-non-empty results). ``restrict_by_artifact=True`` honors
+        Unknown restriction keys raise ``ValueError`` when ``strict`` (the
+        default -- a deliberate v2 query, where an unknown key is a typo, as
+        v1 dropping bad keys quietly returned wrong-but-non-empty results);
+        when ``strict=False`` (the multi-source ``get_restricted_merge_ids``
+        dispatch) an unknown key instead yields an empty result, since it
+        names another pipeline's column and this is not a v2 query.
+        ``restrict_by_artifact=True`` honors
         the v2 IntervalList convention where the artifact-removed
         valid_times row is named ``f"artifact_{artifact_id}"``; callers can
         supply either the bare artifact id or the artifact-named
@@ -1313,6 +1321,14 @@ class CurationV2(SpyglassMixin, dj.Manual):
         allowed = set(rec_keys) | set(sort_keys) | set(curation_keys)
         unknown = set(key) - allowed
         if unknown:
+            if not strict:
+                # Lenient multi-source-dispatch path: an unknown key names a
+                # non-v2 (v0/v1) column, so this is not a v2 query -- v2
+                # contributes no rows, mirroring how the v0/v1 resolvers
+                # silently drop keys their tables lack. The strict raise is
+                # reserved for a deliberate v2 query (sources=['v2'] or a
+                # direct resolve_restriction), where an unknown key is a typo.
+                return cls & "FALSE"
             raise ValueError(
                 "CurationV2.resolve_restriction: "
                 f"unknown restriction keys {sorted(unknown)}. Allowed: "
