@@ -99,6 +99,20 @@ def run_v2_pipeline(
     manifest (same merge_id, same intermediate PKs) without
     duplicating rows.
 
+    Prerequisites (set these up first, in order)
+    --------------------------------------------
+    1. ``initialize_v2_defaults()`` -- seed the default Lookup rows.
+    2. ``LabTeam`` row for ``team_name`` -- the owning team must already
+       exist in ``common.LabTeam``.
+    3. ``SortGroupV2.set_group_by_shank(nwb_file_name=...)`` (or
+       ``set_group_by_electrode_table_column``) -- sort-group structure is
+       session-specific user input the orchestrator does not auto-create.
+
+    So a single-session sort is ~4 user touchpoints (the three setup steps
+    above plus this call), not 2: this orchestrator collapses the per-stage
+    ``insert_selection`` / ``populate`` boilerplate, not the upstream
+    session/team/sort-group setup.
+
     Parameters
     ----------
     nwb_file_name
