@@ -213,10 +213,11 @@ jobs:
       # main suite (run-tests above), via the dedicated env file. The
       # env pins Python 3.11 + SpikeInterface 0.104 and installs the
       # test, spikesorting-v2, and spikesorting-v2-validation extras
-      # (the validation extra brings MEArec / neuroconv). MEArec also
-      # needs NEURON + LFPy to simulate templates; those are installed
-      # in the next step (generation-only, kept out of the env file so
-      # the test env stays lean). It deliberately does NOT install
+      # (the validation extra brings MEArec / neuroconv, which the tests use
+      # to read ground-truth units). NEURON + LFPy are deliberately NOT
+      # installed: they are needed only to *generate* fixtures, and this job
+      # downloads the canonical fixtures via _fetch.py instead. It also does
+      # NOT install
       # ``spikesorting-v2-matching``: it pulls torch + CUDA (heavy) and
       # would bloat the env. The extra is pinned to UnitMatchPy 3.2.7 --
       # the last release declaring numpy>=2 -- so it no longer forces the
@@ -230,87 +231,70 @@ jobs:
         environment-file: environments/environment_spikesorting_v2.yml
         miniforge-version: latest
         use-mamba: true
-    - name: Install MEArec template-generation deps (NEURON + LFPy)
-      # MEArec generates its templates from biophysical (BBP) cell models
-      # via NEURON + LFPy; without them ``MEArec.gen_templates`` fails in
-      # ``import_LFPy_neuron`` ("No module named 'LFPy'") and the fixture
-      # build below dies. These are generation-only (the tests themselves
-      # read the produced NWB and do not import NEURON/LFPy), so they live
-      # here rather than in the env file. Both require only numpy>=1.9, so
-      # they do not perturb the numpy>=2 baseline.
+    - name: Cache downloaded MEArec fixtures
+      # Avoid re-downloading the canonical fixtures from Box every run. Keyed
+      # on the manifest (fixture bytes) + _fetch.py (Box URLs) so a fixture
+      # refresh or URL change busts the cache, and on github.event_name so the
+      # per-PR cache (smoke only) and the nightly cache (smoke + 60s) keep
+      # separate entries rather than clobbering one key. On a hit, _fetch.py
+      # finds the files already present and is a no-op.
+      uses: actions/cache@v4
+      with:
+        path: tests/spikesorting/v2/fixtures/*.nwb
+        key: v2-fixtures-${{ github.event_name }}-${{ hashFiles('tests/spikesorting/v2/fixtures/fixtures_manifest.json', 'tests/spikesorting/v2/fixtures/_fetch.py') }}
+    - name: Download smoke fixture (canonical artifact from Box)
+      # Per-PR fixture. _fetch.py downloads it from Box (URL pinned in
+      # _fetch.py) and sha256-verifies against the committed manifest, retrying
+      # transient network errors. A hash MISMATCH, or a missing/4xx URL, fails
+      # the job loudly -- there is deliberately NO ``|| generate_mearec``
+      # fallback: a silent regenerate would (a) hide a corrupt or rotated
+      # artifact behind a green build, and (b) drag the NEURON/LFPy biophysical
+      # toolchain back into the per-PR job. Regeneration is a manual operation
+      # (generate_mearec.py; see fixtures/README.md), not a CI fallback.
       #
-      # Pins are load-bearing: NEURON 9 dropped the legacy random API
-      # (``scop_random`` / ``nrn_random_arg``) that MEArec's bundled BBP
-      # ``.mod`` mechanisms (ProbAMPANMDA_EMS, ProbGABAAB_EMS) still use, so
-      # ``nrnivmodl`` fails to compile them under 9.x. LFPy 2.3.7 in turn
-      # *requires* neuron>=9.0.1, so the last compatible pair is
-      # LFPy 2.3.6 (neuron>=7.7.2) + neuron 8.2.x. See
-      # tests/spikesorting/v2/fixtures/README.md.
+      # mearec_polymer_smoke.nwb (~4s) drives the per-PR integration /
+      # clusterless / zero-unit cases. The 60s / Neuropixels / drift fixtures
+      # are downloaded only on the nightly/manual runs (next step); their tests
+      # skip cleanly via ``*_PATH.exists()`` guards otherwise. No-op on a cache
+      # hit.
       run: |
-        pip install "neuron<9" "LFPy<2.3.7"
-    - name: Generate MEArec smoke fixture
-      # The smoke MEArec NWB (mearec_polymer_smoke.nwb, ~4s, small
-      # template set) is required by the v2 integration tests in
-      # test_integrity.py, test_downstream_consumers.py, and the
-      # core test_single_session_pipeline.py paths. Without this
-      # step those tests skip via the ``_FIXTURE_PATH.exists()``
-      # guard and CI passes vacuously even when the pipeline has
-      # regressed. The fixture is regenerated from a fixed seed; the
-      # DETERMINISTIC upstream (recording_h5_sha256 + structural fields)
-      # is pinned by ``fixtures/fixtures_manifest.json`` and checked in the
-      # next step. (The neuroconv NWB write is NOT byte-deterministic --
-      # UUIDs/timestamps -- so nwb_sha256 is a snapshot, not a gate.)
-      #
-      # The 60s polymer / 60s Neuropixels / 120s drift fixtures are too
-      # slow to build on every PR, so they are NOT generated here; their
-      # tests skip cleanly when absent. The 60s polymer fixture IS built on
-      # the nightly schedule / manual dispatch (next step) so the tests
-      # that depend on it run regularly rather than only on a developer's
-      # local run.
-      run: |
-        python tests/spikesorting/v2/fixtures/generate_mearec.py --smoke
-    - name: Verify the smoke fixture did not drift from the committed manifest
-      # generate_mearec rewrites fixtures_manifest.json. The MEArec>=1.9 /
-      # neuroconv[mearec] deps are loose, so a version bump can silently
-      # change the recording bytes and CI would just test the drifted fixture.
-      # Fail loudly if the DETERMINISTIC recording_h5_sha256 / n_units / probe
-      # drift from the committed values (nwb_sha256 is non-deterministic and
-      # intentionally not checked).
-      run: |
-        python - <<'PY'
-        import json, subprocess
-        path = "tests/spikesorting/v2/fixtures/fixtures_manifest.json"
-        new = json.load(open(path))["fixtures"]["mearec_polymer_smoke"]
-        old = json.loads(
-            subprocess.check_output(["git", "show", f"HEAD:{path}"])
-        )["fixtures"]["mearec_polymer_smoke"]
-        for k in ("recording_h5_sha256", "n_units", "probe_json_sha256"):
-            assert new[k] == old[k], (
-                f"smoke fixture drift: {k}={new[k]!r} != committed {old[k]!r}. "
-                "A MEArec/dep bump changed the deterministic fixture; "
-                "re-verify and re-commit fixtures_manifest.json."
-            )
-        print(
-            "smoke fixture matches committed manifest "
-            "(recording_h5 / n_units / probe)."
-        )
-        PY
-    - name: Generate 60s polymer fixture (scheduled / manual full runs)
-      # Built only on the nightly cron and manual workflow_dispatch -- a
-      # single 60s MEArec recording is minutes of generation, too slow for
-      # per-PR runs. Generating just the 60s polymer fixture (``--only``)
-      # un-skips the tests that need it: the merge/apply_merge
-      # frame-equality check and the MS5 ground-truth accuracy gate
-      # (test_single_session_pipeline.py) plus the clusterless sparse-id
-      # case (test_clusterless_waveform_features.py). Per-PR runs still skip
-      # those; their guarded behavior is ALSO gated per-PR by smoke-fixture
-      # tests (e.g. test_lazy_vs_applied_merge_frames_equal runs the
-      # lazy-vs-applied merge on the smoke fixture), so nothing is silently
-      # uncovered -- the 60s fixture is the deeper real-MS5 confirmation.
+        python tests/spikesorting/v2/fixtures/_fetch.py mearec_polymer_smoke
+    - name: Download 60s polymer fixture (scheduled / manual full runs)
+      # Pulled into the suite only on the nightly cron / manual dispatch -- it
+      # un-skips the merge frame-equality check, the MS5 ground-truth accuracy
+      # gate (test_single_session_pipeline.py), and the clusterless sparse-id
+      # case. Per-PR runs skip those via their ``*_PATH.exists()`` guards;
+      # their behaviour is also covered per-PR on the smoke fixture (e.g.
+      # test_lazy_vs_applied_merge_frames_equal), so nothing is silently
+      # uncovered. Same download + verify + no-fallback contract as the smoke
+      # step above.
       if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
       run: |
-        python tests/spikesorting/v2/fixtures/generate_mearec.py \
-          --only mearec_polymer_128ch_60s
+        python tests/spikesorting/v2/fixtures/_fetch.py mearec_polymer_128ch_60s
+    - name: Download scenario fixtures (manual dispatch only)
+      # Dense-probe (neuropixels) and tetrode-path coverage. These change
+      # rarely, so they are pulled only on a manual workflow_dispatch (or run
+      # locally) rather than per-PR or nightly. The drift fixture is hosted on
+      # Box but intentionally NOT fetched -- no test references it yet (motion
+      # correction is unwritten). Same download + verify + no-fallback contract.
+      if: github.event_name == 'workflow_dispatch'
+      run: |
+        python tests/spikesorting/v2/fixtures/_fetch.py mearec_neuropixels_60s
+        python tests/spikesorting/v2/fixtures/_fetch.py mearec_tetrode_60s
+    - name: Select required fixtures for this run
+      # Names the fixtures that MUST drive their gates on this tier (matching
+      # the download steps above). conftest's pytest_sessionstart fails the
+      # session if any are absent, so a green run honestly means the gates ran
+      # rather than silently skipping on a missing fixture.
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          REQ="mearec_polymer_smoke mearec_polymer_128ch_60s mearec_neuropixels_60s mearec_tetrode_60s"
+        elif [ "${{ github.event_name }}" = "schedule" ]; then
+          REQ="mearec_polymer_smoke mearec_polymer_128ch_60s"
+        else
+          REQ="mearec_polymer_smoke"
+        fi
+        echo "SPYGLASS_V2_REQUIRE_FIXTURES=$REQ" >> "$GITHUB_ENV"
     - name: Run modern spike-sorting tests
       # Collects the whole v2 dir. The smoke fixture drives the per-PR
       # integration + clusterless + zero-unit cases; when the 60s polymer

@@ -120,6 +120,56 @@ def phase1_baseline_artifacts():
     yield bundle
 
 
+def pytest_sessionstart(session):
+    """Download canonical MEArec fixtures that are missing locally (step 2).
+
+    When a fixture's URL is configured in ``fixtures/_fetch.py`` and the file is
+    absent, fetch + sha256-verify it here -- before any per-module
+    ``_FIXTURE_PATH.exists()`` guard runs -- so the suite uses the downloaded
+    canonical artifact instead of skipping. This is a no-op when the file is
+    already present (e.g. generated locally) or when no URL is configured yet
+    (tests skip as before). Only the per-PR smoke fixture is fetched by default;
+    set ``SPYGLASS_V2_FETCH_FULL=1`` to also pull the larger nightly fixtures.
+    """
+    import os
+    import warnings
+
+    from tests.spikesorting.v2.fixtures._fetch import (
+        FIXTURE_URLS,
+        FixtureFetchError,
+        ensure_fixture,
+    )
+
+    names = (
+        list(FIXTURE_URLS)
+        if os.environ.get("SPYGLASS_V2_FETCH_FULL") == "1"
+        else ["mearec_polymer_smoke"]
+    )
+    for name in names:
+        try:
+            ensure_fixture(name, required=False)
+        except FixtureFetchError as exc:
+            # Don't abort the whole session on a fetch failure -- dependent
+            # tests skip via their own ``_PATH.exists()`` guard. Surface it.
+            warnings.warn(f"[v2 fixtures] could not fetch {name}: {exc}")
+
+    # Honest-green gate: any fixture named in SPYGLASS_V2_REQUIRE_FIXTURES MUST
+    # be present, or its test would silently skip and the run would look green
+    # without exercising the gate. CI sets this per tier to exactly the fixtures
+    # it downloaded (per-PR: smoke; nightly: + 60s polymer; manual dispatch:
+    # + scenario fixtures). Unset locally, so absent fixtures skip as before.
+    required = os.environ.get("SPYGLASS_V2_REQUIRE_FIXTURES", "").split()
+    fixtures_dir = Path(__file__).resolve().parent / "fixtures"
+    missing = [n for n in required if not (fixtures_dir / f"{n}.nwb").exists()]
+    if missing:
+        pytest.exit(
+            "Required v2 fixtures are absent, so their gates would silently "
+            "skip: " + ", ".join(missing) + ". The download step failed or a "
+            "Box link is stale -- see tests/spikesorting/v2/fixtures/_fetch.py.",
+            returncode=1,
+        )
+
+
 _DOWNSTREAM_FIXTURE_NAME = "mearec_polymer_smoke"
 _DOWNSTREAM_FIXTURE_PATH = (
     Path(__file__).resolve().parent
