@@ -126,6 +126,9 @@ def imported_merge_id(common, mini_dict, mini_insert, synthetic_spike_window):
     never touches the external store, which is why position was unaffected and
     writing units BEFORE registration (option 1) was unnecessary.
     """
+    import os
+    import shutil
+
     import pynwb
     from datajoint.hash import uuid_from_file
 
@@ -144,23 +147,46 @@ def imported_merge_id(common, mini_dict, mini_insert, synthetic_spike_window):
 
     abs_path = Nwbfile.get_abs_path(nwb_file_name)
 
-    # Spyglass caches open NWB handles (read-only) in a module-level dict; the
-    # minirec ``_`` copy is already cached by the time the position/ingest
-    # fixtures have run, so opening it ``mode="a"`` would raise "file is already
-    # open for read-only". Close cached handles first; the next reader re-opens
-    # a fresh handle that sees the appended units. (Position data is already
-    # materialized into PositionGroup/pos_merge, so subsequent re-reads are
-    # safe.) This mirrors the ``mini_insert`` teardown's ``close_nwb_files``.
-    close_nwb_files()
+    # The registered ``_`` copy is the SHARED minirec session file. Under the
+    # full test suite other session-scoped fixtures hold it open read-only for
+    # the whole session -- not Spyglass's own cached handles (those are closed
+    # below), but handles OUTSIDE that cache: e.g. the LFP/analysis ``*_raw``
+    # fixtures ``yield`` an nwbfile inside ``with NWBHDF5IO(...)`` and those
+    # analysis files HDF5-external-link the raw ephys, so the open handle
+    # transitively holds this file. HDF5 refuses to open a file ``mode="a"``
+    # while it is open ``"r"`` in the same process, so appending IN PLACE
+    # deadlocks ("file is already open for read-only") -- only under the full
+    # suite, not when the decoding tests run alone, which is why it slipped
+    # through. ``close_nwb_files`` cannot help (the leaked handle is not in its
+    # cache, and the holder keeps a live reference so it will not be GC'd).
+    #
+    # Fix: append the synthetic units to a fresh COPY and atomically swap it in.
+    # The copy has no open handle so ``mode="a"`` always succeeds; ``os.replace``
+    # is atomic on the same filesystem and does not disturb any reader still
+    # holding the old inode.
+    close_nwb_files()  # release Spyglass's own cached handles (best-effort)
 
-    # Append a units table to the registered ``_`` copy in place, only if it
-    # does not already carry one (idempotent across --no-teardown reruns where
-    # the persistent raw file already carries the synthetic units).
-    with pynwb.NWBHDF5IO(path=abs_path, mode="a", load_namespaces=True) as io:
-        nwbf = io.read()
-        if getattr(nwbf, "units", None) is None:
-            nwbf.add_unit(spike_times=spike_times, id=0)
-            io.write(nwbf)
+    # Idempotent across --no-teardown reruns where the persistent file already
+    # carries the synthetic units. A read-only probe is safe even when another
+    # handle holds the file open read-only (concurrent read opens are allowed).
+    with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
+        already_has_units = getattr(io.read(), "units", None) is not None
+
+    if not already_has_units:
+        tmp_path = f"{abs_path}.units_tmp"
+        shutil.copy2(
+            abs_path, tmp_path
+        )  # preserves the raw-ephys external link
+        try:
+            with pynwb.NWBHDF5IO(
+                path=tmp_path, mode="a", load_namespaces=True
+            ) as io:
+                nwbf = io.read()
+                nwbf.add_unit(spike_times=spike_times, id=0)
+                io.write(nwbf)
+            os.replace(tmp_path, abs_path)  # atomic; no exclusive-write needed
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
     close_nwb_files()
 
     # Reconcile the external ``filepath@raw`` row to the current on-disk file.
