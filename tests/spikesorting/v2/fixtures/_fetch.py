@@ -114,8 +114,13 @@ def _sha256(path: Path) -> str:
 def _download_http(url: str, dest_tmp: Path) -> None:
     """Download an HTTP(S) URL to ``dest_tmp`` (follows redirects)."""
     # A User-Agent avoids hosts (incl. Box) that reject default urllib clients.
-    request = urllib.request.Request(url, headers={"User-Agent": "spyglass-tests"})
-    with urllib.request.urlopen(request) as response, dest_tmp.open("wb") as out:
+    request = urllib.request.Request(
+        url, headers={"User-Agent": "spyglass-tests"}
+    )
+    with (
+        urllib.request.urlopen(request) as response,
+        dest_tmp.open("wb") as out,
+    ):
         shutil.copyfileobj(response, out)
 
 
