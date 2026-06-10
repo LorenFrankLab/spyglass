@@ -104,7 +104,12 @@ def _map_class_name_to_class(module: object) -> dict:
         for attr_name, attr in [
             (name, getattr(module, name)) for name in module_attributes
         ]
-        if hasattr(attr, "__class__") and attr.__class__.__name__ == "type"
+        # ``isinstance(attr, type)`` -- not ``attr.__class__.__name__ ==
+        # "type"`` -- so that classes with a non-``type`` metaclass are
+        # included. The detector/classifier classes are ``BaseEstimator``
+        # subclasses whose metaclass is ``ABCMeta``; the stricter check would
+        # silently drop every one of them from the registry.
+        if isinstance(attr, type)
     }
 
 

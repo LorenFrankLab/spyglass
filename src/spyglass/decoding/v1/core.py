@@ -73,12 +73,16 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
         """Override insert to convert classes to dict before inserting.
 
         A detector/classifier is serialized via ``get_params()`` (its public
-        constructor parameters) rather than ``vars()``, so derived internal
-        attributes -- e.g. ``_frozen_discrete_transition_rows_mask_`` -- are not
-        stored and then passed back into the constructor as unexpected keyword
-        arguments on fetch. The concrete class name is recorded so that
-        ``restore_classes`` can rebuild the exact subclass (preserving
-        subclass-only parameters such as NonLocal's ``non_local_*_penalty``).
+        constructor parameters) rather than ``vars()``. ``get_params()`` is the
+        stable serialization contract: it returns exactly the constructor
+        parameters and excludes version-specific derived internal attributes
+        that ``vars()`` may include (historically, e.g.,
+        ``_frozen_discrete_transition_rows_mask_``, since made a lazy property
+        upstream), which would otherwise be passed back into the constructor as
+        unexpected keyword arguments on fetch. The concrete class name is
+        recorded so that ``restore_classes`` can rebuild the exact subclass
+        (preserving subclass-only parameters such as NonLocal's
+        ``non_local_*_penalty``).
         """
         for row in rows:
             params = row["decoding_params"]

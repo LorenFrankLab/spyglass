@@ -342,8 +342,12 @@ def decode_clusterless_params_insert(decode_v1, track_graph):
         },
         skip_duplicates=True,
     )
+    # fetch1() reconstructs the stored model as a concrete instance (current
+    # format); it is no longer a kwargs dict to splat into the constructor.
     model_params = (decode_v1.core.DecodingParameters & params_pk).fetch1()
-    ContFragClusterlessClassifier(**model_params["decoding_params"])
+    assert isinstance(
+        model_params["decoding_params"], ContFragClusterlessClassifier
+    )
 
     yield params_pk
 

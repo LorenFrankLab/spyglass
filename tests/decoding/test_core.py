@@ -106,11 +106,15 @@ def test_fetch_position_info_non_chronological_merge_ids():
 
 def test_decode_param_fetch(decode_v1, decode_clusterless_params_insert):
     from non_local_detector.environment import Environment
+    from non_local_detector.models.base import ClusterlessDetector
 
     key = decode_clusterless_params_insert
+    # Current-format rows reconstruct as a concrete detector instance, not a
+    # dict; environments are attributes on that instance.
     ret = (decode_v1.core.DecodingParameters & key).fetch1()["decoding_params"]
-    env = ret["environments"][0]
-    assert isinstance(env, Environment), "fetch failed to restore class"
+    assert isinstance(ret, ClusterlessDetector), "fetch failed to restore class"
+    env = ret.environments[0]
+    assert isinstance(env, Environment), "fetch failed to restore environment"
 
 
 def test_null_pos_group(caplog, decode_v1, pop_pos_group):
