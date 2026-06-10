@@ -4,14 +4,29 @@ so that datajoint can store them in tables."""
 import copy
 
 import datajoint as dj
+import non_local_detector
 from non_local_detector import continuous_state_transitions as cst
 from non_local_detector import discrete_state_transitions as dst
 from non_local_detector import initial_conditions as ic
 from non_local_detector.environment import Environment
+from non_local_detector.models import base as nld_base
 from non_local_detector.observation_models import ObservationModel
 from track_linearization import make_track_graph
 
 schema = dj.schema("decoding_clusterless_v1")
+
+
+def _model_class_registry() -> dict:
+    """Map model class name -> class for decoder reconstruction.
+
+    Covers the public detector/classifier classes (e.g.
+    ``NonLocalClusterlessDetector``, ``ContFragSortedSpikesClassifier``) plus
+    the base ``ClusterlessDetector`` / ``SortedSpikesDetector``.
+    """
+    return {
+        **_map_class_name_to_class(non_local_detector),
+        **_map_class_name_to_class(nld_base),
+    }
 
 
 def _convert_dict_to_class(d: dict, class_conversion: dict) -> object:
@@ -104,8 +119,11 @@ def restore_classes(params: dict) -> dict:
 
     Returns
     -------
-    converted_params : dict
-        The converted parameters
+    model : object or dict
+        A reconstructed detector/classifier instance when the stored params
+        carry a ``"class_name"`` (the current format). For legacy rows stored
+        without a class name, the converted parameter ``dict`` is returned
+        unchanged for backward compatibility.
     """
 
     params = copy.deepcopy(params)
@@ -139,7 +157,22 @@ def restore_classes(params: dict) -> dict:
             ObservationModel(**obs) for obs in params["observation_models"]
         ]
 
-    return params
+    # Reconstruct the detector instance via its stored class. Reconstructing
+    # with the concrete class (rather than the base detector) is what lets
+    # subclass-only parameters -- e.g. NonLocal*'s ``non_local_position_penalty``
+    # / ``non_local_penalty_std`` -- round-trip. Legacy rows serialized without
+    # a class name fall back to the param dict for backward compatibility.
+    model_class_name = params.pop("class_name", None)
+    if model_class_name is None:
+        return params
+
+    model_classes = _model_class_registry()
+    if model_class_name not in model_classes:
+        raise ValueError(
+            f"Unknown decoder model class '{model_class_name}'. "
+            f"Known classes: {sorted(model_classes)}"
+        )
+    return model_classes[model_class_name](**params)
 
 
 def _convert_algorithm_params(algo_params: dict) -> dict:

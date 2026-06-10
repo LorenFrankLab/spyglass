@@ -213,6 +213,12 @@ for label, interval_data in results.groupby("interval_labels"):
         above.
     - Fix fetching position df in
         SortedSpikesDecodingV1.get_ahead_behind_distance() #1540
+    - Make `DecodingParameters` serialization robust to `non_local_detector`
+        model changes: serialize via `get_params()` instead of `vars()` (so
+        derived internals like `_frozen_discrete_transition_rows_mask_` are not
+        stored and re-passed to the constructor) and reconstruct via the stored
+        model class (so subclass-only parameters such as NonLocal's
+        `non_local_*_penalty` round-trip). Legacy rows remain readable.
 
 - LFP
 

@@ -284,7 +284,13 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         ValueError
             If all decoding intervals are empty (no valid time points)
         """
-        classifier = ClusterlessDetector(**decoding_params)
+        # ``decoding_params`` is a reconstructed detector instance for params
+        # stored in the current format, or a kwargs dict for legacy rows.
+        classifier = (
+            decoding_params
+            if isinstance(decoding_params, ClusterlessDetector)
+            else ClusterlessDetector(**decoding_params)
+        )
 
         if key["estimate_decoding_params"]:
             # When estimating parameters, treat times outside decoding intervals
@@ -504,7 +510,13 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             position_info,
             position_variable_names,
         ) = ClusterlessDecodingV1.fetch_position_info(key)
-        classifier = ClusterlessDetector(**decoding_params)
+        # ``decoding_params`` is a reconstructed detector instance for params
+        # stored in the current format, or a kwargs dict for legacy rows.
+        classifier = (
+            decoding_params
+            if isinstance(decoding_params, ClusterlessDetector)
+            else ClusterlessDetector(**decoding_params)
+        )
 
         classifier.initialize_environments(
             position=position_info[position_variable_names].to_numpy(),
