@@ -65,11 +65,17 @@ def test_decoding_params_roundtrip(class_name):
     from spyglass.decoding.v1.dj_decoder_conversion import restore_classes
 
     cls = getattr(nld, class_name)
-    # NonLocal* models carry subclass-only penalty parameters; set non-default
-    # values so the round-trip is checked by value, not just by key presence.
-    overrides = (
-        NONLOCAL_PARAM_OVERRIDES if class_name.startswith("NonLocal") else {}
-    )
+    # NonLocal* models carry subclass-only penalty parameters in recent
+    # non_local_detector versions; set non-default values so the round-trip is
+    # checked by value, not just key presence. Gate on the params the installed
+    # version actually accepts -- they were added after 0.6.9 -- so older
+    # versions still exercise the isinstance/keys assertions without erroring.
+    available = set(cls().get_params(deep=False))
+    overrides = {
+        name: value
+        for name, value in NONLOCAL_PARAM_OVERRIDES.items()
+        if class_name.startswith("NonLocal") and name in available
+    }
     model = cls(**overrides)
 
     restored = restore_classes(_serialize_like_insert(model))
