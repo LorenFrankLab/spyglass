@@ -1627,11 +1627,12 @@ def run_v2_pipeline(
         for interactive edits.
     require_units
         Zero-unit policy (review-fix C5). Default False: a zero-unit sort is a
-        legitimate result (e.g. a quiet shank) — the pipeline returns a partial
-        manifest with `curation_id=None` and `merge_id=None` plus a loud
-        warning, and does NOT raise. Set True to instead raise
-        `ZeroUnitSortError`. Graceful-by-default is deliberate; raising is the
-        opt-in.
+        legitimate result (e.g. a quiet shank) — the pipeline writes an
+        empty-but-real curation + merge row and returns a FULL manifest with
+        real `curation_id` / `merge_id` and `n_units=0` plus a loud warning,
+        and does NOT raise, so a quiet shank stays merge-keyable like any other
+        sort. Set True to instead raise `ZeroUnitSortError`. Graceful-by-default
+        is deliberate; raising is the opt-in.
 
     Single-session mode requires `nwb_file_name`, `sort_group_id`,
     `interval_list_name`, and `team_name`; it runs recording, optional artifact
@@ -1653,10 +1654,10 @@ def run_v2_pipeline(
     -------
     dict
         Manifest containing each stage name and DataJoint key, plus the final
-        `merge_id`. On a zero-unit sort with `require_units=False`, the manifest
-        is partial: `curation_id` and `merge_id` are None (the `sorting` row is
-        still present and visible). Callers MUST check
-        `manifest["merge_id"] is not None` before passing it downstream.
+        `merge_id`. A zero-unit sort with `require_units=False` still yields a
+        full manifest: the empty-but-real curation + merge row gives real
+        `curation_id` / `merge_id` with `n_units=0`, so downstream consumers
+        treat it like any other `SpikeSortingOutput` row (no None-check needed).
 
     Raises
     ------
@@ -1682,7 +1683,7 @@ def run_v2_unit_match(
 
 - `run_v2_pipeline()` accepts exactly one input mode: single-session inputs or concat session-group inputs. It returns a manifest of every DataJoint row touched. Mixed, missing, or partial input modes raise `PipelineInputError("run_v2_pipeline requires exactly one input mode: either single-session fields (nwb_file_name, sort_group_id, interval_list_name, team_name) or concat fields (concat_session_group_owner, concat_session_group_name)")`.
 - The helper is idempotent through each table's `insert_selection()` contract; rerunning the same call reuses existing rows.
-- **Zero-unit sorts (review-fix C5):** by default (`require_units=False`) a zero-unit sort returns a partial manifest (`curation_id=None`, `merge_id=None`) with a warning instead of raising — curation/merge are skipped because SI's `NwbSortingExtractor` cannot open an empty units NWB. `require_units=True` raises `ZeroUnitSortError`. This matches `shared-contracts.md § Empty / NaN / Boundary Invariants` (zero-unit is valid, loud, not an error by default).
+- **Zero-unit sorts (review-fix C5):** by default (`require_units=False`) a zero-unit sort writes an empty-but-real curation + merge row and returns a full manifest with real `curation_id` / `merge_id` and `n_units=0` plus a warning, instead of raising — the curation reads back through an empty `NumpySorting` (not `NwbSortingExtractor`, which cannot open an empty units NWB), so the row is always merge-keyable. `require_units=True` raises `ZeroUnitSortError`. This matches `shared-contracts.md § Empty / NaN / Boundary Invariants` (zero-unit is valid, loud, not an error by default).
 - `run_v2_unit_match()` is separate from concat sorting and always requires explicit `curation_choices`; it never selects latest curations implicitly.
 
 **Design points**:
