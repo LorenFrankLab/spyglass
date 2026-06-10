@@ -1499,9 +1499,11 @@ class CurationV2(SpyglassMixin, dj.Manual):
 
         from spyglass.spikesorting.v2.utils import _spike_times_to_frames
 
-        base = cls.get_sorting(key)
+        # merges_applied OR no multi-contributor group -> the base sorting
+        # already IS the result; delegate to get_sorting (its read is
+        # unavoidable in those cases).
         if bool((cls & key).fetch1("merges_applied")):
-            return base
+            return cls.get_sorting(key)
         merge_groups = cls.get_merge_groups(key)
         units_to_merge = [
             contribs
@@ -1509,39 +1511,48 @@ class CurationV2(SpyglassMixin, dj.Manual):
             if len(contribs) > 1
         ]
         if not units_to_merge:
-            return base
+            return cls.get_sorting(key)
 
-        # Apply the proposed merges in ABSOLUTE time, NOT via SI's
-        # frame-space ``MergeUnitsSorting``. On a DISJOINT recording the
-        # units NWB frames are contiguous across an excluded wall-clock
-        # gap, so a frame-space 0.4 ms dedup would wrongly drop a
-        # chunk-1-last / chunk-2-first pair that is seconds apart in real
-        # time. Deduping the contributors' ABSOLUTE spike times with the
-        # SAME helper the ``apply_merge=True`` staged path uses
-        # (``_dedup_merged_spike_times``) is gap-correct AND makes the
-        # previewed train identical to the stored one. The deduped times
-        # are mapped back to recording frames (``np.searchsorted``) so the
-        # returned ``NumpySorting`` is frame-aligned like ``get_sorting``.
-        fs = float(base.get_sampling_frequency())
+        # Read the curated units NWB + the recording timeline ONCE and build
+        # the merged sorting directly. Calling get_sorting here would re-open
+        # the units NWB, re-fetch the recording row, and re-read the timeline
+        # only to discard the intermediates (and would emit a spurious
+        # "merges NOT applied" warning -- we ARE applying them).
+        #
+        # Apply the proposed merges in ABSOLUTE time, NOT via SI's frame-space
+        # ``MergeUnitsSorting``. On a DISJOINT recording the units NWB frames
+        # are contiguous across an excluded wall-clock gap, so a frame-space
+        # 0.4 ms dedup would wrongly drop a chunk-1-last / chunk-2-first pair
+        # that is seconds apart in real time. Deduping the contributors'
+        # ABSOLUTE spike times with the SAME helper the ``apply_merge=True``
+        # staged path uses (``_dedup_merged_spike_times``) is gap-correct AND
+        # makes the previewed train identical to the stored one.
+        # ``_spike_times_to_frames`` maps abs times -> frames EXACTLY as
+        # ``_numpysorting_from_abs_times`` (what get_sorting uses), so the
+        # non-merged units are frame-identical to ``get_sorting``'s.
         row = (cls & key).fetch1()
+        recording_row = cls._upstream_recording_row(key)
+        fs = float(recording_row["sampling_frequency"])
         abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
         abs_times = Sorting._read_units_abs_spike_times(abs_path)
-        timestamps = Sorting._recording_timestamps(
-            cls._upstream_recording_row(key)
-        )
+        timestamps = Sorting._recording_timestamps(recording_row)
         n_samples = int(timestamps.size)
         delta_s = _MERGE_DEDUP_DELTA_MS / 1000.0
 
         merged_members = {int(u) for g in units_to_merge for u in g}
         units_dict: dict = {}
-        # Non-merged units keep their frames verbatim.
-        for uid in base.get_unit_ids():
+        # Non-merged units: map their own absolute times to frames (the same
+        # mapping get_sorting applies internally via
+        # ``_numpysorting_from_abs_times``).
+        for uid, st in abs_times.items():
             if int(uid) not in merged_members:
-                units_dict[int(uid)] = base.get_unit_spike_train(unit_id=uid)
+                units_dict[int(uid)] = _spike_times_to_frames(
+                    timestamps, _np.asarray(st), n_samples, int(uid)
+                )
         # Each merge group -> abs-time-deduped train mapped to frames,
         # under a fresh ``max(unit_ids) + 1`` id (in get_merge_groups
         # order -- matches the prior SI MergeUnitsSorting id assignment).
-        next_id = max(int(u) for u in base.get_unit_ids()) + 1
+        next_id = max(int(u) for u in abs_times) + 1
         for contribs in units_to_merge:
             deduped_abs = _dedup_merged_spike_times(
                 [_np.asarray(abs_times[int(u)]) for u in contribs], delta_s
