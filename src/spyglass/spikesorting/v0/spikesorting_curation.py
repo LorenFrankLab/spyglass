@@ -1379,6 +1379,13 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
 
         Fix1513Status.populate(suppress_errors=True)
 
+    Step 3 — After any populate() call that may have used
+    ``action="repopulate"``, finish the deferred ``CuratedSpikeSorting``
+    repopulation (DataJoint cannot run ``populate()`` from within another
+    populate's transaction)::
+
+        Fix1513Status.run_pending_repopulates()
+
     Outstanding work::
 
         # Not yet reviewed (includes entries skipped by none_needed_only):
@@ -2167,34 +2174,38 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
         repopulated = 0
 
         if action == "update":
-            # Stage NWB patches BEFORE the DB transaction so HDF5 writes
-            # never happen inside a DataJoint transaction context.  If the
-            # DB transaction fails, the temp files are discarded.  Only
-            # after a successful commit are temps renamed into place.
+            # make() already runs inside the transaction opened by
+            # Fix1513Status.populate(), so DB writes below share that
+            # transaction (a nested `with ...connection.transaction:`
+            # would raise "Nested connections are not supported").
+            # Stage NWB patches first so HDF5 writes happen before the
+            # transaction commits; on failure the temp files are discarded.
             staged = []
             if has_downstream:
                 staged = self._stage_nwb_repairs(auto_curation_key, new_labels)
             try:
-                with Curation.connection.transaction:
-                    Curation.update1(
-                        {**auto_curation_key, "curation_labels": new_labels}
-                    )
-                    if has_downstream:
-                        self._repair_unit_labels(auto_curation_key, new_labels)
+                Curation.update1(
+                    {**auto_curation_key, "curation_labels": new_labels}
+                )
+                if has_downstream:
+                    self._repair_unit_labels(auto_curation_key, new_labels)
             except Exception:
                 for temp_path, _ in staged:
                     Path(temp_path).unlink(missing_ok=True)
                 raise
             self._activate_nwb_repairs(staged)
         elif action == "repopulate":
-            with Curation.connection.transaction:
-                Curation.update1(
-                    {**auto_curation_key, "curation_labels": new_labels}
-                )
+            Curation.update1(
+                {**auto_curation_key, "curation_labels": new_labels}
+            )
             if has_downstream:
-                (CuratedSpikeSorting & auto_curation_key).delete()
-            CuratedSpikeSorting.populate(auto_curation_key)
-            repopulated = 1
+                # safemode=False: avoid an interactive prompt and allow
+                # this delete to run inside the populate() transaction.
+                (CuratedSpikeSorting & auto_curation_key).delete(safemode=False)
+            # CuratedSpikeSorting.populate() cannot run here: DataJoint
+            # refuses populate() while a transaction is open (the one
+            # Fix1513Status.populate() started). Repopulation is deferred
+            # to run_pending_repopulates(), called after populate() returns.
 
         label_diff = None
         if action in ("keep", "skip") and diff is not None:
@@ -2213,3 +2224,44 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
                 "label_diff": label_diff,
             }
         )
+
+    # ------------------------------------------------------------------
+    # Deferred repopulation (action='repopulate')
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def run_pending_repopulates(cls, restriction=True, verbose=True):
+        """Run ``CuratedSpikeSorting.populate()`` for pending repopulates.
+
+        ``make(action="repopulate")`` updates ``Curation.curation_labels``
+        and deletes the stale ``CuratedSpikeSorting`` rows, but cannot call
+        ``CuratedSpikeSorting.populate()`` itself: DataJoint refuses to start
+        a ``populate()`` while a transaction is open, and ``make()`` runs
+        inside the transaction opened by ``Fix1513Status.populate()``. Call
+        this method afterwards, once that transaction has committed, to
+        finish the repopulation and mark each entry ``repopulated=1``.
+
+        Parameters
+        ----------
+        restriction : dict or str, optional
+            Additional restriction on the pending ``Fix1513Status`` entries.
+        verbose : bool, optional
+            Print the ``AutomaticCuration`` key for each entry repopulated.
+
+        Returns
+        -------
+        int
+            Number of entries repopulated.
+        """
+        pending = cls() & "action='repopulate'" & "repopulated=0" & restriction
+        n_done = 0
+        for key in pending.fetch("KEY"):
+            auto_curation_key = (AutomaticCuration & key).fetch1(
+                "auto_curation_key"
+            )
+            CuratedSpikeSorting.populate(auto_curation_key)
+            cls.update1({**key, "repopulated": 1})
+            n_done += 1
+            if verbose:
+                print(f"Repopulated {auto_curation_key}")
+        return n_done

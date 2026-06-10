@@ -1126,19 +1126,14 @@ class TestNwbTransactionSafety:
             "reject_status_changed": [],
         }
 
-    def _mock_tx(self, mock_curation, raises=None):
-        from unittest.mock import MagicMock
+    def test_case_a_stages_before_update_activates_after(self, table):
+        """stage_nwb_repairs precedes Curation.update1; activate follows.
 
-        mock_curation.connection.transaction.__enter__ = MagicMock(
-            return_value=None
-        )
-        exit_mock = MagicMock(return_value=False)
-        if raises:
-            exit_mock.side_effect = raises
-        mock_curation.connection.transaction.__exit__ = exit_mock
-
-    def test_case_a_stages_before_tx_activates_after(self, table):
-        """stage_nwb_repairs precedes TX enter; activate_nwb_repairs follows."""
+        make() runs inside the transaction opened by
+        Fix1513Status.populate(), so there is no separate inner
+        transaction to enter/exit (see C1 fix) — staging must still
+        happen before the DB writes, and activation after.
+        """
         from unittest.mock import MagicMock, patch
 
         call_order = []
@@ -1160,7 +1155,11 @@ class TestNwbTransactionSafety:
                 "_activate_nwb_repairs",
                 side_effect=lambda *a, **kw: call_order.append("activate"),
             ),
-            patch.object(table, "_repair_unit_labels"),
+            patch.object(
+                table,
+                "_repair_unit_labels",
+                side_effect=lambda *a, **kw: call_order.append("repair_labels"),
+            ),
             patch.object(table, "insert1"),
             patch(f"{module}.Curation") as mock_curation,
             patch(f"{module}.CuratedSpikeSorting") as mock_css,
@@ -1168,22 +1167,20 @@ class TestNwbTransactionSafety:
         ):
             mock_lm.return_value.get_djuser_name.return_value = "alice"
             mock_lm.return_value.admin = []
-            mock_curation.connection.transaction.__enter__ = MagicMock(
-                side_effect=lambda: call_order.append("tx_enter")
-            )
-            mock_curation.connection.transaction.__exit__ = MagicMock(
-                side_effect=lambda *a: call_order.append("tx_exit") or False
+            mock_curation.update1 = MagicMock(
+                side_effect=lambda *a: call_order.append("update1")
             )
             mock_css.__and__ = MagicMock(
                 return_value=MagicMock(__len__=MagicMock(return_value=1))
             )
             table.make(self._make_key(), action="update")
 
-        assert call_order.index("stage") < call_order.index("tx_enter")
-        assert call_order.index("tx_exit") < call_order.index("activate")
+        assert call_order.index("stage") < call_order.index("update1")
+        assert call_order.index("update1") < call_order.index("repair_labels")
+        assert call_order.index("repair_labels") < call_order.index("activate")
 
     def test_db_failure_discards_staged_temps(self, table, tmp_path):
-        """Staged temp files are deleted when the DB transaction fails."""
+        """Staged temp files are deleted when the DB write fails."""
         from unittest.mock import MagicMock, patch
 
         temp_file = tmp_path / "patch.nwb.tmp"
@@ -1206,7 +1203,7 @@ class TestNwbTransactionSafety:
         ):
             mock_lm.return_value.get_djuser_name.return_value = "alice"
             mock_lm.return_value.admin = []
-            self._mock_tx(mock_curation, raises=RuntimeError("DB failure"))
+            mock_curation.update1.side_effect = RuntimeError("DB failure")
             mock_css.__and__ = MagicMock(
                 return_value=MagicMock(__len__=MagicMock(return_value=1))
             )
@@ -1242,14 +1239,13 @@ class TestNwbTransactionSafety:
             patch.object(table, "_activate_nwb_repairs"),
             patch.object(table, "_repair_unit_labels"),
             patch.object(table, "insert1"),
-            patch(f"{module}.Curation") as mock_curation,
+            patch(f"{module}.Curation"),
             patch(f"{module}.CuratedSpikeSorting") as mock_css,
             patch(f"{module}.LabMember") as mock_lm,
         ):
             mock_stage.return_value = []
             mock_lm.return_value.get_djuser_name.return_value = "alice"
             mock_lm.return_value.admin = []
-            self._mock_tx(mock_curation)
             mock_css.__and__ = MagicMock(
                 return_value=MagicMock(__len__=MagicMock(return_value=1))
             )
@@ -1315,3 +1311,170 @@ class TestNwbTransactionSafety:
 
         mock_helper.assert_called_once_with(str(real_file))
         mock_lm.return_value.check_admin_privilege.assert_not_called()
+
+
+# -- Task 6.1.2: populate()-level integration tests (C1) ----------------
+
+
+class TestFix1513PopulateIntegration:
+    """Exercise Fix1513Status through the real populate() machinery.
+
+    Unlike TestFix1513Status/TestNwbTransactionSafety, ``Curation`` and
+    ``CuratedSpikeSorting`` are NOT mocked here for the DB-write paths, so
+    these tests reproduce C1: the inner ``with Curation.connection
+    .transaction:`` blocks raised "Nested connections are not supported"
+    because make() already runs inside the transaction opened by
+    ``_populate1``.
+    """
+
+    @pytest.fixture(autouse=True)
+    def clear_perm_cache(self, spike_v0):
+        spike_v0.Fix1513Status._perm_pass.clear()
+        spike_v0.Fix1513Status._perm_fail.clear()
+        yield
+        spike_v0.Fix1513Status._perm_pass.clear()
+        spike_v0.Fix1513Status._perm_fail.clear()
+
+    def _patched_diff(self, spike_v0, auto_curation_key, new_labels):
+        return {
+            "auto_curation_key": auto_curation_key,
+            "curation_key": {
+                k: auto_curation_key[k]
+                for k in spike_v0.Curation.primary_key
+                if k in auto_curation_key
+            },
+            "old_labels": {0: []},
+            "new_labels": new_labels,
+            "reject_status_changed": [],
+        }
+
+    def test_update_via_populate_no_nested_transaction_error(
+        self, spike_v0, pop_auto_curation
+    ):
+        """action='update' runs through populate() without C1's
+        DataJointError("Nested connections are not supported").
+
+        CuratedSpikeSorting is mocked with len()==0 so has_downstream is
+        False; this still exercises the (un)wrapped Curation.update1 call
+        that previously crashed inside `with Curation.connection
+        .transaction:` when called from inside populate()'s transaction.
+        """
+        from unittest.mock import MagicMock, patch
+
+        Fix1513Status = spike_v0.Fix1513Status
+        AutomaticCuration = spike_v0.AutomaticCuration
+        Curation = spike_v0.Curation
+
+        auto_curation, _ = pop_auto_curation
+        key = auto_curation.fetch("KEY")[0]
+        auto_curation_key = (AutomaticCuration & key).fetch1(
+            "auto_curation_key"
+        )
+        original_labels = (Curation & auto_curation_key).fetch1(
+            "curation_labels"
+        )
+        new_labels = {0: ["mua"]}
+        diff = self._patched_diff(spike_v0, auto_curation_key, new_labels)
+
+        module = "spyglass.spikesorting.v0.spikesorting_curation"
+        try:
+            with (
+                patch.object(
+                    Fix1513Status, "_compute_label_diff", return_value=diff
+                ),
+                patch.object(
+                    Fix1513Status, "_check_permission", return_value="alice"
+                ),
+                patch.object(Fix1513Status, "_print_diff"),
+                patch(f"{module}.CuratedSpikeSorting") as mock_css,
+                patch(f"{module}.LabMember") as mock_lm,
+            ):
+                mock_lm.return_value.get_djuser_name.return_value = "alice"
+                mock_lm.return_value.admin = []
+                mock_css.__and__ = MagicMock(
+                    return_value=MagicMock(__len__=MagicMock(return_value=0))
+                )
+
+                Fix1513Status.populate(key, make_kwargs={"action": "update"})
+
+            assert (Fix1513Status & key).fetch1("action") == "update"
+            assert (Curation & auto_curation_key).fetch1(
+                "curation_labels"
+            ) == new_labels
+        finally:
+            (Fix1513Status & key).delete(safemode=False)
+            Curation.update1(
+                {**auto_curation_key, "curation_labels": original_labels}
+            )
+
+    def test_repopulate_via_populate_no_nested_transaction_error(
+        self, spike_v0, pop_auto_curation
+    ):
+        """action='repopulate' runs through populate() without C1's
+        DataJointError, defers CuratedSpikeSorting.populate() to
+        run_pending_repopulates()."""
+        from unittest.mock import MagicMock, patch
+
+        Fix1513Status = spike_v0.Fix1513Status
+        AutomaticCuration = spike_v0.AutomaticCuration
+        Curation = spike_v0.Curation
+
+        auto_curation, _ = pop_auto_curation
+        key = auto_curation.fetch("KEY")[0]
+        auto_curation_key = (AutomaticCuration & key).fetch1(
+            "auto_curation_key"
+        )
+        original_labels = (Curation & auto_curation_key).fetch1(
+            "curation_labels"
+        )
+        new_labels = {0: ["noise", "reject"]}
+        diff = self._patched_diff(spike_v0, auto_curation_key, new_labels)
+        diff["reject_status_changed"] = [
+            {"unit": 0, "was_rejected": False, "should_reject": True}
+        ]
+
+        module = "spyglass.spikesorting.v0.spikesorting_curation"
+        try:
+            with (
+                patch.object(
+                    Fix1513Status, "_compute_label_diff", return_value=diff
+                ),
+                patch.object(
+                    Fix1513Status, "_check_permission", return_value="alice"
+                ),
+                patch.object(Fix1513Status, "_print_diff"),
+                # No CuratedSpikeSorting rows for this key, so the
+                # transaction-bound delete() inside make() is a no-op.
+                patch(f"{module}.CuratedSpikeSorting") as mock_css,
+                patch(f"{module}.LabMember") as mock_lm,
+            ):
+                mock_lm.return_value.get_djuser_name.return_value = "alice"
+                mock_lm.return_value.admin = []
+                mock_css.__and__ = MagicMock(
+                    return_value=MagicMock(__len__=MagicMock(return_value=0))
+                )
+
+                Fix1513Status.populate(
+                    key, make_kwargs={"action": "repopulate"}
+                )
+
+            row = (Fix1513Status & key).fetch1()
+            assert row["action"] == "repopulate"
+            assert row["repopulated"] == 0
+            assert (Curation & auto_curation_key).fetch1(
+                "curation_labels"
+            ) == new_labels
+
+            with patch(f"{module}.CuratedSpikeSorting") as mock_css:
+                n_done = Fix1513Status.run_pending_repopulates(
+                    restriction=key, verbose=False
+                )
+
+            assert n_done == 1
+            mock_css.populate.assert_called_once_with(auto_curation_key)
+            assert (Fix1513Status & key).fetch1("repopulated") == 1
+        finally:
+            (Fix1513Status & key).delete(safemode=False)
+            Curation.update1(
+                {**auto_curation_key, "curation_labels": original_labels}
+            )
