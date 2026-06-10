@@ -169,8 +169,14 @@ class MetricParameters(SpyglassMixin, dj.Lookup):
     @classmethod
     def show_available_metrics(self):
         """Prints the available metrics and their descriptions."""
-        for metric in _metric_name_to_func:
-            metric_doc = _metric_name_to_func[metric].__doc__.split("\n")[0]
+        for metric, func in _metric_name_to_func.items():
+            if func is None:
+                # The metric's SpikeInterface callable is absent on this SI
+                # version (resolved via ``getattr(sq, name, None)``); report
+                # it rather than crash on ``None.__doc__``.
+                logger.info(f"{metric} : (unavailable on this SpikeInterface)")
+                continue
+            metric_doc = (func.__doc__ or "").split("\n")[0]
             logger.info(f"{metric} : {metric_doc}\n")
 
 
