@@ -223,7 +223,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
     def _run_decoder(
         self,
         key: dict,
-        decoding_params: dict,
+        decoding_params: ClusterlessDetector | dict,
         decoding_kwargs: dict,
         position_info: pd.DataFrame,
         position_variable_names: list[str],
@@ -240,8 +240,9 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         ----------
         key : dict
             The key for the current decode operation
-        decoding_params : dict
-            Parameters for ClusterlessDetector initialization
+        decoding_params : ClusterlessDetector | dict
+            A reconstructed ClusterlessDetector instance (current-format rows)
+            or kwargs for ClusterlessDetector initialization (legacy rows)
         decoding_kwargs : dict
             Additional kwargs for fit/predict
         position_info : pd.DataFrame

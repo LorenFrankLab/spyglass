@@ -168,7 +168,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
     def _run_decoder(
         self,
         key: dict,
-        decoding_params: dict,
+        decoding_params: SortedSpikesDetector | dict,
         decoding_kwargs: dict,
         position_info: pd.DataFrame,
         position_variable_names: list[str],
@@ -184,8 +184,9 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         ----------
         key : dict
             The key for the current decode operation
-        decoding_params : dict
-            Parameters for SortedSpikesDetector initialization
+        decoding_params : SortedSpikesDetector | dict
+            A reconstructed SortedSpikesDetector instance (current-format rows)
+            or kwargs for SortedSpikesDetector initialization (legacy rows)
         decoding_kwargs : dict
             Additional kwargs for fit/predict
         position_info : pd.DataFrame
