@@ -27,10 +27,9 @@ from spyglass.spikesorting.v2.recording import (
     SortGroupV2,  # noqa: F401
 )
 from spyglass.spikesorting.v2.utils import (
-    _assert_schema_version_matches,
     _assert_v2_db_safe,
-    _insert_row_to_dict,
     _validate_params,
+    validate_lookup_rows,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart
 
@@ -142,37 +141,23 @@ class MotionCorrectionParameters(SpyglassMixin, dj.Lookup):
     )
 
     def insert1(self, row, **kwargs):
-        row = dict(row)
-        row["params"] = _validate_params(
-            MotionCorrectionParamsSchema, row["params"]
-        )
-        # Catch outer-column vs inner-blob schema-version drift, mirroring
-        # SorterParameters.insert1: a row whose params_schema_version
-        # disagrees with the validated blob's schema_version would route
-        # downstream version-branching code to the wrong path.
-        _assert_schema_version_matches(
-            row,
-            MotionCorrectionParamsSchema,
-            table_name="MotionCorrectionParameters",
-        )
-        super().insert1(row, **kwargs)
+        # Delegate to ``insert`` so one validated path serves both.
+        self.insert([row], **kwargs)
 
     def insert(self, rows, **kwargs):
-        # Mirror ``insert1``'s validation across a bulk insert so an
-        # ``insert([...])`` (including ``insert_default``'s positional
-        # rows) cannot bypass schema validation or the outer-vs-inner
-        # params_schema_version drift check.
-        rows = [_insert_row_to_dict(r, self.heading.names) for r in rows]
-        for row in rows:
-            row["params"] = _validate_params(
-                MotionCorrectionParamsSchema, row["params"]
-            )
-            _assert_schema_version_matches(
-                row,
-                MotionCorrectionParamsSchema,
+        # Validate every row (incl. ``insert_default``'s positional
+        # ``_DEFAULT_CONTENTS``) so a bulk insert can't bypass schema
+        # validation or the outer-vs-inner params_schema_version drift
+        # check.
+        super().insert(
+            validate_lookup_rows(
+                rows,
+                self.heading.names,
+                schema_for=lambda _row: MotionCorrectionParamsSchema,
                 table_name="MotionCorrectionParameters",
-            )
-        super().insert(rows, **kwargs)
+            ),
+            **kwargs,
+        )
 
     @classmethod
     def insert_default(cls):

@@ -36,13 +36,12 @@ from spyglass.spikesorting.v2.session_group import (
 from spyglass.spikesorting.v2.utils import (
     SourceResolution,
     _assert_noise_levels_length,
-    _assert_schema_version_matches,
     _assert_v2_db_safe,
-    _insert_row_to_dict,
     _validate_params,
     find_orphaned_masters,
     transaction_or_noop,
     unit_brain_region_df,
+    validate_lookup_rows,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 
@@ -121,52 +120,39 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
     """
 
     def insert1(self, row, **kwargs):
-        row = dict(row)
-        schema_cls = _get_sorter_schema(row["sorter"])
-        row["params"] = _validate_params(schema_cls, row["params"])
-        # ``params_schema_version`` is per-row, not per-table: this Lookup
-        # is multi-sorter (MS4/MS5/KS4/clusterless each carry their own
-        # schema_version), so the column default cannot be pinned to any
-        # one sorter's version. It defaults to the sentinel 0
-        # ("unspecified"); a row that reached the DB with 0 would silently
-        # mis-tag the validated ``params`` blob's schema_version (e.g.
-        # clusterless ships schema_version=4). Require the caller to pass
-        # it explicitly and name the version they must use.
-        inner_version = int(row["params"]["schema_version"])
-        if int(row.get("params_schema_version", 0)) == 0:
-            raise ValueError(
-                "SorterParameters.insert1: params_schema_version is "
-                f"required for sorter {row['sorter']!r}; pass "
-                f"params_schema_version={inner_version} to match the "
-                "validated params blob's schema_version."
-            )
-        _assert_schema_version_matches(
-            row, schema_cls, table_name="SorterParameters"
-        )
-        super().insert1(row, **kwargs)
+        # Delegate to ``insert`` so one validated path serves both.
+        self.insert([row], **kwargs)
 
     def insert(self, rows, **kwargs):
-        # Mirror ``insert1``'s validation across a bulk insert so a
-        # ``insert([...])`` (including ``insert_default``'s positional
-        # rows) cannot bypass the per-sorter schema validation and the
-        # params_schema_version checks. Same logic as ``insert1`` applied
-        # per row before the single ``super().insert`` call.
-        rows = [_insert_row_to_dict(r, self.heading.names) for r in rows]
-        for row in rows:
-            schema_cls = _get_sorter_schema(row["sorter"])
-            row["params"] = _validate_params(schema_cls, row["params"])
-            inner_version = int(row["params"]["schema_version"])
+        # Validate every row (incl. ``insert_default``'s positional
+        # ``_DEFAULT_CONTENTS``) before it lands, dispatching the Pydantic
+        # schema per ``sorter``. ``params_schema_version`` is per-row, not
+        # per-table: this Lookup is multi-sorter (MS4/MS5/KS4/clusterless
+        # each carry their own schema_version), so the column default
+        # cannot be pinned to any one sorter's version -- it defaults to
+        # the sentinel 0 ("unspecified") and a row that reached the DB with
+        # 0 would silently mis-tag the validated blob. The per-row hook
+        # requires the caller to pass the matching version explicitly.
+        def _require_params_schema_version(row, _schema_cls):
             if int(row.get("params_schema_version", 0)) == 0:
+                inner = int(row["params"]["schema_version"])
                 raise ValueError(
                     "SorterParameters.insert: params_schema_version is "
                     f"required for sorter {row['sorter']!r}; pass "
-                    f"params_schema_version={inner_version} to match the "
-                    "validated params blob's schema_version."
+                    f"params_schema_version={inner} to match the validated "
+                    "params blob's schema_version."
                 )
-            _assert_schema_version_matches(
-                row, schema_cls, table_name="SorterParameters"
-            )
-        super().insert(rows, **kwargs)
+
+        super().insert(
+            validate_lookup_rows(
+                rows,
+                self.heading.names,
+                schema_for=lambda row: _get_sorter_schema(row["sorter"]),
+                table_name="SorterParameters",
+                per_row_hook=_require_params_schema_version,
+            ),
+            **kwargs,
+        )
 
     _DEFAULT_CONTENTS: tuple = (
         (

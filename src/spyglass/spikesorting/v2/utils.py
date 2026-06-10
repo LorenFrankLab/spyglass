@@ -528,6 +528,50 @@ def _assert_schema_version_matches(
         )
 
 
+def validate_lookup_rows(
+    rows, attr_names, *, schema_for, table_name, per_row_hook=None
+):
+    """Validate + normalize params-Lookup rows before a (bulk) insert.
+
+    Shared body of the four validated-Lookup ``insert`` overrides
+    (``PreprocessingParameters``, ``ArtifactDetectionParameters``,
+    ``SorterParameters``, ``MotionCorrectionParameters``): for each row,
+    normalize to a dict, validate its ``params`` blob against the row's
+    schema, run an optional per-row check, and assert the outer
+    ``params_schema_version`` agrees with the validated blob. Returns the
+    list of validated row dicts to hand to ``super().insert``. Each table's
+    ``insert1`` delegates to ``insert`` (so a single code path validates
+    both), mirroring ``CurationV2.UnitLabel``.
+
+    Parameters
+    ----------
+    rows : iterable
+        The rows handed to ``insert`` (mappings, positional sequences, or a
+        ``QueryExpression``); normalized per row via ``_insert_row_to_dict``.
+    attr_names : Sequence[str]
+        ``self.heading.names``, used to label positional rows.
+    schema_for : Callable[[dict], type[BaseModel]]
+        Picks the schema for a row -- a constant for the single-schema
+        tables, per-``sorter`` for ``SorterParameters``.
+    table_name : str
+        Table name for the drift-check error message.
+    per_row_hook : Callable[[dict, type[BaseModel]], None], optional
+        Extra table-specific check run after validation and before the
+        drift assertion (e.g. ``SorterParameters``' required
+        ``params_schema_version`` guard).
+    """
+    validated = []
+    for row in rows:
+        row = _insert_row_to_dict(row, attr_names)
+        schema_cls = schema_for(row)
+        row["params"] = _validate_params(schema_cls, row["params"])
+        if per_row_hook is not None:
+            per_row_hook(row, schema_cls)
+        _assert_schema_version_matches(row, schema_cls, table_name=table_name)
+        validated.append(row)
+    return validated
+
+
 def _insert_row_to_dict(row, attr_names) -> dict:
     """Normalize a DataJoint insert row to a mutable dict.
 

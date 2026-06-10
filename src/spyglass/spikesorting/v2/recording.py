@@ -33,12 +33,11 @@ from spyglass.spikesorting.v2._params.preprocessing import (
     PreprocessingParamsSchema,
 )
 from spyglass.spikesorting.v2.utils import (
-    _assert_schema_version_matches,
     _assert_v2_db_safe,
-    _insert_row_to_dict,
     _validate_params,
     _validate_reference_fields,
     transaction_or_noop,
+    validate_lookup_rows,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 
@@ -657,31 +656,22 @@ class PreprocessingParameters(SpyglassMixin, dj.Lookup):
     )
 
     def insert1(self, row, **kwargs):
-        row = dict(row)
-        row["params"] = _validate_params(
-            PreprocessingParamsSchema, row["params"]
-        )
-        _assert_schema_version_matches(
-            row, PreprocessingParamsSchema, table_name="PreprocessingParameters"
-        )
-        super().insert1(row, **kwargs)
+        # Delegate to ``insert`` so one validated path serves both.
+        self.insert([row], **kwargs)
 
     def insert(self, rows, **kwargs):
-        # Mirror ``insert1``'s validation across a bulk insert so an
-        # ``insert([...])`` (including ``insert_default``'s positional
-        # rows) cannot bypass schema validation or the
-        # params_schema_version drift check.
-        rows = [_insert_row_to_dict(r, self.heading.names) for r in rows]
-        for row in rows:
-            row["params"] = _validate_params(
-                PreprocessingParamsSchema, row["params"]
-            )
-            _assert_schema_version_matches(
-                row,
-                PreprocessingParamsSchema,
+        # Validate every row (incl. ``insert_default``'s positional
+        # ``_DEFAULT_CONTENTS``) so a bulk insert can't bypass schema
+        # validation or the params_schema_version drift check.
+        super().insert(
+            validate_lookup_rows(
+                rows,
+                self.heading.names,
+                schema_for=lambda _row: PreprocessingParamsSchema,
                 table_name="PreprocessingParameters",
-            )
-        super().insert(rows, **kwargs)
+            ),
+            **kwargs,
+        )
 
     @classmethod
     def insert_default(cls):
