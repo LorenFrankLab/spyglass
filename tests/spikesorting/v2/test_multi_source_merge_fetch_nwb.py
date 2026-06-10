@@ -123,10 +123,15 @@ def two_source_output(populated_sorting, dj_conn, tmp_path_factory):
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_spikesortingoutput_multi_source_fetch_nwb_aligned(two_source_output):
+def test_spikesortingoutput_multi_source_fetch_nwb_aligned(
+    two_source_output, caplog
+):
     """A SpikeSortingOutput restriction spanning CurationV2 +
-    ImportedSpikeSorting: default raises; multi_source=True returns one
-    merge_id per file, each aligned to its owning source's file."""
+    ImportedSpikeSorting: default WARNS and fetches across both;
+    multi_source=True returns one merge_id per file, each aligned to its
+    owning source's file (and silences the warning)."""
+    import logging as _logging
+
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 
     ctx = two_source_output
@@ -135,9 +140,15 @@ def test_spikesortingoutput_multi_source_fetch_nwb_aligned(two_source_output):
         {"merge_id": ctx["mid_imported"]},
     ]
 
-    # Default (multi_source=False): a 2-source restriction must raise clearly.
-    with pytest.raises(ValueError, match="multi_source=True"):
-        (SpikeSortingOutput & merge_keys).fetch_nwb(return_merge_ids=True)
+    # Default (multi_source=False): a 2-source restriction now WARNS (not
+    # raises) and fetches across both sources.
+    with caplog.at_level(_logging.WARNING):
+        nwb_default, mids_default = (SpikeSortingOutput & merge_keys).fetch_nwb(
+            return_merge_ids=True
+        )
+    assert "multi_source=True" in caplog.text
+    assert len(nwb_default) == 2
+    assert set(mids_default) == {ctx["mid_v2"], ctx["mid_imported"]}
 
     # multi_source=True: aligned (nwb_list, merge_ids) across the two sources.
     nwb_list, merge_ids = (SpikeSortingOutput & merge_keys).fetch_nwb(

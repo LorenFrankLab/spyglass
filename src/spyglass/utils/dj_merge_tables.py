@@ -652,7 +652,7 @@ class Merge(ExportMixin, dj.Manual):
                 (self & restriction).fetch(self._reserved_sk, log_export=False)
             )
             if len(sources) > 1 and not multi_source:
-                self._raise_multi_source(sources)
+                self._warn_multi_source(sources)
             for source in sources:
                 source_restr = (
                     self
@@ -725,7 +725,7 @@ class Merge(ExportMixin, dj.Manual):
                 )
             sources = {m[0] for m in matches}
             if len(sources) > 1 and not multi_source:
-                self._raise_multi_source(sources)
+                self._warn_multi_source(sources)
             for _source_name, parent, matched in matches:
                 # ``matched`` already applied the restriction through the join.
                 # Restrict the parent to the matched rows by PRIMARY KEY (a
@@ -752,17 +752,20 @@ class Merge(ExportMixin, dj.Manual):
             return nwb_list, merge_ids
         return nwb_list
 
-    def _raise_multi_source(self, sources) -> None:
-        """Raise a clear error for a restriction spanning multiple sources.
+    def _warn_multi_source(self, sources) -> None:
+        """Warn (do not raise) for a restriction spanning multiple sources.
 
         Each source resolves to a different parent class, so fetching across
-        them mixes files/ids from unrelated tables. The caller opts in with
-        ``multi_source=True``.
+        them mixes files/ids from unrelated tables -- usually unintended, but
+        valid: the per-source loop resolves each source correctly. Warn so the
+        breadth is visible rather than silent; pass ``multi_source=True`` to
+        silence, or restrict to a single source.
         """
-        raise ValueError(
+        logger.warning(
             f"Merge.fetch_nwb: restriction spans {len(sources)} sources "
-            f"({sorted(sources)}). Pass multi_source=True to fetch across "
-            "sources, or restrict to a single source."
+            f"({sorted(sources)}); fetching across all of them. Pass "
+            "multi_source=True to silence this warning, or restrict to a "
+            "single source."
         )
 
     @classmethod

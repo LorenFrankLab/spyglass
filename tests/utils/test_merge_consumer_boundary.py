@@ -143,16 +143,23 @@ def two_source_merge(dj_conn, mini_dict):
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_fetch_nwb_multi_source_requires_opt_in(two_source_merge):
-    """A restriction spanning >=2 source types raises clearly unless the
-    caller passes ``multi_source=True``."""
+def test_fetch_nwb_multi_source_warns_without_opt_in(two_source_merge, caplog):
+    """A restriction spanning >=2 source types now WARNS (not raises) and
+    fetches across both; ``multi_source=True`` silences the warning."""
+    import logging as _logging
+
     Merge = two_source_merge["Merge"]
     merge_id_a = two_source_merge["merge_id_a"]
     merge_id_b = two_source_merge["merge_id_b"]
 
     restriction = [{"merge_id": merge_id_a}, {"merge_id": merge_id_b}]
-    with pytest.raises(ValueError, match="multi_source=True"):
-        (Merge & restriction).fetch_nwb(return_merge_ids=True)
+    with caplog.at_level(_logging.WARNING):
+        nwb_list, merge_ids = (Merge & restriction).fetch_nwb(
+            return_merge_ids=True
+        )
+    assert "multi_source=True" in caplog.text
+    assert len(nwb_list) == 2
+    assert set(merge_ids) == {merge_id_a, merge_id_b}
 
 
 @pytest.mark.slow
