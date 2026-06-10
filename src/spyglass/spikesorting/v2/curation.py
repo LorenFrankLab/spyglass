@@ -1277,15 +1277,17 @@ class CurationV2(SpyglassMixin, dj.Manual):
         ``SpikeSortingOutput._get_restricted_merge_ids_v2`` delegates here
         instead of re-implementing v2 schema knowledge in the merge master,
         so a new v2 source part (e.g. concat) is taught to exactly one
-        place. Returns a ``CurationV2`` query; callers map it to merge ids
-        via ``SpikeSortingOutput.CurationV2``.
+        place. Returns a ``CurationV2`` query (callers map it to merge ids
+        via ``SpikeSortingOutput.CurationV2``), or ``None`` in lenient mode
+        (``strict=False``) when the key names no v2 column.
 
         Unknown restriction keys raise ``ValueError`` when ``strict`` (the
         default -- a deliberate v2 query, where an unknown key is a typo, as
         v1 dropping bad keys quietly returned wrong-but-non-empty results);
         when ``strict=False`` (the multi-source ``get_restricted_merge_ids``
-        dispatch) an unknown key instead yields an empty result, since it
-        names another pipeline's column and this is not a v2 query.
+        dispatch) an unknown key instead returns ``None`` (the caller then
+        contributes no v2 rows), since it names another pipeline's column and
+        this is not a v2 query.
         ``restrict_by_artifact=True`` honors
         the v2 IntervalList convention where the artifact-removed
         valid_times row is named ``f"artifact_{artifact_id}"``; callers can
@@ -1323,12 +1325,13 @@ class CurationV2(SpyglassMixin, dj.Manual):
         if unknown:
             if not strict:
                 # Lenient multi-source-dispatch path: an unknown key names a
-                # non-v2 (v0/v1) column, so this is not a v2 query -- v2
-                # contributes no rows, mirroring how the v0/v1 resolvers
-                # silently drop keys their tables lack. The strict raise is
-                # reserved for a deliberate v2 query (sources=['v2'] or a
-                # direct resolve_restriction), where an unknown key is a typo.
-                return cls & "FALSE"
+                # non-v2 (v0/v1) column, so this is not a v2 query. Return
+                # ``None`` so the caller contributes no v2 rows -- mirroring
+                # how the v0/v1 resolvers drop keys their tables lack. The
+                # strict raise is reserved for a deliberate v2 query
+                # (sources=['v2'] or a direct resolve_restriction), where an
+                # unknown key is a typo.
+                return None
             raise ValueError(
                 "CurationV2.resolve_restriction: "
                 f"unknown restriction keys {sorted(unknown)}. Allowed: "

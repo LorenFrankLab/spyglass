@@ -165,6 +165,9 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         curation_table = CurationV2.resolve_restriction(
             key, restrict_by_artifact=restrict_by_artifact, strict=strict
         )
+        if curation_table is None:
+            # Lenient path: the key names no v2 column -> no v2 merge ids.
+            return []
 
         # Multi-curation fan-out warning. When no ``curation_id`` is given and
         # a sorting carries more than one CurationV2 curation (the v2-supported
