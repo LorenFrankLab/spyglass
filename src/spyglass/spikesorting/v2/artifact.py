@@ -1326,7 +1326,25 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
                 for nwb in member_nwb_files
             ]
         ).fetch("nwb_file_name", "valid_times", as_dict=True)
-        return {row["nwb_file_name"]: row["valid_times"] for row in rows}
+        result = {row["nwb_file_name"]: row["valid_times"] for row in rows}
+        # Match the single-recording ``fetch1`` loudness: a member whose
+        # artifact-removed IntervalList row is absent would otherwise be
+        # SILENTLY dropped from the dict, and a source-agnostic caller
+        # (especially one relying on ``as_dict=True``) would treat the
+        # short dict as complete. A missing row means a partially-deleted
+        # ArtifactDetection, so raise naming the member(s) instead.
+        missing = [nwb for nwb in member_nwb_files if nwb not in result]
+        if missing:
+            raise ValueError(
+                "ArtifactDetection.get_artifact_removed_intervals: shared "
+                f"artifact group {source.key['shared_artifact_group_name']!r}"
+                f" is missing artifact-removed IntervalList row(s) for "
+                f"member(s) {missing} "
+                f"(interval_list_name={interval_list_name!r}). The "
+                "ArtifactDetection row may be partially deleted; "
+                "re-populate it."
+            )
+        return result
 
     def delete(self, *args, safemode=None, **kwargs):
         """Override that also removes the matching IntervalList rows.

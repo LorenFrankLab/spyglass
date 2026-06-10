@@ -227,7 +227,10 @@ def test_sorter_parameters_rejects_unknown_sorter_name():
     (capital S) would validate cleanly here and fail only later inside
     ``Sorting.populate`` with an opaque SI "sorter not registered" error.
     The insert guard rejects it up front with a message naming the bad
-    sorter, while a real registered sorter still inserts (escape hatch).
+    sorter, while real registered sorters still insert -- including the
+    v1 "try any installed SI sorter" escape hatch (a sorter that is in
+    ``sis.available_sorters()`` but NOT in the curated ``_SORTER_SCHEMAS``
+    set, dispatched through ``GenericSorterParamsSchema``).
     """
     from spyglass.spikesorting.v2.sorting import SorterParameters
 
@@ -240,7 +243,8 @@ def test_sorter_parameters_rejects_unknown_sorter_name():
     with pytest.raises(ValueError, match="mountainSort4"):
         SorterParameters().insert1(typo, skip_duplicates=True)
 
-    # A genuine registered sorter is accepted; version backfilled from blob.
+    # A curated v2 sorter is accepted (covered by the _SORTER_SCHEMAS term
+    # of the valid_sorters union).
     ok = {
         "sorter": "tridesclous2",
         "sorter_params_name": "audit_a5_real",
@@ -252,6 +256,26 @@ def test_sorter_parameters_rejects_unknown_sorter_name():
         "sorter": "tridesclous2",
         "sorter_params_name": "audit_a5_real",
     }
+
+    # The escape hatch: ``simple`` is a real SI sorter that is NOT in
+    # ``_SORTER_SCHEMAS`` and NOT in ``_NON_SI_SORTERS``, so it is accepted
+    # ONLY via the ``sis.available_sorters()`` term of the valid_sorters
+    # union and validated by ``GenericSorterParamsSchema``. A regression
+    # that dropped ``available_sorters()`` from the union would still pass
+    # the curated/clusterless cases but break this insert. Its
+    # ``params_schema_version`` is backfilled from the generic blob (1),
+    # exercising backfill from a non-clusterless sorter.
+    escape_hatch = {
+        "sorter": "simple",
+        "sorter_params_name": "audit_a5_escape_hatch",
+        "params": {},
+        "job_kwargs": None,
+    }
+    SorterParameters().insert1(escape_hatch, skip_duplicates=True)
+    assert (
+        SorterParameters
+        & {"sorter": "simple", "sorter_params_name": "audit_a5_escape_hatch"}
+    ).fetch1("params_schema_version") == 1
 
 
 # ---------- A8: MS4 path must not leak the numpy.Inf global ----------------

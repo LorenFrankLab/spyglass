@@ -134,9 +134,13 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
         #    typo like ``"mountainSort4"`` would otherwise validate cleanly
         #    here and fail only much later at ``Sorting.populate`` with an
         #    opaque SI "sorter not registered" error. Reject a name that is
-        #    neither a SpikeInterface-registered sorter, a curated v2 schema
-        #    sorter, nor the Spyglass ``clusterless_thresholder`` path -- the
-        #    check ``_get_sorter_schema``'s docstring already delegates here.
+        #    not in ``sis.available_sorters()``, the curated v2 schema set,
+        #    nor the Spyglass ``clusterless_thresholder`` path -- the check
+        #    ``_get_sorter_schema``'s docstring already delegates here. The
+        #    gate is deliberately ``available_sorters()`` (a pure spelling
+        #    check), NOT ``insert_default``'s stricter ``installed_sorters()``
+        #    availability gate: a correctly-spelled sorter whose binary is
+        #    absent on THIS machine may still be staged for a compute node.
         #
         # 2. ``params_schema_version`` backfill. This Lookup is multi-sorter
         #    (MS4/MS5/KS4/clusterless each carry their own schema_version),
