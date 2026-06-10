@@ -11,5 +11,10 @@ Spyglass.
 - [Mixin](./Mixin.md) - Spyglass-specific functionalities to DataJoint tables,
     including fetching NWB files, long-distance restrictions, and permission
     checks on delete operations.
+- [Interval](./Intervals.md) - The `Interval` class for creating, combining, and
+    querying time windows. Includes migration from deprecated `interval_list_*`
+    functions.
+- [Populate](./Populate.md) - Tri-part make pattern for long-running
+    computations. Includes migration from deprecated `_use_transaction = False`.
 - [Spike Sorting v2](./SpikeSortingV2.md) - Modern SpikeInterface 0.104-based
     spike sorting pipeline (`spyglass.spikesorting.v2`).
