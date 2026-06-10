@@ -1058,14 +1058,16 @@ class AutomaticCuration(SpyglassMixin, dj.Computed):
         Parameters
         ---------
         sorting : spikeinterface.sorting
-        parent_labels : list
-            Information about previous merges
-        quality_metrics : list
+        parent_labels : dict
+            Dictionary of labels keyed by unit_id, from previous merges
+        quality_metrics : dict
+            Dictionary of quality metric values keyed by unit_id
         label_params : dict
 
         Returns
         -------
-        parent_labels : list
+        parent_labels : dict
+            Dictionary of labels keyed by unit_id
 
         """
         # overview:
@@ -1076,7 +1078,9 @@ class AutomaticCuration(SpyglassMixin, dj.Computed):
 
         for metric in label_params:
             if metric not in quality_metrics:
-                Warning(f"{metric} not found in quality metrics; skipping")
+                logger.warning(
+                    f"{metric} not found in quality metrics; skipping"
+                )
                 continue
 
             compare = _comparison_to_function[label_params[metric][0]]
@@ -1370,7 +1374,8 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
         unreviewed, _ = Fix1513Status.pending_for_member("Alice")
         Fix1513Status.populate(unreviewed)
 
-    Batch update (safe for Cases A and B; raises ValueError for Case C)::
+    Batch update (safe only for Case A; raises ValueError for Cases B
+    and C, which require ``action="repopulate"``)::
 
         Fix1513Status.populate(unreviewed, make_kwargs={"action": "update"})
 
@@ -1379,12 +1384,20 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
 
         Fix1513Status.populate(suppress_errors=True)
 
-    Step 3 — After any populate() call that may have used
-    ``action="repopulate"``, finish the deferred ``CuratedSpikeSorting``
-    repopulation (DataJoint cannot run ``populate()`` from within another
-    populate's transaction)::
+    Step 3 — After any populate() call, finish deferred work that could
+    not safely run inside that populate's transaction:
 
-        Fix1513Status.run_pending_repopulates()
+    * ``action="update"`` stages NWB label edits to temp files but does
+      not activate them (``os.replace`` + checksum) until the DB
+      transaction has committed::
+
+          Fix1513Status.activate_pending_nwb_repairs()
+
+    * ``action="repopulate"`` cannot call
+      ``CuratedSpikeSorting.populate()`` itself (DataJoint refuses
+      ``populate()`` from within another populate's transaction)::
+
+          Fix1513Status.run_pending_repopulates()
 
     Outstanding work::
 
@@ -1407,7 +1420,8 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
     reviewed_at   : datetime
     repopulated=0 : tinyint       # 1 after CuratedSpikeSorting confirmed
     notes=''      : varchar(500)
-    label_diff=NULL : longblob    # dict of old_labels/new_labels for keep/skip audit
+    label_diff=NULL : longblob    # dict of old_labels/new_labels for audit
+    nwb_staged=NULL : longblob    # [(temp_path, real_path), ...] pending activation
     """
 
     # Class-level permission cache — persists across populate() calls.
@@ -1544,12 +1558,16 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
         Returns
         -------
         str
-            owner_member name (or ``"unknown"`` if no Session link).
+            owner_member name (``"unknown"`` only for admins, when no
+            Session link / experimenter is found).
 
         Raises
         ------
         PermissionError
-            If the user is not on a team with the curation owner.
+            If the user is not on a team with the curation owner, or
+            (for non-admins) if ownership cannot be determined because
+            no ``Session`` link exists or ``Session.Experimenter`` is
+            missing/NULL.
         """
         from spyglass.common import LabMember, LabTeam
 
@@ -1568,14 +1586,33 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
         # Cache miss — run full chain
         exp_summary = (self & key)._get_exp_summary()
         owners = exp_summary.fetch(self._member_pk) if exp_summary else []
-        owner_member = owners[0] if owners else "unknown"
 
-        if is_admin or owner_member == "unknown":
-            if owner_member == "unknown":
-                logger.warning(
-                    f"Fix1513Status: no Session link found for "
-                    f"{key}; proceeding without permission check."
+        # No Session link at all, or a Session with no
+        # Session.Experimenter (NULL owner): ownership cannot be
+        # determined. Admins may proceed (e.g. the none_needed_only fast
+        # pass); non-admins are denied to fail closed for a destructive
+        # repair.
+        if not owners or None in owners:
+            if is_admin:
+                self._perm_pass[nwb_file] = "unknown"
+                return "unknown"
+            self._perm_fail.add(nwb_file)
+            if not owners:
+                raise PermissionError(
+                    f"Fix1513Status: no Session link found for {key}; "
+                    f"cannot verify the curation owner. An admin can "
+                    f"review this entry."
                 )
+            raise PermissionError(
+                f"Fix1513Status: Session.Experimenter is missing for "
+                f"{key}; cannot verify the curation owner. Please "
+                f"ensure all Sessions have an experimenter, or have an "
+                f"admin review this entry."
+            )
+
+        owner_member = owners[0]
+
+        if is_admin:
             self._perm_pass[nwb_file] = owner_member
             return owner_member
 
@@ -1791,8 +1828,17 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
         Call this only after the DB transaction has committed successfully.
         Each ``os.replace`` is atomic on the same filesystem, so on-disk
         state changes only after the DB is already consistent.
+
+        Safe to re-run on a partially-completed ``staged`` list: a pair
+        whose ``temp_path`` no longer exists is assumed to have already
+        been activated (by ``os.replace`` in a prior, interrupted call)
+        and is skipped.
         """
         for temp_path, real_path in staged:
+            if not Path(temp_path).exists():
+                if verbose:
+                    logger.info(f"  NWB: {real_path} already activated, skip")
+                continue
             os.replace(temp_path, real_path)
             if verbose:
                 logger.info(f"  NWB: activated patch for {real_path}")
@@ -1887,6 +1933,14 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
     @staticmethod
     def _prompt_action(case):
         """Interactively prompt the user for the repair action.
+
+        Interactive only: blocks on ``input()`` while ``make()`` runs
+        inside the ``Fix1513Status.populate()`` transaction.
+        Only reachable via ``action="report"`` (the default), so it must
+        not be used in headless/CI/notebook contexts without stdin —
+        ``input()`` raises ``EOFError`` there. Pass an explicit
+        ``make_kwargs={"action": ...}`` to ``populate()`` to bypass this
+        prompt entirely.
 
         Parameters
         ----------
@@ -2088,13 +2142,19 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
         key : dict
             AutomaticCuration primary key supplied by DataJoint.
         action : str
-            ``'report'`` (default) — compute diff and prompt.
+            ``'report'`` (default) — compute diff and prompt
+              interactively via ``input()``. Interactive only: this
+              blocks on stdin while holding the ``populate()``
+              transaction open and raises ``EOFError`` in
+              headless/CI/notebook contexts. Pass an explicit action
+              below for batch use.
             ``'none_needed_only'`` — insert ``none_needed`` for
               out-of-scope entries; silently pass in-scope entries
               so they remain unpopulated for a later interactive run.
               Useful for a fast first pass to clear trivial entries.
-            ``'update'`` — apply label fix (raises ValueError for
-              Case C entries where spike data is missing from NWB).
+            ``'update'`` — apply label fix in place. Safe only for
+              Case A (no reject-status change); raises ValueError for
+              Cases B and C, which require ``action='repopulate'``.
             ``'repopulate'`` — delete + repopulate CuratedSpikeSorting.
             ``'keep'`` — record decision, no label changes.
             ``'skip'`` — defer; row inserted with action='skip'.
@@ -2172,6 +2232,7 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
         # Use computed table (not Selection) to detect existing downstream rows
         has_downstream = len(CuratedSpikeSorting & auto_curation_key) > 0
         repopulated = 0
+        nwb_staged = None
 
         if action == "update":
             # make() already runs inside the transaction opened by
@@ -2193,7 +2254,13 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
                 for temp_path, _ in staged:
                     Path(temp_path).unlink(missing_ok=True)
                 raise
-            self._activate_nwb_repairs(staged)
+            # Activation (os.replace + checksum) must happen only after
+            # this transaction commits, otherwise a later failure (e.g.
+            # the insert1 below) would roll back the DB while the NWB
+            # files were already swapped. Persist the staged paths and
+            # activate them via activate_pending_nwb_repairs(), called
+            # after populate() returns.
+            nwb_staged = staged or None
         elif action == "repopulate":
             Curation.update1(
                 {**auto_curation_key, "curation_labels": new_labels}
@@ -2207,12 +2274,14 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
             # Fix1513Status.populate() started). Repopulation is deferred
             # to run_pending_repopulates(), called after populate() returns.
 
-        label_diff = None
-        if action in ("keep", "skip") and diff is not None:
-            label_diff = {
-                "old_labels": diff["old_labels"],
-                "new_labels": diff["new_labels"],
-            }
+        # diff is never None here (the diff is None branch already
+        # inserted 'none_needed' and returned above), so label_diff is
+        # recorded for every action — including 'update'/'repopulate',
+        # where it is the only audit trail of the labels actually written.
+        label_diff = {
+            "old_labels": diff["old_labels"],
+            "new_labels": diff["new_labels"],
+        }
         self.insert1(
             {
                 **key,
@@ -2222,6 +2291,7 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
                 "reviewed_at": datetime.now(),
                 "repopulated": repopulated,
                 "label_diff": label_diff,
+                "nwb_staged": nwb_staged,
             }
         )
 
@@ -2264,4 +2334,45 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
             n_done += 1
             if verbose:
                 print(f"Repopulated {auto_curation_key}")
+        return n_done
+
+    # ------------------------------------------------------------------
+    # Deferred NWB activation (action='update')
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def activate_pending_nwb_repairs(cls, restriction=True, verbose=True):
+        """Activate NWB label patches staged by ``make(action="update")``.
+
+        ``make()`` stages NWB edits to temp files but cannot swap them
+        into place (``os.replace`` + checksum update) before the
+        ``Fix1513Status.populate()`` transaction commits — doing so would
+        risk on-disk/DB inconsistency if a later step in that transaction
+        failed. Call this afterwards, once that transaction
+        has committed, to activate the staged patches.
+
+        Safe to re-run: pairs already activated by a prior, interrupted
+        call are skipped (see ``_activate_nwb_repairs``).
+
+        Parameters
+        ----------
+        restriction : dict or str, optional
+            Additional restriction on the pending ``Fix1513Status`` entries.
+        verbose : bool, optional
+            Print the ``AutomaticCuration`` key for each entry activated.
+
+        Returns
+        -------
+        int
+            Number of entries activated.
+        """
+        pending = cls() & "nwb_staged IS NOT NULL" & restriction
+        n_done = 0
+        for key in pending.fetch("KEY"):
+            staged = (cls() & key).fetch1("nwb_staged")
+            cls._activate_nwb_repairs(staged, verbose=verbose)
+            cls.update1({**key, "nwb_staged": None})
+            n_done += 1
+            if verbose:
+                print(f"Activated NWB repairs for {key}")
         return n_done

@@ -158,7 +158,8 @@ def test_resolve_external_table_still_requires_admin():
 
 
 def test_update_analysis_file_checksum_resolves_and_writes(tmp_path):
-    """Helper resolves rel_path against AnalysisNwbfile and writes via
+    """Helper resolves rel_path against AnalysisNwbfile, searches all
+    registered external tables, and writes via
     _write_external_checksum (no admin gate)."""
     from unittest.mock import MagicMock, patch
 
@@ -169,11 +170,17 @@ def test_update_analysis_file_checksum_resolves_and_writes(tmp_path):
     ext_key = {"filepath": "file.nwb"}
     ext_tbl = MagicMock()
     ext_tbl.__and__ = MagicMock(
-        return_value=MagicMock(fetch1=MagicMock(return_value=ext_key))
+        return_value=MagicMock(
+            __bool__=MagicMock(return_value=True),
+            fetch1=MagicMock(return_value=ext_key),
+        )
     )
 
     with (
         patch("spyglass.common.common_nwbfile.AnalysisNwbfile") as mock_anwb,
+        patch(
+            "spyglass.common.common_nwbfile.AnalysisRegistry"
+        ) as mock_registry,
         patch(
             "spyglass.utils.dj_helper_fn._write_external_checksum"
         ) as mock_write,
@@ -181,7 +188,7 @@ def test_update_analysis_file_checksum_resolves_and_writes(tmp_path):
     ):
         inst = mock_anwb.return_value
         inst._analysis_dir = str(tmp_path)
-        inst._ext_tbl = ext_tbl
+        mock_registry.return_value.get_externals.return_value = [ext_tbl]
 
         _update_analysis_file_checksum(str(real_file))
 
@@ -191,3 +198,38 @@ def test_update_analysis_file_checksum_resolves_and_writes(tmp_path):
     assert args[1] is ext_tbl
     assert args[2] == ext_key
     mock_lm.return_value.check_admin_privilege.assert_not_called()
+
+
+def test_update_analysis_file_checksum_warns_on_zero_matches(tmp_path):
+    """Helper logs a warning (does not raise) when the file is registered
+    in zero external tables — avoids an opaque DataJointError after
+    the file has already been swapped on disk."""
+    from unittest.mock import MagicMock, patch
+
+    from spyglass.utils.dj_helper_fn import _update_analysis_file_checksum
+
+    real_file = tmp_path / "file.nwb"
+    real_file.write_bytes(b"payload")
+    ext_tbl = MagicMock()
+    ext_tbl.__and__ = MagicMock(
+        return_value=MagicMock(__bool__=MagicMock(return_value=False))
+    )
+
+    with (
+        patch("spyglass.common.common_nwbfile.AnalysisNwbfile") as mock_anwb,
+        patch(
+            "spyglass.common.common_nwbfile.AnalysisRegistry"
+        ) as mock_registry,
+        patch(
+            "spyglass.utils.dj_helper_fn._write_external_checksum"
+        ) as mock_write,
+        patch("spyglass.utils.dj_helper_fn.logger") as mock_logger,
+    ):
+        inst = mock_anwb.return_value
+        inst._analysis_dir = str(tmp_path)
+        mock_registry.return_value.get_externals.return_value = [ext_tbl]
+
+        _update_analysis_file_checksum(str(real_file))
+
+    mock_write.assert_not_called()
+    mock_logger.warning.assert_called_once()

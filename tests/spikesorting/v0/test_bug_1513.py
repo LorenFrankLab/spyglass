@@ -263,6 +263,23 @@ class TestGetLabelsUnitIdTypeMismatch:
         assert result[3].count("noise") == 1
         assert result[3].count("reject") == 1
 
+    def test_label_lists_not_aliased_across_units(self, get_labels):
+        """Bug B identity check: each unit gets its own label list.
+
+        ``label[2].copy()`` (spikesorting_curation.py:1098) gives each
+        newly-labeled unit its own list. Without ``.copy()``, units 2
+        and 3 below would share the same ``label[2]`` list object, so
+        mutating one would silently corrupt the other.
+        """
+        parent = {}
+        params = {"nn_noise_overlap": [">", 0.1, ["noise", "reject"]]}
+        qm = {"nn_noise_overlap": {"2": 0.5, "3": 0.5}}
+        result = get_labels(parent, qm, params)
+
+        assert result[2] is not result[3]
+        result[2].append("extra")
+        assert "extra" not in result[3]
+
     def test_insert_curation_int_conversion_overwrites_correctly(self):
         """int() normalisation lets QM results overwrite parent labels.
 
@@ -295,17 +312,14 @@ class TestFix1513Status:
     from unittest.mock import MagicMock, patch
 
     @pytest.fixture(autouse=True)
-    def clear_perm_cache(self):
-        """Reset class-level permission caches before and after each test."""
-        from spyglass.spikesorting.v0.spikesorting_curation import (
-            Fix1513Status,
-        )
+    def _unique_nwb_file(self, request):
+        """Give each test its own nwb_file_name.
 
-        Fix1513Status._perm_pass.clear()
-        Fix1513Status._perm_fail.clear()
-        yield
-        Fix1513Status._perm_pass.clear()
-        Fix1513Status._perm_fail.clear()
+        ``_perm_pass``/``_perm_fail`` are keyed by ``nwb_file_name``, so a
+        unique name per test prevents cache entries from one test leaking
+        into another, without needing to reset the class-level caches.
+        """
+        self._nwb_file_name = f"{request.node.name}.nwb"
 
     @pytest.fixture
     def table(self):
@@ -338,7 +352,7 @@ class TestFix1513Status:
     # ---- _compute_label_diff scope gates -----------------------------
 
     def _make_key(self):
-        return {"nwb_file_name": "test.nwb", "sort_group_id": 0}
+        return {"nwb_file_name": self._nwb_file_name, "sort_group_id": 0}
 
     def test_compute_diff_returns_none_for_empty_label_params(self, table):
         """Empty label_params → none_needed without permission check."""
@@ -460,7 +474,7 @@ class TestFix1513Status:
             join_mock.__mul__ = MagicMock(return_value=join_mock)
 
             # auto_curation_key fetch
-            ack = {"nwb_file_name": "test.nwb", "curation_id": 1}
+            ack = {"nwb_file_name": self._nwb_file_name, "curation_id": 1}
             join_mock.fetch1.side_effect = [label_params, ack]
 
             # time_of_creation before bug date
@@ -525,7 +539,7 @@ class TestFix1513Status:
         )
 
         key = self._make_key()
-        Fix1513Status._perm_pass["test.nwb"] = "alice"
+        Fix1513Status._perm_pass[self._nwb_file_name] = "alice"
 
         with patch.object(table, "_get_exp_summary") as mock_exp:
             result = table._check_permission(key, "bob", is_admin=False)
@@ -541,7 +555,7 @@ class TestFix1513Status:
         )
 
         key = self._make_key()
-        Fix1513Status._perm_fail.add("test.nwb")
+        Fix1513Status._perm_fail.add(self._nwb_file_name)
 
         with patch.object(table, "_get_exp_summary") as mock_exp:
             with pytest.raises(PermissionError):
@@ -562,7 +576,7 @@ class TestFix1513Status:
         )
 
         key = self._make_key()
-        Fix1513Status._perm_fail.add("test.nwb")
+        Fix1513Status._perm_fail.add(self._nwb_file_name)
 
         with (
             patch.object(table, "_get_exp_summary") as mock_exp,
@@ -617,7 +631,49 @@ class TestFix1513Status:
             with pytest.raises(PermissionError, match="not on a team"):
                 table._check_permission(key, "bob", is_admin=False)
 
-        assert "test.nwb" in table._perm_fail
+        assert self._nwb_file_name in table._perm_fail
+
+    def test_no_session_link_fails_closed_for_non_admin(self, table):
+        """No Session link (empty exp_summary) raises for non-admins."""
+        from unittest.mock import patch
+
+        key = self._make_key()
+
+        with patch.object(table, "_get_exp_summary", return_value=None):
+            with pytest.raises(PermissionError, match="no Session link"):
+                table._check_permission(key, "bob", is_admin=False)
+
+        assert self._nwb_file_name in table._perm_fail
+
+    def test_no_session_link_proceeds_as_unknown_for_admin(self, table):
+        """No Session link is permitted for admins, returning 'unknown'."""
+        from unittest.mock import patch
+
+        key = self._make_key()
+
+        with patch.object(table, "_get_exp_summary", return_value=None):
+            result = table._check_permission(key, "admin", is_admin=True)
+
+        assert result == "unknown"
+
+    def test_missing_experimenter_fails_closed_for_non_admin(self, table):
+        """Session.Experimenter NULL (owners contains None) raises."""
+        from unittest.mock import MagicMock, patch
+
+        key = self._make_key()
+
+        with patch.object(table, "_get_exp_summary") as mock_exp:
+            mock_exp.return_value = MagicMock(
+                fetch=MagicMock(return_value=[None])
+            )
+            table._member_pk = "lab_member_name"
+
+            with pytest.raises(
+                PermissionError, match="Session.Experimenter is missing"
+            ):
+                table._check_permission(key, "bob", is_admin=False)
+
+        assert self._nwb_file_name in table._perm_fail
 
     # ---- NWB integrity / action tests --------------------------------
 
@@ -628,7 +684,7 @@ class TestFix1513Status:
         key = self._make_key()
         diff = {
             "auto_curation_key": {
-                "nwb_file_name": "test.nwb",
+                "nwb_file_name": self._nwb_file_name,
                 "curation_id": 1,
             },
             "curation_key": {"curation_id": 1},
@@ -676,7 +732,7 @@ class TestFix1513Status:
         key = self._make_key()
         diff = {
             "auto_curation_key": {
-                "nwb_file_name": "test.nwb",
+                "nwb_file_name": self._nwb_file_name,
                 "curation_id": 1,
             },
             "curation_key": {"curation_id": 1},
@@ -710,7 +766,7 @@ class TestFix1513Status:
         key = self._make_key()
         diff = {
             "auto_curation_key": {
-                "nwb_file_name": "test.nwb",
+                "nwb_file_name": self._nwb_file_name,
                 "curation_id": 1,
             },
             "curation_key": {"curation_id": 1},
@@ -766,7 +822,7 @@ class TestFix1513Status:
         key = self._make_key()
         diff = {
             "auto_curation_key": {
-                "nwb_file_name": "test.nwb",
+                "nwb_file_name": self._nwb_file_name,
                 "curation_id": 1,
             },
             "curation_key": {"curation_id": 1},
@@ -801,7 +857,7 @@ class TestFix1513Status:
         key = self._make_key()
         diff = {
             "auto_curation_key": {
-                "nwb_file_name": "test.nwb",
+                "nwb_file_name": self._nwb_file_name,
                 "curation_id": 1,
             },
             "curation_key": {"curation_id": 1},
@@ -832,7 +888,7 @@ class TestFix1513Status:
     def _make_diff(self):
         return {
             "auto_curation_key": {
-                "nwb_file_name": "test.nwb",
+                "nwb_file_name": self._nwb_file_name,
                 "curation_id": 1,
             },
             "curation_key": {"curation_id": 1},
@@ -891,8 +947,8 @@ class TestFix1513Status:
         assert row["label_diff"]["old_labels"] == diff["old_labels"]
         assert row["label_diff"]["new_labels"] == diff["new_labels"]
 
-    def test_update_does_not_store_label_diff(self, table):
-        """action='update' leaves label_diff as None (change is in Curation)."""
+    def test_update_stores_label_diff(self, table):
+        """action='update' records label_diff as the audit trail."""
         from unittest.mock import MagicMock, patch
 
         key = self._make_key()
@@ -922,7 +978,8 @@ class TestFix1513Status:
             table.make(key, action="update")
 
         row = mock_ins.call_args[0][0]
-        assert row.get("label_diff") is None
+        assert row["label_diff"]["old_labels"] == diff["old_labels"]
+        assert row["label_diff"]["new_labels"] == diff["new_labels"]
 
     def test_interactive_prompt_routes_to_update(self, table):
         """Interactive input 'u' routes to update action."""
@@ -931,7 +988,7 @@ class TestFix1513Status:
         key = self._make_key()
         diff = {
             "auto_curation_key": {
-                "nwb_file_name": "test.nwb",
+                "nwb_file_name": self._nwb_file_name,
                 "curation_id": 1,
             },
             "curation_key": {"curation_id": 1},
@@ -976,7 +1033,7 @@ class TestFix1513Status:
         key = self._make_key()
         diff = {
             "auto_curation_key": {
-                "nwb_file_name": "test.nwb",
+                "nwb_file_name": self._nwb_file_name,
                 "curation_id": 1,
             },
             "curation_key": {"curation_id": 1},
@@ -1090,14 +1147,14 @@ class TestNwbTransactionSafety:
     """Option C: NWB writes staged to temp copies outside the DB transaction."""
 
     @pytest.fixture(autouse=True)
-    def clear_perm_cache(self):
-        from spyglass.spikesorting.v0.spikesorting_curation import Fix1513Status
+    def _unique_nwb_file(self, request):
+        """Give each test its own nwb_file_name.
 
-        Fix1513Status._perm_pass.clear()
-        Fix1513Status._perm_fail.clear()
-        yield
-        Fix1513Status._perm_pass.clear()
-        Fix1513Status._perm_fail.clear()
+        ``_perm_pass``/``_perm_fail`` are keyed by ``nwb_file_name``, so a
+        unique name per test prevents cache entries from one test leaking
+        into another, without needing to reset the class-level caches.
+        """
+        self._nwb_file_name = f"{request.node.name}.nwb"
 
     @pytest.fixture
     def table(self):
@@ -1106,7 +1163,7 @@ class TestNwbTransactionSafety:
         return Fix1513Status()
 
     def _make_key(self):
-        return {"nwb_file_name": "test.nwb", "curation_id": 1}
+        return {"nwb_file_name": self._nwb_file_name, "curation_id": 1}
 
     def _case_a_diff(self):
         """Case A diff (label text change, no reject-status flip).
@@ -1117,7 +1174,7 @@ class TestNwbTransactionSafety:
         """
         return {
             "auto_curation_key": {
-                "nwb_file_name": "test.nwb",
+                "nwb_file_name": self._nwb_file_name,
                 "curation_id": 1,
             },
             "curation_key": {"curation_id": 1},
@@ -1126,17 +1183,22 @@ class TestNwbTransactionSafety:
             "reject_status_changed": [],
         }
 
-    def test_case_a_stages_before_update_activates_after(self, table):
-        """stage_nwb_repairs precedes Curation.update1; activate follows.
+    def test_case_a_stages_before_update_and_defers_activation(self, table):
+        """stage_nwb_repairs precedes Curation.update1; activation deferred.
 
         make() runs inside the transaction opened by
         Fix1513Status.populate(), so there is no separate inner
-        transaction to enter/exit (see C1 fix) — staging must still
-        happen before the DB writes, and activation after.
+        transaction to enter/exit — staging must still
+        happen before the DB writes. Activation (os.replace + checksum)
+        must NOT happen inside make(): the staged paths are
+        instead recorded in the inserted row's ``nwb_staged`` field for
+        ``activate_pending_nwb_repairs()`` to process after the
+        transaction commits.
         """
         from unittest.mock import MagicMock, patch
 
         call_order = []
+        staged_paths = [("/tmp/staged.tmp", "/real/file.nwb")]
 
         module = "spyglass.spikesorting.v0.spikesorting_curation"
         with (
@@ -1148,19 +1210,17 @@ class TestNwbTransactionSafety:
             patch.object(
                 table,
                 "_stage_nwb_repairs",
-                side_effect=lambda *a, **kw: call_order.append("stage") or [],
+                side_effect=(
+                    lambda *a, **kw: call_order.append("stage") or staged_paths
+                ),
             ),
-            patch.object(
-                table,
-                "_activate_nwb_repairs",
-                side_effect=lambda *a, **kw: call_order.append("activate"),
-            ),
+            patch.object(table, "_activate_nwb_repairs") as mock_activate,
             patch.object(
                 table,
                 "_repair_unit_labels",
                 side_effect=lambda *a, **kw: call_order.append("repair_labels"),
             ),
-            patch.object(table, "insert1"),
+            patch.object(table, "insert1") as mock_ins,
             patch(f"{module}.Curation") as mock_curation,
             patch(f"{module}.CuratedSpikeSorting") as mock_css,
             patch(f"{module}.LabMember") as mock_lm,
@@ -1177,7 +1237,9 @@ class TestNwbTransactionSafety:
 
         assert call_order.index("stage") < call_order.index("update1")
         assert call_order.index("update1") < call_order.index("repair_labels")
-        assert call_order.index("repair_labels") < call_order.index("activate")
+        mock_activate.assert_not_called()
+        row = mock_ins.call_args[0][0]
+        assert row["nwb_staged"] == staged_paths
 
     def test_db_failure_discards_staged_temps(self, table, tmp_path):
         """Staged temp files are deleted when the DB write fails."""
@@ -1195,7 +1257,6 @@ class TestNwbTransactionSafety:
             patch.object(table, "_check_permission", return_value="alice"),
             patch.object(table, "_print_diff"),
             patch.object(table, "_stage_nwb_repairs", return_value=staged),
-            patch.object(table, "_activate_nwb_repairs"),
             patch.object(table, "_repair_unit_labels"),
             patch(f"{module}.Curation") as mock_curation,
             patch(f"{module}.CuratedSpikeSorting") as mock_css,
@@ -1220,7 +1281,7 @@ class TestNwbTransactionSafety:
 
         case_a_diff = {
             "auto_curation_key": {
-                "nwb_file_name": "test.nwb",
+                "nwb_file_name": self._nwb_file_name,
                 "curation_id": 1,
             },
             "curation_key": {"curation_id": 1},
@@ -1236,7 +1297,6 @@ class TestNwbTransactionSafety:
             patch.object(table, "_check_permission", return_value="alice"),
             patch.object(table, "_print_diff"),
             patch.object(table, "_stage_nwb_repairs") as mock_stage,
-            patch.object(table, "_activate_nwb_repairs"),
             patch.object(table, "_repair_unit_labels"),
             patch.object(table, "insert1"),
             patch(f"{module}.Curation"),
@@ -1261,20 +1321,25 @@ class TestNwbTransactionSafety:
         real_file = tmp_path / "file.nwb"
         temp_file.write_bytes(b"patched content")
 
-        helper_path = "spyglass.common.common_nwbfile.AnalysisNwbfile"
         with (
-            patch(helper_path) as mock_anwb,
+            patch(
+                "spyglass.common.common_nwbfile.AnalysisNwbfile"
+            ) as mock_anwb,
+            patch(
+                "spyglass.common.common_nwbfile.AnalysisRegistry"
+            ) as mock_registry,
             patch("spyglass.utils.dj_helper_fn.dj") as mock_dj,
         ):
             inst = mock_anwb.return_value
             inst._analysis_dir = str(tmp_path)
             ext_tbl = MagicMock()
-            inst._ext_tbl = ext_tbl
             ext_tbl.__and__ = MagicMock(
                 return_value=MagicMock(
-                    fetch1=MagicMock(return_value={"filepath": "file.nwb"})
+                    __bool__=MagicMock(return_value=True),
+                    fetch1=MagicMock(return_value={"filepath": "file.nwb"}),
                 )
             )
+            mock_registry.return_value.get_externals.return_value = [ext_tbl]
             mock_dj.hash.uuid_from_file.return_value = "abc123"
 
             from spyglass.spikesorting.v0.spikesorting_curation import (
@@ -1288,6 +1353,32 @@ class TestNwbTransactionSafety:
         assert not temp_file.exists(), "temp file must be gone after activation"
         assert real_file.read_bytes() == b"patched content"
         ext_tbl.update1.assert_called_once()
+
+    def test_activate_nwb_repairs_skips_already_activated(self, tmp_path):
+        """A pair whose temp file is already gone is skipped, not re-raised.
+
+        Models re-running ``activate_pending_nwb_repairs`` after a prior
+        call activated some files in a multi-file ``staged`` list before
+        failing partway through: already-activated pairs (temp file
+        gone) are skipped so the retry can finish the rest.
+        """
+        from unittest.mock import patch
+
+        from spyglass.spikesorting.v0.spikesorting_curation import (
+            Fix1513Status,
+        )
+
+        already_done_real = tmp_path / "already_done.nwb"
+        already_done_real.write_bytes(b"already activated")
+        missing_temp = tmp_path / "gone.nwb.tmp"  # never created
+
+        with patch.object(Fix1513Status, "_update_nwb_checksum") as mock_cs:
+            Fix1513Status._activate_nwb_repairs(
+                [(str(missing_temp), str(already_done_real))], verbose=False
+            )
+
+        assert already_done_real.read_bytes() == b"already activated"
+        mock_cs.assert_not_called()
 
     def test_update_nwb_checksum_routes_through_helper(self, tmp_path):
         """_update_nwb_checksum delegates to dj_helper_fn helper
@@ -1313,18 +1404,19 @@ class TestNwbTransactionSafety:
         mock_lm.return_value.check_admin_privilege.assert_not_called()
 
 
-# -- Task 6.1.2: populate()-level integration tests (C1) ----------------
+# -- populate()-level integration tests ---------------------------------
 
 
 class TestFix1513PopulateIntegration:
     """Exercise Fix1513Status through the real populate() machinery.
 
     Unlike TestFix1513Status/TestNwbTransactionSafety, ``Curation`` and
-    ``CuratedSpikeSorting`` are NOT mocked here for the DB-write paths, so
-    these tests reproduce C1: the inner ``with Curation.connection
-    .transaction:`` blocks raised "Nested connections are not supported"
-    because make() already runs inside the transaction opened by
-    ``_populate1``.
+    ``CuratedSpikeSorting`` are NOT mocked here for the DB-write paths.
+    Earlier versions of ``make()`` opened an inner ``with Curation
+    .connection.transaction:`` block, which raised "Nested connections are
+    not supported" because ``make()`` already runs inside the transaction
+    opened by ``_populate1`` — these tests guard against a regression to
+    that pattern.
     """
 
     @pytest.fixture(autouse=True)
@@ -1351,7 +1443,7 @@ class TestFix1513PopulateIntegration:
     def test_update_via_populate_no_nested_transaction_error(
         self, spike_v0, pop_auto_curation
     ):
-        """action='update' runs through populate() without C1's
+        """action='update' runs through populate() without raising
         DataJointError("Nested connections are not supported").
 
         CuratedSpikeSorting is mocked with len()==0 so has_downstream is
@@ -1410,7 +1502,7 @@ class TestFix1513PopulateIntegration:
     def test_repopulate_via_populate_no_nested_transaction_error(
         self, spike_v0, pop_auto_curation
     ):
-        """action='repopulate' runs through populate() without C1's
+        """action='repopulate' runs through populate() without raising
         DataJointError, defers CuratedSpikeSorting.populate() to
         run_pending_repopulates()."""
         from unittest.mock import MagicMock, patch
@@ -1464,6 +1556,9 @@ class TestFix1513PopulateIntegration:
             assert (Curation & auto_curation_key).fetch1(
                 "curation_labels"
             ) == new_labels
+            # label_diff is the audit trail for what was rewritten
+            assert row["label_diff"]["old_labels"] == diff["old_labels"]
+            assert row["label_diff"]["new_labels"] == diff["new_labels"]
 
             with patch(f"{module}.CuratedSpikeSorting") as mock_css:
                 n_done = Fix1513Status.run_pending_repopulates(
@@ -1478,3 +1573,143 @@ class TestFix1513PopulateIntegration:
             Curation.update1(
                 {**auto_curation_key, "curation_labels": original_labels}
             )
+
+    def test_activate_pending_nwb_repairs_via_populate(
+        self, spike_v0, pop_auto_curation, tmp_path
+    ):
+        """action='update' with has_downstream=True stages NWB repairs via
+        populate() but defers activation; activate_pending_nwb_repairs()
+        then performs the os.replace + checksum update."""
+        from unittest.mock import MagicMock, patch
+
+        Fix1513Status = spike_v0.Fix1513Status
+        AutomaticCuration = spike_v0.AutomaticCuration
+        Curation = spike_v0.Curation
+
+        auto_curation, _ = pop_auto_curation
+        key = auto_curation.fetch("KEY")[0]
+        auto_curation_key = (AutomaticCuration & key).fetch1(
+            "auto_curation_key"
+        )
+        original_labels = (Curation & auto_curation_key).fetch1(
+            "curation_labels"
+        )
+        new_labels = {0: ["mua"]}
+        diff = self._patched_diff(spike_v0, auto_curation_key, new_labels)
+
+        temp_file = tmp_path / "patch.nwb.tmp"
+        real_file = tmp_path / "file.nwb"
+        temp_file.write_bytes(b"patched content")
+        staged = [(str(temp_file), str(real_file))]
+
+        module = "spyglass.spikesorting.v0.spikesorting_curation"
+        try:
+            with (
+                patch.object(
+                    Fix1513Status, "_compute_label_diff", return_value=diff
+                ),
+                patch.object(
+                    Fix1513Status, "_check_permission", return_value="alice"
+                ),
+                patch.object(Fix1513Status, "_print_diff"),
+                patch.object(
+                    Fix1513Status, "_stage_nwb_repairs", return_value=staged
+                ),
+                patch.object(Fix1513Status, "_repair_unit_labels"),
+                patch(f"{module}.CuratedSpikeSorting") as mock_css,
+                patch(f"{module}.LabMember") as mock_lm,
+            ):
+                mock_lm.return_value.get_djuser_name.return_value = "alice"
+                mock_lm.return_value.admin = []
+                mock_css.__and__ = MagicMock(
+                    return_value=MagicMock(__len__=MagicMock(return_value=1))
+                )
+
+                Fix1513Status.populate(key, make_kwargs={"action": "update"})
+
+            row = (Fix1513Status & key).fetch1()
+            assert row["action"] == "update"
+            assert row["nwb_staged"] == staged
+            assert temp_file.exists(), "activation deferred, temp file remains"
+
+            with patch.object(Fix1513Status, "_update_nwb_checksum"):
+                n_done = Fix1513Status.activate_pending_nwb_repairs(
+                    restriction=key, verbose=False
+                )
+
+            assert n_done == 1
+            assert not temp_file.exists()
+            assert real_file.read_bytes() == b"patched content"
+            assert (Fix1513Status & key).fetch1("nwb_staged") is None
+        finally:
+            (Fix1513Status & key).delete(safemode=False)
+            Curation.update1(
+                {**auto_curation_key, "curation_labels": original_labels}
+            )
+
+
+# -- Real-logic coverage (no mocking of the code under test) ------------
+
+
+class TestApplyNwbLabelEditsRealIO:
+    """_apply_nwb_label_edits against a real on-disk NWB file."""
+
+    def _write_nwb(self, path):
+        from pynwb import NWBHDF5IO
+        from pynwb.testing.mock.file import mock_NWBFile
+
+        nwbfile = mock_NWBFile()
+        nwbfile.add_unit_column(name="label", description="test")
+        nwbfile.add_unit(id=0, spike_times=[0.1], label="noise")
+        nwbfile.add_unit(id=1, spike_times=[0.2], label="")
+        with NWBHDF5IO(str(path), mode="w") as io:
+            io.write(nwbfile)
+
+    def test_apply_nwb_label_edits_writes_changed_labels(self, tmp_path):
+        """Changed labels are written to the units table on disk."""
+        from pynwb import NWBHDF5IO
+
+        from spyglass.spikesorting.v0.spikesorting_curation import (
+            Fix1513Status,
+        )
+
+        nwb_path = tmp_path / "test.nwb"
+        self._write_nwb(nwb_path)
+
+        changed = Fix1513Status._apply_nwb_label_edits(
+            nwb_path, {0: ["noise", "reject"], 1: ["mua"]}, verbose=False
+        )
+        assert changed is True
+
+        with NWBHDF5IO(str(nwb_path), mode="r", load_namespaces=True) as io:
+            nwbf = io.read()
+            labels = list(nwbf.units["label"].data[:])
+        assert labels == ["noise,reject", "mua"]
+
+    def test_apply_nwb_label_edits_no_change_returns_false(self, tmp_path):
+        """Identical labels leave the file untouched and return False."""
+        from spyglass.spikesorting.v0.spikesorting_curation import (
+            Fix1513Status,
+        )
+
+        nwb_path = tmp_path / "test.nwb"
+        self._write_nwb(nwb_path)
+
+        changed = Fix1513Status._apply_nwb_label_edits(
+            nwb_path, {0: ["noise"], 1: []}, verbose=False
+        )
+        assert changed is False
+
+
+class TestComputeLabelDiffRealLogic:
+    """_compute_label_diff against the real DB/fixture data, unmocked."""
+
+    def test_overlap_le_1_returns_none(self, spike_v0, pop_auto_curation):
+        """Real ``label_params`` ('default' has 1 metric) -> overlap <= 1
+        -> out of scope, returns None without computing a diff."""
+        Fix1513Status = spike_v0.Fix1513Status
+
+        auto_curation, _ = pop_auto_curation
+        key = auto_curation.fetch("KEY")[0]
+
+        assert Fix1513Status._compute_label_diff(key) is None

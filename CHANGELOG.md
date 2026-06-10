@@ -73,6 +73,7 @@ updating:
 from spyglass.spikesorting.v0 import Fix1513Status
 
 Fix1513Status.populate()
+Fix1513Status.activate_pending_nwb_repairs()
 Fix1513Status.run_pending_repopulates()
 ```
 
