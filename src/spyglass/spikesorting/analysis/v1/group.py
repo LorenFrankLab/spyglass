@@ -81,12 +81,6 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         keys: list[dict] = [],
     ):
         """Create a new group of sorted spikes"""
-        # Consumer-boundary guard: refuse to build a group from v2 preview
-        # (apply_merge=False) curations or from multiple curations of one sort
-        # (which would double-count units in the decode). No-op for v0/v1.
-        SpikeSortingOutput.assert_decoding_merge_ids_ok(
-            [k.get("merge_id", k.get("spikesorting_merge_id")) for k in keys]
-        )
         group_key = {
             "sorted_spikes_group_name": group_name,
             "nwb_file_name": nwb_file_name,
@@ -99,6 +93,14 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                 f"Group {nwb_file_name}: {group_name} already exists "
                 + "please delete the group before creating a new one",
             )
+        # Consumer-boundary guard: refuse to build a group from v2 preview
+        # (apply_merge=False) curations or from multiple curations of one sort
+        # (which would double-count units in the decode). No-op for v0/v1.
+        # Runs AFTER the existing-group short-circuit -- an existing group is a
+        # no-op and never processes ``keys``, so they must not be validated here.
+        SpikeSortingOutput.assert_decoding_merge_ids_ok(
+            [k.get("merge_id", k.get("spikesorting_merge_id")) for k in keys]
+        )
 
         parts_insert = [{**key, **group_key} for key in keys]
 
