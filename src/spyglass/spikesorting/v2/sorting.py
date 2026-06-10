@@ -126,21 +126,51 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
     def insert(self, rows, **kwargs):
         # Validate every row (incl. ``insert_default``'s positional
         # ``_DEFAULT_CONTENTS``) before it lands, dispatching the Pydantic
-        # schema per ``sorter``. ``params_schema_version`` is per-row, not
-        # per-table: this Lookup is multi-sorter (MS4/MS5/KS4/clusterless
-        # each carry their own schema_version), so the column default
-        # cannot be pinned to any one sorter's version -- it defaults to
-        # the sentinel 0 ("unspecified") and a row that reached the DB with
-        # 0 would silently mis-tag the validated blob. The per-row hook
-        # requires the caller to pass the matching version explicitly.
-        def _require_params_schema_version(row, _schema_cls):
-            if int(row.get("params_schema_version", 0)) == 0:
-                inner = int(row["params"]["schema_version"])
+        # schema per ``sorter``. Two per-row guards run after that:
+        #
+        # 1. Sorter-name typo guard. ``_get_sorter_schema`` falls back to
+        #    the permissive ``GenericSorterParamsSchema`` for any unknown
+        #    sorter (the v1 "try any installed SI sorter" escape hatch), so a
+        #    typo like ``"mountainSort4"`` would otherwise validate cleanly
+        #    here and fail only much later at ``Sorting.populate`` with an
+        #    opaque SI "sorter not registered" error. Reject a name that is
+        #    neither a SpikeInterface-registered sorter, a curated v2 schema
+        #    sorter, nor the Spyglass ``clusterless_thresholder`` path -- the
+        #    check ``_get_sorter_schema``'s docstring already delegates here.
+        #
+        # 2. ``params_schema_version`` backfill. This Lookup is multi-sorter
+        #    (MS4/MS5/KS4/clusterless each carry their own schema_version),
+        #    so the column default cannot be pinned to any one sorter's
+        #    version -- it defaults to the sentinel 0 ("unspecified"). The
+        #    validated ``params`` blob already carries the authoritative
+        #    ``schema_version``, so backfill the outer column from it when
+        #    the caller left it at 0 rather than making them copy the number
+        #    by hand. An explicitly-passed NON-zero value is left untouched
+        #    for ``_assert_schema_version_matches`` to cross-check, so a real
+        #    outer-vs-blob mismatch still raises.
+        import spikeinterface.sorters as sis
+
+        from spyglass.spikesorting.v2._params.sorter import _SORTER_SCHEMAS
+
+        valid_sorters = (
+            set(sis.available_sorters())
+            | set(_SORTER_SCHEMAS)
+            | self._NON_SI_SORTERS
+        )
+
+        def _check_sorter_and_backfill_version(row, _schema_cls):
+            sorter = row["sorter"]
+            if sorter not in valid_sorters:
                 raise ValueError(
-                    "SorterParameters.insert: params_schema_version is "
-                    f"required for sorter {row['sorter']!r}; pass "
-                    f"params_schema_version={inner} to match the validated "
-                    "params blob's schema_version."
+                    f"SorterParameters.insert: sorter {sorter!r} is not a "
+                    "known SpikeInterface sorter or the Spyglass "
+                    "'clusterless_thresholder' path -- check the spelling. "
+                    f"Curated v2 sorters: {sorted(_SORTER_SCHEMAS)}; or any "
+                    "sorter from spikeinterface.sorters.available_sorters()."
+                )
+            if int(row.get("params_schema_version", 0)) == 0:
+                row["params_schema_version"] = int(
+                    row["params"]["schema_version"]
                 )
 
         super().insert(
@@ -149,7 +179,7 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
                 self.heading.names,
                 schema_for=lambda row: _get_sorter_schema(row["sorter"]),
                 table_name="SorterParameters",
-                per_row_hook=_require_params_schema_version,
+                per_row_hook=_check_sorter_and_backfill_version,
             ),
             **kwargs,
         )

@@ -1113,6 +1113,16 @@ def test_artifact_detection_populates_and_writes_interval_list(
     retrieved = ArtifactDetection().get_artifact_removed_intervals(pk)
     assert (retrieved == saved).all()
 
+    # as_dict=True wraps the single-recording array as a one-key dict
+    # keyed by nwb_file_name, so source-agnostic callers can avoid
+    # branching on the return type (single ndarray vs shared-group dict).
+    retrieved_dict = ArtifactDetection().get_artifact_removed_intervals(
+        pk, as_dict=True
+    )
+    assert isinstance(retrieved_dict, dict)
+    assert set(retrieved_dict) == {nwb_file_name}
+    assert (retrieved_dict[nwb_file_name] == saved).all()
+
 
 @pytest.mark.slow
 def test_artifact_detection_delete_removes_interval_list_row(

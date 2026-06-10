@@ -1231,13 +1231,14 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         return _np.asarray(kept) if kept else _np.empty((0, 2))
 
     def get_artifact_removed_intervals(
-        self, key: dict
+        self, key: dict, as_dict: bool = False
     ) -> "np.ndarray | dict[str, np.ndarray]":
         """Return the artifact-removed ``valid_times`` for ``key``.
 
         Single-recording source: one ``IntervalList`` row keyed by
         the recording's parent ``nwb_file_name`` -- returned as a
-        plain ``(n_intervals, 2)`` ndarray.
+        plain ``(n_intervals, 2)`` ndarray (or, with ``as_dict=True``,
+        a one-key ``{nwb_file_name: ndarray}`` dict).
 
         Shared-artifact-group source: ``make_insert`` writes one
         ``IntervalList`` row per distinct member ``nwb_file_name``
@@ -1253,14 +1254,23 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         key : dict
             Restriction selecting a single ``ArtifactDetection`` row;
             must include ``artifact_id``.
+        as_dict : bool, optional
+            If ``False`` (default), the return type depends on the
+            source: a plain ``(n_intervals, 2)`` ndarray for a
+            single-recording source, a ``{nwb_file_name: ndarray}`` dict
+            for a shared-artifact-group source. If ``True``, BOTH sources
+            return the dict shape (a single-recording result is wrapped
+            as a one-key dict), so source-agnostic callers can avoid
+            branching on the return type.
 
         Returns
         -------
         np.ndarray or dict[str, np.ndarray]
-            For a single-recording source, the ``(n_intervals, 2)``
-            artifact-removed ``valid_times`` array. For a shared-
-            artifact-group source, a dict mapping each member
-            ``nwb_file_name`` to its ``(n_intervals, 2)`` array.
+            For a single-recording source with ``as_dict=False``, the
+            ``(n_intervals, 2)`` artifact-removed ``valid_times`` array.
+            For a shared-artifact-group source, or any source with
+            ``as_dict=True``, a dict mapping each member ``nwb_file_name``
+            to its ``(n_intervals, 2)`` array.
         """
         from spyglass.spikesorting.v2.recording import RecordingSelection
         from spyglass.spikesorting.v2.utils import (
@@ -1280,13 +1290,16 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
                 RecordingSelection
                 & {"recording_id": source.key["recording_id"]}
             ).fetch1("nwb_file_name")
-            return (
+            valid_times = (
                 IntervalList
                 & {
                     "nwb_file_name": nwb_file_name,
                     "interval_list_name": interval_list_name,
                 }
             ).fetch1("valid_times")
+            # as_dict wraps the single array as a one-key dict so callers
+            # can treat both source kinds uniformly (see Parameters).
+            return {nwb_file_name: valid_times} if as_dict else valid_times
 
         # shared_artifact_group source: collect the member
         # nwb_file_names through the Member -> RecordingSelection

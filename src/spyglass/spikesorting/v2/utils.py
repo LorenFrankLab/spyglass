@@ -556,9 +556,10 @@ def validate_lookup_rows(
     table_name : str
         Table name for the drift-check error message.
     per_row_hook : Callable[[dict, type[BaseModel]], None], optional
-        Extra table-specific check run after validation and before the
-        drift assertion (e.g. ``SorterParameters``' required
-        ``params_schema_version`` guard).
+        Extra table-specific step run after validation and before the
+        drift assertion. May mutate the row in place: ``SorterParameters``
+        uses it to reject unknown sorter names and to backfill
+        ``params_schema_version`` from the validated blob.
     """
     validated = []
     for row in rows:

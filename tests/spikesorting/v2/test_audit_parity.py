@@ -161,19 +161,19 @@ def test_sorter_parameters_skips_uninstalled_sorters(monkeypatch):
         )
 
 
-# ---------- A5: params_schema_version must be supplied ---------------------
+# ---------- A5: params_schema_version is backfilled; drift still raises -----
 
 
 @pytest.mark.usefixtures("dj_conn")
-def test_sorter_parameters_rejects_missing_schema_version():
-    """A5: a custom row omitting ``params_schema_version`` is rejected.
+def test_sorter_parameters_backfills_missing_schema_version():
+    """A5: a custom row may omit ``params_schema_version``; it is backfilled.
 
-    The column default is the sentinel 0 ("unspecified"). A clusterless
-    row whose validated ``params`` carries ``schema_version=4`` but whose
-    outer column silently defaulted to 0 (or the stale 1) would mis-tag
-    the blob. ``insert1`` requires the caller to pass the version
-    explicitly and the error names both the sorter and the expected
-    version.
+    The column default is the sentinel 0 ("unspecified"). The validated
+    ``params`` blob already carries the authoritative ``schema_version``
+    (4 for clusterless), so ``insert`` backfills the outer column from it
+    when the caller leaves it at 0 -- the user does not copy the number by
+    hand. An explicitly-supplied version that DISAGREES with the blob still
+    trips the drift guard.
     """
     from spyglass.spikesorting.v2.sorting import SorterParameters
 
@@ -183,38 +183,75 @@ def test_sorter_parameters_rejects_missing_schema_version():
         "job_kwargs": None,
     }
 
-    # Omitted entirely -> raise naming the field, the sorter, and the
-    # expected inner version (4 for clusterless).
-    omitted = dict(base, sorter_params_name="audit_a5_missing")
-    with pytest.raises(ValueError) as excinfo:
-        SorterParameters().insert1(omitted, skip_duplicates=True)
-    msg = str(excinfo.value)
-    assert "params_schema_version" in msg
-    assert "clusterless_thresholder" in msg
-    assert "4" in msg
+    def _stored_version(name):
+        return (
+            SorterParameters
+            & {
+                "sorter": "clusterless_thresholder",
+                "sorter_params_name": name,
+            }
+        ).fetch1("params_schema_version")
 
-    # Explicit sentinel 0 is rejected the same way.
+    # Omitted entirely -> backfilled from the blob's schema_version (4).
+    omitted = dict(base, sorter_params_name="audit_a5_missing")
+    SorterParameters().insert1(omitted, skip_duplicates=True)
+    assert _stored_version("audit_a5_missing") == 4
+
+    # Explicit sentinel 0 is backfilled the same way.
     sentinel = dict(
         base, sorter_params_name="audit_a5_zero", params_schema_version=0
     )
-    with pytest.raises(ValueError, match="params_schema_version"):
-        SorterParameters().insert1(sentinel, skip_duplicates=True)
+    SorterParameters().insert1(sentinel, skip_duplicates=True)
+    assert _stored_version("audit_a5_zero") == 4
 
-    # The correct explicit version inserts cleanly.
+    # The correct explicit version inserts cleanly and is preserved.
     ok = dict(base, sorter_params_name="audit_a5_ok", params_schema_version=4)
     SorterParameters().insert1(ok, skip_duplicates=True)
-    assert SorterParameters & {
-        "sorter": "clusterless_thresholder",
-        "sorter_params_name": "audit_a5_ok",
-    }
+    assert _stored_version("audit_a5_ok") == 4
 
     # A wrong (non-sentinel) version that disagrees with the blob still
-    # trips the existing drift check.
+    # trips the drift check -- backfill only fills the sentinel 0.
     drift = dict(
         base, sorter_params_name="audit_a5_drift", params_schema_version=2
     )
     with pytest.raises(ValueError, match="schema_version"):
         SorterParameters().insert1(drift, skip_duplicates=True)
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_sorter_parameters_rejects_unknown_sorter_name():
+    """A typo'd sorter name is rejected at insert, not at populate time.
+
+    ``_get_sorter_schema`` falls back to the permissive generic schema for
+    any unknown sorter, so without the guard a typo like ``"mountainSort4"``
+    (capital S) would validate cleanly here and fail only later inside
+    ``Sorting.populate`` with an opaque SI "sorter not registered" error.
+    The insert guard rejects it up front with a message naming the bad
+    sorter, while a real registered sorter still inserts (escape hatch).
+    """
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    typo = {
+        "sorter": "mountainSort4",  # capital S -> not a real SI sorter
+        "sorter_params_name": "audit_a5_typo",
+        "params": {},
+        "job_kwargs": None,
+    }
+    with pytest.raises(ValueError, match="mountainSort4"):
+        SorterParameters().insert1(typo, skip_duplicates=True)
+
+    # A genuine registered sorter is accepted; version backfilled from blob.
+    ok = {
+        "sorter": "tridesclous2",
+        "sorter_params_name": "audit_a5_real",
+        "params": {},
+        "job_kwargs": None,
+    }
+    SorterParameters().insert1(ok, skip_duplicates=True)
+    assert SorterParameters & {
+        "sorter": "tridesclous2",
+        "sorter_params_name": "audit_a5_real",
+    }
 
 
 # ---------- A8: MS4 path must not leak the numpy.Inf global ----------------
