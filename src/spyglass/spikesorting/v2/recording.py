@@ -1333,11 +1333,14 @@ class Recording(SpyglassMixin, dj.Computed):
         """
         import pathlib as _pathlib
 
-        import spikeinterface.extractors as se
-
+        from spyglass.spikesorting.utils import read_raw_nwb_recording
         from spyglass.spikesorting.v2.utils import _get_recording_timestamps
 
-        recording = se.read_nwb_recording(raw_path, load_time_vector=True)
+        # Read via the shared raw-acquisition wrapper (as v0/v1 do) so the raw
+        # ElectricalSeries is named explicitly: SI >= 0.100 raises (and 0.99.x
+        # silently mis-picks) when a raw file also stores LFP under
+        # ``processing`` and the series is not named.
+        recording = read_raw_nwb_recording(raw_path, load_time_vector=True)
         sampling_frequency = float(recording.get_sampling_frequency())
 
         recording, timestamps_override, n_selected_intervals = (
