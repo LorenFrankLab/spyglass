@@ -707,36 +707,36 @@ class CurationV2(SpyglassMixin, dj.Manual):
         #   apply_merge=True multi-contributor group: kept id is a fresh
         #     ``max(source unit_ids) + 1`` (sequentially incremented per
         #     multi-merge group), matching v1's
-        #     ``np.max(units_dict.keys()) + 1`` pattern; assignment is
-        #     in USER-PROVIDED group order (v1's iteration order). The
-        #     user's first element is one of the contributors, NOT the
-        #     kept id.
+        #     ``np.max(units_dict.keys()) + 1`` pattern. The user's first
+        #     element is one of the contributors, NOT the kept id.
         #   apply_merge=False: kept id is ``min(group)`` -- the proposed
         #     merge leader recorded in MergeGroup until the merge is
         #     applied via get_merged_sorting.
         # A unit may appear in at most one merge group: the overlap
         # check below would otherwise silently double-count spikes when
         # apply_merge=True and ambiguate the kept-unit choice.
-        # Validate merge groups and stage their (key, contributors) pairs
-        # WITHOUT inserting them yet -- we want kept_to_contributors's
-        # insertion order to be "surviving source units first (in
-        # original source order), then merged kept ids appended in
-        # merge-group order." That matches v1's pop-then-append pattern
-        # (``v1/curation.py:359``) and SI's lazy MergeUnitsSorting
-        # (originals retained + merged appended) at the SHAPE level
-        # (survivor-then-appended). The content-to-id mapping can still
-        # diverge between applied and lazy when input order differs from
-        # kept-uid order -- see the NOTE in the next block.
-        # Iterate merge groups in USER-PROVIDED order so new-id
-        # assignment matches v1 (``v1/curation.py:359`` iterates
-        # ``for merge_group in merge_groups:`` and assigns the next
-        # ``max(unit_ids) + 1`` per group). NOTE: the lazy merge path
+        #
+        # CANONICAL-ORDER NOTE (preview==apply contract). The fresh
+        # ``max+1`` ids are assigned in ascending MIN-CONTRIBUTOR order,
+        # NOT user-provided order. This is deliberate: the lazy merge path
         # (``get_merged_sorting`` on an apply_merge=False preview) reads
-        # MergeGroup ordered by ``unit_id`` and so iterates by
-        # kept-uid-ascending; when the user-given group order differs
-        # from kept-uid-ascending, applied (insert-time) and lazy paths
-        # produce different new ids for the same content groups. v1
-        # parity for the applied path is the explicit goal.
+        # MergeGroup ordered by ``unit_id`` and so numbers merges by
+        # ascending kept-uid (== ascending min(group), since the preview
+        # stores ``min(group)`` as each kept id). Numbering the applied
+        # path the same way guarantees apply_merge=True and the lazy
+        # preview assign the SAME fresh id to the SAME content group, even
+        # when the user lists groups out of min order. v2 departs here from
+        # v1's user-iteration-order labels (``v1/curation.py:359``): the
+        # merged-unit integer id is an arbitrary fresh label, so spike
+        # content and unit count are unchanged -- only which group gets
+        # ``max+1`` for reordered input differs, and matching the two
+        # paths is the more important contract.
+        # Validate merge groups and stage their (key, contributors) pairs
+        # WITHOUT inserting them yet -- kept_to_contributors's insertion
+        # order is "surviving source units first (in original source
+        # order), then merged kept ids appended in ascending-min order,"
+        # matching SI's lazy MergeUnitsSorting (originals retained + merged
+        # appended) at the SHAPE level (survivor-then-appended).
         normalized_groups: list[list[int]] = [
             [int(u) for u in g] for g in merge_groups
         ]
@@ -787,10 +787,13 @@ class CurationV2(SpyglassMixin, dj.Manual):
             # (Non-empty merge groups already raised above.)
             return [], {}
 
-        # All groups validated; assign keys.
+        # All groups validated; assign keys. Iterate in ascending
+        # min-contributor order (NOT user-provided order) so the fresh
+        # ``max+1`` ids match the lazy ``get_merged_sorting`` preview path
+        # -- see the canonical-order NOTE above.
         merge_specs: list[tuple[int, list[int]]] = []
         next_merged_id = max(by_id) + 1
-        for int_group in normalized_groups:
+        for int_group in sorted(normalized_groups, key=min):
             if apply_merge and len(int_group) > 1:
                 key = next_merged_id
                 next_merged_id += 1
@@ -878,11 +881,13 @@ class CurationV2(SpyglassMixin, dj.Manual):
 
         With ``apply_merge=True`` the kept unit's spike train is the
         sorted union of its contributors' spike trains and its id is a
-        fresh ``max(source unit_ids) + 1`` assigned in USER-PROVIDED
-        group order (v1 parity); the absorbed contributors are dropped
-        from both the NWB and ``CurationV2.Unit``. Surviving source units
-        are written first (in source order) and merged ids are appended,
-        matching v1's pop-then-append per-unit layout.
+        fresh ``max(source unit_ids) + 1`` assigned in ascending
+        min-contributor order (so the lazy ``get_merged_sorting`` preview
+        assigns matching ids -- see ``_build_curated_unit_rows``); the
+        absorbed contributors are dropped from both the NWB and
+        ``CurationV2.Unit``. Surviving source units are written first (in
+        source order) and merged ids are appended in that same
+        ascending-min order.
 
         With ``apply_merge=False`` (preview) every original unit is
         written 1:1 -- contributors included -- so the proposed merge

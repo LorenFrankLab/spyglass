@@ -6060,16 +6060,20 @@ def test_curation_n_spikes_matches_apply_merge(dj_conn):
     assert preview == {0: 100, 1: 40, 2: 7}, preview
 
 
-def test_curation_two_merge_groups_assign_ids_in_user_input_order(dj_conn):
-    """``_build_curated_unit_rows`` assigns fresh merged ids in
-    USER-PROVIDED group order (v1 parity, ``v1/curation.py:359``
-    iterates ``for merge_group in merge_groups:``). For user input
-    ``[[2, 3], [0, 1]]`` the FIRST group ``[2, 3]`` gets the first new
-    id ``max(source unit_ids) + 1``, and ``[0, 1]`` gets the next one --
-    matching v1. (NOTE: the lazy merge path -- ``get_merged_sorting`` on
-    an apply_merge=False preview -- iterates by kept-uid ascending and
-    can diverge here; v1 parity for the applied path is the explicit
-    goal.)
+def test_curation_two_merge_groups_assign_ids_in_canonical_min_order(dj_conn):
+    """``_build_curated_unit_rows`` assigns fresh merged ids in ascending
+    MIN-CONTRIBUTOR order, INDEPENDENT of user-input group order (C3). For
+    user input ``[[2, 3], [0, 1]]`` the smallest-min group ``[0, 1]`` gets
+    the first new id ``max(source unit_ids) + 1``, and ``[2, 3]`` gets the
+    next one. This matches the lazy ``get_merged_sorting`` preview path
+    (which numbers merges by ascending kept-uid), so apply_merge=True and an
+    apply_merge=False preview assign the SAME id to the SAME content group.
+
+    v2 deliberately departs here from v1's user-iteration-order labels
+    (``v1/curation.py:359``): the merged-unit id is an arbitrary fresh
+    label, so only which group gets ``max+1`` changes for reordered input
+    -- spike content and unit count are identical -- and matching the
+    applied and lazy paths is the more important contract.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
 
@@ -6090,8 +6094,9 @@ def test_curation_two_merge_groups_assign_ids_in_user_input_order(dj_conn):
         _unit(3, 40, 25.0),
         _unit(4, 50, 20.0),
     ]
-    # User input: bigger-min group FIRST. v1 (and v2 now) iterate in
-    # this order; the FIRST group ``[2, 3]`` gets the first new id.
+    # User input: bigger-min group FIRST. Canonical assignment IGNORES
+    # this order and numbers by ascending min(group), so ``[0, 1]`` (min 0)
+    # gets the first new id even though the user listed ``[2, 3]`` first.
     merge_groups = [[2, 3], [0, 1]]
 
     rows, kept = CurationV2._build_curated_unit_rows(
@@ -6102,14 +6107,15 @@ def test_curation_two_merge_groups_assign_ids_in_user_input_order(dj_conn):
         apply_merge=True,
     )
     n_spikes_by_unit = {r["unit_id"]: r["n_spikes"] for r in rows}
-    # max(0..4) + 1 = 5 -> the FIRST input group [2, 3] gets new_id 5
-    # carrying summed n_spikes 70; the second group [0, 1] gets new_id 6
-    # with n_spikes 30. Non-merged unit 4 passes through with own count.
-    assert n_spikes_by_unit == {4: 50, 5: 70, 6: 30}, n_spikes_by_unit
+    # max(0..4) + 1 = 5 -> smallest-min group [0, 1] gets new_id 5 carrying
+    # summed n_spikes 30; group [2, 3] gets new_id 6 with n_spikes 70.
+    # Non-merged unit 4 passes through with own count.
+    assert n_spikes_by_unit == {4: 50, 5: 30, 6: 70}, n_spikes_by_unit
 
-    # kept_to_contributors keys reflect v1 order: surviving source units
-    # FIRST (in source order), then merged ids appended ascending.
+    # kept_to_contributors keys: surviving source units FIRST (in source
+    # order), then merged ids appended in ascending-min order.
     assert list(kept.keys()) == [4, 5, 6], list(kept.keys())
+    assert kept[5] == [0, 1] and kept[6] == [2, 3], kept
 
     # apply_merge=False with the same input: heads are min(group) for
     # each multi-group, so kept_to_contributors keys (after sort + sym
@@ -6129,6 +6135,47 @@ def test_curation_two_merge_groups_assign_ids_in_user_input_order(dj_conn):
     # contributor regardless of how the user listed the group.
     assert 0 in kept_preview and kept_preview[0] == [0, 1]
     assert 2 in kept_preview and kept_preview[2] == [2, 3]
+
+
+def test_curation_merge_ids_assigned_in_canonical_min_order(dj_conn):
+    """Applied-path fresh merged ids are numbered in ascending
+    min-contributor order, INDEPENDENT of user-input group order, so they
+    match the lazy ``get_merged_sorting`` preview path (which numbers merges
+    in ``get_merge_groups`` / ascending-kept-uid order). This is what makes
+    ``apply_merge=True`` and an ``apply_merge=False`` preview assign the SAME
+    fresh id to the SAME content group -- the preview==apply contract (C3).
+
+    The merged-unit integer id is an arbitrary fresh ``max(unit_ids)+1``
+    label; canonicalizing its assignment order (rather than following v1's
+    user-iteration order) changes only which group gets ``max+1`` for
+    reordered input, never spike content or unit count.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    def _unit(uid, n_spikes, amp):
+        return {
+            "unit_id": uid,
+            "n_spikes": n_spikes,
+            "peak_amplitude_uv": amp,
+            "nwb_file_name": "x.nwb",
+            "electrode_group_name": "0",
+            "electrode_id": uid,
+        }
+
+    sorting_units = [_unit(i, 10 * (i + 1), 50.0 - i) for i in range(5)]
+    # User lists the bigger-min group FIRST; canonical assignment ignores
+    # this order and numbers by ascending min(group).
+    _, kept = CurationV2._build_curated_unit_rows(
+        sorting_id="s",
+        sorting_units=sorting_units,
+        merge_groups=[[3, 4], [0, 1]],
+        curation_id=0,
+        apply_merge=True,
+    )
+    # max(0..4) + 1 = 5. Smallest-min group [0, 1] (min 0) -> 5; next
+    # group [3, 4] (min 3) -> 6 -- regardless of the [[3, 4], [0, 1]] order.
+    assert kept[5] == [0, 1], kept
+    assert kept[6] == [3, 4], kept
 
 
 def test_curation_rejects_invalid_merge_groups(dj_conn):
