@@ -6187,6 +6187,232 @@ def test_curation_two_merge_groups_assign_ids_in_canonical_min_order(dj_conn):
     assert 2 in kept_preview and kept_preview[2] == [2, 3]
 
 
+@pytest.mark.usefixtures("dj_conn")
+def test_merged_unit_inherits_max_amplitude_contributor_electrode():
+    """A merged unit inherits the electrode + amplitude of its
+    HIGHEST-amplitude contributor (not the head/min). Brain region is
+    reached through the unit's Electrode FK, so this electrode inheritance
+    IS the region attribution -- a ``max -> min`` regression would silently
+    mis-attribute every merged unit's brain region while n_spikes / id
+    assertions still pass (audit test-hardening #8). Deterministic via
+    ``_build_curated_unit_rows`` (no populate).
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    def _unit(uid, n_spikes, amp, electrode_id):
+        return {
+            "unit_id": uid,
+            "n_spikes": n_spikes,
+            "peak_amplitude_uv": amp,
+            "nwb_file_name": "x.nwb",
+            "electrode_group_name": "0",
+            "electrode_id": electrode_id,
+        }
+
+    # Unit 0: LOWER amplitude on electrode 10 (and it is the min/head of the
+    # group). Unit 1: HIGHER amplitude on electrode 20. The merge must
+    # inherit unit 1's electrode + amplitude, NOT the head's.
+    sorting_units = [
+        _unit(0, 100, 30.0, 10),
+        _unit(1, 50, 80.0, 20),
+    ]
+    rows, _ = CurationV2._build_curated_unit_rows(
+        sorting_id="s",
+        sorting_units=sorting_units,
+        merge_groups=[[0, 1]],
+        curation_id=0,
+        apply_merge=True,
+    )
+    assert len(rows) == 1, "expected a single merged unit"
+    merged = rows[0]
+    assert merged["unit_id"] == 2  # fresh max(source ids)+1
+    assert merged["electrode_id"] == 20, "merged unit took the wrong electrode"
+    assert merged["peak_amplitude_uv"] == 80.0
+    assert merged["n_spikes"] == 150  # summed train
+
+    # Reverse the amplitudes (now the HEAD/min unit dominates) -> the merged
+    # unit must follow the amplitude, landing on the head's electrode. This
+    # pins that inheritance tracks amplitude, not group position.
+    sorting_units_rev = [
+        _unit(0, 100, 90.0, 10),
+        _unit(1, 50, 25.0, 20),
+    ]
+    rows_rev, _ = CurationV2._build_curated_unit_rows(
+        sorting_id="s",
+        sorting_units=sorting_units_rev,
+        merge_groups=[[0, 1]],
+        curation_id=0,
+        apply_merge=True,
+    )
+    assert rows_rev[0]["electrode_id"] == 10
+    assert rows_rev[0]["peak_amplitude_uv"] == 90.0
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_applied_and_lazy_merge_ids_match_for_out_of_order_groups(
+    polymer_smoke_session, monkeypatch
+):
+    """For TWO merge groups listed OUT of min-contributor order, the
+    apply_merge=True stored sorting and the apply_merge=False lazy
+    ``get_merged_sorting`` assign the SAME fresh id to the SAME content
+    group, frame-for-frame. Existing tests cover the single-group case and
+    the ``_build_curated_unit_rows`` id assignment; this pins the >=2-group
+    lazy ``get_merge_groups`` order_by path (audit test-hardening #16).
+    """
+    import uuid as _uuid
+
+    import numpy as _np
+    import spikeinterface as si
+
+    from spyglass.common.common_interval import IntervalList
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    _clean_session_v2(polymer_smoke_session)
+    initialize_v2_defaults()
+    LabTeam.insert1(
+        {"team_name": "v2_test_team", "team_description": "v2 pipeline tests"},
+        skip_duplicates=True,
+    )
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    sort_group_id = int(
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
+    )
+
+    # Four planted units with well-separated frames (no coincidences -> no
+    # cross-unit dedup), so each merged train is just the sorted union.
+    planted = {
+        0: _np.array([100, 700]),
+        1: _np.array([300, 900]),
+        2: _np.array([200, 800]),
+        3: _np.array([400, 1000]),
+    }
+
+    def _planted_four_unit_sorter(
+        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None
+    ):
+        samples = _np.concatenate([planted[u] for u in (0, 1, 2, 3)]).astype(
+            _np.int64
+        )
+        labels = _np.concatenate(
+            [_np.full(len(planted[u]), u) for u in (0, 1, 2, 3)]
+        ).astype(_np.int32)
+        order = _np.argsort(samples)
+        return si.NumpySorting.from_samples_and_labels(
+            samples_list=[samples[order]],
+            labels_list=[labels[order]],
+            sampling_frequency=recording.get_sampling_frequency(),
+        )
+
+    monkeypatch.setattr(
+        Sorting, "_run_sorter", staticmethod(_planted_four_unit_sorter)
+    )
+
+    raw_times = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": "raw data valid times",
+        }
+    ).fetch1("valid_times")
+    t0 = float(raw_times[0][0])
+    t_end = float(raw_times[-1][-1])
+
+    interval_name = f"v2_oo_merge_{_uuid.uuid4().hex[:8]}"
+    IntervalList.insert1(
+        {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": interval_name,
+            "valid_times": _np.array([[t0, min(t0 + 2.9, t_end)]]),
+            "pipeline": "v2_oo_merge_test",
+        },
+        skip_duplicates=True,
+    )
+    rec_pk = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+            "interval_list_name": interval_name,
+            "preproc_params_name": "default_franklab",
+            "team_name": "v2_test_team",
+        }
+    )
+    Recording.populate(rec_pk, reserve_jobs=False)
+    art_pk = ArtifactSelection.insert_selection(
+        {
+            "recording_id": rec_pk["recording_id"],
+            "artifact_params_name": "none",
+        }
+    )
+    ArtifactDetection.populate(art_pk, reserve_jobs=False)
+    sort_pk = SortingSelection.insert_selection(
+        {
+            "recording_id": rec_pk["recording_id"],
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": "default",
+            "artifact_id": art_pk["artifact_id"],
+        }
+    )
+    Sorting.populate(sort_pk, reserve_jobs=False)
+    assert int((Sorting & sort_pk).fetch1("n_units")) == 4
+
+    root_pk = CurationV2.insert_curation(sorting_key=sort_pk, labels={})
+    # Groups listed OUT of min order ([2,3] before [0,1]).
+    oo_groups = [[2, 3], [0, 1]]
+    applied_pk = CurationV2.insert_curation(
+        sorting_key=sort_pk,
+        merge_groups=oo_groups,
+        apply_merge=True,
+        parent_curation_id=root_pk["curation_id"],
+        description="applied",
+    )
+    preview_pk = CurationV2.insert_curation(
+        sorting_key=sort_pk,
+        merge_groups=oo_groups,
+        apply_merge=False,
+        parent_curation_id=root_pk["curation_id"],
+        description="lazy preview",
+    )
+
+    applied = CurationV2().get_sorting(applied_pk)
+    lazy = CurationV2().get_merged_sorting(preview_pk)
+
+    def _frames(sorting, uid):
+        return _np.sort(_np.asarray(sorting.get_unit_spike_train(unit_id=uid)))
+
+    # Canonical-min id assignment, regardless of input order: [0,1] (min 0)
+    # -> max(0..3)+1 = 4, [2,3] (min 2) -> 5. Same fresh id -> same content
+    # group on BOTH the applied and lazy paths.
+    expected = {
+        4: _np.sort(_np.concatenate([planted[0], planted[1]])),
+        5: _np.sort(_np.concatenate([planted[2], planted[3]])),
+    }
+    for fresh_id, exp in expected.items():
+        _np.testing.assert_array_equal(
+            _frames(applied, fresh_id),
+            _frames(lazy, fresh_id),
+            err_msg=f"applied vs lazy frames differ for merged id {fresh_id}",
+        )
+        _np.testing.assert_array_equal(
+            _frames(applied, fresh_id),
+            exp.astype(_frames(applied, fresh_id).dtype),
+            err_msg=f"merged id {fresh_id} frames != hand-computed union",
+        )
+
+
 def test_curation_merge_ids_assigned_in_canonical_min_order(dj_conn):
     """Applied-path fresh merged ids are numbered in ascending
     min-contributor order, INDEPENDENT of user-input group order, so they
