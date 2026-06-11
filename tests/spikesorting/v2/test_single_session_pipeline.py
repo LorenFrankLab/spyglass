@@ -6070,6 +6070,39 @@ def test_curation_n_spikes_matches_apply_merge(dj_conn):
     assert preview == {0: 100, 1: 40, 2: 7}, preview
 
 
+def test_merge_group_contributor_fk_rejects_unknown_unit(populated_sorting):
+    """A direct ``CurationV2.MergeGroup`` insert with a contributor that is
+    not a real ``Sorting.Unit`` row raises ``IntegrityError``.
+
+    ``contributor_unit_id`` is a FK to ``Sorting.Unit`` (audit finding #6):
+    ``insert_curation`` validates contributors in Python, but the schema
+    must also reject a bogus contributor on a direct part-table insert that
+    bypasses the helper -- otherwise merge provenance can be silently
+    corrupted. The shared ``sorting_id`` means the FK also enforces that the
+    contributor belongs to THIS sort.
+    """
+    from datajoint.errors import IntegrityError
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    _clear_curations(populated_sorting)
+    pk = CurationV2.insert_curation(sorting_key=populated_sorting, labels={})
+
+    # A real kept-unit row to hang the bad contributor off of.
+    kept = (CurationV2.Unit & pk).fetch("KEY", as_dict=True)[0]
+    real_unit_ids = set(
+        int(u) for u in (Sorting.Unit & populated_sorting).fetch("unit_id")
+    )
+    bogus_contributor = max(real_unit_ids) + 1000
+    assert bogus_contributor not in real_unit_ids
+
+    with pytest.raises(IntegrityError):
+        CurationV2.MergeGroup.insert1(
+            {**kept, "contributor_unit_id": bogus_contributor}
+        )
+
+
 def test_curation_two_merge_groups_assign_ids_in_canonical_min_order(dj_conn):
     """``_build_curated_unit_rows`` assigns fresh merged ids in ascending
     MIN-CONTRIBUTOR order, INDEPENDENT of user-input group order (C3). For

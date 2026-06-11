@@ -201,12 +201,21 @@ class CurationV2(SpyglassMixin, dj.Manual):
         contributor) pair across sortings") and provenance retrieval
         ("for this paper, list every merge decision") are easy.
 
-        ``contributor_unit_id`` is a plain int, NOT a DataJoint FK:
-        the schema cannot express a nullable self-FK across the
-        renamed unit columns cleanly. ``insert_curation`` validates
-        every contributor id against the sorting's units, but a
-        direct part-table insert is NOT FK-checked -- treat this as
-        helper-maintained provenance, not a schema-enforced relation.
+        ``contributor_unit_id`` is a DataJoint FK to ``Sorting.Unit``
+        (declared ``-> Sorting.Unit.proj(contributor_unit_id='unit_id')``).
+        The part already inherits ``sorting_id`` from ``-> CurationV2.Unit``,
+        so DataJoint UNIFIES the two ``sorting_id`` references and the FK
+        enforces BOTH that the contributor is a real unit AND that it
+        belongs to THIS sort -- including on a direct ``MergeGroup.insert``
+        that bypasses ``insert_curation`` (a bogus contributor raises
+        ``IntegrityError`` instead of silently corrupting provenance).
+        ``insert_curation`` keeps its Python-side contributor check too, for
+        a friendlier error than the raw FK violation. The kept ``unit_id``
+        may be a fresh ``max+1`` merge id (apply_merge=True) that is NOT in
+        ``Sorting.Unit``; that id only ever appears as the kept ``unit_id``
+        (FK'd to ``CurationV2.Unit``), never as a ``contributor_unit_id`` --
+        contributors are always original source units, so the FK is
+        satisfiable in every mode.
 
         One row per ``(kept_unit_id, contributor_unit_id)``. The
         kept unit appears as its own contributor for unmerged
@@ -217,7 +226,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
 
         definition = """
         -> CurationV2.Unit
-        contributor_unit_id: int     # source unit before the merge
+        -> Sorting.Unit.proj(contributor_unit_id='unit_id')
         ---
         """
 

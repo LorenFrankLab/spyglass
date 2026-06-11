@@ -519,11 +519,20 @@ Phase 1b is **mostly behavior-preserving for deterministic paths**: `clusterless
       One row per (kept_unit_id, contributor_unit_id). The kept unit
       appears as its own contributor for 1-unit groups (no merge); this
       makes "list every unit's merge provenance" a single restriction.
+
+      contributor_unit_id is a FK to Sorting.Unit (audit finding #6).
+      The part already inherits sorting_id from -> CurationV2.Unit, so
+      DataJoint unifies the two sorting_id references and the FK enforces
+      both "contributor is a real unit" and "contributor belongs to THIS
+      sort", even on a direct insert bypassing insert_curation. The fresh
+      max+1 merge id (apply_merge=True) appears only as the kept unit_id
+      (FK'd to CurationV2.Unit), never as a contributor, so the FK is
+      satisfiable in every mode.
       """
 
       definition = """
       -> CurationV2.Unit
-      contributor_unit_id: int  # source unit before the merge
+      -> Sorting.Unit.proj(contributor_unit_id='unit_id')
       ---
       """
   ```
