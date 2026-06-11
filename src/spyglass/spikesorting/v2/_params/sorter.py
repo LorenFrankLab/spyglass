@@ -29,7 +29,19 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
+
+# A MAD multiplier for peak detection is conventionally ~3-15; a value
+# above this with threshold_unit='mad' and no explicit noise_levels is
+# almost certainly a microvolt threshold left in the wrong unit (audit
+# finding #7).
+_MAX_PLAUSIBLE_MAD_MULTIPLIER = 50.0
 
 
 class MountainSort4Schema(BaseModel):
@@ -209,22 +221,31 @@ class ClusterlessThresholderSchema(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     schema_version: int = 4
+    # Default 100.0 is the production/real-data clusterless threshold: a
+    # microvolt / native-unit value under the default ``threshold_unit='uv'``
+    # below (which derives noise_levels=[1.0]). The OLD default paired 100
+    # with ``threshold_unit='mad'``, making it a 100x-MAD threshold that
+    # detected almost nothing -- the bare-schema footgun fixed here (audit
+    # finding #7). The synthetic/smoke fixture sets ``threshold_unit='mad'``
+    # EXPLICITLY (a ~5x-MAD multiplier suits the simulation), so it does not
+    # rely on this unit default.
     detect_threshold: float = Field(default=100.0, gt=0.0)
     threshold_unit: Literal["uv", "mad"] = Field(
-        default="mad",
+        default="uv",
         description=(
             "How detect_threshold is interpreted when noise_levels is "
-            "left unset: 'uv' derives noise_levels=[1.0] so the threshold "
-            "is in the recording's native units (raw ADC counts under "
-            "v2's gain-free preprocessing, not true microvolts unless "
-            "gain-scaled) and 'mad' lets SpikeInterface estimate "
-            "per-channel MAD. When "
-            "noise_levels IS set explicitly it takes precedence and is "
-            "used verbatim -- threshold_unit is then descriptive only. The "
-            "two are NOT cross-validated because an explicit per-channel "
-            "noise_levels is a supported advanced override that no single "
-            "threshold_unit value can represent; keep them consistent "
-            "(the shipped 'default' row pairs 'uv' with [1.0])."
+            "left unset: 'uv' (the default) derives noise_levels=[1.0] so "
+            "the threshold is in the recording's native units (raw ADC "
+            "counts under v2's gain-free preprocessing, not true microvolts "
+            "unless gain-scaled), and 'mad' lets SpikeInterface estimate "
+            "per-channel MAD (a multiplier). The default 'uv' pairs with the "
+            "default detect_threshold=100 to give the production/real-data "
+            "threshold; the simulation fixture opts into 'mad' explicitly. "
+            "When noise_levels IS set explicitly it takes precedence and is "
+            "used verbatim -- threshold_unit is then descriptive only, and "
+            "the advanced override bypasses the implausible-MAD guard below. "
+            "Without an explicit noise_levels, a 'mad' multiplier above ~50 "
+            "is rejected as a microvolt threshold left in the wrong unit."
         ),
     )
     # Only ``locally_exclusive`` is wired: the runtime always builds
@@ -237,6 +258,35 @@ class ClusterlessThresholderSchema(BaseModel):
     exclude_sweep_ms: float = Field(default=0.1, gt=0.0)
     local_radius_um: float = Field(default=100.0, gt=0.0)
     noise_levels: list[float] | None = Field(default=None)
+
+    @model_validator(mode="after")
+    def _guard_implausible_mad_threshold(self):
+        """Reject a microvolt-scale threshold left in MAD units.
+
+        ``threshold_unit='mad'`` with no explicit ``noise_levels`` makes
+        SpikeInterface estimate per-channel MAD and treat
+        ``detect_threshold`` as a MAD MULTIPLIER. Real multipliers are
+        ~3-15; a value this large (e.g. 100, a microvolt threshold copied
+        into a MAD-mode row) makes the effective threshold absurd and
+        detects almost nothing -- a silent zero-unit sort. Only fires when
+        ``noise_levels`` is None, so the documented explicit-``noise_levels``
+        advanced override is untouched.
+        """
+        if (
+            self.threshold_unit == "mad"
+            and self.noise_levels is None
+            and self.detect_threshold > _MAX_PLAUSIBLE_MAD_MULTIPLIER
+        ):
+            raise ValueError(
+                "ClusterlessThresholderSchema: detect_threshold="
+                f"{self.detect_threshold} with threshold_unit='mad' and no "
+                "noise_levels is an implausibly large MAD multiplier (> "
+                f"{_MAX_PLAUSIBLE_MAD_MULTIPLIER}); SpikeInterface would "
+                "estimate per-channel MAD and detect almost nothing. Use "
+                "threshold_unit='uv' for a microvolt/native-unit threshold, "
+                "or a MAD multiplier near 5."
+            )
+        return self
 
 
 class SpykingCircus2Schema(BaseModel):

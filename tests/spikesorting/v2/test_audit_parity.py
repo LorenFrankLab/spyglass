@@ -3034,6 +3034,50 @@ def test_clusterless_default_row_ships_noise_levels_one():
         & {"sorter": "clusterless_thresholder", "sorter_params_name": "default"}
     ).fetch1("params")
     assert params["noise_levels"] == [1.0]
+    # The shipped uv row carries detect_threshold=100 (the production
+    # clusterless threshold) via the schema default, paired with its explicit
+    # threshold_unit='uv' (audit finding #7).
+    assert params["detect_threshold"] == 100.0
+
+
+def test_clusterless_schema_default_is_production_uv():
+    """The clusterless schema's bare default is the production/real-data
+    threshold (100 uV under the default 'uv' unit), and a microvolt-scale
+    threshold explicitly left in MAD units is rejected (audit finding #7).
+    The OLD default ``(detect_threshold=100, threshold_unit='mad')`` was a
+    100x-MAD threshold that silently detected almost nothing.
+    """
+    import pydantic
+
+    from spyglass.spikesorting.v2._params.sorter import (
+        ClusterlessThresholderSchema,
+    )
+
+    # Bare default: the real-data 100 uV threshold ('uv' derives
+    # noise_levels=[1.0] at runtime), self-consistent with detect_threshold.
+    bare = ClusterlessThresholderSchema()
+    assert bare.threshold_unit == "uv"
+    assert bare.detect_threshold == 100.0
+
+    # A microvolt-scale threshold explicitly left in MAD units (no
+    # noise_levels override) is rejected with a helpful message.
+    with pytest.raises(pydantic.ValidationError, match="MAD multiplier"):
+        ClusterlessThresholderSchema(
+            detect_threshold=100.0, threshold_unit="mad"
+        )
+
+    # A sane MAD multiplier (the simulation fixture's regime) is accepted.
+    mad = ClusterlessThresholderSchema(
+        detect_threshold=5.0, threshold_unit="mad"
+    )
+    assert mad.threshold_unit == "mad" and mad.detect_threshold == 5.0
+
+    # An explicit noise_levels override bypasses the guard even in MAD mode
+    # (the documented advanced-override path is deliberately untouched).
+    override = ClusterlessThresholderSchema(
+        detect_threshold=100.0, threshold_unit="mad", noise_levels=[2.0]
+    )
+    assert override.noise_levels == [2.0]
 
 
 @pytest.mark.usefixtures("dj_conn")

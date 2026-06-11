@@ -295,10 +295,12 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
                 # regression guard against the 1,400x noise_levels
                 # divergence; the runtime uses it verbatim (explicit
                 # noise_levels take precedence over ``threshold_unit``).
-                # The smoke / synthetic-fixture rows leave both at the
-                # defaults (``threshold_unit="mad"``, no noise_levels)
-                # so SI computes per-channel MAD and the threshold
-                # tracks the recording's noise floor.
+                # The smoke / synthetic-fixture rows set
+                # ``threshold_unit="mad"`` EXPLICITLY (no noise_levels) so SI
+                # computes per-channel MAD and the threshold tracks the
+                # recording's noise floor -- they do not rely on the 'uv'
+                # default unit. (detect_threshold here uses the schema default
+                # 100, a microvolt threshold under this row's explicit 'uv'.)
                 {"threshold_unit": "uv", "noise_levels": [1.0]},
             ),
             # ClusterlessThresholderSchema is at schema_version=4:

@@ -341,8 +341,9 @@ def test_clusterless_default_matches_v1():
     callers who want raw-uV threshold semantics pass
     ``noise_levels=[1.0]`` explicitly (mirroring v1's
     ``default_clusterless``); callers who want MAD-multiplier
-    semantics omit it so SI computes per-channel noise internally.
-    The shipped v2 ``default`` row passes ``[1.0]`` for v1 parity.
+    semantics set ``threshold_unit='mad'`` (noise_levels omitted so SI
+    computes per-channel noise internally). The shipped v2 ``default``
+    row passes ``[1.0]`` for v1 parity.
     """
     blob = ClusterlessThresholderSchema().model_dump()
     assert blob["detect_threshold"] == 100.0
@@ -354,9 +355,11 @@ def test_clusterless_default_matches_v1():
     # invariants.
     assert "outputs" not in blob
     assert "random_chunk_kwargs" not in blob
-    # ``noise_levels`` is now optional; schema default is None
-    # (SI computes per-channel MAD). Explicit ``[1.0]`` opt-in is
-    # the path the v2 production ``default`` row takes.
+    # ``noise_levels`` is now optional; the schema field default is None.
+    # With the default ``threshold_unit='uv'`` the runtime derives [1.0] (a
+    # microvolt/native threshold); MAD-multiplier mode is opt-in via
+    # ``threshold_unit='mad'``. The v2 production ``default`` row passes
+    # ``[1.0]`` explicitly.
     assert blob["noise_levels"] is None
     explicit = ClusterlessThresholderSchema(noise_levels=[1.0]).model_dump()
     assert explicit["noise_levels"] == [1.0]
@@ -365,12 +368,13 @@ def test_clusterless_default_matches_v1():
 def test_clusterless_threshold_unit_explicit():
     """``threshold_unit`` makes the noise_levels unit a first-class knob.
 
-    The default is ``"mad"`` (threshold in MAD multiples; noise_levels
-    left None). ``"uv"`` is the raw-microvolt mode. Typos are rejected
+    The default is ``"uv"`` (the production/real-data 100 uV threshold; at
+    runtime 'uv' derives noise_levels=[1.0]). ``"mad"`` is the MAD-multiplier
+    mode (the simulation fixture's regime). Typos are rejected
     (``extra="forbid"`` + Literal), and the schema is at version 4.
     """
     default = ClusterlessThresholderSchema()
-    assert default.threshold_unit == "mad"
+    assert default.threshold_unit == "uv"
     assert default.noise_levels is None
     assert default.schema_version == 4
 

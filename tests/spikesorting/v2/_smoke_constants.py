@@ -27,15 +27,17 @@ from __future__ import annotations
 #: differ but the name is the same.
 SMOKE_CLUSTERLESS_PARAM_NAME = "smoke_clusterless_5uv"
 
-#: 5 uV threshold + ``locally_exclusive`` peak detection tuned for the
-#: MEArec smoke fixture. ``noise_levels`` is INTENTIONALLY OMITTED so
-#: SpikeInterface computes per-channel MAD and the threshold is
-#: interpreted as a MAD multiplier (matching the v1 baseline-capture
-#: row); forwarding ``[1.0]`` would silently flip the semantic to raw
-#: microvolts and explode the detection count by ~1,400x on this
-#: fixture.
+#: ~5x-MAD threshold + ``locally_exclusive`` peak detection tuned for the
+#: MEArec smoke fixture. ``threshold_unit="mad"`` is set EXPLICITLY (and
+#: ``noise_levels`` omitted) so SpikeInterface computes per-channel MAD and
+#: ``detect_threshold`` is interpreted as a MAD multiplier (matching the v1
+#: baseline-capture row). The schema default unit is 'uv' (the
+#: production/real-data threshold), so WITHOUT this explicit 'mad' the 5
+#: would be read as raw microvolts and explode the detection count by
+#: ~1,400x on this fixture.
 SMOKE_CLUSTERLESS_PARAMS: dict = {
     "detect_threshold": 5.0,
+    "threshold_unit": "mad",
     "method": "locally_exclusive",
     "peak_sign": "neg",
     "exclude_sweep_ms": 0.1,
