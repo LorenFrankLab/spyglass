@@ -3112,6 +3112,29 @@ def test_filtering_description_reflects_actual_steps():
 
 
 @pytest.mark.usefixtures("dj_conn")
+def test_to_int_unit_id_raises_typed_error_on_non_integer():
+    """A sorter unit_id that does not convert to int raises the typed
+    ``NonIntegerUnitIDError`` (a ValueError subclass), naming the offending id
+    and the remap guidance -- not a bare ``int()`` ValueError or a silent
+    coercion (audit test-hardening #10).
+    """
+    from spyglass.spikesorting.v2.exceptions import NonIntegerUnitIDError
+    from spyglass.spikesorting.v2.sorting import _to_int_unit_id
+
+    # Convertible ids pass through.
+    assert _to_int_unit_id(3) == 3
+    assert _to_int_unit_id("5") == 5
+
+    # A non-convertible label raises the TYPED error, naming the bad id.
+    with pytest.raises(NonIntegerUnitIDError, match="noise_3"):
+        _to_int_unit_id("noise_3")
+
+    # It remains a ValueError subclass so existing ``except ValueError``
+    # handlers still catch it.
+    assert issubclass(NonIntegerUnitIDError, ValueError)
+
+
+@pytest.mark.usefixtures("dj_conn")
 def test_sorting_master_ships_analyzer_folder_and_n_units_columns():
     """A30: the ``Sorting`` master declares ``analyzer_folder`` and
     ``n_units`` columns (semantic check via the heading, not a source match)."""

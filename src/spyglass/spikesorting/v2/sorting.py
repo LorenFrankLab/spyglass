@@ -93,6 +93,26 @@ def _clusterless_noise_levels(
     return [1.0] if threshold_unit == "uv" else None
 
 
+def _to_int_unit_id(unit_id):
+    """Coerce a sorter unit id to int, or raise the typed NonIntegerUnitIDError.
+
+    v2's ``Sorting.Unit`` PK stores int unit ids; a sorter that emits a
+    non-convertible id (e.g. a string label like ``"noise_3"``) must be
+    remapped before insertion. Raising the typed error -- not a bare
+    ``int()`` ValueError -- lets callers and tests discriminate this case.
+    """
+    from spyglass.spikesorting.v2.exceptions import NonIntegerUnitIDError
+
+    try:
+        return int(unit_id)
+    except (TypeError, ValueError) as exc:
+        raise NonIntegerUnitIDError(
+            f"Sorting.make: sorter returned unit_id {unit_id!r} that does "
+            "not convert to int. v2's Sorting.Unit stores int unit_ids; "
+            "remap before insertion if the sorter emits non-convertible IDs."
+        ) from exc
+
+
 _assert_v2_db_safe()
 schema = dj.schema("spikesorting_v2_sorting")
 
@@ -2402,7 +2422,6 @@ class Sorting(SpyglassMixin, dj.Computed):
         import spikeinterface as si
         from spikeinterface.core import template_tools
 
-        from spyglass.spikesorting.v2.exceptions import NonIntegerUnitIDError
         from spyglass.spikesorting.v2.recording import (
             RecordingSelection,
             SortGroupV2,
@@ -2452,15 +2471,7 @@ class Sorting(SpyglassMixin, dj.Computed):
 
         rows = []
         for unit_id in sorting.unit_ids:
-            try:
-                int_unit_id = int(unit_id)
-            except (TypeError, ValueError) as exc:
-                raise NonIntegerUnitIDError(
-                    f"Sorting.make: sorter returned unit_id {unit_id!r} "
-                    "that does not convert to int. v2's Sorting.Unit "
-                    "stores int unit_ids; remap before insertion if "
-                    "the sorter emits non-convertible IDs."
-                ) from exc
+            int_unit_id = _to_int_unit_id(unit_id)
             peak_chan = int(peak_channels[unit_id])
             if peak_chan not in electrode_by_id:
                 raise RuntimeError(

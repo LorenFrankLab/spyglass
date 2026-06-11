@@ -3820,6 +3820,13 @@ def test_run_v2_pipeline_clusterless_default_handles_zero_units_gracefully(
     empty_curated = CurationV2().get_sorting(curation_pk)
     assert empty_curated.get_num_units() == 0
 
+    # get_merged_sorting must also handle the zero-unit curation without
+    # reaching the ``max(unit_ids) + 1`` path on an empty unit set (audit
+    # test-hardening #14); the root curation (merges_applied=0, no proposed
+    # merges) returns the empty base sorting.
+    empty_merged = CurationV2().get_merged_sorting(curation_pk)
+    assert empty_merged.get_num_units() == 0
+
 
 # ---------- Sorting.make rollback file cleanup ---------------------------
 
