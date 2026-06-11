@@ -271,14 +271,19 @@ class CurationV2(SpyglassMixin, dj.Manual):
             group is rejected as a likely typo). The merged unit inherits
             the peak channel + amplitude of the highest-amplitude
             contributor. For ``apply_merge=True`` the merged unit gets a
-            fresh id, ``max(source unit_ids) + 1``, sequentially
-            incremented per group in USER-PROVIDED order -- v1 parity
-            (``v1/curation.py:359``). NOTE: the lazy merge path
-            (``get_merged_sorting`` on an apply_merge=False preview) reads
-            MergeGroup ordered by ``unit_id`` and so iterates by
-            kept-uid-ascending; when input order != kept-uid order,
-            applied and lazy paths assign the same fresh ids to different
-            content groups.
+            fresh id ``max(source unit_ids) + 1``, assigned in ASCENDING
+            MIN-CONTRIBUTOR order (``sorted(groups, key=min)``), INDEPENDENT
+            of the order the caller lists the groups -- a deliberate
+            departure from v1's user-iteration order (``v1/curation.py:359``;
+            see feature-parity.md). The lazy preview path
+            (``get_merged_sorting`` on an apply_merge=False curation) numbers
+            merges the same way, so the applied and lazy paths assign the
+            SAME fresh id to the SAME content group (guarded by
+            ``test_lazy_vs_applied_merge_frames_equal`` and
+            ``test_curation_two_merge_groups_assign_ids_in_canonical_min_order``).
+            Merged-unit ids are arbitrary labels: only which group receives
+            ``max+1`` changes with input order -- spike content and unit
+            count are identical.
             For ``apply_merge=False`` (preview) every original unit --
             contributors included -- keeps its own id in
             ``CurationV2.Unit``; the proposed merge is recorded in

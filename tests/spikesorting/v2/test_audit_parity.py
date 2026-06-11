@@ -3081,6 +3081,37 @@ def test_clusterless_schema_default_is_production_uv():
 
 
 @pytest.mark.usefixtures("dj_conn")
+def test_filtering_description_reflects_actual_steps():
+    """The persisted ``ElectricalSeries.filtering`` provenance is built from
+    the preprocessing steps that ACTUALLY ran, not the old hardcoded
+    "Bandpass filter + common reference" that misdescribed the no_filter /
+    reference_mode='none' artifact (audit finding #2).
+    """
+    from spyglass.spikesorting.v2._params.preprocessing import (
+        BandpassFilterParams,
+    )
+    from spyglass.spikesorting.v2.recording import Recording
+
+    bp = BandpassFilterParams(freq_min=300.0, freq_max=6000.0)
+
+    # No preprocessing at all -> must not claim a filter or a reference step.
+    none = Recording._filtering_description(None, "none")
+    assert none == "none (raw, no preprocessing)"
+    assert "bandpass" not in none.lower()
+    assert "common reference" not in none.lower()
+
+    # Bandpass only (reference_mode='none') -> no reference claim.
+    bp_only = Recording._filtering_description(bp, "none")
+    assert "bandpass filter 300-6000 Hz" in bp_only
+    assert "common reference" not in bp_only
+
+    # Bandpass + common reference -> both steps named (with the mode).
+    both = Recording._filtering_description(bp, "global_median")
+    assert "bandpass filter 300-6000 Hz" in both
+    assert "common reference (global_median)" in both
+
+
+@pytest.mark.usefixtures("dj_conn")
 def test_sorting_master_ships_analyzer_folder_and_n_units_columns():
     """A30: the ``Sorting`` master declares ``analyzer_folder`` and
     ``n_units`` columns (semantic check via the heading, not a source match)."""

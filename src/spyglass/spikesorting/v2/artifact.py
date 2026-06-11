@@ -1189,6 +1189,17 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
             # ``timestamps[end_f]`` -- an artifact sample -- in the
             # next valid interval, and ``Sorting._apply_artifact_mask``
             # would fail to mask that sample before the sort.
+            #
+            # When ``end_f == chunk_end`` (artifact reaches the chunk's last
+            # sample), ``end_f + 1`` indexes the NEXT chunk's first
+            # timestamp, so this intermediate interval can span the
+            # inter-chunk gap. That is harmless (audit finding #4):
+            # ``artifact_intervals`` is a local never exposed to consumers,
+            # and the per-chunk subtraction below clips each interval to its
+            # own base chunk. The half-open ``end`` is exactly the same
+            # array element the next chunk uses as its ``base_start``, so the
+            # clip is an identity (not a float coincidence) and the saved
+            # valid_times never cross the gap.
             end_time = timestamps[min(end_f + 1, n - 1)]
             artifact_intervals.append([timestamps[start_f], end_time])
 

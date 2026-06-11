@@ -1409,6 +1409,14 @@ class Recording(SpyglassMixin, dj.Computed):
             sort_group_channel_ids=channel_ids,
         )
 
+        # Provenance string for the persisted ElectricalSeries, built from the
+        # steps ACTUALLY applied (audit finding #2): the old hardcoded
+        # "Bandpass filter + common reference" misdescribed the saved artifact
+        # for the no_filter preset or reference_mode='none' (DANDI / archival).
+        filtering_description = self._filtering_description(
+            preproc_validated.bandpass_filter, reference_mode
+        )
+
         analysis_file_name = None
         try:
             (
@@ -1420,6 +1428,7 @@ class Recording(SpyglassMixin, dj.Computed):
                 nwb_file_name=nwb_file_name,
                 existing_analysis_file_name=existing_analysis_file_name,
                 timestamps_override=timestamps_override,
+                filtering_description=filtering_description,
             )
             # For a single contiguous interval, derive saved
             # start/end/duration from the persisted override
@@ -1816,11 +1825,33 @@ class Recording(SpyglassMixin, dj.Computed):
         return recording
 
     @staticmethod
+    def _filtering_description(bandpass_filter, reference_mode: str) -> str:
+        """``ElectricalSeries.filtering`` provenance from steps ACTUALLY run.
+
+        Built from the preprocessing that actually ran so the persisted NWB
+        metadata does not claim a bandpass / common-reference step that did
+        not happen -- e.g. the ``no_filter`` preset (``bandpass_filter``
+        None) or ``reference_mode='none'`` (audit finding #2). Important for
+        archival / DANDI export; the string is descriptive only and is not
+        read back internally.
+        """
+        steps = []
+        if bandpass_filter is not None:
+            steps.append(
+                f"bandpass filter {bandpass_filter.freq_min:g}-"
+                f"{bandpass_filter.freq_max:g} Hz"
+            )
+        if reference_mode != "none":
+            steps.append(f"common reference ({reference_mode})")
+        return "; ".join(steps) if steps else "none (raw, no preprocessing)"
+
+    @staticmethod
     def _write_nwb_artifact(
         recording,
         nwb_file_name: str,
         existing_analysis_file_name: str | None = None,
         timestamps_override=None,
+        filtering_description: str = "preprocessing applied",
     ) -> tuple[str, str, str]:
         """Write the preprocessed recording into an ``AnalysisNwbfile``.
 
@@ -1942,7 +1973,7 @@ class Recording(SpyglassMixin, dj.Computed):
                     data=data_iterator,
                     electrodes=table_region,
                     timestamps=timestamps_iterator,
-                    filtering="Bandpass filter + common reference",
+                    filtering=filtering_description,
                     description=(
                         f"Pre-motion preprocessed recording from "
                         f"{nwb_file_name} for spike sorting"

@@ -6,7 +6,12 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class BandpassFilterParams(BaseModel):
-    """Bandpass filter cutoffs applied before referencing.
+    """Bandpass filter cutoffs applied AFTER referencing.
+
+    The v2 runtime references first, then bandpass-filters (matching v1 at
+    ``v1/recording.py:643-671``); the order is load-bearing because it is
+    NOT commutative on the global-median common-reference branch, so do not
+    reorder the runtime to "filter then reference".
 
     Defaults ``freq_min=300.0``, ``freq_max=6000.0`` mirror v1's
     ``default`` ``SpikeSortingPreprocessingParameters`` row at
