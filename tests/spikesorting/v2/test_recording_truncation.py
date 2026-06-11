@@ -118,3 +118,116 @@ def test_sub_min_segment_length_sliver_is_not_false_truncation(
         f"saved duration {duration_s:.3f}s should match the kept chunk "
         f"{kept:.3f}s (sliver dropped), not the raw requested ~2.4 s"
     )
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_truncation_tolerance_scales_with_interval_count():
+    """The truncation tolerance grows with the consolidated-interval count.
+
+    Each kept interval's ``[start, end]`` snaps to the raw sample grid
+    INDEPENDENTLY, so the per-boundary quantization error (up to ~1 sample
+    each) accumulates across disjoint epochs. The pre-fix guard used a
+    fixed ``1.5 / fs`` slack, which false-positived on legitimate
+    multi-epoch sorts and then deleted the just-written file. The scaled
+    tolerance must accept that legitimate slop while still flagging a
+    genuine packet drop. Deterministic (no populate) guard for the policy.
+    """
+    from spyglass.spikesorting.v2.recording import Recording
+
+    fs = 30000.0
+    T = 1.0 / fs
+    fixed_old_slack = 1.5 * T  # the removed, interval-count-blind tolerance
+
+    for n in (1, 2, 3, 5, 10, 20):
+        tol = Recording._truncation_tolerance(n, fs)
+        # Worst-case legitimate "missing" from grid snapping is bounded by
+        # ~(n + 1) samples: n interval boundaries + the (N-1)/fs concat
+        # off-by-one. (Numerically the observed worst is even smaller.)
+        worst_legit_missing = (n + 1.0) * T
+        assert worst_legit_missing <= tol, (
+            f"n={n}: legitimate missing {worst_legit_missing:.3e}s exceeds "
+            f"scaled tolerance {tol:.3e}s -- a valid multi-epoch sort would "
+            "falsely raise RecordingTruncatedError"
+        )
+        # The OLD fixed slack would have raised on that same legitimate
+        # slop -- exactly the false positive the fix removes.
+        assert worst_legit_missing > fixed_old_slack, (
+            f"n={n}: expected the legitimate slop to exceed the old fixed "
+            "1.5-sample tolerance (otherwise this test proves nothing)"
+        )
+        # A genuine packet drop (far more than n+1.5 samples) still raises.
+        genuine_drop = (n + 100.0) * T
+        assert genuine_drop > tol, (
+            f"n={n}: a genuine {int(n + 100)}-sample drop must exceed "
+            "tolerance and still raise RecordingTruncatedError"
+        )
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_disjoint_multichunk_not_false_truncation(truncation_session):
+    """Two disjoint, off-grid epochs (both > min_segment_length) populate
+    without a false ``RecordingTruncatedError``, and the saved duration
+    matches the summed kept-epoch durations within sample-level slop.
+
+    Exercises the ``n_intended_intervals >= 2`` wiring end-to-end (the
+    sliver / over-request tests only reach ``n == 1``): the consolidated
+    interval count must be threaded make_compute -> make_insert so the
+    tolerance scales, otherwise the grid-snapping slop accumulates across
+    the two epochs and the guard spuriously fires.
+    """
+    from spyglass.common.common_interval import IntervalList
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+
+    nwb = truncation_session["nwb_file_name"]
+    raw_times = (
+        IntervalList
+        & {"nwb_file_name": nwb, "interval_list_name": "raw data valid times"}
+    ).fetch1("valid_times")
+    t0 = float(raw_times[0][0])
+    t_end = float(raw_times[-1][-1])
+    if (t_end - t0) < 2.7:
+        pytest.skip("smoke fixture too short for a 2-epoch disjoint test")
+
+    # Two ~1.2 s epochs (each > the 1.0 s default min_segment_length) with a
+    # 0.2 s gap, with deliberately non-sample-aligned endpoints.
+    c1 = (t0 + 0.05, t0 + 1.25)
+    c2 = (t0 + 1.45, t0 + 2.65)
+    valid_times = np.array([list(c1), list(c2)])
+    interval_name = f"v2_truncation_disjoint_{uuid.uuid4().hex[:8]}"
+    IntervalList.insert1(
+        {
+            "nwb_file_name": nwb,
+            "interval_list_name": interval_name,
+            "valid_times": valid_times,
+            "pipeline": "v2_truncation_test",
+        }
+    )
+
+    sg = int(
+        sorted((SortGroupV2 & truncation_session).fetch("sort_group_id"))[0]
+    )
+    rec_pk = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb,
+            "sort_group_id": sg,
+            "interval_list_name": interval_name,
+            "preproc_params_name": "default_franklab",
+            "team_name": "v2_test_team",
+        }
+    )
+
+    # Must NOT raise RecordingTruncatedError on a valid disjoint request.
+    Recording.populate(rec_pk, reserve_jobs=False)
+    assert Recording & rec_pk, "disjoint multi-epoch Recording.populate failed"
+
+    duration_s = float((Recording & rec_pk).fetch1("duration_s"))
+    kept = (c1[1] - c1[0]) + (c2[1] - c2[0])  # ~2.4 s
+    assert abs(duration_s - kept) < 0.01, (
+        f"saved duration {duration_s:.4f}s should match the summed kept "
+        f"epochs {kept:.4f}s within sample-level slop (both epochs kept)"
+    )

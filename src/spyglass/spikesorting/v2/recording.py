@@ -796,6 +796,7 @@ class RecordingComputed(NamedTuple):
     sel: dict
     sort_valid_times: np.ndarray
     expected_saved_total: float
+    n_intended_intervals: int
 
 
 @schema
@@ -1038,6 +1039,15 @@ class Recording(SpyglassMixin, dj.Computed):
         expected_saved_total = float(
             sum(end - start for start, end in intended_intervals)
         )
+        # Number of CONSOLIDATED intended intervals (post intersect +
+        # min_segment_length filtering). The truncation tolerance in
+        # ``make_insert`` scales with this: each interval's [start, end] is
+        # snapped to the raw sample grid independently, so the per-boundary
+        # quantization error (up to ~1 sample/interval) ACCUMULATES across
+        # disjoint epochs. A fixed 1.5-sample slack false-positives on a
+        # legitimate multi-epoch sort (~13% single-interval, rising with
+        # interval count) and then deletes the just-written file.
+        n_intended_intervals = len(intended_intervals)
 
         # A sort interval that runs PAST the raw recording's coverage is clipped
         # to what exists (the intersect above) rather than erroring -- but the
@@ -1079,7 +1089,30 @@ class Recording(SpyglassMixin, dj.Computed):
             sel=sel,
             sort_valid_times=sort_valid_times,
             expected_saved_total=expected_saved_total,
+            n_intended_intervals=n_intended_intervals,
         )
+
+    @staticmethod
+    def _truncation_tolerance(
+        n_intended_intervals: int, sampling_frequency: float
+    ) -> float:
+        """Sample-grid tolerance for the ``make_insert`` truncation guard.
+
+        ``expected_saved_total`` is a continuous interval-length sum while
+        the saved duration is the sample-snapped span of the time-stripped
+        concat. Each consolidated interval's ``[start, end]`` is snapped to
+        the raw sample grid INDEPENDENTLY, so the per-boundary quantization
+        error (up to ~1 sample per interval) accumulates with the interval
+        count; the ``+1.5`` then covers the ``(N-1)/fs`` concat off-by-one.
+
+        A fixed ``1.5 / fs`` slack (the pre-fix value) false-positives on
+        legitimate disjoint multi-epoch sorts -- numerically ~13% of
+        single-interval and ~40% of 20-interval requests -- and then
+        deletes the just-written file. Scaling by interval count drops that
+        to 0% while still catching genuine packet loss / interval
+        misalignment, which drops far more than ``n + 1.5`` samples.
+        """
+        return (n_intended_intervals + 1.5) / sampling_frequency
 
     def make_insert(
         self,
@@ -1095,6 +1128,7 @@ class Recording(SpyglassMixin, dj.Computed):
         sel,
         sort_valid_times,
         expected_saved_total,
+        n_intended_intervals,
     ):
         """Truncation check + atomic registration inside the framework transaction.
 
@@ -1112,8 +1146,11 @@ class Recording(SpyglassMixin, dj.Computed):
         slop. Persisted ``ElectricalSeries`` length parity is enforced
         by the writer/PyNWB path; this guard compares requested chunk
         duration against the in-memory recording surface. Tolerance is
-        1.5 sample intervals so the off-by-one NWB boundary
-        (``last_ts = (N-1)/fs``, not ``N/fs``) does not trip the guard.
+        ``(n_intended_intervals + 1.5)`` sample intervals: the +1.5 covers
+        the off-by-one NWB boundary (``last_ts = (N-1)/fs``, not ``N/fs``),
+        and the per-interval term absorbs the independent sample-grid
+        snapping of each consolidated interval, which otherwise accumulates
+        across disjoint epochs and spuriously trips a fixed 1.5-sample slack.
         """
         import pathlib as _pathlib
 
@@ -1135,7 +1172,9 @@ class Recording(SpyglassMixin, dj.Computed):
         # truncation. Using ``expected_saved_total`` leaves the guard
         # firing only on genuine packet loss / interval misalignment.
         saved_total = float(saved_end - saved_start)
-        tolerance = 1.5 / sampling_frequency
+        tolerance = self._truncation_tolerance(
+            n_intended_intervals, sampling_frequency
+        )
         missing = expected_saved_total - saved_total
         if missing > tolerance:
             # File written but never registered: clean it up before
