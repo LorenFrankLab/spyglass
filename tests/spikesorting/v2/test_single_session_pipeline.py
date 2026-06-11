@@ -6413,6 +6413,134 @@ def test_applied_and_lazy_merge_ids_match_for_out_of_order_groups(
         )
 
 
+@pytest.mark.slow
+@pytest.mark.integration
+def test_v2_sorting_nwb_excludes_parent_units(dj_conn, tmp_path, monkeypatch):
+    """The v2 Sorting analysis NWB contains ONLY the v2 sorted units, never
+    the raw NWB's parent ``/units`` table (#1437). Plant a non-empty
+    ``/units`` on a copy of the fixture, run Recording->Artifact->Sorting with
+    a planted 2-unit sorter, then assert the analysis NWB's unit ids equal
+    exactly ``Sorting.Unit`` and contain NONE of the planted parent ids
+    (audit test-hardening #11). All MEArec fixtures keep the parent ``/units``
+    empty, so this is the only exercise of the strip invariant.
+    """
+    from pathlib import Path
+
+    import numpy as _np
+    import pynwb
+    import spikeinterface as si
+
+    from spyglass.common import AnalysisNwbfile
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+    from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
+
+    fixture = (
+        Path(__file__).resolve().parent
+        / "fixtures"
+        / "mearec_polymer_smoke.nwb"
+    )
+    if not fixture.exists():
+        pytest.skip("smoke fixture not found")
+
+    # Plant a non-empty /units table (parent ids 100/101/102) on a copy via
+    # the pynwb modify-and-export pattern.
+    parent_ids = [100, 101, 102]
+    planted = tmp_path / "planted_units_src.nwb"
+    with pynwb.NWBHDF5IO(str(fixture), mode="r") as read_io:
+        nwbf = read_io.read()
+        nwbf.add_unit(spike_times=[0.01, 0.02, 0.03], id=parent_ids[0])
+        nwbf.add_unit(spike_times=[0.04, 0.05], id=parent_ids[1])
+        nwbf.add_unit(spike_times=[0.06], id=parent_ids[2])
+        with pynwb.NWBHDF5IO(str(planted), mode="w") as write_io:
+            write_io.export(src_io=read_io, nwbfile=nwbf)
+
+    nwb_file_name = copy_and_insert_nwb(planted, dest_name="mearec_1437.nwb")
+    session = {"nwb_file_name": nwb_file_name}
+    _clean_session_v2(session)
+    initialize_v2_defaults()
+    LabTeam.insert1(
+        {"team_name": "v2_test_team", "team_description": "v2 #1437"},
+        skip_duplicates=True,
+    )
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    sort_group_id = int(
+        sorted((SortGroupV2 & session).fetch("sort_group_id"))[0]
+    )
+
+    # Planted 2-unit sorter -> v2 unit ids {0, 1}, disjoint from the parent
+    # ids {100, 101, 102} so any leak is unambiguous.
+    def _planted_two_unit_sorter(
+        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None
+    ):
+        samples = _np.array([200, 400, 600, 800], dtype=_np.int64)
+        labels = _np.array([0, 1, 0, 1], dtype=_np.int32)
+        return si.NumpySorting.from_samples_and_labels(
+            [samples], [labels], recording.get_sampling_frequency()
+        )
+
+    monkeypatch.setattr(
+        Sorting, "_run_sorter", staticmethod(_planted_two_unit_sorter)
+    )
+
+    rec_pk = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+            "interval_list_name": "raw data valid times",
+            "preproc_params_name": "default_franklab",
+            "team_name": "v2_test_team",
+        }
+    )
+    Recording.populate(rec_pk, reserve_jobs=False)
+    art_pk = ArtifactSelection.insert_selection(
+        {
+            "recording_id": rec_pk["recording_id"],
+            "artifact_params_name": "none",
+        }
+    )
+    ArtifactDetection.populate(art_pk, reserve_jobs=False)
+    sort_pk = SortingSelection.insert_selection(
+        {
+            "recording_id": rec_pk["recording_id"],
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": "default",
+            "artifact_id": art_pk["artifact_id"],
+        }
+    )
+    Sorting.populate(sort_pk, reserve_jobs=False)
+
+    v2_unit_ids = {int(u) for u in (Sorting.Unit & sort_pk).fetch("unit_id")}
+    assert v2_unit_ids == {0, 1}, f"planted sorter expected, got {v2_unit_ids}"
+
+    analysis_file = (Sorting & sort_pk).fetch1("analysis_file_name")
+    abs_path = AnalysisNwbfile.get_abs_path(analysis_file)
+    with pynwb.NWBHDF5IO(abs_path, mode="r") as io:
+        anwb = io.read()
+        nwb_unit_ids = (
+            set() if anwb.units is None else {int(u) for u in anwb.units.id[:]}
+        )
+
+    # The analysis NWB units are EXACTLY the v2 sort, and none of the planted
+    # parent ids leaked through ``AnalysisNwbfile().create``.
+    assert nwb_unit_ids == v2_unit_ids
+    assert not (
+        set(parent_ids) & nwb_unit_ids
+    ), "parent /units leaked into the v2 Sorting analysis NWB (#1437)"
+
+    _clean_session_v2(session)
+
+
 def test_curation_merge_ids_assigned_in_canonical_min_order(dj_conn):
     """Applied-path fresh merged ids are numbered in ascending
     min-contributor order, INDEPENDENT of user-input group order, so they
