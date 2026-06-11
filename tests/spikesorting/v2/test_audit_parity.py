@@ -3105,10 +3105,41 @@ def test_filtering_description_reflects_actual_steps():
     assert "bandpass filter 300-6000 Hz" in bp_only
     assert "common reference" not in bp_only
 
-    # Bandpass + common reference -> both steps named (with the mode).
+    # Bandpass + common reference -> both steps named, in the RUNTIME APPLY
+    # order (reference first, then bandpass -- the order is non-commutative
+    # and load-bearing, so the provenance must not reverse it).
     both = Recording._filtering_description(bp, "global_median")
     assert "bandpass filter 300-6000 Hz" in both
     assert "common reference (global_median)" in both
+    assert both.index("common reference") < both.index(
+        "bandpass filter"
+    ), "provenance must list reference before bandpass (the apply order)"
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_clusterless_runtime_rejects_bypassed_mad_footgun():
+    """Defense-in-depth at SORT time: a clusterless params blob that bypassed
+    the SorterParameters insert validator (written via ``update1`` or
+    predating the validator) is still caught -- a microvolt-scale
+    detect_threshold left in MAD units with no noise_levels raises rather
+    than running a silent ~zero-detection sort (audit follow-up). The
+    runtime consumes the fetched blob without re-validating the schema, so
+    the guard must live in ``_run_clusterless_thresholder`` too.
+    """
+    import spikeinterface.core as sc
+
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    rec = sc.generate_recording(
+        num_channels=4, durations=[0.5], sampling_frequency=30000.0
+    )
+    # The footgun combo: detect_threshold=100 in MAD units, no noise_levels.
+    with pytest.raises(ValueError, match="MAD multiplier"):
+        Sorting._run_clusterless_thresholder(
+            sorter_params={"detect_threshold": 100.0, "threshold_unit": "mad"},
+            recording=rec,
+            job_kwargs=None,
+        )
 
 
 @pytest.mark.usefixtures("dj_conn")

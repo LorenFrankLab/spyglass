@@ -6077,6 +6077,8 @@ def test_curation_n_spikes_matches_apply_merge(dj_conn):
     assert preview == {0: 100, 1: 40, 2: 7}, preview
 
 
+@pytest.mark.slow
+@pytest.mark.integration
 def test_merge_group_contributor_fk_rejects_unknown_unit(populated_sorting):
     """A direct ``CurationV2.MergeGroup`` insert with a contributor that is
     not a real ``Sorting.Unit`` row raises ``IntegrityError``.

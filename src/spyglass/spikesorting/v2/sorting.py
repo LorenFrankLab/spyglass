@@ -319,8 +319,12 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
                 # ``threshold_unit="mad"`` EXPLICITLY (no noise_levels) so SI
                 # computes per-channel MAD and the threshold tracks the
                 # recording's noise floor -- they do not rely on the 'uv'
-                # default unit. (detect_threshold here uses the schema default
-                # 100, a microvolt threshold under this row's explicit 'uv'.)
+                # default unit.
+                #
+                # THIS shipped ``default`` row sets ``threshold_unit="uv"``
+                # explicitly and takes detect_threshold from the schema
+                # default (100); the runtime ``scale_to_uV`` makes that a
+                # true 100 uV threshold.
                 {"threshold_unit": "uv", "noise_levels": [1.0]},
             ),
             # ClusterlessThresholderSchema is at schema_version=4:
@@ -1894,11 +1898,39 @@ class Sorting(SpyglassMixin, dj.Computed):
         # ``threshold_unit`` is a Spyglass-side knob, not a detect_peaks
         # kwarg: strip it and use it to resolve the noise_levels
         # precedence (explicit noise_levels win; otherwise "uv" -> [1.0]
-        # so detect_threshold reads in the recording's native units --
-        # raw ADC counts under v2's gain-free preprocessing, not true uV
-        # unless gain-scaled; "mad" -> None so SI estimates per-channel
-        # MAD).
+        # AND the recording is scaled to microvolts below via
+        # ``scale_to_uV``, so detect_threshold is a TRUE microvolt
+        # threshold; "mad" -> None so SI estimates per-channel MAD and
+        # detect_threshold is a MAD multiplier).
         threshold_unit = params.pop("threshold_unit", "mad")
+        # Defense-in-depth (audit follow-up): the SorterParameters insert
+        # validator rejects this combo, but it is bypassed by ``update1`` and
+        # by rows written before the validator existed, and make/sort-time
+        # consumes the fetched blob WITHOUT re-validating. A microvolt-scale
+        # detect_threshold left in MAD units with no explicit noise_levels
+        # makes SI treat e.g. 100 as a 100x-MAD threshold and detect almost
+        # nothing -- a silent zero-unit sort. Re-assert the guard here so it
+        # surfaces regardless of how the row reached the detector.
+        from spyglass.spikesorting.v2._params.sorter import (
+            _MAX_PLAUSIBLE_MAD_MULTIPLIER,
+        )
+
+        if (
+            threshold_unit == "mad"
+            and params.get("noise_levels") is None
+            and float(params.get("detect_threshold", 0.0))
+            > _MAX_PLAUSIBLE_MAD_MULTIPLIER
+        ):
+            raise ValueError(
+                "clusterless_thresholder: detect_threshold="
+                f"{params.get('detect_threshold')} with threshold_unit='mad' "
+                "and no noise_levels is an implausibly large MAD multiplier "
+                f"(> {_MAX_PLAUSIBLE_MAD_MULTIPLIER}); SpikeInterface would "
+                "estimate per-channel MAD and detect almost nothing. Use "
+                "threshold_unit='uv' for a microvolt/native threshold, or a "
+                "MAD multiplier near 5. (This row likely bypassed the "
+                "SorterParameters insert validator via update1 or predates it.)"
+            )
         nl_in = _clusterless_noise_levels(
             params.get("noise_levels"), threshold_unit
         )

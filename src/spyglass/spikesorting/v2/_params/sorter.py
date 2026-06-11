@@ -234,11 +234,13 @@ class ClusterlessThresholderSchema(BaseModel):
         default="uv",
         description=(
             "How detect_threshold is interpreted when noise_levels is "
-            "left unset: 'uv' (the default) derives noise_levels=[1.0] so "
-            "the threshold is in the recording's native units (raw ADC "
-            "counts under v2's gain-free preprocessing, not true microvolts "
-            "unless gain-scaled), and 'mad' lets SpikeInterface estimate "
-            "per-channel MAD (a multiplier). The default 'uv' pairs with the "
+            "left unset: 'uv' (the default) derives noise_levels=[1.0] AND "
+            "the runtime scales the recording to microvolts (scale_to_uV, "
+            "using the stored NWB gain) before detection, so detect_threshold "
+            "is a TRUE microvolt threshold (for unity-gain Frank-lab data it "
+            "equals the old raw-count value); 'mad' lets SpikeInterface "
+            "estimate per-channel MAD (a multiplier). The default 'uv' pairs "
+            "with the "
             "default detect_threshold=100 to give the production/real-data "
             "threshold; the simulation fixture opts into 'mad' explicitly. "
             "When noise_levels IS set explicitly it takes precedence and is "

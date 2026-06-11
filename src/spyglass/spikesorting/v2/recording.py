@@ -1833,16 +1833,19 @@ class Recording(SpyglassMixin, dj.Computed):
         not happen -- e.g. the ``no_filter`` preset (``bandpass_filter``
         None) or ``reference_mode='none'`` (audit finding #2). Important for
         archival / DANDI export; the string is descriptive only and is not
-        read back internally.
+        read back internally. Steps are listed in the order the runtime
+        APPLIES them -- common reference first, then bandpass filter (see
+        ``_apply_pre_motion_preprocessing``) -- since that order is
+        non-commutative and load-bearing for v1 parity.
         """
         steps = []
+        if reference_mode != "none":
+            steps.append(f"common reference ({reference_mode})")
         if bandpass_filter is not None:
             steps.append(
                 f"bandpass filter {bandpass_filter.freq_min:g}-"
                 f"{bandpass_filter.freq_max:g} Hz"
             )
-        if reference_mode != "none":
-            steps.append(f"common reference ({reference_mode})")
         return "; ".join(steps) if steps else "none (raw, no preprocessing)"
 
     @staticmethod
@@ -1851,7 +1854,8 @@ class Recording(SpyglassMixin, dj.Computed):
         nwb_file_name: str,
         existing_analysis_file_name: str | None = None,
         timestamps_override=None,
-        filtering_description: str = "preprocessing applied",
+        *,
+        filtering_description: str,
     ) -> tuple[str, str, str]:
         """Write the preprocessed recording into an ``AnalysisNwbfile``.
 

@@ -140,6 +140,10 @@ def test_truncation_tolerance_scales_with_interval_count():
 
     for n in (1, 2, 3, 5, 10, 20):
         tol = Recording._truncation_tolerance(n, fs)
+        # Pin the exact coefficient so a silent change of 1.5 -> e.g. 1.2 is
+        # caught, not just the inequality bounds below. Use the SAME
+        # operation order as production ((n+1.5)/fs, not *T) for bit-equality.
+        assert tol == (n + 1.5) / fs
         # Worst-case legitimate "missing" from grid snapping is bounded by
         # ~(n + 1) samples: n interval boundaries + the (N-1)/fs concat
         # off-by-one. (Numerically the observed worst is even smaller.)
