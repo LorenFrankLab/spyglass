@@ -552,7 +552,9 @@ def test_write_nwb_artifact_rejects_heterogeneous_gains(
 
     with pytest.raises(ValueError, match="heterogeneous channel gains"):
         Recording._write_nwb_artifact(
-            rec, polymer_smoke_session["nwb_file_name"]
+            rec,
+            polymer_smoke_session["nwb_file_name"],
+            filtering_description="test",
         )
 
 
@@ -3466,6 +3468,7 @@ def test_recording_make_rejects_heterogeneous_gains(populated_recording):
         Recording._write_nwb_artifact(
             recording=synthetic_rec,
             nwb_file_name=nwb_file_name,
+            filtering_description="test",
         )
 
 

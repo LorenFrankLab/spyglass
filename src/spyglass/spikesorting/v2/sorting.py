@@ -1902,7 +1902,15 @@ class Sorting(SpyglassMixin, dj.Computed):
         # ``scale_to_uV``, so detect_threshold is a TRUE microvolt
         # threshold; "mad" -> None so SI estimates per-channel MAD and
         # detect_threshold is a MAD multiplier).
-        threshold_unit = params.pop("threshold_unit", "mad")
+        #
+        # The fallback is "uv" (matching ClusterlessThresholderSchema's
+        # default), NOT "mad": a row missing ``threshold_unit`` -- a legacy
+        # pre-v4 row, or a v1-parity default-shaped row carrying only
+        # noise_levels=[1.0] -- is interpreted as a microvolt threshold and
+        # scaled, not silently thresholded in native counts (which on Intan
+        # 0.195 uV/count data would make "100" ~19.5 uV instead of 100 uV).
+        # The runtime fallback must agree with the schema default.
+        threshold_unit = params.pop("threshold_unit", "uv")
         # Defense-in-depth (audit follow-up): the SorterParameters insert
         # validator rejects this combo, but it is bypassed by ``update1`` and
         # by rows written before the validator existed, and make/sort-time

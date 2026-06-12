@@ -55,7 +55,11 @@ def test_clusterless_uv_threshold_scales_input_to_microvolts(
         "spikeinterface.sortingcomponents.peak_detection.detect_peaks", _spy
     )
 
-    params = {"detect_threshold": 100.0, "threshold_unit": threshold_unit}
+    # detect_threshold=5 is sane for BOTH units (a 5x-MAD multiplier in 'mad'
+    # mode -- a 100 there would trip the sort-time implausible-MAD guard). The
+    # assertions below check the SCALED INPUT max, not the threshold value, so
+    # the magnitude is irrelevant to what this test pins.
+    params = {"detect_threshold": 5.0, "threshold_unit": threshold_unit}
     if threshold_unit == "uv":
         params["noise_levels"] = [1.0]
     Sorting._run_clusterless_thresholder(
@@ -73,6 +77,48 @@ def test_clusterless_uv_threshold_scales_input_to_microvolts(
             f"'mad' must not scale the input; got max {seen_max} "
             "(expected 200 raw counts)"
         )
+
+
+def test_clusterless_missing_threshold_unit_defaults_to_uv(
+    monkeypatch, dj_conn
+):
+    """A clusterless params blob MISSING ``threshold_unit`` (a legacy pre-v4
+    row, or a v1-parity default-shaped row carrying only ``noise_levels=[1.0]``)
+    falls back to 'uv' -- matching the schema default -- so the detector input
+    is scaled to microvolts, NOT thresholded in raw counts. Guards the runtime
+    fallback against silently disagreeing with the schema default: with the old
+    'mad' fallback the detector would see 200 raw counts instead of 100 uV on
+    this 0.5 uV/count rig (audit follow-up P1).
+    """
+    import spikeinterface.sortingcomponents.peak_detection as pd_mod
+
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    rec = _rec_with_gain(np.full((200, 2), 200.0), gain=0.5)
+    captured = {}
+
+    def _spy(recording, *, method, method_kwargs, job_kwargs):
+        captured["recording"] = recording
+        return np.zeros(
+            0, dtype=[("sample_index", "int64"), ("channel_index", "int64")]
+        )
+
+    monkeypatch.setattr(pd_mod, "detect_peaks", _spy)
+    monkeypatch.setattr(
+        "spikeinterface.sortingcomponents.peak_detection.detect_peaks", _spy
+    )
+
+    # No threshold_unit -> must default to 'uv' and scale to microvolts.
+    Sorting._run_clusterless_thresholder(
+        sorter_params={"detect_threshold": 100.0, "noise_levels": [1.0]},
+        recording=rec,
+        job_kwargs=None,
+    )
+    seen_max = captured["recording"].get_traces().max()
+    assert np.isclose(seen_max, 100.0), (
+        "a row missing threshold_unit must fall back to 'uv' (scale to "
+        f"microvolts), not raw counts; got max {seen_max} (expected 100 uV)"
+    )
 
 
 def test_clusterless_uv_requires_channel_gains(monkeypatch, dj_conn):
