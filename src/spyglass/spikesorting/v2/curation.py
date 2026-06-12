@@ -33,6 +33,7 @@ from spyglass.spikesorting.v2._units_nwb import (
     numpysorting_from_abs_times,
     read_units_abs_spike_times,
     recording_timestamps,
+    write_curated_units_nwb,
 )
 from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 from spyglass.spikesorting.v2.utils import (
@@ -644,195 +645,21 @@ class CurationV2(SpyglassMixin, dj.Manual):
     ) -> tuple[str, str, str, dict]:
         """Write the curated-units NWB.
 
-        Returns ``(analysis_file_name, units_object_id, nwb_file_name,
-        n_spikes_by_uid)`` where ``n_spikes_by_uid`` maps each written
-        unit_id to the length of its STORED (post cross-unit dedup) spike
-        train, so the caller can override ``CurationV2.Unit.n_spikes`` and
-        keep the ``n_spikes == len(get_sorting train)`` invariant.
-
-        With ``apply_merge=True`` the kept unit's spike train is the
-        sorted union of its contributors' spike trains and its id is a
-        fresh ``max(source unit_ids) + 1`` assigned in ascending
-        min-contributor order (so the lazy ``get_merged_sorting`` preview
-        assigns matching ids -- see ``_build_curated_unit_rows``); the
-        absorbed contributors are dropped from both the NWB and
-        ``CurationV2.Unit``. Surviving source units are written first (in
-        source order) and merged ids are appended in that same
-        ascending-min order.
-
-        With ``apply_merge=False`` (preview) every original unit is
-        written 1:1 -- contributors included -- so the proposed merge
-        can be reviewed before committing; the merge structure lives in
-        ``CurationV2.MergeGroup`` and is reconstructed by
-        ``get_merged_sorting`` on demand.
+        Thin delegator to :func:`._units_nwb.write_curated_units_nwb`;
+        kept as a ``CurationV2`` classmethod because ``insert_curation``
+        calls ``cls._stage_curated_units_nwb(...)`` and the v1-parity AST
+        test (``test_v1_parity.py``) asserts that call by name. The NWB
+        staging IO -- resolving the source sort's units NWB, the
+        ``apply_merge`` cross-unit dedup, and the ragged ``curation_label``
+        column -- lives in the service module. Returns
+        ``(analysis_file_name, units_object_id, nwb_file_name,
+        n_spikes_by_uid)``.
         """
-        import numpy as _np
-        import pynwb
-
-        from spyglass.spikesorting.v2.recording import RecordingSelection
-
-        rec_source = SortingSelection.RecordingSource & {
-            "sorting_id": sorting_id
-        }
-        if not rec_source:
-            raise NotImplementedError(
-                "CurationV2.insert_curation: only RecordingSource sorts "
-                "are supported today; concat-source sorts are not yet "
-                "implemented."
-            )
-        recording_id = rec_source.fetch1("recording_id")
-        nwb_file_name = (
-            RecordingSelection & {"recording_id": recording_id}
-        ).fetch1("nwb_file_name")
-
-        # Source the pre-curation units' ABSOLUTE spike times straight
-        # from the Sorting units NWB. Reading absolute seconds (not a
-        # frame-based SI object) keeps the curated NWB's stored times
-        # exact and gap-correct for disjoint recordings -- a frame->time
-        # round-trip through a NumpySorting (t_start=0) would drop the
-        # absolute offset and the wall-clock gaps.
-        src_abs_path = AnalysisNwbfile.get_abs_path(
-            (Sorting & {"sorting_id": sorting_id}).fetch1("analysis_file_name")
-        )
-        abs_times_by_uid = read_units_abs_spike_times(src_abs_path)
-
-        analysis_file_name = AnalysisNwbfile().create(
-            nwb_file_name=nwb_file_name
-        )
-        analysis_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
-
-        with pynwb.NWBHDF5IO(
-            path=analysis_abs_path, mode="a", load_namespaces=True
-        ) as io:
-            nwbf = io.read()
-            # Add the ``curation_label`` column ONLY when at least one
-            # unit will be written. Adding a column ahead of any
-            # ``add_unit`` call would create an empty Units table whose
-            # ``curation_label`` column has no rows; pynwb's writer
-            # then fails dtype inference at ``io.write`` with
-            # "Cannot infer dtype of empty list or tuple". For the
-            # empty-curation case (zero kept units after filtering, or
-            # the contrived all-merged-away case) we initialize a
-            # bare ``pynwb.misc.Units`` without the column so the
-            # write succeeds.
-            # Resolve which units get written + their spike trains:
-            #   apply_merge=True  -> kept units; a merged head gets the
-            #     concatenated contributor trains.
-            #   apply_merge=False -> every original unit 1:1 (v1 preview
-            #     parity, ``v1/curation.py:359``); proposed merges stay in
-            #     MergeGroup for lazy application via get_merged_sorting.
-            if apply_merge:
-                write_specs = []
-                for kept_uid, contribs in kept_unit_to_contributors.items():
-                    if len(contribs) > 1:
-                        # Membership-aware 0.4 ms dedup of cross-unit
-                        # double-detections (a neuron's refractory period
-                        # makes any sub-0.4 ms cross-unit pair one physical
-                        # spike). Matches v1's lazy get_merged_sorting and
-                        # v2's own get_merged_sorting, so the stored
-                        # (apply_merge=True) train equals the previewed one.
-                        spike_times = _dedup_merged_spike_times(
-                            [abs_times_by_uid[int(u)] for u in contribs],
-                            _MERGE_DEDUP_DELTA_MS / 1000.0,
-                        )
-                    else:
-                        spike_times = abs_times_by_uid[int(kept_uid)]
-                    write_specs.append((int(kept_uid), spike_times))
-            else:
-                write_specs = [
-                    (int(uid), abs_times_by_uid[int(uid)])
-                    for uid in sorted(abs_times_by_uid)
-                ]
-            # ``n_spikes`` per written unit is the length of its STORED
-            # (post-dedup) train, so the invariant
-            # ``CurationV2.Unit.n_spikes == len(get_sorting train)`` holds
-            # even after cross-unit dedup removes double-detections. The
-            # caller overrides ``unit_rows`` with this map.
-            n_spikes_by_uid = {
-                int(uid): int(len(spike_times))
-                for uid, spike_times in write_specs
-            }
-
-            if write_specs:
-                # ``curation_label`` is written as an ``index=True``
-                # (ragged) column with a per-unit list of label
-                # strings, matching v1's ``v1/curation.py:398-403``
-                # shape. External readers (e.g.
-                # ``v1/figurl_curation.py:83-101`` which does
-                # ``list(nwb_sorting.get('curation_label', []))``)
-                # expect a list per unit and would misparse a
-                # comma-separated string by splitting on every
-                # character. The ``CurationV2.UnitLabel`` docstring
-                # already described this shape.
-                #
-                # v1's pattern is to call ``add_unit(...)`` first,
-                # then add the column with ``data=label_values``
-                # AFTER -- this gives pynwb a full per-unit
-                # list-of-lists to infer dtype from. If we
-                # pre-declare the column and pass labels per
-                # ``add_unit``, pynwb fails dtype inference when
-                # all labels happen to be empty (the no-labels
-                # case).
-                all_labels: list[list[str]] = []
-                for unit_id, spike_times in write_specs:
-                    lbl_list = labels.get(int(unit_id), [])
-                    label_list = [
-                        (
-                            lbl.value
-                            if isinstance(lbl, CurationLabel)
-                            else str(lbl)
-                        )
-                        for lbl in lbl_list
-                    ]
-                    all_labels.append(label_list)
-                    nwbf.add_unit(
-                        spike_times=_np.asarray(spike_times, dtype=_np.float64),
-                        id=int(unit_id),
-                    )
-                # Only add the column when at least one unit
-                # carries a non-empty label list. pynwb's dtype
-                # inference fails on an all-empty list-of-lists
-                # ("Cannot infer dtype of empty list"); the
-                # column-missing case is handled by downstream
-                # readers via ``nwb_sorting.get('curation_label',
-                # [])``.
-                if any(all_labels):
-                    nwbf.add_unit_column(
-                        name="curation_label",
-                        description=(
-                            "Curation label list from "
-                            "CurationV2.insert_curation; one entry "
-                            "per label, empty list if unlabeled. "
-                            "Indexed (ragged) column matching v1's "
-                            "shape at v1/curation.py:398-403."
-                        ),
-                        data=all_labels,
-                        index=True,
-                    )
-            else:
-                # Empty curation: initialize an empty Units table so
-                # ``.object_id`` is defined and ``io.write`` does not
-                # try to infer a dtype for any column.
-                nwbf.units = pynwb.misc.Units(
-                    name="units",
-                    description=(
-                        "Empty units table (curation kept zero units)."
-                    ),
-                )
-            units_object_id = nwbf.units.object_id
-            io.write(nwbf)
-
-        # The AnalysisNwbfile DB-row registration (.add) is deliberately
-        # NOT done here -- the caller does it inside its transaction
-        # block so the row rolls back atomically if any of the
-        # CurationV2 / Unit / UnitLabel / merge-insert steps fail.
-        # The file on disk is the only side effect left to clean up on
-        # rollback.
-        return (
-            analysis_file_name,
-            units_object_id,
-            nwb_file_name,
-            n_spikes_by_uid,
+        return write_curated_units_nwb(
+            sorting_id=sorting_id,
+            kept_unit_to_contributors=kept_unit_to_contributors,
+            apply_merge=apply_merge,
+            labels=labels,
         )
 
     # ---- Accessors -------------------------------------------------------
