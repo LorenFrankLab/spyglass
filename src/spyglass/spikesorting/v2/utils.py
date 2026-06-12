@@ -45,6 +45,38 @@ def transaction_or_noop(connection):
             yield
 
 
+def _is_duplicate_key_error(exc: BaseException) -> bool:
+    """True iff ``exc`` is a duplicate-PRIMARY-KEY violation.
+
+    The deterministic-id selection helpers
+    (``RecordingSelection``/``ArtifactSelection``/``SortingSelection``
+    ``insert_selection``) derive each master PK from the selection's
+    logical identity, then insert. Two callers racing on the same logical
+    selection compute the SAME PK, so the loser's insert violates the PK
+    uniqueness constraint; the helper catches that, refetches the winner's
+    row, and returns it. This predicate decides whether a caught exception
+    is that benign race (refetch + return) or a different integrity
+    failure that MUST propagate.
+
+    DataJoint translates MySQL errno 1062 (``ER_DUP_ENTRY``) to
+    ``dj.errors.DuplicateError`` -- a SIBLING of, not a subclass of,
+    ``dj.errors.IntegrityError`` (reserved for FK violations: errno
+    1217/1451/1452). So a duplicate PK is a ``DuplicateError`` and a
+    missing-source-part / FK violation is an ``IntegrityError``; only the
+    former is the race we recover from. The 1062-in-``IntegrityError``
+    branch is purely defensive -- for a raw connector error surfacing
+    before DataJoint's translation -- and matches on the errno/message
+    signature, NEVER on the base class, so FK ``IntegrityError``s (which
+    Phase A step 5 requires to raise) always propagate.
+    """
+    if isinstance(exc, dj.errors.DuplicateError):
+        return True
+    if isinstance(exc, dj.errors.IntegrityError):
+        text = " ".join(str(a) for a in exc.args)
+        return "1062" in text or "Duplicate entry" in text
+    return False
+
+
 class MetricsSource(str, Enum):
     """Provenance of metrics attached to a ``CurationV2`` row.
 

@@ -495,10 +495,6 @@ class ArtifactSelection(SpyglassMixin, dj.Manual):
             logical identity (an integrity bug; v2 inserts via this
             helper should never produce duplicates).
         """
-        from spyglass.spikesorting.v2.exceptions import (
-            DuplicateSelectionError,
-        )
-
         has_recording = "recording_id" in key
         has_shared = "shared_artifact_group_name" in key
         if has_recording == has_shared:
@@ -522,37 +518,46 @@ class ArtifactSelection(SpyglassMixin, dj.Manual):
 
         if has_recording:
             source_part = cls.RecordingSource
+            source_kind = "recording"
             source_restriction = {"recording_id": key["recording_id"]}
         else:
             source_part = cls.SharedArtifactGroupSource
+            source_kind = "shared_artifact_group"
             source_restriction = {
                 "shared_artifact_group_name": key["shared_artifact_group_name"]
             }
 
-        # Find existing master+source rows by joining the master to the
-        # selected source part.
-        joined = (cls * source_part) & master_restriction & source_restriction
-        existing = joined.fetch("KEY", as_dict=True)
-        existing_master_keys = [
-            {k: v for k, v in row.items() if k in cls.primary_key}
-            for row in existing
-        ]
-        # Dedupe master PKs across the join (one master * source row may
-        # appear once per source-part row but our integrity test pins
-        # exactly-one source per master).
-        unique = {tuple(sorted(d.items())) for d in existing_master_keys}
-        if len(unique) == 1:
-            return dict(next(iter(unique)))
-        if len(unique) > 1:
-            raise DuplicateSelectionError(
-                f"ArtifactSelection has {len(unique)} master rows for "
-                f"{master_restriction | source_restriction}. v2 inserts "
-                "via this helper should not produce duplicates."
-            )
+        # Deterministic, content-addressed artifact_id from the logical
+        # identity (params + source). ``source_kind`` is explicit so a
+        # recording source and a shared-group source never alias even if
+        # their source-identifier strings were to collide.
+        from spyglass.spikesorting.v2._selection_identity import (
+            assert_supplied_id_matches,
+            deterministic_id,
+        )
+
+        identity = {
+            "source_kind": source_kind,
+            **master_restriction,
+            **source_restriction,
+        }
+        artifact_id = deterministic_id("artifact", identity)
+        assert_supplied_id_matches(
+            key.get("artifact_id"), artifact_id, field="artifact_id"
+        )
+
+        existing = cls._find_existing_pk(
+            master_restriction, source_part, source_restriction
+        )
+        if existing is not None:
+            return existing
 
         # Translate the would-be DataJoint FK IntegrityError into a
         # clear "missing default row" message before the inserts attempt.
-        from spyglass.spikesorting.v2.utils import _ensure_lookup_row_exists
+        from spyglass.spikesorting.v2.utils import (
+            _ensure_lookup_row_exists,
+            _is_duplicate_key_error,
+        )
 
         _ensure_lookup_row_exists(
             ArtifactDetectionParameters,
@@ -561,18 +566,58 @@ class ArtifactSelection(SpyglassMixin, dj.Manual):
             insert_default_path="ArtifactDetectionParameters.insert_default()",
         )
 
-        new_master_key = {
-            **master_restriction,
-            "artifact_id": uuid.uuid4(),
-        }
-        new_part_key = {
-            "artifact_id": new_master_key["artifact_id"],
-            **source_restriction,
-        }
-        with transaction_or_noop(cls.connection):
-            cls.insert1(new_master_key)
-            source_part.insert1(new_part_key)
+        new_master_key = {**master_restriction, "artifact_id": artifact_id}
+        new_part_key = {"artifact_id": artifact_id, **source_restriction}
+        try:
+            with transaction_or_noop(cls.connection):
+                cls.insert1(new_master_key)
+                source_part.insert1(new_part_key)
+        except Exception as exc:  # noqa: BLE001 -- re-raised unless dup-PK
+            if not _is_duplicate_key_error(exc):
+                raise
+            # Lost a concurrent race on the same deterministic artifact_id;
+            # refetch and return the winner's master+source row.
+            existing = cls._find_existing_pk(
+                master_restriction, source_part, source_restriction
+            )
+            if existing is None:
+                raise
+            return existing
         return {k: new_master_key[k] for k in cls.primary_key}
+
+    @classmethod
+    def _find_existing_pk(
+        cls, master_restriction, source_part, source_restriction
+    ) -> dict | None:
+        """Return the master PK dict for an existing master+source, or None.
+
+        Joins the master to the chosen source part so a prior selection
+        with a DIFFERENT source is not reused. Returns the single matching
+        ``{"artifact_id": ...}`` or ``None``; raises
+        ``DuplicateSelectionError`` if more than one master matches (a raw
+        ``insert`` bypass). Used by ``insert_selection`` for both the
+        pre-insert lookup and the post-duplicate-key refetch.
+        """
+        from spyglass.spikesorting.v2.exceptions import (
+            DuplicateSelectionError,
+        )
+
+        joined = (cls * source_part) & master_restriction & source_restriction
+        existing = joined.fetch("KEY", as_dict=True)
+        existing_master_keys = [
+            {k: v for k, v in row.items() if k in cls.primary_key}
+            for row in existing
+        ]
+        # Dedupe master PKs across the join (the integrity test pins
+        # exactly-one source per master, but be defensive).
+        unique = {tuple(sorted(d.items())) for d in existing_master_keys}
+        if len(unique) > 1:
+            raise DuplicateSelectionError(
+                f"ArtifactSelection has {len(unique)} master rows for "
+                f"{master_restriction | source_restriction}. v2 inserts "
+                "via this helper should not produce duplicates."
+            )
+        return dict(next(iter(unique))) if len(unique) == 1 else None
 
     @classmethod
     def prune_orphaned_selections(cls, dry_run: bool = True) -> list[dict]:

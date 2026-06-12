@@ -708,18 +708,23 @@ class RecordingSelection(SpyglassMixin, dj.Manual):
         LabTeam); the UUID PK is generated server-side and is what the
         downstream pipeline keys off. The helper:
 
-        1. Restricts the table by the non-UUID fields of ``key`` and
-           returns the matching PK if exactly one row exists.
-        2. Inserts a new row with a fresh UUID otherwise.
-        3. Raises ``ValueError`` if more than one matching row exists
-           (which would only happen via direct ``dj.insert`` bypassing
-           this helper -- it is an integrity bug, not user error).
+        1. Derives a deterministic ``recording_id`` from the logical
+           identity (the non-UUID FK fields) so the same selection always
+           maps to the same UUID.
+        2. Returns the matching PK if the row already exists.
+        3. Inserts a new row keyed by the deterministic UUID otherwise; if
+           a concurrent caller wins the race, the duplicate-PK insert is
+           caught and the existing row is returned.
+        4. Raises ``DuplicateSelectionError`` if more than one matching row
+           exists (which would only happen via direct ``dj.insert``
+           bypassing this helper -- an integrity bug, not user error).
 
         Parameters
         ----------
         key
-            Dict containing all FK fields. ``recording_id`` is ignored
-            if present and replaced with a fresh UUID on insert.
+            Dict containing all FK fields. ``recording_id`` is derived from
+            the logical identity; if supplied it must equal the
+            deterministic id (else ``ValueError``).
 
         Returns
         -------
@@ -727,20 +732,25 @@ class RecordingSelection(SpyglassMixin, dj.Manual):
             ``{"recording_id": <uuid>}`` -- never a list, never the full
             row.
         """
-        from spyglass.spikesorting.v2.exceptions import DuplicateSelectionError
-        from spyglass.spikesorting.v2.utils import _ensure_lookup_row_exists
+        from spyglass.spikesorting.v2._selection_identity import (
+            assert_supplied_id_matches,
+            deterministic_id,
+        )
+        from spyglass.spikesorting.v2.utils import (
+            _ensure_lookup_row_exists,
+            _is_duplicate_key_error,
+        )
 
         keys_minus_uuid = {k: v for k, v in key.items() if k != "recording_id"}
-        existing = (cls & keys_minus_uuid).fetch("KEY", as_dict=True)
-        if len(existing) == 1:
-            return existing[0]
-        if len(existing) > 1:
-            raise DuplicateSelectionError(
-                f"RecordingSelection has {len(existing)} duplicate "
-                f"selection rows for logical identity {keys_minus_uuid}. "
-                "This is an integrity bug; v2 inserts via this helper "
-                "should not produce duplicates."
-            )
+        recording_id = deterministic_id("recording", keys_minus_uuid)
+        assert_supplied_id_matches(
+            key.get("recording_id"), recording_id, field="recording_id"
+        )
+
+        existing = cls._find_existing_pk(keys_minus_uuid)
+        if existing is not None:
+            return existing
+
         # Translate the would-be DataJoint FK IntegrityError into a
         # clear "missing default row" message before the insert attempts.
         if "preproc_params_name" in keys_minus_uuid:
@@ -750,9 +760,42 @@ class RecordingSelection(SpyglassMixin, dj.Manual):
                 helper_name="RecordingSelection.insert_selection",
                 insert_default_path="PreprocessingParameters.insert_default()",
             )
-        new_key = {**keys_minus_uuid, "recording_id": uuid.uuid4()}
-        cls.insert1(new_key)
+        new_key = {**keys_minus_uuid, "recording_id": recording_id}
+        try:
+            cls.insert1(new_key)
+        except Exception as exc:  # noqa: BLE001 -- re-raised unless dup-PK
+            if not _is_duplicate_key_error(exc):
+                raise
+            # Lost a concurrent race: another caller inserted the same
+            # deterministic recording_id first. Refetch and return it.
+            existing = cls._find_existing_pk(keys_minus_uuid)
+            if existing is None:
+                raise
+            return existing
         return {k: new_key[k] for k in cls.primary_key}
+
+    @classmethod
+    def _find_existing_pk(cls, keys_minus_uuid: dict) -> dict | None:
+        """Return the PK dict for an existing logical selection, or None.
+
+        Restricts the table by the logical-identity (non-UUID) fields.
+        Returns the single matching ``{"recording_id": ...}`` or ``None``;
+        raises ``DuplicateSelectionError`` if more than one row matches (a
+        raw-``insert`` bypass that this helper would otherwise silently
+        ``[0]``-index). Used by ``insert_selection`` for both the
+        pre-insert lookup and the post-duplicate-key refetch.
+        """
+        from spyglass.spikesorting.v2.exceptions import DuplicateSelectionError
+
+        existing = (cls & keys_minus_uuid).fetch("KEY", as_dict=True)
+        if len(existing) > 1:
+            raise DuplicateSelectionError(
+                f"RecordingSelection has {len(existing)} duplicate "
+                f"selection rows for logical identity {keys_minus_uuid}. "
+                "This is an integrity bug; v2 inserts via this helper "
+                "should not produce duplicates."
+            )
+        return existing[0] if existing else None
 
 
 _ELECTRICAL_SERIES_NAME = "ProcessedElectricalSeries"
