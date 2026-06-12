@@ -291,10 +291,12 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         A. At creation (populate): called with only `key`. Hash is stored in
            `SpikeSortingRecording.hash`; `_record_environment` sets
            `logged_at_creation=True` so `RecordingRecompute` skips it.
-        B. Silent regeneration (`get_recording`): called with `key` and
-           `recompute_file_name` when the file is missing on disk. The caller
-           compares the returned hash against the stored hash and updates the
-           external table. See `get_recording`.
+        B. Silent regeneration (`get_recording`): called with only
+           `recompute_file_name` when the file is missing on disk. The
+           stored `key`, `object_id`, `electrodes_id`, and `hash` are
+           fetched from the existing row by `analysis_file_name`; the
+           recomputed hash is compared against the stored hash and the
+           external table is updated. See `get_recording`.
         C. Retroactive recompute (`RecordingRecompute._recompute`): called with
            `key` and `save_to` pointing to a temp directory. Returns a
            `NwbfileHasher`; `_hash_both` compares old vs. new and deletes the
@@ -335,15 +337,13 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         if isinstance(key, dict):
             key = {k: v for k, v in key.items() if k in cls.primary_key}
 
-        has_key = bool(key)
-        recomp_no_dir = (
-            bool(recompute_file_name) and not save_to and not temp_dir
+        is_recomp = bool(
+            not key and recompute_file_name and not save_to and not temp_dir
         )
-        is_regen = has_key and recomp_no_dir
-        is_recomp = not has_key and recomp_no_dir
 
         hash = None
         file_path = None
+        stored_hash = None
 
         if is_recomp or save_to:  # if we expect file to exist
             file_path = AnalysisNwbfile.get_abs_path(
@@ -355,9 +355,12 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             logger.info(f"Recomputing {recompute_file_name}.")
             query = cls & {"analysis_file_name": recompute_file_name}
             # Use deleted file's ids and hash for recompute
-            key, recompute_object_id, recompute_electrodes_id = query.fetch1(
-                "KEY", "object_id", "electrodes_id"
-            )
+            (
+                key,
+                recompute_object_id,
+                recompute_electrodes_id,
+                stored_hash,
+            ) = query.fetch1("KEY", "object_id", "electrodes_id", "hash")
         elif save_to:  # recompute prior to deletion, save copy to temp_dir
             elect_id = cls._validate_file(file_path)
             obj_id = (cls & key).fetch1("object_id")
@@ -400,8 +403,8 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             from_schema=True,
             precision_lookup=dict(ProcessedElectricalSeries=rounding),
             return_hasher=bool(save_to),
-            resolve=is_recomp or is_regen,
-            stored_hash=(cls & key).fetch1("hash") if is_regen else None,
+            resolve=is_recomp,
+            stored_hash=stored_hash,
         )
 
         return dict(
