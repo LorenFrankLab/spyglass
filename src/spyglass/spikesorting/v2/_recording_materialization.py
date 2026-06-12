@@ -23,11 +23,11 @@ DataJoint shell over pure/IO services" direction as ``_artifact_compute``
 
 DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
 connection at import: all SpikeInterface / numpy / spyglass dependencies
-are imported lazily inside the functions. Two functions inherently touch
+are imported lazily inside the functions. Three functions inherently touch
 the DB / DataJoint at CALL time via lazy imports: ``fetch_sort_group_probe_info``
-(an ``Electrode * Probe`` fetch) and ``spikeinterface_channel_ids`` /
-``write_nwb_artifact`` (``Nwbfile`` / ``AnalysisNwbfile`` path resolution +
-file create). ``write_nwb_artifact`` also lazily imports the
+(an ``Electrode * Probe`` fetch), ``spikeinterface_channel_ids`` (``Nwbfile``
+path resolution), and ``write_nwb_artifact`` (``AnalysisNwbfile`` path
+resolution + file create). ``write_nwb_artifact`` also lazily imports the
 ``_ELECTRICAL_SERIES_NAME`` constant from ``recording`` at call time -- by
 then ``recording`` is fully imported, so there is no import cycle.
 """
