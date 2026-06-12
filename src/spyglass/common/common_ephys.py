@@ -213,7 +213,9 @@ class Electrode(SpyglassIngestion, dj.Imported):
         """Insert Electrode entries from NWB file, using config for overrides."""
         self._cached_config = config
         try:
-            return_val = super().insert_from_nwbfile(nwb_file_name, config, dry_run)
+            return_val = super().insert_from_nwbfile(
+                nwb_file_name, config, dry_run
+            )
         finally:
             self._cached_config = None
         return return_val
