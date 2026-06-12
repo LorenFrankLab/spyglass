@@ -34,12 +34,20 @@ from spyglass.spikesorting.v2._params.preprocessing import (
 from spyglass.spikesorting.v2._recording_materialization import (
     apply_pre_motion_preprocessing,
     fetch_sort_group_probe_info,
-    filtering_description,
     maybe_apply_tetrode_geometry,
     restrict_recording,
     spikeinterface_channel_ids,
     truncation_tolerance,
     write_nwb_artifact,
+)
+
+# Aliased: the bare ``filtering_description`` name would be shadowed by the
+# ``filtering_description`` keyword-only param of the ``_write_nwb_artifact``
+# delegator (and the same-named local in ``_compute_recording_artifact``),
+# a latent readability hazard. The ``_filtering_description`` delegator
+# calls this alias.
+from spyglass.spikesorting.v2._recording_materialization import (
+    filtering_description as _filtering_description_svc,
 )
 from spyglass.spikesorting.v2.utils import (
     SelectionMasterInsertGuard,
@@ -1676,7 +1684,7 @@ class Recording(SpyglassMixin, dj.Computed):
         calls ``self._filtering_description(...)`` and the v2 tests call it
         directly.
         """
-        return filtering_description(bandpass_filter, reference_mode)
+        return _filtering_description_svc(bandpass_filter, reference_mode)
 
     @staticmethod
     def _write_nwb_artifact(
