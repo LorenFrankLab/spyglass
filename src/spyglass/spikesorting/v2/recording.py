@@ -16,7 +16,6 @@ to the sort stage so motion correction never sees whitened data).
 
 from __future__ import annotations
 
-import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -705,8 +704,10 @@ class RecordingSelection(SpyglassMixin, dj.Manual):
 
         The logical identity of a ``RecordingSelection`` row is its full
         FK set (Raw, SortGroupV2, IntervalList, PreprocessingParameters,
-        LabTeam); the UUID PK is generated server-side and is what the
-        downstream pipeline keys off. The helper:
+        LabTeam); the UUID PK is content-addressed -- derived client-side
+        from that identity (see step 1) so the same selection always maps
+        to the same ``recording_id`` -- and is what the downstream pipeline
+        keys off. The helper:
 
         1. Derives a deterministic ``recording_id`` from the logical
            identity (the non-UUID FK fields) so the same selection always
@@ -715,9 +716,10 @@ class RecordingSelection(SpyglassMixin, dj.Manual):
         3. Inserts a new row keyed by the deterministic UUID otherwise; if
            a concurrent caller wins the race, the duplicate-PK insert is
            caught and the existing row is returned.
-        4. Raises ``DuplicateSelectionError`` if more than one matching row
-           exists (which would only happen via direct ``dj.insert``
-           bypassing this helper -- an integrity bug, not user error).
+        4. Raises ``DuplicateSelectionError`` if ANY existing row for this
+           logical identity has a non-deterministic ``recording_id`` (a raw
+           ``dj.insert`` bypass or a pre-determinism legacy row) -- even a
+           single one -- an integrity bug, not user error.
 
         Parameters
         ----------
@@ -768,6 +770,12 @@ class RecordingSelection(SpyglassMixin, dj.Manual):
                 raise
             # Lost a concurrent race: another caller inserted the same
             # deterministic recording_id first. Refetch and return it.
+            # (Top-level recovery only -- see transaction_or_noop.)
+            logger.debug(
+                "RecordingSelection.insert_selection: lost deterministic-id "
+                "race on %s; returning the existing row.",
+                recording_id,
+            )
             existing = cls._find_existing_pk(keys_minus_uuid, recording_id)
             if existing is None:
                 raise

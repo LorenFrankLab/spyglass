@@ -37,6 +37,18 @@ def transaction_or_noop(connection):
     called from inside an existing populate cascade where DataJoint
     refuses nested transactions. This context manager makes the
     transaction wrap a no-op when the connection is already in one.
+
+    NOTE on duplicate-key recovery: the ``insert_selection`` helpers catch
+    a duplicate-PK error raised inside this block and refetch the winner's
+    row. That recovery assumes a TOP-LEVEL call. There is no savepoint, so
+    in the no-op (already-in-transaction) branch a recovered duplicate
+    would rely on the caller's outer transaction for cleanup -- but it is
+    safe in practice because (a) the selection helpers are only invoked at
+    top level (``run_v2_pipeline``), and (b) the deterministic PK makes the
+    duplicate collide on the FIRST statement (the master insert), so no
+    part row is ever written and there is nothing to roll back. Do not call
+    ``insert_selection`` from inside an outer transaction without revisiting
+    this.
     """
     if connection.in_transaction:
         yield
@@ -63,17 +75,27 @@ def _is_duplicate_key_error(exc: BaseException) -> bool:
     ``dj.errors.IntegrityError`` (reserved for FK violations: errno
     1217/1451/1452). So a duplicate PK is a ``DuplicateError`` and a
     missing-source-part / FK violation is an ``IntegrityError``; only the
-    former is the race we recover from. The 1062-in-``IntegrityError``
-    branch is purely defensive -- for a raw connector error surfacing
-    before DataJoint's translation -- and matches on the errno/message
-    signature, NEVER on the base class, so FK ``IntegrityError``s (which
-    Phase A step 5 requires to raise) always propagate.
+    former is the race we recover from.
+
+    The ``IntegrityError`` branch is purely defensive -- for a raw
+    connector error surfacing before DataJoint's translation (which strips
+    the errno, so a *translated* 1062 never reaches ``IntegrityError`` at
+    all). It matches ONLY the structured errno (``exc.args[0] == 1062``) or
+    the specific ``"Duplicate entry"`` text, NEVER a bare ``"1062"``
+    substring: a free substring would false-positive on an FK message that
+    merely contains those digits (a constraint name, a rendered UUID) and
+    silently swallow an error that Phase A step 5 requires to propagate.
     """
     if isinstance(exc, dj.errors.DuplicateError):
         return True
     if isinstance(exc, dj.errors.IntegrityError):
-        text = " ".join(str(a) for a in exc.args)
-        return "1062" in text or "Duplicate entry" in text
+        # Structured errno from a raw/untranslated connector error.
+        if exc.args and exc.args[0] == 1062:
+            return True
+        # ER_DUP_ENTRY messages render as "Duplicate entry '...' for key
+        # '...'". This phrase is specific to duplicate keys; FK-violation
+        # messages ("a foreign key constraint fails") never contain it.
+        return any("Duplicate entry" in str(a) for a in exc.args)
     return False
 
 

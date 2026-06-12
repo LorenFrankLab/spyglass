@@ -126,11 +126,20 @@ def assert_supplied_id_matches(supplied, deterministic, *, field: str) -> None:
     DOES pass one, it must equal the deterministic id; a mismatch means a
     hand-rolled random / legacy UUID that would silently fork the
     selection identity, so raise rather than honor it. Accepts ``str`` or
-    ``uuid.UUID`` for ``supplied`` (normalized before comparison).
+    ``uuid.UUID`` for ``supplied`` (normalized before comparison). A
+    ``supplied`` value that is not even a well-formed UUID is, by
+    definition, not the deterministic id, so it raises the SAME curated
+    message rather than a low-level ``uuid.UUID`` parse error.
     """
     if supplied is None:
         return
-    if uuid.UUID(str(supplied)) != deterministic:
+    if isinstance(supplied, uuid.UUID):
+        normalized = supplied
+    elif isinstance(supplied, str):
+        normalized = _maybe_uuid(supplied)  # None if not a well-formed UUID
+    else:
+        normalized = None
+    if normalized != deterministic:
         raise ValueError(
             f"insert_selection: supplied {field}={supplied!r} does not match "
             f"the deterministic id {deterministic} derived from the "

@@ -33,7 +33,6 @@ detection bundle.
 
 from __future__ import annotations
 
-import uuid
 from typing import NamedTuple
 
 import datajoint as dj
@@ -476,8 +475,11 @@ class ArtifactSelection(SpyglassMixin, dj.Manual):
 
         Reads exactly one source key from ``key`` (``recording_id`` xor
         ``shared_artifact_group_name``), finds an existing master row
-        that matches both the master fields and the source row, or
-        mints a new UUID and inserts master + source part together.
+        that matches both the master fields and the source row, or, if
+        absent, inserts master + source part keyed by a deterministic,
+        content-addressed ``artifact_id`` derived from the params + source
+        identity. A concurrent caller that wins the duplicate-PK race is
+        handled by refetching the winner's row.
 
         The find step joins the master to the chosen source part so a
         prior ``ArtifactSelection`` with a different source is not
@@ -491,9 +493,12 @@ class ArtifactSelection(SpyglassMixin, dj.Manual):
         ValueError
             If zero or two source keys are supplied in ``key``.
         DuplicateSelectionError
-            If more than one master+source row matches the supplied
-            logical identity (an integrity bug; v2 inserts via this
-            helper should never produce duplicates).
+            If any matching master has a non-deterministic ``artifact_id``
+            (a raw ``insert`` bypass or a pre-determinism legacy row) --
+            even a single one; an integrity bug, not user error.
+        SchemaBypassError
+            If a deterministic master exists but its expected source part
+            is missing/mismatched (a raw-insert orphan).
         """
         has_recording = "recording_id" in key
         has_shared = "shared_artifact_group_name" in key
@@ -578,6 +583,12 @@ class ArtifactSelection(SpyglassMixin, dj.Manual):
                 raise
             # Lost a concurrent race on the same deterministic artifact_id;
             # refetch and return the winner's master+source row.
+            # (Top-level recovery only -- see transaction_or_noop.)
+            logger.debug(
+                "ArtifactSelection.insert_selection: lost deterministic-id "
+                "race on %s; returning the existing row.",
+                artifact_id,
+            )
             existing = cls._find_existing_pk(
                 master_restriction, source_part, source_restriction, artifact_id
             )

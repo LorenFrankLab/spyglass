@@ -218,23 +218,52 @@ def test_is_duplicate_key_error_classifies_exceptions():
 
     # DataJoint maps MySQL errno 1062 -> DuplicateError: that is the race.
     assert _is_duplicate_key_error(dj.errors.DuplicateError("Duplicate entry"))
-    # FK violations surface as IntegrityError with no 1062/"Duplicate entry"
-    # signature -- they MUST propagate (Phase A step 5), not be swallowed.
+    # FK violations surface as IntegrityError with no 1062 errno / "Duplicate
+    # entry" text -- they MUST propagate (Phase A step 5), not be swallowed.
     assert not _is_duplicate_key_error(
         dj.errors.IntegrityError(
             "Cannot add or update a child row: a foreign key constraint fails"
         )
     )
-    # Defensive: a raw 1062 surfacing as IntegrityError before translation
-    # is still recognized, by errno or message signature.
+    # Defensive: a raw, untranslated connector error carrying the structured
+    # errno 1062 as the first arg is recognized.
     assert _is_duplicate_key_error(
-        dj.errors.IntegrityError("(1062, \"Duplicate entry 'x' for key\")")
+        dj.errors.IntegrityError(1062, "Duplicate entry 'x' for key 'PRIMARY'")
     )
+    # ...and the rendered "Duplicate entry" text is recognized too.
     assert _is_duplicate_key_error(
         dj.errors.IntegrityError("Duplicate entry 'x' for key 'PRIMARY'")
     )
+    # CRITICAL false-positive guard: an FK-violation IntegrityError whose
+    # message merely CONTAINS the digits "1062" (in a constraint name, a
+    # rendered UUID) must NOT be treated as a duplicate -- a bare "1062"
+    # substring match would silently swallow a real FK error.
+    assert not _is_duplicate_key_error(
+        dj.errors.IntegrityError(
+            "a foreign key constraint fails (`db`.`t`, CONSTRAINT `fk_1062`)"
+        )
+    )
     # An unrelated exception is not a duplicate-key error.
     assert not _is_duplicate_key_error(ValueError("unrelated"))
+
+
+def test_bool_not_collapsed_to_int_in_identity():
+    """``bool`` must not canonicalize to the equivalent ``int`` (the
+    bool-before-int branch ordering in _canonical_scalar is load-bearing)."""
+    assert deterministic_id("recording", {"x": True}) != deterministic_id(
+        "recording", {"x": 1}
+    )
+    assert deterministic_id("recording", {"x": False}) != deterministic_id(
+        "recording", {"x": 0}
+    )
+
+
+def test_assert_supplied_id_matches_non_uuid_string_gives_curated_error():
+    """A non-UUID-parseable supplied id raises the curated "does not match"
+    message, not a low-level uuid parse error."""
+    target = uuid.uuid4()
+    with pytest.raises(ValueError, match="does not match the deterministic"):
+        assert_supplied_id_matches("not-a-uuid", target, field="recording_id")
 
 
 # --------------------------------------------------------------------------
@@ -583,3 +612,63 @@ def test_sorting_selection_orphan_master_raises_schema_bypass(
             )
     finally:
         (SortingSelection & {"sorting_id": det_id}).delete(safemode=False)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_artifact_selection_shared_group_writes_deterministic_pk(
+    populated_sorting,
+):
+    """The shared-group (cross-recording) source branch of
+    ArtifactSelection.insert_selection also writes the deterministic PK,
+    is idempotent, and does NOT alias the recording-source id for the same
+    params + recording (source_kind disambiguates)."""
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactSelection,
+        SharedArtifactGroup,
+    )
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    rec_id = (SortingSelection.RecordingSource & populated_sorting).fetch1(
+        "recording_id"
+    )
+    group_name = "v2_selection_identity_shared_group"
+    # Single-member group: trivially one-session and time-axis-consistent.
+    (SharedArtifactGroup & {"shared_artifact_group_name": group_name}).delete(
+        safemode=False
+    )
+    SharedArtifactGroup.insert_group(group_name, [{"recording_id": rec_id}])
+
+    expected = deterministic_id(
+        "artifact",
+        {
+            "source_kind": "shared_artifact_group",
+            "artifact_params_name": "default",
+            "shared_artifact_group_name": group_name,
+        },
+    )
+    select_key = {
+        "shared_artifact_group_name": group_name,
+        "artifact_params_name": "default",
+    }
+    try:
+        pk = ArtifactSelection.insert_selection(dict(select_key))
+        assert pk == {"artifact_id": expected}
+        # Idempotent re-call returns the same id.
+        assert ArtifactSelection.insert_selection(dict(select_key)) == pk
+        # source_kind keeps it distinct from the recording-source id for the
+        # same params + the member recording.
+        rec_source_id = deterministic_id(
+            "artifact",
+            {
+                "source_kind": "recording",
+                "artifact_params_name": "default",
+                "recording_id": rec_id,
+            },
+        )
+        assert expected != rec_source_id
+    finally:
+        (ArtifactSelection & {"artifact_id": expected}).delete(safemode=False)
+        (
+            SharedArtifactGroup & {"shared_artifact_group_name": group_name}
+        ).delete(safemode=False)

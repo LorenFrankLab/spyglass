@@ -584,7 +584,12 @@ class SortingSelection(SpyglassMixin, dj.Manual):
             If ``concat_recording_id`` is supplied -- concat-source
             sorting is not yet implemented.
         DuplicateSelectionError
-            If more than one master+source row matches.
+            If any matching master has a non-deterministic ``sorting_id``
+            (a raw ``insert`` bypass or a pre-determinism legacy row) --
+            even a single one; an integrity bug, not user error.
+        SchemaBypassError
+            If a deterministic master exists but its recording/artifact
+            source parts are missing/mismatched (a raw-insert orphan).
         """
         has_recording = "recording_id" in key
         has_concat = "concat_recording_id" in key
@@ -693,6 +698,12 @@ class SortingSelection(SpyglassMixin, dj.Manual):
                 raise
             # Lost a concurrent race on the same deterministic sorting_id;
             # refetch and return the winner's master+source row.
+            # (Top-level recovery only -- see transaction_or_noop.)
+            logger.debug(
+                "SortingSelection.insert_selection: lost deterministic-id "
+                "race on %s; returning the existing row.",
+                sorting_id,
+            )
             existing = cls._find_existing_pk(
                 master_restriction, source_restriction, artifact_id, sorting_id
             )
