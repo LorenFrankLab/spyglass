@@ -162,10 +162,16 @@ the race return the existing row cleanly.
   verify it equals the deterministic ID and raise if not.
 - Do not add an `identity_hash` column in the first pass. If later added, it is for auditability,
   not for correctness; the deterministic UUID PK is the core invariant.
-- Direct raw `insert1` into selection masters should be treated as unsupported. Where practical,
-  override `insert`/`insert1` to route through the helper or validate the deterministic ID. For
-  source-part selections, the helper remains the only supported way to create master+part rows
-  atomically.
+- Direct raw `insert1` into selection masters should be treated as unsupported. The **helper is
+  the validation boundary** — it alone holds the full logical payload, including the source-part
+  contents (`recording_id` / `artifact_id`) that the *master row does not carry*, so it is the
+  only place that can compute and verify the deterministic ID for the part-bearing tables
+  (`ArtifactSelection`, `SortingSelection`). An `insert`/`insert1` override, if added, should
+  therefore **reject direct master inserts** rather than attempt to validate the ID from the
+  master row alone (which is structurally impossible for the part-bearing tables). (`SpyglassMixin`
+  does not currently override `insert`/`insert1`, so there is no existing override to compose
+  with.) For source-part selections, the helper remains the only supported way to create
+  master+part rows atomically.
 
 **Steps:**
 1. Add `src/spyglass/spikesorting/v2/_selection_identity.py` as a **DB-free** helper module:
@@ -242,7 +248,12 @@ relocation choice: old folders are simply cache misses and can be cleaned by the
 - Update `Sorting.definition` to stop storing absolute `analyzer_folder`. Because this is
   pre-production, prefer a schema reset over transitional dual-read behavior.
 - Update `Sorting.make_insert` to insert canonical NWB metadata and unit rows only; analyzer
-  folder creation remains part of compute, but the path is not persisted as row state.
+  folder creation remains part of compute, but the path is not persisted as row state. **Blast
+  radius beyond the table `definition`:** drop the `analyzer_folder` field from the
+  `SortingComputed` NamedTuple ([sorting.py:69](../../../../src/spyglass/spikesorting/v2/sorting.py#L69))
+  and update the `make_compute → make_insert` positional contract accordingly (the tri-part
+  dispatch passes NamedTuple fields positionally), plus any test asserting the column is
+  populated (e.g. `test_sorting_get_analyzer_loads_folder`).
 - Update `get_analyzer` to resolve the canonical path, load it if present, and rebuild it into
   that same canonical path if missing.
 - Update `_build_analyzer` and `_rebuild_analyzer_folder` to accept an explicit folder from the
@@ -250,10 +261,16 @@ relocation choice: old folders are simply cache misses and can be cleaned by the
 - Update `delete` to remove the canonical analyzer cache for each deleted `sorting_id`.
 - Simplify `find_orphaned_analyzer_folders` to scan the currently configured analyzer root. Do
   not try to infer every historical root from database rows once paths are no longer stored.
+  DB-side orphan detection does **not** disappear — it becomes "for each `Sorting` row, compute
+  the canonical `analyzer_path(sorting_id)` and check existence," rather than reading a stored
+  column.
 
 **Risk:** moderate, mostly because it is a schema change and touches populate/delete/rebuild
 paths. Architecturally it is cleaner than path self-healing: the row no longer has a value that
-can disagree with the accessor.
+can disagree with the accessor. **Contract to state explicitly:** with the default root under
+`temp_dir`, analyzers are ephemeral by default, so the cache-miss path (`get_analyzer` rebuilds
+into the canonical path) must always be recoverable — and it is, because a valid `Sorting` row
+keeps its FK-guaranteed upstream `Recording`/NWB, so the analyzer can always be regenerated.
 
 **Tests:**
 - analyzer path helper honors `spikesorting_v2_analyzer_dir` and falls back to `temp_dir`;
@@ -312,17 +329,23 @@ tests unchanged and green.
 
 **Execution checkpoints:**
 1. Commit Phase 0 alone. No tests required beyond import/format sanity.
-2. Commit Phase A with focused identity tests first, then run:
-   `pytest tests/spikesorting/v2/ --no-docker --no-dlc -q`
-3. Commit Phase B with analyzer-cache tests, then run the same v2 pytest command.
+2. Commit Phase A with focused identity tests first, then run the full v2 suite.
+   **Env note:** on a local Colima/Docker machine run
+   `python -m pytest tests/spikesorting/v2/ --no-dlc -q` — the conftest manages the MySQL
+   container. The `--no-docker` form is the **CI** path and expects an *external* MySQL on
+   `:3308`; using it locally targets a dead port (see [spikesorting-v2 local-test-env memory]).
+3. Commit Phase B with analyzer-cache tests, then run the same v2 suite command.
 4. Commit each Phase C extraction separately. After each extraction, run at least the affected
    focused test file(s); before handing off, run the full v2 pytest command.
 
 **Implementation defaults, not open questions:**
-1. **Duplicate exception handling:** catch only DataJoint duplicate-key/integrity exceptions
-   around the deterministic master/part insert path, expected to be
-   `dj.errors.DuplicateError` and/or `dj.errors.IntegrityError`. Do not swallow unrelated
-   validation or FK errors.
+1. **Duplicate exception handling:** catch only the **duplicate-primary-key** case around the
+   deterministic master/part insert path. Verified: `dj.errors.DuplicateError` is **not** a
+   subclass of `dj.errors.IntegrityError` (separate branches off `DataJointError`), so catch
+   `DuplicateError` and, for a true DB-level race, the duplicate-key `IntegrityError` (MySQL
+   errno 1062). **Do not** blanket-catch `IntegrityError`: FK / missing-source-part violations
+   are *also* `IntegrityError`, and Phase A step 5 requires those to raise. Match on the
+   duplicate-key signature (errno 1062 / `DuplicateError`), not the base class.
 2. **Analyzer root default:** use the dedicated config key with `temp_dir` fallback described
    above.
 3. **Extraction boundary:** stop each extraction when the table class becomes a clear
@@ -336,6 +359,9 @@ tests unchanged and green.
 - Removing `analyzer_folder` would break a documented public v2 API outside this branch.
 - The full v2 pytest command cannot run because fixtures/environment are unavailable; in that
   case run focused unit tests and report the blocked full-suite gate.
+- The duplicate-key exception observed at runtime differs from the assumed `DuplicateError` /
+  errno-1062 `IntegrityError` signature — confirm the actual exception before relying on the
+  catch (see implementation default #1).
 
 **Not in scope:** v0/v1 parity for any of these (legacy); the artifact-kernel DB-free split is
 already done (commit `32ba091a`).
