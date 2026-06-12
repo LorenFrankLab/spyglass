@@ -29,6 +29,11 @@ from spyglass.spikesorting.v2._curation_transforms import (
     validate_curation_label_rows,
     validate_labels,
 )
+from spyglass.spikesorting.v2._units_nwb import (
+    numpysorting_from_abs_times,
+    read_units_abs_spike_times,
+    recording_timestamps,
+)
 from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 from spyglass.spikesorting.v2.utils import (
     CurationLabel,
@@ -689,7 +694,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         src_abs_path = AnalysisNwbfile.get_abs_path(
             (Sorting & {"sorting_id": sorting_id}).fetch1("analysis_file_name")
         )
-        abs_times_by_uid = Sorting._read_units_abs_spike_times(src_abs_path)
+        abs_times_by_uid = read_units_abs_spike_times(src_abs_path)
 
         analysis_file_name = AnalysisNwbfile().create(
             nwb_file_name=nwb_file_name
@@ -969,11 +974,9 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 index=pd.Index([], name="unit_id", dtype=int),
             )
 
-        abs_times = Sorting._read_units_abs_spike_times(abs_path)
+        abs_times = read_units_abs_spike_times(abs_path)
         if not as_dataframe:
-            return Sorting._numpysorting_from_abs_times(
-                abs_times, recording_row, fs
-            )
+            return numpysorting_from_abs_times(abs_times, recording_row, fs)
 
         import pandas as pd
 
@@ -1297,14 +1300,14 @@ class CurationV2(SpyglassMixin, dj.Manual):
         # staged path uses (``_dedup_merged_spike_times``) is gap-correct AND
         # makes the previewed train identical to the stored one.
         # ``_spike_times_to_frames`` maps abs times -> frames EXACTLY as
-        # ``_numpysorting_from_abs_times`` (what get_sorting uses), so the
+        # ``numpysorting_from_abs_times`` (what get_sorting uses), so the
         # non-merged units are frame-identical to ``get_sorting``'s.
         row = (cls & key).fetch1()
         recording_row = cls._upstream_recording_row(key)
         fs = float(recording_row["sampling_frequency"])
         abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
-        abs_times = Sorting._read_units_abs_spike_times(abs_path)
-        timestamps = Sorting._recording_timestamps(recording_row)
+        abs_times = read_units_abs_spike_times(abs_path)
+        timestamps = recording_timestamps(recording_row)
         n_samples = int(timestamps.size)
         delta_s = _MERGE_DEDUP_DELTA_MS / 1000.0
 
@@ -1312,7 +1315,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         units_dict: dict = {}
         # Non-merged units: map their own absolute times to frames (the same
         # mapping get_sorting applies internally via
-        # ``_numpysorting_from_abs_times``).
+        # ``numpysorting_from_abs_times``).
         for uid, st in abs_times.items():
             if int(uid) not in merged_members:
                 units_dict[int(uid)] = _spike_times_to_frames(
