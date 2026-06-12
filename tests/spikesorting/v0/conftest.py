@@ -169,6 +169,69 @@ def pop_auto_curation(spike_v0, pop_metrics, curation_params_key):
 
 
 @pytest.fixture(scope="session")
+def multi_metric_curation_params_key(spike_v0, pop_metrics):
+    """AutomaticCurationParameters with 2 metrics in label_params.
+
+    Thresholds are the per-metric median across units, so each metric
+    labels roughly half the units -- this distinguishes a fixed
+    ``get_labels`` (both metrics applied) from the pre-#1281-fix
+    early-return bug (only the first metric applied).
+    """
+    import json
+
+    import numpy as np
+
+    qm_path = pop_metrics.fetch("quality_metrics_path")[0]
+    with open(qm_path) as f:
+        qm = json.load(f)
+
+    overlap_thresh = float(np.median(list(qm["nn_noise_overlap"].values())))
+    spikes_thresh = float(np.median(list(qm["num_spikes"].values())))
+
+    params_key = dict(auto_curation_params_name="multi_metric_test")
+    spike_v0.AutomaticCurationParameters().insert1(
+        {
+            **params_key,
+            "merge_params": {},
+            "label_params": {
+                "nn_noise_overlap": [
+                    ">",
+                    overlap_thresh,
+                    ["noise", "reject"],
+                ],
+                "num_spikes": [">", spikes_thresh, ["mua"]],
+            },
+        },
+        skip_duplicates=True,
+    )
+    yield params_key
+
+
+@pytest.fixture(scope="session")
+def pop_auto_curation_multimetric(
+    spike_v0, pop_metrics, multi_metric_curation_params_key
+):
+    metric_keys = [
+        {**k, **multi_metric_curation_params_key} for k in pop_metrics.proj()
+    ]
+    spike_v0.AutomaticCurationSelection.insert(
+        metric_keys, skip_duplicates=True
+    )
+    spike_v0.AutomaticCuration().populate(metric_keys)
+    restr_auto = spike_v0.AutomaticCuration() & metric_keys
+    restr_curation = spike_v0.Curation() & metric_keys
+
+    curated_keys = [dict(k) for k in restr_curation.proj()]
+    spike_v0.CuratedSpikeSortingSelection.insert(
+        curated_keys, skip_duplicates=True
+    )
+    spike_v0.CuratedSpikeSorting.populate(curated_keys)
+    restr_curated = spike_v0.CuratedSpikeSorting() & curated_keys
+
+    yield restr_auto, restr_curation, restr_curated
+
+
+@pytest.fixture(scope="session")
 def pop_curated(spike_v0, pop_auto_curation):
     _, curation = pop_auto_curation
     for cur_key in curation.proj():
