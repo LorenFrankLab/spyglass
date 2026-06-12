@@ -3419,3 +3419,63 @@ def test_motion_correction_parameters_validates_params_blob():
 # ``test_motion_correction_parameters_rejects_schema_version_drift`` and
 # ``test_initialize_v2_defaults_installs_motion_correction_presets``. They are
 # not duplicated here.
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_sorting_computed_matches_make_insert_signature():
+    """The tri-part dispatch unpacks ``SortingComputed`` POSITIONALLY into
+    ``make_insert(key, *computed)``, so the NamedTuple field order is a wire
+    contract. Pin that it matches ``make_insert``'s parameter order -- a
+    reorder would silently mis-bind the several str-adjacent slots
+    (analysis_file_name / units_object_id / recording_id / nwb_file_name)
+    without a TypeError.
+    """
+    import inspect
+
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingComputed
+
+    params = list(inspect.signature(Sorting.make_insert).parameters)
+    assert params[0] == "self"
+    assert params[1] == "key"
+    assert tuple(params[2:]) == SortingComputed._fields
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_changed_analyzer_root_causes_miss_and_rebuild(
+    populated_sorting, restore_custom_config, tmp_path
+):
+    """Phase B headline behavior, end-to-end: relocating the analyzer root
+    (``spikesorting_v2_analyzer_dir``) makes the previously-built folder a
+    cache MISS, and ``get_analyzer`` rebuilds into the NEW root -- never a
+    stale-row inconsistency. The two halves (config override + rebuild-on-
+    miss) were only covered separately before.
+    """
+    import shutil
+
+    import datajoint as dj
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    sid = populated_sorting["sorting_id"]
+    original = analyzer_path(sid)
+    assert original.exists(), "populated sort should have an analyzer folder"
+
+    new_root = tmp_path / "relocated_analyzers"
+    dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(new_root)
+    relocated = analyzer_path(sid)
+    assert relocated != original, "root override must change the resolved path"
+    assert not relocated.exists(), "fresh root -> cache miss, not a stale row"
+    try:
+        analyzer = Sorting().get_analyzer(populated_sorting)
+        assert isinstance(analyzer, si.SortingAnalyzer)
+        assert relocated.exists(), "get_analyzer must rebuild into the NEW root"
+        # The original folder is untouched: a relocation is a cache miss, not
+        # a row inconsistency.
+        assert original.exists()
+    finally:
+        shutil.rmtree(new_root, ignore_errors=True)
+    # restore_custom_config resets spikesorting_v2_analyzer_dir on teardown so
+    # the package-scoped populated_sorting fixture resolves to `original` again.

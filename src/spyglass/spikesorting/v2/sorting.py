@@ -66,17 +66,27 @@ class SortingFetched(NamedTuple):
 
 
 class SortingComputed(NamedTuple):
-    """Outputs of :meth:`Sorting.make_compute`.
+    """Compute -> insert carrier for :meth:`Sorting.make_compute`.
 
-    ``analyzer_folder`` is TRANSIENT in-memory state: the exact folder
-    ``_build_analyzer`` wrote, threaded through to ``make_insert`` /
-    ``_populate_unit_part`` so they load and clean up the SAME folder that
-    was built -- never a recomputed path that a mid-populate config /
-    path-policy change could divert. It is NOT persisted as a DB column
-    (Phase B); every OTHER code path (``get_analyzer``, ``delete``,
-    ``find_orphaned_analyzer_folders``), which has no in-memory folder,
-    resolves the canonical location from ``sorting_id`` via
-    ``_analyzer_cache.analyzer_path``.
+    NONE of these fields are ``Sorting`` columns -- they are values threaded
+    from ``make_compute`` into ``make_insert`` (NWB staging, lookups,
+    unit-part inserts). ``analyzer_folder`` is special only in WHY it is
+    threaded: it is the EXACT folder ``_build_analyzer`` wrote, so
+    ``make_insert`` / ``_populate_unit_part`` load and clean up that folder
+    rather than recomputing a path a mid-populate config / path-policy
+    change could divert. The analyzer cache folder is deliberately NOT a DB
+    column (Phase B); every code path WITHOUT an in-memory folder
+    (``get_analyzer``, ``delete``, ``find_orphaned_analyzer_folders``)
+    resolves the canonical location from ``sorting_id`` through the
+    analyzer-cache path policy (``_analyzer_path`` ->
+    ``_analyzer_cache.analyzer_path``).
+
+    NOTE: the field ORDER here is a positional wire contract -- the tri-part
+    dispatch unpacks this tuple positionally into ``make_insert``
+    (``make_insert(key, *make_compute_result)``). Keep it in sync with
+    ``make_insert``'s parameter order;
+    ``test_sorting_computed_matches_make_insert_signature`` pins the
+    alignment.
     """
 
     sorting_obj: "si.BaseSorting"
@@ -1583,11 +1593,11 @@ class Sorting(SpyglassMixin, dj.Computed):
         ``sorting_id`` (Phase B: not a DataJoint-tracked column), so a plain
         ``.delete()`` would leave the 5-50 GB folder on disk per row.
         Mirrors ``ArtifactDetection.delete``'s IntervalList cleanup pattern:
-        collect every folder path BEFORE the cascade delete (the row
-        needed to compute the path is gone after), then call
-        ``super().delete()``, then ``shutil.rmtree`` each collected
-        path. ``ignore_errors=False`` so a permission error surfaces
-        loudly rather than getting swallowed.
+        snapshot every ``sorting_id`` BEFORE the cascade delete (it can no
+        longer be fetched once the row is gone), call ``super().delete()``,
+        then ``remove_analyzer_cache`` each (which resolves the path from
+        ``sorting_id``, no-ops a missing folder, and surfaces a permission
+        error loudly rather than swallowing it).
 
         Two cleanup paths already cover other points in the analyzer-cache
         lifecycle: ``_run_sorter`` cleans the
@@ -1596,14 +1606,16 @@ class Sorting(SpyglassMixin, dj.Computed):
         folder on populate failure. This override closes the third
         lifecycle event: row deletion.
         """
-        import shutil as _shutil
+        from spyglass.spikesorting.v2._analyzer_cache import (
+            remove_analyzer_cache,
+        )
 
-        from spyglass.spikesorting.v2.utils import _analyzer_path
-
-        keyed_folders = [
-            (row, _analyzer_path({"sorting_id": row["sorting_id"]}))
-            for row in self.fetch("KEY", as_dict=True)
-        ]
+        # Snapshot the PKs BEFORE the cascade -- after deletion the row is
+        # gone, but the cache path is a pure function of sorting_id, so this
+        # delete is one of the sites that resolves it from sorting_id (vs the
+        # populate/rebuild cleanups, which rmtree the EXACT transient folder
+        # they built to avoid a recompute).
+        rows = self.fetch("KEY", as_dict=True)
         if safemode is None:
             super().delete(*args, **kwargs)
         else:
@@ -1612,10 +1624,11 @@ class Sorting(SpyglassMixin, dj.Computed):
         # confirmation prompt (user answers "no") or an empty restriction
         # leaves the rows in place and returns normally -- removing their
         # 5-50 GB analyzer scratch then would destroy data for a row the user
-        # chose to keep.
-        for row, folder in keyed_folders:
-            if folder.exists() and not (Sorting & row):
-                _shutil.rmtree(folder, ignore_errors=False)
+        # chose to keep. ``remove_analyzer_cache`` no-ops a missing folder and
+        # propagates a real removal error (``ignore_errors=False``).
+        for row in rows:
+            if not (Sorting & row):
+                remove_analyzer_cache(row["sorting_id"], missing_ok=True)
 
     @classmethod
     def find_orphaned_analyzer_folders(cls, *, dry_run: bool = True) -> dict:

@@ -105,38 +105,60 @@ class SelectionMasterInsertGuard:
 
     The three v2 selection masters
     (``RecordingSelection`` / ``ArtifactSelection`` / ``SortingSelection``)
-    derive their primary key from the selection's FULL logical identity --
-    which for the part-bearing masters includes the source-part contents
-    the master row itself does NOT carry. So the master PK can be neither
-    computed nor verified from a master row alone, and ``insert_selection``
-    (which holds the full payload and inserts master + source parts
-    atomically) is the only supported way to create rows.
+    derive their primary key from the selection's FULL logical identity, and
+    ``insert_selection`` is the only entry point that holds that full
+    payload: it computes the deterministic PK, pre-checks the lookup-row
+    FKs, and -- for the part-bearing masters (``ArtifactSelection`` /
+    ``SortingSelection``) -- inserts the master + source parts atomically.
+    Those two masters genuinely CANNOT be verified from a master row alone
+    (their source identity lives in a part table, not the master's own
+    columns); ``RecordingSelection`` is not part-bearing, but routing it
+    through the same boundary keeps one consistent create path.
 
-    A direct ``insert`` / ``insert1`` is therefore rejected with a pointer
-    to ``insert_selection``. ``allow_direct_insert=True`` is the escape
+    This guard is a guard-RAIL, not the integrity boundary: it rejects the
+    easy mistake (calling ``insert`` / ``insert1`` instead of
+    ``insert_selection``) early and loudly. The actual integrity enforcement
+    is downstream -- the deterministic-PK uniqueness + the
+    ``SchemaBypassError`` / ``DuplicateSelectionError`` checks that detect a
+    bypassed or orphaned master. ``allow_direct_insert=True`` is the escape
     hatch for a deliberate maintenance or test bypass -- the SAME keyword
-    DataJoint uses to override its own auto-populated-table insert guard,
-    so the convention is familiar. ``insert_selection`` itself passes
+    DataJoint uses to override its own auto-populated-table insert guard
+    (note: on a ``dj.Manual`` table that keyword is otherwise inert, so it
+    is repurposed here). ``insert_selection`` itself passes
     ``allow_direct_insert=True`` for its already-validated master insert.
 
-    ``allow_direct_insert`` is keyword-only so a positional ``replace`` /
-    ``skip_duplicates`` argument cannot accidentally bind it; other insert
-    kwargs are forwarded unchanged.
+    The signature mirrors ``dj.Table.insert`` so positional ``replace`` /
+    ``skip_duplicates`` keep working; only ``allow_direct_insert`` is
+    keyword-only (it cannot accidentally bind a positional flag).
     """
 
-    def insert(self, rows, *, allow_direct_insert=False, **kwargs):
+    def insert(
+        self,
+        rows,
+        replace=False,
+        skip_duplicates=False,
+        ignore_extra_fields=False,
+        *,
+        allow_direct_insert=False,
+        **kwargs,
+    ):
         if not allow_direct_insert:
             raise dj.errors.DataJointError(
                 f"Direct insert into {self.__class__.__name__} is not "
-                "supported: the deterministic primary key is computed from "
-                "the selection's full logical identity (including the "
-                "source-part contents the master row does not carry). Use "
-                f"{self.__class__.__name__}.insert_selection() to create "
-                "master + source parts atomically. Pass "
+                "supported: the primary key is derived from the selection's "
+                "full logical identity (and, for the part-bearing masters, "
+                "the source-part rows are inserted atomically with it). Use "
+                f"{self.__class__.__name__}.insert_selection(). Pass "
                 "allow_direct_insert=True only for a deliberate maintenance "
                 "or test bypass."
             )
-        super().insert(rows, **kwargs)
+        super().insert(
+            rows,
+            replace=replace,
+            skip_duplicates=skip_duplicates,
+            ignore_extra_fields=ignore_extra_fields,
+            **kwargs,
+        )
 
 
 class MetricsSource(str, Enum):

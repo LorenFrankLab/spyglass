@@ -478,18 +478,72 @@ def test_recording_selection_rejects_single_nondeterministic_row(
 @pytest.mark.integration
 def test_direct_master_insert_rejected_without_flag(fresh_recording_identity):
     """A direct insert into a selection master is rejected with a pointer to
-    insert_selection; allow_direct_insert=True is the explicit escape hatch."""
+    insert_selection; allow_direct_insert=True is the explicit escape hatch.
+
+    (RecordingSelection covers the reject + happy-path pair with real FKs;
+    test_direct_master_insert_rejected_all_masters covers the reject path for
+    all three masters.)
+    """
+    import datajoint as dj
+
     from spyglass.spikesorting.v2.recording import RecordingSelection
 
     identity = fresh_recording_identity
     row = {**identity, "recording_id": uuid.uuid4()}
-    # No flag -> rejected.
-    with pytest.raises(Exception, match="insert_selection"):
+    # No flag -> rejected (before any DB write).
+    with pytest.raises(dj.errors.DataJointError, match="is not supported"):
         RecordingSelection.insert1(row)
     assert len(RecordingSelection & identity) == 0
     # Explicit opt-in -> allowed (and cleaned up by the fixture teardown).
     RecordingSelection.insert1(row, allow_direct_insert=True)
     assert len(RecordingSelection & {"recording_id": row["recording_id"]}) == 1
+
+
+@pytest.mark.usefixtures("dj_conn")
+@pytest.mark.parametrize(
+    "module, cls_name, extra",
+    [
+        (
+            "spyglass.spikesorting.v2.recording",
+            "RecordingSelection",
+            {
+                "nwb_file_name": "x_.nwb",
+                "sort_group_id": 0,
+                "interval_list_name": "raw data valid times",
+                "preproc_params_name": "default_franklab",
+                "team_name": "t",
+            },
+        ),
+        (
+            "spyglass.spikesorting.v2.artifact",
+            "ArtifactSelection",
+            {"artifact_params_name": "none"},
+        ),
+        (
+            "spyglass.spikesorting.v2.sorting",
+            "SortingSelection",
+            {"sorter": "mountainsort5", "sorter_params_name": "p"},
+        ),
+    ],
+)
+def test_direct_master_insert_rejected_all_masters(module, cls_name, extra):
+    """All THREE selection masters reject a no-flag direct insert. The guard
+    is a shared mixin, but a per-class regression (a class dropping the mixin
+    from its MRO, or a future per-class insert override that forgets to
+    forward allow_direct_insert) must surface. The guard raises BEFORE any DB
+    write, so the bogus-FK row never reaches MySQL.
+    """
+    import importlib
+    import uuid as _uuid
+
+    import datajoint as dj
+
+    cls = getattr(importlib.import_module(module), cls_name)
+    pk_field = cls.primary_key[0]
+    row = {pk_field: _uuid.uuid4(), **extra}
+    with pytest.raises(dj.errors.DataJointError, match="is not supported"):
+        cls.insert1(row)
+    assert len(cls & {pk_field: row[pk_field]}) == 0
 
 
 @pytest.mark.slow
