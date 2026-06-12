@@ -133,3 +133,45 @@ def test_parallel_artifact_detection_matches_serial(dj_conn):
         )
     finally:
         _clean_session_v2(session)
+
+
+def test_artifact_compute_kernels_import_without_db():
+    """The parallel-artifact worker kernels import with NO DataJoint-schema /
+    ``spyglass.common`` dependency, so a spawned ``n_jobs>1`` worker (macOS
+    ``spawn`` re-imports the kernel's DEFINING module) never opens a DB
+    connection just to run the DB-free chunk computation.
+
+    Regression guard for the ``BrokenProcessPool`` failure: when the kernels
+    lived inline in the DataJoint *schema* module (``artifact.py``), every
+    spawned worker activated ``dj.schema`` / ``from spyglass.common import ...``
+    at import, so a config/port mismatch -- or a DB-isolated compute node --
+    killed the worker before any computation ran. Cold-import the kernel module
+    in a fresh subprocess (the spawn worker's view) and assert it pulled in
+    neither ``spyglass.common`` nor the ``artifact`` schema module. Hermetic --
+    no DB, no container.
+    """
+    import subprocess
+    import sys
+    import textwrap
+
+    probe = textwrap.dedent("""
+        import sys
+        import spyglass.spikesorting.v2._artifact_compute as k
+
+        assert hasattr(k, "_init_artifact_worker")
+        assert hasattr(k, "_compute_artifact_chunk")
+        leaked = sorted(
+            m
+            for m in sys.modules
+            if m.startswith("spyglass.common")
+            or m == "spyglass.spikesorting.v2.artifact"
+        )
+        assert not leaked, "kernel cold-import pulled in DB-layer modules: " + repr(leaked)
+        """)
+    result = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True
+    )
+    assert result.returncode == 0, (
+        "artifact compute kernels must import without a DB dependency\n"
+        f"stdout={result.stdout}\nstderr={result.stderr}"
+    )

@@ -43,6 +43,16 @@ from spikeinterface.core.job_tools import (
 )
 
 from spyglass.common import IntervalList, Session  # noqa: F401
+
+# Pure-compute worker kernels live in a DB-free module so that a spawned
+# ``n_jobs>1`` artifact-detection worker (macOS ``spawn`` re-imports the
+# function's defining module) does NOT open a DB connection at import. Re-export
+# here so existing ``from ...v2.artifact import _compute_artifact_chunk`` call
+# sites keep working. See ``_artifact_compute`` for the rationale.
+from spyglass.spikesorting.v2._artifact_compute import (  # noqa: F401
+    _compute_artifact_chunk,
+    _init_artifact_worker,
+)
 from spyglass.spikesorting.v2._params.artifact_detection import (
     ArtifactDetectionParamsSchema,
 )
@@ -60,91 +70,6 @@ from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 
 _assert_v2_db_safe()
 schema = dj.schema("spikesorting_v2_artifact")
-
-
-def _init_artifact_worker(
-    recording,
-    zscore_thresh,
-    amplitude_thresh_uV,
-    proportion_above_thresh,
-):
-    """Per-worker initializer for the chunked artifact scan.
-
-    Mirrors v1's ``spikesorting/utils.py:_init_artifact_worker`` (this is a
-    self-contained v2 copy -- v2 must not import the v1 helper). On a
-    multi-process pool the ``recording`` arrives as a ``to_dict()`` blob and is
-    re-hydrated with ``si.load`` (SI 0.104 renamed v1's ``load_extractor``);
-    on the single-process / thread path the live recording object is passed
-    straight through. ``n_required`` is constant across chunks, so it is
-    resolved once here and cached in the worker context rather than
-    recomputed per chunk.
-    """
-    import spikeinterface as si
-
-    recording = si.load(recording) if isinstance(recording, dict) else recording
-    n_channels = len(recording.get_channel_ids())
-    return {
-        "recording": recording,
-        "zscore_thresh": zscore_thresh,
-        "amplitude_thresh_uV": amplitude_thresh_uV,
-        "n_required": int(np.ceil(proportion_above_thresh * n_channels)),
-    }
-
-
-def _compute_artifact_chunk(segment_index, start_frame, end_frame, worker_ctx):
-    """Flag artifact frame indices within a ``[start_frame, end_frame)`` chunk.
-
-    Reproduces the EXACT per-frame detection math of the former full-in-memory
-    scan, applied to a single chunk: read traces already in µV, then
-    OR-combine the amplitude and across-channel z-score detectors.
-    The across-channel (``axis=1``) z-score uses only the chunk row's own
-    columns, so it is identical regardless of where the chunk boundaries fall --
-    this is what makes the chunked output frame-identical to the in-memory one.
-    Returns the GLOBAL (``+ start_frame``) ascending frame indices flagged in
-    this chunk.
-
-    Peak working set per chunk ≈ ``4 × (end_frame - start_frame) × n_channels ×
-    4 bytes`` (µV float32 slice + abs + z-score intermediate),
-    independent of the full recording length.
-    """
-    recording = worker_ctx["recording"]
-    zscore_thresh = worker_ctx["zscore_thresh"]
-    amplitude_thresh_uV = worker_ctx["amplitude_thresh_uV"]
-    n_required = worker_ctx["n_required"]
-
-    # ``return_in_uV=True`` lets SpikeInterface apply the recording's stored
-    # per-channel gain AND offset, returning microvolts directly. This is the
-    # threshold's unit, and it avoids re-implementing the count->µV conversion
-    # (a gain-only scaling would silently ignore any non-zero channel offset).
-    traces_uv = recording.get_traces(
-        segment_index=segment_index,
-        start_frame=start_frame,
-        end_frame=end_frame,
-        return_in_uV=True,
-    ).astype(np.float32)
-    absolute = np.abs(traces_uv)
-
-    if amplitude_thresh_uV is not None:
-        above_amp = absolute > amplitude_thresh_uV
-    else:
-        above_amp = np.zeros_like(absolute, dtype=bool)
-    if zscore_thresh is not None:
-        ch_mean = traces_uv.mean(axis=1, keepdims=True)
-        ch_std = traces_uv.std(axis=1, keepdims=True) + 1e-12
-        zscores = np.abs((traces_uv - ch_mean) / ch_std)
-        above_z = zscores > zscore_thresh
-    else:
-        above_z = np.zeros_like(absolute, dtype=bool)
-
-    if amplitude_thresh_uV is not None and zscore_thresh is not None:
-        channel_hit = above_amp | above_z
-    elif amplitude_thresh_uV is not None:
-        channel_hit = above_amp
-    else:
-        channel_hit = above_z
-
-    local = (channel_hit.sum(axis=1) >= n_required).nonzero()[0]
-    return local + start_frame
 
 
 class ArtifactFetched(NamedTuple):
