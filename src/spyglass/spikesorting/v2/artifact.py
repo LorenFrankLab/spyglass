@@ -22,11 +22,13 @@ a dedicated part table -- the UUID-suffixed name prevents collision with
 human-authored session intervals while letting downstream
 IntervalList-querying code consume them through the standard interface.
 
-``insert1`` on ``ArtifactDetectionParameters`` is live and
-Pydantic-validates the ``params`` blob; ``insert_selection``, ``make``,
-``get_artifact_removed_intervals``, ``delete``, and
-``SharedArtifactGroup.insert_group`` are forward-declared stubs that
-raise ``NotImplementedError`` until the matching runtime change lands.
+``ArtifactDetectionParameters.insert1`` Pydantic-validates the
+``params`` blob. ``insert_selection`` resolves a selection to a single
+``artifact_id``, ``make`` runs threshold detection and
+writes the artifact-removed ``IntervalList`` rows,
+``get_artifact_removed_intervals`` reads them back, ``delete`` removes
+them, and ``SharedArtifactGroup.insert_group`` declares a cross-recording
+detection bundle.
 """
 
 from __future__ import annotations

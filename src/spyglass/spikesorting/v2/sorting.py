@@ -9,10 +9,14 @@ Tables (all final-shape under the zero-migration policy):
                                        FK is real so the schema is stable.
     Sorting (+ Unit)          -- Sorted units NWB + SortingAnalyzer folder.
 
-``insert1`` on ``SorterParameters`` is live and dispatches to the
-per-sorter Pydantic schema via ``_get_sorter_schema``; ``make`` /
-``insert_selection`` / accessor methods are forward-declared stubs that
-raise ``NotImplementedError`` until the matching runtime change lands.
+``SorterParameters.insert1`` dispatches to the per-sorter Pydantic
+schema via ``_get_sorter_schema``. ``insert_selection`` resolves a
+sorting request to a single ``sorting_id``, ``make`` runs the
+sorter and writes the units NWB + analyzer, and the accessor methods
+(``get_sorting``, ``get_analyzer``) read those back. Concatenated-
+recording sources are not yet supported: ``insert_selection`` rejects a
+``concat_recording_id`` source and the analyzer rebuild raises
+``NotImplementedError`` for a concat source.
 """
 
 from __future__ import annotations
