@@ -42,8 +42,9 @@ def test_peak_amplitude_is_extremum_on_attributed_electrode(populated_sorting):
     )
     from spyglass.spikesorting.v2.utils import resolve_peak_sign
 
-    analyzer_folder = (Sorting & populated_sorting).fetch1("analyzer_folder")
-    analyzer = si.load_sorting_analyzer(analyzer_folder)
+    # The analyzer folder is no longer a column (Phase B); load via the
+    # accessor, which resolves the path from sorting_id and rebuilds on miss.
+    analyzer = Sorting().get_analyzer(populated_sorting)
     templates = analyzer.get_extension("templates").get_data()
     analyzer_unit_ids = [int(u) for u in analyzer.unit_ids]
     chan_ids = [int(c) for c in analyzer.channel_ids]

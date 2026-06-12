@@ -66,7 +66,18 @@ class SortingFetched(NamedTuple):
 
 
 class SortingComputed(NamedTuple):
-    """Outputs of :meth:`Sorting.make_compute`."""
+    """Outputs of :meth:`Sorting.make_compute`.
+
+    ``analyzer_folder`` is TRANSIENT in-memory state: the exact folder
+    ``_build_analyzer`` wrote, threaded through to ``make_insert`` /
+    ``_populate_unit_part`` so they load and clean up the SAME folder that
+    was built -- never a recomputed path that a mid-populate config /
+    path-policy change could divert. It is NOT persisted as a DB column
+    (Phase B); every OTHER code path (``get_analyzer``, ``delete``,
+    ``find_orphaned_analyzer_folders``), which has no in-memory folder,
+    resolves the canonical location from ``sorting_id`` via
+    ``_analyzer_cache.analyzer_path``.
+    """
 
     sorting_obj: "si.BaseSorting"
     analysis_file_name: str
@@ -950,10 +961,14 @@ class Sorting(SpyglassMixin, dj.Computed):
     ---
     -> AnalysisNwbfile
     object_id: varchar(72)
-    analyzer_folder: varchar(255)
     n_units: int
     time_of_sort: datetime    # populate wall-clock; native DataJoint datetime (v1 stored a Unix-epoch int at v1/sorting.py:239 -- a DataJoint-type workaround no longer needed)
     """
+    # The SortingAnalyzer cache folder is intentionally NOT a column: it is
+    # large (5-50 GB) regeneratable scratch resolved at runtime from
+    # sorting_id via _analyzer_cache.analyzer_path (Phase B). Persisting an
+    # absolute path here previously drifted from the accessor-computed path
+    # whenever temp_dir changed between runs.
 
     class Unit(SpyglassMixinPart):
         """Per-unit metadata persisted at sort time.
@@ -1207,6 +1222,11 @@ class Sorting(SpyglassMixin, dj.Computed):
         import pathlib as _pathlib
         import shutil as _shutil
 
+        # ``analyzer_folder`` is the transient folder ``_build_analyzer``
+        # wrote (threaded from make_compute), used to load the units' peak
+        # channels and for Mode-B rollback cleanup. It is NOT inserted as a
+        # column (Phase B): the canonical path is resolved from sorting_id
+        # everywhere outside this single populate() invocation.
         try:
             # no-op when framework transaction is active; kept defensively
             # so an out-of-populate caller still gets atomic registration.
@@ -1217,7 +1237,6 @@ class Sorting(SpyglassMixin, dj.Computed):
                         **key,
                         "analysis_file_name": analysis_file_name,
                         "object_id": units_object_id,
-                        "analyzer_folder": str(analyzer_folder),
                         "n_units": len(sorting_obj.unit_ids),
                         "time_of_sort": _dt.datetime.now(),
                     }
@@ -1538,8 +1557,13 @@ class Sorting(SpyglassMixin, dj.Computed):
         # true under failure.
         folder = _analyzer_path({"sorting_id": key["sorting_id"]})
         try:
+            # Pass the already-resolved folder so the build target equals
+            # the path this method cleans up on failure (one resolution).
             self._build_analyzer(
-                sorting=sorting_obj, recording=recording, key=key
+                sorting=sorting_obj,
+                recording=recording,
+                key=key,
+                analyzer_folder=folder,
             )
         except Exception:
             try:
@@ -1553,20 +1577,20 @@ class Sorting(SpyglassMixin, dj.Computed):
             raise
 
     def delete(self, *args, safemode=None, **kwargs):
-        """Cascade-delete + analyzer-folder cleanup on disk.
+        """Cascade-delete + analyzer-cache cleanup on disk.
 
-        The ``analyzer_folder`` path column on ``Sorting`` is not
-        tracked by DataJoint, so a plain ``.delete()`` would leave
-        the 5-50 GB scratch folder on disk per row. Mirrors
-        ``ArtifactDetection.delete``'s IntervalList cleanup pattern:
+        The analyzer cache folder is regeneratable scratch resolved from
+        ``sorting_id`` (Phase B: not a DataJoint-tracked column), so a plain
+        ``.delete()`` would leave the 5-50 GB folder on disk per row.
+        Mirrors ``ArtifactDetection.delete``'s IntervalList cleanup pattern:
         collect every folder path BEFORE the cascade delete (the row
         needed to compute the path is gone after), then call
         ``super().delete()``, then ``shutil.rmtree`` each collected
         path. ``ignore_errors=False`` so a permission error surfaces
         loudly rather than getting swallowed.
 
-        Two cleanup paths already cover other points in the
-        ``analyzer_folder`` lifecycle: ``_run_sorter`` cleans the
+        Two cleanup paths already cover other points in the analyzer-cache
+        lifecycle: ``_run_sorter`` cleans the
         sorter scratch ``TemporaryDirectory`` on successful sort,
         and the make_compute / make_insert except blocks clean the
         folder on populate failure. This override closes the third
@@ -1604,11 +1628,12 @@ class Sorting(SpyglassMixin, dj.Computed):
         ``dj.Table.connection.query``) leaks the folder. This periodic audit
         mirrors ``prune_orphaned_selections`` and reports two leak classes:
 
-        - **DB-side orphan**: a ``Sorting`` row whose ``analyzer_folder`` no
-          longer exists on disk (the regeneratable scratch was removed out of
-          band). Reported only -- deleting the *row* is a destructive DB
-          operation the human decides on (per the Spyglass destructive-op
-          contract); this method NEVER auto-deletes a row.
+        - **DB-side orphan**: a ``Sorting`` row whose computed analyzer cache
+          folder (``analyzer_path(sorting_id)``) no longer exists on disk (the
+          regeneratable scratch was removed out of band). Reported only --
+          deleting the *row* is a destructive DB operation the human decides on
+          (per the Spyglass destructive-op contract); this method NEVER
+          auto-deletes a row.
         - **Disk-side orphan**: an on-disk folder under the analyzer root that
           no ``Sorting`` row references (the row was deleted via a path that
           bypassed the ``delete`` override). Safe to delete after inspection.
@@ -1616,10 +1641,9 @@ class Sorting(SpyglassMixin, dj.Computed):
         **Zero-unit carve-out.** Rows with ``n_units == 0`` are NOT DB-side
         orphans: ``_build_analyzer`` short-circuits before writing a folder and
         ``get_analyzer`` raises ``ZeroUnitAnalyzerError`` before reading the
-        path, so an absent folder is expected. The ``analyzer_folder`` column
-        is NOT-NULL ``varchar(255)`` and still carries the would-be path (there
-        is no None/sentinel value), so the carve-out is keyed on
-        ``(Sorting & {"n_units": 0})``, NOT a string match on the column.
+        path, so an absent folder is expected. The cache path is COMPUTED from
+        ``sorting_id`` (Phase B: not a stored column), so the carve-out is
+        keyed on ``(Sorting & {"n_units": 0})``, NOT on any column value.
 
         Parameters
         ----------
@@ -1639,22 +1663,26 @@ class Sorting(SpyglassMixin, dj.Computed):
 
         import datajoint as dj
 
-        from spyglass.spikesorting.v2.utils import _analyzer_path
+        from spyglass.spikesorting.v2._analyzer_cache import (
+            analyzer_cache_root,
+            analyzer_path,
+        )
 
-        # DB-side: units-bearing rows whose stored folder is gone on disk.
-        # The n_units==0 carve-out excludes legitimately folder-less rows.
+        # DB-side: units-bearing rows whose COMPUTED cache folder is gone on
+        # disk. The folder is derived from sorting_id (no stored column); the
+        # n_units==0 carve-out excludes legitimately folder-less rows.
         db_side = [
-            row
-            for row in (cls & "n_units > 0").fetch(
-                "sorting_id", "analyzer_folder", as_dict=True
-            )
-            if not Path(row["analyzer_folder"]).exists()
+            {"sorting_id": sid, "analyzer_folder": str(analyzer_path(sid))}
+            for sid in (cls & "n_units > 0").fetch("sorting_id")
+            if not analyzer_path(sid).exists()
         ]
 
         # Disk-side: folders under the analyzer root that no row (any n_units)
-        # references. The root is the shared parent of every _analyzer_path.
-        referenced = {str(p) for p in cls.fetch("analyzer_folder")}
-        analyzer_root = _analyzer_path({"sorting_id": "x"}).parent
+        # references. The reference set is the computed path of every row.
+        referenced = {
+            str(analyzer_path(sid)) for sid in cls.fetch("sorting_id")
+        }
+        analyzer_root = analyzer_cache_root()
         disk_side = []
         if analyzer_root.exists():
             for child in sorted(analyzer_root.iterdir()):
@@ -2303,6 +2331,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         *,
         sorter_row=None,
         job_kwargs=None,
+        analyzer_folder=None,
     ):
         """Build the binary-folder SortingAnalyzer + base extensions.
 
@@ -2321,6 +2350,13 @@ class Sorting(SpyglassMixin, dj.Computed):
         invocation it resolves once and threads through; the rebuild
         path falls back to resolving locally (same DB-read tradeoff
         as ``sorter_row``).
+
+        ``analyzer_folder`` is the resolved cache folder to write. When
+        ``None`` (the make_compute path) it is resolved from ``sorting_id``
+        and RETURNED for the caller to thread on. Callers that already
+        resolved it (``_rebuild_analyzer_folder``, which needs the path for
+        its own cleanup) pass it in so the folder built equals the folder
+        they clean up -- one resolution, no config-drift edge.
         """
         import shutil as _shutil
 
@@ -2331,7 +2367,11 @@ class Sorting(SpyglassMixin, dj.Computed):
             _resolved_job_kwargs,
         )
 
-        folder = _analyzer_path({"sorting_id": key["sorting_id"]})
+        folder = (
+            analyzer_folder
+            if analyzer_folder is not None
+            else _analyzer_path({"sorting_id": key["sorting_id"]})
+        )
 
         # Zero-unit short-circuit BEFORE any I/O or DB fetch:
         # ``create_sorting_analyzer(sparse=True)`` -> ``estimate_sparsity``
@@ -2553,6 +2593,10 @@ class Sorting(SpyglassMixin, dj.Computed):
         channel (resolved through the sort group's
         ``SortGroupV2.SortGroupElectrode``) plus the peak template
         amplitude in microvolts and the spike count.
+
+        ``analyzer_folder`` is the transient folder ``_build_analyzer``
+        wrote (threaded from make_compute), NOT a stored column -- so the
+        EXACT folder built is loaded here, not a recomputed path.
 
         Zero-unit early-return: ``_build_analyzer`` skips the
         ``create_sorting_analyzer`` call when ``sorting.get_num_units

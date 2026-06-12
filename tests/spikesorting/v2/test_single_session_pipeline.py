@@ -1227,10 +1227,14 @@ def test_sorting_populates_with_mountainsort5(populated_recording):
 
     row = (Sorting & sort_pk).fetch1()
     assert row["n_units"] > 0
-    assert row["analyzer_folder"]
     from pathlib import Path
 
-    assert Path(row["analyzer_folder"]).exists()
+    from spyglass.spikesorting.v2.utils import _analyzer_path
+
+    # The analyzer folder is no longer a column; resolve it from sorting_id.
+    analyzer_folder = _analyzer_path(sort_pk)
+    assert isinstance(analyzer_folder, Path)
+    assert analyzer_folder.exists()
 
     n_unit_rows = len(Sorting.Unit & sort_pk)
     assert n_unit_rows == row["n_units"]
@@ -2674,13 +2678,16 @@ def test_artifact_selection_resolve_source_detects_bypass(populated_recording):
 
     ArtifactDetectionParameters.insert_default()
     orphan_id = _uuid.uuid4()
-    # Insert master with NO source part to simulate bypass.
+    # Insert master with NO source part to simulate bypass. The master
+    # insert guard requires allow_direct_insert=True for this deliberate
+    # raw insert (the bypass the resolve_source check exists to catch).
     dj_table = ArtifactSelection()
     dj_table.insert1(
         {
             "artifact_id": orphan_id,
             "artifact_params_name": "default",
-        }
+        },
+        allow_direct_insert=True,
     )
     try:
         with pytest.raises(SchemaBypassError, match="0 source part"):
@@ -3797,14 +3804,11 @@ def test_run_v2_pipeline_clusterless_default_handles_zero_units_gracefully(
             require_units=True,
         )
 
-    # get_analyzer raises (no analyzer is buildable over zero units) --
-    # it must not try to load the never-built folder. The stored
-    # analyzer_folder column is still a real path string (guard lives in
-    # get_analyzer, not the schema).
-    assert (
-        isinstance(sort_row["analyzer_folder"], str)
-        and sort_row["analyzer_folder"]
-    )
+    # get_analyzer raises (no analyzer is buildable over zero units) -- it
+    # must not try to load a never-built folder. The analyzer path is
+    # computed from sorting_id (no column), so there is no stale-path row
+    # state; the zero-unit guard lives in get_analyzer.
+    assert sort_row["n_units"] == 0
     with pytest.raises(ZeroUnitAnalyzerError):
         Sorting().get_analyzer(sort_pk)
 
@@ -11296,7 +11300,6 @@ def test_curation_get_unit_brain_regions_concat_anchor_member_df(
                 "sorting_id": sid,
                 "analysis_file_name": "a28_concat_fake.nwb",
                 "object_id": "a28-concat-object-id",
-                "analyzer_folder": "/nonexistent/a28_concat",
                 "n_units": 1,
                 "time_of_sort": dt.datetime(2020, 1, 1),
             },

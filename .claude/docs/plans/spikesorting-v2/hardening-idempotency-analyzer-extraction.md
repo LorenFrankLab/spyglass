@@ -247,13 +247,19 @@ relocation choice: old folders are simply cache misses and can be cleaned by the
   - `remove_analyzer_cache(sorting_id, *, missing_ok=True)`.
 - Update `Sorting.definition` to stop storing absolute `analyzer_folder`. Because this is
   pre-production, prefer a schema reset over transitional dual-read behavior.
-- Update `Sorting.make_insert` to insert canonical NWB metadata and unit rows only; analyzer
-  folder creation remains part of compute, but the path is not persisted as row state. **Blast
-  radius beyond the table `definition`:** drop the `analyzer_folder` field from the
-  `SortingComputed` NamedTuple ([sorting.py:69](../../../../src/spyglass/spikesorting/v2/sorting.py#L69))
-  and update the `make_compute → make_insert` positional contract accordingly (the tri-part
-  dispatch passes NamedTuple fields positionally), plus any test asserting the column is
-  populated (e.g. `test_sorting_get_analyzer_loads_folder`).
+- Update `Sorting.make_insert` to insert canonical NWB metadata and unit rows only (no
+  `analyzer_folder` column); analyzer folder creation remains part of compute, but the path is
+  not persisted as row state. **Blast radius beyond the table `definition`:** drop `analyzer_folder`
+  from the `Sorting.definition` only. KEEP `analyzer_folder` on the `SortingComputed` NamedTuple as
+  TRANSIENT in-memory state and thread it `make_compute → make_insert → _populate_unit_part`, so the
+  folder `_build_analyzer` wrote is the exact one loaded/cleaned up (a recomputed path could be
+  diverted by a mid-populate config change). The `make_compute → make_insert` positional contract
+  therefore keeps the field (tri-part dispatch passes NamedTuple fields positionally). Update any
+  test asserting the column is populated, plus the raw-insert/orphan fixtures and the schema-heading
+  test (which now asserts the column is ABSENT).
+  *(Decided during implementation, post-review: the original plan said to drop `analyzer_folder`
+  from `SortingComputed`; that was changed to "keep it transient, drop only the DB column" so the
+  build/load/cleanup all reference one resolved path.)*
 - Update `get_analyzer` to resolve the canonical path, load it if present, and rebuild it into
   that same canonical path if missing.
 - Update `_build_analyzer` and `_rebuild_analyzer_folder` to accept an explicit folder from the

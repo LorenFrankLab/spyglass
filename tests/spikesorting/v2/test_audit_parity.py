@@ -603,15 +603,13 @@ def test_sorting_make_skips_concat_rows_silently():
 def test_get_analyzer_zero_unit_raises_before_path_lookup():
     """A10: a zero-unit sort raises before any analyzer-folder lookup.
 
-    ``analyzer_folder`` is NOT-null ``varchar(255)``, so a zero-unit row
-    still stores its would-be path. ``get_analyzer`` checks ``n_units``
-    FIRST and raises ``ZeroUnitAnalyzerError`` before computing /
-    ``.exists()``-ing the path -- so a missing folder never surfaces as a
-    confusing ``FileNotFoundError``. (The audit's "phantom path" framing
-    was disproved on re-read; this pins the existing guard.)
+    With Phase B the analyzer cache path is computed from ``sorting_id``
+    (not a stored column). ``get_analyzer`` checks ``n_units`` FIRST and
+    raises ``ZeroUnitAnalyzerError`` before computing / ``.exists()``-ing
+    the path -- so a missing folder never surfaces as a confusing
+    ``FileNotFoundError``.
     """
     import datetime as dt
-    import os
     import uuid
 
     import datajoint as dj
@@ -634,11 +632,9 @@ def test_get_analyzer_zero_unit_raises_before_path_lookup():
         allow_direct_insert=True,
     )
 
-    # A zero-unit Sorting row whose analyzer_folder holds a would-be path
-    # that does NOT exist on disk. The AnalysisNwbfile FK is bypassed --
-    # the zero-unit guard never reads the file or the folder.
-    fake_folder = "/nonexistent/analyzer/zero_unit_a10_pin"
-    assert not os.path.exists(fake_folder)
+    # A zero-unit Sorting row; its computed analyzer path does NOT exist on
+    # disk. The AnalysisNwbfile FK is bypassed -- the zero-unit guard never
+    # reads the file or the folder.
     conn = dj.conn()
     conn.query("SET FOREIGN_KEY_CHECKS=0")
     try:
@@ -647,7 +643,6 @@ def test_get_analyzer_zero_unit_raises_before_path_lookup():
                 "sorting_id": sid,
                 "analysis_file_name": "a10_fake.nwb",
                 "object_id": "a10-fake-object-id",
-                "analyzer_folder": fake_folder,
                 "n_units": 0,
                 "time_of_sort": dt.datetime(2020, 1, 1, 0, 0, 0),
             },
@@ -1498,13 +1493,14 @@ def test_tridesclous2_si_defaults_unchanged():
 # ---------- A22: analyzer-folder disk-leak audit job -----------------------
 
 
-def _insert_bypassed_sorting_row(sid, *, n_units, analyzer_folder):
+def _insert_bypassed_sorting_row(sid, *, n_units):
     """Insert a minimal Sorting row via FK-checks-off bypass.
 
     Building a real Sorting row needs the full sort pipeline; for the
     disk-leak audit we only need rows carrying a ``sorting_id`` +
-    ``analyzer_folder`` + ``n_units``, so bypass the AnalysisNwbfile FK like
-    the A10 pin does. Caller cleans up via the SortingSelection cascade.
+    ``n_units`` (the analyzer cache path is computed from ``sorting_id``, not
+    stored), so bypass the AnalysisNwbfile FK like the A10 pin does. Caller
+    cleans up via the SortingSelection cascade.
     """
     import datetime as dt
 
@@ -1533,7 +1529,6 @@ def _insert_bypassed_sorting_row(sid, *, n_units, analyzer_folder):
                 "sorting_id": sid,
                 "analysis_file_name": "a22_fake.nwb",
                 "object_id": "a22-fake-object-id",
-                "analyzer_folder": str(analyzer_folder),
                 "n_units": n_units,
                 "time_of_sort": dt.datetime(2020, 1, 1, 0, 0, 0),
             },
@@ -1554,7 +1549,7 @@ def test_find_orphaned_analyzer_folders_db_side(dj_conn):
     sid = uuid.uuid4()
     folder = _analyzer_path({"sorting_id": sid})  # never written on disk
     assert not folder.exists()
-    _insert_bypassed_sorting_row(sid, n_units=3, analyzer_folder=folder)
+    _insert_bypassed_sorting_row(sid, n_units=3)
 
     try:
         report = Sorting.find_orphaned_analyzer_folders(dry_run=True)
@@ -1598,13 +1593,13 @@ def test_find_orphaned_analyzer_folders_disk_side(dj_conn, tmp_path):
 
 def test_find_orphaned_analyzer_folders_zero_unit_carveout(dj_conn):
     """A22: a zero-unit Sorting row is NOT a DB-side orphan even though its
-    analyzer_folder column carries a would-be path that does not exist.
+    computed analyzer cache path does not exist on disk.
 
     ``_build_analyzer`` short-circuits before writing a folder and
     ``get_analyzer`` raises ``ZeroUnitAnalyzerError`` before reading the path,
     so a missing folder for a zero-unit row is expected, not a leak. The
-    carve-out is keyed on ``n_units == 0`` (the column is NOT-NULL
-    varchar(255), so there is no sentinel path to match on).
+    carve-out is keyed on ``n_units == 0`` (the cache path is computed from
+    ``sorting_id``, not stored, so there is no column value to match on).
     """
     import uuid
 
@@ -1614,7 +1609,7 @@ def test_find_orphaned_analyzer_folders_zero_unit_carveout(dj_conn):
     sid = uuid.uuid4()
     folder = _analyzer_path({"sorting_id": sid})  # never written on disk
     assert not folder.exists()
-    _insert_bypassed_sorting_row(sid, n_units=0, analyzer_folder=folder)
+    _insert_bypassed_sorting_row(sid, n_units=0)
 
     try:
         report = Sorting.find_orphaned_analyzer_folders(dry_run=True)
@@ -2251,7 +2246,6 @@ def test_sorting_get_unit_brain_regions_concat_anchor_member_df(
                 "sorting_id": sid,
                 "analysis_file_name": "a26_concat_fake.nwb",
                 "object_id": "a26-concat-object-id",
-                "analyzer_folder": "/nonexistent/a26_concat",
                 "n_units": 1,
                 "time_of_sort": dt.datetime(2020, 1, 1),
             },
@@ -2649,7 +2643,6 @@ def test_get_sorting_zero_unit_returns_empty_numpysorting(populated_sorting):
                 "sorting_id": sid,
                 "analysis_file_name": "a26_zero_fake.nwb",
                 "object_id": "a26-zero-object-id",
-                "analyzer_folder": "/nonexistent/a26_zero",
                 "n_units": 0,
                 "time_of_sort": dt.datetime(2020, 1, 1),
             },
@@ -2720,6 +2713,8 @@ def test_populate_unit_part_peak_channel_not_in_sort_group(
     nwb_file_name = (
         RecordingSelection & {"recording_id": recording_id}
     ).fetch1("nwb_file_name")
+    # The transient analyzer folder _populate_unit_part loads (built by the
+    # populate that created populated_sorting; resolved from sorting_id).
     analyzer_folder = _analyzer_path(
         {"sorting_id": populated_sorting["sorting_id"]}
     )
@@ -2859,9 +2854,10 @@ def test_sorting_delete_removes_analyzer_folder(
     """A26: ``Sorting.delete`` removes the on-disk analyzer folder for both
     ``safemode=None`` (default) and ``safemode=False`` (explicit pass-through).
 
-    The ``analyzer_folder`` path is not DataJoint-tracked, so the override
-    must rmtree it after the cascade. Populates a dedicated MS5 sort per
-    parametrization so the shared fixture is untouched.
+    The analyzer cache path is not DataJoint-tracked (computed from
+    ``sorting_id``), so the override must rmtree it after the cascade.
+    Populates a dedicated MS5 sort per parametrization so the shared fixture
+    is untouched.
     """
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
     from spyglass.spikesorting.v2.utils import _analyzer_path
@@ -3166,13 +3162,14 @@ def test_to_int_unit_id_raises_typed_error_on_non_integer():
 
 
 @pytest.mark.usefixtures("dj_conn")
-def test_sorting_master_ships_analyzer_folder_and_n_units_columns():
-    """A30: the ``Sorting`` master declares ``analyzer_folder`` and
-    ``n_units`` columns (semantic check via the heading, not a source match)."""
+def test_sorting_master_has_no_analyzer_folder_column():
+    """Phase B: the ``Sorting`` master no longer declares an
+    ``analyzer_folder`` column (the analyzer cache path is computed from
+    ``sorting_id``, not persisted); ``n_units`` is still a column."""
     from spyglass.spikesorting.v2.sorting import Sorting
 
     attrs = Sorting.heading.attributes
-    assert "analyzer_folder" in attrs
+    assert "analyzer_folder" not in attrs
     assert "n_units" in attrs
 
 
