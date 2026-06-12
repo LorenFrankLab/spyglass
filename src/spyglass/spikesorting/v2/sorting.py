@@ -648,13 +648,14 @@ class SortingSelection(SpyglassMixin, dj.Manual):
         )
 
         existing = cls._find_existing_pk(
-            master_restriction, source_restriction, artifact_id
+            master_restriction, source_restriction, artifact_id, sorting_id
         )
         if existing is not None:
             return existing
 
         # Translate the would-be DataJoint FK IntegrityError into a
         # clear "missing default row" message before the inserts attempt.
+        from spyglass.spikesorting.v2.exceptions import SchemaBypassError
         from spyglass.spikesorting.v2.utils import (
             _ensure_lookup_row_exists,
             _is_duplicate_key_error,
@@ -693,26 +694,49 @@ class SortingSelection(SpyglassMixin, dj.Manual):
             # Lost a concurrent race on the same deterministic sorting_id;
             # refetch and return the winner's master+source row.
             existing = cls._find_existing_pk(
-                master_restriction, source_restriction, artifact_id
+                master_restriction, source_restriction, artifact_id, sorting_id
             )
-            if existing is None:
-                raise
-            return existing
+            if existing is not None:
+                return existing
+            # The deterministic master exists (that is the duplicate key)
+            # but its recording/artifact source parts are missing or do not
+            # match the requested selection -- a raw-insert orphan. Surface
+            # a clear schema-bypass error instead of the opaque duplicate.
+            raise SchemaBypassError(
+                f"SortingSelection master {sorting_id} exists but its "
+                "recording/artifact source parts are missing or do not match "
+                "the requested selection: the master was inserted without "
+                "insert_selection (raw-insert orphan). Use insert_selection() "
+                "to create master+source atomically, or drop the orphan "
+                "master."
+            ) from exc
         return {k: new_master_key[k] for k in cls.primary_key}
 
     @classmethod
     def _find_existing_pk(
-        cls, master_restriction, source_restriction, artifact_id
+        cls,
+        master_restriction,
+        source_restriction,
+        artifact_id,
+        deterministic_id,
     ) -> dict | None:
-        """Return the master PK dict for an existing sort selection, or None.
+        """Return the canonical master PK for this sort selection, or None.
 
         Matches a master with the same sorter + recording source AND the
         same artifact-source state (present-with-this-``artifact_id`` vs
         absent), so an artifact-backed and an artifact-free selection never
-        alias. Returns the single matching ``{"sorting_id": ...}`` or
-        ``None``; raises ``DuplicateSelectionError`` if more than one master
-        matches (a raw ``insert`` bypass). Used by ``insert_selection`` for
-        both the pre-insert lookup and the post-duplicate-key refetch.
+        alias. Splits the matches by primary key:
+
+        * the master at ``deterministic_id`` is the canonical, content-
+          addressed selection -> return ``{"sorting_id": ...}``;
+        * ANY master with a different ``sorting_id`` is non-deterministic
+          (a raw ``insert`` bypass or pre-determinism legacy row) and
+          violates the Phase A invariant -> raise
+          ``DuplicateSelectionError`` so it is reset rather than silently
+          returned.
+
+        Used by ``insert_selection`` for both the pre-insert lookup and
+        the post-duplicate-key refetch.
         """
         from spyglass.spikesorting.v2.exceptions import (
             DuplicateSelectionError,
@@ -723,22 +747,24 @@ class SortingSelection(SpyglassMixin, dj.Manual):
             & master_restriction
             & source_restriction
         ).fetch("KEY", as_dict=True)
-        matches = []
-        for cand in candidates:
-            cand_master = {
-                k: v for k, v in cand.items() if k in cls.primary_key
-            }
-            if cls.resolve_artifact(cand_master) == artifact_id:
-                matches.append(cand_master)
-        unique = {tuple(sorted(d.items())) for d in matches}
-        if len(unique) > 1:
+        master_ids = {
+            cand["sorting_id"]
+            for cand in candidates
+            if cls.resolve_artifact({"sorting_id": cand["sorting_id"]})
+            == artifact_id
+        }
+        bypassed = [sid for sid in master_ids if sid != deterministic_id]
+        if bypassed:
             raise DuplicateSelectionError(
-                f"SortingSelection has {len(unique)} master rows for "
+                f"SortingSelection has {len(master_ids)} master rows for "
                 f"{master_restriction | source_restriction} with "
-                f"artifact_id={artifact_id}. v2 inserts via this helper "
-                "should not produce duplicates."
+                f"artifact_id={artifact_id} whose sorting_id is not the "
+                f"deterministic id {deterministic_id}: {bypassed}. This is a "
+                "non-deterministic selection row (a raw insert or pre-"
+                "determinism legacy row); drop it and re-insert via "
+                "insert_selection."
             )
-        return dict(next(iter(unique))) if len(unique) == 1 else None
+        return {"sorting_id": deterministic_id} if master_ids else None
 
     @classmethod
     def _validate_artifact_source_for_recording(

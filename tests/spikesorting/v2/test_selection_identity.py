@@ -163,12 +163,20 @@ def test_assert_supplied_id_matches_rejects_mismatch():
         assert_supplied_id_matches(uuid.uuid4(), target, field="recording_id")
 
 
-def test_selection_identity_module_imports_without_db():
-    """Regression guard (mirrors the ``_artifact_compute`` kernel guard):
-    a cold import of ``_selection_identity`` in a fresh interpreter pulls
-    in neither ``spyglass.common`` nor any v2 *schema* module, so an HPC
-    job array that computes a selection id in a spawned worker never opens
-    a DB connection at import.
+def test_selection_identity_import_pulls_no_db_layer_modules():
+    """A cold import of ``_selection_identity`` pulls in neither
+    ``spyglass.common`` nor any v2 *schema* module.
+
+    Those are the modules that open a DB connection at import (``dj.schema``
+    activation / ``from spyglass.common import ...``); the leaf module
+    itself imports only ``json`` + ``uuid``. This is the precise,
+    checkable claim -- it does NOT assert "no datajoint anywhere", because
+    importing the top-level ``spyglass`` package (via ``settings``)
+    legitimately imports the DataJoint *library*, which does not connect on
+    its own. The guarantee that matters: an HPC job array computing a
+    selection id in a ``spawn`` worker re-imports only this DB-free leaf,
+    so it never opens a connection. Mirrors the ``_artifact_compute``
+    kernel guard.
     """
     import subprocess
     import sys
@@ -195,9 +203,38 @@ def test_selection_identity_module_imports_without_db():
         [sys.executable, "-c", probe], capture_output=True, text=True
     )
     assert result.returncode == 0, (
-        "selection-identity helper must import without a DB dependency\n"
+        "selection-identity helper must import without pulling in the "
+        "DB-layer (spyglass.common) or v2 schema modules\n"
         f"stdout={result.stdout}\nstderr={result.stderr}"
     )
+
+
+def test_is_duplicate_key_error_classifies_exceptions():
+    """``_is_duplicate_key_error`` is True only for a duplicate PRIMARY-KEY
+    violation, never for an FK / missing-source-part ``IntegrityError``."""
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.utils import _is_duplicate_key_error
+
+    # DataJoint maps MySQL errno 1062 -> DuplicateError: that is the race.
+    assert _is_duplicate_key_error(dj.errors.DuplicateError("Duplicate entry"))
+    # FK violations surface as IntegrityError with no 1062/"Duplicate entry"
+    # signature -- they MUST propagate (Phase A step 5), not be swallowed.
+    assert not _is_duplicate_key_error(
+        dj.errors.IntegrityError(
+            "Cannot add or update a child row: a foreign key constraint fails"
+        )
+    )
+    # Defensive: a raw 1062 surfacing as IntegrityError before translation
+    # is still recognized, by errno or message signature.
+    assert _is_duplicate_key_error(
+        dj.errors.IntegrityError("(1062, \"Duplicate entry 'x' for key\")")
+    )
+    assert _is_duplicate_key_error(
+        dj.errors.IntegrityError("Duplicate entry 'x' for key 'PRIMARY'")
+    )
+    # An unrelated exception is not a duplicate-key error.
+    assert not _is_duplicate_key_error(ValueError("unrelated"))
 
 
 # --------------------------------------------------------------------------
@@ -375,3 +412,174 @@ def test_sorting_selection_artifact_vs_no_artifact_distinct(populated_sorting):
         )
     finally:
         (SortingSelection & no_art_pk).delete(safemode=False)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_recording_selection_rejects_single_nondeterministic_row(
+    fresh_recording_identity,
+):
+    """A SINGLE raw-inserted row with a random recording_id for this logical
+    identity is rejected, not returned.
+
+    Phase A's invariant is that the logical identity maps to ONE
+    content-addressed id. A pre-determinism / raw-insert row with a
+    different (random) recording_id violates that, so insert_selection
+    raises instead of silently adopting it as canonical.
+    """
+    from spyglass.spikesorting.v2.exceptions import DuplicateSelectionError
+    from spyglass.spikesorting.v2.recording import RecordingSelection
+
+    identity = fresh_recording_identity
+    # One raw row with the SAME logical identity but a random PK (all FK
+    # targets exist, so this lands without FK-checks-off).
+    RecordingSelection.insert1({**identity, "recording_id": uuid.uuid4()})
+
+    with pytest.raises(DuplicateSelectionError, match="non-deterministic"):
+        RecordingSelection.insert_selection(dict(identity))
+    # The helper did NOT converge a second (deterministic) row on top.
+    assert len(RecordingSelection & identity) == 1
+    # (fixture teardown removes the planted row.)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_artifact_selection_duplicate_pk_race_refetches(populated_sorting):
+    """ArtifactSelection duplicate-PK race loser refetches the winner's
+    master+source row (no new row, no error)."""
+    from spyglass.spikesorting.v2.artifact import ArtifactSelection
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    rec_id = (SortingSelection.RecordingSource & populated_sorting).fetch1(
+        "recording_id"
+    )
+    key = {"recording_id": rec_id, "artifact_params_name": "none"}
+    pk = ArtifactSelection.insert_selection(key)  # the populated selection
+
+    with mock.patch.object(
+        ArtifactSelection, "_find_existing_pk", side_effect=[None, pk]
+    ) as patched:
+        raced = ArtifactSelection.insert_selection(dict(key))
+
+    assert raced == pk
+    assert patched.call_count == 2
+    assert len(ArtifactSelection & {"artifact_id": pk["artifact_id"]}) == 1
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_artifact_selection_orphan_master_raises_schema_bypass(
+    populated_sorting,
+):
+    """A deterministic ArtifactSelection master with NO source part (a
+    raw-insert orphan) surfaces a SchemaBypassError on the duplicate-PK
+    refetch, not the opaque duplicate-key error."""
+    from spyglass.spikesorting.v2.artifact import ArtifactSelection
+    from spyglass.spikesorting.v2.exceptions import SchemaBypassError
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    rec_id = (SortingSelection.RecordingSource & populated_sorting).fetch1(
+        "recording_id"
+    )
+    # "default" params exist (insert_default) but are unused by the fixture,
+    # so this (recording, "default") identity has no real master yet.
+    det_id = deterministic_id(
+        "artifact",
+        {
+            "source_kind": "recording",
+            "artifact_params_name": "default",
+            "recording_id": rec_id,
+        },
+    )
+    ArtifactSelection.insert1(
+        {"artifact_id": det_id, "artifact_params_name": "default"},
+        allow_direct_insert=True,
+    )
+    try:
+        with pytest.raises(SchemaBypassError, match="raw-insert orphan"):
+            ArtifactSelection.insert_selection(
+                {"recording_id": rec_id, "artifact_params_name": "default"}
+            )
+    finally:
+        (ArtifactSelection & {"artifact_id": det_id}).delete(safemode=False)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_sorting_selection_duplicate_pk_race_refetches(populated_sorting):
+    """SortingSelection duplicate-PK race loser refetches the winner's row."""
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    rec_id = (SortingSelection.RecordingSource & populated_sorting).fetch1(
+        "recording_id"
+    )
+    sorter, sorter_params_name = (SortingSelection & populated_sorting).fetch1(
+        "sorter", "sorter_params_name"
+    )
+    artifact_id = SortingSelection.resolve_artifact(populated_sorting)
+    key = {
+        "recording_id": rec_id,
+        "sorter": sorter,
+        "sorter_params_name": sorter_params_name,
+        "artifact_id": artifact_id,
+    }
+    pk = SortingSelection.insert_selection(key)
+    assert pk == populated_sorting
+
+    with mock.patch.object(
+        SortingSelection, "_find_existing_pk", side_effect=[None, pk]
+    ) as patched:
+        raced = SortingSelection.insert_selection(dict(key))
+
+    assert raced == pk
+    assert patched.call_count == 2
+    assert len(SortingSelection & pk) == 1
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_sorting_selection_orphan_master_raises_schema_bypass(
+    populated_sorting,
+):
+    """A deterministic SortingSelection master with NO recording source
+    part (a raw-insert orphan) surfaces a SchemaBypassError on the
+    duplicate-PK refetch."""
+    from spyglass.spikesorting.v2.exceptions import SchemaBypassError
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    rec_id = (SortingSelection.RecordingSource & populated_sorting).fetch1(
+        "recording_id"
+    )
+    sorter, sorter_params_name = (SortingSelection & populated_sorting).fetch1(
+        "sorter", "sorter_params_name"
+    )
+    # A no-artifact sort for this (recording, sorter) has no real master.
+    det_id = deterministic_id(
+        "sorting",
+        {
+            "source_kind": "recording",
+            "recording_id": rec_id,
+            "sorter": sorter,
+            "sorter_params_name": sorter_params_name,
+            "artifact_id": None,
+        },
+    )
+    SortingSelection.insert1(
+        {
+            "sorting_id": det_id,
+            "sorter": sorter,
+            "sorter_params_name": sorter_params_name,
+        },
+        allow_direct_insert=True,
+    )
+    try:
+        with pytest.raises(SchemaBypassError, match="raw-insert orphan"):
+            SortingSelection.insert_selection(
+                {
+                    "recording_id": rec_id,
+                    "sorter": sorter,
+                    "sorter_params_name": sorter_params_name,
+                }
+            )
+    finally:
+        (SortingSelection & {"sorting_id": det_id}).delete(safemode=False)

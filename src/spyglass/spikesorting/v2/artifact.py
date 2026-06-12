@@ -547,13 +547,14 @@ class ArtifactSelection(SpyglassMixin, dj.Manual):
         )
 
         existing = cls._find_existing_pk(
-            master_restriction, source_part, source_restriction
+            master_restriction, source_part, source_restriction, artifact_id
         )
         if existing is not None:
             return existing
 
         # Translate the would-be DataJoint FK IntegrityError into a
         # clear "missing default row" message before the inserts attempt.
+        from spyglass.spikesorting.v2.exceptions import SchemaBypassError
         from spyglass.spikesorting.v2.utils import (
             _ensure_lookup_row_exists,
             _is_duplicate_key_error,
@@ -578,46 +579,68 @@ class ArtifactSelection(SpyglassMixin, dj.Manual):
             # Lost a concurrent race on the same deterministic artifact_id;
             # refetch and return the winner's master+source row.
             existing = cls._find_existing_pk(
-                master_restriction, source_part, source_restriction
+                master_restriction, source_part, source_restriction, artifact_id
             )
-            if existing is None:
-                raise
-            return existing
+            if existing is not None:
+                return existing
+            # The deterministic master exists (that is the duplicate key)
+            # but the expected source part is missing/mismatched -- a
+            # raw-insert orphan. Surface a clear schema-bypass error
+            # instead of the opaque duplicate-key error.
+            raise SchemaBypassError(
+                f"ArtifactSelection master {artifact_id} exists but has no "
+                f"matching {source_part.__name__} row for "
+                f"{source_restriction}: the master was inserted without "
+                "insert_selection (raw-insert orphan). Use insert_selection() "
+                "to create master+source atomically, or drop the orphan "
+                "master."
+            ) from exc
         return {k: new_master_key[k] for k in cls.primary_key}
 
     @classmethod
     def _find_existing_pk(
-        cls, master_restriction, source_part, source_restriction
+        cls,
+        master_restriction,
+        source_part,
+        source_restriction,
+        deterministic_id,
     ) -> dict | None:
-        """Return the master PK dict for an existing master+source, or None.
+        """Return the canonical master PK for this master+source, or None.
 
-        Joins the master to the chosen source part so a prior selection
-        with a DIFFERENT source is not reused. Returns the single matching
-        ``{"artifact_id": ...}`` or ``None``; raises
-        ``DuplicateSelectionError`` if more than one master matches (a raw
-        ``insert`` bypass). Used by ``insert_selection`` for both the
-        pre-insert lookup and the post-duplicate-key refetch.
+        Joins the master to the chosen source part (so a prior selection
+        with a DIFFERENT source is not reused) and splits the matches by
+        primary key:
+
+        * the master at ``deterministic_id`` is the canonical, content-
+          addressed selection -> return ``{"artifact_id": ...}``;
+        * ANY master with a different ``artifact_id`` is non-deterministic
+          (a raw ``insert`` bypass or pre-determinism legacy row) and
+          violates the Phase A invariant -> raise
+          ``DuplicateSelectionError`` so it is reset rather than silently
+          returned.
+
+        Used by ``insert_selection`` for both the pre-insert lookup and
+        the post-duplicate-key refetch.
         """
         from spyglass.spikesorting.v2.exceptions import (
             DuplicateSelectionError,
         )
 
         joined = (cls * source_part) & master_restriction & source_restriction
-        existing = joined.fetch("KEY", as_dict=True)
-        existing_master_keys = [
-            {k: v for k, v in row.items() if k in cls.primary_key}
-            for row in existing
-        ]
-        # Dedupe master PKs across the join (the integrity test pins
-        # exactly-one source per master, but be defensive).
-        unique = {tuple(sorted(d.items())) for d in existing_master_keys}
-        if len(unique) > 1:
+        master_ids = {
+            row["artifact_id"] for row in joined.fetch("KEY", as_dict=True)
+        }
+        bypassed = [aid for aid in master_ids if aid != deterministic_id]
+        if bypassed:
             raise DuplicateSelectionError(
-                f"ArtifactSelection has {len(unique)} master rows for "
-                f"{master_restriction | source_restriction}. v2 inserts "
-                "via this helper should not produce duplicates."
+                f"ArtifactSelection has {len(master_ids)} master rows for "
+                f"{master_restriction | source_restriction} whose artifact_id "
+                f"is not the deterministic id {deterministic_id}: {bypassed}. "
+                "This is a non-deterministic selection row (a raw insert or "
+                "pre-determinism legacy row); drop it and re-insert via "
+                "insert_selection."
             )
-        return dict(next(iter(unique))) if len(unique) == 1 else None
+        return {"artifact_id": deterministic_id} if master_ids else None
 
     @classmethod
     def prune_orphaned_selections(cls, dry_run: bool = True) -> list[dict]:

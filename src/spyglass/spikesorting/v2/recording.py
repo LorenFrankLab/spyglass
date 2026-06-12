@@ -747,7 +747,7 @@ class RecordingSelection(SpyglassMixin, dj.Manual):
             key.get("recording_id"), recording_id, field="recording_id"
         )
 
-        existing = cls._find_existing_pk(keys_minus_uuid)
+        existing = cls._find_existing_pk(keys_minus_uuid, recording_id)
         if existing is not None:
             return existing
 
@@ -768,34 +768,47 @@ class RecordingSelection(SpyglassMixin, dj.Manual):
                 raise
             # Lost a concurrent race: another caller inserted the same
             # deterministic recording_id first. Refetch and return it.
-            existing = cls._find_existing_pk(keys_minus_uuid)
+            existing = cls._find_existing_pk(keys_minus_uuid, recording_id)
             if existing is None:
                 raise
             return existing
         return {k: new_key[k] for k in cls.primary_key}
 
     @classmethod
-    def _find_existing_pk(cls, keys_minus_uuid: dict) -> dict | None:
-        """Return the PK dict for an existing logical selection, or None.
+    def _find_existing_pk(
+        cls, keys_minus_uuid: dict, deterministic_id
+    ) -> dict | None:
+        """Return the canonical PK for this logical selection, or None.
 
-        Restricts the table by the logical-identity (non-UUID) fields.
-        Returns the single matching ``{"recording_id": ...}`` or ``None``;
-        raises ``DuplicateSelectionError`` if more than one row matches (a
-        raw-``insert`` bypass that this helper would otherwise silently
-        ``[0]``-index). Used by ``insert_selection`` for both the
-        pre-insert lookup and the post-duplicate-key refetch.
+        Looks up rows by the logical-identity (non-UUID) fields and splits
+        them by primary key:
+
+        * the row at ``deterministic_id`` is the canonical, content-
+          addressed selection -> return ``{"recording_id": ...}``;
+        * ANY row with a different ``recording_id`` is non-deterministic
+          (a raw ``insert`` bypass or a pre-determinism legacy row) and
+          violates the Phase A invariant -> raise
+          ``DuplicateSelectionError`` so it is reset rather than silently
+          returned or ``[0]``-indexed.
+
+        Used by ``insert_selection`` for both the pre-insert lookup and
+        the post-duplicate-key refetch.
         """
         from spyglass.spikesorting.v2.exceptions import DuplicateSelectionError
 
-        existing = (cls & keys_minus_uuid).fetch("KEY", as_dict=True)
-        if len(existing) > 1:
+        existing = list((cls & keys_minus_uuid).fetch("recording_id"))
+        bypassed = [rid for rid in existing if rid != deterministic_id]
+        if bypassed:
             raise DuplicateSelectionError(
                 f"RecordingSelection has {len(existing)} duplicate "
-                f"selection rows for logical identity {keys_minus_uuid}. "
-                "This is an integrity bug; v2 inserts via this helper "
-                "should not produce duplicates."
+                f"selection row(s) for logical identity {keys_minus_uuid} "
+                f"whose recording_id is not the deterministic id "
+                f"{deterministic_id}: {bypassed}. This is a "
+                "non-deterministic selection row (a raw insert or a "
+                "pre-determinism legacy row); drop it and re-insert via "
+                "insert_selection."
             )
-        return existing[0] if existing else None
+        return {"recording_id": deterministic_id} if existing else None
 
 
 _ELECTRICAL_SERIES_NAME = "ProcessedElectricalSeries"
