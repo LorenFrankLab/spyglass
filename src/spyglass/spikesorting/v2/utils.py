@@ -752,11 +752,16 @@ def _assert_noise_levels_length(
 
 
 def _analyzer_path(key: dict) -> Path:
-    """Return the on-disk SortingAnalyzer folder for a sorting row.
+    """Return the on-disk SortingAnalyzer cache folder for a sorting row.
 
-    The folder holds regeneratable scratch (waveforms, templates, metric
-    extensions); it is not the canonical artifact and lives outside the
-    AnalysisNwbfile storage tree, under Spyglass's configured temp directory.
+    Thin compatibility wrapper over
+    :func:`spyglass.spikesorting.v2._analyzer_cache.analyzer_path`, which
+    owns the path policy -- the optional
+    ``dj.config["custom"]["spikesorting_v2_analyzer_dir"]`` override and the
+    ``temp_dir`` fallback (the default root is unchanged:
+    ``{temp_dir}/spikesorting_v2/analyzers``). Keeping this key-dict wrapper
+    lets existing call sites stay unchanged while path policy lives in one
+    place.
 
     Parameters
     ----------
@@ -766,16 +771,11 @@ def _analyzer_path(key: dict) -> Path:
     Returns
     -------
     pathlib.Path
-        ``{temp_dir}/spikesorting_v2/analyzers/{sorting_id}.analyzer``.
+        ``analyzer_cache_root() / f"{sorting_id}.analyzer"``.
     """
-    from spyglass.settings import temp_dir
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
-    return (
-        Path(temp_dir)
-        / "spikesorting_v2"
-        / "analyzers"
-        / f"{key['sorting_id']}.analyzer"
-    )
+    return analyzer_path(key["sorting_id"])
 
 
 def _resolved_job_kwargs(*row_job_kwargs: dict | None) -> dict:
