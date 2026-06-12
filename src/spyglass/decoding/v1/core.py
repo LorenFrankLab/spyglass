@@ -77,7 +77,7 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
                 "'non_local_detector' is unavailable."
             )
             return
-        cls.super().insert(cls.contents, skip_duplicates=True)
+        cls.insert(cls.contents, skip_duplicates=True)
 
     def insert(self, rows, *args, **kwargs):
         """Override insert to convert classes to dict before inserting"""

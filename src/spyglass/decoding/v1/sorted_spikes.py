@@ -8,6 +8,8 @@ speeds. eLife 10, e64505 (2021).
 
 """
 
+from __future__ import annotations
+
 import copy
 import uuid
 from pathlib import Path
