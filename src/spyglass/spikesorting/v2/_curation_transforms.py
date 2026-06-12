@@ -18,18 +18,23 @@ place. This is the same "thin DataJoint shell over pure services"
 direction as ``_artifact_compute`` / ``_selection_identity`` /
 ``_analyzer_cache``.
 
-DB-FREE BY CONTRACT. This module opens no database connection and
-activates no ``dj.schema`` at import. Its only spyglass import is the
-``CurationLabel`` enum (``utils`` connects nowhere at import either), so a
-spawned worker or DB-isolated node can import it without reaching the
-database.
+DEPENDENCY-LIGHT BY CONTRACT. This module opens no database connection
+and activates no ``dj.schema`` at import. Its own imports are limited to
+the standard library plus the ``CurationLabel`` enum, taken from the
+stdlib-only ``_enums`` module rather than through ``utils`` (which imports
+DataJoint / SpikeInterface at load). So the transform layer itself does
+not depend on the heavy table-support module. (Importing it as a
+``spyglass`` submodule still triggers ``spyglass``'s package ``__init__``,
+which loads DataJoint -- that is package-wide and unavoidable; the point
+here is that these transforms add no DB/SpikeInterface dependency of their
+own.)
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 
-from spyglass.spikesorting.v2.utils import CurationLabel
+from spyglass.spikesorting.v2._enums import CurationLabel
 
 
 def validate_curation_label_rows(
