@@ -103,6 +103,7 @@ for label, interval_data in results.groupby("interval_labels"):
 - Revise table field docstring heading and `mermaid` diagram generation #1402
 - Add pages for custom analysis tables and class inheritance structure #1435
 - Add support for bandstop filter type #1464
+- Add Interval and Populate migration guides #1615
 
 ### Infrastructure
 
@@ -225,6 +226,7 @@ for label, interval_data in results.groupby("interval_labels"):
     - Fix ingestion nwb files with position objects but no spatial series #1405
     - Ignore `percent_frames` when using `limit` in `DLCPosVideo` #1418
     - Increase `DLCProject.config_path` length #1534
+    - Add option to bound output of DLC to defined spatial region #1570
 
 - Spikesorting
 

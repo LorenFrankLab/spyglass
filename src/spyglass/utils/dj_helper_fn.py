@@ -246,8 +246,8 @@ def get_nwb_table(query_expression, tbl, attr_name, *attrs, **kwargs):
     """Get the NWB file name and path from the given DataJoint query.
 
     .. deprecated:: 0.6.0
-        This function has been integrated into FetchMixin.
-        Use table.fetch_nwb() instead, which now includes all this logic.
+        Use ``(table & key).fetch_nwb()`` instead. Migration guide:
+        https://lorenfranklab.github.io/spyglass/latest/Features/Mixin/
 
     Parameters
     ----------
@@ -337,8 +337,8 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
     """Get an NWB object from the given DataJoint query.
 
     .. deprecated:: 0.6.0
-        This function has been integrated into FetchMixin.
-        Use table.fetch_nwb() instead, which now includes all this logic.
+        Use ``(table & key).fetch_nwb()`` instead. Migration guide:
+        https://lorenfranklab.github.io/spyglass/latest/Features/Mixin/
 
     Parameters
     ----------
