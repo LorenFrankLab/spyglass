@@ -55,11 +55,14 @@ class ElectrodeGroup(SpyglassIngestion, dj.Imported):
                 "description": "description",
                 "region_id": self.fetch_add_brain_region,
                 "target_hemisphere": self.hemisphere_from_targeted_x,
-            },
-            "device": {
-                "probe_id": "probe_type",
+                "probe_id": self.device_probe_type_default_none,
             },
         }
+
+    def device_probe_type_default_none(self, nwb_obj):
+        if not (device := getattr(nwb_obj, "device", None)):
+            return None
+        return getattr(device, "probe_type", None)
 
     def fetch_add_brain_region(self, nwb_obj):
         """Fetch or add the brain region from the NWB object."""
@@ -73,16 +76,16 @@ class ElectrodeGroup(SpyglassIngestion, dj.Imported):
             return "Right" if targeted_x >= 0 else "Left"
         return None
 
-    # def make(self, key):
-    #     """Make without transaction
+    def make(self, key):
+        """Make without transaction
 
-    #     Allows populate_all_common to work within a single transaction."""
-    #     from spyglass.common.common_usage import ActivityLog
+        Allows populate_all_common to work within a single transaction."""
+        from spyglass.common.common_usage import ActivityLog
 
-    #     ActivityLog().deprecate_log(
-    #         name="ElectrodeGroup.make", alt="insert_from_nwbfile"
-    #     )
-    #     self.insert_from_nwbfile(key["nwb_file_name"])
+        ActivityLog().deprecate_log(
+            name="ElectrodeGroup.make", alt="insert_from_nwbfile"
+        )
+        self.insert_from_nwbfile(key["nwb_file_name"])
 
 
 @schema
@@ -121,11 +124,11 @@ class Electrode(SpyglassIngestion, dj.Imported):
             "self": {
                 "electrode_id": self.index_to_int,
                 "name": self.index_to_str,
-                "x": "x",
-                "y": "y",
-                "z": "z",
+                "x": self.electrode_x_default_none,
+                "y": self.electrode_y_default_none,
+                "z": self.electrode_z_default_none,
                 "filtering": self.get_filtering_default_unfiltered,
-                "impedance": "imp",
+                "impedance": self.electrode_imp_default_none,
                 "x_warped": self.fixed_to_zero,
                 "y_warped": self.fixed_to_zero,
                 "z_warped": self.fixed_to_zero,
@@ -133,15 +136,36 @@ class Electrode(SpyglassIngestion, dj.Imported):
                 "region_id": self.fetch_add_brain_region,
                 "electrode_group_name": "group_name",
                 # non-default columns
-                "probe_shank": "probe_shank",
-                "probe_electrode": "probe_electrode",
-                "original_reference_electrode": "ref_elect_id",
+                "probe_shank": self.electrode_probe_shank_default_none,
+                "probe_electrode": self.electrode_probe_electrode_default_none,
+                "original_reference_electrode": self.electrode_ref_elect_id_default_none,
                 "bad_channel": self.bad_channel_default_false,
             },
             "group": {
-                "probe_id": self.device_probe_type,
+                "probe_id": self.device_probe_type_default_none,
             },
         }
+
+    def electrode_x_default_none(self, nwb_obj):
+        return getattr(nwb_obj, "x", None)
+
+    def electrode_y_default_none(self, nwb_obj):
+        return getattr(nwb_obj, "y", None)
+
+    def electrode_z_default_none(self, nwb_obj):
+        return getattr(nwb_obj, "z", None)
+
+    def electrode_imp_default_none(self, nwb_obj):
+        return getattr(nwb_obj, "imp", None)
+
+    def electrode_probe_shank_default_none(self, nwb_obj):
+        return getattr(nwb_obj, "probe_shank", None)
+
+    def electrode_probe_electrode_default_none(self, nwb_obj):
+        return getattr(nwb_obj, "probe_electrode", None)
+
+    def electrode_ref_elect_id_default_none(self, nwb_obj):
+        return getattr(nwb_obj, "ref_elect_id", None)
 
     def fixed_to_zero(self, nwb_obj):
         return 0
@@ -166,7 +190,7 @@ class Electrode(SpyglassIngestion, dj.Imported):
     def bad_channel_default_false(self, nwb_obj):
         return "True" if getattr(nwb_obj, "bad_channel", False) else "False"
 
-    def device_probe_type(self, nwb_obj):
+    def device_probe_type_default_none(self, nwb_obj):
         """Fetch the probe type from the NWB object."""
         if not (device := getattr(nwb_obj, "device")):
             return None
@@ -188,8 +212,10 @@ class Electrode(SpyglassIngestion, dj.Imported):
     ):
         """Insert Electrode entries from NWB file, using config for overrides."""
         self._cached_config = config
-        return_val = super().insert_from_nwbfile(nwb_file_name, config, dry_run)
-        self._cached_config = None
+        try:
+            return_val = super().insert_from_nwbfile(nwb_file_name, config, dry_run)
+        finally:
+            self._cached_config = None
         return return_val
 
     def generate_entries_from_nwb_object(
