@@ -1869,12 +1869,14 @@ class Sorting(SpyglassMixin, dj.Computed):
         broadcast to length ``n_channels``
         because SI's ``locally_exclusive`` indexes ``noise_levels[chan]
         * detect_threshold`` per channel. When the params row omits
-        ``noise_levels`` (default in v2, and what the smoke /
-        synthetic-fixture rows do), SI computes per-channel MAD
-        internally and ``detect_threshold`` is interpreted as a MAD
-        multiplier -- which is what the v1 baseline-capture script
-        relies on for the ``smoke_clusterless_5uv`` row to find any
-        peaks on the MEArec fixture.
+        ``noise_levels``, the runtime derives it from ``threshold_unit``:
+        ``"uv"`` (the schema default, and the production Frank-lab row)
+        derives ``[1.0]`` and scales to microvolts as above; ``"mad"``
+        (what the ``smoke_clusterless_5uv`` / synthetic-fixture rows set
+        EXPLICITLY) leaves it unset so SI computes per-channel MAD and
+        ``detect_threshold`` is a MAD multiplier -- which is what the v1
+        baseline-capture script relies on to find any peaks on the
+        low-amplitude MEArec fixture.
         """
         import numpy as _np
         import spikeinterface as si
@@ -1911,6 +1913,22 @@ class Sorting(SpyglassMixin, dj.Computed):
         # 0.195 uV/count data would make "100" ~19.5 uV instead of 100 uV).
         # The runtime fallback must agree with the schema default.
         threshold_unit = params.pop("threshold_unit", "uv")
+        # Reject an invalid ``threshold_unit`` LOUDLY rather than silently
+        # treating it as MAD (audit follow-up P2). The schema's
+        # ``Literal["uv", "mad"]`` enforces this at insert, but ``update1`` and
+        # pre-validator rows bypass it, and make/sort-time consumes the fetched
+        # blob WITHOUT re-validating. Without this guard ANY non-"uv" value
+        # falls through to the MAD path -- ``_clusterless_noise_levels`` returns
+        # ``None`` for everything except "uv" -- so a typo like "microvolts" or
+        # "UV" would silently change what ``detect_threshold`` means instead of
+        # failing.
+        if threshold_unit not in ("uv", "mad"):
+            raise ValueError(
+                "clusterless_thresholder: threshold_unit must be 'uv' or "
+                f"'mad', got {threshold_unit!r}. A params row written via "
+                "update1 or before the SorterParameters validator existed can "
+                "carry an invalid value; fix the stored params row."
+            )
         # Defense-in-depth (audit follow-up): the SorterParameters insert
         # validator rejects this combo, but it is bypassed by ``update1`` and
         # by rows written before the validator existed, and make/sort-time

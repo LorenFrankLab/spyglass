@@ -190,21 +190,22 @@ class ClusterlessThresholderSchema(BaseModel):
     ``threshold_unit`` is the primary, self-documenting knob for how
     ``detect_threshold`` is interpreted:
 
-    * ``"mad"`` (default) -- the threshold is in MAD multiples; SI
-      estimates per-channel MAD (``noise_levels`` left unset). Tracks
-      the recording's actual noise floor; right for synthetic /
-      low-amplitude fixtures.
-    * ``"uv"`` -- ``detect_threshold`` is a TRUE microvolt threshold. The
-      runtime derives ``noise_levels=[1.0]`` (broadcast across channels)
-      AND scales the recording to microvolts (``scale_to_uV``, using the
-      stored NWB gain) before ``detect_peaks``, so a value of ``100``
-      means 100 uV. For Frank-lab data (gain == 1 uV/count) this equals
-      the raw-count value; for non-unity-gain rigs (e.g. Intan ~0.195
-      uV/count) it is the corrected behavior. This honors the label v1
-      used at ``src/spyglass/spikesorting/v1/sorting.py:177`` but never
-      enforced (v1 thresholded in raw counts -- v2 diverges here). Requires
-      the recording to carry channel gains (it always does after the v2
-      ElectricalSeries write); otherwise the runtime raises.
+    * ``"uv"`` (default) -- ``detect_threshold`` is a TRUE microvolt
+      threshold. The runtime derives ``noise_levels=[1.0]`` (broadcast
+      across channels) AND scales the recording to microvolts
+      (``scale_to_uV``, using the stored NWB gain) before ``detect_peaks``,
+      so a value of ``100`` means 100 uV. For Frank-lab data (gain == 1
+      uV/count) this equals the raw-count value; for non-unity-gain rigs
+      (e.g. Intan ~0.195 uV/count) it is the corrected behavior. This
+      honors the label v1 used at ``src/spyglass/spikesorting/v1/
+      sorting.py:177`` but never enforced (v1 thresholded in raw counts --
+      v2 diverges here). Requires the recording to carry channel gains (it
+      always does after the v2 ElectricalSeries write); otherwise the
+      runtime raises. This is the production Frank-lab default (100 uV).
+    * ``"mad"`` -- the threshold is in MAD multiples; SI estimates
+      per-channel MAD (``noise_levels`` left unset). Tracks the
+      recording's actual noise floor; right for synthetic / low-amplitude
+      fixtures (the MEArec smoke row sets this EXPLICITLY).
 
     ``noise_levels`` stays available as an ADVANCED explicit override.
     Precedence: if ``noise_levels`` is set, the runtime uses it

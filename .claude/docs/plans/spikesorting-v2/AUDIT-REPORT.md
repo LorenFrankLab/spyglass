@@ -1,5 +1,17 @@
 # Spike-Sorting v2 Audit — Final Report
 
+> **Status: REMEDIATED (pre-remediation snapshot).** This report captures the
+> codebase *as audited*. All 18 findings below have since been fixed on the
+> `spikesorting-v2` branch. Each **"Current shape:"** line therefore describes
+> the *pre-fix* state, not today's code — e.g. finding **#7** says
+> `threshold_unit='mad' (default)`, but the default is now `'uv'` (100 µV,
+> matching the Frank-lab production threshold), with `'mad'` set explicitly only
+> by the synthetic smoke fixture, plus a runtime guard that rejects an implausible
+> MAD multiplier and an invalid `threshold_unit`. Read the **"Current shape"**
+> lines as the historical defect and the **"Proposed shape" / "Action"** lines as
+> what was implemented. Do not cite this document for current behavior; consult
+> the code and docstrings.
+
 ## Bottom line
 
 This audit confirmed **21 real issues** across 10 surfaces (34 candidates; 3 documented-intentional excluded; 10 refuted). After dedup, the report below covers **18 distinct findings**: 1 high-severity correctness bug, 2 schema-design defects, and the remainder split between test-gaps and (mostly low-severity) doc/code divergences. **The single most important fix is the `RecordingTruncatedError` tolerance** ([recording.py:1137-1161](src/spyglass/spikesorting/v2/recording.py#L1137)): the 1.5-sample threshold compares a continuous-time "expected" against a sample-snapped "saved" duration, so legitimate multi-epoch / off-grid sort requests spuriously raise (~12% single-interval, rising to ~47% for many disjoint chunks) **and the just-written preprocessed recording is deleted** — blocking real science with green CI. Note: ten of the most-impactful merge-id findings collapse into a single root cause (the `insert_curation` docstring describes pre-fix behavior); the underlying code is correct and tested.

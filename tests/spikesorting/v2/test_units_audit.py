@@ -121,6 +121,44 @@ def test_clusterless_missing_threshold_unit_defaults_to_uv(
     )
 
 
+def test_clusterless_runtime_rejects_invalid_threshold_unit(
+    monkeypatch, dj_conn
+):
+    """A clusterless params blob carrying an INVALID ``threshold_unit`` (e.g.
+    "microvolts" or "UV" from an ``update1`` write or a pre-validator row)
+    raises at sort time rather than silently falling through to MAD behavior
+    (audit follow-up P2). The schema's ``Literal["uv", "mad"]`` enforces this at
+    insert, but make/sort-time consumes the fetched blob WITHOUT re-validating,
+    and ``_clusterless_noise_levels`` returns ``None`` for any non-"uv" value --
+    so without this guard a typo silently changes what ``detect_threshold``
+    means.
+    """
+    import spikeinterface.sortingcomponents.peak_detection as pd_mod
+
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    rec = _rec_with_gain(np.full((200, 2), 200.0), gain=0.5)
+    # detect_peaks must never be reached: the guard fires first.
+    monkeypatch.setattr(
+        pd_mod,
+        "detect_peaks",
+        lambda *a, **k: pytest.fail(
+            "detect_peaks reached -- invalid threshold_unit was not rejected"
+        ),
+    )
+
+    with pytest.raises(ValueError, match="threshold_unit must be 'uv' or"):
+        Sorting._run_clusterless_thresholder(
+            sorter_params={
+                "detect_threshold": 5.0,
+                "threshold_unit": "microvolts",
+                "noise_levels": [1.0],
+            },
+            recording=rec,
+            job_kwargs=None,
+        )
+
+
 def test_clusterless_uv_requires_channel_gains(monkeypatch, dj_conn):
     """``threshold_unit="uv"`` on a recording with no channel gains RAISES
     (cannot honor microvolts without the conversion) rather than silently
