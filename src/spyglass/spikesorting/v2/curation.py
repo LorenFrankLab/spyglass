@@ -30,6 +30,7 @@ from spyglass.spikesorting.v2._curation_transforms import (
     validate_labels,
 )
 from spyglass.spikesorting.v2._units_nwb import (
+    build_lazy_merged_sorting,
     numpysorting_from_abs_times,
     read_units_abs_spike_times,
     recording_timestamps,
@@ -40,7 +41,6 @@ from spyglass.spikesorting.v2.utils import (
     CurationLabel,
     MetricsSource,
     _assert_v2_db_safe,
-    _dedup_merged_spike_times,
     transaction_or_noop,
     unit_brain_region_df,
 )
@@ -1093,11 +1093,6 @@ class CurationV2(SpyglassMixin, dj.Manual):
             when merges were already applied or no group has more than
             one contributor.
         """
-        import numpy as _np
-        import spikeinterface as si
-
-        from spyglass.spikesorting.v2.utils import _spike_times_to_frames
-
         # merges_applied OR no multi-contributor group -> the base sorting
         # already IS the result; delegate to get_sorting (its read is
         # unavoidable in those cases).
@@ -1112,56 +1107,26 @@ class CurationV2(SpyglassMixin, dj.Manual):
         if not units_to_merge:
             return cls.get_sorting(key)
 
-        # Read the curated units NWB + the recording timeline ONCE and build
-        # the merged sorting directly. Calling get_sorting here would re-open
-        # the units NWB, re-fetch the recording row, and re-read the timeline
-        # only to discard the intermediates (and would emit a spurious
-        # "merges NOT applied" warning -- we ARE applying them).
-        #
-        # Apply the proposed merges in ABSOLUTE time, NOT via SI's frame-space
-        # ``MergeUnitsSorting``. On a DISJOINT recording the units NWB frames
-        # are contiguous across an excluded wall-clock gap, so a frame-space
-        # 0.4 ms dedup would wrongly drop a chunk-1-last / chunk-2-first pair
-        # that is seconds apart in real time. Deduping the contributors'
-        # ABSOLUTE spike times with the SAME helper the ``apply_merge=True``
-        # staged path uses (``_dedup_merged_spike_times``) is gap-correct AND
-        # makes the previewed train identical to the stored one.
-        # ``_spike_times_to_frames`` maps abs times -> frames EXACTLY as
-        # ``numpysorting_from_abs_times`` (what get_sorting uses), so the
-        # non-merged units are frame-identical to ``get_sorting``'s.
+        # Read the curated units NWB + the recording timeline ONCE, then
+        # rebuild the merged sorting via the pure compute core
+        # (``build_lazy_merged_sorting``). Calling get_sorting here would
+        # re-open the units NWB, re-fetch the recording row, and re-read the
+        # timeline only to discard the intermediates (and would emit a
+        # spurious "merges NOT applied" warning -- we ARE applying them). The
+        # merge is applied in ABSOLUTE time (gap-correct on disjoint
+        # recordings) inside the compute core; see its docstring.
         row = (cls & key).fetch1()
         recording_row = cls._upstream_recording_row(key)
         fs = float(recording_row["sampling_frequency"])
         abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
         abs_times = read_units_abs_spike_times(abs_path)
         timestamps = recording_timestamps(recording_row)
-        n_samples = int(timestamps.size)
-        delta_s = _MERGE_DEDUP_DELTA_MS / 1000.0
-
-        merged_members = {int(u) for g in units_to_merge for u in g}
-        units_dict: dict = {}
-        # Non-merged units: map their own absolute times to frames (the same
-        # mapping get_sorting applies internally via
-        # ``numpysorting_from_abs_times``).
-        for uid, st in abs_times.items():
-            if int(uid) not in merged_members:
-                units_dict[int(uid)] = _spike_times_to_frames(
-                    timestamps, _np.asarray(st), n_samples, int(uid)
-                )
-        # Each merge group -> abs-time-deduped train mapped to frames,
-        # under a fresh ``max(unit_ids) + 1`` id (in get_merge_groups
-        # order -- matches the prior SI MergeUnitsSorting id assignment).
-        next_id = max(int(u) for u in abs_times) + 1
-        for contribs in units_to_merge:
-            deduped_abs = _dedup_merged_spike_times(
-                [_np.asarray(abs_times[int(u)]) for u in contribs], delta_s
-            )
-            units_dict[next_id] = _spike_times_to_frames(
-                timestamps, deduped_abs, n_samples, next_id
-            )
-            next_id += 1
-        return si.NumpySorting.from_unit_dict(
-            [units_dict], sampling_frequency=fs
+        return build_lazy_merged_sorting(
+            abs_times,
+            units_to_merge,
+            timestamps,
+            fs,
+            delta_s=_MERGE_DEDUP_DELTA_MS / 1000.0,
         )
 
     def get_unit_brain_regions(

@@ -75,6 +75,79 @@ def numpysorting_from_abs_times(abs_times, recording_row, fs):
     return si.NumpySorting.from_unit_dict([units_dict], sampling_frequency=fs)
 
 
+def build_lazy_merged_sorting(
+    abs_times, units_to_merge, timestamps, fs, *, delta_s
+):
+    """Reconstruct the lazily-merged ``NumpySorting`` from absolute times.
+
+    Pure compute (no DB, no NWB IO) -- the merge-aware sibling of
+    ``numpysorting_from_abs_times``. Applies a curation's PROPOSED merges
+    (an ``apply_merge=False`` preview) without re-running the sort, in
+    ABSOLUTE time so disjoint-recording wall-clock gaps are respected: the
+    units NWB frames are contiguous across an excluded gap, so a frame-space
+    dedup would wrongly drop a chunk-1-last / chunk-2-first pair that is
+    seconds apart in real time.
+
+    Parameters
+    ----------
+    abs_times : dict[int, np.ndarray]
+        ``{unit_id: absolute spike times (seconds)}`` for every original
+        unit (as read from the curated units NWB).
+    units_to_merge : list[list[int]]
+        Each inner list is a merge group's contributor unit ids; only
+        multi-contributor groups (``len > 1``) belong here -- the caller
+        filters the 1-element self-entries out.
+    timestamps : np.ndarray
+        The recording's (possibly gap-preserving) wall-clock timestamps.
+    fs : float
+        Sampling frequency of the recording.
+    delta_s : float
+        Coincidence window (seconds) for cross-unit duplicate removal.
+
+    Returns
+    -------
+    si.NumpySorting
+        Non-merged units keep their own abs times mapped to frames
+        (identical to ``numpysorting_from_abs_times`` / ``get_sorting``);
+        each merge group is abs-time-deduped with
+        ``_dedup_merged_spike_times`` (the SAME helper the
+        ``apply_merge=True`` staged path uses, so the previewed train is
+        identical to the stored one) and assigned a fresh
+        ``max(unit_ids) + 1`` id in ``units_to_merge`` order (matching the
+        prior SI ``MergeUnitsSorting`` id assignment).
+    """
+    import numpy as _np
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._signal_math import (
+        _dedup_merged_spike_times,
+        _spike_times_to_frames,
+    )
+
+    n_samples = int(_np.asarray(timestamps).size)
+    merged_members = {int(u) for g in units_to_merge for u in g}
+    units_dict: dict = {}
+    # Non-merged units: map their own absolute times to frames (the same
+    # mapping numpysorting_from_abs_times / get_sorting applies).
+    for uid, st in abs_times.items():
+        if int(uid) not in merged_members:
+            units_dict[int(uid)] = _spike_times_to_frames(
+                timestamps, _np.asarray(st), n_samples, int(uid)
+            )
+    # Each merge group -> abs-time-deduped train mapped to frames, under a
+    # fresh ``max(unit_ids) + 1`` id (in units_to_merge order).
+    next_id = max(int(u) for u in abs_times) + 1
+    for contribs in units_to_merge:
+        deduped_abs = _dedup_merged_spike_times(
+            [_np.asarray(abs_times[int(u)]) for u in contribs], delta_s
+        )
+        units_dict[next_id] = _spike_times_to_frames(
+            timestamps, deduped_abs, n_samples, next_id
+        )
+        next_id += 1
+    return si.NumpySorting.from_unit_dict([units_dict], sampling_frequency=fs)
+
+
 def abs_spike_times_dataframe(abs_times):
     """DataFrame (index=unit_id) of absolute spike-time arrays."""
     import pandas as pd
