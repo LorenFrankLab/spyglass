@@ -213,6 +213,7 @@ for label, interval_data in results.groupby("interval_labels"):
         above.
     - Fix fetching position df in
         SortedSpikesDecodingV1.get_ahead_behind_distance() #1540
+    - Set `non_local_detector` as conditional import #1619
 
 - LFP
 
