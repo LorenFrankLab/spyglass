@@ -38,6 +38,7 @@ from spyglass.spikesorting.v2.session_group import (
     ConcatenatedRecording,  # noqa: F401
 )
 from spyglass.spikesorting.v2.utils import (
+    SelectionMasterInsertGuard,
     SourceResolution,
     _assert_noise_levels_length,
     _assert_v2_db_safe,
@@ -502,7 +503,7 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
 
 
 @schema
-class SortingSelection(SpyglassMixin, dj.Manual):
+class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
     """One row per (recording, sorter, artifact detection) tuple.
 
     Source part rows make the input shape explicit: exactly one of
@@ -684,7 +685,8 @@ class SortingSelection(SpyglassMixin, dj.Manual):
         new_part_key = {"sorting_id": sorting_id, **source_restriction}
         try:
             with transaction_or_noop(cls.connection):
-                cls.insert1(new_master_key)
+                # allow_direct_insert: this helper IS the validation boundary.
+                cls.insert1(new_master_key, allow_direct_insert=True)
                 cls.RecordingSource.insert1(new_part_key)
                 if artifact_id is not None:
                     cls.ArtifactSource.insert1(

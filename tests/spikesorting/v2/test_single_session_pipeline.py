@@ -1878,7 +1878,8 @@ def test_prune_orphaned_selections_finds_and_cleans(populated_recording):
         {
             "artifact_id": orphan_artifact,
             "artifact_params_name": "default",
-        }
+        },
+        allow_direct_insert=True,
     )
     orphan_sorting = _uuid.uuid4()
     # The SortingSelection master has no artifact_id FK (artifact state
@@ -1889,7 +1890,8 @@ def test_prune_orphaned_selections_finds_and_cleans(populated_recording):
             "sorting_id": orphan_sorting,
             "sorter": "mountainsort5",
             "sorter_params_name": "franklab_tetrode_hippocampus_30kHz_ms5",
-        }
+        },
+        allow_direct_insert=True,
     )
 
     dry = ArtifactSelection.prune_orphaned_selections(dry_run=True)
@@ -7156,10 +7158,12 @@ def test_recording_selection_raises_on_duplicate_logical_identity(
     # guard exists to catch in case some script uses raw dj.insert).
     planted_ids = []
     RecordingSelection().insert1(
-        {**logical_identity, "recording_id": _uuid.uuid4()}
+        {**logical_identity, "recording_id": _uuid.uuid4()},
+        allow_direct_insert=True,
     )
     RecordingSelection().insert1(
-        {**logical_identity, "recording_id": _uuid.uuid4()}
+        {**logical_identity, "recording_id": _uuid.uuid4()},
+        allow_direct_insert=True,
     )
     planted_ids = list(
         (RecordingSelection & logical_identity).fetch("recording_id")

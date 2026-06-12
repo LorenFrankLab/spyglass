@@ -59,6 +59,7 @@ from spyglass.spikesorting.v2._params.artifact_detection import (
 )
 from spyglass.spikesorting.v2.recording import Recording
 from spyglass.spikesorting.v2.utils import (
+    SelectionMasterInsertGuard,
     SourceResolution,
     _assert_v2_db_safe,
     _get_recording_timestamps,
@@ -438,7 +439,7 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
 
 
 @schema
-class ArtifactSelection(SpyglassMixin, dj.Manual):
+class ArtifactSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
     """One row per (parameters, source) artifact detection request.
 
     Source part rows make the input shape explicit: exactly one of
@@ -576,7 +577,8 @@ class ArtifactSelection(SpyglassMixin, dj.Manual):
         new_part_key = {"artifact_id": artifact_id, **source_restriction}
         try:
             with transaction_or_noop(cls.connection):
-                cls.insert1(new_master_key)
+                # allow_direct_insert: this helper IS the validation boundary.
+                cls.insert1(new_master_key, allow_direct_insert=True)
                 source_part.insert1(new_part_key)
         except Exception as exc:  # noqa: BLE001 -- re-raised unless dup-PK
             if not _is_duplicate_key_error(exc):

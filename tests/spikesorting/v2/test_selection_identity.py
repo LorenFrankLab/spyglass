@@ -460,15 +460,36 @@ def test_recording_selection_rejects_single_nondeterministic_row(
     from spyglass.spikesorting.v2.recording import RecordingSelection
 
     identity = fresh_recording_identity
-    # One raw row with the SAME logical identity but a random PK (all FK
-    # targets exist, so this lands without FK-checks-off).
-    RecordingSelection.insert1({**identity, "recording_id": uuid.uuid4()})
+    # One raw row with the SAME logical identity but a random PK. The master
+    # insert guard requires allow_direct_insert=True for this deliberate
+    # bypass (all FK targets exist, so no FK-checks-off needed).
+    RecordingSelection.insert1(
+        {**identity, "recording_id": uuid.uuid4()}, allow_direct_insert=True
+    )
 
     with pytest.raises(DuplicateSelectionError, match="non-deterministic"):
         RecordingSelection.insert_selection(dict(identity))
     # The helper did NOT converge a second (deterministic) row on top.
     assert len(RecordingSelection & identity) == 1
     # (fixture teardown removes the planted row.)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_direct_master_insert_rejected_without_flag(fresh_recording_identity):
+    """A direct insert into a selection master is rejected with a pointer to
+    insert_selection; allow_direct_insert=True is the explicit escape hatch."""
+    from spyglass.spikesorting.v2.recording import RecordingSelection
+
+    identity = fresh_recording_identity
+    row = {**identity, "recording_id": uuid.uuid4()}
+    # No flag -> rejected.
+    with pytest.raises(Exception, match="insert_selection"):
+        RecordingSelection.insert1(row)
+    assert len(RecordingSelection & identity) == 0
+    # Explicit opt-in -> allowed (and cleaned up by the fixture teardown).
+    RecordingSelection.insert1(row, allow_direct_insert=True)
+    assert len(RecordingSelection & {"recording_id": row["recording_id"]}) == 1
 
 
 @pytest.mark.slow

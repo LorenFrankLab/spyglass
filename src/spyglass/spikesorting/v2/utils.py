@@ -99,6 +99,46 @@ def _is_duplicate_key_error(exc: BaseException) -> bool:
     return False
 
 
+class SelectionMasterInsertGuard:
+    """Mixin: reject a direct ``insert`` into a deterministic-id selection
+    master.
+
+    The three v2 selection masters
+    (``RecordingSelection`` / ``ArtifactSelection`` / ``SortingSelection``)
+    derive their primary key from the selection's FULL logical identity --
+    which for the part-bearing masters includes the source-part contents
+    the master row itself does NOT carry. So the master PK can be neither
+    computed nor verified from a master row alone, and ``insert_selection``
+    (which holds the full payload and inserts master + source parts
+    atomically) is the only supported way to create rows.
+
+    A direct ``insert`` / ``insert1`` is therefore rejected with a pointer
+    to ``insert_selection``. ``allow_direct_insert=True`` is the escape
+    hatch for a deliberate maintenance or test bypass -- the SAME keyword
+    DataJoint uses to override its own auto-populated-table insert guard,
+    so the convention is familiar. ``insert_selection`` itself passes
+    ``allow_direct_insert=True`` for its already-validated master insert.
+
+    ``allow_direct_insert`` is keyword-only so a positional ``replace`` /
+    ``skip_duplicates`` argument cannot accidentally bind it; other insert
+    kwargs are forwarded unchanged.
+    """
+
+    def insert(self, rows, *, allow_direct_insert=False, **kwargs):
+        if not allow_direct_insert:
+            raise dj.errors.DataJointError(
+                f"Direct insert into {self.__class__.__name__} is not "
+                "supported: the deterministic primary key is computed from "
+                "the selection's full logical identity (including the "
+                "source-part contents the master row does not carry). Use "
+                f"{self.__class__.__name__}.insert_selection() to create "
+                "master + source parts atomically. Pass "
+                "allow_direct_insert=True only for a deliberate maintenance "
+                "or test bypass."
+            )
+        super().insert(rows, **kwargs)
+
+
 class MetricsSource(str, Enum):
     """Provenance of metrics attached to a ``CurationV2`` row.
 

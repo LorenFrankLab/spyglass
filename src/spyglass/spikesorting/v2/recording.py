@@ -32,6 +32,7 @@ from spyglass.spikesorting.v2._params.preprocessing import (
     PreprocessingParamsSchema,
 )
 from spyglass.spikesorting.v2.utils import (
+    SelectionMasterInsertGuard,
     _assert_v2_db_safe,
     _validate_params,
     _validate_reference_fields,
@@ -679,7 +680,7 @@ class PreprocessingParameters(SpyglassMixin, dj.Lookup):
 
 
 @schema
-class RecordingSelection(SpyglassMixin, dj.Manual):
+class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
     """One row per (raw, sort group, interval, preproc params, team).
 
     UUID-keyed so downstream FKs (``Recording``, ``SortingSelection``)
@@ -764,7 +765,8 @@ class RecordingSelection(SpyglassMixin, dj.Manual):
             )
         new_key = {**keys_minus_uuid, "recording_id": recording_id}
         try:
-            cls.insert1(new_key)
+            # allow_direct_insert: this helper IS the validation boundary.
+            cls.insert1(new_key, allow_direct_insert=True)
         except Exception as exc:  # noqa: BLE001 -- re-raised unless dup-PK
             if not _is_duplicate_key_error(exc):
                 raise
