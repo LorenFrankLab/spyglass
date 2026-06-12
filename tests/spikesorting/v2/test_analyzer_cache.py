@@ -3,9 +3,8 @@
 The SortingAnalyzer folder is regeneratable scratch whose location is a pure
 function of ``sorting_id`` + one configured root. These tests pin that
 policy: the ``spikesorting_v2_analyzer_dir`` config override, the
-``temp_dir`` fallback (unchanged default), the ``sorting_id``-keyed path, the
-``remove_analyzer_cache`` semantics, and that the ``utils._analyzer_path``
-compatibility wrapper delegates here. They do not touch the database.
+``temp_dir`` fallback (unchanged default), the ``sorting_id``-keyed path, and
+the ``remove_analyzer_cache`` semantics. They do not touch the database.
 """
 
 from __future__ import annotations
@@ -50,18 +49,6 @@ def test_empty_config_value_falls_back(restore_custom_config):
     assert (
         analyzer_cache_root()
         == Path(temp_dir) / "spikesorting_v2" / "analyzers"
-    )
-
-
-def test_utils_analyzer_path_delegates(restore_custom_config):
-    import datajoint as dj
-
-    from spyglass.spikesorting.v2.utils import _analyzer_path
-
-    dj.config["custom"]["spikesorting_v2_analyzer_dir"] = "/tmp/v2_deleg"
-    assert _analyzer_path({"sorting_id": "s1"}) == analyzer_path("s1")
-    assert _analyzer_path({"sorting_id": "s1"}) == Path(
-        "/tmp/v2_deleg/s1.analyzer"
     )
 
 

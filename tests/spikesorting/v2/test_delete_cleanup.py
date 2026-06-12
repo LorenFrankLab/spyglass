@@ -117,9 +117,9 @@ def test_cancelled_delete_preserves_analyzer_folder_and_row(
     planted_sort, monkeypatch
 ):
     from spyglass.spikesorting.v2.sorting import Sorting
-    from spyglass.spikesorting.v2.utils import _analyzer_path
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
-    folder = _analyzer_path({"sorting_id": planted_sort["sorting_id"]})
+    folder = analyzer_path(planted_sort["sorting_id"])
     assert folder.exists(), "fixture should have created the analyzer folder"
 
     # Force a real safemode prompt and answer "no" (cancel the cascade).

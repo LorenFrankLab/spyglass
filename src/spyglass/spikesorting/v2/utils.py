@@ -773,33 +773,6 @@ def _assert_noise_levels_length(
         )
 
 
-def _analyzer_path(key: dict) -> Path:
-    """Return the on-disk SortingAnalyzer cache folder for a sorting row.
-
-    Thin compatibility wrapper over
-    :func:`spyglass.spikesorting.v2._analyzer_cache.analyzer_path`, which
-    owns the path policy -- the optional
-    ``dj.config["custom"]["spikesorting_v2_analyzer_dir"]`` override and the
-    ``temp_dir`` fallback (the default root is unchanged:
-    ``{temp_dir}/spikesorting_v2/analyzers``). Keeping this key-dict wrapper
-    lets existing call sites stay unchanged while path policy lives in one
-    place.
-
-    Parameters
-    ----------
-    key : dict
-        A key containing ``sorting_id``.
-
-    Returns
-    -------
-    pathlib.Path
-        ``analyzer_cache_root() / f"{sorting_id}.analyzer"``.
-    """
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
-
-    return analyzer_path(key["sorting_id"])
-
-
 def _resolved_job_kwargs(*row_job_kwargs: dict | None) -> dict:
     """Merge SpikeInterface-global, DataJoint-config, and per-row job kwargs.
 

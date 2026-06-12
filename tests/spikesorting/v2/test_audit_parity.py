@@ -1544,10 +1544,10 @@ def test_find_orphaned_analyzer_folders_db_side(dj_conn):
     import uuid
 
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
-    from spyglass.spikesorting.v2.utils import _analyzer_path
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
     sid = uuid.uuid4()
-    folder = _analyzer_path({"sorting_id": sid})  # never written on disk
+    folder = analyzer_path(sid)  # never written on disk
     assert not folder.exists()
     _insert_bypassed_sorting_row(sid, n_units=3)
 
@@ -1573,9 +1573,9 @@ def test_find_orphaned_analyzer_folders_disk_side(dj_conn, tmp_path):
     import uuid
 
     from spyglass.spikesorting.v2.sorting import Sorting
-    from spyglass.spikesorting.v2.utils import _analyzer_path
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
-    analyzer_root = _analyzer_path({"sorting_id": "x"}).parent
+    analyzer_root = analyzer_path("x").parent
     analyzer_root.mkdir(parents=True, exist_ok=True)
     stray = analyzer_root / f"a22_disk_orphan_{uuid.uuid4()}.analyzer"
     stray.mkdir()
@@ -1604,10 +1604,10 @@ def test_find_orphaned_analyzer_folders_zero_unit_carveout(dj_conn):
     import uuid
 
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
-    from spyglass.spikesorting.v2.utils import _analyzer_path
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
     sid = uuid.uuid4()
-    folder = _analyzer_path({"sorting_id": sid})  # never written on disk
+    folder = analyzer_path(sid)  # never written on disk
     assert not folder.exists()
     _insert_bypassed_sorting_row(sid, n_units=0)
 
@@ -2402,7 +2402,8 @@ def test_build_analyzer_cleans_partial_folder_when_create_fails(
 
     analyzer_folder = tmp_path / "partial.analyzer"
     monkeypatch.setattr(
-        utils_mod, "_analyzer_path", lambda key: analyzer_folder
+        "spyglass.spikesorting.v2._analyzer_cache.analyzer_path",
+        lambda sorting_id: analyzer_folder,
     )
 
     class _OneUnitSorting:
@@ -2705,7 +2706,7 @@ def test_populate_unit_part_peak_channel_not_in_sort_group(
 
     from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
-    from spyglass.spikesorting.v2.utils import _analyzer_path
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
     recording_id = SortingSelection.resolve_source(populated_sorting).key[
         "recording_id"
@@ -2715,9 +2716,7 @@ def test_populate_unit_part_peak_channel_not_in_sort_group(
     ).fetch1("nwb_file_name")
     # The transient analyzer folder _populate_unit_part loads (built by the
     # populate that created populated_sorting; resolved from sorting_id).
-    analyzer_folder = _analyzer_path(
-        {"sorting_id": populated_sorting["sorting_id"]}
-    )
+    analyzer_folder = analyzer_path(populated_sorting["sorting_id"])
     sorting = Sorting().get_sorting(populated_sorting)
 
     bad_channel = 10_000_000
@@ -2761,9 +2760,9 @@ def test_rebuild_analyzer_folder_recreates_on_missing(populated_sorting):
     import shutil
 
     from spyglass.spikesorting.v2.sorting import Sorting
-    from spyglass.spikesorting.v2.utils import _analyzer_path
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
-    folder = _analyzer_path({"sorting_id": populated_sorting["sorting_id"]})
+    folder = analyzer_path(populated_sorting["sorting_id"])
     original = Sorting().get_analyzer(populated_sorting)
     original_unit_ids = list(original.unit_ids)
     del original  # release the handle before rmtree
@@ -2860,11 +2859,11 @@ def test_sorting_delete_removes_analyzer_folder(
     is untouched.
     """
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
-    from spyglass.spikesorting.v2.utils import _analyzer_path
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
     sort_pk = _fresh_unit_producing_selection(populated_sorting)
     Sorting.populate(sort_pk, reserve_jobs=False)
-    folder = _analyzer_path({"sorting_id": sort_pk["sorting_id"]})
+    folder = analyzer_path(sort_pk["sorting_id"])
     try:
         assert folder.exists(), "fresh sort should have an analyzer folder"
         (Sorting & sort_pk).delete(safemode=safemode_arg)
@@ -2896,10 +2895,10 @@ def test_make_compute_mode_a_cleanup_on_write_failure(
     no Sorting row landed.
     """
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
-    from spyglass.spikesorting.v2.utils import _analyzer_path
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
     sort_pk = _fresh_unit_producing_selection(populated_sorting)
-    folder = _analyzer_path({"sorting_id": sort_pk["sorting_id"]})
+    folder = analyzer_path(sort_pk["sorting_id"])
 
     def _boom_write(self, **kwargs):
         raise RuntimeError("units NWB write blew up")

@@ -1229,10 +1229,10 @@ def test_sorting_populates_with_mountainsort5(populated_recording):
     assert row["n_units"] > 0
     from pathlib import Path
 
-    from spyglass.spikesorting.v2.utils import _analyzer_path
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
     # The analyzer folder is no longer a column; resolve it from sorting_id.
-    analyzer_folder = _analyzer_path(sort_pk)
+    analyzer_folder = analyzer_path(sort_pk["sorting_id"])
     assert isinstance(analyzer_folder, Path)
     assert analyzer_folder.exists()
 
@@ -3971,9 +3971,9 @@ def test_sorting_make_rollback_cleans_units_nwb(
     # be removed by ``make_insert``'s rollback path. A 5-50 GB
     # analyzer folder orphan per failed populate is the leak this
     # guards against.
-    from spyglass.spikesorting.v2.utils import _analyzer_path
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
-    analyzer_folder = _analyzer_path(sort_pk)
+    analyzer_folder = analyzer_path(sort_pk["sorting_id"])
     assert not analyzer_folder.exists(), (
         f"Sorting.make rollback left analyzer folder {analyzer_folder} "
         "on disk. The except-block in Sorting.make_insert must "
@@ -4874,7 +4874,8 @@ def test_build_analyzer_strips_random_seed(dj_conn, monkeypatch, tmp_path):
     from spyglass.spikesorting.v2.sorting import Sorting
 
     monkeypatch.setattr(
-        v2_utils, "_analyzer_path", lambda key: tmp_path / "analyzer"
+        "spyglass.spikesorting.v2._analyzer_cache.analyzer_path",
+        lambda sorting_id: tmp_path / "analyzer",
     )
     captured = {}
 
@@ -4924,7 +4925,8 @@ def test_build_analyzer_compute_args(dj_conn, monkeypatch, tmp_path):
     from spyglass.spikesorting.v2.sorting import Sorting
 
     monkeypatch.setattr(
-        v2_utils, "_analyzer_path", lambda key: tmp_path / "analyzer"
+        "spyglass.spikesorting.v2._analyzer_cache.analyzer_path",
+        lambda sorting_id: tmp_path / "analyzer",
     )
     captured = {}
 
@@ -5038,10 +5040,13 @@ def test_analyzer_rebuild_is_seeded_reproducible(
     )
 
     def _build_and_read(folder):
-        # ``_build_analyzer`` imports ``_analyzer_path`` from utils at
-        # call time, so patching the utils symbol redirects the output
-        # folder for this build.
-        monkeypatch.setattr(v2_utils, "_analyzer_path", lambda key: folder)
+        # ``_build_analyzer`` imports ``analyzer_path`` from _analyzer_cache
+        # at call time, so patching that symbol redirects the output folder
+        # for this build.
+        monkeypatch.setattr(
+            "spyglass.spikesorting.v2._analyzer_cache.analyzer_path",
+            lambda sorting_id: folder,
+        )
         Sorting._build_analyzer(
             sorting,
             recording,
@@ -5123,7 +5128,10 @@ def test_analyzer_random_seed_override_is_honored(
     )
 
     def _selection_for_seed(folder, random_seed):
-        monkeypatch.setattr(v2_utils, "_analyzer_path", lambda key: folder)
+        monkeypatch.setattr(
+            "spyglass.spikesorting.v2._analyzer_cache.analyzer_path",
+            lambda sorting_id: folder,
+        )
         Sorting._build_analyzer(
             sorting,
             recording,
@@ -7994,9 +8002,9 @@ def test_sorting_delete_removes_analyzer_folder(populated_sorting):
     folder is gone.
     """
     from spyglass.spikesorting.v2.sorting import Sorting
-    from spyglass.spikesorting.v2.utils import _analyzer_path
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
-    folder = _analyzer_path({"sorting_id": populated_sorting["sorting_id"]})
+    folder = analyzer_path(populated_sorting["sorting_id"])
     # ``_build_analyzer`` runs at populate time, so the folder is a
     # precondition of this test. Treat absence as a FAILURE rather than a
     # vacuous skip: if it is missing, the populate path is broken and the

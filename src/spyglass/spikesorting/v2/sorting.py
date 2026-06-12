@@ -77,9 +77,8 @@ class SortingComputed(NamedTuple):
     change could divert. The analyzer cache folder is deliberately NOT a DB
     column (Phase B); every code path WITHOUT an in-memory folder
     (``get_analyzer``, ``delete``, ``find_orphaned_analyzer_folders``)
-    resolves the canonical location from ``sorting_id`` through the
-    analyzer-cache path policy (``_analyzer_path`` ->
-    ``_analyzer_cache.analyzer_path``).
+    resolves the canonical location from ``sorting_id`` via
+    ``_analyzer_cache.analyzer_path``.
 
     NOTE: the field ORDER here is a positional wire contract -- the tri-part
     dispatch unpacks this tuple positionally into ``make_insert``
@@ -1490,7 +1489,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         from spyglass.spikesorting.v2.exceptions import (
             ZeroUnitAnalyzerError,
         )
-        from spyglass.spikesorting.v2.utils import _analyzer_path
+        from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
         if int((self & key).fetch1("n_units")) == 0:
             raise ZeroUnitAnalyzerError(
@@ -1501,7 +1500,7 @@ class Sorting(SpyglassMixin, dj.Computed):
                 "unit list, or re-sort with a lower detect_threshold."
             )
 
-        folder = _analyzer_path({"sorting_id": key["sorting_id"]})
+        folder = analyzer_path(key["sorting_id"])
         if not folder.exists():
             self._rebuild_analyzer_folder(key)
         return si.load_sorting_analyzer(folder)
@@ -1515,7 +1514,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         """
         import shutil as _shutil
 
-        from spyglass.spikesorting.v2.utils import _analyzer_path
+        from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
         sel_row = (SortingSelection & key).fetch1()
         # Resolve the artifact from the ArtifactSource part (the master
@@ -1565,7 +1564,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         # Removing it before re-raising keeps the rebuild path's
         # invariant ("analyzer folder reflects the canonical sort")
         # true under failure.
-        folder = _analyzer_path({"sorting_id": key["sorting_id"]})
+        folder = analyzer_path(key["sorting_id"])
         try:
             # Pass the already-resolved folder so the build target equals
             # the path this method cleans up on failure (one resolution).
@@ -1669,8 +1668,10 @@ class Sorting(SpyglassMixin, dj.Computed):
         Returns
         -------
         dict
-            ``{"db_side": [{"sorting_id", "analyzer_folder"}, ...],
-            "disk_side": [folder_path_str, ...]}``.
+            ``{"db_side": [{"sorting_id", "computed_analyzer_path"}, ...],
+            "disk_side": [folder_path_str, ...]}``. ``computed_analyzer_path``
+            is resolved from ``sorting_id`` (Phase B: there is no stored
+            ``analyzer_folder`` column).
         """
         import shutil as _shutil
 
@@ -1685,7 +1686,10 @@ class Sorting(SpyglassMixin, dj.Computed):
         # disk. The folder is derived from sorting_id (no stored column); the
         # n_units==0 carve-out excludes legitimately folder-less rows.
         db_side = [
-            {"sorting_id": sid, "analyzer_folder": str(analyzer_path(sid))}
+            {
+                "sorting_id": sid,
+                "computed_analyzer_path": str(analyzer_path(sid)),
+            }
             for sid in (cls & "n_units > 0").fetch("sorting_id")
             if not analyzer_path(sid).exists()
         ]
@@ -1709,9 +1713,9 @@ class Sorting(SpyglassMixin, dj.Computed):
         )
         for row in db_side:
             logger.info(
-                "  DB-side orphan: sorting_id=%s analyzer_folder=%s",
+                "  DB-side orphan: sorting_id=%s computed_analyzer_path=%s",
                 row["sorting_id"],
-                row["analyzer_folder"],
+                row["computed_analyzer_path"],
             )
         for folder in disk_side:
             logger.info("  disk-side orphan: %s", folder)
@@ -2375,15 +2379,13 @@ class Sorting(SpyglassMixin, dj.Computed):
 
         import spikeinterface as si
 
-        from spyglass.spikesorting.v2.utils import (
-            _analyzer_path,
-            _resolved_job_kwargs,
-        )
+        from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+        from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
 
         folder = (
             analyzer_folder
             if analyzer_folder is not None
-            else _analyzer_path({"sorting_id": key["sorting_id"]})
+            else analyzer_path(key["sorting_id"])
         )
 
         # Zero-unit short-circuit BEFORE any I/O or DB fetch:
