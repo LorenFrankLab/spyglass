@@ -538,9 +538,21 @@ def run_si_sorter(
                 # in SI's default global set) would leak into every
                 # later populate. Reset to the baseline first, then
                 # re-apply the captured prior global for an exact
-                # restore.
-                _si.reset_global_job_kwargs()
-                _si.set_global_job_kwargs(**previous_global)
+                # restore. Guard the restore so a restore failure
+                # cannot MASK an in-flight sort exception (classic
+                # finally-block masking): if ``run_sorter`` raised,
+                # that exception must propagate, not a secondary
+                # ``set_global_job_kwargs`` error.
+                try:
+                    _si.reset_global_job_kwargs()
+                    _si.set_global_job_kwargs(**previous_global)
+                except Exception as restore_exc:
+                    logger.warning(
+                        "Sorting._run_si_sorter: failed to restore SI "
+                        f"global job kwargs to {previous_global!r}: "
+                        f"{restore_exc!r}. Original sort exception (if "
+                        "any) preserved."
+                    )
     finally:
         # Undo the scoped ``np.Inf`` patch so the global numpy
         # module is left exactly as the rest of the process saw it.
