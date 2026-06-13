@@ -837,10 +837,11 @@ def test_artifact_job_kwargs_propagate_to_executor(dj_conn, monkeypatch):
             # ``to_dict()``/``load_extractor`` for a real multi-process pool).
             return []
 
-    monkeypatch.setattr(
-        "spyglass.spikesorting.v2.artifact.ChunkRecordingExecutor",
-        _SpyExecutor,
-    )
+    # ``scan_artifact_frames`` (now in ``_artifact_intervals``) lazy-imports
+    # ``ChunkRecordingExecutor`` from its SI source at call time, so patch the
+    # source module -- the ``from spikeinterface.core.job_tools import
+    # ChunkRecordingExecutor`` inside the scan binds this spy at call time.
+    monkeypatch.setattr(jt, "ChunkRecordingExecutor", _SpyExecutor)
 
     ArtifactDetection._scan_artifact_frames(
         rec,
@@ -891,10 +892,11 @@ def test_artifact_scan_chunked_by_default(dj_conn, monkeypatch):
             seen["chunk_size"] = kwargs.get("chunk_size")
             super().__init__(*args, **kwargs)
 
-    monkeypatch.setattr(
-        "spyglass.spikesorting.v2.artifact.ChunkRecordingExecutor",
-        _SpyExecutor,
-    )
+    # ``scan_artifact_frames`` (now in ``_artifact_intervals``) lazy-imports
+    # ``ChunkRecordingExecutor`` from its SI source at call time, so patch the
+    # source module -- the ``from spikeinterface.core.job_tools import
+    # ChunkRecordingExecutor`` inside the scan binds this spy at call time.
+    monkeypatch.setattr(jt, "ChunkRecordingExecutor", _SpyExecutor)
 
     # No job_kwargs at all -- the bare default path.
     ArtifactDetection._scan_artifact_frames(rec, validated)
