@@ -52,10 +52,11 @@ curations all coexist under one merge surface.
     `insert_default()` on each loads a default row; user params validate the
     `params` blob on insert.
 - **`RecordingSelection` / `Recording`** -- preprocessed recording materialization.
-    Bandpass + common-reference referencing only; whitening is deferred to the
-    sort stage so motion correction never sees whitened data. The make body
-    validates timestamp coverage and raises `RecordingTruncatedError` if the
-    raw timestamps array does not span the requested interval.
+    Optional ADC phase-shift, then bandpass, then common-reference referencing;
+    whitening is deferred to the sort stage so motion correction never sees
+    whitened data. The make body validates timestamp coverage and raises
+    `RecordingTruncatedError` if the raw timestamps array does not span the
+    requested interval. See [ADC phase-shift](#adc-phase-shift-neuropixels) below.
 - **`ArtifactSelection` / `ArtifactDetection`** -- amplitude-threshold artifact
     intervals. Uses the source-part pattern (`SharedArtifactGroupSource`) so
     multiple recordings can share a single artifact-detection result.
@@ -175,6 +176,37 @@ curation_pk = CurationV2.insert_curation(
     description="first pass",
 )
 ```
+
+### ADC phase-shift (Neuropixels)
+
+Multiplexed ADCs (e.g. Neuropixels) sample the channels of a shank at slightly
+different times within each sample period. The optional `phase_shift`
+preprocessing parameter compensates these per-channel sub-sample delays. When
+enabled, it runs **first** -- before the bandpass -- and only when the recording
+carries an `inter_sample_shift` property; on a recording without that property
+(any non-multiplexed acquisition, including Frank-lab polymer probes) it logs a
+skip and is a **no-op**, so enabling it never fails.
+
+It is **off in `default_franklab`** (the headline default is unchanged) and
+**on in the `default_neuropixels` preset** -- a blessed Neuropixels recipe
+(`bandpass 300-6000 Hz` + phase-shift, `margin_ms=100`). Because Frank-lab smoke
+recordings carry no `inter_sample_shift`, `default_neuropixels` materializes
+**identically** to `default_franklab` on them (the phase-shift is skipped); it
+only does work once an acquisition system that ingests `inter_sample_shift` is
+used. To use it:
+
+```python
+rec_pk = RecordingSelection.insert_selection({
+    "nwb_file_name": nwb_file_name,
+    "sort_group_id": 0,
+    "interval_list_name": "raw data valid times",
+    "preproc_params_name": "default_neuropixels",
+    "team_name": "my_team",
+})
+```
+
+The persisted `ElectricalSeries.filtering` provenance lists `phase-shift (ADC)`
+only when the step actually ran (not when it was requested but skipped).
 
 ### Downstream consumers
 

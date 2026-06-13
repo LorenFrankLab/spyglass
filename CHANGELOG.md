@@ -840,6 +840,23 @@ for label, interval_data in results.groupby("interval_labels"):
         passes the version-correct keyword (`electrical_series_name` on
         0.99.x, `electrical_series_path` on >= 0.100). Covered by
         `tests/utils/test_nwb_helper_fn.py`.
+    - Add an optional ADC phase-shift step to v2 preprocessing
+        (`PreprocessingParamsSchema.phase_shift`), compensating the
+        per-channel sample delays of multiplexed ADCs (Neuropixels). It runs
+        first (before the bandpass) and only when the recording carries an
+        `inter_sample_shift` property; otherwise it logs a skip and is a
+        no-op, so it never fails on non-multiplexed data. Off in
+        `default_franklab`; **on in the `default_neuropixels` preset** (a
+        blessed Neuropixels recipe that stays a no-op until the property is
+        ingested). `apply_pre_motion_preprocessing` now returns an
+        applied-step report so the persisted `ElectricalSeries.filtering`
+        provenance names only the steps that actually ran (a
+        requested-but-skipped phase-shift is not claimed). The optional field
+        defaults to `None`, so existing rows validate unchanged with **no
+        `params_schema_version` bump**. The `default_neuropixels` preset
+        change is only picked up by a fresh `PreprocessingParameters.insert_default()`
+        — `skip_duplicates=True` will not overwrite an existing row, so a
+        populated database must re-insert the preset to pick it up.
 
 ## [0.5.5] (Aug 6, 2025)
 
