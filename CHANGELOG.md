@@ -213,6 +213,11 @@ dropping; `restrict_by_artifact=True` now honors the v2
   reference (…)` in apply order. The params blob shape is unchanged, so
   `params_schema_version` stays at 3 (the schema-history docstring records the
   order change at v3); dev rows are regenerated, not migrated.
+- **`global_median` reference on a single-channel (unitrode) sort group now
+  raises** instead of silently zeroing the signal (the median/mean across one
+  channel is that channel, so subtracting it yields all zeros — a recording
+  that sorts to nothing with no error). Use `reference_mode="none"` for
+  unitrodes, or `omit_unitrode=True` when creating sort groups.
 - **Tetrode probe `set_contact_ids`** now passes string ids
   (`[str(c) for c in sort_group_channel_ids]`) instead of v1's raw
   integers. probeinterface accepts both; flagged for users who

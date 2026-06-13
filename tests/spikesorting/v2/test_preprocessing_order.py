@@ -116,6 +116,19 @@ def test_global_median_filters_then_references(monkeypatch):
     assert cr[2] == "median"  # operator passed through to common_reference
 
 
+def test_global_median_single_channel_raises(monkeypatch):
+    calls: list = []
+    _patch_sip(monkeypatch, calls)
+    # A global reference on a unitrode (1-channel) group would subtract the
+    # channel from itself -> all zeros. The helper must fail loud instead.
+    rec = _FakeRecording([0], calls)
+
+    with pytest.raises(ValueError, match="zeroes the signal"):
+        apply_pre_motion_preprocessing(
+            rec, "global_median", None, [0], _validated()
+        )
+
+
 def test_none_reference_still_filters(monkeypatch):
     calls: list = []
     _patch_sip(monkeypatch, calls)

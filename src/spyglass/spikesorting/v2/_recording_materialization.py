@@ -404,6 +404,19 @@ def apply_pre_motion_preprocessing(
             )
         recording = recording.remove_channels([int(reference_electrode_id)])
     elif reference_mode == "global_median":
+        # A global reference on a single-channel group zeroes the signal: the
+        # per-sample median (or mean) across one channel IS that channel, so
+        # subtracting it yields all zeros -- a recording that sorts to nothing
+        # with no error. Fail loud instead.
+        n_channels = len(recording.get_channel_ids())
+        if n_channels < 2:
+            raise ValueError(
+                "apply_pre_motion_preprocessing: 'global_median' reference on "
+                f"a {n_channels}-channel sort group zeroes the signal (the "
+                "median/mean across one channel is that channel itself). Use "
+                "reference_mode='none' for unitrodes, or omit_unitrode=True "
+                "when creating the sort group."
+            )
         recording = sip.common_reference(
             recording,
             reference="global",
