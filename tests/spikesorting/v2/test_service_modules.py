@@ -100,6 +100,24 @@ def _unit_train(sorting, unit_id):
     return sorting.get_unit_spike_train(unit_id=unit_id).tolist()
 
 
+# Shared frame grid for the lazy-merge cases: 100 samples at 1 kHz
+# (0.000 .. 0.099 s). The gap case overrides ``timestamps``.
+_FS = 1000.0
+_TS = np.arange(100, dtype=float) / _FS
+
+
+def _lazy_merge(abs_times, units_to_merge, timestamps=_TS):
+    from spyglass.spikesorting.v2._units_nwb import build_lazy_merged_sorting
+
+    return build_lazy_merged_sorting(
+        abs_times,
+        units_to_merge=units_to_merge,
+        timestamps=timestamps,
+        fs=_FS,
+        delta_s=0.4e-3,
+    )
+
+
 def test_build_lazy_merged_sorting_assigns_fresh_id_and_keeps_non_merged():
     """Non-merged units pass through; the merge group gets ``max(id)+1``.
 
@@ -108,23 +126,14 @@ def test_build_lazy_merged_sorting_assigns_fresh_id_and_keeps_non_merged():
     ``searchsorted`` mapping of its own abs times (identical to
     ``numpysorting_from_abs_times`` / ``get_sorting``).
     """
-    from spyglass.spikesorting.v2._units_nwb import build_lazy_merged_sorting
-
-    fs = 1000.0
-    timestamps = np.arange(100, dtype=float) / fs  # 0.000 .. 0.099 s
-    abs_times = {
-        0: timestamps[[10, 20]],  # non-merged
-        1: timestamps[[30]],
-        2: timestamps[[31]],  # 1 ms from unit 1 -> > delta, both kept
-    }
-    merged = build_lazy_merged_sorting(
-        abs_times,
-        units_to_merge=[[1, 2]],
-        timestamps=timestamps,
-        fs=fs,
-        delta_s=0.4e-3,
+    merged = _lazy_merge(
+        {
+            0: _TS[[10, 20]],  # non-merged
+            1: _TS[[30]],
+            2: _TS[[31]],  # 1 ms from unit 1 -> > delta, both kept
+        },
+        [[1, 2]],
     )
-
     assert sorted(int(u) for u in merged.get_unit_ids()) == [0, 3]
     assert _unit_train(merged, 0) == [10, 20]
     # Fresh id 3 = max(0,1,2)+1; both contributor spikes survive (> delta).
@@ -133,20 +142,12 @@ def test_build_lazy_merged_sorting_assigns_fresh_id_and_keeps_non_merged():
 
 def test_build_lazy_merged_sorting_dedups_coincident_cross_unit_spikes():
     """Coincident spikes from DIFFERENT contributors collapse to one."""
-    from spyglass.spikesorting.v2._units_nwb import build_lazy_merged_sorting
-
-    fs = 1000.0
-    timestamps = np.arange(100, dtype=float) / fs
-    abs_times = {
-        1: timestamps[[30]],
-        2: timestamps[[30]],  # exactly coincident, different unit -> dedup
-    }
-    merged = build_lazy_merged_sorting(
-        abs_times,
-        units_to_merge=[[1, 2]],
-        timestamps=timestamps,
-        fs=fs,
-        delta_s=0.4e-3,
+    merged = _lazy_merge(
+        {
+            1: _TS[[30]],
+            2: _TS[[30]],  # exactly coincident, different unit -> dedup
+        },
+        [[1, 2]],
     )
     assert sorted(int(u) for u in merged.get_unit_ids()) == [3]
     assert _unit_train(merged, 3) == [30]
@@ -160,26 +161,20 @@ def test_build_lazy_merged_sorting_absolute_time_dedup_respects_gaps():
     apart in real time must BOTH survive -- a frame-space dedup would
     wrongly drop one. This pins the gap-correctness of the abs-time merge.
     """
-    from spyglass.spikesorting.v2._units_nwb import build_lazy_merged_sorting
-
-    fs = 1000.0
     # Two 50-sample chunks separated by a 10 s wall-clock gap.
-    timestamps = np.concatenate(
+    gap_ts = np.concatenate(
         [
-            np.arange(50, dtype=float) / fs,
-            10.0 + np.arange(50, dtype=float) / fs,
+            np.arange(50, dtype=float) / _FS,
+            10.0 + np.arange(50, dtype=float) / _FS,
         ]
     )
-    abs_times = {
-        1: timestamps[[49]],  # last sample of chunk 1 (0.049 s)
-        2: timestamps[[50]],  # first sample of chunk 2 (10.000 s)
-    }
-    merged = build_lazy_merged_sorting(
-        abs_times,
-        units_to_merge=[[1, 2]],
-        timestamps=timestamps,
-        fs=fs,
-        delta_s=0.4e-3,
+    merged = _lazy_merge(
+        {
+            1: gap_ts[[49]],  # last sample of chunk 1 (0.049 s)
+            2: gap_ts[[50]],  # first sample of chunk 2 (10.000 s)
+        },
+        [[1, 2]],
+        timestamps=gap_ts,
     )
     # Frame-adjacent but seconds apart -> both kept.
     assert _unit_train(merged, 3) == [49, 50]
@@ -187,22 +182,9 @@ def test_build_lazy_merged_sorting_absolute_time_dedup_respects_gaps():
 
 def test_build_lazy_merged_sorting_fresh_ids_in_group_order():
     """Multiple groups get consecutive ``max(id)+1`` ids in input order."""
-    from spyglass.spikesorting.v2._units_nwb import build_lazy_merged_sorting
-
-    fs = 1000.0
-    timestamps = np.arange(100, dtype=float) / fs
-    abs_times = {
-        5: timestamps[[10]],
-        2: timestamps[[12]],
-        8: timestamps[[14]],
-        3: timestamps[[16]],
-    }
-    merged = build_lazy_merged_sorting(
-        abs_times,
-        units_to_merge=[[5, 2], [8, 3]],
-        timestamps=timestamps,
-        fs=fs,
-        delta_s=0.4e-3,
+    merged = _lazy_merge(
+        {5: _TS[[10]], 2: _TS[[12]], 8: _TS[[14]], 3: _TS[[16]]},
+        [[5, 2], [8, 3]],
     )
     # next_id = max(5,2,8,3)+1 = 9; groups assigned in units_to_merge order.
     assert sorted(int(u) for u in merged.get_unit_ids()) == [9, 10]

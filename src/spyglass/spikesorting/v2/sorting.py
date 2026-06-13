@@ -1430,6 +1430,12 @@ class Sorting(SpyglassMixin, dj.Computed):
         Reloads the canonical sorting from the units NWB so the
         rebuilt analyzer is bit-equivalent to the one Sorting.make
         wrote -- not a fresh, possibly nondeterministic, sort.
+
+        ``key`` must carry a literal ``sorting_id`` (it is used directly
+        for ``analyzer_path`` and the ``SortingSelection`` fetches). The
+        public ``get_analyzer`` resolves the canonical id from a general
+        restriction and hands this private helper a normalized
+        ``{"sorting_id": ...}``; callers should do the same.
         """
         import shutil as _shutil
 
