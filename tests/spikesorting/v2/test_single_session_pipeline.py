@@ -7140,6 +7140,164 @@ def test_recording_no_filter_preset_skips_bandpass(polymer_smoke_session):
     )
 
 
+# ---------- L5-A2: ADC phase-shift no-op regressions -------------------
+
+
+@pytest.mark.slow
+def test_phase_shift_field_does_not_change_default_recording(
+    polymer_smoke_session,
+):
+    """A pre-field params blob materializes identically to the default.
+
+    The optional ``phase_shift`` field defaults to ``None``, so a params blob
+    written BEFORE the field existed (no ``phase_shift`` key) must materialize
+    to the **same traces** as the ``default_franklab`` preset (whose blob now
+    carries ``phase_shift=None``). Pins the headline behavior-preservation
+    metric: adding the optional field changes nothing on the default path, and
+    existing rows validate + materialize unchanged.
+
+    Note: the materialized recordings are compared by **trace equality**, not
+    ``cache_hash``. ``cache_hash`` is an ``NwbfileHasher`` digest that includes
+    per-write NWB metadata (the analysis file's ``object_id`` UUIDs and
+    ``file_create_date``), so two separate fresh writes of byte-identical
+    preprocessing produce different hashes; the preprocessed traces are the
+    behavioral output to compare.
+    """
+    import numpy as _np
+
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2._params.preprocessing import (
+        PreprocessingParamsSchema,
+    )
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+
+    _clean_session_v2(polymer_smoke_session)
+    initialize_v2_defaults()
+    LabTeam.insert1(
+        {"team_name": "v2_test_team", "team_description": "v2 pipeline tests"},
+        skip_duplicates=True,
+    )
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    sort_group_id = int(
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
+    )
+    common = {
+        "nwb_file_name": nwb_file_name,
+        "sort_group_id": sort_group_id,
+        "interval_list_name": "raw data valid times",
+        "team_name": "v2_test_team",
+    }
+
+    # default_franklab (carries phase_shift=None in its blob).
+    fl_pk = RecordingSelection.insert_selection(
+        {**common, "preproc_params_name": "default_franklab"}
+    )
+    Recording.populate(fl_pk, reserve_jobs=False)
+    traces_fl = Recording().get_recording(fl_pk).get_traces()
+
+    # A pre-field blob: the default schema dump with the phase_shift key
+    # removed (what a row written before the field looked like). It validates
+    # (phase_shift defaults to None) and must materialize identically.
+    legacy_blob = PreprocessingParamsSchema().model_dump()
+    legacy_blob.pop("phase_shift")
+    PreprocessingParameters.insert1(
+        {
+            "preproc_params_name": "_pytest_legacy_no_phase_shift",
+            "params": legacy_blob,
+            "params_schema_version": 3,
+            "job_kwargs": None,
+        },
+        skip_duplicates=True,
+    )
+    legacy_pk = RecordingSelection.insert_selection(
+        {**common, "preproc_params_name": "_pytest_legacy_no_phase_shift"}
+    )
+    Recording.populate(legacy_pk, reserve_jobs=False)
+    traces_legacy = Recording().get_recording(legacy_pk).get_traces()
+
+    assert _np.array_equal(traces_legacy, traces_fl), (
+        "A pre-field params blob (no phase_shift key) materialized to "
+        "different traces than default_franklab; the optional phase_shift "
+        "field perturbed the default path."
+    )
+
+
+@pytest.mark.slow
+def test_neuropixels_preset_phase_shift_inert_without_property(
+    polymer_smoke_session, caplog
+):
+    """The ``default_neuropixels`` preset is a safe no-op on non-multiplexed data.
+
+    ``default_neuropixels`` enables phase-shift; ``default_franklab`` does not,
+    and the two presets are otherwise identical. The smoke fixture carries no
+    ``inter_sample_shift`` property, so the requested phase-shift is **skipped**
+    (with a logged warning) and the two presets must materialize to the **same
+    traces** -- proving the blessed NP recipe never alters the output on a
+    recording lacking the property.
+
+    Compared by trace equality rather than ``cache_hash`` (see
+    ``test_phase_shift_field_does_not_change_default_recording`` for why
+    ``cache_hash`` is not stable across two fresh writes).
+    """
+    import numpy as _np
+
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+
+    _clean_session_v2(polymer_smoke_session)
+    initialize_v2_defaults()
+    LabTeam.insert1(
+        {"team_name": "v2_test_team", "team_description": "v2 pipeline tests"},
+        skip_duplicates=True,
+    )
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    sort_group_id = int(
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
+    )
+    common = {
+        "nwb_file_name": nwb_file_name,
+        "sort_group_id": sort_group_id,
+        "interval_list_name": "raw data valid times",
+        "team_name": "v2_test_team",
+    }
+
+    fl_pk = RecordingSelection.insert_selection(
+        {**common, "preproc_params_name": "default_franklab"}
+    )
+    Recording.populate(fl_pk, reserve_jobs=False)
+    traces_fl = Recording().get_recording(fl_pk).get_traces()
+
+    np_pk = RecordingSelection.insert_selection(
+        {**common, "preproc_params_name": "default_neuropixels"}
+    )
+    with caplog.at_level("WARNING"):
+        Recording.populate(np_pk, reserve_jobs=False)
+    traces_np = Recording().get_recording(np_pk).get_traces()
+
+    assert _np.array_equal(traces_np, traces_fl), (
+        "default_neuropixels and default_franklab produced different traces "
+        "on a fixture without inter_sample_shift; the phase-shift was NOT "
+        "skipped (or the presets differ by more than phase-shift)."
+    )
+    assert any(
+        "skipping phase-shift" in record.getMessage()
+        for record in caplog.records
+    ), "the absent-property phase-shift skip was not logged during populate"
+
+
 # ---------- L5-B: DuplicateSelectionError on insert_selection -----------
 
 
