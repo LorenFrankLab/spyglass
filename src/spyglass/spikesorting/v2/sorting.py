@@ -1404,18 +1404,24 @@ class Sorting(SpyglassMixin, dj.Computed):
         )
         from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
-        if int((self & key).fetch1("n_units")) == 0:
+        # Resolve the canonical sorting_id from the matched row rather than
+        # assuming ``key`` literally carries "sorting_id" -- a general
+        # restriction (e.g. {"object_id": ...} or any single-row selector)
+        # must work too. ``fetch1`` enforces that the restriction selects
+        # exactly one Sorting row, so the resolved id is unambiguous.
+        sorting_id, n_units = (self & key).fetch1("sorting_id", "n_units")
+        if int(n_units) == 0:
             raise ZeroUnitAnalyzerError(
                 "Sorting.get_analyzer: sorting_id="
-                f"{key['sorting_id']!r} has zero units; no "
+                f"{sorting_id!r} has zero units; no "
                 "SortingAnalyzer exists (SI cannot build one over zero "
                 "units). Use get_sorting() if you only need the empty "
                 "unit list, or re-sort with a lower detect_threshold."
             )
 
-        folder = analyzer_path(key["sorting_id"])
+        folder = analyzer_path(sorting_id)
         if not folder.exists():
-            self._rebuild_analyzer_folder(key)
+            self._rebuild_analyzer_folder({"sorting_id": sorting_id})
         return si.load_sorting_analyzer(folder)
 
     def _rebuild_analyzer_folder(self, key) -> None:

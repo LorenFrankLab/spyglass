@@ -261,23 +261,22 @@ def run_v2_pipeline(
             "detect_threshold / the artifact mask if you expected output."
         )
 
-    # Idempotent curation: if a root (parent_curation_id=-1) curation
-    # already exists for this sorting, reuse it; otherwise insert a
-    # fresh one. The CurationV2 part on the merge table is auto-
-    # registered inside insert_curation, so reusing a row reuses its
-    # merge_id.
-    existing_root = (CurationV2 & sort_pk & {"parent_curation_id": -1}).fetch(
-        "KEY", as_dict=True
+    # Idempotent curation: ``insert_curation`` owns the root-reuse logic.
+    # With ``reuse_existing=True`` it returns the canonical (lowest
+    # curation_id) existing root if one is present -- deterministically,
+    # and through the same source-part / guard / merge-registration path a
+    # fresh insert uses -- otherwise it stages a fresh root. Routing through
+    # it (rather than a raw fetch-or-insert here) avoids bypassing that
+    # guard and silently reusing a root whose description/labels differ. The
+    # CurationV2 part on the merge table is auto-registered inside
+    # insert_curation, so a reused row reuses its merge_id.
+    curation_pk = CurationV2.insert_curation(
+        sorting_key=sort_pk,
+        labels={},
+        parent_curation_id=-1,
+        description=description or f"run_v2_pipeline preset={preset}",
+        reuse_existing=True,
     )
-    if existing_root:
-        curation_pk = existing_root[0]
-    else:
-        curation_pk = CurationV2.insert_curation(
-            sorting_key=sort_pk,
-            labels={},
-            parent_curation_id=-1,
-            description=description or f"run_v2_pipeline preset={preset}",
-        )
 
     merge_id = (SpikeSortingOutput.CurationV2 & curation_pk).fetch1("merge_id")
 

@@ -11122,6 +11122,92 @@ def test_insert_curation_idempotent_root_rejects_nondefault_args(
     assert reused["curation_id"] == existing["curation_id"]
 
 
+def test_insert_curation_idempotent_root_rejects_apply_merge_and_metrics(
+    populated_sorting_with_curation, populated_sorting
+):
+    """Review finding: the existing-root guard also covers apply_merge /
+    metrics_source.
+
+    ``merges_applied`` and the metrics provenance record user intent, so a
+    second root insert that flips ``apply_merge=True`` (or sets a
+    non-"manual" ``metrics_source``) must NOT silently return the existing
+    ``merges_applied=False`` / manual root. It raises unless
+    ``reuse_existing=True``.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    existing = populated_sorting_with_curation
+    with pytest.raises(ValueError, match="already exists"):
+        CurationV2.insert_curation(
+            sorting_key=populated_sorting, apply_merge=True
+        )
+    with pytest.raises(ValueError, match="already exists"):
+        CurationV2.insert_curation(
+            sorting_key=populated_sorting, metrics_source="figpack"
+        )
+    # Opt-in reuse still returns the existing root unchanged.
+    reused = CurationV2.insert_curation(
+        sorting_key=populated_sorting,
+        apply_merge=True,
+        reuse_existing=True,
+    )
+    assert reused["curation_id"] == existing["curation_id"]
+
+
+def test_insert_curation_root_reuse_deterministic_with_multiple_roots(
+    populated_sorting_with_curation,
+):
+    """Review finding: reuse picks the canonical lowest-curation_id root.
+
+    A raw/manual insert can leave a SECOND root (parent_curation_id=-1).
+    ``order_by="curation_id"`` makes ``insert_curation(reuse_existing=True)``
+    return the lowest-id (canonical) root deterministically rather than a
+    DB-row-order coin flip. Plant a second bare root master row (a raw
+    bypass insert_curation would never produce) and assert the lowest id is
+    returned.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    root = populated_sorting_with_curation
+    sid = root["sorting_id"]
+    full = (CurationV2 & root).fetch1()
+    existing_ids = [
+        int(c) for c in (CurationV2 & {"sorting_id": sid}).fetch("curation_id")
+    ]
+    planted_id = max(existing_ids) + 1
+    planted = {**full, "curation_id": planted_id, "parent_curation_id": -1}
+    CurationV2.insert1(planted, allow_direct_insert=True)
+    try:
+        reused = CurationV2.insert_curation(
+            sorting_key={"sorting_id": sid}, reuse_existing=True
+        )
+        assert reused["curation_id"] == min(root["curation_id"], planted_id)
+        assert reused["curation_id"] == root["curation_id"]
+    finally:
+        (
+            CurationV2 & {"sorting_id": sid, "curation_id": planted_id}
+        ).delete_quick()
+
+
+def test_get_analyzer_accepts_non_sorting_id_restriction(populated_sorting):
+    """Review finding: get_analyzer resolves sorting_id from the matched row.
+
+    A restriction that selects a single ``Sorting`` row WITHOUT a literal
+    ``sorting_id`` key (here the unique ``object_id``) must load / rebuild
+    the analyzer, not ``KeyError`` on ``key["sorting_id"]``.
+    """
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    object_id, n_units = (Sorting & populated_sorting).fetch1(
+        "object_id", "n_units"
+    )
+    if int(n_units) == 0:
+        pytest.skip("zero-unit sort has no analyzer to load")
+    analyzer = Sorting().get_analyzer({"object_id": object_id})
+    assert analyzer is not None
+    assert analyzer.get_num_units() == int(n_units)
+
+
 def test_insert_curation_rejects_merge_group_overlap(populated_sorting):
     """A28: a unit appearing in two merge groups raises.
 

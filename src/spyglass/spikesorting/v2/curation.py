@@ -362,29 +362,50 @@ class CurationV2(SpyglassMixin, dj.Manual):
             # ``v1/curation.py:88-93``; without this, every repeat
             # call grows another row + analysis file + merge-table
             # entry.
+            # ``order_by="curation_id"`` makes the reused root deterministic:
+            # if more than one root somehow exists (a raw/manual insert that
+            # bypassed this helper), the canonical lowest-curation_id root is
+            # returned every time rather than a DB-row-order coin flip.
             existing_root = (
                 cls
                 & {
                     "sorting_id": sorting_id,
                     "parent_curation_id": -1,
                 }
-            ).fetch("KEY", as_dict=True)
+            ).fetch("KEY", as_dict=True, order_by="curation_id")
             if existing_root:
-                # A root curation already exists. If the caller passed
-                # non-default labels / merge_groups / description, those
-                # would be SILENTLY ignored by returning the existing
-                # row -- a parameter-change-with-no-effect footgun. Raise
-                # unless the caller explicitly opts into reuse.
+                # A root curation already exists. If the caller passed ANY
+                # non-default parameter -- labels / merge_groups / description
+                # / apply_merge / a non-"manual" metrics_source -- it would be
+                # SILENTLY ignored by returning the existing row, a
+                # parameter-change-with-no-effect footgun. The apply_merge /
+                # metrics_source cases matter because ``merges_applied`` and
+                # the metrics provenance record user intent: a second
+                # ``apply_merge=True`` insert must NOT quietly return a
+                # ``merges_applied=False`` root. Raise unless the caller opts
+                # into reuse. (An invalid metrics_source is NOT treated as a
+                # change here so the friendlier enum-validation error below
+                # still fires for it.)
+                try:
+                    metrics_source_changed = (
+                        MetricsSource(metrics_source).value != "manual"
+                    )
+                except ValueError:
+                    metrics_source_changed = False
                 if (
-                    bool(labels) or bool(merge_groups) or bool(description)
+                    bool(labels)
+                    or bool(merge_groups)
+                    or bool(description)
+                    or apply_merge
+                    or metrics_source_changed
                 ) and not reuse_existing:
                     raise ValueError(
                         "CurationV2.insert_curation: a root curation "
                         f"already exists for sorting_id={sorting_id}, but "
-                        "you passed labels/merge_groups/description that "
-                        "would be silently ignored. Pass "
-                        "reuse_existing=True to reuse the existing root, "
-                        "or curate as a child with "
+                        "you passed labels / merge_groups / description / "
+                        "apply_merge / metrics_source that would be silently "
+                        "ignored. Pass reuse_existing=True to reuse the "
+                        "existing root, or curate as a child with "
                         "parent_curation_id=<existing root curation_id>."
                     )
                 logger.warning(
