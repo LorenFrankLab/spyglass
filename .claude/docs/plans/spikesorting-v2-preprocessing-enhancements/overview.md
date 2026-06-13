@@ -42,7 +42,8 @@ working tree at planning time; re-confirm before editing (files move).
   channel slice (`:184-203`). It already adds the `specific` reference channel
   to the slice; **phase 3** additionally re-includes the sort group's
   **interior** bad channels on the `interpolate` path so they are present to
-  fill (scoped to the good channels' coordinate span, not the whole shank).
+  fill (scoped by spatial **adjacency** to the good channels — not the whole
+  shank, and not a bounding-box span).
 - `v2/_recording_materialization.py:435` — `filtering_description`: the NWB
   provenance string. **Phase 1** and **phase 3** append their steps so the
   persisted `ElectricalSeries.filtering` lists what actually ran.
@@ -182,7 +183,7 @@ Open Question 1.
 | Detection thresholds are Neuropixels-derived and may over/under-flag on polymer data. | Phase 2 exposes every threshold as an overridable parameter, ships SI defaults, and documents the NP origin; the persist helper is **suggest-then-confirm**, never an automatic overwrite of curated flags. |
 | Phase-shift enabled on data with no `inter_sample_shift` would no-op invisibly or misbehave. | Phase 1 gates on the property and logs a clear skip; it never fabricates a shift. |
 | Interpolating an out-of-brain channel (no in-brain neighbors) invents signal; SI's guide says out channels should be removed. | Handling is **label-aware** (phase 3): `out` is always removed, only `dead`/`noise` interpolate; labels are preserved end-to-end (phase 2 detection → handling), never collapsed to a boolean. |
-| Reconstructing a custom column-group's bad channels "by shank" can pull in electrodes never near that group (`set_group_by_electrode_table_column` stores no original membership). | Phase 3 re-includes only the bad channels **interior to the group's coordinate span**, not the whole shank; no positions → `interpolate` raises (Open Question 4). |
+| Reconstructing a custom column-group's bad channels "by shank" can pull in electrodes never near that group (`set_group_by_electrode_table_column` stores no original membership). | Phase 3 re-includes only bad channels **spatially adjacent** to the group's good channels (≥`MIN_GOOD_NEIGHBORS` within a spacing-relative radius), not the whole shank and not a `[min,max]` bounding box (which would swallow the gap of a non-contiguous custom group); no positions → `interpolate` raises (Open Question 4). |
 | The bad-channel step runs before referencing, and `restrict_recording` slices the `specific` reference electrode in for subtraction — handling could remove/interpolate it and break referencing. | Phase 3 **excludes the reference electrode** from the handled set (it is dropped after referencing as today); a detection that flags the reference bad **raises** instead. |
 | `None`-as-"use SI default" sentinel passed straight to SI would break (`psd_hf_threshold=None` is invalid in 0.104.3). | The detection wrapper **drops `None`** overrides; only `method` is pinned, every other knob falls through to SI's own signature default. |
 | Motion estimation is expensive (peak detect + localize + estimate). | Phase 4 is a `dj.Computed` table populated **on demand** (never auto-eager), with a smoke-test timing step before any larger run. |
@@ -224,12 +225,19 @@ see no change.
 4. **Interpolation for arbitrary-column groups (resolved, revisitable).**
    `set_group_by_electrode_table_column` builds arbitrary-membership groups and
    stores no original requested values, so "the group's bad channels" cannot be
-   reconstructed exactly. Chosen behavior: re-include only bad channels whose
-   electrode position is **interior** to the group's good-channel coordinate
-   span (works for contiguous shank groups and conservative for custom ones);
-   if positions are absent, `interpolate` raises and the user falls back to
-   `remove`. Revisit if a use case needs interpolation for non-contiguous
-   custom groups (would require persisting group membership/origin).
+   reconstructed exactly. Chosen behavior: re-include only bad channels
+   **spatially adjacent** to the group's good channels — at least
+   `MIN_GOOD_NEIGHBORS` good electrodes within `RADIUS_FACTOR × d_nn` (the
+   group's own median nearest-neighbor spacing). This is conservative for both
+   contiguous shank groups (interior bad channels qualify) and non-contiguous
+   custom groups (a bad channel in the gap between two separated clusters has no
+   nearby good neighbors and is excluded — a `[min,max]` bounding box would
+   wrongly include it). Isolated/gap curated-bad channels in a custom group are
+   therefore left unfilled (correctly — there is nothing local to fill them
+   from); the user handles them via `remove` or a contiguous group. If positions
+   are absent, `interpolate` raises and the user falls back to `remove`. Revisit
+   only if a use case needs to interpolate genuinely isolated channels (would
+   require persisting group membership/origin).
 
 ## Estimated Effort
 
