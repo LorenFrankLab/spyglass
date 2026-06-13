@@ -16,6 +16,14 @@ DataJoint -- that is package-wide and unrelated to this module.)
 from __future__ import annotations
 
 from enum import Enum
+from typing import Literal
+
+# Bad-channel labels returned by SpikeInterface's ``detect_bad_channels``
+# (``coherence+psd``). A ``Literal`` rather than an ``Enum`` because these
+# values flow through plain result dicts as the raw SpikeInterface strings;
+# naming the closed set here gives the wrapper / persist helper one source of
+# truth for the vocabulary and lets a type checker catch a typo'd label.
+BadChannelLabel = Literal["good", "dead", "noise", "out"]
 
 
 class MetricsSource(str, Enum):
