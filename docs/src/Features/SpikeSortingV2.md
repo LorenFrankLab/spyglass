@@ -208,6 +208,50 @@ rec_pk = RecordingSelection.insert_selection({
 The persisted `ElectricalSeries.filtering` provenance lists `phase-shift (ADC)`
 only when the step actually ran (not when it was requested but skipped).
 
+### Automated bad-channel detection
+
+`suggest_bad_channels` proposes — and, on a second confirmed call, persists —
+the `Electrode.bad_channel` flags for a session. It loads the raw recording,
+bandpass-filters it, and runs SpikeInterface's `detect_bad_channels`
+(`coherence+psd`, the IBL coherence/PSD method) **per full shank** (the
+coherence method is spatially local, so each physical shank is scanned on its
+own). It is **suggest-then-confirm**: the default `write=False` changes nothing
+and just returns a report.
+
+```python
+from spyglass.spikesorting.v2._bad_channels import suggest_bad_channels
+
+# 1. Review (default): mutates nothing, returns one dict per flagged electrode.
+report = suggest_bad_channels(nwb_file_name, write=False)
+for entry in report:
+    print(entry)  # {"electrode_group_name", "electrode_id", "probe_shank", "label"}
+
+# 2. Confirm: persist the quality-bad channels you reviewed.
+suggest_bad_channels(nwb_file_name, write=True)
+```
+
+Each flagged electrode carries its **label** (`dead`, `noise`, or `out`) so you
+can see what kind of bad it is before persisting. `write=True` sets
+`Electrode.bad_channel='True'` for **`dead`/`noise` only** and is **additive** —
+it never clears a flag you have already curated. `out` (outside-brain) channels
+are **report-only**: they are surfaced for awareness but **never** written,
+because `Electrode.bad_channel='True'` means a *quality-bad* (dead/noise-class)
+channel that is safe to interpolate or remove — it must not mark an
+outside-brain channel. To keep an `out` channel out of a sort, omit it from the
+group's membership (e.g.
+`SortGroupV2.set_group_by_electrode_table_column(column="electrode_id",
+groups=[[...in-brain electrode_ids...]])`).
+
+The detection thresholds are SpikeInterface defaults (Neuropixels-derived);
+pass `detection_params=` (e.g. `{"dead_channel_threshold": -0.4}`) to recalibrate
+for other probe geometries such as polymer probes. You can also scope the scan
+with `electrode_group_names=` and change the band with `bandpass=`.
+
+**Ordering contract:** run this helper and finalize the `bad_channel` flags
+**before** creating sort groups. `SortGroupV2.set_group_by_*` excludes flagged
+channels at group creation, so a flag added *after* a group already exists does
+not retroactively drop its members — recreate the group to apply later flags.
+
 ### Downstream consumers
 
 Both v1 (`CurationV1`) and v2 (`CurationV2`) curations register on the same

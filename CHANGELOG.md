@@ -857,6 +857,25 @@ for label, interval_data in results.groupby("interval_labels"):
         change is only picked up by a fresh `PreprocessingParameters.insert_default()`
         — `skip_duplicates=True` will not overwrite an existing row, so a
         populated database must re-insert the preset to pick it up.
+    - Add automated bad-channel detection to v2
+        (`spikesorting.v2._bad_channels.suggest_bad_channels`), a
+        suggest-then-confirm helper that loads a session's raw recording,
+        bandpass-filters it, and runs SpikeInterface's `detect_bad_channels`
+        (`coherence+psd`, the IBL method) **per full shank**. `write=False`
+        (the default) returns a report — one dict per flagged electrode with
+        its `dead`/`noise`/`out` label — and mutates nothing; `write=True`
+        sets `Electrode.bad_channel='True'` for `dead`/`noise` electrodes
+        only. `out` (outside-brain) channels are **report-only**, never
+        persisted (the boolean flag cannot carry the label and a persisted
+        `out` would be wrongly interpolated downstream), and the write is
+        **additive** — it never clears an existing curated flag. Detection
+        thresholds are SpikeInterface defaults (Neuropixels-derived) and every
+        threshold is overridable via `detection_params`. Run it (and finalize
+        flags) **before** creating sort groups: `SortGroupV2.set_group_by_*`
+        excludes flagged channels at creation, so a flag added after a group
+        exists does not retroactively drop its members. This is a runtime
+        helper only — it makes no schema change, so there is **no
+        `params_schema_version` bump**.
 
 ## [0.5.5] (Aug 6, 2025)
 
