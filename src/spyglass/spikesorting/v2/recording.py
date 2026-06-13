@@ -1701,7 +1701,7 @@ class Recording(SpyglassMixin, dj.Computed):
                 min_segment_length=preproc_validated.min_segment_length,
             )
         )
-        recording = self._apply_pre_motion_preprocessing(
+        recording, applied_steps = self._apply_pre_motion_preprocessing(
             recording=recording,
             reference_mode=reference_mode,
             reference_electrode_id=reference_electrode_id,
@@ -1716,11 +1716,12 @@ class Recording(SpyglassMixin, dj.Computed):
         )
 
         # Provenance string for the persisted ElectricalSeries, built from the
-        # steps ACTUALLY applied: the old hardcoded
-        # "Bandpass filter + common reference" misdescribed the saved artifact
-        # for the no_filter preset or reference_mode='none' (DANDI / archival).
+        # steps ACTUALLY applied (the ``applied_steps`` report): the old
+        # hardcoded "Bandpass filter + common reference" misdescribed the saved
+        # artifact for the no_filter preset or reference_mode='none' (DANDI /
+        # archival), and a requested-but-skipped phase-shift must not be listed.
         filtering_description = self._filtering_description(
-            preproc_validated.bandpass_filter, reference_mode
+            preproc_validated.bandpass_filter, reference_mode, applied_steps
         )
 
         analysis_file_name = None
@@ -1884,16 +1885,18 @@ class Recording(SpyglassMixin, dj.Computed):
         sort_group_channel_ids: list,
         validated: PreprocessingParamsSchema,
     ):
-        """Apply the pre-motion preprocessing stack (filter + reference).
+        """Apply the pre-motion preprocessing stack (phase-shift, filter, ref).
 
         Thin delegator to
         :func:`._recording_materialization.apply_pre_motion_preprocessing`;
         kept as a ``Recording`` staticmethod because
         ``_compute_recording_artifact`` calls
         ``self._apply_pre_motion_preprocessing(...)`` and the v2 tests call
-        it directly. The bandpass-filter-then-common-reference stack
-        (whitening deferred to the sorter so motion correction never sees
-        whitened data) lives in the service module.
+        it directly. The optional-phase-shift-then-bandpass-then-common-
+        reference stack (whitening deferred to the sorter so motion correction
+        never sees whitened data) lives in the service module. Returns
+        ``(recording, applied_steps)`` -- the applied-step report feeds
+        ``_filtering_description``.
         """
         return apply_pre_motion_preprocessing(
             recording,
@@ -1904,16 +1907,22 @@ class Recording(SpyglassMixin, dj.Computed):
         )
 
     @staticmethod
-    def _filtering_description(bandpass_filter, reference_mode: str) -> str:
+    def _filtering_description(
+        bandpass_filter, reference_mode: str, applied_steps: dict
+    ) -> str:
         """``ElectricalSeries.filtering`` provenance from steps ACTUALLY run.
 
         Thin delegator to
         :func:`._recording_materialization.filtering_description`; kept as a
         ``Recording`` staticmethod because ``_compute_recording_artifact``
         calls ``self._filtering_description(...)`` and the v2 tests call it
-        directly.
+        directly. ``applied_steps`` is the report from
+        ``_apply_pre_motion_preprocessing`` so a requested-but-skipped
+        phase-shift is not falsely listed.
         """
-        return _filtering_description_svc(bandpass_filter, reference_mode)
+        return _filtering_description_svc(
+            bandpass_filter, reference_mode, applied_steps
+        )
 
     @staticmethod
     def _write_nwb_artifact(

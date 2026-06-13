@@ -440,15 +440,31 @@ def test_filtering_description_lists_only_steps_that_ran():
     )
 
     bp = SimpleNamespace(freq_min=300, freq_max=6000)
-    assert filtering_description(None, "none") == "none (raw, no preprocessing)"
-    assert filtering_description(bp, "none") == "bandpass filter 300-6000 Hz"
-    assert filtering_description(None, "global_median") == (
+    no_ps = {"phase_shift": False}
+    assert (
+        filtering_description(None, "none", no_ps)
+        == "none (raw, no preprocessing)"
+    )
+    assert (
+        filtering_description(bp, "none", no_ps) == "bandpass filter 300-6000 Hz"
+    )
+    assert filtering_description(None, "global_median", no_ps) == (
         "common reference (global_median)"
     )
     # Bandpass first, then reference (the non-commutative apply order).
-    assert filtering_description(bp, "global_median") == (
+    assert filtering_description(bp, "global_median", no_ps) == (
         "bandpass filter 300-6000 Hz; common reference (global_median)"
     )
+
+    # Phase-shift is listed ONLY when the report says it ran, and prepended
+    # first (the apply order). A requested-but-skipped phase-shift (report
+    # False) must NOT appear -- the report-driven honesty check.
+    ran = {"phase_shift": True}
+    assert filtering_description(bp, "global_median", ran) == (
+        "phase-shift (ADC); bandpass filter 300-6000 Hz; "
+        "common reference (global_median)"
+    )
+    assert "phase-shift" not in filtering_description(bp, "global_median", no_ps)
 
 
 # --------------------------------------------------------------------------- #

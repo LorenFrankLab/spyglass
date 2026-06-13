@@ -346,9 +346,10 @@ def apply_pre_motion_preprocessing(
     sort_group_channel_ids: list,
     validated,
 ):
-    """Apply the pre-motion preprocessing stack (filter then reference).
+    """Apply the pre-motion preprocessing stack (phase-shift, filter, ref).
 
-    Bandpass filter (temporal) runs BEFORE referencing (spatial). This is
+    Optional ADC phase-shift runs FIRST, then the bandpass filter
+    (temporal), then referencing (spatial). Bandpass-before-reference is
     the signal-processing-preferred order and intentionally diverges from
     v1, which referenced first. The two are not commutative on the
     global-median branch (the per-sample median is non-linear), so v2 and v1
@@ -362,11 +363,43 @@ def apply_pre_motion_preprocessing(
     so the DB read happens once in ``make_fetch`` -- this method
     is called from inside ``make_compute`` where the tri-part
     contract forbids further DB I/O.
+
+    Returns ``(recording, applied_steps)`` where ``applied_steps`` is a
+    report of which steps actually RAN -- ``{"phase_shift": bool,
+    "bandpass": bool, "reference": reference_mode}``. ``filtering_description``
+    consumes it so provenance can distinguish a phase-shift that ran from one
+    that was requested but skipped (no ``inter_sample_shift`` property).
     """
     import numpy as _np
     import spikeinterface.preprocessing as sip
 
-    # 1. Bandpass filter first. ``bandpass_filter=None`` is the "no_filter"
+    from spyglass.utils import logger
+
+    applied_steps: dict = {}
+
+    # 0. ADC phase-shift (multiplexed-ADC / Neuropixels) -- runs FIRST,
+    #    before the bandpass. Valid only when the recording carries an
+    #    ``inter_sample_shift`` property (``sip.phase_shift`` raises without
+    #    it); skip (loudly) otherwise so enabling it on non-multiplexed
+    #    acquisition is a safe no-op rather than a hard failure. The AIND
+    #    "phase-shift first" order is a deliberate choice, not a correctness
+    #    requirement (a fractional-sample delay and a zero-phase bandpass are
+    #    both LTI per channel and commute, modulo edge margins).
+    applied_steps["phase_shift"] = False
+    if validated.phase_shift is not None:
+        if recording.get_property("inter_sample_shift") is not None:
+            recording = sip.phase_shift(
+                recording, margin_ms=validated.phase_shift.margin_ms
+            )
+            applied_steps["phase_shift"] = True
+        else:
+            logger.warning(
+                "apply_pre_motion_preprocessing: phase_shift requested but the "
+                "recording has no 'inter_sample_shift' property (not a "
+                "multiplexed-ADC acquisition); skipping phase-shift."
+            )
+
+    # 1. Bandpass filter. ``bandpass_filter=None`` is the "no_filter"
     #    preset -- skip the step entirely rather than passing a wide band
     #    that still filters.
     if validated.bandpass_filter is not None:
@@ -376,6 +409,7 @@ def apply_pre_motion_preprocessing(
             freq_max=validated.bandpass_filter.freq_max,
             dtype=_np.float64,
         )
+    applied_steps["bandpass"] = validated.bandpass_filter is not None
 
     # 2. Reference the filtered signal.
     if reference_mode == "specific":
@@ -429,23 +463,31 @@ def apply_pre_motion_preprocessing(
             f"{reference_mode!r}. Use 'none', 'global_median', or "
             "'specific'."
         )
-    return recording
+    applied_steps["reference"] = reference_mode
+    return recording, applied_steps
 
 
-def filtering_description(bandpass_filter, reference_mode: str) -> str:
+def filtering_description(
+    bandpass_filter, reference_mode: str, applied_steps: dict
+) -> str:
     """``ElectricalSeries.filtering`` provenance from steps ACTUALLY run.
 
     Built from the preprocessing that actually ran so the persisted NWB
-    metadata does not claim a bandpass / common-reference step that did
-    not happen -- e.g. the ``no_filter`` preset (``bandpass_filter``
-    None) or ``reference_mode='none'``. Important for
-    archival / DANDI export; the string is descriptive only and is not
-    read back internally. Steps are listed in the order the runtime
-    APPLIES them -- bandpass filter first, then common reference (see
-    ``apply_pre_motion_preprocessing``) -- since that order is
-    non-commutative on the global-median branch.
+    metadata does not claim a step that did not happen -- e.g. the
+    ``no_filter`` preset (``bandpass_filter`` None), ``reference_mode='none'``,
+    or a phase-shift that was requested but skipped because the recording
+    lacks an ``inter_sample_shift`` property. The phase-shift claim is driven
+    by ``applied_steps`` (the report from ``apply_pre_motion_preprocessing``),
+    not the params, precisely so a requested-but-skipped phase-shift is not
+    falsely listed. Important for archival / DANDI export; the string is
+    descriptive only and is not read back internally. Steps are listed in the
+    order the runtime APPLIES them -- phase-shift first, then bandpass filter,
+    then common reference (see ``apply_pre_motion_preprocessing``) -- since
+    that order is non-commutative on the global-median branch.
     """
     steps = []
+    if applied_steps.get("phase_shift"):
+        steps.append("phase-shift (ADC)")
     if bandpass_filter is not None:
         steps.append(
             f"bandpass filter {bandpass_filter.freq_min:g}-"

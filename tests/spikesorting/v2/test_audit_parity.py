@@ -3090,27 +3090,37 @@ def test_filtering_description_reflects_actual_steps():
     from spyglass.spikesorting.v2.recording import Recording
 
     bp = BandpassFilterParams(freq_min=300.0, freq_max=6000.0)
+    no_ps = {"phase_shift": False}
 
     # No preprocessing at all -> must not claim a filter or a reference step.
-    none = Recording._filtering_description(None, "none")
+    none = Recording._filtering_description(None, "none", no_ps)
     assert none == "none (raw, no preprocessing)"
     assert "bandpass" not in none.lower()
     assert "common reference" not in none.lower()
 
     # Bandpass only (reference_mode='none') -> no reference claim.
-    bp_only = Recording._filtering_description(bp, "none")
+    bp_only = Recording._filtering_description(bp, "none", no_ps)
     assert "bandpass filter 300-6000 Hz" in bp_only
     assert "common reference" not in bp_only
 
     # Bandpass + common reference -> both steps named, in the RUNTIME APPLY
     # order (bandpass first, then reference -- the order is non-commutative on
     # the global-median branch, so the provenance must track the apply order).
-    both = Recording._filtering_description(bp, "global_median")
+    both = Recording._filtering_description(bp, "global_median", no_ps)
     assert "bandpass filter 300-6000 Hz" in both
     assert "common reference (global_median)" in both
     assert both.index("bandpass filter") < both.index(
         "common reference"
     ), "provenance must list bandpass before reference (the apply order)"
+
+    # Phase-shift is named ONLY when the applied-step report says it ran, and
+    # listed first; a requested-but-skipped phase-shift (report False) is not
+    # claimed -- the provenance tracks what RAN, not what was requested.
+    with_ps = Recording._filtering_description(
+        bp, "global_median", {"phase_shift": True}
+    )
+    assert with_ps.startswith("phase-shift (ADC); bandpass filter 300-6000 Hz")
+    assert "phase-shift" not in both
 
 
 @pytest.mark.usefixtures("dj_conn")
