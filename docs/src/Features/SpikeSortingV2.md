@@ -263,6 +263,52 @@ unreliable — treat a small-shank "no bad channels" with skepticism).
 channels at group creation, so a flag added *after* a group already exists does
 not retroactively drop its members — recreate the group to apply later flags.
 
+### Bad-channel handling (remove vs interpolate)
+
+The `bad_channel_handling` preprocessing parameter chooses what happens to the
+curated `Electrode.bad_channel='True'` channels at materialization:
+
+- **`"remove"` (default)** — byte-identical to before the option existed. A sort
+  group is its declared members, and the curated-bad channels that grouping
+  already excluded stay excluded. Use this for tetrodes and sparse/custom groups
+  (the coherence-style geometry has no meaning there), and whenever you want the
+  sorter to see only the good channels.
+- **`"interpolate"`** — re-includes the group's **pitch-adjacent interior**
+  curated-bad channels and fills them from good neighbours
+  (`interpolate_bad_channels`, inverse-distance kriging) so a geometry-aware
+  sorter (Kilosort, MountainSort5) sees a complete probe. Only bad channels
+  physically embedded among the group's good channels (≥2 good neighbours within
+  ~1.5× the probe pitch) are filled; an isolated bad channel, or one in the gap
+  of a non-contiguous custom group, is left out (kriging has nothing local to
+  fill it from). Interpolation needs probe geometry — if the probe carries no
+  contact positions, `interpolate` raises a clear error (use `remove`).
+
+```python
+rec_pk = RecordingSelection.insert_selection({
+    "nwb_file_name": nwb_file_name,
+    "sort_group_id": 0,
+    "interval_list_name": "raw data valid times",
+    "preproc_params_name": "my_interpolate_preset",  # bad_channel_handling="interpolate"
+    "team_name": "my_team",
+})
+```
+
+The handling runs **between** the bandpass filter and the reference (matching the
+IBL/AIND destripe order). The persisted `ElectricalSeries.filtering` provenance
+lists `interpolate N bad channels` only when N > 0, so the default `remove` path
+is unchanged.
+
+This consumes the **curated** flags only — it does **no** detection (that is
+`suggest_bad_channels`, above). The same ordering contract applies: the flags are
+honoured at **group creation** (exclusion) and by `interpolate` (re-inclusion of
+the excluded interior ones); `remove` honours the declared membership and
+re-reads nothing, so curate flags **before** creating the sort group. Convention
+boundary: `Electrode.bad_channel='True'` means a *quality-bad* (dead/noise-class)
+channel only — a manually set flag on an outside-brain channel must use `remove`,
+never `interpolate` (which would invent signal). The `specific` reference
+electrode is never a handling target; a `bad_channel='True'` reference (e.g. a
+dedicated ground) materializes exactly as before.
+
 ### Downstream consumers
 
 Both v1 (`CurationV1`) and v2 (`CurationV2`) curations register on the same

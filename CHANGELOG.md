@@ -880,6 +880,27 @@ for label, interval_data in results.groupby("interval_labels"):
         exists does not retroactively drop its members. This is a runtime
         helper only — it makes no schema change, so there is **no
         `params_schema_version` bump**.
+    - Add a `bad_channel_handling` v2 preprocessing parameter
+        (`PreprocessingParamsSchema.bad_channel_handling`, `"remove"` |
+        `"interpolate"`, default `"remove"`) controlling how curated
+        `Electrode.bad_channel='True'` flags are handled at materialization.
+        `"remove"` is **byte-identical to before** (the flagged channels were
+        already excluded at sort-group creation and stay excluded).
+        `"interpolate"` re-includes the group's **pitch-adjacent interior**
+        flagged channels and fills them from good neighbours
+        (`interpolate_bad_channels`) so geometry-aware sorters see a complete
+        probe; the handling runs between the bandpass and the reference, and
+        `ElectricalSeries.filtering` lists `interpolate N bad channels` only when
+        N > 0 (so `remove` provenance is unchanged). Only bad channels embedded
+        among the group's good channels are filled (pitch-anchored adjacency from
+        the probe `rel_x/rel_y/rel_z` geometry); interpolation raises a clear
+        error if the probe carries no positions (use `remove`). Detection is not
+        done here — the flags come from `suggest_bad_channels` or curation, and
+        `Electrode.bad_channel='True'` is quality-bad (dead/noise) by convention,
+        never an outside-brain channel. The `specific` reference electrode is
+        never a handling target. Because `"remove"` keeps existing rows valid and
+        output identical, there is **no `params_schema_version` bump**; dev rows
+        are regenerated.
 
 ## [0.5.5] (Aug 6, 2025)
 
