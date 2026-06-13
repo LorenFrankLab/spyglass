@@ -10,9 +10,12 @@ persists — `Electrode.bad_channel` flags for a session. Detection runs on the
 spatially-local coherence method). This phase does not change any materialization
 path; it gives users a tool to populate the curated flag that the rest of the
 pipeline already consumes. **This is the single detection surface for the
-pipeline** — [phase 3](phase-3-bad-channel-handling.md) does not detect; it
-consumes the `Electrode.bad_channel` flags this helper writes (`remove` or
-`interpolate`).
+pipeline** — [phase 3](phase-3-bad-channel-handling.md) does not detect. The
+flags this helper writes are consumed at **sort-group creation** (`set_group_by_*`
+excludes them) and by phase 3's `interpolate` (which re-includes the excluded
+interior ones and fills them); `remove` honors the declared membership. So run
+this helper / finalize flags **before** creating sort groups (see the ordering
+contract in phase 3).
 
 **Inputs to read first:**
 
@@ -120,7 +123,12 @@ consumes the `Electrode.bad_channel` flags this helper writes (`remove` or
 - **Documentation (ships in this phase):** the helper docstring (with the
   suggest-then-confirm contract and the NP-threshold caveat); a
   `SpikeSortingV2.md` "automated bad-channel detection" subsection showing
-  `suggest_bad_channels(nwb, write=False)` then `write=True`; a CHANGELOG entry.
+  `suggest_bad_channels(nwb, write=False)` then `write=True`. **State the ordering
+  contract:** run this (and finalize `bad_channel` flags) **before** creating sort
+  groups — `SortGroupV2.set_group_by_*` excludes flagged channels at creation, and
+  [phase 3](phase-3-bad-channel-handling.md)'s `remove` honors that declared
+  membership (a channel flagged after a group exists is not dropped; recreate the
+  group to apply it). A CHANGELOG entry.
 
 ## Deliberately not in this phase
 

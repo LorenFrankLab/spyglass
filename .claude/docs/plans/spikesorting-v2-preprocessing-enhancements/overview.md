@@ -155,7 +155,14 @@ sort group excludes them at creation (`set_group_by_*` filters
   by convention** (`dead`/`noise`, never `out`), enforced by phase 2's
   `suggest_bad_channels` on the write side — so the `interpolate` path can fill a
   curated flag without re-deriving its label. A manually/externally set `out`
-  flag is documented as "use `remove`", not interpolation.
+  flag is documented as "use `remove`", not interpolation. **Membership is
+  authoritative:** a sort group fixes its channels at creation
+  (`set_group_by_*` excludes `bad_channel='True'` then), and `make_fetch` reads
+  that membership verbatim — so flags are applied at **group creation**
+  (exclusion) and by `interpolate` (re-inclusion of the excluded interior bad);
+  `remove` honors the declared membership and re-filters nothing. Curate flags
+  **before** creating sort groups; recreate a group to apply later flags
+  (Open Question 6).
 - **Option B (rejected).** Make the group the *physical* electrode group
   (good + bad), and handle bad channels only at preprocessing. Conceptually
   uniform, but it reworks the just-shipped grouping helpers and forces the
@@ -199,6 +206,7 @@ Open Question 1.
 | Interpolating an out-of-brain channel (no in-brain neighbors) invents signal; SI's guide says out channels should be removed. | The curated flag is **quality-bad by convention** (`dead`/`noise`, never `out`), enforced by phase 2's `suggest_bad_channels` on the write side; phase 3 documents that a manually/externally set `out` flag must use `remove`/exclusion, not `interpolate`. Phase 3 runs no detection, so it never invents an `out` label. |
 | Reconstructing a custom column-group's bad channels "by shank" can pull in electrodes never near that group (`set_group_by_electrode_table_column` stores no original membership). | Phase 3 re-includes only bad channels **adjacent to the group's good channels at the probe's physical pitch** (≥`MIN_GOOD_NEIGHBORS` within `RADIUS_FACTOR × pitch`, `pitch` from the full shank — NOT the group's own spacing, which degenerates to the gap for a sparse group), not the whole shank and not a `[min,max]` box; no positions / undefined pitch → `interpolate` raises (Open Question 4). |
 | `restrict_recording` slices the `specific` reference electrode in for subtraction, so handling could remove/interpolate it and break referencing. | Phase 3 **excludes the reference from handling** (it is dropped after referencing as today); a `bad_channel='True'` reference (e.g. a dedicated ground) materializes exactly as today — **no reference-quality raise** (v2 intentionally supports it; Open Question 5). |
+| A channel flagged `bad_channel='True'` **after** a sort group is created stays a member (membership is fixed at creation), so `remove` (which honors declared membership) silently keeps sorting it. | Documented ordering contract: curate flags **before** creating sort groups; recreate a group to apply later flags. Phase 3 ships a flag-before-create regression and a stale-group regression that pins the behavior (Open Question 6). `interpolate` is more forgiving — it re-reads on-shank flags — but the documented workflow is flag-then-create. |
 | Motion estimation is expensive (peak detect + localize + estimate). | Phase 4 is a `dj.Computed` table populated **on demand** (never auto-eager), with a smoke-test timing step before any larger run. |
 
 ## Rollout Strategy
@@ -267,6 +275,21 @@ see no change.
    config and flipped an existing default row from "materializes" to "raises".)
    Revisit only as a **separate** opt-in reference-quality feature with its own
    migration note — never silently on the default path.
+6. **When `bad_channel` flags are applied — group creation, not materialization
+   (resolved, revisitable).** Sort-group membership is fixed at creation
+   (`set_group_by_*` excludes `bad_channel='True'`), and `make_fetch` reads it
+   verbatim. So `remove` honors the declared membership and does **not** re-read
+   flags; `interpolate` re-includes the excluded interior bad channels. A channel
+   flagged bad *after* a group exists is therefore not dropped by `remove` —
+   the documented workflow is **flag before create**, and recreating the group
+   applies later flags. Chosen this way (declared membership authoritative)
+   because the alternative — `remove` re-filtering current flags at
+   materialization — contradicts "`remove` = today's behavior", diverges the
+   recording from `SortGroupElectrode`, and conflicts with
+   `set_group_by_electrode_table_column(remove_bad_channels=False)` groups whose
+   members are bad by design. Revisit if a "re-filter at materialization" mode is
+   ever wanted; it would be a new opt-in handling value (e.g.
+   `remove_current`), not a change to `remove`'s default semantics.
 
 ## Estimated Effort
 

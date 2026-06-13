@@ -4,10 +4,11 @@
 
 Add a `bad_channel_handling = "remove" | "interpolate"` preprocessing
 parameter. `"remove"` (the default) is **byte-identical to today**: the sort
-group is its good channels, and the curated-bad channels that grouping already
-excluded stay excluded. `"interpolate"` re-includes the group's **pitch-adjacent
-interior** curated-bad channels and fills them from good neighbors
-(`interpolate_bad_channels`) so geometry-aware sorters see a complete probe.
+group is its declared `SortGroupElectrode` members, and the curated-bad channels
+that grouping already excluded stay excluded. `"interpolate"` re-includes the
+group's **pitch-adjacent interior** curated-bad channels (the ones grouping
+excluded) and fills them from good neighbors (`interpolate_bad_channels`) so
+geometry-aware sorters see a complete probe.
 
 **This phase does not detect bad channels.** Detection is owned entirely by
 [phase 2](phase-2-bad-channel-detection.md)'s `suggest_bad_channels`, which runs
@@ -16,6 +17,29 @@ writes `Electrode.bad_channel` flags. Phase 3 only *consumes* those curated
 flags. (An inline at-materialization detector was considered and rejected: it
 would run on the restricted sort-group recording — not the physical shank — and
 mis-label coherence/`out` for sparse custom groups; see overview Non-Goals.)
+
+**Where the flags are consumed — the ordering contract.** A sort group fixes its
+membership **at creation**: `set_group_by_shank`
+([recording.py:443](../../../../src/spyglass/spikesorting/v2/recording.py#L443))
+and `set_group_by_electrode_table_column`
+([recording.py:733](../../../../src/spyglass/spikesorting/v2/recording.py#L733))
+filter `bad_channel='True'` then, and `make_fetch` later reads that stored
+`SortGroupElectrode` membership verbatim. So `Electrode.bad_channel` flags are
+consumed **(a)** at group creation — flagged channels are excluded from the sort
+target — and **(b)** by phase 3's `interpolate`, which re-includes those excluded
+interior channels and fills them. `remove` re-reads **nothing** at
+materialization; it honors the declared membership (which is why it is a true
+no-op and byte-identical to today). **Consequence the executor must document:**
+set / curate `bad_channel` flags (e.g. run `suggest_bad_channels`) **before**
+creating the sort group. A channel flagged bad *after* a group already exists
+stays a member, and `remove` will **not** drop it — recreate the sort group to
+apply later flags. (This is the deliberate, DataJoint-idiomatic choice — declared
+membership is authoritative — not a gap; making `remove` re-filter at
+materialization was considered and rejected because it contradicts "`remove` =
+today's behavior" and conflicts with
+`set_group_by_electrode_table_column(remove_bad_channels=False)` groups whose
+members are bad *by design*. See the validation slice and overview Open
+Question 6.)
 
 **Convention boundary this phase relies on (and documents):**
 `Electrode.bad_channel='True'` means a **quality-bad** (dead/noise-class)
@@ -255,12 +279,15 @@ today — phase 3 adds no reference-quality check).
   2) or curation, and the **convention boundary**: `Electrode.bad_channel='True'`
   is *quality-bad* (dead/noise-class) only — a manually/externally set flag on an
   outside-brain channel must use `remove`/exclusion, never `interpolate` (which
-  would invent signal). Note that the `specific` reference electrode is never a
-  handling target and a `bad_channel='True'` reference (e.g. a dedicated ground)
-  is supported exactly as today. A CHANGELOG entry. A
-  `SpikeSortingV2_Migration.md` note is **not** needed (default is byte-identical
-  to current v2; these are new opt-in v2 capabilities with no v1↔v2 parity
-  change).
+  would invent signal). **Document the ordering contract prominently:** curate /
+  set `bad_channel` flags **before** creating the sort group (membership is fixed
+  at creation); a channel flagged bad after the group exists stays a member and
+  `remove` will not drop it — recreate the sort group to apply later flags. Note
+  that the `specific` reference electrode is never a handling target and a
+  `bad_channel='True'` reference (e.g. a dedicated ground) is supported exactly as
+  today. A CHANGELOG entry. A `SpikeSortingV2_Migration.md` note is **not** needed
+  (default is byte-identical to current v2; these are new opt-in v2 capabilities
+  with no v1↔v2 parity change).
 
 ## Deliberately not in this phase
 
@@ -274,6 +301,14 @@ today — phase 3 adds no reference-quality check).
 - Any **reference-quality** check / raise on a `bad_channel='True'` reference —
   v2 intentionally supports a bad-marked reference (overview Open Question 5);
   changing that needs a separate feature with its own migration note.
+- **Re-filtering sort-group membership at materialization** (the rejected
+  alternative to the ordering contract): having `remove` re-read current
+  `bad_channel` flags and `remove_channels` the now-bad members. Rejected because
+  it contradicts "`remove` = today's behavior", makes the recording diverge from
+  the declared `SortGroupElectrode` membership, and conflicts with
+  `set_group_by_electrode_table_column(remove_bad_channels=False)` groups whose
+  members are bad by design. Membership stays authoritative; flags are applied at
+  group creation (overview Open Question 6).
 - Changing the grouping helpers to include bad channels (the rejected Option B;
   see overview Open Question 1).
 - A spatial-frequency "destripe" reference (`highpass_spatial_filter`) — a
@@ -297,6 +332,8 @@ today — phase 3 adds no reference-quality check).
 | bad-marked reference still materializes *(integration, DB)* | a `specific` sort group whose reference electrode has `Electrode.bad_channel='True'`, with default params → materializes (no raise), the reference is used for subtraction and dropped after referencing, `cache_hash` matches the same row pre-plan (the round-3 raise is gone; v2's intentional support for a bad-marked reference is preserved); restore the flag. |
 | default cache_hash unchanged *(integration, DB+SI, slow)* | smoke-fixture `Recording` with all defaults (`bad_channel_handling="remove"`) has the same `cache_hash` as pre-phase code (headline regression guard). |
 | interpolate fills a bad channel *(integration, DB+SI, slow)* | mark one *interior* smoke-fixture electrode `bad_channel='True'`, materialize with `bad_channel_handling="interpolate"` → the cached recording retains that channel (count complete) and its trace differs from the raw (filled, not zero); restore the flag. |
+| flag-before-create workflow: `remove` omits a flagged channel *(integration, DB)* | flag an electrode `bad_channel='True'`, **then** create the sort group (`set_group_by_shank`) → the channel is excluded from `SortGroupElectrode` at creation → materialize with `remove` → the cached recording omits it. This is the documented ordering contract; restore the flag. |
+| stale group: post-creation flag is **not** dropped by `remove` *(integration, DB)* | create the sort group **first**, then flag one of its members `bad_channel='True'` → `make_fetch` still returns it as a member and `remove` leaves it in the recording (the documented limitation — declared membership is authoritative; recreate the group to apply later flags). Pins the behavior so it is not a silent surprise; restore the flag. |
 
 Stub tests are DB-free (fake recording + monkeypatched `sip.*`). Mark the two
 DB+SI integration tests (cache_hash, interpolate-fills) slow; restore any mutated
@@ -318,6 +355,11 @@ independent reviewer) against the diff. Confirm:
 - Handling sits **between** filter and reference; `interpolate` re-includes only
   the group's **interior** curated-bad channels via `restrict_recording`, and
   `remove` re-includes nothing (so its handling step is a genuine no-op).
+- **Ordering contract honored and documented:** flags are consumed at group
+  creation (exclusion) and by `interpolate` (re-inclusion); `remove` honors the
+  declared `SortGroupElectrode` membership and does **not** re-filter at
+  materialization. The docs tell users to set `bad_channel` flags before creating
+  the sort group; the flag-before-create and stale-group regression rows pass.
 - The interior re-inclusion uses the **pitch-anchored adjacency** rule
   (`≥MIN_GOOD_NEIGHBORS` good channels within `RADIUS_FACTOR × pitch`, where
   `pitch` is the **full-shank** `_shank_pitch`), **not** a `[min,max]` span and
