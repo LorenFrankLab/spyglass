@@ -1,9 +1,8 @@
 """v2-specific exception classes.
 
-Per shared-contracts § Custom Exception Classes, every named v2
-invariant gets a dedicated exception class so callers can catch the
-specific failure mode rather than parsing a bare ``ValueError`` /
-``RuntimeError`` message. Each message names the failed invariant and
+Every named v2 invariant gets a dedicated exception class so callers can
+catch the specific failure mode rather than parsing a bare ``ValueError``
+/ ``RuntimeError`` message. Each message names the failed invariant and
 the next action the user can take.
 """
 

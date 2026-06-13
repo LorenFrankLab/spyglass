@@ -405,7 +405,7 @@ def filtering_description(bandpass_filter, reference_mode: str) -> str:
     Built from the preprocessing that actually ran so the persisted NWB
     metadata does not claim a bandpass / common-reference step that did
     not happen -- e.g. the ``no_filter`` preset (``bandpass_filter``
-    None) or ``reference_mode='none'`` (audit finding #2). Important for
+    None) or ``reference_mode='none'``. Important for
     archival / DANDI export; the string is descriptive only and is not
     read back internally. Steps are listed in the order the runtime
     APPLIES them -- common reference first, then bandpass filter (see
@@ -444,9 +444,8 @@ def write_nwb_artifact(
     Returns ``(analysis_file_name, electrical_series_object_id,
     cache_hash)``. The ``cache_hash`` is computed **after** the
     write via ``_hash_nwb_recording`` -- the ``NwbfileHasher``
-    digest of the file we just persisted, per shared-contracts.md
-    Recording Cache Format. The v1 recompute machinery uses the
-    same hashing path, so v2 verification does not maintain a
+    digest of the file we just persisted. The v1 recompute machinery
+    uses the same hashing path, so v2 verification does not maintain a
     parallel implementation.
 
     Writes the file to disk only; the caller registers the
@@ -570,8 +569,7 @@ def write_nwb_artifact(
         # Hash the persisted file (not in-memory bytes) so the
         # digest reflects what was actually written --
         # timestamps, electrodes, conversion, ElectricalSeries
-        # metadata -- not just trace data. Matches
-        # shared-contracts.md Recording Cache Format and the v1
+        # metadata -- not just trace data. Matches the v1
         # recompute hashing path.
         cache_hash = _hash_nwb_recording(analysis_file_name)
     except Exception:

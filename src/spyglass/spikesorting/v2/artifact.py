@@ -455,8 +455,9 @@ class ArtifactSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
     ``RecordingSource`` (single-recording, default) or
     ``SharedArtifactGroupSource`` (cross-recording, opt-in) must exist
     for each selection row. Enforced by ``insert_selection`` and
-    re-checked at the start of ``ArtifactDetection.make()`` per the
-    shared-contracts Source Part Pattern.
+    re-checked at the start of ``ArtifactDetection.make()`` so a row
+    inserted via raw ``insert1`` (bypassing ``insert_selection``) is
+    caught before populate proceeds.
     """
 
     definition = """
@@ -637,7 +638,7 @@ class ArtifactSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
           addressed selection -> return ``{"artifact_id": ...}``;
         * ANY master with a different ``artifact_id`` is non-deterministic
           (a raw ``insert`` bypass or pre-determinism legacy row) and
-          violates the Phase A invariant -> raise
+          violates the content-addressed-identity invariant -> raise
           ``DuplicateSelectionError`` so it is reset rather than silently
           returned.
 

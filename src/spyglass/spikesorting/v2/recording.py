@@ -702,9 +702,9 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
     """One row per (raw, sort group, interval, preproc params, team).
 
     UUID-keyed so downstream FKs (``Recording``, ``SortingSelection``)
-    are single-column. ``insert_selection`` follows the shared-contracts
-    ``insert_selection() Return-Value Normalization`` convention:
-    find-existing-or-insert, always returns a single PK-only dict.
+    are single-column. ``insert_selection`` follows the v2 find-existing-
+    or-insert convention: it always returns a single PK-only dict, whether
+    the row already existed or was just inserted.
     """
 
     definition = """
@@ -815,7 +815,7 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
           addressed selection -> return ``{"recording_id": ...}``;
         * ANY row with a different ``recording_id`` is non-deterministic
           (a raw ``insert`` bypass or a pre-determinism legacy row) and
-          violates the Phase A invariant -> raise
+          violates the content-addressed-identity invariant -> raise
           ``DuplicateSelectionError`` so it is reset rather than silently
           returned or ``[0]``-indexed.
 
@@ -888,8 +888,8 @@ class Recording(SpyglassMixin, dj.Computed):
     """Preprocessed recording materialized NWB-resident in AnalysisNwbfile.
 
     The preprocessed ``ElectricalSeries`` lives inside an
-    ``AnalysisNwbfile`` (the canonical artifact). No binary sidecar; see
-    shared-contracts ``Recording Cache Format``.
+    ``AnalysisNwbfile`` (the canonical artifact). No binary sidecar -- the
+    in-NWB ``ElectricalSeries`` is the sole cached artifact.
 
     ``make()`` loads the raw NWB, restricts to the requested sort group
     and interval, applies pre-motion preprocessing (bandpass + common
@@ -897,9 +897,9 @@ class Recording(SpyglassMixin, dj.Computed):
     need it), streams one ``ElectricalSeries`` into a fresh
     ``AnalysisNwbfile``, validates the saved timestamp range covers the
     requested ``IntervalList.valid_times``, and records an
-    ``NwbfileHasher`` digest of the persisted file (per shared-contracts
-    Recording Cache Format; the v1 recompute machinery uses the same
-    hashing path). The populate body is split into ``make_fetch`` /
+    ``NwbfileHasher`` digest of the persisted file (the same hashing path
+    the v1 recompute machinery uses, so verification is not
+    reimplemented). The populate body is split into ``make_fetch`` /
     ``make_compute`` / ``make_insert`` so the long-running write does
     not hold a DB transaction. ``get_recording`` exposes the cached
     artifact and rebuilds on disk if missing, without deleting the
@@ -1008,8 +1008,9 @@ class Recording(SpyglassMixin, dj.Computed):
             preproc_row["params"]
         )
         # Pull the job_kwargs blob so ``make_compute`` can call
-        # ``_resolved_job_kwargs(preproc_job_kwargs)`` per the
-        # shared-contracts.md "Job-Kwargs Resolution" invariant.
+        # ``_resolved_job_kwargs(preproc_job_kwargs)`` -- every v2 compute
+        # stage resolves job_kwargs once so the override channels are
+        # honored consistently.
         # Currently the Recording write path streams via HDMF's
         # chunked iterator and does not consume SI-style job_kwargs;
         # the resolver call is kept so the override channels
@@ -1067,10 +1068,9 @@ class Recording(SpyglassMixin, dj.Computed):
         the populate-side staging contract and the
         ``RecordingComputed`` boxing.
         """
-        # shared-contracts.md "Job-Kwargs Resolution" requires every v2
-        # compute stage to call ``_resolved_job_kwargs(...)`` so the
-        # override channels (DataJoint config + per-row blob) are
-        # testable. The Recording streaming write path uses HDMF's
+        # Every v2 compute stage calls ``_resolved_job_kwargs(...)`` so the
+        # override channels (DataJoint config + per-row blob) are honored
+        # and testable. The Recording streaming write path uses HDMF's
         # chunked iterator and does not consume SI-style job_kwargs
         # yet, so the resolved dict is informational. The resolver
         # still runs so a monkey-patched ``_resolved_job_kwargs`` in
@@ -1337,8 +1337,8 @@ class Recording(SpyglassMixin, dj.Computed):
         # letting SI auto-detect the series. A future writer that
         # places more than one ``ElectricalSeries`` in the analysis
         # NWB (e.g., LFP next to raw) would silently pick the wrong
-        # source under auto-detect. The path is part of the v2 row's
-        # contract per shared-contracts.md "Recording Cache Format".
+        # source under auto-detect. The stored ``electrical_series_path``
+        # is the authoritative pointer to the persisted series, not a hint.
         rec = se.read_nwb_recording(
             abs_path,
             electrical_series_path=row["electrical_series_path"],
@@ -1487,7 +1487,7 @@ class Recording(SpyglassMixin, dj.Computed):
         )
 
         # Provenance string for the persisted ElectricalSeries, built from the
-        # steps ACTUALLY applied (audit finding #2): the old hardcoded
+        # steps ACTUALLY applied: the old hardcoded
         # "Bandpass filter + common reference" misdescribed the saved artifact
         # for the no_filter preset or reference_mode='none' (DANDI / archival).
         filtering_description = self._filtering_description(

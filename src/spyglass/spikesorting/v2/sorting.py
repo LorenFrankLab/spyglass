@@ -90,7 +90,7 @@ class SortingComputed(NamedTuple):
     ``make_insert`` / ``_populate_unit_part`` load and clean up that folder
     rather than recomputing a path a mid-populate config / path-policy
     change could divert. The analyzer cache folder is deliberately NOT a DB
-    column (Phase B); every code path WITHOUT an in-memory folder
+    column; every code path WITHOUT an in-memory folder
     (``get_analyzer``, ``delete``, ``find_orphaned_analyzer_folders``)
     resolves the canonical location from ``sorting_id`` via
     ``_analyzer_cache.analyzer_path``.
@@ -757,7 +757,7 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
           addressed selection -> return ``{"sorting_id": ...}``;
         * ANY master with a different ``sorting_id`` is non-deterministic
           (a raw ``insert`` bypass or pre-determinism legacy row) and
-          violates the Phase A invariant -> raise
+          violates the content-addressed-identity invariant -> raise
           ``DuplicateSelectionError`` so it is reset rather than silently
           returned.
 
@@ -968,17 +968,17 @@ class Sorting(SpyglassMixin, dj.Computed):
     """
     # The SortingAnalyzer cache folder is intentionally NOT a column: it is
     # large (5-50 GB) regeneratable scratch resolved at runtime from
-    # sorting_id via _analyzer_cache.analyzer_path (Phase B). Persisting an
+    # sorting_id via _analyzer_cache.analyzer_path. Persisting an
     # absolute path here previously drifted from the accessor-computed path
     # whenever temp_dir changed between runs.
 
     class Unit(SpyglassMixinPart):
         """Per-unit metadata persisted at sort time.
 
-        Brain region is reached through ``Sorting.Unit * Electrode *
-        BrainRegion`` (NON-NULL on Spyglass's ``Electrode``); see
-        shared-contracts ``Unit-Level Brain Region Tracing``. For concat
-        sorts the Electrode FK is anchored to the FIRST member's row.
+        Brain region is reached through the ``Sorting.Unit * Electrode *
+        BrainRegion`` join (``Electrode`` carries a NON-NULL ``BrainRegion``
+        FK in Spyglass). For concat sorts the Electrode FK is anchored to
+        the FIRST member's row.
         """
 
         definition = """
@@ -1130,9 +1130,8 @@ class Sorting(SpyglassMixin, dj.Computed):
         # wrapper does not accept it.
         sorter_params.pop("schema_version", None)
 
-        # Resolve job_kwargs ONCE per compute stage
-        # (shared-contracts.md "Job-Kwargs Resolution" invariant).
-        # The resolved dict flows into BOTH ``sis.run_sorter`` AND
+        # Resolve job_kwargs ONCE per compute stage so the resolved dict
+        # flows into BOTH ``sis.run_sorter`` AND
         # ``analyzer.compute`` so a user's ``n_jobs=N`` override --
         # via ``dj.config['custom']['spikesorting_v2_job_kwargs']``
         # or via the per-row ``job_kwargs`` blob -- propagates to
@@ -1227,7 +1226,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         # ``analyzer_folder`` is the transient folder ``_build_analyzer``
         # wrote (threaded from make_compute), used to load the units' peak
         # channels and for Mode-B rollback cleanup. It is NOT inserted as a
-        # column (Phase B): the canonical path is resolved from sorting_id
+        # column: the canonical path is resolved from sorting_id
         # everywhere outside this single populate() invocation.
         try:
             # no-op when framework transaction is active; kept defensively
@@ -1514,7 +1513,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         """Cascade-delete + analyzer-cache cleanup on disk.
 
         The analyzer cache folder is regeneratable scratch resolved from
-        ``sorting_id`` (Phase B: not a DataJoint-tracked column), so a plain
+        ``sorting_id`` (not a DataJoint-tracked column), so a plain
         ``.delete()`` would leave the 5-50 GB folder on disk per row.
         Mirrors ``ArtifactDetection.delete``'s IntervalList cleanup pattern:
         snapshot every ``sorting_id`` BEFORE the cascade delete (it can no
@@ -1579,7 +1578,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         orphans: ``_build_analyzer`` short-circuits before writing a folder and
         ``get_analyzer`` raises ``ZeroUnitAnalyzerError`` before reading the
         path, so an absent folder is expected. The cache path is COMPUTED from
-        ``sorting_id`` (Phase B: not a stored column), so the carve-out is
+        ``sorting_id`` (not a stored column), so the carve-out is
         keyed on ``(Sorting & {"n_units": 0})``, NOT on any column value.
 
         Parameters
@@ -1595,7 +1594,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         dict
             ``{"db_side": [{"sorting_id", "computed_analyzer_path"}, ...],
             "disk_side": [folder_path_str, ...]}``. ``computed_analyzer_path``
-            is resolved from ``sorting_id`` (Phase B: there is no stored
+            is resolved from ``sorting_id`` (there is no stored
             ``analyzer_folder`` column).
         """
         import shutil as _shutil

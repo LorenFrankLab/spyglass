@@ -92,7 +92,9 @@ def _is_duplicate_key_error(exc: BaseException) -> bool:
     the specific ``"Duplicate entry"`` text, NEVER a bare ``"1062"``
     substring: a free substring would false-positive on an FK message that
     merely contains those digits (a constraint name, a rendered UUID) and
-    silently swallow an error that Phase A step 5 requires to propagate.
+    silently swallow a genuine integrity failure (e.g. an FK violation)
+    that must propagate rather than be treated as the recoverable
+    duplicate-PK race.
     """
     if isinstance(exc, dj.errors.DuplicateError):
         return True

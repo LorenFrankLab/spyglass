@@ -278,7 +278,7 @@ def run_clusterless_thresholder(
     # The runtime fallback must agree with the schema default.
     threshold_unit = params.pop("threshold_unit", "uv")
     # Reject an invalid ``threshold_unit`` LOUDLY rather than silently
-    # treating it as MAD (audit follow-up P2). The schema's
+    # treating it as MAD. The schema's
     # ``Literal["uv", "mad"]`` enforces this at insert, but ``update1`` and
     # pre-validator rows bypass it, and make/sort-time consumes the fetched
     # blob WITHOUT re-validating. Without this guard ANY non-"uv" value
@@ -293,7 +293,7 @@ def run_clusterless_thresholder(
             "update1 or before the SorterParameters validator existed can "
             "carry an invalid value; fix the stored params row."
         )
-    # Defense-in-depth (audit follow-up): the SorterParameters insert
+    # Defense-in-depth: the SorterParameters insert
     # validator rejects this combo, but it is bypassed by ``update1`` and
     # by rows written before the validator existed, and make/sort-time
     # consumes the fetched blob WITHOUT re-validating. A microvolt-scale

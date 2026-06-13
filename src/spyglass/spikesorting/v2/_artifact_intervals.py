@@ -263,7 +263,7 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
         # When ``end_f == chunk_end`` (artifact reaches the chunk's last
         # sample), ``end_f + 1`` indexes the NEXT chunk's first
         # timestamp, so this intermediate interval can span the
-        # inter-chunk gap. That is harmless (audit finding #4):
+        # inter-chunk gap. That is harmless:
         # ``artifact_intervals`` is a local never exposed to consumers,
         # and the per-chunk subtraction below clips each interval to its
         # own base chunk. The half-open ``end`` is exactly the same

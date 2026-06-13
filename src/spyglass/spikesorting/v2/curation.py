@@ -74,10 +74,9 @@ class CurationV2(SpyglassMixin, dj.Manual):
     the schema does not self-FK because DataJoint cannot resolve a
     nullable self-FK across renamed columns cleanly).
 
-    ``object_id`` (NOT ``units_object_id``) matches the convention
-    ``SpikeSortingOutput.get_spike_times()`` dispatches against; see
-    shared-contracts ``NWB Column-Name Convention for SpikeSortingOutput
-    Routing``.
+    ``object_id`` (NOT ``units_object_id``) is the column name the
+    ``SpikeSortingOutput`` merge-table router expects when dispatching
+    ``get_spike_times()``; using the wrong name would break that routing.
     """
 
     definition = """
@@ -97,9 +96,8 @@ class CurationV2(SpyglassMixin, dj.Manual):
 
         Populated by ``insert_curation`` from the upstream
         ``Sorting.Unit`` rows after applying ``merge_groups``. A merged
-        unit inherits the peak channel of the highest-amplitude
-        contributing unit; see shared-contracts ``Unit-Level Brain
-        Region Tracing``.
+        unit inherits the peak channel (and thus the Electrode /
+        brain-region trace) of its highest-amplitude contributing unit.
         """
 
         definition = """
