@@ -85,7 +85,9 @@ working tree at planning time; re-confirm before editing (files move).
   **preserved**, not collapsed to a boolean. Exposed two ways: a reviewable
   helper that suggests / persists `Electrode.bad_channel` (flagging `dead`/
   `noise` by default, not `out`), and an opt-in detector that runs at
-  materialization.
+  materialization on a **reference-excluded, per-shank** surface (so the
+  spatially-local coherence method is not skewed by the reference channel or by
+  mixing shanks).
 - A `bad_channel_handling = "remove" | "interpolate"` preprocessing parameter,
   applied **label-aware**: `out` channels are always removed (never
   interpolated — no in-brain neighbors to fill from, per IBL/SI); only
@@ -136,11 +138,15 @@ sort group excludes them at creation (`set_group_by_*` filters
   them. Bad-channel awareness stays localized to two clear places
   (excluded-at-creation for the sort target; optionally-re-included at
   preprocessing for interpolation scaffolding). Two contracts this rests on,
-  both enforced in phase 3: the `specific` reference electrode is **excluded**
-  from handling (it is needed for subtraction and dropped after referencing;
-  a reference flagged bad raises), and `Electrode.bad_channel='True'` is a
-  **quality-bad-only** flag (phase 2 never persists an `out` label to it), so
-  the curated-flag interpolate path never fills an outside-brain channel.
+  both enforced in phase 3: the `specific` reference electrode is **excluded from
+  handling and from the at-materialization detector surface** (it is sliced in
+  only for subtraction and dropped after referencing; leaving it in the coherence
+  pool would skew the other channels' labels — its own quality is guarded by a
+  `make_fetch` raise when it is curated `bad_channel='True'`), and because the
+  boolean `Electrode.bad_channel` cannot encode an `out` label, the `interpolate`
+  path **audits** label-less curated flags with a coherence/PSD pass and removes
+  (never fills) any classified outside-brain. Detection also runs **per shank**
+  (the coherence method is spatially local).
 - **Option B (rejected).** Make the group the *physical* electrode group
   (good + bad), and handle bad channels only at preprocessing. Conceptually
   uniform, but it reworks the just-shipped grouping helpers and forces the
@@ -183,8 +189,10 @@ Open Question 1.
 | Detection thresholds are Neuropixels-derived and may over/under-flag on polymer data. | Phase 2 exposes every threshold as an overridable parameter, ships SI defaults, and documents the NP origin; the persist helper is **suggest-then-confirm**, never an automatic overwrite of curated flags. |
 | Phase-shift enabled on data with no `inter_sample_shift` would no-op invisibly or misbehave. | Phase 1 gates on the property and logs a clear skip; it never fabricates a shift. |
 | Interpolating an out-of-brain channel (no in-brain neighbors) invents signal; SI's guide says out channels should be removed. | Handling is **label-aware** (phase 3): `out` is always removed, only `dead`/`noise` interpolate; labels are preserved end-to-end (phase 2 detection → handling), never collapsed to a boolean. |
-| Reconstructing a custom column-group's bad channels "by shank" can pull in electrodes never near that group (`set_group_by_electrode_table_column` stores no original membership). | Phase 3 re-includes only bad channels **spatially adjacent** to the group's good channels (≥`MIN_GOOD_NEIGHBORS` within a spacing-relative radius), not the whole shank and not a `[min,max]` bounding box (which would swallow the gap of a non-contiguous custom group); no positions → `interpolate` raises (Open Question 4). |
-| The bad-channel step runs before referencing, and `restrict_recording` slices the `specific` reference electrode in for subtraction — handling could remove/interpolate it and break referencing. | Phase 3 **excludes the reference electrode** from the handled set (it is dropped after referencing as today); a detection that flags the reference bad **raises** instead. |
+| Reconstructing a custom column-group's bad channels "by shank" can pull in electrodes never near that group (`set_group_by_electrode_table_column` stores no original membership). | Phase 3 re-includes only bad channels **adjacent to the group's good channels at the probe's physical pitch** (≥`MIN_GOOD_NEIGHBORS` within `RADIUS_FACTOR × pitch`, `pitch` from the full shank — NOT the group's own spacing, which degenerates to the gap for a sparse group), not the whole shank and not a `[min,max]` box; no positions / undefined pitch → `interpolate` raises (Open Question 4). |
+| The bad-channel step runs before referencing, and `restrict_recording` slices the `specific` reference electrode in for subtraction — handling or detection could remove/interpolate it or let it skew labels. | Phase 3 **excludes the reference from the handled set AND from the detector surface** (it is dropped after referencing as today); the reference's own quality is guarded by a `make_fetch` raise when it is curated `bad_channel='True'`. |
+| Automated detection on the **restricted** recording would run the spatially-local coherence/PSD method across a reference channel and/or multiple shanks at once, corrupting the labels of real sort channels. | Phase 3 builds a **reference-excluded, per-shank** detector surface (via the `channel_shank` map threaded from `make_fetch`) and merges per-shank labels — the same per-shank scope phase 2 uses. |
+| The boolean `Electrode.bad_channel` cannot carry an `out` label, so a pre-existing / manual / config flag could mark an outside-brain channel that `interpolate` would then wrongly fill. | The `interpolate` path **audits** every label-less curated flag with a coherence/PSD pass and **removes** (never fills) any classified `out`, so the unenforceable convention cannot cause invented signal. |
 | `None`-as-"use SI default" sentinel passed straight to SI would break (`psd_hf_threshold=None` is invalid in 0.104.3). | The detection wrapper **drops `None`** overrides; only `method` is pinned, every other knob falls through to SI's own signature default. |
 | Motion estimation is expensive (peak detect + localize + estimate). | Phase 4 is a `dj.Computed` table populated **on demand** (never auto-eager), with a smoke-test timing step before any larger run. |
 
@@ -226,18 +234,22 @@ see no change.
    `set_group_by_electrode_table_column` builds arbitrary-membership groups and
    stores no original requested values, so "the group's bad channels" cannot be
    reconstructed exactly. Chosen behavior: re-include only bad channels
-   **spatially adjacent** to the group's good channels — at least
-   `MIN_GOOD_NEIGHBORS` good electrodes within `RADIUS_FACTOR × d_nn` (the
-   group's own median nearest-neighbor spacing). This is conservative for both
+   **adjacent to the group's good channels at the probe's physical pitch** — at
+   least `MIN_GOOD_NEIGHBORS` good electrodes within `RADIUS_FACTOR × pitch`,
+   where `pitch` is the **full shank's** median nearest-neighbor spacing
+   (`_shank_pitch`). The radius must come from the full-shank pitch, **not** the
+   group's own spacing: with only two far-apart good channels the group's spacing
+   *is* the gap, so a group-relative radius would wrongly keep the midpoint
+   channel. Anchored to the dense probe pitch, the rule is conservative for both
    contiguous shank groups (interior bad channels qualify) and non-contiguous
-   custom groups (a bad channel in the gap between two separated clusters has no
-   nearby good neighbors and is excluded — a `[min,max]` bounding box would
-   wrongly include it). Isolated/gap curated-bad channels in a custom group are
-   therefore left unfilled (correctly — there is nothing local to fill them
+   custom groups (a bad channel many pitches from any good channel is excluded —
+   a `[min,max]` bounding box would wrongly include it). Isolated/gap curated-bad
+   channels are therefore left unfilled (correctly — nothing local to fill them
    from); the user handles them via `remove` or a contiguous group. If positions
-   are absent, `interpolate` raises and the user falls back to `remove`. Revisit
-   only if a use case needs to interpolate genuinely isolated channels (would
-   require persisting group membership/origin).
+   are absent or `pitch` is undefined (`<2` positioned electrodes on the shank),
+   `interpolate` raises and the user falls back to `remove`. Revisit only if a
+   use case needs to interpolate genuinely isolated channels (would require
+   persisting group membership/origin).
 
 ## Estimated Effort
 

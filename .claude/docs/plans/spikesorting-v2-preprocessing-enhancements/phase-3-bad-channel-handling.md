@@ -4,12 +4,13 @@
 
 Add a `bad_channel_handling = "remove" | "interpolate"` preprocessing
 parameter and an opt-in `bad_channel_detection` config. `"remove"` (the
-default, no detection) is **byte-identical to today**. `"interpolate"` fills
-the sort group's shank bad channels from good neighbors so geometry-aware
-sorters see a complete probe. The optional detector runs SpikeInterface
-`detect_bad_channels` at materialization (consuming
-[phase 2](phase-2-bad-channel-detection.md)'s `detect_bad_channels`) and feeds
-its result into the same handling step.
+default, no detection) is **byte-identical to today**. `"interpolate"` fills the
+sort group's interior bad channels (those embedded among its good channels) from
+good neighbors so geometry-aware sorters see a complete probe. The optional
+detector runs SpikeInterface `detect_bad_channels` at materialization (consuming
+[phase 2](phase-2-bad-channel-detection.md)'s `detect_bad_channels`) on a
+reference-excluded, per-shank surface and feeds its labels into the same
+handling step.
 
 See the [overview's bad-channel design decision](overview.md#the-bad-channel-handling-design-decision-chosen-option-a):
 the sort group stays the **good-channel sort target**; the curated-bad channels
@@ -105,64 +106,92 @@ they can be filled.
   - Fetch the candidate bad electrodes that share the sort group's
     `(electrode_group_name, probe_shank)` set **and** carry `bad_channel='True'`,
     with their positions (`Electrode.x/y/z`).
-  - **Restrict by spatial adjacency, not a bounding box:** keep a candidate only
-    if at least `MIN_GOOD_NEIGHBORS` of the group's good electrodes lie within
-    `RADIUS_FACTOR × d_nn` of it, where `d_nn` is the group's own median
-    nearest-neighbor spacing (helper below). A `[min, max]` coordinate **span**
-    is *not* conservative for arbitrary-column groups: a custom group spanning
-    two separated good-channel clusters has a span that swallows the gap between
-    them, wrongly re-including unrelated bad electrodes sitting there. The
-    adjacency test instead keeps only bad channels genuinely *embedded among*
-    group members — the only ones kriging can fill from local neighbors — and
-    excludes inter-cluster gap channels. For a contiguous shank group this is the
-    shank's interior bad channels; for a custom group it is only the bad channels
-    surrounded by that group's good channels, regardless of contiguity.
+  - **Compute the shank's physical pitch.** For each `(electrode_group_name,
+    probe_shank)` the group touches, read **all** that shank's electrode
+    positions (good + bad) from `Electrode` and take the median
+    nearest-neighbor distance — the probe's nominal electrode spacing, a
+    physical constant. This is the scale for the adjacency test below.
+  - **Restrict by absolute spatial adjacency, not a bounding box:** keep a
+    candidate only if at least `MIN_GOOD_NEIGHBORS` of the group's good
+    electrodes lie within `RADIUS_FACTOR × pitch` of it (helper below). Two
+    things this gets right that a `[min, max]` coordinate span does not: (1) a
+    custom group spanning two separated good-channel clusters has a span that
+    swallows the gap between them, wrongly re-including unrelated electrodes
+    there; and (2) the radius MUST come from the **full-shank pitch**, not from
+    the *group's own* nearest-neighbor spacing — with only two far-apart good
+    channels the group's spacing degenerates to the gap itself, so a
+    `radius = 1.5 × (group spacing)` would admit the very midpoint channel we
+    must exclude. Anchoring the radius to the dense probe pitch keeps only bad
+    channels physically embedded among good neighbors (the only ones kriging can
+    fill); a channel many pitches from any good channel is dropped, contiguous or
+    not.
 
     ```python
-    # Module-level, near the other geometry helpers. The constants are NOT
-    # probe-specific: the radius is derived from the group's OWN spacing, so one
-    # rule fits dense Neuropixels shanks and sparse polymer groups alike.
+    # Module-level, near the other geometry helpers. Constants are dimensionless
+    # multiples of the probe's own pitch, so one rule fits dense Neuropixels
+    # shanks and sparse polymer groups alike.
     MIN_GOOD_NEIGHBORS = 2  # surrounded (>=2), not merely adjacent on one side
-    RADIUS_FACTOR = 1.5     # one site away counts; a multi-site gap does not
+    RADIUS_FACTOR = 1.5     # one pitch away counts; a multi-pitch gap does not
 
-    def _interior_bad_channel_ids(good_xyz, candidate_xyz):
-        """Curated-bad ids spatially embedded among a group's good channels.
+    def _shank_pitch(shank_xyz):
+        """Median nearest-neighbor distance over ALL electrodes on a shank.
 
-        ``good_xyz``: (N, 3) array of the group's good-channel positions.
+        ``shank_xyz``: (M, 3) positions of every electrode on the shank (good
+        AND bad), so the result is the probe's physical pitch, independent of
+        which channels a sort group happens to keep. Returns ``None`` if the
+        shank has < 2 positioned electrodes.
+        """
+        import numpy as np
+
+        xyz = np.asarray(shank_xyz, dtype=float)
+        if xyz.shape[0] < 2:
+            return None
+        dd = np.linalg.norm(xyz[:, None, :] - xyz[None, :, :], axis=-1)
+        np.fill_diagonal(dd, np.inf)
+        return float(np.median(dd.min(axis=1)))
+
+    def _interior_bad_channel_ids(good_xyz, candidate_xyz, pitch):
+        """Curated-bad ids physically embedded among a group's good channels.
+
+        ``good_xyz``: (N, 3) positions of the group's good channels.
         ``candidate_xyz``: list of ``(electrode_id, (x, y, z))`` for the
-        curated-bad electrodes on the group's shank(s). A candidate is kept
-        only when at least ``MIN_GOOD_NEIGHBORS`` good channels lie within
-        ``RADIUS_FACTOR * d_nn`` of it, where ``d_nn`` is the median
-        nearest-neighbor distance among the good channels -- so a bad channel
-        in the gap between two distant good-channel clusters (which a
-        ``[min, max]`` box would include) is excluded. Returns a sorted list.
+        curated-bad electrodes on the group's shank(s). ``pitch``: the shank's
+        physical electrode spacing from ``_shank_pitch`` (NOT derived from the
+        possibly-sparse good set). A candidate is kept only when at least
+        ``MIN_GOOD_NEIGHBORS`` good channels lie within ``RADIUS_FACTOR *
+        pitch`` of it -- so a bad channel between two far-apart good channels
+        (its nearest good channel many pitches away) is excluded, while a bad
+        channel in a dense run is kept. Returns a sorted list.
         """
         import numpy as np
 
         good = np.asarray(good_xyz, dtype=float)
-        if good.shape[0] < 2:
-            return []  # need >=2 good channels to define spacing AND to fill from
-        gg = np.linalg.norm(good[:, None, :] - good[None, :, :], axis=-1)
-        np.fill_diagonal(gg, np.inf)
-        radius = RADIUS_FACTOR * float(np.median(gg.min(axis=1)))
-        kept = [
+        if good.shape[0] < 2 or not pitch:
+            return []  # need >=2 good channels and a defined pitch to fill from
+        radius = RADIUS_FACTOR * float(pitch)
+        return sorted(
             int(cid)
             for cid, pos in candidate_xyz
             if int((np.linalg.norm(good - np.asarray(pos, float), axis=1)
                     <= radius).sum()) >= MIN_GOOD_NEIGHBORS
-        ]
-        return sorted(kept)
+        )
     ```
 
+    (Apply per shank when the group spans more than one — each shank uses its
+    own `pitch`.)
   - **If electrode positions are not populated** (legacy NWBs without
-    coordinates, so `Electrode.x/y/z` are null), interpolation has no geometry to
-    scope or to fill from: raise a clear error from the materialization for
+    coordinates, so `Electrode.x/y/z` are null, or a shank with `< 2` positioned
+    electrodes so `pitch` is `None`), interpolation has no geometry to scope or
+    to fill from: raise a clear error from the materialization for
     `bad_channel_handling="interpolate"` on such a session (point the user to
     `remove`), rather than guessing a neighborhood. See overview Open Question 4.
-  - Return the result as a sorted tuple (DeepHash-stable, like the other
-    `make_fetch` outputs) and thread it through `make_compute` →
-    `_compute_recording_artifact` → `restrict_recording` and
-    `apply_pre_motion_preprocessing`.
+  - Return `bad_channel_ids` as a sorted tuple (DeepHash-stable, like the other
+    `make_fetch` outputs). Also build and return a `channel_shank` map
+    (`{electrode_id: (electrode_group_name, probe_shank)}` for every channel the
+    compute step may see — good channels plus re-included curated-bad) so the
+    handling step can split detection per shank **without** a DB read (next
+    task). Thread both through `make_compute` → `_compute_recording_artifact` →
+    `restrict_recording` and `apply_pre_motion_preprocessing`.
 
 - **`make_fetch`: reject a curated-bad `specific` reference**
   ([recording.py:1187](../../../../src/spyglass/spikesorting/v2/recording.py#L1187),
@@ -193,67 +222,99 @@ they can be filled.
 
 - **`apply_pre_motion_preprocessing`: the LABEL-AWARE handling step**
   ([_recording_materialization.py:342](../../../../src/spyglass/spikesorting/v2/_recording_materialization.py#L342)).
-  Add `bad_channel_handling`, `bad_channel_ids`, and `bad_channel_detection`
-  params (it already receives `reference_mode` / `reference_electrode_id`).
-  Insert **after** the bandpass (`:369`) and **before** the reference (`:380`).
-  Two invariants: **(a)** out-of-brain channels are always removed, never
-  interpolated (per IBL `voltage.py:539`/`:774` and the SI preprocessing guide —
-  an `out` channel has no in-brain neighbors to fill from); only `dead`/`noise`
-  follow `bad_channel_handling`. **Removal runs before interpolation** so the
-  removed `out` channels cannot act as interpolation donors. **(b)** the
-  `specific` reference electrode is
-  sliced into the recording for subtraction (`restrict_recording:187`) and is
-  dropped only *after* `common_reference` — so the handling step must **not**
-  remove or interpolate it. If detection flags the reference electrode itself
-  bad, **raise** (referencing to a bad channel is invalid):
+  Add `bad_channel_handling`, `bad_channel_ids`, `bad_channel_detection`, and
+  `channel_shank` params (it already receives `reference_mode` /
+  `reference_electrode_id`). Insert **after** the bandpass (`:369`) and
+  **before** the reference (`:380`). Invariants:
+  - **(a)** out-of-brain channels are always removed, never interpolated (per IBL
+    `voltage.py:539`/`:774` and the SI preprocessing guide — an `out` channel has
+    no in-brain neighbors to fill from); only `dead`/`noise` follow
+    `bad_channel_handling`. **Removal runs before interpolation** so removed
+    `out` channels cannot act as interpolation donors.
+  - **(b)** the `specific` reference electrode is sliced in for subtraction
+    (`restrict_recording:187`) and dropped only *after* `common_reference`, so it
+    must survive handling. It is therefore **excluded from the detector surface
+    entirely**, not merely skipped after the fact: coherence/PSD detection
+    compares each channel to the cross-channel median, so a reference left in the
+    pool would perturb the labels of the real sort channels. The reference's own
+    quality is vetted separately by the curated-bad check in `make_fetch` (above).
+  - **(c)** detection runs **per shank** — the coherence method is spatially
+    local, so mixing shanks corrupts it (the same rule as phase 2) — using the
+    `channel_shank` map threaded from `make_fetch`.
+  - **(d)** because the boolean `Electrode.bad_channel` cannot encode an `out`
+    label, a label-less curated flag selected for `interpolate` is **audited**: a
+    coherence/PSD pass classifies it, and any channel that comes back
+    outside-brain is removed, never filled — so a pre-existing / manual / config
+    flag that happens to mark an out-of-brain channel can never invent signal.
 
   ```python
   # Bad-channel handling: between filter and reference (matches IBL/AIND).
   from spyglass.spikesorting.v2._bad_channels import detect_bad_channels
+  from spyglass.utils import logger
 
   present = {int(c) for c in recording.get_channel_ids()}
-  # Protect the 'specific' reference channel: it must survive for subtraction
-  # and is removed later by the existing post-reference drop.
+  # The 'specific' reference is present only for subtraction (dropped after
+  # common_reference); it is never handled and never fed to detection.
   ref_id = int(reference_electrode_id) if reference_mode == "specific" else None
   to_remove, to_interpolate = set(), set()
-  # Curated Electrode.bad_channel flags carry no label -> quality-bad by the
-  # phase-2 invariant, so follow the user's explicit bad_channel_handling
-  # (they were re-included for interpolate; for remove they are already absent).
+
+  # (1) Curated Electrode.bad_channel flags carry no label (quality-bad by the
+  #     phase-2 convention) -> follow the user's bad_channel_handling. They were
+  #     re-included for interpolate; for remove they are already absent.
   curated = (present & {int(c) for c in bad_channel_ids}) - {ref_id}
   (to_interpolate if bad_channel_handling == "interpolate" else to_remove)\
       .update(curated)
-  # Detected channels carry SI labels: 'out' is ALWAYS removed; 'dead'/'noise'
-  # follow bad_channel_handling. BadChannelDetectionParams is a model -> dump it
-  # (the wrapper drops None so unset knobs use SI defaults).
-  if bad_channel_detection is not None:
-      labels = detect_bad_channels(
-          recording, **bad_channel_detection.model_dump()
-      )["labels"]
-      if ref_id is not None and labels.get(ref_id) in ("dead", "noise", "out"):
-          raise ValueError(
-              "apply_pre_motion_preprocessing: the 'specific' reference "
-              f"electrode {ref_id} was flagged bad ({labels.get(ref_id)!r}); "
-              "referencing to a bad channel is invalid. Pick a different "
-              "reference_electrode_id (or clear the detection)."
+
+  # (2) Labels (coherence+psd) from a REFERENCE-EXCLUDED, PER-SHANK detector
+  #     surface (invariants b, c). Needed when the user enabled detection, OR --
+  #     even if not -- when interpolating label-less curated flags, which must be
+  #     audited for outside-brain channels (invariant d). detect_bad_channels
+  #     pins method; {} -> SI signature defaults, model_dump() drops None.
+  need_labels = bad_channel_detection is not None or (
+      bad_channel_handling == "interpolate" and bool(curated)
+  )
+  labels = {}
+  if need_labels:
+      params = (bad_channel_detection.model_dump()
+                if bad_channel_detection is not None else {})
+      detector = recording.channel_slice(
+          [c for c in recording.get_channel_ids() if int(c) != ref_id]
+      )
+      for shank_rec in _split_by_shank(detector, channel_shank):
+          labels.update(
+              {int(k): v for k, v
+               in detect_bad_channels(shank_rec, **params)["labels"].items()}
           )
+
+  # (3) Act on detections only when the user opted IN (never auto-drop channels
+  #     they did not flag): 'out' removed, 'dead'/'noise' follow handling.
+  if bad_channel_detection is not None:
       for cid, label in labels.items():
-          cid = int(cid)
-          if cid == ref_id:
-              continue  # protected; dropped after referencing
           if label == "out":
               to_remove.add(cid)
           elif label in ("dead", "noise"):
               (to_interpolate if bad_channel_handling == "interpolate"
                else to_remove).add(cid)
+
+  # (4) Audit (invariant d): never interpolate a channel the detector classifies
+  #     outside-brain, even a label-less curated flag with detection off.
+  out_flagged = {c for c in to_interpolate if labels.get(c) == "out"}
+  if out_flagged:
+      logger.warning(
+          "apply_pre_motion_preprocessing: channels %s were flagged bad but "
+          "classified outside-brain; removing instead of interpolating.",
+          sorted(out_flagged),
+      )
+      to_interpolate -= out_flagged
+      to_remove |= out_flagged
+
+  # (5) Resolve overlaps, then REMOVE BEFORE INTERPOLATE so removed (incl. out)
+  #     channels are never interpolation donors (IBL keeps out-of-brain out of
+  #     the spatial computation, voltage.py:539/:774). to_remove/to_interpolate
+  #     are disjoint and to_interpolate is &= present, so removing never drops a
+  #     fill target.
   to_interpolate &= present
   to_remove = (to_remove & present) - to_interpolate
-  # Order matters: REMOVE BEFORE INTERPOLATE. 'out' channels (and any bad
-  # channel under "remove") must be gone before interpolation so they are never
-  # used as donor/source channels when kriging-filling dead/noise -- IBL keeps
-  # out-of-brain channels out of the spatial computation (voltage.py:539/:774).
-  # to_remove and to_interpolate are disjoint (line above), and to_interpolate
-  # was already &= present, so removing to_remove never drops an interpolation
-  # target; the filled channels are interpolated from the remaining good set.
   if to_remove:
       recording = recording.remove_channels(sorted(to_remove))
   if to_interpolate:
@@ -270,6 +331,29 @@ they can be filled.
       "interpolated": sorted(to_interpolate),
       "removed": sorted(to_remove),
   }
+  ```
+
+  Module-level helper (alongside `_interior_bad_channel_ids`):
+
+  ```python
+  from collections import defaultdict
+
+  def _split_by_shank(rec, channel_shank):
+      """Yield per-shank channel-sliced sub-recordings for detection.
+
+      ``channel_shank`` maps electrode id -> a hashable shank key
+      ((electrode_group_name, probe_shank)). Coherence/PSD detection is
+      spatially local, so it must run within a shank (phase 2). A single-shank
+      group yields the whole recording unchanged.
+      """
+      groups = defaultdict(list)
+      for cid in rec.get_channel_ids():
+          groups[channel_shank[int(cid)]].append(cid)
+      if len(groups) <= 1:
+          yield rec
+      else:
+          for ids in groups.values():
+              yield rec.channel_slice(ids)
   ```
 
   Note the asymmetry (documented in the overview): for `"remove"`,
@@ -290,16 +374,20 @@ they can be filled.
   `SpikeSortingV2.md` subsection on `bad_channel_handling` (when to interpolate
   vs remove — interpolate for geometry-aware sorters on dense shanks, remove for
   tetrodes / sparse groups), the `bad_channel_detection` opt-in, **and the
-  curated-flag invariant**: `Electrode.bad_channel='True'` must mark a
-  *quality-bad* (dead/noise-class) channel — because under `interpolate` a
-  label-less curated flag is filled, an outside-brain channel must NOT be marked
-  `bad_channel` (use `remove`, exclude it from the sort group, or rely on
-  at-materialization detection, which keeps the `out` label and always removes
-  it). Also document that the `specific` reference electrode is protected from
-  handling and that a detection that flags the reference bad raises. A CHANGELOG
-  entry. A `SpikeSortingV2_Migration.md` note is **not** needed (default is
-  byte-identical to current v2; these are new opt-in v2 capabilities with no
-  v1↔v2 parity change).
+  curated-flag convention**: `Electrode.bad_channel='True'` is intended to mark a
+  *quality-bad* (dead/noise-class) channel — the boolean cannot encode an `out`
+  label, so populate it via `suggest_bad_channels` (phase 2, which never writes
+  `out`). Document that this convention is **not enforced by the schema**, so the
+  `interpolate` path **audits** every label-less curated flag with a coherence/PSD
+  pass and *removes* (never fills) any channel that comes back outside-brain
+  (invariant d) — a pre-existing / manual / config flag on an out-of-brain
+  channel is therefore handled safely, never interpolated. Also document that the
+  `specific` reference electrode is excluded from both handling **and** the
+  detector surface, and that its own quality is vetted by the `make_fetch`
+  curated-bad check (a curated-bad reference raises). A CHANGELOG entry. A
+  `SpikeSortingV2_Migration.md` note is **not** needed (default is byte-identical
+  to current v2; these are new opt-in v2 capabilities with no v1↔v2 parity
+  change).
 
 ## Deliberately not in this phase
 
@@ -318,19 +406,22 @@ they can be filled.
 | interpolate needs locations *(stub/mock)* | `interpolate` on a recording whose `get_channel_locations()` is `None` raises the clear ValueError. |
 | `out` removed before interpolate *(stub/mock)* | `bad_channel_detection` labels a channel `"out"` and another `"dead"` with `bad_channel_handling="interpolate"` → the `"out"` id goes to `remove_channels` and the `"dead"` id to `interpolate_bad_channels` (label policy, not blanket interpolate), **and `remove_channels` is invoked before `interpolate_bad_channels`** so the removed `out` channel cannot be an interpolation donor (assert recorded call order). |
 | dead/noise follow the param *(stub/mock)* | the same `"dead"`/`"noise"` channels go to `remove` when `bad_channel_handling="remove"`. |
-| specific reference is protected *(stub/mock)* | `reference_mode="specific"` with the reference electrode present and `bad_channel_detection` flagging *other* channels → the reference id is in **neither** `to_remove` nor `to_interpolate`; `common_reference(reference="single")` is still called with it. |
-| reference-flagged-bad raises *(stub/mock)* | `bad_channel_detection` labels the `specific` reference electrode `"dead"` → a clear ValueError ("referencing to a bad channel") is raised before referencing. |
-| curated-bad reference raises with detection off *(integration, DB)* | a `specific` sort group whose reference electrode has `Electrode.bad_channel='True'`, materialized with `bad_channel_detection=None` → `make_fetch` raises the clear "reference is curated-bad" error (the detection-independent half of the guard); restore the flag. |
+| reference excluded from detector surface *(stub/mock)* | `reference_mode="specific"` with the reference present and `bad_channel_detection` set → the channel id passed into `detect_bad_channels` (via the `channel_slice` building the detector) **omits** the reference; the reference is in **neither** `to_remove` nor `to_interpolate`; `common_reference(reference="single")` is still called with it. |
+| detection runs per shank *(stub/mock)* | a two-shank `channel_shank` map → `detect_bad_channels` is invoked **once per shank** on each shank's `channel_slice`, never once on the mixed-shank recording (spy on call count + the ids each call sees). |
+| curated `out` flag audited, not filled *(stub/mock)* | `bad_channel_handling="interpolate"`, `bad_channel_detection=None`, a curated `bad_channel_ids` channel that the audit pass classifies `"out"` → it is moved to `remove_channels` (a warning is logged), **not** `interpolate_bad_channels`; a curated channel classified `dead`/`good` is interpolated. |
+| curated-bad reference raises with detection off *(integration, DB)* | a `specific` sort group whose reference electrode has `Electrode.bad_channel='True'`, materialized with `bad_channel_detection=None` → `make_fetch` raises the clear "reference is curated-bad" error (the detection-independent reference guard); restore the flag. |
 | detection params are dumped, None dropped *(stub/mock)* | `bad_channel_detection=BadChannelDetectionParams(psd_hf_threshold=None)` → `detect_bad_channels` is called via `model_dump()` and the `None` is not forwarded (no SI crash). |
-| `_interior_bad_channel_ids` adjacency *(unit, no DB)* | on a synthetic linear array: a bad channel one spacing from good neighbors is kept; a bad channel beyond `RADIUS_FACTOR×d_nn` from any good channel (an inter-cluster gap) is dropped **even though it lies inside the `[min,max]` box**; `<2` good channels → returns `[]`. |
-| interior re-inclusion via adjacency *(integration, DB)* | for an arbitrary-column group whose good channels form two separated clusters, `make_fetch` re-includes a bad electrode embedded among good members but NOT one sitting in the gap between clusters, nor one outside the group's footprint — adjacency, not a bounding box. |
+| `_interior_bad_channel_ids` pitch-anchored *(unit, no DB)* | radius is `RADIUS_FACTOR × pitch` (full-shank `_shank_pitch`), **not** the group's own spacing: with exactly two far-apart good channels and a bad channel at their midpoint, the candidate is **dropped** (the degenerate case a group-`d_nn` rule would wrongly keep); a bad channel within `pitch` of ≥2 good channels on a dense run is kept; `pitch=None` or `<2` good channels → `[]`. |
+| `_shank_pitch` is full-shank *(unit, no DB)* | `_shank_pitch` over all electrodes on a shank returns the dense nominal spacing regardless of how few channels the sort group keeps (it is computed from the whole shank, not the group). |
+| interior re-inclusion via adjacency *(integration, DB)* | for an arbitrary-column group whose good channels form two separated clusters, `make_fetch` re-includes a bad electrode embedded among good members but NOT one in the gap between clusters, nor one outside the group's footprint — pitch-anchored adjacency, not a bounding box. |
 | no positions → interpolate raises *(integration, DB)* | a session without electrode coordinates + `bad_channel_handling="interpolate"` raises the clear "needs positions" error rather than guessing. |
 | default cache_hash unchanged *(integration, DB+SI, slow)* | smoke-fixture `Recording` with all defaults has the same `cache_hash` as pre-phase code (headline regression guard). |
 | interpolate fills a bad channel *(integration, DB+SI, slow)* | mark one *interior* smoke-fixture electrode `bad_channel='True'`, materialize with `bad_channel_handling="interpolate"` → the cached recording retains that channel (count complete) and its trace differs from the raw (filled, not zero); restore the flag. |
 | remove drops a detected channel *(integration, DB+SI, slow)* | with `bad_channel_detection` flagging a synthesized-bad channel and `remove`, the cached recording omits it. |
 
 Stub tests are DB-free (fake recording + monkeypatched `sip.*`). Mark the three
-integration tests slow; restore any mutated `Electrode.bad_channel`.
+DB+SI integration tests (cache_hash, interpolate-fills, remove-drops) slow;
+restore any mutated `Electrode.bad_channel` in every DB test.
 
 ## Fixtures
 
@@ -353,24 +444,32 @@ independent reviewer) against the diff. Confirm:
   are not used as interpolation donors; only `dead`/`noise` follow
   `bad_channel_handling`. Curated (label-less) channels follow the user's chosen
   handling.
-- The interior re-inclusion uses the spacing-relative **adjacency** rule
-  (`≥MIN_GOOD_NEIGHBORS` good channels within `RADIUS_FACTOR×d_nn`), **not** a
-  bounding-box span, so it pulls in neither whole-shank bad channels nor the
-  inter-cluster gap channels a `[min,max]` box would swallow for a non-contiguous
-  custom group; positions absent → interpolate raises.
-- **The `specific` reference electrode is excluded from handling** (it is
-  needed for subtraction and dropped after referencing); a detection that flags
-  the reference bad **raises** rather than removing/interpolating it, **and**
-  `make_fetch` raises when the reference is already curated `bad_channel='True'`
-  (the detection-off path), so "a reference flagged bad raises" holds whether the
-  flag is curated or detected.
+- The interior re-inclusion uses the **pitch-anchored adjacency** rule
+  (`≥MIN_GOOD_NEIGHBORS` good channels within `RADIUS_FACTOR × pitch`, where
+  `pitch` is the **full-shank** `_shank_pitch`), **not** a `[min,max]` span and
+  **not** the group's own spacing (which degenerates to the gap for a two-channel
+  group and would wrongly keep the midpoint); so it pulls in neither whole-shank
+  bad channels nor inter-cluster gap channels; positions absent / `pitch=None` →
+  interpolate raises.
+- **The `specific` reference is excluded from both handling and the detector
+  surface** — it is sliced in only for subtraction and dropped after referencing,
+  and leaving it in the coherence pool would perturb the other channels' labels.
+  Its own quality is guarded by `make_fetch`, which **raises** when the reference
+  is curated `bad_channel='True'` — so "a reference flagged bad raises" holds, via
+  the curated check rather than a detection-time check.
+- **Detection runs per shank** (via the threaded `channel_shank` map), never once
+  on a mixed-shank recording; labels are int-keyed and merged across shanks.
 - `BadChannelDetectionParams` is **dumped** (`.model_dump()`, not `**model`)
   before forwarding; its fields default to `None` = "use SI default" and the
   wrapper drops `None`, so no threshold is hardcoded and `None` never reaches
   SI; `extra="allow"` keys are validated against the installed
-  `detect_bad_channels` signature.
-- **Curated-flag invariant** documented: `Electrode.bad_channel` is quality-bad
-  only (never outside-brain), so the curated-flag interpolate path is safe.
+  `detect_bad_channels` signature. The empty-params audit pass (detection off,
+  curated interpolate) forwards `{}` → method-only SI defaults.
+- **Curated-flag convention documented as unenforced**, with the **audit** as the
+  enforcement: the `interpolate` path runs a coherence/PSD pass over label-less
+  curated flags and *removes* (never fills) any classified outside-brain, so a
+  manual / pre-existing / config flag on an out-of-brain channel cannot invent
+  signal. Detection acts on non-curated channels **only when the user opted in**.
 - `apply_pre_motion_preprocessing` returns the `applied_steps` report and
   `filtering_description` reads it (honest counts, not param-derived).
 - Interpolation guards on channel locations and raises clearly, never letting
