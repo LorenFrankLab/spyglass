@@ -26,6 +26,11 @@ group (which carry no such property and leave `phase_shift=None`).
   before `:369`.
 - [src/spyglass/spikesorting/v2/_recording_materialization.py:435](../../../../src/spyglass/spikesorting/v2/_recording_materialization.py#L435) —
   `filtering_description`: provenance string to extend.
+- [src/spyglass/spikesorting/v2/recording.py:870](../../../../src/spyglass/spikesorting/v2/recording.py#L870) —
+  `PreprocessingParameters._DEFAULT_CONTENTS`: the shipped presets
+  (`default_franklab` `:872`, `default_neuropixels` `:883`, `no_filter`);
+  `insert_default` (`:924`) bulk-inserts them with `skip_duplicates=True`. This
+  phase enables `phase_shift` on the `default_neuropixels` row.
 - [src/spyglass/spikesorting/v2/recording.py:1704](../../../../src/spyglass/spikesorting/v2/recording.py#L1704) —
   `_compute_recording_artifact`: calls `_apply_pre_motion_preprocessing`
   (`:1704`, currently returns only `recording`) then builds
@@ -120,10 +125,47 @@ group (which carry no such property and leave `phase_shift=None`).
   so a requested-but-skipped phase-shift is not falsely claimed. Keep the
   existing bandpass/common-reference ordering after it.
 
+- **Enable `phase_shift` in the `default_neuropixels` preset**
+  ([recording.py:870](../../../../src/spyglass/spikesorting/v2/recording.py#L870) —
+  `PreprocessingParameters._DEFAULT_CONTENTS`). The Lookup already ships a
+  `default_neuropixels` row
+  ([recording.py:883](../../../../src/spyglass/spikesorting/v2/recording.py#L883),
+  currently just `bandpass 300–6000`). Update its params to also turn phase-shift
+  on, so Neuropixels users get a **blessed preset** instead of having to hand-set
+  the param:
+
+  ```python
+  (
+      "default_neuropixels",
+      PreprocessingParamsSchema.model_validate(
+          {
+              "bandpass_filter": {"freq_min": 300.0, "freq_max": 6000.0},
+              "phase_shift": {"margin_ms": 100.0},
+          }
+      ).model_dump(),
+      3,
+      None,
+  ),
+  ```
+
+  Leave `default_franklab`
+  ([recording.py:872](../../../../src/spyglass/spikesorting/v2/recording.py#L872))
+  **exactly as today** (`phase_shift=None`) — the headline default stays a no-op.
+  Enabling it on `default_neuropixels` is still a **safe no-op until the recording
+  carries `inter_sample_shift`** (ingestion of that property remains out of scope,
+  below): selecting this preset on a recording without the property logs a skip,
+  it never fails. Note `insert_default` uses `skip_duplicates=True`, so it does
+  **not** overwrite an existing `default_neuropixels` row — pre-release dev DBs
+  are regenerated (the new contents ship fresh); a populated DB must re-insert the
+  row to pick up the change (call this out in the CHANGELOG).
+
 - **Documentation (ships in this phase):** the new docstrings above;
-  a `SpikeSortingV2.md` note that phase-shift exists for Neuropixels and is off
-  by default; a one-line CHANGELOG entry. No migration-doc divergence (v1 has no
-  equivalent and the default is a no-op).
+  a `SpikeSortingV2.md` note that phase-shift exists for Neuropixels, is **off in
+  `default_franklab`** and **on in `default_neuropixels`** (a no-op until
+  `inter_sample_shift` is present); a one-line CHANGELOG entry (including the
+  `default_neuropixels` preset change + the `skip_duplicates` re-insert caveat).
+  No migration-doc divergence (v1 has no equivalent and the franklab default is a
+  no-op).
 
 ## Deliberately not in this phase
 
@@ -140,9 +182,11 @@ group (which carry no such property and leave `phase_shift=None`).
 | phase-shift off by default *(stub/mock)* | `phase_shift=None` → no `phase_shift` call regardless of property. |
 | `filtering_description` lists phase-shift only when it ran | applied → string starts `"phase-shift (ADC); bandpass filter …; common reference (…)"`; **requested-but-skipped** (no property) → string does **not** contain "phase-shift" (the report-driven honesty check). |
 | default cache_hash unchanged *(integration, DB+SI, slow)* | a smoke-fixture `Recording` materialized with `phase_shift=None` has the same `cache_hash` as the pre-phase code (no behavior change on the default path). |
+| presets: NP on, franklab off *(unit, no DB)* | validate the two `_DEFAULT_CONTENTS` blobs — `default_franklab` has `phase_shift is None`; `default_neuropixels` has `phase_shift.margin_ms == 100.0` (and bandpass 300–6000). |
+| NP preset is inert without the property *(integration, DB+SI, slow)* | materializing the smoke fixture (no `inter_sample_shift`) with `default_neuropixels` logs the skip and yields the **same `cache_hash`** as `default_franklab` on that fixture (the two presets differ only by the skipped phase-shift), proving the blessed preset is a safe no-op on non-multiplexed data. |
 
 The stub tests use a fake recording exposing `get_property` and monkeypatched
-`sip.*`; DB-free and fast. Mark the cache_hash test integration + slow.
+`sip.*`; DB-free and fast. Mark both cache_hash integration tests slow.
 
 ## Fixtures
 
@@ -167,6 +211,11 @@ independent reviewer) against the diff. Confirm:
   `filtering_description` reflects phase-shift only when `applied_steps` says it
   actually ran (not when it was merely requested).
 - The default-path cache_hash is unchanged (the regression row passes).
+- `default_neuropixels` enables `phase_shift` and `default_franklab` stays
+  `phase_shift=None`; the NP preset is a verified no-op on a recording lacking
+  `inter_sample_shift` (same cache_hash as franklab on the smoke fixture). The
+  CHANGELOG notes the preset change is only picked up by a fresh
+  `insert_default` (`skip_duplicates=True` won't overwrite an existing row).
 - Validation slice passes; integration tests are marked.
 - Docstrings / test names / module names don't reference this plan or its
   phases.

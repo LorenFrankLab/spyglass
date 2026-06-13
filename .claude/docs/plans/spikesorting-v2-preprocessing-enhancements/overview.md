@@ -75,9 +75,11 @@ working tree at planning time; re-confirm before editing (files move).
 
 ### Goals
 
-- Optional ADC phase-shift correction, **off by default**, applied only when
-  the recording carries an `inter_sample_shift` property (so enabling it on
-  non-multiplexed acquisition is a safe no-op). Readiness for Neuropixels.
+- Optional ADC phase-shift correction, **off in `default_franklab`** and **on in
+  the `default_neuropixels` preset** (a blessed Neuropixels recipe), applied only
+  when the recording carries an `inter_sample_shift` property — so it is a safe
+  no-op on non-multiplexed acquisition and until that metadata is ingested.
+  Readiness for Neuropixels.
 - Automated bad-channel detection via SpikeInterface's `detect_bad_channels`
   (`method="coherence+psd"`, the IBL method) run on the *filtered* signal **per
   full shank**, with **every threshold overridable** (the wrapper merges over
@@ -305,7 +307,8 @@ see no change.
 
 ## Estimated Effort
 
-- Phase 1: ~40 LOC runtime + schema, ~60 LOC stub tests.
+- Phase 1: ~45 LOC runtime + schema + the `default_neuropixels` preset edit,
+  ~80 LOC tests (stub call-order + preset checks + the NP-preset no-op regression).
 - Phase 2: ~120 LOC (detection wrapper + persist helper + report), ~120 LOC
   tests (synthetic dead-channel fixture + DB integration).
 - Phase 3: ~70 LOC across `_recording_materialization.py` (slice + interpolate

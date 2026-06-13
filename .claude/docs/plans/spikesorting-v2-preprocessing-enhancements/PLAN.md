@@ -36,8 +36,8 @@ cross-references the other.
   bad-channel-handling design decision, risks, rollout, open questions.
 - Phases (each ships as a separable PR):
   - [phase-1-adc-phase-shift.md](phase-1-adc-phase-shift.md) — optional ADC
-    phase-shift correction, off by default, gated on the recording's
-    `inter_sample_shift` property.
+    phase-shift correction, gated on the recording's `inter_sample_shift`
+    property; off in `default_franklab`, on in the `default_neuropixels` preset.
   - [phase-2-bad-channel-detection.md](phase-2-bad-channel-detection.md) —
     automated bad-channel detection (`coherence+psd`) on the full shank: a
     reviewable helper that suggests/persists `Electrode.bad_channel`. This is the
