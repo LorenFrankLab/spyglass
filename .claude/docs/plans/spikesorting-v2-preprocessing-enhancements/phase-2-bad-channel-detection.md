@@ -6,11 +6,13 @@ Add SpikeInterface's `detect_bad_channels` (`method="coherence+psd"`, the IBL
 coherence/PSD method) as (a) a pure, reusable detection function and (b) a
 reviewable **suggest-then-confirm** helper that proposes — and optionally
 persists — `Electrode.bad_channel` flags for a session. Detection runs on the
-*filtered* signal, per shank. This phase does not change any materialization
+*filtered* signal, **per full shank** (the correct surface for the
+spatially-local coherence method). This phase does not change any materialization
 path; it gives users a tool to populate the curated flag that the rest of the
-pipeline already consumes, and exports the detection function that
-[phase 3](phase-3-bad-channel-handling.md)'s opt-in at-materialization detector
-will call.
+pipeline already consumes. **This is the single detection surface for the
+pipeline** — [phase 3](phase-3-bad-channel-handling.md) does not detect; it
+consumes the `Electrode.bad_channel` flags this helper writes (`remove` or
+`interpolate`).
 
 **Inputs to read first:**
 
@@ -101,11 +103,10 @@ will call.
     `dead`/`noise`** electrodes. `"out"` channels are **never** written to
     `bad_channel` — the boolean flag cannot carry the `out` label, and a
     persisted `out` would later be wrongly *interpolated* by phase 3 (which
-    treats label-less curated flags as quality-bad). Outside-brain channels are
-    surfaced in the report so the user handles them deliberately (exclude them
-    from sort groups, or rely on phase 3's at-materialization detection, which
-    keeps the label and always removes `out`). The write is **additive** — it
-    never clears an existing curated `bad_channel='True'`.
+    treats curated flags as quality-bad and fills them). Outside-brain channels
+    are surfaced in the report so the user handles them deliberately — exclude
+    them from sort groups, or use `bad_channel_handling="remove"`. The write is
+    **additive** — it never clears an existing curated `bad_channel='True'`.
   - **Invariant to document:** `Electrode.bad_channel='True'` means a
     *quality-bad* (dead/noise-class) channel that is safe to interpolate or
     remove; it must NOT be used to mark an outside-brain channel. This is why
@@ -123,9 +124,11 @@ will call.
 
 ## Deliberately not in this phase
 
-- The **at-materialization** detector (`bad_channel_detection` schema field) and
-  any remove/interpolate handling — phase 3. Phase 2 only writes the curated
-  flag and exports `detect_bad_channels`, which phase 3 imports.
+- **Remove/interpolate handling** — phase 3 (it consumes the curated flag this
+  phase writes). Phase 2 only detects + writes the curated flag. There is **no**
+  at-materialization detector: phase 2 is the single detection surface, on the
+  full shank (an inline detector on the restricted sort-group recording was
+  rejected — see phase 3 / overview Non-Goals).
 - Re-tuning thresholds to polymer data (a follow-up; phase 2 ships SI defaults
   as overridable parameters).
 - Phase-shift (phase 1) and drift estimation (phase 4).
