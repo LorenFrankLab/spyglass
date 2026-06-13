@@ -54,30 +54,33 @@ they can be filled.
       recording and its per-channel labels feed the label-aware handling step.
       ``None`` (default) uses only the curated ``Electrode.bad_channel`` flag.
 
-      Every field is forwarded verbatim to SpikeInterface's
-      ``detect_bad_channels`` and defaults to SI's value;
-      ``model_config = ConfigDict(extra="allow")`` lets any SI knob NOT named
-      here (or one a future SI release adds) pass through without a schema
-      change, honoring the overview's "every threshold is overridable" goal.
-      The executor MUST validate the forwarded kwargs against the installed
-      ``detect_bad_channels`` signature (reject unknown keys with a clear
-      error) so a typo is not silently dropped. Thresholds are
-      Neuropixels-derived -- recalibrate for polymer (overview Non-Goals).
+      Every field defaults to ``None`` meaning "leave at SpikeInterface's
+      signature default" -- the values are NOT hardcoded here (that would
+      diverge from SI and masquerade as defaults). Forward via
+      ``detect_bad_channels(recording, **params.model_dump())``; the shared
+      wrapper DROPS ``None`` values, so an unset knob uses SI's default and
+      ``None`` never reaches SI (where e.g. ``psd_hf_threshold=None`` is
+      invalid -- SI expects ``0.02``). ``extra="allow"`` lets a knob NOT named
+      here (or one a future SI release adds) pass through; the executor MUST
+      validate the forwarded keys against the installed ``detect_bad_channels``
+      signature so a typo raises rather than being silently ignored. Thresholds
+      are Neuropixels-derived -- recalibrate for polymer (overview Non-Goals).
       """
 
       model_config = ConfigDict(extra="allow")
-      # The commonly-tuned knobs surfaced explicitly (names per SI 0.104.3);
-      # confirm against the installed signature, which is the source of truth.
-      dead_channel_threshold: float = -0.5
-      noisy_channel_threshold: float = 1.0
-      outside_channel_threshold: float = -0.3
+      # Commonly-tuned knobs surfaced for discoverability/typing; None = use
+      # SI's signature default (names per SI 0.104.3 -- the installed signature
+      # is the source of truth).
+      dead_channel_threshold: float | None = None
+      noisy_channel_threshold: float | None = None
+      outside_channel_threshold: float | None = None
       psd_hf_threshold: float | None = None
-      outside_channels_location: Literal["top", "bottom", "both"] = "top"
-      n_neighbors: int = 11
-      num_random_chunks: int = 100
-      chunk_duration_s: float = 0.3
-      direction: Literal["x", "y", "z"] = "y"
-      seed: int = 0
+      outside_channels_location: Literal["top", "bottom", "both"] | None = None
+      n_neighbors: int | None = None
+      num_random_chunks: int | None = None
+      chunk_duration_s: float | None = None
+      direction: Literal["x", "y", "z"] | None = None
+      seed: int | None = None
   ```
 
   (`channel_filters` — which label classes to act on — is **not** a detection
@@ -130,30 +133,50 @@ they can be filled.
 - **`apply_pre_motion_preprocessing`: the LABEL-AWARE handling step**
   ([_recording_materialization.py:342](../../../../src/spyglass/spikesorting/v2/_recording_materialization.py#L342)).
   Add `bad_channel_handling`, `bad_channel_ids`, and `bad_channel_detection`
-  params. Insert **after** the bandpass (`:369`) and **before** the reference
-  (`:380`). **Out-of-brain channels are always removed, never interpolated**
-  (per IBL `voltage.py:539`/`:774` and the SpikeInterface preprocessing guide —
-  an `out` channel has no in-brain neighbors to interpolate from); only
-  `dead`/`noise` channels follow `bad_channel_handling`:
+  params (it already receives `reference_mode` / `reference_electrode_id`).
+  Insert **after** the bandpass (`:369`) and **before** the reference (`:380`).
+  Two invariants: **(a)** out-of-brain channels are always removed, never
+  interpolated (per IBL `voltage.py:539`/`:774` and the SI preprocessing guide —
+  an `out` channel has no in-brain neighbors to fill from); only `dead`/`noise`
+  follow `bad_channel_handling`. **(b)** the `specific` reference electrode is
+  sliced into the recording for subtraction (`restrict_recording:187`) and is
+  dropped only *after* `common_reference` — so the handling step must **not**
+  remove or interpolate it. If detection flags the reference electrode itself
+  bad, **raise** (referencing to a bad channel is invalid):
 
   ```python
   # Bad-channel handling: between filter and reference (matches IBL/AIND).
   from spyglass.spikesorting.v2._bad_channels import detect_bad_channels
 
   present = {int(c) for c in recording.get_channel_ids()}
+  # Protect the 'specific' reference channel: it must survive for subtraction
+  # and is removed later by the existing post-reference drop.
+  ref_id = int(reference_electrode_id) if reference_mode == "specific" else None
   to_remove, to_interpolate = set(), set()
-  # Curated Electrode.bad_channel flags carry no label -> follow the user's
-  # explicit bad_channel_handling choice (they were re-included for
-  # interpolate; for remove they are already absent).
-  curated = present & {int(c) for c in bad_channel_ids}
+  # Curated Electrode.bad_channel flags carry no label -> quality-bad by the
+  # phase-2 invariant, so follow the user's explicit bad_channel_handling
+  # (they were re-included for interpolate; for remove they are already absent).
+  curated = (present & {int(c) for c in bad_channel_ids}) - {ref_id}
   (to_interpolate if bad_channel_handling == "interpolate" else to_remove)\
       .update(curated)
   # Detected channels carry SI labels: 'out' is ALWAYS removed; 'dead'/'noise'
-  # follow bad_channel_handling.
+  # follow bad_channel_handling. BadChannelDetectionParams is a model -> dump it
+  # (the wrapper drops None so unset knobs use SI defaults).
   if bad_channel_detection is not None:
-      labels = detect_bad_channels(recording, **bad_channel_detection)["labels"]
+      labels = detect_bad_channels(
+          recording, **bad_channel_detection.model_dump()
+      )["labels"]
+      if ref_id is not None and labels.get(ref_id) in ("dead", "noise", "out"):
+          raise ValueError(
+              "apply_pre_motion_preprocessing: the 'specific' reference "
+              f"electrode {ref_id} was flagged bad ({labels.get(ref_id)!r}); "
+              "referencing to a bad channel is invalid. Pick a different "
+              "reference_electrode_id (or clear the detection)."
+          )
       for cid, label in labels.items():
           cid = int(cid)
+          if cid == ref_id:
+              continue  # protected; dropped after referencing
           if label == "out":
               to_remove.add(cid)
           elif label in ("dead", "noise"):
@@ -196,9 +219,17 @@ they can be filled.
 - **Documentation (ships in this phase):** the schema docstrings; a
   `SpikeSortingV2.md` subsection on `bad_channel_handling` (when to interpolate
   vs remove — interpolate for geometry-aware sorters on dense shanks, remove for
-  tetrodes / sparse groups) and the `bad_channel_detection` opt-in; a CHANGELOG
+  tetrodes / sparse groups), the `bad_channel_detection` opt-in, **and the
+  curated-flag invariant**: `Electrode.bad_channel='True'` must mark a
+  *quality-bad* (dead/noise-class) channel — because under `interpolate` a
+  label-less curated flag is filled, an outside-brain channel must NOT be marked
+  `bad_channel` (use `remove`, exclude it from the sort group, or rely on
+  at-materialization detection, which keeps the `out` label and always removes
+  it). Also document that the `specific` reference electrode is protected from
+  handling and that a detection that flags the reference bad raises. A CHANGELOG
   entry. A `SpikeSortingV2_Migration.md` note is **not** needed (default is
-  byte-identical to current v2).
+  byte-identical to current v2; these are new opt-in v2 capabilities with no
+  v1↔v2 parity change).
 
 ## Deliberately not in this phase
 
@@ -217,6 +248,9 @@ they can be filled.
 | interpolate needs locations *(stub/mock)* | `interpolate` on a recording whose `get_channel_locations()` is `None` raises the clear ValueError. |
 | `out` is removed even under interpolate *(stub/mock)* | `bad_channel_detection` labels a channel `"out"` and another `"dead"` with `bad_channel_handling="interpolate"` → the `"out"` id goes to `remove_channels` and the `"dead"` id to `interpolate_bad_channels` (label policy, not blanket interpolate). |
 | dead/noise follow the param *(stub/mock)* | the same `"dead"`/`"noise"` channels go to `remove` when `bad_channel_handling="remove"`. |
+| specific reference is protected *(stub/mock)* | `reference_mode="specific"` with the reference electrode present and `bad_channel_detection` flagging *other* channels → the reference id is in **neither** `to_remove` nor `to_interpolate`; `common_reference(reference="single")` is still called with it. |
+| reference-flagged-bad raises *(stub/mock)* | `bad_channel_detection` labels the `specific` reference electrode `"dead"` → a clear ValueError ("referencing to a bad channel") is raised before referencing. |
+| detection params are dumped, None dropped *(stub/mock)* | `bad_channel_detection=BadChannelDetectionParams(psd_hf_threshold=None)` → `detect_bad_channels` is called via `model_dump()` and the `None` is not forwarded (no SI crash). |
 | interior re-inclusion only *(unit/DB)* | for an arbitrary-column group, `make_fetch` returns only bad electrodes within the good channels' coordinate span — a bad electrode on the same shank but outside the group's footprint is NOT re-included. |
 | no positions → interpolate raises *(integration, DB)* | a session without electrode coordinates + `bad_channel_handling="interpolate"` raises the clear "needs positions" error rather than guessing. |
 | default cache_hash unchanged *(integration, DB+SI, slow)* | smoke-fixture `Recording` with all defaults has the same `cache_hash` as pre-phase code (headline regression guard). |
@@ -247,8 +281,16 @@ independent reviewer) against the diff. Confirm:
   (label-less) channels follow the user's chosen handling.
 - The interior re-inclusion does **not** pull whole-shank bad channels into an
   arbitrary-column group (High finding); positions absent → interpolate raises.
-- `BadChannelDetectionParams` forwards arbitrary SI kwargs (`extra="allow"`)
-  validated against the installed `detect_bad_channels` signature.
+- **The `specific` reference electrode is excluded from handling** (it is
+  needed for subtraction and dropped after referencing); a detection that flags
+  the reference bad **raises** rather than removing/interpolating it.
+- `BadChannelDetectionParams` is **dumped** (`.model_dump()`, not `**model`)
+  before forwarding; its fields default to `None` = "use SI default" and the
+  wrapper drops `None`, so no threshold is hardcoded and `None` never reaches
+  SI; `extra="allow"` keys are validated against the installed
+  `detect_bad_channels` signature.
+- **Curated-flag invariant** documented: `Electrode.bad_channel` is quality-bad
+  only (never outside-brain), so the curated-flag interpolate path is safe.
 - `apply_pre_motion_preprocessing` returns the `applied_steps` report and
   `filtering_description` reads it (honest counts, not param-derived).
 - Interpolation guards on channel locations and raises clearly, never letting

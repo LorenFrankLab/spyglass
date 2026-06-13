@@ -42,37 +42,32 @@ will call.
   """Bad-channel detection wrapper (SpikeInterface coherence+psd)."""
   from __future__ import annotations
 
-  # SpikeInterface detect_bad_channels defaults, surfaced so callers can
-  # override EVERY knob per probe. Names per SI 0.104.3 -- treat the installed
-  # signature as the source of truth. These are Neuropixels-derived (the IBL
-  # method); polymer thresholds may need calibration (overview Non-Goals).
-  BAD_CHANNEL_DETECT_DEFAULTS: dict = {
-      "method": "coherence+psd",
-      "dead_channel_threshold": -0.5,
-      "noisy_channel_threshold": 1.0,
-      "outside_channel_threshold": -0.3,
-      "psd_hf_threshold": None,            # SI auto by sampling rate
-      "outside_channels_location": "top",  # NP geometry; revisit for polymer
-      "n_neighbors": 11,
-      "num_random_chunks": 100,
-      "chunk_duration_s": 0.3,
-      "direction": "y",
-      "seed": 0,
-  }
+  # We pin ONLY the method. Every threshold is left to SpikeInterface's own
+  # signature default (e.g. SI 0.104.3: dead -0.5, noisy 1.0, outside -0.75,
+  # psd_hf 0.02, seed None) so "ships SI defaults" is literally true and a
+  # future SI default change flows through. Do NOT hardcode threshold values
+  # here -- they would silently diverge from SI and masquerade as defaults.
+  BAD_CHANNEL_DETECT_DEFAULTS: dict = {"method": "coherence+psd"}
 
   def detect_bad_channels(recording, **overrides) -> dict:
       """Return {"bad_channel_ids": [...], "labels": {id: label}}.
 
-      Thin wrapper over ``spikeinterface.preprocessing.detect_bad_channels``;
-      ``overrides`` win over ``BAD_CHANNEL_DETECT_DEFAULTS`` (so every knob,
-      including ones not in the defaults dict, is overridable). The recording
-      should already be band-pass / high-pass filtered (the method assumes
-      spike-band data). Labels are ``"good"|"dead"|"noise"|"out"`` and are
-      returned per channel -- the caller decides per label what to do (out is
-      not interpolatable; see phase 3). DB-free.
+      Thin wrapper over ``spikeinterface.preprocessing.detect_bad_channels``.
+      Only ``method="coherence+psd"`` is pinned; every other knob falls through
+      to SI's signature default unless the caller overrides it. ``None``
+      overrides are **dropped** (so a "leave at SI default" sentinel never
+      reaches SI, where e.g. ``psd_hf_threshold=None`` would be invalid -- SI
+      expects ``0.02``). The recording should already be band-pass /
+      high-pass filtered (the method assumes spike-band data). Labels are
+      ``"good"|"dead"|"noise"|"out"``, returned per channel -- the caller
+      decides per label what to do (out is not interpolatable; see phase 3).
+      DB-free.
       """
       import spikeinterface.preprocessing as sip
-      params = {**BAD_CHANNEL_DETECT_DEFAULTS, **overrides}
+      params = {
+          **BAD_CHANNEL_DETECT_DEFAULTS,
+          **{k: v for k, v in overrides.items() if v is not None},
+      }
       bad_ids, labels = sip.detect_bad_channels(recording, **params)
       return {
           "bad_channel_ids": [c for c in bad_ids],
@@ -88,8 +83,7 @@ will call.
   alongside the other `Electrode`-touching code, or in `_bad_channels.py` with a
   lazy `Electrode` import). Signature:
   `suggest_bad_channels(nwb_file_name, *, electrode_group_names=None,
-  bandpass=(300.0, 6000.0), detection_params=None, write=False,
-  write_labels=("dead", "noise")) -> list[dict]`.
+  bandpass=(300.0, 6000.0), detection_params=None, write=False) -> list[dict]`.
   Behavior:
   - Load the raw recording (`read_raw_nwb_recording`), bandpass-filter it
     (`sip.bandpass_filter`) so detection runs on spike-band data.
@@ -101,18 +95,26 @@ will call.
     bad it is: one dict per flagged electrode
     `{"electrode_group_name", "electrode_id", "probe_shank", "label"}` where
     `label ∈ {"dead", "noise", "out"}`.
-  - **`write=False` (default): suggest only** — return the report, change
-    nothing. **`write=True`:** set `Electrode.bad_channel='True'` (via
-    `Electrode.update1`) only for electrodes whose label is in `write_labels`
-    (**default `("dead", "noise")`** — the clearly-bad classes). `"out"`
-    channels are **not** auto-flagged by default: outside-brain is a
-    recording-geometry concern, not a channel-quality one, and a user may want
-    them handled differently (pass `write_labels=("dead","noise","out")` to opt
-    in). The write is **additive** — it never clears an existing curated
-    `bad_channel='True'`, so a hand-curated flag is never silently undone.
+  - **`write=False` (default): suggest only** — return the report (all labels,
+    including `out`), change nothing. **`write=True`:** set
+    `Electrode.bad_channel='True'` (via `Electrode.update1`) **only for
+    `dead`/`noise`** electrodes. `"out"` channels are **never** written to
+    `bad_channel` — the boolean flag cannot carry the `out` label, and a
+    persisted `out` would later be wrongly *interpolated* by phase 3 (which
+    treats label-less curated flags as quality-bad). Outside-brain channels are
+    surfaced in the report so the user handles them deliberately (exclude them
+    from sort groups, or rely on phase 3's at-materialization detection, which
+    keeps the label and always removes `out`). The write is **additive** — it
+    never clears an existing curated `bad_channel='True'`.
+  - **Invariant to document:** `Electrode.bad_channel='True'` means a
+    *quality-bad* (dead/noise-class) channel that is safe to interpolate or
+    remove; it must NOT be used to mark an outside-brain channel. This is why
+    the helper refuses to write `out`. (See phase 3, which relies on this
+    invariant for the curated-flag handling path.)
   - Log a one-line summary of how many of each label were found per shank,
-    which were written, and that the thresholds are SpikeInterface defaults
-    (recalibrate for polymer if needed).
+    which `dead`/`noise` were written, how many `out` were surfaced-only, and
+    that the thresholds are SpikeInterface defaults (recalibrate for polymer if
+    needed).
 
 - **Documentation (ships in this phase):** the helper docstring (with the
   suggest-then-confirm contract and the NP-threshold caveat); a
@@ -133,9 +135,9 @@ will call.
 | Test | Asserts |
 | --- | --- |
 | `detect_bad_channels` returns labels *(unit, SI, no DB)* | a synthesized recording (e.g. SI `generate_recording`) with one channel zeroed/flat → that channel id is in `bad_channel_ids` with a `"dead"`/`"noise"` label; clean channels are `"good"`. The returned dict carries a per-channel `labels` map. |
-| override wins over default + extra knob *(unit)* | passing `dead_channel_threshold=…` changes the flagged set; passing a knob not in the defaults dict (e.g. `psd_hf_threshold=…`) is forwarded to SI (confirms full overridability). |
+| override + None-drop *(unit)* | passing `dead_channel_threshold=…` changes the flagged set; passing `psd_hf_threshold=None` is **dropped** (SI's 0.02 default applies, no crash); a non-defaults knob (e.g. `psd_hf_threshold=0.05`) is forwarded (full overridability without masking SI defaults). |
 | `suggest_bad_channels(write=False)` is read-only *(integration, DB)* | on the smoke fixture, returns a report list (with labels) and leaves every `Electrode.bad_channel` unchanged. |
-| `write=True` flags dead/noise, not out, by default *(integration, DB)* | with a synthesized `"out"` and a `"dead"` channel, `write=True` flips only the `"dead"` electrode to `'True'`; the `"out"` electrode is left unflagged (in the report but not written). `write_labels=("dead","noise","out")` then also flags the `"out"` one. |
+| `write=True` never persists `out` *(integration, DB)* | with a synthesized `"out"` and a `"dead"` channel, `write=True` flips only the `"dead"` electrode to `'True'`; the `"out"` electrode is in the report but is **never** written to `bad_channel` (there is no opt-in). |
 | `write=True` is additive *(integration, DB)* | never clears a pre-set `'True'`; re-running is idempotent. |
 | per-shank scope *(integration, DB)* | detection is run within shank (assert the helper restricts per shank, e.g. by checking it doesn't flag a whole-probe common-mode artifact as one shank's bad set). |
 
@@ -158,12 +160,16 @@ independent reviewer) against the diff. Confirm:
   connection); detection runs on filtered data, per shank.
 - `suggest_bad_channels` is **suggest-then-confirm**: `write=False` mutates
   nothing; `write=True` is additive and never clears a curated flag.
-- **Labels are preserved** in the report; `write=True` flags only `dead`/`noise`
-  by default and does not auto-flag `out` (which phase 3 treats differently);
-  `detect_bad_channels` returns the per-channel `labels` map phase 3 consumes.
+- **Labels are preserved** in the report; `write=True` writes only `dead`/
+  `noise` and **never** `out` (the boolean flag can't carry the label and a
+  persisted `out` would be wrongly interpolated downstream); the
+  quality-bad-only invariant for `Electrode.bad_channel` is documented.
 - The integration test restores any mutated `Electrode.bad_channel`.
-- **Every** detection knob is overridable (the defaults dict is merged, not
-  fixed) and the SI-default / NP-origin caveat is documented, not hidden.
+- Only `method` is pinned; **no threshold is hardcoded** (they fall through to
+  SI's signature defaults), `None` overrides are dropped (never passed to SI),
+  and the NP-origin caveat is documented. Confirm against the installed
+  `detect_bad_channels` signature (SI 0.104.3: `psd_hf_threshold=0.02`,
+  `outside_channel_threshold=-0.75`).
 - Validation slice passes; integration tests are marked.
 - Docstrings / test names / module names don't reference this plan or its
   phases.

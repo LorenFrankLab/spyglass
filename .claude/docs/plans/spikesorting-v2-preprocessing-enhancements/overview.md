@@ -130,11 +130,16 @@ sort group excludes them at creation (`set_group_by_*` filters
   (grouping helpers and the phase-1 reference resolution are untouched).
   Bad-channel handling is a preprocessing parameter applied at materialization:
   `"remove"` leaves the recording as the good channels (today's behavior);
-  `"interpolate"` has `restrict_recording` re-include the group's shank
+  `"interpolate"` has `restrict_recording` re-include the group's **interior**
   bad channels from `Electrode` so `apply_pre_motion_preprocessing` can fill
   them. Bad-channel awareness stays localized to two clear places
   (excluded-at-creation for the sort target; optionally-re-included at
-  preprocessing for interpolation scaffolding).
+  preprocessing for interpolation scaffolding). Two contracts this rests on,
+  both enforced in phase 3: the `specific` reference electrode is **excluded**
+  from handling (it is needed for subtraction and dropped after referencing;
+  a reference flagged bad raises), and `Electrode.bad_channel='True'` is a
+  **quality-bad-only** flag (phase 2 never persists an `out` label to it), so
+  the curated-flag interpolate path never fills an outside-brain channel.
 - **Option B (rejected).** Make the group the *physical* electrode group
   (good + bad), and handle bad channels only at preprocessing. Conceptually
   uniform, but it reworks the just-shipped grouping helpers and forces the
@@ -178,6 +183,8 @@ Open Question 1.
 | Phase-shift enabled on data with no `inter_sample_shift` would no-op invisibly or misbehave. | Phase 1 gates on the property and logs a clear skip; it never fabricates a shift. |
 | Interpolating an out-of-brain channel (no in-brain neighbors) invents signal; SI's guide says out channels should be removed. | Handling is **label-aware** (phase 3): `out` is always removed, only `dead`/`noise` interpolate; labels are preserved end-to-end (phase 2 detection → handling), never collapsed to a boolean. |
 | Reconstructing a custom column-group's bad channels "by shank" can pull in electrodes never near that group (`set_group_by_electrode_table_column` stores no original membership). | Phase 3 re-includes only the bad channels **interior to the group's coordinate span**, not the whole shank; no positions → `interpolate` raises (Open Question 4). |
+| The bad-channel step runs before referencing, and `restrict_recording` slices the `specific` reference electrode in for subtraction — handling could remove/interpolate it and break referencing. | Phase 3 **excludes the reference electrode** from the handled set (it is dropped after referencing as today); a detection that flags the reference bad **raises** instead. |
+| `None`-as-"use SI default" sentinel passed straight to SI would break (`psd_hf_threshold=None` is invalid in 0.104.3). | The detection wrapper **drops `None`** overrides; only `method` is pinned, every other knob falls through to SI's own signature default. |
 | Motion estimation is expensive (peak detect + localize + estimate). | Phase 4 is a `dj.Computed` table populated **on demand** (never auto-eager), with a smoke-test timing step before any larger run. |
 
 ## Rollout Strategy
@@ -186,9 +193,19 @@ All-at-once per phase, no feature flags beyond the parameters themselves
 (pre-release). Schema edits are in place with **no `params_schema_version`
 bump** (the pre-release policy); affected dev rows / cached recordings are
 regenerated, not migrated. Every default is chosen so users who do not opt in
-see no change. Each phase ships user-facing docs (the `PreprocessingParamsSchema`
-docstrings, `SpikeSortingV2.md` / `SpikeSortingV2_Migration.md`, and a CHANGELOG
-entry) as a task within that phase.
+see no change.
+
+**Documentation per phase (each is a task in that phase, not deferred):**
+
+- **Always:** the new/changed docstrings (`PreprocessingParamsSchema`, the new
+  helpers/tables), a feature subsection in
+  `docs/src/Features/SpikeSortingV2.md`, and a `CHANGELOG.md` entry.
+- **`SpikeSortingV2_Migration.md` (v1→v2 guide): NOT updated for these phases.**
+  That doc records v1↔v2 *behavioral differences*; all four features are new,
+  opt-in v2 capabilities whose defaults leave v1↔v2 parity unchanged (unlike the
+  Phase-1/2 reference + filter-order work, which DID diverge from v1 and so got
+  migration-doc entries). If review chooses a non-default that changes v1↔v2
+  comparison, add the migration note in that phase.
 
 ## Open Questions
 
