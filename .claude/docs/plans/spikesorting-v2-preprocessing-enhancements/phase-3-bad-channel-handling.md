@@ -24,7 +24,11 @@ they can be filled.
 - [src/spyglass/spikesorting/v2/_recording_materialization.py:61](../../../../src/spyglass/spikesorting/v2/_recording_materialization.py#L61) —
   `restrict_recording`: the channel-slice (`:184-203`). The `specific` branch
   already shows how to add channels to the slice; `interpolate` adds the
-  group's curated-bad channels the same way.
+  group's curated-bad channels the same way. Note `:101` /`:198`: this codebase
+  channel-slices via `ChannelSliceRecording(recording, channel_ids=...)` because
+  **SI 0.104 dropped `Recording.channel_slice`** — the handling step's per-shank
+  detector uses the same API (the `_slice_channels` helper below), never
+  `recording.channel_slice(...)`.
 - [src/spyglass/spikesorting/v2/_recording_materialization.py:342](../../../../src/spyglass/spikesorting/v2/_recording_materialization.py#L342) —
   `apply_pre_motion_preprocessing`: bandpass at `:369`, reference at `:380`.
   Handling goes **between** them.
@@ -138,13 +142,16 @@ they can be filled.
 
         ``shank_xyz``: (M, 3) positions of every electrode on the shank (good
         AND bad), so the result is the probe's physical pitch, independent of
-        which channels a sort group happens to keep. Returns ``None`` if the
-        shank has < 2 positioned electrodes.
+        which channels a sort group happens to keep. Returns ``None`` when the
+        shank has < 2 electrodes OR any coordinate is non-finite
+        (``Electrode.x/y/z`` are nullable -> a NULL arrives as NaN); a ``None``
+        pitch makes the caller raise the clear "needs positions" error rather
+        than silently producing NaN distances.
         """
         import numpy as np
 
         xyz = np.asarray(shank_xyz, dtype=float)
-        if xyz.shape[0] < 2:
+        if xyz.shape[0] < 2 or not np.isfinite(xyz).all():
             return None
         dd = np.linalg.norm(xyz[:, None, :] - xyz[None, :, :], axis=-1)
         np.fill_diagonal(dd, np.inf)
@@ -161,30 +168,40 @@ they can be filled.
         ``MIN_GOOD_NEIGHBORS`` good channels lie within ``RADIUS_FACTOR *
         pitch`` of it -- so a bad channel between two far-apart good channels
         (its nearest good channel many pitches away) is excluded, while a bad
-        channel in a dense run is kept. Returns a sorted list.
+        channel in a dense run is kept. Returns a sorted list. Defensive on
+        non-finite input (see ``make_fetch``, which raises before calling): a
+        non-finite ``pitch`` or good position -> ``[]``; a candidate with a
+        non-finite position is skipped (never silently treated as adjacent).
         """
         import numpy as np
 
         good = np.asarray(good_xyz, dtype=float)
-        if good.shape[0] < 2 or not pitch:
-            return []  # need >=2 good channels and a defined pitch to fill from
+        if (good.shape[0] < 2 or not pitch or not np.isfinite(pitch)
+                or not np.isfinite(good).all()):
+            return []  # need >=2 finite good channels and a finite pitch
         radius = RADIUS_FACTOR * float(pitch)
         return sorted(
             int(cid)
             for cid, pos in candidate_xyz
-            if int((np.linalg.norm(good - np.asarray(pos, float), axis=1)
-                    <= radius).sum()) >= MIN_GOOD_NEIGHBORS
+            if np.isfinite(pos).all()
+            and int((np.linalg.norm(good - np.asarray(pos, float), axis=1)
+                     <= radius).sum()) >= MIN_GOOD_NEIGHBORS
         )
     ```
 
     (Apply per shank when the group spans more than one — each shank uses its
     own `pitch`.)
-  - **If electrode positions are not populated** (legacy NWBs without
-    coordinates, so `Electrode.x/y/z` are null, or a shank with `< 2` positioned
-    electrodes so `pitch` is `None`), interpolation has no geometry to scope or
-    to fill from: raise a clear error from the materialization for
-    `bad_channel_handling="interpolate"` on such a session (point the user to
-    `remove`), rather than guessing a neighborhood. See overview Open Question 4.
+  - **Reject non-finite positions explicitly — do not rely on the helpers'
+    empty return.** `Electrode.x/y/z` are **nullable** (a NULL arrives as
+    `NaN`). For `bad_channel_handling="interpolate"`, verify that every position
+    needed for interpolation is finite: the group's good-channel positions, the
+    full-shank positions (so `pitch` is defined), and the candidate positions. If
+    any is null/NaN — or `_shank_pitch` returns `None` (legacy NWBs without
+    coordinates, or a shank with `< 2` positioned electrodes) — **raise** the
+    clear "interpolate needs positions" error (point the user to `remove`). This
+    is mandatory: non-finite coordinates otherwise make `_interior_bad_channel_ids`
+    return an **empty** set, which would silently look like "no bad channels to
+    fill" instead of the promised hard error. See overview Open Question 4.
   - Return `bad_channel_ids` as a sorted tuple (DeepHash-stable, like the other
     `make_fetch` outputs). Also build and return a `channel_shank` map
     (`{electrode_id: (electrode_group_name, probe_shank)}` for every channel the
@@ -236,8 +253,14 @@ they can be filled.
     must survive handling. It is therefore **excluded from the detector surface
     entirely**, not merely skipped after the fact: coherence/PSD detection
     compares each channel to the cross-channel median, so a reference left in the
-    pool would perturb the labels of the real sort channels. The reference's own
-    quality is vetted separately by the curated-bad check in `make_fetch` (above).
+    pool would perturb the labels of the real sort channels. The trade-off:
+    automated at-materialization detection **does not vet the reference itself**.
+    Its quality is guarded only by the curated-bad check in `make_fetch` (above),
+    so a reference that is genuinely dead/noisy but **un-flagged** would not be
+    caught here. The intended workflow is to run `suggest_bad_channels` (phase 2)
+    during curation — it flags a dead/noisy reference electrode `bad_channel=
+    'True'`, which the `make_fetch` check then raises on. Document this limit
+    (see the documentation task and overview Open Question 5).
   - **(c)** detection runs **per shank** — the coherence method is spatially
     local, so mixing shanks corrupts it (the same rule as phase 2) — using the
     `channel_shank` map threaded from `make_fetch`.
@@ -277,8 +300,9 @@ they can be filled.
   if need_labels:
       params = (bad_channel_detection.model_dump()
                 if bad_channel_detection is not None else {})
-      detector = recording.channel_slice(
-          [c for c in recording.get_channel_ids() if int(c) != ref_id]
+      detector = _slice_channels(
+          recording,
+          [c for c in recording.get_channel_ids() if int(c) != ref_id],
       )
       for shank_rec in _split_by_shank(detector, channel_shank):
           labels.update(
@@ -333,10 +357,22 @@ they can be filled.
   }
   ```
 
-  Module-level helper (alongside `_interior_bad_channel_ids`):
+  Module-level helpers (alongside `_interior_bad_channel_ids`):
 
   ```python
   from collections import defaultdict
+
+  def _slice_channels(recording, channel_ids):
+      """Channel-slice a recording by id.
+
+      SI 0.104 dropped ``Recording.channel_slice``, so build a
+      ``ChannelSliceRecording`` directly -- the same call the materialization
+      path already uses (_recording_materialization.py:198). ``channel_ids`` are
+      ids already present on ``recording`` (no rename).
+      """
+      from spikeinterface.core.channelslice import ChannelSliceRecording
+
+      return ChannelSliceRecording(recording, channel_ids=list(channel_ids))
 
   def _split_by_shank(rec, channel_shank):
       """Yield per-shank channel-sliced sub-recordings for detection.
@@ -353,7 +389,7 @@ they can be filled.
           yield rec
       else:
           for ids in groups.values():
-              yield rec.channel_slice(ids)
+              yield _slice_channels(rec, ids)
   ```
 
   Note the asymmetry (documented in the overview): for `"remove"`,
@@ -384,7 +420,10 @@ they can be filled.
   channel is therefore handled safely, never interpolated. Also document that the
   `specific` reference electrode is excluded from both handling **and** the
   detector surface, and that its own quality is vetted by the `make_fetch`
-  curated-bad check (a curated-bad reference raises). A CHANGELOG entry. A
+  curated-bad check (a curated-bad reference raises) — **automated detection does
+  not validate the reference**, so to catch a bad reference run
+  `suggest_bad_channels` during curation (it flags a dead/noisy reference, which
+  the `make_fetch` check then enforces). A CHANGELOG entry. A
   `SpikeSortingV2_Migration.md` note is **not** needed (default is byte-identical
   to current v2; these are new opt-in v2 capabilities with no v1↔v2 parity
   change).
@@ -406,13 +445,15 @@ they can be filled.
 | interpolate needs locations *(stub/mock)* | `interpolate` on a recording whose `get_channel_locations()` is `None` raises the clear ValueError. |
 | `out` removed before interpolate *(stub/mock)* | `bad_channel_detection` labels a channel `"out"` and another `"dead"` with `bad_channel_handling="interpolate"` → the `"out"` id goes to `remove_channels` and the `"dead"` id to `interpolate_bad_channels` (label policy, not blanket interpolate), **and `remove_channels` is invoked before `interpolate_bad_channels`** so the removed `out` channel cannot be an interpolation donor (assert recorded call order). |
 | dead/noise follow the param *(stub/mock)* | the same `"dead"`/`"noise"` channels go to `remove` when `bad_channel_handling="remove"`. |
-| reference excluded from detector surface *(stub/mock)* | `reference_mode="specific"` with the reference present and `bad_channel_detection` set → the channel id passed into `detect_bad_channels` (via the `channel_slice` building the detector) **omits** the reference; the reference is in **neither** `to_remove` nor `to_interpolate`; `common_reference(reference="single")` is still called with it. |
-| detection runs per shank *(stub/mock)* | a two-shank `channel_shank` map → `detect_bad_channels` is invoked **once per shank** on each shank's `channel_slice`, never once on the mixed-shank recording (spy on call count + the ids each call sees). |
+| reference excluded from detector surface *(stub/mock)* | `reference_mode="specific"` with the reference present and `bad_channel_detection` set → the channel ids passed into `detect_bad_channels` (via the `_slice_channels` view building the detector) **omit** the reference; the reference is in **neither** `to_remove` nor `to_interpolate`; `common_reference(reference="single")` is still called with it. |
+| detection runs per shank *(stub/mock)* | a two-shank `channel_shank` map → `detect_bad_channels` is invoked **once per shank** on each shank's sliced sub-recording, never once on the mixed-shank recording (spy on call count + the ids each call sees). |
 | curated `out` flag audited, not filled *(stub/mock)* | `bad_channel_handling="interpolate"`, `bad_channel_detection=None`, a curated `bad_channel_ids` channel that the audit pass classifies `"out"` → it is moved to `remove_channels` (a warning is logged), **not** `interpolate_bad_channels`; a curated channel classified `dead`/`good` is interpolated. |
 | curated-bad reference raises with detection off *(integration, DB)* | a `specific` sort group whose reference electrode has `Electrode.bad_channel='True'`, materialized with `bad_channel_detection=None` → `make_fetch` raises the clear "reference is curated-bad" error (the detection-independent reference guard); restore the flag. |
 | detection params are dumped, None dropped *(stub/mock)* | `bad_channel_detection=BadChannelDetectionParams(psd_hf_threshold=None)` → `detect_bad_channels` is called via `model_dump()` and the `None` is not forwarded (no SI crash). |
 | `_interior_bad_channel_ids` pitch-anchored *(unit, no DB)* | radius is `RADIUS_FACTOR × pitch` (full-shank `_shank_pitch`), **not** the group's own spacing: with exactly two far-apart good channels and a bad channel at their midpoint, the candidate is **dropped** (the degenerate case a group-`d_nn` rule would wrongly keep); a bad channel within `pitch` of ≥2 good channels on a dense run is kept; `pitch=None` or `<2` good channels → `[]`. |
 | `_shank_pitch` is full-shank *(unit, no DB)* | `_shank_pitch` over all electrodes on a shank returns the dense nominal spacing regardless of how few channels the sort group keeps (it is computed from the whole shank, not the group). |
+| non-finite positions guarded *(unit, no DB)* | `_shank_pitch` with any `NaN` coordinate returns `None`; `_interior_bad_channel_ids` with a non-finite `pitch` or good position returns `[]` and skips a candidate whose own position is `NaN` (never counts it as adjacent) — so a partial-null shank cannot silently yield an empty re-inclusion that masquerades as "no bad channels". |
+| partial-null positions raise *(integration, DB)* | a `specific`/shank group where one needed electrode has a `NULL` `Electrode.x/y/z` + `bad_channel_handling="interpolate"` → `make_fetch` raises the clear "interpolate needs positions" error (not an empty, silent re-inclusion); restore the row. |
 | interior re-inclusion via adjacency *(integration, DB)* | for an arbitrary-column group whose good channels form two separated clusters, `make_fetch` re-includes a bad electrode embedded among good members but NOT one in the gap between clusters, nor one outside the group's footprint — pitch-anchored adjacency, not a bounding box. |
 | no positions → interpolate raises *(integration, DB)* | a session without electrode coordinates + `bad_channel_handling="interpolate"` raises the clear "needs positions" error rather than guessing. |
 | default cache_hash unchanged *(integration, DB+SI, slow)* | smoke-fixture `Recording` with all defaults has the same `cache_hash` as pre-phase code (headline regression guard). |
@@ -456,9 +497,15 @@ independent reviewer) against the diff. Confirm:
   and leaving it in the coherence pool would perturb the other channels' labels.
   Its own quality is guarded by `make_fetch`, which **raises** when the reference
   is curated `bad_channel='True'` — so "a reference flagged bad raises" holds, via
-  the curated check rather than a detection-time check.
+  the curated check rather than a detection-time check. Automated detection
+  **does not** vet the reference (documented limitation, Open Question 5); the
+  doc directs users to `suggest_bad_channels` to flag a bad reference.
 - **Detection runs per shank** (via the threaded `channel_shank` map), never once
   on a mixed-shank recording; labels are int-keyed and merged across shanks.
+- **Channel slicing uses `ChannelSliceRecording`** (the `_slice_channels` helper),
+  never `recording.channel_slice(...)` — that method was dropped in SI 0.104, and
+  the materialization path already uses `ChannelSliceRecording`
+  (`_recording_materialization.py:198`).
 - `BadChannelDetectionParams` is **dumped** (`.model_dump()`, not `**model`)
   before forwarding; its fields default to `None` = "use SI default" and the
   wrapper drops `None`, so no threshold is hardcoded and `None` never reaches
@@ -474,6 +521,12 @@ independent reviewer) against the diff. Confirm:
   `filtering_description` reads it (honest counts, not param-derived).
 - Interpolation guards on channel locations and raises clearly, never letting
   SI fail opaquely deep in the call stack.
+- **Non-finite positions raise, not silently drop.** `Electrode.x/y/z` are
+  nullable; `make_fetch` explicitly checks finiteness of every needed position
+  (good, candidate, full-shank) and raises the "needs positions" error for
+  `interpolate` — it does **not** rely on `_interior_bad_channel_ids` returning an
+  empty set (which would masquerade as "no bad channels"). The helpers also guard
+  non-finite input defensively.
 - `bad_channel_ids` is DeepHash-stable across two `make_fetch` calls (sorted
   tuple), matching the other fetched fields.
 - The Option-A asymmetry is documented where the handling code lives.

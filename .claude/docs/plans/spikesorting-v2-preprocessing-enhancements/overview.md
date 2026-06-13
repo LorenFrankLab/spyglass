@@ -190,7 +190,7 @@ Open Question 1.
 | Phase-shift enabled on data with no `inter_sample_shift` would no-op invisibly or misbehave. | Phase 1 gates on the property and logs a clear skip; it never fabricates a shift. |
 | Interpolating an out-of-brain channel (no in-brain neighbors) invents signal; SI's guide says out channels should be removed. | Handling is **label-aware** (phase 3): `out` is always removed, only `dead`/`noise` interpolate; labels are preserved end-to-end (phase 2 detection → handling), never collapsed to a boolean. |
 | Reconstructing a custom column-group's bad channels "by shank" can pull in electrodes never near that group (`set_group_by_electrode_table_column` stores no original membership). | Phase 3 re-includes only bad channels **adjacent to the group's good channels at the probe's physical pitch** (≥`MIN_GOOD_NEIGHBORS` within `RADIUS_FACTOR × pitch`, `pitch` from the full shank — NOT the group's own spacing, which degenerates to the gap for a sparse group), not the whole shank and not a `[min,max]` box; no positions / undefined pitch → `interpolate` raises (Open Question 4). |
-| The bad-channel step runs before referencing, and `restrict_recording` slices the `specific` reference electrode in for subtraction — handling or detection could remove/interpolate it or let it skew labels. | Phase 3 **excludes the reference from the handled set AND from the detector surface** (it is dropped after referencing as today); the reference's own quality is guarded by a `make_fetch` raise when it is curated `bad_channel='True'`. |
+| The bad-channel step runs before referencing, and `restrict_recording` slices the `specific` reference electrode in for subtraction — handling or detection could remove/interpolate it or let it skew labels. | Phase 3 **excludes the reference from the handled set AND from the detector surface** (it is dropped after referencing as today); the reference's own quality is guarded by a `make_fetch` raise when it is curated `bad_channel='True'` (an un-flagged bad reference relies on the `suggest_bad_channels` curation workflow — Open Question 5). |
 | Automated detection on the **restricted** recording would run the spatially-local coherence/PSD method across a reference channel and/or multiple shanks at once, corrupting the labels of real sort channels. | Phase 3 builds a **reference-excluded, per-shank** detector surface (via the `channel_shank` map threaded from `make_fetch`) and merges per-shank labels — the same per-shank scope phase 2 uses. |
 | The boolean `Electrode.bad_channel` cannot carry an `out` label, so a pre-existing / manual / config flag could mark an outside-brain channel that `interpolate` would then wrongly fill. | The `interpolate` path **audits** every label-less curated flag with a coherence/PSD pass and **removes** (never fills) any classified `out`, so the unenforceable convention cannot cause invented signal. |
 | `None`-as-"use SI default" sentinel passed straight to SI would break (`psd_hf_threshold=None` is invalid in 0.104.3). | The detection wrapper **drops `None`** overrides; only `method` is pinned, every other knob falls through to SI's own signature default. |
@@ -250,6 +250,17 @@ see no change.
    `interpolate` raises and the user falls back to `remove`. Revisit only if a
    use case needs to interpolate genuinely isolated channels (would require
    persisting group membership/origin).
+5. **Reference-electrode quality vetting (resolved, revisitable).** The
+   at-materialization detector excludes the `specific` reference from its surface
+   (so it cannot skew the sort channels' labels), which means automated detection
+   does **not** classify the reference itself. A reference that is genuinely
+   dead/noisy but never curated `bad_channel='True'` is therefore not caught at
+   materialization. Chosen behavior: rely on the curation workflow — run
+   `suggest_bad_channels`, which flags a dead/noisy reference, and the `make_fetch`
+   curated-bad raise then enforces it; document the limitation. Revisit with a
+   dedicated single-channel reference-quality check (a separate detection pass on
+   the reference's shank, read only for the reference's own label) if un-flagged
+   bad references prove common in practice.
 
 ## Estimated Effort
 
