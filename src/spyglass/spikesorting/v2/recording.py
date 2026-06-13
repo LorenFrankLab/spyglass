@@ -881,9 +881,15 @@ class PreprocessingParameters(SpyglassMixin, dj.Lookup):
         ),
         (
             "default_neuropixels",
+            # Blessed Neuropixels recipe: bandpass + ADC phase-shift. The
+            # phase-shift is a safe no-op until the recording carries an
+            # ``inter_sample_shift`` property (the runtime logs a skip and
+            # never fails), so selecting this preset never breaks a
+            # non-multiplexed recording.
             PreprocessingParamsSchema.model_validate(
                 {
                     "bandpass_filter": {"freq_min": 300.0, "freq_max": 6000.0},
+                    "phase_shift": {"margin_ms": 100.0},
                 }
             ).model_dump(),
             3,

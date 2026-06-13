@@ -91,6 +91,47 @@ def test_default_franklab_whiten_none():
     assert contents["default_franklab"]["whiten"] is None
 
 
+def test_phase_shift_preset_neuropixels_on_franklab_off():
+    """Phase-shift ships ON in ``default_neuropixels``, OFF in ``default_franklab``.
+
+    The franklab headline default stays a no-op (``phase_shift is None``);
+    the blessed Neuropixels recipe enables it (``margin_ms == 100.0``) on top
+    of the same 300-6000 Hz bandpass, so the two presets differ ONLY by the
+    phase-shift step.
+    """
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+    )
+
+    contents = {
+        name: params
+        for (
+            name,
+            params,
+            _ver,
+            _job,
+        ) in PreprocessingParameters._DEFAULT_CONTENTS
+    }
+
+    # franklab: phase-shift OFF.
+    assert contents["default_franklab"]["phase_shift"] is None
+
+    # neuropixels: phase-shift ON (margin 100 ms) + the same bandpass.
+    np_params = contents["default_neuropixels"]
+    assert np_params["phase_shift"] == {"margin_ms": 100.0}
+    assert np_params["bandpass_filter"] == {
+        "freq_min": 300.0,
+        "freq_max": 6000.0,
+    }
+
+    # The two presets differ ONLY by the phase-shift step.
+    assert {k: v for k, v in np_params.items() if k != "phase_shift"} == {
+        k: v
+        for k, v in contents["default_franklab"].items()
+        if k != "phase_shift"
+    }
+
+
 def test_min_segment_length_field_present():
     """``PreprocessingParamsSchema`` carries ``min_segment_length``."""
     blob = PreprocessingParamsSchema().model_dump()
