@@ -168,7 +168,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
     def _run_decoder(
         self,
         key: dict,
-        decoding_params: dict,
+        decoding_params: SortedSpikesDetector | dict,
         decoding_kwargs: dict,
         position_info: pd.DataFrame,
         position_variable_names: list[str],
@@ -184,8 +184,9 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         ----------
         key : dict
             The key for the current decode operation
-        decoding_params : dict
-            Parameters for SortedSpikesDetector initialization
+        decoding_params : SortedSpikesDetector | dict
+            A reconstructed SortedSpikesDetector instance (current-format rows)
+            or kwargs for SortedSpikesDetector initialization (legacy rows)
         decoding_kwargs : dict
             Additional kwargs for fit/predict
         position_info : pd.DataFrame
@@ -231,7 +232,13 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         ValueError
             If all decoding intervals are empty (no valid time points)
         """
-        classifier = SortedSpikesDetector(**decoding_params)
+        # ``decoding_params`` is a reconstructed detector instance for params
+        # stored in the current format, or a kwargs dict for legacy rows.
+        classifier = (
+            decoding_params
+            if isinstance(decoding_params, SortedSpikesDetector)
+            else SortedSpikesDetector(**decoding_params)
+        )
 
         if key["estimate_decoding_params"]:
             # When estimating parameters, treat times outside decoding intervals
@@ -448,7 +455,13 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             position_info,
             position_variable_names,
         ) = SortedSpikesDecodingV1.fetch_position_info(key)
-        classifier = SortedSpikesDetector(**decoding_params)
+        # ``decoding_params`` is a reconstructed detector instance for params
+        # stored in the current format, or a kwargs dict for legacy rows.
+        classifier = (
+            decoding_params
+            if isinstance(decoding_params, SortedSpikesDetector)
+            else SortedSpikesDetector(**decoding_params)
+        )
 
         classifier.initialize_environments(
             position=position_info[position_variable_names].to_numpy(),
