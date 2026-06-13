@@ -40,6 +40,21 @@ class BandpassFilterParams(BaseModel):
         return self
 
 
+class PhaseShiftParams(BaseModel):
+    """ADC sample-shift (phase-shift) correction options.
+
+    Compensates the per-channel time offsets introduced by multiplexed
+    ADCs (e.g. Neuropixels). Applied FIRST, before bandpass filtering. Only
+    meaningful when the recording carries an ``inter_sample_shift``
+    property; the runtime skips it (with a log) otherwise, so enabling it
+    on non-multiplexed acquisition is a safe no-op. Off by default
+    (``PreprocessingParamsSchema.phase_shift = None``).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    margin_ms: float = Field(default=100.0, ge=0.0)
+
+
 class CommonReferenceParams(BaseModel):
     """Common-reference re-referencing options.
 
@@ -109,10 +124,18 @@ class PreprocessingParamsSchema(BaseModel):
       ``apply_pre_motion_preprocessing``). The params blob shape is
       unchanged, so ``schema_version`` is NOT bumped -- only the runtime
       interpretation moved; dev rows are regenerated, not migrated.
+    * 3 also added the optional ``phase_shift`` sub-model (ADC sample-shift
+      correction for multiplexed acquisition; off by default, ``None``).
+      The blob shape only grows by an optional field that defaults to
+      ``None``, so existing rows validate unchanged and ``schema_version``
+      is again NOT bumped; dev rows are regenerated.
     """
 
     model_config = ConfigDict(extra="forbid")
     schema_version: int = 3
+    phase_shift: PhaseShiftParams | None = Field(default=None)
+    # phase_shift defaults to None: off in the franklab default and only a
+    # no-op-until-present step for multiplexed-ADC (Neuropixels) recordings.
     bandpass_filter: BandpassFilterParams | None = Field(
         default_factory=BandpassFilterParams
     )
@@ -132,12 +155,17 @@ class PreprocessingParamsSchema(BaseModel):
     # to ``sort_interval.intersect(..., min_length=...)``.
 
     def to_pre_motion_dict(self) -> dict:
-        """Return the stage-1 dict (filter + reference). Cached.
+        """Return the stage-1 dict (phase-shift + filter + reference). Cached.
 
-        ``bandpass_filter`` is ``None`` when filtering is disabled; the
-        runtime skips the filter step in that case.
+        ``phase_shift`` / ``bandpass_filter`` are ``None`` when the
+        corresponding step is disabled; the runtime skips it in that case.
         """
         return {
+            "phase_shift": (
+                None
+                if self.phase_shift is None
+                else self.phase_shift.model_dump()
+            ),
             "bandpass_filter": (
                 None
                 if self.bandpass_filter is None

@@ -44,6 +44,46 @@ def test_preprocessing_defaults_round_trip():
     assert rebuilt == blob
 
 
+def test_phase_shift_off_by_default():
+    """``phase_shift`` defaults to ``None`` (the franklab default is a no-op).
+
+    Existing rows that predate the field still validate because the new
+    optional field defaults to ``None`` (no ``schema_version`` bump).
+    """
+    schema = PreprocessingParamsSchema()
+    assert schema.phase_shift is None
+    assert schema.to_pre_motion_dict()["phase_shift"] is None
+    # A pre-field blob (no ``phase_shift`` key) validates unchanged.
+    legacy = {
+        "schema_version": 3,
+        "bandpass_filter": {"freq_min": 300.0, "freq_max": 6000.0},
+        "common_reference": {"operator": "median"},
+        "whiten": None,
+        "min_segment_length": 1.0,
+    }
+    assert PreprocessingParamsSchema.model_validate(legacy).phase_shift is None
+
+
+def test_phase_shift_enabled_dumps_margin():
+    """Enabling ``phase_shift`` carries ``margin_ms`` into the pre-motion dict."""
+    schema = PreprocessingParamsSchema(phase_shift={"margin_ms": 100.0})
+    assert schema.phase_shift is not None
+    assert schema.phase_shift.margin_ms == 100.0
+    assert schema.to_pre_motion_dict()["phase_shift"] == {"margin_ms": 100.0}
+    # ``margin_ms`` defaults to 100.0 when omitted.
+    assert (
+        PreprocessingParamsSchema(phase_shift={}).phase_shift.margin_ms == 100.0
+    )
+
+
+def test_phase_shift_rejects_negative_margin_and_extra_keys():
+    """``margin_ms`` is non-negative and the sub-model forbids extra keys."""
+    with pytest.raises(ValidationError):
+        PreprocessingParamsSchema(phase_shift={"margin_ms": -1.0})
+    with pytest.raises(ValidationError):
+        PreprocessingParamsSchema(phase_shift={"bogus": 1.0})
+
+
 def test_preprocessing_inverted_bandpass_rejected():
     """``freq_min`` above ``freq_max`` is a validation error."""
     with pytest.raises(ValidationError):
