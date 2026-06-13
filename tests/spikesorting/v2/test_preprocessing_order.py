@@ -130,8 +130,6 @@ def test_specific_filters_then_references_then_drops(monkeypatch):
     assert 99 not in out.get_channel_ids()
     # No phase-shift requested -> report says it did not run.
     assert applied_steps["phase_shift"] is False
-    assert applied_steps["bandpass"] is True
-    assert applied_steps["reference"] == "specific"
 
 
 def test_global_median_filters_then_references(monkeypatch):
@@ -179,14 +177,13 @@ def test_no_filter_still_references_and_drops(monkeypatch):
     _patch_sip(monkeypatch, calls)
     rec = _FakeRecording([0, 1, 2, 99], calls)
 
-    out, applied_steps = apply_pre_motion_preprocessing(
+    out, _ = apply_pre_motion_preprocessing(
         rec, "specific", 99, [0, 1, 2], _validated(bandpass=False)
     )
 
     # bandpass_filter=None disables the filter, but referencing + drop run.
     assert [c[0] for c in calls] == ["common_reference", "remove_channels"]
     assert 99 not in out.get_channel_ids()
-    assert applied_steps["bandpass"] is False
 
 
 def test_invalid_reference_mode_raises(monkeypatch):
@@ -238,7 +235,6 @@ def test_phase_shift_runs_before_bandpass(monkeypatch):
     ps = next(c for c in calls if c[0] == "phase_shift")
     assert ps[1] == 100.0  # margin_ms forwarded
     assert applied_steps["phase_shift"] is True
-    assert applied_steps["bandpass"] is True
     assert out.get_channel_ids() == [0, 1, 2, 3]
 
 
@@ -285,4 +281,3 @@ def test_phase_shift_off_by_default_ignores_property(monkeypatch):
 
     assert "phase_shift" not in [c[0] for c in calls]
     assert applied_steps["phase_shift"] is False
-    assert applied_steps["bandpass"] is True

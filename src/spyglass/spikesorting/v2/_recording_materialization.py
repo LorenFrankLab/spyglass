@@ -364,11 +364,14 @@ def apply_pre_motion_preprocessing(
     is called from inside ``make_compute`` where the tri-part
     contract forbids further DB I/O.
 
-    Returns ``(recording, applied_steps)`` where ``applied_steps`` is a
-    report of which steps actually RAN -- ``{"phase_shift": bool,
-    "bandpass": bool, "reference": reference_mode}``. ``filtering_description``
-    consumes it so provenance can distinguish a phase-shift that ran from one
-    that was requested but skipped (no ``inter_sample_shift`` property).
+    Returns ``(recording, applied_steps)`` where ``applied_steps`` reports the
+    runtime facts a caller cannot derive from the params alone -- currently
+    ``{"phase_shift": bool}``, whether the gated phase-shift actually ran (it
+    is skipped when the recording lacks ``inter_sample_shift``).
+    ``filtering_description`` consumes it so provenance can distinguish a
+    phase-shift that ran from one that was requested but skipped. Bandpass and
+    reference have no skip path (they run iff their params are set), so they
+    are not reported -- the params are ground truth for them.
     """
     import numpy as _np
     import spikeinterface.preprocessing as sip
@@ -409,7 +412,6 @@ def apply_pre_motion_preprocessing(
             freq_max=validated.bandpass_filter.freq_max,
             dtype=_np.float64,
         )
-    applied_steps["bandpass"] = validated.bandpass_filter is not None
 
     # 2. Reference the filtered signal.
     if reference_mode == "specific":
@@ -463,7 +465,6 @@ def apply_pre_motion_preprocessing(
             f"{reference_mode!r}. Use 'none', 'global_median', or "
             "'specific'."
         )
-    applied_steps["reference"] = reference_mode
     return recording, applied_steps
 
 
