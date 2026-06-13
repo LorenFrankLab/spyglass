@@ -30,6 +30,7 @@ def test_preprocessing_params_schema_default():
         "common_reference": {"operator": "median"},
         "whiten": None,
         "min_segment_length": 1.0,
+        "bad_channel_handling": "remove",
     }
 
     # extra="forbid": an unknown field is rejected.
@@ -60,6 +61,7 @@ def test_preprocessing_params_stage_split():
         "phase_shift": None,
         "bandpass_filter": {"freq_min": 300.0, "freq_max": 6000.0},
         "common_reference": {"operator": "median"},
+        "bad_channel_handling": "remove",
     }
     # Whitening defaults to None (deferred to the sorter), so the
     # post-motion stage is empty by default.
