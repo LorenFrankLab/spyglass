@@ -69,8 +69,8 @@ def _ensure_sort_group(
 ) -> None:
     """Make sure the sort-group layout exists for this NWB.
 
-    ``SortGroup.set_group_by_shank`` is idempotent; calling it on an
-    already-grouped session is a no-op.
+    For the default ``reference_mode="none"`` the call is idempotent:
+    ``SortGroup.set_group_by_shank`` is a no-op when rows already exist.
 
     ``reference_mode`` selects the v1 referencing for the captured baseline:
     ``"none"`` (the order-invariant default used by the parity matrix) leaves
@@ -79,11 +79,28 @@ def _ensure_sort_group(
     the ``references`` dict). The global-median baseline is v1's REFERENCE-
     FIRST output; v2 filters before referencing, so its global-median result
     intentionally diverges from this baseline.
+
+    The ``"global_median"`` path must DROP any existing sort groups first:
+    v1's ``set_group_by_shank`` early-returns under ``test_mode`` (the
+    standalone capture bootstrap sets ``custom.test_mode=True``) when rows
+    already exist, so on a reused capture DB the new ``references`` mapping
+    would be silently ignored and the baseline would carry the prior (likely
+    no-reference) sentinel. After rebuilding, the captured group's
+    ``sort_reference_electrode_id`` is asserted to be ``-2`` so a stale or
+    mis-configured group fails loud rather than producing a baseline that is
+    not actually global-median.
     """
     from spyglass.common.common_ephys import Electrode
     from spyglass.spikesorting.v1 import SortGroup
 
     if reference_mode == "global_median":
+        # Force a clean rebuild so test_mode's "rows exist -> return" cannot
+        # leave a stale (e.g. no-reference) group in place. The cascade clears
+        # this session's downstream v1 recording/sorting/curation rows too,
+        # which is what we want before re-materializing under a new reference.
+        existing = SortGroup & {"nwb_file_name": nwb_file_name}
+        if existing:
+            existing.delete(safemode=False)
         # v1 stores -2 as the global-median sentinel; map every electrode
         # group to it so the whole session is common-median referenced.
         e_groups = {
@@ -98,15 +115,30 @@ def _ensure_sort_group(
         )
     else:
         SortGroup.set_group_by_shank(nwb_file_name=nwb_file_name)
-    if not (
-        SortGroup
-        & {"nwb_file_name": nwb_file_name, "sort_group_id": sort_group_id}
-    ):
+    group_row = SortGroup & {
+        "nwb_file_name": nwb_file_name,
+        "sort_group_id": sort_group_id,
+    }
+    if not group_row:
         raise RuntimeError(
             f"sort_group_id={sort_group_id} is not present after "
             f"set_group_by_shank({nwb_file_name!r}). Pass a sort group that "
             "exists for this NWB."
         )
+    if reference_mode == "global_median":
+        # Defense-in-depth: confirm the captured group is actually
+        # global-median referenced (-2) and not a stale config-derived group
+        # that survived test_mode's early return -- otherwise the "global
+        # median" baseline would silently be something else.
+        ref_id = int(group_row.fetch1("sort_reference_electrode_id"))
+        if ref_id != -2:
+            raise RuntimeError(
+                f"sort_group_id={sort_group_id} has "
+                f"sort_reference_electrode_id={ref_id}, not the global-median "
+                "sentinel -2. The v1 sort group was not re-referenced (a stale "
+                "group from a prior capture on this reused DB?); drop the "
+                "session's SortGroup rows and re-run."
+            )
 
 
 def _ensure_lab_team(team_name: str) -> None:
