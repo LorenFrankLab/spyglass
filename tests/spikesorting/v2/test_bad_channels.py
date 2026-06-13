@@ -104,6 +104,34 @@ def test_detect_bad_channels_drops_none_and_pins_method(monkeypatch):
     assert set(result["labels"].values()) == {"good"}
 
 
+def test_shank_groups_partitions_and_orders():
+    """`_shank_groups` partitions by (electrode group, shank), sorted."""
+    from spyglass.spikesorting.v2._bad_channels import _shank_groups
+
+    rows = [
+        {"electrode_group_name": "A", "electrode_id": 3, "probe_shank": 1},
+        {"electrode_group_name": "A", "electrode_id": 1, "probe_shank": 0},
+        {"electrode_group_name": "A", "electrode_id": 2, "probe_shank": 0},
+        {"electrode_group_name": "B", "electrode_id": 4, "probe_shank": 0},
+    ]
+    groups = _shank_groups(rows, "x.nwb")
+
+    assert groups == {("A", 0): [1, 2], ("A", 1): [3], ("B", 0): [4]}
+    assert list(groups) == [("A", 0), ("A", 1), ("B", 0)]  # deterministic order
+
+
+def test_shank_groups_raises_on_null_probe_shank():
+    """A NULL `probe_shank` (unset nullable FK) fails loud, not opaquely."""
+    from spyglass.spikesorting.v2._bad_channels import _shank_groups
+
+    rows = [
+        {"electrode_group_name": "A", "electrode_id": 0, "probe_shank": 0},
+        {"electrode_group_name": "A", "electrode_id": 7, "probe_shank": None},
+    ]
+    with pytest.raises(ValueError, match="no probe_shank"):
+        _shank_groups(rows, "x.nwb")
+
+
 # --------------------------------------------------------------------------- #
 # Integration tier (DB): suggest_bad_channels on the smoke fixture.
 # --------------------------------------------------------------------------- #
@@ -225,35 +253,38 @@ def test_suggest_write_false_is_read_only(badchan_session):
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_suggest_write_true_writes_dead_not_out(badchan_session, monkeypatch):
-    """``write=True`` persists ``dead`` but never the report-only ``out``."""
+def test_suggest_write_true_writes_quality_bad_not_out(
+    badchan_session, monkeypatch
+):
+    """``write=True`` persists both writable labels (``dead`` and ``noise``)
+    but never the report-only ``out``."""
     from spyglass.spikesorting.v2 import _bad_channels
 
     nwb = badchan_session["nwb_file_name"]
-    dead_eid, out_eid = 0, 1  # both on shank 0 of the polymer fixture
+    # All on shank 0 of the polymer fixture; one of each label.
+    dead_eid, out_eid, noise_eid = 0, 1, 2
+    fake_labels = {dead_eid: "dead", out_eid: "out", noise_eid: "noise"}
 
     def fake_detect(recording, **kwargs):
         labels, bad = {}, []
         for c in recording.get_channel_ids():
-            if int(c) == dead_eid:
-                labels[c] = "dead"
+            label = fake_labels.get(int(c), "good")
+            labels[c] = label
+            if label != "good":
                 bad.append(c)
-            elif int(c) == out_eid:
-                labels[c] = "out"
-                bad.append(c)
-            else:
-                labels[c] = "good"
         return {"bad_channel_ids": bad, "labels": labels}
 
     monkeypatch.setattr(_bad_channels, "detect_bad_channels", fake_detect)
 
-    with _restore_bad_channel(nwb, [dead_eid, out_eid]):
+    with _restore_bad_channel(nwb, [dead_eid, out_eid, noise_eid]):
         report = _bad_channels.suggest_bad_channels(nwb, write=True)
 
         labels_by_eid = {e["electrode_id"]: e["label"] for e in report}
         assert labels_by_eid[dead_eid] == "dead"
+        assert labels_by_eid[noise_eid] == "noise"
         assert labels_by_eid[out_eid] == "out"  # surfaced in the report ...
         assert _bad_channel(nwb, dead_eid) == "True"  # ... dead persisted ...
+        assert _bad_channel(nwb, noise_eid) == "True"  # ... noise persisted ...
         assert _bad_channel(nwb, out_eid) == "False"  # ... out never written
 
 
@@ -377,3 +408,77 @@ def test_detection_runs_per_shank(badchan_session, monkeypatch):
     assert len(seen) == len(expected)  # one detection call per shank
     # Each call's channel set is exactly one shank's electrodes -- no mixing.
     assert sorted(seen, key=sorted) == sorted(expected.values(), key=sorted)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_suggest_forwards_detection_params(badchan_session, monkeypatch):
+    """`detection_params` is forwarded to the detector on every shank."""
+    from spyglass.spikesorting.v2 import _bad_channels
+
+    nwb = badchan_session["nwb_file_name"]
+    captured: list[dict] = []
+
+    def spy_detect(recording, **kwargs):
+        captured.append(kwargs)
+        return {
+            "bad_channel_ids": [],
+            "labels": {c: "good" for c in recording.get_channel_ids()},
+        }
+
+    monkeypatch.setattr(_bad_channels, "detect_bad_channels", spy_detect)
+    _bad_channels.suggest_bad_channels(
+        nwb, detection_params={"dead_channel_threshold": -0.4}, write=False
+    )
+
+    assert captured  # at least one shank scanned
+    assert all(c == {"dead_channel_threshold": -0.4} for c in captured)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_suggest_persists_reviewed_report_without_redetecting(
+    badchan_session, monkeypatch
+):
+    """``report=`` persists exactly the reviewed entries and skips detection."""
+    from spyglass.common.common_ephys import Electrode
+    from spyglass.spikesorting.v2 import _bad_channels
+
+    nwb = badchan_session["nwb_file_name"]
+
+    def boom(*args, **kwargs):
+        raise AssertionError("detection must not run in apply mode")
+
+    monkeypatch.setattr(_bad_channels, "detect_bad_channels", boom)
+
+    dead_eid, out_eid = 0, 1
+    reviewed = [
+        {
+            "electrode_group_name": (
+                Electrode & {"nwb_file_name": nwb, "electrode_id": eid}
+            ).fetch1("electrode_group_name"),
+            "electrode_id": eid,
+            "probe_shank": 0,
+            "label": label,
+        }
+        for eid, label in [(dead_eid, "dead"), (out_eid, "out")]
+    ]
+
+    with _restore_bad_channel(nwb, [dead_eid, out_eid]):
+        returned = _bad_channels.suggest_bad_channels(
+            nwb, write=True, report=reviewed
+        )
+        assert returned is reviewed  # returned unchanged
+        assert _bad_channel(nwb, dead_eid) == "True"  # reviewed dead persisted
+        assert _bad_channel(nwb, out_eid) == "False"  # reviewed out not written
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_suggest_report_requires_write(badchan_session):
+    """Passing ``report=`` without ``write=True`` is a clear error."""
+    from spyglass.spikesorting.v2 import _bad_channels
+
+    nwb = badchan_session["nwb_file_name"]
+    with pytest.raises(ValueError, match="write=True"):
+        _bad_channels.suggest_bad_channels(nwb, report=[], write=False)
