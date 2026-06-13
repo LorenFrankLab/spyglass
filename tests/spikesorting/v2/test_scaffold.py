@@ -25,6 +25,7 @@ def test_preprocessing_params_schema_default():
 
     assert PreprocessingParamsSchema().model_dump() == {
         "schema_version": 3,
+        "phase_shift": None,
         "bandpass_filter": {"freq_min": 300.0, "freq_max": 6000.0},
         "common_reference": {"operator": "median"},
         "whiten": None,
