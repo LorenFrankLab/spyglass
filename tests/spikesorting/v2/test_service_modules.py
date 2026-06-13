@@ -34,6 +34,7 @@ _DB_FREE_SERVICE_MODULES = [
     "_analyzer_cache",
     "_artifact_compute",
     "_artifact_intervals",
+    "_bad_channels",
     "_curation_transforms",
     "_enums",
     "_recording_materialization",
