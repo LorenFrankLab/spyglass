@@ -406,6 +406,20 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
                 sorter_params["radius_um"] = sorter_params.pop(
                     "local_radius_um"
                 )  # correct existing parameter sets for spikeinterface>=0.99.1
+            # SpikeInterface <0.100 (the legacy runtime this path runs under)
+            # has no ``threshold_unit`` on ``detect_peaks``; its
+            # ``detect_threshold`` is always a MAD multiplier. v2-shaped param
+            # rows carry ``threshold_unit``; strip the MAD case (SI <0.100's
+            # native behavior) and reject the microvolt case, which the legacy
+            # detector cannot reproduce.
+            threshold_unit = sorter_params.pop("threshold_unit", None)
+            if threshold_unit not in (None, "mad"):
+                raise ValueError(
+                    "clusterless_thresholder threshold_unit="
+                    f"{threshold_unit!r} is not supported by SpikeInterface "
+                    "<0.100 (detect_threshold is MAD-only there); use "
+                    "threshold_unit='mad' for the legacy v1 path."
+                )
 
             # Detect peaks for clusterless decoding
             detected_spikes = detect_peaks(recording, **sorter_params)
