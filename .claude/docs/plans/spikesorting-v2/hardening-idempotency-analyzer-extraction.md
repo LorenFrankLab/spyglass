@@ -1,12 +1,13 @@
 # Spike-Sorting v2 — Hardening Plan: Selection Idempotency, Analyzer Paths, Compute Extraction
 
 **Author:** Claude (plan-evaluation session); revised by Codex
-**Date:** 2026-06-12
-**Status:** PROPOSED. Claims verified against the code on branch `spikesorting-v2`
-(at/after commit `32ba091a`). Not started. This branch is pre-production, so the
-plan now optimizes for clean invariants rather than compatibility with existing
-v2 rows. Expect to reset/drop/redeclare v2 tables during implementation if that
-keeps the final model simpler.
+**Date:** 2026-06-12 (proposed); **as-built update:** 2026-06-12
+**Status:** IMPLEMENTED / AS-BUILT. Phases 0, A, B, and C are all landed on
+branch `spikesorting-v2` (this branch is pre-production). The full v2 suite is
+green. Remaining work is test-hardening + docs, not new architecture — see
+**Implementation status (as-built)** immediately below. The original
+forward-looking plan text is preserved unchanged after that section for
+provenance; where it says "do X" / "steps", read it as "X was done".
 **Scope:** Three independent post-audit hardening tracks on top of completed Phases 0–1
 (+ partial 1b) and the [AUDIT-REPORT.md](AUDIT-REPORT.md) remediations. This is **not**
 part of the numbered phase roadmap in [PLAN.md](PLAN.md); it is pre-release architecture
@@ -14,6 +15,42 @@ hardening before v2 becomes public API.
 **Relationship:** Complements [ARCHITECTURE-EVALUATION.md](ARCHITECTURE-EVALUATION.md)
 (layering/cohesion) and continues the "thin DataJoint shell over pure/IO services" direction
 established by the artifact-kernel extraction (`_artifact_compute.py`, commit `32ba091a`).
+
+---
+
+## Implementation status (as-built)
+
+All four phases are **implemented and landed** on `spikesorting-v2`. Summary:
+
+| Phase | Status | As-built notes |
+|---|---|---|
+| **0 — docstring cleanup** | ✅ Done | Module docstrings corrected (no more "stub raises NotImplementedError" overclaim for implemented methods). |
+| **A — deterministic selection identity** | ✅ Done | `_selection_identity.py` (UUID5 `deterministic_id` / `assert_supplied_id_matches`); `RecordingSelection` / `ArtifactSelection` / `SortingSelection` `insert_selection` rewritten to content-addressed IDs with duplicate-PK race recovery + source-part collision checks. |
+| **B — analyzer cache contract** | ✅ Done | `_analyzer_cache.py` (`analyzer_path` / root resolution); `Sorting.analyzer_folder` is transient state (threaded `make_compute → make_insert`), not a persisted absolute path; orphan scan computes the canonical path. |
+| **C — service extraction** | ✅ Done | DB-free service modules: `_artifact_compute`, `_artifact_intervals`, `_curation_transforms`, `_units_nwb` (incl. `build_lazy_merged_sorting`), `_sorting_compute`, `_recording_materialization`, `_signal_math`, `_enums`, `_analyzer_cache`, `_selection_identity`. Table classes are thin orchestrators; delegators kept only where a test / external caller pins the surface. |
+
+**Deliberately NOT done (rejected, do not re-attempt):** the broad
+`_curation_queries.py` extraction (resolve_restriction / get_sort_metadata /
+get_merge_groups / get_merged_sorting / get_matchable_unit_ids /
+get_unit_brain_regions / get_sort_group_info / _upstream_recording_row /
+has_unapplied_proposed_merges). Those are DataJoint relation API, not DB-free
+service logic — all are DB-bound, 8 are externally/test-pinned, and a module
+would still depend on `CurationV2` while forcing compatibility delegators
+(churn without payoff). The "single owner of join topology" is already true
+because they are centralized methods. The better move (taken instead) was to
+extract only the genuine compute core, `build_lazy_merged_sorting`, and leave
+the table methods in place. Decision rule going forward: extract only when it
+removes hidden DB reads, creates directly testable pure/IO logic, or removes
+real duplication — not for LOC reduction.
+
+**Remaining TODO (test-hardening / docs, not architecture):**
+
+- Direct service-level tests for the newest helpers (`build_lazy_merged_sorting`,
+  the `_artifact_intervals` pure functions) + cold-import checks asserting the
+  DB-free modules open no DB connection at import.
+- Keep this doc in sync as further service tests land.
+
+The forward-looking proposal text below is preserved for provenance.
 
 ---
 
