@@ -112,11 +112,18 @@ contract in phase 3).
     `bad_channel_handling="remove"` will **not** drop it — `remove` honors the
     declared sort-group membership and re-reads no flags, and `out` is never a
     curated flag, so a report-only `out` channel that is a sort-group member
-    keeps being sorted. To keep an `out` channel out of a sort, **omit it when
-    the sort group is defined** (it is not auto-excluded, unlike a
-    `bad_channel='True'` channel) — or wait for a future explicit out-handling
-    mode (overview Non-Goals). The `write=True` action is **additive** — it never
-    clears an existing curated `bad_channel='True'`.
+    keeps being sorted. To keep an `out` channel out of a sort it must not be a
+    **member**. Note that `set_group_by_shank` (the common path) has **no
+    per-electrode omit** — it groups every `bad_channel='False'` electrode on the
+    shank, so it cannot drop a single `out` channel. The actionable workflow today
+    is to build the group from an explicit electrode list with
+    `set_group_by_electrode_table_column(column="electrode_id",
+    groups=[[…in-brain electrode_ids…]])`, enumerating the electrodes you want and
+    omitting the `out` ones (it still filters `bad_channel='True'` too). A future
+    convenience — an `exclude_electrode_ids` argument on `set_group_by_shank`, or
+    an explicit out-handling mode — is noted in overview Non-Goals. The
+    `write=True` action is **additive** — it never clears an existing curated
+    `bad_channel='True'`.
   - **Invariant to document:** `Electrode.bad_channel='True'` means a
     *quality-bad* (dead/noise-class) channel that is safe to interpolate or
     remove; it must NOT be used to mark an outside-brain channel. This is why

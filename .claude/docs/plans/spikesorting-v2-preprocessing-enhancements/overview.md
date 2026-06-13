@@ -126,10 +126,13 @@ working tree at planning time; re-confirm before editing (files move).
   carry the label, and a persisted `out` would be wrongly interpolated). `out` is
   **report-only**: it is not removed or interpolated anywhere — `remove` re-reads
   no flags, so it will not drop a report-only `out` channel. A user keeps an `out`
-  channel out of a sort by **omitting it when the sort group is defined**. An
-  explicit out-handling mode (a new `bad_channel_handling` value that removes
-  report-flagged `out` channels at materialization) is a possible future
-  addition, out of scope here.
+  channel out of a sort by building the group so it is not a member: since
+  `set_group_by_shank` has no per-electrode omit, the workflow is
+  `set_group_by_electrode_table_column(column="electrode_id", groups=[[…in-brain
+  ids…]])`. Possible future conveniences, out of scope here: an
+  `exclude_electrode_ids` argument on `set_group_by_shank`, or an explicit
+  out-handling mode (a new `bad_channel_handling` value that removes
+  report-flagged `out` channels at materialization).
 - Changing the sort-group concept to *include* bad channels (the rejected
   Option B below).
 - A spatial-frequency "destripe" reference (`highpass_spatial_filter`). Noted as
