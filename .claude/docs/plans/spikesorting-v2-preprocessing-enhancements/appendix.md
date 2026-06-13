@@ -121,8 +121,16 @@ whitening covariance. Both apply the same step order.
 ### B.3 ADC phase-shift (fshift)
 
 - `voltage.py:529-532` / `:762` — `fourier.fshift(x, h["sample_shift"], ...)`,
-  a frequency-domain per-channel sub-sample shift. Comes after the temporal
-  filter. NP multiplexing correction (`sample_shift` from the probe header).
+  a frequency-domain per-channel sub-sample shift. NP multiplexing correction
+  (`sample_shift` from the probe header).
+- **Order note:** IBL applies `fshift` **after** the temporal high-pass filter
+  (`:525` then `:529`), whereas AIND ([A.1](#a1-adc-phase-shift)) applies
+  phase-shift **first**. The two are equivalent: a fractional-sample delay
+  (`fshift`/`phase_shift`) and a zero-phase Butterworth bandpass are both LTI
+  per channel and commute (modulo edge margins). [Phase 1](phase-1-adc-phase-shift.md)
+  adopts the AIND "first" order as a deliberate choice, not a correctness
+  requirement — so "matches AIND/IBL" is more precisely "AIND order; equivalent
+  to IBL's post-filter order."
 
 ### B.4 Bad-channel interpolation
 

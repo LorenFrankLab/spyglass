@@ -28,13 +28,21 @@ working tree at planning time; re-confirm before editing (files move).
   `params_schema_version` bump (it stays `3`); dev rows are regenerated.
 - `v2/_recording_materialization.py:342` — `apply_pre_motion_preprocessing`:
   the runtime stack. Current order is bandpass (`:369`) then reference
-  (`:380`). **Phase 1** inserts phase-shift as a new step *before* the bandpass;
-  **phase 3** inserts bad-channel handling *between* bandpass (`:369`) and
-  reference (`:380`).
+  (`:380`), and it returns only `recording`. **Phase 1** inserts phase-shift as
+  a new step *before* the bandpass **and changes the return to
+  `(recording, applied_steps)`** (the provenance report); **phase 3** inserts
+  label-aware bad-channel handling *between* bandpass (`:369`) and reference
+  (`:380`) and adds to the report.
+- `v2/recording.py:1704` — `_compute_recording_artifact`: calls
+  `_apply_pre_motion_preprocessing` (`:1704`) then `_filtering_description`
+  (`:1722`) from bandpass/reference only. **Phase 1** updates this call site
+  (and the `_rebuild_nwb_artifact` path) to capture `applied_steps` and pass it
+  to `_filtering_description`.
 - `v2/_recording_materialization.py:61` — `restrict_recording`: builds the
   channel slice (`:184-203`). It already adds the `specific` reference channel
   to the slice; **phase 3** additionally re-includes the sort group's
-  bad channels on the `interpolate` path so they are present to fill.
+  **interior** bad channels on the `interpolate` path so they are present to
+  fill (scoped to the good channels' coordinate span, not the whole shank).
 - `v2/_recording_materialization.py:435` — `filtering_description`: the NWB
   provenance string. **Phase 1** and **phase 3** append their steps so the
   persisted `ElectricalSeries.filtering` lists what actually ran.
@@ -70,13 +78,24 @@ working tree at planning time; re-confirm before editing (files move).
   the recording carries an `inter_sample_shift` property (so enabling it on
   non-multiplexed acquisition is a safe no-op). Readiness for Neuropixels.
 - Automated bad-channel detection via SpikeInterface's `detect_bad_channels`
-  (`method="coherence+psd"`, the IBL method) run on the *filtered* signal,
-  exposed two ways: a reviewable helper that suggests / persists
-  `Electrode.bad_channel`, and an opt-in detector that runs at materialization.
-- A `bad_channel_handling = "remove" | "interpolate"` preprocessing parameter.
-  `"remove"` (default) is byte-identical to today; `"interpolate"` fills bad
-  channels from good neighbors (`interpolate_bad_channels`) so geometry-aware
-  sorters see a complete probe.
+  (`method="coherence+psd"`, the IBL method) run on the *filtered* signal, with
+  **every threshold overridable** (the wrapper merges over SI's defaults and
+  forwards unknown knobs). Detection labels (`dead`/`noise`/`out`) are
+  **preserved**, not collapsed to a boolean. Exposed two ways: a reviewable
+  helper that suggests / persists `Electrode.bad_channel` (flagging `dead`/
+  `noise` by default, not `out`), and an opt-in detector that runs at
+  materialization.
+- A `bad_channel_handling = "remove" | "interpolate"` preprocessing parameter,
+  applied **label-aware**: `out` channels are always removed (never
+  interpolated — no in-brain neighbors to fill from, per IBL/SI); only
+  `dead`/`noise` (and label-less curated) channels follow the parameter.
+  `"remove"` (default) is byte-identical to today; `"interpolate"` fills the
+  group's **interior** bad channels from good neighbors
+  (`interpolate_bad_channels`) so geometry-aware sorters see a complete probe.
+- An applied-step **report** returned by `apply_pre_motion_preprocessing` (added
+  in phase 1) so `filtering_description` provenance names the steps that *ran*
+  (a requested-but-skipped phase-shift, the actual interpolate/remove counts) —
+  not what the params merely requested.
 - A saved drift/motion estimate (`compute_motion`) stored as a queryable QC
   artifact, **never applied** to the cached traces.
 
@@ -157,6 +176,8 @@ Open Question 1.
 | Interpolation needs channel **locations**; a recording without a probe (e.g. the legacy tetrode patch path, or an NWB lacking positions) would raise deep in SI. | Phase 3 asserts a probe with locations is attached before calling `interpolate_bad_channels` and raises a clear error naming the fix, rather than letting SI fail opaquely. |
 | Detection thresholds are Neuropixels-derived and may over/under-flag on polymer data. | Phase 2 exposes every threshold as an overridable parameter, ships SI defaults, and documents the NP origin; the persist helper is **suggest-then-confirm**, never an automatic overwrite of curated flags. |
 | Phase-shift enabled on data with no `inter_sample_shift` would no-op invisibly or misbehave. | Phase 1 gates on the property and logs a clear skip; it never fabricates a shift. |
+| Interpolating an out-of-brain channel (no in-brain neighbors) invents signal; SI's guide says out channels should be removed. | Handling is **label-aware** (phase 3): `out` is always removed, only `dead`/`noise` interpolate; labels are preserved end-to-end (phase 2 detection → handling), never collapsed to a boolean. |
+| Reconstructing a custom column-group's bad channels "by shank" can pull in electrodes never near that group (`set_group_by_electrode_table_column` stores no original membership). | Phase 3 re-includes only the bad channels **interior to the group's coordinate span**, not the whole shank; no positions → `interpolate` raises (Open Question 4). |
 | Motion estimation is expensive (peak detect + localize + estimate). | Phase 4 is a `dj.Computed` table populated **on demand** (never auto-eager), with a smoke-test timing step before any larger run. |
 
 ## Rollout Strategy
@@ -183,6 +204,15 @@ entry) as a task within that phase.
    `Electrode.bad_channel` per session (all shanks) by default; a per-shank /
    per-sort-group restriction is offered as an argument. Confirm the default
    scope at phase-2 review.
+4. **Interpolation for arbitrary-column groups (resolved, revisitable).**
+   `set_group_by_electrode_table_column` builds arbitrary-membership groups and
+   stores no original requested values, so "the group's bad channels" cannot be
+   reconstructed exactly. Chosen behavior: re-include only bad channels whose
+   electrode position is **interior** to the group's good-channel coordinate
+   span (works for contiguous shank groups and conservative for custom ones);
+   if positions are absent, `interpolate` raises and the user falls back to
+   `remove`. Revisit if a use case needs interpolation for non-contiguous
+   custom groups (would require persisting group membership/origin).
 
 ## Estimated Effort
 
