@@ -394,12 +394,15 @@ def read_artifact_removed_intervals(key, as_dict=False):
         artifact_interval_list_name,
     )
 
-    source = ArtifactSelection.resolve_source(key)
+    # Validate the key BEFORE resolving the source so a missing
+    # ``artifact_id`` surfaces this clear ValueError rather than a
+    # source-resolution / SchemaBypassError from ``resolve_source``.
     if "artifact_id" not in key:
         raise ValueError(
             "ArtifactDetection.get_artifact_removed_intervals: key "
             "must include 'artifact_id'."
         )
+    source = ArtifactSelection.resolve_source(key)
     interval_list_name = artifact_interval_list_name(key["artifact_id"])
 
     if source.kind == "recording":
