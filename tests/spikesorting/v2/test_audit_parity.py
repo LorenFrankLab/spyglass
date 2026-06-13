@@ -3103,14 +3103,14 @@ def test_filtering_description_reflects_actual_steps():
     assert "common reference" not in bp_only
 
     # Bandpass + common reference -> both steps named, in the RUNTIME APPLY
-    # order (reference first, then bandpass -- the order is non-commutative
-    # and load-bearing, so the provenance must not reverse it).
+    # order (bandpass first, then reference -- the order is non-commutative on
+    # the global-median branch, so the provenance must track the apply order).
     both = Recording._filtering_description(bp, "global_median")
     assert "bandpass filter 300-6000 Hz" in both
     assert "common reference (global_median)" in both
-    assert both.index("common reference") < both.index(
-        "bandpass filter"
-    ), "provenance must list reference before bandpass (the apply order)"
+    assert both.index("bandpass filter") < both.index(
+        "common reference"
+    ), "provenance must list bandpass before reference (the apply order)"
 
 
 @pytest.mark.usefixtures("dj_conn")

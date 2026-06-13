@@ -1891,9 +1891,9 @@ class Recording(SpyglassMixin, dj.Computed):
         kept as a ``Recording`` staticmethod because
         ``_compute_recording_artifact`` calls
         ``self._apply_pre_motion_preprocessing(...)`` and the v2 tests call
-        it directly. The reference + bandpass-filter stack (whitening
-        deferred to the sorter so motion correction never sees whitened
-        data) lives in the service module.
+        it directly. The bandpass-filter-then-common-reference stack
+        (whitening deferred to the sorter so motion correction never sees
+        whitened data) lives in the service module.
         """
         return apply_pre_motion_preprocessing(
             recording,

@@ -6,12 +6,15 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class BandpassFilterParams(BaseModel):
-    """Bandpass filter cutoffs applied AFTER referencing.
+    """Bandpass filter cutoffs applied BEFORE referencing.
 
-    The v2 runtime references first, then bandpass-filters (matching v1 at
-    ``v1/recording.py:643-671``); the order is load-bearing because it is
-    NOT commutative on the global-median common-reference branch, so do not
-    reorder the runtime to "filter then reference".
+    The v2 runtime bandpass-filters first, then references -- the
+    signal-processing-preferred order and an **intentional divergence from
+    v1**, which referenced first (``v1/recording.py:643-671``). The order is
+    NOT commutative on the global-median common-reference branch (the
+    per-sample median is non-linear), so v2 and v1 differ numerically there;
+    on the ``specific`` / ``none`` paths the steps are linear and commute, so
+    output is identical to either order.
 
     Defaults ``freq_min=300.0``, ``freq_max=6000.0`` mirror v1's
     ``default`` ``SpikeSortingPreprocessingParameters`` row at
@@ -99,7 +102,13 @@ class PreprocessingParamsSchema(BaseModel):
       so the ``"no_filter"`` preset is a real disable instead of a
       wide-band pass) and flipped the ``whiten`` default to ``None``
       to match the runtime (whitening is deferred to the sorter, so
-      the schema must not default to claiming it is configured).
+      the schema must not default to claiming it is configured). The
+      runtime preprocessing ORDER also changed at 3, from
+      reference->filter to **bandpass filter->reference** (the
+      signal-processing-preferred order; see
+      ``apply_pre_motion_preprocessing``). The params blob shape is
+      unchanged, so ``schema_version`` is NOT bumped -- only the runtime
+      interpretation moved; dev rows are regenerated, not migrated.
     """
 
     model_config = ConfigDict(extra="forbid")

@@ -64,15 +64,40 @@ def _resolve_nwb(args: argparse.Namespace) -> Path | None:
     return Path(candidate).expanduser()
 
 
-def _ensure_sort_group(nwb_file_name: str, sort_group_id: int) -> None:
+def _ensure_sort_group(
+    nwb_file_name: str, sort_group_id: int, reference_mode: str = "none"
+) -> None:
     """Make sure the sort-group layout exists for this NWB.
 
     ``SortGroup.set_group_by_shank`` is idempotent; calling it on an
     already-grouped session is a no-op.
+
+    ``reference_mode`` selects the v1 referencing for the captured baseline:
+    ``"none"`` (the order-invariant default used by the parity matrix) leaves
+    v1's config-derived references alone, while ``"global_median"`` forces a
+    common-median reference on every electrode group (v1's ``-2`` sentinel via
+    the ``references`` dict). The global-median baseline is v1's REFERENCE-
+    FIRST output; v2 filters before referencing, so its global-median result
+    intentionally diverges from this baseline.
     """
+    from spyglass.common.common_ephys import Electrode
     from spyglass.spikesorting.v1 import SortGroup
 
-    SortGroup.set_group_by_shank(nwb_file_name=nwb_file_name)
+    if reference_mode == "global_median":
+        # v1 stores -2 as the global-median sentinel; map every electrode
+        # group to it so the whole session is common-median referenced.
+        e_groups = {
+            str(g)
+            for g in (
+                Electrode & {"nwb_file_name": nwb_file_name}
+            ).fetch("electrode_group_name")
+        }
+        SortGroup.set_group_by_shank(
+            nwb_file_name=nwb_file_name,
+            references={e_group: -2 for e_group in e_groups},
+        )
+    else:
+        SortGroup.set_group_by_shank(nwb_file_name=nwb_file_name)
     if not (
         SortGroup
         & {"nwb_file_name": nwb_file_name, "sort_group_id": sort_group_id}
@@ -485,6 +510,7 @@ def run_baseline_capture(
     sorter_param_name: str = "default_clusterless",
     artifact_param_name: str = "default",
     sorter: str = "clusterless_thresholder",
+    reference_mode: str = "none",
 ) -> tuple[Path, Path]:
     """Run the full v1 pipeline on ``nwb_source`` and write baseline artifacts.
 
@@ -522,7 +548,7 @@ def run_baseline_capture(
     """
     nwb_file_name = copy_and_insert_nwb(nwb_source)
     _ensure_lab_team(team_name)
-    _ensure_sort_group(nwb_file_name, sort_group_id)
+    _ensure_sort_group(nwb_file_name, sort_group_id, reference_mode)
     recording_pk = _populate_recording(
         nwb_file_name=nwb_file_name,
         sort_group_id=sort_group_id,
@@ -736,6 +762,19 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "(n_units >= 2 AND median_firing_rate > 0) on the baseline."
         ),
     )
+    parser.add_argument(
+        "--reference-mode",
+        default="none",
+        choices=("none", "global_median"),
+        help=(
+            "Referencing applied to the captured v1 sort group. Defaults to "
+            "'none' (the order-invariant path used by the parity matrix). "
+            "Pass 'global_median' to capture a v1 REFERENCE-FIRST common-"
+            "median baseline; v2 bandpass-filters BEFORE referencing, so its "
+            "global-median output intentionally DIVERGES from this baseline "
+            "(use it for manual divergence inspection, not an automated match)."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -878,6 +917,7 @@ def main(argv: list[str] | None = None) -> int:
         artifact_param_name=args.artifact_param_name,
         sorter_param_name=args.sorter_param_name,
         sorter=args.sorter,
+        reference_mode=args.reference_mode,
     )
     return 0
 

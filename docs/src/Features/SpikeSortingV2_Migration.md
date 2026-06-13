@@ -131,6 +131,18 @@ If you compare v1 and v2 outputs on the same input, expect these
 **intentional, correct** differences (each is documented in the
 [CHANGELOG](../CHANGELOG.md) v2 breaking-changes subsection):
 
+- **v2 bandpass-filters BEFORE referencing** (v1 referenced first). The
+  *reasoning*: the spatial common reference should be estimated from the
+  band-limited spike signal, so out-of-band drift and DC offset are filtered
+  out first and do not leak into the reference subtracted from every channel —
+  the signal-processing-preferred order, an intentional divergence from v1.
+  The two orders are *not* commutative only on the **`global_median` common
+  reference** (the per-sample median is non-linear), so the preprocessed —
+  and therefore sorted — output differs from v1 **only** for global-median
+  sort groups. `specific`-electrode and `none` references (and a global
+  *average* reference — `global_median` with `operator="average"`, where the
+  mean is linear) commute with the filter, so they are numerically identical
+  to v1.
 - **Small spike-count delta near artifact-mask edges.** v2 fixes v1's
   off-by-one interval consolidation. A few spikes per disjoint interval
   boundary differ; v2 is correct.

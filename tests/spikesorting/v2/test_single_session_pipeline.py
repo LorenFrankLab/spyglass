@@ -6962,11 +6962,16 @@ def test_recording_make_global_median_reference(polymer_smoke_session):
     1. The populate completes without raising (the cross-schema
        ``validated.common_reference.operator`` field resolution
        works -- a load-bearing untested code path).
-    2. The resulting traces differ from a no-reference (``-1``)
-       recording on the same data: CMR is applied BEFORE bandpass
-       so the final per-sample channel median is not exactly zero,
-       but the data IS materially different from the unreferenced
-       version (signed-traces sum and overall variance shift).
+    2. The resulting traces differ materially from a no-reference
+       (``-1``) recording on the same data (the CMR subtracts the
+       per-sample channel median, shifting the signal vs the
+       unreferenced version).
+    3. The runtime order is filter-then-reference: because the
+       global-median CMR runs LAST (after bandpass), the recording's
+       per-sample median ACROSS channels is ~0 (the median is
+       translation-equivariant). The old reference-then-filter order
+       (per-channel bandpass AFTER CMR) does not preserve that, so a
+       ~0 per-sample median pins the intentional v1-divergent order.
     """
     import numpy as _np
 
@@ -7041,6 +7046,23 @@ def test_recording_make_global_median_reference(polymer_smoke_session):
         f"indistinguishable (mean |diff| = {delta:.2e}). The -2 "
         "branch may not be applying CMR; check the call to "
         "sip.common_reference(reference='global')."
+    )
+
+    # Pin (3): filter-then-reference order. The global-median CMR is the
+    # LAST step, so subtracting the per-sample cross-channel median leaves
+    # that median at ~0 (median is translation-equivariant). The old
+    # reference-then-filter order (per-channel bandpass AFTER CMR) does not
+    # preserve this, so a ~0 per-sample median is the numeric signature of
+    # the intentional v1-divergent order. (Requires the default_franklab
+    # preset's operator="median"; an "average" operator would zero the per-
+    # sample MEAN, not the median.)
+    scale = max(1.0, float(_np.abs(traces_ref).max()))
+    per_sample_median = _np.median(traces_ref, axis=1)
+    max_abs_median = float(_np.abs(per_sample_median).max())
+    assert max_abs_median < 1e-3 * scale, (
+        "global-median recording's per-sample cross-channel median is "
+        f"{max_abs_median:.3e} (scale {scale:.3e}); expected ~0, which "
+        "holds only when CMR is the FINAL step (bandpass-then-reference)."
     )
 
 
@@ -8602,6 +8624,20 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
     operator-captured v1 baselines. The ``pytest-v2`` workflow does not set
     either, so reviewers should not count these cases as per-PR coverage --
     they activate only under the capture workflow described in "Env vars" below.
+
+    **Referencing scope.** This v1↔v2 spike-parity contract holds only for
+    *order-invariant* referencing -- the parity fixtures use the inherited
+    default, which is ``reference_mode="none"`` here, and ``specific`` (and a
+    global *average* reference) are also linear and commute with the filter.
+    It does NOT hold for ``reference_mode="global_median"``: v2 bandpass-
+    filters BEFORE referencing while v1 referenced first, and the per-sample
+    median is non-linear, so global-median output intentionally diverges from
+    v1. Do not add a global-median case to this matrix expecting a match; that
+    divergence is guarded instead by
+    ``test_recording_make_global_median_reference`` (Pin 3) and documented in
+    the migration guide. (``baseline_capture.py --reference-mode global_median``
+    can capture a v1 reference-first global-median baseline for manual
+    divergence inspection.)
 
     The deterministic threshold sorter SHOULD detect the same peaks
     under SI 0.104 as it did under SI 0.99. The test enforces a

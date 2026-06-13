@@ -199,6 +199,20 @@ dropping; `restrict_by_artifact=True` now honors the v2
   change (the persisted `reference_mode` / `reference_electrode_id` columns and
   their validator are unchanged); there is **no** stored `"auto"` mode — auto
   is resolved in the helper to one of the three real modes.
+- **Preprocessing now bandpass-filters BEFORE referencing** (v1 referenced
+  first; `v1/recording.py:643-671`). `apply_pre_motion_preprocessing` applies
+  the temporal bandpass, then the spatial common reference, then drops a
+  `"specific"` reference channel — the signal-processing-preferred order and
+  an intentional divergence from v1. The two orders are non-commutative
+  **only** on the `global_median` common reference (the per-sample median is
+  non-linear), so preprocessed/sorted output differs from v1 only for
+  global-median sort groups; `specific` / `none` (and a global *average*
+  reference — `global_median` mode with `operator="average"`, where the mean
+  is linear) remain numerically identical to v1. The
+  `ElectricalSeries.filtering` provenance now lists `bandpass filter …; common
+  reference (…)` in apply order. The params blob shape is unchanged, so
+  `params_schema_version` stays at 3 (the schema-history docstring records the
+  order change at v3); dev rows are regenerated, not migrated.
 - **Tetrode probe `set_contact_ids`** now passes string ids
   (`[str(c) for c in sort_group_channel_ids]`) instead of v1's raw
   integers. probeinterface accepts both; flagged for users who

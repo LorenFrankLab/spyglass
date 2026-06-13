@@ -2,8 +2,9 @@
 
 These functions are the materialization core of ``Recording.make_compute``
 (and the rebuild path): slicing the raw recording in time and channels,
-applying the pre-motion preprocessing stack (reference + bandpass filter,
-no whitening), attaching legacy tetrode geometry, resolving SpikeInterface
+applying the pre-motion preprocessing stack (bandpass filter, then common
+reference, no whitening), attaching legacy tetrode geometry, resolving
+SpikeInterface
 channel ids and per-channel probe metadata, building the
 ``ElectricalSeries.filtering`` provenance string, the truncation-guard
 tolerance, and streaming the preprocessed traces into an
@@ -345,11 +346,17 @@ def apply_pre_motion_preprocessing(
     sort_group_channel_ids: list,
     validated,
 ):
-    """Apply the pre-motion preprocessing stack (filter + reference).
+    """Apply the pre-motion preprocessing stack (filter then reference).
 
-    Whitening is deliberately deferred to the sorter stage so motion
-    correction never sees whitened data (SpikeInterface docs flag
-    whitening as destructive for motion estimators).
+    Bandpass filter (temporal) runs BEFORE referencing (spatial). This is
+    the signal-processing-preferred order and intentionally diverges from
+    v1, which referenced first. The two are not commutative on the
+    global-median branch (the per-sample median is non-linear), so v2 and v1
+    differ numerically there; on the ``specific`` / ``none`` paths the steps
+    are linear and commute, so output is identical to the old order.
+    Whitening stays deferred to the sorter stage so motion correction never
+    sees whitened data (SpikeInterface docs flag whitening as destructive for
+    motion estimators).
 
     Takes a pre-validated ``PreprocessingParamsSchema`` instance
     so the DB read happens once in ``make_fetch`` -- this method
@@ -359,6 +366,18 @@ def apply_pre_motion_preprocessing(
     import numpy as _np
     import spikeinterface.preprocessing as sip
 
+    # 1. Bandpass filter first. ``bandpass_filter=None`` is the "no_filter"
+    #    preset -- skip the step entirely rather than passing a wide band
+    #    that still filters.
+    if validated.bandpass_filter is not None:
+        recording = sip.bandpass_filter(
+            recording,
+            freq_min=validated.bandpass_filter.freq_min,
+            freq_max=validated.bandpass_filter.freq_max,
+            dtype=_np.float64,
+        )
+
+    # 2. Reference the filtered signal.
     if reference_mode == "specific":
         recording = sip.common_reference(
             recording,
@@ -367,11 +386,23 @@ def apply_pre_motion_preprocessing(
             dtype=_np.float64,
         )
         # Drop the reference channel from the recording surface so
-        # the sorter only sees the actual sort-group channels.
-        if int(reference_electrode_id) in [
-            int(c) for c in recording.get_channel_ids()
-        ]:
-            recording = recording.remove_channels([int(reference_electrode_id)])
+        # the sorter only sees the actual sort-group channels
+        # (restrict_recording included it solely for this step).
+        # Its presence here is an invariant: restrict_recording always
+        # slices the specific reference in, and bandpass / common_reference
+        # preserve channel ids, so a missing ref means an upstream contract
+        # broke. Fail loud rather than silently shipping a reference channel
+        # into the sort.
+        channel_ids = [int(c) for c in recording.get_channel_ids()]
+        if int(reference_electrode_id) not in channel_ids:
+            raise RuntimeError(
+                "apply_pre_motion_preprocessing: 'specific' reference "
+                f"electrode {int(reference_electrode_id)} is absent after "
+                f"referencing (channels={channel_ids}); cannot drop it from "
+                "the sort surface. restrict_recording must slice the "
+                "reference channel in for subtraction."
+            )
+        recording = recording.remove_channels([int(reference_electrode_id)])
     elif reference_mode == "global_median":
         recording = sip.common_reference(
             recording,
@@ -385,17 +416,6 @@ def apply_pre_motion_preprocessing(
             f"{reference_mode!r}. Use 'none', 'global_median', or "
             "'specific'."
         )
-
-    # bandpass_filter=None disables filtering (the "no_filter"
-    # preset); skip the step entirely rather than passing a
-    # wide-band that still filters.
-    if validated.bandpass_filter is not None:
-        recording = sip.bandpass_filter(
-            recording,
-            freq_min=validated.bandpass_filter.freq_min,
-            freq_max=validated.bandpass_filter.freq_max,
-            dtype=_np.float64,
-        )
     return recording
 
 
@@ -408,18 +428,18 @@ def filtering_description(bandpass_filter, reference_mode: str) -> str:
     None) or ``reference_mode='none'``. Important for
     archival / DANDI export; the string is descriptive only and is not
     read back internally. Steps are listed in the order the runtime
-    APPLIES them -- common reference first, then bandpass filter (see
+    APPLIES them -- bandpass filter first, then common reference (see
     ``apply_pre_motion_preprocessing``) -- since that order is
-    non-commutative and load-bearing for v1 parity.
+    non-commutative on the global-median branch.
     """
     steps = []
-    if reference_mode != "none":
-        steps.append(f"common reference ({reference_mode})")
     if bandpass_filter is not None:
         steps.append(
             f"bandpass filter {bandpass_filter.freq_min:g}-"
             f"{bandpass_filter.freq_max:g} Hz"
         )
+    if reference_mode != "none":
+        steps.append(f"common reference ({reference_mode})")
     return "; ".join(steps) if steps else "none (raw, no preprocessing)"
 
 

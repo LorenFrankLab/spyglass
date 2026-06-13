@@ -442,10 +442,12 @@ def test_filtering_description_lists_only_steps_that_ran():
     bp = SimpleNamespace(freq_min=300, freq_max=6000)
     assert filtering_description(None, "none") == "none (raw, no preprocessing)"
     assert filtering_description(bp, "none") == "bandpass filter 300-6000 Hz"
-    assert filtering_description(None, "median") == "common reference (median)"
-    # Reference first, then bandpass (the non-commutative apply order).
-    assert filtering_description(bp, "median") == (
-        "common reference (median); bandpass filter 300-6000 Hz"
+    assert filtering_description(None, "global_median") == (
+        "common reference (global_median)"
+    )
+    # Bandpass first, then reference (the non-commutative apply order).
+    assert filtering_description(bp, "global_median") == (
+        "bandpass filter 300-6000 Hz; common reference (global_median)"
     )
 
 
