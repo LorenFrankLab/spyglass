@@ -868,9 +868,13 @@ for label, interval_data in results.groupby("interval_labels"):
         only. `out` (outside-brain) channels are **report-only**, never
         persisted (the boolean flag cannot carry the label and a persisted
         `out` would be wrongly interpolated downstream), and the write is
-        **additive** — it never clears an existing curated flag. Detection
-        thresholds are SpikeInterface defaults (Neuropixels-derived) and every
-        threshold is overridable via `detection_params`. Run it (and finalize
+        **additive** — it never clears an existing curated flag. Pass the
+        reviewed report back (`write=True, report=report`) to persist exactly
+        what you reviewed without re-detecting (detection samples random chunks
+        with SpikeInterface's `seed=None`, so a fresh confirm call may differ).
+        Detection thresholds are SpikeInterface defaults (Neuropixels-derived)
+        and every threshold is overridable via `detection_params`. Run it
+        (and finalize
         flags) **before** creating sort groups: `SortGroupV2.set_group_by_*`
         excludes flagged channels at creation, so a flag added after a group
         exists does not retroactively drop its members. This is a runtime

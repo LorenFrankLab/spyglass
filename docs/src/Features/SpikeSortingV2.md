@@ -226,9 +226,16 @@ report = suggest_bad_channels(nwb_file_name, write=False)
 for entry in report:
     print(entry)  # {"electrode_group_name", "electrode_id", "probe_shank", "label"}
 
-# 2. Confirm: persist the quality-bad channels you reviewed.
-suggest_bad_channels(nwb_file_name, write=True)
+# 2. Confirm: persist exactly the report you reviewed (no re-detection).
+suggest_bad_channels(nwb_file_name, write=True, report=report)
 ```
+
+Pass the reviewed `report` back to the confirm call so it persists precisely what
+you saw. A bare `suggest_bad_channels(nwb_file_name, write=True)` re-detects, and
+since the method samples random chunks (`seed=None`) it may flag a slightly
+different set than the review returned — fine for a one-shot run, but pass
+`report=` (or a fixed `detection_params={"seed": ...}` to both calls) when the
+reviewed and persisted sets must match.
 
 Each flagged electrode carries its **label** (`dead`, `noise`, or `out`) so you
 can see what kind of bad it is before persisting. `write=True` sets
@@ -239,13 +246,17 @@ because `Electrode.bad_channel='True'` means a *quality-bad* (dead/noise-class)
 channel that is safe to interpolate or remove — it must not mark an
 outside-brain channel. To keep an `out` channel out of a sort, omit it from the
 group's membership (e.g.
-`SortGroupV2.set_group_by_electrode_table_column(column="electrode_id",
-groups=[[...in-brain electrode_ids...]])`).
+`SortGroupV2.set_group_by_electrode_table_column(nwb_file_name,
+column="electrode_id", groups=[[...in-brain electrode_ids...]])`).
 
 The detection thresholds are SpikeInterface defaults (Neuropixels-derived);
 pass `detection_params=` (e.g. `{"dead_channel_threshold": -0.4}`) to recalibrate
 for other probe geometries such as polymer probes. You can also scope the scan
-with `electrode_group_names=` and change the band with `bandpass=`.
+with `electrode_group_names=` and change the band with `bandpass=`. The method
+estimates from random chunks with SpikeInterface's `seed=None`, so the flagged
+set can vary run-to-run; pass `detection_params={"seed": ...}` for a reproducible
+result (it is Neuropixels-density-tuned, so small shanks such as tetrodes are
+unreliable — treat a small-shank "no bad channels" with skepticism).
 
 **Ordering contract:** run this helper and finalize the `bad_channel` flags
 **before** creating sort groups. `SortGroupV2.set_group_by_*` excludes flagged
