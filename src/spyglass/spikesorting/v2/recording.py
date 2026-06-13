@@ -33,6 +33,7 @@ from spyglass.spikesorting.v2._params.preprocessing import (
 )
 from spyglass.spikesorting.v2._recording_materialization import (
     apply_pre_motion_preprocessing,
+    fetch_interior_bad_channel_ids,
     fetch_sort_group_probe_info,
     maybe_apply_tetrode_geometry,
     restrict_recording,
@@ -1096,6 +1097,7 @@ class RecordingFetched(NamedTuple):
     preproc_job_kwargs: dict | None
     probe_types: tuple
     electrode_group_names: tuple
+    bad_channel_ids: tuple
 
 
 class RecordingComputed(NamedTuple):
@@ -1262,6 +1264,15 @@ class Recording(SpyglassMixin, dj.Computed):
         probe_types, electrode_group_names = self._fetch_sort_group_probe_info(
             nwb_file_name, channel_ids
         )
+        # The sort group's interior curated-bad channels to re-include and fill
+        # on the ``interpolate`` path -- empty for ``remove`` (which re-includes
+        # nothing, so the slice and output are byte-identical to today). Sorted
+        # tuple so the fetched value is DeepHash-stable like the others.
+        bad_channel_ids: tuple = ()
+        if preproc_validated.bad_channel_handling == "interpolate":
+            bad_channel_ids = fetch_interior_bad_channel_ids(
+                nwb_file_name, channel_ids
+            )
         return RecordingFetched(
             sel=sel,
             channel_ids=channel_ids,
@@ -1273,6 +1284,7 @@ class Recording(SpyglassMixin, dj.Computed):
             preproc_job_kwargs=preproc_job_kwargs,
             probe_types=probe_types,
             electrode_group_names=electrode_group_names,
+            bad_channel_ids=bad_channel_ids,
         )
 
     def make_compute(
@@ -1288,6 +1300,7 @@ class Recording(SpyglassMixin, dj.Computed):
         preproc_job_kwargs,
         probe_types,
         electrode_group_names,
+        bad_channel_ids,
     ):
         """Run the preprocessing + streaming write outside any DB transaction.
 
@@ -1336,6 +1349,7 @@ class Recording(SpyglassMixin, dj.Computed):
             preproc_validated=preproc_validated,
             probe_types=probe_types,
             electrode_group_names=electrode_group_names,
+            bad_channel_ids=bad_channel_ids,
         )
 
         # The duration we INTENDED to save: the sort interval intersected
@@ -1628,6 +1642,7 @@ class Recording(SpyglassMixin, dj.Computed):
             preproc_validated=fetched.preproc_validated,
             probe_types=fetched.probe_types,
             electrode_group_names=fetched.electrode_group_names,
+            bad_channel_ids=fetched.bad_channel_ids,
             existing_analysis_file_name=row["analysis_file_name"],
         )
         if rebuilt_hash != row["cache_hash"]:
@@ -1656,6 +1671,7 @@ class Recording(SpyglassMixin, dj.Computed):
         preproc_validated: PreprocessingParamsSchema,
         probe_types: tuple,
         electrode_group_names: tuple,
+        bad_channel_ids: tuple = (),
         existing_analysis_file_name: str | None = None,
     ) -> tuple[str, str, str, float, float, float, int, float]:
         """Open raw NWB, run preprocessing, stream to AnalysisNwbfile.
@@ -1705,6 +1721,8 @@ class Recording(SpyglassMixin, dj.Computed):
                 sort_valid_times=sort_valid_times,
                 raw_valid_times=raw_valid_times,
                 min_segment_length=preproc_validated.min_segment_length,
+                bad_channel_handling=preproc_validated.bad_channel_handling,
+                bad_channel_ids=bad_channel_ids,
             )
         )
         recording, applied_steps = self._apply_pre_motion_preprocessing(
@@ -1713,6 +1731,8 @@ class Recording(SpyglassMixin, dj.Computed):
             reference_electrode_id=reference_electrode_id,
             sort_group_channel_ids=channel_ids,
             validated=preproc_validated,
+            bad_channel_handling=preproc_validated.bad_channel_handling,
+            bad_channel_ids=bad_channel_ids,
         )
         recording = self._maybe_apply_tetrode_geometry(
             recording=recording,
@@ -1806,6 +1826,8 @@ class Recording(SpyglassMixin, dj.Computed):
         raw_valid_times,
         *,
         min_segment_length: float = 1.0,
+        bad_channel_handling: str = "remove",
+        bad_channel_ids=(),
     ):
         """Slice the SI recording in time and channels.
 
@@ -1814,8 +1836,9 @@ class Recording(SpyglassMixin, dj.Computed):
         ``Recording`` classmethod because ``_compute_recording_artifact``
         calls ``self._restrict_recording(...)``. The time/channel slicing,
         the disjoint-interval concat + ``timestamps_override``
-        construction, and the reference-channel handling live in the
-        service module. Returns ``(recording, timestamps_override,
+        construction, the reference-channel handling, and the ``interpolate``
+        re-inclusion of interior curated-bad channels live in the service
+        module. Returns ``(recording, timestamps_override,
         n_selected_intervals)``.
         """
         return restrict_recording(
@@ -1828,6 +1851,8 @@ class Recording(SpyglassMixin, dj.Computed):
             sort_valid_times,
             raw_valid_times,
             min_segment_length=min_segment_length,
+            bad_channel_handling=bad_channel_handling,
+            bad_channel_ids=bad_channel_ids,
         )
 
     @staticmethod
@@ -1890,6 +1915,8 @@ class Recording(SpyglassMixin, dj.Computed):
         reference_electrode_id: int | None,
         sort_group_channel_ids: list,
         validated: PreprocessingParamsSchema,
+        bad_channel_handling: str = "remove",
+        bad_channel_ids=(),
     ):
         """Apply the pre-motion preprocessing stack (phase-shift, filter, ref).
 
@@ -1898,11 +1925,11 @@ class Recording(SpyglassMixin, dj.Computed):
         kept as a ``Recording`` staticmethod because
         ``_compute_recording_artifact`` calls
         ``self._apply_pre_motion_preprocessing(...)`` and the v2 tests call
-        it directly. The optional-phase-shift-then-bandpass-then-common-
-        reference stack (whitening deferred to the sorter so motion correction
-        never sees whitened data) lives in the service module. Returns
-        ``(recording, applied_steps)`` -- the applied-step report feeds
-        ``_filtering_description``.
+        it directly. The optional phase-shift -> bandpass -> bad-channel
+        handling -> common-reference stack (whitening deferred to the sorter so
+        motion correction never sees whitened data) lives in the service
+        module. Returns ``(recording, applied_steps)`` -- the applied-step
+        report feeds ``_filtering_description``.
         """
         return apply_pre_motion_preprocessing(
             recording,
@@ -1910,6 +1937,8 @@ class Recording(SpyglassMixin, dj.Computed):
             reference_electrode_id,
             sort_group_channel_ids,
             validated,
+            bad_channel_handling=bad_channel_handling,
+            bad_channel_ids=bad_channel_ids,
         )
 
     @staticmethod

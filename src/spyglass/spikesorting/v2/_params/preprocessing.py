@@ -129,6 +129,15 @@ class PreprocessingParamsSchema(BaseModel):
       The blob shape only grows by an optional field that defaults to
       ``None``, so existing rows validate unchanged and ``schema_version``
       is again NOT bumped; dev rows are regenerated.
+    * 3 also added ``bad_channel_handling`` (``"remove"`` | ``"interpolate"``,
+      default ``"remove"``) controlling how curated ``Electrode.bad_channel``
+      flags are handled at materialization. ``"remove"`` is byte-identical to
+      pre-field behavior (the flagged channels were already excluded at sort-
+      group creation), so existing rows validate unchanged and output is
+      identical -- ``schema_version`` is again NOT bumped; dev rows are
+      regenerated. Detection of bad channels is a separate concern handled by
+      ``suggest_bad_channels`` (it writes the flags this field consumes), not a
+      preprocessing parameter.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -153,12 +162,22 @@ class PreprocessingParamsSchema(BaseModel):
     # before the sorter sees them. Matches v1's default at
     # ``src/spyglass/spikesorting/v1/recording.py:135``; passed through
     # to ``sort_interval.intersect(..., min_length=...)``.
+    bad_channel_handling: Literal["remove", "interpolate"] = "remove"
+    # How curated ``Electrode.bad_channel='True'`` flags are handled at
+    # materialization. ``"remove"`` (default) is byte-identical to today: the
+    # flagged channels were already excluded at sort-group creation and stay
+    # out. ``"interpolate"`` re-includes the group's pitch-adjacent interior
+    # flagged channels and fills them from good neighbours so geometry-aware
+    # sorters see a complete probe. Detection is NOT done here -- the flags come
+    # from ``suggest_bad_channels`` or manual curation.
 
     def to_pre_motion_dict(self) -> dict:
         """Return the stage-1 dict (phase-shift + filter + reference). Cached.
 
         ``phase_shift`` / ``bandpass_filter`` are ``None`` when the
         corresponding step is disabled; the runtime skips it in that case.
+        ``bad_channel_handling`` is included because the handling step runs in
+        stage 1 (between filter and reference).
         """
         return {
             "phase_shift": (
@@ -172,6 +191,7 @@ class PreprocessingParamsSchema(BaseModel):
                 else self.bandpass_filter.model_dump()
             ),
             "common_reference": self.common_reference.model_dump(),
+            "bad_channel_handling": self.bad_channel_handling,
         }
 
     def to_post_motion_dict(self) -> dict:

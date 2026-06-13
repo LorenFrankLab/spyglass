@@ -69,6 +69,8 @@ def restrict_recording(
     raw_valid_times,
     *,
     min_segment_length: float = 1.0,
+    bad_channel_handling: str = "remove",
+    bad_channel_ids=(),
 ):
     """Slice the SI recording in time and channels.
 
@@ -184,15 +186,18 @@ def restrict_recording(
     assert_reference_not_member(
         reference_mode, reference_electrode_id, sort_group_channel_ids
     )
+    # Base slice = the sort group's declared members. Add the ``specific``
+    # reference (sliced in only for subtraction, dropped after referencing) and,
+    # on the ``interpolate`` path, the group's interior curated-bad channels so
+    # they are present to be filled. ``remove`` adds neither curated-bad channel,
+    # so the slice is byte-identical to today (the members, already sorted in
+    # ``make_fetch``; ``sorted(set(...))`` preserves that order/dedup).
+    extra: list[int] = []
     if reference_mode == "specific":
-        slice_ids = sorted(
-            set(
-                [int(c) for c in sort_group_channel_ids]
-                + [int(reference_electrode_id)]
-            )
-        )
-    else:
-        slice_ids = [int(c) for c in sort_group_channel_ids]
+        extra.append(int(reference_electrode_id))
+    if bad_channel_handling == "interpolate":
+        extra.extend(int(c) for c in bad_channel_ids)
+    slice_ids = sorted(set([int(c) for c in sort_group_channel_ids] + extra))
 
     si_ids = spikeinterface_channel_ids(nwb_file_name, slice_ids)
     recording = ChannelSliceRecording(
@@ -339,12 +344,208 @@ def maybe_apply_tetrode_geometry(
     return recording.set_probe(tetrode, in_place=True)
 
 
+# Pitch-anchored adjacency for the ``interpolate`` re-inclusion. Constants are
+# dimensionless multiples of the probe's own physical pitch, so one rule fits
+# dense Neuropixels shanks and sparse polymer groups alike.
+MIN_GOOD_NEIGHBORS = 2  # surrounded (>=2), not merely adjacent on one side
+RADIUS_FACTOR = 1.5  # one pitch away counts; a multi-pitch gap does not
+
+
+def _shank_pitch(shank_xyz):
+    """Median nearest-neighbor distance over ALL electrodes on a shank.
+
+    ``shank_xyz``: (M, 3) probe-relative positions (``Probe.Electrode``
+    ``rel_x/rel_y/rel_z``) of every electrode on the shank (good AND bad), so
+    the result is the probe's physical pitch, independent of which channels a
+    sort group happens to keep. Returns ``None`` when the shank has < 2
+    electrodes OR any coordinate is non-finite (``rel_x/rel_y/rel_z`` are
+    nullable -> a NULL arrives as NaN); a ``None`` pitch makes the caller raise
+    the clear "needs positions" error rather than silently producing NaN
+    distances.
+    """
+    import numpy as np
+
+    xyz = np.asarray(shank_xyz, dtype=float)
+    if xyz.shape[0] < 2 or not np.isfinite(xyz).all():
+        return None
+    dd = np.linalg.norm(xyz[:, None, :] - xyz[None, :, :], axis=-1)
+    np.fill_diagonal(dd, np.inf)
+    return float(np.median(dd.min(axis=1)))
+
+
+def _interior_bad_channel_ids(good_xyz, candidate_xyz, pitch):
+    """Curated-bad ids physically embedded among a group's good channels.
+
+    ``good_xyz``: (N, 3) probe-relative positions of the group's good channels.
+    ``candidate_xyz``: list of ``(electrode_id, (rel_x, rel_y, rel_z))`` for the
+    curated-bad electrodes on the group's shank(s). ``pitch``: the shank's
+    physical electrode spacing from :func:`_shank_pitch` (NOT derived from the
+    possibly-sparse good set). A candidate is kept only when at least
+    ``MIN_GOOD_NEIGHBORS`` good channels lie within ``RADIUS_FACTOR * pitch`` of
+    it -- so a bad channel between two far-apart good channels (its nearest good
+    channel many pitches away) is excluded, while a bad channel in a dense run
+    is kept. Returns a sorted list. Defensive on non-finite input
+    (``make_fetch`` raises before calling): a non-finite ``pitch`` or good
+    position -> ``[]``; a candidate with a non-finite position is skipped (never
+    silently treated as adjacent).
+    """
+    import numpy as np
+
+    good = np.asarray(good_xyz, dtype=float)
+    if (
+        good.shape[0] < 2
+        or not pitch
+        or not np.isfinite(pitch)
+        or not np.isfinite(good).all()
+    ):
+        return []  # need >=2 finite good channels and a finite pitch
+    radius = RADIUS_FACTOR * float(pitch)
+    return sorted(
+        int(cid)
+        for cid, pos in candidate_xyz
+        if np.isfinite(pos).all()
+        and int(
+            (
+                np.linalg.norm(good - np.asarray(pos, float), axis=1) <= radius
+            ).sum()
+        )
+        >= MIN_GOOD_NEIGHBORS
+    )
+
+
+def fetch_interior_bad_channel_ids(
+    nwb_file_name: str, sort_group_channel_ids
+) -> tuple:
+    """The sort group's *interior* curated-bad electrode ids (interpolate path).
+
+    Returns a sorted tuple of the curated-bad (``Electrode.bad_channel='True'``)
+    electrodes on the sort group's shank(s) that are physically embedded among
+    the group's good channels (>= ``MIN_GOOD_NEIGHBORS`` good channels within
+    ``RADIUS_FACTOR * pitch``, ``pitch`` the full-shank spacing). These are the
+    channels ``interpolate`` re-includes and fills. The candidate set is scoped
+    to the group's ``(electrode_group_name, probe_shank)`` -- NOT a shank-wide
+    grab -- because ``set_group_by_electrode_table_column`` builds
+    arbitrary-membership groups and stores no original column values.
+
+    Geometry comes from the probe-relative ``Probe.Electrode``
+    ``rel_x/rel_y/rel_z`` (joined onto ``Electrode``), NOT ``Electrode.x/y/z``:
+    the latter are absolute brain coordinates that are commonly unset (all
+    zero / NULL), whereas ``rel_*`` is the physical contact geometry -- the
+    same coordinate system SpikeInterface's ``get_channel_locations`` (and
+    therefore ``interpolate_bad_channels``) reads from the NWB. Using the same
+    source keeps the adjacency decision consistent with the actual fill.
+
+    Raises ``ValueError`` (pointing the user at ``remove``) when any required
+    position is null/NaN, a needed electrode has no probe geometry, or a shank's
+    pitch is undefined -- the full-shank position fetch is a superset of the
+    good + candidate positions, so a ``_shank_pitch`` of ``None`` is the
+    finiteness gate for the whole shank (rather than silently returning an empty
+    set that masquerades as "no bad channels to fill"). DB-touching at call time
+    via lazy ``Electrode`` / ``Probe`` imports; the geometry math is delegated to
+    the pure helpers above.
+    """
+    import numpy as np
+
+    from spyglass.common.common_device import Probe
+    from spyglass.common.common_ephys import Electrode
+
+    def _fail(what: str):
+        raise ValueError(
+            "Recording.make: bad_channel_handling='interpolate' needs probe "
+            f"geometry for {nwb_file_name!r}, but {what}. Use "
+            "bad_channel_handling='remove', or populate Probe.Electrode "
+            "rel_x/rel_y/rel_z and probe_shank for the sort group's shank(s)."
+        )
+
+    good_ids = {int(c) for c in sort_group_channel_ids}
+    # Inner-join Electrode with Probe.Electrode to bring in rel_x/rel_y/rel_z
+    # (and probe_shank). Electrodes lacking a probe link drop out of the join,
+    # so an incomplete result means a member without geometry -> fail loud.
+    good_rows = (
+        (Electrode * Probe.Electrode)
+        & {"nwb_file_name": nwb_file_name}
+        & [{"electrode_id": c} for c in sorted(good_ids)]
+    ).fetch(
+        "electrode_id",
+        "electrode_group_name",
+        "probe_shank",
+        "rel_x",
+        "rel_y",
+        "rel_z",
+        as_dict=True,
+    )
+    found_ids = {int(r["electrode_id"]) for r in good_rows}
+    if found_ids != good_ids:
+        missing = sorted(good_ids - found_ids)
+        _fail(
+            f"sort-group electrode(s) {missing[:5]} have no probe geometry "
+            "(no Probe.Electrode link)"
+        )
+
+    # Group the good channels by physical shank.
+    good_by_shank: dict[tuple[str, int], list] = {}
+    for r in good_rows:
+        if r["probe_shank"] is None:
+            _fail(f"electrode {int(r['electrode_id'])} has no probe_shank")
+        pos = np.array([r["rel_x"], r["rel_y"], r["rel_z"]], dtype=float)
+        if not np.isfinite(pos).all():
+            _fail(
+                f"good electrode {int(r['electrode_id'])} has a null position"
+            )
+        good_by_shank.setdefault(
+            (str(r["electrode_group_name"]), int(r["probe_shank"])), []
+        ).append(pos)
+
+    interior: list[int] = []
+    for (egroup, shank), good_xyz in good_by_shank.items():
+        restr = {
+            "nwb_file_name": nwb_file_name,
+            "electrode_group_name": egroup,
+            "probe_shank": shank,
+        }
+        # Full-shank positions -> physical pitch (and the finiteness gate).
+        shank_xyz = np.array(
+            [
+                [r["rel_x"], r["rel_y"], r["rel_z"]]
+                for r in ((Electrode * Probe.Electrode) & restr).fetch(
+                    "rel_x", "rel_y", "rel_z", as_dict=True
+                )
+            ],
+            dtype=float,
+        )
+        pitch = _shank_pitch(shank_xyz)
+        if pitch is None:
+            _fail(
+                f"shank {shank} of group {egroup!r} has < 2 positioned "
+                "electrodes or a null coordinate (pitch undefined)"
+            )
+        # Curated-bad candidates on this shank, excluding any that are already
+        # sort-group members (a remove_bad_channels=False group keeps its own
+        # bad members present; only the *excluded* interior bad are re-included).
+        candidate_xyz = [
+            (
+                int(r["electrode_id"]),
+                np.array([r["rel_x"], r["rel_y"], r["rel_z"]], dtype=float),
+            )
+            for r in (
+                (Electrode * Probe.Electrode) & restr & {"bad_channel": "True"}
+            ).fetch("electrode_id", "rel_x", "rel_y", "rel_z", as_dict=True)
+            if int(r["electrode_id"]) not in good_ids
+        ]
+        interior.extend(
+            _interior_bad_channel_ids(good_xyz, candidate_xyz, pitch)
+        )
+    return tuple(sorted(set(interior)))
+
+
 def apply_pre_motion_preprocessing(
     recording,
     reference_mode: str,
     reference_electrode_id: int | None,
     sort_group_channel_ids: list,
     validated,
+    bad_channel_handling: str = "remove",
+    bad_channel_ids=(),
 ):
     """Apply the pre-motion preprocessing stack (phase-shift, filter, ref).
 
@@ -412,6 +613,35 @@ def apply_pre_motion_preprocessing(
             freq_max=validated.bandpass_filter.freq_max,
             dtype=_np.float64,
         )
+
+    # 1b. Bad-channel handling: between filter and reference (matches the
+    #     IBL/AIND destripe order). Only ``interpolate`` does anything -- it
+    #     fills the interior curated-bad channels ``restrict_recording``
+    #     re-included. On ``remove`` those channels were never re-added, so
+    #     ``bad_channel_ids`` is empty here and this is a no-op (today's
+    #     behavior). The ``specific`` reference is present only for subtraction
+    #     (dropped after ``common_reference``) and is never a handling target.
+    present = {int(c) for c in recording.get_channel_ids()}
+    ref_id = (
+        int(reference_electrode_id) if reference_mode == "specific" else None
+    )
+    to_interpolate = sorted(
+        (present & {int(c) for c in bad_channel_ids}) - {ref_id}
+    )
+    if bad_channel_handling == "interpolate" and to_interpolate:
+        # interpolation needs channel locations; fail clearly if absent rather
+        # than letting SI raise opaquely deep in the kriging call.
+        if recording.get_channel_locations() is None:
+            raise ValueError(
+                "apply_pre_motion_preprocessing: interpolate requires channel "
+                "locations on the recording, but none are set (no probe "
+                "geometry). Use bad_channel_handling='remove', or ensure the "
+                "NWB / probe carries electrode positions."
+            )
+        recording = sip.interpolate_bad_channels(recording, to_interpolate)
+    else:
+        to_interpolate = []
+    applied_steps["bad_channels"] = {"interpolated": to_interpolate}
 
     # 2. Reference the filtered signal.
     if reference_mode == "specific":
@@ -483,8 +713,15 @@ def filtering_description(
     falsely listed. Important for archival / DANDI export; the string is
     descriptive only and is not read back internally. Steps are listed in the
     order the runtime APPLIES them -- phase-shift first, then bandpass filter,
-    then common reference (see ``apply_pre_motion_preprocessing``) -- since
-    that order is non-commutative on the global-median branch.
+    then bad-channel interpolation, then common reference (see
+    ``apply_pre_motion_preprocessing``) -- since that order is non-commutative
+    on the global-median branch.
+
+    The bad-channel interpolation claim is driven by ``applied_steps`` (the
+    actual count that ran), not the params, and is appended ONLY when that count
+    is > 0 -- so the default ``remove`` path (count 0) leaves the string
+    byte-for-byte unchanged (this string is persisted into
+    ``ElectricalSeries.filtering`` and hashed into ``cache_hash``).
     """
     steps = []
     if applied_steps.get("phase_shift"):
@@ -493,6 +730,13 @@ def filtering_description(
         steps.append(
             f"bandpass filter {bandpass_filter.freq_min:g}-"
             f"{bandpass_filter.freq_max:g} Hz"
+        )
+    n_interp = len(
+        applied_steps.get("bad_channels", {}).get("interpolated", [])
+    )
+    if n_interp:
+        steps.append(
+            f"interpolate {n_interp} bad channel{'s' if n_interp != 1 else ''}"
         )
     if reference_mode != "none":
         steps.append(f"common reference ({reference_mode})")
