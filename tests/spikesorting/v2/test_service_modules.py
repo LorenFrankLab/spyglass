@@ -354,3 +354,184 @@ def test_read_artifact_removed_intervals_missing_artifact_id_raises_value_error(
 
     with pytest.raises(ValueError, match="must include 'artifact_id'"):
         read_artifact_removed_intervals({})
+
+
+# --------------------------------------------------------------------------- #
+# _signal_math merge dedup (the abs-time core build_lazy_merged_sorting uses)
+# --------------------------------------------------------------------------- #
+
+
+def test_dedup_merged_spike_times_drops_cross_unit_coincidences():
+    """Cross-contributor spikes within delta collapse; far ones are kept."""
+    from spyglass.spikesorting.v2._signal_math import (
+        _dedup_merged_spike_times,
+    )
+
+    # unit A=[0.0], unit B=[0.0001] -> 0.1 ms apart, different units -> dedup.
+    near = _dedup_merged_spike_times([[0.0], [0.0001]], delta_s=0.4e-3)
+    assert near.tolist() == [0.0]
+    # unit A=[0.0], unit B=[0.001] -> 1 ms apart -> both kept.
+    far = _dedup_merged_spike_times([[0.0], [0.001]], delta_s=0.4e-3)
+    assert far.tolist() == [0.0, 0.001]
+
+
+def test_dedup_merged_spike_times_keeps_within_unit_close_pair():
+    """A close pair from the SAME contributor is a real event, kept.
+
+    The membership guard mirrors SI's ``(diff>delta)|(diff(membership)==0)``:
+    a sub-delta pair is dropped only when the two spikes came from DIFFERENT
+    contributors (a cross-unit double-detection), never within one unit.
+    """
+    from spyglass.spikesorting.v2._signal_math import (
+        _dedup_merged_spike_times,
+    )
+
+    out = _dedup_merged_spike_times([[0.0, 0.0001]], delta_s=0.4e-3)
+    assert out.tolist() == [0.0, 0.0001]
+
+
+def test_dedup_merged_spike_times_empty():
+    from spyglass.spikesorting.v2._signal_math import (
+        _dedup_merged_spike_times,
+    )
+
+    assert _dedup_merged_spike_times([], delta_s=0.4e-3).tolist() == []
+
+
+# --------------------------------------------------------------------------- #
+# _sorting_compute contracts (pure precedence + input-validation guards)
+# --------------------------------------------------------------------------- #
+
+
+def test_clusterless_noise_levels_precedence():
+    """Explicit noise_levels win; else uv->[1.0], mad->None."""
+    from spyglass.spikesorting.v2._sorting_compute import (
+        _clusterless_noise_levels,
+    )
+
+    assert _clusterless_noise_levels([2.0, 3.0], "uv") == [2.0, 3.0]
+    assert _clusterless_noise_levels([2.0, 3.0], "mad") == [2.0, 3.0]
+    assert _clusterless_noise_levels(None, "uv") == [1.0]
+    assert _clusterless_noise_levels(None, "mad") is None
+
+
+def test_apply_artifact_mask_rejects_malformed_valid_times():
+    """The complement walker rejects inputs that would silently under-mask."""
+    from spyglass.spikesorting.v2._sorting_compute import apply_artifact_mask
+    from spyglass.spikesorting.v2.exceptions import (
+        EmptyArtifactValidTimesError,
+    )
+
+    rec = _rec(np.zeros((100, 2), dtype="float32"))
+    with pytest.raises(EmptyArtifactValidTimesError):
+        apply_artifact_mask(rec, np.empty((0, 2)))
+    with pytest.raises(ValueError):
+        apply_artifact_mask(rec, np.array([0.0, 1.0, 2.0]))  # not (n, 2)
+    with pytest.raises(ValueError):
+        apply_artifact_mask(rec, np.array([[1.0, 0.0]]))  # end < start
+    with pytest.raises(ValueError):
+        apply_artifact_mask(
+            rec, np.array([[0.0, 0.05], [0.02, 0.08]])
+        )  # overlapping / unsorted
+
+
+# --------------------------------------------------------------------------- #
+# _recording_materialization contracts (pure)
+# --------------------------------------------------------------------------- #
+
+
+def test_truncation_tolerance_scales_with_interval_count():
+    from spyglass.spikesorting.v2._recording_materialization import (
+        truncation_tolerance,
+    )
+
+    fs = 30000.0
+    assert truncation_tolerance(1, fs) == pytest.approx(2.5 / fs)
+    assert truncation_tolerance(20, fs) == pytest.approx(21.5 / fs)
+
+
+def test_filtering_description_lists_only_steps_that_ran():
+    from types import SimpleNamespace
+
+    from spyglass.spikesorting.v2._recording_materialization import (
+        filtering_description,
+    )
+
+    bp = SimpleNamespace(freq_min=300, freq_max=6000)
+    assert filtering_description(None, "none") == "none (raw, no preprocessing)"
+    assert filtering_description(bp, "none") == "bandpass filter 300-6000 Hz"
+    assert filtering_description(None, "median") == "common reference (median)"
+    # Reference first, then bandpass (the non-commutative apply order).
+    assert filtering_description(bp, "median") == (
+        "common reference (median); bandpass filter 300-6000 Hz"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# _units_nwb edge cases (dataframes pure; readback via pynwb, no DB)
+# --------------------------------------------------------------------------- #
+
+
+def test_empty_spike_times_dataframe_shape():
+    from spyglass.spikesorting.v2._units_nwb import (
+        empty_spike_times_dataframe,
+    )
+
+    df = empty_spike_times_dataframe()
+    assert list(df.columns) == ["spike_times"]
+    assert df.index.name == "unit_id"
+    assert len(df) == 0
+
+
+def test_abs_spike_times_dataframe_roundtrip():
+    from spyglass.spikesorting.v2._units_nwb import abs_spike_times_dataframe
+
+    df = abs_spike_times_dataframe(
+        {0: np.array([1.0, 2.0]), 3: np.array([5.0])}
+    )
+    assert df.index.name == "unit_id"
+    assert list(df.index) == [0, 3]
+    np.testing.assert_array_equal(df.loc[0, "spike_times"], [1.0, 2.0])
+    np.testing.assert_array_equal(df.loc[3, "spike_times"], [5.0])
+    assert len(abs_spike_times_dataframe({})) == 0
+
+
+def _write_units_nwb(path, unit_spike_times):
+    """Write a minimal NWB; add a Units table only if spike trains given."""
+    from datetime import datetime, timezone
+
+    import pynwb
+
+    nwbfile = pynwb.NWBFile(
+        session_description="test",
+        identifier="test-units-nwb",
+        session_start_time=datetime(2020, 1, 1, tzinfo=timezone.utc),
+    )
+    for st in unit_spike_times:
+        nwbfile.add_unit(spike_times=list(st))
+    with pynwb.NWBHDF5IO(path=str(path), mode="w") as io:
+        io.write(nwbfile)
+
+
+def test_read_units_abs_spike_times_populated(tmp_path):
+    from spyglass.spikesorting.v2._units_nwb import (
+        read_units_abs_spike_times,
+    )
+
+    p = tmp_path / "units.nwb"
+    _write_units_nwb(p, [[0.1, 0.2, 0.3], [1.5]])
+    out = read_units_abs_spike_times(str(p))
+    assert set(out) == {0, 1}
+    np.testing.assert_allclose(out[0], [0.1, 0.2, 0.3])
+    np.testing.assert_allclose(out[1], [1.5])
+
+
+def test_read_units_abs_spike_times_empty(tmp_path):
+    """No Units table -> {} (the zero-unit-sort edge case)."""
+    from spyglass.spikesorting.v2._units_nwb import (
+        read_units_abs_spike_times,
+    )
+
+    p = tmp_path / "no_units.nwb"
+    _write_units_nwb(p, [])  # no add_unit -> nwbf.units is None
+    assert read_units_abs_spike_times(str(p)) == {}
