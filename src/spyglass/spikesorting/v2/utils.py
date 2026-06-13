@@ -351,6 +351,100 @@ def assert_reference_not_member(
         )
 
 
+# Private sentinel for "derive the reference from the per-electrode config"
+# in :func:`resolve_group_reference`. A distinct object (not ``None``) so an
+# explicit/configured ``None`` can still mean "no reference" -- ``None`` is a
+# real, v1-compatible sentinel value (``original_reference_electrode`` is
+# nullable), so it cannot double as the "auto-derive" marker.
+_AUTO_REFERENCE = object()
+
+
+def resolve_group_reference(
+    configured_ref_ids,
+    *,
+    explicit_ref=_AUTO_REFERENCE,
+    group_label="",
+) -> tuple[ReferenceMode, int | None]:
+    """Resolve one electrode group's reference to ``(reference_mode, id)``.
+
+    Maps a sort group's configured or explicitly-supplied reference to a
+    validated ``(reference_mode, reference_electrode_id)`` pair that
+    satisfies :func:`_validate_reference_fields`. Emits only the three real
+    ``ReferenceMode`` values -- never ``"auto"`` -- so the resolved pair can
+    be written straight into a ``SortGroupV2`` master row.
+
+    Sentinels (v1-compatible): ``None`` or ``-1`` -> ``("none", None)``;
+    ``-2`` -> ``("global_median", None)``; ``>= 0`` -> ``("specific", id)``.
+
+    Parameters
+    ----------
+    configured_ref_ids : iterable of (int or None)
+        The ``original_reference_electrode`` value of every member electrode
+        in the group. Only read on the auto-derivation path
+        (``explicit_ref is _AUTO_REFERENCE``).
+    explicit_ref : int, None, or _AUTO_REFERENCE, optional
+        A reference electrode id / sentinel from a ``references`` mapping, or
+        the private ``_AUTO_REFERENCE`` sentinel (the default) to derive the
+        reference from ``configured_ref_ids``. An explicit value -- including
+        an explicit ``None`` ("no reference") -- always wins over config.
+    group_label : str, optional
+        Group name used in error messages.
+
+    Returns
+    -------
+    (reference_mode, reference_electrode_id) : tuple of (str, int or None)
+
+    Raises
+    ------
+    ValueError
+        On the auto path, if the members carry mixed
+        ``original_reference_electrode`` values (cannot pick one reference;
+        v1 silently fell through here). For any path, if the resolved
+        sentinel is a negative value other than ``-1`` / ``-2``.
+
+    Notes
+    -----
+    Membership validation is intentionally outside this resolver: helpers that
+    support ``omit_ref_electrode_group`` must honor those skips first, then
+    call :func:`assert_reference_not_member` for the groups they actually
+    insert.
+    """
+    if explicit_ref is not _AUTO_REFERENCE:
+        ref = -1 if explicit_ref is None else int(explicit_ref)
+    else:
+        uniq = sorted(
+            {-1 if r is None else int(r) for r in configured_ref_ids}
+        )
+        if len(uniq) == 0:
+            raise ValueError(
+                "SortGroupV2: electrode group "
+                f"{group_label!r} has no member electrodes to auto-derive a "
+                "reference from. Pass an explicit `references` entry, or check "
+                "the group membership."
+            )
+        if len(uniq) != 1:
+            raise ValueError(
+                "SortGroupV2: electrode group "
+                f"{group_label!r} has mixed original_reference_electrode "
+                f"values {uniq}; cannot auto-derive a single reference. "
+                "Pass an explicit `references` entry for this group, or fix "
+                "the Electrode config."
+            )
+        ref = uniq[0]
+
+    if ref == -1:
+        return "none", None
+    if ref == -2:
+        return "global_median", None
+    if ref < 0:
+        raise ValueError(
+            f"SortGroupV2: electrode group {group_label!r} has unrecognized "
+            f"reference sentinel {ref}; expected -1 (none), -2 "
+            "(global_median), or a non-negative electrode id."
+        )
+    return "specific", ref
+
+
 def resolve_conversion_and_offset(recording) -> tuple[float, float]:
     """Resolve the ElectricalSeries ``(conversion, offset)`` for a recording.
 

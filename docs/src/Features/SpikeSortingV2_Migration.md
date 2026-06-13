@@ -25,6 +25,27 @@ notebook. For the pipeline overview, see
 - **Filter fields are `freq_min` / `freq_max`** (v1:
   `frequency_min` / `frequency_max`), nested under `bandpass_filter` in
   the preprocessing schema.
+- **Sort-group referencing inherits the configured reference by default**
+  (matching v1). `SortGroupV2.set_group_by_shank` and
+  `set_group_by_electrode_table_column` now read each group's
+  `Electrode.original_reference_electrode` and map it per group to a
+  `reference_mode` — `-1` / `None` → `"none"`, `-2` → `"global_median"`,
+  a non-negative id → `"specific"` (that electrode). This replaces the
+  earlier v2 default of no reference (`"none"`). Override knobs:
+  `set_group_by_shank` takes v1's per-group `references={electrode_group:
+  ref_id}` dict back, and both helpers accept a call-wide
+  `reference_mode=` (with `reference_electrode_id=` for `"specific"`) that
+  forces one mode on every group; the two are mutually exclusive.
+  **Three things now fail loud at group creation that v1 tolerated:**
+  electrodes in one group with *mixed* configured references raise instead of
+  silently mis-referencing (v1 built a `ValueError` but never raised it); a
+  `"specific"` reference that is itself a member of the sort group raises (it
+  would be subtracted then dropped, silently shrinking the group) — use
+  `omit_ref_electrode_group=True` or a cross-group reference; and a
+  `"specific"` reference electrode that does not exist in the session, or
+  whose owning electrode group is ambiguous (the same `electrode_id` under
+  two electrode groups), raises here instead of failing later inside
+  `Recording.populate`.
 - **Porting a non-curated sorter by name?** Call the opt-in helper once:
 
   ```python

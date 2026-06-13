@@ -178,10 +178,27 @@ dropping; `restrict_by_artifact=True` now honors the v2
   input are therefore not byte-equivalent at the per-interval
   boundary; the trace arrays differ by one sample per interval.
   `cache_hash` will not match.
-- **`SortGroupV2.set_group_by_shank` API.** v1's per-group
-  `references: dict` parameter is gone; v2 takes a single
-  `sort_reference_electrode_id`. Users who need per-group
-  references in v2 must build the rows manually.
+- **`SortGroupV2` grouping helpers inherit the configured reference by
+  default + fail loud on ambiguity.** `set_group_by_shank` and
+  `set_group_by_electrode_table_column` now resolve referencing **per sort
+  group** from each group's members' `Electrode.original_reference_electrode`
+  (v1's useful default), mapped via the v1-compatible sentinels (`-1` /
+  `None` → `"none"`, `-2` → `"global_median"`, `>= 0` → `"specific"`),
+  replacing the earlier v2 default of no reference. `set_group_by_shank`
+  restores v1's per-group `references: dict` (keyed by `electrode_group_name`);
+  both helpers keep a call-wide `reference_mode` / `reference_electrode_id`
+  override (mutually exclusive with `references`). Cases that v1 silently
+  mishandled now raise at group creation: electrodes in one group with
+  **mixed** configured references (v1 constructed a `ValueError` but never
+  raised it); a `"specific"` reference that is itself a member of the sort
+  group it references (caught at group creation rather than deep in `make`) —
+  use `omit_ref_electrode_group=True` or a cross-group reference; and a
+  `"specific"` reference that names a nonexistent electrode or whose owning
+  electrode group is ambiguous (the same `electrode_id` under two electrode
+  groups), instead of failing later inside `Recording.populate`. No schema
+  change (the persisted `reference_mode` / `reference_electrode_id` columns and
+  their validator are unchanged); there is **no** stored `"auto"` mode — auto
+  is resolved in the helper to one of the three real modes.
 - **Tetrode probe `set_contact_ids`** now passes string ids
   (`[str(c) for c in sort_group_channel_ids]`) instead of v1's raw
   integers. probeinterface accepts both; flagged for users who
