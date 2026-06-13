@@ -121,6 +121,15 @@ working tree at planning time; re-confirm before editing (files move).
 - A **reference-quality** check. v2 intentionally supports a `bad_channel='True'`
   reference (e.g. a dedicated ground); phase 3 preserves that and adds no raise
   (Open Question 5).
+- **Automatic handling of `out` (outside-brain) channels.** Phase 2 surfaces
+  `out` in the report but never persists it (the boolean `bad_channel` cannot
+  carry the label, and a persisted `out` would be wrongly interpolated). `out` is
+  **report-only**: it is not removed or interpolated anywhere — `remove` re-reads
+  no flags, so it will not drop a report-only `out` channel. A user keeps an `out`
+  channel out of a sort by **omitting it when the sort group is defined**. An
+  explicit out-handling mode (a new `bad_channel_handling` value that removes
+  report-flagged `out` channels at materialization) is a possible future
+  addition, out of scope here.
 - Changing the sort-group concept to *include* bad channels (the rejected
   Option B below).
 - A spatial-frequency "destripe" reference (`highpass_spatial_filter`). Noted as

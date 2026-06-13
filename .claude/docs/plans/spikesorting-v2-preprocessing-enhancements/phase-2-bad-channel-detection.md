@@ -106,10 +106,17 @@ contract in phase 3).
     `dead`/`noise`** electrodes. `"out"` channels are **never** written to
     `bad_channel` — the boolean flag cannot carry the `out` label, and a
     persisted `out` would later be wrongly *interpolated* by phase 3 (which
-    treats curated flags as quality-bad and fills them). Outside-brain channels
-    are surfaced in the report so the user handles them deliberately — exclude
-    them from sort groups, or use `bad_channel_handling="remove"`. The write is
-    **additive** — it never clears an existing curated `bad_channel='True'`.
+    treats curated flags as quality-bad and fills them). `"out"` is therefore
+    **report-only**: it is surfaced for the user's awareness but is **not**
+    handled automatically anywhere in this pipeline. In particular,
+    `bad_channel_handling="remove"` will **not** drop it — `remove` honors the
+    declared sort-group membership and re-reads no flags, and `out` is never a
+    curated flag, so a report-only `out` channel that is a sort-group member
+    keeps being sorted. To keep an `out` channel out of a sort, **omit it when
+    the sort group is defined** (it is not auto-excluded, unlike a
+    `bad_channel='True'` channel) — or wait for a future explicit out-handling
+    mode (overview Non-Goals). The `write=True` action is **additive** — it never
+    clears an existing curated `bad_channel='True'`.
   - **Invariant to document:** `Electrode.bad_channel='True'` means a
     *quality-bad* (dead/noise-class) channel that is safe to interpolate or
     remove; it must NOT be used to mark an outside-brain channel. This is why
