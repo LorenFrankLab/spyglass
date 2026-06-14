@@ -57,6 +57,12 @@ curations all coexist under one merge surface.
     whitened data. The make body validates timestamp coverage and raises
     `RecordingTruncatedError` if the raw timestamps array does not span the
     requested interval. See [ADC phase-shift](#adc-phase-shift-neuropixels) below.
+- **`DriftEstimate`** -- per-`Recording` probe-motion QC estimate
+    (`compute_motion`), populated **on demand**. Stores the displacement field
+    plus a `max_abs_displacement_um` summary so high-drift sessions can be
+    flagged. It is **never applied** to the traces or the sort -- drift
+    correction stays deferred to the sorter. See
+    [Drift QC](#drift-qc-motion-estimate-never-applied) below.
 - **`ArtifactSelection` / `ArtifactDetection`** -- amplitude-threshold artifact
     intervals. Uses the source-part pattern (`SharedArtifactGroupSource`) so
     multiple recordings can share a single artifact-detection result.
@@ -308,6 +314,41 @@ channel only — a manually set flag on an outside-brain channel must use `remov
 never `interpolate` (which would invent signal). The `specific` reference
 electrode is never a handling target; a `bad_channel='True'` reference (e.g. a
 dedicated ground) materializes exactly as before.
+
+### Drift QC (motion estimate, never applied)
+
+`DriftEstimate` estimates probe motion (drift) on a materialized `Recording` and
+stores it as a queryable QC artifact. It is **computed, never applied** — nothing
+in the pipeline corrects the traces or the sort with it (drift correction stays
+deferred to the sorter, exactly as without this table). The point is to *flag*
+high-drift sessions, not to change any sort output.
+
+It is a `dj.Computed` table populated **on demand** — the expensive estimation
+runs only when you call `.populate()`, never eagerly alongside `Recording`:
+
+```python
+from spyglass.spikesorting.v2.recording import DriftEstimate, Recording
+
+# rec_key selects a materialized Recording, e.g. {"recording_id": ...}
+DriftEstimate.populate(rec_key)
+
+# Flag high-drift sessions by the summary metric.
+(DriftEstimate & "max_abs_displacement_um > 20").fetch("recording_id")
+max_um = (DriftEstimate & rec_key).fetch1("max_abs_displacement_um")
+
+# Rehydrate the full SpikeInterface Motion for plotting / inspection.
+motion = DriftEstimate().get_motion(rec_key)  # .displacement, .temporal_bins_s, ...
+```
+
+The estimate uses a single default preset (`dredge_fast`, stored on the row for
+provenance); there is deliberately no parameters Lookup. `dredge_fast` routes
+through SpikeInterface's dredge estimator, so the `spikesorting-v2` extra now
+installs `torch`. `compute_motion` localizes peaks spatially, so it consumes the
+recording's channel locations (the cached `Recording` carries probe geometry).
+
+To be explicit: populating `DriftEstimate` leaves the upstream `Recording`
+untouched — its `cache_hash` and the traces from `get_recording` are unchanged.
+Applying motion correction is out of scope by design.
 
 ### Downstream consumers
 
