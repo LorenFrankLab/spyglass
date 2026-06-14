@@ -358,10 +358,11 @@ def _shank_pitch(shank_xyz):
     ``rel_x/rel_y/rel_z``) of every electrode on the shank (good AND bad), so
     the result is the probe's physical pitch, independent of which channels a
     sort group happens to keep. Returns ``None`` when the shank has < 2
-    electrodes OR any coordinate is non-finite (``rel_x/rel_y/rel_z`` are
-    nullable -> a NULL arrives as NaN); a ``None`` pitch makes the caller raise
-    the clear "needs positions" error rather than silently producing NaN
-    distances.
+    electrodes, any coordinate is non-finite (``rel_x/rel_y/rel_z`` are
+    nullable -> a NULL arrives as NaN), OR the spacing is non-positive
+    (coincident / duplicate contact positions give a 0 median). A ``None``
+    pitch makes the caller raise the clear "needs positions" error rather than
+    silently producing NaN distances or a 0 pitch that re-includes nothing.
     """
     import numpy as np
 
@@ -370,15 +371,20 @@ def _shank_pitch(shank_xyz):
         return None
     dd = np.linalg.norm(xyz[:, None, :] - xyz[None, :, :], axis=-1)
     np.fill_diagonal(dd, np.inf)
-    return float(np.median(dd.min(axis=1)))
+    pitch = float(np.median(dd.min(axis=1)))
+    # A non-positive median (coincident/duplicate contacts) is degenerate
+    # geometry the adjacency test can't use; treat it as undefined so the caller
+    # raises rather than the falsy-0 path silently returning an empty set.
+    return pitch if pitch > 0 else None
 
 
 def _interior_bad_channel_ids(good_xyz, candidate_xyz, pitch):
     """Curated-bad ids physically embedded among a group's good channels.
 
     ``good_xyz``: (N, 3) probe-relative positions of the group's good channels.
-    ``candidate_xyz``: list of ``(electrode_id, (rel_x, rel_y, rel_z))`` for the
-    curated-bad electrodes on the group's shank(s). ``pitch``: the shank's
+    ``candidate_xyz``: list of ``(electrode_id, rel_position_array)`` for the
+    curated-bad electrodes on the group's shank(s) (the position is a
+    ``(rel_x, rel_y, rel_z)`` array or tuple). ``pitch``: the shank's
     physical electrode spacing from :func:`_shank_pitch` (NOT derived from the
     possibly-sparse good set). A candidate is kept only when at least
     ``MIN_GOOD_NEIGHBORS`` good channels lie within ``RADIUS_FACTOR * pitch`` of
@@ -621,17 +627,37 @@ def apply_pre_motion_preprocessing(
     #     ``bad_channel_ids`` is empty here and this is a no-op (today's
     #     behavior). The ``specific`` reference is present only for subtraction
     #     (dropped after ``common_reference``) and is never a handling target.
-    present = {int(c) for c in recording.get_channel_ids()}
+    if bad_channel_handling not in ("remove", "interpolate"):
+        raise ValueError(
+            "apply_pre_motion_preprocessing: invalid bad_channel_handling "
+            f"{bad_channel_handling!r}; use 'remove' or 'interpolate'."
+        )
     ref_id = (
         int(reference_electrode_id) if reference_mode == "specific" else None
     )
-    to_interpolate = sorted(
-        (present & {int(c) for c in bad_channel_ids}) - {ref_id}
-    )
-    if bad_channel_handling == "interpolate" and to_interpolate:
+    to_interpolate: list[int] = []
+    if bad_channel_handling == "interpolate":
+        present = {int(c) for c in recording.get_channel_ids()}
+        requested = {int(c) for c in bad_channel_ids}
+        # ``restrict_recording`` was told to slice these in; a missing one means
+        # the slice contract broke -- fail loud rather than silently leaving an
+        # interior bad channel unfilled (mirrors the specific-reference guard
+        # below).
+        missing = requested - present
+        if missing:
+            raise RuntimeError(
+                "apply_pre_motion_preprocessing: interior bad channels "
+                f"{sorted(missing)} are absent from the recording surface; "
+                "restrict_recording must slice them in for interpolation."
+            )
+        to_interpolate = sorted(requested - {ref_id})
+    if to_interpolate:
         # interpolation needs channel locations; fail clearly if absent rather
         # than letting SI raise opaquely deep in the kriging call.
-        if recording.get_channel_locations() is None:
+        # ``has_channel_location()`` is the right predicate -- SI's
+        # ``get_channel_locations()`` *raises* (does not return None) when no
+        # probe geometry is set.
+        if not recording.has_channel_location():
             raise ValueError(
                 "apply_pre_motion_preprocessing: interpolate requires channel "
                 "locations on the recording, but none are set (no probe "
@@ -639,8 +665,6 @@ def apply_pre_motion_preprocessing(
                 "NWB / probe carries electrode positions."
             )
         recording = sip.interpolate_bad_channels(recording, to_interpolate)
-    else:
-        to_interpolate = []
     applied_steps["bad_channels"] = {"interpolated": to_interpolate}
 
     # 2. Reference the filtered signal.

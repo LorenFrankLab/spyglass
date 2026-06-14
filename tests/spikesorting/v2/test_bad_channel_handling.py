@@ -54,6 +54,9 @@ def test_shank_pitch_is_full_shank_spacing():
     nan_shank[3, 1] = np.nan
     assert _shank_pitch(nan_shank) is None
     assert _shank_pitch(shank[:1]) is None
+    # Degenerate geometry: coincident contacts -> 0 median -> None (so the
+    # caller raises rather than the falsy-0 path silently re-including nothing).
+    assert _shank_pitch(np.zeros((4, 3), dtype=float)) is None
 
 
 def test_interior_bad_channel_ids_pitch_anchored():
@@ -107,11 +110,16 @@ class _FakeRecording:
     def get_property(self, key):
         return None
 
+    def has_channel_location(self):
+        # The predicate `apply_pre_motion_preprocessing` actually uses (SI's
+        # `get_channel_locations()` *raises* when no geometry, it never returns
+        # None -- so the guard checks `has_channel_location()`).
+        return bool(self._locations)
+
     def get_channel_locations(self):
-        # A real recording returns an (n, 2/3) array; the "no geometry" case is
-        # represented as None so the interpolate guard can be exercised.
+        # Faithful to SI: raises (does not return None) when no geometry.
         if not self._locations:
-            return None
+            raise Exception("There are no channel locations")
         return [[0.0, float(i)] for i in range(len(self._ids))]
 
     def remove_channels(self, ids):
@@ -256,6 +264,50 @@ def test_interpolate_needs_channel_locations(monkeypatch):
             bad_channel_handling="interpolate",
             bad_channel_ids=[2],
         )
+
+
+def test_invalid_bad_channel_handling_raises(monkeypatch):
+    from spyglass.spikesorting.v2._recording_materialization import (
+        apply_pre_motion_preprocessing,
+    )
+
+    calls: list = []
+    _patch_sip(monkeypatch, calls)
+    rec = _FakeRecording([0, 1, 2], calls)
+
+    with pytest.raises(ValueError, match="invalid bad_channel_handling"):
+        apply_pre_motion_preprocessing(
+            rec,
+            "none",
+            None,
+            [0, 1, 2],
+            _validated(),
+            bad_channel_handling="interpoltae",  # typo -> loud, not silent no-op
+        )
+
+
+def test_filtering_description_interpolate_branch():
+    """`filtering_description` appends the interpolate clause only when N > 0
+    (so `remove` provenance/cache_hash is unchanged), singular vs plural, and
+    positioned between bandpass and reference."""
+    from spyglass.spikesorting.v2._recording_materialization import (
+        filtering_description,
+    )
+
+    bp = SimpleNamespace(freq_min=300.0, freq_max=6000.0)
+    none_run = {"phase_shift": False, "bad_channels": {"interpolated": []}}
+    assert "interpolate" not in filtering_description(
+        bp, "global_median", none_run
+    )
+    one = {"phase_shift": False, "bad_channels": {"interpolated": [5]}}
+    assert filtering_description(bp, "global_median", one) == (
+        "bandpass filter 300-6000 Hz; interpolate 1 bad channel; "
+        "common reference (global_median)"
+    )
+    two = {"phase_shift": False, "bad_channels": {"interpolated": [5, 6]}}
+    assert "interpolate 2 bad channels" in filtering_description(
+        bp, "none", two
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -451,6 +503,53 @@ def test_make_fetch_remove_reincludes_nothing(handling_session):
 
 @pytest.mark.slow
 @pytest.mark.integration
+def test_make_fetch_reincludes_interior_bad_per_shank(handling_session):
+    """A group spanning two shanks re-includes the interior bad on EACH shank
+    (the per-shank pitch/adjacency loop) and excludes a gap bad."""
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+
+    nwb = handling_session["nwb_file_name"]
+    # electrode_id = shank * 32 + within. Shank 0 cluster {0,1,3}, shank 1
+    # cluster {32,33,35}; electrode 2 / 34 are interior to each cluster; 15 is a
+    # shank-0 gap bad far from any good channel.
+    good = [0, 1, 3, 32, 33, 35]
+    interior_s0, interior_s1, gap = 2, 34, 15
+
+    with (
+        _clean_sort_groups(nwb),
+        _restore_bad_channel(nwb, [interior_s0, interior_s1, gap]),
+    ):
+        for eid in (interior_s0, interior_s1, gap):
+            _set_bad(nwb, eid, "True")
+        SortGroupV2.set_group_by_electrode_table_column(
+            nwb_file_name=nwb,
+            column="electrode_id",
+            groups=[good],
+            reference_mode="none",
+        )
+        sg_id = int(
+            (SortGroupV2 & {"nwb_file_name": nwb}).fetch1("sort_group_id")
+        )
+        rec_pk = RecordingSelection.insert_selection(
+            {
+                "nwb_file_name": nwb,
+                "sort_group_id": sg_id,
+                "interval_list_name": "raw data valid times",
+                "preproc_params_name": _INTERP_PARAMS,
+                "team_name": "v2_handling_team",
+            }
+        )
+        fetched = Recording().make_fetch(rec_pk)
+        # One interior bad from each shank; the gap bad excluded.
+        assert tuple(fetched.bad_channel_ids) == (interior_s0, interior_s1)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
 def test_interpolate_completes_probe_remove_omits(handling_session):
     """``interpolate`` materializes the flagged interior channel back (count
     complete); ``remove`` (default) omits it. The headline behavior."""
@@ -497,6 +596,24 @@ def test_interpolate_completes_probe_remove_omits(handling_session):
         n_interp = int((Recording & interp_pk).fetch1("n_channels"))
         assert n_remove == 31  # flagged channel stays excluded
         assert n_interp == 32  # flagged interior channel re-included + filled
+
+        # The re-included channel is genuinely present and filled (finite,
+        # non-zero) in the cached recording -- not a zeroed/broken stub. (The
+        # stub test proves `interpolate_bad_channels` is invoked between filter
+        # and reference; this confirms the end-to-end result is real.) `remove`
+        # omits it entirely.
+        import numpy as np
+
+        interp_rec = Recording().get_recording(interp_pk)
+        interp_ids = [int(c) for c in interp_rec.get_channel_ids()]
+        assert bad_eid in interp_ids
+        col = np.asarray(interp_rec.get_traces()[:, interp_ids.index(bad_eid)])
+        assert np.all(np.isfinite(col)) and np.any(col != 0)
+        remove_ids = {
+            int(c)
+            for c in Recording().get_recording(remove_pk).get_channel_ids()
+        }
+        assert bad_eid not in remove_ids
 
 
 @pytest.mark.slow

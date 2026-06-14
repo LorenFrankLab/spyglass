@@ -275,7 +275,7 @@ curated `Electrode.bad_channel='True'` channels at materialization:
   sorter to see only the good channels.
 - **`"interpolate"`** — re-includes the group's **pitch-adjacent interior**
   curated-bad channels and fills them from good neighbours
-  (`interpolate_bad_channels`, inverse-distance kriging) so a geometry-aware
+  (`interpolate_bad_channels`, distance-weighted kriging) so a geometry-aware
   sorter (Kilosort, MountainSort5) sees a complete probe. Only bad channels
   physically embedded among the group's good channels (≥2 good neighbours within
   ~1.5× the probe pitch) are filled; an isolated bad channel, or one in the gap
