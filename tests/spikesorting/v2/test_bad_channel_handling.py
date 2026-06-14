@@ -715,3 +715,123 @@ def test_stale_group_post_flag_stays_member(handling_session):
             SortGroupV2.SortGroupElectrode & {"nwb_file_name": nwb}
         ).fetch("electrode_id")
         assert 8 in {int(m) for m in members}  # not retroactively dropped
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_remove_field_does_not_change_default_recording(handling_session):
+    """A pre-field params blob (no ``bad_channel_handling`` key) materializes to
+    the SAME traces as ``default_franklab`` (which now carries
+    ``bad_channel_handling='remove'``) -- the default-unchanged regression guard.
+
+    Compared by trace equality, not ``cache_hash`` (which folds in per-write
+    object_id UUIDs / file_create_date), mirroring the phase-shift precedent.
+    """
+    import numpy as np
+
+    from spyglass.spikesorting.v2._params.preprocessing import (
+        PreprocessingParamsSchema,
+    )
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+
+    nwb = handling_session["nwb_file_name"]
+    with _clean_sort_groups(nwb):
+        SortGroupV2.set_group_by_shank(nwb_file_name=nwb)
+        sg0 = int(
+            sorted(
+                (SortGroupV2 & {"nwb_file_name": nwb}).fetch("sort_group_id")
+            )[0]
+        )
+        common = {
+            "nwb_file_name": nwb,
+            "sort_group_id": sg0,
+            "interval_list_name": "raw data valid times",
+            "team_name": "v2_handling_team",
+        }
+        fl_pk = RecordingSelection.insert_selection(
+            {**common, "preproc_params_name": "default_franklab"}
+        )
+        Recording.populate(fl_pk, reserve_jobs=False)
+        traces_fl = Recording().get_recording(fl_pk).get_traces()
+
+        legacy_blob = PreprocessingParamsSchema().model_dump()
+        legacy_blob.pop(
+            "bad_channel_handling"
+        )  # a row written before the field
+        PreprocessingParameters().insert1(
+            {
+                "preproc_params_name": "_pytest_legacy_no_bad_channel_handling",
+                "params": legacy_blob,
+                "params_schema_version": 3,
+                "job_kwargs": None,
+            },
+            skip_duplicates=True,
+        )
+        legacy_pk = RecordingSelection.insert_selection(
+            {
+                **common,
+                "preproc_params_name": (
+                    "_pytest_legacy_no_bad_channel_handling"
+                ),
+            }
+        )
+        Recording.populate(legacy_pk, reserve_jobs=False)
+        traces_legacy = Recording().get_recording(legacy_pk).get_traces()
+
+        assert np.array_equal(traces_legacy, traces_fl), (
+            "A pre-field params blob materialized to different traces than "
+            "default_franklab; the bad_channel_handling field perturbed the "
+            "default 'remove' path."
+        )
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_bad_marked_specific_reference_materializes(handling_session):
+    """A ``specific`` sort group whose reference electrode is flagged
+    ``bad_channel='True'`` (e.g. a dedicated ground) still materializes: the
+    reference is subtracted then dropped, and phase 3 adds no reference-quality
+    raise and never interpolates the reference."""
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+
+    nwb = handling_session["nwb_file_name"]
+    members = [0, 1, 2, 3]  # shank 0
+    ref = 10  # on shank 0, NOT a member; flagged bad
+
+    with _clean_sort_groups(nwb), _restore_bad_channel(nwb, [ref]):
+        _set_bad(nwb, ref, "True")
+        SortGroupV2.set_group_by_electrode_table_column(
+            nwb_file_name=nwb,
+            column="electrode_id",
+            groups=[members],
+            reference_mode="specific",
+            reference_electrode_id=ref,
+        )
+        sg_id = int(
+            (SortGroupV2 & {"nwb_file_name": nwb}).fetch1("sort_group_id")
+        )
+        rec_pk = RecordingSelection.insert_selection(
+            {
+                "nwb_file_name": nwb,
+                "sort_group_id": sg_id,
+                "interval_list_name": "raw data valid times",
+                "preproc_params_name": "default_franklab",
+                "team_name": "v2_handling_team",
+            }
+        )
+        Recording.populate(rec_pk, reserve_jobs=False)
+        ids = {
+            int(c) for c in Recording().get_recording(rec_pk).get_channel_ids()
+        }
+        # The bad-marked reference is subtracted then dropped; only the members
+        # remain. Materializing without a raise is the point.
+        assert ids == set(members)
