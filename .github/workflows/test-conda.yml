@@ -220,14 +220,14 @@ jobs:
       # ``spikesorting-v2`` extra now brings torch (the DriftEstimate
       # drift-QC table's dredge preset needs it; torch 2.x keeps numpy>=2).
       # It does NOT install
-      # ``spikesorting-v2-matching``: UnitMatchPy reactively pins numpy<2,
-      # which would downgrade the v2 numpy>=2 baseline. The extra is pinned
-      # to UnitMatchPy 3.2.7 --
-      # the last release declaring numpy>=2 -- so it no longer forces the
-      # numpy<2 downgrade 3.3.x's reactive pin caused (upstream #134; see
-      # pyproject). ``test_optional_matching_extra_resolution`` asserts
-      # numpy major >= 2; the matching extra is exercised in a separate
-      # env in the step below.
+      # ``spikesorting-v2-matching``: that is kept separate for dependency
+      # weight (and the resolver-evidence contract), not because the pinned
+      # extra breaks numpy. The extra is pinned to UnitMatchPy 3.2.7 --
+      # the last release declaring numpy>=2 -- so it does NOT force the
+      # numpy<2 downgrade 3.2.8+/3.3.x's reactive pin would cause (upstream
+      # #134; see pyproject). ``test_optional_matching_extra_resolution``
+      # asserts numpy major >= 2; the matching extra is exercised in a
+      # separate env in the step below.
       uses: conda-incubator/setup-miniconda@v3
       with:
         activate-environment: spyglass_spikesorting_v2

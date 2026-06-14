@@ -27,11 +27,14 @@
 # torch (2.x) coexists with the v2 numpy >= 2 baseline -- it does NOT
 # downgrade numpy.
 #
-# Do NOT install the `spikesorting-v2-matching` extra into this env:
-# UnitMatchPy reactively pins numpy < 2, which would downgrade the v2
-# numpy >= 2 baseline (`test_optional_matching_extra_resolution` guards
-# this). That conflict is UnitMatchPy's numpy pin, not torch's. CI
-# exercises that extra in a throwaway env.
+# Do NOT install the `spikesorting-v2-matching` extra into this env -- it
+# is kept separate for dependency weight and the resolver-evidence
+# contract, NOT because the pinned extra breaks numpy. The pin
+# (UnitMatchPy >=3.2.6,<3.2.8) declares numpy>=2,<3 and coexists with the
+# v2 baseline; it is 3.2.8+/unpinned UnitMatchPy that reactively flips to
+# numpy<2 (upstream #134) and would force the downgrade
+# (`test_optional_matching_extra_resolution` guards that the pin stays on
+# a numpy>=2 release). CI exercises the extra in a throwaway env.
 #
 # 4. Run the suite (Docker MySQL for DataJoint, or --no-docker null_server):
 #       pytest tests/spikesorting/v2/ --no-docker --no-dlc
