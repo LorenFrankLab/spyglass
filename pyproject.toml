@@ -108,12 +108,11 @@ optional-dependencies.spikesorting-v2 = [
   "mountainsort4",      # v1 production sorter; pulls ml_ms4alg + isosplit5
   "mountainsort5>=0.5", # default v2 sorter; pulls isosplit6 + scikit-learn
   # Drift/motion QC: DriftEstimate's default preset
-  # (compute_motion preset="dredge_fast") routes through the dredge motion
-  # estimator, which requires torch. Pinned >=2 because torch 2.x is the
-  # numpy>=2-compatible line -- this is NOT the UnitMatchPy numpy<2 conflict
-  # (that one is UnitMatchPy's own reactive pin, not torch's; see the
-  # spikesorting-v2-matching extra below). A modern standalone torch coexists
-  # with the v2 numpy>=2 baseline.
+  # (compute_motion preset="dredge_fast") requires torch. Pinned >=2 because
+  # torch 2.x is the numpy>=2-compatible line -- this is NOT the UnitMatchPy
+  # numpy<2 conflict (that one is UnitMatchPy's own reactive pin, not torch's;
+  # see the spikesorting-v2-matching extra below). A modern standalone torch
+  # coexists with the v2 numpy>=2 baseline.
   "torch>=2",
 ]
 optional-dependencies.spikesorting-v2-matching = [

@@ -341,10 +341,10 @@ motion = DriftEstimate().get_motion(rec_key)  # .displacement, .temporal_bins_s,
 ```
 
 The estimate uses a single default preset (`dredge_fast`, stored on the row for
-provenance); there is deliberately no parameters Lookup. `dredge_fast` routes
-through SpikeInterface's dredge estimator, so the `spikesorting-v2` extra now
-installs `torch`. `compute_motion` localizes peaks spatially, so it consumes the
-recording's channel locations (the cached `Recording` carries probe geometry).
+provenance); there is deliberately no parameters Lookup. `dredge_fast` requires
+`torch`, so the `spikesorting-v2` extra now installs it. `compute_motion`
+localizes peaks spatially, so it consumes the recording's channel locations (the
+cached `Recording` carries probe geometry).
 
 To be explicit: populating `DriftEstimate` leaves the upstream `Recording`
 untouched — its `cache_hash` and the traces from `get_recording` are unchanged.

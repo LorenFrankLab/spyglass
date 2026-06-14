@@ -918,10 +918,10 @@ for label, interval_data in results.groupby("interval_labels"):
         `make_insert` split as `Recording` so `compute_motion` runs outside the
         DB transaction. `get_motion(key)` rehydrates the stored blob into a
         SpikeInterface `Motion`. Being a new Computed table, there is **no
-        `params_schema_version` bump**. The `dredge_fast` preset routes through
-        SpikeInterface's dredge estimator, so the `spikesorting-v2` extra now
-        installs `torch` (a modern standalone torch coexists with the v2
-        numpy >= 2 baseline — it does not downgrade numpy).
+        `params_schema_version` bump**. The `dredge_fast` preset requires
+        `torch`, so the `spikesorting-v2` extra now installs it (a modern
+        standalone torch coexists with the v2 numpy >= 2 baseline — it does not
+        downgrade numpy).
 
 ## [0.5.5] (Aug 6, 2025)
 

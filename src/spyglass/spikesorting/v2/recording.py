@@ -2000,7 +2000,7 @@ class Recording(SpyglassMixin, dj.Computed):
 def _motion_to_storage_dict(motion) -> dict:
     """Flatten a SpikeInterface ``Motion`` to a DataJoint-blob-safe dict.
 
-    The stored blob keeps every field ``Motion.from_dict`` needs so
+    The stored blob keeps every field the ``Motion`` constructor needs so
     :func:`_motion_from_storage_dict` reconstructs the object exactly:
 
     - ``displacement``: list (one entry per recording segment) of 2-D
@@ -2030,7 +2030,10 @@ def _motion_from_storage_dict(blob: dict):
     Inverse of :func:`_motion_to_storage_dict`. Coerces each entry back to a
     clean NumPy array before constructing ``Motion`` so a blob codec that
     returns the per-segment lists as object arrays (rather than Python lists)
-    still rehydrates to the 2-D / 1-D shapes ``Motion`` asserts on.
+    still rehydrates to the 2-D / 1-D shapes ``Motion`` asserts on. Every key
+    is read directly (no defaulting): :func:`_motion_to_storage_dict` always
+    writes all five, so a missing key means a corrupt blob and should raise
+    rather than silently rehydrate a wrong motion axis.
     """
     from spikeinterface.core.motion import Motion
 
@@ -2038,8 +2041,8 @@ def _motion_from_storage_dict(blob: dict):
         [np.asarray(d) for d in blob["displacement"]],
         [np.asarray(t) for t in blob["temporal_bins_s"]],
         np.asarray(blob["spatial_bins_um"]),
-        direction=str(blob.get("direction", "y")),
-        interpolation_method=str(blob.get("interpolation_method", "linear")),
+        direction=str(blob["direction"]),
+        interpolation_method=str(blob["interpolation_method"]),
     )
 
 
@@ -2099,7 +2102,8 @@ class DriftEstimate(SpyglassMixin, dj.Computed):
     max_abs_displacement_um : float
         ``max(|displacement|)`` over all segments / temporal bins / spatial
         windows -- the drift-severity summary (>= 0; ~0 on a drift-free
-        recording).
+        recording). A non-finite estimate raises at populate rather than
+        being stored, so a stored value is always finite.
     n_temporal_bins : int
         Total number of temporal bins in the estimate.
     motion : longblob
@@ -2108,8 +2112,7 @@ class DriftEstimate(SpyglassMixin, dj.Computed):
 
     Notes
     -----
-    The default preset (``dredge_fast``) routes through SpikeInterface's
-    dredge estimator, which requires ``torch`` (installed by the
+    The default preset (``dredge_fast``) requires ``torch`` (installed by the
     ``spikesorting-v2`` extra). ``compute_motion`` consumes the recording's
     channel locations to localize peaks, so the upstream ``Recording`` must
     carry probe geometry (it does -- ``get_recording`` returns a recording
@@ -2157,9 +2160,22 @@ class DriftEstimate(SpyglassMixin, dj.Computed):
 
         recording = Recording().get_recording(key)
         motion = sip.compute_motion(recording, preset=preset)
+        max_abs_displacement_um = _motion_max_abs_displacement_um(motion)
+        if not np.isfinite(max_abs_displacement_um):
+            # compute_motion(raise_error=True, its default) raises on a hard
+            # failure, but a numerically degenerate-but-completed estimate can
+            # still yield non-finite displacement. Refuse to store an unusable
+            # QC metric -- a NaN summary would also slip past a
+            # ``max_abs_displacement_um > x`` filter, so the worst case would
+            # silently go unflagged.
+            raise ValueError(
+                f"DriftEstimate: compute_motion(preset={preset!r}) produced a "
+                f"non-finite max displacement ({max_abs_displacement_um}) for "
+                f"{key}; refusing to store an unusable drift-QC metric."
+            )
         return DriftComputed(
             preset=preset,
-            max_abs_displacement_um=_motion_max_abs_displacement_um(motion),
+            max_abs_displacement_um=max_abs_displacement_um,
             n_temporal_bins=_motion_n_temporal_bins(motion),
             motion=_motion_to_storage_dict(motion),
         )
