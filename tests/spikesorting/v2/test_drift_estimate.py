@@ -76,6 +76,9 @@ def test_drift_estimate_populate_writes_qc_row(drift_recording_key):
     from spyglass.spikesorting.v2.recording import DriftEstimate
 
     key = drift_recording_key
+    # No pre-clear: populate is idempotent (DataJoint skips present keys), and
+    # the PK is recording_id only (one row per recording), so re-running is a
+    # no-op that leaves the single row intact.
     DriftEstimate.populate(key, reserve_jobs=False)
 
     rows = (DriftEstimate & key).fetch(as_dict=True)
@@ -97,6 +100,25 @@ def test_drift_estimate_populate_writes_qc_row(drift_recording_key):
     assert flat.size > 0 and np.all(np.isfinite(flat))
     # The stored summary is consistent with the stored blob.
     assert np.isclose(max_abs, float(np.max(np.abs(flat))))
+
+    # Shape contract: each segment's displacement is 2-D
+    # (n_temporal_bins, n_spatial_bins); spatial_bins_um is a single 1-D array
+    # of window centers; and the stored n_temporal_bins column equals the
+    # blob's total temporal-bin count. The fixture is drift-free (max_abs ~ 0),
+    # so this structural check -- not a value check -- is what proves the blob
+    # is a real compute_motion output (a flattened/transposed field would fail
+    # here even though the numbers are finite).
+    tbins = motion["temporal_bins_s"]
+    sbins = np.asarray(motion["spatial_bins_um"])
+    assert len(tbins) == len(disp)
+    assert sbins.ndim == 1 and sbins.shape[0] >= 1
+    for d, t in zip(disp, tbins):
+        d = np.asarray(d)
+        assert d.ndim == 2
+        assert d.shape == (np.asarray(t).shape[0], sbins.shape[0])
+    assert int(row["n_temporal_bins"]) == sum(
+        np.asarray(t).shape[0] for t in tbins
+    )
 
 
 @pytest.mark.slow
