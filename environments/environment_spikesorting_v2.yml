@@ -22,9 +22,15 @@
 #    and generating the MEArec smoke fixture. Note MEArec / elephant cap
 #    numpy < 2.)
 #
+# torch is a direct `spikesorting-v2` dependency (drift/motion QC: the
+# DriftEstimate table's dredge preset needs it). A modern standalone
+# torch (2.x) coexists with the v2 numpy >= 2 baseline -- it does NOT
+# downgrade numpy.
+#
 # Do NOT install the `spikesorting-v2-matching` extra into this env:
-# UnitMatchPy pulls torch + numpy < 2 and downgrades the v2 numpy >= 2
-# baseline (`test_optional_matching_extra_resolution` guards this). CI
+# UnitMatchPy reactively pins numpy < 2, which would downgrade the v2
+# numpy >= 2 baseline (`test_optional_matching_extra_resolution` guards
+# this). That conflict is UnitMatchPy's numpy pin, not torch's. CI
 # exercises that extra in a throwaway env.
 #
 # 4. Run the suite (Docker MySQL for DataJoint, or --no-docker null_server):

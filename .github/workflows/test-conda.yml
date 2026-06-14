@@ -216,10 +216,13 @@ jobs:
       # (the validation extra brings MEArec / neuroconv, which the tests use
       # to read ground-truth units). NEURON + LFPy are deliberately NOT
       # installed: they are needed only to *generate* fixtures, and this job
-      # downloads the canonical fixtures via _fetch.py instead. It also does
-      # NOT install
-      # ``spikesorting-v2-matching``: it pulls torch + CUDA (heavy) and
-      # would bloat the env. The extra is pinned to UnitMatchPy 3.2.7 --
+      # downloads the canonical fixtures via _fetch.py instead. The
+      # ``spikesorting-v2`` extra now brings torch (the DriftEstimate
+      # drift-QC table's dredge preset needs it; torch 2.x keeps numpy>=2).
+      # It does NOT install
+      # ``spikesorting-v2-matching``: UnitMatchPy reactively pins numpy<2,
+      # which would downgrade the v2 numpy>=2 baseline. The extra is pinned
+      # to UnitMatchPy 3.2.7 --
       # the last release declaring numpy>=2 -- so it no longer forces the
       # numpy<2 downgrade 3.3.x's reactive pin caused (upstream #134; see
       # pyproject). ``test_optional_matching_extra_resolution`` asserts

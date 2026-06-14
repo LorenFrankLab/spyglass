@@ -5,6 +5,8 @@ Tables (all final-shape under the zero-migration policy):
     PreprocessingParameters -- Pydantic-validated preprocessing blob.
     RecordingSelection   -- one row per (raw, sort group, interval, params).
     Recording            -- materialized preprocessed recording (NWB-resident).
+    DriftEstimate        -- per-Recording probe-motion QC estimate (never
+                            applied to the traces; populated on demand).
 
 ``insert1`` on the Lookup tables is live and Pydantic-validates the
 ``params`` blob. ``SortGroupV2.set_group_by_*`` constructors,
@@ -1988,3 +1990,211 @@ class Recording(SpyglassMixin, dj.Computed):
             timestamps_override,
             filtering_description=filtering_description,
         )
+
+
+# --------------------------------------------------------------------------- #
+# Drift / motion QC -- estimate probe motion and store it, never apply it.
+# --------------------------------------------------------------------------- #
+
+
+def _motion_to_storage_dict(motion) -> dict:
+    """Flatten a SpikeInterface ``Motion`` to a DataJoint-blob-safe dict.
+
+    The stored blob keeps every field ``Motion.from_dict`` needs so
+    :func:`_motion_from_storage_dict` reconstructs the object exactly:
+
+    - ``displacement``: list (one entry per recording segment) of 2-D
+      ``float`` arrays, each shape ``(n_temporal_bins, n_spatial_bins)`` (um).
+    - ``temporal_bins_s``: list (per segment) of 1-D bin-center arrays (s).
+    - ``spatial_bins_um``: a single 1-D array of window centers (um),
+      ``shape == (n_spatial_bins,)`` -- shared across segments.
+    - ``direction``: the motion axis (``"x"`` / ``"y"`` / ``"z"``).
+    - ``interpolation_method``: how displacement interpolates between bins.
+
+    Arrays stay as NumPy arrays (DataJoint's blob codec round-trips them);
+    only the container shape is normalized so the rehydrate side is
+    deterministic regardless of how the codec returns nested lists.
+    """
+    return {
+        "displacement": [np.asarray(d) for d in motion.displacement],
+        "temporal_bins_s": [np.asarray(t) for t in motion.temporal_bins_s],
+        "spatial_bins_um": np.asarray(motion.spatial_bins_um),
+        "direction": str(motion.direction),
+        "interpolation_method": str(motion.interpolation_method),
+    }
+
+
+def _motion_from_storage_dict(blob: dict):
+    """Rebuild a SpikeInterface ``Motion`` from a stored blob.
+
+    Inverse of :func:`_motion_to_storage_dict`. Coerces each entry back to a
+    clean NumPy array before constructing ``Motion`` so a blob codec that
+    returns the per-segment lists as object arrays (rather than Python lists)
+    still rehydrates to the 2-D / 1-D shapes ``Motion`` asserts on.
+    """
+    from spikeinterface.core.motion import Motion
+
+    return Motion(
+        [np.asarray(d) for d in blob["displacement"]],
+        [np.asarray(t) for t in blob["temporal_bins_s"]],
+        np.asarray(blob["spatial_bins_um"]),
+        direction=str(blob.get("direction", "y")),
+        interpolation_method=str(blob.get("interpolation_method", "linear")),
+    )
+
+
+def _motion_max_abs_displacement_um(motion) -> float:
+    """Largest absolute displacement (um) over all segments / bins / windows.
+
+    The single-number drift-severity summary used to flag high-drift
+    sessions. NaNs are NOT masked -- a non-finite estimate surfaces in the
+    stored metric rather than being silently hidden by a ``nan``-aware max.
+    """
+    flat = np.concatenate([np.asarray(d).ravel() for d in motion.displacement])
+    return float(np.max(np.abs(flat)))
+
+
+def _motion_n_temporal_bins(motion) -> int:
+    """Total number of temporal bins across all recording segments."""
+    return int(sum(np.asarray(t).shape[0] for t in motion.temporal_bins_s))
+
+
+class DriftFetched(NamedTuple):
+    """``make_fetch`` output for :class:`DriftEstimate` (no trace/SI I/O)."""
+
+    preset: str
+
+
+class DriftComputed(NamedTuple):
+    """``make_compute`` output for :class:`DriftEstimate`."""
+
+    preset: str
+    max_abs_displacement_um: float
+    n_temporal_bins: int
+    motion: dict
+
+
+@schema
+class DriftEstimate(SpyglassMixin, dj.Computed):
+    """Probe-motion estimate for a ``Recording`` -- QC only, never applied.
+
+    Estimates drift on the cached preprocessed recording with
+    SpikeInterface's ``compute_motion`` and stores the displacement field
+    plus a one-number severity summary. **Nothing in the pipeline consumes
+    this for correction** -- drift correction stays deferred to the sorter,
+    exactly as without this table. It exists so high-drift sessions can be
+    flagged/queried (``max_abs_displacement_um``) without changing any sort
+    output.
+
+    Populated **on demand**: a ``dj.Computed`` table fills only when the user
+    calls ``DriftEstimate.populate(recording_key)``, so the expensive
+    estimation never runs eagerly alongside ``Recording``.
+
+    Columns
+    -------
+    motion_preset : varchar
+        The ``compute_motion`` preset used (stored for provenance; the
+        module default is ``_DEFAULT_PRESET``). A single default is used --
+        there is deliberately no parameters Lookup.
+    max_abs_displacement_um : float
+        ``max(|displacement|)`` over all segments / temporal bins / spatial
+        windows -- the drift-severity summary (>= 0; ~0 on a drift-free
+        recording).
+    n_temporal_bins : int
+        Total number of temporal bins in the estimate.
+    motion : longblob
+        The serialized ``Motion`` (see :func:`_motion_to_storage_dict` for
+        the exact keys); rehydrate with :meth:`get_motion`.
+
+    Notes
+    -----
+    The default preset (``dredge_fast``) routes through SpikeInterface's
+    dredge estimator, which requires ``torch`` (installed by the
+    ``spikesorting-v2`` extra). ``compute_motion`` consumes the recording's
+    channel locations to localize peaks, so the upstream ``Recording`` must
+    carry probe geometry (it does -- ``get_recording`` returns a recording
+    whose ``get_channel_locations()`` comes from the probe's relative
+    contact coordinates).
+    """
+
+    definition = """
+    -> Recording
+    ---
+    motion_preset: varchar(64)
+    max_abs_displacement_um: float
+    n_temporal_bins: int
+    motion: longblob
+    """
+
+    # ``_parallel_make = True`` + the tri-part ``make_fetch`` /
+    # ``make_compute`` / ``make_insert`` split mirror ``Recording`` so the
+    # long ``compute_motion`` call runs OUTSIDE the DB transaction (and so
+    # multiple recordings can be estimated in parallel). The inherited
+    # ``AutoPopulate.make`` generator is left in place so DataJoint routes
+    # through tri-part dispatch.
+    _parallel_make = True
+    _DEFAULT_PRESET = "dredge_fast"
+
+    def make_fetch(self, key) -> DriftFetched:
+        """Return only the preset -- no trace/SI I/O.
+
+        The recording is loaded in ``make_compute``; this method does no
+        SpikeInterface or NWB I/O so the tri-part contract's two
+        ``make_fetch`` calls stay DeepHash-stable (a constant string).
+        """
+        return DriftFetched(preset=self._DEFAULT_PRESET)
+
+    def make_compute(self, key, preset) -> DriftComputed:
+        """Run ``compute_motion`` outside any DB transaction.
+
+        Loads the cached preprocessed recording, estimates motion with the
+        given preset, and flattens the resulting ``Motion`` to a storable
+        dict plus the summary metrics. The long-running step (peak detect +
+        localize + estimate) returns before the framework opens its commit
+        transaction, so it never holds a DB lock.
+        """
+        import spikeinterface.preprocessing as sip
+
+        recording = Recording().get_recording(key)
+        motion = sip.compute_motion(recording, preset=preset)
+        return DriftComputed(
+            preset=preset,
+            max_abs_displacement_um=_motion_max_abs_displacement_um(motion),
+            n_temporal_bins=_motion_n_temporal_bins(motion),
+            motion=_motion_to_storage_dict(motion),
+        )
+
+    def make_insert(
+        self, key, preset, max_abs_displacement_um, n_temporal_bins, motion
+    ) -> None:
+        """Insert the single QC row inside the framework transaction."""
+        self.insert1(
+            {
+                **key,
+                "motion_preset": preset,
+                "max_abs_displacement_um": max_abs_displacement_um,
+                "n_temporal_bins": n_temporal_bins,
+                "motion": motion,
+            }
+        )
+
+    # ---- Public accessors ------------------------------------------------
+
+    def get_motion(self, key: dict):
+        """Rehydrate the stored estimate into a SpikeInterface ``Motion``.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``DriftEstimate`` row.
+
+        Returns
+        -------
+        spikeinterface.core.motion.Motion
+            The motion object as ``compute_motion`` produced it (displacement
+            list, temporal/spatial bins, direction). Use this for plotting /
+            inspection so QC code does not re-derive the blob shape from
+            :func:`_motion_to_storage_dict`.
+        """
+        blob = (self & key).fetch1("motion")
+        return _motion_from_storage_dict(blob)
