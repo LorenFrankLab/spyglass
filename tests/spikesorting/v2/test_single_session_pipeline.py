@@ -2023,6 +2023,31 @@ def test_metrics_source_invalid_preserves_cause(populated_sorting):
 
 
 @pytest.mark.slow
+def test_metrics_source_invalid_rejected_with_existing_root(populated_sorting):
+    """A bogus ``metrics_source`` raises even when a root curation already
+    exists. ``metrics_source`` is coerced through the enum up front, so the
+    idempotent existing-root early return does NOT swallow an invalid value
+    (which would otherwise let ``metrics_source="not_a_real_source"`` quietly
+    return the existing root). Complements
+    ``test_metrics_source_invalid_preserves_cause``, which exercises the
+    no-existing-root path.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    _clear_curations(populated_sorting)
+    CurationV2.insert_curation(sorting_key=populated_sorting, labels={})
+    # A root now exists; a second call with a bogus metrics_source must still
+    # raise the friendly enum error, not return the existing root.
+    with pytest.raises(ValueError) as excinfo:
+        CurationV2.insert_curation(
+            sorting_key=populated_sorting,
+            metrics_source="not_a_real_source",
+        )
+    assert "metrics_source" in str(excinfo.value)
+    assert isinstance(excinfo.value.__cause__, ValueError)
+
+
+@pytest.mark.slow
 def test_curation_v2_insert_with_labels(populated_sorting):
     """Labels round-trip into ``CurationV2.UnitLabel`` and unknown
     labels raise before any DB rows are written."""

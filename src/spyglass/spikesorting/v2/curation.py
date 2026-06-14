@@ -339,6 +339,19 @@ class CurationV2(SpyglassMixin, dj.Manual):
 
         validate_labels(labels, allow_custom_labels=allow_custom_labels)
 
+        # Coerce metrics_source through the enum up front so a typo raises a
+        # friendly error on EVERY path -- including the idempotent
+        # existing-root early return below, which would otherwise swallow an
+        # invalid value and return the existing root instead of rejecting it.
+        try:
+            metrics_source = MetricsSource(metrics_source).value
+        except ValueError as exc:
+            raise ValueError(
+                f"CurationV2.insert_curation: metrics_source="
+                f"{metrics_source!r} is not a MetricsSource value. "
+                f"Valid: {[m.value for m in MetricsSource]}."
+            ) from exc
+
         if parent_curation_id != -1:
             if not (
                 cls
@@ -381,15 +394,10 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 # the metrics provenance record user intent: a second
                 # ``apply_merge=True`` insert must NOT quietly return a
                 # ``merges_applied=False`` root. Raise unless the caller opts
-                # into reuse. (An invalid metrics_source is NOT treated as a
-                # change here so the friendlier enum-validation error below
-                # still fires for it.)
-                try:
-                    metrics_source_changed = (
-                        MetricsSource(metrics_source).value != "manual"
-                    )
-                except ValueError:
-                    metrics_source_changed = False
+                # into reuse. metrics_source is already coerced to its enum
+                # value above, so a typo has already raised before reaching
+                # this point (it is never silently treated as "unchanged").
+                metrics_source_changed = metrics_source != "manual"
                 if (
                     bool(labels)
                     or bool(merge_groups)
@@ -412,17 +420,6 @@ class CurationV2(SpyglassMixin, dj.Manual):
                     "existing key without staging a new NWB."
                 )
                 return existing_root[0]
-
-        # Coerce metrics_source through the enum so a typo raises here
-        # rather than at the DataJoint enum-mismatch layer.
-        try:
-            metrics_source = MetricsSource(metrics_source).value
-        except ValueError as exc:
-            raise ValueError(
-                f"CurationV2.insert_curation: metrics_source="
-                f"{metrics_source!r} is not a MetricsSource value. "
-                f"Valid: {[m.value for m in MetricsSource]}."
-            ) from exc
 
         # Resolve which curation_id to use (auto-increment within sort).
         existing_ids = (cls & {"sorting_id": sorting_id}).fetch("curation_id")
