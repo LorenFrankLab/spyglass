@@ -56,7 +56,9 @@ class DandiValidationSelection(SpyglassMixin, dj.Manual):
     -> Export.File
     """
 
-    def check_paper_for_dandi_errors(self, key: dict, force=False, n_processes: int = 128):
+    def check_paper_for_dandi_errors(
+        self, key: dict, force=False, n_processes: int = 128
+    ):
         """Run dandi validate checks on all files for a given paper.
 
         If called on a previously-populated paper, will delete and re-populate the
