@@ -120,32 +120,58 @@ def phase1_baseline_artifacts():
     yield bundle
 
 
-def pytest_sessionstart(session):
-    """Download canonical MEArec fixtures that are missing locally (step 2).
+# The per-PR smoke fixture. Fetched lazily -- only when a collected test needs
+# the database (see ``pytest_collection_modifyitems``), never unconditionally.
+_SMOKE_FIXTURE = "mearec_polymer_smoke"
 
-    When a fixture's URL is configured in ``fixtures/_fetch.py`` and the file is
-    absent, fetch + sha256-verify it here -- before any per-module
-    ``_FIXTURE_PATH.exists()`` guard runs -- so the suite uses the downloaded
-    canonical artifact instead of skipping. This is a no-op when the file is
-    already present (e.g. generated locally) or when no URL is configured yet
-    (tests skip as before). Only the per-PR smoke fixture is fetched by default;
-    set ``SPYGLASS_V2_FETCH_FULL=1`` to also pull the larger nightly fixtures.
+
+def _eager_fetch_names():
+    """Fixture stems to download at *session start*, before collection.
+
+    Only fixtures the honest-green gate will require (so they are present when
+    the gate checks below) -- plus every fixture when ``SPYGLASS_V2_FETCH_FULL=1``,
+    an explicit developer opt-in. The per-PR smoke fixture is deliberately NOT in
+    this set: a run that collects no database test (a pure-helper unit run) needs
+    no fixture, so fetching one unconditionally here starts a spurious download.
+    The smoke fixture is fetched lazily at collection time for runs that do need
+    the DB (see ``pytest_collection_modifyitems``).
+    """
+    import os
+
+    from tests.spikesorting.v2.fixtures._fetch import FIXTURE_URLS
+
+    if os.environ.get("SPYGLASS_V2_FETCH_FULL") == "1":
+        return list(FIXTURE_URLS)
+    required = os.environ.get("SPYGLASS_V2_REQUIRE_FIXTURES", "").split()
+    return [n for n in required if n in FIXTURE_URLS]
+
+
+def _session_needs_db(items):
+    """True if any collected test requests the Docker DB (the ``dj_conn``
+    fixture). Pure-helper unit tests don't, so a run that collects none needs no
+    ingested fixture -- the case we must not start a download for."""
+    return any("dj_conn" in getattr(item, "fixturenames", ()) for item in items)
+
+
+def pytest_sessionstart(session):
+    """Pre-fetch only the fixtures this session is configured to require.
+
+    Downloads the honest-green-gated set (``SPYGLASS_V2_REQUIRE_FIXTURES``, or
+    every fixture under ``SPYGLASS_V2_FETCH_FULL=1``) and verifies the gate. The
+    per-PR smoke fixture is fetched lazily at collection time instead (see
+    ``pytest_collection_modifyitems``), so a pure-helper run -- which collects no
+    DB test -- starts no download. ``ensure_fixture`` is a no-op when the file is
+    already present (e.g. generated locally) or when no URL is configured.
     """
     import os
     import warnings
 
     from tests.spikesorting.v2.fixtures._fetch import (
-        FIXTURE_URLS,
         FixtureFetchError,
         ensure_fixture,
     )
 
-    names = (
-        list(FIXTURE_URLS)
-        if os.environ.get("SPYGLASS_V2_FETCH_FULL") == "1"
-        else ["mearec_polymer_smoke"]
-    )
-    for name in names:
+    for name in _eager_fetch_names():
         try:
             ensure_fixture(name, required=False)
         except FixtureFetchError as exc:
@@ -170,7 +196,33 @@ def pytest_sessionstart(session):
         )
 
 
-_DOWNSTREAM_FIXTURE_NAME = "mearec_polymer_smoke"
+def pytest_collection_modifyitems(session, config, items):
+    """Fetch the per-PR smoke fixture lazily -- only when the collected tests
+    actually need the database.
+
+    Runs after collection, where the collected ``items`` (and their fixture
+    closures) are known, so a pure-helper unit run -- which requests no
+    ``dj_conn`` -- triggers no download. ``ensure_fixture`` is a no-op when the
+    file is already present, so this only reaches the network when the smoke
+    fixture is genuinely missing and a DB test will consume it.
+    """
+    import warnings
+
+    from tests.spikesorting.v2.fixtures._fetch import (
+        FixtureFetchError,
+        ensure_fixture,
+    )
+
+    if not _session_needs_db(items):
+        return
+    try:
+        ensure_fixture(_SMOKE_FIXTURE, required=False)
+    except FixtureFetchError as exc:
+        warnings.warn(f"[v2 fixtures] could not fetch {_SMOKE_FIXTURE}: {exc}")
+
+
+# Same fixture the lazy fetch above produces; named once so the two can't drift.
+_DOWNSTREAM_FIXTURE_NAME = _SMOKE_FIXTURE
 _DOWNSTREAM_FIXTURE_PATH = (
     Path(__file__).resolve().parent
     / "fixtures"
