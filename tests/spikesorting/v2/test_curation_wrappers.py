@@ -1,0 +1,257 @@
+"""Tests for the friendly CurationV2 wrappers + summarize_curation.
+
+The three write wrappers (create_initial_curation / propose_merge_curation /
+create_merged_curation) are thin intent-first sugar over the expert
+``insert_curation``; these tests pin that they pre-fill the right arguments,
+inherit its validation (not re-implement it), and thread ``parent_curation_id``
+so merges branch off an initial curation. ``summarize_curation`` is a pure read
+accessor whose fields are checked against the underlying parts/registration.
+
+All DB-tier; the single-unit checks reuse the shared package-scoped
+``populated_sorting`` fixture, while the merge checks use a module-scoped sort
+that yields several well-isolated units (``polymer_60s_sort``). Each test clears
+curations first so it is order-independent. ``CurationV2`` (a ``@schema`` table)
+is imported INSIDE each test, not at module top level, so pytest collection does
+not open a DB connection before the conftest's MySQL container is ready.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+_TEAM = "curation_wrappers_team"
+# The smoke sort yields a single unit -- too few to form a merge. The 60s
+# polymer shank reliably yields several (a nightly-tier fixture, like the
+# waveform tests use); the merge tests skip when it is absent (per-PR CI).
+_POLYMER_60S_PATH = (
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "mearec_polymer_128ch_60s.nwb"
+)
+
+
+@pytest.fixture(scope="module")
+def polymer_60s_sort(dj_conn):
+    """A MountainSort5 sort that yields several well-isolated single units.
+
+    The merge wrappers operate on distinct single units (e.g. merging an
+    oversplit cluster back together), so they need a sort with at least two
+    units. The smoke sort yields only one; the 60s polymer shank reliably
+    yields several. Module-scoped so the one 60s sort is shared across the
+    merge tests; each clears curations first, so they stay order-independent.
+    Ingested under a distinct session name to avoid colliding with other
+    modules that use the same 60s polymer fixture.
+    """
+    if not _POLYMER_60S_PATH.exists():
+        pytest.skip(f"Fixture {_POLYMER_60S_PATH.name} not found.")
+
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+    from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
+
+    nwb_file_name = copy_and_insert_nwb(
+        _POLYMER_60S_PATH, dest_name="mearec_curwrap_60s.nwb"
+    )
+    session = {"nwb_file_name": nwb_file_name}
+    initialize_v2_defaults()
+    LabTeam.insert1(
+        {"team_name": _TEAM, "team_description": "curation wrapper tests"},
+        skip_duplicates=True,
+    )
+    if not (SortGroupV2 & session):
+        SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    sort_group_id = int(
+        sorted((SortGroupV2 & session).fetch("sort_group_id"))[0]
+    )
+    manifest = run_v2_pipeline(
+        nwb_file_name=nwb_file_name,
+        sort_group_id=sort_group_id,
+        interval_list_name="raw data valid times",
+        team_name=_TEAM,
+        preset="franklab_tetrode_mountainsort5",
+    )
+    return {"sorting_id": manifest["sorting_id"]}
+
+
+def _unit_ids(sort_pk) -> list[int]:
+    """Sorted real unit ids of the populated sort."""
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    return sorted(int(u) for u in (Sorting.Unit & sort_pk).fetch("unit_id"))
+
+
+def _two_unit_ids(sort_pk) -> tuple[int, int]:
+    """First two real unit ids, or skip if the sort has fewer than two."""
+    ids = _unit_ids(sort_pk)
+    if len(ids) < 2:
+        pytest.skip(f"need >=2 sort units for merge tests; got {len(ids)}")
+    return ids[0], ids[1]
+
+
+@pytest.mark.database
+@pytest.mark.slow
+def test_create_initial_curation_equiv(populated_sorting):
+    """``create_initial_curation`` == ``insert_curation(parent=-1)``."""
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    clear_curations_for(populated_sorting)
+    wrapper_key = CurationV2.create_initial_curation(populated_sorting)
+    # insert_curation is idempotent on a default root, so the expert call
+    # returns the very row the wrapper created.
+    expert_key = CurationV2.insert_curation(
+        sorting_key=populated_sorting, parent_curation_id=-1
+    )
+    assert wrapper_key == expert_key
+    assert bool((CurationV2 & wrapper_key).fetch1("merges_applied")) is False
+    assert len(CurationV2.Unit & wrapper_key) >= 1
+
+
+@pytest.mark.database
+@pytest.mark.slow
+def test_propose_merge_records_not_applies(polymer_60s_sort):
+    """``propose_merge_curation`` records merges without applying them."""
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    a, b = _two_unit_ids(polymer_60s_sort)
+    clear_curations_for(polymer_60s_sort)
+    key = CurationV2.propose_merge_curation(
+        polymer_60s_sort, merge_groups=[[a, b]]
+    )
+    assert bool((CurationV2 & key).fetch1("merges_applied")) is False
+    # Preview keeps every original unit (no contributors absorbed).
+    units_after = {int(u) for u in (CurationV2.Unit & key).fetch("unit_id")}
+    assert {a, b} <= units_after
+    # The proposed merge is recorded as a >1-contributor group.
+    groups = CurationV2.get_merge_groups(key)
+    assert any(len(c) > 1 for c in groups.values())
+    assert CurationV2.summarize_curation(key)["is_merge_preview"] is True
+
+
+@pytest.mark.database
+@pytest.mark.slow
+def test_create_merged_curation_commits(polymer_60s_sort):
+    """``create_merged_curation`` commits the merged unit set."""
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    a, b = _two_unit_ids(polymer_60s_sort)
+    n_sort_units = len(_unit_ids(polymer_60s_sort))
+    clear_curations_for(polymer_60s_sort)
+    key = CurationV2.create_merged_curation(
+        polymer_60s_sort, merge_groups=[[a, b]]
+    )
+    assert bool((CurationV2 & key).fetch1("merges_applied")) is True
+    assert CurationV2.summarize_curation(key)["is_merge_preview"] is False
+    # Two contributors collapse into one merged unit: count drops by one.
+    assert len(CurationV2.Unit & key) == n_sort_units - 1
+
+
+@pytest.mark.database
+def test_wrappers_inherit_singleton_rejection(populated_sorting):
+    """A singleton merge group raises the SAME error ``insert_curation`` does.
+
+    Proves the wrapper does not bypass or weaken the >=2-member validation.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    ids = _unit_ids(populated_sorting)
+    if not ids:
+        pytest.skip("need >=1 sort unit")
+    a = ids[0]
+    clear_curations_for(populated_sorting)
+
+    with pytest.raises(ValueError) as wrap_exc:
+        CurationV2.propose_merge_curation(populated_sorting, merge_groups=[[a]])
+    with pytest.raises(ValueError) as expert_exc:
+        CurationV2.insert_curation(
+            sorting_key=populated_sorting,
+            merge_groups=[[a]],
+            apply_merge=False,
+        )
+    assert str(wrap_exc.value) == str(expert_exc.value)
+
+
+@pytest.mark.database
+@pytest.mark.slow
+def test_propose_merge_off_existing_initial_curation(polymer_60s_sort):
+    """A merge proposal branches off an initial curation (DAG child)."""
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    a, b = _two_unit_ids(polymer_60s_sort)
+    clear_curations_for(polymer_60s_sort)
+    root = CurationV2.create_initial_curation(polymer_60s_sort)
+    child = CurationV2.propose_merge_curation(
+        polymer_60s_sort,
+        merge_groups=[[a, b]],
+        parent_curation_id=root["curation_id"],
+    )
+    assert child["curation_id"] != root["curation_id"]
+    assert (
+        int((CurationV2 & child).fetch1("parent_curation_id"))
+        == root["curation_id"]
+    )
+
+
+@pytest.mark.database
+@pytest.mark.slow
+def test_summarize_curation_fields(populated_sorting):
+    """``summarize_curation`` reports the curation's fields from the parts.
+
+    Also asserts a minimal curation key and a full pipeline manifest normalize
+    to the same summary.
+    """
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    ids = _unit_ids(populated_sorting)
+    if not ids:
+        pytest.skip("need >=1 sort unit")
+    a = ids[0]
+    clear_curations_for(populated_sorting)
+    key = CurationV2.create_initial_curation(
+        populated_sorting, labels={a: ["mua"]}, description="summary test"
+    )
+
+    summary = CurationV2.summarize_curation(key)
+    assert summary["sorting_id"] == populated_sorting["sorting_id"]
+    assert summary["curation_id"] == key["curation_id"]
+    assert summary["n_units"] == len(CurationV2.Unit & key)
+    assert summary["labels"].get(a) == ["mua"]
+    assert summary["merge_groups"] == CurationV2.get_merge_groups(key)
+    assert summary["merges_applied"] is False
+    assert summary["is_merge_preview"] is False
+    assert summary["description"] == "summary test"
+    expected_merge = (SpikeSortingOutput.CurationV2 & key).fetch1("merge_id")
+    assert summary["merge_id"] == expected_merge
+
+    # A full run_v2_pipeline manifest (extra, non-PK keys) normalizes to the
+    # same summary as the minimal curation key.
+    manifest_like = {
+        **key,
+        "preset": "irrelevant",
+        "recording_id": "irrelevant",
+        "artifact_id": "irrelevant",
+        "n_units": 999,
+        "merge_id": "irrelevant",
+    }
+    assert CurationV2.summarize_curation(manifest_like) == summary
+
+
+@pytest.mark.database
+def test_summarize_unregistered_merge_id_none(populated_sorting):
+    """An unregistered curation summarizes with ``merge_id`` None (no raise)."""
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    clear_curations_for(populated_sorting)
+    key = CurationV2.create_initial_curation(populated_sorting)
+    merge_id = (SpikeSortingOutput.CurationV2 & key).fetch1("merge_id")
+    # Drop the merge registration but leave the CurationV2 row in place.
+    (SpikeSortingOutput & {"merge_id": merge_id}).super_delete(warn=False)
+
+    assert CurationV2.summarize_curation(key)["merge_id"] is None
