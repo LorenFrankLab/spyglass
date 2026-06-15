@@ -82,7 +82,27 @@ RecordingRecompute().populate(...)
 
 If you were using a pre-release version of Spyglass 0.5.6 LFPBandV1 after April
 2025, you may have stored inaccurate interval list times due to #1481. To fix
-these, please run `LFPBandV1().fix_1481()` as shown in the release notes.
+these, please run the following after updating:
+
+```python
+from spyglass.lfp.analysis.v1 import LFPBandV1
+
+LFPBandV1().fix_1481()
+```
+
+#### AutomaticCuration Fix
+
+If you were using `v0.AutomaticCuration` after April 2025, you may have stored
+inaccurate labels due to #1513. To fix these, please run the following after
+updating:
+
+```python
+from spyglass.spikesorting.v0 import Fix1513Status
+
+Fix1513Status.populate()
+Fix1513Status.activate_pending_nwb_repairs()
+Fix1513Status.run_pending_repopulates()
+```
 
 #### Decoding Results Structure
 
@@ -125,7 +145,7 @@ for label, interval_data in results.groupby("interval_labels"):
 
 ### Documentation
 
-- Delete extra pyscripts that were renamed # 1363
+- Delete extra pyscripts that were renamed #1363
 - Add note on fetching changes to setup notebook #1371
 - Revise table field docstring heading and `mermaid` diagram generation #1402
 - Add pages for custom analysis tables and class inheritance structure #1435
@@ -226,9 +246,7 @@ for label, interval_data in results.groupby("interval_labels"):
     - Allow ingestion of nwb files without behavior module #1441
     - Warn when ingesting ImageSeries without TaskEpoch #1461
     - Support ingestion of multi-epoch video files #1548
-    - Fix bug with sgc.LabTeam().create_new_team when google_user_name is not
-        available #1546
-    - Fix bug with sgc.LabTeam().create_new_team when google_user_name is not
+    - Fix bug with `LabTeam().create_new_team` when `google_user_name` is not
         available #1546
     - Fix bug from overlapping intervals in interval union #1520
 
@@ -244,8 +262,8 @@ for label, interval_data in results.groupby("interval_labels"):
         with an `interval_labels` coordinate to track interval membership. This
         eliminates NaN padding and reduces memory usage. See migration guide
         above.
-    - Fix fetching position df in
-        SortedSpikesDecodingV1.get_ahead_behind_distance() #1540
+    - Fix fetching position dataframe in
+        `SortedSpikesDecodingV1.get_ahead_behind_distance()` #1540
 
 - LFP
 
@@ -281,6 +299,7 @@ for label, interval_data in results.groupby("interval_labels"):
     - Fix `NwbfileHasher` to include HDF5 Dataset content in
         `SpikeSortingRecording.hash`; previously only attrs/shape/dtype were
         hashed so in-place Dataset edits were invisible to the hasher #1600
+    - Implement fix for `AutomaticCuration` incorrect labels #1537
 
 ## [0.5.5] (Aug 6, 2025)
 
