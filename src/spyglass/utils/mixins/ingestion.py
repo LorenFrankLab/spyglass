@@ -149,7 +149,11 @@ class IngestionMixin(BaseMixin):
                 if isinstance(v, str):
                     base_key[k] = getattr(obj_, v)
                 # attribute with default value as tuple (attr_name, default_val)
-                elif isinstance(v, tuple) and len(v) == 2 and isinstance(v[0], str):
+                elif (
+                    isinstance(v, tuple)
+                    and len(v) == 2
+                    and isinstance(v[0], str)
+                ):
                     base_key[k] = getattr(obj_, v[0], v[1])
                 # callable function
                 elif callable(v):
