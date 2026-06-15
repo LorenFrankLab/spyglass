@@ -118,6 +118,80 @@ def deterministic_id(kind: str, payload: dict) -> uuid.UUID:
     )
 
 
+def recording_identity_payload(key: dict) -> dict:
+    """Build a ``RecordingSelection`` logical-identity payload.
+
+    The identity is the full FK set (Raw, SortGroupV2, IntervalList,
+    PreprocessingParameters, LabTeam) -- i.e. every supplied field except
+    the content-addressed ``recording_id`` PK itself. Single source of
+    truth shared by ``RecordingSelection.insert_selection`` and
+    ``preflight_v2_pipeline`` so the two cannot derive different ids for
+    the same selection.
+    """
+    return {k: v for k, v in key.items() if k != "recording_id"}
+
+
+def artifact_identity_payload(
+    *,
+    artifact_params_name,
+    recording_id=None,
+    shared_artifact_group_name=None,
+) -> dict:
+    """Build an ``ArtifactSelection`` logical-identity payload (params + source).
+
+    Exactly one of ``recording_id`` (single-recording path) or
+    ``shared_artifact_group_name`` (cross-recording path) must be given.
+    ``source_kind`` is explicit so a recording source and a shared-group
+    source never alias even if their source-identifier strings collide.
+    Single source of truth shared by
+    ``ArtifactSelection.insert_selection`` and ``preflight_v2_pipeline``.
+    """
+    if (recording_id is None) == (shared_artifact_group_name is None):
+        raise ValueError(
+            "artifact_identity_payload requires exactly one source: "
+            "recording_id xor shared_artifact_group_name."
+        )
+    if recording_id is not None:
+        return {
+            "source_kind": "recording",
+            "artifact_params_name": artifact_params_name,
+            "recording_id": recording_id,
+        }
+    return {
+        "source_kind": "shared_artifact_group",
+        "artifact_params_name": artifact_params_name,
+        "shared_artifact_group_name": shared_artifact_group_name,
+    }
+
+
+def sorting_identity_payload(
+    *,
+    recording_id,
+    sorter: str,
+    sorter_params_name: str,
+    artifact_id=None,
+) -> dict:
+    """Build a ``SortingSelection`` logical-identity payload.
+
+    Identity is the recording source + sorter + the optional artifact
+    pass. ``artifact_id`` is normalized to a ``uuid.UUID`` (or kept
+    ``None``) so a caller-supplied ``str`` and the stored ``uuid.UUID``
+    share one identity; ``artifact_id=None`` is the single "no artifact
+    pass" form and cannot alias any real ``artifact_id``. Single source of
+    truth shared by ``SortingSelection.insert_selection`` and
+    ``preflight_v2_pipeline``.
+    """
+    if artifact_id is not None:
+        artifact_id = uuid.UUID(str(artifact_id))
+    return {
+        "source_kind": "recording",
+        "recording_id": recording_id,
+        "sorter": sorter,
+        "sorter_params_name": sorter_params_name,
+        "artifact_id": artifact_id,
+    }
+
+
 def assert_supplied_id_matches(supplied, deterministic, *, field: str) -> None:
     """Reject a caller-supplied selection PK that is not the deterministic id.
 

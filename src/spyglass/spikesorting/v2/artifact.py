@@ -534,29 +534,29 @@ class ArtifactSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
 
         if has_recording:
             source_part = cls.RecordingSource
-            source_kind = "recording"
             source_restriction = {"recording_id": key["recording_id"]}
         else:
             source_part = cls.SharedArtifactGroupSource
-            source_kind = "shared_artifact_group"
             source_restriction = {
                 "shared_artifact_group_name": key["shared_artifact_group_name"]
             }
 
         # Deterministic, content-addressed artifact_id from the logical
-        # identity (params + source). ``source_kind`` is explicit so a
-        # recording source and a shared-group source never alias even if
-        # their source-identifier strings were to collide.
+        # identity (params + source), built via the shared payload helper so
+        # preflight derives the identical id. ``source_kind`` is explicit so a
+        # recording source and a shared-group source never alias even if their
+        # source-identifier strings were to collide.
         from spyglass.spikesorting.v2._selection_identity import (
+            artifact_identity_payload,
             assert_supplied_id_matches,
             deterministic_id,
         )
 
-        identity = {
-            "source_kind": source_kind,
-            **master_restriction,
-            **source_restriction,
-        }
+        identity = artifact_identity_payload(
+            artifact_params_name=key[master_field],
+            recording_id=key.get("recording_id"),
+            shared_artifact_group_name=key.get("shared_artifact_group_name"),
+        )
         artifact_id = deterministic_id("artifact", identity)
         assert_supplied_id_matches(
             key.get("artifact_id"), artifact_id, field="artifact_id"

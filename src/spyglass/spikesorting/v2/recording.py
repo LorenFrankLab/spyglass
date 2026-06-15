@@ -994,13 +994,14 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         from spyglass.spikesorting.v2._selection_identity import (
             assert_supplied_id_matches,
             deterministic_id,
+            recording_identity_payload,
         )
         from spyglass.spikesorting.v2.utils import (
             _ensure_lookup_row_exists,
             _is_duplicate_key_error,
         )
 
-        keys_minus_uuid = {k: v for k, v in key.items() if k != "recording_id"}
+        keys_minus_uuid = recording_identity_payload(key)
         recording_id = deterministic_id("recording", keys_minus_uuid)
         assert_supplied_id_matches(
             key.get("recording_id"), recording_id, field="recording_id"

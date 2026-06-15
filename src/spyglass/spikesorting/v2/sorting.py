@@ -652,15 +652,15 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         from spyglass.spikesorting.v2._selection_identity import (
             assert_supplied_id_matches,
             deterministic_id,
+            sorting_identity_payload,
         )
 
-        identity = {
-            "source_kind": "recording",
-            "recording_id": key["recording_id"],
-            "sorter": key["sorter"],
-            "sorter_params_name": key["sorter_params_name"],
-            "artifact_id": artifact_id,
-        }
+        identity = sorting_identity_payload(
+            recording_id=key["recording_id"],
+            sorter=key["sorter"],
+            sorter_params_name=key["sorter_params_name"],
+            artifact_id=artifact_id,
+        )
         sorting_id = deterministic_id("sorting", identity)
         assert_supplied_id_matches(
             key.get("sorting_id"), sorting_id, field="sorting_id"
