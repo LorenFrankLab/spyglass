@@ -51,6 +51,33 @@ DLCProject().alter()
 
 ### Breaking Changes
 
+#### NwbfileHasher Now Includes Dataset Content (#1600)
+
+`NwbfileHasher` previously discarded the return value of `hash_dataset()`, so
+HDF5 Dataset values (the actual array data) were never incorporated into
+`SpikeSortingRecording.hash`. Only metadata (attrs, shape, dtype) was hashed.
+
+**Impact**: All V1 `SpikeSortingRecording` hashes computed before this fix are
+metadata-only. Running `RecordingRecompute.populate()` against a pre-fix stored
+hash will produce `matched=False` even when the file is identical, because the
+old and new hashers disagree on what to include.
+
+**If you have existing `matched=1` entries** from before this fix, those matches
+only verified metadata — Dataset content was not compared. These entries should
+be re-validated once all users have upgraded.
+
+**Backward compatibility**: Set `SPYGLASS_LEGACY_HASHES=true` in your shell
+environment to restore pre-fix (metadata-only) hashing in `RecordingRecompute`.
+This allows existing matched entries to be reproduced without recomputing, and
+is intended as a temporary bridge while labs transition:
+
+```bash
+SPYGLASS_LEGACY_HASHES=true python -c "
+from spyglass.spikesorting.v1.recompute import RecordingRecompute
+RecordingRecompute().populate(...)
+"
+```
+
 #### LFPBandV1 Fix
 
 If you were using a pre-release version of Spyglass 0.5.6 LFPBandV1 after April
@@ -103,6 +130,7 @@ for label, interval_data in results.groupby("interval_labels"):
 - Revise table field docstring heading and `mermaid` diagram generation #1402
 - Add pages for custom analysis tables and class inheritance structure #1435
 - Add support for bandstop filter type #1464
+- Add Interval and Populate migration guides #1615
 
 ### Infrastructure
 
@@ -159,6 +187,13 @@ for label, interval_data in results.groupby("interval_labels"):
     `FALSE` default #1575
 - Warn on no-operation restrictions #1586
 - Improved efficiency for writing multiple objects to analysis file #1594
+- Pin `scipy<1.13` for `spikeinterface==0.99.1` compatibility #1612
+- Fix `NwbfileHasher` to include HDF5 Dataset content in file hash; add
+    `SPYGLASS_LEGACY_HASHES` env var to `RecordingRecompute` for backward
+    compatibility with pre-fix hashes #1600
+- Fix redundant hash computation in `SpikeSortingRecording._make_file`:
+    `_update_external` no longer re-reads the NWB file to verify a hash that was
+    just computed by the caller #1600
 - Add `DandiValidation` tables for tracking dandi compliance during export #1584
 
 ### Pipelines
@@ -225,6 +260,7 @@ for label, interval_data in results.groupby("interval_labels"):
     - Fix ingestion nwb files with position objects but no spatial series #1405
     - Ignore `percent_frames` when using `limit` in `DLCPosVideo` #1418
     - Increase `DLCProject.config_path` length #1534
+    - Add option to bound output of DLC to defined spatial region #1570
 
 - Spikesorting
 
@@ -243,6 +279,9 @@ for label, interval_data in results.groupby("interval_labels"):
     - Restrict `ImportedSpikeSorting.Annotations` to the current session in
         `make_df_from_annotations` so `fetch_nwb` works across multiple sessions
         with overlapping unit ids #1581, #1592
+    - Fix `NwbfileHasher` to include HDF5 Dataset content in
+        `SpikeSortingRecording.hash`; previously only attrs/shape/dtype were
+        hashed so in-place Dataset edits were invisible to the hasher #1600
 
 ## [0.5.5] (Aug 6, 2025)
 
