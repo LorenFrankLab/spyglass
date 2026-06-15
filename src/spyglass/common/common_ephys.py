@@ -139,12 +139,16 @@ class Electrode(SpyglassIngestion, dj.Imported):
                 "probe_shank": ("probe_shank", None),
                 "probe_electrode": ("probe_electrode", None),
                 "original_reference_electrode": ("ref_elect_id", None),
-                "bad_channel": ("bad_channel", False),
+                "bad_channel": self.bad_channel_as_string,
             },
             "group": {
                 "probe_id": self.device_probe_type_default_none,
             },
         }
+
+    def bad_channel_as_string(self, nwb_obj):
+        bad_channel = getattr(nwb_obj, "bad_channel", False)
+        return "True" if bad_channel else "False"
 
     def fixed_to_zero(self, nwb_obj):
         return 0
