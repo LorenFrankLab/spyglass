@@ -31,6 +31,7 @@ from spyglass.spikesorting.v2.pipeline import (
     _STAGE_STATUSES,
     describe_presets,
     describe_sort_groups,
+    plot_sort_groups,
     preflight_v2_pipeline,
     run_v2_pipeline,
 )
@@ -341,6 +342,48 @@ def test_describe_sort_groups_empty(dj_conn):
     sort_groups = describe_sort_groups("not_an_ingested_session_.nwb")
     assert list(sort_groups.columns) == _SORT_GROUP_COLUMNS
     assert sort_groups.empty
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_plot_sort_groups_geometry_view(first_hour):
+    """The sort-group geometry view renders one contact collection per group."""
+    matplotlib = pytest.importorskip("matplotlib")
+
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots()
+    returned = plot_sort_groups(first_hour["nwb_file_name"], ax=ax)
+    assert returned is ax
+
+    group_collections = [
+        collection
+        for collection in ax.collections
+        if str(collection.get_label()).startswith("sort_group_id ")
+    ]
+    assert len(group_collections) == 4
+    assert sum(len(c.get_offsets()) for c in group_collections) == 128
+    assert ax.get_xlabel() == "Probe rel_x (um)"
+    assert ax.get_ylabel() == "Probe rel_y (um)"
+    assert ax.get_legend() is not None
+    plt.close(fig)
+
+
+@pytest.mark.database
+def test_plot_sort_groups_empty(dj_conn):
+    """A session with no SortGroupV2 rows produces a clear empty axes."""
+    matplotlib = pytest.importorskip("matplotlib")
+
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots()
+    returned = plot_sort_groups("not_an_ingested_session_.nwb", ax=ax)
+    assert returned is ax
+    assert ax.texts
+    assert "No SortGroupV2 rows" in ax.texts[0].get_text()
+    plt.close(fig)
 
 
 def test_user_notebook_cell_budget():

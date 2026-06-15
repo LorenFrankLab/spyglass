@@ -250,6 +250,325 @@ def describe_sort_groups(nwb_file_name: str) -> "pd.DataFrame":
     return pd.DataFrame(rows, columns=_SORT_GROUP_COLUMNS)
 
 
+def _sort_group_geometry_rows(nwb_file_name: str) -> list[dict[str, Any]]:
+    """Return DB-backed electrode geometry rows for sort-group plotting."""
+    import pandas as pd
+
+    from spyglass.common.common_device import Probe
+    from spyglass.common.common_ephys import Electrode
+    from spyglass.common.common_region import BrainRegion
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    def _missing(value) -> bool:
+        return value is None or bool(pd.isna(value))
+
+    def _nullable_int(value):
+        if _missing(value):
+            return None
+        return int(value)
+
+    master_rows = (SortGroupV2 & {"nwb_file_name": nwb_file_name}).fetch(
+        as_dict=True
+    )
+    master_by_group = {
+        int(row["sort_group_id"]): row
+        for row in sorted(
+            master_rows, key=lambda row: int(row["sort_group_id"])
+        )
+    }
+    if not master_by_group:
+        return []
+
+    member_rows = (
+        (SortGroupV2.SortGroupElectrode & {"nwb_file_name": nwb_file_name})
+        * Electrode
+        * BrainRegion
+    ).fetch(as_dict=True)
+
+    probe_restrictions = []
+    for electrode in member_rows:
+        probe_key = {
+            "probe_id": electrode.get("probe_id"),
+            "probe_shank": electrode.get("probe_shank"),
+            "probe_electrode": electrode.get("probe_electrode"),
+        }
+        if all(not _missing(value) for value in probe_key.values()):
+            probe_restrictions.append(
+                {
+                    key: _nullable_int(value) if key != "probe_id" else value
+                    for key, value in probe_key.items()
+                }
+            )
+    probe_geometry = {}
+    if probe_restrictions:
+        probe_rows = (Probe.Electrode & probe_restrictions).fetch(
+            "probe_id",
+            "probe_shank",
+            "probe_electrode",
+            "rel_x",
+            "rel_y",
+            "rel_z",
+            "contact_size",
+            as_dict=True,
+        )
+        probe_geometry = {
+            (
+                row["probe_id"],
+                int(row["probe_shank"]),
+                int(row["probe_electrode"]),
+            ): row
+            for row in probe_rows
+        }
+
+    rows: list[dict[str, Any]] = []
+    for sort_group_id, master in master_by_group.items():
+        sort_group_id = int(master["sort_group_id"])
+        reference_mode = master["reference_mode"]
+        reference_electrode_id = (
+            _nullable_int(master["reference_electrode_id"])
+            if reference_mode == "specific"
+            else None
+        )
+        group_electrodes = sorted(
+            (
+                row
+                for row in member_rows
+                if int(row["sort_group_id"]) == sort_group_id
+            ),
+            key=lambda row: int(row["electrode_id"]),
+        )
+        for electrode in group_electrodes:
+            rel_x = rel_y = rel_z = contact_size = None
+            probe_key = {
+                "probe_id": electrode.get("probe_id"),
+                "probe_shank": electrode.get("probe_shank"),
+                "probe_electrode": electrode.get("probe_electrode"),
+            }
+            if all(not _missing(value) for value in probe_key.values()):
+                geometry = probe_geometry.get(
+                    (
+                        probe_key["probe_id"],
+                        _nullable_int(probe_key["probe_shank"]),
+                        _nullable_int(probe_key["probe_electrode"]),
+                    )
+                )
+                if geometry:
+                    rel_x = geometry["rel_x"]
+                    rel_y = geometry["rel_y"]
+                    rel_z = geometry["rel_z"]
+                    contact_size = geometry["contact_size"]
+
+            x = rel_x if not _missing(rel_x) else electrode.get("x")
+            y = rel_y if not _missing(rel_y) else electrode.get("y")
+            coord_source = (
+                "probe"
+                if not _missing(rel_x) and not _missing(rel_y)
+                else "electrode"
+                if not _missing(electrode.get("x"))
+                and not _missing(electrode.get("y"))
+                else None
+            )
+            rows.append(
+                {
+                    "nwb_file_name": nwb_file_name,
+                    "sort_group_id": sort_group_id,
+                    "electrode_id": int(electrode["electrode_id"]),
+                    "electrode_group_name": str(
+                        electrode["electrode_group_name"]
+                    ),
+                    "probe_id": electrode.get("probe_id"),
+                    "probe_shank": _nullable_int(electrode.get("probe_shank")),
+                    "probe_electrode": _nullable_int(
+                        electrode.get("probe_electrode")
+                    ),
+                    "brain_region": str(electrode["region_name"]),
+                    "bad_channel": str(electrode.get("bad_channel")),
+                    "reference_mode": reference_mode,
+                    "reference_electrode_id": reference_electrode_id,
+                    "is_reference": reference_electrode_id
+                    == int(electrode["electrode_id"]),
+                    "x": electrode.get("x"),
+                    "y": electrode.get("y"),
+                    "z": electrode.get("z"),
+                    "rel_x": rel_x,
+                    "rel_y": rel_y,
+                    "rel_z": rel_z,
+                    "contact_size": contact_size,
+                    "plot_x": x,
+                    "plot_y": y,
+                    "coordinate_source": coord_source,
+                }
+            )
+    return rows
+
+
+def plot_sort_groups(
+    nwb_file_name: str,
+    *,
+    ax=None,
+    sort_group_ids: list[int] | tuple[int, ...] | set[int] | None = None,
+    label_electrodes: bool = False,
+    show_bad_channels: bool = True,
+    show_reference: bool = True,
+    title: str | None = None,
+):
+    """Plot a DB-backed geometry view of existing v2 sort groups.
+
+    Use this immediately after ``describe_sort_groups`` and before choosing a
+    ``sort_group_id``. Contacts are colored by ``sort_group_id``; bad-channel
+    members and specific reference electrodes are overlaid when present. The
+    helper reads Spyglass metadata only -- it does not open the raw recording or
+    create SpikeInterface objects.
+
+    Parameters
+    ----------
+    nwb_file_name
+        Session whose existing ``SortGroupV2`` rows should be visualized.
+    ax
+        Optional Matplotlib axes to draw into. A new figure/axes is created
+        when omitted.
+    sort_group_ids
+        Optional subset of sort-group ids to display.
+    label_electrodes
+        If ``True``, annotate each plotted contact with its ``electrode_id``.
+    show_bad_channels
+        If ``True``, overlay bad-channel members with red ``x`` markers.
+    show_reference
+        If ``True``, overlay ``reference_mode='specific'`` electrodes with a
+        black star marker.
+    title
+        Optional axes title.
+
+    Returns
+    -------
+    matplotlib.axes.Axes
+        The axes containing the plot.
+    """
+    import pandas as pd
+    import matplotlib.pyplot as plt
+
+    def _missing(value) -> bool:
+        return value is None or bool(pd.isna(value))
+
+    if ax is None:
+        _, ax = plt.subplots(figsize=(7, 5), constrained_layout=True)
+
+    rows = _sort_group_geometry_rows(nwb_file_name)
+    if sort_group_ids is not None:
+        wanted = {int(sort_group_id) for sort_group_id in sort_group_ids}
+        rows = [row for row in rows if row["sort_group_id"] in wanted]
+
+    if not rows:
+        ax.text(
+            0.5,
+            0.5,
+            "No SortGroupV2 rows",
+            ha="center",
+            va="center",
+            transform=ax.transAxes,
+        )
+        ax.set_axis_off()
+        return ax
+
+    plottable = [
+        row
+        for row in rows
+        if not _missing(row["plot_x"]) and not _missing(row["plot_y"])
+    ]
+    if not plottable:
+        ax.text(
+            0.5,
+            0.5,
+            "No plottable electrode geometry",
+            ha="center",
+            va="center",
+            transform=ax.transAxes,
+        )
+        ax.set_axis_off()
+        return ax
+
+    cmap = plt.get_cmap("tab10")
+    sort_group_ids = sorted({row["sort_group_id"] for row in plottable})
+    for color_index, sort_group_id in enumerate(sort_group_ids):
+        group_rows = [
+            row for row in plottable if row["sort_group_id"] == sort_group_id
+        ]
+        color = cmap(color_index % cmap.N)
+        ax.scatter(
+            [row["plot_x"] for row in group_rows],
+            [row["plot_y"] for row in group_rows],
+            s=50,
+            color=color,
+            edgecolors="black",
+            linewidths=0.35,
+            alpha=0.85,
+            label=f"sort_group_id {sort_group_id}",
+        )
+
+    if show_bad_channels:
+        bad_rows = [
+            row for row in plottable if str(row["bad_channel"]) == "True"
+        ]
+        if bad_rows:
+            ax.scatter(
+                [row["plot_x"] for row in bad_rows],
+                [row["plot_y"] for row in bad_rows],
+                s=90,
+                marker="x",
+                color="red",
+                linewidths=1.2,
+                label="bad channel",
+            )
+
+    if show_reference:
+        reference_rows = [row for row in plottable if row["is_reference"]]
+        if reference_rows:
+            ax.scatter(
+                [row["plot_x"] for row in reference_rows],
+                [row["plot_y"] for row in reference_rows],
+                s=150,
+                marker="*",
+                facecolors="none",
+                edgecolors="black",
+                linewidths=1.2,
+                label="specific reference",
+            )
+
+    if label_electrodes:
+        for row in plottable:
+            ax.annotate(
+                str(row["electrode_id"]),
+                (row["plot_x"], row["plot_y"]),
+                xytext=(3, 3),
+                textcoords="offset points",
+                fontsize=7,
+            )
+
+    coordinate_sources = {
+        row["coordinate_source"] for row in plottable if row["coordinate_source"]
+    }
+    if coordinate_sources == {"probe"}:
+        ax.set_xlabel("Probe rel_x (um)")
+        ax.set_ylabel("Probe rel_y (um)")
+    elif coordinate_sources == {"electrode"}:
+        ax.set_xlabel("Electrode x (um)")
+        ax.set_ylabel("Electrode y (um)")
+    else:
+        ax.set_xlabel("x coordinate (um)")
+        ax.set_ylabel("y coordinate (um)")
+
+    missing_count = len(rows) - len(plottable)
+    plot_title = title or f"Sort groups for {nwb_file_name}"
+    if missing_count:
+        plot_title = f"{plot_title} ({missing_count} contact(s) hidden)"
+    ax.set_title(plot_title)
+    ax.set_aspect("equal", adjustable="datalim")
+    ax.grid(True, alpha=0.25)
+
+    ax.legend(fontsize="small", loc="best")
+    return ax
+
+
 _PRESETS: dict[str, _Preset] = {
     "franklab_tetrode_mountainsort4": _Preset(
         preproc_params_name="default_franklab",

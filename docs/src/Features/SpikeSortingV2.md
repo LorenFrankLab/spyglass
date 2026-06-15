@@ -120,6 +120,7 @@ from spyglass.common.common_lab import LabTeam
 from spyglass.spikesorting.v2 import initialize_v2_defaults
 from spyglass.spikesorting.v2.pipeline import (
     describe_sort_groups,
+    plot_sort_groups,
     preflight_v2_pipeline,
     run_v2_pipeline,
 )
@@ -140,6 +141,7 @@ LabTeam.insert1(
 SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
 sort_groups = describe_sort_groups(nwb_file_name)
 sort_group_id = int(sort_groups.iloc[0]["sort_group_id"])
+plot_sort_groups(nwb_file_name)
 sort_groups
 
 # End-to-end populate + register on the merge table.
@@ -166,20 +168,23 @@ completed before it.
 
 ### Choosing a sort group
 
-`set_group_by_shank` creates the rows; `describe_sort_groups` helps you decide
-which one to run:
+`set_group_by_shank` creates the rows; `describe_sort_groups` and
+`plot_sort_groups` help you decide which one to run:
 
 ```python
-from spyglass.spikesorting.v2.pipeline import describe_sort_groups
+from spyglass.spikesorting.v2.pipeline import describe_sort_groups, plot_sort_groups
 
 describe_sort_groups(nwb_file_name)
+plot_sort_groups(nwb_file_name)
 ```
 
 Each row is one `SortGroupV2` group. Check `n_electrodes`, `electrode_ids`,
 `electrode_group_names`, `probe_shanks`, `brain_regions`, `bad_channel_count`,
-and the reference fields before sorting. For real analyses, choose
-`sort_group_id` intentionally from this table rather than assuming `0` is the
-scientifically relevant shank.
+and the reference fields before sorting. The geometry plot colors contacts by
+`sort_group_id` using Spyglass probe/electrode metadata, overlays bad-channel
+members with red `x` markers, and marks `reference_mode="specific"` electrodes
+with a star. For real analyses, choose `sort_group_id` intentionally from this
+table and plot rather than assuming `0` is the scientifically relevant shank.
 
 Available presets:
 
