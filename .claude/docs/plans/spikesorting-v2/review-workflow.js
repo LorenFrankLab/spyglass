@@ -281,7 +281,7 @@ const COVERAGE_AREAS = [
   'params validation + schema versions + defaults',
   'v1 parity + downstream consumers (decoding/SortedSpikesGroup/UnitAnnotation)',
   'export (DANDI/FigURL/Kachery) snapshots v2 tables + SpikeSortingOutput.CurationV2 part',
-  'SpikeInterface integration: sorter/preproc defaults pinned, analyzer + quality-metric outputs asserted',
+  'SpikeInterface integration: sorter/preprocessing defaults pinned, analyzer + quality-metric outputs asserted',
 ]
 
 // v1 vs v2 study (Parity phase). Areas mirror the pipeline stages.

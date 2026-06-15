@@ -58,9 +58,9 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
     # future mode behind a forbidden ALTER TABLE under the zero-migration
     # policy. The Literal gives the same typo-protection without the
     # migration risk (same rationale as CurationLabel; contrast
-    # metrics_source, whose set is closed). `insert1` enforces both the
+    # curation_source, whose set is closed). `insert1` enforces both the
     # Literal membership AND "reference_electrode_id IS NOT NULL iff
-    # reference_mode='specific'". The preproc dispatch switches on
+    # reference_mode='specific'". The preprocessing dispatch switches on
     # reference_mode (no more -1/-2/≥0 magic-int arithmetic). See
     # review-fixes/phase-2 T2.
 
@@ -184,7 +184,7 @@ from spyglass.spikesorting.v2.utils import _validate_params, _resolved_job_kwarg
 @schema
 class PreprocessingParameters(SpyglassMixin, dj.Lookup):
     definition = """
-    preproc_params_name: varchar(128)              # matches v1's varchar(200) ballpark
+    preprocessing_params_name: varchar(128)              # matches v1's varchar(200) ballpark
     ---
     params: blob                # SI PreprocessingPipeline dict, validated by PreprocessingParamsSchema
     params_schema_version=3: int   # post-review-fixes baseline (bandpass Optional + whiten=None); column default tracks the schema
@@ -306,7 +306,7 @@ Mirrors v1's structure but consumes the v2 NWB-resident `Recording` artifact (vi
 @schema
 class ArtifactDetectionParameters(SpyglassMixin, dj.Lookup):
     definition = """
-    artifact_params_name: varchar(64)
+    artifact_detection_params_name: varchar(64)
     ---
     params: blob   # validated by ArtifactDetectionParamsSchema (Pydantic)
     params_schema_version=1: int
@@ -316,9 +316,9 @@ class ArtifactDetectionParameters(SpyglassMixin, dj.Lookup):
         ("none", {"detect": False}, 1, None),
         ("default", {
             "detect": True,
-            "amplitude_thresh_uV": 500.0,
-            "zscore_thresh": None,
-            "proportion_above_thresh": 0.5,
+            "amplitude_threshold_uv": 500.0,
+            "zscore_threshold": None,
+            "proportion_above_threshold": 0.5,
             "removal_window_ms": 1.0,
             "join_window_ms": 1.0,
         }, 1, None),
@@ -688,11 +688,11 @@ class CurationV2(SpyglassMixin, dj.Manual):
                                   # NWB Column-Name Convention (CurationV1 parity).
                                   # v1 CurationV1 uses varchar(72) — match for parity.
     merges_applied=0: bool
-    metrics_source = 'manual': enum('manual', 'analyzer_curation', 'figpack')
+    curation_source = 'manual': enum('manual', 'analyzer_curation', 'figpack')
                                   # provenance of any metrics blob attached to
                                   # this curation. Addresses Spyglass GitHub
                                   # issue #939 (CurationV1 does not track a
-                                  # metrics source). 'manual' = user-supplied
+                                  # curation source). 'manual' = user-supplied
                                   # via insert_curation(metrics=...);
                                   # 'analyzer_curation' = materialized from
                                   # AnalyzerCuration.materialize_curation();
@@ -735,7 +735,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         `CurationLabel` set; labels outside it are rejected unless the caller
         passes `allow_custom_labels=True` (the explicit escape hatch). Do NOT
         repeat the false "DataJoint cannot enforce enums on varchar" claim —
-        it can (see `metrics_source`); we choose varchar deliberately.
+        it can (see `curation_source`); we choose varchar deliberately.
         """
         definition = """
         -> CurationV2.Unit
@@ -859,18 +859,18 @@ class AnalyzerCurationSelection(SpyglassMixin, dj.Manual):
         """Insert/find AnalyzerCurationSelection row.
 
         Emits a `logger.warning` when the upstream CurationV2 has
-        `metrics_source == 'analyzer_curation'` (running auto-curation on an
+        `curation_source == 'analyzer_curation'` (running auto-curation on an
         already-auto-curated child computes metrics over post-merge
         templates — usually not what the user wants, but not a hard error).
         Lineage depth is recoverable via the `parent_curation_id` chain.
 
         Returns single PK-only dict per shared-contracts.
         """
-        upstream_metrics_source = (CurationV2 & key).fetch1("metrics_source")
-        if upstream_metrics_source == "analyzer_curation":
+        upstream_curation_source = (CurationV2 & key).fetch1("curation_source")
+        if upstream_curation_source == "analyzer_curation":
             logger.warning(
                 "AnalyzerCuration is being inserted on a CurationV2 row with "
-                "metrics_source='analyzer_curation' (already auto-curated). "
+                "curation_source='analyzer_curation' (already auto-curated). "
                 "Metrics will be computed over post-merge templates."
             )
         # ... validate params, find-or-mint UUID, return PK
@@ -1225,14 +1225,14 @@ class ConcatenatedRecordingSelection(SpyglassMixin, dj.Manual):
         Recording.populate() call (DataJoint anti-pattern).
         """
         members = (SessionGroup.Member & key).fetch(as_dict=True)
-        preproc_params_name = key["preproc_params_name"]
+        preprocessing_params_name = key["preprocessing_params_name"]
         missing: list[dict] = []
         for m in members:
             rec_sel_key = {
                 "nwb_file_name": m["nwb_file_name"],
                 "sort_group_id": m["sort_group_id"],
                 "interval_list_name": m["interval_list_name"],
-                "preproc_params_name": preproc_params_name,
+                "preprocessing_params_name": preprocessing_params_name,
                 "team_name": m["team_name"],
             }
             # Recording row exists iff RecordingSelection row exists AND
@@ -1698,8 +1698,8 @@ def run_v2_unit_match(
 ```python
 PRESETS = {
     "franklab_tetrode_mountainsort5": {
-        "preproc_params_name": "default_franklab",
-        "artifact_params_name": "default",
+        "preprocessing_params_name": "default_franklab",
+        "artifact_detection_params_name": "default",
         "sorter": "mountainsort5",
         "sorter_params_name": "franklab_tetrode_hippocampus_30kHz_ms5",
         "metric_params_name": "franklab_default",
@@ -1709,13 +1709,13 @@ PRESETS = {
     "franklab_probe_kilosort4": {...},
     "franklab_tetrode_clusterless_thresholder": {...},
     "franklab_tetrode_mountainsort5_sameday_concat": {
-        "preproc_params_name": "default_franklab",
-        # artifact_params_name is None for concat presets: concat sorts run
+        "preprocessing_params_name": "default_franklab",
+        # artifact_detection_params_name is None for concat presets: concat sorts run
         # NO artifact detection (the concat SortingSelection has no
         # ArtifactSource row), so a non-None value here would be silently
         # ignored. The _Preset model makes the field Optional and the
         # orchestrator forbids consuming it in concat mode.
-        "artifact_params_name": None,
+        "artifact_detection_params_name": None,
         "sorter": "mountainsort5",
         "sorter_params_name": "franklab_tetrode_hippocampus_30kHz_ms5",
         "metric_params_name": "franklab_default",

@@ -35,7 +35,7 @@ below for the concrete metadata schema.
 3. **Sort group / electrodes**: same `sort_group_id`, same
    `sort_group_electrode_ids` (sorted list), same
    `bad_channel_by_electrode_id` (dict).
-4. **Preprocessing**: same `canonical_preproc_params` (effective SI
+4. **Preprocessing**: same `canonical_preprocessing_params` (effective SI
    kwargs after schema normalization — see invariant 6 on schema
    drift).
 5. **Artifact removal**: same `canonical_artifact_params` (effective
@@ -73,7 +73,7 @@ fields beyond the current schema:
 | `nwb_sha256` | str (hex) | `hashlib.sha256(nwb_source.read_bytes()).hexdigest()` |
 | `sort_group_electrode_ids` | list[int] | `(SortGroup.SortGroupElectrode & {"nwb_file_name": nwb_file_name, "sort_group_id": sort_group_id}).fetch("electrode_id", order_by="electrode_id").tolist()` — restricted by the **full** PK (`SortGroup` is keyed by `Session` + `sort_group_id`, and `sort_group_id` collides across sessions) |
 | `bad_channel_by_electrode_id` | dict[str, bool] *(JSON-keyed: int→str on serialize)* | `Electrode & {"nwb_file_name": nwb_file_name}` → `{str(eid): bool(bad == "True") for eid, bad in zip(electrode_id, bad_channel)}` |
-| `canonical_preproc_params` | dict | `_canonical_preproc((SpikeSortingPreprocessingParameters & {"preproc_param_name": name}).fetch1("preproc_params"))` |
+| `canonical_preprocessing_params` | dict | `_canonical_preprocessing((SpikeSortingPreprocessingParameters & {"preproc_param_name": name}).fetch1("preproc_params"))` |
 | `canonical_artifact_params` | dict | `_canonical_artifact((ArtifactDetectionParameters & {"artifact_param_name": name}).fetch1("artifact_params"))` |
 | `artifact_valid_times` | `{"_array_data": list, "_array_meta": {"dtype": "float64", "shape": [n, 2]}}` | `_normalize(np.round(np.ascontiguousarray(valid_times, dtype="<f8").reshape(-1, 2), decimals=3))` — reshape to `(n_intervals, 2)` (v1 ships 1D for 1 interval, v2 always 2D); round to nearest millisecond to absorb v1's `(n-1)/fs` vs v2's `n/fs` end-boundary convention (1 sample = 31 µs at 32 kHz, well below 1 ms). The original sha256-hash design failed on the shape + boundary drift; the array form lets `assert_canonical_dict_equal` compare element-wise with `math.isclose` float tolerance. |
 | `canonical_sorter_params` | dict | `_canonical_sorter(sorter, (SpikeSorterParameters & {"sorter": sorter, "sorter_param_name": name}).fetch1("sorter_params"))` |
@@ -122,7 +122,7 @@ Live in a new module
 - `_normalize(value)` (private recursive) — handles numpy scalars,
   numpy arrays, tuples, nested dicts/lists per the serialization
   rules above.
-- `canonical_preproc(v1_or_v2_params: dict) -> dict` — strips
+- `canonical_preprocessing(v1_or_v2_params: dict) -> dict` — strips
   schema-only keys, applies `_normalize`, returns canonical dict.
 - `canonical_artifact(v1_or_v2_params: dict) -> dict` — same shape.
 - `canonical_sorter(sorter: str, v1_or_v2_params: dict) -> dict` —
@@ -403,7 +403,7 @@ A0.7 **Sync Phase-A capture-harness modifications into
   with the invariant fingerprints listed in
   [Invariant fingerprinting](#invariant-fingerprinting). This adds
   `nwb_sha256`, `sort_group_electrode_ids`,
-  `bad_channel_by_electrode_id`, `canonical_preproc_params`,
+  `bad_channel_by_electrode_id`, `canonical_preprocessing_params`,
   `canonical_artifact_params`, `artifact_valid_times`,
   `canonical_sorter_params`. Implemented via the
   `_parity_canonical` helpers (also new).
@@ -414,7 +414,7 @@ A0.7 **Sync Phase-A capture-harness modifications into
     `(fixture_stem, sort_group_id)` for the 8 Phase-A cases.
     `ids=` use NWB stems (e.g., `mearec_polymer_smoke-shank0`).
   - **Assert each invariant fingerprint before sorting**: the v2
-    side reconstructs its preproc/artifact/sorter state, computes
+    side reconstructs its preprocessing/artifact/sorter state, computes
     the same canonical fingerprints, and asserts each matches the
     v1 baseline. A mismatch is FAIL with a specific diff in the
     message (so an output-level regression isn't conflated with an
@@ -464,7 +464,7 @@ echo "Started 8 tmux sessions. Monitor: tmux ls"
 ```
 
 ### Tasks
-A1. Write `_parity_canonical.py` + unit tests for `canonical_preproc`,
+A1. Write `_parity_canonical.py` + unit tests for `canonical_preprocessing`,
     `canonical_artifact`, `canonical_sorter("clusterless_thresholder", ...)`.
 A1.5. Extend `baseline_capture.py` metadata with invariant
     fingerprints (see [Invariant fingerprinting](#invariant-fingerprinting)).

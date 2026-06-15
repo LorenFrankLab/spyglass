@@ -21,7 +21,7 @@ bytes differ.
 
 1. Did the MEArec `.h5` file change? (Templates regenerated? Recording
    regenerated?) → **Full recapture required.**
-2. Did sorter params (preproc, sorter, sorter_params, artifact_params,
+2. Did sorter params (preprocessing, sorter, sorter_params, artifact_params,
    seed) change? → **Full recapture required.**
 3. Only the NWB-writer code changed and added/edited metadata columns? →
    **Patch `nwb_sha256` in each `baseline_v1_recording_meta.json`.**

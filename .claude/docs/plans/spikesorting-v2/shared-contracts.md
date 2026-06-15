@@ -85,7 +85,7 @@ bare `ValueError` / `RuntimeError` for these cases once runtime code lands.
 | `NonIntegerUnitIDError` | SpikeInterface sorting returns non-integer unit IDs that cannot be written to `Sorting.Unit.unit_id`. | Offending unit IDs and instruction to remap before insertion. |
 | `SessionGroupDateError` | `SessionGroup.create_group()` receives caller-supplied `recording_date`, or members span multiple dates without `allow_multi_day=True`. | State that dates are derived from `Session.session_start_time`; for multi-day groups, list dates and point to sort-then-match as the recommended cross-day workflow. |
 | `ConcatBrainRegionAmbiguousError` | `Sorting.get_unit_brain_regions()` or `CurationV2.get_unit_brain_regions()` is called on concat-backed data without `allow_anchor_member=True`. | Explain anchor-member ambiguity; say to pass `allow_anchor_member=True` for anchor-only regions. **Per-session wording is build-dependent (review-fix Q2):** until cross-session matching exists, the message uses behavior wording with NO phase number and NO non-existent helper name, e.g. *"per-session resolution requires cross-session matching support, which is not available in this build."* (per [§ Code Artifact Naming](#code-artifact-naming), exception messages may not cite phase numbers). Once cross-session matching ships, the message names the concrete `TrackedUnit.get_unit_brain_regions()` resolver. |
-| `MissingRecordingForConcatError` | `ConcatenatedRecordingSelection.insert_selection()` or `ConcatenatedRecording.make()` cannot find a populated per-member `Recording` row with the shared `preproc_params_name`. | Missing member keys and instruction to populate `Recording` for those members first. |
+| `MissingRecordingForConcatError` | `ConcatenatedRecordingSelection.insert_selection()` or `ConcatenatedRecording.make()` cannot find a populated per-member `Recording` row with the shared `preprocessing_params_name`. | Missing member keys and instruction to populate `Recording` for those members first. |
 | `StaleEnvMatchedError` | Recompute deletion sees `matched=1` only in non-current `UserEnvironment` rows. | Current env ID, stale env IDs, and instruction to rerun recompute or pass `force_stale_env=True` with audit justification. |
 | `UnknownMatcherError` | `MatcherParameters.insert1()` receives an unregistered matcher name. | Unknown matcher, registered matcher names, and `register_matcher()`. |
 | `UnitMatchSelectionIntegrityError` | Direct-inserted `UnitMatchSelection.MemberCuration` rows do not exactly match the parent `SessionGroup.Member` set or point to the wrong member provenance. | Missing/extra/wrong member indexes and instruction to use `UnitMatchSelection.insert_selection()`. |
@@ -408,7 +408,7 @@ from spyglass.spikesorting.v2.curation import CurationV2 as CurationV2_table
 
 Implement `_get_restricted_merge_ids_v2(key, as_dict=False)` as the v2 analog of `_get_restricted_merge_ids_v1`, but without v1's `IntervalList` artifact rewrite. The helper must accept ordinary user-facing restriction keys, not only UUID primary keys:
 
-- Phase 1 keys: `nwb_file_name`, `team_name`, `sort_group_id`, `interval_list_name`, `preproc_params_name`, `recording_id`, `artifact_id`, `sorter`, `sorter_params_name`, `sorting_id`, `curation_id`.
+- Phase 1 keys: `nwb_file_name`, `team_name`, `sort_group_id`, `interval_list_name`, `preprocessing_params_name`, `recording_id`, `artifact_id`, `sorter`, `sorter_params_name`, `sorting_id`, `curation_id`.
 - Phase 2 keys: `analyzer_curation_id`, `metric_params_name`, `auto_curation_rules_name`.
 - Phase 3+ keys when their tables exist: `session_group_owner`, `session_group_name`, `concat_recording_id`.
 
@@ -416,7 +416,7 @@ The implementation should join through the relevant v2 Selection tables and sour
 
 **Imported sorting parity**:
 
-Do not add a `CurationV2` part for imported NWB Units, do not add `imported` to the `CurationV2.metrics_source` enum, and do not duplicate `ImportedSpikeSorting` under `spyglass.spikesorting.v2`. The existing `spyglass.spikesorting.imported.ImportedSpikeSorting` table and `SpikeSortingOutput.ImportedSpikeSorting` part remain the canonical import path for external/ground-truth Units. v2 documentation and tests may compare v2 sorting output against imported ground-truth Units, but that comparison does not make the imported Units part of v2 lineage.
+Do not add a `CurationV2` part for imported NWB Units, do not add `imported` to the `CurationV2.curation_source` enum, and do not duplicate `ImportedSpikeSorting` under `spyglass.spikesorting.v2`. The existing `spyglass.spikesorting.imported.ImportedSpikeSorting` table and `SpikeSortingOutput.ImportedSpikeSorting` part remain the canonical import path for external/ground-truth Units. v2 documentation and tests may compare v2 sorting output against imported ground-truth Units, but that comparison does not make the imported Units part of v2 lineage.
 
 **Invariant — do not weaken**: v2 modifies `spikesorting_merge.py` only to add the `CurationV2` part, register/route that part, add v2 restriction handling, and add the optional `get_unit_brain_regions` dispatch. It must not change v0/v1 merge semantics. The default behavior of `merge_get_part`, `merge_restrict`, `merge_delete` must work uniformly across v0, v1, v2 parts.
 
@@ -709,9 +709,9 @@ are unique within each source family:
   + sorter fields (concat sorts have **no** `ArtifactSource` row — see the
   concat guard below).
 - `ArtifactSelection.RecordingSource`: source `recording_id` +
-  `artifact_params_name`.
+  `artifact_detection_params_name`.
 - `ArtifactSelection.SharedArtifactGroupSource`: source
-  `shared_artifact_group_name` + `artifact_params_name`.
+  `shared_artifact_group_name` + `artifact_detection_params_name`.
 
 It runs with the rest of the v2 suite; not a separate nightly job or operational
 integrity system.
@@ -908,7 +908,7 @@ build on the corrected baseline; the forward-compat table reflects it.
 | `ConcatenatedRecording` + `ConcatenatedRecording.MemberBoundary` | Declared in Phase 1; `make()` body raises `NotImplementedError("ConcatenatedRecording.make() is not implemented yet")` | Final schema; Phase 3 only fills in the `make()` body and writes member boundary rows. Test in Phase 1 asserts `populate()` raises. |
 | `SortingSelection` + source parts | `RecordingSource` and `ConcatenatedRecordingSource` part tables declared in Phase 1. Exactly one source part is enforced by `insert_selection()` and re-checked in `make()`. | Both source FK targets exist from Phase 1, so the schema is final. Phase 1's `insert_selection` rejects `ConcatenatedRecordingSource`; Phase 3 lifts that runtime gate without touching the schema. |
 | `SortingSelection.ArtifactSource` | Optional `association` part (`-> master` / `-> ArtifactDetection`), zero-or-one per master; **replaces** the old nullable `-> ArtifactDetection` FK | "No `ArtifactSource` row" = no artifact detection. Concat sorts skip artifact detection by simply having no `ArtifactSource` row. Excluded from `resolve_source()` / orphan counts. |
-| `SortGroupV2` | `reference_mode: varchar(32)` (validated against a `ReferenceMode` Literal: `none`/`global_median`/`specific`) + nullable `reference_electrode_id` (**replaces** the `sort_reference_electrode_id` magic sentinels -1/-2/≥0) | Reference dispatch reads the validated mode + nullable FK; "specific iff `reference_electrode_id IS NOT NULL`" enforced in `insert1`. **varchar, not enum, on purpose** — the reference-mode set may grow (SI also has `global_average`/CAR and local/per-group referencing), so an enum would trap a future mode behind a forbidden `ALTER TABLE`. The `Literal` gives typo-protection without the migration risk (same rationale as `CurationLabel`; the closed `metrics_source` set is the contrasting enum case). A future reviewer must NOT "tighten" this to an enum. |
+| `SortGroupV2` | `reference_mode: varchar(32)` (validated against a `ReferenceMode` Literal: `none`/`global_median`/`specific`) + nullable `reference_electrode_id` (**replaces** the `sort_reference_electrode_id` magic sentinels -1/-2/≥0) | Reference dispatch reads the validated mode + nullable FK; "specific iff `reference_electrode_id IS NOT NULL`" enforced in `insert1`. **varchar, not enum, on purpose** — the reference-mode set may grow (SI also has `global_average`/CAR and local/per-group referencing), so an enum would trap a future mode behind a forbidden `ALTER TABLE`. The `Literal` gives typo-protection without the migration risk (same rationale as `CurationLabel`; the closed `curation_source` set is the contrasting enum case). A future reviewer must NOT "tighten" this to an enum. |
 | `Sorting.Unit` | Part table present in Phase 1 | Phase 2 `AnalyzerCuration` reads brain regions from here; Phase 4 `TrackedUnit` per-session region lookup reads from here. |
 | `CurationV2.Unit` | Part table present in Phase 1 | Same downstream consumers; merges shrink `CurationV2.Unit` from `Sorting.Unit` row count. |
 | `CurationV2.UnitLabel` | Part table present in Phase 1 | Phase 2/5 label filtering and Phase 4 matchable-unit selection rely on queryable multi-label rows. No later label-table migration is allowed. |

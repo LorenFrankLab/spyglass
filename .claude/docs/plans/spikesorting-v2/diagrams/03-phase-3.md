@@ -41,7 +41,7 @@ erDiagram
         uuid concat_recording_id PK
         varchar session_group_owner FK
         varchar session_group_name FK
-        varchar preproc_params_name FK
+        varchar preprocessing_params_name FK
         varchar motion_correction_params_name FK
     }
     ConcatenatedRecording {

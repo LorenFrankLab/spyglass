@@ -10,7 +10,7 @@ End-to-end single-session sort: preprocessing → artifact detection → sorting
 | --- | --- | --- |
 | `SortGroupV2` (+ `SortGroupElectrode` part) | Manual | Per-session electrode grouping; ports v1 `SortGroup` with safe overwrite. |
 | `PreprocessingParameters` | Lookup | Bandpass + CMR + optional whiten; Pydantic-validated. |
-| `RecordingSelection` | Manual | One row per (raw, sort group, sort interval, preproc params, team). UUID PK. |
+| `RecordingSelection` | Manual | One row per (raw, sort group, sort interval, preprocessing params, team). UUID PK. |
 | `Recording` | Computed | NWB-resident preprocessed `ElectricalSeries` inside an `AnalysisNwbfile`. |
 | `ArtifactDetectionParameters` | Lookup | Threshold detection parameters. |
 | `SharedArtifactGroup` (+ `Member` part) | Manual | Opt-in: cross-recording artifact detection (issue #928). |
@@ -57,7 +57,7 @@ erDiagram
     %% Recording preprocessing
     %% =========================================================
     PreprocessingParameters {
-        varchar preproc_params_name PK
+        varchar preprocessing_params_name PK
         blob params
         int params_schema_version
     }
@@ -66,7 +66,7 @@ erDiagram
         varchar nwb_file_name FK
         int sort_group_id FK
         varchar interval_list_name FK
-        varchar preproc_params_name FK
+        varchar preprocessing_params_name FK
         varchar team_name FK
     }
     Recording {
@@ -89,7 +89,7 @@ erDiagram
     %% Artifact detection
     %% =========================================================
     ArtifactDetectionParameters {
-        varchar artifact_params_name PK
+        varchar artifact_detection_params_name PK
         blob params
     }
     SharedArtifactGroup {
@@ -102,7 +102,7 @@ erDiagram
     }
     ArtifactSelection {
         uuid artifact_id PK
-        varchar artifact_params_name FK
+        varchar artifact_detection_params_name FK
     }
     ArtifactSelection_RecordingSource {
         uuid artifact_id PK
@@ -185,7 +185,7 @@ erDiagram
         int parent_curation_id
         varchar analysis_file_name FK
         varchar object_id
-        enum metrics_source
+        enum curation_source
     }
     CurationV2_Unit {
         uuid sorting_id PK
@@ -244,7 +244,7 @@ erDiagram
         uuid concat_recording_id PK
         varchar session_group_owner FK
         varchar session_group_name FK
-        varchar preproc_params_name FK
+        varchar preprocessing_params_name FK
         varchar motion_correction_params_name FK
     }
     ConcatenatedRecording {

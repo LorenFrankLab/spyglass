@@ -190,7 +190,7 @@ flowchart LR
 ## Critical design points
 
 - **One table replaces two**: `AnalyzerCuration` consolidates v1's `MetricCuration` + `BurstPair`. The burst-pair cross-correlogram-asymmetry logic becomes one auto-merge preset; the visualization helpers (`plot_correlograms_by_sort_group`, `investigate_pair_xcorrel`, `investigate_pair_peaks`, `plot_peak_over_time`) become methods on `AnalyzerCuration`.
-- **`materialize_curation()` is explicit** — auto-curation never silently writes a new `CurationV2` row. The user calls `AnalyzerCuration.materialize_curation(key)` to commit, which inserts a child `CurationV2` row with `parent_curation_id` set and `metrics_source='analyzer_curation'`.
+- **`materialize_curation()` is explicit** — auto-curation never silently writes a new `CurationV2` row. The user calls `AnalyzerCuration.materialize_curation(key)` to commit, which inserts a child `CurationV2` row with `parent_curation_id` set and `curation_source='analyzer_curation'`.
 - **Fetch-helper parity**: `AnalyzerCuration` exposes `get_waveforms`, `get_metrics`, `get_labels`, `get_merge_groups` to match v1's `MetricCuration` notebook surface.
 - **NaN sanitization**: serialized metric tables coerce non-finite values to `None` in the JSON-bound path; in-memory DataFrames preserve NaN semantics (issue #1556).
 - **Two distinct recompute families**: `RecordingArtifactRecompute*` verifies the NWB `ElectricalSeries` byte-hash; `SortingAnalyzerRecompute*` verifies the analyzer folder contents. Same lifecycle, different artifacts.

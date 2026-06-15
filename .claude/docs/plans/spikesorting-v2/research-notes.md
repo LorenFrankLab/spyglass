@@ -370,7 +370,7 @@ The original spec shipped three policy values (`strict`, `transitive`, `transiti
 
 ### AnalyzerCuration recursive-auto-curation: raise → warn
 
-The original spec raised `RecursiveAutoCurationError` when `insert_selection` was called on a curation whose upstream `metrics_source == 'analyzer_curation'`, with `allow_recursive=True` as the bypass. Phase 2 and `designs.md` now emit a `logger.warning` and proceed. Lineage depth is still recoverable from `parent_curation_id`. Reason: recursive auto-curation is unusual but not wrong; a warning is friendlier than blocking the workflow with a dedicated exception class.
+The original spec raised `RecursiveAutoCurationError` when `insert_selection` was called on a curation whose upstream `curation_source == 'analyzer_curation'`, with `allow_recursive=True` as the bypass. Phase 2 and `designs.md` now emit a `logger.warning` and proceed. Lineage depth is still recoverable from `parent_curation_id`. Reason: recursive auto-curation is unusual but not wrong; a warning is friendlier than blocking the workflow with a dedicated exception class.
 
 ### SessionGroup recording_date: derive only
 

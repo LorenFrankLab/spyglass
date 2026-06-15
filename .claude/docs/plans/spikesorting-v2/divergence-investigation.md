@@ -13,7 +13,7 @@ parity matrix (`mearec_polymer_smoke` × 4 shanks + `mearec_polymer_128ch_60s`
 × 4 shanks), comparing v1 (SI 0.99.1, Python 3.10, conda env
 `spyglass-v1-parity`) against v2 (SI 0.104.3, Python 3.11, `.venv-spikesorting-v2`).
 The seven invariant fingerprints (`nwb_sha256`, `sort_group_electrode_ids`,
-`bad_channel_by_electrode_id`, `canonical_preproc_params`,
+`bad_channel_by_electrode_id`, `canonical_preprocessing_params`,
 `canonical_artifact_params`, `artifact_valid_times_hash`,
 `canonical_sorter_params`) pass on all 8 cases — i.e., the *inputs* are
 provably identical bytes-and-config across the two stacks.
@@ -121,7 +121,7 @@ of samples — explaining the ~1300-1600-sample drifts on 60s-shank0/1.
 - The v2-only extras should look like *time-shifted* v1 peaks rather
   than new peaks.
 - Per-channel filter-output differences would be observable directly:
-  load the same raw NWB slice, apply v1 preproc and v2 preproc, diff
+  load the same raw NWB slice, apply v1 preprocessing and v2 preprocessing, diff
   the traces.
 - Smoke shanks pass because their few spikes are well-separated; on
   dense traces, filter-phase drift creates many doubled-up peaks.
@@ -266,7 +266,7 @@ difference in `noise_levels[chan]` can flip thousands of borderline peaks.
 
 This **discriminates against H3 (filter implementation)** because the
 preprocessing chain (`bandpass_filter` + CMR) is unchanged structurally —
-we'd have to verify filter parameters, but the canonical_preproc_params
+we'd have to verify filter parameters, but the canonical_preprocessing_params
 match. Moves H1 (noise_levels divergence) and H2 (RNG non-determinism)
 toward **strong** confidence; weakens H4 to "secondary contributor" because
 the numba algorithm change still applies but its *immediate* output depends

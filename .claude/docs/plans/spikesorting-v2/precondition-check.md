@@ -45,7 +45,7 @@ Review the JSON `warnings` block on every `path` run. Any unaccounted `heuristic
 | v1 `SpikeSortingRecordingSelection` (v1/recording.py:147, Manual) | `recording_id: uuid` | Secondary FKs: Raw, SortGroup, IntervalList, SpikeSortingPreprocessingParameters, LabTeam. **LabTeam is secondary, NOT in PK** — fix to the misleading #133 traceability earlier in this plan. |
 | v1 `SpikeSorting` (v1/sorting.py:233, Computed) | `-> SpikeSortingSelection` | `object_id: varchar(40)`. v2 Sorting intentionally widens to `varchar(72)` to match the curation object-id convention. |
 | v1 `CurationV1` (v1/curation.py:30, Manual) | `-> SpikeSorting, curation_id=0: int` | `object_id: varchar(72)`, `description: varchar(100)`, `merges_applied: bool`. v2 CurationV2 widens object_id to varchar(72) to match. |
-| v1 `SpikeSortingPreprocessingParameters` (v1/recording.py:99, Lookup) | `preproc_param_name: varchar(200)` | v2 widens its `preproc_params_name` from varchar(64) to varchar(128) (still narrower than v1, but adequate). |
+| v1 `SpikeSortingPreprocessingParameters` (v1/recording.py:99, Lookup) | `preproc_param_name: varchar(200)` | v2 widens its `preprocessing_params_name` from varchar(64) to varchar(128) (still narrower than v1, but adequate). |
 | v1 `SpikeSorterParameters` (v1/sorting.py:83, Lookup) | `(sorter: varchar(200), sorter_param_name: varchar(200))` | v2 widens `sorter` to varchar(64) and `sorter_params_name` to varchar(128). |
 
 ## Merge / utility classes
@@ -61,7 +61,7 @@ Review the JSON `warnings` block on every `path` run. Any unaccounted `heuristic
 - ElectrodeGroup also has non-null `-> BrainRegion` — mentioned in shared-contracts.
 - `bad_channel` and `contact_side_numbering` are `enum("True", "False")` strings on Spyglass tables (vs int on raw NWB DataFrame) — note added to SortGroupV2 design.
 - v2 `CurationV2.object_id` widened from varchar(40) to varchar(72) (v1 parity).
-- v2 `sorter` widened to varchar(64), `sorter_params_name` to varchar(128), `preproc_params_name` to varchar(128).
+- v2 `sorter` widened to varchar(64), `sorter_params_name` to varchar(128), `preprocessing_params_name` to varchar(128).
 - ProbeType + Probe rows for polymer probe need to be inserted by the Phase 0 fixture converter.
 
 ## v2 draft schemas validation result
