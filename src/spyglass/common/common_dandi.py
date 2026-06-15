@@ -51,7 +51,7 @@ schema = dj.schema("common_dandi")
 
 
 @schema
-class DandiViolationsSelection(SpyglassMixin, dj.Manual):
+class DandiValidationSelection(SpyglassMixin, dj.Manual):
     definition = """
     -> Export.File
     """
@@ -60,7 +60,7 @@ class DandiViolationsSelection(SpyglassMixin, dj.Manual):
         """Run dandi validate checks on all files for a given paper.
 
         If called on a previously-populated paper, will delete and re-populate the
-        DandiViolations table for that paper.
+        DandiValidation table for that paper.
 
         Parameters
         ----------
@@ -80,14 +80,14 @@ class DandiViolationsSelection(SpyglassMixin, dj.Manual):
             )
             return
 
-        if DandiViolations & key:
+        if DandiValidation & key:
             logger.info(
-                f"Existing Dandi violations found for {key}. Deleting and re-populating."
+                f"Existing Dandi validations found for {key}. Deleting and re-populating."
             )
-            (DandiViolations & key).delete()
+            (DandiValidation & key).delete()
 
         self.insert(files_to_check, skip_duplicates=True)
-        DandiViolations.populate(
+        DandiValidation.populate(
             files_to_check,
             processes=min(n_processes, len(files_to_check)),
             display_progress=True,
@@ -95,9 +95,9 @@ class DandiViolationsSelection(SpyglassMixin, dj.Manual):
 
 
 @schema
-class DandiViolations(SpyglassMixin, dj.Computed):
+class DandiValidation(SpyglassMixin, dj.Computed):
     definition = """
-    -> DandiViolationsSelection
+    -> DandiValidationSelection
     """
 
     class Violations(dj.Part):
@@ -146,7 +146,10 @@ class DandiViolations(SpyglassMixin, dj.Computed):
                 for result in validator_result
                 if result.severity is not None
                 and result.severity.value >= min_severity_value
-                and (max_severity_value is None or result.severity.value < max_severity_value)
+                and (
+                    max_severity_value is None
+                    or result.severity.value < max_severity_value
+                )
                 and result.id != "DANDI.NO_DANDISET_FOUND"
             ]
             part_keys = [

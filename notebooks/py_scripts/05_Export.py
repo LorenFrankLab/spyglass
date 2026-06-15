@@ -256,21 +256,21 @@ Export().populate_paper(**paper_key)
 # updated between generating the original nwb file and paper submission, spyglass
 # provides several tools for meeting data compliance
 #
-# First, The `DandiViolations` table provides a tool to easily scan for standard violations
+# First, The `DandiValidation` table provides a tool to easily scan for standard violations
 # within the published files. Issues are organized and searchable by both file and
 # violation id, making it easier to identify shared issues and apply fixes:
 
 # +
 from spyglass.common.common_dandi import (
-    DandiViolationsSelection,
-    DandiViolations,
+    DandiValidationSelection,
+    DandiValidation,
 )
 
-# scan all exported files for violations and log them in the DandiViolations table
+# scan all exported files for violations and log them in the DandiValidation table
 # rerunning this (after fixing some violations) will update the table with new violations
 # with corrected ones removed and new ones added
-DandiViolationsSelection().check_paper_for_dandi_errors(paper_key)
-DandiViolations.Violations & (Export & paper_key)
+DandiValidationSelection().check_paper_for_dandi_errors(paper_key)
+DandiValidation.Violations & (Export & paper_key)
 # -
 
 # These identified issues must be resolved prior to Dandi upload.
