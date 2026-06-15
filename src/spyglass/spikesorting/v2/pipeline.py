@@ -21,6 +21,7 @@ manifest (with the same merge_id) without inserting duplicates.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -480,6 +481,40 @@ def preflight_v2_pipeline(
     )
 
 
+# Closed vocabulary for the per-stage ``*_status`` manifest keys. A stage is
+# ``"computed"`` when its row did not exist before this call and populate /
+# insert_curation created it this call; ``"reused"`` when the row already
+# existed and the call no-opped. Test code asserts each status is a member.
+_STAGE_STATUSES = frozenset({"computed", "reused"})
+
+
+def _run_stage(stage: str, exists: bool, work, partial: dict):
+    """Time a pipeline stage's ``work()``; classify it; wrap failures.
+
+    ``exists`` is the result of a pre-``work`` existence check on the stage's
+    output row, so the status is ``"reused"`` when the row was already present
+    (``work`` no-ops) and ``"computed"`` otherwise. ``work`` is a zero-arg
+    closure over the stage's ``populate`` / ``insert_curation`` call; its
+    return value is passed back (the curation stage needs the returned key).
+    A failure is re-raised as a chained :class:`PipelineStageError` carrying a
+    snapshot of ``partial`` (the manifest accumulated from earlier stages) so
+    the caller sees which stage broke and what was already built.
+
+    Returns ``(work_result, status, seconds)`` where ``seconds`` is monotonic
+    wall-clock spent in ``work`` THIS call (≈0 on a reused no-op), not
+    cumulative compute cost.
+    """
+    from spyglass.spikesorting.v2.exceptions import PipelineStageError
+
+    status = "reused" if exists else "computed"
+    start = time.perf_counter()
+    try:
+        result = work()
+    except Exception as exc:  # noqa: BLE001 - re-raised as typed + chained
+        raise PipelineStageError(stage, dict(partial), str(exc)) from exc
+    return result, status, time.perf_counter() - start
+
+
 def run_v2_pipeline(
     nwb_file_name: str,
     sort_group_id: int,
@@ -575,6 +610,23 @@ def run_v2_pipeline(
         Units table), not ``None``, so the result is always
         merge-keyable.
 
+        Plus per-stage observability keys (additive; the keys above are
+        unchanged):
+            ``recording_status`` / ``artifact_status`` / ``sorting_status``
+            / ``curation_status`` : ``"computed"`` if the stage did work
+                this call, ``"reused"`` if its row already existed and the
+                call no-opped (see ``_STAGE_STATUSES``).
+            ``stage_seconds``     : dict of monotonic wall-clock seconds
+                spent per stage (keys ``"recording"`` / ``"artifact"`` /
+                ``"sorting"`` / ``"curation"``) **this call** -- ≈0 on an
+                idempotent re-run, NOT cumulative compute cost.
+            ``warnings``          : list of human-readable advisories raised
+                during the run (e.g. the zero-unit message); empty when
+                clean.
+        Two identical calls return equal manifests except for
+        ``stage_seconds`` and the ``*_status`` values (the second reports
+        ``"reused"``), inserting no duplicate rows.
+
     Raises
     ------
     PipelineInputError
@@ -583,6 +635,13 @@ def run_v2_pipeline(
         If ``preflight=True`` and a prerequisite is missing (the message
         lists every failed check and its fix). Bypass with
         ``preflight=False``.
+    PipelineStageError
+        If a compute stage's ``populate`` / ``insert_curation`` fails. Names
+        the failing stage and carries the partial manifest of the stages that
+        completed before it (the original error is chained). Only the compute
+        stages are wrapped; an error from the cheap ``insert_selection``
+        prelude surfaces as its own native exception (e.g.
+        ``DuplicateSelectionError``).
     ZeroUnitSortError
         If the sort finds zero units and ``require_units=True``.
     ValueError
@@ -635,9 +694,17 @@ def run_v2_pipeline(
         if not report.ok:
             raise PreflightError("\n".join(report.errors))
 
-    # DataJoint's ``populate()`` is idempotent (no-ops on present
-    # rows), so no separate ``if not (X & pk)`` guards are needed
-    # before each call.
+    # Per-stage observability. For each stage: derive computed-vs-reused from
+    # an existence check on the output row BEFORE populate, time the
+    # populate/insert with a monotonic clock, and on failure raise a stage-
+    # aware PipelineStageError carrying the manifest built so far. The stable
+    # manifest keys are unchanged; *_status / stage_seconds / warnings are
+    # additive. DataJoint's ``populate()`` is idempotent (no-ops on present
+    # rows), so no separate guard is needed before each call.
+    manifest: dict[str, Any] = {"preset": preset}
+    stage_seconds: dict[str, float] = {}
+    warnings_list: list[str] = []
+
     rec_pk = RecordingSelection.insert_selection(
         {
             "nwb_file_name": nwb_file_name,
@@ -647,7 +714,13 @@ def run_v2_pipeline(
             "team_name": team_name,
         }
     )
-    Recording.populate(rec_pk, reserve_jobs=False)
+    _, manifest["recording_status"], stage_seconds["recording"] = _run_stage(
+        "recording",
+        bool(Recording & rec_pk),
+        lambda: Recording.populate(rec_pk, reserve_jobs=False),
+        manifest,
+    )
+    manifest["recording_id"] = rec_pk["recording_id"]
 
     art_pk = ArtifactSelection.insert_selection(
         {
@@ -655,7 +728,13 @@ def run_v2_pipeline(
             "artifact_params_name": bundle.artifact_params_name,
         }
     )
-    ArtifactDetection.populate(art_pk, reserve_jobs=False)
+    _, manifest["artifact_status"], stage_seconds["artifact"] = _run_stage(
+        "artifact",
+        bool(ArtifactDetection & art_pk),
+        lambda: ArtifactDetection.populate(art_pk, reserve_jobs=False),
+        manifest,
+    )
+    manifest["artifact_id"] = art_pk["artifact_id"]
 
     sort_pk = SortingSelection.insert_selection(
         {
@@ -665,7 +744,13 @@ def run_v2_pipeline(
             "artifact_id": art_pk["artifact_id"],
         }
     )
-    Sorting.populate(sort_pk, reserve_jobs=False)
+    _, manifest["sorting_status"], stage_seconds["sorting"] = _run_stage(
+        "sorting",
+        bool(Sorting & sort_pk),
+        lambda: Sorting.populate(sort_pk, reserve_jobs=False),
+        manifest,
+    )
+    manifest["sorting_id"] = sort_pk["sorting_id"]
 
     # Zero units is a legitimate result on a quiet shank. Unless the
     # caller set require_units=True, proceed to build an empty (but real)
@@ -686,13 +771,16 @@ def run_v2_pipeline(
         # -- matching v1, which writes an empty Units table -- so
         # downstream consumers treat it like any other
         # SpikeSortingOutput row instead of special-casing a None
-        # merge_id.
-        logger.warning(
+        # merge_id. The warning is both logged (console) and recorded on
+        # the manifest's ``warnings`` list (programmatic access).
+        zero_unit_warning = (
             "run_v2_pipeline: zero units for recording_id="
             f"{recording_id} (sorting_id={sort_pk['sorting_id']}); "
             "writing an EMPTY curation + merge row. Check "
             "detect_threshold / the artifact mask if you expected output."
         )
+        logger.warning(zero_unit_warning)
+        warnings_list.append(zero_unit_warning)
 
     # Idempotent curation: ``insert_curation`` owns the root-reuse logic.
     # With ``reuse_existing=True`` it returns the canonical (lowest
@@ -702,23 +790,34 @@ def run_v2_pipeline(
     # it (rather than a raw fetch-or-insert here) avoids bypassing that
     # guard and silently reusing a root whose description/labels differ. The
     # CurationV2 part on the merge table is auto-registered inside
-    # insert_curation, so a reused row reuses its merge_id.
-    curation_pk = CurationV2.insert_curation(
-        sorting_key=sort_pk,
-        labels={},
-        parent_curation_id=-1,
-        description=description or f"run_v2_pipeline preset={preset}",
-        reuse_existing=True,
+    # insert_curation, so a reused row reuses its merge_id. ``curation_id``
+    # is not content-addressed, so classify reused/computed from whether a
+    # root curation already exists for this sorting (the same check
+    # insert_curation's root-reuse path uses).
+    curation_exists = bool(
+        CurationV2
+        & {"sorting_id": sort_pk["sorting_id"], "parent_curation_id": -1}
     )
+    curation_pk, manifest["curation_status"], stage_seconds["curation"] = (
+        _run_stage(
+            "curation",
+            curation_exists,
+            lambda: CurationV2.insert_curation(
+                sorting_key=sort_pk,
+                labels={},
+                parent_curation_id=-1,
+                description=description or f"run_v2_pipeline preset={preset}",
+                reuse_existing=True,
+            ),
+            manifest,
+        )
+    )
+    manifest["curation_id"] = curation_pk["curation_id"]
 
     merge_id = (SpikeSortingOutput.CurationV2 & curation_pk).fetch1("merge_id")
 
-    return {
-        "preset": preset,
-        "recording_id": rec_pk["recording_id"],
-        "artifact_id": art_pk["artifact_id"],
-        "sorting_id": sort_pk["sorting_id"],
-        "curation_id": curation_pk["curation_id"],
-        "merge_id": merge_id,
-        "n_units": n_units,
-    }
+    manifest["merge_id"] = merge_id
+    manifest["n_units"] = n_units
+    manifest["stage_seconds"] = stage_seconds
+    manifest["warnings"] = warnings_list
+    return manifest

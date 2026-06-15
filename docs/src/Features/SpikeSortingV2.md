@@ -124,6 +124,16 @@ manifest = run_v2_pipeline(
 merge_id = manifest["merge_id"]  # key off this downstream
 ```
 
+Besides the stable keys (`recording_id` / `artifact_id` / `sorting_id` /
+`curation_id` / `merge_id` / `n_units`), the manifest carries per-stage
+observability: `recording_status` / `artifact_status` / `sorting_status` /
+`curation_status` (`"computed"` if the stage did work this call, `"reused"` if
+its row already existed), a `stage_seconds` dict of wall-clock per stage **this
+call** (≈0 on an idempotent re-run, not cumulative compute), and a `warnings`
+list (e.g. a zero-unit advisory). A failed stage raises `PipelineStageError`,
+which names the stage and carries the partial manifest of the stages that
+completed before it.
+
 Available presets:
 
 - `franklab_tetrode_mountainsort4` -- legacy MountainSort4 (parity with v1)

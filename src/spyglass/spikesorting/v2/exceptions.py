@@ -85,6 +85,26 @@ class PreflightError(ValueError):
     attempt the run anyway."""
 
 
+class PipelineStageError(RuntimeError):
+    """A run_v2_pipeline stage failed during populate/insert.
+
+    Names the failing stage and carries the partial manifest of stages that
+    completed before the failure, so callers can resume/inspect without
+    re-deriving intermediate PKs. The original exception is chained
+    (``raise PipelineStageError(...) from exc``) so the underlying traceback
+    is preserved.
+    """
+
+    def __init__(self, stage: str, partial_manifest: dict, message: str = ""):
+        self.stage = stage
+        self.partial_manifest = partial_manifest
+        super().__init__(
+            f"run_v2_pipeline: stage {stage!r} failed"
+            + (f": {message}" if message else "")
+            + f". Completed stages: {sorted(partial_manifest)}."
+        )
+
+
 class ZeroUnitSortError(RuntimeError):
     """A sort produced zero units and the caller opted into treating
     that as an error (``run_v2_pipeline(..., require_units=True)``). Zero

@@ -941,6 +941,18 @@ for label, interval_data in results.groupby("interval_labels"):
         identity payloads (now extracted to shared builders in
         `_selection_identity`) and the same `installed_sorters()` sorter gate
         the populate path uses, so its checks cannot drift from the real run.
+    - Make the `run_v2_pipeline` manifest observable: each call now adds
+        per-stage `recording_status` / `artifact_status` / `sorting_status` /
+        `curation_status` (`"computed"` vs `"reused"`), a `stage_seconds` dict
+        of monotonic wall-clock per stage **this call** (≈0 on an idempotent
+        re-run, not cumulative compute), and a `warnings` list (e.g. the
+        zero-unit advisory). The seven existing manifest keys are unchanged,
+        and two identical runs still return equal manifests modulo
+        `stage_seconds`/`*_status` with no duplicate rows. A failed stage now
+        raises the new `PipelineStageError`, which names the stage and carries
+        the partial manifest of the stages that completed before it (the
+        underlying error is chained). `ZeroUnitSortError` is unchanged (a
+        graceful zero-unit result is not a stage failure).
 
 ## [0.5.5] (Aug 6, 2025)
 

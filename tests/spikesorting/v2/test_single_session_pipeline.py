@@ -2520,7 +2520,11 @@ def test_run_v2_pipeline_end_to_end_and_idempotent(polymer_smoke_session):
         preset="franklab_tetrode_mountainsort5",
         description="pipeline e2e test",
     )
-    expected_keys = {
+    # The stable manifest keys must always be present. The run also adds
+    # additive observability keys (``*_status`` / ``stage_seconds`` /
+    # ``warnings``), asserted in ``test_pipeline_observability.py``; assert a
+    # subset here so this e2e/idempotency test isn't coupled to them.
+    stable_keys = {
         "preset",
         "recording_id",
         "artifact_id",
@@ -2529,7 +2533,7 @@ def test_run_v2_pipeline_end_to_end_and_idempotent(polymer_smoke_session):
         "merge_id",
         "n_units",
     }
-    assert set(manifest.keys()) == expected_keys
+    assert stable_keys <= set(manifest.keys())
     assert manifest["preset"] == "franklab_tetrode_mountainsort5"
     assert manifest["curation_id"] == 0  # root curation
     assert manifest["n_units"] >= 1
