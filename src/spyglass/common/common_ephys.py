@@ -73,7 +73,7 @@ class ElectrodeGroup(SpyglassIngestion, dj.Imported):
         """Determine hemisphere from targeted_x coordinate."""
         targeted_x = getattr(nwb_obj, "targeted_x", None)
         if targeted_x is not None:
-            return "Right" if targeted_x >= 0 else "Left"
+            return "Right" if float(targeted_x) >= 0 else "Left"
         return None
 
     def make(self, key):
@@ -276,16 +276,16 @@ class Electrode(SpyglassIngestion, dj.Imported):
         for update in updates:
             cls.update1(update)
 
-    # def make(self, key):
-    #     """Make without transaction
+    def make(self, key):
+        """Make without transaction
 
-    #     Allows populate_all_common to work within a single transaction."""
-    #     from spyglass.common.common_usage import ActivityLog
+        Allows populate_all_common to work within a single transaction."""
+        from spyglass.common.common_usage import ActivityLog
 
-    #     ActivityLog().deprecate_log(
-    #         name="Electrode.make", alt="insert_from_nwbfile"
-    #     )
-    #     self.insert_from_nwbfile(key["nwb_file_name"])
+        ActivityLog().deprecate_log(
+            name="Electrode.make", alt="insert_from_nwbfile"
+        )
+        self.insert_from_nwbfile(key["nwb_file_name"])
 
 
 @schema
