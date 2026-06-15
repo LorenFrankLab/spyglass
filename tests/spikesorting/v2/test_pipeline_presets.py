@@ -93,3 +93,35 @@ def test_describe_presets_matches_preset_objects():
         assert row["intended_use"] == preset.intended_use
         assert row["threshold_units"] == preset.threshold_units
         assert row["notes"] == preset.notes
+
+
+def test_describe_presets_threshold_units_mountainsort():
+    """Both MountainSort presets report a MAD-multiplier threshold, not µV.
+
+    The complement of the clusterless footgun: MountainSort ``detect_threshold``
+    is a noise-relative MAD multiplier, so mislabeling it with absolute
+    microvolts would be the same class of error in the other direction.
+    """
+    df = describe_presets().set_index("preset")
+    for name in (
+        "franklab_tetrode_mountainsort4",
+        "franklab_tetrode_mountainsort5",
+    ):
+        units = df.loc[name, "threshold_units"]
+        assert "MAD" in units
+        assert "µV" not in units
+        assert "sigma" not in units.lower()
+
+
+def test_describe_presets_builtins_populate_human_fields():
+    """Every shipped preset populates the human-facing fields (no blanks).
+
+    The ``intended_use`` / ``threshold_units`` / ``notes`` fields default to
+    ``""`` so external presets need not supply them, but the built-ins must --
+    a blank here means a user reading the catalog learns nothing about the
+    preset.
+    """
+    df = describe_presets().set_index("preset")
+    for name in list_presets():
+        for col in ("intended_use", "threshold_units", "notes"):
+            assert df.loc[name, col].strip(), f"{name}.{col} is blank"
