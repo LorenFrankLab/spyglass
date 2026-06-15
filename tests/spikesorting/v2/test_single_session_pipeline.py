@@ -206,7 +206,7 @@ def test_recording_selection_insert_is_idempotent(polymer_smoke_session):
         "nwb_file_name": nwb_file_name,
         "sort_group_id": int(sort_group_id),
         "interval_list_name": interval_list_name,
-        "preproc_params_name": "default_franklab",
+        "preprocessing_params_name": "default_franklab",
         "team_name": team_name,
     }
     pk_first = RecordingSelection.insert_selection(selection_key)
@@ -307,7 +307,7 @@ def recording_selection_key(polymer_smoke_session):
         "nwb_file_name": nwb_file_name,
         "sort_group_id": sort_group_id,
         "interval_list_name": "raw data valid times",
-        "preproc_params_name": "default_franklab",
+        "preprocessing_params_name": "default_franklab",
         "team_name": "v2_test_team",
     }
     return RecordingSelection.insert_selection(selection_key)
@@ -485,7 +485,7 @@ def test_tetrode_geometry_attached(tetrode_60s_session):
         "nwb_file_name": nwb_file_name,
         "sort_group_id": sort_group_id,
         "interval_list_name": "raw data valid times",
-        "preproc_params_name": "default_franklab",
+        "preprocessing_params_name": "default_franklab",
         "team_name": "v2_test_team",
     }
     rec_pk = RecordingSelection.insert_selection(selection_key)
@@ -700,7 +700,7 @@ def test_artifact_selection_inserts_master_and_source_part(populated_recording):
     ArtifactDetectionParameters.insert_default()
     key = {
         "recording_id": populated_recording["recording_id"],
-        "artifact_params_name": "default",
+        "artifact_detection_params_name": "default",
     }
     # Clean any prior selection so we can assert on the count.
     existing = (
@@ -731,7 +731,7 @@ def test_artifact_selection_is_idempotent(populated_recording):
     ArtifactDetectionParameters.insert_default()
     key = {
         "recording_id": populated_recording["recording_id"],
-        "artifact_params_name": "default",
+        "artifact_detection_params_name": "default",
     }
     pk1 = ArtifactSelection.insert_selection(key)
     pk2 = ArtifactSelection.insert_selection(key)
@@ -758,7 +758,7 @@ def test_artifact_selection_rejects_zero_and_two_sources(populated_recording):
 
     with pytest.raises(ValueError, match="exactly one source key"):
         ArtifactSelection.insert_selection(
-            {"artifact_params_name": "default"}  # no source
+            {"artifact_detection_params_name": "default"}  # no source
         )
 
     with pytest.raises(ValueError, match="exactly one source key"):
@@ -766,7 +766,7 @@ def test_artifact_selection_rejects_zero_and_two_sources(populated_recording):
             {
                 "recording_id": populated_recording["recording_id"],
                 "shared_artifact_group_name": "fake",
-                "artifact_params_name": "default",
+                "artifact_detection_params_name": "default",
             }
         )
 
@@ -786,7 +786,7 @@ def test_artifact_selection_resolve_source_returns_recording_kind(
     pk = ArtifactSelection.insert_selection(
         {
             "recording_id": populated_recording["recording_id"],
-            "artifact_params_name": "default",
+            "artifact_detection_params_name": "default",
         }
     )
     resolution = ArtifactSelection.resolve_source(pk)
@@ -921,7 +921,7 @@ def test_shared_artifact_group_insert_rejects_mismatched_durations(
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": truncated_interval,
-            "preproc_params_name": "default_franklab",
+            "preprocessing_params_name": "default_franklab",
             "team_name": "v2_test_team",
         }
     )
@@ -1007,7 +1007,7 @@ def test_shared_artifact_group_insert_rejects_mismatched_dtypes(
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": second_interval,
-            "preproc_params_name": "default_franklab",
+            "preprocessing_params_name": "default_franklab",
             "team_name": "v2_test_team",
         }
     )
@@ -1091,7 +1091,7 @@ def test_artifact_detection_populates_and_writes_interval_list(
     pk = ArtifactSelection.insert_selection(
         {
             "recording_id": populated_recording["recording_id"],
-            "artifact_params_name": "none",
+            "artifact_detection_params_name": "none",
         }
     )
     ArtifactDetection.populate(pk, reserve_jobs=False)
@@ -1156,7 +1156,7 @@ def test_artifact_detection_delete_removes_interval_list_row(
     pk = ArtifactSelection.insert_selection(
         {
             "recording_id": populated_recording["recording_id"],
-            "artifact_params_name": "none",
+            "artifact_detection_params_name": "none",
         }
     )
     ArtifactDetection.populate(pk, reserve_jobs=False)
@@ -1207,7 +1207,7 @@ def test_sorting_populates_with_mountainsort5(populated_recording):
     art_pk = ArtifactSelection.insert_selection(
         {
             "recording_id": populated_recording["recording_id"],
-            "artifact_params_name": "none",
+            "artifact_detection_params_name": "none",
         }
     )
     if not (ArtifactDetection & art_pk):
@@ -1611,7 +1611,7 @@ def test_recording_over_request_clips_with_warning(
         "nwb_file_name": nwb_file_name,
         "sort_group_id": sort_group_id,
         "interval_list_name": over_request_interval_name,
-        "preproc_params_name": "default_franklab",
+        "preprocessing_params_name": "default_franklab",
         "team_name": "v2_test_team",
     }
     pk = RecordingSelection.insert_selection(selection_key)
@@ -1726,7 +1726,7 @@ def test_recording_over_request_multi_interval_clips_with_warning(
         "nwb_file_name": nwb_file_name,
         "sort_group_id": sort_group_id,
         "interval_list_name": multi_interval_name,
-        "preproc_params_name": "default_franklab",
+        "preprocessing_params_name": "default_franklab",
         "team_name": "v2_test_team",
     }
     pk = RecordingSelection.insert_selection(selection_key)
@@ -1882,7 +1882,7 @@ def test_prune_orphaned_selections_finds_and_cleans(populated_recording):
     ArtifactSelection().insert1(
         {
             "artifact_id": orphan_artifact,
-            "artifact_params_name": "default",
+            "artifact_detection_params_name": "default",
         },
         allow_direct_insert=True,
     )
@@ -1941,7 +1941,7 @@ def populated_sorting(populated_recording):
     art_pk = ArtifactSelection.insert_selection(
         {
             "recording_id": populated_recording["recording_id"],
-            "artifact_params_name": "none",
+            "artifact_detection_params_name": "none",
         }
     )
     if not (ArtifactDetection & art_pk):
@@ -1993,18 +1993,18 @@ def test_curation_v2_insert_root_unlabeled(populated_sorting):
     row = (CurationV2 & pk).fetch1()
     assert row["parent_curation_id"] == -1
     assert row["merges_applied"] == 0
-    assert row["metrics_source"] == "manual"
+    assert row["curation_source"] == "manual"
 
 
 @pytest.mark.slow
-def test_metrics_source_invalid_preserves_cause(populated_sorting):
-    """A bogus ``metrics_source`` re-raise preserves the enum cause.
+def test_curation_source_invalid_preserves_cause(populated_sorting):
+    """A bogus ``curation_source`` re-raise preserves the enum cause.
 
-    ``insert_curation`` coerces ``metrics_source`` through the
-    ``MetricsSource`` enum and re-raises a friendlier ``ValueError`` on a
+    ``insert_curation`` coerces ``curation_source`` through the
+    ``CurationSource`` enum and re-raises a friendlier ``ValueError`` on a
     typo. The re-raise uses ``from exc`` so the underlying enum
     ``ValueError`` is preserved as ``__cause__`` -- without it the
-    original "'bogus' is not a valid MetricsSource" context is lost from
+    original "'bogus' is not a valid CurationSource" context is lost from
     the traceback. (Reaching the enum check requires a real Sorting row;
     the earlier "not in Sorting" guard fires first otherwise.)
     """
@@ -2013,37 +2013,37 @@ def test_metrics_source_invalid_preserves_cause(populated_sorting):
     _clear_curations(populated_sorting)
     with pytest.raises(ValueError) as excinfo:
         CurationV2.insert_curation(
-            sorting_key=populated_sorting, metrics_source="bogus"
+            sorting_key=populated_sorting, curation_source="bogus"
         )
     # The friendly message names the offending value...
-    assert "metrics_source" in str(excinfo.value)
+    assert "curation_source" in str(excinfo.value)
     # ...and the underlying enum ValueError is preserved as the cause.
     assert isinstance(excinfo.value.__cause__, ValueError)
     assert excinfo.value.__cause__ is not excinfo.value
 
 
 @pytest.mark.slow
-def test_metrics_source_invalid_rejected_with_existing_root(populated_sorting):
-    """A bogus ``metrics_source`` raises even when a root curation already
-    exists. ``metrics_source`` is coerced through the enum up front, so the
+def test_curation_source_invalid_rejected_with_existing_root(populated_sorting):
+    """A bogus ``curation_source`` raises even when a root curation already
+    exists. ``curation_source`` is coerced through the enum up front, so the
     idempotent existing-root early return does NOT swallow an invalid value
-    (which would otherwise let ``metrics_source="not_a_real_source"`` quietly
+    (which would otherwise let ``curation_source="not_a_real_source"`` quietly
     return the existing root). Complements
-    ``test_metrics_source_invalid_preserves_cause``, which exercises the
+    ``test_curation_source_invalid_preserves_cause``, which exercises the
     no-existing-root path.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
 
     _clear_curations(populated_sorting)
     CurationV2.insert_curation(sorting_key=populated_sorting, labels={})
-    # A root now exists; a second call with a bogus metrics_source must still
+    # A root now exists; a second call with a bogus curation_source must still
     # raise the friendly enum error, not return the existing root.
     with pytest.raises(ValueError) as excinfo:
         CurationV2.insert_curation(
             sorting_key=populated_sorting,
-            metrics_source="not_a_real_source",
+            curation_source="not_a_real_source",
         )
-    assert "metrics_source" in str(excinfo.value)
+    assert "curation_source" in str(excinfo.value)
     assert isinstance(excinfo.value.__cause__, ValueError)
 
 
@@ -2656,7 +2656,7 @@ def test_run_v2_pipeline_idempotent_row_counts(polymer_smoke_session):
             ArtifactSelection * ArtifactSelection.RecordingSource
             & {
                 "recording_id": art_row["recording_id"],
-                "artifact_params_name": art_row["artifact_params_name"],
+                "artifact_detection_params_name": art_row["artifact_detection_params_name"],
             }
         ),
         "SortingSelection": len(
@@ -2715,7 +2715,7 @@ def test_artifact_selection_resolve_source_detects_bypass(populated_recording):
     dj_table.insert1(
         {
             "artifact_id": orphan_id,
-            "artifact_params_name": "default",
+            "artifact_detection_params_name": "default",
         },
         allow_direct_insert=True,
     )
@@ -2804,7 +2804,7 @@ def test_clusterless_thresholder_end_to_end(polymer_smoke_session):
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": "raw data valid times",
-            "preproc_params_name": "default_franklab",
+            "preprocessing_params_name": "default_franklab",
             "team_name": "v2_test_team",
         }
     )
@@ -2813,7 +2813,7 @@ def test_clusterless_thresholder_end_to_end(polymer_smoke_session):
     art_pk = ArtifactSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],
-            "artifact_params_name": "none",
+            "artifact_detection_params_name": "none",
         }
     )
     ArtifactDetection.populate(art_pk, reserve_jobs=False)
@@ -2937,7 +2937,7 @@ def test_mountainsort5_ground_truth_polymer_60s(polymer_60s_session):
                 "nwb_file_name": nwb_file_name,
                 "sort_group_id": sg_id,
                 "interval_list_name": "raw data valid times",
-                "preproc_params_name": "default_franklab",
+                "preprocessing_params_name": "default_franklab",
                 "team_name": "v2_test_team",
             }
         )
@@ -2945,7 +2945,7 @@ def test_mountainsort5_ground_truth_polymer_60s(polymer_60s_session):
         art_pk = ArtifactSelection.insert_selection(
             {
                 "recording_id": rec_pk["recording_id"],
-                "artifact_params_name": "none",
+                "artifact_detection_params_name": "none",
             }
         )
         ArtifactDetection.populate(art_pk, reserve_jobs=False)
@@ -3929,7 +3929,7 @@ def test_sorting_make_rollback_cleans_units_nwb(
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": "raw data valid times",
-            "preproc_params_name": "default_franklab",
+            "preprocessing_params_name": "default_franklab",
             "team_name": "v2_test_team",
         }
     )
@@ -3938,7 +3938,7 @@ def test_sorting_make_rollback_cleans_units_nwb(
     art_pk = ArtifactSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],
-            "artifact_params_name": "none",
+            "artifact_detection_params_name": "none",
         }
     )
     ArtifactDetection.populate(art_pk, reserve_jobs=False)
@@ -4084,7 +4084,7 @@ def test_boundary_spike_round_trip_does_not_raise(
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": "raw data valid times",
-            "preproc_params_name": "default_franklab",
+            "preprocessing_params_name": "default_franklab",
             "team_name": "v2_test_team",
         }
     )
@@ -4093,7 +4093,7 @@ def test_boundary_spike_round_trip_does_not_raise(
     art_pk = ArtifactSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],
-            "artifact_params_name": "none",
+            "artifact_detection_params_name": "none",
         }
     )
     ArtifactDetection.populate(art_pk, reserve_jobs=False)
@@ -4252,7 +4252,7 @@ def test_get_sorting_recovers_frames_across_disjoint_gap(
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": disjoint_name,
-            "preproc_params_name": "default_franklab",
+            "preprocessing_params_name": "default_franklab",
             "team_name": "v2_test_team",
         }
     )
@@ -4261,7 +4261,7 @@ def test_get_sorting_recovers_frames_across_disjoint_gap(
     art_pk = ArtifactSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],
-            "artifact_params_name": "none",
+            "artifact_detection_params_name": "none",
         }
     )
     ArtifactDetection.populate(art_pk, reserve_jobs=False)
@@ -4411,7 +4411,7 @@ def test_obs_intervals_no_artifact_respects_disjoint_gap(
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": disjoint_name,
-            "preproc_params_name": "default_franklab",
+            "preprocessing_params_name": "default_franklab",
             "team_name": "v2_test_team",
         }
     )
@@ -4529,7 +4529,7 @@ def test_get_merged_sorting_keeps_cross_gap_pair(
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": disjoint_name,
-            "preproc_params_name": "default_franklab",
+            "preprocessing_params_name": "default_franklab",
             "team_name": "v2_test_team",
         }
     )
@@ -4659,9 +4659,9 @@ def test_detect_artifacts_finds_known_transient(dj_conn):
     # small so the assertions below can be exact.
     params = ArtifactDetectionParamsSchema(
         detect=True,
-        amplitude_thresh_uV=50.0,
-        zscore_thresh=None,
-        proportion_above_thresh=0.5,
+        amplitude_threshold_uv=50.0,
+        zscore_threshold=None,
+        proportion_above_threshold=0.5,
         removal_window_ms=0.05,
         join_window_ms=0.0,
         min_length_s=0.001,  # default 1.0 would wipe synthetic-recording intervals
@@ -4737,9 +4737,9 @@ def test_detect_artifacts_no_threshold_crossings(dj_conn):
 
     params = ArtifactDetectionParamsSchema(
         detect=True,
-        amplitude_thresh_uV=10.0,
-        zscore_thresh=None,
-        proportion_above_thresh=0.5,
+        amplitude_threshold_uv=10.0,
+        zscore_threshold=None,
+        proportion_above_threshold=0.5,
     )
     valid_times = ArtifactDetection._detect_artifacts(rec, params)
     timestamps = rec.get_times()
@@ -5197,7 +5197,7 @@ def test_analyzer_random_seed_override_is_honored(
 
 def test_detect_artifacts_zscore_only_detection(dj_conn):
     """``_detect_artifacts`` runs the z-score-only branch when
-    ``amplitude_thresh_uV is None``.
+    ``amplitude_threshold_uv is None``.
 
     The z-score is **across channels per frame** (matching v1's
     semantics); a frame where one channel deviates substantially
@@ -5218,7 +5218,7 @@ def test_detect_artifacts_zscore_only_detection(dj_conn):
 
     rng = _np.random.default_rng(42)
     # 32 channels so the cross-channel z-score on a single-channel
-    # excursion can plausibly exceed ``zscore_thresh``. With N
+    # excursion can plausibly exceed ``zscore_threshold``. With N
     # channels and one channel at X while the rest are near zero,
     # the per-frame z on the spiking channel is bounded by
     # ~sqrt(N-1) (an algebraic upper limit of cross-channel
@@ -5236,9 +5236,9 @@ def test_detect_artifacts_zscore_only_detection(dj_conn):
 
     params = ArtifactDetectionParamsSchema(
         detect=True,
-        amplitude_thresh_uV=None,  # z-score only
-        zscore_thresh=4.0,
-        proportion_above_thresh=1.0 / n_channels,  # any-1-channel triggers
+        amplitude_threshold_uv=None,  # z-score only
+        zscore_threshold=4.0,
+        proportion_above_threshold=1.0 / n_channels,  # any-1-channel triggers
         removal_window_ms=0.05,
         join_window_ms=0.0,
         min_length_s=0.001,  # default 1.0 would wipe synthetic-recording intervals
@@ -5297,9 +5297,9 @@ def test_detect_artifacts_amplitude_and_zscore_combined(dj_conn):
 
     params = ArtifactDetectionParamsSchema(
         detect=True,
-        amplitude_thresh_uV=50.0,
-        zscore_thresh=5.0,
-        proportion_above_thresh=0.5,
+        amplitude_threshold_uv=50.0,
+        zscore_threshold=5.0,
+        proportion_above_threshold=0.5,
         removal_window_ms=0.05,
         join_window_ms=0.0,
         min_length_s=0.001,  # default 1.0 would wipe synthetic-recording intervals
@@ -5349,9 +5349,9 @@ def test_detect_artifacts_join_window_merges_runs(dj_conn):
         rec,
         ArtifactDetectionParamsSchema(
             detect=True,
-            amplitude_thresh_uV=50.0,
-            zscore_thresh=None,
-            proportion_above_thresh=0.5,
+            amplitude_threshold_uv=50.0,
+            zscore_threshold=None,
+            proportion_above_threshold=0.5,
             removal_window_ms=0.05,
             join_window_ms=1.0,
             min_length_s=0.001,  # default 1.0 would wipe synthetic-recording intervals
@@ -5375,9 +5375,9 @@ def test_detect_artifacts_join_window_merges_runs(dj_conn):
         rec,
         ArtifactDetectionParamsSchema(
             detect=True,
-            amplitude_thresh_uV=50.0,
-            zscore_thresh=None,
-            proportion_above_thresh=0.5,
+            amplitude_threshold_uv=50.0,
+            zscore_threshold=None,
+            proportion_above_threshold=0.5,
             removal_window_ms=0.05,
             join_window_ms=0.1,
             min_length_s=0.0001,
@@ -5406,10 +5406,10 @@ def test_artifact_detection_parameters_validates_via_insert1(dj_conn):
     )
 
     bad_row = {
-        "artifact_params_name": "params_validates_unit_test",
+        "artifact_detection_params_name": "params_validates_unit_test",
         "params": {
             "detect": True,
-            "amplitude_thresh_uV": 100.0,
+            "amplitude_threshold_uv": 100.0,
             "not_a_real_field": "x",  # rejected by extra="forbid"
         },
         "params_schema_version": 1,
@@ -5421,7 +5421,7 @@ def test_artifact_detection_parameters_validates_via_insert1(dj_conn):
     assert (
         len(
             ArtifactDetectionParameters
-            & {"artifact_params_name": "params_validates_unit_test"}
+            & {"artifact_detection_params_name": "params_validates_unit_test"}
         )
         == 0
     ), "Failed validation should not have written a row."
@@ -5553,7 +5553,7 @@ def test_recording_make_rollback_cleans_analysis_nwb(
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": "raw data valid times",
-            "preproc_params_name": "default_franklab",
+            "preprocessing_params_name": "default_franklab",
             "team_name": "v2_test_team",
         }
     )
@@ -5666,7 +5666,7 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": "raw data valid times",
-            "preproc_params_name": "default_franklab",
+            "preprocessing_params_name": "default_franklab",
             "team_name": "v2_test_team",
         }
     )
@@ -5674,7 +5674,7 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
     art_pk = ArtifactSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],
-            "artifact_params_name": "none",
+            "artifact_detection_params_name": "none",
         }
     )
     ArtifactDetection.populate(art_pk, reserve_jobs=False)
@@ -5960,7 +5960,7 @@ def test_lazy_vs_applied_merge_frames_equal(polymer_smoke_session, monkeypatch):
                 "nwb_file_name": nwb_file_name,
                 "sort_group_id": sort_group_id,
                 "interval_list_name": interval_name,
-                "preproc_params_name": "default_franklab",
+                "preprocessing_params_name": "default_franklab",
                 "team_name": "v2_test_team",
             }
         )
@@ -5968,7 +5968,7 @@ def test_lazy_vs_applied_merge_frames_equal(polymer_smoke_session, monkeypatch):
         art_pk = ArtifactSelection.insert_selection(
             {
                 "recording_id": rec_pk["recording_id"],
-                "artifact_params_name": "none",
+                "artifact_detection_params_name": "none",
             }
         )
         ArtifactDetection.populate(art_pk, reserve_jobs=False)
@@ -6397,7 +6397,7 @@ def test_applied_and_lazy_merge_ids_match_for_out_of_order_groups(
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": interval_name,
-            "preproc_params_name": "default_franklab",
+            "preprocessing_params_name": "default_franklab",
             "team_name": "v2_test_team",
         }
     )
@@ -6405,7 +6405,7 @@ def test_applied_and_lazy_merge_ids_match_for_out_of_order_groups(
     art_pk = ArtifactSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],
-            "artifact_params_name": "none",
+            "artifact_detection_params_name": "none",
         }
     )
     ArtifactDetection.populate(art_pk, reserve_jobs=False)
@@ -6549,7 +6549,7 @@ def test_v2_sorting_nwb_excludes_parent_units(dj_conn, tmp_path, monkeypatch):
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": "raw data valid times",
-            "preproc_params_name": "default_franklab",
+            "preprocessing_params_name": "default_franklab",
             "team_name": "v2_test_team",
         }
     )
@@ -6557,7 +6557,7 @@ def test_v2_sorting_nwb_excludes_parent_units(dj_conn, tmp_path, monkeypatch):
     art_pk = ArtifactSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],
-            "artifact_params_name": "none",
+            "artifact_detection_params_name": "none",
         }
     )
     ArtifactDetection.populate(art_pk, reserve_jobs=False)
@@ -6739,13 +6739,13 @@ def test_si_merge_units_drops_same_sample_unless_delta_is_none(dj_conn):
 
 def test_detect_artifacts_below_proportion_threshold_ignored(dj_conn):
     """``_detect_artifacts`` does NOT flag artifact frames when
-    fewer than ``proportion_above_thresh`` of channels exceed the
+    fewer than ``proportion_above_threshold`` of channels exceed the
     amplitude threshold.
 
     Existing detection tests put the transient on every channel,
     so the proportion gate is never the binding constraint. This
     test puts a 200 uV transient on a SINGLE channel of a
-    4-channel recording with ``proportion_above_thresh=0.5``
+    4-channel recording with ``proportion_above_threshold=0.5``
     (= ceil(0.5 * 4) = 2 channels required). Detection must not
     fire: the single-channel transient does not meet the cross-
     channel quorum.
@@ -6767,9 +6767,9 @@ def test_detect_artifacts_below_proportion_threshold_ignored(dj_conn):
 
     params = ArtifactDetectionParamsSchema(
         detect=True,
-        amplitude_thresh_uV=50.0,
-        zscore_thresh=None,
-        proportion_above_thresh=0.5,
+        amplitude_threshold_uv=50.0,
+        zscore_threshold=None,
+        proportion_above_threshold=0.5,
         removal_window_ms=0.05,
         join_window_ms=0.0,
         min_length_s=0.001,  # default 1.0 would wipe synthetic-recording intervals
@@ -6907,7 +6907,7 @@ def test_sorting_selection_artifact_source_part_shape(populated_recording):
     art_pk = ArtifactSelection.insert_selection(
         {
             "recording_id": populated_recording["recording_id"],
-            "artifact_params_name": "none",
+            "artifact_detection_params_name": "none",
         }
     )
     if not (ArtifactDetection & art_pk):
@@ -7035,7 +7035,7 @@ def test_recording_make_global_median_reference(polymer_smoke_session):
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": "raw data valid times",
-            "preproc_params_name": "default_franklab",
+            "preprocessing_params_name": "default_franklab",
             "team_name": "v2_test_team",
         }
     )
@@ -7143,16 +7143,16 @@ def test_recording_no_filter_preset_skips_bandpass(polymer_smoke_session):
     }
     # Bandpassed reference (default_franklab ships a real 300-6000 Hz band).
     bp_pk = RecordingSelection.insert_selection(
-        {**common, "preproc_params_name": "default_franklab"}
+        {**common, "preprocessing_params_name": "default_franklab"}
     )
     Recording.populate(bp_pk, reserve_jobs=False)
     traces_bp = Recording().get_recording(bp_pk).get_traces()
 
     # no_filter ships bandpass_filter=None -> the filter step is skipped.
-    # Distinct preproc_params_name => distinct cache_hash => distinct row,
+    # Distinct preprocessing_params_name => distinct cache_hash => distinct row,
     # so no delete/repopulate dance is needed.
     nf_pk = RecordingSelection.insert_selection(
-        {**common, "preproc_params_name": "no_filter"}
+        {**common, "preprocessing_params_name": "no_filter"}
     )
     Recording.populate(nf_pk, reserve_jobs=False)
     traces_nf = Recording().get_recording(nf_pk).get_traces()
@@ -7228,7 +7228,7 @@ def test_phase_shift_field_does_not_change_default_recording(
 
     # default_franklab (carries phase_shift=None in its blob).
     fl_pk = RecordingSelection.insert_selection(
-        {**common, "preproc_params_name": "default_franklab"}
+        {**common, "preprocessing_params_name": "default_franklab"}
     )
     Recording.populate(fl_pk, reserve_jobs=False)
     traces_fl = Recording().get_recording(fl_pk).get_traces()
@@ -7240,7 +7240,7 @@ def test_phase_shift_field_does_not_change_default_recording(
     legacy_blob.pop("phase_shift")
     PreprocessingParameters.insert1(
         {
-            "preproc_params_name": "_pytest_legacy_no_phase_shift",
+            "preprocessing_params_name": "_pytest_legacy_no_phase_shift",
             "params": legacy_blob,
             "params_schema_version": 3,
             "job_kwargs": None,
@@ -7248,7 +7248,7 @@ def test_phase_shift_field_does_not_change_default_recording(
         skip_duplicates=True,
     )
     legacy_pk = RecordingSelection.insert_selection(
-        {**common, "preproc_params_name": "_pytest_legacy_no_phase_shift"}
+        {**common, "preprocessing_params_name": "_pytest_legacy_no_phase_shift"}
     )
     Recording.populate(legacy_pk, reserve_jobs=False)
     traces_legacy = Recording().get_recording(legacy_pk).get_traces()
@@ -7306,13 +7306,13 @@ def test_neuropixels_preset_phase_shift_inert_without_property(
     }
 
     fl_pk = RecordingSelection.insert_selection(
-        {**common, "preproc_params_name": "default_franklab"}
+        {**common, "preprocessing_params_name": "default_franklab"}
     )
     Recording.populate(fl_pk, reserve_jobs=False)
     traces_fl = Recording().get_recording(fl_pk).get_traces()
 
     np_pk = RecordingSelection.insert_selection(
-        {**common, "preproc_params_name": "default_neuropixels"}
+        {**common, "preprocessing_params_name": "default_neuropixels"}
     )
     with caplog.at_level("WARNING"):
         Recording.populate(np_pk, reserve_jobs=False)
@@ -7375,7 +7375,7 @@ def test_recording_selection_raises_on_duplicate_logical_identity(
         "nwb_file_name": nwb_file_name,
         "sort_group_id": sort_group_id,
         "interval_list_name": "raw data valid times",
-        "preproc_params_name": "default_franklab",
+        "preprocessing_params_name": "default_franklab",
         "team_name": "v2_test_team",
     }
     # Bypass the helper to plant the duplicate (this is what the
@@ -7441,7 +7441,7 @@ def test_artifact_detection_delete_handles_orphan_source_part(
     art_pk = ArtifactSelection.insert_selection(
         {
             "recording_id": populated_recording["recording_id"],
-            "artifact_params_name": "none",
+            "artifact_detection_params_name": "none",
         }
     )
     ArtifactDetection.populate(art_pk, reserve_jobs=False)
@@ -7492,7 +7492,7 @@ def test_artifact_detection_delete_aborts_on_unexpected_resolve_error(
     art_pk = ArtifactSelection.insert_selection(
         {
             "recording_id": populated_recording["recording_id"],
-            "artifact_params_name": "none",
+            "artifact_detection_params_name": "none",
         }
     )
     ArtifactDetection.populate(art_pk, reserve_jobs=False)
@@ -7616,9 +7616,9 @@ def test_detect_artifacts_clamps_artifact_at_recording_end(dj_conn):
 
     params = ArtifactDetectionParamsSchema(
         detect=True,
-        amplitude_thresh_uV=50.0,
-        zscore_thresh=None,
-        proportion_above_thresh=0.5,
+        amplitude_threshold_uv=50.0,
+        zscore_threshold=None,
+        proportion_above_threshold=0.5,
         removal_window_ms=0.05,
         join_window_ms=0.0,
         min_length_s=0.001,  # default 1.0 would wipe synthetic-recording intervals
@@ -7851,7 +7851,7 @@ def test_disjoint_sort_intervals_concatenated(polymer_smoke_session):
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": disjoint_interval_name,
-            "preproc_params_name": "default_franklab",
+            "preprocessing_params_name": "default_franklab",
             "team_name": "v2_test_team",
         }
     )
@@ -7966,7 +7966,7 @@ def test_artifact_valid_times_respect_disjoint_gap(polymer_smoke_session):
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": disjoint_name,
-            "preproc_params_name": "default_franklab",
+            "preprocessing_params_name": "default_franklab",
             "team_name": "v2_test_team",
         }
     )
@@ -7975,7 +7975,7 @@ def test_artifact_valid_times_respect_disjoint_gap(polymer_smoke_session):
     art_pk = ArtifactSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],
-            "artifact_params_name": "none",
+            "artifact_detection_params_name": "none",
         }
     )
     ArtifactDetection.populate(art_pk, reserve_jobs=False)
@@ -8469,7 +8469,7 @@ def test_shared_artifact_group_populate_end_to_end(
     art_pk = ArtifactSelection.insert_selection(
         {
             "shared_artifact_group_name": group_name,
-            "artifact_params_name": "none",
+            "artifact_detection_params_name": "none",
         }
     )
     # ``none`` preset writes a full-window valid interval so the test
@@ -8635,7 +8635,7 @@ def test_mountainsort5_ground_truth_neuropixels_60s(neuropixels_60s_session):
                 "nwb_file_name": nwb_file_name,
                 "sort_group_id": sg_id,
                 "interval_list_name": "raw data valid times",
-                "preproc_params_name": "default_franklab",
+                "preprocessing_params_name": "default_franklab",
                 "team_name": "v2_test_team",
             }
         )
@@ -8643,7 +8643,7 @@ def test_mountainsort5_ground_truth_neuropixels_60s(neuropixels_60s_session):
         art_pk = ArtifactSelection.insert_selection(
             {
                 "recording_id": rec_pk["recording_id"],
-                "artifact_params_name": "none",
+                "artifact_detection_params_name": "none",
             }
         )
         ArtifactDetection.populate(art_pk, reserve_jobs=False)
@@ -9042,7 +9042,7 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
     # parity comparison is supposed to expose.
     # Map v1's row-name conventions to v2's equivalents. v1 ships
     # ``preproc_param_name="default"`` / ``sorter_param_name=
-    # "default_clusterless"``; v2 ships ``preproc_params_name=
+    # "default_clusterless"``; v2 ships ``preprocessing_params_name=
     # "default_franklab"`` / ``sorter_params_name="default"``. The
     # smoke row (``smoke_clusterless_5uv``) is consistently named
     # across both pipelines. Custom names that the lab user picks
@@ -9106,7 +9106,7 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
             "nwb_file_name": nwb_file_name,
             "sort_group_id": int(meta["sort_group_id"]),
             "interval_list_name": meta["interval_list_name"],
-            "preproc_params_name": preproc_name_v2,
+            "preprocessing_params_name": preproc_name_v2,
             "team_name": meta["team_name"],
         }
     )
@@ -9122,7 +9122,7 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
     art_pk = ArtifactSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],
-            "artifact_params_name": artifact_name_meta,
+            "artifact_detection_params_name": artifact_name_meta,
         }
     )
     ArtifactDetection.populate(art_pk, reserve_jobs=False)
@@ -9212,13 +9212,13 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
         "canonical_preproc_params": canonical_preproc(
             (
                 PreprocessingParameters
-                & {"preproc_params_name": preproc_name_v2}
+                & {"preprocessing_params_name": preproc_name_v2}
             ).fetch1("params")
         ),
         "canonical_artifact_params": canonical_artifact(
             (
                 ArtifactDetectionParameters
-                & {"artifact_params_name": artifact_name_meta}
+                & {"artifact_detection_params_name": artifact_name_meta}
             ).fetch1("params")
         ),
         # Stored as the canonical (shape-aware) array rather than a
@@ -9621,7 +9621,7 @@ def test_v2_real_data_v1_parity_mountainsort4(
             "nwb_file_name": nwb_file_name,
             "sort_group_id": int(meta["sort_group_id"]),
             "interval_list_name": meta["interval_list_name"],
-            "preproc_params_name": preproc_name_v2,
+            "preprocessing_params_name": preproc_name_v2,
             "team_name": meta["team_name"],
         }
     )
@@ -9631,7 +9631,7 @@ def test_v2_real_data_v1_parity_mountainsort4(
     art_pk = ArtifactSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],
-            "artifact_params_name": artifact_name_meta,
+            "artifact_detection_params_name": artifact_name_meta,
         }
     )
     ArtifactDetection.populate(art_pk, reserve_jobs=False)
@@ -9705,13 +9705,13 @@ def test_v2_real_data_v1_parity_mountainsort4(
         "canonical_preproc_params": canonical_preproc(
             (
                 PreprocessingParameters
-                & {"preproc_params_name": preproc_name_v2}
+                & {"preprocessing_params_name": preproc_name_v2}
             ).fetch1("params")
         ),
         "canonical_artifact_params": canonical_artifact(
             (
                 ArtifactDetectionParameters
-                & {"artifact_params_name": artifact_name_meta}
+                & {"artifact_detection_params_name": artifact_name_meta}
             ).fetch1("params")
         ),
         "artifact_valid_times": _normalize(v2_valid_times),
@@ -9914,7 +9914,7 @@ def test_mountainsort4_ground_truth(
                 "nwb_file_name": nwb_file_name,
                 "sort_group_id": sg_id,
                 "interval_list_name": "raw data valid times",
-                "preproc_params_name": "default_franklab",
+                "preprocessing_params_name": "default_franklab",
                 "team_name": "v2_test_team",
             }
         )
@@ -9922,7 +9922,7 @@ def test_mountainsort4_ground_truth(
         art_pk = ArtifactSelection.insert_selection(
             {
                 "recording_id": rec_pk["recording_id"],
-                "artifact_params_name": "none",
+                "artifact_detection_params_name": "none",
             }
         )
         ArtifactDetection.populate(art_pk, reserve_jobs=False)
@@ -10160,7 +10160,7 @@ def test_clusterless_thresholder_ground_truth(
                 "nwb_file_name": nwb_file_name,
                 "sort_group_id": sg_id,
                 "interval_list_name": "raw data valid times",
-                "preproc_params_name": "default_franklab",
+                "preprocessing_params_name": "default_franklab",
                 "team_name": "v2_test_team",
             }
         )
@@ -10168,7 +10168,7 @@ def test_clusterless_thresholder_ground_truth(
         art_pk = ArtifactSelection.insert_selection(
             {
                 "recording_id": rec_pk["recording_id"],
-                "artifact_params_name": "none",
+                "artifact_detection_params_name": "none",
             }
         )
         ArtifactDetection.populate(art_pk, reserve_jobs=False)
@@ -10381,14 +10381,14 @@ def test_artifact_empty_warning_has_context(dj_conn, monkeypatch):
 
     rec = _build_synthetic_rec(np.zeros((1000, 4), dtype=np.float32))
     validated = ArtifactDetectionParamsSchema(
-        detect=True, amplitude_thresh_uV=500.0
+        detect=True, amplitude_threshold_uv=500.0
     )
     out = artifact_mod.ArtifactDetection._detect_artifacts(
         rec, validated, context=" for artifact_id=abc-123"
     )
     assert out.shape == (1, 2)  # full window returned on zero artifacts
     assert any("abc-123" in m for m in captured), captured
-    assert any("amplitude_thresh_uV" in m for m in captured)
+    assert any("amplitude_threshold_uv" in m for m in captured)
 
 
 @pytest.mark.slow
@@ -10440,7 +10440,7 @@ def test_artifact_delete_aborts_on_unexpected_resolve_error(
     art_pk = ArtifactSelection.insert_selection(
         {
             "recording_id": populated_recording["recording_id"],
-            "artifact_params_name": "default",
+            "artifact_detection_params_name": "default",
         }
     )
     ArtifactDetection.populate(art_pk, reserve_jobs=False)
@@ -10647,7 +10647,7 @@ def test_recording_specific_reference_drops_ref_channel(polymer_smoke_session):
             "nwb_file_name": nwb_file_name,
             "sort_group_id": target_sg,
             "interval_list_name": "raw data valid times",
-            "preproc_params_name": "default_franklab",
+            "preprocessing_params_name": "default_franklab",
             "team_name": "v2_test_team",
         }
     )
@@ -11474,7 +11474,7 @@ def test_recording_multi_interval_saved_times_use_concat_path(
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": interval_name,
-            "preproc_params_name": "default_franklab",
+            "preprocessing_params_name": "default_franklab",
             "team_name": "v2_test_team",
         }
     )
@@ -11545,7 +11545,7 @@ def test_recording_fresh_write_cleanup_unlinks_staged_file(
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": "raw data valid times",
-            "preproc_params_name": "default_franklab",
+            "preprocessing_params_name": "default_franklab",
             "team_name": "v2_test_team",
         }
     )
@@ -11669,7 +11669,7 @@ def test_recording_rebuild_path_keeps_existing_file_on_failure(
                 reference_electrode_id=fetched.reference_electrode_id,
                 sort_valid_times=fetched.sort_valid_times,
                 raw_valid_times=fetched.raw_valid_times,
-                preproc_validated=fetched.preproc_validated,
+                preprocessing_params=fetched.preprocessing_params,
                 probe_types=fetched.probe_types,
                 electrode_group_names=fetched.electrode_group_names,
                 existing_analysis_file_name=existing,  # REBUILD path
@@ -11694,7 +11694,7 @@ def test_recording_rebuild_path_keeps_existing_file_on_failure(
 # ===========================================================================
 # A28: curation.py untested branches.
 #
-# Invalid metrics_source, the POST-E5 idempotent-root guard (now LIVE -- E5
+# Invalid curation_source, the POST-E5 idempotent-root guard (now LIVE -- E5
 # merged), across-group merge overlap, the concat-source ambiguity guard on
 # the CurationV2 accessor, the missing-sorting_id guard, get_merged_sorting
 # early returns, the curation_label column-add gate, the empty-part guards,
@@ -11703,20 +11703,20 @@ def test_recording_rebuild_path_keeps_existing_file_on_failure(
 # ===========================================================================
 
 
-def test_insert_curation_rejects_invalid_metrics_source(populated_sorting):
-    """A28: an unknown ``metrics_source`` raises naming the valid options.
+def test_insert_curation_rejects_invalid_curation_source(populated_sorting):
+    """A28: an unknown ``curation_source`` raises naming the valid options.
 
-    ``metrics_source`` is coerced through the ``MetricsSource`` enum so a typo
+    ``curation_source`` is coerced through the ``CurationSource`` enum so a typo
     fails at the Python boundary (with the valid set) rather than at the
     DataJoint enum-mismatch layer.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
 
     _clear_curations(populated_sorting)
-    with pytest.raises(ValueError, match="MetricsSource"):
+    with pytest.raises(ValueError, match="CurationSource"):
         CurationV2.insert_curation(
             sorting_key=populated_sorting,
-            metrics_source="not_a_real_source",
+            curation_source="not_a_real_source",
         )
 
 
@@ -11753,11 +11753,11 @@ def test_insert_curation_idempotent_root_rejects_apply_merge_and_metrics(
     populated_sorting_with_curation, populated_sorting
 ):
     """Review finding: the existing-root guard also covers apply_merge /
-    metrics_source.
+    curation_source.
 
-    ``merges_applied`` and the metrics provenance record user intent, so a
+    ``merges_applied`` and the curation provenance record user intent, so a
     second root insert that flips ``apply_merge=True`` (or sets a
-    non-"manual" ``metrics_source``) must NOT silently return the existing
+    non-"manual" ``curation_source``) must NOT silently return the existing
     ``merges_applied=False`` / manual root. It raises unless
     ``reuse_existing=True``.
     """
@@ -11770,7 +11770,7 @@ def test_insert_curation_idempotent_root_rejects_apply_merge_and_metrics(
         )
     with pytest.raises(ValueError, match="already exists"):
         CurationV2.insert_curation(
-            sorting_key=populated_sorting, metrics_source="figpack"
+            sorting_key=populated_sorting, curation_source="figpack"
         )
     # Opt-in reuse still returns the existing root unchanged.
     reused = CurationV2.insert_curation(
@@ -12434,7 +12434,7 @@ def test_disjoint_multi_gap_readback_and_artifact(
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": disjoint_name,
-            "preproc_params_name": "default_franklab",
+            "preprocessing_params_name": "default_franklab",
             "team_name": "v2_test_team",
         }
     )
@@ -12443,7 +12443,7 @@ def test_disjoint_multi_gap_readback_and_artifact(
     art_pk = ArtifactSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],
-            "artifact_params_name": "none",
+            "artifact_detection_params_name": "none",
         }
     )
     ArtifactDetection.populate(art_pk, reserve_jobs=False)
@@ -12531,7 +12531,7 @@ def test_shared_artifact_group_multi_member_union(
     ``si.aggregate_channels`` union-scan branch of ``make_compute`` is
     untested. Here two time-aligned members are grouped; a supra-threshold
     transient is planted on member A's channels only, member B is clean.
-    With ``proportion_above_thresh=0.4`` over the 8-channel union, A's 4
+    With ``proportion_above_threshold=0.4`` over the 8-channel union, A's 4
     channels alone exceed the required count, so the union scan removes the
     artifact window -- a per-member scan of the CLEAN member B would not.
     The single session writes one shared ``IntervalList`` row that every
@@ -12605,7 +12605,7 @@ def test_shared_artifact_group_multi_member_union(
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": second_interval,
-            "preproc_params_name": "default_franklab",
+            "preprocessing_params_name": "default_franklab",
             "team_name": "v2_test_team",
         }
     )
@@ -12627,12 +12627,12 @@ def test_shared_artifact_group_multi_member_union(
     params_name = "phase4_union_test"
     ArtifactDetectionParameters.insert1(
         {
-            "artifact_params_name": params_name,
+            "artifact_detection_params_name": params_name,
             "params": ArtifactDetectionParamsSchema(
                 detect=True,
-                amplitude_thresh_uV=1000.0,
-                zscore_thresh=None,
-                proportion_above_thresh=0.4,
+                amplitude_threshold_uv=1000.0,
+                zscore_threshold=None,
+                proportion_above_threshold=0.4,
                 removal_window_ms=1.0,
                 join_window_ms=1.0,
                 min_length_s=0.1,
@@ -12678,7 +12678,7 @@ def test_shared_artifact_group_multi_member_union(
         art_pk = ArtifactSelection.insert_selection(
             {
                 "shared_artifact_group_name": group_name,
-                "artifact_params_name": params_name,
+                "artifact_detection_params_name": params_name,
             }
         )
         ArtifactDetection.populate(art_pk, reserve_jobs=False)

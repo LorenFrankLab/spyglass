@@ -204,10 +204,11 @@ def _populate_artifact_detection(
         ``"default"`` (v1: 3000 µV threshold). For the polymer parity
         matrix pass ``"none"`` so the artifact stage is a typed
         no-detect on both pipelines; v1's ``"default"`` and v2's
-        ``"default"`` rows ship different ``amplitude_thresh_uV`` (3000
-        vs 500 after the v1 unit-conversion bug fix), which would
-        otherwise FAIL the ``canonical_artifact_params`` fingerprint
-        check.
+        ``"default"`` rows ship different amplitude thresholds
+        (v1 ``amplitude_thresh_uV=3000`` vs v2
+        ``amplitude_threshold_uv=500`` after the v1 unit-conversion bug
+        fix), which would otherwise FAIL the ``canonical_artifact_params``
+        fingerprint check.
     """
     from spyglass.spikesorting.v1 import (
         ArtifactDetection,
@@ -776,8 +777,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "Defaults to 'default' (v1: 3000 uV threshold). For the "
             "polymer parity matrix pass 'none' so the artifact stage "
             "is a typed no-detect on both pipelines -- v1's 'default' "
-            "and v2's 'default' rows differ in amplitude_thresh_uV "
-            "(3000 vs 500), which would FAIL the canonical_artifact_params "
+            "and v2's 'default' rows differ in artifact amplitude threshold "
+            "(v1 amplitude_thresh_uV=3000 vs v2 amplitude_threshold_uv=500), "
+            "which would FAIL the canonical_artifact_params "
             "fingerprint check on synthetic fixtures with no real artifacts."
         ),
     )

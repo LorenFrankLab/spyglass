@@ -938,7 +938,7 @@ for label, interval_data in results.groupby("interval_labels"):
         electrode IDs, electrode groups, probe shanks, brain regions,
         bad-channel counts, and reference fields. The user notebook and
         feature docs now show this table before choosing a `sort_group_id`.
-    - Add `plot_sort_groups(nwb_file_name)` to
+    - Add `plot_sort_group_geometry(nwb_file_name)` to
         `spyglass.spikesorting.v2.pipeline`, a DB-backed Matplotlib geometry
         view that colors contacts by `sort_group_id` and overlays
         bad-channel/reference markers before users commit compute to a group.

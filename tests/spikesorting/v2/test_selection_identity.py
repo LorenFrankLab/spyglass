@@ -128,7 +128,7 @@ def test_kind_namespaces_the_three_tables():
 def test_source_kind_participates_in_identity():
     """A recording-source and a shared-group-source artifact selection
     with otherwise-identical payloads get different ids."""
-    base = {"artifact_params_name": "p", "v": 1}
+    base = {"artifact_detection_params_name": "p", "v": 1}
     assert deterministic_id(
         "artifact", {**base, "source_kind": "recording"}
     ) != deterministic_id(
@@ -300,7 +300,7 @@ def fresh_recording_identity(populated_sorting):
         "nwb_file_name": rec_row["nwb_file_name"],
         "sort_group_id": int(rec_row["sort_group_id"]),
         "interval_list_name": rec_row["interval_list_name"],
-        "preproc_params_name": rec_row["preproc_params_name"],
+        "preprocessing_params_name": rec_row["preprocessing_params_name"],
         "team_name": team_name,
     }
     # Pre-clean in case a crashed prior run left the row.
@@ -510,14 +510,14 @@ def test_direct_master_insert_rejected_without_flag(fresh_recording_identity):
                 "nwb_file_name": "x_.nwb",
                 "sort_group_id": 0,
                 "interval_list_name": "raw data valid times",
-                "preproc_params_name": "default_franklab",
+                "preprocessing_params_name": "default_franklab",
                 "team_name": "t",
             },
         ),
         (
             "spyglass.spikesorting.v2.artifact",
             "ArtifactSelection",
-            {"artifact_params_name": "none"},
+            {"artifact_detection_params_name": "none"},
         ),
         (
             "spyglass.spikesorting.v2.sorting",
@@ -557,7 +557,7 @@ def test_artifact_selection_duplicate_pk_race_refetches(populated_sorting):
     rec_id = (SortingSelection.RecordingSource & populated_sorting).fetch1(
         "recording_id"
     )
-    key = {"recording_id": rec_id, "artifact_params_name": "none"}
+    key = {"recording_id": rec_id, "artifact_detection_params_name": "none"}
     pk = ArtifactSelection.insert_selection(key)  # the populated selection
 
     with mock.patch.object(
@@ -591,18 +591,18 @@ def test_artifact_selection_orphan_master_raises_schema_bypass(
         "artifact",
         {
             "source_kind": "recording",
-            "artifact_params_name": "default",
+            "artifact_detection_params_name": "default",
             "recording_id": rec_id,
         },
     )
     ArtifactSelection.insert1(
-        {"artifact_id": det_id, "artifact_params_name": "default"},
+        {"artifact_id": det_id, "artifact_detection_params_name": "default"},
         allow_direct_insert=True,
     )
     try:
         with pytest.raises(SchemaBypassError, match="raw-insert orphan"):
             ArtifactSelection.insert_selection(
-                {"recording_id": rec_id, "artifact_params_name": "default"}
+                {"recording_id": rec_id, "artifact_detection_params_name": "default"}
             )
     finally:
         (ArtifactSelection & {"artifact_id": det_id}).delete(safemode=False)
@@ -718,13 +718,13 @@ def test_artifact_selection_shared_group_writes_deterministic_pk(
         "artifact",
         {
             "source_kind": "shared_artifact_group",
-            "artifact_params_name": "default",
+            "artifact_detection_params_name": "default",
             "shared_artifact_group_name": group_name,
         },
     )
     select_key = {
         "shared_artifact_group_name": group_name,
-        "artifact_params_name": "default",
+        "artifact_detection_params_name": "default",
     }
     try:
         pk = ArtifactSelection.insert_selection(dict(select_key))
@@ -737,7 +737,7 @@ def test_artifact_selection_shared_group_writes_deterministic_pk(
             "artifact",
             {
                 "source_kind": "recording",
-                "artifact_params_name": "default",
+                "artifact_detection_params_name": "default",
                 "recording_id": rec_id,
             },
         )

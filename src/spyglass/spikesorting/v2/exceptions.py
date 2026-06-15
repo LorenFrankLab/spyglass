@@ -67,7 +67,7 @@ class ConcatBrainRegionAmbiguousError(RuntimeError):
 class MissingRecordingForConcatError(RuntimeError):
     """``ConcatenatedRecordingSelection.insert_selection()`` or
     ``ConcatenatedRecording.make()`` cannot find a populated per-member
-    ``Recording`` row with the shared ``preproc_params_name``. Message
+    ``Recording`` row with the shared ``preprocessing_params_name``. Message
     lists the missing member keys and instructs the caller to populate
     ``Recording`` for those members first."""
 

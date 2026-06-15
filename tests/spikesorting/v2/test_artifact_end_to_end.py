@@ -124,7 +124,7 @@ def artifact_e2e_session(dj_conn):
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": "raw data valid times",
-            "preproc_params_name": "default_franklab",
+            "preprocessing_params_name": "default_franklab",
             "team_name": "v2_test_team",
         }
     )
@@ -184,12 +184,12 @@ def test_detected_artifact_is_masked_out_of_the_sorted_recording(
     params_name = "v2_e2e_amp1000"
     ArtifactDetectionParameters().insert1(
         {
-            "artifact_params_name": params_name,
+            "artifact_detection_params_name": params_name,
             "params": ArtifactDetectionParamsSchema(
                 detect=True,
-                amplitude_thresh_uV=_AMP_THRESH_UV,
-                zscore_thresh=None,
-                proportion_above_thresh=1.0,
+                amplitude_threshold_uv=_AMP_THRESH_UV,
+                zscore_threshold=None,
+                proportion_above_threshold=1.0,
                 removal_window_ms=1.0,
                 min_length_s=0.001,
             ).model_dump(),
@@ -201,7 +201,7 @@ def test_detected_artifact_is_masked_out_of_the_sorted_recording(
     SorterParameters.insert_default()
 
     art_pk = ArtifactSelection.insert_selection(
-        {"recording_id": recording_id, "artifact_params_name": params_name}
+        {"recording_id": recording_id, "artifact_detection_params_name": params_name}
     )
     ArtifactDetection.populate(art_pk, reserve_jobs=False)
 
@@ -339,7 +339,7 @@ def gt60_recording(dj_conn):
             "nwb_file_name": nwb,
             "sort_group_id": sg,
             "interval_list_name": "raw data valid times",
-            "preproc_params_name": "default_franklab",
+            "preprocessing_params_name": "default_franklab",
             "team_name": "v2_test_team",
         }
     )
@@ -426,12 +426,12 @@ def test_artifact_masking_preserves_clean_gt_spikes(
     params_name = "v2_gt_artifact_1500"
     ArtifactDetectionParameters().insert1(
         {
-            "artifact_params_name": params_name,
+            "artifact_detection_params_name": params_name,
             "params": ArtifactDetectionParamsSchema(
                 detect=True,
-                amplitude_thresh_uV=amp_thresh_uv,
-                zscore_thresh=None,
-                proportion_above_thresh=1.0,
+                amplitude_threshold_uv=amp_thresh_uv,
+                zscore_threshold=None,
+                proportion_above_threshold=1.0,
                 removal_window_ms=1.0,
                 min_length_s=0.001,
             ).model_dump(),
@@ -441,7 +441,7 @@ def test_artifact_masking_preserves_clean_gt_spikes(
         skip_duplicates=True,
     )
     art_pk = ArtifactSelection.insert_selection(
-        {"recording_id": recording_id, "artifact_params_name": params_name}
+        {"recording_id": recording_id, "artifact_detection_params_name": params_name}
     )
     ArtifactDetection.populate(art_pk, reserve_jobs=False)
 

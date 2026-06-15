@@ -42,7 +42,7 @@ from spyglass.spikesorting.v2.curation import CurationV2
 from spyglass.spikesorting.v2.pipeline import (
     describe_presets,
     describe_sort_groups,
-    plot_sort_groups,
+    plot_sort_group_geometry,
     preflight_v2_pipeline,
     run_v2_pipeline,
 )
@@ -73,7 +73,7 @@ preset = "franklab_tetrode_mountainsort5"
 # needs (preprocessing / artifact / sorter), so there is no per-table
 # `insert_default()` to remember. The owning `LabTeam` and the per-shank sort
 # groups are session-specific user input, so we create them here.
-# `describe_sort_groups()` and `plot_sort_groups()` then show the membership,
+# `describe_sort_groups()` and `plot_sort_group_geometry()` then show the membership,
 # metadata, and physical layout you should inspect before deciding which group
 # to sort. The walkthrough picks the first group only to keep the example
 # reproducible; for real analyses, set `sort_group_id` deliberately after
@@ -91,7 +91,7 @@ sort_groups = describe_sort_groups(nwb_file_name)
 if sort_groups.empty:
     raise ValueError(f"No SortGroupV2 rows found for {nwb_file_name!r}.")
 sort_group_id = int(sort_groups.iloc[0]["sort_group_id"])
-plot_sort_groups(nwb_file_name)
+plot_sort_group_geometry(nwb_file_name)
 sort_groups
 
 

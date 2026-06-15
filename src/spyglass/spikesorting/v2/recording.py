@@ -240,15 +240,19 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         but without any destructive intent.
         """
         existing = cls & {"nwb_file_name": nwb_file_name}
-        sg_count = len(existing)
-        sge_count = len(
+        sort_group_count = len(existing)
+        sort_group_electrode_count = len(
             cls.SortGroupElectrode & {"nwb_file_name": nwb_file_name}
         )
-        cascade = existing.cautious_delete(dry_run=True) if sg_count else None
+        cascade = (
+            existing.cautious_delete(dry_run=True)
+            if sort_group_count
+            else None
+        )
         return DeletionPreview(
             nwb_file_name=nwb_file_name,
-            sort_group_rows=sg_count,
-            electrode_rows=sge_count,
+            sort_group_rows=sort_group_count,
+            electrode_rows=sort_group_electrode_count,
             cascade_summary=cascade,
         )
 
@@ -464,7 +468,7 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
             np.unique(electrodes["electrode_group_name"]).tolist(),
             key=_electrode_group_sort_key,
         )
-        # Each entry: (e_group, group_elecs, resolved_mode, resolved_ref_id).
+        # Each entry: (e_group, electrode_ids, resolved_mode, resolved_ref_id).
         proposed: list[tuple[str, np.ndarray, str, int | None]] = []
         skipped: list[dict] = []
         for e_group in e_groups:
@@ -472,8 +476,8 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
             shanks = np.unique(electrodes["probe_shank"][in_group])
             for shank in shanks:
                 mask = in_group & (electrodes["probe_shank"] == shank)
-                group_elecs = electrodes["electrode_id"][mask]
-                if omit_unitrode and len(group_elecs) == 1:
+                electrode_ids = electrodes["electrode_id"][mask]
+                if omit_unitrode and len(electrode_ids) == 1:
                     logger.warning(
                         f"set_group_by_shank: skipping {nwb_file_name!r} "
                         f"electrode group {e_group} shank {shank} -- "
@@ -542,10 +546,10 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
                 # member of the sort group we are about to insert (it would be
                 # subtracted then dropped, silently shrinking the group).
                 assert_reference_not_member(
-                    resolved_mode, resolved_ref_id, group_elecs
+                    resolved_mode, resolved_ref_id, electrode_ids
                 )
                 proposed.append(
-                    (e_group, group_elecs, resolved_mode, resolved_ref_id)
+                    (e_group, electrode_ids, resolved_mode, resolved_ref_id)
                 )
 
         if not proposed:
@@ -584,23 +588,23 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         )
 
         master_rows, part_rows = [], []
-        for group, sg_id in zip(proposed, sort_group_ids):
-            e_group, group_elecs, resolved_mode, resolved_ref_id = group
+        for group, sort_group_id in zip(proposed, sort_group_ids):
+            e_group, electrode_ids, resolved_mode, resolved_ref_id = group
             master_rows.append(
                 {
                     "nwb_file_name": nwb_file_name,
-                    "sort_group_id": sg_id,
+                    "sort_group_id": sort_group_id,
                     "reference_mode": resolved_mode,
                     "reference_electrode_id": resolved_ref_id,
                 }
             )
-            for elec in group_elecs:
+            for electrode_id in electrode_ids:
                 part_rows.append(
                     {
                         "nwb_file_name": nwb_file_name,
-                        "sort_group_id": sg_id,
+                        "sort_group_id": sort_group_id,
                         "electrode_group_name": e_group,
-                        "electrode_id": int(elec),
+                        "electrode_id": int(electrode_id),
                     }
                 )
 
@@ -751,25 +755,25 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
                 f"were requested. Lengths must match."
             )
 
-        # Each entry: (sg_id, group_elecs, resolved_mode, resolved_ref_id).
+        # Each entry: (sort_group_id, group_electrodes, resolved_mode, resolved_ref_id).
         proposed: list[tuple[int, np.ndarray, str, int | None]] = []
         skipped: list[dict] = []
-        for sg_id, values in zip(sort_group_ids, groups):
+        for sort_group_id, values in zip(sort_group_ids, groups):
             mask = np.isin(electrodes[resolved_column], values)
-            group_elecs = electrodes[mask]
-            if len(group_elecs) == 0:
+            group_electrodes = electrodes[mask]
+            if len(group_electrodes) == 0:
                 raise ValueError(
                     f"set_group_by_electrode_table_column: sort group "
-                    f"{sg_id} (column={column!r}, values={list(values)}) "
+                    f"{sort_group_id} (column={column!r}, values={list(values)}) "
                     f"matched no electrodes for {nwb_file_name!r}."
                 )
-            if omit_unitrode and len(group_elecs) == 1:
+            if omit_unitrode and len(group_electrodes) == 1:
                 logger.warning(
                     f"set_group_by_electrode_table_column: skipping sort "
-                    f"group {sg_id} -- single-channel unitrode."
+                    f"group {sort_group_id} -- single-channel unitrode."
                 )
                 skipped.append(
-                    {"sort_group_id": int(sg_id), "reason": "unitrode"}
+                    {"sort_group_id": int(sort_group_id), "reason": "unitrode"}
                 )
                 continue
 
@@ -780,8 +784,8 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
                 resolved_mode, resolved_ref_id = override_pair
             else:
                 resolved_mode, resolved_ref_id = resolve_group_reference(
-                    group_elecs["original_reference_electrode"],
-                    group_label=str(sg_id),
+                    group_electrodes["original_reference_electrode"],
+                    group_label=str(sort_group_id),
                 )
             # A "specific" reference must name a real, unambiguous session
             # electrode -- fail here instead of later in Recording.populate.
@@ -790,10 +794,17 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
             # Fail early if the resolved specific reference is itself a member
             # of the sort group (it would be subtracted then dropped).
             assert_reference_not_member(
-                resolved_mode, resolved_ref_id, group_elecs["electrode_id"]
+                resolved_mode,
+                resolved_ref_id,
+                group_electrodes["electrode_id"],
             )
             proposed.append(
-                (sg_id, group_elecs, resolved_mode, resolved_ref_id)
+                (
+                    sort_group_id,
+                    group_electrodes,
+                    resolved_mode,
+                    resolved_ref_id,
+                )
             )
 
         if not proposed:
@@ -812,20 +823,25 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         )
 
         master_rows, part_rows = [], []
-        for sg_id, group_elecs, resolved_mode, resolved_ref_id in proposed:
+        for (
+            sort_group_id,
+            group_electrodes,
+            resolved_mode,
+            resolved_ref_id,
+        ) in proposed:
             master_rows.append(
                 {
                     "nwb_file_name": nwb_file_name,
-                    "sort_group_id": sg_id,
+                    "sort_group_id": sort_group_id,
                     "reference_mode": resolved_mode,
                     "reference_electrode_id": resolved_ref_id,
                 }
             )
-            for elec_row in group_elecs:
+            for elec_row in group_electrodes:
                 part_rows.append(
                     {
                         "nwb_file_name": nwb_file_name,
-                        "sort_group_id": sg_id,
+                        "sort_group_id": sort_group_id,
                         "electrode_group_name": elec_row[
                             "electrode_group_name"
                         ],
@@ -858,7 +874,7 @@ class PreprocessingParameters(SpyglassMixin, dj.Lookup):
     """
 
     definition = """
-    preproc_params_name: varchar(128)
+    preprocessing_params_name: varchar(128)
     ---
     params: blob
     params_schema_version=3: int
@@ -937,7 +953,7 @@ class PreprocessingParameters(SpyglassMixin, dj.Lookup):
 
 @schema
 class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
-    """One row per (raw, sort group, interval, preproc params, team).
+    """One row per (raw, sort group, interval, preprocessing params, team).
 
     UUID-keyed so downstream FKs (``Recording``, ``SortingSelection``)
     are single-column. ``insert_selection`` follows the v2 find-existing-
@@ -1013,10 +1029,10 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
 
         # Translate the would-be DataJoint FK IntegrityError into a
         # clear "missing default row" message before the insert attempts.
-        if "preproc_params_name" in keys_minus_uuid:
+        if "preprocessing_params_name" in keys_minus_uuid:
             _ensure_lookup_row_exists(
                 PreprocessingParameters,
-                {"preproc_params_name": keys_minus_uuid["preproc_params_name"]},
+                {"preprocessing_params_name": keys_minus_uuid["preprocessing_params_name"]},
                 helper_name="RecordingSelection.insert_selection",
                 insert_default_path="PreprocessingParameters.insert_default()",
             )
@@ -1096,8 +1112,8 @@ class RecordingFetched(NamedTuple):
     reference_electrode_id: int | None
     sort_valid_times: np.ndarray
     raw_valid_times: np.ndarray
-    preproc_validated: PreprocessingParamsSchema
-    preproc_job_kwargs: dict | None
+    preprocessing_params: PreprocessingParamsSchema
+    preprocessing_job_kwargs: dict | None
     probe_types: tuple
     electrode_group_names: tuple
     bad_channel_ids: tuple
@@ -1240,15 +1256,15 @@ class Recording(SpyglassMixin, dj.Computed):
         # compute stage does not need to re-read them. The validated
         # model is DeepHash-stable across the two ``make_fetch``
         # calls DataJoint makes (Pydantic ``__dict__`` is primitives).
-        preproc_row = (
+        preprocessing_row = (
             PreprocessingParameters
-            & {"preproc_params_name": sel["preproc_params_name"]}
+            & {"preprocessing_params_name": sel["preprocessing_params_name"]}
         ).fetch1()
-        preproc_validated = PreprocessingParamsSchema.model_validate(
-            preproc_row["params"]
+        preprocessing_params = PreprocessingParamsSchema.model_validate(
+            preprocessing_row["params"]
         )
         # Pull the job_kwargs blob so ``make_compute`` can call
-        # ``_resolved_job_kwargs(preproc_job_kwargs)`` -- every v2 compute
+        # ``_resolved_job_kwargs(preprocessing_job_kwargs)`` -- every v2 compute
         # stage resolves job_kwargs once so the override channels are
         # honored consistently.
         # Currently the Recording write path streams via HDMF's
@@ -1258,7 +1274,7 @@ class Recording(SpyglassMixin, dj.Computed):
         # the per-row blob) are testable here and so future
         # consumers can pick up the resolved dict without retrofitting
         # the fetch.
-        preproc_job_kwargs = preproc_row.get("job_kwargs")
+        preprocessing_job_kwargs = preprocessing_row.get("job_kwargs")
         # Per-channel ``probe_type`` + ``electrode_group_name`` for the
         # sort group, used by ``make_compute`` to decide whether the
         # legacy ``tetrode_12.5`` probe-geometry patch (v1 parity at
@@ -1272,7 +1288,7 @@ class Recording(SpyglassMixin, dj.Computed):
         # nothing, so the slice and output are byte-identical to today). Sorted
         # tuple so the fetched value is DeepHash-stable like the others.
         bad_channel_ids: tuple = ()
-        if preproc_validated.bad_channel_handling == "interpolate":
+        if preprocessing_params.bad_channel_handling == "interpolate":
             bad_channel_ids = fetch_interior_bad_channel_ids(
                 nwb_file_name, channel_ids
             )
@@ -1283,8 +1299,8 @@ class Recording(SpyglassMixin, dj.Computed):
             reference_electrode_id=reference_electrode_id,
             sort_valid_times=sort_valid_times,
             raw_valid_times=raw_valid_times,
-            preproc_validated=preproc_validated,
-            preproc_job_kwargs=preproc_job_kwargs,
+            preprocessing_params=preprocessing_params,
+            preprocessing_job_kwargs=preprocessing_job_kwargs,
             probe_types=probe_types,
             electrode_group_names=electrode_group_names,
             bad_channel_ids=bad_channel_ids,
@@ -1299,8 +1315,8 @@ class Recording(SpyglassMixin, dj.Computed):
         reference_electrode_id,
         sort_valid_times,
         raw_valid_times,
-        preproc_validated,
-        preproc_job_kwargs,
+        preprocessing_params,
+        preprocessing_job_kwargs,
         probe_types,
         electrode_group_names,
         bad_channel_ids,
@@ -1328,7 +1344,7 @@ class Recording(SpyglassMixin, dj.Computed):
         # tests confirms this stage's resolution path is wired.
         from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
 
-        _resolved_job_kwargs(preproc_job_kwargs)
+        _resolved_job_kwargs(preprocessing_job_kwargs)
 
         raw_path = Nwbfile().get_abs_path(sel["nwb_file_name"])
         (
@@ -1349,7 +1365,7 @@ class Recording(SpyglassMixin, dj.Computed):
             reference_electrode_id=reference_electrode_id,
             sort_valid_times=sort_valid_times,
             raw_valid_times=raw_valid_times,
-            preproc_validated=preproc_validated,
+            preprocessing_params=preprocessing_params,
             probe_types=probe_types,
             electrode_group_names=electrode_group_names,
             bad_channel_ids=bad_channel_ids,
@@ -1368,7 +1384,7 @@ class Recording(SpyglassMixin, dj.Computed):
             Interval(sort_valid_times)
             .intersect(
                 Interval(raw_valid_times),
-                min_length=preproc_validated.min_segment_length,
+                min_length=preprocessing_params.min_segment_length,
             )
             .times
         )
@@ -1399,7 +1415,7 @@ class Recording(SpyglassMixin, dj.Computed):
             sum(
                 end - start
                 for start, end in sort_valid_times
-                if (end - start) >= preproc_validated.min_segment_length
+                if (end - start) >= preprocessing_params.min_segment_length
             )
         )
         over_request = requested_saved_total - expected_saved_total
@@ -1642,7 +1658,7 @@ class Recording(SpyglassMixin, dj.Computed):
             reference_electrode_id=fetched.reference_electrode_id,
             sort_valid_times=fetched.sort_valid_times,
             raw_valid_times=fetched.raw_valid_times,
-            preproc_validated=fetched.preproc_validated,
+            preprocessing_params=fetched.preprocessing_params,
             probe_types=fetched.probe_types,
             electrode_group_names=fetched.electrode_group_names,
             bad_channel_ids=fetched.bad_channel_ids,
@@ -1671,7 +1687,7 @@ class Recording(SpyglassMixin, dj.Computed):
         reference_electrode_id: int | None,
         sort_valid_times,
         raw_valid_times,
-        preproc_validated: PreprocessingParamsSchema,
+        preprocessing_params: PreprocessingParamsSchema,
         probe_types: tuple,
         electrode_group_names: tuple,
         bad_channel_ids: tuple = (),
@@ -1723,8 +1739,8 @@ class Recording(SpyglassMixin, dj.Computed):
                 reference_electrode_id=reference_electrode_id,
                 sort_valid_times=sort_valid_times,
                 raw_valid_times=raw_valid_times,
-                min_segment_length=preproc_validated.min_segment_length,
-                bad_channel_handling=preproc_validated.bad_channel_handling,
+                min_segment_length=preprocessing_params.min_segment_length,
+                bad_channel_handling=preprocessing_params.bad_channel_handling,
                 bad_channel_ids=bad_channel_ids,
             )
         )
@@ -1733,8 +1749,8 @@ class Recording(SpyglassMixin, dj.Computed):
             reference_mode=reference_mode,
             reference_electrode_id=reference_electrode_id,
             sort_group_channel_ids=channel_ids,
-            validated=preproc_validated,
-            bad_channel_handling=preproc_validated.bad_channel_handling,
+            validated=preprocessing_params,
+            bad_channel_handling=preprocessing_params.bad_channel_handling,
             bad_channel_ids=bad_channel_ids,
         )
         recording = self._maybe_apply_tetrode_geometry(
@@ -1750,7 +1766,7 @@ class Recording(SpyglassMixin, dj.Computed):
         # artifact for the no_filter preset or reference_mode='none' (DANDI /
         # archival), and a requested-but-skipped phase-shift must not be listed.
         filtering_description = self._filtering_description(
-            preproc_validated.bandpass_filter, reference_mode, applied_steps
+            preprocessing_params.bandpass_filter, reference_mode, applied_steps
         )
 
         analysis_file_name = None

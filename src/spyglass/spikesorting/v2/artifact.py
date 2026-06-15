@@ -139,7 +139,7 @@ class ArtifactDetectionParameters(SpyglassMixin, dj.Lookup):
     """
 
     definition = """
-    artifact_params_name: varchar(64)
+    artifact_detection_params_name: varchar(64)
     ---
     params: blob
     params_schema_version=2: int
@@ -153,7 +153,7 @@ class ArtifactDetectionParameters(SpyglassMixin, dj.Lookup):
         (
             "none",
             ArtifactDetectionParamsSchema(
-                detect=False, amplitude_thresh_uV=None
+                detect=False, amplitude_threshold_uv=None
             ).model_dump(),
             2,
             None,
@@ -287,7 +287,7 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
 
         # Time-axis compatibility check. ``RecordingSelection`` is
         # keyed by (nwb_file_name, sort_group_id, interval_list_name,
-        # preproc_params_name, team_name); same NWB does NOT imply
+        # preprocessing_params_name, team_name); same NWB does NOT imply
         # same time axis. ``si.aggregate_channels`` requires every
         # member to share ``n_samples``, ``sampling_frequency``, and
         # dtype, otherwise the union construction crashes deep inside
@@ -328,7 +328,7 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
         (nwb_file_name,) = sessions
 
         # Sampling frequency must match: SI's ``aggregate_channels``
-        # requires identical fs. A typo in upstream preproc params
+        # requires identical fs. A typo in upstream preprocessing params
         # could silently produce different ``sampling_frequency``
         # values on the same NWB; catch it here.
         sampling_frequencies = {
@@ -524,7 +524,7 @@ class ArtifactSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
                 f"{'set' if has_shared else 'unset'}."
             )
 
-        master_field = "artifact_params_name"
+        master_field = "artifact_detection_params_name"
         if master_field not in key:
             raise ValueError(
                 "ArtifactSelection.insert_selection requires "
@@ -553,7 +553,7 @@ class ArtifactSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         )
 
         identity = artifact_identity_payload(
-            artifact_params_name=key[master_field],
+            artifact_detection_params_name=key[master_field],
             recording_id=key.get("recording_id"),
             shared_artifact_group_name=key.get("shared_artifact_group_name"),
         )

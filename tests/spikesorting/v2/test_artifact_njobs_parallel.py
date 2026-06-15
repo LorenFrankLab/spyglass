@@ -33,12 +33,12 @@ def _insert_artifact_params(name, *, n_jobs):
 
     ArtifactDetectionParameters().insert1(
         {
-            "artifact_params_name": name,
+            "artifact_detection_params_name": name,
             "params": ArtifactDetectionParamsSchema(
                 detect=True,
-                amplitude_thresh_uV=30.0,
-                zscore_thresh=None,
-                proportion_above_thresh=0.1,
+                amplitude_threshold_uv=30.0,
+                zscore_threshold=None,
+                proportion_above_threshold=0.1,
                 removal_window_ms=1.0,
                 min_length_s=0.001,
             ).model_dump(),
@@ -90,7 +90,7 @@ def test_parallel_artifact_detection_matches_serial(dj_conn):
                 "nwb_file_name": nwb,
                 "sort_group_id": sg,
                 "interval_list_name": "raw data valid times",
-                "preproc_params_name": "default_franklab",
+                "preprocessing_params_name": "default_franklab",
                 "team_name": "v2_test_team",
             }
         )
@@ -114,7 +114,7 @@ def test_parallel_artifact_detection_matches_serial(dj_conn):
             art_pk = ArtifactSelection.insert_selection(
                 {
                     "recording_id": rec_pk["recording_id"],
-                    "artifact_params_name": name,
+                    "artifact_detection_params_name": name,
                 }
             )
             ArtifactDetection.populate(art_pk, reserve_jobs=False)

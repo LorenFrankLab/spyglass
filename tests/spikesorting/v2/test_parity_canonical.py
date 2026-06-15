@@ -328,9 +328,9 @@ def test_canonical_artifact_strips_v1_job_kwargs():
     v2_clean = {
         "schema_version": 2,
         "detect": True,
-        "zscore_thresh": None,
-        "amplitude_thresh_uV": 500.0,
-        "proportion_above_thresh": 1.0,
+        "zscore_threshold": None,
+        "amplitude_threshold_uv": 500.0,
+        "proportion_above_threshold": 1.0,
         "removal_window_ms": 1.0,
         "join_window_ms": 1.0,
         "min_length_s": 1.0,
@@ -343,7 +343,7 @@ def test_canonical_artifact_strips_v1_job_kwargs():
     )
 
 
-def test_canonical_artifact_amplitude_thresh_mismatch_diverges():
+def test_canonical_artifact_amplitude_threshold_mismatch_diverges():
     v1 = {
         "zscore_thresh": None,
         "amplitude_thresh_uV": 3000,
@@ -353,9 +353,9 @@ def test_canonical_artifact_amplitude_thresh_mismatch_diverges():
     v2 = {
         "schema_version": 2,
         "detect": True,
-        "zscore_thresh": None,
-        "amplitude_thresh_uV": 500.0,
-        "proportion_above_thresh": 1.0,
+        "zscore_threshold": None,
+        "amplitude_threshold_uv": 500.0,
+        "proportion_above_threshold": 1.0,
         "removal_window_ms": 1.0,
         "join_window_ms": 1.0,
         "min_length_s": 1.0,
@@ -380,9 +380,9 @@ def test_canonical_artifact_none_preset_disables_detect():
     v2_none = {
         "schema_version": 2,
         "detect": False,
-        "zscore_thresh": None,
-        "amplitude_thresh_uV": None,
-        "proportion_above_thresh": 1.0,
+        "zscore_threshold": None,
+        "amplitude_threshold_uv": None,
+        "proportion_above_threshold": 1.0,
         "removal_window_ms": 1.0,
         "join_window_ms": 1.0,
         "min_length_s": 1.0,

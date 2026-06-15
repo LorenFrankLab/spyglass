@@ -134,22 +134,22 @@ def test_whiten_default_is_none():
 # ---------- artifact detection ---------------------------------------------
 
 
-def test_artifact_default_keeps_v1_field_names():
-    """Defaults match v1 field names plus the v2 additions.
+def test_artifact_default_field_values():
+    """Defaults use the v2 field names and ship the expected values.
 
     Shipping v2 default values:
-    * ``amplitude_thresh_uV == 500.0`` -- v2's bug-fix value
+    * ``amplitude_threshold_uv == 500.0`` -- v2's bug-fix value
       (matches v1's effective Intan-probe behavior; v1's
       nominal 3000 was a unit-conversion bug, see the
       CHANGELOG entry).
-    * ``proportion_above_thresh == 1.0`` -- v1 parity revert
+    * ``proportion_above_threshold == 1.0`` -- v1 parity revert
       from an earlier silently-changed 0.5.
     """
     blob = ArtifactDetectionParamsSchema().model_dump()
     assert blob["detect"] is True
-    assert blob["amplitude_thresh_uV"] == 500.0
-    assert blob["zscore_thresh"] is None
-    assert blob["proportion_above_thresh"] == 1.0
+    assert blob["amplitude_threshold_uv"] == 500.0
+    assert blob["zscore_threshold"] is None
+    assert blob["proportion_above_threshold"] == 1.0
     assert blob["removal_window_ms"] == 1.0
     assert blob["join_window_ms"] == 1.0
 
@@ -157,7 +157,7 @@ def test_artifact_default_keeps_v1_field_names():
 def test_artifact_none_preset_disables_detection():
     """``detect=False`` lets all threshold fields be None."""
     blob = ArtifactDetectionParamsSchema(
-        detect=False, amplitude_thresh_uV=None
+        detect=False, amplitude_threshold_uv=None
     ).model_dump()
     assert blob["detect"] is False
 
@@ -166,7 +166,7 @@ def test_artifact_detect_true_requires_a_threshold():
     """``detect=True`` with both thresholds None is a validation error."""
     with pytest.raises(ValidationError):
         ArtifactDetectionParamsSchema(
-            detect=True, amplitude_thresh_uV=None, zscore_thresh=None
+            detect=True, amplitude_threshold_uv=None, zscore_threshold=None
         )
 
 
@@ -178,29 +178,29 @@ def test_artifact_rejects_unknown_field():
         )
 
 
-def test_artifact_proportion_above_thresh_bounds():
-    """``proportion_above_thresh`` must lie in (0, 1]."""
+def test_artifact_proportion_above_threshold_bounds():
+    """``proportion_above_threshold`` must lie in (0, 1]."""
     with pytest.raises(ValidationError):
-        ArtifactDetectionParamsSchema(proportion_above_thresh=0.0)
+        ArtifactDetectionParamsSchema(proportion_above_threshold=0.0)
     with pytest.raises(ValidationError):
-        ArtifactDetectionParamsSchema(proportion_above_thresh=1.5)
+        ArtifactDetectionParamsSchema(proportion_above_threshold=1.5)
 
 
 def test_artifact_zscore_description_documents_common_mode():
-    """The ``zscore_thresh`` field documents that the cross-channel
+    """The ``zscore_threshold`` field documents that the cross-channel
     z-score is blind to pure common-mode events and that
-    ``amplitude_thresh_uV`` is the way to catch them.
+    ``amplitude_threshold_uv`` is the way to catch them.
 
     Guards against the prior (false) claim that the cross-channel
     z-score *detects* common-mode artifacts.
     """
     desc = ArtifactDetectionParamsSchema.model_fields[
-        "zscore_thresh"
+        "zscore_threshold"
     ].description
     assert desc is not None
     lowered = desc.lower()
     assert "common-mode" in lowered
-    assert "amplitude_thresh_uV" in desc
+    assert "amplitude_threshold_uv" in desc
     assert "not detected" in lowered or "blind" in lowered
 
 
@@ -212,18 +212,18 @@ def test_artifact_thresholds_or_semantics():
     thresholds, so leaving stale thresholds set is not an error.
     """
     # amplitude-only
-    ArtifactDetectionParamsSchema(amplitude_thresh_uV=500.0, zscore_thresh=None)
+    ArtifactDetectionParamsSchema(amplitude_threshold_uv=500.0, zscore_threshold=None)
     # z-score-only
-    ArtifactDetectionParamsSchema(amplitude_thresh_uV=None, zscore_thresh=5.0)
+    ArtifactDetectionParamsSchema(amplitude_threshold_uv=None, zscore_threshold=5.0)
     # both thresholds at once -- the OR mode
     both = ArtifactDetectionParamsSchema(
-        amplitude_thresh_uV=500.0, zscore_thresh=5.0
+        amplitude_threshold_uv=500.0, zscore_threshold=5.0
     ).model_dump()
-    assert both["amplitude_thresh_uV"] == 500.0
-    assert both["zscore_thresh"] == 5.0
+    assert both["amplitude_threshold_uv"] == 500.0
+    assert both["zscore_threshold"] == 5.0
     # detect=False ignores both thresholds even when they are still set
     disabled = ArtifactDetectionParamsSchema(
-        detect=False, amplitude_thresh_uV=500.0, zscore_thresh=5.0
+        detect=False, amplitude_threshold_uv=500.0, zscore_threshold=5.0
     ).model_dump()
     assert disabled["detect"] is False
 
@@ -714,7 +714,7 @@ def test_shipped_rows_carry_current_params_schema_version(dj_conn):
     assert clusterless["params"]["schema_version"] == 4
 
     for name in ("default_franklab", "default_neuropixels", "no_filter"):
-        row = (PreprocessingParameters & {"preproc_params_name": name}).fetch1()
+        row = (PreprocessingParameters & {"preprocessing_params_name": name}).fetch1()
         assert row["params_schema_version"] == 3, name
         assert row["params"]["schema_version"] == 3, name
 
@@ -748,12 +748,12 @@ _BULK_INSERT_CASES = [
         "spyglass.spikesorting.v2.artifact",
         "ArtifactDetectionParameters",
         {
-            "artifact_params_name": "_pytest_bulk_a",
+            "artifact_detection_params_name": "_pytest_bulk_a",
             "params": ArtifactDetectionParamsSchema().model_dump(),
             "params_schema_version": 2,
         },
         {
-            "artifact_params_name": "_pytest_bulk_b",
+            "artifact_detection_params_name": "_pytest_bulk_b",
             "params": ArtifactDetectionParamsSchema().model_dump(),
             "params_schema_version": 2,
         },
@@ -778,12 +778,12 @@ _BULK_INSERT_CASES = [
         "spyglass.spikesorting.v2.recording",
         "PreprocessingParameters",
         {
-            "preproc_params_name": "_pytest_bulk_a",
+            "preprocessing_params_name": "_pytest_bulk_a",
             "params": PreprocessingParamsSchema().model_dump(),
             "params_schema_version": 3,
         },
         {
-            "preproc_params_name": "_pytest_bulk_b",
+            "preprocessing_params_name": "_pytest_bulk_b",
             "params": PreprocessingParamsSchema().model_dump(),
             "params_schema_version": 3,
         },

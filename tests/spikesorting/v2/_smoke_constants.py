@@ -14,7 +14,7 @@ lands in one place and the v1↔v2 parity gate stays meaningful.
 The ``V1_TO_V2_*_NAMES`` dicts encode the v1-vs-v2 row-name asymmetry
 that the v1↔v2 parity test crosses: v1 ships ``preproc_param_name=
 "default"`` / ``sorter_param_name="default_clusterless"`` while v2
-ships ``preproc_params_name="default_franklab"`` /
+ships ``preprocessing_params_name="default_franklab"`` /
 ``sorter_params_name="default"``. Captures done with v1's shipping
 default names get mapped to v2's equivalents at parity-test time.
 """

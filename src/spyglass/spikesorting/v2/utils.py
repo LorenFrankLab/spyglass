@@ -18,7 +18,7 @@ import spikeinterface as si
 # existing ``from .utils import CurationLabel`` call sites are unchanged.
 from spyglass.spikesorting.v2._enums import (  # noqa: F401
     CurationLabel,
-    MetricsSource,
+    CurationSource,
 )
 
 # Pure signal/frame/interval math lives in _signal_math.py; re-exported
@@ -171,7 +171,7 @@ class SelectionMasterInsertGuard:
         )
 
 
-# ``MetricsSource`` and ``CurationLabel`` are defined in the stdlib-only
+# ``CurationSource`` and ``CurationLabel`` are defined in the stdlib-only
 # ``_enums`` module and re-exported at the top of this file; see the
 # import there for why they live outside ``utils``.
 
@@ -893,7 +893,7 @@ def _ensure_lookup_row_exists(
         ``PreprocessingParameters``).
     restriction
         The dict identifying the required row (e.g.
-        ``{"preproc_params_name": "default_franklab"}``).
+        ``{"preprocessing_params_name": "default_franklab"}``).
     helper_name
         Name of the insert_selection helper calling us, for the error
         message (e.g. ``"RecordingSelection.insert_selection"``).
@@ -967,7 +967,7 @@ def get_spiking_sorting_v2_merge_ids(
     restriction : dict
         Restriction on any v2 column (``nwb_file_name``,
         ``sort_group_id``, ``interval_list_name``,
-        ``preproc_params_name``, ``recording_id``, ``artifact_id``,
+        ``preprocessing_params_name``, ``recording_id``, ``artifact_id``,
         ``sorter``, ``sorter_params_name``, ``sorting_id``,
         ``curation_id``). Unknown keys raise ``ValueError``.
     as_dict : bool, optional

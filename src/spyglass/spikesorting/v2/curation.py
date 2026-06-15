@@ -3,7 +3,7 @@
 Tables (all final-shape under the zero-migration policy):
     CurationV2 (+ Unit + UnitLabel) -- Manual; lineage via parent_curation_id.
 
-``metrics_source`` is restricted to true CurationV2 provenance values
+``curation_source`` is restricted to true CurationV2 provenance values
 (``manual``, ``analyzer_curation``, ``figpack``). External or
 ground-truth NWB Units continue to use ``ImportedSpikeSorting``; v2 does
 NOT duplicate them into ``CurationV2``.
@@ -39,7 +39,7 @@ from spyglass.spikesorting.v2._units_nwb import (
 from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 from spyglass.spikesorting.v2.utils import (
     CurationLabel,
-    MetricsSource,
+    CurationSource,
     _assert_v2_db_safe,
     transaction_or_noop,
     unit_brain_region_df,
@@ -87,7 +87,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
     -> AnalysisNwbfile
     object_id: varchar(72)
     merges_applied=0: bool
-    metrics_source = 'manual': enum('manual', 'analyzer_curation', 'figpack')
+    curation_source = 'manual': enum('manual', 'analyzer_curation', 'figpack')
     description: varchar(255)
     """
 
@@ -121,7 +121,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         canonical ``CurationLabel`` set at insert time on EVERY insert
         path -- including a direct ``UnitLabel.insert1`` / ``insert`` (the
         overrides below), not only via ``CurationV2.insert_curation``.
-        DataJoint *can* declare an enum column (``metrics_source`` on the
+        DataJoint *can* declare an enum column (``curation_source`` on the
         master is one); v2 deliberately uses ``varchar`` + Python-side
         validation because the label set is open-ended -- a lab adding a
         custom label later would otherwise need a forbidden ``ALTER
@@ -202,7 +202,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         merge_groups: list[list[int]] | None = None,
         apply_merge: bool = False,
         description: str = "",
-        metrics_source: str | MetricsSource = "manual",
+        curation_source: str | CurationSource = "manual",
         reuse_existing: bool = False,
         permissive_labels: bool = False,
         allow_custom_labels: bool = False,
@@ -268,8 +268,8 @@ class CurationV2(SpyglassMixin, dj.Manual):
             likely typos.)
         description
             Free-text curation description.
-        metrics_source
-            Provenance for any attached metrics blob. Must be one of
+        curation_source
+            Provenance for how this curation row was created. Must be one of
             'manual' (default), 'analyzer_curation', or 'figpack'.
         permissive_labels
             Controls ONLY truly-stray label keys (ids that are neither
@@ -339,17 +339,17 @@ class CurationV2(SpyglassMixin, dj.Manual):
 
         validate_labels(labels, allow_custom_labels=allow_custom_labels)
 
-        # Coerce metrics_source through the enum up front so a typo raises a
+        # Coerce curation_source through the enum up front so a typo raises a
         # friendly error on EVERY path -- including the idempotent
         # existing-root early return below, which would otherwise swallow an
         # invalid value and return the existing root instead of rejecting it.
         try:
-            metrics_source = MetricsSource(metrics_source).value
+            curation_source = CurationSource(curation_source).value
         except ValueError as exc:
             raise ValueError(
-                f"CurationV2.insert_curation: metrics_source="
-                f"{metrics_source!r} is not a MetricsSource value. "
-                f"Valid: {[m.value for m in MetricsSource]}."
+                f"CurationV2.insert_curation: curation_source="
+                f"{curation_source!r} is not a CurationSource value. "
+                f"Valid: {[m.value for m in CurationSource]}."
             ) from exc
 
         if parent_curation_id != -1:
@@ -387,29 +387,29 @@ class CurationV2(SpyglassMixin, dj.Manual):
             if existing_root:
                 # A root curation already exists. If the caller passed ANY
                 # non-default parameter -- labels / merge_groups / description
-                # / apply_merge / a non-"manual" metrics_source -- it would be
+                # / apply_merge / a non-"manual" curation_source -- it would be
                 # SILENTLY ignored by returning the existing row, a
                 # parameter-change-with-no-effect footgun. The apply_merge /
-                # metrics_source cases matter because ``merges_applied`` and
-                # the metrics provenance record user intent: a second
+                # curation_source cases matter because ``merges_applied`` and
+                # the curation provenance record user intent: a second
                 # ``apply_merge=True`` insert must NOT quietly return a
                 # ``merges_applied=False`` root. Raise unless the caller opts
-                # into reuse. metrics_source is already coerced to its enum
+                # into reuse. curation_source is already coerced to its enum
                 # value above, so a typo has already raised before reaching
                 # this point (it is never silently treated as "unchanged").
-                metrics_source_changed = metrics_source != "manual"
+                curation_source_changed = curation_source != "manual"
                 if (
                     bool(labels)
                     or bool(merge_groups)
                     or bool(description)
                     or apply_merge
-                    or metrics_source_changed
+                    or curation_source_changed
                 ) and not reuse_existing:
                     raise ValueError(
                         "CurationV2.insert_curation: a root curation "
                         f"already exists for sorting_id={sorting_id}, but "
                         "you passed labels / merge_groups / description / "
-                        "apply_merge / metrics_source that would be silently "
+                        "apply_merge / curation_source that would be silently "
                         "ignored. Pass reuse_existing=True to reuse the "
                         "existing root, or curate as a child with "
                         "parent_curation_id=<existing root curation_id>."
@@ -515,7 +515,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 # to the effective state -- consistent with v1 and
                 # avoids silent semantic divergence.
                 "merges_applied": bool(apply_merge),
-                "metrics_source": metrics_source,
+                "curation_source": curation_source,
                 "description": description,
             }
             # Labels attach to the units actually written. For
@@ -1121,7 +1121,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         ``SortingSelection`` -> ``ArtifactSource``) so a cross-table
         restriction over the v2 part-table convention keys --
         ``nwb_file_name``, ``team_name``, ``sort_group_id``,
-        ``interval_list_name``, ``preproc_params_name``, ``recording_id``,
+        ``interval_list_name``, ``preprocessing_params_name``, ``recording_id``,
         ``artifact_id``, ``sorter``, ``sorter_params_name``, ``sorting_id``,
         ``curation_id`` -- resolves to the ``CurationV2`` rows it selects.
 
@@ -1162,7 +1162,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
             "team_name",
             "sort_group_id",
             "interval_list_name",
-            "preproc_params_name",
+            "preprocessing_params_name",
             "recording_id",
         ]
         sort_keys = [

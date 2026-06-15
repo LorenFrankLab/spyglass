@@ -331,7 +331,7 @@ def populated_sorting(dj_conn):
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": "raw data valid times",
-            "preproc_params_name": "default_franklab",
+            "preprocessing_params_name": "default_franklab",
             "team_name": "v2_test_team",
         }
     )
@@ -340,7 +340,7 @@ def populated_sorting(dj_conn):
     art_pk = ArtifactSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],
-            "artifact_params_name": "none",
+            "artifact_detection_params_name": "none",
         }
     )
     if not (ArtifactDetection & art_pk):

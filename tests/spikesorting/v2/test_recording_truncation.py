@@ -99,7 +99,7 @@ def test_sub_min_segment_length_sliver_is_not_false_truncation(
             "nwb_file_name": nwb,
             "sort_group_id": sg,
             "interval_list_name": interval_name,
-            "preproc_params_name": "default_franklab",
+            "preprocessing_params_name": "default_franklab",
             "team_name": "v2_test_team",
         }
     )
@@ -220,7 +220,7 @@ def test_disjoint_multichunk_not_false_truncation(truncation_session):
             "nwb_file_name": nwb,
             "sort_group_id": sg,
             "interval_list_name": interval_name,
-            "preproc_params_name": "default_franklab",
+            "preprocessing_params_name": "default_franklab",
             "team_name": "v2_test_team",
         }
     )

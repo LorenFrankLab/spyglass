@@ -228,7 +228,7 @@ def _run_clusterless(session, *, tuned):
             "nwb_file_name": session["nwb_file_name"],
             "sort_group_id": sort_group_id,
             "interval_list_name": "raw data valid times",
-            "preproc_params_name": "default_franklab",
+            "preprocessing_params_name": "default_franklab",
             "team_name": _TEAM,
         }
     )
@@ -237,7 +237,7 @@ def _run_clusterless(session, *, tuned):
     art_pk = ArtifactSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],
-            "artifact_params_name": "none",
+            "artifact_detection_params_name": "none",
         }
     )
     ArtifactDetection.populate(art_pk, reserve_jobs=False)

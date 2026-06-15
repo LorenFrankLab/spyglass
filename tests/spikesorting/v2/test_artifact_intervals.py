@@ -39,9 +39,9 @@ def _artifact_params(**overrides):
 
     base = dict(
         detect=True,
-        amplitude_thresh_uV=1000.0,
-        zscore_thresh=None,
-        proportion_above_thresh=1.0,
+        amplitude_threshold_uv=1000.0,
+        zscore_threshold=None,
+        proportion_above_threshold=1.0,
         removal_window_ms=1.0,
         join_window_ms=1.0,
         min_length_s=1.0,

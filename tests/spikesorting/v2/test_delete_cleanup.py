@@ -67,14 +67,14 @@ def planted_sort(dj_conn):
             "nwb_file_name": nwb,
             "sort_group_id": sg,
             "interval_list_name": "raw data valid times",
-            "preproc_params_name": "default_franklab",
+            "preprocessing_params_name": "default_franklab",
             "team_name": "v2_test_team",
         }
     )
     if not (Recording & rec_pk):
         Recording.populate(rec_pk, reserve_jobs=False)
     art_pk = ArtifactSelection.insert_selection(
-        {"recording_id": rec_pk["recording_id"], "artifact_params_name": "none"}
+        {"recording_id": rec_pk["recording_id"], "artifact_detection_params_name": "none"}
     )
     if not (ArtifactDetection & art_pk):
         ArtifactDetection.populate(art_pk, reserve_jobs=False)

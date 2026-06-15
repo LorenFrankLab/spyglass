@@ -28,6 +28,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from spyglass.spikesorting.v2._enums import BadChannelLabel
 
+__all__ = ["detect_bad_channels", "suggest_bad_channels"]
+
 # We pin ONLY the method. Every threshold is left to SpikeInterface's own
 # signature default (e.g. SI 0.104.3: dead -0.5, noisy 1.0, outside -0.75,
 # psd_hf 0.02, seed None) so "ships SI defaults" is literally true and a future

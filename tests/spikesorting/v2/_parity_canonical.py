@@ -299,9 +299,20 @@ def _derive_detect(params: dict) -> bool:
     """
     if "detect" in params:
         return bool(params["detect"])
-    amp = params.get("amplitude_thresh_uV")
-    zsc = params.get("zscore_thresh")
+    amp = _artifact_param(
+        params, "amplitude_threshold_uv", "amplitude_thresh_uV"
+    )
+    zsc = _artifact_param(params, "zscore_threshold", "zscore_thresh")
     return not (amp is None and zsc is None)
+
+
+def _artifact_param(params: dict, new_name: str, v1_name: str, default=None):
+    """Read a v2 artifact parameter, accepting the historical v1 name."""
+    if new_name in params:
+        return params[new_name]
+    if v1_name in params:
+        return params[v1_name]
+    return default
 
 
 def canonical_artifact(params: dict) -> dict:
@@ -310,14 +321,15 @@ def canonical_artifact(params: dict) -> dict:
     Strips v1's runtime concurrency knobs (``chunk_duration``,
     ``n_jobs``, ``progress_bar``) and v2's ``schema_version`` stamp,
     then fills the v2 schema defaults (``join_window_ms=1.0``,
-    ``min_length_s=1.0``, ``proportion_above_thresh=1.0``,
+    ``min_length_s=1.0``, ``proportion_above_threshold=1.0``,
     ``removal_window_ms=1.0``) when v1's row omits the field. The
     canonical form is the eight scientific fields that reach SI:
 
     * ``detect`` (derived from threshold presence on v1, explicit on v2),
-    * ``amplitude_thresh_uV``, ``zscore_thresh`` (at least one
-      non-None unless ``detect=False``),
-    * ``proportion_above_thresh``, ``removal_window_ms``,
+    * ``amplitude_threshold_uv`` / v1 ``amplitude_thresh_uV`` and
+      ``zscore_threshold`` / v1 ``zscore_thresh`` (at least one non-None
+      unless ``detect=False``),
+    * ``proportion_above_threshold``, ``removal_window_ms``,
     * ``join_window_ms``, ``min_length_s`` (v2-only fields; v1
       rows are read with the v2 defaults applied).
 
@@ -328,19 +340,29 @@ def canonical_artifact(params: dict) -> dict:
     diverging from the v2 default surfaces as a canonical mismatch.
     """
     p = _normalize(params)
+    amplitude_threshold_uv = _artifact_param(
+        p, "amplitude_threshold_uv", "amplitude_thresh_uV"
+    )
+    zscore_threshold = _artifact_param(p, "zscore_threshold", "zscore_thresh")
+    proportion_above_threshold = _artifact_param(
+        p,
+        "proportion_above_threshold",
+        "proportion_above_thresh",
+        default=1.0,
+    )
     return {
         "detect": _derive_detect(p),
-        "amplitude_thresh_uV": (
-            float(p["amplitude_thresh_uV"])
-            if p.get("amplitude_thresh_uV") is not None
+        "amplitude_threshold_uv": (
+            float(amplitude_threshold_uv)
+            if amplitude_threshold_uv is not None
             else None
         ),
-        "zscore_thresh": (
-            float(p["zscore_thresh"])
-            if p.get("zscore_thresh") is not None
+        "zscore_threshold": (
+            float(zscore_threshold)
+            if zscore_threshold is not None
             else None
         ),
-        "proportion_above_thresh": float(p.get("proportion_above_thresh", 1.0)),
+        "proportion_above_threshold": float(proportion_above_threshold),
         "removal_window_ms": float(p.get("removal_window_ms", 1.0)),
         "join_window_ms": float(p.get("join_window_ms", 1.0)),
         "min_length_s": float(p.get("min_length_s", 1.0)),

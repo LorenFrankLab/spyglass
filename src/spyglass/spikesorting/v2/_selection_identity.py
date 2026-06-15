@@ -133,7 +133,7 @@ def recording_identity_payload(key: dict) -> dict:
 
 def artifact_identity_payload(
     *,
-    artifact_params_name,
+    artifact_detection_params_name,
     recording_id=None,
     shared_artifact_group_name=None,
 ) -> dict:
@@ -154,12 +154,12 @@ def artifact_identity_payload(
     if recording_id is not None:
         return {
             "source_kind": "recording",
-            "artifact_params_name": artifact_params_name,
+            "artifact_detection_params_name": artifact_detection_params_name,
             "recording_id": recording_id,
         }
     return {
         "source_kind": "shared_artifact_group",
-        "artifact_params_name": artifact_params_name,
+        "artifact_detection_params_name": artifact_detection_params_name,
         "shared_artifact_group_name": shared_artifact_group_name,
     }
 

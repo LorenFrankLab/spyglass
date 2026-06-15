@@ -33,9 +33,9 @@ import numpy as np
 
 def _init_artifact_worker(
     recording,
-    zscore_thresh,
-    amplitude_thresh_uV,
-    proportion_above_thresh,
+    zscore_threshold,
+    amplitude_threshold_uv,
+    proportion_above_threshold,
 ):
     """Per-worker initializer for the chunked artifact scan.
 
@@ -54,9 +54,9 @@ def _init_artifact_worker(
     n_channels = len(recording.get_channel_ids())
     return {
         "recording": recording,
-        "zscore_thresh": zscore_thresh,
-        "amplitude_thresh_uV": amplitude_thresh_uV,
-        "n_required": int(np.ceil(proportion_above_thresh * n_channels)),
+        "zscore_threshold": zscore_threshold,
+        "amplitude_threshold_uv": amplitude_threshold_uv,
+        "n_required": int(np.ceil(proportion_above_threshold * n_channels)),
     }
 
 
@@ -77,8 +77,8 @@ def _compute_artifact_chunk(segment_index, start_frame, end_frame, worker_ctx):
     independent of the full recording length.
     """
     recording = worker_ctx["recording"]
-    zscore_thresh = worker_ctx["zscore_thresh"]
-    amplitude_thresh_uV = worker_ctx["amplitude_thresh_uV"]
+    zscore_threshold = worker_ctx["zscore_threshold"]
+    amplitude_threshold_uv = worker_ctx["amplitude_threshold_uv"]
     n_required = worker_ctx["n_required"]
 
     # ``return_in_uV=True`` lets SpikeInterface apply the recording's stored
@@ -93,21 +93,21 @@ def _compute_artifact_chunk(segment_index, start_frame, end_frame, worker_ctx):
     ).astype(np.float32)
     absolute = np.abs(traces_uv)
 
-    if amplitude_thresh_uV is not None:
-        above_amp = absolute > amplitude_thresh_uV
+    if amplitude_threshold_uv is not None:
+        above_amp = absolute > amplitude_threshold_uv
     else:
         above_amp = np.zeros_like(absolute, dtype=bool)
-    if zscore_thresh is not None:
+    if zscore_threshold is not None:
         ch_mean = traces_uv.mean(axis=1, keepdims=True)
         ch_std = traces_uv.std(axis=1, keepdims=True) + 1e-12
         zscores = np.abs((traces_uv - ch_mean) / ch_std)
-        above_z = zscores > zscore_thresh
+        above_z = zscores > zscore_threshold
     else:
         above_z = np.zeros_like(absolute, dtype=bool)
 
-    if amplitude_thresh_uV is not None and zscore_thresh is not None:
+    if amplitude_threshold_uv is not None and zscore_threshold is not None:
         channel_hit = above_amp | above_z
-    elif amplitude_thresh_uV is not None:
+    elif amplitude_threshold_uv is not None:
         channel_hit = above_amp
     else:
         channel_hit = above_z

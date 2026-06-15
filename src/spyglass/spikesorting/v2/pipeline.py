@@ -49,8 +49,8 @@ class _Preset(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
-    preproc_params_name: str
-    artifact_params_name: str
+    preprocessing_params_name: str
+    artifact_detection_params_name: str
     sorter: str
     sorter_params_name: str
     intended_use: str = ""  # one-line "when to reach for this preset"
@@ -88,8 +88,8 @@ def describe_presets() -> "pd.DataFrame":
     -------
     pandas.DataFrame
         One row per preset, sorted by preset name, with columns
-        ``preset``, ``sorter``, ``preproc_params_name``,
-        ``artifact_params_name``, ``sorter_params_name``,
+        ``preset``, ``sorter``, ``preprocessing_params_name``,
+        ``artifact_detection_params_name``, ``sorter_params_name``,
         ``intended_use``, ``threshold_units``, and ``notes``. Call
         ``.to_dict("records")`` for raw rows.
 
@@ -104,8 +104,8 @@ def describe_presets() -> "pd.DataFrame":
     columns = [
         "preset",
         "sorter",
-        "preproc_params_name",
-        "artifact_params_name",
+        "preprocessing_params_name",
+        "artifact_detection_params_name",
         "sorter_params_name",
         "intended_use",
         "threshold_units",
@@ -115,8 +115,8 @@ def describe_presets() -> "pd.DataFrame":
         {
             "preset": name,
             "sorter": preset.sorter,
-            "preproc_params_name": preset.preproc_params_name,
-            "artifact_params_name": preset.artifact_params_name,
+            "preprocessing_params_name": preset.preprocessing_params_name,
+            "artifact_detection_params_name": preset.artifact_detection_params_name,
             "sorter_params_name": preset.sorter_params_name,
             "intended_use": preset.intended_use,
             "threshold_units": preset.threshold_units,
@@ -409,7 +409,7 @@ def _sort_group_geometry_rows(nwb_file_name: str) -> list[dict[str, Any]]:
     return rows
 
 
-def plot_sort_groups(
+def plot_sort_group_geometry(
     nwb_file_name: str,
     *,
     ax=None,
@@ -539,7 +539,7 @@ def plot_sort_groups(
                 row["display_x"] = row["plot_x"] + offset
             cursor += (max_x - min_x) + gap
         warnings.warn(
-            f"plot_sort_groups: {len(probe_ids)} probes present. "
+            f"plot_sort_group_geometry: {len(probe_ids)} probes present. "
             "Probe.Electrode rel_x/rel_y are per-probe coordinates, so the "
             "probes are laid out side-by-side along x (x positions are "
             "display-shifted per probe; within-probe geometry and y depths are "
@@ -654,8 +654,8 @@ def plot_sort_groups(
 
 _PRESETS: dict[str, _Preset] = {
     "franklab_tetrode_mountainsort4": _Preset(
-        preproc_params_name="default_franklab",
-        artifact_params_name="default",
+        preprocessing_params_name="default_franklab",
+        artifact_detection_params_name="default",
         sorter="mountainsort4",
         sorter_params_name="franklab_tetrode_hippocampus_30kHz_ms4",
         intended_use=(
@@ -670,8 +670,8 @@ _PRESETS: dict[str, _Preset] = {
         ),
     ),
     "franklab_tetrode_mountainsort5": _Preset(
-        preproc_params_name="default_franklab",
-        artifact_params_name="default",
+        preprocessing_params_name="default_franklab",
+        artifact_detection_params_name="default",
         sorter="mountainsort5",
         sorter_params_name="franklab_tetrode_hippocampus_30kHz_ms5",
         intended_use=(
@@ -686,8 +686,8 @@ _PRESETS: dict[str, _Preset] = {
         ),
     ),
     "franklab_tetrode_clusterless_thresholder": _Preset(
-        preproc_params_name="default_franklab",
-        artifact_params_name="default",
+        preprocessing_params_name="default_franklab",
+        artifact_detection_params_name="default",
         sorter="clusterless_thresholder",
         sorter_params_name="default",
         intended_use=(
@@ -711,7 +711,7 @@ class PreflightCheck:
 
     name: str  # e.g. "session_exists", "sorter_installed"
     ok: bool
-    message: str  # empty when ok; the actionable fix when not ok
+    fix: str  # empty when ok; the actionable fix when not ok
 
 
 @dataclass(frozen=True)
@@ -731,7 +731,7 @@ class PreflightReport:
     errors
         Blocking-problem messages; non-empty iff ``ok`` is False.
     warnings
-        Non-blocking advisories (e.g. ``artifact_params_name="none"``).
+        Non-blocking advisories (e.g. ``artifact_detection_params_name="none"``).
     resolved_preset
         The preset name that was checked.
     expected_ids
@@ -816,7 +816,7 @@ def preflight_v2_pipeline(
         )
         return PreflightReport(
             ok=False,
-            errors=[c.message for c in checks if not c.ok],
+            errors=[c.fix for c in checks if not c.ok],
             warnings=warnings,
             resolved_preset=preset,
             expected_ids={},
@@ -885,17 +885,17 @@ def preflight_v2_pipeline(
 
     # 6-8. The preset's parameter Lookup rows.
     _check(
-        "preproc_params_exist",
+        "preprocessing_params_exist",
         PreprocessingParameters
-        & {"preproc_params_name": bundle.preproc_params_name},
-        f"PreprocessingParameters row {bundle.preproc_params_name!r} is "
+        & {"preprocessing_params_name": bundle.preprocessing_params_name},
+        f"PreprocessingParameters row {bundle.preprocessing_params_name!r} is "
         "missing. Run initialize_v2_defaults().",
     )
     _check(
-        "artifact_params_exist",
+        "artifact_detection_params_exist",
         ArtifactDetectionParameters
-        & {"artifact_params_name": bundle.artifact_params_name},
-        f"ArtifactDetectionParameters row {bundle.artifact_params_name!r} "
+        & {"artifact_detection_params_name": bundle.artifact_detection_params_name},
+        f"ArtifactDetectionParameters row {bundle.artifact_detection_params_name!r} "
         "is missing. Run initialize_v2_defaults().",
     )
     _check(
@@ -941,9 +941,9 @@ def preflight_v2_pipeline(
     # Non-blocking advisory: the "none" artifact params are a no-op
     # pass-through (no masking). "default" performs real amplitude-threshold
     # detection and is the legitimate built-in choice, so it is NOT warned.
-    if bundle.artifact_params_name == "none":
+    if bundle.artifact_detection_params_name == "none":
         warnings.append(
-            "artifact_params_name='none': no artifact masking will be "
+            "artifact_detection_params_name='none': no artifact masking will be "
             "applied for this run."
         )
 
@@ -959,7 +959,7 @@ def preflight_v2_pipeline(
                 "nwb_file_name": nwb_file_name,
                 "sort_group_id": sort_group_id,
                 "interval_list_name": interval_list_name,
-                "preproc_params_name": bundle.preproc_params_name,
+                "preprocessing_params_name": bundle.preprocessing_params_name,
                 "team_name": team_name,
             }
         ),
@@ -967,7 +967,7 @@ def preflight_v2_pipeline(
     artifact_id = deterministic_id(
         "artifact",
         artifact_identity_payload(
-            artifact_params_name=bundle.artifact_params_name,
+            artifact_detection_params_name=bundle.artifact_detection_params_name,
             recording_id=recording_id,
         ),
     )
@@ -995,7 +995,7 @@ def preflight_v2_pipeline(
         },
     }
 
-    errors = [c.message for c in checks if not c.ok]
+    errors = [c.fix for c in checks if not c.ok]
     return PreflightReport(
         ok=not errors,
         errors=errors,
@@ -1232,64 +1232,64 @@ def run_v2_pipeline(
     stage_seconds: dict[str, float] = {}
     warnings_list: list[str] = []
 
-    rec_pk = RecordingSelection.insert_selection(
+    recording_key = RecordingSelection.insert_selection(
         {
             "nwb_file_name": nwb_file_name,
             "sort_group_id": int(sort_group_id),
             "interval_list_name": interval_list_name,
-            "preproc_params_name": bundle.preproc_params_name,
+            "preprocessing_params_name": bundle.preprocessing_params_name,
             "team_name": team_name,
         }
     )
     _, manifest["recording_status"], stage_seconds["recording"] = _run_stage(
         "recording",
-        bool(Recording & rec_pk),
-        lambda: Recording.populate(rec_pk, reserve_jobs=False),
+        bool(Recording & recording_key),
+        lambda: Recording.populate(recording_key, reserve_jobs=False),
         manifest,
     )
-    manifest["recording_id"] = rec_pk["recording_id"]
+    manifest["recording_id"] = recording_key["recording_id"]
 
-    art_pk = ArtifactSelection.insert_selection(
+    artifact_key = ArtifactSelection.insert_selection(
         {
-            "recording_id": rec_pk["recording_id"],
-            "artifact_params_name": bundle.artifact_params_name,
+            "recording_id": recording_key["recording_id"],
+            "artifact_detection_params_name": bundle.artifact_detection_params_name,
         }
     )
     _, manifest["artifact_status"], stage_seconds["artifact"] = _run_stage(
         "artifact",
-        bool(ArtifactDetection & art_pk),
-        lambda: ArtifactDetection.populate(art_pk, reserve_jobs=False),
+        bool(ArtifactDetection & artifact_key),
+        lambda: ArtifactDetection.populate(artifact_key, reserve_jobs=False),
         manifest,
     )
-    manifest["artifact_id"] = art_pk["artifact_id"]
+    manifest["artifact_id"] = artifact_key["artifact_id"]
 
-    sort_pk = SortingSelection.insert_selection(
+    sorting_key = SortingSelection.insert_selection(
         {
-            "recording_id": rec_pk["recording_id"],
+            "recording_id": recording_key["recording_id"],
             "sorter": bundle.sorter,
             "sorter_params_name": bundle.sorter_params_name,
-            "artifact_id": art_pk["artifact_id"],
+            "artifact_id": artifact_key["artifact_id"],
         }
     )
     _, manifest["sorting_status"], stage_seconds["sorting"] = _run_stage(
         "sorting",
-        bool(Sorting & sort_pk),
-        lambda: Sorting.populate(sort_pk, reserve_jobs=False),
+        bool(Sorting & sorting_key),
+        lambda: Sorting.populate(sorting_key, reserve_jobs=False),
         manifest,
     )
-    manifest["sorting_id"] = sort_pk["sorting_id"]
+    manifest["sorting_id"] = sorting_key["sorting_id"]
 
     # Zero units is a legitimate result on a quiet shank. Unless the
     # caller set require_units=True, proceed to build an empty (but real)
     # curation + merge row so the result is merge-keyable like any other.
-    n_units = int((Sorting & sort_pk).fetch1("n_units"))
+    n_units = int((Sorting & sorting_key).fetch1("n_units"))
     if n_units == 0:
-        recording_id = rec_pk["recording_id"]
+        recording_id = recording_key["recording_id"]
         if require_units:
             raise ZeroUnitSortError(
                 "run_v2_pipeline: sort found zero units for "
                 f"recording_id={recording_id} (sorting_id="
-                f"{sort_pk['sorting_id']}); require_units=True. Check "
+                f"{sorting_key['sorting_id']}); require_units=True. Check "
                 "detect_threshold / the artifact mask, or call with "
                 "require_units=False to accept the empty result."
             )
@@ -1302,7 +1302,7 @@ def run_v2_pipeline(
         # the manifest's ``warnings`` list (programmatic access).
         zero_unit_warning = (
             "run_v2_pipeline: zero units for recording_id="
-            f"{recording_id} (sorting_id={sort_pk['sorting_id']}); "
+            f"{recording_id} (sorting_id={sorting_key['sorting_id']}); "
             "writing an EMPTY curation + merge row. Check "
             "detect_threshold / the artifact mask if you expected output."
         )
@@ -1327,12 +1327,12 @@ def run_v2_pipeline(
     # check insert_curation's root-reuse path uses).
     curation_exists = bool(
         CurationV2
-        & {"sorting_id": sort_pk["sorting_id"], "parent_curation_id": -1}
+        & {"sorting_id": sorting_key["sorting_id"], "parent_curation_id": -1}
     )
 
     def _curate_and_register():
-        curation_pk = CurationV2.insert_curation(
-            sorting_key=sort_pk,
+        curation_key = CurationV2.insert_curation(
+            sorting_key=sorting_key,
             labels={},
             parent_curation_id=-1,
             description=description or f"run_v2_pipeline preset={preset}",
@@ -1343,17 +1343,17 @@ def run_v2_pipeline(
         # the curation stage: a reused root whose registration is missing
         # (e.g. deleted out-of-band) then surfaces as a stage-aware
         # PipelineStageError carrying the partial manifest, not a raw fetch1.
-        merge_id = (SpikeSortingOutput.CurationV2 & curation_pk).fetch1(
+        merge_id = (SpikeSortingOutput.CurationV2 & curation_key).fetch1(
             "merge_id"
         )
-        return curation_pk, merge_id
+        return curation_key, merge_id
 
-    (curation_pk, merge_id), curation_status, curation_seconds = _run_stage(
+    (curation_key, merge_id), curation_status, curation_seconds = _run_stage(
         "curation", curation_exists, _curate_and_register, manifest
     )
     manifest["curation_status"] = curation_status
     stage_seconds["curation"] = curation_seconds
-    manifest["curation_id"] = curation_pk["curation_id"]
+    manifest["curation_id"] = curation_key["curation_id"]
     manifest["merge_id"] = merge_id
     manifest["stage_seconds"] = stage_seconds
     return manifest

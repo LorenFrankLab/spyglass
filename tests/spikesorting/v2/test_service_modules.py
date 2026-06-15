@@ -34,7 +34,7 @@ _DB_FREE_SERVICE_MODULES = [
     "_analyzer_cache",
     "_artifact_compute",
     "_artifact_intervals",
-    "_bad_channels",
+    "bad_channels",
     "_curation_transforms",
     "_enums",
     "_recording_materialization",
@@ -222,9 +222,9 @@ def _artifact_params(**overrides):
     # valid intervals on a 0.1 s recording survive the min-length filter.
     base = dict(
         detect=True,
-        amplitude_thresh_uV=1000.0,
-        zscore_thresh=None,
-        proportion_above_thresh=1.0,
+        amplitude_threshold_uv=1000.0,
+        zscore_threshold=None,
+        proportion_above_threshold=1.0,
         removal_window_ms=0.5,
         join_window_ms=0.0,
         min_length_s=0.001,

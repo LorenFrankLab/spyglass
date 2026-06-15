@@ -682,26 +682,26 @@ def _in_memory_artifact_frames_reference(recording, validated):
     absolute = np.abs(traces_uv)
 
     n_channels = traces.shape[1]
-    n_required = int(np.ceil(validated.proportion_above_thresh * n_channels))
+    n_required = int(np.ceil(validated.proportion_above_threshold * n_channels))
 
-    if validated.amplitude_thresh_uV is not None:
-        above_amp = absolute > validated.amplitude_thresh_uV
+    if validated.amplitude_threshold_uv is not None:
+        above_amp = absolute > validated.amplitude_threshold_uv
     else:
         above_amp = np.zeros_like(absolute, dtype=bool)
-    if validated.zscore_thresh is not None:
+    if validated.zscore_threshold is not None:
         ch_mean = traces_uv.mean(axis=1, keepdims=True)
         ch_std = traces_uv.std(axis=1, keepdims=True) + 1e-12
         zscores = np.abs((traces_uv - ch_mean) / ch_std)
-        above_z = zscores > validated.zscore_thresh
+        above_z = zscores > validated.zscore_threshold
     else:
         above_z = np.zeros_like(absolute, dtype=bool)
 
     if (
-        validated.amplitude_thresh_uV is not None
-        and validated.zscore_thresh is not None
+        validated.amplitude_threshold_uv is not None
+        and validated.zscore_threshold is not None
     ):
         channel_hit = above_amp | above_z
-    elif validated.amplitude_thresh_uV is not None:
+    elif validated.amplitude_threshold_uv is not None:
         channel_hit = above_amp
     else:
         channel_hit = above_z
@@ -736,7 +736,7 @@ def _synthetic_artifact_recording():
 
 
 @pytest.mark.parametrize(
-    "amplitude_thresh_uV,zscore_thresh",
+    "amplitude_threshold_uv,zscore_threshold",
     [
         (50.0, None),  # amplitude-only branch
         (None, 6.0),  # z-score-only branch
@@ -744,7 +744,7 @@ def _synthetic_artifact_recording():
     ],
 )
 def test_chunked_artifact_matches_in_memory_reference(
-    dj_conn, amplitude_thresh_uV, zscore_thresh
+    dj_conn, amplitude_threshold_uv, zscore_threshold
 ):
     """A17: the chunked ``_scan_artifact_frames`` produces frame-identical
     output to the frozen full-in-memory reference, and is invariant to chunk
@@ -766,9 +766,9 @@ def test_chunked_artifact_matches_in_memory_reference(
     rec = _synthetic_artifact_recording()
     validated = ArtifactDetectionParamsSchema(
         detect=True,
-        amplitude_thresh_uV=amplitude_thresh_uV,
-        zscore_thresh=zscore_thresh,
-        proportion_above_thresh=0.5,
+        amplitude_threshold_uv=amplitude_threshold_uv,
+        zscore_threshold=zscore_threshold,
+        proportion_above_threshold=0.5,
         removal_window_ms=1.0,
         join_window_ms=0.0,
         min_length_s=0.001,
@@ -810,9 +810,9 @@ def test_artifact_job_kwargs_propagate_to_executor(dj_conn, monkeypatch):
     rec = _synthetic_artifact_recording()
     validated = ArtifactDetectionParamsSchema(
         detect=True,
-        amplitude_thresh_uV=50.0,
-        zscore_thresh=None,
-        proportion_above_thresh=0.5,
+        amplitude_threshold_uv=50.0,
+        zscore_threshold=None,
+        proportion_above_threshold=0.5,
         removal_window_ms=1.0,
         join_window_ms=0.0,
         min_length_s=0.001,
@@ -872,9 +872,9 @@ def test_artifact_scan_chunked_by_default(dj_conn, monkeypatch):
     rec = _synthetic_artifact_recording()
     validated = ArtifactDetectionParamsSchema(
         detect=True,
-        amplitude_thresh_uV=50.0,
-        zscore_thresh=None,
-        proportion_above_thresh=0.5,
+        amplitude_threshold_uv=50.0,
+        zscore_threshold=None,
+        proportion_above_threshold=0.5,
         removal_window_ms=1.0,
         join_window_ms=0.0,
         min_length_s=0.001,
@@ -935,9 +935,9 @@ def test_artifact_scan_multiprocess_worker_path_runs(dj_conn, tmp_path):
     saved = _synthetic_artifact_recording().save(folder=tmp_path / "rec")
     validated = ArtifactDetectionParamsSchema(
         detect=True,
-        amplitude_thresh_uV=50.0,
-        zscore_thresh=None,
-        proportion_above_thresh=0.5,
+        amplitude_threshold_uv=50.0,
+        zscore_threshold=None,
+        proportion_above_threshold=0.5,
         removal_window_ms=1.0,
         join_window_ms=0.0,
         min_length_s=0.001,
@@ -999,9 +999,9 @@ def test_artifact_detection_peak_memory_bounded_by_chunk_size(dj_conn):
 
     validated = ArtifactDetectionParamsSchema(
         detect=True,
-        amplitude_thresh_uV=50.0,
-        zscore_thresh=None,
-        proportion_above_thresh=0.5,
+        amplitude_threshold_uv=50.0,
+        zscore_threshold=None,
+        proportion_above_threshold=0.5,
         removal_window_ms=1.0,
         join_window_ms=0.0,
         min_length_s=0.001,
@@ -1761,7 +1761,7 @@ def _plant_fake_recording(recording_id, nwb_file_name, sampling_frequency):
                 "nwb_file_name": nwb_file_name,
                 "sort_group_id": 0,
                 "interval_list_name": "raw data valid times",
-                "preproc_params_name": "default_franklab",
+                "preprocessing_params_name": "default_franklab",
                 "team_name": "v2_a25_team",
             },
             allow_direct_insert=True,
@@ -1925,7 +1925,7 @@ def test_artifact_selection_raises_duplicate_selection_error():
     ``DuplicateSelectionError``.
 
     ``insert_selection`` is find-existing-or-insert; if a prior direct
-    bypass left two masters sharing the same ``artifact_params_name`` and
+    bypass left two masters sharing the same ``artifact_detection_params_name`` and
     ``recording_id``, the find step sees >1 and must raise the integrity
     error rather than silently picking one. Plant the duplicate masters +
     matching ``RecordingSource`` parts via the FK-checks-off bypass (the
@@ -1946,7 +1946,7 @@ def test_artifact_selection_raises_duplicate_selection_error():
     try:
         for aid in (aid1, aid2):
             ArtifactSelection.insert1(
-                {"artifact_id": aid, "artifact_params_name": params_name},
+                {"artifact_id": aid, "artifact_detection_params_name": params_name},
                 allow_direct_insert=True,
             )
             ArtifactSelection.RecordingSource.insert1(
@@ -1959,7 +1959,7 @@ def test_artifact_selection_raises_duplicate_selection_error():
     try:
         with pytest.raises(DuplicateSelectionError, match="master rows"):
             ArtifactSelection.insert_selection(
-                {"recording_id": rec_id, "artifact_params_name": params_name}
+                {"recording_id": rec_id, "artifact_detection_params_name": params_name}
             )
     finally:
         conn.query("SET FOREIGN_KEY_CHECKS=0")
@@ -1974,8 +1974,8 @@ def test_artifact_selection_raises_duplicate_selection_error():
 
 
 @pytest.mark.usefixtures("dj_conn")
-def test_artifact_selection_requires_artifact_params_name():
-    """A25: a key without ``artifact_params_name`` raises naming the field.
+def test_artifact_selection_requires_artifact_detection_params_name():
+    """A25: a key without ``artifact_detection_params_name`` raises naming the field.
 
     The source key alone is insufficient -- the master row needs the
     params FK. The guard names the missing field so the notebook user can
@@ -1985,7 +1985,7 @@ def test_artifact_selection_requires_artifact_params_name():
 
     from spyglass.spikesorting.v2.artifact import ArtifactSelection
 
-    with pytest.raises(ValueError, match="artifact_params_name"):
+    with pytest.raises(ValueError, match="artifact_detection_params_name"):
         ArtifactSelection.insert_selection({"recording_id": uuid.uuid4()})
 
 
@@ -2007,7 +2007,7 @@ def test_artifact_selection_missing_lookup_row_diagnostic():
         ArtifactSelection.insert_selection(
             {
                 "recording_id": uuid.uuid4(),
-                "artifact_params_name": "v2_a25_no_such_params_row",
+                "artifact_detection_params_name": "v2_a25_no_such_params_row",
             }
         )
     message = str(excinfo.value)
@@ -2035,9 +2035,9 @@ def test_detect_artifacts_empty_sliver_filter_returns_empty():
     rec = _synthetic_artifact_recording()
     validated = ArtifactDetectionParamsSchema(
         detect=True,
-        amplitude_thresh_uV=50.0,  # trips on the planted 300 µV burst
-        zscore_thresh=None,
-        proportion_above_thresh=0.5,
+        amplitude_threshold_uv=50.0,  # trips on the planted 300 µV burst
+        zscore_threshold=None,
+        proportion_above_threshold=0.5,
         removal_window_ms=1.0,
         join_window_ms=0.0,
         min_length_s=1e9,  # larger than the whole recording -> all filtered
@@ -2088,7 +2088,7 @@ def test_artifact_detection_delete_tolerates_already_gone_interval_list():
     conn.query("SET FOREIGN_KEY_CHECKS=0")
     try:
         ArtifactSelection.insert1(
-            {"artifact_id": aid, "artifact_params_name": params_name},
+            {"artifact_id": aid, "artifact_detection_params_name": params_name},
             allow_direct_insert=True,
         )
         ArtifactSelection.RecordingSource.insert1(
@@ -2338,7 +2338,7 @@ def test_sorting_selection_rejects_cross_recording_artifact_source():
         ArtifactSelection.insert1(
             {
                 "artifact_id": artifact_id,
-                "artifact_params_name": "v2_a26_cross_artifact_params",
+                "artifact_detection_params_name": "v2_a26_cross_artifact_params",
             },
             allow_direct_insert=True,
         )
@@ -2998,20 +2998,20 @@ def test_common_reference_params_operator_knob():
         CommonReferenceParams(operator="rms")
 
 
-def test_metrics_source_enum_members():
-    """A30: ``MetricsSource`` carries ``manual`` / ``analyzer_curation`` /
+def test_curation_source_enum_members():
+    """A30: ``CurationSource`` carries ``manual`` / ``analyzer_curation`` /
     ``figpack`` (the set ``insert_curation`` coerces against).
 
     Today only ``manual`` is exercised end-to-end; pinning the other two
     members guards against a refactor dropping them (which would make a valid
-    metrics_source raise at the insert boundary).
+    curation_source raise at the insert boundary).
     """
-    from spyglass.spikesorting.v2.utils import MetricsSource
+    from spyglass.spikesorting.v2.utils import CurationSource
 
     for value in ("manual", "analyzer_curation", "figpack"):
-        assert MetricsSource(value).value == value
+        assert CurationSource(value).value == value
     with pytest.raises(ValueError):
-        MetricsSource("not_a_member")
+        CurationSource("not_a_member")
 
 
 @pytest.mark.usefixtures("dj_conn")

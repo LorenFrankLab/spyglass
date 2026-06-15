@@ -249,7 +249,7 @@ def test_v2_lookup_tables_validate_via_pydantic():
     from spyglass.spikesorting.v2.sorting import SorterParameters
 
     bogus_pydantic_row = {
-        "preproc_params_name": "v2_integrity_test_bogus",
+        "preprocessing_params_name": "v2_integrity_test_bogus",
         "params": {"bandpass_filter": {"freq_min": "not_a_float"}},
         "params_schema_version": 2,
         "job_kwargs": None,
@@ -258,12 +258,12 @@ def test_v2_lookup_tables_validate_via_pydantic():
         PreprocessingParameters.insert1(bogus_pydantic_row)
 
     bogus_artifact_row = {
-        "artifact_params_name": "v2_integrity_test_bogus",
-        "params": {"amplitude_thresh_uV": "not_a_float"},
+        "artifact_detection_params_name": "v2_integrity_test_bogus",
+        "params": {"amplitude_threshold_uv": "not_a_float"},
         "params_schema_version": 2,
         "job_kwargs": None,
     }
-    with pytest.raises((ValueError, TypeError), match="amplitude_thresh_uV"):
+    with pytest.raises((ValueError, TypeError), match="amplitude_threshold_uv"):
         ArtifactDetectionParameters.insert1(bogus_artifact_row)
 
     bogus_sorter_row = {

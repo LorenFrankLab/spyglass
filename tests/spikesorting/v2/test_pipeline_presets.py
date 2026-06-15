@@ -24,8 +24,8 @@ pytestmark = pytest.mark.unit
 _COLUMNS = [
     "preset",
     "sorter",
-    "preproc_params_name",
-    "artifact_params_name",
+    "preprocessing_params_name",
+    "artifact_detection_params_name",
     "sorter_params_name",
     "intended_use",
     "threshold_units",
@@ -87,8 +87,8 @@ def test_describe_presets_matches_preset_objects():
     for name, preset in _PRESETS.items():
         row = df.loc[name]
         assert row["sorter"] == preset.sorter
-        assert row["preproc_params_name"] == preset.preproc_params_name
-        assert row["artifact_params_name"] == preset.artifact_params_name
+        assert row["preprocessing_params_name"] == preset.preprocessing_params_name
+        assert row["artifact_detection_params_name"] == preset.artifact_detection_params_name
         assert row["sorter_params_name"] == preset.sorter_params_name
         assert row["intended_use"] == preset.intended_use
         assert row["threshold_units"] == preset.threshold_units

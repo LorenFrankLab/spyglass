@@ -40,7 +40,7 @@ pytestmark = pytest.mark.usefixtures("dj_conn")
 
 
 def test_artifact_defaults_match_b1_revised():
-    """``amplitude_thresh_uV=500.0`` µV; ``proportion_above_thresh=1.0``.
+    """``amplitude_threshold_uv=500.0`` µV; ``proportion_above_threshold=1.0``.
 
     The amplitude default is the v1-effective Frank-lab Intan
     threshold post-unit-conversion-fix (v1's 3000 nominal == ~585 µV
@@ -52,8 +52,8 @@ def test_artifact_defaults_match_b1_revised():
     )
 
     blob = ArtifactDetectionParamsSchema().model_dump()
-    assert blob["amplitude_thresh_uV"] == 500.0
-    assert blob["proportion_above_thresh"] == 1.0
+    assert blob["amplitude_threshold_uv"] == 500.0
+    assert blob["proportion_above_threshold"] == 1.0
 
 
 def test_common_reference_field_removed_from_schema():

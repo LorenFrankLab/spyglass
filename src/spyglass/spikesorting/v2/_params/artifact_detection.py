@@ -14,17 +14,19 @@ class ArtifactDetectionParamsSchema(BaseModel):
     channels, then writes the artifact-removed valid times into
     ``common.IntervalList`` for the sorter to read.
 
-    Fields mirror v1's defaults (``zscore_thresh``, ``amplitude_thresh_uV``,
-    ``proportion_above_thresh``, ``removal_window_ms``) plus two additions:
-    ``detect`` (so the ``"none"`` preset is a typed ``detect=False`` rather
-    than an absent-fields blob) and ``join_window_ms`` (artifact intervals
-    closer than this are merged into one).
+    Fields replace v1's threshold names (``zscore_thresh``,
+    ``amplitude_thresh_uV``, ``proportion_above_thresh``) with explicit v2
+    names (``zscore_threshold``, ``amplitude_threshold_uv``,
+    ``proportion_above_threshold``), while preserving the same default
+    semantics. v2 also adds ``detect`` (so the ``"none"`` preset is a typed
+    ``detect=False`` rather than an absent-fields blob) and ``join_window_ms``
+    (artifact intervals closer than this are merged into one).
 
-    Detector note: ``zscore_thresh`` is a per-frame *cross-channel*
+    Detector note: ``zscore_threshold`` is a per-frame *cross-channel*
     z-score (across channels within a frame), so it flags single-channel
     outliers but is BLIND to pure common-mode events -- when every
     channel jumps together the shift cancels in the across-channel mean
-    and the z-score stays ~0. Use ``amplitude_thresh_uV`` to catch
+    and the z-score stays ~0. Use ``amplitude_threshold_uv`` to catch
     common-mode (e.g. EMG) artifacts; the two thresholds OR together
     when both are set (a frame is flagged if it exceeds the amplitude
     threshold OR the z-score threshold). This is an intentional mode,
@@ -48,9 +50,9 @@ class ArtifactDetectionParamsSchema(BaseModel):
     # matches v1's hardcoded value at
     # ``src/spyglass/spikesorting/v1/artifact.py:327-328``.
     #
-    # ``amplitude_thresh_uV=500.0`` is v2's bug-fix default (matches
+    # ``amplitude_threshold_uv=500.0`` is v2's bug-fix default (matches
     # v1's effective Intan-probe behavior within ~15%) and
-    # ``proportion_above_thresh`` is ``1.0`` (v1's principled "all
+    # ``proportion_above_threshold`` is ``1.0`` (v1's principled "all
     # channels must exceed" default; a 0.5 default had no documented
     # justification). The CHANGELOG entry explains the v1 unit-
     # conversion bug that motivated keeping 500 uV; users with
@@ -58,8 +60,8 @@ class ArtifactDetectionParamsSchema(BaseModel):
     # ``v1_value * probe_gain_uV_per_count`` to the v2-equivalent uV
     # value.
     detect: bool = True
-    amplitude_thresh_uV: float | None = Field(default=500.0, ge=0.0)
-    zscore_thresh: float | None = Field(
+    amplitude_threshold_uv: float | None = Field(default=500.0, ge=0.0)
+    zscore_threshold: float | None = Field(
         default=None,
         ge=0.0,
         description=(
@@ -68,11 +70,11 @@ class ArtifactDetectionParamsSchema(BaseModel):
             "time). It flags single-channel outliers within a frame; "
             "pure common-mode events (every channel jumps together) "
             "produce a ~0 z-score and are NOT detected -- use "
-            "amplitude_thresh_uV to catch common-mode (e.g. EMG) "
+            "amplitude_threshold_uv to catch common-mode (e.g. EMG) "
             "artifacts."
         ),
     )
-    proportion_above_thresh: float = Field(default=1.0, gt=0.0, le=1.0)
+    proportion_above_threshold: float = Field(default=1.0, gt=0.0, le=1.0)
     removal_window_ms: float = Field(default=1.0, gt=0.0)
     join_window_ms: float = Field(default=1.0, ge=0.0)
     min_length_s: float = Field(default=1.0, gt=0.0)
@@ -81,11 +83,11 @@ class ArtifactDetectionParamsSchema(BaseModel):
     def _check_thresholds(self) -> "ArtifactDetectionParamsSchema":
         if (
             self.detect
-            and self.amplitude_thresh_uV is None
-            and self.zscore_thresh is None
+            and self.amplitude_threshold_uv is None
+            and self.zscore_threshold is None
         ):
             raise ValueError(
                 "ArtifactDetectionParamsSchema requires at least one of "
-                "amplitude_thresh_uV or zscore_thresh when detect=True"
+                "amplitude_threshold_uv or zscore_threshold when detect=True"
             )
         return self

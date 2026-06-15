@@ -69,7 +69,7 @@ def test_identity_payload_extraction_stable():
         "nwb_file_name": "preflight_pin_test_.nwb",
         "sort_group_id": 0,
         "interval_list_name": _INTERVAL,
-        "preproc_params_name": "default_franklab",
+        "preprocessing_params_name": "default_franklab",
         "team_name": "pin_team",
     }
     recording_id = deterministic_id(
@@ -78,7 +78,7 @@ def test_identity_payload_extraction_stable():
     artifact_id = deterministic_id(
         "artifact",
         artifact_identity_payload(
-            artifact_params_name="default", recording_id=recording_id
+            artifact_detection_params_name="default", recording_id=recording_id
         ),
     )
     sorting_id = deterministic_id(
@@ -90,9 +90,9 @@ def test_identity_payload_extraction_stable():
             artifact_id=artifact_id,
         ),
     )
-    assert recording_id == uuid.UUID("f4d1dd87-f21a-51d5-a08c-0eaf91727947")
-    assert artifact_id == uuid.UUID("b46e4564-dc5e-5d8b-8be7-acc6c6566303")
-    assert sorting_id == uuid.UUID("a50e86f0-0a62-5dd8-bebc-44ce4b13046f")
+    assert recording_id == uuid.UUID("dc4a5c37-7a80-54fc-b939-b6fbdaa0ec3a")
+    assert artifact_id == uuid.UUID("6e5c1b34-7d87-51d5-b4f0-b94771bb450f")
+    assert sorting_id == uuid.UUID("fd3fb389-24af-5309-bb7f-7627657147dd")
 
 
 @pytest.mark.unit
@@ -200,7 +200,7 @@ def test_preflight_missing_team(preflight_inputs):
     failed = {c.name for c in report.checks if not c.ok}
     assert failed == {"team_exists"}
     (team_check,) = [c for c in report.checks if c.name == "team_exists"]
-    assert "no_such_team_preflight" in team_check.message
+    assert "no_such_team_preflight" in team_check.fix
     # Report is complete: every check ran, not just up to the first failure.
     assert {c.name for c in report.checks} >= {
         "session_exists",
@@ -219,7 +219,7 @@ def test_preflight_missing_sort_group(preflight_inputs):
     assert report.ok is False
     (sg_check,) = [c for c in report.checks if c.name == "sort_group_exists"]
     assert sg_check.ok is False
-    assert "set_group_by_shank" in sg_check.message
+    assert "set_group_by_shank" in sg_check.fix
 
 
 @pytest.mark.database
@@ -241,7 +241,7 @@ def test_preflight_sorter_not_installed(preflight_inputs, monkeypatch):
     report = preflight_v2_pipeline(**preflight_inputs)  # default = ms5
     (sorter_check,) = [c for c in report.checks if c.name == "sorter_installed"]
     assert sorter_check.ok is False
-    assert "installed_sorters()" in sorter_check.message
+    assert "installed_sorters()" in sorter_check.fix
 
     clusterless = preflight_v2_pipeline(
         **{
@@ -267,8 +267,8 @@ def test_preflight_sorter_misspelled(preflight_inputs, monkeypatch):
     from spyglass.spikesorting.v2 import pipeline as pl
 
     bogus_preset = pl._Preset(
-        preproc_params_name="default_franklab",
-        artifact_params_name="default",
+        preprocessing_params_name="default_franklab",
+        artifact_detection_params_name="default",
         sorter="not_a_real_sorter_xyz",
         sorter_params_name="default",
     )
@@ -279,13 +279,13 @@ def test_preflight_sorter_misspelled(preflight_inputs, monkeypatch):
     )
     (check,) = [c for c in report.checks if c.name == "sorter_installed"]
     assert check.ok is False
-    assert "not a known SpikeInterface sorter" in check.message
-    assert "installed_sorters()" not in check.message
+    assert "not a known SpikeInterface sorter" in check.fix
+    assert "installed_sorters()" not in check.fix
 
 
 @pytest.mark.database
 def test_preflight_warns_on_none_artifact_params(preflight_inputs, monkeypatch):
-    """artifact_params_name='none' raises a non-blocking advisory, not an error.
+    """artifact_detection_params_name='none' raises a non-blocking advisory, not an error.
 
     The three built-ins use 'default' (real amplitude-threshold detection, no
     warning -- see test_preflight_all_pass); register a temporary 'none'-
@@ -295,8 +295,8 @@ def test_preflight_warns_on_none_artifact_params(preflight_inputs, monkeypatch):
     from spyglass.spikesorting.v2 import pipeline as pl
 
     none_preset = pl._Preset(
-        preproc_params_name="default_franklab",
-        artifact_params_name="none",
+        preprocessing_params_name="default_franklab",
+        artifact_detection_params_name="none",
         sorter="mountainsort5",
         sorter_params_name="franklab_tetrode_hippocampus_30kHz_ms5",
     )

@@ -350,7 +350,7 @@ def handling_session(dj_conn):
     PreprocessingParameters.insert_default()
     PreprocessingParameters().insert1(
         {
-            "preproc_params_name": _INTERP_PARAMS,
+            "preprocessing_params_name": _INTERP_PARAMS,
             "params": PreprocessingParamsSchema.model_validate(
                 {"bad_channel_handling": "interpolate"}
             ).model_dump(),
@@ -460,7 +460,7 @@ def test_make_fetch_reincludes_only_interior_bad(handling_session):
                 "nwb_file_name": nwb,
                 "sort_group_id": sg_id,
                 "interval_list_name": "raw data valid times",
-                "preproc_params_name": _INTERP_PARAMS,
+                "preprocessing_params_name": _INTERP_PARAMS,
                 "team_name": "v2_handling_team",
             }
         )
@@ -493,7 +493,7 @@ def test_make_fetch_remove_reincludes_nothing(handling_session):
                 "nwb_file_name": nwb,
                 "sort_group_id": sg0,
                 "interval_list_name": "raw data valid times",
-                "preproc_params_name": "default_franklab",
+                "preprocessing_params_name": "default_franklab",
                 "team_name": "v2_handling_team",
             }
         )
@@ -539,7 +539,7 @@ def test_make_fetch_reincludes_interior_bad_per_shank(handling_session):
                 "nwb_file_name": nwb,
                 "sort_group_id": sg_id,
                 "interval_list_name": "raw data valid times",
-                "preproc_params_name": _INTERP_PARAMS,
+                "preprocessing_params_name": _INTERP_PARAMS,
                 "team_name": "v2_handling_team",
             }
         )
@@ -584,10 +584,10 @@ def test_interpolate_completes_probe_remove_omits(handling_session):
             "team_name": "v2_handling_team",
         }
         remove_pk = RecordingSelection.insert_selection(
-            {**common, "preproc_params_name": "default_franklab"}
+            {**common, "preprocessing_params_name": "default_franklab"}
         )
         interp_pk = RecordingSelection.insert_selection(
-            {**common, "preproc_params_name": _INTERP_PARAMS}
+            {**common, "preprocessing_params_name": _INTERP_PARAMS}
         )
         Recording.populate(remove_pk, reserve_jobs=False)
         Recording.populate(interp_pk, reserve_jobs=False)
@@ -643,7 +643,7 @@ def test_interpolate_without_geometry_raises(handling_session):
                 "nwb_file_name": nwb,
                 "sort_group_id": sg0,
                 "interval_list_name": "raw data valid times",
-                "preproc_params_name": _INTERP_PARAMS,
+                "preprocessing_params_name": _INTERP_PARAMS,
                 "team_name": "v2_handling_team",
             }
         )
@@ -754,7 +754,7 @@ def test_remove_field_does_not_change_default_recording(handling_session):
             "team_name": "v2_handling_team",
         }
         fl_pk = RecordingSelection.insert_selection(
-            {**common, "preproc_params_name": "default_franklab"}
+            {**common, "preprocessing_params_name": "default_franklab"}
         )
         Recording.populate(fl_pk, reserve_jobs=False)
         traces_fl = Recording().get_recording(fl_pk).get_traces()
@@ -765,7 +765,7 @@ def test_remove_field_does_not_change_default_recording(handling_session):
         )  # a row written before the field
         PreprocessingParameters().insert1(
             {
-                "preproc_params_name": "_pytest_legacy_no_bad_channel_handling",
+                "preprocessing_params_name": "_pytest_legacy_no_bad_channel_handling",
                 "params": legacy_blob,
                 "params_schema_version": 3,
                 "job_kwargs": None,
@@ -775,7 +775,7 @@ def test_remove_field_does_not_change_default_recording(handling_session):
         legacy_pk = RecordingSelection.insert_selection(
             {
                 **common,
-                "preproc_params_name": (
+                "preprocessing_params_name": (
                     "_pytest_legacy_no_bad_channel_handling"
                 ),
             }
@@ -824,7 +824,7 @@ def test_bad_marked_specific_reference_materializes(handling_session):
                 "nwb_file_name": nwb,
                 "sort_group_id": sg_id,
                 "interval_list_name": "raw data valid times",
-                "preproc_params_name": "default_franklab",
+                "preprocessing_params_name": "default_franklab",
                 "team_name": "v2_handling_team",
             }
         )

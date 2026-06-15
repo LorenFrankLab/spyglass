@@ -2,7 +2,7 @@
 
 ``artifact._compute_artifact_chunk`` scales raw counts to microvolts with
 the recording's stored per-channel gains (``traces_uv = traces * gains``)
-before comparing against ``amplitude_thresh_uV``. Every other direct
+before comparing against ``amplitude_threshold_uv``. Every other direct
 artifact test uses ``gain = 1.0``, where counts and µV are numerically
 identical, so the conversion itself is never exercised. This test plants a
 peak at a KNOWN non-unity gain and asserts the absolute detect / no-detect
@@ -43,11 +43,11 @@ def _planted_recording(gain=0.195, n_ch=4, n_frames=200):
     return rec, n_frames
 
 
-def _flagged_frames(rec, n_frames, amplitude_thresh_uV):
+def _flagged_frames(rec, n_frames, amplitude_threshold_uv):
     """Run the amplitude-only chunk detector over the whole recording.
 
-    ``proportion_above_thresh = 1.0`` requires every channel to exceed the
-    threshold; ``zscore_thresh = None`` disables the z-score detector so the
+    ``proportion_above_threshold = 1.0`` requires every channel to exceed the
+    threshold; ``zscore_threshold = None`` disables the z-score detector so the
     outcome is governed purely by the µV amplitude comparison.
     """
     from spyglass.spikesorting.v2.artifact import (
@@ -57,9 +57,9 @@ def _flagged_frames(rec, n_frames, amplitude_thresh_uV):
 
     ctx = _init_artifact_worker(
         rec,
-        zscore_thresh=None,
-        amplitude_thresh_uV=amplitude_thresh_uV,
-        proportion_above_thresh=1.0,
+        zscore_threshold=None,
+        amplitude_threshold_uv=amplitude_threshold_uv,
+        proportion_above_threshold=1.0,
     )
     return _compute_artifact_chunk(
         segment_index=0,
@@ -75,7 +75,7 @@ def test_gain_conversion_detects_peak_above_uv_threshold():
     The 390 µV bump (frame 100) is below threshold. Exact frame set.
     """
     rec, n = _planted_recording(gain=0.195)
-    flagged = _flagged_frames(rec, n, amplitude_thresh_uV=500.0)
+    flagged = _flagged_frames(rec, n, amplitude_threshold_uv=500.0)
     np.testing.assert_array_equal(flagged, np.array([50]))
 
 
@@ -87,7 +87,7 @@ def test_gain_conversion_no_detect_when_uv_below_threshold():
     wrongly flag frame 50. The empty result is the gain-correctness signal.
     """
     rec, n = _planted_recording(gain=0.195)
-    flagged = _flagged_frames(rec, n, amplitude_thresh_uV=700.0)
+    flagged = _flagged_frames(rec, n, amplitude_threshold_uv=700.0)
     assert flagged.tolist() == [], (
         "frame 50 (3000 counts = 585 µV) must not exceed a 700 µV threshold; "
         f"got {flagged.tolist()} -- gain conversion was not applied."
@@ -97,5 +97,5 @@ def test_gain_conversion_no_detect_when_uv_below_threshold():
 def test_gain_conversion_low_threshold_flags_both_peaks():
     """Threshold 300 µV: both the 585 µV and 390 µV peaks are flagged."""
     rec, n = _planted_recording(gain=0.195)
-    flagged = _flagged_frames(rec, n, amplitude_thresh_uV=300.0)
+    flagged = _flagged_frames(rec, n, amplitude_threshold_uv=300.0)
     np.testing.assert_array_equal(flagged, np.array([50, 100]))

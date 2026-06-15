@@ -120,7 +120,7 @@ from spyglass.common.common_lab import LabTeam
 from spyglass.spikesorting.v2 import initialize_v2_defaults
 from spyglass.spikesorting.v2.pipeline import (
     describe_sort_groups,
-    plot_sort_groups,
+    plot_sort_group_geometry,
     preflight_v2_pipeline,
     run_v2_pipeline,
 )
@@ -141,7 +141,7 @@ LabTeam.insert1(
 SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
 sort_groups = describe_sort_groups(nwb_file_name)
 sort_group_id = int(sort_groups.iloc[0]["sort_group_id"])
-plot_sort_groups(nwb_file_name)
+plot_sort_group_geometry(nwb_file_name)
 sort_groups
 
 # End-to-end populate + register on the merge table.
@@ -169,13 +169,13 @@ completed before it.
 ### Choosing a sort group
 
 `set_group_by_shank` creates the rows; `describe_sort_groups` and
-`plot_sort_groups` help you decide which one to run:
+`plot_sort_group_geometry` help you decide which one to run:
 
 ```python
-from spyglass.spikesorting.v2.pipeline import describe_sort_groups, plot_sort_groups
+from spyglass.spikesorting.v2.pipeline import describe_sort_groups, plot_sort_group_geometry
 
 describe_sort_groups(nwb_file_name)
-plot_sort_groups(nwb_file_name)
+plot_sort_group_geometry(nwb_file_name)
 ```
 
 Each row is one `SortGroupV2` group. Check `n_electrodes`, `electrode_ids`,
@@ -220,7 +220,7 @@ describe_presets()  # one row per preset
       preset="franklab_tetrode_mountainsort5",
   )
   for check in report.checks:
-      print(check.name, check.ok, check.message)
+      print(check.name, check.ok, check.fix)
   ```
 
 - **A compute stage fails.** Catch `PipelineStageError`; `err.stage` names the
@@ -305,31 +305,31 @@ from spyglass.spikesorting.v2.curation import CurationV2
 
 nwb_file_name = "your_session_.nwb"  # same session as above
 
-rec_pk = RecordingSelection.insert_selection({
+recording_key = RecordingSelection.insert_selection({
     "nwb_file_name": nwb_file_name,
     "sort_group_id": 0,
     "interval_list_name": "raw data valid times",
-    "preproc_params_name": "default_franklab",
+    "preprocessing_params_name": "default_franklab",
     "team_name": "my_team",
 })
-Recording.populate(rec_pk)
+Recording.populate(recording_key)
 
-art_pk = ArtifactSelection.insert_selection({
-    "recording_id": rec_pk["recording_id"],
-    "artifact_params_name": "default",
+artifact_key = ArtifactSelection.insert_selection({
+    "recording_id": recording_key["recording_id"],
+    "artifact_detection_params_name": "default",
 })
-ArtifactDetection.populate(art_pk)
+ArtifactDetection.populate(artifact_key)
 
-sort_pk = SortingSelection.insert_selection({
-    "recording_id": rec_pk["recording_id"],
+sorting_key = SortingSelection.insert_selection({
+    "recording_id": recording_key["recording_id"],
     "sorter": "mountainsort5",
     "sorter_params_name": "franklab_tetrode_hippocampus_30kHz_ms5",
-    "artifact_id": art_pk["artifact_id"],
+    "artifact_id": artifact_key["artifact_id"],
 })
-Sorting.populate(sort_pk)
+Sorting.populate(sorting_key)
 
-curation_pk = CurationV2.insert_curation(
-    sorting_key=sort_pk,
+curation_key = CurationV2.insert_curation(
+    sorting_key=sorting_key,
     labels={},
     parent_curation_id=-1,
     description="first pass",
@@ -355,11 +355,11 @@ only does work once an acquisition system that ingests `inter_sample_shift` is
 used. To use it:
 
 ```python
-rec_pk = RecordingSelection.insert_selection({
+recording_key = RecordingSelection.insert_selection({
     "nwb_file_name": nwb_file_name,
     "sort_group_id": 0,
     "interval_list_name": "raw data valid times",
-    "preproc_params_name": "default_neuropixels",
+    "preprocessing_params_name": "default_neuropixels",
     "team_name": "my_team",
 })
 ```
@@ -378,7 +378,7 @@ own). It is **suggest-then-confirm**: the default `write=False` changes nothing
 and just returns a report.
 
 ```python
-from spyglass.spikesorting.v2._bad_channels import suggest_bad_channels
+from spyglass.spikesorting.v2.bad_channels import suggest_bad_channels
 
 # 1. Review (default): mutates nothing, returns one dict per flagged electrode.
 report = suggest_bad_channels(nwb_file_name, write=False)
@@ -443,11 +443,11 @@ curated `Electrode.bad_channel='True'` channels at materialization:
   contact positions, `interpolate` raises a clear error (use `remove`).
 
 ```python
-rec_pk = RecordingSelection.insert_selection({
+recording_key = RecordingSelection.insert_selection({
     "nwb_file_name": nwb_file_name,
     "sort_group_id": 0,
     "interval_list_name": "raw data valid times",
-    "preproc_params_name": "my_interpolate_preset",  # bad_channel_handling="interpolate"
+    "preprocessing_params_name": "my_interpolate_preset",  # bad_channel_handling="interpolate"
     "team_name": "my_team",
 })
 ```
@@ -482,15 +482,15 @@ runs only when you call `.populate()`, never eagerly alongside `Recording`:
 ```python
 from spyglass.spikesorting.v2.recording import DriftEstimate, Recording
 
-# rec_key selects a materialized Recording, e.g. {"recording_id": ...}
-DriftEstimate.populate(rec_key)
+# recording_key selects a materialized Recording, e.g. {"recording_id": ...}
+DriftEstimate.populate(recording_key)
 
 # Flag high-drift sessions by the summary metric.
 (DriftEstimate & "max_abs_displacement_um > 20").fetch("recording_id")
-max_um = (DriftEstimate & rec_key).fetch1("max_abs_displacement_um")
+max_drift_um = (DriftEstimate & recording_key).fetch1("max_abs_displacement_um")
 
 # Rehydrate the full SpikeInterface Motion for plotting / inspection.
-motion = DriftEstimate().get_motion(rec_key)  # .displacement, .temporal_bins_s, ...
+motion = DriftEstimate().get_motion(recording_key)  # .displacement, .temporal_bins_s, ...
 ```
 
 The estimate uses a single default preset (`dredge_fast`, stored on the row for

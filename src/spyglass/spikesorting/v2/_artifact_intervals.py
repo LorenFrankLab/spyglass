@@ -97,9 +97,9 @@ def scan_artifact_frames(recording, validated, job_kwargs=None):
     rec_arg = recording if n_jobs == 1 else recording.to_dict()
     init_args = (
         rec_arg,
-        validated.zscore_thresh,
-        validated.amplitude_thresh_uV,
-        validated.proportion_above_thresh,
+        validated.zscore_threshold,
+        validated.amplitude_threshold_uv,
+        validated.proportion_above_threshold,
     )
     executor = ChunkRecordingExecutor(
         recording=recording,
@@ -165,9 +165,9 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
     # v1's logger.info at v1/artifact.py:258-261.
     logger.info(
         "ArtifactDetection: scanning with "
-        f"amplitude_thresh_uV={validated.amplitude_thresh_uV}, "
-        f"zscore_thresh={validated.zscore_thresh}, "
-        f"proportion_above_thresh={validated.proportion_above_thresh}, "
+        f"amplitude_threshold_uv={validated.amplitude_threshold_uv}, "
+        f"zscore_threshold={validated.zscore_threshold}, "
+        f"proportion_above_threshold={validated.proportion_above_threshold}, "
         f"removal_window_ms={validated.removal_window_ms}, "
         f"join_window_ms={validated.join_window_ms}, "
         f"min_length_s={validated.min_length_s}."
@@ -193,10 +193,10 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
         # whether detection was attempted-and-empty vs skipped.
         logger.warning(
             "ArtifactDetection: scan found zero artifact frames"
-            f"{context} (amplitude_thresh_uV="
-            f"{validated.amplitude_thresh_uV}, zscore_thresh="
-            f"{validated.zscore_thresh}, proportion_above_thresh="
-            f"{validated.proportion_above_thresh}); returning the "
+            f"{context} (amplitude_threshold_uv="
+            f"{validated.amplitude_threshold_uv}, zscore_threshold="
+            f"{validated.zscore_threshold}, proportion_above_threshold="
+            f"{validated.proportion_above_threshold}); returning the "
             "recorded window(s) as valid intervals."
         )
         return _np.asarray(base_intervals)

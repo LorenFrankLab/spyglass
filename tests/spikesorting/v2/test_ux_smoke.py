@@ -31,7 +31,7 @@ from spyglass.spikesorting.v2.pipeline import (
     _STAGE_STATUSES,
     describe_presets,
     describe_sort_groups,
-    plot_sort_groups,
+    plot_sort_group_geometry,
     preflight_v2_pipeline,
     run_v2_pipeline,
 )
@@ -346,7 +346,7 @@ def test_describe_sort_groups_empty(dj_conn):
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_plot_sort_groups_geometry_view(first_hour):
+def test_plot_sort_group_geometry_geometry_view(first_hour):
     """The sort-group geometry view renders one contact collection per group."""
     matplotlib = pytest.importorskip("matplotlib")
 
@@ -354,7 +354,7 @@ def test_plot_sort_groups_geometry_view(first_hour):
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots()
-    returned = plot_sort_groups(first_hour["nwb_file_name"], ax=ax)
+    returned = plot_sort_group_geometry(first_hour["nwb_file_name"], ax=ax)
     assert returned is ax
 
     group_collections = [
@@ -371,7 +371,7 @@ def test_plot_sort_groups_geometry_view(first_hour):
 
 
 @pytest.mark.database
-def test_plot_sort_groups_empty(dj_conn):
+def test_plot_sort_group_geometry_empty(dj_conn):
     """A session with no SortGroupV2 rows produces a clear empty axes."""
     matplotlib = pytest.importorskip("matplotlib")
 
@@ -379,20 +379,20 @@ def test_plot_sort_groups_empty(dj_conn):
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots()
-    returned = plot_sort_groups("not_an_ingested_session_.nwb", ax=ax)
+    returned = plot_sort_group_geometry("not_an_ingested_session_.nwb", ax=ax)
     assert returned is ax
     assert ax.texts
     assert "No SortGroupV2 rows" in ax.texts[0].get_text()
     plt.close(fig)
 
 
-def test_plot_sort_groups_multi_probe_offset(monkeypatch):
+def test_plot_sort_group_geometry_multi_probe_offset(monkeypatch):
     """Multiple probes are laid out side-by-side (disjoint x) with a warning.
 
     ``Probe.Electrode`` rel_x/rel_y are per-probe frames, so two probes whose
     contacts share the same raw rel_x would coincide without an offset. The
     smoke fixture is single-probe, so the multi-probe layout is exercised by
-    feeding ``plot_sort_groups`` synthetic two-probe geometry rows (no DB).
+    feeding ``plot_sort_group_geometry`` synthetic two-probe geometry rows (no DB).
     """
     matplotlib = pytest.importorskip("matplotlib")
 
@@ -423,7 +423,7 @@ def test_plot_sort_groups_multi_probe_offset(monkeypatch):
     monkeypatch.setattr(pl, "_sort_group_geometry_rows", _fake_rows)
     fig, ax = plt.subplots()
     with pytest.warns(UserWarning, match="probes present"):
-        pl.plot_sort_groups("any_.nwb", ax=ax)
+        pl.plot_sort_group_geometry("any_.nwb", ax=ax)
 
     group_collections = [
         collection

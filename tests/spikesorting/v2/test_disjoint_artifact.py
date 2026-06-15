@@ -191,9 +191,9 @@ def test_detect_artifacts_valid_times_never_cross_gap():
 
     validated = ArtifactDetectionParamsSchema(
         detect=True,
-        amplitude_thresh_uV=500.0,
-        zscore_thresh=None,
-        proportion_above_thresh=1.0,
+        amplitude_threshold_uv=500.0,
+        zscore_threshold=None,
+        proportion_above_threshold=1.0,
         removal_window_ms=1.0,
         join_window_ms=1.0,
         min_length_s=0.001,
@@ -279,9 +279,9 @@ def test_detect_artifacts_removal_window_does_not_spill_across_gap():
 
     validated = ArtifactDetectionParamsSchema(
         detect=True,
-        amplitude_thresh_uV=500.0,
-        zscore_thresh=None,
-        proportion_above_thresh=1.0,
+        amplitude_threshold_uv=500.0,
+        zscore_threshold=None,
+        proportion_above_threshold=1.0,
         removal_window_ms=1.0,
         join_window_ms=0.0,
         min_length_s=0.001,
@@ -322,9 +322,9 @@ def test_detect_artifacts_join_does_not_bridge_gap():
 
     validated = ArtifactDetectionParamsSchema(
         detect=True,
-        amplitude_thresh_uV=500.0,
-        zscore_thresh=None,
-        proportion_above_thresh=1.0,
+        amplitude_threshold_uv=500.0,
+        zscore_threshold=None,
+        proportion_above_threshold=1.0,
         removal_window_ms=1.0,  # half = 15 frames -> tail beyond 195 free
         join_window_ms=1.0,  # 30 frames -> would bridge the 20-frame gap
         min_length_s=1e-5,
