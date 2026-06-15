@@ -617,6 +617,235 @@ class CurationV2(SpyglassMixin, dj.Manual):
 
         return {"sorting_id": sorting_id, "curation_id": curation_id}
 
+    # ---- Friendly wrappers (intent-first sugar over insert_curation) -----
+
+    @classmethod
+    def create_initial_curation(
+        cls,
+        sorting_key: dict,
+        labels: dict | None = None,
+        description: str = "",
+    ) -> dict:
+        """Create the initial curation (no merges) over a sort.
+
+        Intent-first sugar over the expert :meth:`insert_curation`: pre-fills
+        ``parent_curation_id=-1`` (a root/initial curation) and
+        ``apply_merge=False``. Use this as the first curation of a sort; later
+        merge curations can branch off it via ``parent_curation_id``.
+
+        Parameters
+        ----------
+        sorting_key
+            ``{sorting_id}`` of the upstream Sorting row.
+        labels
+            Optional ``unit_id -> [label, ...]`` dict (validated by
+            ``insert_curation``).
+        description
+            Free-text description.
+
+        Returns
+        -------
+        dict
+            ``{"sorting_id", "curation_id"}`` of the curation.
+
+        See Also
+        --------
+        insert_curation : the full expert API this wraps.
+        """
+        return cls.insert_curation(
+            sorting_key=sorting_key,
+            labels=labels,
+            parent_curation_id=-1,
+            description=description,
+        )
+
+    @classmethod
+    def propose_merge_curation(
+        cls,
+        sorting_key: dict,
+        merge_groups: list[list[int]],
+        labels: dict | None = None,
+        parent_curation_id: int = -1,
+        description: str = "",
+    ) -> dict:
+        """Record proposed merges WITHOUT applying them (reviewable).
+
+        Intent-first sugar over :meth:`insert_curation` that pre-fills
+        ``apply_merge=False`` with ``merge_groups``. Every original unit keeps
+        its id; the proposed merges live in ``CurationV2.MergeGroup`` and are
+        applied lazily by ``get_merged_sorting``. ``parent_curation_id``
+        (default ``-1``) lets the proposal branch off an existing initial
+        curation rather than always rooting a new one. The ≥2-member-per-group
+        rule is enforced by ``insert_curation`` (not re-implemented here).
+
+        Parameters
+        ----------
+        sorting_key
+            ``{sorting_id}`` of the upstream Sorting row.
+        merge_groups
+            List of merge groups, each a list of ``unit_id`` ints (≥2 each).
+        labels
+            Optional ``unit_id -> [label, ...]`` dict.
+        parent_curation_id
+            ``-1`` to root a new curation, or an existing ``curation_id`` of
+            the same sort to branch off it.
+        description
+            Free-text description.
+
+        Returns
+        -------
+        dict
+            ``{"sorting_id", "curation_id"}`` of the curation.
+
+        See Also
+        --------
+        insert_curation : the full expert API this wraps.
+        create_merged_curation : commit the merges instead of proposing them.
+        """
+        return cls.insert_curation(
+            sorting_key=sorting_key,
+            labels=labels,
+            merge_groups=merge_groups,
+            apply_merge=False,
+            parent_curation_id=parent_curation_id,
+            description=description,
+        )
+
+    @classmethod
+    def create_merged_curation(
+        cls,
+        sorting_key: dict,
+        merge_groups: list[list[int]],
+        labels: dict | None = None,
+        parent_curation_id: int = -1,
+        description: str = "",
+    ) -> dict:
+        """Create a new curation with merges applied (committed unit set).
+
+        Intent-first sugar over :meth:`insert_curation` that pre-fills
+        ``apply_merge=True`` with ``merge_groups``: each merged unit's spike
+        train is the union of its contributors and the contributors are
+        absorbed (the curated unit set shrinks). ``parent_curation_id``
+        (default ``-1``) lets the merged curation branch off an existing
+        initial curation. The ≥2-member-per-group rule is enforced by
+        ``insert_curation`` (not re-implemented here).
+
+        Parameters
+        ----------
+        sorting_key
+            ``{sorting_id}`` of the upstream Sorting row.
+        merge_groups
+            List of merge groups, each a list of ``unit_id`` ints (≥2 each).
+        labels
+            Optional ``unit_id -> [label, ...]`` dict.
+        parent_curation_id
+            ``-1`` to root a new curation, or an existing ``curation_id`` of
+            the same sort to branch off it.
+        description
+            Free-text description.
+
+        Returns
+        -------
+        dict
+            ``{"sorting_id", "curation_id"}`` of the curation.
+
+        See Also
+        --------
+        insert_curation : the full expert API this wraps.
+        propose_merge_curation : record the merges without applying them.
+        """
+        return cls.insert_curation(
+            sorting_key=sorting_key,
+            labels=labels,
+            merge_groups=merge_groups,
+            apply_merge=True,
+            parent_curation_id=parent_curation_id,
+            description=description,
+        )
+
+    @classmethod
+    def summarize_curation(cls, curation_key: dict) -> dict:
+        """Return a notebook-printable summary of one curation.
+
+        Pure read accessor: it reads only existing master fields and part
+        rows, computing nothing new. Accepts either a minimal curation key
+        (``{"sorting_id", "curation_id"}``) or a full ``run_v2_pipeline``
+        manifest -- the manifest carries keys that are NOT part of the
+        curation primary key (``preset`` / ``recording_id`` / ``artifact_id``
+        / ``n_units`` / ...), so it is normalized to the ``(sorting_id,
+        curation_id)`` PK before any restriction.
+
+        Parameters
+        ----------
+        curation_key
+            A curation key or a ``run_v2_pipeline`` manifest. Must carry both
+            ``sorting_id`` and ``curation_id`` (``curation_id`` is only unique
+            within a sort).
+
+        Returns
+        -------
+        dict
+            ``sorting_id`` (UUID), ``curation_id`` (int), ``n_units`` (count of
+            ``CurationV2.Unit`` rows), ``labels`` (``unit_id -> [label, ...]``
+            from ``UnitLabel``), ``merge_groups`` (from ``get_merge_groups``),
+            ``merges_applied`` (the stored field), ``is_merge_preview`` (has a
+            real >1-contributor merge group AND not applied, via
+            ``has_unapplied_proposed_merges``), ``merge_id`` (from
+            ``SpikeSortingOutput.CurationV2``, ``None`` if unregistered), and
+            ``description``.
+
+        See Also
+        --------
+        insert_curation : the expert write API.
+        get_merge_groups : the merge-group provenance this summarizes.
+        """
+        from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+
+        if (
+            "sorting_id" not in curation_key
+            or "curation_id" not in curation_key
+        ):
+            raise ValueError(
+                "summarize_curation: key must contain 'sorting_id' and "
+                "'curation_id' (curation_id is only unique within a sort). "
+                f"Got keys: {sorted(curation_key)}."
+            )
+        pk = {
+            "sorting_id": curation_key["sorting_id"],
+            "curation_id": curation_key["curation_id"],
+        }
+
+        # fetch1 doubles as the "exactly one curation" check.
+        merges_applied, description = (cls & pk).fetch1(
+            "merges_applied", "description"
+        )
+
+        label_rows = (cls.UnitLabel & pk).fetch(
+            "unit_id", "curation_label", as_dict=True
+        )
+        labels: dict[int, list[str]] = {}
+        for lr in label_rows:
+            labels.setdefault(int(lr["unit_id"]), []).append(
+                str(lr["curation_label"])
+            )
+
+        # Defensive: a curation may not be merge-registered in edge cases;
+        # return None rather than letting fetch1 raise on zero rows.
+        merge_ids = (SpikeSortingOutput.CurationV2 & pk).fetch("merge_id")
+        merge_id = merge_ids[0] if len(merge_ids) else None
+
+        return {
+            "sorting_id": pk["sorting_id"],
+            "curation_id": int(pk["curation_id"]),
+            "n_units": len(cls.Unit & pk),
+            "labels": labels,
+            "merge_groups": cls.get_merge_groups(pk),
+            "merges_applied": bool(merges_applied),
+            "is_merge_preview": cls.has_unapplied_proposed_merges(pk),
+            "merge_id": merge_id,
+            "description": str(description),
+        }
+
     # ---- Curated-unit construction --------------------------------------
 
     @classmethod

@@ -953,6 +953,17 @@ for label, interval_data in results.groupby("interval_labels"):
         the partial manifest of the stages that completed before it (the
         underlying error is chained). `ZeroUnitSortError` is unchanged (a
         graceful zero-unit result is not a stage failure).
+    - Add intent-first curation wrappers on `CurationV2`:
+        `create_initial_curation`, `propose_merge_curation` (records merges
+        without applying them), and `create_merged_curation` (commits the
+        merged unit set), plus a `summarize_curation(key)` read accessor that
+        returns a notebook-printable dict (`n_units` / `labels` /
+        `merge_groups` / `merges_applied` / `is_merge_preview` / `merge_id` /
+        ...) and accepts either a minimal curation key or a full
+        `run_v2_pipeline` manifest. The wrappers are thin pass-throughs that
+        pre-fill `parent_curation_id` / `apply_merge` by name; the expert
+        `insert_curation` (and its ≥2-member merge-group validation) is
+        unchanged.
 
 ## [0.5.5] (Aug 6, 2025)
 

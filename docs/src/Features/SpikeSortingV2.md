@@ -152,6 +152,33 @@ from spyglass.spikesorting.v2.pipeline import describe_presets
 describe_presets()  # one row per preset
 ```
 
+### Curation: quick path vs expert path
+
+`run_v2_pipeline` already creates the initial (root) curation for you. To
+curate further, reach for the intent-first wrappers on `CurationV2` instead of
+the ten-parameter `insert_curation`:
+
+```python
+from spyglass.spikesorting.v2.curation import CurationV2
+
+# Inspect what the pipeline produced (accepts the manifest directly).
+CurationV2.summarize_curation(manifest)
+
+# Record proposed merges WITHOUT applying them (reviewable; units keep ids).
+prev = CurationV2.propose_merge_curation({"sorting_id": manifest["sorting_id"]},
+                                         merge_groups=[[3, 7]])
+
+# Commit the merges into a new curation (merged unit set is final).
+CurationV2.create_merged_curation({"sorting_id": manifest["sorting_id"]},
+                                  merge_groups=[[3, 7]])
+```
+
+`create_initial_curation` / `propose_merge_curation` / `create_merged_curation`
+are thin sugar over `insert_curation` (the expert API, still available for full
+control); they pre-fill `parent_curation_id` / `apply_merge` by name.
+`summarize_curation` returns a plain dict (`n_units`, `labels`, `merge_groups`,
+`merges_applied`, `is_merge_preview`, `merge_id`, ...) for notebook printing.
+
 ### Stage-by-stage (custom preset)
 
 `run_v2_pipeline` is a convenience wrapper. The underlying stages can be
