@@ -165,6 +165,47 @@ def test_wrappers_inherit_singleton_rejection(populated_sorting):
 
 
 @pytest.mark.database
+def test_merge_wrappers_forward_args(populated_sorting):
+    """The merge wrappers forward apply_merge and parent_curation_id.
+
+    Pins the forwarding contract -- the only thing that distinguishes
+    ``propose_merge_curation`` from ``create_merged_curation``, plus the
+    DAG-branch threading -- on the always-present smoke fixture. An empty
+    ``merge_groups`` (no merges) isolates the forwarding without needing >=2
+    units, so this runs on every PR; the apply-vs-preview merge BEHAVIOR
+    (which needs multiple units) is covered by the 60s-fixture tests.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    # apply_merge forwarding: propose -> not applied, create_merged -> applied.
+    clear_curations_for(populated_sorting)
+    preview = CurationV2.propose_merge_curation(
+        populated_sorting, merge_groups=[]
+    )
+    assert bool((CurationV2 & preview).fetch1("merges_applied")) is False
+
+    clear_curations_for(populated_sorting)
+    applied = CurationV2.create_merged_curation(
+        populated_sorting, merge_groups=[]
+    )
+    assert bool((CurationV2 & applied).fetch1("merges_applied")) is True
+
+    # parent_curation_id forwarding: a proposal branches off an initial root.
+    clear_curations_for(populated_sorting)
+    root = CurationV2.create_initial_curation(populated_sorting)
+    child = CurationV2.propose_merge_curation(
+        populated_sorting,
+        merge_groups=[],
+        parent_curation_id=root["curation_id"],
+    )
+    assert child["curation_id"] != root["curation_id"]
+    assert (
+        int((CurationV2 & child).fetch1("parent_curation_id"))
+        == root["curation_id"]
+    )
+
+
+@pytest.mark.database
 @pytest.mark.slow
 def test_propose_merge_off_existing_initial_curation(polymer_60s_sort):
     """A merge proposal branches off an initial curation (DAG child)."""
