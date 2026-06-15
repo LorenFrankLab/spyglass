@@ -127,6 +127,129 @@ def describe_presets() -> "pd.DataFrame":
     return pd.DataFrame(rows, columns=columns)
 
 
+_SORT_GROUP_COLUMNS = [
+    "nwb_file_name",
+    "sort_group_id",
+    "n_electrodes",
+    "electrode_ids",
+    "electrode_group_names",
+    "probe_shanks",
+    "brain_regions",
+    "bad_channel_count",
+    "reference_mode",
+    "reference_electrode_id",
+]
+
+
+def describe_sort_groups(nwb_file_name: str) -> "pd.DataFrame":
+    """Return a notebook-friendly summary of v2 sort groups for a session.
+
+    Use this after creating ``SortGroupV2`` rows, before choosing a
+    ``sort_group_id`` for ``run_v2_pipeline``. The table surfaces the
+    scientific context a user normally needs at that decision point:
+    electrode membership, electrode groups, probe shanks, brain regions,
+    bad-channel membership, and reference mode. The helper is read-only:
+    it restricts existing ``SortGroupV2`` / ``Electrode`` / ``BrainRegion``
+    rows and never creates sort groups.
+
+    Parameters
+    ----------
+    nwb_file_name
+        Session whose existing ``SortGroupV2`` rows should be summarized.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per sort group, sorted by ``sort_group_id``. Empty, with
+        the documented columns, when the session has no sort groups.
+        Columns are ``nwb_file_name``, ``sort_group_id``, ``n_electrodes``,
+        ``electrode_ids``, ``electrode_group_names``, ``probe_shanks``,
+        ``brain_regions``, ``bad_channel_count``, ``reference_mode``, and
+        ``reference_electrode_id``.
+    """
+    import pandas as pd
+
+    from spyglass.common.common_ephys import Electrode
+    from spyglass.common.common_region import BrainRegion
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    def _nullable_int(value):
+        if value is None or pd.isna(value):
+            return None
+        return int(value)
+
+    def _sorted_nullable_ints(values):
+        normalized = {_nullable_int(value) for value in values}
+        return tuple(
+            sorted(
+                normalized,
+                key=lambda value: (
+                    value is None,
+                    value if value is not None else 0,
+                ),
+            )
+        )
+
+    master_rows = (SortGroupV2 & {"nwb_file_name": nwb_file_name}).fetch(
+        as_dict=True
+    )
+    if not master_rows:
+        return pd.DataFrame(columns=_SORT_GROUP_COLUMNS)
+
+    rows = []
+    for master in sorted(
+        master_rows, key=lambda row: int(row["sort_group_id"])
+    ):
+        sort_group_id = int(master["sort_group_id"])
+        restriction = {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+        }
+        electrode_rows = (
+            (SortGroupV2.SortGroupElectrode & restriction)
+            * Electrode
+            * BrainRegion
+        ).fetch(as_dict=True)
+
+        reference_mode = master["reference_mode"]
+        reference_electrode_id = (
+            _nullable_int(master["reference_electrode_id"])
+            if reference_mode == "specific"
+            else None
+        )
+        rows.append(
+            {
+                "nwb_file_name": nwb_file_name,
+                "sort_group_id": sort_group_id,
+                "n_electrodes": len(electrode_rows),
+                "electrode_ids": tuple(
+                    sorted(int(row["electrode_id"]) for row in electrode_rows)
+                ),
+                "electrode_group_names": tuple(
+                    sorted(
+                        {
+                            str(row["electrode_group_name"])
+                            for row in electrode_rows
+                        }
+                    )
+                ),
+                "probe_shanks": _sorted_nullable_ints(
+                    row.get("probe_shank") for row in electrode_rows
+                ),
+                "brain_regions": tuple(
+                    sorted({str(row["region_name"]) for row in electrode_rows})
+                ),
+                "bad_channel_count": sum(
+                    str(row.get("bad_channel")) == "True"
+                    for row in electrode_rows
+                ),
+                "reference_mode": reference_mode,
+                "reference_electrode_id": reference_electrode_id,
+            }
+        )
+    return pd.DataFrame(rows, columns=_SORT_GROUP_COLUMNS)
+
+
 _PRESETS: dict[str, _Preset] = {
     "franklab_tetrode_mountainsort4": _Preset(
         preproc_params_name="default_franklab",

@@ -14,11 +14,10 @@ is paid once in a module-scoped fixture and shared. It skips cleanly when the
 smoke fixture (or, for the notebook-execution test, ``jupytext``) is absent
 locally; CI provides them.
 
-``run_v2_pipeline`` / ``preflight_v2_pipeline`` / ``describe_presets`` live in
-the pure ``pipeline`` module and are safe to import at module scope; the
-``@schema`` tables (``CurationV2``, ``SpikeSortingOutput``, the selection
-tables) are imported inside the tests so collection does not open a DataJoint
-connection before the MySQL container is ready.
+The pipeline discovery/orchestration helpers are safe to import at module
+scope; table imports stay lazy inside the helpers or inside the tests so
+collection does not open a DataJoint connection before the MySQL container is
+ready.
 """
 
 from __future__ import annotations
@@ -31,6 +30,7 @@ import pytest
 from spyglass.spikesorting.v2.pipeline import (
     _STAGE_STATUSES,
     describe_presets,
+    describe_sort_groups,
     preflight_v2_pipeline,
     run_v2_pipeline,
 )
@@ -71,6 +71,18 @@ _STATUS_KEYS = (
 _STAGES = ("recording", "artifact", "sorting", "curation")
 # Keys that legitimately differ between two identical runs.
 _VOLATILE_KEYS = {"stage_seconds", *_STATUS_KEYS}
+_SORT_GROUP_COLUMNS = [
+    "nwb_file_name",
+    "sort_group_id",
+    "n_electrodes",
+    "electrode_ids",
+    "electrode_group_names",
+    "probe_shanks",
+    "brain_regions",
+    "bad_channel_count",
+    "reference_mode",
+    "reference_electrode_id",
+]
 
 
 @pytest.fixture(scope="module")
@@ -144,6 +156,34 @@ def test_ux_smoke_first_hour(first_hour):
     catalog = describe_presets()
     assert _PRESET in set(catalog["preset"])
 
+    # 2b. describe_sort_groups lets users inspect the scientific grouping
+    #     context before committing to a sort_group_id.
+    sort_groups = describe_sort_groups(first_hour["nwb_file_name"])
+    assert list(sort_groups.columns) == _SORT_GROUP_COLUMNS
+    assert sort_groups["sort_group_id"].tolist() == sorted(
+        sort_groups["sort_group_id"]
+    )
+    assert len(sort_groups) == 4
+    assert set(sort_groups["n_electrodes"]) == {32}
+    assert first_hour["inputs"]["sort_group_id"] in set(
+        sort_groups["sort_group_id"]
+    )
+    selected_group = sort_groups.loc[
+        sort_groups["sort_group_id"] == first_hour["inputs"]["sort_group_id"]
+    ].iloc[0]
+    assert selected_group["n_electrodes"] == len(
+        selected_group["electrode_ids"]
+    )
+    assert selected_group["n_electrodes"] > 0
+    assert selected_group["electrode_group_names"]
+    assert selected_group["brain_regions"]
+    assert selected_group["reference_mode"] in {
+        "none",
+        "global_median",
+        "specific",
+    }
+    assert isinstance(selected_group["bad_channel_count"], (int, np.integer))
+
     report = first_hour["report_before"]
     manifest = first_hour["manifest"]
 
@@ -160,9 +200,7 @@ def test_ux_smoke_first_hour(first_hour):
     for key in (*_STABLE_KEYS, *_STATUS_KEYS, "stage_seconds", "warnings"):
         assert key in manifest, f"missing manifest key {key!r}"
     assert set(manifest["stage_seconds"]) == set(_STAGES)
-    assert all(
-        isinstance(v, float) for v in manifest["stage_seconds"].values()
-    )
+    assert all(isinstance(v, float) for v in manifest["stage_seconds"].values())
     assert isinstance(manifest["warnings"], list)
     for key in _STATUS_KEYS:
         assert manifest[key] in _STAGE_STATUSES
@@ -207,12 +245,12 @@ def test_ux_smoke_preflight_predicts_ids(first_hour):
     report = first_hour["report_before"]
     manifest = first_hour["manifest"]
     for id_key in ("recording_id", "artifact_id", "sorting_id"):
-        assert report.expected_ids[id_key]["id"] == manifest[id_key], (
-            f"preflight mispredicted {id_key}"
-        )
-        assert report.expected_ids[id_key]["exists"] is False, (
-            f"{id_key} unexpectedly existed before the run"
-        )
+        assert (
+            report.expected_ids[id_key]["id"] == manifest[id_key]
+        ), f"preflight mispredicted {id_key}"
+        assert (
+            report.expected_ids[id_key]["exists"] is False
+        ), f"{id_key} unexpectedly existed before the run"
 
 
 @pytest.mark.slow
@@ -295,6 +333,14 @@ def test_user_notebook_executes(first_hour):
         namespace["manifest"]["merge_id"] == first_hour["manifest"]["merge_id"]
     )
     assert isinstance(namespace["spike_times"], list)
+
+
+@pytest.mark.database
+def test_describe_sort_groups_empty(dj_conn):
+    """A session with no SortGroupV2 rows returns an empty typed table."""
+    sort_groups = describe_sort_groups("not_an_ingested_session_.nwb")
+    assert list(sort_groups.columns) == _SORT_GROUP_COLUMNS
+    assert sort_groups.empty
 
 
 def test_user_notebook_cell_budget():

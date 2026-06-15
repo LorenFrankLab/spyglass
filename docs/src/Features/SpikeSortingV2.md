@@ -99,7 +99,9 @@ which walks the whole happy path on one already-ingested session. In prose, the
 path is:
 
 1. **Defaults** -- `initialize_v2_defaults()` seeds every parameter row.
-2. **Sort group** -- `SortGroupV2.set_group_by_shank(nwb_file_name=...)`.
+2. **Sort group** -- `SortGroupV2.set_group_by_shank(nwb_file_name=...)`,
+   then inspect `describe_sort_groups(nwb_file_name)` before choosing the
+   `sort_group_id`.
 3. **Preflight** -- `preflight_v2_pipeline(...)` confirms the session, team,
    parameter rows, and sorter binary are present in ~1 s, *before* any
    `populate`, returning a structured report with the exact fix for any missing
@@ -117,7 +119,7 @@ Each step is detailed below.
 from spyglass.common.common_lab import LabTeam
 from spyglass.spikesorting.v2 import initialize_v2_defaults
 from spyglass.spikesorting.v2.pipeline import (
-    list_presets,
+    describe_sort_groups,
     preflight_v2_pipeline,
     run_v2_pipeline,
 )
@@ -136,11 +138,14 @@ LabTeam.insert1(
 
 # Build the sort groups (one per shank).
 SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+sort_groups = describe_sort_groups(nwb_file_name)
+sort_group_id = int(sort_groups.iloc[0]["sort_group_id"])
+sort_groups
 
 # End-to-end populate + register on the merge table.
 manifest = run_v2_pipeline(
     nwb_file_name=nwb_file_name,
-    sort_group_id=0,
+    sort_group_id=sort_group_id,
     interval_list_name="raw data valid times",
     team_name="my_team",
     preset="franklab_tetrode_mountainsort5",
@@ -159,6 +164,23 @@ list (e.g. a zero-unit advisory). A failed stage raises `PipelineStageError`,
 which names the stage and carries the partial manifest of the stages that
 completed before it.
 
+### Choosing a sort group
+
+`set_group_by_shank` creates the rows; `describe_sort_groups` helps you decide
+which one to run:
+
+```python
+from spyglass.spikesorting.v2.pipeline import describe_sort_groups
+
+describe_sort_groups(nwb_file_name)
+```
+
+Each row is one `SortGroupV2` group. Check `n_electrodes`, `electrode_ids`,
+`electrode_group_names`, `probe_shanks`, `brain_regions`, `bad_channel_count`,
+and the reference fields before sorting. For real analyses, choose
+`sort_group_id` intentionally from this table rather than assuming `0` is the
+scientifically relevant shank.
+
 Available presets:
 
 - `franklab_tetrode_mountainsort4` -- legacy MountainSort4 (parity with v1)
@@ -176,6 +198,51 @@ from spyglass.spikesorting.v2.pipeline import describe_presets
 
 describe_presets()  # one row per preset
 ```
+
+### Debugging cookbook
+
+- **Preflight fails before any work starts.** Inspect `report.errors` for the
+  blocking fixes and `report.checks` for the full pass/fail list:
+
+  ```python
+  report = preflight_v2_pipeline(
+      nwb_file_name=nwb_file_name,
+      sort_group_id=sort_group_id,
+      interval_list_name="raw data valid times",
+      team_name="my_team",
+      preset="franklab_tetrode_mountainsort5",
+  )
+  for check in report.checks:
+      print(check.name, check.ok, check.message)
+  ```
+
+- **A compute stage fails.** Catch `PipelineStageError`; `err.stage` names the
+  failed stage and `err.partial_manifest` shows which IDs were already created.
+
+  ```python
+  from spyglass.spikesorting.v2.exceptions import PipelineStageError
+
+  try:
+      manifest = run_v2_pipeline(...)
+  except PipelineStageError as err:
+      print(err.stage)
+      print(err.partial_manifest)
+      raise
+  ```
+
+- **The sorter binary is missing.** `preflight_v2_pipeline` checks
+  `spikeinterface.sorters.installed_sorters()` and tells you whether to install
+  the sorter runtime or pick another preset.
+- **The chosen sort group looks suspicious.** Re-run
+  `describe_sort_groups(nwb_file_name)` and verify the electrode count, shank,
+  brain region, and reference fields. Recreate groups only after reviewing
+  `SortGroupV2.preview_existing_entries(nwb_file_name)`.
+- **The sort returns zero units.** By default, `run_v2_pipeline` writes an
+  empty-but-real curation and `merge_id`; this is valid for quiet shanks. Pass
+  `require_units=True` only when zero units should abort the run.
+- **The output is unexpectedly sparse.** Check `manifest["warnings"]`, the
+  chosen preset's threshold units in `describe_presets()`, and whether artifact
+  masking removed the interval you expected to sort.
 
 ### Curation: quick path vs expert path
 
@@ -433,7 +500,19 @@ Applying motion correction is out of scope by design.
 
 Both v1 (`CurationV1`) and v2 (`CurationV2`) curations register on the same
 `SpikeSortingOutput` merge table, so existing downstream code (decoding,
-ripple detection, etc.) keeps working unchanged:
+ripple detection, etc.) keeps working unchanged. For most downstream work,
+carry `merge_id = manifest["merge_id"]` forward:
+
+#### What do I call next?
+
+| Goal | Call |
+| --- | --- |
+| Spike times | `SpikeSortingOutput().get_spike_times({"merge_id": merge_id})` |
+| Recording | `SpikeSortingOutput().get_recording({"merge_id": merge_id})` |
+| Sorting | `SpikeSortingOutput().get_sorting({"merge_id": merge_id})` |
+| Unit brain regions | `SpikeSortingOutput.get_unit_brain_regions({"merge_id": merge_id})` |
+| Curation summary | `CurationV2.summarize_curation(manifest)` |
+| Analyzer/debug internals | `Sorting().get_analyzer({"sorting_id": manifest["sorting_id"]})` |
 
 ```python
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput

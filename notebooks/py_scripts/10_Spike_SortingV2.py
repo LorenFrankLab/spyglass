@@ -41,12 +41,15 @@ from spyglass.spikesorting.v2 import initialize_v2_defaults
 from spyglass.spikesorting.v2.curation import CurationV2
 from spyglass.spikesorting.v2.pipeline import (
     describe_presets,
+    describe_sort_groups,
     preflight_v2_pipeline,
     run_v2_pipeline,
 )
 from spyglass.spikesorting.v2.recording import SortGroupV2
+from spyglass.spikesorting.v2.sorting import Sorting  # noqa: F401
 
 dj.config["display.limit"] = 12  # cap rows in table reprs
+
 # -
 
 # ## 1. Choose your session
@@ -69,8 +72,11 @@ preset = "franklab_tetrode_mountainsort5"
 # needs (preprocessing / artifact / sorter), so there is no per-table
 # `insert_default()` to remember. The owning `LabTeam` and the per-shank sort
 # groups are session-specific user input, so we create them here.
-# `set_group_by_shank` is guarded so re-running the notebook does not raise on
-# an already-grouped session.
+# `describe_sort_groups()` then shows the membership and metadata you should
+# inspect before deciding which group to sort. The walkthrough picks the first
+# group only to keep the example reproducible; for real analyses, set
+# `sort_group_id` deliberately after reviewing the table.
+#
 
 initialize_v2_defaults()
 LabTeam.insert1(
@@ -79,12 +85,12 @@ LabTeam.insert1(
 )
 if not (SortGroupV2 & {"nwb_file_name": nwb_file_name}):
     SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
-sort_group_id = int(
-    sorted(
-        (SortGroupV2 & {"nwb_file_name": nwb_file_name}).fetch("sort_group_id")
-    )[0]
-)
-sort_group_id
+sort_groups = describe_sort_groups(nwb_file_name)
+if sort_groups.empty:
+    raise ValueError(f"No SortGroupV2 rows found for {nwb_file_name!r}.")
+sort_group_id = int(sort_groups.iloc[0]["sort_group_id"])
+sort_groups
+
 
 # ## 3. Pick a preset
 #
@@ -172,18 +178,29 @@ manifest
 
 CurationV2.summarize_curation(manifest)
 
-# ## 8. Downstream: fetch spike times
+# ## 8. Downstream: choose the output accessor
 #
 # The payoff: the sort is resolvable through the `SpikeSortingOutput` merge
 # table, so every existing downstream consumer (decoding, ripple detection,
 # `SortedSpikesGroup`) works on the v2 `merge_id` unchanged.
-# `get_spike_times` returns one array of spike times (seconds) per unit.
+#
+# | Goal | Call |
+# | --- | --- |
+# | Spike times | `SpikeSortingOutput().get_spike_times({"merge_id": merge_id})` |
+# | Recording | `SpikeSortingOutput().get_recording({"merge_id": merge_id})` |
+# | Sorting | `SpikeSortingOutput().get_sorting({"merge_id": merge_id})` |
+# | Unit brain regions | `SpikeSortingOutput.get_unit_brain_regions({"merge_id": merge_id})` |
+# | Curation summary | `CurationV2.summarize_curation(manifest)` |
+# | Analyzer/debug internals | `Sorting().get_analyzer({"sorting_id": manifest["sorting_id"]})` |
+#
+# Here we fetch spike times: one array of spike times (seconds) per unit.
+#
 
-spike_times = SpikeSortingOutput().get_spike_times(
-    {"merge_id": manifest["merge_id"]}
-)
+merge_id = manifest["merge_id"]
+spike_times = SpikeSortingOutput().get_spike_times({"merge_id": merge_id})
 print(f"{len(spike_times)} unit(s)")
 spike_times
+
 
 # ## Next steps
 #
@@ -191,5 +208,5 @@ spike_times
 #   [Spike Sorting Analysis](./11_Spike_Sorting_Analysis.ipynb)
 #   (`SortedSpikesGroup`).
 # - Drive the stages individually (custom presets, ADC phase-shift, bad-channel
-#   handling, drift QC) — see the
-#   [Spike Sorting v2 feature page](../Features/SpikeSortingV2.md).
+#   handling, drift QC) — see `docs/src/Features/SpikeSortingV2.md`.
+#

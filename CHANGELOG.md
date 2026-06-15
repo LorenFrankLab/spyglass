@@ -932,6 +932,12 @@ for label, interval_data in results.groupby("interval_labels"):
         and detection-threshold units — "MAD multiplier" for the MountainSort
         presets, "µV" for the clusterless thresholder, a known footgun). Pure
         and database-free; `pandas` is imported lazily.
+    - Add `describe_sort_groups(nwb_file_name)` to
+        `spyglass.spikesorting.v2.pipeline`, a read-only
+        `pandas.DataFrame` summary of existing `SortGroupV2` rows with
+        electrode IDs, electrode groups, probe shanks, brain regions,
+        bad-channel counts, and reference fields. The user notebook and
+        feature docs now show this table before choosing a `sort_group_id`.
     - Add `preflight_v2_pipeline()` to `spyglass.spikesorting.v2.pipeline`
         and run it by default from `run_v2_pipeline(..., preflight=True)`. It
         is a read-only, ~1 s configuration check that the session, interval,
