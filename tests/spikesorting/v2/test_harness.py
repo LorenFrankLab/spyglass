@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from types import SimpleNamespace
 
 
 def test_unconfigure_tolerates_unbound_server():
@@ -125,8 +126,11 @@ def test_data_downloader_downloads_lazily_on_wait_for(tmp_path, monkeypatch):
 
 
 class _FakeItem:
-    def __init__(self, fixturenames):
+    def __init__(self, fixturenames, module_file=None):
         self.fixturenames = fixturenames
+        self.module = (
+            SimpleNamespace(__file__=str(module_file)) if module_file else None
+        )
 
 
 def test_eager_fetch_names_empty_for_pure_helper_run(monkeypatch):
@@ -173,12 +177,33 @@ def test_eager_fetch_names_ignores_unknown_required(monkeypatch):
     assert _eager_fetch_names() == []
 
 
-def test_session_needs_db_detects_dj_conn():
-    """The lazy smoke fetch fires only when a collected test requests the DB."""
-    from tests.spikesorting.v2.conftest import _session_needs_db
+def test_item_consumes_smoke_fixture_only_for_real_consumers(tmp_path):
+    """The lazy smoke fetch must fire only for tests that actually ingest it.
 
-    assert not _session_needs_db([_FakeItem(["tmp_path"]), _FakeItem([])])
-    assert _session_needs_db([_FakeItem(["tmp_path"]), _FakeItem(["dj_conn"])])
+    Not for a DB test that merely declares tables (``dj_conn`` but no fixture
+    reference), and not for a pure-helper test that just names the fixture in an
+    assertion (a reference but no ``dj_conn``). Both would otherwise pull a 55MB
+    download they never use.
+    """
+    from tests.spikesorting.v2.conftest import _item_consumes_smoke_fixture
+
+    consumer_mod = tmp_path / "consumer_mod.py"
+    consumer_mod.write_text('_FIXTURE_NAME = "mearec_polymer_smoke"\n')
+    bare_mod = tmp_path / "bare_mod.py"
+    bare_mod.write_text("# synthetic-only DB test; declares tables\n")
+
+    # Depends on a shared smoke-ingesting fixture -> consumer, module aside.
+    assert _item_consumes_smoke_fixture(
+        _FakeItem(["populated_sorting"], bare_mod)
+    )
+    # dj_conn AND the module references the fixture -> consumer.
+    assert _item_consumes_smoke_fixture(_FakeItem(["dj_conn"], consumer_mod))
+    # dj_conn but the module never references it (table-declaration-only) -> not.
+    assert not _item_consumes_smoke_fixture(_FakeItem(["dj_conn"], bare_mod))
+    # References the fixture but no dj_conn (pure-helper) -> not.
+    assert not _item_consumes_smoke_fixture(
+        _FakeItem(["tmp_path"], consumer_mod)
+    )
 
 
 def test_require_fixtures_gate_still_exits_nonzero():

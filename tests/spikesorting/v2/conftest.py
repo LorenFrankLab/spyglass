@@ -146,11 +146,43 @@ def _eager_fetch_names():
     return [n for n in required if n in FIXTURE_URLS]
 
 
-def _session_needs_db(items):
-    """True if any collected test requests the Docker DB (the ``dj_conn``
-    fixture). Pure-helper unit tests don't, so a run that collects none needs no
-    ingested fixture -- the case we must not start a download for."""
-    return any("dj_conn" in getattr(item, "fixturenames", ()) for item in items)
+# Shared fixtures (defined below) that ingest the smoke NWB; a test using one is
+# a consumer even when its own module never names the fixture.
+_SMOKE_CONSUMING_FIXTURES = frozenset(
+    {"populated_sorting", "populated_sorting_with_curation"}
+)
+
+_MODULE_SOURCE_CACHE: dict[str, str] = {}
+
+
+def _module_references_smoke(item):
+    """True if the collected item's test module mentions the smoke fixture
+    anywhere in its source (module-level ``_FIXTURE_PATH`` constant or an
+    in-function ``copy_and_insert_nwb`` path). Cheap, cached per module file."""
+    path = getattr(getattr(item, "module", None), "__file__", None)
+    if not path:
+        return False
+    if path not in _MODULE_SOURCE_CACHE:
+        try:
+            _MODULE_SOURCE_CACHE[path] = Path(path).read_text()
+        except OSError:
+            _MODULE_SOURCE_CACHE[path] = ""
+    return _SMOKE_FIXTURE in _MODULE_SOURCE_CACHE[path]
+
+
+def _item_consumes_smoke_fixture(item):
+    """True only if a collected item actually ingests the smoke MEArec fixture.
+
+    A consumer either depends on a shared smoke-ingesting fixture, or requests
+    ``dj_conn`` *and* references the fixture in its module source. Requiring both
+    signals keeps two non-consumers out: a DB test that only declares tables
+    (``dj_conn`` but no fixture reference) and a pure-helper test that merely
+    names the fixture in an assertion (a reference but no ``dj_conn``). Neither
+    should trigger a 55MB download."""
+    fixtures = set(getattr(item, "fixturenames", ()))
+    if fixtures & _SMOKE_CONSUMING_FIXTURES:
+        return True
+    return "dj_conn" in fixtures and _module_references_smoke(item)
 
 
 def pytest_sessionstart(session):
@@ -201,10 +233,11 @@ def pytest_collection_modifyitems(session, config, items):
     actually need the database.
 
     Runs after collection, where the collected ``items`` (and their fixture
-    closures) are known, so a pure-helper unit run -- which requests no
-    ``dj_conn`` -- triggers no download. ``ensure_fixture`` is a no-op when the
-    file is already present, so this only reaches the network when the smoke
-    fixture is genuinely missing and a DB test will consume it.
+    closures) are known, so only a run that actually ingests the fixture fetches
+    it -- a pure-helper unit run, or a DB run that just declares tables, triggers
+    no download. ``ensure_fixture`` is a no-op when the file is already present,
+    so this only reaches the network when the smoke fixture is genuinely missing
+    and a collected test will consume it.
     """
     import warnings
 
@@ -213,7 +246,7 @@ def pytest_collection_modifyitems(session, config, items):
         ensure_fixture,
     )
 
-    if not _session_needs_db(items):
+    if not any(_item_consumes_smoke_fixture(item) for item in items):
         return
     try:
         ensure_fixture(_SMOKE_FIXTURE, required=False)
