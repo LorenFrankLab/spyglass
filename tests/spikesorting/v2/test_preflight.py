@@ -347,12 +347,23 @@ def test_preflight_is_read_only(preflight_inputs):
 
 @pytest.mark.database
 def test_preflight_speed(preflight_inputs):
-    """Preflight returns well under 1 s (guards against an accidental populate)."""
+    """Preflight returns well under 1 s (guards against an accidental populate).
+
+    A real populate/materialization of the smoke recording costs seconds to
+    minutes, so a sub-second bound catches an accidental one. We assert the
+    *best* of several runs rather than a single shot: on a loaded box (e.g. the
+    full suite running in parallel) scheduler/GC/DB-contention jitter can add
+    tens of ms to any one call without reflecting preflight's real cost, and a
+    single timed call flaked at ~1.005 s. The minimum is a stable lower bound on
+    that cost and still blows past 1 s if preflight ever starts doing real work.
+    """
     preflight_v2_pipeline(**preflight_inputs)  # warm lazy imports
-    start = time.perf_counter()
-    preflight_v2_pipeline(**preflight_inputs)
-    elapsed = time.perf_counter() - start
-    assert elapsed < 1.0, f"preflight took {elapsed:.2f}s (expected < 1 s)"
+    best = float("inf")
+    for _ in range(3):
+        start = time.perf_counter()
+        preflight_v2_pipeline(**preflight_inputs)
+        best = min(best, time.perf_counter() - start)
+    assert best < 1.0, f"preflight best-of-3 took {best:.2f}s (expected < 1 s)"
 
 
 @pytest.mark.database
