@@ -1,10 +1,10 @@
 """Tests for run_v2_pipeline observability: stage status/timing + warnings.
 
-Phase-3 enrichment adds, to the run manifest, per-stage ``*_status``
-(``"computed"`` vs ``"reused"``), a ``stage_seconds`` timing dict, and a
-``warnings`` list -- all additive (the seven stable keys are untouched) -- and
-raises a stage-aware ``PipelineStageError`` (carrying the partial manifest)
-when a stage's populate/insert fails.
+The run manifest carries, additively, per-stage ``*_status`` (``"computed"``
+vs ``"reused"``), a ``stage_seconds`` timing dict, and a ``warnings`` list (the
+seven stable keys are untouched), and raises a stage-aware
+``PipelineStageError`` (carrying the partial manifest) when a stage's
+populate/insert fails.
 
 The heavy mountainsort5 sort is run ONCE in a module-scoped fixture and reused
 across tests; only the zero-unit test pays a second (fast) clusterless sort.

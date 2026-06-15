@@ -488,7 +488,9 @@ def preflight_v2_pipeline(
 _STAGE_STATUSES = frozenset({"computed", "reused"})
 
 
-def _run_stage(stage: str, exists: bool, work, partial: dict):
+def _run_stage(
+    stage: str, exists: bool, work, partial: dict
+) -> tuple[Any, str, float]:
     """Time a pipeline stage's ``work()``; classify it; wrap failures.
 
     ``exists`` is the result of a pre-``work`` existence check on the stage's

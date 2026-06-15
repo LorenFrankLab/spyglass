@@ -124,8 +124,9 @@ manifest = run_v2_pipeline(
 merge_id = manifest["merge_id"]  # key off this downstream
 ```
 
-Besides the stable keys (`recording_id` / `artifact_id` / `sorting_id` /
-`curation_id` / `merge_id` / `n_units`), the manifest carries per-stage
+Besides the stable keys (`preset` / `recording_id` / `artifact_id` /
+`sorting_id` / `curation_id` / `merge_id` / `n_units`), the manifest carries
+per-stage
 observability: `recording_status` / `artifact_status` / `sorting_status` /
 `curation_status` (`"computed"` if the stage did work this call, `"reused"` if
 its row already existed), a `stage_seconds` dict of wall-clock per stage **this
@@ -165,12 +166,20 @@ from spyglass.spikesorting.v2.curation import CurationV2
 CurationV2.summarize_curation(manifest)
 
 # Record proposed merges WITHOUT applying them (reviewable; units keep ids).
-prev = CurationV2.propose_merge_curation({"sorting_id": manifest["sorting_id"]},
-                                         merge_groups=[[3, 7]])
+# Branch off the pipeline's root curation via parent_curation_id (unit ids
+# 3/7 are illustrative).
+prev = CurationV2.propose_merge_curation(
+    {"sorting_id": manifest["sorting_id"]},
+    merge_groups=[[3, 7]],
+    parent_curation_id=manifest["curation_id"],
+)
 
 # Commit the merges into a new curation (merged unit set is final).
-CurationV2.create_merged_curation({"sorting_id": manifest["sorting_id"]},
-                                  merge_groups=[[3, 7]])
+CurationV2.create_merged_curation(
+    {"sorting_id": manifest["sorting_id"]},
+    merge_groups=[[3, 7]],
+    parent_curation_id=manifest["curation_id"],
+)
 ```
 
 `create_initial_curation` / `propose_merge_curation` / `create_merged_curation`

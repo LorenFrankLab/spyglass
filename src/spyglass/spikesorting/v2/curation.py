@@ -787,9 +787,11 @@ class CurationV2(SpyglassMixin, dj.Manual):
         dict
             ``sorting_id`` (UUID), ``curation_id`` (int), ``n_units`` (count of
             ``CurationV2.Unit`` rows), ``labels`` (``unit_id -> [label, ...]``
-            from ``UnitLabel``), ``merge_groups`` (from ``get_merge_groups``),
-            ``merges_applied`` (the stored field), ``is_merge_preview`` (has a
-            real >1-contributor merge group AND not applied, via
+            from ``UnitLabel``), ``merge_groups`` (from ``get_merge_groups`` --
+            note this includes a 1-element self-entry per unit; real merges
+            have >1 contributor), ``merges_applied`` (the stored field),
+            ``is_merge_preview`` (True iff not applied AND at least one
+            >1-contributor merge group -- the same condition as
             ``has_unapplied_proposed_merges``), ``merge_id`` (from
             ``SpikeSortingOutput.CurationV2``, ``None`` if unregistered), and
             ``description``.

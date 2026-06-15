@@ -73,9 +73,9 @@ class MissingRecordingForConcatError(RuntimeError):
 
 
 class PipelineInputError(ValueError):
-    """``run_v2_pipeline()`` receives zero, partial, or mixed input
-    modes. Message says exactly one input mode is required and lists
-    the required fields for each mode."""
+    """``run_v2_pipeline()`` was given an unknown ``preset`` name.
+    Message lists the available presets and points at
+    ``describe_presets()`` / ``list_presets()``."""
 
 
 class PreflightError(ValueError):
