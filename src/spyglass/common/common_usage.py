@@ -26,6 +26,8 @@ from spyglass.utils.sql_helper_fn import SQLDumpHelper
 
 schema = dj.schema("common_usage")
 
+_warned_functions: set = set()
+
 
 @schema
 class CautiousDelete(dj.Manual):
@@ -68,7 +70,7 @@ class ActivityLog(dj.Manual):
     """
 
     @classmethod
-    def deprecate_log(cls, name, alt=None, warning=True) -> None:
+    def deprecate_log(cls, name, alt=None, warning=True, doc=None) -> None:
         """Log a deprecation warning for a feature.
 
         Parameters
@@ -76,15 +78,20 @@ class ActivityLog(dj.Manual):
         name : str
             The name of the feature to deprecate.
         alt : str, optional
-            What to use instead. Default no such message.
+            Exact replacement call to display. Default no such message.
         warning : bool, optional
             Whether to log a warning. Default is True.
+        doc : str, optional
+            URL of the migration guide. Default no such message.
         """
-        if warning:
-            msg = f"\n\tUse {alt} instead" if alt else ""
-            logger.warning(
-                f"DEPRECATION scheduled for Spyglass 0.6.0: {name}{msg}"
-            )
+        if warning and name not in _warned_functions:
+            _warned_functions.add(name)
+            msg = f"DEPRECATION scheduled for Spyglass 0.6.0: {name}"
+            if alt:
+                msg += f"\n\tUse instead: {alt}"
+            if doc:
+                msg += f"\n\tMigration guide: {doc}"
+            logger.warning(msg)
         cls.insert1(
             dict(dj_user=dj.config["database.user"], function=name[:64])
         )
