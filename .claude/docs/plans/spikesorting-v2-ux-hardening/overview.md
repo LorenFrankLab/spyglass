@@ -26,7 +26,7 @@ File:line refs into the existing v2 code showing exactly what each phase touches
 - A scientist can discover what each preset does (`describe_presets()`) without reading module source.
 - A misconfigured run fails in **seconds** with a structured, actionable report — not minutes/hours into `populate()` with an opaque FK or sorter error.
 - A completed run reports, per stage, whether work was **computed** vs **reused** and how long it took; a failed run raises a stage-aware exception carrying the partial manifest.
-- Basic curation (root, preview-merge, apply-merge) has discoverable, named entry points; the expert `insert_curation` stays for power users.
+- Basic curation (initial curation, proposed merges, applied merges) has discoverable, named entry points; the expert `insert_curation` stays for power users.
 - The v2 test suite runs without spurious downloads or error-masking teardown.
 - A new user can run one notebook end-to-end (defaults → sort group → preflight → pipeline → curation summary → downstream fetch), and CI proves that path stays working.
 
@@ -73,7 +73,7 @@ This plan and `.claude/docs/plans/spikesorting-v2/` are complementary, not compe
 | `preflight=True` default breaks an existing caller whose configuration preflight wrongly rejects (false positive). | Preflight failures raise a typed `PreflightError` listing each failed check with the exact fix; callers can pass `preflight=False` to bypass. The default is justified because the alternative is a worse failure deep in `populate()`. |
 | Per-stage timing is misread as compute cost on an idempotent re-run (re-runs no-op in `populate`, so `stage_seconds≈0`). | The manifest carries a per-stage **status** (`computed`/`reused`) alongside `stage_seconds`; the field is documented as "wall-clock spent *this call*," not cumulative compute. See [shared-contracts.md](shared-contracts.md#stage-status-values). |
 | Changing the manifest shape breaks the master-roadmap Phase 5 tests / downstream readers. | Current keys are strictly preserved; only additive keys (`*_status`, `stage_seconds`, `warnings`) are introduced. A regression test pins the original keys' presence and values. |
-| Curation wrappers obscure the merge DAG (a preview/apply wrapper always roots a new curation, losing the parent-child branch model). | Wrappers accept an optional `parent_curation_id` (default `-1`) so merges can branch off an existing root, matching `insert_curation`'s DAG semantics. See [phase-4](phase-4-curation-wrappers.md). |
+| Curation wrappers obscure the merge DAG (a proposed/applied merge wrapper always roots a new curation, losing the parent-child branch model). | Merge wrappers accept an optional `parent_curation_id` (default `-1`) so merges can branch off an existing initial curation, matching `insert_curation`'s DAG semantics. See [phase-4](phase-4-curation-wrappers.md). |
 | Phase 5 harness "fixes" encode a problem that isn't actually there (the SERVER/addopts claims are hypotheses). | Phase 5 is **verify-first**: each fix has a reproduction step that must fail before the fix and pass after; a claim that cannot be reproduced is dropped, not patched speculatively. |
 
 ## Rollout Strategy

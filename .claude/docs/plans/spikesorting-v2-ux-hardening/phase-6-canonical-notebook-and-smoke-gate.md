@@ -12,7 +12,7 @@ The capstone. Ship one runnable single-session notebook that walks the whole hap
 **Inputs to read first:**
 
 - [pipeline.py](../../../../src/spyglass/spikesorting/v2/pipeline.py) — `describe_presets` (Phase 1), `preflight_v2_pipeline` + `preflight=True` (Phase 2), enriched manifest (Phase 3).
-- [curation.py](../../../../src/spyglass/spikesorting/v2/curation.py) — `create_root_curation` / `summarize_curation` (Phase 4).
+- [curation.py](../../../../src/spyglass/spikesorting/v2/curation.py) — `create_initial_curation` / `propose_merge_curation` / `create_merged_curation` / `summarize_curation` (Phase 4).
 - [__init__.py:14-44](../../../../src/spyglass/spikesorting/v2/__init__.py#L14-L44) — `initialize_v2_defaults()`, step 1 of the notebook.
 - [tests/spikesorting/v2/conftest.py:181-273](../../../../tests/spikesorting/v2/conftest.py#L181-L273) — the existing populate setup the smoke test mirrors (session ingest, team, sort group, defaults).
 - The master-roadmap [phase-5-ux-overhaul.md](../spikesorting-v2/phase-5-ux-overhaul.md) notebook task — confirm the target filename `notebooks/13_Spike_SortingV2.ipynb` so Phase 5 *extends* this notebook rather than creating a competing one.
@@ -27,7 +27,7 @@ The capstone. Ship one runnable single-session notebook that walks the whole hap
   5. `report = preflight_v2_pipeline(...)`; print `report` — show a green check before committing minutes to populate. Mention `preflight=False` exists.
   6. `manifest = run_v2_pipeline(..., preset="franklab_tetrode_mountainsort5")`.
   7. Print `manifest` — call out `merge_id` (the downstream key), `n_units`, the `*_status` (computed vs reused), and `stage_seconds`.
-  8. `CurationV2.summarize_curation(manifest)` — Phase 4 explicitly normalizes a full manifest to `{"sorting_id": ..., "curation_id": ...}` before querying, so the notebook can pass the pipeline result directly. Show units/labels/merge state; mention `create_root_curation` / `preview_merge_curation` for manual curation.
+  8. `CurationV2.summarize_curation(manifest)` — Phase 4 explicitly normalizes a full manifest to `{"sorting_id": ..., "curation_id": ...}` before querying, so the notebook can pass the pipeline result directly. Show units/labels/merge state; mention `create_initial_curation` / `propose_merge_curation` / `create_merged_curation` for manual curation.
   9. Downstream: resolve the sort through `SpikeSortingOutput` and fetch spike times (the "it actually produced usable data" payoff). Optionally insert into `SortedSpikesGroup`.
   - Keep markdown cells for narration; the **≤10 limit is code cells only**. Include the zero-unit and rerun behaviors as short markdown notes (per the UX plan), not extra code cells.
 - **Docs quickstart:** add a "Run your first single-session sort" section to `docs/src/Features/SpikeSortingV2.md` mirroring the notebook's path in prose (defaults → sort group → preflight → pipeline → summary → fetch). Do **not** promote v2 to "recommended for new work" or rewrite the README quick-example — that promotion is owned by master-roadmap Phase 5. CHANGELOG entry: the v2 single-session notebook + quickstart.

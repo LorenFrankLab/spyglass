@@ -22,7 +22,7 @@ For agent invocation, **load only the slice you need**:
   - [phase-1-preset-discovery.md](phase-1-preset-discovery.md) — `describe_presets()` accessor beside `list_presets()`.
   - [phase-2-preflight.md](phase-2-preflight.md) — `preflight_v2_pipeline()` + `run_v2_pipeline(..., preflight=True)`.
   - [phase-3-observability.md](phase-3-observability.md) — per-stage status/timing/warnings in the manifest + `PipelineStageError` with partial manifest.
-  - [phase-4-curation-wrappers.md](phase-4-curation-wrappers.md) — `create_root_curation` / `preview_merge_curation` / `apply_merge_curation` / `summarize_curation`.
+  - [phase-4-curation-wrappers.md](phase-4-curation-wrappers.md) — `create_initial_curation` / `propose_merge_curation` / `create_merged_curation` / `summarize_curation`.
   - [phase-5-test-harness.md](phase-5-test-harness.md) — pytest harness friction fixes (verify-first).
   - [phase-6-canonical-notebook-and-smoke-gate.md](phase-6-canonical-notebook-and-smoke-gate.md) — runnable single-session notebook, docs quickstart, and the end-to-end UX smoke-test release gate.
 
