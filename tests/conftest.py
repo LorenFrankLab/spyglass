@@ -64,6 +64,17 @@ from .data_downloader import DataDownloader
 
 # ------------------------------- TESTS CONFIG -------------------------------
 
+# Module-level default so `pytest_unconfigure` never references an unbound name.
+# `pytest_configure` sets TEARDOWN early but binds SERVER late (after building
+# the Docker MySQL manager). If configure raises in between -- e.g. Docker is
+# unavailable, so `DockerMySQLManager(...)` raises before the assignment -- pytest
+# still runs `pytest_unconfigure` from `wrap_session`'s finally. Without this
+# default the teardown's `SERVER.stop()` raises `NameError: name 'SERVER' is not
+# defined`, a second traceback that buries the real configuration error. The
+# default + the `SERVER is not None` guard in `pytest_unconfigure` surface the
+# real error instead.
+SERVER = None
+
 
 # ---------- Fix ResourceWarning from datajoint.hash.uuid_from_file -----------
 # Patch uuid_from_file to properly close file handles (upstream opens without
@@ -497,7 +508,10 @@ def pytest_unconfigure(config):
     from spyglass.utils.nwb_helper_fn import close_nwb_files
 
     close_nwb_files()
-    if TEARDOWN:
+    # `SERVER is not None` guards the case where pytest_configure raised before
+    # binding SERVER (e.g. Docker unavailable): teardown then skips the
+    # nonexistent server instead of masking the real error with a NameError.
+    if TEARDOWN and SERVER is not None:
         SERVER.stop()
         if TMP_BASE_DIR is None:
             # Selective cleanup only for user-supplied base_dirs; a temp dir
