@@ -91,12 +91,36 @@ rows.
 
 ## How
 
+### Run your first single-session sort
+
+The fastest way to learn the pipeline is to run the notebook
+[`notebooks/10_Spike_SortingV2.ipynb`](../notebooks/10_Spike_SortingV2.ipynb),
+which walks the whole happy path on one already-ingested session. In prose, the
+path is:
+
+1. **Defaults** -- `initialize_v2_defaults()` seeds every parameter row.
+2. **Sort group** -- `SortGroupV2.set_group_by_shank(nwb_file_name=...)`.
+3. **Preflight** -- `preflight_v2_pipeline(...)` confirms the session, team,
+   parameter rows, and sorter binary are present in ~1 s, *before* any
+   `populate`, returning a structured report with the exact fix for any missing
+   prerequisite.
+4. **Pipeline** -- `run_v2_pipeline(...)` returns the manifest (key off
+   `merge_id`).
+5. **Summary** -- `CurationV2.summarize_curation(manifest)`.
+6. **Fetch** -- `SpikeSortingOutput().get_spike_times({"merge_id": ...})`.
+
+Each step is detailed below.
+
 ### Single-session sort
 
 ```python
 from spyglass.common.common_lab import LabTeam
 from spyglass.spikesorting.v2 import initialize_v2_defaults
-from spyglass.spikesorting.v2.pipeline import list_presets, run_v2_pipeline
+from spyglass.spikesorting.v2.pipeline import (
+    list_presets,
+    preflight_v2_pipeline,
+    run_v2_pipeline,
+)
 from spyglass.spikesorting.v2.recording import SortGroupV2
 
 # Replace with the session you've already ingested via insert_sessions.

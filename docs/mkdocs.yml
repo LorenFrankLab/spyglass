@@ -58,6 +58,7 @@ nav:
       - Spikes:
           - Spike Sorting V0: notebooks/10_Spike_SortingV0.ipynb
           - Spike Sorting V1: notebooks/10_Spike_SortingV1.ipynb
+          - Spike Sorting V2: notebooks/10_Spike_SortingV2.ipynb
           - Spike Sorting Analysis: notebooks/11_Spike_Sorting_Analysis.ipynb
           - Spike Burst Merge: notebooks/12_Burst_Merge_Curation.ipynb
       - Position:

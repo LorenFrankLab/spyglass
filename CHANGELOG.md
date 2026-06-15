@@ -610,6 +610,10 @@ for label, interval_data in results.groupby("interval_labels"):
 - Add pages for custom analysis tables and class inheritance structure #1435
 - Add support for bandstop filter type #1464
 - Add Interval and Populate migration guides #1615
+- Add the single-session Spike Sorting v2 user notebook
+    (`notebooks/10_Spike_SortingV2.ipynb`) and a "Run your first single-session
+    sort" quickstart walking defaults → sort group → preflight → pipeline →
+    curation summary → downstream fetch, gated by an end-to-end UX smoke test
 
 ### Infrastructure
 
