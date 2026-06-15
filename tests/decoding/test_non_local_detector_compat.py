@@ -64,4 +64,9 @@ def test_non_local_detector_unavailable(monkeypatch):
         with pytest.raises(ImportError, match="non_local_detector"):
             compat.raise_if_unavailable()
     finally:
+        # Undo the __import__ patch before reloading, otherwise the reload
+        # itself hits fake_import and leaves compat permanently "unavailable"
+        # for the rest of the test session.
+        monkeypatch.undo()
         importlib.reload(compat)
+        assert compat.NON_LOCAL_DETECTOR_AVAILABLE is True
