@@ -193,6 +193,6 @@ LOC sanity check, not a time estimate:
 - Phase 2: ~900 LOC for `metric_curation.py` + the curation rules engine + tests.
 - Phase 3: ~700 LOC for `session_group.py` (including `ConcatenatedRecording` make()) + tests.
 - Phase 4: ~1100 LOC for matcher plugin scaffold + UnitMatch implementation + `TrackedUnit` + tests.
-- Phase 5: ~800 LOC for `pipeline.py` helpers + Pydantic models + FigPack curation + notebook rewrite.
+- Phase 5: ~800 LOC for `pipeline.py` helpers + Pydantic models + FigPack curation + canonical notebook extension.
 
 Runtime v2 footprint is roughly 5300 LOC across the planned execution checkpoints, but the full branch impact is likely 2-3x that once tests, fixtures, converter code, notebooks, docs, and resolver artifacts are included. Compared to v1 at 5229 LOC in `src/spyglass/spikesorting/v1/` (counted via `wc -l` during plan review), v2 runtime code is similar in size despite richer capability because the per-stage scaffolding is more consolidated.

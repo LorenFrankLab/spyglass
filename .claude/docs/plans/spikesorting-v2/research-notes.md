@@ -350,7 +350,7 @@ self.insert1({**key, "analysis_file_name": analysis_file_name, "result_object_id
 - **Phase 2**: AnalyzerCuration (metrics + auto-merge + burst-pair consolidated) plus Recording/Sorting recompute verification for storage reclamation. 1-2 PRs.
 - **Phase 3**: SessionGroup + ConcatenatedRecording (same-day chronic). 1-2 PRs.
 - **Phase 4**: UnitMatch cross-session matching. 1-2 PRs (1 for matcher plugin scaffold + UnitMatch, 1 for tetrode validation).
-- **Phase 5**: UX overhaul — `run_v2_pipeline()`, `run_v2_unit_match()`, FigPack, parameter Pydantic validation, notebook rewrite. 1-2 PRs.
+- **Phase 5**: UX overhaul — `run_v2_pipeline()`, `run_v2_unit_match()`, FigPack, parameter Pydantic validation, canonical notebook extension. 1-2 PRs.
 
 Total estimated: 7-10 PRs over the v2 lifetime.
 

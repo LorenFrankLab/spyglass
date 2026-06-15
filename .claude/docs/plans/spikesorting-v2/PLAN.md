@@ -2,6 +2,16 @@
 
 **Status:** Phase 0a / 0b / 0c and Phase 1 complete. Phase 1b runtime-regressions partially landed (R17 `_hash_nwb_recording` contract complete; see [recording.py:1923](../../../../src/spyglass/spikesorting/v2/recording.py#L1923)); other 1b items pending. Phases 2 (AnalyzerCuration), 3 (SessionGroup / ConcatenatedRecording), 4 (UnitMatch), 5 (UX / FigPack) pending. The review-fixes child plan (completed; its planning artifacts have been removed) addressed correctness/schema findings on top of the completed phases.
 
+**Current UX addendum:** the separate `spikesorting-v2-ux-hardening` plan has
+landed a minimal first-hour single-session path on top of the Phase 1 MVP:
+`notebooks/10_Spike_SortingV2.ipynb`, `describe_presets`,
+`describe_sort_groups`, `plot_sort_groups`, preflight, manifest observability,
+and curation convenience wrappers. Treat those as the current user-facing
+baseline. Phase 5 extends that canonical notebook rather than creating another
+single-session notebook. Post-sort SpikeInterface quality metrics, analyzer
+extension growth, auto-labels, merge suggestions, and BurstPair-style plots
+remain Phase 2 `AnalyzerCuration` work, not ad hoc additions to `pipeline.py`.
+
 A next-generation spike sorting pipeline for Spyglass that (1) targets SpikeInterface ≥0.104 with the SortingAnalyzer API, keeps the v1 production sorters (MountainSort 4 and `clusterless_thresholder`), adds MS5 and KS4, and preserves a custom-row path for other SpikeInterface sorters, (2) supports cross-session unit tracking via a pluggable matcher backend (UnitMatchPy first, DeepUnitMatch via the same plugin slot later), (3) handles chronic recordings — same-day concatenation as the default path, with multi-day opt-in (sort-then-match via Phase 4 UnitMatch is the recommended cross-day workflow) — (4) makes unit → brain region tracing first-class via a `Sorting.Unit` part table populated at sort time (fixes the v1 multi-region under-reporting bug), (5) reduces user-facing table touchpoints from ~7 to ~2 via a `run_v2_pipeline()` convenience API with Pydantic-validated parameters and FigPack as the curation UI, and (6) plugs into the existing `SpikeSortingOutput` merge table so downstream consumers (decoding, ripple, MUA, `SortedSpikesGroup`) keep working unchanged. **Zero schema migration**: every table is final from the phase that introduces it. v0 and v1 stay in-tree indefinitely.
 
 ## Reading order
@@ -46,7 +56,7 @@ All implementation artifacts also use the [Code Artifact Naming](shared-contract
   - [phase-2-analyzer-curation.md](phase-2-analyzer-curation.md) — metrics + auto-merge + burst-pair consolidated into `AnalyzerCuration`, plus recompute verification tables for storage reclamation.
   - [phase-3-session-group-concat.md](phase-3-session-group-concat.md) — `SessionGroup` table + `ConcatenatedRecording` for same-day chronic recordings.
   - [phase-4-unitmatch-cross-session.md](phase-4-unitmatch-cross-session.md) — pluggable matcher backend with UnitMatchPy; polymer validation gate.
-  - [phase-5-ux-overhaul.md](phase-5-ux-overhaul.md) — `run_v2_pipeline()` sorting API, `run_v2_unit_match()` helper, FigPack curation, notebook rewrite, v1/v2 path-selection docs. Split into Phase 5a (FigPack feasibility spike — verifies the FigPack spike-sorting API and edited-curation round trip, replaces the `PHASE5A_CONTRACT_STUB` markers) and Phase 5b (orchestrator extension, FigPack tables, notebooks, docs). Phase 5b is gated on Phase 5a, mirroring the Phase 4a/4b split.
+  - [phase-5-ux-overhaul.md](phase-5-ux-overhaul.md) — `run_v2_pipeline()` sorting API, `run_v2_unit_match()` helper, FigPack curation, canonical notebook extension, v1/v2 path-selection docs. Split into Phase 5a (FigPack feasibility spike — verifies the FigPack spike-sorting API and edited-curation round trip, replaces the `PHASE5A_CONTRACT_STUB` markers) and Phase 5b (orchestrator extension, FigPack tables, notebooks, docs). Phase 5b is gated on Phase 5a, mirroring the Phase 4a/4b split.
 - [appendix.md](appendix.md) — SpikeInterface 0.99→0.104 migration cheat sheet, UnitMatchPy integration notes, MountainSort 5 install + sorter param table.
 
 ## Dependency DAG

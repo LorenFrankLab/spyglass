@@ -1,8 +1,17 @@
-# Phase 5 — UX overhaul: pipeline orchestrator, FigPack, notebook rewrite
+# Phase 5 — UX overhaul: pipeline orchestrator, FigPack, notebook extension
 
 [← back to PLAN.md](PLAN.md) · [overview](overview.md) · [designs](designs.md#run_v2_pipeline-orchestrator)
 
-The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell notebook → ≤10-cell notebook), Pydantic-validated parameter presets, FigPack as the v2 curation UI, and the full v2 notebook walkthrough. It is split into **Phase 5a FigPack feasibility** and **Phase 5b implementation/docs** so the unknown FigPack curation-state API is verified before any DataJoint table is written. **v1 source is NOT removed by this plan**; existing v0/v1 rows continue to coexist with v2. Active v0/v1 runtime workflows use the legacy SI 0.99 environment unless Phase 0c explicitly ports a narrow shim.
+The capstone phase. Extends the current canonical single-session notebook
+(`notebooks/10_Spike_SortingV2.ipynb`, created by the UX-hardening addendum)
+with the remaining user-facing v2 surfaces: full `run_v2_pipeline()`
+orchestration, Pydantic-validated parameter presets, FigPack as the v2 curation
+UI, and v1/v2 path-selection docs. It is split into **Phase 5a FigPack
+feasibility** and **Phase 5b implementation/docs** so the unknown FigPack
+curation-state API is verified before any DataJoint table is written. **v1
+source is NOT removed by this plan**; existing v0/v1 rows continue to coexist
+with v2. Active v0/v1 runtime workflows use the legacy SI 0.99 environment
+unless Phase 0c explicitly ports a narrow shim.
 
 ## Executor Checklist
 
@@ -10,14 +19,16 @@ The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell n
 - Extend `pipeline.py` with full presets, auto-curation, concat routing, FigPack routing, and separate `run_v2_unit_match()`.
 - Implement preset validation and optional FigPack dependency gates.
 - Implement `FigPackCurationSelection`, `FigPackCuration`, URI generation, and curation round-trip only against the verified FigPack API.
-- Rewrite notebooks/docs so v2 is easier to use while v0/v1 remain available.
+- Extend the canonical v2 notebook/docs so v2 is easier to use while v0/v1
+  remain available.
 - Run end-to-end notebook/orchestrator tests in the isolated database. Production-connected real-data smoke is optional and must use the explicit production-smoke gate with test schemas/temp output directories.
 - Run the Phase 5 validation goals plus `code_graph.py describe/path` for FigPack tables.
 
 **Inputs to read first:**
 
 - All files implemented in Phases 1–4. Phase 5 adds only its own FigPack tables (`FigPackCurationSelection`, `FigPackCuration`) and preset registrations; it must not alter any Phase 1–4 table definitions.
-- [notebooks/10_Spike_SortingV1.ipynb](notebooks/10_Spike_SortingV1.ipynb) — the v1 notebook v2 replaces.
+- [notebooks/10_Spike_SortingV2.ipynb](../../../../notebooks/10_Spike_SortingV2.ipynb) — the canonical v2 single-session notebook to extend; do not create a competing single-session notebook.
+- [notebooks/10_Spike_SortingV1.ipynb](../../../../notebooks/10_Spike_SortingV1.ipynb) — the v1 notebook whose long manual workflow the v2 notebook replaces.
 - [notebooks/11_Spike_Sorting_Analysis.ipynb](notebooks/11_Spike_Sorting_Analysis.ipynb) — downstream consumer notebook; should work unchanged with v2 outputs.
 - [src/spyglass/spikesorting/v1/figurl_curation.py](../../../../src/spyglass/spikesorting/v1/figurl_curation.py) — FigURL pattern to mirror in FigPack.
 - [.claude/docs/plans/spikesorting-v2/appendix.md § FigPack vs FigURL](appendix.md#figpack-vs-figurl) — migration policy.
@@ -89,16 +100,25 @@ The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell n
   ```
   Pin minimum versions once verified at implementation time. Do not add these to core Spyglass dependencies.
 
-- **Write the v2 notebook**: new file `notebooks/13_Spike_SortingV2.ipynb`. Target ≤10 code cells:
+- **Extend the canonical v2 notebook**: update
+  `notebooks/10_Spike_SortingV2.ipynb`. Do **not** create another competing
+  single-session walkthrough. Keep the main single-session path ≤10 code cells
+  by consolidating cells as needed:
   1. Imports + DataJoint config (1 cell).
-  2. Insert team + session (1 cell).
-  3. `SortGroupV2().set_group_by_shank(nwb_file_name=...)` (1 cell).
-  4. `manifest = run_v2_pipeline(..., preset="franklab_tetrode_mountainsort5")` (1 cell).
-  5. Print the manifest (1 cell).
-  6. Optional: launch FigPack curation, retrieve labels (2 cells).
-  7. Optional: insert into `SortedSpikesGroup` for downstream analysis (1 cell).
+  2. Parameters for an already-ingested session (1 cell).
+  3. Initialize defaults, insert team, create/inspect sort groups, including
+     `describe_sort_groups` and `plot_sort_groups` (1 cell).
+  4. Choose/inspect a preset (1 cell).
+  5. Preflight and run `run_v2_pipeline(..., preset="franklab_tetrode_mountainsort5")` (1-2 cells).
+  6. Inspect the manifest and curation summary (1 cell).
+  7. Fetch downstream outputs by `merge_id` (1 cell).
+  8. Optional: launch FigPack curation and retrieve labels if this can be kept
+     inside the same ≤10-code-cell budget; otherwise link to the FigPack docs
+     or a dedicated curation snippet rather than bloating the first-hour path.
+  9. Optional: insert into `SortedSpikesGroup` for downstream analysis if it
+     fits the same budget.
 
-  Compare with [notebooks/10_Spike_SortingV1.ipynb](notebooks/10_Spike_SortingV1.ipynb) (35 code cells). Phase 5 success metric: ≤10 cells.
+  Compare with [notebooks/10_Spike_SortingV1.ipynb](../../../../notebooks/10_Spike_SortingV1.ipynb) (35 code cells). Phase 5 success metric: ≤10 cells.
 
 - **Cross-session notebook**: new file `notebooks/14_Spike_Sorting_CrossSession.ipynb`. Walks through:
   1. Build a `SessionGroup` for 3 same-day sessions.
@@ -113,7 +133,7 @@ The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell n
   - Keep existing v0/v1 docs, API references, and notebooks accessible and live; do NOT remove v1 docs. Make the environment boundary explicit: active v0/v1 population and curation workflows use the legacy SI 0.99 environment unless Phase 0c explicitly ported that surface.
   - Add a new docs page: `docs/src/Features/ChoosingSpikeSortingV1VsV2.md` — for users deciding which path to use. TL;DR: v2 is recommended for new work under the SI 0.104 environment; active v1 runtime workflows require the legacy SI 0.99 environment unless Phase 0c explicitly ported that surface. Existing v1 sorts stay queryable through v1 where possible.
   - In `docs/src/Features/ChoosingSpikeSortingV1VsV2.md`, include the import path explicitly: external or ground-truth NWB Units still use the existing `ImportedSpikeSorting` workflow and appear in `SpikeSortingOutput.ImportedSpikeSorting`; they are not reinserted as `CurationV2` rows.
-  - Add CHANGELOG entry noting the full v2 orchestrator, FigPack curation, notebook rewrite, v2's recommended-for-new-work designation, v0/v1 continued support, and the opt-in `auto_curate=True` path.
+  - Add CHANGELOG entry noting the full v2 orchestrator, FigPack curation, canonical notebook extension, v2's recommended-for-new-work designation, v0/v1 continued support, and the opt-in `auto_curate=True` path.
 
 - **No v1 source-removal criteria.** Per the resolved design decision in [overview.md](overview.md), v0 and v1 stay in-tree indefinitely. Phase 5 documents that v2 is the recommended path for new sorts under SI 0.104 and that active v1 runtime workflows use the legacy SI 0.99 environment unless explicitly ported; v1 docs stay live with that environment boundary.
 
@@ -128,7 +148,11 @@ The capstone phase. Adds the `run_v2_pipeline()` convenience function (35-cell n
   - `test_run_v2_unit_match_requires_explicit_curations` — `run_v2_unit_match(..., curation_choices=None)` raises and never auto-pins latest curations.
   - `test_preset_validation_catches_missing_lookup_rows` — define a preset referencing a nonexistent param name; `register_preset` raises with a clear "row 'foo' not found in PreprocessingParameters" message.
 
-- **Notebook smoke test**: `tests/spikesorting/v2/test_notebooks.py` — uses `jupytext` (already a docs optional dep at [pyproject.toml](../../../../pyproject.toml)) to execute `notebooks/13_Spike_SortingV2.ipynb` cell-by-cell against the `minirec` fixture. Marked slow.
+- **Notebook smoke test**: extend the existing UX smoke coverage or add
+  `tests/spikesorting/v2/test_notebooks.py` — uses `jupytext` (already a docs
+  optional dep at [pyproject.toml](../../../../pyproject.toml)) to execute
+  `notebooks/10_Spike_SortingV2.ipynb` cell-by-cell against the `minirec` or
+  smoke fixture. Marked slow.
 
 - **Document GitHub-hosted curation JSON ingress workflow (audit followup NB-N5 from Phase 1b sweep).** v1 supports loading curation labels/merge_groups from a GitHub-hosted `curation.json` via `FigURLCuration.generate_curation_uri` and `gh://.../curation.json` URIs (v1 notebook cells `924cdfce`, `b2e9b018`). Phase 5's FigPack design replaces FigURL but does not document the equivalent v2 workflow for loading external curation JSONs. Common Frank-lab pattern for sharing manual curations between users.
 
@@ -156,7 +180,7 @@ Behaviors the Phase 5 validation goals must cover. Implementer chooses test name
 4b. **Zero-unit manifest (review-fix C5)**: default `require_units=False` writes an empty-but-real curation + merge row and returns a full manifest (real `curation_id` / `merge_id`, `n_units=0`) with a warning and does not raise; `require_units=True` raises `ZeroUnitSortError`.
 5. **`run_v2_unit_match`**: requires explicit `curation_choices` (raises if missing — never auto-picks "latest"); two calls with identical args return the same `unitmatch_id`.
 6. **FigPack feasibility-gated** (slow, integration, optional): Phase 5a has replaced all `PHASE5A_CONTRACT_STUB` markers and recorded `figpack-runtime.md`; with the `spikesorting-v2-curation` extra installed, `FigPackCuration.populate(key)` returns a non-empty URI or verified local artifact reference; zero-unit curation publishes an empty view or raises a clear `EmptySortingError` (never missing-column `KeyError`); published labels round-trip via `fetch_curation_from_uri`.
-7. **Notebook smoke** (slow, integration): `jupytext` executes `notebooks/13_Spike_SortingV2.ipynb` against `minirec` with no errors; programmatic check confirms code-cell count ≤10. Cross-session notebook executes when a multi-session fixture is available (optional).
+7. **Notebook smoke** (slow, integration): `jupytext` executes `notebooks/10_Spike_SortingV2.ipynb` against `minirec` or the smoke fixture with no errors; programmatic check confirms code-cell count ≤10. Cross-session notebook executes when a multi-session fixture is available (optional).
 
 ## Commands to run
 
@@ -174,7 +198,7 @@ test -z "$(rg 'PHASE5A_CONTRACT_STUB' .claude/docs/plans/spikesorting-v2 || true
 
 pytest tests/spikesorting/v2/test_run_pipeline.py -q
 pytest tests/spikesorting/v2/test_notebooks.py -q
-test "$(jq '.cells | map(select(.cell_type == "code")) | length' notebooks/13_Spike_SortingV2.ipynb)" -le 10
+test "$(jq '.cells | map(select(.cell_type == "code")) | length' notebooks/10_Spike_SortingV2.ipynb)" -le 10
 
 python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe FigPackCurationSelection --file spyglass/spikesorting/v2/figpack_curation.py
 python "$SPYGLASS_SKILL_DIR/scripts/code_graph.py" --src src describe FigPackCuration --file spyglass/spikesorting/v2/figpack_curation.py
@@ -197,12 +221,12 @@ Before opening or reviewing the implementation PR that contains this checkpoint,
 - Every task in this phase is implemented as specified.
 - The "Deliberately not in this phase" list is honored — v1 is NOT removed, no v0/v1 schema touched, no existing v2 table altered.
 - Validation goals are covered; slow / integration tests are marked.
-- `notebooks/13_Spike_SortingV2.ipynb` is ≤10 code cells (verify by running `jq '.cells | map(select(.cell_type == "code")) | length' notebooks/13_Spike_SortingV2.ipynb`).
+- `notebooks/10_Spike_SortingV2.ipynb` is ≤10 code cells (verify by running `jq '.cells | map(select(.cell_type == "code")) | length' notebooks/10_Spike_SortingV2.ipynb`).
 - `run_v2_pipeline()` is idempotent (the manifest comparison test passes).
 - `run_v2_unit_match()` is idempotent by `(session_group_owner, session_group_name, matcher_params_name, curation_set_hash)` and does not conflate UnitMatch with concatenated sorting.
 - FigPack feasibility was verified in Phase 5a before implementation began, `tests/spikesorting/v2/resolver/figpack-runtime.md` records the working API and round trip, and no `PHASE5A_CONTRACT_STUB` markers remain. If FigPack proved unusable, the project owner was escalated and no degraded fallback shipped.
 - All docs tasks landed: `docs/src/Features/SpikeSortingV2.md` banner, README snippet, `docs/src/Features/ChoosingSpikeSortingV1VsV2.md` decision page.
-- CHANGELOG.md mentions the delivered user-facing capabilities (orchestrator, FigPack, notebook rewrite), the opt-in `auto_curate=True` path, v0/v1 source/query coexistence, and the legacy-environment boundary for active v0/v1 runtime workflows without referencing plan phases.
+- CHANGELOG.md mentions the delivered user-facing capabilities (orchestrator, FigPack, canonical notebook extension), the opt-in `auto_curate=True` path, v0/v1 source/query coexistence, and the legacy-environment boundary for active v0/v1 runtime workflows without referencing plan phases.
 - Sanity: `git diff src/spyglass/spikesorting/v0/ src/spyglass/spikesorting/v1/` is empty — no v0/v1 source touched.
 - Sanity: `git diff` against any Phase 1–4 table `definition` strings is empty — zero-migration policy honored.
 - `code_graph.py describe` returns clean output for every new table; `path --up`/`path --down` chains match the design DAG; JSON warnings are empty or explicitly accounted for in `precondition-check.md`.

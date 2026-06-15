@@ -127,7 +127,7 @@ Phase 1 is large. The implementer may land it as one change set or as the follow
 - **Remove the draft schema artifact once real schemas land.** Before Phase 1 is complete, delete `src/spyglass/spikesorting/v2/_draft.py` or move it out of `src/` as a non-importable archived plan artifact. The draft file exists only for pre-implementation `code_graph.py` validation; keeping it under `src/` after real `@schema` tables land creates an import/confusion risk. Update `precondition-check.md` only if the path changes.
 
 - **Documentation update** (Phase 1 ships user-visible changes, so docs go with it):
-  - New `docs/src/Features/SpikeSortingV2.md` — overview, single-session walkthrough, link to the new notebook (Phase 5 will write the full notebook; Phase 1 ships a minimal end-to-end Python script as the example).
+  - New `docs/src/Features/SpikeSortingV2.md` — overview, single-session walkthrough, link to the canonical v2 notebook. Phase 5 extends that notebook with the full UX surface; Phase 1 ships a minimal end-to-end Python script as the example.
   - Add CHANGELOG entry noting the new v2 single-session surface (`Recording`, `Sorting`, `CurationV2`, `SpikeSortingOutput.CurationV2`) and the SI 0.104 requirement.
   - Add v2 module to `docs/src/api/spikesorting.md` (mkdocs API page).
 
