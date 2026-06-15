@@ -66,9 +66,7 @@ def list_presets() -> list[str]:
     --------
     >>> from spyglass.spikesorting.v2.pipeline import list_presets
     >>> list_presets()
-    ['franklab_tetrode_clusterless_thresholder',
-     'franklab_tetrode_mountainsort4',
-     'franklab_tetrode_mountainsort5']
+    ['franklab_tetrode_clusterless_thresholder', 'franklab_tetrode_mountainsort4', 'franklab_tetrode_mountainsort5']
     """
     return sorted(_PRESETS)
 
