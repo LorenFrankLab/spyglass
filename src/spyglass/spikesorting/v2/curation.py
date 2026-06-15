@@ -834,14 +834,23 @@ class CurationV2(SpyglassMixin, dj.Manual):
         merge_ids = (SpikeSortingOutput.CurationV2 & pk).fetch("merge_id")
         merge_id = merge_ids[0] if len(merge_ids) else None
 
+        # Derive ``is_merge_preview`` from the values already in hand rather
+        # than calling ``has_unapplied_proposed_merges`` (which would re-fetch
+        # ``merges_applied`` and rebuild the merge groups). This is its exact
+        # definition: not applied AND at least one >1-contributor group.
+        merge_groups = cls.get_merge_groups(pk)
+        is_merge_preview = not bool(merges_applied) and any(
+            len(contribs) > 1 for contribs in merge_groups.values()
+        )
+
         return {
             "sorting_id": pk["sorting_id"],
             "curation_id": int(pk["curation_id"]),
             "n_units": len(cls.Unit & pk),
             "labels": labels,
-            "merge_groups": cls.get_merge_groups(pk),
+            "merge_groups": merge_groups,
             "merges_applied": bool(merges_applied),
-            "is_merge_preview": cls.has_unapplied_proposed_merges(pk),
+            "is_merge_preview": is_merge_preview,
             "merge_id": merge_id,
             "description": str(description),
         }
