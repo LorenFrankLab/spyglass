@@ -1061,7 +1061,9 @@ class AutomaticCuration(SpyglassMixin, dj.Computed):
         parent_labels : dict
             Dictionary of labels keyed by unit_id, from previous merges
         quality_metrics : dict
-            Dictionary of quality metric values keyed by unit_id
+            Dictionary keyed by metric name, each value a dictionary of
+            metric values keyed by unit_id:
+            ``{metric_name: {unit_id: value}}``
         label_params : dict
 
         Returns
@@ -1455,9 +1457,9 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
             out of scope or unchanged.
         """
         from copy import deepcopy
-        from datetime import datetime
+        from datetime import datetime, timezone
 
-        bug_date = datetime(2025, 4, 22).timestamp()
+        bug_date = datetime(2025, 4, 22, tzinfo=timezone.utc).timestamp()
 
         # --- Early return 1: empty label_params ---
         label_params = (
@@ -1569,7 +1571,7 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
             no ``Session`` link exists or ``Session.Experimenter`` is
             missing/NULL.
         """
-        from spyglass.common import LabMember, LabTeam
+        from spyglass.common import LabTeam
 
         nwb_file = key["nwb_file_name"]
         if nwb_file in self._perm_pass:
@@ -1787,8 +1789,8 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
         )
         tmp.close()
         temp_path = Path(tmp.name)
-        shutil.copy2(abs_path, temp_path)
         try:
+            shutil.copy2(abs_path, temp_path)
             changed = Fix1513Status._apply_nwb_label_edits(
                 temp_path, new_labels, verbose
             )

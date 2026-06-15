@@ -26,14 +26,14 @@ of the discrepancy, and lets the data owner choose how to repair it.
 
 ### Scope
 
-An entry is **out of scope** (no repair needed) if its `label_params` has at
-most one metric with a non-empty label list — in that case the original (buggy)
-and recomputed labels are identical, so `Fix1513Status` records
-`action='none_needed'` automatically.
+An entry is **out of scope** (no repair needed) if at most one of the metrics in
+its `label_params` also has an entry in the recomputed `quality_metrics` (i.e.,
+`overlap <= 1`) — in that case the original (buggy) and recomputed labels are
+identical, so `Fix1513Status` records `action='none_needed'` automatically.
 
-For **in-scope** entries (more than one such metric), `Fix1513Status` computes a
-`label_diff` — the old and new label lists per unit — and classifies the change
-into one of three cases:
+For **in-scope** entries (more than one overlapping metric), `Fix1513Status`
+computes a `label_diff` — the old and new label lists per unit — and classifies
+the change into one of three cases:
 
 | Case  | Meaning                                                              | Available actions            |
 | ----- | -------------------------------------------------------------------- | ---------------------------- |

@@ -172,10 +172,18 @@ def pop_auto_curation(spike_v0, pop_metrics, curation_params_key):
 def multi_metric_curation_params_key(spike_v0, pop_metrics):
     """AutomaticCurationParameters with 2 metrics in label_params.
 
-    Thresholds are the per-metric median across units, so each metric
-    labels roughly half the units -- this distinguishes a fixed
-    ``get_labels`` (both metrics applied) from the pre-#1281-fix
-    early-return bug (only the first metric applied).
+    Thresholds are set just below each metric's minimum across units, so
+    every unit exceeds both thresholds and gets labels from *both*
+    metrics -- this distinguishes a fixed ``get_labels`` (both metrics
+    applied) from the pre-#1281-fix early-return bug (only the first
+    metric applied). ``nn_noise_overlap`` maps to ``"noise"`` only (not
+    ``"reject"``) so units stay accepted and the second metric's
+    ``"mua"`` label remains visible in ``CuratedSpikeSorting.Unit``.
+
+    A median-based threshold was previously used, but with a single unit
+    (or all-equal metric values, as seen in CI) the median equals the
+    only value and ``>`` never matches, so the first metric's label was
+    never applied. See ``failing_test.log``.
     """
     import json
 
@@ -185,8 +193,8 @@ def multi_metric_curation_params_key(spike_v0, pop_metrics):
     with open(qm_path) as f:
         qm = json.load(f)
 
-    overlap_thresh = float(np.median(list(qm["nn_noise_overlap"].values())))
-    spikes_thresh = float(np.median(list(qm["num_spikes"].values())))
+    overlap_thresh = float(np.min(list(qm["nn_noise_overlap"].values()))) - 1
+    spikes_thresh = float(np.min(list(qm["num_spikes"].values()))) - 1
 
     params_key = dict(auto_curation_params_name="multi_metric_test")
     spike_v0.AutomaticCurationParameters().insert1(
@@ -194,11 +202,7 @@ def multi_metric_curation_params_key(spike_v0, pop_metrics):
             **params_key,
             "merge_params": {},
             "label_params": {
-                "nn_noise_overlap": [
-                    ">",
-                    overlap_thresh,
-                    ["noise", "reject"],
-                ],
+                "nn_noise_overlap": [">", overlap_thresh, ["noise"]],
                 "num_spikes": [">", spikes_thresh, ["mua"]],
             },
         },
