@@ -928,6 +928,19 @@ for label, interval_data in results.groupby("interval_labels"):
         and detection-threshold units — "MAD multiplier" for the MountainSort
         presets, "µV" for the clusterless thresholder, a known footgun). Pure
         and database-free; `pandas` is imported lazily.
+    - Add `preflight_v2_pipeline()` to `spyglass.spikesorting.v2.pipeline`
+        and run it by default from `run_v2_pipeline(..., preflight=True)`. It
+        is a read-only, ~1 s configuration check that the session, interval,
+        team, sort-group, and preset parameter rows exist and the sorter
+        binary is installed, returning a structured `PreflightReport`
+        (`ok` / `errors` / `warnings` / `expected_ids`); `run_v2_pipeline`
+        raises the new `PreflightError` with each failed check's fix before
+        any populate, so a misconfigured run fails in seconds instead of
+        minutes into `populate()` with an opaque foreign-key error. Pass
+        `preflight=False` to bypass. Preflight reuses the same deterministic
+        identity payloads (now extracted to shared builders in
+        `_selection_identity`) and the same `installed_sorters()` sorter gate
+        the populate path uses, so its checks cannot drift from the real run.
 
 ## [0.5.5] (Aug 6, 2025)
 

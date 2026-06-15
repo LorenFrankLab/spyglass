@@ -21,6 +21,7 @@ manifest (with the same merge_id) without inserting duplicates.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict
@@ -178,6 +179,307 @@ _PRESETS: dict[str, _Preset] = {
 }
 
 
+@dataclass(frozen=True)
+class PreflightCheck:
+    """One preflight check outcome: name, pass/fail, and the fix on fail."""
+
+    name: str  # e.g. "session_exists", "sorter_installed"
+    ok: bool
+    message: str  # empty when ok; the actionable fix when not ok
+
+
+@dataclass(frozen=True)
+class PreflightReport:
+    """Result of ``preflight_v2_pipeline``: a pre-populate config check.
+
+    Truthy when the configuration is runnable (``ok is True``), so a
+    notebook can ``if not preflight_v2_pipeline(...): ...``. ``errors``
+    lists each blocking problem with its fix; ``warnings`` holds
+    non-blocking advisories; ``expected_ids`` carries the deterministic
+    selection PKs the run would produce.
+
+    Attributes
+    ----------
+    ok
+        True when no blocking problem was found (``errors`` is empty).
+    errors
+        Blocking-problem messages; non-empty iff ``ok`` is False.
+    warnings
+        Non-blocking advisories (e.g. ``artifact_params_name="none"``).
+    resolved_preset
+        The preset name that was checked.
+    expected_ids
+        The selection PKs a subsequent ``run_v2_pipeline`` would produce,
+        each annotated with whether the row already exists, e.g.
+        ``{"recording_id": {"id": UUID(...), "exists": False}, ...}``. IDs
+        are computed DB-free via ``deterministic_id``; ``exists`` is a
+        ``& pk`` restriction. Empty when the preset is unknown (the param
+        names needed to derive the IDs are then unavailable). For an ``ok``
+        report each ``id`` equals the PK ``run_v2_pipeline`` returns.
+        ``curation_id`` is intentionally excluded: it is assigned by
+        ``CurationV2.insert_curation``, not content-addressed.
+    checks
+        Per-check detail; every check runs (the report is complete, not
+        first-failure-only).
+    """
+
+    ok: bool
+    errors: list[str]
+    warnings: list[str]
+    resolved_preset: str
+    expected_ids: dict
+    checks: list["PreflightCheck"]
+
+    def __bool__(self) -> bool:
+        return self.ok
+
+
+def preflight_v2_pipeline(
+    nwb_file_name: str,
+    sort_group_id: int,
+    interval_list_name: str,
+    team_name: str,
+    preset: str = "franklab_tetrode_mountainsort5",
+) -> PreflightReport:
+    """Read-only pre-populate configuration check for ``run_v2_pipeline``.
+
+    Verifies -- in ~1 s, inserting nothing and never calling ``populate``
+    -- that every prerequisite a subsequent ``run_v2_pipeline(...,
+    preset=preset)`` needs is in place: the session / interval / team /
+    sort-group rows exist, the preset's parameter Lookup rows exist, and
+    the sorter binary is installed. Returns a structured
+    :class:`PreflightReport` instead of failing minutes into ``populate``
+    with an opaque foreign-key or SpikeInterface error.
+
+    Every check is a read-only restriction (``& {...}``) or a pure call;
+    all checks run even after one fails, so the report lists every problem
+    at once. An unknown ``preset`` short-circuits before any database
+    access (the later checks need the resolved param names).
+
+    Parameters
+    ----------
+    nwb_file_name, sort_group_id, interval_list_name, team_name, preset
+        The same inputs as :func:`run_v2_pipeline`.
+
+    Returns
+    -------
+    PreflightReport
+        Truthy when the configuration is runnable. ``report.errors`` lists
+        each blocking problem with the action to fix it;
+        ``report.expected_ids`` holds the deterministic selection PKs the
+        run would produce (see :class:`PreflightReport`).
+    """
+    checks: list[PreflightCheck] = []
+    warnings: list[str] = []
+
+    def _check(name: str, ok, fix: str) -> bool:
+        ok = bool(ok)
+        checks.append(PreflightCheck(name, ok, "" if ok else fix))
+        return ok
+
+    # 1. preset_known. Short-circuit before any DB access on failure: the
+    # remaining checks (and expected_ids) all derive from the resolved
+    # bundle's param names, which are unknown for a bogus preset.
+    if preset not in _PRESETS:
+        _check(
+            "preset_known",
+            False,
+            f"unknown preset {preset!r}. Available presets: "
+            f"{sorted(_PRESETS)}. Call describe_presets() to see what each "
+            "one does.",
+        )
+        return PreflightReport(
+            ok=False,
+            errors=[c.message for c in checks if not c.ok],
+            warnings=warnings,
+            resolved_preset=preset,
+            expected_ids={},
+            checks=checks,
+        )
+    _check("preset_known", True, "")
+    bundle = _PRESETS[preset]
+
+    import spikeinterface.sorters as sis
+
+    from spyglass.common import IntervalList, LabTeam, Session
+    from spyglass.spikesorting.v2._selection_identity import (
+        artifact_identity_payload,
+        deterministic_id,
+        recording_identity_payload,
+        sorting_identity_payload,
+    )
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetectionParameters,
+        ArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+        RecordingSelection,
+        SortGroupV2,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        SortingSelection,
+    )
+
+    sort_group_id = int(sort_group_id)
+
+    # 2-5. Upstream session/interval/team/sort-group rows.
+    _check(
+        "session_exists",
+        Session & {"nwb_file_name": nwb_file_name},
+        f"session {nwb_file_name!r} is not ingested. Ingest it with "
+        "insert_sessions(...) first.",
+    )
+    _check(
+        "interval_exists",
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": interval_list_name,
+        },
+        f"interval_list_name {interval_list_name!r} not found for "
+        f"{nwb_file_name!r}. A full-session sort typically uses "
+        "'raw data valid times'.",
+    )
+    _check(
+        "team_exists",
+        LabTeam & {"team_name": team_name},
+        f"LabTeam {team_name!r} does not exist. Create it with "
+        "LabTeam.insert1({'team_name': ..., 'team_description': ...}).",
+    )
+    _check(
+        "sort_group_exists",
+        SortGroupV2
+        & {"nwb_file_name": nwb_file_name, "sort_group_id": sort_group_id},
+        f"SortGroupV2 sort_group_id={sort_group_id} not found for "
+        f"{nwb_file_name!r}. Create sort groups first with "
+        "SortGroupV2.set_group_by_shank(nwb_file_name=...).",
+    )
+
+    # 6-8. The preset's parameter Lookup rows.
+    _check(
+        "preproc_params_exist",
+        PreprocessingParameters
+        & {"preproc_params_name": bundle.preproc_params_name},
+        f"PreprocessingParameters row {bundle.preproc_params_name!r} is "
+        "missing. Run initialize_v2_defaults().",
+    )
+    _check(
+        "artifact_params_exist",
+        ArtifactDetectionParameters
+        & {"artifact_params_name": bundle.artifact_params_name},
+        f"ArtifactDetectionParameters row {bundle.artifact_params_name!r} "
+        "is missing. Run initialize_v2_defaults().",
+    )
+    _check(
+        "sorter_params_exist",
+        SorterParameters
+        & {
+            "sorter": bundle.sorter,
+            "sorter_params_name": bundle.sorter_params_name,
+        },
+        f"SorterParameters row (sorter={bundle.sorter!r}, "
+        f"sorter_params_name={bundle.sorter_params_name!r}) is missing. "
+        "Run initialize_v2_defaults().",
+    )
+
+    # 9. sorter_installed. Reuse the SAME strict gate insert_default uses:
+    # the internal clusterless_thresholder (_NON_SI_SORTERS) is never an SI
+    # binary and is always available; otherwise the sorter must be in
+    # installed_sorters(), distinguishing "known but not installed" from
+    # "misspelled / unknown" for the fix message.
+    if (
+        bundle.sorter in SorterParameters._NON_SI_SORTERS
+        or bundle.sorter in set(sis.installed_sorters())
+    ):
+        _check("sorter_installed", True, "")
+    elif bundle.sorter in set(sis.available_sorters()):
+        _check(
+            "sorter_installed",
+            False,
+            f"sorter {bundle.sorter!r} is a known SpikeInterface sorter but "
+            "its binary/runtime is not installed here "
+            "(spikeinterface.sorters.installed_sorters()). Install it, or "
+            "pick a preset whose sorter is installed.",
+        )
+    else:
+        _check(
+            "sorter_installed",
+            False,
+            f"sorter {bundle.sorter!r} is not a known SpikeInterface sorter "
+            "(spikeinterface.sorters.available_sorters()) -- check the "
+            "spelling or the preset.",
+        )
+
+    # Non-blocking advisory: the "none" artifact params are a no-op
+    # pass-through (no masking). "default" performs real amplitude-threshold
+    # detection and is the legitimate built-in choice, so it is NOT warned.
+    if bundle.artifact_params_name == "none":
+        warnings.append(
+            "artifact_params_name='none': no artifact masking will be "
+            "applied for this run."
+        )
+
+    # expected_ids: the deterministic selection PKs this run would produce.
+    # Pure hashes of (preset params + inputs) via the SAME payload builders
+    # insert_selection uses, so they cannot drift; computable once the
+    # preset resolves, regardless of whether the rows exist yet. ``exists``
+    # is a read-only & pk check.
+    recording_id = deterministic_id(
+        "recording",
+        recording_identity_payload(
+            {
+                "nwb_file_name": nwb_file_name,
+                "sort_group_id": sort_group_id,
+                "interval_list_name": interval_list_name,
+                "preproc_params_name": bundle.preproc_params_name,
+                "team_name": team_name,
+            }
+        ),
+    )
+    artifact_id = deterministic_id(
+        "artifact",
+        artifact_identity_payload(
+            artifact_params_name=bundle.artifact_params_name,
+            recording_id=recording_id,
+        ),
+    )
+    sorting_id = deterministic_id(
+        "sorting",
+        sorting_identity_payload(
+            recording_id=recording_id,
+            sorter=bundle.sorter,
+            sorter_params_name=bundle.sorter_params_name,
+            artifact_id=artifact_id,
+        ),
+    )
+    expected_ids = {
+        "recording_id": {
+            "id": recording_id,
+            "exists": bool(RecordingSelection & {"recording_id": recording_id}),
+        },
+        "artifact_id": {
+            "id": artifact_id,
+            "exists": bool(ArtifactSelection & {"artifact_id": artifact_id}),
+        },
+        "sorting_id": {
+            "id": sorting_id,
+            "exists": bool(SortingSelection & {"sorting_id": sorting_id}),
+        },
+    }
+
+    errors = [c.message for c in checks if not c.ok]
+    return PreflightReport(
+        ok=not errors,
+        errors=errors,
+        warnings=warnings,
+        resolved_preset=preset,
+        expected_ids=expected_ids,
+        checks=checks,
+    )
+
+
 def run_v2_pipeline(
     nwb_file_name: str,
     sort_group_id: int,
@@ -186,6 +488,7 @@ def run_v2_pipeline(
     preset: str = "franklab_tetrode_mountainsort5",
     description: str = "",
     require_units: bool = False,
+    preflight: bool = True,
 ) -> dict[str, Any]:
     """End-to-end single-session sort: recording -> artifact -> sort -> curation.
 
@@ -206,7 +509,11 @@ def run_v2_pipeline(
     So a single-session sort is ~4 user touchpoints (the three setup steps
     above plus this call), not 2: this orchestrator collapses the per-stage
     ``insert_selection`` / ``populate`` boilerplate, not the upstream
-    session/team/sort-group setup.
+    session/team/sort-group setup. With ``preflight=True`` (the default)
+    this call verifies those prerequisites in ~1 s before any populate and
+    raises ``PreflightError`` with the exact fix if one is missing; call
+    ``preflight_v2_pipeline(...)`` directly to inspect the report without
+    running.
 
     Parameters
     ----------
@@ -244,6 +551,13 @@ def run_v2_pipeline(
         ``SpikeSortingOutput`` row. If True, a zero-unit sort raises
         ``ZeroUnitSortError`` instead (for callers that treat zero units
         as a hard error).
+    preflight
+        If True (default), run ``preflight_v2_pipeline`` first as a fast,
+        read-only check that the session / interval / team / sort-group
+        rows, the preset's parameter rows, and the sorter binary are all
+        present; a failure raises ``PreflightError`` (with the exact fix)
+        before any populate. Pass ``preflight=False`` to skip the check and
+        attempt the run directly (e.g. to see the raw underlying error).
 
     Returns
     -------
@@ -265,11 +579,16 @@ def run_v2_pipeline(
     ------
     PipelineInputError
         If ``preset`` is not a known name.
+    PreflightError
+        If ``preflight=True`` and a prerequisite is missing (the message
+        lists every failed check and its fix). Bypass with
+        ``preflight=False``.
     ZeroUnitSortError
         If the sort finds zero units and ``require_units=True``.
     ValueError
         If the upstream sort group / session / interval list / team
-        do not exist (raised by the underlying insert helpers).
+        do not exist (raised by the underlying insert helpers when
+        ``preflight=False``).
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.artifact import (
@@ -279,6 +598,7 @@ def run_v2_pipeline(
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.exceptions import (
         PipelineInputError,
+        PreflightError,
         ZeroUnitSortError,
     )
     from spyglass.spikesorting.v2.recording import (
@@ -299,6 +619,21 @@ def run_v2_pipeline(
             "what each preset does, or list_presets() for just the names."
         )
     bundle = _PRESETS[preset]
+
+    # Fail fast: a read-only config check before any insert/populate, so a
+    # missing team / interval / sort group / param row / sorter binary
+    # surfaces in ~1 s with the exact fix, not minutes into populate() with
+    # an opaque FK or SpikeInterface error. Bypass with preflight=False.
+    if preflight:
+        report = preflight_v2_pipeline(
+            nwb_file_name=nwb_file_name,
+            sort_group_id=sort_group_id,
+            interval_list_name=interval_list_name,
+            team_name=team_name,
+            preset=preset,
+        )
+        if not report.ok:
+            raise PreflightError("\n".join(report.errors))
 
     # DataJoint's ``populate()`` is idempotent (no-ops on present
     # rows), so no separate ``if not (X & pk)`` guards are needed

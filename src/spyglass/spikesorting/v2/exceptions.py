@@ -78,6 +78,13 @@ class PipelineInputError(ValueError):
     the required fields for each mode."""
 
 
+class PreflightError(ValueError):
+    """``run_v2_pipeline(..., preflight=True)`` found a blocking
+    configuration problem before any populate. Message lists each failed
+    check and the action to fix it. Bypass with ``preflight=False`` to
+    attempt the run anyway."""
+
+
 class ZeroUnitSortError(RuntimeError):
     """A sort produced zero units and the caller opted into treating
     that as an error (``run_v2_pipeline(..., require_units=True)``). Zero
