@@ -124,11 +124,11 @@ class Electrode(SpyglassIngestion, dj.Imported):
             "self": {
                 "electrode_id": self.index_to_int,
                 "name": self.index_to_str,
-                "x": self.electrode_x_default_none,
-                "y": self.electrode_y_default_none,
-                "z": self.electrode_z_default_none,
-                "filtering": self.get_filtering_default_unfiltered,
-                "impedance": self.electrode_imp_default_none,
+                "x": ("x", None),
+                "y": ("y", None),
+                "z": ("z", None),
+                "filtering": ("filtering", "unfiltered"),
+                "impedance": ("imp", None),
                 "x_warped": self.fixed_to_zero,
                 "y_warped": self.fixed_to_zero,
                 "z_warped": self.fixed_to_zero,
@@ -136,36 +136,15 @@ class Electrode(SpyglassIngestion, dj.Imported):
                 "region_id": self.fetch_add_brain_region,
                 "electrode_group_name": "group_name",
                 # non-default columns
-                "probe_shank": self.electrode_probe_shank_default_none,
-                "probe_electrode": self.electrode_probe_electrode_default_none,
-                "original_reference_electrode": self.electrode_ref_elect_id_default_none,
-                "bad_channel": self.bad_channel_default_false,
+                "probe_shank": ("probe_shank", None),
+                "probe_electrode": ("probe_electrode", None),
+                "original_reference_electrode": ("ref_elect_id", None),
+                "bad_channel": ("bad_channel", False),
             },
             "group": {
                 "probe_id": self.device_probe_type_default_none,
             },
         }
-
-    def electrode_x_default_none(self, nwb_obj):
-        return getattr(nwb_obj, "x", None)
-
-    def electrode_y_default_none(self, nwb_obj):
-        return getattr(nwb_obj, "y", None)
-
-    def electrode_z_default_none(self, nwb_obj):
-        return getattr(nwb_obj, "z", None)
-
-    def electrode_imp_default_none(self, nwb_obj):
-        return getattr(nwb_obj, "imp", None)
-
-    def electrode_probe_shank_default_none(self, nwb_obj):
-        return getattr(nwb_obj, "probe_shank", None)
-
-    def electrode_probe_electrode_default_none(self, nwb_obj):
-        return getattr(nwb_obj, "probe_electrode", None)
-
-    def electrode_ref_elect_id_default_none(self, nwb_obj):
-        return getattr(nwb_obj, "ref_elect_id", None)
 
     def fixed_to_zero(self, nwb_obj):
         return 0
@@ -179,16 +158,10 @@ class Electrode(SpyglassIngestion, dj.Imported):
     def index_to_int(self, nwb_obj):
         return nwb_obj[0]
 
-    def get_filtering_default_unfiltered(self, nwb_obj):
-        return getattr(nwb_obj, "filtering", "unfiltered")
-
     def fetch_add_brain_region(self, nwb_obj):
         """Fetch or add the brain region from the NWB object."""
         region_name = nwb_obj.group.location
         return BrainRegion.fetch_add(region_name=region_name)
-
-    def bad_channel_default_false(self, nwb_obj):
-        return "True" if getattr(nwb_obj, "bad_channel", False) else "False"
 
     def device_probe_type_default_none(self, nwb_obj):
         """Fetch the probe type from the NWB object."""
