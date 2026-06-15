@@ -1,0 +1,195 @@
+# ---
+# jupyter:
+#   jupytext:
+#     text_representation:
+#       extension: .py
+#       format_name: light
+#       format_version: '1.5'
+#       jupytext_version: 1.19.3
+#   kernelspec:
+#     display_name: Python 3 (spyglass_spikesorting_v2)
+#     language: python
+#     name: python3
+# ---
+
+# # Spike Sorting v2 — single-session walkthrough
+#
+# This notebook runs the modern (`spyglass.spikesorting.v2`) spike-sorting
+# pipeline end-to-end on **one already-ingested session**, using the
+# high-level `run_v2_pipeline` orchestrator:
+#
+# > defaults → sort group → **preflight** → pipeline → curation summary →
+# > downstream fetch
+#
+# It assumes you have already:
+#
+# 1. configured your DataJoint connection (see
+#    [Setup](./00_Setup.ipynb)), and
+# 2. ingested a session with `insert_sessions` (see
+#    [Insert Data](./02_Insert_Data.ipynb)).
+#
+# For a table-by-table tour of the internals (what each `populate` does, how
+# identities are content-addressed, how curation is staged), see the
+# developer walkthrough notebook `10_Spike_SortingV2_dev_walkthrough.ipynb`.
+
+# +
+import datajoint as dj
+
+from spyglass.common import LabTeam
+from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+from spyglass.spikesorting.v2 import initialize_v2_defaults
+from spyglass.spikesorting.v2.curation import CurationV2
+from spyglass.spikesorting.v2.pipeline import (
+    describe_presets,
+    preflight_v2_pipeline,
+    run_v2_pipeline,
+)
+from spyglass.spikesorting.v2.recording import SortGroupV2
+
+dj.config["display.limit"] = 12  # cap rows in table reprs
+# -
+
+# ## 1. Choose your session
+#
+# Point the notebook at the session you ingested with `insert_sessions`. A
+# full-session sort uses the `"raw data valid times"` interval and the
+# recommended MountainSort5 preset; change `preset` to one of the names from
+# `describe_presets()` below if you want a different sorter.
+
+# + tags=["parameters"]
+nwb_file_name = "your_session_.nwb"  # replace with your ingested session
+team_name = "my_team"
+interval_list_name = "raw data valid times"
+preset = "franklab_tetrode_mountainsort5"
+# -
+
+# ## 2. One-time setup
+#
+# `initialize_v2_defaults()` installs every default parameter row the pipeline
+# needs (preprocessing / artifact / sorter), so there is no per-table
+# `insert_default()` to remember. The owning `LabTeam` and the per-shank sort
+# groups are session-specific user input, so we create them here.
+# `set_group_by_shank` is guarded so re-running the notebook does not raise on
+# an already-grouped session.
+
+initialize_v2_defaults()
+LabTeam.insert1(
+    {"team_name": team_name, "team_description": "spike sorting"},
+    skip_duplicates=True,
+)
+if not (SortGroupV2 & {"nwb_file_name": nwb_file_name}):
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+sort_group_id = int(
+    sorted(
+        (SortGroupV2 & {"nwb_file_name": nwb_file_name}).fetch("sort_group_id")
+    )[0]
+)
+sort_group_id
+
+# ## 3. Pick a preset
+#
+# `describe_presets()` returns a table of what each shipping preset does — the
+# sorter, the parameter rows each stage uses, the intended use, and (a known
+# footgun) the units of the detection threshold — so you can choose one
+# without reading the module source.
+
+describe_presets()
+
+# ## 4. Preflight — a fast, fail-early check
+#
+# `preflight_v2_pipeline` verifies in ~1 s (inserting nothing, never calling
+# `populate`) that every prerequisite is in place: the session / interval /
+# team / sort-group rows, the preset's parameter rows, and the sorter binary.
+# It returns a `PreflightReport` that is truthy when the configuration is
+# runnable; `report.errors` lists each blocking problem with the exact fix, and
+# `report.expected_ids` shows the selection PKs the run will produce. (Skip it
+# with `run_v2_pipeline(..., preflight=False)`.)
+
+report = preflight_v2_pipeline(
+    nwb_file_name=nwb_file_name,
+    sort_group_id=sort_group_id,
+    interval_list_name=interval_list_name,
+    team_name=team_name,
+    preset=preset,
+)
+print("preflight ok:", report.ok)
+report
+
+# ## 5. Run the pipeline
+#
+# `run_v2_pipeline` chains recording → artifact → sort → curation into one
+# idempotent call and registers the result on the `SpikeSortingOutput` merge
+# table. With `preflight=True` (the default) it re-runs the check above before
+# any populate. **Re-running with the same inputs is safe** — it finds the
+# existing rows and returns the same manifest (same `merge_id`) without
+# inserting duplicates.
+
+manifest = run_v2_pipeline(
+    nwb_file_name=nwb_file_name,
+    sort_group_id=sort_group_id,
+    interval_list_name=interval_list_name,
+    team_name=team_name,
+    preset=preset,
+)
+
+# ## 6. Read the manifest
+#
+# Besides the stable keys (`preset` / `recording_id` / `artifact_id` /
+# `sorting_id` / `curation_id` / `merge_id` / `n_units`), the manifest carries
+# per-stage observability: each `*_status` is `"computed"` if the stage did
+# work this call or `"reused"` if its row already existed; `stage_seconds` is
+# the wall-clock spent **this call** per stage (≈0 on an idempotent re-run, not
+# cumulative compute cost); `warnings` collects advisories. **Downstream code
+# keys off `merge_id`.**
+#
+# A sort that finds **zero units** is a legitimate result on a quiet shank: it
+# still produces an empty-but-real curation + merge row (with a loud warning),
+# so downstream code treats it like any other row. Pass `require_units=True` to
+# turn that into a hard error instead.
+
+print("merge_id (downstream key):", manifest["merge_id"])
+print("n_units                  :", manifest["n_units"])
+print(
+    "stage status             :",
+    {
+        stage: manifest[f"{stage}_status"]
+        for stage in ("recording", "artifact", "sorting", "curation")
+    },
+)
+print("stage seconds            :", manifest["stage_seconds"])
+manifest
+
+# ## 7. Inspect / curate
+#
+# `summarize_curation` accepts the manifest directly and returns a plain dict
+# (`n_units`, `labels`, `merge_groups`, `merges_applied`, `is_merge_preview`,
+# `merge_id`, ...). To curate further, reach for the intent-first wrappers on
+# `CurationV2` — `create_initial_curation`, `propose_merge_curation`,
+# `create_merged_curation` — rather than the expert `insert_curation`.
+#
+# > Interactive web curation (label/merge in a browser) is coming via FigPack
+# > in a later release; it will slot in here.
+
+CurationV2.summarize_curation(manifest)
+
+# ## 8. Downstream: fetch spike times
+#
+# The payoff: the sort is resolvable through the `SpikeSortingOutput` merge
+# table, so every existing downstream consumer (decoding, ripple detection,
+# `SortedSpikesGroup`) works on the v2 `merge_id` unchanged.
+# `get_spike_times` returns one array of spike times (seconds) per unit.
+
+spike_times = SpikeSortingOutput().get_spike_times(
+    {"merge_id": manifest["merge_id"]}
+)
+print(f"{len(spike_times)} unit(s)")
+spike_times
+
+# ## Next steps
+#
+# - Organize sorts across sessions and filter units with
+#   [Spike Sorting Analysis](./11_Spike_Sorting_Analysis.ipynb)
+#   (`SortedSpikesGroup`).
+# - Drive the stages individually (custom presets, ADC phase-shift, bad-channel
+#   handling, drift QC) — see the
+#   [Spike Sorting v2 feature page](../Features/SpikeSortingV2.md).
