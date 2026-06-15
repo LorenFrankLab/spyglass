@@ -1,6 +1,6 @@
 # Spike Sorting v2 — First-Hour UX Hardening Plan
 
-**Status:** Phases 1–5 complete (preset discovery, preflight, observability, curation wrappers, test-harness fixes). Phase 6 remaining (canonical notebook + smoke gate).
+**Status:** Phases 1–6 complete (preset discovery, preflight, observability, curation wrappers, test-harness fixes, canonical notebook + smoke gate).
 
 Makes the *already-shipped* v2 single-session pipeline pleasant for a scientist's first hour: a discoverable preset catalog, a fast fail-early preflight check, an observable run manifest with per-stage timing/status and a stage-aware exception, friendly named curation wrappers, a less-surprising test harness, and a runnable canonical notebook gated by an end-to-end UX smoke test. It adds usability surface on top of the current MVP (post Phase 1 of the master plan); it does **not** add scientific features.
 

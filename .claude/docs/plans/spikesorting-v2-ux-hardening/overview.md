@@ -54,7 +54,7 @@ This plan and `.claude/docs/plans/spikesorting-v2/` are complementary, not compe
 | Curation | named Python wrappers over `insert_curation` | Phase 5: FigPack web curation UI |
 | Notebook | minimal runnable single-session `.ipynb` | Phase 5: adds FigPack + cross-session cells to the **same** notebook |
 
-**One notebook, not two.** Phase 6 creates `notebooks/13_Spike_SortingV2.ipynb`; master-roadmap Phase 5 was slated to create that same file — it should instead *extend* the one this plan ships. This is flagged in [phase-6](phase-6-canonical-notebook-and-smoke-gate.md#deliberately-not-in-this-phase).
+**One notebook, not two.** Phase 6 created `notebooks/10_Spike_SortingV2.ipynb`; master-roadmap Phase 5 should extend that notebook rather than create a competing one. This is flagged in [phase-6](phase-6-canonical-notebook-and-smoke-gate.md#deliberately-not-in-this-phase).
 
 **Manifest-drift note (for the master-roadmap executor, not an action here):** [phase-5-ux-overhaul.md](../spikesorting-v2/phase-5-ux-overhaul.md) and `designs.md` describe a manifest with keys `recording` / `artifact_detection` / `sorting` / `initial_curation` that **never shipped** — the actual manifest uses `recording_id` / `artifact_id` / `sorting_id` / `curation_id` (`pipeline.py:283-291`). This plan builds on the shipped keys and preserves them (see [shared-contracts.md § Pipeline manifest](shared-contracts.md#pipeline-manifest-schema)). The master roadmap's manifest design should be reconciled to the shipped keys when Phase 5 is executed.
 
@@ -63,7 +63,7 @@ This plan and `.claude/docs/plans/spikesorting-v2/` are complementary, not compe
 - **Preflight speed:** `preflight_v2_pipeline()` returns in < ~1 s on the smoke fixture's session (no `populate`, no recording materialization). Asserted by a wall-clock bound in the Phase 2 validation slice.
 - **Preflight accuracy:** for a valid configuration, `expected_ids` equals the selection PKs a subsequent `run_v2_pipeline` actually produces (round-trip assertion in Phase 2). `curation_id` is not precomputed because it is assigned by `CurationV2.insert_curation`.
 - **Idempotency preserved:** after Phases 2–3, two identical `run_v2_pipeline` calls still return equal manifests modulo the timing field, and insert no duplicate rows (regression assertion).
-- **Notebook gate:** `notebooks/13_Spike_SortingV2.ipynb` executes end-to-end against the smoke fixture in CI with zero errors (Phase 6).
+- **Notebook gate:** `notebooks/10_Spike_SortingV2.ipynb` executes end-to-end against the smoke fixture in CI with zero errors (Phase 6).
 
 ## Risks and Mitigations
 

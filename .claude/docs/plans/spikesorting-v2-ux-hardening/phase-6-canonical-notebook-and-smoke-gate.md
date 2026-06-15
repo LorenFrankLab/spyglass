@@ -15,11 +15,11 @@ The capstone. Ship one runnable single-session notebook that walks the whole hap
 - [curation.py](../../../../src/spyglass/spikesorting/v2/curation.py) — `create_initial_curation` / `propose_merge_curation` / `create_merged_curation` / `summarize_curation` (Phase 4).
 - [__init__.py:14-44](../../../../src/spyglass/spikesorting/v2/__init__.py#L14-L44) — `initialize_v2_defaults()`, step 1 of the notebook.
 - [tests/spikesorting/v2/conftest.py:181-273](../../../../tests/spikesorting/v2/conftest.py#L181-L273) — the existing populate setup the smoke test mirrors (session ingest, team, sort group, defaults).
-- The master-roadmap [phase-5-ux-overhaul.md](../spikesorting-v2/phase-5-ux-overhaul.md) notebook task — confirm the target filename `notebooks/13_Spike_SortingV2.ipynb` so Phase 5 *extends* this notebook rather than creating a competing one.
+- The master-roadmap [phase-5-ux-overhaul.md](../spikesorting-v2/phase-5-ux-overhaul.md) notebook task — confirm the target filename `notebooks/10_Spike_SortingV2.ipynb` so Phase 5 *extends* this notebook rather than creating a competing one.
 
 ## Tasks
 
-- **Write `notebooks/13_Spike_SortingV2.ipynb`** — minimal single-session walkthrough, **≤10 code cells**. Author it via `jupytext` paired mode (see the `jupyter-notebook-editor` workflow) so it's diffable. Cells:
+- **Write `notebooks/10_Spike_SortingV2.ipynb`** — minimal single-session walkthrough, **≤10 code cells**. Author it via `jupytext` paired mode (see the `jupyter-notebook-editor` workflow) so it's diffable. Cells:
   1. Imports + DataJoint config.
   2. `initialize_v2_defaults()`; insert the `LabTeam` row; (note that the session is assumed already ingested via `insert_sessions` — link to the ingestion notebook rather than re-teaching it).
   3. `SortGroupV2.set_group_by_shank(nwb_file_name=...)`.
@@ -39,7 +39,7 @@ The capstone. Ship one runnable single-session notebook that walks the whole hap
   5. `summarize_curation(manifest)` returns a coherent summary; `merge_id` matches the manifest and the same call with a minimal curation key returns the same summary.
   6. The sort is resolvable through `SpikeSortingOutput` and `get_spike_times` (or the documented accessor) returns sane arrays.
   7. A second `run_v2_pipeline(...)` is idempotent (manifest equal modulo `stage_seconds`/`*_status`; `*_status` now `reused`).
-- **Notebook execution smoke test** — extend `test_ux_smoke.py` (or add `tests/spikesorting/v2/test_notebooks.py`) to execute `notebooks/13_Spike_SortingV2.ipynb` cell-by-cell against the smoke fixture using `jupytext` (already a docs optional dep), and assert the code-cell count ≤10 (`jq '.cells | map(select(.cell_type=="code")) | length' notebooks/13_Spike_SortingV2.ipynb`). Marked `slow`. Skip cleanly (not fail) when the smoke fixture is absent locally; CI provides it.
+- **Notebook execution smoke test** — extend `test_ux_smoke.py` (or add `tests/spikesorting/v2/test_notebooks.py`) to execute `notebooks/10_Spike_SortingV2.ipynb` cell-by-cell against the smoke fixture using `jupytext` (already a docs optional dep), and assert the code-cell count ≤10 (`jq '.cells | map(select(.cell_type=="code")) | length' notebooks/10_Spike_SortingV2.ipynb`). Marked `slow`. Skip cleanly (not fail) when the smoke fixture is absent locally; CI provides it.
 
 ## Deliberately not in this phase
 
@@ -55,8 +55,8 @@ The capstone. Ship one runnable single-session notebook that walks the whole hap
 | `test_ux_smoke_first_hour` (slow, integration) | The full defaults→sort-group→preflight→pipeline→summary→fetch path runs end-to-end with the asserts listed in the task; this is the "does a scientist's first hour work?" gate. |
 | `test_ux_smoke_preflight_predicts_ids` (slow, integration) | `preflight` `expected_ids` match the recording/artifact/sorting PKs the manifest returns (ties Phases 2+3 together at the user surface without pretending preflight predicts `curation_id`). |
 | `test_ux_smoke_idempotent` (slow, integration) | Re-running the path returns an equal manifest (modulo timing/status) and inserts no duplicate rows. |
-| `test_notebook_13_executes` (slow) | `notebooks/13_Spike_SortingV2.ipynb` executes cell-by-cell with no errors against the smoke fixture. |
-| `test_notebook_13_cell_budget` | The notebook has ≤10 code cells. (Fast; pure file inspection — does not need the DB.) |
+| `test_user_notebook_executes` (slow) | `notebooks/10_Spike_SortingV2.ipynb` executes cell-by-cell with no errors against the smoke fixture. |
+| `test_user_notebook_cell_budget` | The notebook has ≤10 code cells. (Fast; pure file inspection — does not need the DB.) |
 
 ## Fixtures
 
