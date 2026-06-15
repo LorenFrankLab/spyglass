@@ -223,7 +223,9 @@ def pop_auto_curation_multimetric(
     )
     spike_v0.AutomaticCuration().populate(metric_keys)
     restr_auto = spike_v0.AutomaticCuration() & metric_keys
-    restr_curation = spike_v0.Curation() & metric_keys
+    # Restrict to the curation rows AutomaticCuration created (labeled),
+    # not the unlabeled parent curations referenced by metric_keys.
+    restr_curation = spike_v0.Curation() & restr_auto.fetch("auto_curation_key")
 
     curated_keys = [dict(k) for k in restr_curation.proj()]
     spike_v0.CuratedSpikeSortingSelection.insert(
