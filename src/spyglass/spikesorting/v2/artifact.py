@@ -3,19 +3,10 @@
 Tables (all final-shape under the zero-migration policy):
     ArtifactDetectionParameters       -- threshold detection parameters.
     SharedArtifactGroup (+ Member)    -- opt-in cross-recording detection.
-    ArtifactSelection                 -- source parts encode input shape.
+    ArtifactDetectionSelection        -- source parts encode input shape.
         .RecordingSource              -- single-recording path (default).
-        .SharedArtifactGroupSource    -- cross-recording path (#928).
+        .SharedGroupSource          -- cross-recording path (#928).
     ArtifactDetection                 -- writes IntervalList rows; no part.
-
-The master is named ``ArtifactSelection`` (a shorter alternative to the
-verbose v1 ``ArtifactDetectionSelection`` pattern) so that the
-auto-generated FK constraint name for the source part referencing
-``SharedArtifactGroup`` fits inside MySQL's 64-character identifier
-limit -- the longer master + the longer part together overflow. The
-shorter master also matches the v2 single-master-per-topic convention:
-there is only one v2 artifact-related ``Selection`` table, so the
-``Detection`` qualifier is redundant.
 
 Artifact-removed valid times live in ``common.IntervalList`` rather than
 a dedicated part table -- the UUID-suffixed name prevents collision with
@@ -24,7 +15,7 @@ IntervalList-querying code consume them through the standard interface.
 
 ``ArtifactDetectionParameters.insert1`` Pydantic-validates the
 ``params`` blob. ``insert_selection`` resolves a selection to a single
-``artifact_id``, ``make`` runs threshold detection and
+``artifact_detection_id``, ``make`` runs threshold detection and
 writes the artifact-removed ``IntervalList`` rows,
 ``get_artifact_removed_intervals`` reads them back, ``delete`` removes
 them, and ``SharedArtifactGroup.insert_group`` declares a cross-recording
@@ -448,12 +439,12 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
 
 
 @schema
-class ArtifactSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
+class ArtifactDetectionSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
     """One row per (parameters, source) artifact detection request.
 
     Source part rows make the input shape explicit: exactly one of
     ``RecordingSource`` (single-recording, default) or
-    ``SharedArtifactGroupSource`` (cross-recording, opt-in) must exist
+    ``SharedGroupSource`` (cross-recording, opt-in) must exist
     for each selection row. Enforced by ``insert_selection`` and
     re-checked at the start of ``ArtifactDetection.make()`` so a row
     inserted via raw ``insert1`` (bypassing ``insert_selection``) is
@@ -461,7 +452,7 @@ class ArtifactSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
     """
 
     definition = """
-    artifact_id: uuid
+    artifact_detection_id: uuid
     ---
     -> ArtifactDetectionParameters
     """
@@ -473,7 +464,7 @@ class ArtifactSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         -> Recording
         """
 
-    class SharedArtifactGroupSource(SpyglassMixinPart):
+    class SharedGroupSource(SpyglassMixinPart):
         definition = """
         -> master
         ---
@@ -488,12 +479,12 @@ class ArtifactSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         ``shared_artifact_group_name``), finds an existing master row
         that matches both the master fields and the source row, or, if
         absent, inserts master + source part keyed by a deterministic,
-        content-addressed ``artifact_id`` derived from the params + source
+        content-addressed ``artifact_detection_id`` derived from the params + source
         identity. A concurrent caller that wins the duplicate-PK race is
         handled by refetching the winner's row.
 
         The find step joins the master to the chosen source part so a
-        prior ``ArtifactSelection`` with a different source is not
+        prior ``ArtifactDetectionSelection`` with a different source is not
         silently reused. Source-part atomicity is enforced via the
         ``SchemaBypassError`` re-check at the top of
         ``ArtifactDetection.make()`` (Layer 2 of the source-part
@@ -504,7 +495,7 @@ class ArtifactSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         ValueError
             If zero or two source keys are supplied in ``key``.
         DuplicateSelectionError
-            If any matching master has a non-deterministic ``artifact_id``
+            If any matching master has a non-deterministic ``artifact_detection_id``
             (a raw ``insert`` bypass or a pre-determinism legacy row) --
             even a single one; an integrity bug, not user error.
         SchemaBypassError
@@ -515,7 +506,7 @@ class ArtifactSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         has_shared = "shared_artifact_group_name" in key
         if has_recording == has_shared:
             raise ValueError(
-                "ArtifactSelection.insert_selection requires exactly one "
+                "ArtifactDetectionSelection.insert_selection requires exactly one "
                 "source key. Provide either recording_id (single-recording "
                 "path) or shared_artifact_group_name (cross-recording "
                 "path), not both and not neither. Got: "
@@ -527,7 +518,7 @@ class ArtifactSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         master_field = "artifact_detection_params_name"
         if master_field not in key:
             raise ValueError(
-                "ArtifactSelection.insert_selection requires "
+                "ArtifactDetectionSelection.insert_selection requires "
                 f"{master_field!r} in key."
             )
         master_restriction = {master_field: key[master_field]}
@@ -536,34 +527,38 @@ class ArtifactSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             source_part = cls.RecordingSource
             source_restriction = {"recording_id": key["recording_id"]}
         else:
-            source_part = cls.SharedArtifactGroupSource
+            source_part = cls.SharedGroupSource
             source_restriction = {
                 "shared_artifact_group_name": key["shared_artifact_group_name"]
             }
 
-        # Deterministic, content-addressed artifact_id from the logical
+        # Deterministic, content-addressed artifact_detection_id from the logical
         # identity (params + source), built via the shared payload helper so
         # preflight derives the identical id. ``source_kind`` is explicit so a
         # recording source and a shared-group source never alias even if their
         # source-identifier strings were to collide.
         from spyglass.spikesorting.v2._selection_identity import (
-            artifact_identity_payload,
+            artifact_detection_identity_payload,
             assert_supplied_id_matches,
             deterministic_id,
         )
 
-        identity = artifact_identity_payload(
+        identity = artifact_detection_identity_payload(
             artifact_detection_params_name=key[master_field],
             recording_id=key.get("recording_id"),
             shared_artifact_group_name=key.get("shared_artifact_group_name"),
         )
-        artifact_id = deterministic_id("artifact", identity)
+        artifact_detection_id = deterministic_id(
+            "artifact_detection", identity
+        )
         assert_supplied_id_matches(
-            key.get("artifact_id"), artifact_id, field="artifact_id"
+            key.get("artifact_detection_id"),
+            artifact_detection_id,
+            field="artifact_detection_id",
         )
 
         existing = cls._find_existing_pk(
-            master_restriction, source_part, source_restriction, artifact_id
+            master_restriction, source_part, source_restriction, artifact_detection_id
         )
         if existing is not None:
             return existing
@@ -579,12 +574,18 @@ class ArtifactSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         _ensure_lookup_row_exists(
             ArtifactDetectionParameters,
             master_restriction,
-            helper_name="ArtifactSelection.insert_selection",
+            helper_name="ArtifactDetectionSelection.insert_selection",
             insert_default_path="ArtifactDetectionParameters.insert_default()",
         )
 
-        new_master_key = {**master_restriction, "artifact_id": artifact_id}
-        new_part_key = {"artifact_id": artifact_id, **source_restriction}
+        new_master_key = {
+            **master_restriction,
+            "artifact_detection_id": artifact_detection_id,
+        }
+        new_part_key = {
+            "artifact_detection_id": artifact_detection_id,
+            **source_restriction,
+        }
         try:
             with transaction_or_noop(cls.connection):
                 # allow_direct_insert: this helper IS the validation boundary.
@@ -593,16 +594,16 @@ class ArtifactSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         except Exception as exc:  # noqa: BLE001 -- re-raised unless dup-PK
             if not _is_duplicate_key_error(exc):
                 raise
-            # Lost a concurrent race on the same deterministic artifact_id;
+            # Lost a concurrent race on the same deterministic artifact_detection_id;
             # refetch and return the winner's master+source row.
             # (Top-level recovery only -- see transaction_or_noop.)
             logger.debug(
-                "ArtifactSelection.insert_selection: lost deterministic-id "
+                "ArtifactDetectionSelection.insert_selection: lost deterministic-id "
                 "race on %s; returning the existing row.",
-                artifact_id,
+                artifact_detection_id,
             )
             existing = cls._find_existing_pk(
-                master_restriction, source_part, source_restriction, artifact_id
+                master_restriction, source_part, source_restriction, artifact_detection_id
             )
             if existing is not None:
                 return existing
@@ -611,7 +612,7 @@ class ArtifactSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             # raw-insert orphan. Surface a clear schema-bypass error
             # instead of the opaque duplicate-key error.
             raise SchemaBypassError(
-                f"ArtifactSelection master {artifact_id} exists but has no "
+                f"ArtifactDetectionSelection master {artifact_detection_id} exists but has no "
                 f"matching {source_part.__name__} row for "
                 f"{source_restriction}: the master was inserted without "
                 "insert_selection (raw-insert orphan). Use insert_selection() "
@@ -635,8 +636,8 @@ class ArtifactSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         primary key:
 
         * the master at ``deterministic_id`` is the canonical, content-
-          addressed selection -> return ``{"artifact_id": ...}``;
-        * ANY master with a different ``artifact_id`` is non-deterministic
+          addressed selection -> return ``{"artifact_detection_id": ...}``;
+        * ANY master with a different ``artifact_detection_id`` is non-deterministic
           (a raw ``insert`` bypass or pre-determinism legacy row) and
           violates the content-addressed-identity invariant -> raise
           ``DuplicateSelectionError`` so it is reset rather than silently
@@ -651,19 +652,22 @@ class ArtifactSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
 
         joined = (cls * source_part) & master_restriction & source_restriction
         master_ids = {
-            row["artifact_id"] for row in joined.fetch("KEY", as_dict=True)
+            row["artifact_detection_id"]
+            for row in joined.fetch("KEY", as_dict=True)
         }
         bypassed = [aid for aid in master_ids if aid != deterministic_id]
         if bypassed:
             raise DuplicateSelectionError(
-                f"ArtifactSelection has {len(master_ids)} master rows for "
-                f"{master_restriction | source_restriction} whose artifact_id "
+                f"ArtifactDetectionSelection has {len(master_ids)} master rows for "
+                f"{master_restriction | source_restriction} whose artifact_detection_id "
                 f"is not the deterministic id {deterministic_id}: {bypassed}. "
                 "This is a non-deterministic selection row (a raw insert or "
                 "pre-determinism legacy row); drop it and re-insert via "
                 "insert_selection."
             )
-        return {"artifact_id": deterministic_id} if master_ids else None
+        return (
+            {"artifact_detection_id": deterministic_id} if master_ids else None
+        )
 
     @classmethod
     def prune_orphaned_selections(cls, dry_run: bool = True) -> list[dict]:
@@ -688,12 +692,12 @@ class ArtifactSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         Returns
         -------
         list of dict
-            Orphan master PKs (``{"artifact_id": ...}``). Empty when
+            Orphan master PKs (``{"artifact_detection_id": ...}``). Empty when
             no orphans remain.
         """
         orphans = find_orphaned_masters(
             cls,
-            [cls.RecordingSource, cls.SharedArtifactGroupSource],
+            [cls.RecordingSource, cls.SharedGroupSource],
         )
         if dry_run or not orphans:
             return orphans
@@ -719,15 +723,15 @@ class ArtifactSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
 
         master_key = {k: v for k, v in key.items() if k in cls.primary_key}
         rec_rows = (cls.RecordingSource & master_key).fetch(as_dict=True)
-        shared_rows = (cls.SharedArtifactGroupSource & master_key).fetch(
+        shared_rows = (cls.SharedGroupSource & master_key).fetch(
             as_dict=True
         )
         total = len(rec_rows) + len(shared_rows)
         if total != 1:
             raise SchemaBypassError(
-                f"ArtifactSelection {master_key} has {total} source part "
+                f"ArtifactDetectionSelection {master_key} has {total} source part "
                 "rows; expected exactly one. Use "
-                "ArtifactSelection.insert_selection() to add or remove "
+                "ArtifactDetectionSelection.insert_selection() to add or remove "
                 "this selection."
             )
         if rec_rows:
@@ -750,14 +754,14 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
     """Artifact-removed valid times for a Recording or SharedArtifactGroup.
 
     The valid times are written to ``common.IntervalList`` under name
-    ``f"artifact_{artifact_id}"`` at the end of ``make()`` -- one row per
+    ``f"artifact_detection_{artifact_detection_id}"`` at the end of ``make()`` -- one row per
     affected session. Single-recording detections write exactly one row;
     cross-recording detections write one row per distinct member
     ``nwb_file_name``.
     """
 
     definition = """
-    -> ArtifactSelection
+    -> ArtifactDetectionSelection
     """
 
     # Tri-part dispatch enables non-daemon parallel populate via
@@ -782,10 +786,10 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         """
         from spyglass.spikesorting.v2.recording import RecordingSelection
 
-        source = ArtifactSelection.resolve_source(key)
+        source = ArtifactDetectionSelection.resolve_source(key)
 
         params_blob, artifact_job_kwargs = (
-            ArtifactDetectionParameters * (ArtifactSelection & key)
+            ArtifactDetectionParameters * (ArtifactDetectionSelection & key)
         ).fetch1("params", "job_kwargs")
         validated = ArtifactDetectionParamsSchema.model_validate(params_blob)
 
@@ -894,7 +898,7 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
                 recording,
                 validated,
                 context=(
-                    f" for artifact_id={key['artifact_id']}, "
+                    f" for artifact_detection_id={key['artifact_detection_id']}, "
                     f"recording_id={source.key['recording_id']}"
                 ),
                 job_kwargs=resolved_job_kwargs,
@@ -929,7 +933,7 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
             unioned,
             validated,
             context=(
-                f" for artifact_id={key['artifact_id']}, "
+                f" for artifact_detection_id={key['artifact_detection_id']}, "
                 f"shared_artifact_group="
                 f"{source.key['shared_artifact_group_name']}"
             ),
@@ -1035,7 +1039,7 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         ----------
         key : dict
             Restriction selecting a single ``ArtifactDetection`` row;
-            must include ``artifact_id``.
+            must include ``artifact_detection_id``.
         as_dict : bool, optional
             If ``False`` (default), the return type depends on the
             source: a plain ``(n_intervals, 2)`` ndarray for a

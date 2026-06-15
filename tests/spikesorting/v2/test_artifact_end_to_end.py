@@ -158,7 +158,7 @@ def test_detected_artifact_is_masked_out_of_the_sorted_recording(
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetection,
         ArtifactDetectionParameters,
-        ArtifactSelection,
+        ArtifactDetectionSelection,
     )
     from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.sorting import (
@@ -200,18 +200,18 @@ def test_detected_artifact_is_masked_out_of_the_sorted_recording(
     )
     SorterParameters.insert_default()
 
-    art_pk = ArtifactSelection.insert_selection(
+    art_pk = ArtifactDetectionSelection.insert_selection(
         {"recording_id": recording_id, "artifact_detection_params_name": params_name}
     )
     ArtifactDetection.populate(art_pk, reserve_jobs=False)
 
     # ---- Assertion (a): the persisted valid_times exclude the transient ----
-    artifact_id = art_pk["artifact_id"]
+    artifact_detection_id = art_pk["artifact_detection_id"]
     valid_times = (
         IntervalList
         & {
             "nwb_file_name": nwb_file_name,
-            "interval_list_name": f"artifact_{artifact_id}",
+            "interval_list_name": f"artifact_detection_{artifact_detection_id}",
         }
     ).fetch1("valid_times")
     assert valid_times.shape == (2, 2), (
@@ -230,7 +230,7 @@ def test_detected_artifact_is_masked_out_of_the_sorted_recording(
             "recording_id": recording_id,
             "sorter": "mountainsort5",
             "sorter_params_name": "franklab_tetrode_hippocampus_30kHz_ms5",
-            "artifact_id": artifact_id,
+            "artifact_detection_id": artifact_detection_id,
         }
     )
     (Sorting & sort_pk).super_delete(warn=False)
@@ -372,7 +372,7 @@ def test_artifact_masking_preserves_clean_gt_spikes(
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetection,
         ArtifactDetectionParameters,
-        ArtifactSelection,
+        ArtifactDetectionSelection,
     )
     from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.sorting import Sorting
@@ -440,7 +440,7 @@ def test_artifact_masking_preserves_clean_gt_spikes(
         },
         skip_duplicates=True,
     )
-    art_pk = ArtifactSelection.insert_selection(
+    art_pk = ArtifactDetectionSelection.insert_selection(
         {"recording_id": recording_id, "artifact_detection_params_name": params_name}
     )
     ArtifactDetection.populate(art_pk, reserve_jobs=False)
@@ -449,7 +449,7 @@ def test_artifact_masking_preserves_clean_gt_spikes(
         IntervalList
         & {
             "nwb_file_name": nwb_file_name,
-            "interval_list_name": f"artifact_{art_pk['artifact_id']}",
+            "interval_list_name": f"artifact_detection_{art_pk['artifact_detection_id']}",
         }
     ).fetch1("valid_times")
     # Detection fired on every injected window: each window's center time is

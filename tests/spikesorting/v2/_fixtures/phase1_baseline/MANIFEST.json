@@ -1,5 +1,5 @@
 {
-  "artifact_id": "b197c88b-7eae-41d6-93c2-edf933c00ea7",
+  "artifact_detection_id": "b197c88b-7eae-41d6-93c2-edf933c00ea7",
   "curation_id": 0,
   "fixture_filename": "mearec_polymer_128ch_60s.nwb",
   "interval_list_name": "raw data valid times",
@@ -8,7 +8,7 @@
   "n_units": 1,
   "numpy": "2.4.6",
   "nwb_file_name": "mearec_polymer_128ch_60s_.nwb",
-  "preset": "franklab_tetrode_clusterless_thresholder",
+  "pipeline_preset": "franklab_tetrode_clusterless_thresholder",
   "pynwb": "3.1.3",
   "python": "3.11.15",
   "recording_id": "385db412-2c46-47a2-94bd-34e5f313542d",

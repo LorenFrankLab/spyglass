@@ -225,10 +225,10 @@ def write_sorting_units_nwb(
 
     timestamps = recording.get_times()
     if obs_intervals is None:
-        # ``obs_intervals is None`` is the "no artifact pass" case:
-        # the artifact pass is optional (an ArtifactSource part is
-        # zero-or-one; no part / artifact_id=None means no masking),
-        # so there is no artifact-removed IntervalList to read. The
+        # ``obs_intervals is None`` is the "no artifact-detection pass" case:
+        # the artifact-detection pass is optional (an ArtifactDetectionSource
+        # part is zero-or-one; no part / artifact_detection_id=None means no
+        # masking), so there is no artifact-removed IntervalList to read. The
         # recorded window(s) ARE the correct obs_intervals then -- the
         # sort observed every recorded sample. Split at wall-clock
         # discontinuities so a DISJOINT recording reports one interval

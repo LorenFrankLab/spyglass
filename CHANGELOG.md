@@ -62,14 +62,14 @@ Intan probes (0.195 µV/count) this meant v1's documented default of
 v1's 3000 was effectively ~7020 µV. v2 correctly scales traces by
 channel gain before comparison.
 
-The v2 default of `amplitude_thresh_uV = 500.0` matches v1's effective
+The v2 default of `amplitude_threshold_uv = 500.0` matches v1's effective
 Intan-probe behavior within ~15%. v1 users with custom thresholds
 should translate `v2_threshold_uV = v1_value * probe_gain_uV_per_count`
 to get the v2-equivalent uV value (e.g., on Intan at 0.195 µV/count,
 v1's nominal 3000 was effectively `3000 * 0.195 ≈ 585 µV` in v2 units).
 The Spyglass convention is `recording.get_channel_gains()` in µV/count,
 so no further unit conversion is needed. v2 also reverts
-`proportion_above_thresh` to v1's default of `1.0` ("all channels must
+`proportion_above_threshold` to v1's default of `1.0` ("all channels must
 exceed"); an earlier v2 development pass had silently shipped 0.5 without
 justification.
 
@@ -145,7 +145,7 @@ now defaults to `sources=["v0", "v1", "v2"]` so v2 users copying
 v1 notebooks see v2 merge_ids without explicit `sources=` arg;
 unknown restriction keys raise `ValueError` instead of silently
 dropping; `restrict_by_artifact=True` now honors the v2
-`f"artifact_{artifact_id}"` IntervalList convention.
+`f"artifact_detection_{artifact_detection_id}"` IntervalList convention.
 
 **Migration notes for v1 users porting workflows to v2:**
 
@@ -165,9 +165,10 @@ dropping; `restrict_by_artifact=True` now honors the v2
   porting custom parameter rows must re-shape them under v2's
   schema.
 - **Artifact `IntervalList` naming convention changed** from v1's
-  raw-UUID `interval_list_name` to v2's `f"artifact_{artifact_id}"`.
+  raw-UUID `interval_list_name` to v2's
+  `f"artifact_detection_{artifact_detection_id}"`.
   Notebook code that fetched IntervalList rows by raw UUID must
-  prepend `"artifact_"`. The `restrict_by_artifact=True` path on
+  prepend `"artifact_detection_"`. The `restrict_by_artifact=True` path on
   `SpikeSortingOutput.get_restricted_merge_ids` accepts either
   shape.
 - **`_consolidate_intervals` off-by-one fix.** v1's helper used
@@ -260,7 +261,7 @@ dropping; `restrict_by_artifact=True` now honors the v2
   The v2 design required this; a code-review
   followup activated it. `SharedArtifactGroup.insert_group(name,
   members)` validates session consistency + Recording existence;
-  `ArtifactDetection.populate(...)` on a `SharedArtifactGroupSource`
+  `ArtifactDetection.populate(...)` on a `SharedGroupSource`
   loads each member's preprocessed recording, unions their
   channels via `si.aggregate_channels`, runs the threshold scan
   ONCE over the union, and writes one `IntervalList` row per
@@ -400,8 +401,8 @@ cross-referenced here, not duplicated.
   valid_times = np.asarray([[row["saved_start"], row["saved_end"]]])
   ```
 - Artifact `IntervalList.interval_list_name` is now prefixed
-  `artifact_{uuid}` (was a bare `str(uuid)`); use
-  `parse_artifact_interval_list_name` for backward-compatible lookup
+  `artifact_detection_{uuid}` (was a bare `str(uuid)`); use
+  `parse_artifact_detection_interval_list_name` for backward-compatible lookup
   ([utils.py:576-611](./src/spyglass/spikesorting/v2/utils.py#L576-L611)).
 - `Sorting.time_of_sort` is a native `datetime`, not Unix int seconds
   ([sorting.py:684](./src/spyglass/spikesorting/v2/sorting.py#L684)).
@@ -475,7 +476,7 @@ cross-referenced here, not duplicated.
 
 **Default thresholds**
 
-- Artifact detection ships `amplitude_thresh_uV=500` (was `3000` in v1)
+- Artifact detection ships `amplitude_threshold_uv=500` (was `3000` in v1)
   ([_params/artifact_detection.py:61](./src/spyglass/spikesorting/v2/_params/artifact_detection.py#L61));
   see the artifact-detection unit-conversion subsection above for the
   full rationale.
@@ -500,7 +501,7 @@ cross-referenced here, not duplicated.
 **Tags**
 
 - Artifact `IntervalList.pipeline` tag `spikesorting_artifact_v1` →
-  `spikesorting_artifact_v2`
+  `spikesorting_artifact_detection_v2`
   ([artifact.py:918](./src/spyglass/spikesorting/v2/artifact.py#L918)).
 
 **Production-scale (chunking, version pin, disk-leak audit)**
@@ -808,7 +809,7 @@ for label, interval_data in results.groupby("interval_labels"):
         SpikeInterface 0.104's `SortingAnalyzer` API: `SortGroupV2`,
         `PreprocessingParameters` / `RecordingSelection` / `Recording`,
         `ArtifactDetectionParameters` / `SharedArtifactGroup` /
-        `ArtifactSelection` / `ArtifactDetection`, `SorterParameters` /
+        `ArtifactDetectionSelection` / `ArtifactDetection`, `SorterParameters` /
         `SortingSelection` / `Sorting`, and `CurationV2`. Adds a
         `SpikeSortingOutput.CurationV2` part so v0, v1, imported, and v2
         curations coexist on one merge surface (downstream consumers --
@@ -926,10 +927,11 @@ for label, interval_data in results.groupby("interval_labels"):
         `torch`, so the `spikesorting-v2` extra now installs it (a modern
         standalone torch coexists with the v2 numpy >= 2 baseline — it does not
         downgrade numpy).
-    - Add `describe_presets()` to `spyglass.spikesorting.v2.pipeline`, a
-        companion to `list_presets()` that returns a `pandas.DataFrame`
-        describing each shipped preset (sorter, parameter rows, intended use,
-        and detection-threshold units — "MAD multiplier" for the MountainSort
+    - Add `describe_pipeline_presets()` to
+        `spyglass.spikesorting.v2.pipeline`, a companion to
+        `list_pipeline_presets()` that returns a `pandas.DataFrame` describing
+        each shipped pipeline preset (sorter, parameter rows, intended use,
+        and detection-threshold units -- "MAD multiplier" for the MountainSort
         presets, "µV" for the clusterless thresholder, a known footgun). Pure
         and database-free; `pandas` is imported lazily.
     - Add `describe_sort_groups(nwb_file_name)` to
@@ -958,7 +960,7 @@ for label, interval_data in results.groupby("interval_labels"):
         `_selection_identity`) and the same `installed_sorters()` sorter gate
         the populate path uses, so its checks cannot drift from the real run.
     - Make the `run_v2_pipeline` manifest observable: each call now adds
-        per-stage `recording_status` / `artifact_status` / `sorting_status` /
+        per-stage `recording_status` / `artifact_detection_status` / `sorting_status` /
         `curation_status` (`"computed"` vs `"reused"`), a `stage_seconds` dict
         of monotonic wall-clock per stage **this call** (≈0 on an idempotent
         re-run, not cumulative compute), and a `warnings` list (e.g. the

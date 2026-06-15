@@ -25,7 +25,7 @@ SortGroupV2
 RecordingSelection --> Recording          (bandpass + common reference)
                           |
                           v
-                       ArtifactSelection --> ArtifactDetection
+                       ArtifactDetectionSelection --> ArtifactDetection
                                                   |
                                                   v
                                               SortingSelection --> Sorting
@@ -63,8 +63,8 @@ curations all coexist under one merge surface.
     flagged. It is **never applied** to the traces or the sort -- drift
     correction stays deferred to the sorter. See
     [Drift QC](#drift-qc-motion-estimate-never-applied) below.
-- **`ArtifactSelection` / `ArtifactDetection`** -- amplitude-threshold artifact
-    intervals. Uses the source-part pattern (`SharedArtifactGroupSource`) so
+- **`ArtifactDetectionSelection` / `ArtifactDetection`** -- amplitude-threshold artifact
+    intervals. Uses the source-part pattern (`SharedGroupSource`) so
     multiple recordings can share a single artifact-detection result.
 - **`SortingSelection` / `Sorting`** -- runs the configured sorter through
     SpikeInterface. Dispatches `clusterless_thresholder` (peak detection
@@ -79,7 +79,8 @@ curations all coexist under one merge surface.
 ### Pipeline orchestrator
 
 `spyglass.spikesorting.v2.pipeline.run_v2_pipeline` chains the per-stage
-`insert_selection` + `populate` calls into one call. Three presets ship today:
+`insert_selection` + `populate` calls into one call. Three pipeline presets ship
+today:
 
 - `franklab_tetrode_mountainsort4`
 - `franklab_tetrode_mountainsort5` (default)
@@ -119,6 +120,7 @@ Each step is detailed below.
 from spyglass.common.common_lab import LabTeam
 from spyglass.spikesorting.v2 import initialize_v2_defaults
 from spyglass.spikesorting.v2.pipeline import (
+    describe_pipeline_presets,
     describe_sort_groups,
     plot_sort_group_geometry,
     preflight_v2_pipeline,
@@ -144,27 +146,30 @@ sort_group_id = int(sort_groups.iloc[0]["sort_group_id"])
 plot_sort_group_geometry(nwb_file_name)
 sort_groups
 
+describe_pipeline_presets()
+
 # End-to-end populate + register on the merge table.
 manifest = run_v2_pipeline(
     nwb_file_name=nwb_file_name,
     sort_group_id=sort_group_id,
     interval_list_name="raw data valid times",
     team_name="my_team",
-    preset="franklab_tetrode_mountainsort5",
+    pipeline_preset="franklab_tetrode_mountainsort5",
 )
 merge_id = manifest["merge_id"]  # key off this downstream
 ```
 
-Besides the stable keys (`preset` / `recording_id` / `artifact_id` /
-`sorting_id` / `curation_id` / `merge_id` / `n_units`), the manifest carries
-per-stage
-observability: `recording_status` / `artifact_status` / `sorting_status` /
+Besides the stable keys (`pipeline_preset` / `recording_id` /
+`artifact_detection_id` / `sorting_id` / `curation_id` / `merge_id` /
+`n_units`), the manifest carries per-stage observability:
+`recording_status` / `artifact_detection_status` / `sorting_status` /
 `curation_status` (`"computed"` if the stage did work this call, `"reused"` if
 its row already existed), a `stage_seconds` dict of wall-clock per stage **this
-call** (≈0 on an idempotent re-run, not cumulative compute), and a `warnings`
-list (e.g. a zero-unit advisory). A failed stage raises `PipelineStageError`,
-which names the stage and carries the partial manifest of the stages that
-completed before it.
+call** (keys `recording` / `artifact_detection` / `sorting` / `curation`; ≈0
+on an idempotent re-run, not cumulative compute), and a `warnings` list (e.g.
+a zero-unit advisory). A failed stage raises `PipelineStageError`, which names
+the stage and carries the partial manifest of the stages that completed before
+it.
 
 ### Choosing a sort group
 
@@ -188,22 +193,22 @@ per probe, annotated with the `probe_id`), since `Probe.Electrode` coordinates
 are per-probe. For real analyses, choose `sort_group_id` intentionally from this
 table and plot rather than assuming `0` is the scientifically relevant shank.
 
-Available presets:
+Available pipeline presets:
 
 - `franklab_tetrode_mountainsort4` -- legacy MountainSort4 (parity with v1)
 - `franklab_tetrode_mountainsort5` -- **recommended**, current MS5 defaults
 - `franklab_tetrode_clusterless_thresholder` -- peak-detection only (no
     clustering), feeds the clusterless decoding pipeline
 
-`list_presets()` returns the same names at runtime; `describe_presets()`
-returns a table of what each preset does (sorter, parameter rows, intended
-use, and detection-threshold units) so you can choose one without reading the
-module source:
+`list_pipeline_presets()` returns the same names at runtime;
+`describe_pipeline_presets()` returns a table of what each pipeline preset does
+(sorter, parameter rows, intended use, and detection-threshold units) so you
+can choose one without reading the module source:
 
 ```python
-from spyglass.spikesorting.v2.pipeline import describe_presets
+from spyglass.spikesorting.v2.pipeline import describe_pipeline_presets
 
-describe_presets()  # one row per preset
+describe_pipeline_presets()  # one row per pipeline preset
 ```
 
 ### Debugging cookbook
@@ -217,7 +222,7 @@ describe_presets()  # one row per preset
       sort_group_id=sort_group_id,
       interval_list_name="raw data valid times",
       team_name="my_team",
-      preset="franklab_tetrode_mountainsort5",
+      pipeline_preset="franklab_tetrode_mountainsort5",
   )
   for check in report.checks:
       print(check.name, check.ok, check.fix)
@@ -239,7 +244,7 @@ describe_presets()  # one row per preset
 
 - **The sorter binary is missing.** `preflight_v2_pipeline` checks
   `spikeinterface.sorters.installed_sorters()` and tells you whether to install
-  the sorter runtime or pick another preset.
+  the sorter runtime or pick another pipeline preset.
 - **The chosen sort group looks suspicious.** Re-run
   `describe_sort_groups(nwb_file_name)` and verify the electrode count, shank,
   brain region, and reference fields. Recreate groups only after reviewing
@@ -248,8 +253,8 @@ describe_presets()  # one row per preset
   empty-but-real curation and `merge_id`; this is valid for quiet shanks. Pass
   `require_units=True` only when zero units should abort the run.
 - **The output is unexpectedly sparse.** Check `manifest["warnings"]`, the
-  chosen preset's threshold units in `describe_presets()`, and whether artifact
-  masking removed the interval you expected to sort.
+  chosen pipeline preset's threshold units in `describe_pipeline_presets()`,
+  and whether artifact masking removed the interval you expected to sort.
 
 ### Curation: quick path vs expert path
 
@@ -286,17 +291,17 @@ control); they pre-fill `parent_curation_id` / `apply_merge` by name.
 `summarize_curation` returns a plain dict (`n_units`, `labels`, `merge_groups`,
 `merges_applied`, `is_merge_preview`, `merge_id`, ...) for notebook printing.
 
-### Stage-by-stage (custom preset)
+### Stage-by-stage (custom pipeline preset)
 
 `run_v2_pipeline` is a convenience wrapper. The underlying stages can be
-driven directly when a preset does not apply:
+driven directly when a built-in pipeline preset does not apply:
 
 ```python
 from spyglass.spikesorting.v2.recording import (
     Recording, RecordingSelection,
 )
 from spyglass.spikesorting.v2.artifact import (
-    ArtifactDetection, ArtifactSelection,
+    ArtifactDetection, ArtifactDetectionSelection,
 )
 from spyglass.spikesorting.v2.sorting import (
     Sorting, SortingSelection,
@@ -314,17 +319,17 @@ recording_key = RecordingSelection.insert_selection({
 })
 Recording.populate(recording_key)
 
-artifact_key = ArtifactSelection.insert_selection({
+artifact_detection_key = ArtifactDetectionSelection.insert_selection({
     "recording_id": recording_key["recording_id"],
     "artifact_detection_params_name": "default",
 })
-ArtifactDetection.populate(artifact_key)
+ArtifactDetection.populate(artifact_detection_key)
 
 sorting_key = SortingSelection.insert_selection({
     "recording_id": recording_key["recording_id"],
     "sorter": "mountainsort5",
     "sorter_params_name": "franklab_tetrode_hippocampus_30kHz_ms5",
-    "artifact_id": artifact_key["artifact_id"],
+    "artifact_detection_id": artifact_detection_key["artifact_detection_id"],
 })
 Sorting.populate(sorting_key)
 

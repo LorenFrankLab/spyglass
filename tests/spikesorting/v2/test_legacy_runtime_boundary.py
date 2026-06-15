@@ -202,7 +202,7 @@ def test_default_merge_sources_skip_v2_when_unavailable(dj_conn, monkeypatch):
 
 def test_v2_artifact_restriction_warns_when_unresolved(dj_conn, monkeypatch):
     """``restrict_by_artifact=True`` with a non-artifact interval name and
-    no ``artifact_id`` warns that v2 results are NOT artifact-restricted,
+    no ``artifact_detection_id`` warns that v2 results are NOT artifact-restricted,
     instead of silently returning unrestricted merge ids.
     """
     from spyglass.spikesorting import spikesorting_merge as m

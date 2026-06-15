@@ -115,7 +115,7 @@ def test_phase1_baseline_manifest_records_fixture_provenance(
         "numpy",
         "pynwb",
         "python",
-        "preset",
+        "pipeline_preset",
         "recording_id",
         "sorting_id",
         "curation_id",

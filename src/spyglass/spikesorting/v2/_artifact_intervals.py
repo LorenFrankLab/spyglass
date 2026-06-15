@@ -27,7 +27,7 @@ are imported lazily inside the functions. The persistence functions
 (``read_artifact_removed_intervals``, ``collect_artifact_interval_rows_to_remove``,
 ``remove_artifact_interval_rows``) DO touch the DB at call time -- they
 lazy-import ``common.IntervalList``, the v2 ``recording`` tables, and
-``ArtifactSelection`` / ``SharedArtifactGroup`` back from ``artifact``
+``ArtifactDetectionSelection`` / ``SharedArtifactGroup`` back from ``artifact``
 (a backward import that is cycle-free because ``artifact`` is fully
 imported by call time). The pure-compute kernels live in
 ``_artifact_compute``; ``scan_artifact_frames`` drives them through
@@ -131,7 +131,7 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
     ``job_kwargs`` is the merged per-row / config / global SI job-kwargs
     blob; the caller resolves it via ``_resolved_job_kwargs`` and passes it
     through to the executor. ``context`` is an optional caller-supplied
-    string (e.g. ``" for artifact_id=... recording_id=..."``) appended to
+    string (e.g. ``" for artifact_detection_id=... recording_id=..."``) appended to
     the zero-frames warning so an operator can identify which selection
     scanned empty.
     """
@@ -321,13 +321,16 @@ def build_artifact_interval_rows(
     affected session sees the artifact times. For the single-recording
     path this is one row keyed by the master's ``nwb_file_name``. Every
     row carries the same ``valid_times`` (the detection ran once over the
-    -- possibly unioned -- channels) and the ``spikesorting_artifact_v2``
+    -- possibly unioned -- channels) and the
+    ``spikesorting_artifact_detection_v2``
     pipeline tag. The interval name is centralized in
-    ``artifact_interval_list_name``.
+    ``artifact_detection_interval_list_name``.
     """
-    from spyglass.spikesorting.v2.utils import artifact_interval_list_name
+    from spyglass.spikesorting.v2.utils import artifact_detection_interval_list_name
 
-    interval_list_name = artifact_interval_list_name(key["artifact_id"])
+    interval_list_name = artifact_detection_interval_list_name(
+        key["artifact_detection_id"]
+    )
     # Backwards compat: callers that constructed
     # ``ArtifactComputed`` without ``per_member_nwb_files``
     # (older test stubs) fall back to the single
@@ -338,7 +341,7 @@ def build_artifact_interval_rows(
             "nwb_file_name": member_nwb,
             "interval_list_name": interval_list_name,
             "valid_times": valid_times,
-            "pipeline": "spikesorting_artifact_v2",
+            "pipeline": "spikesorting_artifact_detection_v2",
         }
         for member_nwb in targets
     ]
@@ -365,7 +368,7 @@ def read_artifact_removed_intervals(key, as_dict=False):
     ----------
     key : dict
         Restriction selecting a single ``ArtifactDetection`` row;
-        must include ``artifact_id``.
+        must include ``artifact_detection_id``.
     as_dict : bool, optional
         If ``False`` (default), the return type depends on the
         source: a plain ``(n_intervals, 2)`` ndarray for a
@@ -386,24 +389,26 @@ def read_artifact_removed_intervals(key, as_dict=False):
     """
     from spyglass.common import IntervalList
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactSelection,
+        ArtifactDetectionSelection,
         SharedArtifactGroup,
     )
     from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.utils import (
-        artifact_interval_list_name,
+        artifact_detection_interval_list_name,
     )
 
     # Validate the key BEFORE resolving the source so a missing
-    # ``artifact_id`` surfaces this clear ValueError rather than a
+    # ``artifact_detection_id`` surfaces this clear ValueError rather than a
     # source-resolution / SchemaBypassError from ``resolve_source``.
-    if "artifact_id" not in key:
+    if "artifact_detection_id" not in key:
         raise ValueError(
             "ArtifactDetection.get_artifact_removed_intervals: key "
-            "must include 'artifact_id'."
+            "must include 'artifact_detection_id'."
         )
-    source = ArtifactSelection.resolve_source(key)
-    interval_list_name = artifact_interval_list_name(key["artifact_id"])
+    source = ArtifactDetectionSelection.resolve_source(key)
+    interval_list_name = artifact_detection_interval_list_name(
+        key["artifact_detection_id"]
+    )
 
     if source.kind == "recording":
         nwb_file_name = (
@@ -482,20 +487,20 @@ def collect_artifact_interval_rows_to_remove(rows):
     propagates.
     """
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactSelection,
+        ArtifactDetectionSelection,
         SharedArtifactGroup,
     )
     from spyglass.spikesorting.v2.exceptions import SchemaBypassError
     from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.utils import (
-        artifact_interval_list_name,
+        artifact_detection_interval_list_name,
     )
     from spyglass.utils import logger
 
     interval_rows_to_remove = []
     for row in rows:
         try:
-            source = ArtifactSelection.resolve_source(row)
+            source = ArtifactDetectionSelection.resolve_source(row)
         except SchemaBypassError as resolve_exc:
             # A genuinely broken source (zero/multiple source part
             # rows -- the only thing ``resolve_source`` raises) cannot
@@ -507,12 +512,14 @@ def collect_artifact_interval_rows_to_remove(rows):
             # master is removed, so the operator sees the failure.
             logger.error(
                 "ArtifactDetection.delete: resolve_source failed for "
-                f"{ {k: row[k] for k in ('artifact_id',)} }; leaving "
+                f"{ {k: row[k] for k in ('artifact_detection_id',)} }; leaving "
                 f"IntervalList rows in place. Underlying error: "
                 f"{resolve_exc!r}"
             )
             continue
-        interval_list_name = artifact_interval_list_name(row["artifact_id"])
+        interval_list_name = artifact_detection_interval_list_name(
+            row["artifact_detection_id"]
+        )
         if source.kind == "recording":
             nwb_file_name = (
                 RecordingSelection

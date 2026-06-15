@@ -71,13 +71,13 @@ notebook. For the pipeline overview, see
   valid_times = np.asarray([[row["saved_start"], row["saved_end"]]])
   ```
 
-- **Artifact `IntervalList` names are prefixed `artifact_{uuid}`** (v1
-  used a bare UUID string). Use the helper instead of string-munging:
+- **Artifact `IntervalList` names are prefixed `artifact_detection_{uuid}`**
+  (v1 used a bare UUID string). Use the helper instead of string-munging:
 
   ```python
   from spyglass.spikesorting.v2.utils import (
-      artifact_interval_list_name,
-      parse_artifact_interval_list_name,
+      artifact_detection_interval_list_name,
+      parse_artifact_detection_interval_list_name,
   )
   ```
 

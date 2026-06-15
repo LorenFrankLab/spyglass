@@ -1,16 +1,17 @@
 """Tests for ``preflight_v2_pipeline`` and ``run_v2_pipeline(preflight=...)``.
 
 Preflight is a read-only, pre-populate configuration check: it verifies the
-upstream rows + preset param rows exist and the sorter binary is installed,
-returning a structured :class:`PreflightReport` (and ``run_v2_pipeline`` turns
-a failing report into a :class:`PreflightError`) so a misconfigured run fails
-in seconds instead of minutes into ``populate``.
+    upstream rows + pipeline-preset param rows exist and the sorter binary is
+    installed, returning a structured :class:`PreflightReport` (and
+    ``run_v2_pipeline`` turns a failing report into a :class:`PreflightError`)
+    so a misconfigured run fails in seconds instead of minutes into
+    ``populate``.
 
 Two tiers:
 
-* ``unit`` (DB-free): the deterministic-identity payload extraction is
-  behavior-preserving (frozen to literal UUIDs), and an unknown preset
-  short-circuits before any database access.
+    * ``unit`` (DB-free): the deterministic-identity payload extraction is
+      behavior-preserving (frozen to literal UUIDs), and an unknown
+      pipeline preset short-circuits before any database access.
 * ``database``: the per-check pass/fail behavior, read-only-ness, speed, the
   ``expected_ids`` round-trip, and the ``run_v2_pipeline`` raise/bypass wiring,
   against a cleanly-configured (but not-yet-run) smoke session.
@@ -26,7 +27,7 @@ import datajoint as dj
 import pytest
 
 from spyglass.spikesorting.v2._selection_identity import (
-    artifact_identity_payload,
+    artifact_detection_identity_payload,
     deterministic_id,
     recording_identity_payload,
     sorting_identity_payload,
@@ -59,11 +60,12 @@ _INTERVAL = "raw data valid times"
 def test_identity_payload_extraction_stable():
     """The extracted payload builders reproduce the frozen selection ids.
 
-    The recording/artifact/sorting identity payloads were extracted from the
-    three ``insert_selection`` methods into shared builders so preflight cannot
-    derive a different id than the real run. The builders feed ``uuid.uuid5``,
-    a pure hash, so a fixed logical identity must always map to the same UUID:
-    pinning those UUIDs to literals catches any drift in the extraction.
+    The recording/artifact-detection/sorting identity payloads were extracted
+    from the three ``insert_selection`` methods into shared builders so
+    preflight cannot derive a different id than the real run. The builders
+    feed ``uuid.uuid5``, a pure hash, so a fixed logical identity must always
+    map to the same UUID: pinning those UUIDs to literals catches any drift in
+    the extraction.
     """
     cfg = {
         "nwb_file_name": "preflight_pin_test_.nwb",
@@ -75,9 +77,9 @@ def test_identity_payload_extraction_stable():
     recording_id = deterministic_id(
         "recording", recording_identity_payload(cfg)
     )
-    artifact_id = deterministic_id(
-        "artifact",
-        artifact_identity_payload(
+    artifact_detection_id = deterministic_id(
+        "artifact_detection",
+        artifact_detection_identity_payload(
             artifact_detection_params_name="default", recording_id=recording_id
         ),
     )
@@ -87,40 +89,40 @@ def test_identity_payload_extraction_stable():
             recording_id=recording_id,
             sorter="mountainsort5",
             sorter_params_name="franklab_tetrode_hippocampus_30kHz_ms5",
-            artifact_id=artifact_id,
+            artifact_detection_id=artifact_detection_id,
         ),
     )
     assert recording_id == uuid.UUID("dc4a5c37-7a80-54fc-b939-b6fbdaa0ec3a")
-    assert artifact_id == uuid.UUID("6e5c1b34-7d87-51d5-b4f0-b94771bb450f")
-    assert sorting_id == uuid.UUID("fd3fb389-24af-5309-bb7f-7627657147dd")
+    assert artifact_detection_id == uuid.UUID("4fcc28ef-8bc9-5510-8b6b-c6466817269e")
+    assert sorting_id == uuid.UUID("94e2ce30-674c-54fd-994e-95ec6207fa33")
 
 
 @pytest.mark.unit
-def test_preflight_unknown_preset(monkeypatch):
-    """A bogus preset fails fast with no database access at all.
+def test_preflight_unknown_pipeline_preset(monkeypatch):
+    """A bogus pipeline preset fails fast with no database access at all.
 
     The param-row / existence checks need the resolved bundle's names, so an
-    unknown preset short-circuits before any query. Patch ``Connection.query``
-    to fail loudly if preflight touches the DB.
+    unknown pipeline preset short-circuits before any query. Patch
+    ``Connection.query`` to fail loudly if preflight touches the DB.
     """
 
     def _boom(*args, **kwargs):
         raise AssertionError(
-            "preflight_v2_pipeline queried the DB on an unknown preset"
+            "preflight_v2_pipeline queried the DB on an unknown pipeline preset"
         )
 
     monkeypatch.setattr(dj.Connection, "query", _boom)
     report = preflight_v2_pipeline(
-        "x.nwb", 0, _INTERVAL, "team", preset="not_a_real_preset"
+        "x.nwb", 0, _INTERVAL, "team", pipeline_preset="not_a_real_preset"
     )
     assert isinstance(report, PreflightReport)
     assert report.ok is False
     assert bool(report) is False
     assert report.expected_ids == {}
-    assert [c.name for c in report.checks] == ["preset_known"]
+    assert [c.name for c in report.checks] == ["pipeline_preset_known"]
     (msg,) = report.errors
     assert "not_a_real_preset" in msg
-    assert "describe_presets()" in msg
+    assert "describe_pipeline_presets()" in msg
 
 
 # ---------------------------------------------------------------------------
@@ -169,7 +171,7 @@ def preflight_inputs(preflight_session):
 
     Ensure-exists and idempotent: seeds the default Lookup rows, the LabTeam,
     and a sort group, but runs no ``populate``. Yields the ``run_v2_pipeline``
-    input dict for the default preset.
+    input dict for the default pipeline preset.
     """
     return _configure_inputs(preflight_session)
 
@@ -227,7 +229,7 @@ def test_preflight_sorter_not_installed(preflight_inputs, monkeypatch):
     """A spelled-valid sorter whose binary is absent fails the install gate.
 
     The internal ``clusterless_thresholder`` is never an SI binary, so its
-    preset still passes the sorter check under the same patch.
+    pipeline preset still passes the sorter check under the same patch.
     """
     import spikeinterface.sorters as sis
 
@@ -246,7 +248,7 @@ def test_preflight_sorter_not_installed(preflight_inputs, monkeypatch):
     clusterless = preflight_v2_pipeline(
         **{
             **preflight_inputs,
-            "preset": "franklab_tetrode_clusterless_thresholder",
+            "pipeline_preset": "franklab_tetrode_clusterless_thresholder",
         }
     )
     (cl_check,) = [
@@ -261,21 +263,21 @@ def test_preflight_sorter_misspelled(preflight_inputs, monkeypatch):
 
     Distinct from the 'known but binary not installed' branch
     (test_preflight_sorter_not_installed): the fix message points at the
-    spelling / preset, not at installing a binary -- so it must NOT mention
-    ``installed_sorters()``.
+    spelling / pipeline preset, not at installing a binary -- so it must NOT
+    mention ``installed_sorters()``.
     """
     from spyglass.spikesorting.v2 import pipeline as pl
 
-    bogus_preset = pl._Preset(
+    bogus_preset = pl._PipelinePreset(
         preprocessing_params_name="default_franklab",
         artifact_detection_params_name="default",
         sorter="not_a_real_sorter_xyz",
         sorter_params_name="default",
     )
-    monkeypatch.setitem(pl._PRESETS, "_preflight_bogus_sorter", bogus_preset)
+    monkeypatch.setitem(pl._PIPELINE_PRESETS, "_preflight_bogus_sorter", bogus_preset)
 
     report = preflight_v2_pipeline(
-        **{**preflight_inputs, "preset": "_preflight_bogus_sorter"}
+        **{**preflight_inputs, "pipeline_preset": "_preflight_bogus_sorter"}
     )
     (check,) = [c for c in report.checks if c.name == "sorter_installed"]
     assert check.ok is False
@@ -289,21 +291,21 @@ def test_preflight_warns_on_none_artifact_params(preflight_inputs, monkeypatch):
 
     The three built-ins use 'default' (real amplitude-threshold detection, no
     warning -- see test_preflight_all_pass); register a temporary 'none'-
-    artifact preset to drive the advisory branch and confirm it does not flip
-    ``ok`` to False.
+    artifact-detection pipeline preset to drive the advisory branch and
+    confirm it does not flip ``ok`` to False.
     """
     from spyglass.spikesorting.v2 import pipeline as pl
 
-    none_preset = pl._Preset(
+    none_preset = pl._PipelinePreset(
         preprocessing_params_name="default_franklab",
         artifact_detection_params_name="none",
         sorter="mountainsort5",
         sorter_params_name="franklab_tetrode_hippocampus_30kHz_ms5",
     )
-    monkeypatch.setitem(pl._PRESETS, "_preflight_none_artifact", none_preset)
+    monkeypatch.setitem(pl._PIPELINE_PRESETS, "_preflight_none_artifact", none_preset)
 
     report = preflight_v2_pipeline(
-        **{**preflight_inputs, "preset": "_preflight_none_artifact"}
+        **{**preflight_inputs, "pipeline_preset": "_preflight_none_artifact"}
     )
     assert report.ok is True
     assert any("artifact" in w and "none" in w for w in report.warnings), (
@@ -317,7 +319,7 @@ def test_preflight_is_read_only(preflight_inputs):
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetectionParameters,
-        ArtifactSelection,
+        ArtifactDetectionSelection,
     )
     from spyglass.spikesorting.v2.recording import (
         PreprocessingParameters,
@@ -331,7 +333,7 @@ def test_preflight_is_read_only(preflight_inputs):
 
     tables = [
         RecordingSelection,
-        ArtifactSelection,
+        ArtifactDetectionSelection,
         SortingSelection,
         PreprocessingParameters,
         ArtifactDetectionParameters,
@@ -386,16 +388,16 @@ def test_preflight_expected_ids_round_trip(preflight_session):
 
     pre = preflight_v2_pipeline(**preflight_inputs)
     assert pre.ok is True
-    for stage in ("recording_id", "artifact_id", "sorting_id"):
+    for stage in ("recording_id", "artifact_detection_id", "sorting_id"):
         assert pre.expected_ids[stage]["exists"] is False
 
     manifest = run_v2_pipeline(**preflight_inputs)
     assert pre.expected_ids["recording_id"]["id"] == manifest["recording_id"]
-    assert pre.expected_ids["artifact_id"]["id"] == manifest["artifact_id"]
+    assert pre.expected_ids["artifact_detection_id"]["id"] == manifest["artifact_detection_id"]
     assert pre.expected_ids["sorting_id"]["id"] == manifest["sorting_id"]
 
     post = preflight_v2_pipeline(**preflight_inputs)
-    for stage in ("recording_id", "artifact_id", "sorting_id"):
+    for stage in ("recording_id", "artifact_detection_id", "sorting_id"):
         assert post.expected_ids[stage]["exists"] is True
 
     _clean_session_v2({"nwb_file_name": preflight_inputs["nwb_file_name"]})

@@ -62,7 +62,7 @@ def polymer_60s_sort(dj_conn):
         nwb_file_name, _TEAM, team_description="curation wrapper tests"
     )
     manifest = run_v2_pipeline(
-        **inputs, preset="franklab_tetrode_mountainsort5"
+        **inputs, pipeline_preset="franklab_tetrode_mountainsort5"
     )
     return {"sorting_id": manifest["sorting_id"]}
 
@@ -262,9 +262,9 @@ def test_summarize_curation_fields(populated_sorting):
     # same summary as the minimal curation key.
     manifest_like = {
         **key,
-        "preset": "irrelevant",
+        "pipeline_preset": "irrelevant",
         "recording_id": "irrelevant",
-        "artifact_id": "irrelevant",
+        "artifact_detection_id": "irrelevant",
         "n_units": 999,
         "merge_id": "irrelevant",
     }

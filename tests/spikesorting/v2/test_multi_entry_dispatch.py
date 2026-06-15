@@ -102,7 +102,7 @@ def _build_sort_on_group(sort_group_id, plant, nwb_file_name):
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetection,
-        ArtifactSelection,
+        ArtifactDetectionSelection,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.recording import Recording, RecordingSelection
@@ -123,7 +123,7 @@ def _build_sort_on_group(sort_group_id, plant, nwb_file_name):
     if not (Recording & rec_pk):
         Recording.populate(rec_pk, reserve_jobs=False)
 
-    art_pk = ArtifactSelection.insert_selection(
+    art_pk = ArtifactDetectionSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],
             "artifact_detection_params_name": "none",
@@ -137,7 +137,7 @@ def _build_sort_on_group(sort_group_id, plant, nwb_file_name):
             "recording_id": rec_pk["recording_id"],
             "sorter": "mountainsort5",
             "sorter_params_name": "franklab_tetrode_hippocampus_30kHz_ms5",
-            "artifact_id": art_pk["artifact_id"],
+            "artifact_detection_id": art_pk["artifact_detection_id"],
         }
     )
     (Sorting & sort_pk).super_delete(warn=False)

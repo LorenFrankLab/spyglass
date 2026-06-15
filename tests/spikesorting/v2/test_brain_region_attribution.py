@@ -242,7 +242,7 @@ def region_60s_sort(dj_conn):
     from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetection,
-        ArtifactSelection,
+        ArtifactDetectionSelection,
     )
     from spyglass.spikesorting.v2.recording import (
         Recording,
@@ -280,7 +280,7 @@ def region_60s_sort(dj_conn):
     )
     if not (Recording & rec_pk):
         Recording.populate(rec_pk, reserve_jobs=False)
-    art_pk = ArtifactSelection.insert_selection(
+    art_pk = ArtifactDetectionSelection.insert_selection(
         {"recording_id": rec_pk["recording_id"], "artifact_detection_params_name": "none"}
     )
     if not (ArtifactDetection & art_pk):
@@ -290,7 +290,7 @@ def region_60s_sort(dj_conn):
             "recording_id": rec_pk["recording_id"],
             "sorter": "mountainsort5",
             "sorter_params_name": "franklab_tetrode_hippocampus_30kHz_ms5",
-            "artifact_id": art_pk["artifact_id"],
+            "artifact_detection_id": art_pk["artifact_detection_id"],
         }
     )
     if not (Sorting & sort_pk):

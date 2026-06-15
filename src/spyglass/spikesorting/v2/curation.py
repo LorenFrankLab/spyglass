@@ -771,9 +771,9 @@ class CurationV2(SpyglassMixin, dj.Manual):
         rows, computing nothing new. Accepts either a minimal curation key
         (``{"sorting_id", "curation_id"}``) or a full ``run_v2_pipeline``
         manifest -- the manifest carries keys that are NOT part of the
-        curation primary key (``preset`` / ``recording_id`` / ``artifact_id``
-        / ``n_units`` / ...), so it is normalized to the ``(sorting_id,
-        curation_id)`` PK before any restriction.
+        curation primary key (``pipeline_preset`` / ``recording_id`` /
+        ``artifact_detection_id`` / ``n_units`` / ...), so it is normalized
+        to the ``(sorting_id, curation_id)`` PK before any restriction.
 
         Parameters
         ----------
@@ -1118,11 +1118,11 @@ class CurationV2(SpyglassMixin, dj.Manual):
 
         Walks the v2 Selection tables and source parts
         (``RecordingSelection`` -> ``SortingSelection.RecordingSource`` ->
-        ``SortingSelection`` -> ``ArtifactSource``) so a cross-table
+        ``SortingSelection`` -> ``ArtifactDetectionSource``) so a cross-table
         restriction over the v2 part-table convention keys --
         ``nwb_file_name``, ``team_name``, ``sort_group_id``,
         ``interval_list_name``, ``preprocessing_params_name``, ``recording_id``,
-        ``artifact_id``, ``sorter``, ``sorter_params_name``, ``sorting_id``,
+        ``artifact_detection_id``, ``sorter``, ``sorter_params_name``, ``sorting_id``,
         ``curation_id`` -- resolves to the ``CurationV2`` rows it selects.
 
         This method is the SINGLE owner of v2's source-part join topology.
@@ -1142,18 +1142,20 @@ class CurationV2(SpyglassMixin, dj.Manual):
         this is not a v2 query.
         ``restrict_by_artifact=True`` honors
         the v2 IntervalList convention where the artifact-removed
-        valid_times row is named ``f"artifact_{artifact_id}"``; callers can
-        supply either the bare artifact id or the artifact-named
-        IntervalList and both resolve. ``artifact_id=None`` means "no
-        artifact pass" (anti-join to sorts with no ``ArtifactSource`` row),
-        NOT "match anything" -- only an absent key is a wildcard.
+        valid_times row is named
+        ``f"artifact_detection_{artifact_detection_id}"``; callers can
+        supply either the bare ``artifact_detection_id`` or the
+        artifact-detection IntervalList and both resolve.
+        ``artifact_detection_id=None`` means "no artifact-detection pass"
+        (anti-join to sorts with no ``ArtifactDetectionSource`` row), NOT
+        "match anything" -- only an absent key is a wildcard.
         """
         import uuid
 
         from spyglass.spikesorting.v2.recording import RecordingSelection
         from spyglass.spikesorting.v2.sorting import SortingSelection
         from spyglass.spikesorting.v2.utils import (
-            parse_artifact_interval_list_name,
+            parse_artifact_detection_interval_list_name,
         )
         from spyglass.utils import logger
 
@@ -1169,7 +1171,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
             "sorter",
             "sorter_params_name",
             "sorting_id",
-            "artifact_id",
+            "artifact_detection_id",
         ]
         curation_keys = ["curation_id"]
         allowed = set(rec_keys) | set(sort_keys) | set(curation_keys)
@@ -1191,69 +1193,71 @@ class CurationV2(SpyglassMixin, dj.Manual):
             )
 
         key = key.copy()
-        # ``restrict_by_artifact`` maps the artifact-named IntervalList
-        # convention (``f"artifact_{artifact_id}"``) back to the
-        # ``artifact_id`` master-side column so the v2 join chain
-        # downstream resolves correctly.
+        # ``restrict_by_artifact`` maps the artifact-detection IntervalList
+        # convention (``f"artifact_detection_{artifact_detection_id}"``) back
+        # to the ``artifact_detection_id`` master-side column so the v2 join
+        # chain downstream resolves correctly.
         if restrict_by_artifact and "interval_list_name" in key:
-            artifact_id = parse_artifact_interval_list_name(
+            artifact_detection_id = parse_artifact_detection_interval_list_name(
                 key["interval_list_name"]
             )
-            if artifact_id is not None:
-                key["artifact_id"] = artifact_id
+            if artifact_detection_id is not None:
+                key["artifact_detection_id"] = artifact_detection_id
                 key.pop("interval_list_name", None)
-            elif "artifact_id" not in key:
+            elif "artifact_detection_id" not in key:
                 # The caller asked to restrict by artifact, but the
-                # interval name is not the ``artifact_{uuid}`` form and no
-                # artifact_id was supplied, so there is nothing to map.
-                # Warn instead of silently returning unrestricted ids.
+                # interval name is not the
+                # ``artifact_detection_{uuid}`` form and no
+                # artifact_detection_id was supplied, so there is nothing to
+                # map. Warn instead of silently returning unrestricted ids.
                 logger.warning(
                     "CurationV2.resolve_restriction: "
                     "restrict_by_artifact=True but interval_list_name "
                     f"{key['interval_list_name']!r} is not an "
-                    "'artifact_{uuid}' interval and no artifact_id was "
-                    "given; v2 results will NOT be artifact-restricted. "
-                    "Pass artifact_id=... or use the artifact-named "
-                    "interval to restrict."
+                    "'artifact_detection_{uuid}' interval and no "
+                    "artifact_detection_id was given; v2 results will NOT be "
+                    "artifact-restricted. Pass artifact_detection_id=... or "
+                    "use the artifact-detection interval to restrict."
                 )
 
-        # ``parse_artifact_interval_list_name`` returns a str and a caller may
-        # pass either a str or a UUID, but ``artifact_id`` is a uuid column.
-        # Normalize to a ``uuid.UUID`` so the ArtifactSource intersection below
+        # ``parse_artifact_detection_interval_list_name`` returns a str and a caller may
+        # pass either a str or a UUID, but ``artifact_detection_id`` is a uuid column.
+        # Normalize to a ``uuid.UUID`` so the ArtifactDetectionSource intersection below
         # is unambiguous and a malformed id fails fast here rather than
         # silently matching nothing.
-        if key.get("artifact_id") is not None:
-            key["artifact_id"] = uuid.UUID(str(key["artifact_id"]))
+        if key.get("artifact_detection_id") is not None:
+            key["artifact_detection_id"] = uuid.UUID(str(key["artifact_detection_id"]))
 
         rec_restriction = {k: key[k] for k in rec_keys if k in key}
         rec_table = RecordingSelection & rec_restriction
 
         sort_rec_source = SortingSelection.RecordingSource * rec_table.proj()
         sort_master = SortingSelection * sort_rec_source.proj()
-        # ``artifact_id`` lives on the optional ``SortingSelection.
-        # ArtifactSource`` part, NOT on ``SortingSelection`` -- it is absent
+        # ``artifact_detection_id`` lives on the optional ``SortingSelection.
+        # ArtifactDetectionSource`` part, NOT on ``SortingSelection`` -- it is absent
         # from ``sort_master``'s heading, so a dict restriction with it is
         # silently dropped (verified: the compiled SQL is identical with and
         # without the key). Apply the non-artifact sort keys directly, then
-        # resolve ``artifact_id`` through the part. In the v2 design the
-        # presence/absence of an ``ArtifactSource`` row IS the artifact state,
-        # so ``artifact_id=None`` means "no artifact pass" (anti-join to sorts
-        # with no part row), NOT "match anything" -- only an absent key is a
-        # wildcard.
+        # resolve ``artifact_detection_id`` through the part. In the v2 design
+        # the presence/absence of an ``ArtifactDetectionSource`` row IS the
+        # artifact-detection state, so ``artifact_detection_id=None`` means
+        # "no artifact-detection pass" (anti-join to sorts with no part row),
+        # NOT "match anything" -- only an absent key is a wildcard.
         sort_restriction = {
-            k: key[k] for k in sort_keys if k in key and k != "artifact_id"
+            k: key[k] for k in sort_keys if k in key and k != "artifact_detection_id"
         }
         sort_master = sort_master & sort_restriction
-        if "artifact_id" in key:
-            if key["artifact_id"] is None:
+        if "artifact_detection_id" in key:
+            if key["artifact_detection_id"] is None:
                 sort_master = (
-                    sort_master - SortingSelection.ArtifactSource.proj()
+                    sort_master - SortingSelection.ArtifactDetectionSource.proj()
                 )
             else:
-                artifact_source = SortingSelection.ArtifactSource & {
-                    "artifact_id": key["artifact_id"]
-                }
-                sort_master = sort_master & artifact_source.proj()
+                artifact_detection_source = (
+                    SortingSelection.ArtifactDetectionSource
+                    & {"artifact_detection_id": key["artifact_detection_id"]}
+                )
+                sort_master = sort_master & artifact_detection_source.proj()
 
         curation_restriction = {k: key[k] for k in curation_keys if k in key}
         return (cls * sort_master.proj("sorting_id")) & curation_restriction

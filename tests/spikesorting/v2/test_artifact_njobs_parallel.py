@@ -65,7 +65,7 @@ def test_parallel_artifact_detection_matches_serial(dj_conn):
     from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetection,
-        ArtifactSelection,
+        ArtifactDetectionSelection,
     )
     from spyglass.spikesorting.v2.recording import (
         Recording,
@@ -111,7 +111,7 @@ def test_parallel_artifact_detection_matches_serial(dj_conn):
         results = {}
         for name, n_jobs in (("v2_njobs_serial", 1), ("v2_njobs_parallel", 2)):
             _insert_artifact_params(name, n_jobs=n_jobs)
-            art_pk = ArtifactSelection.insert_selection(
+            art_pk = ArtifactDetectionSelection.insert_selection(
                 {
                     "recording_id": rec_pk["recording_id"],
                     "artifact_detection_params_name": name,
@@ -122,7 +122,7 @@ def test_parallel_artifact_detection_matches_serial(dj_conn):
                 IntervalList
                 & {
                     "nwb_file_name": nwb,
-                    "interval_list_name": f"artifact_{art_pk['artifact_id']}",
+                    "interval_list_name": f"artifact_detection_{art_pk['artifact_detection_id']}",
                 }
             ).fetch1("valid_times")
 

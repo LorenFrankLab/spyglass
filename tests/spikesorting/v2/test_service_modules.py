@@ -284,7 +284,7 @@ def test_build_artifact_interval_rows_single_recording_fallback():
     art_id = uuid.UUID("00000000-0000-0000-0000-0000000000aa")
     valid_times = np.array([[0.0, 1.0], [2.0, 3.0]])
     rows = build_artifact_interval_rows(
-        {"artifact_id": art_id},
+        {"artifact_detection_id": art_id},
         valid_times,
         nwb_file_name="sess.nwb",
         per_member_nwb_files=(),
@@ -292,8 +292,8 @@ def test_build_artifact_interval_rows_single_recording_fallback():
     assert len(rows) == 1
     (row,) = rows
     assert row["nwb_file_name"] == "sess.nwb"
-    assert row["interval_list_name"] == f"artifact_{art_id}"
-    assert row["pipeline"] == "spikesorting_artifact_v2"
+    assert row["interval_list_name"] == f"artifact_detection_{art_id}"
+    assert row["pipeline"] == "spikesorting_artifact_detection_v2"
     np.testing.assert_array_equal(row["valid_times"], valid_times)
 
 
@@ -306,14 +306,14 @@ def test_build_artifact_interval_rows_one_row_per_member():
     art_id = uuid.UUID("00000000-0000-0000-0000-0000000000bb")
     valid_times = np.array([[0.0, 1.0]])
     rows = build_artifact_interval_rows(
-        {"artifact_id": art_id},
+        {"artifact_detection_id": art_id},
         valid_times,
         nwb_file_name="a.nwb",
         per_member_nwb_files=("a.nwb", "b.nwb"),
     )
     assert [r["nwb_file_name"] for r in rows] == ["a.nwb", "b.nwb"]
     # Same interval name + valid_times across members.
-    assert {r["interval_list_name"] for r in rows} == {f"artifact_{art_id}"}
+    assert {r["interval_list_name"] for r in rows} == {f"artifact_detection_{art_id}"}
     for r in rows:
         np.testing.assert_array_equal(r["valid_times"], valid_times)
 
@@ -324,18 +324,18 @@ def test_build_artifact_interval_rows_one_row_per_member():
 
 
 @pytest.mark.usefixtures("dj_conn")
-def test_read_artifact_removed_intervals_missing_artifact_id_raises_value_error():
-    """Missing ``artifact_id`` raises a clear ValueError before source-resolve.
+def test_read_artifact_removed_intervals_missing_artifact_detection_id_raises_value_error():
+    """Missing ``artifact_detection_id`` raises a clear ValueError before source-resolve.
 
-    The guard runs BEFORE ``ArtifactSelection.resolve_source(key)``, so a key
-    with no ``artifact_id`` surfaces this targeted message rather than a
+    The guard runs BEFORE ``ArtifactDetectionSelection.resolve_source(key)``, so a key
+    with no ``artifact_detection_id`` surfaces this targeted message rather than a
     source-resolution / ``SchemaBypassError`` from walking the source parts.
     """
     from spyglass.spikesorting.v2._artifact_intervals import (
         read_artifact_removed_intervals,
     )
 
-    with pytest.raises(ValueError, match="must include 'artifact_id'"):
+    with pytest.raises(ValueError, match="must include 'artifact_detection_id'"):
         read_artifact_removed_intervals({})
 
 

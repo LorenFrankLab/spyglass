@@ -150,7 +150,7 @@ def _sort_group_id(session):
 
 
 def _run_ms5(session):
-    """Clean + run the MountainSort5 preset; return its run manifest."""
+    """Clean + run the MountainSort5 pipeline preset; return its manifest."""
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
@@ -167,7 +167,7 @@ def _run_ms5(session):
         sort_group_id=sort_group_id,
         interval_list_name="raw data valid times",
         team_name=_TEAM,
-        preset="franklab_tetrode_mountainsort5",
+        pipeline_preset="franklab_tetrode_mountainsort5",
         description="v2 waveform ms5",
     )
 
@@ -183,7 +183,7 @@ def _run_clusterless(session, *, tuned):
     from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetection,
-        ArtifactSelection,
+        ArtifactDetectionSelection,
     )
     from spyglass.spikesorting.v2.recording import (
         Recording,
@@ -234,7 +234,7 @@ def _run_clusterless(session, *, tuned):
     )
     Recording.populate(rec_pk, reserve_jobs=False)
 
-    art_pk = ArtifactSelection.insert_selection(
+    art_pk = ArtifactDetectionSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],
             "artifact_detection_params_name": "none",
@@ -247,7 +247,7 @@ def _run_clusterless(session, *, tuned):
             "recording_id": rec_pk["recording_id"],
             "sorter": "clusterless_thresholder",
             "sorter_params_name": params_name,
-            "artifact_id": art_pk["artifact_id"],
+            "artifact_detection_id": art_pk["artifact_detection_id"],
         }
     )
     Sorting.populate(sort_pk, reserve_jobs=False)

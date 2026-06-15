@@ -17,8 +17,9 @@ on the **unmodified pre-refactor code**. This module is the capture
 machinery:
 
     1. ``regenerate(...)`` runs ``run_v2_pipeline`` against the 60s MEArec
-       polymer fixture under ``preset="franklab_tetrode_clusterless_thresholder"``
-       and writes a small bundle of numpy / json files to
+       polymer fixture under
+       ``pipeline_preset="franklab_tetrode_clusterless_thresholder"`` and
+       writes a small bundle of numpy / json files to
        ``tests/spikesorting/v2/_fixtures/phase1_baseline/``.
     2. ``load(...)`` reads that bundle off disk without touching the
        database. Validation tests load through this.
@@ -181,7 +182,7 @@ def _current_environment_manifest(source_sha: str | None) -> dict:
         "pynwb": _pkg_version("pynwb"),
         "spyglass": _pkg_version("spyglass-neuro"),
         "python": ".".join(map(str, sys.version_info[:3])),
-        "preset": "franklab_tetrode_clusterless_thresholder",
+        "pipeline_preset": "franklab_tetrode_clusterless_thresholder",
         "fixture_filename": _POLYMER_60S_PATH.name,
     }
 
@@ -269,7 +270,7 @@ def regenerate(
             sort_group_id=sort_group_id,
             interval_list_name=interval_list_name,
             team_name=team_name,
-            preset="franklab_tetrode_clusterless_thresholder",
+            pipeline_preset="franklab_tetrode_clusterless_thresholder",
             description=description,
         )
     rss_after = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
@@ -320,7 +321,7 @@ def regenerate(
             "interval_list_name": interval_list_name,
             "team_name": team_name,
             "recording_id": str(manifest["recording_id"]),
-            "artifact_id": str(manifest["artifact_id"]),
+            "artifact_detection_id": str(manifest["artifact_detection_id"]),
             "sorting_id": str(manifest["sorting_id"]),
             "curation_id": int(manifest["curation_id"]),
             "merge_id": str(manifest["merge_id"]),

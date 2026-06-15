@@ -65,7 +65,7 @@ def _clusterless_noise_levels(
 
 
 def apply_artifact_mask(
-    recording, valid_times, *, artifact_id=None, recording_id=None
+    recording, valid_times, *, artifact_detection_id=None, recording_id=None
 ):
     """Zero out the complement of ``valid_times`` on the recording.
 
@@ -75,7 +75,7 @@ def apply_artifact_mask(
     passes it through here instead of re-issuing the DB lookup
     (the tri-part contract forbids DB I/O inside compute).
 
-    ``artifact_id`` / ``recording_id`` are used only to make the
+    ``artifact_detection_id`` / ``recording_id`` are used only to make the
     empty-``valid_times`` error message actionable.
 
     Raises
@@ -104,12 +104,12 @@ def apply_artifact_mask(
     if valid_times.size == 0:
         raise EmptyArtifactValidTimesError(
             "Artifact-removed valid_times is empty for "
-            f"artifact_id={artifact_id!r}, "
-            f"recording_id={recording_id!r}: the artifact pass kept "
+            f"artifact_detection_id={artifact_detection_id!r}, "
+            f"recording_id={recording_id!r}: the artifact-detection pass kept "
             "zero seconds of the recording. Masking would zero the "
             "entire recording and the sort would run over all-zeros. "
             "Re-run ArtifactDetection with looser thresholds or "
-            "override the artifact selection."
+            "override the artifact-detection selection."
         )
     if valid_times.ndim != 2 or valid_times.shape[1] != 2:
         raise ValueError(

@@ -1,7 +1,7 @@
 """Deterministic, content-addressed identities for v2 selection rows.
 
 Every logical spike-sorting v2 *selection* -- a ``RecordingSelection``,
-``ArtifactSelection``, or ``SortingSelection`` -- must resolve to ONE
+``ArtifactDetectionSelection``, or ``SortingSelection`` -- must resolve to ONE
 stable primary-key UUID under serial, repeated, concurrent, and
 worker-retry insertion. This module derives that UUID from the
 selection's canonical logical identity with :func:`uuid.uuid5`, so the
@@ -18,10 +18,9 @@ the DB, and an HPC job array re-importing this module in a spawned worker
 connection. Keep it to the standard library.
 
 Canonicalization is the footgun this module exists to kill: a v2 sort was
-once duplicated because a ``str`` ``artifact_id`` never compared equal to
-the stored ``uuid.UUID`` (see
-``test_insert_selection_dedup_accepts_str_artifact_id``). Every value that
-has proven dangerous is normalized to a single representation here so
+once duplicated because a ``str`` ``artifact_detection_id`` never compared
+equal to the stored ``uuid.UUID``. Every value that has proven dangerous is
+normalized to a single representation here so
 ``uuid.UUID(x)`` and ``str(x)`` -- and a ``numpy`` vs a plain
 ``sort_group_id`` -- produce the SAME identity.
 """
@@ -50,12 +49,13 @@ def _maybe_uuid(value: str) -> uuid.UUID | None:
 def _canonical_scalar(value):
     """Normalize one identity value to a single canonical form.
 
-    * ``None`` -> ``None`` (the single "no artifact" / "absent" form; it
-      JSON-encodes to ``null``, which can never alias a UUID string).
+    * ``None`` -> ``None`` (the single "no artifact-detection pass" /
+      "absent" form; it JSON-encodes to ``null``, which can never alias a
+      UUID string).
     * ``uuid.UUID`` -> canonical lowercase string.
     * a UUID-ish ``str`` -> the same canonical lowercase string, so a
       ``str`` and a ``uuid.UUID`` of the same value share one identity --
-      this is the str-vs-UUID ``artifact_id`` bug, fixed at the source.
+      this is the str-vs-UUID ``artifact_detection_id`` bug, fixed at the source.
     * ``bool`` -> kept as ``bool``. ``bool`` is an ``int`` subclass; do
       not collapse ``True``/``False`` into ``1``/``0``.
     * ``int`` and integer-like ids (e.g. a ``numpy`` ``sort_group_id``,
@@ -106,9 +106,9 @@ def canonical_identity(payload: dict) -> str:
 def deterministic_id(kind: str, payload: dict) -> uuid.UUID:
     """Derive a selection's primary-key UUID from its logical identity.
 
-    ``kind`` ("recording" / "artifact" / "sorting") namespaces the three
-    selection tables so identical payloads in different tables never
-    alias. Within a table, ``payload`` must carry the FULL logical
+    ``kind`` ("recording" / "artifact_detection" / "sorting") namespaces
+    the three selection tables so identical payloads in different tables
+    never alias. Within a table, ``payload`` must carry the FULL logical
     identity -- including an explicit ``source_kind`` for the part-bearing
     tables, whose master row alone does not encode which source produced
     it.
@@ -131,24 +131,25 @@ def recording_identity_payload(key: dict) -> dict:
     return {k: v for k, v in key.items() if k != "recording_id"}
 
 
-def artifact_identity_payload(
+def artifact_detection_identity_payload(
     *,
     artifact_detection_params_name,
     recording_id=None,
     shared_artifact_group_name=None,
 ) -> dict:
-    """Build an ``ArtifactSelection`` logical-identity payload (params + source).
+    """Build an ``ArtifactDetectionSelection`` logical-identity payload.
 
     Exactly one of ``recording_id`` (single-recording path) or
     ``shared_artifact_group_name`` (cross-recording path) must be given.
     ``source_kind`` is explicit so a recording source and a shared-group
     source never alias even if their source-identifier strings collide.
     Single source of truth shared by
-    ``ArtifactSelection.insert_selection`` and ``preflight_v2_pipeline``.
+    ``ArtifactDetectionSelection.insert_selection`` and
+    ``preflight_v2_pipeline``.
     """
     if (recording_id is None) == (shared_artifact_group_name is None):
         raise ValueError(
-            "artifact_identity_payload requires exactly one source: "
+            "artifact_detection_identity_payload requires exactly one source: "
             "recording_id xor shared_artifact_group_name."
         )
     if recording_id is not None:
@@ -169,26 +170,26 @@ def sorting_identity_payload(
     recording_id,
     sorter: str,
     sorter_params_name: str,
-    artifact_id=None,
+    artifact_detection_id=None,
 ) -> dict:
     """Build a ``SortingSelection`` logical-identity payload.
 
     Identity is the recording source + sorter + the optional artifact
-    pass. ``artifact_id`` is normalized to a ``uuid.UUID`` (or kept
-    ``None``) so a caller-supplied ``str`` and the stored ``uuid.UUID``
-    share one identity; ``artifact_id=None`` is the single "no artifact
-    pass" form and cannot alias any real ``artifact_id``. Single source of
-    truth shared by ``SortingSelection.insert_selection`` and
-    ``preflight_v2_pipeline``.
+    pass. ``artifact_detection_id`` is normalized to a ``uuid.UUID`` (or
+    kept ``None``) so a caller-supplied ``str`` and the stored
+    ``uuid.UUID`` share one identity; ``artifact_detection_id=None`` is the
+    single "no artifact-detection pass" form and cannot alias any real
+    ``artifact_detection_id``. Single source of truth shared by
+    ``SortingSelection.insert_selection`` and ``preflight_v2_pipeline``.
     """
-    if artifact_id is not None:
-        artifact_id = uuid.UUID(str(artifact_id))
+    if artifact_detection_id is not None:
+        artifact_detection_id = uuid.UUID(str(artifact_detection_id))
     return {
         "source_kind": "recording",
         "recording_id": recording_id,
         "sorter": sorter,
         "sorter_params_name": sorter_params_name,
-        "artifact_id": artifact_id,
+        "artifact_detection_id": artifact_detection_id,
     }
 
 

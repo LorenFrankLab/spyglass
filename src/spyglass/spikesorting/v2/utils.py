@@ -69,7 +69,7 @@ def _is_duplicate_key_error(exc: BaseException) -> bool:
     """True iff ``exc`` is a duplicate-PRIMARY-KEY violation.
 
     The deterministic-id selection helpers
-    (``RecordingSelection``/``ArtifactSelection``/``SortingSelection``
+    (``RecordingSelection``/``ArtifactDetectionSelection``/``SortingSelection``
     ``insert_selection``) derive each master PK from the selection's
     logical identity, then insert. Two callers racing on the same logical
     selection compute the SAME PK, so the loser's insert violates the PK
@@ -114,11 +114,11 @@ class SelectionMasterInsertGuard:
     master.
 
     The three v2 selection masters
-    (``RecordingSelection`` / ``ArtifactSelection`` / ``SortingSelection``)
+    (``RecordingSelection`` / ``ArtifactDetectionSelection`` / ``SortingSelection``)
     derive their primary key from the selection's FULL logical identity, and
     ``insert_selection`` is the only entry point that holds that full
     payload: it computes the deterministic PK, pre-checks the lookup-row
-    FKs, and -- for the part-bearing masters (``ArtifactSelection`` /
+    FKs, and -- for the part-bearing masters (``ArtifactDetectionSelection`` /
     ``SortingSelection``) -- inserts the master + source parts atomically.
     Those two masters genuinely CANNOT be verified from a master row alone
     (their source identity lives in a part table, not the master's own
@@ -235,10 +235,10 @@ def _validate_reference_fields(row: dict) -> None:
 def find_orphaned_masters(master_table, part_tables: list) -> list[dict]:
     """Return master PKs whose source-part counts sum to zero.
 
-    Shared implementation of ``ArtifactSelection.prune_orphaned_selections``
+    Shared implementation of ``ArtifactDetectionSelection.prune_orphaned_selections``
     and ``SortingSelection.prune_orphaned_selections``. ``part_tables``
     is the list of source-part tables to count against the master --
-    e.g. ``[RecordingSource, SharedArtifactGroupSource]`` for artifact
+    e.g. ``[RecordingSource, SharedGroupSource]`` for artifact
     selection, ``[RecordingSource, ConcatenatedRecordingSource]`` for
     sorting selection.
 
@@ -912,37 +912,37 @@ def _ensure_lookup_row_exists(
         )
 
 
-_ARTIFACT_INTERVAL_LIST_PREFIX = "artifact_"
+_ARTIFACT_DETECTION_INTERVAL_LIST_PREFIX = "artifact_detection_"
 
 
-def artifact_interval_list_name(artifact_id) -> str:
-    """Return the ``IntervalList.interval_list_name`` for an artifact id.
+def artifact_detection_interval_list_name(artifact_detection_id) -> str:
+    """Return the ``IntervalList.interval_list_name`` for an artifact detection.
 
-    Centralizes the v2 convention ``f"artifact_{artifact_id}"`` so the
-    prefix lives in one place; ``parse_artifact_interval_list_name``
-    is its inverse.
+    Centralizes the v2 convention
+    ``f"artifact_detection_{artifact_detection_id}"`` so the prefix lives in
+    one place; ``parse_artifact_detection_interval_list_name`` is its inverse.
 
-    NOTE: v2 prefixes the name with ``artifact_``; v1 wrote the bare
-    ``str(artifact_id)`` (``v1/artifact.py:200``). The prefix is
-    intentional -- it disambiguates artifact-derived IntervalList rows
+    NOTE: v2 prefixes the name with ``artifact_detection_``; v1 wrote the bare
+    ``str(artifact_detection_id)`` (``v1/artifact.py:200``). The prefix is
+    intentional -- it disambiguates artifact-detection-derived IntervalList rows
     from sort_valid_times / lfp / etc. rows when grepping by name. A
     ported v1 query that looks rows up by the bare UUID returns empty;
     use this helper (or its inverse) instead.
     """
-    return f"{_ARTIFACT_INTERVAL_LIST_PREFIX}{artifact_id}"
+    return f"{_ARTIFACT_DETECTION_INTERVAL_LIST_PREFIX}{artifact_detection_id}"
 
 
-def parse_artifact_interval_list_name(name: str):
-    """Return the artifact id encoded in an artifact IntervalList name.
+def parse_artifact_detection_interval_list_name(name: str):
+    """Return the artifact-detection id encoded in an IntervalList name.
 
     Returns ``None`` if ``name`` is not in the artifact-named form,
     matching the merge-dispatcher's "leave non-artifact names alone"
     contract.
     """
     if isinstance(name, str) and name.startswith(
-        _ARTIFACT_INTERVAL_LIST_PREFIX
+        _ARTIFACT_DETECTION_INTERVAL_LIST_PREFIX
     ):
-        return name[len(_ARTIFACT_INTERVAL_LIST_PREFIX) :]
+        return name[len(_ARTIFACT_DETECTION_INTERVAL_LIST_PREFIX) :]
     return None
 
 
@@ -967,7 +967,7 @@ def get_spiking_sorting_v2_merge_ids(
     restriction : dict
         Restriction on any v2 column (``nwb_file_name``,
         ``sort_group_id``, ``interval_list_name``,
-        ``preprocessing_params_name``, ``recording_id``, ``artifact_id``,
+        ``preprocessing_params_name``, ``recording_id``, ``artifact_detection_id``,
         ``sorter``, ``sorter_params_name``, ``sorting_id``,
         ``curation_id``). Unknown keys raise ``ValueError``.
     as_dict : bool, optional

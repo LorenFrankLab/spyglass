@@ -142,6 +142,6 @@ def test_changelog_contains_v2_breaking_section():
         "seed",  # determinism
         "amplitude_thresh_uv",  # default thresholds
         "metriccuration",  # removed v1 features
-        "spikesorting_artifact_v2",  # tags
+        "spikesorting_artifact_detection_v2",  # tags
     ):
         assert marker in lower, f"missing CHANGELOG marker: {marker!r}"

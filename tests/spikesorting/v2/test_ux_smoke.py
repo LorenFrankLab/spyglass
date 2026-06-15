@@ -29,7 +29,7 @@ import pytest
 
 from spyglass.spikesorting.v2.pipeline import (
     _STAGE_STATUSES,
-    describe_presets,
+    describe_pipeline_presets,
     describe_sort_groups,
     plot_sort_group_geometry,
     preflight_v2_pipeline,
@@ -52,12 +52,12 @@ _NOTEBOOK_PATH = (
 )
 _TEAM = "ux_smoke_team"
 _INTERVAL = "raw data valid times"
-_PRESET = "franklab_tetrode_mountainsort5"
+_PIPELINE_PRESET = "franklab_tetrode_mountainsort5"
 
 _STABLE_KEYS = (
-    "preset",
+    "pipeline_preset",
     "recording_id",
-    "artifact_id",
+    "artifact_detection_id",
     "sorting_id",
     "curation_id",
     "merge_id",
@@ -65,11 +65,11 @@ _STABLE_KEYS = (
 )
 _STATUS_KEYS = (
     "recording_status",
-    "artifact_status",
+    "artifact_detection_status",
     "sorting_status",
     "curation_status",
 )
-_STAGES = ("recording", "artifact", "sorting", "curation")
+_STAGES = ("recording", "artifact_detection", "sorting", "curation")
 # Keys that legitimately differ between two identical runs.
 _VOLATILE_KEYS = {"stage_seconds", *_STATUS_KEYS}
 _SORT_GROUP_COLUMNS = [
@@ -126,8 +126,10 @@ def first_hour(ux_session):
         interval_list_name=_INTERVAL,
         team_description="ux smoke",
     )
-    report_before = preflight_v2_pipeline(**inputs, preset=_PRESET)
-    manifest = run_v2_pipeline(**inputs, preset=_PRESET)
+    report_before = preflight_v2_pipeline(
+        **inputs, pipeline_preset=_PIPELINE_PRESET
+    )
+    manifest = run_v2_pipeline(**inputs, pipeline_preset=_PIPELINE_PRESET)
     return {
         "inputs": inputs,
         "report_before": report_before,
@@ -153,9 +155,9 @@ def test_ux_smoke_first_hour(first_hour):
     initialize_v2_defaults()
     initialize_v2_defaults()
 
-    # 2. describe_presets returns the catalog including the preset under test.
-    catalog = describe_presets()
-    assert _PRESET in set(catalog["preset"])
+    # 2. describe_pipeline_presets returns the catalog including the tested preset.
+    catalog = describe_pipeline_presets()
+    assert _PIPELINE_PRESET in set(catalog["pipeline_preset"])
 
     # 2b. describe_sort_groups lets users inspect the scientific grouping
     #     context before committing to a sort_group_id.
@@ -192,7 +194,7 @@ def test_ux_smoke_first_hour(first_hour):
     assert report.ok is True, report.errors
     assert set(report.expected_ids) == {
         "recording_id",
-        "artifact_id",
+        "artifact_detection_id",
         "sorting_id",
     }
 
@@ -245,7 +247,7 @@ def test_ux_smoke_preflight_predicts_ids(first_hour):
     """
     report = first_hour["report_before"]
     manifest = first_hour["manifest"]
-    for id_key in ("recording_id", "artifact_id", "sorting_id"):
+    for id_key in ("recording_id", "artifact_detection_id", "sorting_id"):
         assert (
             report.expected_ids[id_key]["id"] == manifest[id_key]
         ), f"preflight mispredicted {id_key}"
@@ -262,7 +264,7 @@ def test_ux_smoke_idempotent(first_hour):
     Equal manifest modulo ``stage_seconds`` / ``*_status`` (now ``reused``),
     inserting no duplicate selection rows.
     """
-    from spyglass.spikesorting.v2.artifact import ArtifactSelection
+    from spyglass.spikesorting.v2.artifact import ArtifactDetectionSelection
     from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
@@ -271,13 +273,15 @@ def test_ux_smoke_idempotent(first_hour):
 
     counts_before = [
         len(RecordingSelection()),
-        len(ArtifactSelection()),
+        len(ArtifactDetectionSelection()),
         len(SortingSelection()),
     ]
-    second_manifest = run_v2_pipeline(**inputs, preset=_PRESET)
+    second_manifest = run_v2_pipeline(
+        **inputs, pipeline_preset=_PIPELINE_PRESET
+    )
     counts_after = [
         len(RecordingSelection()),
-        len(ArtifactSelection()),
+        len(ArtifactDetectionSelection()),
         len(SortingSelection()),
     ]
     assert counts_after == counts_before, "re-run inserted duplicate rows"
@@ -313,7 +317,7 @@ def test_user_notebook_executes(first_hour):
         "nwb_file_name": inputs["nwb_file_name"],
         "team_name": inputs["team_name"],
         "interval_list_name": inputs["interval_list_name"],
-        "preset": _PRESET,
+        "pipeline_preset": _PIPELINE_PRESET,
     }
 
     notebook = jupytext.read(str(_NOTEBOOK_PATH))

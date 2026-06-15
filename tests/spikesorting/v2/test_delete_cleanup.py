@@ -39,7 +39,7 @@ def planted_sort(dj_conn):
     from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetection,
-        ArtifactSelection,
+        ArtifactDetectionSelection,
     )
     from spyglass.spikesorting.v2.recording import (
         Recording,
@@ -73,7 +73,7 @@ def planted_sort(dj_conn):
     )
     if not (Recording & rec_pk):
         Recording.populate(rec_pk, reserve_jobs=False)
-    art_pk = ArtifactSelection.insert_selection(
+    art_pk = ArtifactDetectionSelection.insert_selection(
         {"recording_id": rec_pk["recording_id"], "artifact_detection_params_name": "none"}
     )
     if not (ArtifactDetection & art_pk):
@@ -83,7 +83,7 @@ def planted_sort(dj_conn):
             "recording_id": rec_pk["recording_id"],
             "sorter": "mountainsort5",
             "sorter_params_name": "franklab_tetrode_hippocampus_30kHz_ms5",
-            "artifact_id": art_pk["artifact_id"],
+            "artifact_detection_id": art_pk["artifact_detection_id"],
         }
     )
     (Sorting & sort_pk).super_delete(warn=False)
@@ -149,9 +149,9 @@ def test_cancelled_artifact_delete_preserves_interval_list(
     from spyglass.spikesorting.v2.artifact import ArtifactDetection
     from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.sorting import SortingSelection
-    from spyglass.spikesorting.v2.utils import artifact_interval_list_name
+    from spyglass.spikesorting.v2.utils import artifact_detection_interval_list_name
 
-    art_id = SortingSelection.resolve_artifact(planted_sort)
+    art_id = SortingSelection.resolve_artifact_detection(planted_sort)
     assert art_id is not None, "planted sort must be artifact-backed"
     rec_id = SortingSelection.resolve_source(planted_sort).key["recording_id"]
     nwb = (RecordingSelection & {"recording_id": rec_id}).fetch1(
@@ -159,17 +159,17 @@ def test_cancelled_artifact_delete_preserves_interval_list(
     )
     il_restr = {
         "nwb_file_name": nwb,
-        "interval_list_name": artifact_interval_list_name(art_id),
+        "interval_list_name": artifact_detection_interval_list_name(art_id),
     }
     assert (
         IntervalList & il_restr
     ), "fixture should have an artifact IntervalList"
 
     monkeypatch.setattr("datajoint.table.user_choice", lambda *a, **k: "no")
-    (ArtifactDetection & {"artifact_id": art_id}).delete(safemode=True)
+    (ArtifactDetection & {"artifact_detection_id": art_id}).delete(safemode=True)
 
     assert ArtifactDetection & {
-        "artifact_id": art_id
+        "artifact_detection_id": art_id
     }, "cancelled delete removed the ArtifactDetection master row"
     assert IntervalList & il_restr, (
         "cancelled artifact delete removed the IntervalList row for a master "

@@ -464,7 +464,7 @@ def test_apply_artifact_mask_empty_valid_times_raises():
     When the artifact pass keeps zero seconds, the complement walker
     would mask the WHOLE recording to zeros and the sort would run over
     all-zeros, emitting a misleading "zero units" result. The fix raises
-    ``EmptyArtifactValidTimesError`` naming the ``artifact_id`` and
+    ``EmptyArtifactValidTimesError`` naming the ``artifact_detection_id`` and
     ``recording_id`` so the user re-runs detection or overrides the
     selection -- a loud failure, not a silent blanked recording.
     """
@@ -483,7 +483,7 @@ def test_apply_artifact_mask_empty_valid_times_raises():
         Sorting._apply_artifact_mask(
             rec,
             np_mod.zeros((0, 2)),
-            artifact_id="art-123",
+            artifact_detection_id="art-123",
             recording_id="rec-456",
         )
     msg = str(excinfo.value)
@@ -1728,7 +1728,7 @@ def test_run_si_sorter_restores_global_job_kwargs_on_success(
 # A25: artifact-detection invariant + lookup branches.
 #
 # SharedArtifactGroup.insert_group cross-session / cross-frequency guards,
-# ArtifactSelection.insert_selection duplicate + missing-Lookup-row
+# ArtifactDetectionSelection.insert_selection duplicate + missing-Lookup-row
 # diagnostics, the empty sliver-filter return, and the already-gone
 # IntervalList cleanup. The insert_group session/frequency checks and the
 # duplicate check all fire BEFORE any recording load, so every
@@ -1920,7 +1920,7 @@ def test_shared_artifact_group_rejects_timestamp_mismatch(monkeypatch):
 
 
 @pytest.mark.usefixtures("dj_conn")
-def test_artifact_selection_raises_duplicate_selection_error():
+def test_artifact_detection_selection_raises_duplicate_selection_error():
     """A25: two master rows for one (params, source) raise
     ``DuplicateSelectionError``.
 
@@ -1935,7 +1935,7 @@ def test_artifact_selection_raises_duplicate_selection_error():
 
     import datajoint as dj
 
-    from spyglass.spikesorting.v2.artifact import ArtifactSelection
+    from spyglass.spikesorting.v2.artifact import ArtifactDetectionSelection
     from spyglass.spikesorting.v2.exceptions import DuplicateSelectionError
 
     params_name = "v2_a25_dup_params"
@@ -1945,12 +1945,12 @@ def test_artifact_selection_raises_duplicate_selection_error():
     conn.query("SET FOREIGN_KEY_CHECKS=0")
     try:
         for aid in (aid1, aid2):
-            ArtifactSelection.insert1(
-                {"artifact_id": aid, "artifact_detection_params_name": params_name},
+            ArtifactDetectionSelection.insert1(
+                {"artifact_detection_id": aid, "artifact_detection_params_name": params_name},
                 allow_direct_insert=True,
             )
-            ArtifactSelection.RecordingSource.insert1(
-                {"artifact_id": aid, "recording_id": rec_id},
+            ArtifactDetectionSelection.RecordingSource.insert1(
+                {"artifact_detection_id": aid, "recording_id": rec_id},
                 allow_direct_insert=True,
             )
     finally:
@@ -1958,23 +1958,23 @@ def test_artifact_selection_raises_duplicate_selection_error():
 
     try:
         with pytest.raises(DuplicateSelectionError, match="master rows"):
-            ArtifactSelection.insert_selection(
+            ArtifactDetectionSelection.insert_selection(
                 {"recording_id": rec_id, "artifact_detection_params_name": params_name}
             )
     finally:
         conn.query("SET FOREIGN_KEY_CHECKS=0")
         try:
             (
-                ArtifactSelection.RecordingSource & {"recording_id": rec_id}
+                ArtifactDetectionSelection.RecordingSource & {"recording_id": rec_id}
             ).delete_quick()
             for aid in (aid1, aid2):
-                (ArtifactSelection & {"artifact_id": aid}).delete_quick()
+                (ArtifactDetectionSelection & {"artifact_detection_id": aid}).delete_quick()
         finally:
             conn.query("SET FOREIGN_KEY_CHECKS=1")
 
 
 @pytest.mark.usefixtures("dj_conn")
-def test_artifact_selection_requires_artifact_detection_params_name():
+def test_artifact_detection_selection_requires_artifact_detection_params_name():
     """A25: a key without ``artifact_detection_params_name`` raises naming the field.
 
     The source key alone is insufficient -- the master row needs the
@@ -1983,14 +1983,14 @@ def test_artifact_selection_requires_artifact_detection_params_name():
     """
     import uuid
 
-    from spyglass.spikesorting.v2.artifact import ArtifactSelection
+    from spyglass.spikesorting.v2.artifact import ArtifactDetectionSelection
 
     with pytest.raises(ValueError, match="artifact_detection_params_name"):
-        ArtifactSelection.insert_selection({"recording_id": uuid.uuid4()})
+        ArtifactDetectionSelection.insert_selection({"recording_id": uuid.uuid4()})
 
 
 @pytest.mark.usefixtures("dj_conn")
-def test_artifact_selection_missing_lookup_row_diagnostic():
+def test_artifact_detection_selection_missing_lookup_row_diagnostic():
     """A25: a missing ``ArtifactDetectionParameters`` row raises a
     diagnostic ValueError, not an opaque FK IntegrityError.
 
@@ -2001,10 +2001,10 @@ def test_artifact_selection_missing_lookup_row_diagnostic():
     """
     import uuid
 
-    from spyglass.spikesorting.v2.artifact import ArtifactSelection
+    from spyglass.spikesorting.v2.artifact import ArtifactDetectionSelection
 
     with pytest.raises(ValueError) as excinfo:
-        ArtifactSelection.insert_selection(
+        ArtifactDetectionSelection.insert_selection(
             {
                 "recording_id": uuid.uuid4(),
                 "artifact_detection_params_name": "v2_a25_no_such_params_row",
@@ -2074,29 +2074,29 @@ def test_artifact_detection_delete_tolerates_already_gone_interval_list():
     from spyglass.common import IntervalList
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetection,
-        ArtifactSelection,
+        ArtifactDetectionSelection,
     )
     from spyglass.spikesorting.v2.recording import RecordingSelection
-    from spyglass.spikesorting.v2.utils import artifact_interval_list_name
+    from spyglass.spikesorting.v2.utils import artifact_detection_interval_list_name
 
     nwb = "a25_delete_session_.nwb"
     rec_id = _plant_fake_recording(uuid.uuid4(), nwb, 30000.0)
     aid = uuid.uuid4()
     params_name = "v2_a25_delete_params"
-    ilist_name = artifact_interval_list_name(aid)
+    ilist_name = artifact_detection_interval_list_name(aid)
     conn = dj.conn()
     conn.query("SET FOREIGN_KEY_CHECKS=0")
     try:
-        ArtifactSelection.insert1(
-            {"artifact_id": aid, "artifact_detection_params_name": params_name},
+        ArtifactDetectionSelection.insert1(
+            {"artifact_detection_id": aid, "artifact_detection_params_name": params_name},
             allow_direct_insert=True,
         )
-        ArtifactSelection.RecordingSource.insert1(
-            {"artifact_id": aid, "recording_id": rec_id},
+        ArtifactDetectionSelection.RecordingSource.insert1(
+            {"artifact_detection_id": aid, "recording_id": rec_id},
             allow_direct_insert=True,
         )
         ArtifactDetection.insert1(
-            {"artifact_id": aid}, allow_direct_insert=True
+            {"artifact_detection_id": aid}, allow_direct_insert=True
         )
         # The IntervalList row the delete would resolve and try to clean.
         IntervalList.insert1(
@@ -2122,16 +2122,16 @@ def test_artifact_detection_delete_tolerates_already_gone_interval_list():
         ).delete_quick()
 
         # Must not raise even though the cleanup target is already gone.
-        (ArtifactDetection & {"artifact_id": aid}).delete(safemode=False)
-        assert len(ArtifactDetection & {"artifact_id": aid}) == 0
+        (ArtifactDetection & {"artifact_detection_id": aid}).delete(safemode=False)
+        assert len(ArtifactDetection & {"artifact_detection_id": aid}) == 0
     finally:
         conn.query("SET FOREIGN_KEY_CHECKS=0")
         try:
-            (ArtifactDetection & {"artifact_id": aid}).delete_quick()
+            (ArtifactDetection & {"artifact_detection_id": aid}).delete_quick()
             (
-                ArtifactSelection.RecordingSource & {"artifact_id": aid}
+                ArtifactDetectionSelection.RecordingSource & {"artifact_detection_id": aid}
             ).delete_quick()
-            (ArtifactSelection & {"artifact_id": aid}).delete_quick()
+            (ArtifactDetectionSelection & {"artifact_detection_id": aid}).delete_quick()
         finally:
             conn.query("SET FOREIGN_KEY_CHECKS=1")
         _drop_fake_recording(rec_id)
@@ -2304,13 +2304,13 @@ def test_sorting_selection_missing_sorter_params_diagnostic():
 
 
 @pytest.mark.usefixtures("dj_conn")
-def test_sorting_selection_rejects_cross_recording_artifact_source():
+def test_sorting_selection_rejects_cross_recording_artifact_detection_source():
     """A26: a sort cannot link an artifact detected on another recording.
 
     Both recordings are in the same session, so the old interval lookup by
     ``nwb_file_name`` + artifact interval name could succeed and apply the
     wrong artifact mask. ``insert_selection`` must reject the mismatch before
-    writing ``SortingSelection.ArtifactSource``.
+    writing ``SortingSelection.ArtifactDetectionSource``.
     """
     import uuid
 
@@ -2318,7 +2318,7 @@ def test_sorting_selection_rejects_cross_recording_artifact_source():
 
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetection,
-        ArtifactSelection,
+        ArtifactDetectionSelection,
     )
     from spyglass.spikesorting.v2.sorting import (
         SorterParameters,
@@ -2331,23 +2331,23 @@ def test_sorting_selection_rejects_cross_recording_artifact_source():
     rid_artifact = _plant_fake_recording(
         uuid.uuid4(), "session_cross_artifact_.nwb", 30000.0
     )
-    artifact_id = uuid.uuid4()
+    artifact_detection_id = uuid.uuid4()
     conn = dj.conn()
     conn.query("SET FOREIGN_KEY_CHECKS=0")
     try:
-        ArtifactSelection.insert1(
+        ArtifactDetectionSelection.insert1(
             {
-                "artifact_id": artifact_id,
+                "artifact_detection_id": artifact_detection_id,
                 "artifact_detection_params_name": "v2_a26_cross_artifact_params",
             },
             allow_direct_insert=True,
         )
-        ArtifactSelection.RecordingSource.insert1(
-            {"artifact_id": artifact_id, "recording_id": rid_artifact},
+        ArtifactDetectionSelection.RecordingSource.insert1(
+            {"artifact_detection_id": artifact_detection_id, "recording_id": rid_artifact},
             allow_direct_insert=True,
         )
         ArtifactDetection.insert1(
-            {"artifact_id": artifact_id}, allow_direct_insert=True
+            {"artifact_detection_id": artifact_detection_id}, allow_direct_insert=True
         )
     finally:
         conn.query("SET FOREIGN_KEY_CHECKS=1")
@@ -2360,11 +2360,11 @@ def test_sorting_selection_rejects_cross_recording_artifact_source():
                     "recording_id": rid_sort,
                     "sorter": "clusterless_thresholder",
                     "sorter_params_name": "default",
-                    "artifact_id": artifact_id,
+                    "artifact_detection_id": artifact_detection_id,
                 }
             )
         assert (
-            len(SortingSelection.ArtifactSource & {"artifact_id": artifact_id})
+            len(SortingSelection.ArtifactDetectionSource & {"artifact_detection_id": artifact_detection_id})
             == 0
         )
     finally:
@@ -2374,17 +2374,17 @@ def test_sorting_selection_rejects_cross_recording_artifact_source():
                 SortingSelection.RecordingSource & {"recording_id": rid_sort}
             ).fetch("KEY", as_dict=True)
             if sort_keys:
-                (SortingSelection.ArtifactSource & sort_keys).delete_quick()
+                (SortingSelection.ArtifactDetectionSource & sort_keys).delete_quick()
                 (
                     SortingSelection.RecordingSource
                     & {"recording_id": rid_sort}
                 ).delete_quick()
                 (SortingSelection & sort_keys).delete_quick()
-            (ArtifactDetection & {"artifact_id": artifact_id}).delete_quick()
+            (ArtifactDetection & {"artifact_detection_id": artifact_detection_id}).delete_quick()
             (
-                ArtifactSelection.RecordingSource & {"artifact_id": artifact_id}
+                ArtifactDetectionSelection.RecordingSource & {"artifact_detection_id": artifact_detection_id}
             ).delete_quick()
-            (ArtifactSelection & {"artifact_id": artifact_id}).delete_quick()
+            (ArtifactDetectionSelection & {"artifact_detection_id": artifact_detection_id}).delete_quick()
         finally:
             conn.query("SET FOREIGN_KEY_CHECKS=1")
         _drop_fake_recording(rid_sort)
@@ -2822,7 +2822,7 @@ def _fresh_unit_producing_selection(populated_sorting):
     clusterless ``default`` row finds zero peaks on the MEArec smoke fixture
     (no folder, vacuous assertions). MS5 produces units.
 
-    The selection is ARTIFACT-FREE (no ``artifact_id``) so it is a DISTINCT
+    The selection is ARTIFACT-FREE (no ``artifact_detection_id``) so it is a DISTINCT
     row from the package fixture's artifact-backed MS5 sort -- otherwise
     ``insert_selection`` (find-existing-or-insert) would return the shared
     fixture's sort and a destructive test would delete shared state. The
@@ -3267,7 +3267,7 @@ def test_obs_intervals_recorded_windows_fallback(populated_sorting):
         RecordingSelection,
     )
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
-    from spyglass.spikesorting.v2.utils import artifact_interval_list_name
+    from spyglass.spikesorting.v2.utils import artifact_detection_interval_list_name
 
     def _first_unit_obs_intervals(sort_pk):
         analysis_file_name = (Sorting & sort_pk).fetch1("analysis_file_name")
@@ -3299,8 +3299,8 @@ def test_obs_intervals_recorded_windows_fallback(populated_sorting):
         (SortingSelection & free_pk).delete(safemode=False)
 
     # --- artifact-backed fixture: obs_intervals from the IntervalList -----
-    artifact_id = SortingSelection.resolve_artifact(populated_sorting)
-    assert artifact_id is not None, "fixture sort should be artifact-backed"
+    artifact_detection_id = SortingSelection.resolve_artifact_detection(populated_sorting)
+    assert artifact_detection_id is not None, "fixture sort should be artifact-backed"
     recording_id = SortingSelection.resolve_source(populated_sorting).key[
         "recording_id"
     ]
@@ -3311,7 +3311,7 @@ def test_obs_intervals_recorded_windows_fallback(populated_sorting):
         IntervalList
         & {
             "nwb_file_name": nwb_file_name,
-            "interval_list_name": artifact_interval_list_name(artifact_id),
+            "interval_list_name": artifact_detection_interval_list_name(artifact_detection_id),
         }
     ).fetch1("valid_times")
     obs = _first_unit_obs_intervals(populated_sorting)

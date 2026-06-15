@@ -526,13 +526,13 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
     so the validator can be relaxed without a migration once the concat
     materializer lands.
 
-    Whether an artifact pass was applied is recorded by the presence or
-    absence of an ``ArtifactSource`` part row (zero-or-one), NOT by a
-    nullable FK on the master. A nullable FK conflates "no artifact
-    pass" with "match anything" in a restriction and forces every reader
-    to special-case ``None``; the part row makes "no artifact pass" a
-    plain "no ``ArtifactSource`` row" that is queryable, joinable, and
-    impossible to alias. ``ArtifactSource`` is independent of the
+    Whether an artifact-detection pass was applied is recorded by the
+    presence or absence of an ``ArtifactDetectionSource`` part row
+    (zero-or-one), NOT by a nullable FK on the master. A nullable FK
+    conflates "no artifact-detection pass" with "match anything" in a
+    restriction and forces every reader to special-case ``None``; the part
+    row makes "no ``ArtifactDetectionSource`` row" queryable, joinable, and
+    impossible to alias. ``ArtifactDetectionSource`` is independent of the
     recording-source parts -- it is NOT counted by ``resolve_source``
     (a sort still has exactly one *recording* source) nor by
     ``prune_orphaned_selections``.
@@ -558,14 +558,14 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         -> ConcatenatedRecording
         """
 
-    class ArtifactSource(SpyglassMixinPart):
-        """Optional artifact pass for a sorting selection (zero-or-one).
+    class ArtifactDetectionSource(SpyglassMixinPart):
+        """Optional artifact-detection pass for a sorting selection.
 
         Present iff an artifact detection was configured for the sort;
-        absent means "no artifact pass." Deliberately separate from the
+        absent means "no artifact-detection pass." Deliberately separate from the
         recording-source parts so ``resolve_source``'s "exactly one
         recording source" invariant is unaffected -- read it through
-        :meth:`SortingSelection.resolve_artifact`.
+        :meth:`SortingSelection.resolve_artifact_detection`.
         """
 
         definition = """
@@ -582,9 +582,9 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         ``concat_recording_id`` (concat) from ``key``; raises ValueError
         on zero or two sources. The concat path is rejected today with
         ``NotImplementedError`` because the concat materializer is gated.
-        ``artifact_id`` is optional: when supplied (non-None), an
-        ``ArtifactSource`` part row is inserted recording the artifact
-        pass; when omitted/None, no ``ArtifactSource`` row is created.
+        ``artifact_detection_id`` is optional: when supplied (non-None), an
+        ``ArtifactDetectionSource`` part row records the artifact-detection
+        pass; when omitted/None, no ``ArtifactDetectionSource`` row is created.
         The find-existing path keys on the presence/absence and identity
         of that part row, so an artifact-backed and an artifact-free
         selection for the same ``(recording_id, sorter,
@@ -602,7 +602,7 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             (a raw ``insert`` bypass or a pre-determinism legacy row) --
             even a single one; an integrity bug, not user error.
         SchemaBypassError
-            If a deterministic master exists but its recording/artifact
+            If a deterministic master exists but its recording/artifact-detection
             source parts are missing/mismatched (a raw-insert orphan).
         """
         has_recording = "recording_id" in key
@@ -634,21 +634,23 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             "sorter_params_name": key["sorter_params_name"],
         }
         source_restriction = {"recording_id": key["recording_id"]}
-        artifact_id = key.get("artifact_id")
-        # ``resolve_artifact`` reads the uuid column back as a ``uuid.UUID``;
-        # normalize a caller-supplied ``artifact_id`` (which may be a str) so
-        # the find-existing comparison below is UUID-vs-UUID. A str would
-        # otherwise never equal the stored UUID, so an idempotent re-insert
-        # would miss its match and create a duplicate sort.
-        if artifact_id is not None:
-            artifact_id = uuid.UUID(str(artifact_id))
+        artifact_detection_id = key.get("artifact_detection_id")
+        # ``resolve_artifact_detection`` reads the uuid column back as a
+        # ``uuid.UUID``; normalize a caller-supplied
+        # ``artifact_detection_id`` (which may be a str) so the find-existing
+        # comparison below is UUID-vs-UUID. A str would otherwise never equal
+        # the stored UUID, so an idempotent re-insert would miss its match and
+        # create a duplicate sort.
+        if artifact_detection_id is not None:
+            artifact_detection_id = uuid.UUID(str(artifact_detection_id))
 
         # Deterministic, content-addressed sorting_id from the logical
-        # identity (recording source + sorter + the optional artifact
-        # pass). ``artifact_id=None`` is the single "no artifact pass"
-        # form and cannot alias any real artifact_id, so an
-        # artifact-backed and an artifact-free sort for the same
-        # (recording, sorter) are distinct, idempotent rows.
+        # identity (recording source + sorter + the optional
+        # artifact-detection pass). ``artifact_detection_id=None`` is the
+        # single "no artifact-detection pass" form and cannot alias any real
+        # artifact_detection_id, so an artifact-detection-backed and an
+        # artifact-detection-free sort for the same (recording, sorter) are
+        # distinct, idempotent rows.
         from spyglass.spikesorting.v2._selection_identity import (
             assert_supplied_id_matches,
             deterministic_id,
@@ -659,7 +661,7 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             recording_id=key["recording_id"],
             sorter=key["sorter"],
             sorter_params_name=key["sorter_params_name"],
-            artifact_id=artifact_id,
+            artifact_detection_id=artifact_detection_id,
         )
         sorting_id = deterministic_id("sorting", identity)
         assert_supplied_id_matches(
@@ -667,7 +669,10 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         )
 
         existing = cls._find_existing_pk(
-            master_restriction, source_restriction, artifact_id, sorting_id
+            master_restriction,
+            source_restriction,
+            artifact_detection_id,
+            sorting_id,
         )
         if existing is not None:
             return existing
@@ -689,9 +694,9 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             helper_name="SortingSelection.insert_selection",
             insert_default_path="SorterParameters.insert_default()",
         )
-        cls._validate_artifact_source_for_recording(
+        cls._validate_artifact_detection_source_for_recording(
             recording_id=key["recording_id"],
-            artifact_id=artifact_id,
+            artifact_detection_id=artifact_detection_id,
         )
 
         new_master_key = {**master_restriction, "sorting_id": sorting_id}
@@ -701,11 +706,11 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
                 # allow_direct_insert: this helper IS the validation boundary.
                 cls.insert1(new_master_key, allow_direct_insert=True)
                 cls.RecordingSource.insert1(new_part_key)
-                if artifact_id is not None:
-                    cls.ArtifactSource.insert1(
+                if artifact_detection_id is not None:
+                    cls.ArtifactDetectionSource.insert1(
                         {
                             "sorting_id": sorting_id,
-                            "artifact_id": artifact_id,
+                            "artifact_detection_id": artifact_detection_id,
                         }
                     )
         except Exception as exc:  # noqa: BLE001 -- re-raised unless dup-PK
@@ -720,17 +725,20 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
                 sorting_id,
             )
             existing = cls._find_existing_pk(
-                master_restriction, source_restriction, artifact_id, sorting_id
+                master_restriction,
+                source_restriction,
+                artifact_detection_id,
+                sorting_id,
             )
             if existing is not None:
                 return existing
             # The deterministic master exists (that is the duplicate key)
-            # but its recording/artifact source parts are missing or do not
-            # match the requested selection -- a raw-insert orphan. Surface
+            # but its recording/artifact-detection source parts are missing or
+            # do not match the requested selection -- a raw-insert orphan. Surface
             # a clear schema-bypass error instead of the opaque duplicate.
             raise SchemaBypassError(
                 f"SortingSelection master {sorting_id} exists but its "
-                "recording/artifact source parts are missing or do not match "
+                "recording/artifact-detection source parts are missing or do not match "
                 "the requested selection: the master was inserted without "
                 "insert_selection (raw-insert orphan). Use insert_selection() "
                 "to create master+source atomically, or drop the orphan "
@@ -743,15 +751,16 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         cls,
         master_restriction,
         source_restriction,
-        artifact_id,
+        artifact_detection_id,
         deterministic_id,
     ) -> dict | None:
         """Return the canonical master PK for this sort selection, or None.
 
         Matches a master with the same sorter + recording source AND the
-        same artifact-source state (present-with-this-``artifact_id`` vs
-        absent), so an artifact-backed and an artifact-free selection never
-        alias. Splits the matches by primary key:
+        same artifact-detection-source state
+        (present-with-this-``artifact_detection_id`` vs absent), so an
+        artifact-detection-backed and an artifact-detection-free selection
+        never alias. Splits the matches by primary key:
 
         * the master at ``deterministic_id`` is the canonical, content-
           addressed selection -> return ``{"sorting_id": ...}``;
@@ -776,15 +785,16 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         master_ids = {
             cand["sorting_id"]
             for cand in candidates
-            if cls.resolve_artifact({"sorting_id": cand["sorting_id"]})
-            == artifact_id
+            if cls.resolve_artifact_detection({"sorting_id": cand["sorting_id"]})
+            == artifact_detection_id
         }
         bypassed = [sid for sid in master_ids if sid != deterministic_id]
         if bypassed:
             raise DuplicateSelectionError(
                 f"SortingSelection has {len(master_ids)} master rows for "
                 f"{master_restriction | source_restriction} with "
-                f"artifact_id={artifact_id} whose sorting_id is not the "
+                f"artifact_detection_id={artifact_detection_id} whose sorting_id "
+                "is not the "
                 f"deterministic id {deterministic_id}: {bypassed}. This is a "
                 "non-deterministic selection row (a raw insert or pre-"
                 "determinism legacy row); drop it and re-insert via "
@@ -793,43 +803,46 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         return {"sorting_id": deterministic_id} if master_ids else None
 
     @classmethod
-    def _validate_artifact_source_for_recording(
+    def _validate_artifact_detection_source_for_recording(
         cls,
         *,
         recording_id,
-        artifact_id,
+        artifact_detection_id,
     ) -> None:
-        """Ensure an artifact pass is valid for a sorting recording.
+        """Ensure an artifact-detection pass is valid for a sorting recording.
 
-        Single-recording artifacts may only be linked to that exact
-        ``recording_id``. Shared-group artifacts may be linked to any member
+        Single-recording artifact detections may only be linked to that exact
+        ``recording_id``. Shared-group detections may be linked to any member
         recording in the group. This keeps artifact masks from one recording
         in a session from being silently applied to a different recording.
         """
-        if artifact_id is None:
+        if artifact_detection_id is None:
             return
 
         from spyglass.spikesorting.v2.artifact import (
-            ArtifactSelection,
+            ArtifactDetectionSelection,
             SharedArtifactGroup,
         )
 
-        artifact_key = {"artifact_id": artifact_id}
-        if not (ArtifactDetection & artifact_key):
+        artifact_detection_key = {"artifact_detection_id": artifact_detection_id}
+        if not (ArtifactDetection & artifact_detection_key):
             raise ValueError(
-                "SortingSelection.insert_selection: artifact_id "
-                f"{artifact_id!r} is not in ArtifactDetection. Populate "
-                "ArtifactDetection before linking an artifact pass to a sort."
+                "SortingSelection.insert_selection: artifact_detection_id "
+                f"{artifact_detection_id!r} is not in ArtifactDetection. Populate "
+                "ArtifactDetection before linking an artifact-detection pass "
+                "to a sort."
             )
 
-        source = ArtifactSelection.resolve_source(artifact_key)
+        source = ArtifactDetectionSelection.resolve_source(
+            artifact_detection_key
+        )
         target_recording_id = str(recording_id)
         if source.kind == "recording":
             artifact_recording_id = str(source.key["recording_id"])
             if artifact_recording_id != target_recording_id:
                 raise ValueError(
-                    "SortingSelection.insert_selection: artifact_id "
-                    f"{artifact_id!r} belongs to recording_id="
+                    "SortingSelection.insert_selection: artifact_detection_id "
+                    f"{artifact_detection_id!r} belongs to recording_id="
                     f"{artifact_recording_id!r}, not the requested "
                     f"recording_id={target_recording_id!r}."
                 )
@@ -845,23 +858,23 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
                 }
             ):
                 raise ValueError(
-                    "SortingSelection.insert_selection: artifact_id "
-                    f"{artifact_id!r} belongs to shared artifact group "
+                    "SortingSelection.insert_selection: artifact_detection_id "
+                    f"{artifact_detection_id!r} belongs to shared artifact group "
                     f"{group_name!r}, which does not include requested "
                     f"recording_id={target_recording_id!r}."
                 )
             return
 
         raise ValueError(
-            "SortingSelection.insert_selection: artifact_id "
-            f"{artifact_id!r} has unsupported source kind {source.kind!r}."
+            "SortingSelection.insert_selection: artifact_detection_id "
+            f"{artifact_detection_id!r} has unsupported source kind {source.kind!r}."
         )
 
     @classmethod
     def prune_orphaned_selections(cls, dry_run: bool = True) -> list[dict]:
         """Find or delete master rows that have no source-part row.
 
-        See ``ArtifactSelection.prune_orphaned_selections`` for the full
+        See ``ArtifactDetectionSelection.prune_orphaned_selections`` for the full
         rationale. Same contract: dry-run by default; with
         ``dry_run=False`` runs cautious_delete on each orphan so the
         cascade preview shows downstream ``Sorting`` / ``CurationV2`` /
@@ -918,29 +931,31 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         )
 
     @classmethod
-    def resolve_artifact(cls, key: dict):
-        """Return the ``artifact_id`` for a selection, or ``None``.
+    def resolve_artifact_detection(cls, key: dict):
+        """Return the ``artifact_detection_id`` for a selection, or ``None``.
 
-        Reads the optional ``ArtifactSource`` part row. Returns the
-        ``artifact_id`` when an artifact pass was configured, else
-        ``None`` (no ``ArtifactSource`` row = no artifact pass). This is
-        the single accessor every reader uses instead of a nullable-FK
-        column lookup.
+        Reads the optional ``ArtifactDetectionSource`` part row. Returns the
+        ``artifact_detection_id`` when an artifact-detection pass was
+        configured, else ``None`` (no ``ArtifactDetectionSource`` row = no
+        artifact-detection pass). This is the single accessor every reader uses
+        instead of a nullable-FK column lookup.
 
         Raises
         ------
         SchemaBypassError
-            If more than one ``ArtifactSource`` row exists for ``key``
+            If more than one ``ArtifactDetectionSource`` row exists for ``key``
             (the part is zero-or-one by construction).
         """
         from spyglass.spikesorting.v2.exceptions import SchemaBypassError
 
         master_key = {k: v for k, v in key.items() if k in cls.primary_key}
-        rows = (cls.ArtifactSource & master_key).fetch("artifact_id")
+        rows = (cls.ArtifactDetectionSource & master_key).fetch(
+            "artifact_detection_id"
+        )
         if len(rows) > 1:
             raise SchemaBypassError(
                 f"SortingSelection {master_key} has {len(rows)} "
-                "ArtifactSource rows; expected zero or one."
+                "ArtifactDetectionSource rows; expected zero or one."
             )
         return rows[0] if len(rows) == 1 else None
 
@@ -1027,16 +1042,19 @@ class Sorting(SpyglassMixin, dj.Computed):
             )
 
         sel_row = (SortingSelection & key).fetch1()
-        # The artifact pass lives on the zero-or-one ``ArtifactSource``
-        # part, not a nullable ``artifact_id`` FK on the master, so
-        # ``sel_row`` does not carry an ``artifact_id`` key. Resolve it
-        # once here and stash it on ``sel_row`` so the
+        # The artifact-detection pass lives on the zero-or-one
+        # ``ArtifactDetectionSource`` part, not a nullable
+        # ``artifact_detection_id`` FK on the master, so ``sel_row`` does not
+        # carry an ``artifact_detection_id`` key. Resolve it once here and stash it
+        # on ``sel_row`` so the
         # downstream readers (obs_intervals derivation below,
         # make_compute's artifact-mask gate, _rebuild_analyzer_folder)
-        # see the artifact id without re-querying. Without this the
-        # ``sel_row.get("artifact_id")`` reads would always be None and
-        # every artifact-backed sort would silently skip artifact masking.
-        sel_row["artifact_id"] = SortingSelection.resolve_artifact(key)
+        # see the artifact-detection id without re-querying. Without this the
+        # ``sel_row.get("artifact_detection_id")`` reads would always be None
+        # and every artifact-backed sort would silently skip artifact masking.
+        sel_row["artifact_detection_id"] = (
+            SortingSelection.resolve_artifact_detection(key)
+        )
         sorter_row = (
             SorterParameters
             & {
@@ -1056,20 +1074,20 @@ class Sorting(SpyglassMixin, dj.Computed):
         # without this column the units NWB looks like the unit
         # was observed across the full session even where the
         # artifact mask blanked the signal. Matches v1 at
-        # ``v1/sorting.py:597``. When ``artifact_id`` is unset the
+        # ``v1/sorting.py:597``. When ``artifact_detection_id`` is unset the
         # caller (make_compute) falls back to the recording's
         # full timestamp envelope.
-        if sel_row.get("artifact_id") is not None:
+        if sel_row.get("artifact_detection_id") is not None:
             from spyglass.spikesorting.v2.utils import (
-                artifact_interval_list_name,
+                artifact_detection_interval_list_name,
             )
 
             obs_intervals = (
                 IntervalList
                 & {
                     "nwb_file_name": nwb_file_name,
-                    "interval_list_name": artifact_interval_list_name(
-                        sel_row["artifact_id"]
+                    "interval_list_name": artifact_detection_interval_list_name(
+                        sel_row["artifact_detection_id"]
                     ),
                 }
             ).fetch1("valid_times")
@@ -1097,7 +1115,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         The long-running steps run here:
 
         - load the cached preprocessed recording,
-        - apply the artifact mask if ``artifact_id`` is set,
+        - apply the artifact mask if ``artifact_detection_id`` is set,
         - dispatch ``_run_sorter`` (clusterless thresholder or SI
           sorter; tempdir + Singularity + container carve-outs apply),
         - ``_remove_excess_spikes`` (boundary safety),
@@ -1116,11 +1134,11 @@ class Sorting(SpyglassMixin, dj.Computed):
         recording_id = source.key["recording_id"]
         recording = Recording().get_recording({"recording_id": recording_id})
 
-        if sel_row.get("artifact_id") is not None and obs_intervals is not None:
+        if sel_row.get("artifact_detection_id") is not None and obs_intervals is not None:
             recording = self._apply_artifact_mask(
                 recording=recording,
                 valid_times=obs_intervals,
-                artifact_id=sel_row.get("artifact_id"),
+                artifact_detection_id=sel_row.get("artifact_detection_id"),
                 recording_id=recording_id,
             )
 
@@ -1441,12 +1459,14 @@ class Sorting(SpyglassMixin, dj.Computed):
         from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
         sel_row = (SortingSelection & key).fetch1()
-        # Resolve the artifact from the ArtifactSource part (the master
-        # has no artifact_id FK); without this the artifact-mask gate
-        # below would never fire and a rebuilt analyzer for an
-        # artifact-backed sort would omit the mask, diverging from what
+        # Resolve the artifact-detection id from the ArtifactDetectionSource
+        # part (the master has no artifact_detection_id FK); without this the
+        # artifact-mask gate below would never fire and a rebuilt analyzer for
+        # an artifact-backed sort would omit the mask, diverging from what
         # Sorting.make wrote.
-        sel_row["artifact_id"] = SortingSelection.resolve_artifact(key)
+        sel_row["artifact_detection_id"] = (
+            SortingSelection.resolve_artifact_detection(key)
+        )
         source = SortingSelection.resolve_source(key)
         if source.kind != "recording":
             raise NotImplementedError(
@@ -1456,11 +1476,11 @@ class Sorting(SpyglassMixin, dj.Computed):
         recording = Recording().get_recording(
             {"recording_id": source.key["recording_id"]}
         )
-        if sel_row.get("artifact_id") is not None:
+        if sel_row.get("artifact_detection_id") is not None:
             from spyglass.common.common_interval import IntervalList
             from spyglass.spikesorting.v2.recording import RecordingSelection
             from spyglass.spikesorting.v2.utils import (
-                artifact_interval_list_name,
+                artifact_detection_interval_list_name,
             )
 
             nwb_file_name = (
@@ -1471,15 +1491,15 @@ class Sorting(SpyglassMixin, dj.Computed):
                 IntervalList
                 & {
                     "nwb_file_name": nwb_file_name,
-                    "interval_list_name": artifact_interval_list_name(
-                        sel_row["artifact_id"]
+                    "interval_list_name": artifact_detection_interval_list_name(
+                        sel_row["artifact_detection_id"]
                     ),
                 }
             ).fetch1("valid_times")
             recording = self._apply_artifact_mask(
                 recording=recording,
                 valid_times=valid_times,
-                artifact_id=sel_row["artifact_id"],
+                artifact_detection_id=sel_row["artifact_detection_id"],
                 recording_id=source.key["recording_id"],
             )
         sorting_obj = self.get_sorting(key)
@@ -1718,7 +1738,7 @@ class Sorting(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def _apply_artifact_mask(
-        recording, valid_times, *, artifact_id=None, recording_id=None
+        recording, valid_times, *, artifact_detection_id=None, recording_id=None
     ):
         """Zero out the complement of ``valid_times`` on the recording.
 
@@ -1732,7 +1752,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         return apply_artifact_mask(
             recording,
             valid_times,
-            artifact_id=artifact_id,
+            artifact_detection_id=artifact_detection_id,
             recording_id=recording_id,
         )
 

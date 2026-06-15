@@ -40,7 +40,7 @@ from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 from spyglass.spikesorting.v2 import initialize_v2_defaults
 from spyglass.spikesorting.v2.curation import CurationV2
 from spyglass.spikesorting.v2.pipeline import (
-    describe_presets,
+    describe_pipeline_presets,
     describe_sort_groups,
     plot_sort_group_geometry,
     preflight_v2_pipeline,
@@ -57,14 +57,15 @@ dj.config["display.limit"] = 12  # cap rows in table reprs
 #
 # Point the notebook at the session you ingested with `insert_sessions`. A
 # full-session sort uses the `"raw data valid times"` interval and the
-# recommended MountainSort5 preset; change `preset` to one of the names from
-# `describe_presets()` below if you want a different sorter.
+# recommended MountainSort5 pipeline preset; change `pipeline_preset` to one
+# of the names from `describe_pipeline_presets()` below if you want a
+# different sorter.
 
 # + tags=["parameters"]
 nwb_file_name = "your_session_.nwb"  # replace with your ingested session
 team_name = "my_team"
 interval_list_name = "raw data valid times"
-preset = "franklab_tetrode_mountainsort5"
+pipeline_preset = "franklab_tetrode_mountainsort5"
 # -
 
 # ## 2. One-time setup
@@ -95,20 +96,20 @@ plot_sort_group_geometry(nwb_file_name)
 sort_groups
 
 
-# ## 3. Pick a preset
+# ## 3. Pick a Pipeline Preset
 #
-# `describe_presets()` returns a table of what each shipping preset does — the
-# sorter, the parameter rows each stage uses, the intended use, and (a known
-# footgun) the units of the detection threshold — so you can choose one
-# without reading the module source.
+# `describe_pipeline_presets()` returns a table of what each shipping pipeline
+# preset does — the sorter, the parameter rows each stage uses, the intended
+# use, and (a known footgun) the units of the detection threshold — so you can
+# choose one without reading the module source.
 
-describe_presets()
+describe_pipeline_presets()
 
 # ## 4. Preflight — a fast, fail-early check
 #
 # `preflight_v2_pipeline` verifies in ~1 s (inserting nothing, never calling
 # `populate`) that every prerequisite is in place: the session / interval /
-# team / sort-group rows, the preset's parameter rows, and the sorter binary.
+# team / sort-group rows, the pipeline preset's parameter rows, and the sorter binary.
 # It returns a `PreflightReport` that is truthy when the configuration is
 # runnable; `report.errors` lists each blocking problem with the exact fix, and
 # `report.expected_ids` shows the selection PKs the run will produce. (Skip it
@@ -119,14 +120,14 @@ report = preflight_v2_pipeline(
     sort_group_id=sort_group_id,
     interval_list_name=interval_list_name,
     team_name=team_name,
-    preset=preset,
+    pipeline_preset=pipeline_preset,
 )
 print("preflight ok:", report.ok)
 report
 
 # ## 5. Run the pipeline
 #
-# `run_v2_pipeline` chains recording → artifact → sort → curation into one
+# `run_v2_pipeline` chains recording → artifact detection → sort → curation into one
 # idempotent call and registers the result on the `SpikeSortingOutput` merge
 # table. With `preflight=True` (the default) it re-runs the check above before
 # any populate. **Re-running with the same inputs is safe** — it finds the
@@ -138,13 +139,14 @@ manifest = run_v2_pipeline(
     sort_group_id=sort_group_id,
     interval_list_name=interval_list_name,
     team_name=team_name,
-    preset=preset,
+    pipeline_preset=pipeline_preset,
 )
 
 # ## 6. Read the manifest
 #
-# Besides the stable keys (`preset` / `recording_id` / `artifact_id` /
-# `sorting_id` / `curation_id` / `merge_id` / `n_units`), the manifest carries
+# Besides the stable keys (`pipeline_preset` / `recording_id` /
+# `artifact_detection_id` / `sorting_id` / `curation_id` / `merge_id` /
+# `n_units`), the manifest carries
 # per-stage observability: each `*_status` is `"computed"` if the stage did
 # work this call or `"reused"` if its row already existed; `stage_seconds` is
 # the wall-clock spent **this call** per stage (≈0 on an idempotent re-run, not
@@ -162,7 +164,7 @@ print(
     "stage status             :",
     {
         stage: manifest[f"{stage}_status"]
-        for stage in ("recording", "artifact", "sorting", "curation")
+        for stage in ("recording", "artifact_detection", "sorting", "curation")
     },
 )
 print("stage seconds            :", manifest["stage_seconds"])
@@ -210,6 +212,6 @@ spike_times
 # - Organize sorts across sessions and filter units with
 #   [Spike Sorting Analysis](./11_Spike_Sorting_Analysis.ipynb)
 #   (`SortedSpikesGroup`).
-# - Drive the stages individually (custom presets, ADC phase-shift, bad-channel
+# - Drive the stages individually (custom pipeline presets, ADC phase-shift, bad-channel
 #   handling, drift QC) — see `docs/src/Features/SpikeSortingV2.md`.
 #

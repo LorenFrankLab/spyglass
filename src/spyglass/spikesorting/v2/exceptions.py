@@ -31,10 +31,10 @@ class RecordingTruncatedError(RuntimeError):
 
 class EmptyArtifactValidTimesError(RuntimeError):
     """``_apply_artifact_mask`` received an empty ``valid_times`` array --
-    the artifact pass kept zero seconds of the recording. Masking would
-    zero the entire recording and the sort would run over all-zeros,
-    emitting a misleading "zero units" result. Message names the
-    ``artifact_id`` and ``recording_id`` and points the caller at
+    the artifact-detection pass kept zero seconds of the recording.
+    Masking would zero the entire recording and the sort would run over
+    all-zeros, emitting a misleading "zero units" result. Message names the
+    ``artifact_detection_id`` and ``recording_id`` and points the caller at
     re-running ``ArtifactDetection`` with looser thresholds or overriding
     the artifact selection."""
 
@@ -73,9 +73,9 @@ class MissingRecordingForConcatError(RuntimeError):
 
 
 class PipelineInputError(ValueError):
-    """``run_v2_pipeline()`` was given an unknown ``preset`` name.
-    Message lists the available presets and points at
-    ``describe_presets()`` / ``list_presets()``."""
+    """``run_v2_pipeline()`` was given an unknown ``pipeline_preset`` name.
+    Message lists the available pipeline presets and points at
+    ``describe_pipeline_presets()`` / ``list_pipeline_presets()``."""
 
 
 class PreflightError(ValueError):

@@ -48,7 +48,7 @@ def export_smoke_session(dj_conn):
     yield {"nwb_file_name": nwb_file_name}
 
 
-def _run_pipeline(session, preset):
+def _run_pipeline(session, pipeline_preset):
     """Run ``run_v2_pipeline`` end-to-end and return its manifest.
 
     Cleans every v2 row for the session first so the sort is rebuilt
@@ -75,7 +75,7 @@ def _run_pipeline(session, preset):
         sort_group_id=sort_group_id,
         interval_list_name="raw data valid times",
         team_name=_TEAM,
-        preset=preset,
+        pipeline_preset=pipeline_preset,
         description="v2 export test",
     )
 

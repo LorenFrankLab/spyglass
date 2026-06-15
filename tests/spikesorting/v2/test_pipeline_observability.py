@@ -3,7 +3,7 @@
 The run manifest carries, additively, per-stage ``*_status`` (``"computed"``
 vs ``"reused"``), a ``stage_seconds`` timing dict, and a ``warnings`` list (the
 seven stable keys are untouched), and raises a stage-aware
-``PipelineStageError`` (carrying the partial manifest) when a stage's
+    ``PipelineStageError`` (carrying the partial manifest) when a stage's
 populate/insert fails.
 
 The heavy mountainsort5 sort is run ONCE in a module-scoped fixture and reused
@@ -34,9 +34,9 @@ _TEAM = "obs_test_team"
 _INTERVAL = "raw data valid times"
 
 _STABLE_KEYS = (
-    "preset",
+    "pipeline_preset",
     "recording_id",
-    "artifact_id",
+    "artifact_detection_id",
     "sorting_id",
     "curation_id",
     "merge_id",
@@ -44,11 +44,11 @@ _STABLE_KEYS = (
 )
 _STATUS_KEYS = (
     "recording_status",
-    "artifact_status",
+    "artifact_detection_status",
     "sorting_status",
     "curation_status",
 )
-_STAGES = ("recording", "artifact", "sorting", "curation")
+_STAGES = ("recording", "artifact_detection", "sorting", "curation")
 # Keys that legitimately differ between two identical runs.
 _VOLATILE_KEYS = {"stage_seconds", *_STATUS_KEYS}
 
@@ -151,7 +151,7 @@ def test_first_run_computed_second_reused(first_run):
 @pytest.mark.slow
 def test_idempotent_manifest_modulo_timing(first_run):
     """Two identical runs are equal modulo timing/status, inserting no dups."""
-    from spyglass.spikesorting.v2.artifact import ArtifactSelection
+    from spyglass.spikesorting.v2.artifact import ArtifactDetectionSelection
     from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
@@ -159,13 +159,13 @@ def test_idempotent_manifest_modulo_timing(first_run):
 
     counts_before = [
         len(RecordingSelection()),
-        len(ArtifactSelection()),
+        len(ArtifactDetectionSelection()),
         len(SortingSelection()),
     ]
     second_manifest = run_v2_pipeline(**inputs)
     counts_after = [
         len(RecordingSelection()),
-        len(ArtifactSelection()),
+        len(ArtifactDetectionSelection()),
         len(SortingSelection()),
     ]
     assert counts_after == counts_before, "re-run inserted duplicate rows"
@@ -183,9 +183,9 @@ def test_idempotent_manifest_modulo_timing(first_run):
 def test_stage_error_carries_partial_manifest(first_run, monkeypatch):
     """A failing stage raises PipelineStageError with the partial manifest.
 
-    Recording/artifact are already populated (reused, fast); patch
+    Recording/artifact detection are already populated (reused, fast); patch
     ``Sorting.populate`` to throw so the sorting stage fails with
-    ``recording_id`` + ``artifact_id`` already in the partial manifest and the
+    ``recording_id`` + ``artifact_detection_id`` already in the partial manifest and the
     injected error chained.
     """
     from spyglass.spikesorting.v2.sorting import Sorting
@@ -203,7 +203,7 @@ def test_stage_error_carries_partial_manifest(first_run, monkeypatch):
 
     err = exc.value
     assert err.stage == "sorting"
-    assert {"recording_id", "artifact_id"} <= set(err.partial_manifest)
+    assert {"recording_id", "artifact_detection_id"} <= set(err.partial_manifest)
     assert "sorting_id" not in err.partial_manifest
     assert err.__cause__ is sentinel
 
@@ -233,7 +233,7 @@ def test_curation_stage_error_partial_has_n_units(first_run, monkeypatch):
     assert err.stage == "curation"
     assert {
         "recording_id",
-        "artifact_id",
+        "artifact_detection_id",
         "sorting_id",
         "n_units",
     } <= set(err.partial_manifest)
@@ -247,13 +247,14 @@ def test_curation_stage_error_partial_has_n_units(first_run, monkeypatch):
 def test_zero_unit_warning_in_manifest(first_run):
     """A zero-unit sort records its advisory on the manifest ``warnings``.
 
-    The shipped clusterless preset (100 µV detect_threshold) finds zero peaks
-    on the smoke fixture, so the run completes gracefully (``n_units == 0``)
-    with the zero-unit message captured for programmatic access.
+    The shipped clusterless pipeline preset (100 µV detect_threshold) finds
+    zero peaks on the smoke fixture, so the run completes gracefully
+    (``n_units == 0``) with the zero-unit message captured for programmatic
+    access.
     """
     _, inputs = first_run
     manifest = run_v2_pipeline(
-        **{**inputs, "preset": "franklab_tetrode_clusterless_thresholder"}
+        **{**inputs, "pipeline_preset": "franklab_tetrode_clusterless_thresholder"}
     )
     assert manifest["n_units"] == 0
     assert any("zero units" in w for w in manifest["warnings"]), manifest[
@@ -292,7 +293,7 @@ def test_curation_stage_wraps_missing_merge_registration(first_run):
         assert err.stage == "curation"
         assert {
             "recording_id",
-            "artifact_id",
+            "artifact_detection_id",
             "sorting_id",
             "n_units",
         } <= set(err.partial_manifest)

@@ -8,7 +8,7 @@ the minimum-viable single-session path; richer surfaces (metrics +
 auto-curation, concat sorts, cross-session matching, UI hooks) come
 in later versions.
 
-Presets are Pydantic-validated bundles of Lookup-row names; the
+Pipeline presets are Pydantic-validated bundles of Lookup-row names; the
 orchestrator looks them up at first call. Three presets ship today:
     franklab_tetrode_mountainsort4
     franklab_tetrode_mountainsort5
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     import pandas as pd
 
 
-class _Preset(BaseModel):
+class _PipelinePreset(BaseModel):
     """A v2 pipeline preset: a bundle of Lookup-row names.
 
     The orchestrator consults this bundle once, then drives the
@@ -43,7 +43,7 @@ class _Preset(BaseModel):
 
     The human-facing fields (``intended_use``, ``threshold_units``,
     ``notes``) carry no runtime behavior; they describe the preset for
-    ``describe_presets()`` so a scientist can choose one without reading
+    ``describe_pipeline_presets()`` so a scientist can choose one without reading
     module source. They default to ``""`` so external presets need not
     supply them, but the built-ins below populate them.
     """
@@ -53,30 +53,30 @@ class _Preset(BaseModel):
     artifact_detection_params_name: str
     sorter: str
     sorter_params_name: str
-    intended_use: str = ""  # one-line "when to reach for this preset"
+    intended_use: str = ""  # one-line "when to reach for this pipeline preset"
     threshold_units: str = ""  # detection-threshold units (MAD mult. / µV)
     notes: str = ""  # key assumptions (probe geometry, sampling rate, etc.)
 
 
-def list_presets() -> list[str]:
-    """Return the sorted preset names accepted by ``run_v2_pipeline``.
+def list_pipeline_presets() -> list[str]:
+    """Return the sorted pipeline-preset names accepted by ``run_v2_pipeline``.
 
     Notebook-discoverable accessor so users don't need to read the
     module source to learn what's available.
 
     Examples
     --------
-    >>> from spyglass.spikesorting.v2.pipeline import list_presets
-    >>> list_presets()
+    >>> from spyglass.spikesorting.v2.pipeline import list_pipeline_presets
+    >>> list_pipeline_presets()
     ['franklab_tetrode_clusterless_thresholder', 'franklab_tetrode_mountainsort4', 'franklab_tetrode_mountainsort5']
     """
-    return sorted(_PRESETS)
+    return sorted(_PIPELINE_PRESETS)
 
 
-def describe_presets() -> "pd.DataFrame":
-    """Return a table describing each preset accepted by ``run_v2_pipeline``.
+def describe_pipeline_presets() -> "pd.DataFrame":
+    """Return a table describing each pipeline preset accepted by ``run_v2_pipeline``.
 
-    Companion to :func:`list_presets` that adds the detail a scientist
+    Companion to :func:`list_pipeline_presets` that adds the detail a scientist
     needs to choose a preset -- the sorter, the parameter-row names each
     stage uses, the intended use, and (a known footgun) the units of the
     detection threshold -- without reading module source. Pure and
@@ -87,22 +87,22 @@ def describe_presets() -> "pd.DataFrame":
     Returns
     -------
     pandas.DataFrame
-        One row per preset, sorted by preset name, with columns
-        ``preset``, ``sorter``, ``preprocessing_params_name``,
+        One row per pipeline preset, sorted by name, with columns
+        ``pipeline_preset``, ``sorter``, ``preprocessing_params_name``,
         ``artifact_detection_params_name``, ``sorter_params_name``,
         ``intended_use``, ``threshold_units``, and ``notes``. Call
         ``.to_dict("records")`` for raw rows.
 
     Examples
     --------
-    >>> from spyglass.spikesorting.v2.pipeline import describe_presets
-    >>> describe_presets()["preset"].tolist()
+    >>> from spyglass.spikesorting.v2.pipeline import describe_pipeline_presets
+    >>> describe_pipeline_presets()["pipeline_preset"].tolist()
     ['franklab_tetrode_clusterless_thresholder', 'franklab_tetrode_mountainsort4', 'franklab_tetrode_mountainsort5']
     """
     import pandas as pd
 
     columns = [
-        "preset",
+        "pipeline_preset",
         "sorter",
         "preprocessing_params_name",
         "artifact_detection_params_name",
@@ -113,16 +113,18 @@ def describe_presets() -> "pd.DataFrame":
     ]
     rows = [
         {
-            "preset": name,
-            "sorter": preset.sorter,
-            "preprocessing_params_name": preset.preprocessing_params_name,
-            "artifact_detection_params_name": preset.artifact_detection_params_name,
-            "sorter_params_name": preset.sorter_params_name,
-            "intended_use": preset.intended_use,
-            "threshold_units": preset.threshold_units,
-            "notes": preset.notes,
+            "pipeline_preset": name,
+            "sorter": pipeline_preset.sorter,
+            "preprocessing_params_name": pipeline_preset.preprocessing_params_name,
+            "artifact_detection_params_name": (
+                pipeline_preset.artifact_detection_params_name
+            ),
+            "sorter_params_name": pipeline_preset.sorter_params_name,
+            "intended_use": pipeline_preset.intended_use,
+            "threshold_units": pipeline_preset.threshold_units,
+            "notes": pipeline_preset.notes,
         }
-        for name, preset in sorted(_PRESETS.items())
+        for name, pipeline_preset in sorted(_PIPELINE_PRESETS.items())
     ]
     return pd.DataFrame(rows, columns=columns)
 
@@ -652,8 +654,8 @@ def plot_sort_group_geometry(
     return ax
 
 
-_PRESETS: dict[str, _Preset] = {
-    "franklab_tetrode_mountainsort4": _Preset(
+_PIPELINE_PRESETS: dict[str, _PipelinePreset] = {
+    "franklab_tetrode_mountainsort4": _PipelinePreset(
         preprocessing_params_name="default_franklab",
         artifact_detection_params_name="default",
         sorter="mountainsort4",
@@ -669,7 +671,7 @@ _PRESETS: dict[str, _Preset] = {
             "voltage."
         ),
     ),
-    "franklab_tetrode_mountainsort5": _Preset(
+    "franklab_tetrode_mountainsort5": _PipelinePreset(
         preprocessing_params_name="default_franklab",
         artifact_detection_params_name="default",
         sorter="mountainsort5",
@@ -685,7 +687,7 @@ _PRESETS: dict[str, _Preset] = {
             "voltage."
         ),
     ),
-    "franklab_tetrode_clusterless_thresholder": _Preset(
+    "franklab_tetrode_clusterless_thresholder": _PipelinePreset(
         preprocessing_params_name="default_franklab",
         artifact_detection_params_name="default",
         sorter="clusterless_thresholder",
@@ -732,8 +734,8 @@ class PreflightReport:
         Blocking-problem messages; non-empty iff ``ok`` is False.
     warnings
         Non-blocking advisories (e.g. ``artifact_detection_params_name="none"``).
-    resolved_preset
-        The preset name that was checked.
+    resolved_pipeline_preset
+        The pipeline-preset name that was checked.
     expected_ids
         The selection PKs a subsequent ``run_v2_pipeline`` would produce,
         each annotated with whether the row already exists, e.g.
@@ -752,7 +754,7 @@ class PreflightReport:
     ok: bool
     errors: list[str]
     warnings: list[str]
-    resolved_preset: str
+    resolved_pipeline_preset: str
     expected_ids: dict
     checks: list["PreflightCheck"]
 
@@ -765,26 +767,27 @@ def preflight_v2_pipeline(
     sort_group_id: int,
     interval_list_name: str,
     team_name: str,
-    preset: str = "franklab_tetrode_mountainsort5",
+    pipeline_preset: str = "franklab_tetrode_mountainsort5",
 ) -> PreflightReport:
     """Read-only pre-populate configuration check for ``run_v2_pipeline``.
 
     Verifies -- in ~1 s, inserting nothing and never calling ``populate``
     -- that every prerequisite a subsequent ``run_v2_pipeline(...,
-    preset=preset)`` needs is in place: the session / interval / team /
-    sort-group rows exist, the preset's parameter Lookup rows exist, and
+    pipeline_preset=pipeline_preset)`` needs is in place: the session /
+    interval / team / sort-group rows exist, the pipeline preset's
+    parameter Lookup rows exist, and
     the sorter binary is installed. Returns a structured
     :class:`PreflightReport` instead of failing minutes into ``populate``
     with an opaque foreign-key or SpikeInterface error.
 
     Every check is a read-only restriction (``& {...}``) or a pure call;
     all checks run even after one fails, so the report lists every problem
-    at once. An unknown ``preset`` short-circuits before any database
+    at once. An unknown ``pipeline_preset`` short-circuits before any database
     access (the later checks need the resolved param names).
 
     Parameters
     ----------
-    nwb_file_name, sort_group_id, interval_list_name, team_name, preset
+    nwb_file_name, sort_group_id, interval_list_name, team_name, pipeline_preset
         The same inputs as :func:`run_v2_pipeline`.
 
     Returns
@@ -803,40 +806,40 @@ def preflight_v2_pipeline(
         checks.append(PreflightCheck(name, ok, "" if ok else fix))
         return ok
 
-    # 1. preset_known. Short-circuit before any DB access on failure: the
+    # 1. pipeline_preset_known. Short-circuit before any DB access on failure: the
     # remaining checks (and expected_ids) all derive from the resolved
-    # bundle's param names, which are unknown for a bogus preset.
-    if preset not in _PRESETS:
+    # bundle's param names, which are unknown for a bogus pipeline preset.
+    if pipeline_preset not in _PIPELINE_PRESETS:
         _check(
-            "preset_known",
+            "pipeline_preset_known",
             False,
-            f"unknown preset {preset!r}. Available presets: "
-            f"{sorted(_PRESETS)}. Call describe_presets() to see what each "
+            f"unknown pipeline_preset {pipeline_preset!r}. Available pipeline presets: "
+            f"{sorted(_PIPELINE_PRESETS)}. Call describe_pipeline_presets() to see what each "
             "one does.",
         )
         return PreflightReport(
             ok=False,
             errors=[c.fix for c in checks if not c.ok],
             warnings=warnings,
-            resolved_preset=preset,
+            resolved_pipeline_preset=pipeline_preset,
             expected_ids={},
             checks=checks,
         )
-    _check("preset_known", True, "")
-    bundle = _PRESETS[preset]
+    _check("pipeline_preset_known", True, "")
+    bundle = _PIPELINE_PRESETS[pipeline_preset]
 
     import spikeinterface.sorters as sis
 
     from spyglass.common import IntervalList, LabTeam, Session
     from spyglass.spikesorting.v2._selection_identity import (
-        artifact_identity_payload,
+        artifact_detection_identity_payload,
         deterministic_id,
         recording_identity_payload,
         sorting_identity_payload,
     )
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetectionParameters,
-        ArtifactSelection,
+        ArtifactDetectionSelection,
     )
     from spyglass.spikesorting.v2.recording import (
         PreprocessingParameters,
@@ -964,9 +967,9 @@ def preflight_v2_pipeline(
             }
         ),
     )
-    artifact_id = deterministic_id(
-        "artifact",
-        artifact_identity_payload(
+    artifact_detection_id = deterministic_id(
+        "artifact_detection",
+        artifact_detection_identity_payload(
             artifact_detection_params_name=bundle.artifact_detection_params_name,
             recording_id=recording_id,
         ),
@@ -977,7 +980,7 @@ def preflight_v2_pipeline(
             recording_id=recording_id,
             sorter=bundle.sorter,
             sorter_params_name=bundle.sorter_params_name,
-            artifact_id=artifact_id,
+            artifact_detection_id=artifact_detection_id,
         ),
     )
     expected_ids = {
@@ -985,9 +988,12 @@ def preflight_v2_pipeline(
             "id": recording_id,
             "exists": bool(RecordingSelection & {"recording_id": recording_id}),
         },
-        "artifact_id": {
-            "id": artifact_id,
-            "exists": bool(ArtifactSelection & {"artifact_id": artifact_id}),
+        "artifact_detection_id": {
+            "id": artifact_detection_id,
+            "exists": bool(
+                ArtifactDetectionSelection
+                & {"artifact_detection_id": artifact_detection_id}
+            ),
         },
         "sorting_id": {
             "id": sorting_id,
@@ -1000,7 +1006,7 @@ def preflight_v2_pipeline(
         ok=not errors,
         errors=errors,
         warnings=warnings,
-        resolved_preset=preset,
+        resolved_pipeline_preset=pipeline_preset,
         expected_ids=expected_ids,
         checks=checks,
     )
@@ -1047,12 +1053,12 @@ def run_v2_pipeline(
     sort_group_id: int,
     interval_list_name: str,
     team_name: str,
-    preset: str = "franklab_tetrode_mountainsort5",
+    pipeline_preset: str = "franklab_tetrode_mountainsort5",
     description: str = "",
     require_units: bool = False,
     preflight: bool = True,
 ) -> dict[str, Any]:
-    """End-to-end single-session sort: recording -> artifact -> sort -> curation.
+    """End-to-end single-session sort: recording -> artifact detection -> sort -> curation.
 
     Chains the v2 ``insert_selection`` + ``populate`` calls into one
     call. Idempotent: re-running with the same inputs returns the same
@@ -1095,14 +1101,14 @@ def run_v2_pipeline(
     team_name
         LabTeam owning the sort. Must already exist in
         ``common.LabTeam``.
-    preset
-        Preset name from ``_PRESETS``. Three presets ship today:
+    pipeline_preset
+        Pipeline-preset name from ``_PIPELINE_PRESETS``. Three presets ship today:
         ``franklab_tetrode_mountainsort4``,
         ``franklab_tetrode_mountainsort5`` (default), and
         ``franklab_tetrode_clusterless_thresholder``. Call
-        ``describe_presets()`` for a table of what each one does (sorter,
+        ``describe_pipeline_presets()`` for a table of what each one does (sorter,
         parameter rows, intended use, and threshold units), or
-        ``list_presets()`` for just the names.
+        ``list_pipeline_presets()`` for just the names.
     description
         Free-text description passed to ``CurationV2.insert_curation``.
     require_units
@@ -1116,7 +1122,7 @@ def run_v2_pipeline(
     preflight
         If True (default), run ``preflight_v2_pipeline`` first as a fast,
         read-only check that the session / interval / team / sort-group
-        rows, the preset's parameter rows, and the sorter binary are all
+        rows, the pipeline preset's parameter rows, and the sorter binary are all
         present; a failure raises ``PreflightError`` (with the exact fix)
         before any populate. Pass ``preflight=False`` to skip the check and
         attempt the run directly (e.g. to see the raw underlying error).
@@ -1125,13 +1131,13 @@ def run_v2_pipeline(
     -------
     dict
         Manifest with the following stage keys:
-            ``preset``                : the preset name
-            ``recording_id``          : RecordingSelection PK
-            ``artifact_id``           : ArtifactSelection PK
-            ``sorting_id``            : SortingSelection PK
-            ``curation_id``           : CurationV2 PK
-            ``merge_id``              : SpikeSortingOutput master PK
-            ``n_units``                : unit count (0 on a zero-unit sort)
+            ``pipeline_preset``          : the pipeline-preset name
+            ``recording_id``             : RecordingSelection PK
+            ``artifact_detection_id``    : ArtifactDetectionSelection PK
+            ``sorting_id``               : SortingSelection PK
+            ``curation_id``              : CurationV2 PK
+            ``merge_id``                 : SpikeSortingOutput master PK
+            ``n_units``                  : unit count (0 on a zero-unit sort)
         Downstream consumers should key off ``merge_id``. A zero-unit
         sort yields an empty curation/merge row (matching v1's empty
         Units table), not ``None``, so the result is always
@@ -1139,13 +1145,13 @@ def run_v2_pipeline(
 
         Plus per-stage observability keys (additive; the keys above are
         unchanged):
-            ``recording_status`` / ``artifact_status`` / ``sorting_status``
-            / ``curation_status`` : ``"computed"`` if the stage did work
+            ``recording_status`` / ``artifact_detection_status`` /
+            ``sorting_status`` / ``curation_status`` : ``"computed"`` if the stage did work
                 this call, ``"reused"`` if its row already existed and the
                 call no-opped (see ``_STAGE_STATUSES``).
             ``stage_seconds``     : dict of monotonic wall-clock seconds
-                spent per stage (keys ``"recording"`` / ``"artifact"`` /
-                ``"sorting"`` / ``"curation"``) **this call** -- ≈0 on an
+                spent per stage (keys ``"recording"`` / ``"artifact_detection"``
+                / ``"sorting"`` / ``"curation"``) **this call** -- ≈0 on an
                 idempotent re-run, NOT cumulative compute cost.
             ``warnings``          : list of human-readable advisories raised
                 during the run (e.g. the zero-unit message); empty when
@@ -1157,7 +1163,7 @@ def run_v2_pipeline(
     Raises
     ------
     PipelineInputError
-        If ``preset`` is not a known name.
+        If ``pipeline_preset`` is not a known name.
     PreflightError
         If ``preflight=True`` and a prerequisite is missing (the message
         lists every failed check and its fix). Bypass with
@@ -1179,7 +1185,7 @@ def run_v2_pipeline(
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetection,
-        ArtifactSelection,
+        ArtifactDetectionSelection,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.exceptions import (
@@ -1197,14 +1203,14 @@ def run_v2_pipeline(
     )
     from spyglass.utils import logger
 
-    if preset not in _PRESETS:
+    if pipeline_preset not in _PIPELINE_PRESETS:
         raise PipelineInputError(
-            f"run_v2_pipeline: unknown preset {preset!r}. "
-            f"Available presets: {sorted(_PRESETS)}. "
-            "Call spyglass.spikesorting.v2.pipeline.describe_presets() to see "
-            "what each preset does, or list_presets() for just the names."
+            f"run_v2_pipeline: unknown pipeline_preset {pipeline_preset!r}. "
+            f"Available pipeline presets: {sorted(_PIPELINE_PRESETS)}. "
+            "Call spyglass.spikesorting.v2.pipeline.describe_pipeline_presets() to see "
+            "what each preset does, or list_pipeline_presets() for just the names."
         )
-    bundle = _PRESETS[preset]
+    bundle = _PIPELINE_PRESETS[pipeline_preset]
 
     # Fail fast: a read-only config check before any insert/populate, so a
     # missing team / interval / sort group / param row / sorter binary
@@ -1216,7 +1222,7 @@ def run_v2_pipeline(
             sort_group_id=sort_group_id,
             interval_list_name=interval_list_name,
             team_name=team_name,
-            preset=preset,
+            pipeline_preset=pipeline_preset,
         )
         if not report.ok:
             raise PreflightError("\n".join(report.errors))
@@ -1225,10 +1231,10 @@ def run_v2_pipeline(
     # an existence check on the output row BEFORE populate, time the
     # populate/insert with a monotonic clock, and on failure raise a stage-
     # aware PipelineStageError carrying the manifest built so far. The stable
-    # manifest keys are unchanged; *_status / stage_seconds / warnings are
+    # manifest keys are stable; *_status / stage_seconds / warnings are
     # additive. DataJoint's ``populate()`` is idempotent (no-ops on present
     # rows), so no separate guard is needed before each call.
-    manifest: dict[str, Any] = {"preset": preset}
+    manifest: dict[str, Any] = {"pipeline_preset": pipeline_preset}
     stage_seconds: dict[str, float] = {}
     warnings_list: list[str] = []
 
@@ -1249,26 +1255,36 @@ def run_v2_pipeline(
     )
     manifest["recording_id"] = recording_key["recording_id"]
 
-    artifact_key = ArtifactSelection.insert_selection(
+    artifact_detection_key = ArtifactDetectionSelection.insert_selection(
         {
             "recording_id": recording_key["recording_id"],
             "artifact_detection_params_name": bundle.artifact_detection_params_name,
         }
     )
-    _, manifest["artifact_status"], stage_seconds["artifact"] = _run_stage(
-        "artifact",
-        bool(ArtifactDetection & artifact_key),
-        lambda: ArtifactDetection.populate(artifact_key, reserve_jobs=False),
+    (
+        _,
+        manifest["artifact_detection_status"],
+        stage_seconds["artifact_detection"],
+    ) = _run_stage(
+        "artifact_detection",
+        bool(ArtifactDetection & artifact_detection_key),
+        lambda: ArtifactDetection.populate(
+            artifact_detection_key, reserve_jobs=False
+        ),
         manifest,
     )
-    manifest["artifact_id"] = artifact_key["artifact_id"]
+    manifest["artifact_detection_id"] = artifact_detection_key[
+        "artifact_detection_id"
+    ]
 
     sorting_key = SortingSelection.insert_selection(
         {
             "recording_id": recording_key["recording_id"],
             "sorter": bundle.sorter,
             "sorter_params_name": bundle.sorter_params_name,
-            "artifact_id": artifact_key["artifact_id"],
+            "artifact_detection_id": artifact_detection_key[
+                "artifact_detection_id"
+            ],
         }
     )
     _, manifest["sorting_status"], stage_seconds["sorting"] = _run_stage(
@@ -1335,7 +1351,9 @@ def run_v2_pipeline(
             sorting_key=sorting_key,
             labels={},
             parent_curation_id=-1,
-            description=description or f"run_v2_pipeline preset={preset}",
+            description=(
+                description or f"run_v2_pipeline pipeline_preset={pipeline_preset}"
+            ),
             reuse_existing=True,
         )
         # The CurationV2 part on the merge table is auto-registered inside

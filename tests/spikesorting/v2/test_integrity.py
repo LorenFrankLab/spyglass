@@ -9,7 +9,7 @@ exercise as a focused gate:
   ``make_compute`` / ``make_insert`` rather than a monolithic
   ``make``. The reason is to move the long-running compute step
   OUTSIDE the framework transaction so it does not hold row locks.
-- **Source-part FK consistency**: every ``ArtifactSelection`` and
+- **Source-part FK consistency**: every ``ArtifactDetectionSelection`` and
   ``SortingSelection`` master row has EXACTLY one source-part row
   (the invariant from shared-contracts.md "Source Part Pattern").
 - **Merge-table CurationV2 part is correctly wired**:
@@ -108,7 +108,7 @@ def test_v2_dispatch_classes_wired_into_merge_table():
 def test_source_part_pattern_holds_for_artifact_and_sorting_selection(
     populated_sorting,
 ):
-    """Every ``ArtifactSelection`` / ``SortingSelection`` master
+    """Every ``ArtifactDetectionSelection`` / ``SortingSelection`` master
     reachable from the populated fixture has EXACTLY one source-
     part row.
 
@@ -123,7 +123,7 @@ def test_source_part_pattern_holds_for_artifact_and_sorting_selection(
     logical contradiction.
     """
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactSelection,
+        ArtifactDetectionSelection,
     )
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
@@ -146,24 +146,24 @@ def test_source_part_pattern_holds_for_artifact_and_sorting_selection(
         f"part rows (expected 1). Source-part invariant violated."
     )
 
-    # Artifact master reachable via SortingSelection -> artifact_id.
-    # The artifact pass is recorded on the zero-or-one ArtifactSource
-    # part now (the master no longer carries a nullable artifact_id FK).
-    art_id = SortingSelection.resolve_artifact(sort_master_pk)
-    art_master_rows = ArtifactSelection & {"artifact_id": art_id}
+    # Artifact master reachable via SortingSelection -> artifact_detection_id.
+    # The artifact pass is recorded on the zero-or-one ArtifactDetectionSource
+    # part now (the master no longer carries a nullable artifact_detection_id FK).
+    art_id = SortingSelection.resolve_artifact_detection(sort_master_pk)
+    art_master_rows = ArtifactDetectionSelection & {"artifact_detection_id": art_id}
     assert len(art_master_rows) == 1, (
-        f"populated_sorting points at artifact_id={art_id!r} but no "
-        "ArtifactSelection master row exists for it; FK chain broken."
+        f"populated_sorting points at artifact_detection_id={art_id!r} but no "
+        "ArtifactDetectionSelection master row exists for it; FK chain broken."
     )
-    rec_parts = ArtifactSelection.RecordingSource & {"artifact_id": art_id}
-    shared_parts = ArtifactSelection.SharedArtifactGroupSource & {
-        "artifact_id": art_id
+    rec_parts = ArtifactDetectionSelection.RecordingSource & {"artifact_detection_id": art_id}
+    shared_parts = ArtifactDetectionSelection.SharedGroupSource & {
+        "artifact_detection_id": art_id
     }
     total = len(rec_parts) + len(shared_parts)
     assert total == 1, (
-        f"ArtifactSelection artifact_id={art_id!r} has {total} source-"
+        f"ArtifactDetectionSelection artifact_detection_id={art_id!r} has {total} source-"
         f"part rows (expected 1: {len(rec_parts)} RecordingSource + "
-        f"{len(shared_parts)} SharedArtifactGroupSource). "
+        f"{len(shared_parts)} SharedGroupSource). "
         "Source-part invariant violated."
     )
 
