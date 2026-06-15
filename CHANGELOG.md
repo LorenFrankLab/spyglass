@@ -922,6 +922,12 @@ for label, interval_data in results.groupby("interval_labels"):
         `torch`, so the `spikesorting-v2` extra now installs it (a modern
         standalone torch coexists with the v2 numpy >= 2 baseline — it does not
         downgrade numpy).
+    - Add `describe_presets()` to `spyglass.spikesorting.v2.pipeline`, a
+        companion to `list_presets()` that returns a `pandas.DataFrame`
+        describing each shipped preset (sorter, parameter rows, intended use,
+        and detection-threshold units — "MAD multiplier" for the MountainSort
+        presets, "µV" for the clusterless thresholder, a known footgun). Pure
+        and database-free; `pandas` is imported lazily.
 
 ## [0.5.5] (Aug 6, 2025)
 

@@ -131,7 +131,16 @@ Available presets:
 - `franklab_tetrode_clusterless_thresholder` -- peak-detection only (no
     clustering), feeds the clusterless decoding pipeline
 
-`list_presets()` returns the same list at runtime.
+`list_presets()` returns the same names at runtime; `describe_presets()`
+returns a table of what each preset does (sorter, parameter rows, intended
+use, and detection-threshold units) so you can choose one without reading the
+module source:
+
+```python
+from spyglass.spikesorting.v2.pipeline import describe_presets
+
+describe_presets()  # one row per preset
+```
 
 ### Stage-by-stage (custom preset)
 

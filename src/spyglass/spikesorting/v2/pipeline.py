@@ -21,9 +21,12 @@ manifest (with the same merge_id) without inserting duplicates.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 
 class _Preset(BaseModel):
@@ -35,6 +38,12 @@ class _Preset(BaseModel):
     ``run_v2_pipeline`` is called; the preset itself does NOT insert
     Lookup rows (default rows are inserted explicitly by callers via
     ``*.insert_default()``).
+
+    The human-facing fields (``intended_use``, ``threshold_units``,
+    ``notes``) carry no runtime behavior; they describe the preset for
+    ``describe_presets()`` so a scientist can choose one without reading
+    module source. They default to ``""`` so external presets need not
+    supply them, but the built-ins below populate them.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -42,6 +51,9 @@ class _Preset(BaseModel):
     artifact_params_name: str
     sorter: str
     sorter_params_name: str
+    intended_use: str = ""  # one-line "when to reach for this preset"
+    threshold_units: str = ""  # detection-threshold units (MAD mult. / µV)
+    notes: str = ""  # key assumptions (probe geometry, sampling rate, etc.)
 
 
 def list_presets() -> list[str]:
@@ -61,24 +73,109 @@ def list_presets() -> list[str]:
     return sorted(_PRESETS)
 
 
+def describe_presets() -> "pd.DataFrame":
+    """Return a table describing each preset accepted by ``run_v2_pipeline``.
+
+    Companion to :func:`list_presets` that adds the detail a scientist
+    needs to choose a preset -- the sorter, the parameter-row names each
+    stage uses, the intended use, and (a known footgun) the units of the
+    detection threshold -- without reading module source. Pure and
+    database-free: it reads only the in-module preset metadata and
+    queries/inserts nothing. ``pandas`` is imported lazily so
+    ``import spyglass.spikesorting.v2.pipeline`` stays cheap.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per preset, sorted by preset name, with columns
+        ``preset``, ``sorter``, ``preproc_params_name``,
+        ``artifact_params_name``, ``sorter_params_name``,
+        ``intended_use``, ``threshold_units``, and ``notes``. Call
+        ``.to_dict("records")`` for raw rows.
+
+    Examples
+    --------
+    >>> from spyglass.spikesorting.v2.pipeline import describe_presets
+    >>> describe_presets()["preset"].tolist()
+    ['franklab_tetrode_clusterless_thresholder', 'franklab_tetrode_mountainsort4', 'franklab_tetrode_mountainsort5']
+    """
+    import pandas as pd
+
+    columns = [
+        "preset",
+        "sorter",
+        "preproc_params_name",
+        "artifact_params_name",
+        "sorter_params_name",
+        "intended_use",
+        "threshold_units",
+        "notes",
+    ]
+    rows = [
+        {
+            "preset": name,
+            "sorter": preset.sorter,
+            "preproc_params_name": preset.preproc_params_name,
+            "artifact_params_name": preset.artifact_params_name,
+            "sorter_params_name": preset.sorter_params_name,
+            "intended_use": preset.intended_use,
+            "threshold_units": preset.threshold_units,
+            "notes": preset.notes,
+        }
+        for name, preset in sorted(_PRESETS.items())
+    ]
+    return pd.DataFrame(rows, columns=columns)
+
+
 _PRESETS: dict[str, _Preset] = {
     "franklab_tetrode_mountainsort4": _Preset(
         preproc_params_name="default_franklab",
         artifact_params_name="default",
         sorter="mountainsort4",
         sorter_params_name="franklab_tetrode_hippocampus_30kHz_ms4",
+        intended_use=(
+            "Frank-lab hippocampal tetrodes at 30 kHz; legacy MountainSort4 "
+            "(parity with v1)."
+        ),
+        threshold_units="MAD multiplier",
+        notes=(
+            "MountainSort detect_threshold is a median-absolute-deviation "
+            "multiplier on the per-channel noise floor, not an absolute "
+            "voltage."
+        ),
     ),
     "franklab_tetrode_mountainsort5": _Preset(
         preproc_params_name="default_franklab",
         artifact_params_name="default",
         sorter="mountainsort5",
         sorter_params_name="franklab_tetrode_hippocampus_30kHz_ms5",
+        intended_use=(
+            "Frank-lab hippocampal tetrodes at 30 kHz; recommended default "
+            "(current MountainSort5 settings)."
+        ),
+        threshold_units="MAD multiplier",
+        notes=(
+            "MountainSort detect_threshold is a median-absolute-deviation "
+            "multiplier on the per-channel noise floor, not an absolute "
+            "voltage."
+        ),
     ),
     "franklab_tetrode_clusterless_thresholder": _Preset(
         preproc_params_name="default_franklab",
         artifact_params_name="default",
         sorter="clusterless_thresholder",
         sorter_params_name="default",
+        intended_use=(
+            "Peak detection only (no clustering); feeds the clusterless "
+            "decoding pipeline."
+        ),
+        threshold_units="µV (100 µV default)",
+        notes=(
+            "The 'default' clusterless SorterParameters row sets "
+            "threshold_unit='uv' with detect_threshold=100, so the traces are "
+            "scaled to microvolts before detection -- a true 100 µV threshold, "
+            "not a MAD multiplier."
+        ),
     ),
 }
 
@@ -135,7 +232,10 @@ def run_v2_pipeline(
         Preset name from ``_PRESETS``. Three presets ship today:
         ``franklab_tetrode_mountainsort4``,
         ``franklab_tetrode_mountainsort5`` (default), and
-        ``franklab_tetrode_clusterless_thresholder``.
+        ``franklab_tetrode_clusterless_thresholder``. Call
+        ``describe_presets()`` for a table of what each one does (sorter,
+        parameter rows, intended use, and threshold units), or
+        ``list_presets()`` for just the names.
     description
         Free-text description passed to ``CurationV2.insert_curation``.
     require_units
@@ -197,8 +297,8 @@ def run_v2_pipeline(
         raise PipelineInputError(
             f"run_v2_pipeline: unknown preset {preset!r}. "
             f"Available presets: {sorted(_PRESETS)}. "
-            "Call run_v2_pipeline? to see the docstring, or check "
-            "spyglass.spikesorting.v2.pipeline.list_presets()."
+            "Call spyglass.spikesorting.v2.pipeline.describe_presets() to see "
+            "what each preset does, or list_presets() for just the names."
         )
     bundle = _PRESETS[preset]
 
