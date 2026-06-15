@@ -256,6 +256,34 @@ def test_preflight_sorter_not_installed(preflight_inputs, monkeypatch):
 
 
 @pytest.mark.database
+def test_preflight_sorter_misspelled(preflight_inputs, monkeypatch):
+    """A sorter that is not even a known SI sorter fails with a spelling hint.
+
+    Distinct from the 'known but binary not installed' branch
+    (test_preflight_sorter_not_installed): the fix message points at the
+    spelling / preset, not at installing a binary -- so it must NOT mention
+    ``installed_sorters()``.
+    """
+    from spyglass.spikesorting.v2 import pipeline as pl
+
+    bogus_preset = pl._Preset(
+        preproc_params_name="default_franklab",
+        artifact_params_name="default",
+        sorter="not_a_real_sorter_xyz",
+        sorter_params_name="default",
+    )
+    monkeypatch.setitem(pl._PRESETS, "_preflight_bogus_sorter", bogus_preset)
+
+    report = preflight_v2_pipeline(
+        **{**preflight_inputs, "preset": "_preflight_bogus_sorter"}
+    )
+    (check,) = [c for c in report.checks if c.name == "sorter_installed"]
+    assert check.ok is False
+    assert "not a known SpikeInterface sorter" in check.message
+    assert "installed_sorters()" not in check.message
+
+
+@pytest.mark.database
 def test_preflight_warns_on_none_artifact_params(preflight_inputs, monkeypatch):
     """artifact_params_name='none' raises a non-blocking advisory, not an error.
 
@@ -347,8 +375,8 @@ def test_preflight_expected_ids_round_trip(preflight_session):
 
     pre = preflight_v2_pipeline(**preflight_inputs)
     assert pre.ok is True
-    assert pre.expected_ids["recording_id"]["exists"] is False
-    assert pre.expected_ids["sorting_id"]["exists"] is False
+    for stage in ("recording_id", "artifact_id", "sorting_id"):
+        assert pre.expected_ids[stage]["exists"] is False
 
     manifest = run_v2_pipeline(**preflight_inputs)
     assert pre.expected_ids["recording_id"]["id"] == manifest["recording_id"]
@@ -356,8 +384,8 @@ def test_preflight_expected_ids_round_trip(preflight_session):
     assert pre.expected_ids["sorting_id"]["id"] == manifest["sorting_id"]
 
     post = preflight_v2_pipeline(**preflight_inputs)
-    assert post.expected_ids["recording_id"]["exists"] is True
-    assert post.expected_ids["sorting_id"]["exists"] is True
+    for stage in ("recording_id", "artifact_id", "sorting_id"):
+        assert post.expected_ids[stage]["exists"] is True
 
     _clean_session_v2({"nwb_file_name": preflight_inputs["nwb_file_name"]})
 

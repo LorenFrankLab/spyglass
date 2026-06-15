@@ -243,3 +243,16 @@ def test_summarize_unregistered_merge_id_none(populated_sorting):
     (SpikeSortingOutput & {"merge_id": merge_id}).super_delete(warn=False)
 
     assert CurationV2.summarize_curation(key)["merge_id"] is None
+
+
+@pytest.mark.database
+def test_summarize_curation_requires_full_pk(dj_conn):
+    """summarize_curation rejects a key lacking sorting_id or curation_id.
+
+    The guard prevents a ``curation_id``-only key (not globally unique) from
+    silently restricting to the wrong rows; it raises before any DB access.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    with pytest.raises(ValueError, match="sorting_id"):
+        CurationV2.summarize_curation({"curation_id": 0})
