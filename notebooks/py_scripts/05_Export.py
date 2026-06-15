@@ -138,7 +138,7 @@ my_lfp_data = (
     Electrode  # Logging this table
     & dj.AndList(
         [
-            "nwb_file_name LIKE 'min%'",  # using a string restrictionshared
+            "nwb_file_name LIKE 'min%'",  # using a string restriction
             {"electrode_id": 1},  # and a dictionary restriction
         ]
     )
@@ -166,7 +166,7 @@ my_other_lfp_data = (
     Electrode
     & dj.AndList(
         [
-            "nwb_file_name LIKE 'min%'",  # using a string restrictionshared
+            "nwb_file_name LIKE 'min%'",  # using a string restriction
             "electrode_id <125",
         ]
     )

@@ -56,7 +56,7 @@ class DandiValidationSelection(SpyglassMixin, dj.Manual):
     -> Export.File
     """
 
-    def check_paper_for_dandi_errors(self, key: dict, n_processes: int = 128):
+    def check_paper_for_dandi_errors(self, key: dict, force=False, n_processes: int = 128):
         """Run dandi validate checks on all files for a given paper.
 
         If called on a previously-populated paper, will delete and re-populate the
@@ -81,10 +81,12 @@ class DandiValidationSelection(SpyglassMixin, dj.Manual):
             return
 
         if DandiValidation & key:
-            logger.info(
-                f"Existing Dandi validations found for {key}. Deleting and re-populating."
-            )
-            (DandiValidation & key).delete()
+            if not force:
+                raise RuntimeError(
+                    f"Existing Dandi validations found for {key}. To re-run validation, "
+                    + "set force=True to delete existing validations and re-populate."
+                )
+            (DandiValidation & key).delete(safemode=False)
 
         self.insert(files_to_check, skip_duplicates=True)
         DandiValidation.populate(
