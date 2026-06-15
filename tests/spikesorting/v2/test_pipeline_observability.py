@@ -221,6 +221,40 @@ def test_stage_error_carries_partial_manifest(first_run, monkeypatch):
 
 
 @pytest.mark.database
+def test_curation_stage_error_partial_has_n_units(first_run, monkeypatch):
+    """A curation failure's partial manifest carries the pre-curation data.
+
+    ``n_units`` (a stable key) and ``warnings`` are known before the curation
+    stage runs, so a ``PipelineStageError`` from ``insert_curation`` must carry
+    them (along with the three selection PKs), not just the pre-sorting keys.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    _, inputs = first_run
+    sentinel = RuntimeError("injected curation failure")
+
+    def _boom(*args, **kwargs):
+        raise sentinel
+
+    monkeypatch.setattr(CurationV2, "insert_curation", _boom)
+
+    with pytest.raises(PipelineStageError) as exc:
+        run_v2_pipeline(**inputs)
+
+    err = exc.value
+    assert err.stage == "curation"
+    assert {
+        "recording_id",
+        "artifact_id",
+        "sorting_id",
+        "n_units",
+    } <= set(err.partial_manifest)
+    assert "warnings" in err.partial_manifest
+    assert "curation_id" not in err.partial_manifest
+    assert err.__cause__ is sentinel
+
+
+@pytest.mark.database
 @pytest.mark.slow
 def test_zero_unit_warning_in_manifest(first_run):
     """A zero-unit sort records its advisory on the manifest ``warnings``.

@@ -782,6 +782,12 @@ def run_v2_pipeline(
         logger.warning(zero_unit_warning)
         warnings_list.append(zero_unit_warning)
 
+    # Record the now-known stable ``n_units`` and the ``warnings`` before the
+    # curation stage runs, so a curation-stage failure's partial manifest
+    # carries them (not just the pre-sorting keys).
+    manifest["n_units"] = n_units
+    manifest["warnings"] = warnings_list
+
     # Idempotent curation: ``insert_curation`` owns the root-reuse logic.
     # With ``reuse_existing=True`` it returns the canonical (lowest
     # curation_id) existing root if one is present -- deterministically,
@@ -817,7 +823,5 @@ def run_v2_pipeline(
     merge_id = (SpikeSortingOutput.CurationV2 & curation_pk).fetch1("merge_id")
 
     manifest["merge_id"] = merge_id
-    manifest["n_units"] = n_units
     manifest["stage_seconds"] = stage_seconds
-    manifest["warnings"] = warnings_list
     return manifest
