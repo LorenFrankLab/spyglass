@@ -1,0 +1,411 @@
+"""Tests for ``preflight_v2_pipeline`` and ``run_v2_pipeline(preflight=...)``.
+
+Preflight is a read-only, pre-populate configuration check: it verifies the
+upstream rows + preset param rows exist and the sorter binary is installed,
+returning a structured :class:`PreflightReport` (and ``run_v2_pipeline`` turns
+a failing report into a :class:`PreflightError`) so a misconfigured run fails
+in seconds instead of minutes into ``populate``.
+
+Two tiers:
+
+* ``unit`` (DB-free): the deterministic-identity payload extraction is
+  behavior-preserving (frozen to literal UUIDs), and an unknown preset
+  short-circuits before any database access.
+* ``database``: the per-check pass/fail behavior, read-only-ness, speed, the
+  ``expected_ids`` round-trip, and the ``run_v2_pipeline`` raise/bypass wiring,
+  against a cleanly-configured (but not-yet-run) smoke session.
+"""
+
+from __future__ import annotations
+
+import time
+import uuid
+from pathlib import Path
+
+import datajoint as dj
+import pytest
+
+from spyglass.spikesorting.v2._selection_identity import (
+    artifact_identity_payload,
+    deterministic_id,
+    recording_identity_payload,
+    sorting_identity_payload,
+)
+from spyglass.spikesorting.v2.exceptions import PreflightError
+from spyglass.spikesorting.v2.pipeline import (
+    PreflightReport,
+    preflight_v2_pipeline,
+    run_v2_pipeline,
+)
+from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
+
+_FIXTURE_NAME = "mearec_polymer_smoke"
+_FIXTURE_PATH = (
+    Path(__file__).resolve().parent / "fixtures" / f"{_FIXTURE_NAME}.nwb"
+)
+_TEAM = "preflight_test_team"
+_INTERVAL = "raw data valid times"
+
+
+# ---------------------------------------------------------------------------
+# unit tier (DB-free)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_identity_payload_extraction_stable():
+    """The extracted payload builders reproduce the frozen selection ids.
+
+    The recording/artifact/sorting identity payloads were extracted from the
+    three ``insert_selection`` methods into shared builders so preflight cannot
+    derive a different id than the real run. The builders feed ``uuid.uuid5``,
+    a pure hash, so a fixed logical identity must always map to the same UUID:
+    pinning those UUIDs to literals catches any drift in the extraction.
+    """
+    cfg = {
+        "nwb_file_name": "preflight_pin_test_.nwb",
+        "sort_group_id": 0,
+        "interval_list_name": _INTERVAL,
+        "preproc_params_name": "default_franklab",
+        "team_name": "pin_team",
+    }
+    recording_id = deterministic_id(
+        "recording", recording_identity_payload(cfg)
+    )
+    artifact_id = deterministic_id(
+        "artifact",
+        artifact_identity_payload(
+            artifact_params_name="default", recording_id=recording_id
+        ),
+    )
+    sorting_id = deterministic_id(
+        "sorting",
+        sorting_identity_payload(
+            recording_id=recording_id,
+            sorter="mountainsort5",
+            sorter_params_name="franklab_tetrode_hippocampus_30kHz_ms5",
+            artifact_id=artifact_id,
+        ),
+    )
+    assert recording_id == uuid.UUID("f4d1dd87-f21a-51d5-a08c-0eaf91727947")
+    assert artifact_id == uuid.UUID("b46e4564-dc5e-5d8b-8be7-acc6c6566303")
+    assert sorting_id == uuid.UUID("a50e86f0-0a62-5dd8-bebc-44ce4b13046f")
+
+
+@pytest.mark.unit
+def test_preflight_unknown_preset(monkeypatch):
+    """A bogus preset fails fast with no database access at all.
+
+    The param-row / existence checks need the resolved bundle's names, so an
+    unknown preset short-circuits before any query. Patch ``Connection.query``
+    to fail loudly if preflight touches the DB.
+    """
+
+    def _boom(*args, **kwargs):
+        raise AssertionError(
+            "preflight_v2_pipeline queried the DB on an unknown preset"
+        )
+
+    monkeypatch.setattr(dj.Connection, "query", _boom)
+    report = preflight_v2_pipeline(
+        "x.nwb", 0, _INTERVAL, "team", preset="not_a_real_preset"
+    )
+    assert isinstance(report, PreflightReport)
+    assert report.ok is False
+    assert bool(report) is False
+    assert report.expected_ids == {}
+    assert [c.name for c in report.checks] == ["preset_known"]
+    (msg,) = report.errors
+    assert "not_a_real_preset" in msg
+    assert "describe_presets()" in msg
+
+
+# ---------------------------------------------------------------------------
+# database tier — fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def preflight_session(dj_conn):
+    """Ingest the smoke fixture under a preflight-isolated session name.
+
+    Module-scoped: NWB ingestion is the heaviest setup. Ingested under a
+    DISTINCT ``nwb_file_name`` so the missing-prerequisite tests (which never
+    touch other modules' rows) and the round-trip cleanup stay isolated.
+    """
+    if not _FIXTURE_PATH.exists():
+        pytest.skip(
+            f"Generated MEArec fixture {_FIXTURE_PATH.name} not found. Run "
+            "`python tests/spikesorting/v2/fixtures/generate_mearec.py "
+            "--smoke` first."
+        )
+    nwb_file_name = copy_and_insert_nwb(
+        _FIXTURE_PATH, dest_name="mearec_preflight_smoke.nwb"
+    )
+    return nwb_file_name
+
+
+def _configure_inputs(nwb_file_name: str) -> dict:
+    """Ensure defaults + team + sort group (no populate); return run inputs.
+
+    Idempotent ensure-exists, so it both builds the initial config and
+    rebuilds the sort group after a ``_clean_session_v2`` cascade (which
+    drops ``SortGroupV2``) in the round-trip test.
+    """
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    initialize_v2_defaults()
+    LabTeam.insert1(
+        {"team_name": _TEAM, "team_description": "preflight tests"},
+        skip_duplicates=True,
+    )
+    session_key = {"nwb_file_name": nwb_file_name}
+    if not (SortGroupV2 & session_key):
+        SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    sort_group_id = int(
+        sorted((SortGroupV2 & session_key).fetch("sort_group_id"))[0]
+    )
+    return {
+        "nwb_file_name": nwb_file_name,
+        "sort_group_id": sort_group_id,
+        "interval_list_name": _INTERVAL,
+        "team_name": _TEAM,
+    }
+
+
+@pytest.fixture
+def preflight_inputs(preflight_session):
+    """A cleanly-configured-but-not-yet-run session (defaults + team + group).
+
+    Ensure-exists and idempotent: seeds the default Lookup rows, the LabTeam,
+    and a sort group, but runs no ``populate``. Yields the ``run_v2_pipeline``
+    input dict for the default preset.
+    """
+    return _configure_inputs(preflight_session)
+
+
+# ---------------------------------------------------------------------------
+# database tier — preflight behavior
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.database
+def test_preflight_all_pass(preflight_inputs):
+    """A fully-configured session passes every check."""
+    report = preflight_v2_pipeline(**preflight_inputs)
+    assert report.ok is True
+    assert bool(report) is True
+    assert report.errors == []
+    assert all(c.ok for c in report.checks)
+    # The default 'default' artifact params do real detection -> no warning.
+    assert report.warnings == []
+
+
+@pytest.mark.database
+def test_preflight_missing_team(preflight_inputs):
+    """A missing LabTeam fails team_exists; the other checks still run."""
+    inputs = {**preflight_inputs, "team_name": "no_such_team_preflight"}
+    report = preflight_v2_pipeline(**inputs)
+    assert report.ok is False
+    failed = {c.name for c in report.checks if not c.ok}
+    assert failed == {"team_exists"}
+    (team_check,) = [c for c in report.checks if c.name == "team_exists"]
+    assert "no_such_team_preflight" in team_check.message
+    # Report is complete: every check ran, not just up to the first failure.
+    assert {c.name for c in report.checks} >= {
+        "session_exists",
+        "interval_exists",
+        "team_exists",
+        "sort_group_exists",
+        "sorter_installed",
+    }
+
+
+@pytest.mark.database
+def test_preflight_missing_sort_group(preflight_inputs):
+    """A missing SortGroupV2 fails with a set_group_by_shank pointer."""
+    inputs = {**preflight_inputs, "sort_group_id": 987654}
+    report = preflight_v2_pipeline(**inputs)
+    assert report.ok is False
+    (sg_check,) = [c for c in report.checks if c.name == "sort_group_exists"]
+    assert sg_check.ok is False
+    assert "set_group_by_shank" in sg_check.message
+
+
+@pytest.mark.database
+def test_preflight_sorter_not_installed(preflight_inputs, monkeypatch):
+    """A spelled-valid sorter whose binary is absent fails the install gate.
+
+    The internal ``clusterless_thresholder`` is never an SI binary, so its
+    preset still passes the sorter check under the same patch.
+    """
+    import spikeinterface.sorters as sis
+
+    real_installed = set(sis.installed_sorters())
+    monkeypatch.setattr(
+        sis,
+        "installed_sorters",
+        lambda: sorted(real_installed - {"mountainsort5"}),
+    )
+
+    report = preflight_v2_pipeline(**preflight_inputs)  # default = ms5
+    (sorter_check,) = [c for c in report.checks if c.name == "sorter_installed"]
+    assert sorter_check.ok is False
+    assert "installed_sorters()" in sorter_check.message
+
+    clusterless = preflight_v2_pipeline(
+        **{
+            **preflight_inputs,
+            "preset": "franklab_tetrode_clusterless_thresholder",
+        }
+    )
+    (cl_check,) = [
+        c for c in clusterless.checks if c.name == "sorter_installed"
+    ]
+    assert cl_check.ok is True
+
+
+@pytest.mark.database
+def test_preflight_warns_on_none_artifact_params(preflight_inputs, monkeypatch):
+    """artifact_params_name='none' raises a non-blocking advisory, not an error.
+
+    The three built-ins use 'default' (real amplitude-threshold detection, no
+    warning -- see test_preflight_all_pass); register a temporary 'none'-
+    artifact preset to drive the advisory branch and confirm it does not flip
+    ``ok`` to False.
+    """
+    from spyglass.spikesorting.v2 import pipeline as pl
+
+    none_preset = pl._Preset(
+        preproc_params_name="default_franklab",
+        artifact_params_name="none",
+        sorter="mountainsort5",
+        sorter_params_name="franklab_tetrode_hippocampus_30kHz_ms5",
+    )
+    monkeypatch.setitem(pl._PRESETS, "_preflight_none_artifact", none_preset)
+
+    report = preflight_v2_pipeline(
+        **{**preflight_inputs, "preset": "_preflight_none_artifact"}
+    )
+    assert report.ok is True
+    assert any("artifact" in w and "none" in w for w in report.warnings), (
+        report.warnings
+    )
+
+
+@pytest.mark.database
+def test_preflight_is_read_only(preflight_inputs):
+    """Preflight inserts nothing: every Selection/Lookup count is unchanged."""
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetectionParameters,
+        ArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+        RecordingSelection,
+        SortGroupV2,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        SortingSelection,
+    )
+
+    tables = [
+        RecordingSelection,
+        ArtifactSelection,
+        SortingSelection,
+        PreprocessingParameters,
+        ArtifactDetectionParameters,
+        SorterParameters,
+        LabTeam,
+        SortGroupV2,
+    ]
+    before = [len(t()) for t in tables]
+    preflight_v2_pipeline(**preflight_inputs)
+    after = [len(t()) for t in tables]
+    assert before == after
+
+
+@pytest.mark.database
+def test_preflight_speed(preflight_inputs):
+    """Preflight returns well under 1 s (guards against an accidental populate)."""
+    preflight_v2_pipeline(**preflight_inputs)  # warm lazy imports
+    start = time.perf_counter()
+    preflight_v2_pipeline(**preflight_inputs)
+    elapsed = time.perf_counter() - start
+    assert elapsed < 1.0, f"preflight took {elapsed:.2f}s (expected < 1 s)"
+
+
+@pytest.mark.database
+@pytest.mark.slow
+def test_preflight_expected_ids_round_trip(preflight_session):
+    """``expected_ids`` equals the PKs ``run_v2_pipeline`` actually produces.
+
+    On a clean session ``exists`` is False pre-run; the deterministic ids match
+    the manifest the run returns, and a post-run preflight sees them as
+    existing.
+    """
+    from tests.spikesorting.v2.test_single_session_pipeline import (
+        _clean_session_v2,
+    )
+
+    # Clean any prior run for this session, then rebuild the config: the
+    # cascade also drops SortGroupV2, so configure AFTER cleaning.
+    _clean_session_v2({"nwb_file_name": preflight_session})
+    preflight_inputs = _configure_inputs(preflight_session)
+
+    pre = preflight_v2_pipeline(**preflight_inputs)
+    assert pre.ok is True
+    assert pre.expected_ids["recording_id"]["exists"] is False
+    assert pre.expected_ids["sorting_id"]["exists"] is False
+
+    manifest = run_v2_pipeline(**preflight_inputs)
+    assert pre.expected_ids["recording_id"]["id"] == manifest["recording_id"]
+    assert pre.expected_ids["artifact_id"]["id"] == manifest["artifact_id"]
+    assert pre.expected_ids["sorting_id"]["id"] == manifest["sorting_id"]
+
+    post = preflight_v2_pipeline(**preflight_inputs)
+    assert post.expected_ids["recording_id"]["exists"] is True
+    assert post.expected_ids["sorting_id"]["exists"] is True
+
+    _clean_session_v2({"nwb_file_name": preflight_inputs["nwb_file_name"]})
+
+
+# ---------------------------------------------------------------------------
+# database tier — run_v2_pipeline wiring
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.database
+def test_run_pipeline_preflight_raises(preflight_inputs):
+    """``preflight=True`` raises PreflightError and inserts no Selection rows."""
+    from spyglass.spikesorting.v2.recording import RecordingSelection
+
+    inputs = {**preflight_inputs, "team_name": "no_such_team_preflight"}
+    before = len(RecordingSelection())
+    with pytest.raises(PreflightError) as exc:
+        run_v2_pipeline(**inputs)
+    assert "no_such_team_preflight" in str(exc.value)
+    assert len(RecordingSelection()) == before
+
+
+@pytest.mark.database
+@pytest.mark.slow
+def test_run_pipeline_preflight_bypass(preflight_inputs):
+    """``preflight=False`` bypasses the guard and hits the raw failure.
+
+    The same missing-team misconfiguration that ``preflight=True`` catches as a
+    PreflightError instead surfaces as the underlying insert/FK error, proving
+    the bypass actually skips the check.
+    """
+    inputs = {
+        **preflight_inputs,
+        "team_name": "no_such_team_preflight",
+        "preflight": False,
+    }
+    with pytest.raises(Exception) as exc:
+        run_v2_pipeline(**inputs)
+    assert not isinstance(exc.value, PreflightError)
