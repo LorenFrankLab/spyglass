@@ -427,6 +427,13 @@ def plot_sort_groups(
     helper reads Spyglass metadata only -- it does not open the raw recording or
     create SpikeInterface objects.
 
+    When the session spans **more than one probe**, ``Probe.Electrode``
+    rel_x/rel_y are each probe's own coordinate frame (all near the origin), so
+    the probes are laid out **side-by-side** along x -- each probe's contacts
+    are display-shifted into their own column (annotated with the ``probe_id``)
+    and a ``UserWarning`` is emitted. y depths and within-probe geometry are
+    unchanged; the underlying ``rel_x`` is not mutated.
+
     Parameters
     ----------
     nwb_file_name
@@ -494,6 +501,56 @@ def plot_sort_groups(
         ax.set_axis_off()
         return ax
 
+    # ``Probe.Electrode`` rel_x/rel_y are each probe's OWN coordinate frame
+    # (every probe starts near the origin), so plotting multiple probes on one
+    # shared axis would overlap them. Lay probes out side-by-side along x by
+    # offsetting each probe's contacts into its own column; y (depth) is left
+    # untouched. ``display_x`` carries the (possibly shifted) plot coordinate so
+    # the raw per-probe ``plot_x`` is preserved on each row.
+    probe_ids = sorted(
+        {row["probe_id"] for row in plottable},
+        key=lambda probe_id: (probe_id is None, str(probe_id)),
+    )
+    by_probe = {
+        probe_id: [row for row in plottable if row["probe_id"] == probe_id]
+        for probe_id in probe_ids
+    }
+    multi_probe = len(probe_ids) > 1
+    if multi_probe:
+        import warnings
+
+        # Gap scales with the overall geometry extent so it is non-zero even
+        # for single-column (linear) probes whose contacts share one rel_x.
+        all_x = [row["plot_x"] for row in plottable]
+        all_y = [row["plot_y"] for row in plottable]
+        scale = max(
+            max(all_x) - min(all_x),
+            max(all_y) - min(all_y),
+            1.0,
+        )
+        gap = 0.15 * scale
+        cursor = 0.0
+        for probe_id in probe_ids:
+            probe_rows = by_probe[probe_id]
+            xs = [row["plot_x"] for row in probe_rows]
+            min_x, max_x = min(xs), max(xs)
+            offset = cursor - min_x
+            for row in probe_rows:
+                row["display_x"] = row["plot_x"] + offset
+            cursor += (max_x - min_x) + gap
+        warnings.warn(
+            f"plot_sort_groups: {len(probe_ids)} probes present. "
+            "Probe.Electrode rel_x/rel_y are per-probe coordinates, so the "
+            "probes are laid out side-by-side along x (x positions are "
+            "display-shifted per probe; within-probe geometry and y depths are "
+            "unchanged).",
+            UserWarning,
+            stacklevel=2,
+        )
+    else:
+        for row in plottable:
+            row["display_x"] = row["plot_x"]
+
     cmap = plt.get_cmap("tab10")
     sort_group_ids = sorted({row["sort_group_id"] for row in plottable})
     for color_index, sort_group_id in enumerate(sort_group_ids):
@@ -502,7 +559,7 @@ def plot_sort_groups(
         ]
         color = cmap(color_index % cmap.N)
         ax.scatter(
-            [row["plot_x"] for row in group_rows],
+            [row["display_x"] for row in group_rows],
             [row["plot_y"] for row in group_rows],
             s=50,
             color=color,
@@ -518,7 +575,7 @@ def plot_sort_groups(
         ]
         if bad_rows:
             ax.scatter(
-                [row["plot_x"] for row in bad_rows],
+                [row["display_x"] for row in bad_rows],
                 [row["plot_y"] for row in bad_rows],
                 s=90,
                 marker="x",
@@ -531,7 +588,7 @@ def plot_sort_groups(
         reference_rows = [row for row in plottable if row["is_reference"]]
         if reference_rows:
             ax.scatter(
-                [row["plot_x"] for row in reference_rows],
+                [row["display_x"] for row in reference_rows],
                 [row["plot_y"] for row in reference_rows],
                 s=150,
                 marker="*",
@@ -545,23 +602,42 @@ def plot_sort_groups(
         for row in plottable:
             ax.annotate(
                 str(row["electrode_id"]),
-                (row["plot_x"], row["plot_y"]),
+                (row["display_x"], row["plot_y"]),
                 xytext=(3, 3),
                 textcoords="offset points",
                 fontsize=7,
             )
 
+    # Label each probe's column so the side-by-side layout is interpretable.
+    if multi_probe:
+        for probe_id in probe_ids:
+            probe_rows = by_probe[probe_id]
+            center_x = sum(row["display_x"] for row in probe_rows) / len(
+                probe_rows
+            )
+            top_y = max(row["plot_y"] for row in probe_rows)
+            ax.annotate(
+                str(probe_id),
+                (center_x, top_y),
+                xytext=(0, 8),
+                textcoords="offset points",
+                ha="center",
+                fontsize=8,
+                fontweight="bold",
+            )
+
     coordinate_sources = {
         row["coordinate_source"] for row in plottable if row["coordinate_source"]
     }
+    x_suffix = ", offset per probe" if multi_probe else ""
     if coordinate_sources == {"probe"}:
-        ax.set_xlabel("Probe rel_x (um)")
+        ax.set_xlabel(f"Probe rel_x (um{x_suffix})")
         ax.set_ylabel("Probe rel_y (um)")
     elif coordinate_sources == {"electrode"}:
-        ax.set_xlabel("Electrode x (um)")
+        ax.set_xlabel(f"Electrode x (um{x_suffix})")
         ax.set_ylabel("Electrode y (um)")
     else:
-        ax.set_xlabel("x coordinate (um)")
+        ax.set_xlabel(f"x coordinate (um{x_suffix})")
         ax.set_ylabel("y coordinate (um)")
 
     missing_count = len(rows) - len(plottable)

@@ -942,6 +942,8 @@ for label, interval_data in results.groupby("interval_labels"):
         `spyglass.spikesorting.v2.pipeline`, a DB-backed Matplotlib geometry
         view that colors contacts by `sort_group_id` and overlays
         bad-channel/reference markers before users commit compute to a group.
+        Multi-probe sessions are laid out side-by-side along x (per-probe
+        columns) since `Probe.Electrode` coordinates are per-probe.
     - Add `preflight_v2_pipeline()` to `spyglass.spikesorting.v2.pipeline`
         and run it by default from `run_v2_pipeline(..., preflight=True)`. It
         is a read-only, ~1 s configuration check that the session, interval,

@@ -386,6 +386,65 @@ def test_plot_sort_groups_empty(dj_conn):
     plt.close(fig)
 
 
+def test_plot_sort_groups_multi_probe_offset(monkeypatch):
+    """Multiple probes are laid out side-by-side (disjoint x) with a warning.
+
+    ``Probe.Electrode`` rel_x/rel_y are per-probe frames, so two probes whose
+    contacts share the same raw rel_x would coincide without an offset. The
+    smoke fixture is single-probe, so the multi-probe layout is exercised by
+    feeding ``plot_sort_groups`` synthetic two-probe geometry rows (no DB).
+    """
+    matplotlib = pytest.importorskip("matplotlib")
+
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+
+    from spyglass.spikesorting.v2 import pipeline as pl
+
+    def _fake_rows(nwb_file_name):
+        # Two single-column probes, both at rel_x=0 -> identical raw frames.
+        rows = []
+        for probe_id, sort_group_id in (("probeA", 0), ("probeB", 1)):
+            for k in range(4):
+                rows.append(
+                    {
+                        "sort_group_id": sort_group_id,
+                        "electrode_id": sort_group_id * 100 + k,
+                        "probe_id": probe_id,
+                        "bad_channel": "False",
+                        "is_reference": False,
+                        "coordinate_source": "probe",
+                        "plot_x": 0.0,
+                        "plot_y": -20.0 * k,
+                    }
+                )
+        return rows
+
+    monkeypatch.setattr(pl, "_sort_group_geometry_rows", _fake_rows)
+    fig, ax = plt.subplots()
+    with pytest.warns(UserWarning, match="probes present"):
+        pl.plot_sort_groups("any_.nwb", ax=ax)
+
+    group_collections = [
+        collection
+        for collection in ax.collections
+        if str(collection.get_label()).startswith("sort_group_id ")
+    ]
+    assert len(group_collections) == 2
+    xranges = sorted(
+        (
+            min(point[0] for point in collection.get_offsets()),
+            max(point[0] for point in collection.get_offsets()),
+        )
+        for collection in group_collections
+    )
+    # Disjoint x-intervals despite identical raw rel_x -> the per-probe offset
+    # was applied (probes no longer overlap).
+    assert xranges[0][1] < xranges[1][0]
+    assert "offset per probe" in ax.get_xlabel()
+    plt.close(fig)
+
+
 def test_user_notebook_cell_budget():
     """The user notebook stays within the 10-code-cell budget (DB-free).
 

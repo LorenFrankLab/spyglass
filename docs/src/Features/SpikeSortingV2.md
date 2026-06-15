@@ -183,7 +183,9 @@ Each row is one `SortGroupV2` group. Check `n_electrodes`, `electrode_ids`,
 and the reference fields before sorting. The geometry plot colors contacts by
 `sort_group_id` using Spyglass probe/electrode metadata, overlays bad-channel
 members with red `x` markers, and marks `reference_mode="specific"` electrodes
-with a star. For real analyses, choose `sort_group_id` intentionally from this
+with a star. Multi-probe sessions are laid out side-by-side along x (one column
+per probe, annotated with the `probe_id`), since `Probe.Electrode` coordinates
+are per-probe. For real analyses, choose `sort_group_id` intentionally from this
 table and plot rather than assuming `0` is the scientifically relevant shank.
 
 Available presets:
