@@ -14,8 +14,8 @@ End-to-end single-session sort: preprocessing → artifact detection → sorting
 | `Recording` | Computed | NWB-resident preprocessed `ElectricalSeries` inside an `AnalysisNwbfile`. |
 | `ArtifactDetectionParameters` | Lookup | Threshold detection parameters. |
 | `SharedArtifactGroup` (+ `Member` part) | Manual | Opt-in: cross-recording artifact detection (issue #928). |
-| `ArtifactSelection` | Manual | Source parts: either `RecordingSource` or `SharedArtifactGroupSource`. |
-| `ArtifactDetection` | Computed | Writes artifact-removed valid times to `common.IntervalList` as `f"artifact_{artifact_id}"`. |
+| `ArtifactDetectionSelection` | Manual | Source parts: either `RecordingSource` or `SharedGroupSource`. |
+| `ArtifactDetection` | Computed | Writes artifact-removed valid times to `common.IntervalList` as `f"artifact_detection_{artifact_detection_id}"`. |
 | `SorterParameters` | Lookup | Per-sorter Pydantic-validated params; MS4 / MS5 / KS4 / clusterless / SC2 / TDC2. |
 | `SortingSelection` | Manual | Source parts for `Recording` / `ConcatenatedRecording`, plus nullable `ArtifactDetection`. |
 | `Sorting` (+ `Unit` part) | Computed | Sorts via SI 0.104; writes units NWB + SortingAnalyzer folder; persists per-unit peak channel. |
@@ -100,32 +100,32 @@ erDiagram
         varchar shared_artifact_group_name PK
         uuid recording_id PK
     }
-    ArtifactSelection {
-        uuid artifact_id PK
+    ArtifactDetectionSelection {
+        uuid artifact_detection_id PK
         varchar artifact_detection_params_name FK
     }
-    ArtifactSelection_RecordingSource {
-        uuid artifact_id PK
+    ArtifactDetectionSelection_RecordingSource {
+        uuid artifact_detection_id PK
         uuid recording_id FK
     }
-    ArtifactSelection_SharedArtifactGroupSource {
-        uuid artifact_id PK
+    ArtifactDetectionSelection_SharedGroupSource {
+        uuid artifact_detection_id PK
         varchar shared_artifact_group_name FK
     }
     ArtifactDetection {
-        uuid artifact_id PK
+        uuid artifact_detection_id PK
     }
 
     Session ||--o{ SharedArtifactGroup : "FK"
     SharedArtifactGroup ||--o{ SharedArtifactGroup_Member : "part"
     Recording ||--o{ SharedArtifactGroup_Member : "FK"
-    ArtifactSelection ||--o{ ArtifactSelection_RecordingSource : "part"
-    ArtifactSelection ||--o{ ArtifactSelection_SharedArtifactGroupSource : "part"
-    Recording ||--o{ ArtifactSelection_RecordingSource : "FK"
-    SharedArtifactGroup ||--o{ ArtifactSelection_SharedArtifactGroupSource : "FK"
-    ArtifactDetectionParameters ||--o{ ArtifactSelection : "FK"
-    ArtifactSelection ||--|| ArtifactDetection : "Computed"
-    ArtifactDetection ||..o{ IntervalList : "writes artifact_{artifact_id} row(s)"
+    ArtifactDetectionSelection ||--o{ ArtifactDetectionSelection_RecordingSource : "part"
+    ArtifactDetectionSelection ||--o{ ArtifactDetectionSelection_SharedGroupSource : "part"
+    Recording ||--o{ ArtifactDetectionSelection_RecordingSource : "FK"
+    SharedArtifactGroup ||--o{ ArtifactDetectionSelection_SharedGroupSource : "FK"
+    ArtifactDetectionParameters ||--o{ ArtifactDetectionSelection : "FK"
+    ArtifactDetectionSelection ||--|| ArtifactDetection : "Computed"
+    ArtifactDetection ||..o{ IntervalList : "writes artifact_detection_{artifact_detection_id} row(s)"
 
     %% =========================================================
     %% Sorting
@@ -139,7 +139,7 @@ erDiagram
         uuid sorting_id PK
         varchar sorter FK
         varchar sorter_params_name FK
-        uuid artifact_id "nullable FK"
+        uuid artifact_detection_id "nullable FK"
     }
     SortingSelection_RecordingSource {
         uuid sorting_id PK
@@ -283,7 +283,7 @@ erDiagram
 flowchart LR
     A[SortGroupV2.set_group_by_shank] --> B[RecordingSelection.insert_selection]
     B --> C[Recording.populate]
-    C --> D[ArtifactSelection.insert_selection]
+    C --> D[ArtifactDetectionSelection.insert_selection]
     D --> E[ArtifactDetection.populate]
     C --> F[SortingSelection.insert_selection]
     E --> F
@@ -295,8 +295,8 @@ flowchart LR
 ## Critical design points
 
 - **Source parts on `SortingSelection`**: exactly one of `RecordingSource` / `ConcatenatedRecordingSource` exists. Enforced in `insert_selection()`, re-checked at the start of `Sorting.make()`, and covered by the v2 integrity test. The schema is final today; Phase 3 only relaxes the runtime guard that rejects `ConcatenatedRecordingSource`.
-- **Source parts on `ArtifactSelection`**: exactly one of `RecordingSource` / `SharedArtifactGroupSource` exists. Enforced in `insert_selection()`, re-checked at the start of `ArtifactDetection.make()`, and covered by the v2 integrity test.
-- **`SortingSelection.artifact_id` is a real FK, not a loose UUID column.** Concat sorts leave it NULL.
+- **Source parts on `ArtifactDetectionSelection`**: exactly one of `RecordingSource` / `SharedGroupSource` exists. Enforced in `insert_selection()`, re-checked at the start of `ArtifactDetection.make()`, and covered by the v2 integrity test.
+- **`SortingSelection.artifact_detection_id` is a real FK, not a loose UUID column.** Concat sorts leave it NULL.
 - **`Recording` is a single canonical NWB artifact per `recording_id`.** Subsequent sorts with different `SorterParameters` read the same `ElectricalSeries`. No per-stage re-materialization.
 - **`Sorting.Unit.electrode_id`** is the unit's peak-amplitude channel; brain region is reached via `Sorting.Unit * Electrode * BrainRegion`. Constant-time lookup, no template re-walking.
 - **`CurationV2.Unit` is populated by `insert_curation()`** from `Sorting.Unit` plus merge_groups. Merged units inherit the peak channel of the highest-amplitude contributor.

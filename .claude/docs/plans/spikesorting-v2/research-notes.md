@@ -79,7 +79,7 @@ current phase docs but should not distract from execution.
 |------|--------|
 | `recording.py` | `SortGroup`, `SpikeSortingPreprocessingParameters`, `SpikeSortingRecordingSelection`, `SpikeSortingRecording` |
 | `sorting.py` | `SpikeSorterParameters`, `SpikeSortingSelection`, `SpikeSorting` |
-| `artifact.py` | `ArtifactDetectionParameters`, `ArtifactSelection`, `ArtifactDetection` |
+| `artifact.py` | `ArtifactDetectionParameters`, `ArtifactDetectionSelection`, `ArtifactDetection` |
 | `curation.py` | `CurationV1` |
 | `metric_curation.py` | `WaveformParameters`, `MetricParameters`, `MetricCurationParameters`, `MetricCurationSelection`, `MetricCuration` |
 | `figurl_curation.py` | `FigURLCurationSelection`, `FigURLCuration` |
@@ -103,7 +103,7 @@ current phase docs but should not distract from execution.
 🟢 Sorting → AnalysisNwbfile `/units` table.
 🟢 Waveforms → SI WaveformExtractor folder under `temp_dir/{metric_curation_id}/`.
 🟢 Metrics → columns on AnalysisNwbfile units table.
-🟢 Artifact intervals → `IntervalList` with `interval_list_name = str(artifact_id)`.
+🟢 Artifact intervals → `IntervalList` with `interval_list_name = str(artifact_detection_id)`.
 
 ---
 

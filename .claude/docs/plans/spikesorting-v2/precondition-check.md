@@ -25,7 +25,7 @@ Review the JSON `warnings` block on every `path` run. Any unaccounted `heuristic
 |---|---|---|---|
 | `Session` (common_session.py:19, Imported) | `-> Nwbfile` | nullable `-> Subject`, `-> Institution`, `-> Lab`; `session_id`, `session_description`, `session_start_time` | MEArec fixture can leave Subject NULL; converter writes the others. |
 | `Nwbfile` (common_nwbfile.py:45, Manual) | `nwb_file_name: varchar(64)` | `nwb_file_abs_path: filepath@raw` | Anchor for AnalysisNwbfile. v2 concat anchors to first member's `nwb_file_name`. |
-| `IntervalList` (common_interval.py:24, Manual) | `-> Session`, `interval_list_name: varchar(170)` | `valid_times: longblob` | v2 reuses `IntervalList` for artifact-removed intervals under name `f"artifact_{artifact_id}"` (`artifact_` + 36-char UUID = 45 chars; well under the 170 limit). Single-recording artifact detections write one row; `SharedArtifactGroup` detections write one row per member `nwb_file_name`. |
+| `IntervalList` (common_interval.py:24, Manual) | `-> Session`, `interval_list_name: varchar(170)` | `valid_times: longblob` | v2 reuses `IntervalList` for artifact-removed intervals under name `f"artifact_detection_{artifact_detection_id}"` (`artifact_detection_` + 36-char UUID = 55 chars; well under the 170 limit). Single-recording artifact detections write one row; `SharedArtifactGroup` detections write one row per member `nwb_file_name`. |
 | `Raw` (common_ephys.py:276, Imported) | `-> Session` | `-> IntervalList`, `raw_object_id`, `sampling_rate` | One Raw row per session. |
 | `Electrode` (class at common_ephys.py:73, Imported; BrainRegion FK at common_ephys.py:79) | `-> ElectrodeGroup`, `electrode_id: int` | `-> [nullable] Probe.Electrode`, **`-> BrainRegion` (NON-NULL)**, `bad_channel: enum("True", "False")` | Round-5 fix confirmed: brain region is NON-null on Electrode. `bad_channel` is enum string, NOT int — v2 helpers filtering Spyglass `Electrode` must use `== "True"`, not `== 1`. |
 | `ElectrodeGroup` (common_ephys.py:31, Imported) | `-> Session`, `electrode_group_name: varchar(80)` | `-> BrainRegion` (NON-NULL), `-> [nullable] Probe` | Brain region also exists at group level. The trodes-compatible polymer fixture uses one `ElectrodeGroup` for the whole probe; multi-region unit-tracing tests override `Electrode.region_id` by `probe_shank` after ingestion rather than splitting the NWB into one group per shank. |
@@ -68,13 +68,13 @@ Review the JSON `warnings` block on every `path` run. Any unaccounted `heuristic
 
 `code_graph.py describe` was run against the full v2 draft at `spyglass/spikesorting/v2/_draft.py` for every proposed table:
 
-- **Draft FK structure parses, with the accounted ambiguities below.** Source part tables on SortingSelection (RecordingSource / ConcatenatedRecordingSource) and ArtifactSelection (RecordingSource / SharedArtifactGroupSource) parse correctly.
+- **Draft FK structure parses, with the accounted ambiguities below.** Source part tables on SortingSelection (RecordingSource / ConcatenatedRecordingSource) and ArtifactDetectionSelection (RecordingSource / SharedGroupSource) parse correctly.
 - **Full ancestor walks**: `SortingSelection`'s `--up` traversal reaches Raw, Session, Nwbfile, Electrode, BrainRegion, LabTeam, Probe — all upstream Spyglass tables resolve. `UnitMatch`'s `--up` walks back through CurationV2 → Sorting → SortingSelection → both Recording and ConcatenatedRecording paths.
 - **Descendant walks**: `CurationV2`'s `--down` shows the curation-dependent Phase 2/4/5 dependency tree (CurationV2.UnitLabel, AnalyzerCuration, UnitMatchSelection.MemberCuration, FigPackCurationSelection, TrackedUnit.Member). `Recording` / `Sorting` down-walks additionally show the Phase 2 recompute tables (`RecordingArtifactRecompute*`, `SortingAnalyzerRecompute*`).
 - **No unresolved imports and no FK cycles.**
 - **Accounted code-graph ambiguities**:
   - `AnalysisNwbfile` exists in both `spyglass/common/common_nwbfile.py:630` and `spyglass/common/custom_nwbfile.py:30`. The v2 production design imports and FK's the core common table (`spyglass.common.common_nwbfile.AnalysisNwbfile`); code-graph path walks may emit a `heuristic_resolution` warning and select the custom table. Treat that warning as expected only when this exact target pair appears.
-  - `ArtifactDetection`, `ArtifactSelection`, and `ArtifactDetectionParameters` exist in v0, v1, and the v2 draft. For draft walks rooted in `spyglass/spikesorting/v2/_draft.py`, same-package resolution to the v2 draft classes is expected. Treat any other same-name resolution as a blocker.
+  - `ArtifactDetection`, `ArtifactDetectionSelection`, and `ArtifactDetectionParameters` exist in v0, v1, and the v2 draft. For draft walks rooted in `spyglass/spikesorting/v2/_draft.py`, same-package resolution to the v2 draft classes is expected. Treat any other same-name resolution as a blocker.
   - v0/v1 define `RecordingRecompute*`, but v2 intentionally uses `RecordingArtifactRecompute*` names to avoid class-name collisions. `SortingAnalyzerRecompute*` is v2-only. Any code-graph warning that resolves a v2 `RecordingArtifact*` / `SortingAnalyzer*` FK to a v0/v1 recompute class is a blocker.
 
 The draft schemas are structurally implementable as written. Phase 0 splits this single file into the per-module Phase 1/2/3/4/5 files; the structural validation carries over.
@@ -121,7 +121,7 @@ and `-> SorterParameters`, matching the design.
 walks 46 nodes and emits exactly 4 `heuristic_resolution` warnings, all
 accounted for by the ambiguities recorded above:
 
-- `ArtifactDetection`, `ArtifactSelection`, and
+- `ArtifactDetection`, `ArtifactDetectionSelection`, and
   `ArtifactDetectionParameters` each resolve to the v2 `_draft.py` class
   (same-package preference) — expected.
 - `AnalysisNwbfile` resolves to `common/custom_nwbfile.py` — the documented

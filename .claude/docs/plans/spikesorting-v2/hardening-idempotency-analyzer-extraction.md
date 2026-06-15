@@ -25,7 +25,7 @@ All four phases are **implemented and landed** on `spikesorting-v2`. Summary:
 | Phase | Status | As-built notes |
 |---|---|---|
 | **0 — docstring cleanup** | ✅ Done | Module docstrings corrected (no more "stub raises NotImplementedError" overclaim for implemented methods). |
-| **A — deterministic selection identity** | ✅ Done | `_selection_identity.py` (UUID5 `deterministic_id` / `assert_supplied_id_matches`); `RecordingSelection` / `ArtifactSelection` / `SortingSelection` `insert_selection` rewritten to content-addressed IDs with duplicate-PK race recovery + source-part collision checks. |
+| **A — deterministic selection identity** | ✅ Done | `_selection_identity.py` (UUID5 `deterministic_id` / `assert_supplied_id_matches`); `RecordingSelection` / `ArtifactDetectionSelection` / `SortingSelection` `insert_selection` rewritten to content-addressed IDs with duplicate-PK race recovery + source-part collision checks. |
 | **B — analyzer cache contract** | ✅ Done | `_analyzer_cache.py` (`analyzer_path` / root resolution); `Sorting.analyzer_folder` is transient state (threaded `make_compute → make_insert`), not a persisted absolute path; orphan scan computes the canonical path. |
 | **C — service extraction** | ✅ Done | DB-free service modules: `_artifact_compute`, `_artifact_intervals`, `_curation_transforms`, `_units_nwb` (incl. `build_lazy_merged_sorting`), `_sorting_compute`, `_recording_materialization`, `_signal_math`, `_enums`, `_analyzer_cache`, `_selection_identity`. Table classes are thin orchestrators; delegators kept only where a test / external caller pins the surface. |
 
@@ -101,8 +101,8 @@ Executor defaults:
 | Table | PK + `uuid4()` site | Existing find-existing dedup | Transaction |
 |---|---|---|---|
 | `RecordingSelection` | `recording_id`, [recording.py:753](../../../../src/spyglass/spikesorting/v2/recording.py#L753) | [recording.py:733-743](../../../../src/spyglass/spikesorting/v2/recording.py#L733), matches `nwb_file_name, sort_group_id, interval_list_name, preprocessing_params_name, team_name` | **none** around check+insert |
-| `ArtifactSelection` | `artifact_id`, [artifact.py:564](../../../../src/spyglass/spikesorting/v2/artifact.py#L564) | [artifact.py:519-549](../../../../src/spyglass/spikesorting/v2/artifact.py#L519), matches `artifact_detection_params_name` + (`recording_id` \| `shared_artifact_group_name`) via source-part join | insert wrapped ([artifact.py:570-572](../../../../src/spyglass/spikesorting/v2/artifact.py#L570)); **check is before the txn** |
-| `SortingSelection` | `sorting_id`, [sorting.py:675](../../../../src/spyglass/spikesorting/v2/sorting.py#L675) | [sorting.py:613-653](../../../../src/spyglass/spikesorting/v2/sorting.py#L613), matches `sorter, sorter_params_name, recording_id` + optional `artifact_id` (normalized to `uuid.UUID`) | insert wrapped ([sorting.py:681-690](../../../../src/spyglass/spikesorting/v2/sorting.py#L681)); **check is before the txn** |
+| `ArtifactDetectionSelection` | `artifact_detection_id`, [artifact.py:564](../../../../src/spyglass/spikesorting/v2/artifact.py#L564) | [artifact.py:519-549](../../../../src/spyglass/spikesorting/v2/artifact.py#L519), matches `artifact_detection_params_name` + (`recording_id` \| `shared_artifact_group_name`) via source-part join | insert wrapped ([artifact.py:570-572](../../../../src/spyglass/spikesorting/v2/artifact.py#L570)); **check is before the txn** |
+| `SortingSelection` | `sorting_id`, [sorting.py:675](../../../../src/spyglass/spikesorting/v2/sorting.py#L675) | [sorting.py:613-653](../../../../src/spyglass/spikesorting/v2/sorting.py#L613), matches `sorter, sorter_params_name, recording_id` + optional `artifact_detection_id` (normalized to `uuid.UUID`) | insert wrapped ([sorting.py:681-690](../../../../src/spyglass/spikesorting/v2/sorting.py#L681)); **check is before the txn** |
 
 - The proposal's logical-identity field lists **match the code exactly** (`source_kind` is not a
   stored column; it is implicit in which source part exists, already handled by the joins).
@@ -116,9 +116,9 @@ Executor defaults:
   concurrently (e.g. HPC job arrays each "ensure the selection exists" — the same usage class
   that motivated the DB-free artifact kernels).
 - No existing canonicalize/`uuid5`/hash helper in v2. One idempotency test exists:
-  `test_insert_selection_dedup_accepts_str_artifact_id`
+  `test_insert_selection_dedup_accepts_str_artifact_detection_id`
   ([test_merge_id_artifact_resolution.py:196](../../../../tests/spikesorting/v2/test_merge_id_artifact_resolution.py#L196)) —
-  it documents that a str-vs-`UUID` `artifact_id` mismatch already caused a duplicate-sort bug.
+  it documents that a str-vs-`UUID` `artifact_detection_id` mismatch already caused a duplicate-sort bug.
   **That is the canonicalization footgun Phase A must respect.**
 
 ### Analyzer paths (Phase B)
@@ -177,13 +177,13 @@ methods as implemented, **preserving** the accurate note that the concatenated-r
 serial, repeated, concurrent, and worker-retry insertion. Because v2 is pre-production, do
 **not** carry legacy random-UUID compatibility in the steady-state code.
 
-**Chosen shape:** keep the compact single-column handles (`recording_id`, `artifact_id`,
+**Chosen shape:** keep the compact single-column handles (`recording_id`, `artifact_detection_id`,
 `sorting_id`) because downstream FKs, interval names, NWB object names, and user-facing keys are
 much simpler with them. Make those handles deterministic from the canonical logical identity.
 
 Natural composite PKs would be the most literal database model, but the blast radius is high:
 every downstream FK grows, and the alternate-source tables (`RecordingSource` vs
-`SharedArtifactGroupSource`, artifact/no-artifact sorting) become awkward. Content-addressed
+`SharedGroupSource`, artifact/no-artifact sorting) become awkward. Content-addressed
 UUIDs give the pipeline the important invariant without making every downstream table carry the
 whole input tuple.
 
@@ -201,9 +201,9 @@ the race return the existing row cleanly.
   not for correctness; the deterministic UUID PK is the core invariant.
 - Direct raw `insert1` into selection masters should be treated as unsupported. The **helper is
   the validation boundary** — it alone holds the full logical payload, including the source-part
-  contents (`recording_id` / `artifact_id`) that the *master row does not carry*, so it is the
+  contents (`recording_id` / `artifact_detection_id`) that the *master row does not carry*, so it is the
   only place that can compute and verify the deterministic ID for the part-bearing tables
-  (`ArtifactSelection`, `SortingSelection`). An `insert`/`insert1` override, if added, should
+  (`ArtifactDetectionSelection`, `SortingSelection`). An `insert`/`insert1` override, if added, should
   therefore **reject direct master inserts** rather than attempt to validate the ID from the
   master row alone (which is structurally impossible for the part-bearing tables). (`SpyglassMixin`
   does not currently override `insert`/`insert1`, so there is no existing override to compose
@@ -219,10 +219,10 @@ the race return the existing row cleanly.
 2. Canonicalize every type that has already proven dangerous:
    - `UUID` and UUID-ish strings → lowercase canonical UUID strings.
    - `sort_group_id` and integer-like IDs → `int`.
-   - "no artifact" → one representation only; it must not alias with any real `artifact_id`.
+   - "no artifact" → one representation only; it must not alias with any real `artifact_detection_id`.
    - source kind is explicit in the payload, even when it is implicit in today's part-table
      topology.
-3. Replace `uuid.uuid4()` in `RecordingSelection`, `ArtifactSelection`, and `SortingSelection`
+3. Replace `uuid.uuid4()` in `RecordingSelection`, `ArtifactDetectionSelection`, and `SortingSelection`
    with deterministic IDs built from these payloads.
 4. Simplify the find-existing flow:
    - compute deterministic ID first;
@@ -230,7 +230,7 @@ the race return the existing row cleanly.
    - if found, verify all logical fields and required source/artifact parts match, then return;
    - if absent, insert master+parts in one transaction;
    - on duplicate PK/hash, refetch, verify, and return.
-5. For `ArtifactSelection` and `SortingSelection`, collision verification must check source parts.
+5. For `ArtifactDetectionSelection` and `SortingSelection`, collision verification must check source parts.
    If the deterministic master exists but the expected part row is missing, raise a clear
    integrity error; do not manufacture the missing part after the fact.
 6. Add a one-time audit/reset helper for test and development schemas:
@@ -239,7 +239,7 @@ the race return the existing row cleanly.
    - optionally rebuild v2 selection/computed rows after a schema reset.
 
 **Risk:** low–moderate. The canonicalization is the important part. If the payload normalization
-is sloppy, the old `str` vs `UUID` `artifact_id` class of bug comes back under a prettier name.
+is sloppy, the old `str` vs `UUID` `artifact_detection_id` class of bug comes back under a prettier name.
 
 **Tests:**
 - deterministic IDs are stable across `uuid.UUID` vs `str` inputs;
@@ -249,7 +249,7 @@ is sloppy, the old `str` vs `UUID` `artifact_id` class of bug comes back under a
 - true same-selection concurrency produces exactly one master row where practical;
 - artifact-backed and artifact-free `SortingSelection` identities do not alias;
 - source kind is part of the identity for artifact and sorting selections;
-- existing `test_insert_selection_dedup_accepts_str_artifact_id` still passes.
+- existing `test_insert_selection_dedup_accepts_str_artifact_detection_id` still passes.
 
 ---
 

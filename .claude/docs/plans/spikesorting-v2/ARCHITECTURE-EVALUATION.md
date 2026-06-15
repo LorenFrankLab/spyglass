@@ -65,7 +65,7 @@ Colima-backed v2 test DB (101 targeted tests green, black-clean at line-length 8
 
 | Hypothesis | Prior → Posterior | Outcome |
 |---|---|---|
-| **H1 — Clean modernization** | 30% → **78%** | Best supported, and *strengthened* by the deep-dive: the export design (FK cascade, not per-fetch logging) is elegant, and the merge `artifact_id` resolution is correct + tested. Layering, tri-part populate, Pydantic params, brain-region tracing all real. |
+| **H1 — Clean modernization** | 30% → **78%** | Best supported, and *strengthened* by the deep-dive: the export design (FK cascade, not per-fetch logging) is elegant, and the merge `artifact_detection_id` resolution is correct + tested. Layering, tri-part populate, Pydantic params, brain-region tracing all real. |
 | **H2 — God-files / diluted cohesion** | 35% → **25%** | Mostly refuted. Size is justified; only maintainability smells survive (C6). |
 | **H3 — Plan/impl divergence & seams** | 25% → **12%** | Refuted. Stubs fenced; code is *ahead* of the planning docs (the review report lagged the code by ~5 days). |
 | **H4 — Leaky coupling** | 35% → **40%** | Narrowed. SI coupling well-localized; export is NOT a leak (FK cascade). The only genuine leaks are C2 (merge-restriction resolver carries v2 schema knowledge) and C3 (curation merge-id ordering) — localized, not pervasive. |
@@ -118,13 +118,13 @@ correctness fix).** Not a structurally risky architecture.
   but that's a new behavior for v1+v2, not a v2 fix.)
 
 ### C2 [Med — real, maintainability/evolvability] merge-restriction resolver carries v2 schema knowledge
-**Verified live and real, but NOT a correctness bug** (the acute `artifact_id`-drop bug A1 is fixed).
+**Verified live and real, but NOT a correctness bug** (the acute `artifact_detection_id`-drop bug A1 is fixed).
 `SpikeSortingOutput._get_restricted_merge_ids_v2` (spikesorting_merge.py:137-299) hard-codes:
 - the rec/sort/curation key partitioning (`rec_keys`/`sort_keys`/`curation_keys`, :177-191),
-- that `artifact_id` lives on the optional `SortingSelection.ArtifactSource` part and must be
+- that `artifact_detection_id` lives on the optional `SortingSelection.ArtifactDetectionSource` part and must be
   resolved by part-intersection/anti-join (:245-268) — explicitly working around DataJoint's
   silent dict-restriction drop (the comment at :245-254 documents the footgun),
-- the `artifact_{uuid}` interval-name convention (:206-230),
+- the `artifact_detection_{uuid}` interval-name convention (:206-230),
 - the multi-curation fan-out semantics (:282-299, warn-only).
 
 This is ~160 lines of **v2-internal schema topology living in the merge master**. Correctness is now
@@ -232,7 +232,7 @@ each with new dedicated tests. Still-live items below — these are the only car
 | low cluster | Low | latent/cosmetic | `artifact.py:1241` `>=` vs v1 strict `>` (measure-zero edge); `curation.py:399-401` reuse guard omits `apply_merge=True` (silent flag no-op on existing root); `utils.py:808-809` consolidate-intervals re-sort (harmless); `common_interval.py:381/588-592/253-255` three latent `Interval`/`IntervalList` issues (no in-tree trigger); `v0/figurl_views/SpikeSortingView.py:43,53` v0 dead code. |
 
 ### FIXED since the report (do not re-investigate)
-A1/D1 (merge artifact_id drop), A2 (multi-source `fetch_nwb` misalign), A3 (MS5 filter/whiten),
+A1/D1 (merge artifact_detection_id drop), A2 (multi-source `fetch_nwb` misalign), A3 (MS5 filter/whiten),
 A4 (v0 unbound `get_curated_sorting`), A5 (unseeded `random_spikes` → now `seed=job_kwargs`/0),
 A6 (`deprecate_log` kwarg), A7 (`UnitWaveformFeatures` v2 branch now reachable via `_fetch_waveform_v2`),
 C/P2 (bulk `insert` now Pydantic-validated on all 4 Lookups), P3 (noise_levels length guard),

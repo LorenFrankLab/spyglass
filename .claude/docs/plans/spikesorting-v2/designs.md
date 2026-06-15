@@ -300,7 +300,7 @@ class Recording(SpyglassMixin, dj.Computed):
 
 ## ArtifactDetectionParameters + ArtifactDetection
 
-Mirrors v1's structure but consumes the v2 NWB-resident `Recording` artifact (via `Recording.get_recording(key)`). v2 reuses Spyglass's `common.IntervalList` for the artifact-removed valid-time interval -- the same table session intervals live in -- under a UUID-decorated name (`f"artifact_{artifact_id}"`) so downstream `IntervalList`-querying code finds these intervals through the standard interface. `ArtifactDetection.get_artifact_removed_intervals(key)` is a thin `IntervalList.fetch1("valid_times")` wrapper.
+Mirrors v1's structure but consumes the v2 NWB-resident `Recording` artifact (via `Recording.get_recording(key)`). v2 reuses Spyglass's `common.IntervalList` for the artifact-removed valid-time interval -- the same table session intervals live in -- under a UUID-decorated name (`f"artifact_detection_{artifact_detection_id}"`) so downstream `IntervalList`-querying code finds these intervals through the standard interface. `ArtifactDetection.get_artifact_removed_intervals(key)` is a thin `IntervalList.fetch1("valid_times")` wrapper.
 
 ```python
 @schema
@@ -356,18 +356,18 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
 
 
 @schema
-class ArtifactSelection(SpyglassMixin, dj.Manual):
+class ArtifactDetectionSelection(SpyglassMixin, dj.Manual):
     """One row per (recording, artifact params) pair to detect.
 
     UUID-keyed; populated via insert_selection() per shared-contracts.
     Computed table ArtifactDetection is keyed off this selection.
 
     Source part rows make the input explicit: exactly one of
-    RecordingSource or SharedArtifactGroupSource must exist for each
+    RecordingSource or SharedGroupSource must exist for each
     selection row.
     """
     definition = """
-    artifact_id: uuid
+    artifact_detection_id: uuid
     ---
     -> ArtifactDetectionParameters
     """
@@ -379,7 +379,7 @@ class ArtifactSelection(SpyglassMixin, dj.Manual):
         -> Recording                              # single-recording path (default)
         """
 
-    class SharedArtifactGroupSource(SpyglassMixinPart):
+    class SharedGroupSource(SpyglassMixinPart):
         definition = """
         -> master
         ---
@@ -402,10 +402,10 @@ class ArtifactSelection(SpyglassMixin, dj.Manual):
 @schema
 class ArtifactDetection(SpyglassMixin, dj.Computed):
     definition = """
-    -> ArtifactSelection
+    -> ArtifactDetectionSelection
     """
     # No part table for the interval; the artifact-removed valid times are
-    # written to common.IntervalList under name f"artifact_{artifact_id}"
+    # written to common.IntervalList under name f"artifact_detection_{artifact_detection_id}"
     # at the end of make(). See the IntervalList convention below.
 ```
 
@@ -413,18 +413,18 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
 
 - `ArtifactDetection.make()` writes one `IntervalList` row per affected session:
   - `RecordingSource`: exactly one row, keyed by the source `Recording`'s `nwb_file_name`.
-  - `SharedArtifactGroupSource`: one row per distinct member `nwb_file_name`. All rows share the same `interval_list_name`; the `(nwb_file_name, interval_list_name)` PK keeps them distinct.
-- `interval_list_name = f"artifact_{artifact_id}"`. The UUID suffix guarantees the name does not collide with any human-authored session interval, and rerunning artifact detection legitimately fails with a duplicate-key error rather than silently overwriting.
+  - `SharedGroupSource`: one row per distinct member `nwb_file_name`. All rows share the same `interval_list_name`; the `(nwb_file_name, interval_list_name)` PK keeps them distinct.
+- `interval_list_name = f"artifact_detection_{artifact_detection_id}"`. The UUID suffix guarantees the name does not collide with any human-authored session interval, and rerunning artifact detection legitimately fails with a duplicate-key error rather than silently overwriting.
 - Use `IntervalList.insert1(...)` -- **not** `skip_duplicates=True`. v1's `skip_duplicates=True` pattern is forbidden under `custom_pipeline_authoring.md` Non-Negotiable #6 because it masks real bugs; the UUID-suffixed name removes the only legitimate reason v1 needed it.
-- `ArtifactDetection.delete()` must remove the matching `IntervalList` rows (one or N depending on source). DataJoint does not cascade through `interval_list_name`-keyed dependencies, so the cleanup is explicit; the delete override fetches `artifact_id` (and, for shared-group sources, the member `nwb_file_name`s) before calling `super().delete()`.
+- `ArtifactDetection.delete()` must remove the matching `IntervalList` rows (one or N depending on source). DataJoint does not cascade through `interval_list_name`-keyed dependencies, so the cleanup is explicit; the delete override fetches `artifact_detection_id` (and, for shared-group sources, the member `nwb_file_name`s) before calling `super().delete()`.
 
-**Design change from v1**: v1 used `interval_list_name = str(artifact_id)` (raw UUID, no prefix) and called `IntervalList.insert1(..., skip_duplicates=True)` inside `make()`. v2 keeps the IntervalList write but (a) prefixes the name with `"artifact_"` so namespace queries can filter v2 artifact intervals from session/task intervals, (b) drops `skip_duplicates=True`, and (c) writes one row per member session for cross-recording (`SharedArtifactGroup`) detections instead of dropping the multi-session case.
+**Design change from v1**: v1 used `interval_list_name = str(artifact_detection_id)` (raw UUID, no prefix) and called `IntervalList.insert1(..., skip_duplicates=True)` inside `make()`. v2 keeps the IntervalList write but (a) prefixes the name with `"artifact_detection_"` so namespace queries can filter v2 artifact-detection intervals from session/task intervals, (b) drops `skip_duplicates=True`, and (c) writes one row per member session for cross-recording (`SharedArtifactGroup`) detections instead of dropping the multi-session case.
 
-**Source re-validation at populate time**: `ArtifactDetection.make()` MUST re-check that the upstream `ArtifactSelection` row has exactly one source part row at the start of `make()`, mirroring `Sorting.make()`'s pattern. This catches rows inserted via `dj.Manual.insert1()` that bypassed `insert_selection()`. See shared-contracts.md § Source Part Pattern.
+**Source re-validation at populate time**: `ArtifactDetection.make()` MUST re-check that the upstream `ArtifactDetectionSelection` row has exactly one source part row at the start of `make()`, mirroring `Sorting.make()`'s pattern. This catches rows inserted via `dj.Manual.insert1()` that bypassed `insert_selection()`. See shared-contracts.md § Source Part Pattern.
 
 ```python
 def make(self, key):
-    source = ArtifactSelection.resolve_source(key)
+    source = ArtifactDetectionSelection.resolve_source(key)
     # ... rest of make() body
 ```
 
@@ -483,8 +483,8 @@ class SortingSelection(SpyglassMixin, dj.Manual):
     explicit, and runtime helpers enforce exactly one INPUT source.
 
     Post-review-fixes (T1): artifact detection is recorded by an OPTIONAL
-    `ArtifactSource` association part, not a nullable FK on the master.
-    "No `ArtifactSource` row" means "no artifact detection." `ArtifactSource`
+    `ArtifactDetectionSource` association part, not a nullable FK on the master.
+    "No `ArtifactDetectionSource` row" means "no artifact detection." `ArtifactDetectionSource`
     is NOT an input source — it is excluded from `resolve_source()` and from
     `prune_orphaned_selections()`.
     """
@@ -508,7 +508,7 @@ class SortingSelection(SpyglassMixin, dj.Manual):
         -> ConcatenatedRecording                # concat INPUT source
         """
 
-    class ArtifactSource(SpyglassMixinPart):
+    class ArtifactDetectionSource(SpyglassMixinPart):
         # Optional association part (zero-or-one). Presence = "an artifact
         # pass was applied"; absence = "no artifact detection". NOT counted
         # as an input source by resolve_source / prune_orphaned_selections.
@@ -521,34 +521,34 @@ class SortingSelection(SpyglassMixin, dj.Manual):
     @classmethod
     def insert_selection(cls, key: dict) -> dict:
         """Inserts the master row, exactly one INPUT source part row, and
-        (if an artifact is supplied) one `ArtifactSource` row.
+        (if an artifact is supplied) one `ArtifactDetectionSource` row.
 
         Logical identity = sorter params + INPUT source + presence/absence
         of an artifact. An artifact-backed and a no-artifact sort with
         otherwise identical fields are DISTINCT rows (this is the bug-class
-        the old nullable `artifact_id` aliased — see review-fixes T1).
+        the old nullable `artifact_detection_id` aliased — see review-fixes T1).
 
         Pseudocode:
             input_kind, input_key = pop_input_source(key)   # recording XOR concat
-            artifact_id = key.pop("artifact_id", None)      # optional
+            artifact_detection_id = key.pop("artifact_detection_id", None)      # optional
             existing = find_by(sorter_params, input_kind, input_key,
-                               has_artifact=(artifact_id is not None),
-                               artifact_id=artifact_id)
+                               has_artifact=(artifact_detection_id is not None),
+                               artifact_detection_id=artifact_detection_id)
             if exactly one existing: return its PK
             if >1: raise DuplicateSelectionError
             with transaction:
                 insert master (sorter params only)
                 insert <input>Source row
-                if artifact_id is not None:
-                    insert ArtifactSource row   # else: no row == no artifact
+                if artifact_detection_id is not None:
+                    insert ArtifactDetectionSource row   # else: no row == no artifact
             return PK-only dict
 
-        Concat sorts MUST have NO `ArtifactSource` row until concat-wide
+        Concat sorts MUST have NO `ArtifactDetectionSource` row until concat-wide
         artifact masking has a semantic model (review-fixes; was
-        "artifact_id IS NULL").
+        "artifact_detection_id IS NULL").
 
-        Read the artifact downstream via `resolve_artifact(key) ->
-        artifact_id | None`, never `row["artifact_id"]` (the column is gone).
+        Read the artifact downstream via `resolve_artifact_detection(key) ->
+        artifact_detection_id | None`, never `row["artifact_detection_id"]` (the column is gone).
 
         See shared-contracts.md § Source Part Pattern for the input-source
         invariant, populate-time re-check, and parametrized integrity test.
@@ -1599,7 +1599,7 @@ def run_v2_pipeline(
     team_name: str | None = None,
     concat_session_group_owner: str | None = None,
     concat_session_group_name: str | None = None,
-    preset: str = "franklab_tetrode_mountainsort5",
+    pipeline_preset: str = "franklab_tetrode_mountainsort5",
     skip_artifact: bool = False,
     auto_curate: bool = False,
     figpack: bool = False,
@@ -1616,8 +1616,8 @@ def run_v2_pipeline(
     concat_session_group_owner, concat_session_group_name
         Required together for concat mode. Mutually exclusive with all
         single-session fields, including team_name.
-    preset
-        Registered preset name.
+    pipeline_preset
+        Registered pipeline-preset name.
     skip_artifact
         Skip single-session artifact detection.
     auto_curate
@@ -1712,8 +1712,8 @@ PRESETS = {
         "preprocessing_params_name": "default_franklab",
         # artifact_detection_params_name is None for concat presets: concat sorts run
         # NO artifact detection (the concat SortingSelection has no
-        # ArtifactSource row), so a non-None value here would be silently
-        # ignored. The _Preset model makes the field Optional and the
+        # ArtifactDetectionSource row), so a non-None value here would be silently
+        # ignored. The _PipelinePreset model makes the field Optional and the
         # orchestrator forbids consuming it in concat mode.
         "artifact_detection_params_name": None,
         "sorter": "mountainsort5",

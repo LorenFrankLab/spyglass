@@ -408,11 +408,11 @@ from spyglass.spikesorting.v2.curation import CurationV2 as CurationV2_table
 
 Implement `_get_restricted_merge_ids_v2(key, as_dict=False)` as the v2 analog of `_get_restricted_merge_ids_v1`, but without v1's `IntervalList` artifact rewrite. The helper must accept ordinary user-facing restriction keys, not only UUID primary keys:
 
-- Phase 1 keys: `nwb_file_name`, `team_name`, `sort_group_id`, `interval_list_name`, `preprocessing_params_name`, `recording_id`, `artifact_id`, `sorter`, `sorter_params_name`, `sorting_id`, `curation_id`.
+- Phase 1 keys: `nwb_file_name`, `team_name`, `sort_group_id`, `interval_list_name`, `preprocessing_params_name`, `recording_id`, `artifact_detection_id`, `sorter`, `sorter_params_name`, `sorting_id`, `curation_id`.
 - Phase 2 keys: `analyzer_curation_id`, `metric_params_name`, `auto_curation_rules_name`.
 - Phase 3+ keys when their tables exist: `session_group_owner`, `session_group_name`, `concat_recording_id`.
 
-The implementation should join through the relevant v2 Selection tables and source parts, then restrict `SpikeSortingOutput.CurationV2`. Restrictions by `recording_id` route through `SortingSelection.RecordingSource`; restrictions by `concat_recording_id` route through `SortingSelection.ConcatenatedRecordingSource` once concat support lands. Unknown restriction fields should fail clearly rather than silently returning unrelated merge IDs. `restrict_by_artifact` remains accepted by the public method for API compatibility; v2 looks up the artifact's `IntervalList` row by `(nwb_file_name, interval_list_name=f"artifact_{artifact_id}")` rather than v1's bare-UUID lookup.
+The implementation should join through the relevant v2 Selection tables and source parts, then restrict `SpikeSortingOutput.CurationV2`. Restrictions by `recording_id` route through `SortingSelection.RecordingSource`; restrictions by `concat_recording_id` route through `SortingSelection.ConcatenatedRecordingSource` once concat support lands. Unknown restriction fields should fail clearly rather than silently returning unrelated merge IDs. `restrict_by_artifact` remains accepted by the public method for API compatibility; v2 looks up the artifact's `IntervalList` row by `(nwb_file_name, interval_list_name=f"artifact_detection_{artifact_detection_id}")` rather than v1's bare-UUID lookup.
 
 **Imported sorting parity**:
 
@@ -583,7 +583,7 @@ source part tables instead of nullable source FKs on the master row:
 | Master table | Source parts | Meaning |
 | --- | --- | --- |
 | `SortingSelection` | `RecordingSource`, `ConcatenatedRecordingSource` | exactly one sort **input** source |
-| `ArtifactSelection` | `RecordingSource`, `SharedArtifactGroupSource` | exactly one artifact-detection input source |
+| `ArtifactDetectionSelection` | `RecordingSource`, `SharedGroupSource` | exactly one artifact-detection input source |
 
 This is the selected design because source-specific queries remain explicit:
 users join the source part they mean (`SortingSelection.RecordingSource` or
@@ -593,23 +593,23 @@ FK columns whose joins silently drop the other source type.
 DataJoint does not enforce "exactly one part row across two part tables", so
 the invariant still needs two runtime checks plus a small integrity test.
 
-**`SortingSelection.ArtifactSource` (post-review-fixes) is an optional
+**`SortingSelection.ArtifactDetectionSource` (post-review-fixes) is an optional
 *association* part, NOT an input source.** The review-fixes checkpoint replaced
 the nullable `-> ArtifactDetection` FK on the `SortingSelection` master with a
-zero-or-one `ArtifactSource` part (`-> master` / `-> ArtifactDetection`). It
+zero-or-one `ArtifactDetectionSource` part (`-> master` / `-> ArtifactDetection`). It
 records "was an artifact pass applied to this sort." It is deliberately
 **excluded** from the "exactly one input source" invariant:
 
 - `resolve_source()` counts ONLY `RecordingSource` + `ConcatenatedRecordingSource`
-  (still exactly one). It MUST NOT count `ArtifactSource`, or every
+  (still exactly one). It MUST NOT count `ArtifactDetectionSource`, or every
   artifact-backed sort would resolve as "two sources."
 - `prune_orphaned_selections()` checks ONLY the two input-source parts; a sort
-  with no `ArtifactSource` row is valid (it means "no artifact detection"), not
+  with no `ArtifactDetectionSource` row is valid (it means "no artifact detection"), not
   an orphan.
-- **Contract: "no `ArtifactSource` row" means "no artifact detection."** This
-  replaces the old "`artifact_id IS NULL`" contract — there is no nullable
-  `artifact_id` column on the master anymore. Read the artifact via the
-  `resolve_artifact(key) -> artifact_id | None` accessor, not `row["artifact_id"]`.
+- **Contract: "no `ArtifactDetectionSource` row" means "no artifact detection."** This
+  replaces the old "`artifact_detection_id IS NULL`" contract — there is no nullable
+  `artifact_detection_id` column on the master anymore. Read the artifact via the
+  `resolve_artifact_detection(key) -> artifact_detection_id | None` accessor, not `row["artifact_detection_id"]`.
 
 ### Layer 1: transaction-wrapped insert helper
 
@@ -675,7 +675,7 @@ elif source.kind == "concatenated_recording":
 ```
 
 `SortingSelection.resolve_source(key)` returns kind `"recording"` or
-`"concatenated_recording"`. `ArtifactSelection.resolve_source(key)`
+`"concatenated_recording"`. `ArtifactDetectionSelection.resolve_source(key)`
 returns kind `"recording"` or `"shared_artifact_group"`. These are per-table
 classmethods, not a single shared resolver with table-specific branching.
 
@@ -703,14 +703,14 @@ row has exactly one source part. The same test also asserts logical identities
 are unique within each source family:
 
 - `SortingSelection.RecordingSource`: source `recording_id` + sorter fields +
-  presence/absence of an `ArtifactSource` row (an artifact-backed and a
+  presence/absence of an `ArtifactDetectionSource` row (an artifact-backed and a
   no-artifact sort with otherwise identical fields are distinct identities).
 - `SortingSelection.ConcatenatedRecordingSource`: source `concat_recording_id`
-  + sorter fields (concat sorts have **no** `ArtifactSource` row — see the
+  + sorter fields (concat sorts have **no** `ArtifactDetectionSource` row — see the
   concat guard below).
-- `ArtifactSelection.RecordingSource`: source `recording_id` +
+- `ArtifactDetectionSelection.RecordingSource`: source `recording_id` +
   `artifact_detection_params_name`.
-- `ArtifactSelection.SharedArtifactGroupSource`: source
+- `ArtifactDetectionSelection.SharedGroupSource`: source
   `shared_artifact_group_name` + `artifact_detection_params_name`.
 
 It runs with the rest of the v2 suite; not a separate nightly job or operational
@@ -722,7 +722,7 @@ The source FK lives on the source part, not on the selection master. This is the
 DataJoint-native way to model polymorphic sources, but it changes delete
 semantics: deleting a source row (`Recording`, `ConcatenatedRecording`, or
 `SharedArtifactGroup`) cascades to the matching source part row and **does not**
-automatically cascade to the `SortingSelection` or `ArtifactSelection`
+automatically cascade to the `SortingSelection` or `ArtifactDetectionSelection`
 master row. A source-polymorphic master with zero source parts is invalid and
 must not be treated as a usable selection.
 
@@ -741,10 +741,10 @@ def prune_orphaned_selections(cls, *, dry_run: bool = True) -> list[dict]:
 ```
 
 `SortingSelection.prune_orphaned_selections()` checks
-`RecordingSource` + `ConcatenatedRecordingSource` ONLY (not `ArtifactSource` —
-a sort with no `ArtifactSource` row is valid, not orphaned).
-`ArtifactSelection.prune_orphaned_selections()` checks
-`RecordingSource` + `SharedArtifactGroupSource`.
+`RecordingSource` + `ConcatenatedRecordingSource` ONLY (not `ArtifactDetectionSource` —
+a sort with no `ArtifactDetectionSource` row is valid, not orphaned).
+`ArtifactDetectionSelection.prune_orphaned_selections()` checks
+`RecordingSource` + `SharedGroupSource`.
 
 Deletion guidance for maintainers: delete through the selection master or run
 `prune_orphaned_selections(dry_run=False)` after deleting source rows. Do not
@@ -888,7 +888,7 @@ This contract enforces the user's binding constraint: every v2 table is designed
 review-fixes plan is a one-time
 correction pass that lands schema-shape fixes BEFORE the zero-migration rule
 binds for the rest of the epic: it replaces the nullable `SortingSelection ->
-ArtifactDetection` FK with an optional `ArtifactSource` part, splits
+ArtifactDetection` FK with an optional `ArtifactDetectionSource` part, splits
 `SortGroupV2.sort_reference_electrode_id` into `reference_mode` +
 `reference_electrode_id`, makes `bandpass_filter` Optional, flips the
 `whiten` default to None, and adds `threshold_unit` to the clusterless schema
@@ -907,7 +907,7 @@ build on the corrected baseline; the forward-compat table reflects it.
 | `ConcatenatedRecordingSelection` | Declared in Phase 1 (Manual, UUID PK) | Provides the UUID PK that `ConcatenatedRecording` (Computed) inherits. Needed so `SortingSelection` can FK `ConcatenatedRecording` from Phase 1. |
 | `ConcatenatedRecording` + `ConcatenatedRecording.MemberBoundary` | Declared in Phase 1; `make()` body raises `NotImplementedError("ConcatenatedRecording.make() is not implemented yet")` | Final schema; Phase 3 only fills in the `make()` body and writes member boundary rows. Test in Phase 1 asserts `populate()` raises. |
 | `SortingSelection` + source parts | `RecordingSource` and `ConcatenatedRecordingSource` part tables declared in Phase 1. Exactly one source part is enforced by `insert_selection()` and re-checked in `make()`. | Both source FK targets exist from Phase 1, so the schema is final. Phase 1's `insert_selection` rejects `ConcatenatedRecordingSource`; Phase 3 lifts that runtime gate without touching the schema. |
-| `SortingSelection.ArtifactSource` | Optional `association` part (`-> master` / `-> ArtifactDetection`), zero-or-one per master; **replaces** the old nullable `-> ArtifactDetection` FK | "No `ArtifactSource` row" = no artifact detection. Concat sorts skip artifact detection by simply having no `ArtifactSource` row. Excluded from `resolve_source()` / orphan counts. |
+| `SortingSelection.ArtifactDetectionSource` | Optional `association` part (`-> master` / `-> ArtifactDetection`), zero-or-one per master; **replaces** the old nullable `-> ArtifactDetection` FK | "No `ArtifactDetectionSource` row" = no artifact detection. Concat sorts skip artifact detection by simply having no `ArtifactDetectionSource` row. Excluded from `resolve_source()` / orphan counts. |
 | `SortGroupV2` | `reference_mode: varchar(32)` (validated against a `ReferenceMode` Literal: `none`/`global_median`/`specific`) + nullable `reference_electrode_id` (**replaces** the `sort_reference_electrode_id` magic sentinels -1/-2/≥0) | Reference dispatch reads the validated mode + nullable FK; "specific iff `reference_electrode_id IS NOT NULL`" enforced in `insert1`. **varchar, not enum, on purpose** — the reference-mode set may grow (SI also has `global_average`/CAR and local/per-group referencing), so an enum would trap a future mode behind a forbidden `ALTER TABLE`. The `Literal` gives typo-protection without the migration risk (same rationale as `CurationLabel`; the closed `curation_source` set is the contrasting enum case). A future reviewer must NOT "tighten" this to an enum. |
 | `Sorting.Unit` | Part table present in Phase 1 | Phase 2 `AnalyzerCuration` reads brain regions from here; Phase 4 `TrackedUnit` per-session region lookup reads from here. |
 | `CurationV2.Unit` | Part table present in Phase 1 | Same downstream consumers; merges shrink `CurationV2.Unit` from `Sorting.Unit` row count. |

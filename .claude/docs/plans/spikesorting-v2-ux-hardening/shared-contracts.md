@@ -19,9 +19,9 @@ Cross-phase types and schemas. Each appears once here; phases link in by anchor 
 
 | Key | Type | Meaning |
 | --- | --- | --- |
-| `preset` | `str` | The resolved preset name. |
+| `pipeline_preset` | `str` | The resolved pipeline-preset name. |
 | `recording_id` | `uuid.UUID` | `RecordingSelection` PK. |
-| `artifact_id` | `uuid.UUID` | `ArtifactSelection` PK. |
+| `artifact_detection_id` | `uuid.UUID` | `ArtifactDetectionSelection` PK. |
 | `sorting_id` | `uuid.UUID` | `SortingSelection` PK. |
 | `curation_id` | `int` | `CurationV2` PK. |
 | `merge_id` | `uuid.UUID` | `SpikeSortingOutput` master PK. The key downstream consumers use. |
@@ -32,10 +32,10 @@ Cross-phase types and schemas. Each appears once here; phases link in by anchor 
 | Key | Type | Meaning |
 | --- | --- | --- |
 | `recording_status` | `str` | One of the [stage-status values](#stage-status-values) for the recording stage. |
-| `artifact_status` | `str` | Stage-status for the artifact stage. |
+| `artifact_detection_status` | `str` | Stage-status for the artifact-detection stage. |
 | `sorting_status` | `str` | Stage-status for the sorting stage. |
 | `curation_status` | `str` | Stage-status for the curation stage (`computed` for a fresh root, `reused` when an existing root was returned). |
-| `stage_seconds` | `dict[str, float]` | Wall-clock seconds spent **this call** per stage, keyed `"recording" / "artifact" / "sorting" / "curation"`. On an idempotent re-run these are ≈0 because `populate` no-ops — this is per-call latency, NOT cumulative compute cost. |
+| `stage_seconds` | `dict[str, float]` | Wall-clock seconds spent **this call** per stage, keyed `"recording" / "artifact_detection" / "sorting" / "curation"`. On an idempotent re-run these are ≈0 because `populate` no-ops — this is per-call latency, NOT cumulative compute cost. |
 | `warnings` | `list[str]` | Human-readable advisories raised during the run (e.g. the zero-unit warning). Empty list when clean. |
 
 **Idempotency invariant (do not weaken):** two `run_v2_pipeline` calls with identical inputs return manifests that are equal **except** for `stage_seconds` and the `*_status` values (second call reports `reused`). All stable keys and `n_units` are identical, and no duplicate rows are inserted. [phase-3](phase-3-observability.md) and [phase-6](phase-6-canonical-notebook-and-smoke-gate.md) both assert this.
@@ -73,7 +73,7 @@ class PreflightReport:
     ok: bool
     errors: list[str]            # blocking problems; non-empty <=> ok is False
     warnings: list[str]          # non-blocking advisories (e.g. artifact_params="none")
-    resolved_preset: str         # the preset name that was checked
+    resolved_pipeline_preset: str         # the pipeline-preset name that was checked
     expected_ids: dict           # see below
     checks: list["PreflightCheck"]  # per-check detail (name, ok, message)
 
@@ -92,7 +92,7 @@ class PreflightCheck:
 ```python
 {
     "recording_id": {"id": UUID(...), "exists": False},
-    "artifact_id":  {"id": UUID(...), "exists": False},
+    "artifact_detection_id":  {"id": UUID(...), "exists": False},
     "sorting_id":   {"id": UUID(...), "exists": True},
 }
 ```
@@ -124,4 +124,4 @@ class PipelineStageError(RuntimeError):
         )
 ```
 
-**Contract (do not weaken):** always chain the original (`raise ... from exc`); never swallow the underlying error into a bare string. `partial_manifest` contains every stable manifest key produced *before* the failing stage (e.g. a sorting-stage failure carries `recording_id` + `artifact_id`). `ZeroUnitSortError` ([exceptions.py:81](../../../../src/spyglass/spikesorting/v2/exceptions.py#L81)) is **not** rerouted through this — zero units is a graceful-by-default result, not a stage failure.
+**Contract (do not weaken):** always chain the original (`raise ... from exc`); never swallow the underlying error into a bare string. `partial_manifest` contains every stable manifest key produced *before* the failing stage (e.g. a sorting-stage failure carries `recording_id` + `artifact_detection_id`). `ZeroUnitSortError` ([exceptions.py:81](../../../../src/spyglass/spikesorting/v2/exceptions.py#L81)) is **not** rerouted through this — zero units is a graceful-by-default result, not a stage failure.

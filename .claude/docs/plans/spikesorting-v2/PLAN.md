@@ -4,7 +4,7 @@
 
 **Current UX addendum:** the separate `spikesorting-v2-ux-hardening` plan has
 landed a minimal first-hour single-session path on top of the Phase 1 MVP:
-`notebooks/10_Spike_SortingV2.ipynb`, `describe_presets`,
+`notebooks/10_Spike_SortingV2.ipynb`, `describe_pipeline_presets`,
 `describe_sort_groups`, `plot_sort_group_geometry`, preflight, manifest observability,
 and curation convenience wrappers. Treat those as the current user-facing
 baseline. Phase 5 extends that canonical notebook rather than creating another

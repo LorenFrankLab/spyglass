@@ -14,7 +14,7 @@ A run today returns only final PKs. Add per-stage `*_status` (computed vs reused
 
 **Inputs to read first:**
 
-- [pipeline.py:205-291](../../../../src/spyglass/spikesorting/v2/pipeline.py#L205-L291) — the four stages (recording, artifact, sorting, curation) and the current manifest return. This is what gets instrumented.
+- [pipeline.py:205-291](../../../../src/spyglass/spikesorting/v2/pipeline.py#L205-L291) — the four stages (recording, artifact_detection, sorting, curation) and the current manifest return. This is what gets instrumented.
 - [pipeline.py:240-262](../../../../src/spyglass/spikesorting/v2/pipeline.py#L240-L262) — the existing zero-unit warning path; its `logger.warning` text becomes the first entry in the manifest `warnings` list.
 - [curation.py:370-426](../../../../src/spyglass/spikesorting/v2/curation.py#L370-L426) — root-curation reuse and integer `curation_id` assignment. Read this before instrumenting curation; do not assume a deterministic curation PK.
 - [exceptions.py:75-99](../../../../src/spyglass/spikesorting/v2/exceptions.py#L75-L99) — exception module; add `PipelineStageError`. Note `ZeroUnitSortError` is **not** rerouted through it.
@@ -27,7 +27,7 @@ A run today returns only final PKs. Add per-stage `*_status` (computed vs reused
   1. Recording/artifact/sorting: compute the deterministic selection PK (already known from Phase 2's identity builders) and check existence with `& pk` **before** populate → record `status = "reused" if exists else "computed"`.
   2. Curation: before `insert_curation`, check whether a root curation already exists for the `sorting_id` (`parent_curation_id == -1`, matching the current root-reuse path). Record `curation_status = "reused"` if that root existed, otherwise `"computed"`, and use the actual key returned by `insert_curation` for `curation_id`.
   3. Time the `populate`/`insert_curation` call with a monotonic clock (`time.perf_counter()` deltas; do **not** use `time.time()`), storing into `stage_seconds[stage]`.
-  4. Wrap the `populate`/insert in `try/except Exception as exc: raise PipelineStageError(stage, partial_manifest, str(exc)) from exc`, where `partial_manifest` is the manifest accumulated from earlier stages. The curation stage's failure must still carry `recording_id`/`artifact_id`/`sorting_id`.
+  4. Wrap the `populate`/insert in `try/except Exception as exc: raise PipelineStageError(stage, partial_manifest, str(exc)) from exc`, where `partial_manifest` is the manifest accumulated from earlier stages. The curation stage's failure must still carry `recording_id`/`artifact_detection_id`/`sorting_id`.
   Implement this as a small internal helper to avoid four copy-pasted try/except/timer blocks, e.g.:
   ```python
   import time
@@ -44,7 +44,7 @@ A run today returns only final PKs. Add per-stage `*_status` (computed vs reused
   ```
   (Note: the recording/artifact/sorting `populate` calls and the `insert_curation` call have different signatures — `work` is a zero-arg closure capturing the right call. Keep the existing `reserve_jobs=False`.)
 - **Collect `warnings`.** Accumulate a `warnings: list[str]` across the run. The zero-unit branch ([pipeline.py:257-262](../../../../src/spyglass/spikesorting/v2/pipeline.py#L257-L262)) appends its message to this list **in addition to** the existing `logger.warning` (keep the log call — the list is for programmatic access, the log for console visibility). Any artifact-pass-through advisory likewise appends here.
-- **Extend the manifest return** ([pipeline.py:283-291](../../../../src/spyglass/spikesorting/v2/pipeline.py#L283-L291)) with the additive keys from [shared-contracts.md](shared-contracts.md#pipeline-manifest-schema): `recording_status`, `artifact_status`, `sorting_status`, `curation_status`, `stage_seconds`, `warnings`. **Do not touch the existing keys.**
+- **Extend the manifest return** ([pipeline.py:283-291](../../../../src/spyglass/spikesorting/v2/pipeline.py#L283-L291)) with the additive keys from [shared-contracts.md](shared-contracts.md#pipeline-manifest-schema): `recording_status`, `artifact_detection_status`, `sorting_status`, `curation_status`, `stage_seconds`, `warnings`. **Do not touch the existing keys.**
 - **Docs:** update the `run_v2_pipeline` docstring `Returns` section to document the additive keys (and the "this call, not cumulative" meaning of `stage_seconds`) and add `PipelineStageError` to `Raises`. CHANGELOG entry: observable manifest + stage-aware errors.
 
 ## Deliberately not in this phase
@@ -62,7 +62,7 @@ A run today returns only final PKs. Add per-stage `*_status` (computed vs reused
 | `test_manifest_stable_keys_unchanged` (db, slow) | The seven stable keys are present with the same values a pre-Phase-3 run produced (pin against a recorded baseline manifest or a parallel un-instrumented computation). |
 | `test_first_run_computed_second_reused` (db, slow) | On a cleanly configured session with no pre-existing selection rows or root curation, first run reports `*_status == "computed"`; an immediate identical second run reports `reused` for all stages and `stage_seconds` values near zero. |
 | `test_idempotent_manifest_modulo_timing` (db, slow) | Two identical runs return manifests equal after dropping `stage_seconds` and `*_status`; no duplicate rows inserted (count check on every Selection table). |
-| `test_stage_error_carries_partial_manifest` (db) | Force the sorting stage to raise (monkeypatch `Sorting.populate` to throw) → `PipelineStageError` with `.stage == "sorting"`, `.partial_manifest` containing `recording_id` + `artifact_id`, and `__cause__` is the injected error. |
+| `test_stage_error_carries_partial_manifest` (db) | Force the sorting stage to raise (monkeypatch `Sorting.populate` to throw) → `PipelineStageError` with `.stage == "sorting"`, `.partial_manifest` containing `recording_id` + `artifact_detection_id`, and `__cause__` is the injected error. |
 | `test_zero_unit_warning_in_manifest` (db, slow) | A zero-unit sort (`require_units=False`) returns a manifest whose `warnings` list contains the zero-unit message and `n_units == 0` (uses an artifact/threshold config that yields zero units, mirroring the existing zero-unit test). |
 
 Place in `tests/spikesorting/v2/test_pipeline_observability.py`. Reuse the smoke fixture; the `PipelineStageError` test uses monkeypatching to avoid needing a genuinely failing sort.

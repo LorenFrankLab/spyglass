@@ -23,7 +23,7 @@ This phase touches shared test infrastructure (`tests/conftest.py`, `pyproject.t
 
 ### Item B — Don't download fixtures for pure-helper v2 tests
 
-- **Reproduce:** run a pure v2 unit test that needs no DB and no fixture (e.g. the Phase 1 `test_describe_presets_no_db`) in a clean environment with the smoke fixture absent, and confirm whether either network path starts even though no collected test uses a fixture:
+- **Reproduce:** run a pure v2 unit test that needs no DB and no fixture (e.g. the Phase 1 `test_describe_pipeline_presets_no_db`) in a clean environment with the smoke fixture absent, and confirm whether either network path starts even though no collected test uses a fixture:
   - v2 smoke fixture fetch from `pytest_sessionstart` ([tests/spikesorting/v2/conftest.py:123-155](../../../../tests/spikesorting/v2/conftest.py#L123-L155)).
   - shared root `DataDownloader` initialization from `pytest_configure` ([tests/conftest.py:489](../../../../tests/conftest.py#L489)), which eagerly starts `curl` processes in `DataDownloader.__init__`.
 - **If reproduced, fix:** gate each reproduced fetch path on whether any *collected* test actually needs the corresponding fixture/download. Lowest-risk options (pick the one that fits pytest's hook ordering and the specific reproduced path):

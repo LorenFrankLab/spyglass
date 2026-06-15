@@ -51,15 +51,15 @@ erDiagram
     SortGroupV2 ||--o{ RecordingSelection : ""
     PreprocessingParameters ||--o{ RecordingSelection : ""
     RecordingSelection ||--|| Recording : "Computed"
-    ArtifactSelection ||--o{ ArtifactSelection_RecordingSource : "part"
-    ArtifactSelection ||--o{ ArtifactSelection_SharedArtifactGroupSource : "part"
-    Recording ||--o{ ArtifactSelection_RecordingSource : "source"
+    ArtifactDetectionSelection ||--o{ ArtifactDetectionSelection_RecordingSource : "part"
+    ArtifactDetectionSelection ||--o{ ArtifactDetectionSelection_SharedGroupSource : "part"
+    Recording ||--o{ ArtifactDetectionSelection_RecordingSource : "source"
     SharedArtifactGroup ||--o{ SharedArtifactGroup_Member : "part"
-    SharedArtifactGroup ||--o{ ArtifactSelection_SharedArtifactGroupSource : "source"
+    SharedArtifactGroup ||--o{ ArtifactDetectionSelection_SharedGroupSource : "source"
     Recording ||--o{ SharedArtifactGroup_Member : ""
-    ArtifactDetectionParameters ||--o{ ArtifactSelection : ""
-    ArtifactSelection ||--|| ArtifactDetection : "Computed"
-    ArtifactDetection ||..o{ IntervalList : "writes artifact_{artifact_id} row(s)"
+    ArtifactDetectionParameters ||--o{ ArtifactDetectionSelection : ""
+    ArtifactDetectionSelection ||--|| ArtifactDetection : "Computed"
+    ArtifactDetection ||..o{ IntervalList : "writes artifact_detection_{artifact_detection_id} row(s)"
 
     %% --- Phase 3 concat chain ---
     SessionGroup ||--o{ SessionGroup_Member : "part"
@@ -163,7 +163,7 @@ flowchart TB
 
 Phase 5 leaves v2 with:
 
-- 13 v2 Manual tables: 9 selection-style drivers (`RecordingSelection`, `ArtifactSelection`, `SortingSelection`, `ConcatenatedRecordingSelection`, `AnalyzerCurationSelection`, `RecordingArtifactRecomputeSelection`, `SortingAnalyzerRecomputeSelection`, `UnitMatchSelection`, `FigPackCurationSelection`) plus `SortGroupV2`, `SharedArtifactGroup`, `CurationV2`, and `SessionGroup`.
+- 13 v2 Manual tables: 9 selection-style drivers (`RecordingSelection`, `ArtifactDetectionSelection`, `SortingSelection`, `ConcatenatedRecordingSelection`, `AnalyzerCurationSelection`, `RecordingArtifactRecomputeSelection`, `SortingAnalyzerRecomputeSelection`, `UnitMatchSelection`, `FigPackCurationSelection`) plus `SortGroupV2`, `SharedArtifactGroup`, `CurationV2`, and `SessionGroup`.
 - 12 Computed tables: `Recording`, `ArtifactDetection`, `ConcatenatedRecording`, `Sorting`, `AnalyzerCuration`, `RecordingArtifactVersions`, `RecordingArtifactRecompute`, `SortingAnalyzerVersions`, `SortingAnalyzerRecompute`, `UnitMatch`, `TrackedUnit`, and `FigPackCuration`.
 - 14 v2 part tables: sort-group electrodes, shared-artifact members, artifact intervals, sorting units, curation units + labels, session-group members, UnitMatch member curations + pair records, tracked-unit members, and Name/Hash parts for both recompute families.
 - 7 Lookup tables: preprocessing, artifact, sorter, motion-correction, quality-metric, auto-curation-rule, and matcher parameters.

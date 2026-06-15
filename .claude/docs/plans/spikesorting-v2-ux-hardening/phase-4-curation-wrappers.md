@@ -50,7 +50,7 @@
   ```
   - The `parent_curation_id` parameter (default `-1`) is the [overview.md risk-table](overview.md#risks-and-mitigations) mitigation: a real merge workflow branches proposed/applied merge curations off an existing initial curation, not always a second initial curation. `create_initial_curation` omits it (the initial/root curation is always `parent_curation_id=-1`).
   - Keep the existing merge-group validation in `insert_curation` (≥2 members per group) — the wrappers inherit it; do not duplicate or weaken it.
-- **Add `summarize_curation(curation_key)`** as a `CurationV2` classmethod returning a plain dict (notebook-printable). It accepts either a minimal curation key (`{"sorting_id": ..., "curation_id": ...}`) or the full `run_v2_pipeline` manifest, normalizing internally to the curation PK before restricting `CurationV2`/parts. Do not pass a full manifest directly into DataJoint restrictions without normalization; manifest-only keys such as `preset`, `recording_id`, `artifact_id`, and `n_units` are not part of the curation primary key.
+- **Add `summarize_curation(curation_key)`** as a `CurationV2` classmethod returning a plain dict (notebook-printable). It accepts either a minimal curation key (`{"sorting_id": ..., "curation_id": ...}`) or the full `run_v2_pipeline` manifest, normalizing internally to the curation PK before restricting `CurationV2`/parts. Do not pass a full manifest directly into DataJoint restrictions without normalization; manifest-only keys such as `pipeline_preset`, `recording_id`, `artifact_detection_id`, and `n_units` are not part of the curation primary key.
   ```python
   {
       "sorting_id": uuid.UUID,
