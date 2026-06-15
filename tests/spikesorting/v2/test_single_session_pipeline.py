@@ -3683,27 +3683,29 @@ def test_run_v2_pipeline_clusterless_preset(polymer_smoke_session):
         "sorter_params_name": "default",
     }
     original_default = (SorterParameters & default_key).fetch1()
-    # ``ClusterlessThresholderSchema`` (extra="forbid") rejects
-    # ``outputs`` and ``random_chunk_kwargs``; the test params
-    # dict must not carry them. The runtime strip path in
-    # ``Sorting._run_sorter`` still tolerates either shape -- but
-    # ``SorterParameters.insert1`` validates through Pydantic
-    # first, so the v1-era ``outputs`` key would fail at insert
-    # time.
+    # ``ClusterlessThresholderSchema`` (extra="forbid") rejects ``outputs`` and
+    # ``random_chunk_kwargs``; ``SMOKE_CLUSTERLESS_PARAMS`` is already stripped to
+    # the schema's allowed shape so the stored row stays canonical (the runtime
+    # strip path in ``Sorting._run_sorter`` tolerates either form).
     from tests.spikesorting.v2._smoke_constants import (
         SMOKE_CLUSTERLESS_PARAMS,
     )
 
-    SorterParameters().insert1(
+    # Mutate the existing row IN PLACE with update1, NOT insert1(replace=True):
+    # replace deletes then reinserts, and a SortingSelection left by an earlier
+    # test (or by this one) FKs back to (sorter, sorter_params_name), so the
+    # delete half fails with an IntegrityError -- an order-dependent flake in a
+    # full-suite run. update1 edits the secondary attributes without touching the
+    # key, so it is safe regardless of test order. The ``finally`` below restores
+    # the 100 uV default the same way.
+    SorterParameters.update1(
         {
             "sorter": "clusterless_thresholder",
             "sorter_params_name": "default",
             "params": dict(SMOKE_CLUSTERLESS_PARAMS),
             "params_schema_version": 4,
             "job_kwargs": None,
-        },
-        skip_duplicates=False,
-        replace=True,
+        }
     )
 
     try:
