@@ -259,3 +259,45 @@ def test_zero_unit_warning_in_manifest(first_run):
     assert any("zero units" in w for w in manifest["warnings"]), manifest[
         "warnings"
     ]
+
+
+@pytest.mark.database
+@pytest.mark.slow
+def test_curation_stage_wraps_missing_merge_registration(first_run):
+    """A reused root whose merge registration is gone fails stage-aware.
+
+    The merge_id read-back lives inside the curation stage, so an out-of-band
+    deletion of the ``SpikeSortingOutput.CurationV2`` registration (a realistic
+    edge -- summarize_curation tolerates it too) surfaces as a typed
+    ``PipelineStageError`` carrying the partial manifest, not a raw ``fetch1``.
+    """
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    _, inputs = first_run
+    manifest = run_v2_pipeline(**inputs)  # reused; curation exists + registered
+    curation_pk = {
+        "sorting_id": manifest["sorting_id"],
+        "curation_id": manifest["curation_id"],
+    }
+    sort_pk = {"sorting_id": manifest["sorting_id"]}
+    merge_id = (SpikeSortingOutput.CurationV2 & curation_pk).fetch1("merge_id")
+    # Drop just the merge registration, leaving the CurationV2 root in place.
+    (SpikeSortingOutput & {"merge_id": merge_id}).super_delete(warn=False)
+
+    try:
+        with pytest.raises(PipelineStageError) as exc:
+            run_v2_pipeline(**inputs)
+        err = exc.value
+        assert err.stage == "curation"
+        assert {
+            "recording_id",
+            "artifact_id",
+            "sorting_id",
+            "n_units",
+        } <= set(err.partial_manifest)
+    finally:
+        # Restore a registered root so the other first_run consumers see a
+        # valid, reusable curation regardless of test order.
+        clear_curations_for(sort_pk)
+        run_v2_pipeline(**inputs)

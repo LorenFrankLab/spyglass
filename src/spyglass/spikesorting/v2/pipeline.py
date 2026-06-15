@@ -796,34 +796,39 @@ def run_v2_pipeline(
     # and through the same source-part / guard / merge-registration path a
     # fresh insert uses -- otherwise it stages a fresh root. Routing through
     # it (rather than a raw fetch-or-insert here) avoids bypassing that
-    # guard and silently reusing a root whose description/labels differ. The
-    # CurationV2 part on the merge table is auto-registered inside
-    # insert_curation, so a reused row reuses its merge_id. ``curation_id``
-    # is not content-addressed, so classify reused/computed from whether a
-    # root curation already exists for this sorting (the same check
-    # insert_curation's root-reuse path uses).
+    # guard and silently reusing a root whose description/labels differ.
+    # ``curation_id`` is not content-addressed, so classify reused/computed
+    # from whether a root curation already exists for this sorting (the same
+    # check insert_curation's root-reuse path uses).
     curation_exists = bool(
         CurationV2
         & {"sorting_id": sort_pk["sorting_id"], "parent_curation_id": -1}
     )
-    curation_pk, manifest["curation_status"], stage_seconds["curation"] = (
-        _run_stage(
-            "curation",
-            curation_exists,
-            lambda: CurationV2.insert_curation(
-                sorting_key=sort_pk,
-                labels={},
-                parent_curation_id=-1,
-                description=description or f"run_v2_pipeline preset={preset}",
-                reuse_existing=True,
-            ),
-            manifest,
+
+    def _curate_and_register():
+        curation_pk = CurationV2.insert_curation(
+            sorting_key=sort_pk,
+            labels={},
+            parent_curation_id=-1,
+            description=description or f"run_v2_pipeline preset={preset}",
+            reuse_existing=True,
         )
+        # The CurationV2 part on the merge table is auto-registered inside
+        # insert_curation (atomically), so the merge_id read-back is part of
+        # the curation stage: a reused root whose registration is missing
+        # (e.g. deleted out-of-band) then surfaces as a stage-aware
+        # PipelineStageError carrying the partial manifest, not a raw fetch1.
+        merge_id = (SpikeSortingOutput.CurationV2 & curation_pk).fetch1(
+            "merge_id"
+        )
+        return curation_pk, merge_id
+
+    (curation_pk, merge_id), curation_status, curation_seconds = _run_stage(
+        "curation", curation_exists, _curate_and_register, manifest
     )
+    manifest["curation_status"] = curation_status
+    stage_seconds["curation"] = curation_seconds
     manifest["curation_id"] = curation_pk["curation_id"]
-
-    merge_id = (SpikeSortingOutput.CurationV2 & curation_pk).fetch1("merge_id")
-
     manifest["merge_id"] = merge_id
     manifest["stage_seconds"] = stage_seconds
     return manifest
