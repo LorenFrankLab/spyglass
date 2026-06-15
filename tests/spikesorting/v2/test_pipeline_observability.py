@@ -21,7 +21,10 @@ from spyglass.spikesorting.v2.pipeline import (
     _STAGE_STATUSES,
     run_v2_pipeline,
 )
-from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
+from tests.spikesorting.v2._ingest_helpers import (
+    configure_v2_run_inputs,
+    copy_and_insert_nwb,
+)
 
 _FIXTURE_NAME = "mearec_polymer_smoke"
 _FIXTURE_PATH = (
@@ -52,27 +55,12 @@ _VOLATILE_KEYS = {"stage_seconds", *_STATUS_KEYS}
 
 def _configure_inputs(nwb_file_name: str) -> dict:
     """Ensure defaults + team + sort group (no populate); return run inputs."""
-    from spyglass.common.common_lab import LabTeam
-    from spyglass.spikesorting.v2 import initialize_v2_defaults
-    from spyglass.spikesorting.v2.recording import SortGroupV2
-
-    initialize_v2_defaults()
-    LabTeam.insert1(
-        {"team_name": _TEAM, "team_description": "observability tests"},
-        skip_duplicates=True,
+    return configure_v2_run_inputs(
+        nwb_file_name,
+        _TEAM,
+        interval_list_name=_INTERVAL,
+        team_description="observability tests",
     )
-    session_key = {"nwb_file_name": nwb_file_name}
-    if not (SortGroupV2 & session_key):
-        SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
-    sort_group_id = int(
-        sorted((SortGroupV2 & session_key).fetch("sort_group_id"))[0]
-    )
-    return {
-        "nwb_file_name": nwb_file_name,
-        "sort_group_id": sort_group_id,
-        "interval_list_name": _INTERVAL,
-        "team_name": _TEAM,
-    }
 
 
 @pytest.fixture(scope="module")

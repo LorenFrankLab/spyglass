@@ -90,3 +90,56 @@ def clear_curations_for(sorting_key) -> None:
     for mid in (SpikeSortingOutput.CurationV2 & sorting_key).fetch("merge_id"):
         (SpikeSortingOutput & {"merge_id": mid}).super_delete(warn=False)
     (CurationV2 & sorting_key).super_delete(warn=False)
+
+
+def configure_v2_run_inputs(
+    nwb_file_name: str,
+    team_name: str,
+    *,
+    interval_list_name: str = "raw data valid times",
+    team_description: str = "",
+) -> dict:
+    """Seed defaults + LabTeam + sort group (no populate); return run inputs.
+
+    Idempotent ensure-exists setup shared by the v2 pipeline test modules:
+    inserts the default Lookup rows and the LabTeam, builds one sort group per
+    shank if absent, and returns the ``run_v2_pipeline`` input dict keyed on
+    the lowest ``sort_group_id``. Does NOT call ``populate``.
+
+    Parameters
+    ----------
+    nwb_file_name : str
+        Ingested session to configure.
+    team_name : str
+        LabTeam to ensure exists and own the sort.
+    interval_list_name : str
+        Interval to sort. Default ``"raw data valid times"``.
+    team_description : str
+        Description for the LabTeam row.
+
+    Returns
+    -------
+    dict
+        ``{nwb_file_name, sort_group_id, interval_list_name, team_name}``.
+    """
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    initialize_v2_defaults()
+    LabTeam.insert1(
+        {"team_name": team_name, "team_description": team_description},
+        skip_duplicates=True,
+    )
+    session_key = {"nwb_file_name": nwb_file_name}
+    if not (SortGroupV2 & session_key):
+        SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    sort_group_id = int(
+        sorted((SortGroupV2 & session_key).fetch("sort_group_id"))[0]
+    )
+    return {
+        "nwb_file_name": nwb_file_name,
+        "sort_group_id": sort_group_id,
+        "interval_list_name": interval_list_name,
+        "team_name": team_name,
+    }

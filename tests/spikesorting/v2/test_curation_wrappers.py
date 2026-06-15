@@ -49,32 +49,20 @@ def polymer_60s_sort(dj_conn):
     if not _POLYMER_60S_PATH.exists():
         pytest.skip(f"Fixture {_POLYMER_60S_PATH.name} not found.")
 
-    from spyglass.common.common_lab import LabTeam
-    from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
-    from spyglass.spikesorting.v2.recording import SortGroupV2
-    from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
+    from tests.spikesorting.v2._ingest_helpers import (
+        configure_v2_run_inputs,
+        copy_and_insert_nwb,
+    )
 
     nwb_file_name = copy_and_insert_nwb(
         _POLYMER_60S_PATH, dest_name="mearec_curwrap_60s.nwb"
     )
-    session = {"nwb_file_name": nwb_file_name}
-    initialize_v2_defaults()
-    LabTeam.insert1(
-        {"team_name": _TEAM, "team_description": "curation wrapper tests"},
-        skip_duplicates=True,
-    )
-    if not (SortGroupV2 & session):
-        SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
-    sort_group_id = int(
-        sorted((SortGroupV2 & session).fetch("sort_group_id"))[0]
+    inputs = configure_v2_run_inputs(
+        nwb_file_name, _TEAM, team_description="curation wrapper tests"
     )
     manifest = run_v2_pipeline(
-        nwb_file_name=nwb_file_name,
-        sort_group_id=sort_group_id,
-        interval_list_name="raw data valid times",
-        team_name=_TEAM,
-        preset="franklab_tetrode_mountainsort5",
+        **inputs, preset="franklab_tetrode_mountainsort5"
     )
     return {"sorting_id": manifest["sorting_id"]}
 
