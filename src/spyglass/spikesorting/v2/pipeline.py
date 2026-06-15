@@ -358,16 +358,23 @@ def _sort_group_geometry_rows(nwb_file_name: str) -> list[dict[str, Any]]:
                     rel_z = geometry["rel_z"]
                     contact_size = geometry["contact_size"]
 
-            x = rel_x if not _missing(rel_x) else electrode.get("x")
-            y = rel_y if not _missing(rel_y) else electrode.get("y")
-            coord_source = (
-                "probe"
-                if not _missing(rel_x) and not _missing(rel_y)
-                else "electrode"
-                if not _missing(electrode.get("x"))
-                and not _missing(electrode.get("y"))
-                else None
-            )
+            # Pick plot coordinates from a SINGLE source so plot_x/plot_y and
+            # coordinate_source can never disagree (e.g. plot probe rel_x
+            # against electrode y, or label "electrode" while plotting a probe
+            # coord). Probe rel_x/rel_y are populated together, but pairing
+            # here keeps the contract explicit if only one were present.
+            electrode_x = electrode.get("x")
+            electrode_y = electrode.get("y")
+            if not _missing(rel_x) and not _missing(rel_y):
+                plot_x, plot_y, coord_source = rel_x, rel_y, "probe"
+            elif not _missing(electrode_x) and not _missing(electrode_y):
+                plot_x, plot_y, coord_source = (
+                    electrode_x,
+                    electrode_y,
+                    "electrode",
+                )
+            else:
+                plot_x, plot_y, coord_source = None, None, None
             rows.append(
                 {
                     "nwb_file_name": nwb_file_name,
@@ -387,15 +394,15 @@ def _sort_group_geometry_rows(nwb_file_name: str) -> list[dict[str, Any]]:
                     "reference_electrode_id": reference_electrode_id,
                     "is_reference": reference_electrode_id
                     == int(electrode["electrode_id"]),
-                    "x": electrode.get("x"),
-                    "y": electrode.get("y"),
+                    "x": electrode_x,
+                    "y": electrode_y,
                     "z": electrode.get("z"),
                     "rel_x": rel_x,
                     "rel_y": rel_y,
                     "rel_z": rel_z,
                     "contact_size": contact_size,
-                    "plot_x": x,
-                    "plot_y": y,
+                    "plot_x": plot_x,
+                    "plot_y": plot_y,
                     "coordinate_source": coord_source,
                 }
             )
