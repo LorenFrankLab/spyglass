@@ -213,8 +213,13 @@ filterwarnings = [
   "ignore::DeprecationWarning:.*",
   "ignore::UserWarning:.*",
   "ignore::FutureWarning:.*",
-  "ignore::PerformanceWarning:.*",
-  "ignore::MissingRequiredBuildWarning:.*",
+  # Custom categories MUST be fully qualified: pytest resolves a bare name
+  # against ``builtins`` (AttributeError otherwise). With the default
+  # ``-p no:warnings`` the warnings plugin never parses this list, but a
+  # developer who drops that flag to see warnings would hit the unresolved
+  # category at collection time -- so spell the import paths out.
+  "ignore::pandas.errors.PerformanceWarning:.*",
+  "ignore::hdmf.build.warnings.MissingRequiredBuildWarning:.*",
   # DLC training ends by cancelling a TF enqueue thread; expected, not a bug
   "ignore::pytest.PytestUnhandledThreadExceptionWarning",
 ]

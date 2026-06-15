@@ -229,3 +229,49 @@ def _clean_env():
     env.pop("SPYGLASS_V2_REQUIRE_FIXTURES", None)
     env.pop("SPYGLASS_V2_FETCH_FULL", None)
     return env
+
+
+# --------------------------------------------------------------------------
+# Item C: every category named in ``filterwarnings`` must stay resolvable, so
+# toggling ``-p no:warnings`` (a developer wanting to see warnings) does not
+# break collection. pytest resolves a bare category against ``builtins``; a bare
+# *custom* category therefore fails with AttributeError.
+# --------------------------------------------------------------------------
+
+
+def test_filterwarnings_categories_are_resolvable():
+    """Each ``filterwarnings`` category resolves the way pytest resolves it.
+
+    A bare name must be a builtin warning; anything else must be fully qualified
+    (``module.path.Category``) and importable. A bare custom category -- the bug
+    this guards -- crashes collection once the warnings plugin is active.
+    """
+    import builtins
+    import importlib
+    import tomllib
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[3]
+    config = tomllib.loads((repo_root / "pyproject.toml").read_text())
+    filters = config["tool"]["pytest"]["ini_options"]["filterwarnings"]
+
+    for entry in filters:
+        # filterwarnings format: action:message:category:module:lineno
+        parts = entry.split(":")
+        category = parts[2] if len(parts) > 2 else ""
+        if not category:
+            continue  # no category named (e.g. "ignore::ResourceWarning" -> set)
+        if "." in category:
+            module_path, _, klass = category.rpartition(".")
+            module = importlib.import_module(module_path)
+            resolved = getattr(module, klass)
+        else:
+            assert hasattr(builtins, category), (
+                f"filterwarnings category {category!r} is a bare name but not a "
+                "builtin warning; pytest resolves it against builtins and "
+                "crashes. Qualify it as module.path.Category."
+            )
+            resolved = getattr(builtins, category)
+        assert isinstance(resolved, type) and issubclass(resolved, Warning), (
+            f"filterwarnings category {category!r} is not a Warning subclass"
+        )
