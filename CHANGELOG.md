@@ -246,6 +246,10 @@ for label, interval_data in results.groupby("interval_labels"):
         above.
     - Fix fetching position df in
         SortedSpikesDecodingV1.get_ahead_behind_distance() #1540
+    - Fix `DecodingOutput.create_decoding_view()` for 2D decoders: normalize the
+        posterior over the correct spatial dimension(s), auto-detect the
+        orientation column name, and pass the `linear_position` column (not the
+        whole DataFrame) to the 1D view #1616
 
 - LFP
 
