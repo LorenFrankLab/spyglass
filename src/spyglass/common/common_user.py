@@ -137,6 +137,14 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
 
         return f"{base_id}_{next_int:02d}"
 
+    def _parse_pip_line(self, line: str) -> bool:
+        """Compatibility shim — delegates to the shared env-cache parser.
+
+        ``_parse_pip_line`` was moved to ``CondaEnvCache``.
+        This shim keeps existing callers working without changes.
+        """
+        return _env_cache._parse_pip_line(line)
+
     def insert_current_env(self, env_id=DEFAULT_ENV_ID) -> dict:
         """Insert the current environment into the table."""
 
