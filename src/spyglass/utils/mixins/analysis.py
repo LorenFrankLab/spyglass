@@ -4,7 +4,7 @@ import string
 import subprocess
 from functools import cached_property
 from pathlib import Path
-from typing import Dict, Optional, Union
+from typing import Dict, Optional, Union, Tuple
 from uuid import uuid4
 
 import datajoint as dj
@@ -510,10 +510,8 @@ class AnalysisMixin(BaseMixin):
 
         Direct I/O for complex cases:
         >>> with AnalysisNwbfile().build(nwb_file_name) as builder:
-        ...     with builder.open_for_write() as io:
-        ...         nwbf = io.read()
-        ...         nwbf.add_unit(spike_times=times, id=unit_id)
-        ...         io.write(nwbf)
+        ...     io, nwbf = builder.open_nwb
+        ...     nwbf.add_unit(spike_times=times, id=unit_id)
 
         See Also
         --------
@@ -655,7 +653,7 @@ class AnalysisMixin(BaseMixin):
         self,
         analysis_file_name: str,
         nwb_object: pynwb.core.NWBDataInterface,
-        table_name: Optional[str] = "pandas_table",
+        table_name: Optional[str] = None,
     ):
         """Add an NWB object to the analysis file and return the NWB object ID
 
@@ -683,35 +681,69 @@ class AnalysisMixin(BaseMixin):
             load_namespaces=True,
         ) as io:
             nwbf = io.read()
-            # convert to pynwb object if it is a dataframe or array
-            if isinstance(nwb_object, pd.DataFrame):
-                nwb_object = DynamicTable.from_dataframe(
-                    name=table_name or "pandas_table", df=nwb_object
-                )
-            elif isinstance(nwb_object, np.ndarray):
-                nwb_object = ScratchData(
-                    name=table_name or "numpy_array",
-                    data=nwb_object,
-                    description="Numpy array stored in scratch space",
-                )
-            if nwb_object.name in nwbf.scratch:
-                raise ValueError(
-                    f"Object with name '{nwb_object.name}' already exists in "
-                    + f"{analysis_file_name}. Please pass a different name "
-                    + "argument to AnalysisNwbfile.add_nwb_object()."
-                )
-            nwbf.add_scratch(nwb_object)
+            object_id = self._add_nwb_object_to_open_nwb(
+                nwbf, nwb_object, table_name
+            )
             io.write(nwbf)
-            return nwb_object.object_id
+            return object_id
+
+    def _add_nwb_object_to_open_nwb(
+        self,
+        nwbf: pynwb.NWBFile,
+        nwb_object: pynwb.core.NWBDataInterface,
+        table_name: Optional[str] = None,
+    ) -> str:
+        """Add an NWB object to an open NWB file and return the NWB object ID
+
+        Adds object to the scratch space of the NWB file.
+
+        Parameters
+        ----------
+        nwbf : pynwb.NWBFile
+            An open NWB file.
+        nwb_object : pynwb.core.NWBDataInterface
+            The NWB object created by PyNWB.
+        table_name : str, optional
+            The name of the pynwb object made from a passed dataframe or array.
+            Defaults to "pandas_table" or "numpy_array" for dataframes and arrays
+            respectively.
+        Returns
+        -------
+        nwb_object_id : str
+            The NWB object ID of the added object.
+        """
+
+        # convert to pynwb object if it is a dataframe or array
+        if isinstance(nwb_object, pd.DataFrame):
+            nwb_object = DynamicTable.from_dataframe(
+                name=table_name or "pandas_table", df=nwb_object
+            )
+        elif isinstance(nwb_object, np.ndarray):
+            nwb_object = ScratchData(
+                name=table_name or "numpy_array",
+                data=nwb_object,
+                description="Numpy array stored in scratch space",
+            )
+        if nwb_object.name in nwbf.scratch:
+            raise ValueError(
+                f"Object with name '{nwb_object.name}' already exists in "
+                + f"{Path(nwbf.container_source).name}. Please pass a different name "
+                + "argument to AnalysisNwbfile.add_nwb_object()."
+            )
+        nwbf.add_scratch(nwb_object)
+        return nwb_object.object_id
 
     # -------------------------------- Hashing --------------------------------
 
     def get_hash(
         self,
         analysis_file_name: str,
+        path: Optional[Path] = None,
         from_schema: Optional[bool] = False,
         precision_lookup: Optional[Dict[str, int]] = None,
         return_hasher: Optional[bool] = False,
+        stored_hash: Optional[str] = None,
+        resolve: bool = False,
     ) -> Union[str, NwbfileHasher]:
         """Return the hash of the file contents.
 
@@ -719,6 +751,9 @@ class AnalysisMixin(BaseMixin):
         ----------
         analysis_file_name : str
             The name of the analysis NWB file.
+        path : Path, Optional
+            If provided, hash this path directly instead of resolving via
+            `get_abs_path`. Used when the file is in a temp directory.
         from_schema : bool, Optional
             If true, get the file path from the schema externals table, skipping
             checksum and file existence checks. Defaults to False.
@@ -729,50 +764,67 @@ class AnalysisMixin(BaseMixin):
         return_hasher: bool, Optional
             If true, return the hasher object instead of the hash. Defaults to
             False.
+        stored_hash : str, Optional
+            If provided, compare the computed hash against this value and warn
+            on mismatch. Intended for silent in-place regeneration (path B).
+        resolve : bool, Optional
+            If true, update the external table entry after hashing so
+            DataJoint's file checksum stays in sync. Defaults to False.
 
         Returns
         -------
         hash : [str, NwbfileHasher]
             The hash of the file contents or the hasher object itself.
         """
-        hasher = NwbfileHasher(
-            self.get_abs_path(analysis_file_name, from_schema=from_schema),
-            precision_lookup=precision_lookup,
+        legacy_mode = (
+            os.environ.get("SPYGLASS_LEGACY_HASHES", "").lower() == "true"
         )
+        file_path = path or self.get_abs_path(
+            analysis_file_name, from_schema=from_schema
+        )
+        try:
+            hasher = NwbfileHasher(
+                file_path,
+                precision_lookup=precision_lookup,
+                legacy_mode=legacy_mode,
+            )
+        except EnvironmentError as e:
+            self._logger.warning(
+                "Cannot compute hash for %s: %s. "
+                "File will be created without a stored hash; "
+                "logged_at_creation will be set to False.",
+                analysis_file_name,
+                e,
+            )
+            return None
+        if stored_hash and hasher.hash != stored_hash:
+            if not legacy_mode:
+                self._logger.warning(
+                    "Hash mismatch for %s. "
+                    "If this recording was hashed before the NwbfileHasher "
+                    "Dataset-content fix, the stored hash excludes Dataset "
+                    "values and will never match a correctly recomputed file. "
+                    "To restore legacy (metadata-only) hashing for comparison,"
+                    " rerun with:\n\tSPYGLASS_LEGACY_HASHES=true",
+                    analysis_file_name,
+                )
+        if resolve:
+            self._resolve_external(analysis_file_name)
         return hasher if return_hasher else hasher.hash
 
-    def _update_external(self, analysis_file_name: str, hash: str):
-        """Update the external contents checksum for an analysis file.
+    def _resolve_external(self, analysis_file_name: str):
+        """Update the external table entry for a recomputed analysis file.
 
-        Ensures that the file contents match the hash. If not, raise an error.
+        Admin-free counterpart to `_resolve_external_table` for automated
+        recompute workflows. Called by `get_hash` when `resolve=True`, and
+        directly by `_make_file` for the legacy recompute path. Comparison of
+        old vs. new file hashes is handled by `RecordingRecompute._hash_both`.
 
         Parameters
         ----------
         analysis_file_name : str
             The name of the analysis NWB file.
-        hash : str
-            The hash of the file contents as calculated by NwbfileHasher.
-            If the hash does not match the file contents, the file and
-            downstream entries are deleted.
-
-        Raises
-        ------
-        ValueError
-            If the hash does not match the file contents, the file is deleted
-            and a ValueError is raised.
         """
-        file_path = self.get_abs_path(analysis_file_name, from_schema=True)
-        new_hash = self.get_hash(analysis_file_name, from_schema=True)
-
-        if hash != new_hash:
-            Path(file_path).unlink()  # remove mismatched file
-            raise ValueError(
-                f"Checksum mismatch for analysis file '{file_path}'."
-                + HASH_ERROR_MSG.format(
-                    hash=hash, new_hash=new_hash, file_path=file_path
-                )
-            )
-
         file_path = self.__get_analysis_path(analysis_file_name, relative=True)
         key = (self._ext_tbl & f"filepath = '{str(file_path)}'").fetch1()
         abs_path = Path(self._analysis_dir) / file_path
@@ -828,77 +880,121 @@ class AnalysisMixin(BaseMixin):
             load_namespaces=True,
         ) as io:
             nwbf = io.read()
-            sort_intervals = list()
+            units_object_id, waveforms_object_id = self._add_units_to_open_nwb(
+                nwbf,
+                units,
+                units_valid_times,
+                units_sort_interval,
+                metrics=metrics,
+                units_waveforms=units_waveforms,
+                labels=labels,
+            )
+            io.write(nwbf)
+            return units_object_id, waveforms_object_id
 
-            if not len(units.keys()):
-                return ""
+    def _add_units_to_open_nwb(
+        self,
+        nwbf: pynwb.NWBFile,
+        units: dict,
+        units_valid_times: dict,
+        units_sort_interval: dict,
+        metrics: Optional[dict] = None,
+        units_waveforms: Optional[dict] = None,
+        labels: Optional[dict] = None,
+    ) -> Tuple[str, str]:
+        """Add units to an open NWB file
 
-            # Add spike times and valid time range for the sort
-            for id in units.keys():
-                nwbf.add_unit(
-                    spike_times=units[id],
-                    id=id,
-                    # waveform_mean = units_templates[id],
-                    obs_intervals=units_valid_times[id],
-                )
-                sort_intervals.append(units_sort_interval[id])
+        Parameters
+        ----------
+        nwbf : pynwb.NWBFile
+            An open NWB file.
+        units : dict
+            keys are unit ids, values are spike times
+        units_valid_times : dict
+            Dictionary of units and valid times with unit ids as keys.
+        units_sort_interval : dict
+            Dictionary of units and sort_interval with unit ids as keys.
+        units_waveforms : dict, optional
+            Dictionary of unit waveforms with unit ids as keys.
+        metrics : dict, optional
+            Cluster metrics.
+        labels : dict, optional
+            Curation labels for clusters
+        Returns
+        -------
+        units_object_id, waveforms_object_id : str, str
+            The NWB object id of the Units object and the object id of the
+            waveforms object ('' if None)
+        """
 
-            # Add a column for the sort interval (subset of valid time)
+        sort_intervals = list()
+
+        if not len(units.keys()):
+            return "", ""
+
+        # Add spike times and valid time range for the sort
+        for id in units.keys():
+            nwbf.add_unit(
+                spike_times=units[id],
+                id=id,
+                # waveform_mean = units_templates[id],
+                obs_intervals=units_valid_times[id],
+            )
+            sort_intervals.append(units_sort_interval[id])
+
+        # Add a column for the sort interval (subset of valid time)
+        nwbf.add_unit_column(
+            name="sort_interval",
+            description="the interval used for spike sorting",
+            data=sort_intervals,
+        )
+
+        # If metrics were specified, add one column per metric
+        metrics = metrics or []  # do nothing if metrics is None
+        for metric in metrics:
+            if not metrics.get(metric):
+                continue
+
+            unit_ids = np.array(list(metrics[metric].keys()))
+            metric_values = np.array(list(metrics[metric].values()))
+
+            # sort by unit_ids and apply that sorting to values
+            # to ensure that things go in the right order
+
+            metric_values = metric_values[np.argsort(unit_ids)]
+            self._info_msg(f"Adding metric {metric} : {metric_values}")
             nwbf.add_unit_column(
-                name="sort_interval",
-                description="the interval used for spike sorting",
-                data=sort_intervals,
+                name=metric,
+                description=f"{metric} metric",
+                data=metric_values,
             )
 
-            # If metrics were specified, add one column per metric
-            metrics = metrics or []  # do nothing if metrics is None
-            for metric in metrics:
-                if not metrics.get(metric):
-                    continue
+        if labels is not None:
+            unit_ids = np.array(list(units.keys()))
+            labels.update({unit: "" for unit in unit_ids if unit not in labels})
+            label_values = np.array(list(labels.values()))
+            label_values = label_values[np.argsort(unit_ids)].tolist()
+            nwbf.add_unit_column(
+                name="label",
+                description="label given during curation",
+                data=label_values,
+            )
 
-                unit_ids = np.array(list(metrics[metric].keys()))
-                metric_values = np.array(list(metrics[metric].values()))
+        # If the waveforms were specified, add them as a df to scratch
+        waveforms_object_id = ""
+        if units_waveforms is not None:
+            waveforms_df = pd.DataFrame.from_dict(
+                units_waveforms, orient="index"
+            )
+            waveforms_df.columns = ["waveforms"]
+            nwbf.add_scratch(
+                waveforms_df,
+                name="units_waveforms",
+                notes="spike waveforms for each unit",
+            )
+            waveforms_object_id = nwbf.scratch["units_waveforms"].object_id
 
-                # sort by unit_ids and apply that sorting to values
-                # to ensure that things go in the right order
-
-                metric_values = metric_values[np.argsort(unit_ids)]
-                self._info_msg(f"Adding metric {metric} : {metric_values}")
-                nwbf.add_unit_column(
-                    name=metric,
-                    description=f"{metric} metric",
-                    data=metric_values,
-                )
-
-            if labels is not None:
-                unit_ids = np.array(list(units.keys()))
-                labels.update(
-                    {unit: "" for unit in unit_ids if unit not in labels}
-                )
-                label_values = np.array(list(labels.values()))
-                label_values = label_values[np.argsort(unit_ids)].tolist()
-                nwbf.add_unit_column(
-                    name="label",
-                    description="label given during curation",
-                    data=label_values,
-                )
-
-            # If the waveforms were specified, add them as a df to scratch
-            waveforms_object_id = ""
-            if units_waveforms is not None:
-                waveforms_df = pd.DataFrame.from_dict(
-                    units_waveforms, orient="index"
-                )
-                waveforms_df.columns = ["waveforms"]
-                nwbf.add_scratch(
-                    waveforms_df,
-                    name="units_waveforms",
-                    notes="spike waveforms for each unit",
-                )
-                waveforms_object_id = nwbf.scratch["units_waveforms"].object_id
-
-            io.write(nwbf)
-            return nwbf.units.object_id, waveforms_object_id
+        return nwbf.units.object_id, waveforms_object_id
 
     def add_units_waveforms(
         self,
@@ -931,41 +1027,69 @@ class AnalysisMixin(BaseMixin):
             load_namespaces=True,
         ) as io:
             nwbf = io.read()
-            for id in waveform_extractor.sorting.get_unit_ids():
-                # (spikes, samples, channels)
-                waveforms = waveform_extractor.get_waveforms(unit_id=id)
-                # (channels, spikes, samples)
-                waveforms = np.moveaxis(waveforms, source=2, destination=0)
-                nwbf.add_unit(
-                    spike_times=waveform_extractor.sorting.get_unit_spike_train(
-                        unit_id=id
-                    ),
-                    id=id,
-                    electrodes=waveform_extractor.recording.get_channel_ids(),
-                    waveforms=waveforms,
-                )
-
-            # If metrics were specified, add one column per metric
-            if metrics is not None:
-                for metric_name, metric_dict in metrics.items():
-                    self._info_msg(
-                        f"Adding metric {metric_name} : {metric_dict}"
-                    )
-                    metric_data = metric_dict.values().to_list()
-                    nwbf.add_unit_column(
-                        name=metric_name,
-                        description=metric_name,
-                        data=metric_data,
-                    )
-            if labels is not None:
-                nwbf.add_unit_column(
-                    name="label",
-                    description="label given during curation",
-                    data=labels,
-                )
-
+            units_object_id = self._add_units_waveforms_to_open_nwb(
+                nwbf, waveform_extractor, metrics=metrics, labels=labels
+            )
             io.write(nwbf)
-            return nwbf.units.object_id
+            return units_object_id
+
+    def _add_units_waveforms_to_open_nwb(
+        self,
+        nwbf: pynwb.NWBFile,
+        waveform_extractor: si.WaveformExtractor,
+        metrics: Optional[dict] = None,
+        labels: Optional[dict] = None,
+    ) -> str:
+        """Add units to an open NWB file along with the waveforms
+
+        Parameters
+        ----------
+        nwbf : pynwb.NWBFile
+            An open NWB file.
+        waveform_extractor : si.WaveformExtractor object
+        metrics : dict, optional
+            Cluster metrics.
+        labels : dict, optional
+            Curation labels for clusters
+
+        Returns
+        -------
+        units_object_id : str
+            The NWB object id of the Units object
+        """
+
+        for id in waveform_extractor.sorting.get_unit_ids():
+            # (spikes, samples, channels)
+            waveforms = waveform_extractor.get_waveforms(unit_id=id)
+            # (channels, spikes, samples)
+            waveforms = np.moveaxis(waveforms, source=2, destination=0)
+            nwbf.add_unit(
+                spike_times=waveform_extractor.sorting.get_unit_spike_train(
+                    unit_id=id
+                ),
+                id=id,
+                electrodes=waveform_extractor.recording.get_channel_ids(),
+                waveforms=waveforms,
+            )
+
+        # If metrics were specified, add one column per metric
+        if metrics is not None:
+            for metric_name, metric_dict in metrics.items():
+                self._info_msg(f"Adding metric {metric_name} : {metric_dict}")
+                metric_data = metric_dict.values().to_list()
+                nwbf.add_unit_column(
+                    name=metric_name,
+                    description=metric_name,
+                    data=metric_data,
+                )
+        if labels is not None:
+            nwbf.add_unit_column(
+                name="label",
+                description="label given during curation",
+                data=labels,
+            )
+
+        return nwbf.units.object_id
 
     def add_units_metrics(self, analysis_file_name: str, metrics: dict):
         """Add units to analysis NWB file along with the waveforms
@@ -982,26 +1106,47 @@ class AnalysisMixin(BaseMixin):
         units_object_id : str
             The NWB object id of the Units object
         """
-        metric_names = list(metrics.keys())
-        unit_ids = list(metrics[metric_names[0]].keys())
         with pynwb.NWBHDF5IO(
             path=self.get_abs_path(analysis_file_name),
             mode="a",
             load_namespaces=True,
         ) as io:
             nwbf = io.read()
-            for id in unit_ids:
-                nwbf.add_unit(id=id)
-
-            for metric_name, metric_dict in metrics.items():
-                self._info_msg(f"Adding metric {metric_name} : {metric_dict}")
-                metric_data = list(metric_dict.values())
-                nwbf.add_unit_column(
-                    name=metric_name, description=metric_name, data=metric_data
-                )
+            units_object_id = self._add_units_metrics_to_open_nwb(nwbf, metrics)
 
             io.write(nwbf)
-            return nwbf.units.object_id
+            return units_object_id
+
+    def _add_units_metrics_to_open_nwb(
+        self, nwbf: pynwb.NWBFile, metrics: dict
+    ) -> str:
+        """Add units to an open NWB file along with the waveforms
+
+        Parameters
+        ----------
+        nwbf : pynwb.NWBFile
+            An open NWB file.
+        metrics : dict
+            Cluster metrics.
+
+        Returns
+        -------
+        units_object_id : str
+            The NWB object id of the Units object
+        """
+        metric_names = list(metrics.keys())
+        unit_ids = list(metrics[metric_names[0]].keys())
+        for id in unit_ids:
+            nwbf.add_unit(id=id)
+
+        for metric_name, metric_dict in metrics.items():
+            self._info_msg(f"Adding metric {metric_name} : {metric_dict}")
+            metric_data = list(metric_dict.values())
+            nwbf.add_unit_column(
+                name=metric_name, description=metric_name, data=metric_data
+            )
+
+        return nwbf.units.object_id
 
     @classmethod
     def get_electrode_indices(
