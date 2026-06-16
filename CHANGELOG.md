@@ -1,53 +1,6 @@
 # Change Log
 
-## [0.5.6] (Unreleased)
-
-### Release Notes
-
-Running draft to be removed immediately prior to release. When altering tables,
-import all foreign key references.
-
-```python
-# Alter Decoding v1 table
-from spyglass.common.common_filter import FirFilterParameters
-from spyglass.decoding.v1.core import DecodingParameters
-
-FirFilterParameters().alter()
-DecodingParameters().alter()
-
-# Alter v0 recompute table
-from spyglass.spikesorting.v0.spikesorting_recompute import (
-    RecordingRecompute,
-    RecordingRecomputeSelection,
-    RecordingRecomputeVersions,  # noqa F401
-    UserEnvironment,  # noqa F401
-)
-
-RecordingRecomputeSelection().alter()
-RecordingRecompute().alter()
-
-# Alter v1 recompute table
-from spyglass.spikesorting.v1.recompute import (
-    RecordingRecompute,
-    RecordingRecomputeSelection,
-    RecordingRecomputeVersions,  # noqa F401
-    UserEnvironment,  # noqa F401
-)
-
-RecordingRecomputeSelection().alter()
-RecordingRecompute().alter()
-
-
-# Fix LFPBandV1 issue #1481
-from spyglass.lfp.analysis.v1 import LFPBandV1
-
-LFPBandV1().fix_1481()
-
-# Increase DLCProject.config_path length
-from spyglass.position.v1.position_dlc_project import DLCProject
-
-DLCProject().alter()
-```
+## [0.6.0] (June 16th 2026)
 
 ### Breaking Changes
 
@@ -798,4 +751,4 @@ for label, interval_data in results.groupby("interval_labels"):
 [0.5.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.3
 [0.5.4]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.4
 [0.5.5]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.5
-[0.5.6]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.6
+[0.6.0]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.6.0
