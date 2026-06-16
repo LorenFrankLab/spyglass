@@ -28,7 +28,6 @@ collect_ignore = [
     "test_env.py",
     "baseline_capture.py",
     "fixtures/generate_mearec.py",
-    "_fixtures/phase1_baseline.py",
 ]
 
 
@@ -64,60 +63,6 @@ def _disable_datajoint_safemode(request):
     """
     dj.config["safemode"] = False
     yield
-
-
-@pytest.fixture(scope="session")
-def phase1_baseline_artifacts():
-    """Load the on-disk pre-refactor baseline bundle for regression
-    tests.
-
-    The bundle is generated on **unmodified pre-refactor code** by
-    the standalone test ``test_phase1_baseline_regen.py``. After
-    the v2 refactors land, validation tests load this fixture to
-    check that bit-equivalence holds on deterministic paths (the
-    ``Recording`` artifact and ``clusterless_thresholder`` spike
-    samples).
-
-    This fixture intentionally does **not** depend on ``dj_conn`` or on
-    the raw 60s polymer NWB fixture -- it only reads the captured npz /
-    pickle / json bundle. Tests that need both the baseline and a live
-    populate request ``dj_conn`` and ``polymer_60s_session`` alongside
-    this fixture; this one is the cheap-load layer.
-
-    **Local / manual gate, not a CI gate.** Only the lightweight
-    ``MANIFEST.json`` + ``stage_metrics.json`` are committed; the
-    heavy ``.npz`` / ``.pkl`` payloads are gitignored. CI runs
-    therefore skip every test that depends on this fixture (the
-    bundle is "not present"). To exercise the gate locally,
-    regenerate the bundle on pre-refactor tip via
-    ``pytest tests/spikesorting/v2/test_phase1_baseline_regen.py
-    -m regenerate`` (the ``regenerate`` marker is excluded by
-    default in ``pyproject.toml``).
-
-    Skipped with a clear pointer to the regen workflow if the bundle is
-    missing or if the captured SI / NumPy / pynwb versions diverge from
-    the current environment. Version drift would invalidate the
-    bit-equivalence comparisons, so we fail loudly rather than silently
-    relaxing the gate.
-    """
-    from tests.spikesorting.v2._fixtures import phase1_baseline as _baseline
-
-    if not _baseline.baseline_present():
-        pytest.skip(
-            "Pre-refactor baseline bundle missing from "
-            f"{_baseline.PHASE1_BASELINE_DIR}. Regenerate via "
-            "`pytest tests/spikesorting/v2/test_phase1_baseline_regen.py -q` "
-            "from a clean checkout of the pre-refactor tip."
-        )
-    bundle = _baseline.load()
-    mismatches = _baseline.verify_manifest_compatible(bundle.manifest)
-    if mismatches:
-        pytest.skip(
-            "Pre-refactor baseline bundle env mismatch: "
-            + "; ".join(mismatches)
-            + ". Regenerate or pin the dependency versions to the baseline."
-        )
-    yield bundle
 
 
 # The per-PR smoke fixture. Fetched lazily -- only when a collected test needs

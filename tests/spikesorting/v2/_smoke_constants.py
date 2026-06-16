@@ -4,8 +4,8 @@ Several test sites need the same low-amplitude ``clusterless_thresholder``
 row to find any peaks on the synthetic MEArec smoke fixture (its
 templates max out around a few microvolts; the Frank-lab production
 default at 100 uV rejects every peak). Hoisting the row's name and
-parameter payload here keeps all five call sites
-(``baseline_capture.py``, ``test_phase1_baseline_regen.py``,
+parameter payload here keeps all four call sites
+(``baseline_capture.py``,
 ``test_run_v2_pipeline_clusterless_preset``,
 ``test_clusterless_thresholder_end_to_end``,
 ``test_v2_real_data_v1_parity``) in lockstep -- a future param tweak
