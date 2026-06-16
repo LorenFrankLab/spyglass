@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.17.2
+#       jupytext_version: 1.19.1
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
 #     language: python
@@ -488,12 +488,18 @@ si_params_name = "just_nan"  # could also use "default"
 #     "interp_params": {"likelihood_thresh": 0.00},
 #     "max_plausible_speed": 0,
 #     "speed_smoothing_std_dev": 0.000,
+#     "set_boundary": True, # set a boundary around ROI to exclude points outside of bounds
+#     "boundary": boundary # an ordered (n,2) shape array of the nodes of the bounding region in cm.
 # }
 # sgp.DLCSmoothInterpParams().insert1(
 #     {"dlc_si_params_name": si_params_name, "params": params},
 #     skip_duplicates=True,
 # )
 # ```
+#
+# __Note__ The `set_boundary` option allows you to restrict inferred points to a bounded region of the video.  This region is defined by
+# `boundary`, an array composed of a list of 2-d coordinates of the regions corners, ordered in a clockwise manner.
+#
 #
 
 # We'll create a dictionary with the correct set of keys for the `DLCSmoothInterpSelection` table
