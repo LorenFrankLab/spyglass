@@ -40,6 +40,12 @@ if TYPE_CHECKING:
 def transaction_or_noop(connection):
     """Open a DataJoint transaction unless one is already active.
 
+    Parameters
+    ----------
+    connection : datajoint.connection.Connection
+        The active DataJoint connection. A transaction is opened on it
+        only when one is not already in progress.
+
     Source-part inserts and curation inserts both want to wrap their
     master + part rows in one transaction; but the same helpers may be
     called from inside an existing populate cascade where DataJoint
@@ -66,7 +72,7 @@ def transaction_or_noop(connection):
 
 
 def _is_duplicate_key_error(exc: BaseException) -> bool:
-    """True iff ``exc`` is a duplicate-PRIMARY-KEY violation.
+    """Return whether ``exc`` is a duplicate-PRIMARY-KEY violation.
 
     The deterministic-id selection helpers
     (``RecordingSelection``/``ArtifactDetectionSelection``/``SortingSelection``
@@ -110,8 +116,7 @@ def _is_duplicate_key_error(exc: BaseException) -> bool:
 
 
 class SelectionMasterInsertGuard:
-    """Mixin: reject a direct ``insert`` into a deterministic-id selection
-    master.
+    """Reject a direct ``insert`` into a deterministic-id selection master.
 
     The three v2 selection masters
     (``RecordingSelection`` / ``ArtifactDetectionSelection`` / ``SortingSelection``)
@@ -152,6 +157,31 @@ class SelectionMasterInsertGuard:
         allow_direct_insert=False,
         **kwargs,
     ):
+        """Reject a direct insert unless ``allow_direct_insert`` is set.
+
+        Parameters
+        ----------
+        rows : iterable
+            Rows to insert, forwarded to ``dj.Table.insert``.
+        replace : bool, optional
+            Replace existing rows on key conflict. Default ``False``.
+        skip_duplicates : bool, optional
+            Silently skip duplicate-key rows. Default ``False``.
+        ignore_extra_fields : bool, optional
+            Drop row keys not in the table heading. Default ``False``.
+        allow_direct_insert : bool, optional
+            Escape hatch for a deliberate maintenance or test bypass of
+            the ``insert_selection`` boundary. Default ``False``.
+        **kwargs
+            Additional keyword arguments forwarded to
+            ``super().insert``.
+
+        Raises
+        ------
+        datajoint.errors.DataJointError
+            If ``allow_direct_insert`` is ``False`` (the default),
+            directing the caller to ``insert_selection`` instead.
+        """
         if not allow_direct_insert:
             raise dj.errors.DataJointError(
                 f"Direct insert into {self.__class__.__name__} is not "
@@ -211,6 +241,14 @@ def _validate_reference_fields(row: dict) -> None:
        ``reference_mode == 'specific'``: a specific reference needs a
        channel to subtract, and a non-specific mode must not carry a
        stray channel id the runtime would silently ignore.
+
+    Raises
+    ------
+    ValueError
+        If ``reference_mode`` is not a valid ``ReferenceMode``, if a
+        ``'specific'`` mode omits ``reference_electrode_id``, or if a
+        non-``'specific'`` mode carries a non-null
+        ``reference_electrode_id``.
     """
     mode = row.get("reference_mode", "none")
     if mode not in _VALID_REFERENCE_MODES:
@@ -249,6 +287,18 @@ def find_orphaned_masters(master_table, part_tables: list) -> list[dict]:
     ``SharedArtifactGroup`` / ``ConcatenatedRecording`` can leave the
     master row without any source children. This helper finds those
     orphans so a maintenance script can review or remove them.
+
+    Parameters
+    ----------
+    master_table : datajoint.Table
+        The selection master table to scan for orphaned rows.
+    part_tables : list
+        The source-part tables to count against each master row.
+
+    Returns
+    -------
+    list[dict]
+        The primary-key dicts of masters with zero source-part rows.
     """
     orphans: list[dict] = []
     for master in master_table.fetch("KEY", as_dict=True):
@@ -310,6 +360,19 @@ def write_buffer_gb(
     Scale the buffer with channel count so every group buffers ~the same
     bounded duration, capped at ``cap_gb`` so wide groups are unchanged.
 
+    Parameters
+    ----------
+    n_channels : int
+        Number of channels in the recording being written.
+    sampling_frequency : float
+        Sampling frequency of the recording, in Hz.
+    max_seconds : float, optional
+        Target buffered duration, in seconds. Default ``30.0``.
+    itemsize : int, optional
+        Bytes per sample of the trace dtype. Default ``8`` (float64).
+    cap_gb : float, optional
+        Upper bound on the returned buffer size, in GB. Default ``5.0``.
+
     Returns
     -------
     float
@@ -337,6 +400,23 @@ def assert_reference_not_member(
     (a 4-wire tetrode would sort on 3). v1 silently dropped it via
     ``setdiff1d``; v2 fails loud. No-op for non-``'specific'`` modes (which
     carry no reference electrode).
+
+    Parameters
+    ----------
+    reference_mode : str
+        The group's ``ReferenceMode``. Only ``'specific'`` is checked;
+        any other mode is a no-op.
+    reference_electrode_id : int
+        The electrode id subtracted as the specific reference.
+    sort_group_channel_ids : iterable of int
+        The sort group's member channel ids.
+
+    Raises
+    ------
+    ValueError
+        If ``reference_mode == 'specific'`` and
+        ``reference_electrode_id`` is itself a member of
+        ``sort_group_channel_ids``.
     """
     if reference_mode != "specific":
         return
@@ -465,6 +545,13 @@ def resolve_conversion_and_offset(recording) -> tuple[float, float]:
     -------
     (conversion, offset) : tuple of float
         Volts-per-count and volts, for the ElectricalSeries.
+
+    Raises
+    ------
+    ValueError
+        If the recording has heterogeneous channel gains, a non-positive
+        channel gain, or heterogeneous channel offsets -- none of which a
+        single scalar ``conversion``/``offset`` can represent.
     """
     import numpy as np
 
@@ -517,6 +604,8 @@ def electrode_table_region(nwbf, electrode_ids, description: str):
     Returns
     -------
     hdmf.common.table.DynamicTableRegion
+        Region over the NWB ``electrodes`` table rows that correspond to
+        ``electrode_ids``, for attaching to the ElectricalSeries.
     """
     from spyglass.utils.nwb_helper_fn import (
         get_electrode_indices,
@@ -547,6 +636,22 @@ def unit_brain_region_df(unit_relation, resolution: str):
     (non-null FK on ``Electrode``) and returns a DataFrame with the
     standard column set + a ``region_resolution`` literal label so
     concat-backed callers can distinguish anchor-member results.
+
+    Parameters
+    ----------
+    unit_relation : datajoint.expression.QueryExpression
+        A Unit-part relation carrying an ``Electrode`` FK.
+    resolution : str
+        Literal label written verbatim into the ``region_resolution``
+        column of every returned row.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Columns ``unit_id``, ``electrode_id``, ``region_name``,
+        ``subregion_name``, ``subsubregion_name``, and the
+        ``region_resolution`` literal label. Carries the full schema
+        even when empty.
     """
     import pandas as pd
 
@@ -672,8 +777,7 @@ def _validate_params(model_cls: type[BaseModel], payload: dict) -> dict:
 def _assert_schema_version_matches(
     row: dict, model_cls: type[BaseModel], *, table_name: str
 ) -> None:
-    """Raise if a Lookup row's ``params_schema_version`` disagrees with
-    the inner Pydantic schema_version.
+    """Raise if outer and inner Pydantic ``schema_version`` disagree.
 
     Each v2 Lookup table stores a ``params_schema_version`` column
     alongside the validated ``params`` blob. The blob also carries a

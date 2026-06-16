@@ -60,6 +60,8 @@ class SessionGroup(SpyglassMixin, dj.Manual):
     """
 
     class Member(SpyglassMixinPart):
+        """One sorting member belonging to a ``SessionGroup``."""
+
         definition = """
         -> master
         member_index: int
@@ -84,6 +86,12 @@ class SessionGroup(SpyglassMixin, dj.Manual):
         The schema is final-shape so users can start declaring groups
         for the concat workflow as soon as the Recording chain
         materializes; this helper is forward-declared.
+
+        Raises
+        ------
+        NotImplementedError
+            Always, until the concat materializer lands; this helper is
+            forward-declared.
         """
         raise NotImplementedError(
             "SessionGroup.create_group is not yet implemented"
@@ -91,9 +99,14 @@ class SessionGroup(SpyglassMixin, dj.Manual):
 
     @classmethod
     def is_multi_day(cls, key: dict) -> bool:
-        """True if the group's members span two or more session dates.
+        """Report whether the group's members span two or more dates.
 
         Implemented in a follow-up change.
+
+        Raises
+        ------
+        NotImplementedError
+            Always, until this helper is implemented.
         """
         raise NotImplementedError(
             "SessionGroup.is_multi_day is not yet implemented"
@@ -141,10 +154,12 @@ class MotionCorrectionParameters(SpyglassMixin, dj.Lookup):
     )
 
     def insert1(self, row, **kwargs):
+        """Validate and insert a single motion-correction parameter row."""
         # Delegate to ``insert`` so one validated path serves both.
         self.insert([row], **kwargs)
 
     def insert(self, rows, **kwargs):
+        """Validate and insert motion-correction parameter rows."""
         # Validate every row (incl. ``insert_default``'s positional
         # ``_DEFAULT_CONTENTS``) so a bulk insert can't bypass schema
         # validation or the outer-vs-inner params_schema_version drift
@@ -186,10 +201,21 @@ class ConcatenatedRecordingSelection(SpyglassMixin, dj.Manual):
 
     @classmethod
     def insert_selection(cls, key: dict) -> dict:
-        """Find-existing-or-insert; returns a single PK-only dict.
+        """Find-existing-or-insert; return a single PK-only dict.
 
         Forward-declared; the schema is in place so single-session
         tables can FK ``concat_recording_id`` from day one.
+
+        Returns
+        -------
+        dict
+            A PK-only dict ``{"concat_recording_id": ...}`` for the
+            existing-or-inserted selection row.
+
+        Raises
+        ------
+        NotImplementedError
+            Always, until this helper is implemented.
         """
         raise NotImplementedError(
             "ConcatenatedRecordingSelection.insert_selection is not yet "
@@ -221,6 +247,8 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
     """
 
     class MemberBoundary(SpyglassMixinPart):
+        """Per-member end-sample boundary in the concatenated recording."""
+
         definition = """
         -> master
         member_index: int
@@ -235,6 +263,17 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         rejects ``ConcatenatedRecordingSource`` requests with a matching
         error until the consumer lands; the schemas are in their final
         shape so both helpers can be relaxed without a migration.
+
+        Parameters
+        ----------
+        key : dict
+            The ``ConcatenatedRecordingSelection`` primary key being
+            populated.
+
+        Raises
+        ------
+        NotImplementedError
+            Always, until the concat materializer is implemented.
         """
         raise NotImplementedError(
             "ConcatenatedRecording.make() is not implemented yet"

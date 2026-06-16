@@ -71,7 +71,25 @@ if TYPE_CHECKING:
 
 
 class SortingFetched(NamedTuple):
-    """DB-side inputs gathered by :meth:`Sorting.make_fetch`."""
+    """DB-side inputs gathered by :meth:`Sorting.make_fetch`.
+
+    Attributes
+    ----------
+    source : SourceResolution
+        Resolved recording source for the selection (``kind == "recording"``;
+        concat sources are rejected upstream).
+    sel_row : dict
+        The ``SortingSelection`` row, with ``artifact_detection_id`` resolved
+        and stashed on it for downstream readers.
+    sorter_row : dict
+        The matching ``SorterParameters`` row (``sorter``, ``params``,
+        ``job_kwargs``).
+    nwb_file_name : str
+        Source NWB file backing the recording selection.
+    obs_intervals : numpy.ndarray or None
+        Artifact-removed valid-times window, or ``None`` when no
+        artifact-detection pass is configured.
+    """
 
     source: SourceResolution
     sel_row: dict
@@ -101,6 +119,23 @@ class SortingComputed(NamedTuple):
     ``make_insert``'s parameter order;
     ``test_sorting_computed_matches_make_insert_signature`` pins the
     alignment.
+
+    Attributes
+    ----------
+    sorting_obj : spikeinterface.BaseSorting
+        The computed sorting (unit ids + spike trains).
+    analysis_file_name : str
+        Staged-but-unregistered AnalysisNwbfile holding the units.
+    units_object_id : str
+        NWB object id of the units table inside that file.
+    analyzer_folder : pathlib.Path
+        Exact on-disk analyzer folder ``_build_analyzer`` wrote; threaded so
+        ``make_insert`` loads/cleans that folder rather than recomputing a
+        path.
+    recording_id : str
+        Recording id the sort was run against.
+    nwb_file_name : str
+        Source NWB file backing the recording selection.
     """
 
     sorting_obj: "si.BaseSorting"
@@ -158,10 +193,12 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
     """
 
     def insert1(self, row, **kwargs):
+        """Validate and insert a single row via the ``insert`` path."""
         # Delegate to ``insert`` so one validated path serves both.
         self.insert([row], **kwargs)
 
     def insert(self, rows, **kwargs):
+        """Validate every row against its per-sorter schema, then insert."""
         # Validate every row (incl. ``insert_default``'s positional
         # ``_DEFAULT_CONTENTS``) before it lands, dispatching the Pydantic
         # schema per ``sorter``. Two per-row guards run after that:
@@ -545,6 +582,8 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
     """
 
     class RecordingSource(SpyglassMixinPart):
+        """Single-session recording source for a sorting selection."""
+
         definition = """
         -> master
         ---
@@ -552,6 +591,8 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         """
 
     class ConcatenatedRecordingSource(SpyglassMixinPart):
+        """Concatenated-recording source for a sorting selection."""
+
         definition = """
         -> master
         ---
@@ -589,6 +630,21 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         of that part row, so an artifact-backed and an artifact-free
         selection for the same ``(recording_id, sorter,
         sorter_params_name)`` are distinct, idempotent rows.
+
+        Parameters
+        ----------
+        key : dict
+            Selection request. Must carry exactly one of ``recording_id`` or
+            ``concat_recording_id``, plus ``sorter`` and
+            ``sorter_params_name``. ``artifact_detection_id`` is optional;
+            an explicit ``sorting_id`` is cross-checked against the derived
+            deterministic id.
+
+        Returns
+        -------
+        dict
+            Primary-key-only dict (``{"sorting_id": ...}``) for the
+            inserted-or-existing master row.
 
         Raises
         ------
@@ -1031,6 +1087,22 @@ class Sorting(SpyglassMixin, dj.Computed):
         (DataJoint fetches inline dicts) so DataJoint's tri-part
         DeepHash integrity check across the two fetches stays
         stable.
+
+        Parameters
+        ----------
+        key : dict
+            Primary key restricting to one ``SortingSelection`` row.
+
+        Returns
+        -------
+        SortingFetched
+            DB inputs (source, ``sel_row``, ``sorter_row``,
+            ``nwb_file_name``, ``obs_intervals``) for the compute step.
+
+        Raises
+        ------
+        NotImplementedError
+            If the resolved source is a concatenated recording.
         """
         from spyglass.spikesorting.v2.recording import RecordingSelection
 
@@ -1128,6 +1200,29 @@ class Sorting(SpyglassMixin, dj.Computed):
         folder and any staged units NWB are removed before the
         exception propagates. DataJoint will not call ``make_insert``
         once this raises, so cleanup has to happen here.
+
+        Parameters
+        ----------
+        key : dict
+            Primary key of the sorting being populated.
+        source : SourceResolution
+            Resolved recording source from ``make_fetch``.
+        sel_row : dict
+            The ``SortingSelection`` row (with ``artifact_detection_id``).
+        sorter_row : dict
+            The ``SorterParameters`` row (``sorter``, ``params``,
+            ``job_kwargs``).
+        nwb_file_name : str
+            Source NWB file backing the recording selection.
+        obs_intervals : numpy.ndarray or None
+            Artifact-removed valid-times window, or ``None`` when no
+            artifact-detection pass is configured.
+
+        Returns
+        -------
+        SortingComputed
+            Carrier of the computed sorting, staged units NWB, analyzer
+            folder, and lookups threaded into ``make_insert``.
         """
         import shutil as _shutil
 
@@ -1236,6 +1331,28 @@ class Sorting(SpyglassMixin, dj.Computed):
         Failure-mode B: if the registration raises after a
         successful ``make_compute``, the staged units NWB AND the
         analyzer folder are removed before propagating.
+
+        Parameters
+        ----------
+        key : dict
+            Primary key of the sorting being populated.
+        sorting_obj : spikeinterface.BaseSorting
+            The computed sorting (unit ids + spike trains).
+        analysis_file_name : str
+            Staged AnalysisNwbfile registered here.
+        units_object_id : str
+            NWB object id of the units table inside that file.
+        analyzer_folder : pathlib.Path
+            On-disk analyzer folder used to load peak channels and for
+            Mode-B rollback cleanup.
+        recording_id : str
+            Recording id the sort was run against.
+        nwb_file_name : str
+            Source NWB file backing the recording selection.
+
+        Returns
+        -------
+        None
         """
         import datetime as _dt
         import pathlib as _pathlib
@@ -1548,6 +1665,17 @@ class Sorting(SpyglassMixin, dj.Computed):
         and the make_compute / make_insert except blocks clean the
         folder on populate failure. This override closes the third
         lifecycle event: row deletion.
+
+        Parameters
+        ----------
+        *args
+            Positional arguments forwarded to ``super().delete``.
+        safemode : bool or None, optional
+            Forwarded to ``super().delete`` to control the confirmation
+            prompt. ``None`` (default) omits the argument so DataJoint's
+            own default applies.
+        **kwargs
+            Keyword arguments forwarded to ``super().delete``.
         """
         from spyglass.spikesorting.v2._analyzer_cache import (
             remove_analyzer_cache,

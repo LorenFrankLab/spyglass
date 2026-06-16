@@ -58,8 +58,8 @@ _FORBIDDEN_PRESET_KWARGS: frozenset[str] = frozenset(
 class MotionCorrectionParamsSchema(BaseModel):
     """Validated schema for the motion-correction parameter blob.
 
-    Fields
-    ------
+    Attributes
+    ----------
     preset
         One of: ``"none"`` (skip motion correction), ``"auto"`` (Spyglass
         alias resolved inside ``ConcatenatedRecording.make()`` -- maps to

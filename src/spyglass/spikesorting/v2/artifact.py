@@ -158,10 +158,12 @@ class ArtifactDetectionParameters(SpyglassMixin, dj.Lookup):
     )
 
     def insert1(self, row, **kwargs):
+        """Insert one validated artifact-detection parameter row."""
         # Delegate to ``insert`` so one validated path serves both.
         self.insert([row], **kwargs)
 
     def insert(self, rows, **kwargs):
+        """Insert artifact-detection parameter rows after validation."""
         # Validate every row (incl. ``insert_default``'s positional
         # ``_DEFAULT_CONTENTS``) so a bulk insert can't bypass schema
         # validation or the params_schema_version drift check.
@@ -204,6 +206,8 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
     """
 
     class Member(SpyglassMixinPart):
+        """One member Recording of a shared artifact-detection group."""
+
         definition = """
         -> master
         -> Recording
@@ -458,6 +462,8 @@ class ArtifactDetectionSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.M
     """
 
     class RecordingSource(SpyglassMixinPart):
+        """Single-recording source for an artifact-detection selection."""
+
         definition = """
         -> master
         ---
@@ -465,6 +471,8 @@ class ArtifactDetectionSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.M
         """
 
     class SharedGroupSource(SpyglassMixinPart):
+        """Shared-group source for an artifact-detection selection."""
+
         definition = """
         -> master
         ---
@@ -783,6 +791,20 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         DB I/O.  Tuple return is DeepHash-stable across the two
         calls DataJoint makes (before compute and again inside the
         transaction).
+
+        Parameters
+        ----------
+        key : dict
+            Primary-key restriction selecting one
+            ``ArtifactDetectionSelection`` row to populate.
+
+        Returns
+        -------
+        ArtifactFetched
+            The resolved source, validated params, parent
+            ``nwb_file_name``, per-row job kwargs, and -- for the
+            shared-group source -- the ordered member
+            ``recording_id`` / ``nwb_file_name`` tuples.
         """
         from spyglass.spikesorting.v2.recording import RecordingSelection
 
@@ -879,8 +901,34 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         member session sees the artifact times in its own
         namespace.
 
-        Returns ``valid_times`` plus the per-member-nwb-file
-        target list ``make_insert`` writes to.
+        Parameters
+        ----------
+        key : dict
+            Primary-key restriction for the populating row.
+        source : SourceResolution
+            Resolved source record (``recording`` or
+            ``shared_artifact_group`` kind) from ``make_fetch``.
+        validated : ArtifactDetectionParamsSchema
+            Validated detection parameters.
+        nwb_file_name : str
+            Parent session for the single-recording path; the
+            canonical member session for the shared-group path.
+        artifact_job_kwargs : dict or None
+            Per-row SI job-kwargs blob, merged over the global and
+            config defaults before the chunked scan.
+        member_recording_ids : tuple, optional
+            Ordered member ``recording_id`` s for the shared-group
+            source; ``None`` for the single-recording source.
+        member_nwb_file_names : tuple, optional
+            Ordered member ``nwb_file_name`` s for the shared-group
+            source; ``None`` for the single-recording source.
+
+        Returns
+        -------
+        ArtifactComputed
+            The artifact-removed ``valid_times`` plus the
+            per-member ``nwb_file_name`` target list that
+            ``make_insert`` writes one ``IntervalList`` row per.
         """
         # Merge the SI-global, DataJoint-config, and per-row job_kwargs so
         # the chunked ``_scan_artifact_frames`` pass honors ``n_jobs`` /
@@ -973,6 +1021,20 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         built by :func:`._artifact_intervals.build_artifact_interval_rows`;
         the transaction + master ``self.insert1`` stay here because they
         are the table's Computed-make contract.
+
+        Parameters
+        ----------
+        key : dict
+            Primary-key restriction for the row being inserted.
+        valid_times : np.ndarray
+            Artifact-removed valid times, shape ``(n_intervals, 2)``.
+        nwb_file_name : str
+            Parent session used as the fallback IntervalList target
+            when ``per_member_nwb_files`` is empty.
+        per_member_nwb_files : tuple, optional
+            Distinct member ``nwb_file_name`` s to write one
+            ``IntervalList`` row each. Default ``()`` falls back to
+            ``(nwb_file_name,)``.
         """
         from spyglass.spikesorting.v2.utils import transaction_or_noop
 

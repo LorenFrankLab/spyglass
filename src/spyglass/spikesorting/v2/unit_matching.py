@@ -7,6 +7,7 @@ in the project repository for the roadmap.
 
 
 def __getattr__(name):
+    """Reject public-name access; cross-session matching is not available."""
     # Dunder names (``__path__``, ``__all__``, ``__spec__``, ``__file__``,
     # ...) are probed defensively by the import machinery, pickle, and
     # inspection tools. Always raise ``AttributeError`` for those so the

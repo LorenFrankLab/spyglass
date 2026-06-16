@@ -60,7 +60,21 @@ def scan_artifact_frames(recording, validated, job_kwargs=None):
     serially in-process and passes the live recording to each worker; a
     multi-process pool receives the ``to_dict()`` blob instead.
 
-    Returns the ascending ndarray of flagged frame indices.
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        Preprocessed recording to scan for artifact frames.
+    validated : ArtifactDetectionParamsSchema
+        Validated detection parameters supplying the amplitude /
+        z-score thresholds and the proportion-above-threshold.
+    job_kwargs : dict, optional
+        Merged SI job-kwargs blob. Default ``None`` runs serially with
+        a 1 s chunk.
+
+    Returns
+    -------
+    np.ndarray
+        Ascending flagged frame indices, shape ``(n_flagged,)``.
     """
     import numpy as np
     from spikeinterface.core.job_tools import (
@@ -119,21 +133,36 @@ def scan_artifact_frames(recording, validated, job_kwargs=None):
 def detect_artifacts(recording, validated, context="", job_kwargs=None):
     """Run amplitude / z-score artifact scan on a SI recording.
 
-    Returns an ``ndarray`` of shape ``(n_intervals, 2)`` containing
-    the artifact-removed valid times in seconds. When ``detect`` is
-    False the full recording window is returned untouched.
+    When ``detect`` is False the full recording window is returned
+    untouched.
 
     The threshold scan runs chunk by chunk via ``scan_artifact_frames``
     (SpikeInterface's ``ChunkRecordingExecutor``) so peak memory is bounded
     by the chunk size rather than the full recording -- see that function's
     docstring for the per-chunk memory formula and the default chunk size.
 
-    ``job_kwargs`` is the merged per-row / config / global SI job-kwargs
-    blob; the caller resolves it via ``_resolved_job_kwargs`` and passes it
-    through to the executor. ``context`` is an optional caller-supplied
-    string (e.g. ``" for artifact_detection_id=... recording_id=..."``) appended to
-    the zero-frames warning so an operator can identify which selection
-    scanned empty.
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        Preprocessed recording to scan.
+    validated : ArtifactDetectionParamsSchema
+        Validated detection parameters (thresholds, removal / join
+        windows, ``min_length_s``, and the ``detect`` flag).
+    context : str, optional
+        Caller-supplied string (e.g.
+        ``" for artifact_detection_id=... recording_id=..."``)
+        appended to the zero-frames warning so an operator can
+        identify which selection scanned empty. Default ``""``.
+    job_kwargs : dict, optional
+        Merged per-row / config / global SI job-kwargs blob,
+        resolved by the caller via ``_resolved_job_kwargs`` and
+        forwarded to the executor. Default ``None``.
+
+    Returns
+    -------
+    np.ndarray
+        Artifact-removed valid times in seconds, shape
+        ``(n_intervals, 2)``.
     """
     import numpy as _np
 
@@ -325,6 +354,25 @@ def build_artifact_interval_rows(
     ``spikesorting_artifact_detection_v2``
     pipeline tag. The interval name is centralized in
     ``artifact_detection_interval_list_name``.
+
+    Parameters
+    ----------
+    key : dict
+        Restriction carrying ``artifact_detection_id``, used to build
+        the interval list name.
+    valid_times : np.ndarray
+        Artifact-removed valid times, shape ``(n_intervals, 2)``.
+    nwb_file_name : str
+        Parent session used as the fallback target when
+        ``per_member_nwb_files`` is empty.
+    per_member_nwb_files : tuple, optional
+        Distinct member ``nwb_file_name`` s to build one row each.
+        Default ``()`` falls back to ``(nwb_file_name,)``.
+
+    Returns
+    -------
+    list[dict]
+        One ``IntervalList`` row dict per target ``nwb_file_name``.
     """
     from spyglass.spikesorting.v2.utils import artifact_detection_interval_list_name
 
@@ -485,6 +533,18 @@ def collect_artifact_interval_rows_to_remove(rows):
     target; that row is logged and skipped (its IntervalList rows are left
     in place) rather than aborting the whole cleanup. Any OTHER exception
     propagates.
+
+    Parameters
+    ----------
+    rows : list of dict
+        ``ArtifactDetection`` master row dicts, fetched before the
+        master delete while the source-part join still resolves.
+
+    Returns
+    -------
+    list of dict
+        ``{nwb_file_name, interval_list_name}`` restrictions to remove
+        after the master delete commits.
     """
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetectionSelection,
@@ -565,6 +625,12 @@ def remove_artifact_interval_rows(restrictions):
     Companion to ``collect_artifact_interval_rows_to_remove``: removes the
     matching IntervalList rows AFTER the ``ArtifactDetection`` master delete
     committed. Skips any restriction that matches nothing.
+
+    Parameters
+    ----------
+    restrictions : list of dict
+        ``{nwb_file_name, interval_list_name}`` restrictions from
+        ``collect_artifact_interval_rows_to_remove``.
     """
     from spyglass.common import IntervalList
 

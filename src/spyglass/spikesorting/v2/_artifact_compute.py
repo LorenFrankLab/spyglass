@@ -47,6 +47,25 @@ def _init_artifact_worker(
     straight through. ``n_required`` is constant across chunks, so it is
     resolved once here and cached in the worker context rather than
     recomputed per chunk.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording or dict
+        Live recording (single-process path) or a ``to_dict()`` blob
+        (multi-process path) re-hydrated with ``si.load``.
+    zscore_threshold : float or None
+        Across-channel z-score threshold, or ``None`` to disable.
+    amplitude_threshold_uv : float or None
+        Absolute amplitude threshold in µV, or ``None`` to disable.
+    proportion_above_threshold : float
+        Fraction of channels that must be flagged for a frame to count
+        as an artifact; converted to the per-chunk ``n_required`` count.
+
+    Returns
+    -------
+    dict
+        Worker context with keys ``recording``, ``zscore_threshold``,
+        ``amplitude_threshold_uv``, and ``n_required``.
     """
     import spikeinterface as si
 
@@ -69,12 +88,26 @@ def _compute_artifact_chunk(segment_index, start_frame, end_frame, worker_ctx):
     The across-channel (``axis=1``) z-score uses only the chunk row's own
     columns, so it is identical regardless of where the chunk boundaries fall --
     this is what makes the chunked output frame-identical to the in-memory one.
-    Returns the GLOBAL (``+ start_frame``) ascending frame indices flagged in
-    this chunk.
-
     Peak working set per chunk ≈ ``4 × (end_frame - start_frame) × n_channels ×
     4 bytes`` (µV float32 slice + abs + z-score intermediate),
     independent of the full recording length.
+
+    Parameters
+    ----------
+    segment_index : int
+        SpikeInterface segment index to read traces from.
+    start_frame : int
+        Inclusive start frame of the chunk.
+    end_frame : int
+        Exclusive end frame of the chunk.
+    worker_ctx : dict
+        Worker context built by :func:`_init_artifact_worker`.
+
+    Returns
+    -------
+    np.ndarray
+        Global (``+ start_frame``) ascending flagged frame indices,
+        shape ``(n_flagged,)``.
     """
     recording = worker_ctx["recording"]
     zscore_threshold = worker_ctx["zscore_threshold"]

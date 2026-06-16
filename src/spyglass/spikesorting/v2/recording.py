@@ -214,16 +214,20 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
     # -2 global median, >=0 specific) conflated mode with channel id.
 
     class SortGroupElectrode(SpyglassMixinPart):
+        """Electrodes belonging to one sort group."""
+
         definition = """
         -> master
         -> Electrode
         """
 
     def insert1(self, row, **kwargs):
+        """Insert one row after validating its reference fields."""
         _validate_reference_fields(dict(row))
         super().insert1(row, **kwargs)
 
     def insert(self, rows, **kwargs):
+        """Insert rows after validating each row's reference fields."""
         rows = [dict(r) for r in rows]
         for r in rows:
             _validate_reference_fields(r)
@@ -928,10 +932,12 @@ class PreprocessingParameters(SpyglassMixin, dj.Lookup):
     )
 
     def insert1(self, row, **kwargs):
+        """Insert one row through the validated bulk ``insert`` path."""
         # Delegate to ``insert`` so one validated path serves both.
         self.insert([row], **kwargs)
 
     def insert(self, rows, **kwargs):
+        """Insert rows after Pydantic-validating each params blob."""
         # Validate every row (incl. ``insert_default``'s positional
         # ``_DEFAULT_CONTENTS``) so a bulk insert can't bypass schema
         # validation or the params_schema_version drift check.
@@ -1104,6 +1110,14 @@ class RecordingFetched(NamedTuple):
     Tri-part dispatch unpacks this positionally into ``make_compute``;
     fields are listed in the order they appear in the compute
     signature.
+
+    Attributes
+    ----------
+    sort_valid_times : numpy.ndarray
+        Requested sort interval ``valid_times``, shape
+        ``(n_intervals, 2)`` in seconds.
+    raw_valid_times : numpy.ndarray
+        Raw data ``valid_times``, shape ``(n_intervals, 2)`` in seconds.
     """
 
     sel: dict
@@ -1186,10 +1200,20 @@ class Recording(SpyglassMixin, dj.Computed):
     def make_fetch(self, key):
         """Read every DB input the compute step needs (no SI / NWB I/O).
 
-        Returns a tuple suitable for DataJoint's tri-part dispatch
+        The returned value is suitable for DataJoint's tri-part dispatch
         contract: deterministic byte representations across two
         successive fetches so the framework's DeepHash integrity
         check inside the transaction does not raise.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``Recording`` row.
+
+        Returns
+        -------
+        RecordingFetched
+            DB-side inputs unpacked positionally into ``make_compute``.
         """
         sel = (RecordingSelection & key).fetch1()
         nwb_file_name = sel["nwb_file_name"]
@@ -1334,6 +1358,41 @@ class Recording(SpyglassMixin, dj.Computed):
         ``_compute_recording_artifact``; this method only handles
         the populate-side staging contract and the
         ``RecordingComputed`` boxing.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``Recording`` row.
+        sel : dict
+            The fetched ``RecordingSelection`` row.
+        channel_ids : list
+            Sorted electrode ids for the sort group.
+        reference_mode : str
+            Referencing mode (e.g. ``'none'``, ``'specific'``).
+        reference_electrode_id : int or None
+            Reference electrode id; non-``None`` only for ``'specific'``.
+        sort_valid_times : numpy.ndarray
+            Requested sort interval ``valid_times``, shape
+            ``(n_intervals, 2)`` in seconds.
+        raw_valid_times : numpy.ndarray
+            Raw data ``valid_times``, shape ``(n_intervals, 2)`` in
+            seconds.
+        preprocessing_params : PreprocessingParamsSchema
+            Validated preprocessing parameters.
+        preprocessing_job_kwargs : dict or None
+            Per-row SpikeInterface job kwargs blob.
+        probe_types : tuple
+            Per-channel ``probe_type`` for the sort group.
+        electrode_group_names : tuple
+            Per-channel ``electrode_group_name`` for the sort group.
+        bad_channel_ids : tuple
+            Interior bad channels to re-include on the ``interpolate``
+            path; empty for ``remove``.
+
+        Returns
+        -------
+        RecordingComputed
+            Computed artifact metadata unpacked into ``make_insert``.
         """
         # Every v2 compute stage calls ``_resolved_job_kwargs(...)`` so the
         # override channels (DataJoint config + per-row blob) are honored
@@ -1475,7 +1534,7 @@ class Recording(SpyglassMixin, dj.Computed):
         expected_saved_total,
         n_intended_intervals,
     ):
-        """Truncation check + atomic registration inside the framework transaction.
+        """Run the truncation check and atomically register the artifact.
 
         DataJoint's tri-part dispatch already opens the master
         transaction around this method, so the inner
@@ -1496,6 +1555,48 @@ class Recording(SpyglassMixin, dj.Computed):
         and the per-interval term absorbs the independent sample-grid
         snapping of each consolidated interval, which otherwise accumulates
         across disjoint epochs and spuriously trips a fixed 1.5-sample slack.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``Recording`` row.
+        analysis_file_name : str
+            Name of the staged ``AnalysisNwbfile`` to register.
+        object_id : str
+            Object id of the persisted ``ElectricalSeries``.
+        cache_hash : str
+            ``NwbfileHasher`` digest of the persisted file.
+        saved_start : float
+            First persisted timestamp, in seconds.
+        saved_end : float
+            Last persisted timestamp, in seconds.
+        sampling_frequency : float
+            Sampling rate of the recording, in Hz.
+        n_channels : int
+            Number of channels in the persisted recording.
+        duration_s : float
+            Persisted recording duration, in seconds.
+        sel : dict
+            The fetched ``RecordingSelection`` row.
+        sort_valid_times : numpy.ndarray
+            Requested sort interval ``valid_times``, shape
+            ``(n_intervals, 2)`` in seconds.
+        expected_saved_total : float
+            Intended saved duration after ``min_segment_length``
+            filtering, in seconds.
+        n_intended_intervals : int
+            Number of consolidated intended intervals; scales the
+            truncation tolerance.
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        RecordingTruncatedError
+            If the saved duration falls short of ``expected_saved_total``
+            by more than the sample-grid tolerance.
         """
         import pathlib as _pathlib
 
@@ -1700,13 +1801,51 @@ class Recording(SpyglassMixin, dj.Computed):
         ``_rebuild_nwb_artifact`` (overwrite the row's slot,
         ``existing_analysis_file_name=row["analysis_file_name"]``).
 
-        Returns ``(analysis_file_name, object_id, cache_hash,
-        sampling_frequency, saved_start, saved_end, n_channels,
-        duration_s)`` -- the metadata needed for the
-        ``RecordingComputed`` boxing.
-        ``saved_start``/``saved_end``/``duration_s`` describe the
-        PERSISTED timestamps (the override when set).
+        Parameters
+        ----------
+        raw_path : str
+            Absolute path to the raw NWB file to read.
+        nwb_file_name : str
+            Name of the session's raw NWB file.
+        interval_list_name : str
+            ``IntervalList`` name selecting the sort interval.
+        channel_ids : list
+            Sorted electrode ids for the sort group.
+        reference_mode : str
+            Referencing mode (e.g. ``'none'``, ``'specific'``).
+        reference_electrode_id : int or None
+            Reference electrode id; non-``None`` only for ``'specific'``.
+        sort_valid_times : numpy.ndarray
+            Requested sort interval ``valid_times``, shape
+            ``(n_intervals, 2)`` in seconds.
+        raw_valid_times : numpy.ndarray
+            Raw data ``valid_times``, shape ``(n_intervals, 2)`` in
+            seconds.
+        preprocessing_params : PreprocessingParamsSchema
+            Validated preprocessing parameters.
+        probe_types : tuple
+            Per-channel ``probe_type`` for the sort group.
+        electrode_group_names : tuple
+            Per-channel ``electrode_group_name`` for the sort group.
+        bad_channel_ids : tuple, optional
+            Interior bad channels to re-include on the ``interpolate``
+            path; defaults to ``()`` (empty, the ``remove`` path).
+        existing_analysis_file_name : str or None, optional
+            When ``None`` (default), stage a fresh ``AnalysisNwbfile``;
+            otherwise overwrite this existing file (the rebuild path).
 
+        Returns
+        -------
+        tuple
+            ``(analysis_file_name, object_id, cache_hash,
+            sampling_frequency, saved_start, saved_end, n_channels,
+            duration_s)`` -- the metadata needed for the
+            ``RecordingComputed`` boxing.
+            ``saved_start``/``saved_end``/``duration_s`` describe the
+            PERSISTED timestamps (the override when set).
+
+        Notes
+        -----
         Cleanup contract: ``_write_nwb_artifact`` either writes a
         full file or raises before any registration; if a later
         metadata-extraction step raises after the file is on disk

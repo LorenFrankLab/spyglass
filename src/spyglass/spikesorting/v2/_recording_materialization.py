@@ -39,7 +39,7 @@ from __future__ import annotations
 def truncation_tolerance(
     n_intended_intervals: int, sampling_frequency: float
 ) -> float:
-    """Sample-grid tolerance for the ``make_insert`` truncation guard.
+    """Compute the sample-grid tolerance for the truncation guard.
 
     ``expected_saved_total`` is a continuous interval-length sum while
     the saved duration is the sample-snapped span of the time-stripped
@@ -54,6 +54,19 @@ def truncation_tolerance(
     deletes the just-written file. Scaling by interval count drops that
     to 0% while still catching genuine packet loss / interval
     misalignment, which drops far more than ``n + 1.5`` samples.
+
+    Parameters
+    ----------
+    n_intended_intervals : int
+        Number of consolidated intervals that were saved; the tolerance
+        scales with this count to cover per-boundary quantization error.
+    sampling_frequency : float
+        Recording sampling frequency in Hz.
+
+    Returns
+    -------
+    float
+        Tolerance in seconds for the ``make_insert`` truncation guard.
     """
     return (n_intended_intervals + 1.5) / sampling_frequency
 
@@ -107,11 +120,38 @@ def restrict_recording(
 
     Parameters
     ----------
+    recording : si.BaseRecording
+        The full-source SI recording to slice in time and channels.
+    nwb_file_name : str
+        Parent NWB filename, used to resolve SpikeInterface channel
+        ids for the requested electrode ids.
+    interval_list_name : str
+        Name of the sort interval list; used only in the error
+        message raised when the intersection is empty.
+    sort_group_channel_ids : list
+        Spyglass electrode ids of the sort group's declared members.
+    reference_mode : str
+        One of ``"none"``, ``"global_median"``, or ``"specific"``.
+        On ``"specific"`` the reference electrode is sliced in for
+        later subtraction.
+    reference_electrode_id : int or None
+        Electrode id of the ``"specific"`` reference; ignored for the
+        other reference modes.
     sort_valid_times, raw_valid_times
         ``(n, 2)`` ndarrays of [start, end] seconds for the sort
         interval and the raw-data valid times. Fetched by
         ``make_fetch`` so the tri-part compute step does no DB
         I/O.
+    min_segment_length : float, optional
+        Drop intersected sub-intervals shorter than this many seconds
+        before slicing. Default ``1.0``.
+    bad_channel_handling : str, optional
+        ``"remove"`` (default) or ``"interpolate"``. On
+        ``"interpolate"`` the group's interior curated-bad channels
+        are sliced in so they are present to be filled.
+    bad_channel_ids : sequence of int, optional
+        Interior curated-bad electrode ids to slice in for the
+        ``"interpolate"`` path. Default ``()``.
     """
     import numpy as np
     from spikeinterface import concatenate_recordings
@@ -219,6 +259,20 @@ def spikeinterface_channel_ids(nwb_file_name: str, spyglass_ids):
     ``channel_name`` column resolve correctly. The Frank-lab
     MEArec fixture lacks the column and falls through to the
     integer path.
+
+    Parameters
+    ----------
+    nwb_file_name : str
+        Parent NWB filename whose electrodes table is read.
+    spyglass_ids : sequence of int
+        Spyglass electrode ids to map onto SI channel ids.
+
+    Returns
+    -------
+    list
+        SpikeInterface channel ids -- ``channel_name`` strings when
+        the electrodes table carries that column, otherwise integer
+        electrode ids.
     """
     import pynwb
 
@@ -255,6 +309,22 @@ def fetch_sort_group_probe_info(
     ordered-fetch pattern used by the other tri-part ``make_fetch``
     paths in this package (e.g. ``ArtifactDetection.make_fetch`` in
     artifact.py, which orders its member fetch by ``recording_id``).
+
+    Parameters
+    ----------
+    nwb_file_name : str
+        Parent NWB filename to restrict the ``Electrode * Probe``
+        fetch.
+    channel_ids : sequence of int
+        Spyglass electrode ids to look up, one metadata entry per id.
+
+    Returns
+    -------
+    probe_types : tuple
+        ``probe_type`` per channel id, ordered by ``electrode_id``.
+    electrode_group_names : tuple
+        ``electrode_group_name`` per channel id, ordered by
+        ``electrode_id``.
     """
     from spyglass.common.common_device import Probe as _Probe
     from spyglass.common.common_ephys import Electrode as _Electrode
@@ -296,6 +366,26 @@ def maybe_apply_tetrode_geometry(
     ``INFO`` log names the failed gate's reason, so an operator
     debugging "Kilosort sees the wrong geometry" can grep the populate
     log for which condition skipped the patch.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        The sliced recording to attach probe geometry to.
+    probe_types : tuple
+        ``probe_type`` per channel; the patch requires a single
+        ``"tetrode_12.5"`` value across the group.
+    electrode_group_names : tuple
+        ``electrode_group_name`` per channel; the patch requires a
+        single electrode group across the group.
+    sort_group_channel_ids : list
+        Spyglass electrode ids of the sort group; the patch requires
+        exactly four.
+
+    Returns
+    -------
+    si.BaseRecording
+        The recording with tetrode geometry attached when every gate
+        passes, otherwise the input recording unchanged.
     """
     from spyglass.utils import logger
 
@@ -352,7 +442,7 @@ RADIUS_FACTOR = 1.5  # one pitch away counts; a multi-pitch gap does not
 
 
 def _shank_pitch(shank_xyz):
-    """Median nearest-neighbor distance over ALL electrodes on a shank.
+    """Compute the median nearest-neighbor distance over a shank.
 
     ``shank_xyz``: (M, 3) probe-relative positions (``Probe.Electrode``
     ``rel_x/rel_y/rel_z``) of every electrode on the shank (good AND bad), so
@@ -379,7 +469,7 @@ def _shank_pitch(shank_xyz):
 
 
 def _interior_bad_channel_ids(good_xyz, candidate_xyz, pitch):
-    """Curated-bad ids physically embedded among a group's good channels.
+    """Select curated-bad ids embedded among a group's good channels.
 
     ``good_xyz``: (N, 3) probe-relative positions of the group's good channels.
     ``candidate_xyz``: list of ``(electrode_id, rel_position_array)`` for the
@@ -422,7 +512,9 @@ def _interior_bad_channel_ids(good_xyz, candidate_xyz, pitch):
 def fetch_interior_bad_channel_ids(
     nwb_file_name: str, sort_group_channel_ids
 ) -> tuple:
-    """The sort group's *interior* curated-bad electrode ids (interpolate path).
+    """Fetch the sort group's *interior* curated-bad electrode ids.
+
+    For the ``interpolate`` bad-channel-handling path.
 
     Returns a sorted tuple of the curated-bad (``Electrode.bad_channel='True'``)
     electrodes on the sort group's shank(s) that are physically embedded among
@@ -449,6 +541,21 @@ def fetch_interior_bad_channel_ids(
     set that masquerades as "no bad channels to fill"). DB-touching at call time
     via lazy ``Electrode`` / ``Probe`` imports; the geometry math is delegated to
     the pure helpers above.
+
+    Parameters
+    ----------
+    nwb_file_name : str
+        Parent NWB filename to restrict the geometry fetch.
+    sort_group_channel_ids : sequence of int
+        Spyglass electrode ids of the sort group's good (member)
+        channels.
+
+    Returns
+    -------
+    tuple
+        Sorted tuple of interior curated-bad electrode ids to
+        re-include and fill on the ``interpolate`` path; empty when
+        the group has no interior bad channels.
     """
     import numpy as np
 
@@ -579,6 +686,27 @@ def apply_pre_motion_preprocessing(
     phase-shift that ran from one that was requested but skipped. Bandpass and
     reference have no skip path (they run iff their params are set), so they
     are not reported -- the params are ground truth for them.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        The time- and channel-restricted recording to preprocess.
+    reference_mode : str
+        One of ``"none"``, ``"global_median"``, or ``"specific"``.
+    reference_electrode_id : int or None
+        Electrode id subtracted on the ``"specific"`` path and dropped
+        from the surface afterward; ignored otherwise.
+    sort_group_channel_ids : list
+        Spyglass electrode ids of the sort group's declared members.
+    validated : PreprocessingParamsSchema
+        Pre-validated preprocessing params (phase-shift, bandpass,
+        common-reference operator) read once in ``make_fetch``.
+    bad_channel_handling : str, optional
+        ``"remove"`` (default) or ``"interpolate"``. Only
+        ``"interpolate"`` acts here, filling the interior bad channels.
+    bad_channel_ids : sequence of int, optional
+        Interior curated-bad electrode ids to interpolate on the
+        ``"interpolate"`` path. Default ``()``.
     """
     import numpy as _np
     import spikeinterface.preprocessing as sip
@@ -806,10 +934,14 @@ def write_nwb_artifact(
         When set, write into the existing slot (the recompute /
         rebuild path) rather than minting a new analysis file.
     timestamps_override : numpy.ndarray, optional
-        Pre-computed persisted timestamps. ``None`` lets the helper
-        concatenate per-segment
+        Pre-computed persisted timestamps, shape ``(n_samples,)``.
+        ``None`` lets the helper concatenate per-segment
         ``recording.get_times()`` via
         :func:`_get_recording_timestamps`.
+    filtering_description : str
+        Keyword-only. Provenance string written to
+        ``ElectricalSeries.filtering`` describing the preprocessing
+        steps that actually ran (from :func:`filtering_description`).
     """
     import numpy as _np
     import pynwb

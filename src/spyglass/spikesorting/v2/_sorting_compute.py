@@ -78,6 +78,27 @@ def apply_artifact_mask(
     ``artifact_detection_id`` / ``recording_id`` are used only to make the
     empty-``valid_times`` error message actionable.
 
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        The recording to mask; the complement of ``valid_times`` is
+        zeroed in place of the kept intervals.
+    valid_times : numpy.ndarray
+        Artifact-removed ``(n, 2)`` array of (start, end) seconds,
+        sorted by start and non-overlapping.
+    artifact_detection_id : optional
+        Keyword-only. Used only in the empty-``valid_times`` error
+        message. Default ``None``.
+    recording_id : optional
+        Keyword-only. Used only in the empty-``valid_times`` error
+        message. Default ``None``.
+
+    Returns
+    -------
+    si.BaseRecording
+        The artifact-masked recording, or the input recording
+        unchanged when no artifact frames need zeroing.
+
     Raises
     ------
     EmptyArtifactValidTimesError
@@ -239,6 +260,24 @@ def run_clusterless_thresholder(
     ``detect_threshold`` is a MAD multiplier -- which is what the v1
     baseline-capture script relies on to find any peaks on the
     low-amplitude MEArec fixture.
+
+    Parameters
+    ----------
+    sorter_params : dict
+        The fetched clusterless-thresholder params row (detect kwargs
+        plus the Spyglass-side ``threshold_unit`` knob).
+    recording : si.BaseRecording
+        The artifact-masked recording to detect peaks on; scaled to
+        microvolts on the ``threshold_unit="uv"`` path.
+    job_kwargs : dict or None
+        Resolved SI job kwargs; the Spyglass-side ``random_seed`` is
+        stripped before the ``detect_peaks`` call.
+
+    Returns
+    -------
+    spikeinterface.NumpySorting
+        A single-unit sorting wrapping the detected peak sample
+        indices.
     """
     import numpy as _np
     import spikeinterface as si
@@ -430,6 +469,27 @@ def run_si_sorter(
     ``singularity_image=True`` and the strip-kwargs carve-out:
     ``tempdir`` / ``mp_context`` / ``max_threads_per_process`` do
     not survive containerization.
+
+    Parameters
+    ----------
+    sorter : str
+        SpikeInterface registered sorter name (e.g.
+        ``"mountainsort4"``).
+    sorter_params : dict
+        The fetched sorter params row passed to ``run_sorter``; a
+        truthy ``whiten`` is moved to the external float64 path.
+    recording : si.BaseRecording
+        The artifact-masked recording to sort.
+    sorting_id : str
+        Sorting identifier; used to name the managed scratch dir.
+    job_kwargs : dict or None
+        Resolved SI job kwargs installed via
+        ``set_global_job_kwargs``; ``random_seed`` is stripped first.
+
+    Returns
+    -------
+    spikeinterface.BaseSorting
+        The sorter output as returned by ``run_sorter``.
     """
     import os
     import tempfile
@@ -578,7 +638,20 @@ def run_si_sorter(
 
 
 def remove_excess_spikes(sorting, recording):
-    """Drop spikes whose sample index is outside the recording window."""
+    """Drop spikes whose sample index is outside the recording window.
+
+    Parameters
+    ----------
+    sorting : spikeinterface.BaseSorting
+        The sorter output to trim.
+    recording : si.BaseRecording
+        The recording whose sample window bounds valid spike indices.
+
+    Returns
+    -------
+    spikeinterface.BaseSorting
+        The sorting with out-of-window spikes removed.
+    """
     import spikeinterface.curation as sic
 
     return sic.remove_excess_spikes(sorting, recording)
@@ -617,6 +690,32 @@ def build_analyzer(
     resolved it (``_rebuild_analyzer_folder``, which needs the path for
     its own cleanup) pass it in so the folder built equals the folder
     they clean up -- one resolution, no config-drift edge.
+
+    Parameters
+    ----------
+    sorting : spikeinterface.BaseSorting
+        The (excess-trimmed) sorting to build the analyzer from.
+    recording : si.BaseRecording
+        The recording the sorting was computed on.
+    key : dict
+        Restriction dict carrying ``sorting_id``; used to resolve the
+        analyzer folder and the fallback ``SorterParameters`` fetch.
+    sorter_row : dict, optional
+        Keyword-only. Pre-fetched ``SorterParameters`` row. ``None``
+        (the rebuild path) triggers a one-time DB fetch. Default
+        ``None``.
+    job_kwargs : dict, optional
+        Keyword-only. Pre-resolved job kwargs. ``None`` resolves them
+        locally from ``sorter_row``. Default ``None``.
+    analyzer_folder : pathlib.Path, optional
+        Keyword-only. Resolved cache folder to write. ``None`` resolves
+        it from ``key["sorting_id"]``. Default ``None``.
+
+    Returns
+    -------
+    pathlib.Path
+        The analyzer cache folder path. For a zero-unit sort the folder
+        is returned without being built.
     """
     import shutil as _shutil
 

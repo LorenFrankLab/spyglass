@@ -56,6 +56,30 @@ class SpikeInterfaceRecordingDataChunkIterator(GenericDataChunkIterator):
         display_progress: bool = False,
         progress_bar_options: Optional[dict] = None,
     ):
+        """Build the iterator over a SpikeInterface recording.
+
+        Parameters
+        ----------
+        recording : si.BaseRecording
+            The recording whose traces are streamed.
+        segment_index : int, optional
+            Segment to read from. Default ``0``.
+        return_in_uV : bool, optional
+            Return scaled microvolt traces rather than raw counts.
+            Default ``False`` (v2 writes unscaled traces).
+        buffer_gb : float, optional
+            Target buffer size in GB. ``None`` uses HDMF's default.
+        buffer_shape : tuple, optional
+            Explicit buffer shape, overriding ``buffer_gb``.
+        chunk_mb : float, optional
+            Target chunk size in MB. ``None`` uses HDMF's default.
+        chunk_shape : tuple, optional
+            Explicit chunk shape, overriding ``chunk_mb``.
+        display_progress : bool, optional
+            Show a progress bar during iteration. Default ``False``.
+        progress_bar_options : dict, optional
+            Keyword options forwarded to the progress bar.
+        """
         self.recording = recording
         self.segment_index = segment_index
         self.return_in_uV = return_in_uV
@@ -161,6 +185,27 @@ class TimestampsDataChunkIterator(GenericDataChunkIterator):
         display_progress: bool = False,
         progress_bar_options: Optional[dict] = None,
     ):
+        """Build the iterator over a 1D timestamps vector.
+
+        Parameters
+        ----------
+        timestamps : np.ndarray, shape (n_samples,)
+            The wall-clock timestamps vector to stream.
+        sampling_frequency : float
+            Sampling frequency of the recording, in Hz.
+        buffer_gb : float, optional
+            Target buffer size in GB. ``None`` uses HDMF's default.
+        buffer_shape : tuple, optional
+            Explicit buffer shape, overriding ``buffer_gb``.
+        chunk_mb : float, optional
+            Target chunk size in MB. ``None`` uses HDMF's default.
+        chunk_shape : tuple, optional
+            Explicit chunk shape, overriding ``chunk_mb``.
+        display_progress : bool, optional
+            Show a progress bar during iteration. Default ``False``.
+        progress_bar_options : dict, optional
+            Keyword options forwarded to the progress bar.
+        """
         self._extractor = _TimestampsExtractor(
             timestamps=timestamps,
             sampling_frequency=sampling_frequency,

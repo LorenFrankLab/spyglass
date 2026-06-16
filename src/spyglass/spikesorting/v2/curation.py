@@ -136,6 +136,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         """
 
         def insert1(self, row, *, allow_custom_labels: bool = False, **kwargs):
+            """Validate and insert a single ``UnitLabel`` row."""
             # Delegate to ``insert`` (as DataJoint's own ``insert1`` does:
             # ``self.insert((row,))``) so the single validation happens in
             # one place AND ``allow_custom_labels`` survives the dispatch.
@@ -147,6 +148,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
             )
 
         def insert(self, rows, *, allow_custom_labels: bool = False, **kwargs):
+            """Validate ``curation_label`` values, then insert the rows."""
             rows = list(rows)
             validate_curation_label_rows(
                 rows, allow_custom_labels=allow_custom_labels
@@ -271,6 +273,14 @@ class CurationV2(SpyglassMixin, dj.Manual):
         curation_source
             Provenance for how this curation row was created. Must be one of
             'manual' (default), 'analyzer_curation', or 'figpack'.
+        reuse_existing : bool, optional
+            When a root curation already exists for the sorting and the
+            caller passes non-default parameters (labels / merge_groups /
+            description / apply_merge / a non-'manual' curation_source),
+            those would be silently ignored by returning the existing
+            row. If False (default), that situation raises ``ValueError``;
+            pass True to opt into reusing the existing root and return its
+            key instead.
         permissive_labels
             Controls ONLY truly-stray label keys (ids that are neither
             in ``Sorting.Unit`` nor in the curated unit set -- usually a
@@ -295,6 +305,17 @@ class CurationV2(SpyglassMixin, dj.Manual):
         -------
         dict
             ``{"sorting_id": ..., "curation_id": ...}`` PK-only dict.
+
+        Raises
+        ------
+        ValueError
+            If a label value is a scalar/non-list (it must be a list or
+            tuple of labels); if ``curation_source`` is not a valid
+            ``CurationSource`` value; if ``parent_curation_id`` does not
+            reference an existing curation for the sorting; if a root
+            curation already exists and non-default parameters were passed
+            without ``reuse_existing=True``; or if ``labels`` reference
+            truly-stray unit_id(s) and ``permissive_labels`` is False.
         """
         import pathlib as _pathlib
 
@@ -880,8 +901,28 @@ class CurationV2(SpyglassMixin, dj.Manual):
 
         ``sorting_units`` is the pre-fetched ``Sorting.Unit`` rows for
         ``sorting_id``; the caller fetches once and threads through to
-        avoid re-querying. Returns ``(unit_rows,
-        kept_unit_to_contributors)``.
+        avoid re-querying.
+
+        Parameters
+        ----------
+        sorting_id
+            ``sorting_id`` of the upstream Sorting row.
+        sorting_units : list of dict
+            Pre-fetched ``Sorting.Unit`` rows for ``sorting_id``.
+        merge_groups : list of list of int
+            Merge groups, each a list of ``unit_id`` ints (>=2 each).
+        curation_id : int
+            ``curation_id`` to stamp on the resulting rows.
+        apply_merge : bool
+            If True, build the merged (committed) unit set; if False,
+            keep every original unit and record proposed merges.
+
+        Returns
+        -------
+        tuple of (list of dict, dict[int, list[int]])
+            ``(unit_rows, kept_unit_to_contributors)``. See
+            :func:`._curation_transforms.build_curated_unit_rows` for the
+            element semantics.
         """
         return build_curated_unit_rows(
             sorting_id=sorting_id,
@@ -907,9 +948,28 @@ class CurationV2(SpyglassMixin, dj.Manual):
         test (``test_v1_parity.py``) asserts that call by name. The NWB
         staging IO -- resolving the source sort's units NWB, the
         ``apply_merge`` cross-unit dedup, and the ragged ``curation_label``
-        column -- lives in the service module. Returns
-        ``(analysis_file_name, units_object_id, nwb_file_name,
-        n_spikes_by_uid)``.
+        column -- lives in the service module.
+
+        Parameters
+        ----------
+        sorting_id
+            ``sorting_id`` of the upstream Sorting row.
+        kept_unit_to_contributors : dict
+            ``{kept_unit_id: [contributor_unit_id, ...]}`` from
+            ``_build_curated_unit_rows``.
+        apply_merge : bool
+            If True, write the merged unit set (contributors absorbed,
+            cross-unit dedup applied); if False, write every original
+            unit.
+        labels : dict
+            ``{unit_id: [label, ...]}`` written as the ragged
+            ``curation_label`` NWB column.
+
+        Returns
+        -------
+        tuple of (str, str, str, dict)
+            ``(analysis_file_name, units_object_id, nwb_file_name,
+            n_spikes_by_uid)``.
         """
         return write_curated_units_nwb(
             sorting_id=sorting_id,
@@ -1091,7 +1151,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
 
     @classmethod
     def has_unapplied_proposed_merges(cls, key) -> bool:
-        """True if a curation has a proposed merge that was NOT applied.
+        """Return whether a curation has a proposed but unapplied merge.
 
         A curation created with ``apply_merge=False`` records proposed merges in
         ``MergeGroup`` without applying them. A real merge is a group with more
@@ -1099,6 +1159,17 @@ class CurationV2(SpyglassMixin, dj.Manual):
         a plain root curation (all self-entries) returns ``False``. Short-
         circuits on ``merges_applied`` so the ``MergeGroup`` fetch is skipped on
         the common already-applied / root path.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``CurationV2`` row.
+
+        Returns
+        -------
+        bool
+            ``True`` if the curation was not applied and has at least one
+            >1-contributor merge group; ``False`` otherwise.
         """
         if bool((cls & key).fetch1("merges_applied")):
             return False
@@ -1149,6 +1220,35 @@ class CurationV2(SpyglassMixin, dj.Manual):
         ``artifact_detection_id=None`` means "no artifact-detection pass"
         (anti-join to sorts with no ``ArtifactDetectionSource`` row), NOT
         "match anything" -- only an absent key is a wildcard.
+
+        Parameters
+        ----------
+        key : dict
+            Interpretable restriction over the v2 part-table convention
+            keys (e.g. ``nwb_file_name``, ``sorting_id``, ``curation_id``,
+            ``artifact_detection_id``).
+        restrict_by_artifact : bool, optional
+            If ``True`` (default), map an ``artifact_detection_{uuid}``
+            ``interval_list_name`` back to ``artifact_detection_id`` so the
+            join restricts by the artifact-removed valid_times row.
+        strict : bool, optional
+            If ``True`` (default), an unknown restriction key raises
+            ``ValueError`` (a deliberate v2 query). If ``False``, an
+            unknown key instead returns ``None`` (multi-source dispatch:
+            the key names another pipeline's column).
+
+        Returns
+        -------
+        datajoint.expression.QueryExpression or None
+            A ``CurationV2`` query selecting the matching rows, or
+            ``None`` in lenient mode (``strict=False``) when the key names
+            no v2 column.
+
+        Raises
+        ------
+        ValueError
+            If ``strict`` is True and ``key`` contains restriction keys
+            that are not v2 columns.
         """
         import uuid
 
@@ -1272,6 +1372,16 @@ class CurationV2(SpyglassMixin, dj.Manual):
         re-implement v2's join topology. ``key`` must carry ``sorting_id``
         (sorter and nwb_file_name are fixed per sort, independent of
         ``curation_id``).
+
+        Parameters
+        ----------
+        key : dict
+            Restriction carrying ``sorting_id``.
+
+        Returns
+        -------
+        tuple of (str, str)
+            ``(sorter, nwb_file_name)`` for the underlying sort.
         """
         from spyglass.spikesorting.v2.recording import RecordingSelection
         from spyglass.spikesorting.v2.sorting import SortingSelection
@@ -1299,6 +1409,17 @@ class CurationV2(SpyglassMixin, dj.Manual):
         Used by ``get_merged_sorting`` (which filters
         ``len(contribs) > 1``, so self-entries are auto-skipped) and
         exposed publicly so users can do bulk-audit queries directly.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``CurationV2`` row.
+
+        Returns
+        -------
+        dict[int, list[int]]
+            ``{kept_unit_id: [contributor_unit_id, ...]}`` with sorted
+            contributor lists.
         """
         # ``order_by`` makes BOTH the outer dict key order and the
         # contributor list order deterministic (DataJoint gives no

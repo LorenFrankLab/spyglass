@@ -66,6 +66,12 @@ def _canonical_scalar(value):
     Raises ``TypeError`` for unsupported value types so a new identity
     field cannot silently serialize to something order- or
     repr-dependent.
+
+    Raises
+    ------
+    TypeError
+        If ``value`` is not a ``UUID``, ``str``, ``int``, ``bool``,
+        ``None``, or an integer-like object implementing ``__index__``.
     """
     if value is None:
         return None
@@ -98,6 +104,16 @@ def canonical_identity(payload: dict) -> str:
     on dict insertion order or Python's JSON spacing defaults; every value
     is normalized via :func:`_canonical_scalar` so equivalent inputs
     collapse to one identity.
+
+    Parameters
+    ----------
+    payload : dict
+        The selection's logical-identity fields.
+
+    Returns
+    -------
+    str
+        A byte-stable JSON string with sorted keys and fixed separators.
     """
     normalized = {str(k): _canonical_scalar(v) for k, v in payload.items()}
     return json.dumps(normalized, sort_keys=True, separators=(",", ":"))
@@ -112,6 +128,19 @@ def deterministic_id(kind: str, payload: dict) -> uuid.UUID:
     identity -- including an explicit ``source_kind`` for the part-bearing
     tables, whose master row alone does not encode which source produced
     it.
+
+    Parameters
+    ----------
+    kind : str
+        Selection-table namespace: ``"recording"``,
+        ``"artifact_detection"``, or ``"sorting"``.
+    payload : dict
+        The full logical identity of the selection.
+
+    Returns
+    -------
+    uuid.UUID
+        The deterministic ``uuid5`` primary key for the selection.
     """
     return uuid.uuid5(
         V2_SELECTION_NAMESPACE, f"{kind}:{canonical_identity(payload)}"
@@ -127,6 +156,17 @@ def recording_identity_payload(key: dict) -> dict:
     truth shared by ``RecordingSelection.insert_selection`` and
     ``preflight_v2_pipeline`` so the two cannot derive different ids for
     the same selection.
+
+    Parameters
+    ----------
+    key : dict
+        The supplied ``RecordingSelection`` fields, including the FK set
+        and possibly the ``recording_id`` PK.
+
+    Returns
+    -------
+    dict
+        ``key`` with the content-addressed ``recording_id`` removed.
     """
     return {k: v for k, v in key.items() if k != "recording_id"}
 
@@ -146,6 +186,29 @@ def artifact_detection_identity_payload(
     Single source of truth shared by
     ``ArtifactDetectionSelection.insert_selection`` and
     ``preflight_v2_pipeline``.
+
+    Parameters
+    ----------
+    artifact_detection_params_name : str
+        Name of the ``ArtifactDetectionParameters`` row.
+    recording_id : optional
+        The single-recording source id. Mutually exclusive with
+        ``shared_artifact_group_name``. Default ``None``.
+    shared_artifact_group_name : optional
+        The cross-recording shared-group source name. Mutually exclusive
+        with ``recording_id``. Default ``None``.
+
+    Returns
+    -------
+    dict
+        The logical-identity payload, with an explicit ``source_kind``.
+
+    Raises
+    ------
+    ValueError
+        If neither or both of ``recording_id`` and
+        ``shared_artifact_group_name`` are given (exactly one source is
+        required).
     """
     if (recording_id is None) == (shared_artifact_group_name is None):
         raise ValueError(
@@ -181,6 +244,25 @@ def sorting_identity_payload(
     single "no artifact-detection pass" form and cannot alias any real
     ``artifact_detection_id``. Single source of truth shared by
     ``SortingSelection.insert_selection`` and ``preflight_v2_pipeline``.
+
+    Parameters
+    ----------
+    recording_id
+        The recording source id.
+    sorter : str
+        Sorter name.
+    sorter_params_name : str
+        Name of the ``SorterParameters`` row.
+    artifact_detection_id : optional
+        The optional artifact-detection pass id, normalized to a
+        ``uuid.UUID``; ``None`` is the "no artifact-detection pass" form.
+        Default ``None``.
+
+    Returns
+    -------
+    dict
+        The logical-identity payload, with ``source_kind`` set to
+        ``"recording"``.
     """
     if artifact_detection_id is not None:
         artifact_detection_id = uuid.UUID(str(artifact_detection_id))
@@ -205,6 +287,22 @@ def assert_supplied_id_matches(supplied, deterministic, *, field: str) -> None:
     ``supplied`` value that is not even a well-formed UUID is, by
     definition, not the deterministic id, so it raises the SAME curated
     message rather than a low-level ``uuid.UUID`` parse error.
+
+    Parameters
+    ----------
+    supplied : uuid.UUID, str, or None
+        The caller-supplied selection PK. ``None`` is a no-op (the id is
+        derived rather than supplied).
+    deterministic : uuid.UUID
+        The id derived from the selection's logical identity.
+    field : str
+        Name of the PK field, used in the error message.
+
+    Raises
+    ------
+    ValueError
+        If ``supplied`` is non-``None`` and does not equal
+        ``deterministic`` (including when it is not a well-formed UUID).
     """
     if supplied is None:
         return

@@ -293,7 +293,17 @@ def _normalize_cell_type(raw: object) -> CellType:
 
 @dataclass
 class _GroundTruth:
-    """Ground-truth units extracted from a MEArec recording generator."""
+    """Ground-truth units extracted from a MEArec recording generator.
+
+    Attributes
+    ----------
+    spike_times : list of numpy.ndarray
+        Per-unit planted spike times in seconds.
+    positions_um : numpy.ndarray
+        Per-unit soma positions of shape ``(n_units, 3)`` in micrometers.
+    cell_types : list of CellType
+        Per-unit normalized cell-type code, one of ``{"E", "I"}``.
+    """
 
     spike_times: list[np.ndarray]
     positions_um: np.ndarray  # (n_units, 3)
@@ -355,6 +365,8 @@ def _read_ground_truth(mearec_h5_path: Path) -> _GroundTruth:
     Returns
     -------
     _GroundTruth
+        Planted spike times in seconds, per-unit soma positions of shape
+        ``(n_units, 3)`` in micrometers, and normalized cell types.
     """
     import MEArec
 
@@ -436,6 +448,8 @@ def _build_nwbfile(fixture_name: str, session_start: datetime):
     Returns
     -------
     pynwb.NWBFile
+        An empty NWBFile carrying only synthetic session and subject
+        metadata (no electrodes, ephys, or behavior).
     """
     from pynwb import NWBFile
     from pynwb.file import Subject
@@ -773,6 +787,16 @@ def _add_behavior_stub(
     file. Spyglass parses this through its standard Position path,
     so the fixture works under master spyglass + SI 0.99 (the v1
     parity capture environment) as well as the v2 ingestion paths.
+
+    Parameters
+    ----------
+    nwbfile : pynwb.NWBFile
+        File under construction.
+    n_samples : int
+        Number of ephys samples; the position trace is decimated from
+        this count.
+    sampling_frequency : float
+        Ephys sampling rate in Hz, used to build the position time-base.
     """
     import pynwb.behavior
 
@@ -879,9 +903,13 @@ def mearec_to_spyglass_nwb(
     Raises
     ------
     ValueError
-        If the MEArec channel count does not match the layout.
+        If the MEArec channel count does not match the layout, or if the
+        ground-truth read fails because of missing or invalid MEArec
+        annotations (absent ``cell_type``, an unrecognized cell type, or
+        missing/misshaped ``template_locations``).
     RuntimeError
-        If NWBInspector reports a blocking finding on the written file.
+        If the MEArec traces lack a microvolt conversion, or if
+        NWBInspector reports a blocking finding on the written file.
     """
     mearec_h5_path = Path(mearec_h5_path)
     out_nwb_path = Path(out_nwb_path)

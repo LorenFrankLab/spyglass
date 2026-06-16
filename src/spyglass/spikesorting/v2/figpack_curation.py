@@ -16,6 +16,7 @@ project repository.
 
 
 def __getattr__(name):
+    """Raise an informative ImportError for any not-yet-ported v2 name."""
     # Dunder names (``__path__``, ``__all__``, ``__spec__``, ``__file__``,
     # ...) are probed defensively by the import machinery, pickle, and
     # inspection tools. Always raise ``AttributeError`` for those so the

@@ -37,6 +37,11 @@ def analyzer_cache_root() -> Path:
 
     ``dj.config["custom"]["spikesorting_v2_analyzer_dir"]`` when truthy,
     else ``Path(temp_dir) / "spikesorting_v2" / "analyzers"``.
+
+    Returns
+    -------
+    pathlib.Path
+        The root directory under which analyzer caches are stored.
     """
     import datajoint as dj
 
@@ -55,18 +60,42 @@ def analyzer_path(sorting_id) -> Path:
     ``analyzer_cache_root() / f"{sorting_id}.analyzer"``. Deterministic in
     ``sorting_id`` + the configured root, so every code path resolves the
     same folder without the ``Sorting`` row needing to store it.
+
+    Returns
+    -------
+    pathlib.Path
+        The analyzer-cache folder path for this ``sorting_id``.
     """
     return analyzer_cache_root() / f"{sorting_id}.analyzer"
 
 
 def remove_analyzer_cache(sorting_id, *, missing_ok: bool = True) -> bool:
-    """Remove a sorting's analyzer-cache folder. Return True if one was removed.
+    """Remove a sorting's analyzer-cache folder.
 
     ``missing_ok=True`` (default) makes an absent folder a no-op returning
     ``False`` (the common case: zero-unit sorts never wrote one, and the
     cache is regeneratable). ``missing_ok=False`` raises ``FileNotFoundError``
     for an absent folder. A removal failure (e.g. a permission error)
     propagates rather than being swallowed.
+
+    Parameters
+    ----------
+    sorting_id
+        The sorting whose analyzer-cache folder should be removed.
+    missing_ok : bool, optional
+        If ``True`` (the default), an absent folder is a no-op. If
+        ``False``, an absent folder raises ``FileNotFoundError``.
+
+    Returns
+    -------
+    bool
+        ``True`` if a folder was removed, ``False`` if none existed and
+        ``missing_ok=True``.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the folder does not exist and ``missing_ok=False``.
     """
     folder = analyzer_path(sorting_id)
     if not folder.exists():

@@ -127,9 +127,8 @@ def build_curated_unit_rows(
 ) -> tuple[list[dict], dict[int, list[int]]]:
     """Resolve the post-merge ``CurationV2.Unit`` rows.
 
-    Returns ``(unit_rows, kept_unit_to_contributors)``. Each kept
-    unit's Electrode FK + peak amplitude come from the contributor
-    with the largest ``peak_amplitude_uv``. The merged-unit
+    Each kept unit's Electrode FK + peak amplitude come from the
+    contributor with the largest ``peak_amplitude_uv``. The merged-unit
     ``unit_id`` depends on ``apply_merge``: a fresh
     ``max(source unit_ids) + 1`` for ``apply_merge=True`` (v1 parity,
     ``v1/curation.py:361``); ``min(group)`` for ``apply_merge=False``
@@ -137,10 +136,6 @@ def build_curated_unit_rows(
     the absorbed contributors so the preview retains every original
     unit). Each merge group must have at least 2 members; empty or
     singleton groups raise ``ValueError``.
-
-    ``sorting_units`` is the pre-fetched ``Sorting.Unit`` rows for
-    ``sorting_id``; the caller fetches once and threads through to
-    avoid re-querying.
 
     ``n_spikes`` is computed to match what ``_stage_curated_units_nwb``
     writes for the SAME ``apply_merge``: the merged sum only when the
@@ -150,6 +145,35 @@ def build_curated_unit_rows(
     len(get_sorting().get_unit_spike_train(kept_uid))`` for BOTH
     ``apply_merge`` values -- otherwise an ``apply_merge=False``
     preview would store the merged sum against a head-only train.
+
+    Parameters
+    ----------
+    sorting_id
+        ``sorting_id`` of the upstream Sorting row.
+    sorting_units : list of dict
+        Pre-fetched ``Sorting.Unit`` rows for ``sorting_id``; the
+        caller fetches once and threads through to avoid re-querying.
+    merge_groups : list of list of int
+        Merge groups, each a list of ``unit_id`` ints (>=2 each).
+    curation_id : int
+        ``curation_id`` to stamp on the resulting rows.
+    apply_merge : bool
+        If True, build the merged (committed) unit set; if False, keep
+        every original unit and record the proposed merges.
+
+    Returns
+    -------
+    unit_rows : list of dict
+        One ``CurationV2.Unit`` row per kept unit.
+    kept_unit_to_contributors : dict[int, list[int]]
+        ``{kept_unit_id: [contributor_unit_id, ...]}`` mapping.
+
+    Raises
+    ------
+    ValueError
+        If a merge group has fewer than 2 members, contains duplicate
+        members, references a unit_id not in ``sorting_units``, or
+        overlaps another merge group.
     """
     by_id = {int(row["unit_id"]): row for row in sorting_units}
 

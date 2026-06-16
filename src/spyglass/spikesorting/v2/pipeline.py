@@ -156,7 +156,7 @@ def describe_sort_groups(nwb_file_name: str) -> "pd.DataFrame":
 
     Parameters
     ----------
-    nwb_file_name
+    nwb_file_name : str
         Session whose existing ``SortGroupV2`` rows should be summarized.
 
     Returns
@@ -438,27 +438,39 @@ def plot_sort_group_geometry(
 
     Parameters
     ----------
-    nwb_file_name
+    nwb_file_name : str
         Session whose existing ``SortGroupV2`` rows should be visualized.
-    ax
-        Optional Matplotlib axes to draw into. A new figure/axes is created
-        when omitted.
-    sort_group_ids
-        Optional subset of sort-group ids to display.
-    label_electrodes
-        If ``True``, annotate each plotted contact with its ``electrode_id``.
-    show_bad_channels
+    ax : matplotlib.axes.Axes, optional
+        Matplotlib axes to draw into. A new figure/axes is created when
+        omitted (the default).
+    sort_group_ids : list of int or tuple of int or set of int, optional
+        Subset of sort-group ids to display. All sort groups are shown
+        when omitted (the default).
+    label_electrodes : bool, optional
+        If ``True``, annotate each plotted contact with its
+        ``electrode_id``. Defaults to ``False``.
+    show_bad_channels : bool, optional
         If ``True``, overlay bad-channel members with red ``x`` markers.
-    show_reference
+        Defaults to ``True``.
+    show_reference : bool, optional
         If ``True``, overlay ``reference_mode='specific'`` electrodes with a
-        black star marker.
-    title
-        Optional axes title.
+        black star marker. Defaults to ``True``.
+    title : str, optional
+        Axes title. A default title naming the session is used when
+        omitted.
 
     Returns
     -------
     matplotlib.axes.Axes
         The axes containing the plot.
+
+    Warns
+    -----
+    UserWarning
+        When the session spans more than one probe. ``Probe.Electrode``
+        rel_x/rel_y are per-probe coordinates, so the probes are laid out
+        side-by-side along x (x positions are display-shifted per probe;
+        within-probe geometry and y depths are unchanged).
     """
     import pandas as pd
     import matplotlib.pyplot as plt
@@ -759,6 +771,7 @@ class PreflightReport:
     checks: list["PreflightCheck"]
 
     def __bool__(self) -> bool:
+        """Return ``True`` when the configuration is runnable (``ok``)."""
         return self.ok
 
 
@@ -1178,9 +1191,16 @@ def run_v2_pipeline(
     ZeroUnitSortError
         If the sort finds zero units and ``require_units=True``.
     ValueError
-        If the upstream sort group / session / interval list / team
-        do not exist (raised by the underlying insert helpers when
-        ``preflight=False``).
+        If a required parameter Lookup row is missing (e.g.
+        ``PreprocessingParameters`` / ``SorterParameters`` defaults not
+        installed); the insert helpers translate the would-be
+        foreign-key error into this clear message. Run
+        ``initialize_v2_defaults()`` first.
+    datajoint.errors.IntegrityError
+        If an upstream sort group / session / interval list / team does
+        not exist when ``preflight=False`` -- the foreign-key violation
+        surfaces untranslated. ``preflight=True`` catches these earlier
+        as a ``PreflightError`` with the exact fix.
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.artifact import (

@@ -39,6 +39,17 @@ def read_units_abs_spike_times(abs_path) -> dict:
     NWB (``nwbf.units.to_dataframe()``), so callers get the persisted
     wall-clock values exactly -- no affine round-trip. Returns ``{}``
     for an empty/absent Units table.
+
+    Parameters
+    ----------
+    abs_path : str or pathlib.Path
+        Absolute path to the v2 units NWB file.
+
+    Returns
+    -------
+    dict
+        ``{unit_id (int): absolute spike times (np.ndarray of seconds)}``;
+        ``{}`` for an empty or absent Units table.
     """
     import numpy as _np
     import pynwb
@@ -61,6 +72,22 @@ def numpysorting_from_abs_times(abs_times, recording_row, fs):
     with ``np.searchsorted`` against the recording's (possibly
     gap-preserving) timestamps -- the v1-parity readback that an
     affine inverse breaks across wall-clock gaps.
+
+    Parameters
+    ----------
+    abs_times : dict[int, np.ndarray]
+        ``{unit_id: absolute spike times (seconds)}`` for each unit.
+    recording_row : dict
+        The upstream Recording row, used to read the persisted
+        timestamp vector via :func:`recording_timestamps`.
+    fs : float
+        Sampling frequency of the recording, in Hz.
+
+    Returns
+    -------
+    si.NumpySorting
+        A sorting whose per-unit spike trains are frame indices into
+        the recording.
     """
     import spikeinterface as si
 
@@ -149,7 +176,19 @@ def build_lazy_merged_sorting(
 
 
 def abs_spike_times_dataframe(abs_times):
-    """DataFrame (index=unit_id) of absolute spike-time arrays."""
+    """Build a DataFrame (index=unit_id) of absolute spike-time arrays.
+
+    Parameters
+    ----------
+    abs_times : dict[int, np.ndarray]
+        ``{unit_id: absolute spike times (seconds)}``.
+
+    Returns
+    -------
+    pandas.DataFrame
+        A single ``spike_times`` column of per-unit arrays, indexed by
+        ``unit_id``.
+    """
     import pandas as pd
 
     unit_ids = list(abs_times)
@@ -160,7 +199,14 @@ def abs_spike_times_dataframe(abs_times):
 
 
 def empty_spike_times_dataframe():
-    """Empty (index=unit_id) spike-times DataFrame for zero-unit sorts."""
+    """Build an empty spike-times DataFrame for zero-unit sorts.
+
+    Returns
+    -------
+    pandas.DataFrame
+        An empty ``spike_times`` column, with an integer ``unit_id``
+        index.
+    """
     import pandas as pd
 
     return pd.DataFrame(
@@ -179,6 +225,17 @@ def recording_timestamps(recording_row):
     ``t_start + i/fs`` assumption is wrong across wall-clock gaps.
     Reads only the timestamps dataset (not the traces), so it is far
     lighter than loading the full SI recording.
+
+    Parameters
+    ----------
+    recording_row : dict
+        The upstream Recording row, carrying ``analysis_file_name`` and
+        ``electrical_series_path``.
+
+    Returns
+    -------
+    np.ndarray, shape (n_samples,)
+        The recording's wall-clock timestamps, in seconds (float64).
     """
     import numpy as _np
     import pynwb
