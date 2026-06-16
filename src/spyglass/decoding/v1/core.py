@@ -16,8 +16,9 @@ from spyglass.decoding.v1.dj_decoder_conversion import (
 )
 from spyglass.position.position_merge import PositionOutput  # noqa: F401
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("decoding_core_v1")
+schema = SpyglassSchema("decoding_core_v1")
 
 
 @schema

@@ -6,12 +6,13 @@ import pynwb
 
 from spyglass.common import IntervalList, Nwbfile
 from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils.dj_schema import SpyglassSchema
 from spyglass.utils.nwb_helper_fn import (
     estimate_sampling_rate,
     get_valid_intervals,
 )
 
-schema = dj.schema("position_v1_imported_pose")
+schema = SpyglassSchema("position_v1_imported_pose")
 
 
 @schema

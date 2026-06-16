@@ -10,8 +10,9 @@ from spyglass.position.v1.position_dlc_project import BodyPart, DLCProject
 from spyglass.position.v1.position_dlc_training import DLCModelTraining
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import str_to_bool
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("position_v1_dlc_model")
+schema = SpyglassSchema("position_v1_dlc_model")
 
 
 @schema

@@ -11,8 +11,9 @@ from spyglass.common.common_lab import (
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_subject import Subject
 from spyglass.utils import SpyglassIngestion, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("common_session")
+schema = SpyglassSchema("common_session")
 
 
 @schema

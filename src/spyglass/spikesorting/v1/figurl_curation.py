@@ -13,8 +13,9 @@ from spyglass.spikesorting.utils import _reformat_metrics
 from spyglass.spikesorting.v1.curation import CurationV1, _merge_dict_to_list
 from spyglass.spikesorting.v1.sorting import SpikeSortingSelection
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("spikesorting_v1_figurl_curation")
+schema = SpyglassSchema("spikesorting_v1_figurl_curation")
 
 
 @schema

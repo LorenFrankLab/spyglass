@@ -11,8 +11,9 @@ from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.lfp.lfp_electrode import LFPElectrodeGroup
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("lfp_v1")
+schema = SpyglassSchema("lfp_v1")
 
 MIN_LFP_INTERVAL_DURATION = 1.0  # 1 second minimum interval duration
 

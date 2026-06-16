@@ -14,6 +14,8 @@ import h5py
 import numpy as np
 from datajoint.table import Table
 from datajoint.user_tables import TableMeta, UserTable
+
+from spyglass.utils.dj_schema import SpyglassSchema
 from spyglass.utils.logging import logger
 from spyglass.utils.nwb_helper_fn import file_from_dandi, get_nwb_file
 
@@ -783,3 +785,36 @@ def _replace_nan_with_default(data_dict, default_value=-1.0):
             result[key] = default_value
 
     return result
+
+
+# Log table for errors encountered during file edits
+schema = SpyglassSchema("common_export_error_log")
+
+
+@schema
+class ExportErrorLog(dj.Manual):
+    definition = """
+    file: varchar(255)  # file being processed
+    source: varchar(255)  # source of the error (e.g., table name or function)
+    ---
+    """
+
+    @staticmethod
+    def _logger_warning(key):
+        logger.warning(
+            f"Logging export error for file: {key.get('file', 'unknown')}"
+            + f" from source: {key.get('source', 'unknown')}"
+        )
+
+    def insert1(self, key, **kwargs):
+        """Insert a new entry into the ExportErrorLog table.
+
+        Parameters
+        ----------
+        key : dict
+            Dictionary containing the primary key fields for the table.
+        **kwargs : dict
+            Additional keyword arguments for non-primary key fields.
+        """
+        self._logger_warning(key)
+        super().insert1(key, **kwargs)

@@ -11,8 +11,9 @@ from spyglass.decoding.v1.sorted_spikes import (
 )  # noqa: F401
 from spyglass.settings import config
 from spyglass.utils import SpyglassMixin, _Merge, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("decoding_merge")
+schema = SpyglassSchema("decoding_merge")
 
 
 @schema

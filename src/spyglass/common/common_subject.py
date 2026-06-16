@@ -2,8 +2,9 @@ import datajoint as dj
 import pynwb
 
 from spyglass.utils import SpyglassIngestion, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("common_subject")
+schema = SpyglassSchema("common_subject")
 
 
 @schema

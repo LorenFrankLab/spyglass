@@ -40,8 +40,9 @@ from spyglass.spikesorting.spikesorting_merge import (
     SpikeSortingOutput,  # noqa: F401
 )
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("decoding_sorted_spikes_v1")
+schema = SpyglassSchema("decoding_sorted_spikes_v1")
 
 
 @schema

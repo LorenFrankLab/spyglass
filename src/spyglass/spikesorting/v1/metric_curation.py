@@ -24,8 +24,9 @@ from spyglass.spikesorting.v1.metric_utils import (
 )
 from spyglass.spikesorting.v1.sorting import SpikeSortingSelection
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("spikesorting_v1_metric_curation")
+schema = SpyglassSchema("spikesorting_v1_metric_curation")
 
 
 _metric_name_to_func = {

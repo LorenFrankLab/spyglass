@@ -7,13 +7,16 @@ import pynwb
 
 from spyglass.common.common_device import Probe  # noqa: F401
 from spyglass.common.common_filter import FirFilterParameters
-from spyglass.common.common_interval import interval_list_censor  # noqa: F401
-from spyglass.common.common_interval import IntervalList
+from spyglass.common.common_interval import (
+    IntervalList,
+    interval_list_censor,  # noqa: F401
+)
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 from spyglass.common.common_region import BrainRegion  # noqa: F401
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.settings import test_mode
 from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 from spyglass.utils.nwb_helper_fn import (
     estimate_sampling_rate,
     get_config,
@@ -24,7 +27,7 @@ from spyglass.utils.nwb_helper_fn import (
     is_nwb_obj_type,
 )
 
-schema = dj.schema("common_ephys")
+schema = SpyglassSchema("common_ephys")
 
 
 @schema

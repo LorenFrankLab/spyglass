@@ -12,8 +12,9 @@ from spyglass.position.v1.dlc_utils import file_log
 from spyglass.position.v1.position_dlc_project import DLCProject
 from spyglass.settings import test_mode
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("position_v1_dlc_training")
+schema = SpyglassSchema("position_v1_dlc_training")
 
 
 @schema

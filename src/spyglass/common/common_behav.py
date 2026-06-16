@@ -18,6 +18,7 @@ from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.common.common_task import TaskEpoch
 from spyglass.settings import test_mode, video_dir
 from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 from spyglass.utils.nwb_helper_fn import (
     estimate_sampling_rate,
     get_all_spatial_series,
@@ -27,7 +28,7 @@ from spyglass.utils.nwb_helper_fn import (
     is_nwb_obj_type,
 )
 
-schema = dj.schema("common_behav")
+schema = SpyglassSchema("common_behav")
 
 
 @schema

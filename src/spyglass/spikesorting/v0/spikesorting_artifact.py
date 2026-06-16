@@ -15,9 +15,10 @@ from spyglass.spikesorting.v0.spikesorting_recording import (
     SpikeSortingRecording,
 )
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 from spyglass.utils.nwb_helper_fn import get_valid_intervals
 
-schema = dj.schema("spikesorting_artifact")
+schema = SpyglassSchema("spikesorting_artifact")
 
 
 @schema

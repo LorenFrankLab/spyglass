@@ -11,7 +11,9 @@ from non_local_detector.environment import Environment
 from non_local_detector.observation_models import ObservationModel
 from track_linearization import make_track_graph
 
-schema = dj.schema("decoding_clusterless_v1")
+from spyglass.utils.dj_schema import SpyglassSchema
+
+schema = SpyglassSchema("decoding_clusterless_v1")
 
 
 def _convert_dict_to_class(d: dict, class_conversion: dict) -> object:

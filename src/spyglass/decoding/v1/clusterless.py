@@ -22,8 +22,10 @@ from track_linearization import get_linearized_position
 
 from spyglass.common.common_interval import IntervalList  # noqa: F401
 from spyglass.common.common_session import Session  # noqa: F401
-from spyglass.decoding.v1.core import DecodingParameters  # noqa: F401
-from spyglass.decoding.v1.core import PositionGroup
+from spyglass.decoding.v1.core import (
+    DecodingParameters,  # noqa: F401
+    PositionGroup,
+)
 from spyglass.decoding.v1.utils import (
     _get_interval_range,
     concatenate_interval_results,
@@ -36,9 +38,10 @@ from spyglass.decoding.v1.waveform_features import (
 from spyglass.position.position_merge import PositionOutput  # noqa: F401
 from spyglass.settings import config
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 from spyglass.utils.spikesorting import firing_rate_from_spike_indicator
 
-schema = dj.schema("decoding_clusterless_v1")
+schema = SpyglassSchema("decoding_clusterless_v1")
 
 
 @schema

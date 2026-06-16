@@ -29,6 +29,7 @@ from spyglass.common import AnalysisNwbfile
 from spyglass.position.position_merge import PositionOutput
 from spyglass.settings import moseq_project_dir, moseq_video_dir
 from spyglass.utils import SpyglassMixin
+from spyglass.utils.dj_schema import SpyglassSchema
 
 from .core import (
     PoseGroup,
@@ -37,7 +38,7 @@ from .core import (
     _normalize_1_pose_dataset,
 )
 
-schema = dj.schema("behavior_v1_moseq")
+schema = SpyglassSchema("behavior_v1_moseq")
 
 
 @schema

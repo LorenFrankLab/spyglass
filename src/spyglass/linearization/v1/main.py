@@ -14,8 +14,9 @@ from track_linearization import (
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.position.position_merge import PositionOutput
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("position_linearization_v1")
+schema = SpyglassSchema("position_linearization_v1")
 
 
 @schema

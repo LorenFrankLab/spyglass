@@ -8,8 +8,9 @@ from packaging.version import parse as version_parse
 from spyglass import __version__ as sg_verion
 from spyglass.utils import logger
 from spyglass.utils.dj_helper_fn import str_to_bool
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("common_version")
+schema = SpyglassSchema("common_version")
 
 
 @schema

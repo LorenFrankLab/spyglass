@@ -15,8 +15,9 @@ from spyglass.position.v1.dlc_utils import find_mp4, get_video_info
 from spyglass.settings import dlc_project_dir, dlc_video_dir
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import sanitize_unix_name
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("position_v1_dlc_project")
+schema = SpyglassSchema("position_v1_dlc_project")
 
 
 @schema

@@ -19,8 +19,9 @@ from spyglass.spikesorting.v1.recording import (
     SpikeSortingRecordingSelection,
 )
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("spikesorting_v1_artifact")
+schema = SpyglassSchema("spikesorting_v1_artifact")
 
 
 @schema

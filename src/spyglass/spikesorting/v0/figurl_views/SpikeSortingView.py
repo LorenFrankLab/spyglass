@@ -10,8 +10,9 @@ from spyglass.spikesorting.v0.figurl_views.prepare_spikesortingview_data import 
     prepare_spikesortingview_data,
 )
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("figurl_view_spike_sorting_recording")
+schema = SpyglassSchema("figurl_view_spike_sorting_recording")
 
 
 @schema

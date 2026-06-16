@@ -214,6 +214,8 @@ for label, interval_data in results.groupby("interval_labels"):
 - Fix redundant hash computation in `SpikeSortingRecording._make_file`:
     `_update_external` no longer re-reads the NWB file to verify a hash that was
     just computed by the caller #1600
+- Allow no database connection during import #1559
+- Fix bug from overlapping intervals in interval union #1520
 
 ### Pipelines
 
@@ -245,10 +247,9 @@ for label, interval_data in results.groupby("interval_labels"):
         files #1466
     - Allow ingestion of nwb files without behavior module #1441
     - Warn when ingesting ImageSeries without TaskEpoch #1461
-    - Support ingestion of multi-epoch video files #1548
+    - Support ingestion of multi-epoch video files #1548 \<<\<<\<<< HEAD
+    - Fix bug with sgc.LabTeam().create_new_team when google_user_name is not
     - Fix bug with `LabTeam().create_new_team` when `google_user_name` is not
-        available #1546
-    - Fix bug from overlapping intervals in interval union #1520
 
 - Decoding
 
@@ -261,7 +262,9 @@ for label, interval_data in results.groupby("interval_labels"):
         from multiple intervals are now concatenated along the `time` dimension
         with an `interval_labels` coordinate to track interval membership. This
         eliminates NaN padding and reduces memory usage. See migration guide
-        above.
+        above. \<<\<<\<<< HEAD
+    - Fix fetching position df in
+        SortedSpikesDecodingV1.get_ahead_behind_distance() #1540
     - Fix fetching position dataframe in
         `SortedSpikesDecodingV1.get_ahead_behind_distance()` #1540
 

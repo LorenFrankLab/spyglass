@@ -13,8 +13,9 @@ from spyglass.spikesorting.v0.spikesorting_recording import (
 )
 from spyglass.spikesorting.v0.spikesorting_sorting import SpikeSorting
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("spikesorting_curation_figurl")
+schema = SpyglassSchema("spikesorting_curation_figurl")
 
 # A curation figURL is a link to a visualization of a curation.
 # Optionally you can specify a new_curation_uri which will be

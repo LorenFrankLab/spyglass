@@ -6,10 +6,11 @@ import datajoint as dj
 import pynwb
 
 from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 
 from .common_nwbfile import Nwbfile  # noqa: F401
 
-schema = dj.schema("common_lab")
+schema = SpyglassSchema("common_lab")
 
 
 @schema

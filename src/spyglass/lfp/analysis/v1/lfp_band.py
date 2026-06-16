@@ -13,9 +13,10 @@ from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.lfp.lfp_electrode import LFPElectrodeGroup
 from spyglass.lfp.lfp_merge import LFPOutput
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 from spyglass.utils.nwb_helper_fn import get_electrode_indices
 
-schema = dj.schema("lfp_band_v1")
+schema = SpyglassSchema("lfp_band_v1")
 
 
 @schema

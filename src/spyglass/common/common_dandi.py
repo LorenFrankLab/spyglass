@@ -13,6 +13,7 @@ from tqdm import tqdm
 from spyglass.common.common_usage import Export, ExportSelection
 from spyglass.settings import export_dir, raw_dir
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 from spyglass.utils.sql_helper_fn import SQLDumpHelper
 
 try:
@@ -42,7 +43,7 @@ except (ImportError, ModuleNotFoundError) as e:
     logger.warning(e)
 
 
-schema = dj.schema("common_dandi")
+schema = SpyglassSchema("common_dandi")
 
 
 @schema

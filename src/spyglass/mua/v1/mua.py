@@ -12,8 +12,9 @@ from spyglass.spikesorting.analysis.v1.group import (
     SortedSpikesGroup,
 )  # noqa: F401
 from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("mua_v1")
+schema = SpyglassSchema("mua_v1")
 
 
 @schema

@@ -24,9 +24,10 @@ from spyglass.spikesorting.utils import (
 )
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import dj_replace
+from spyglass.utils.dj_schema import SpyglassSchema
 from spyglass.utils.nwb_hash import DirectoryHasher
 
-schema = dj.schema("spikesorting_recording")
+schema = SpyglassSchema("spikesorting_recording")
 
 
 @schema

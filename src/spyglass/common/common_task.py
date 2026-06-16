@@ -7,13 +7,14 @@ from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import accept_divergence
+from spyglass.utils.dj_schema import SpyglassSchema
 from spyglass.utils.nwb_helper_fn import (
     get_config,
     get_nwb_file,
     is_nwb_obj_type,
 )
 
-schema = dj.schema("common_task")
+schema = SpyglassSchema("common_task")
 
 
 @schema

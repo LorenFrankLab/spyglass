@@ -10,9 +10,10 @@ import pynwb
 import scipy.signal as signal
 
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 from spyglass.utils.nwb_helper_fn import get_electrode_indices
 
-schema = dj.schema("common_filter")
+schema = SpyglassSchema("common_filter")
 
 
 def _import_ghostipy():

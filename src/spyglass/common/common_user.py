@@ -12,8 +12,9 @@ import datajoint as dj
 import yaml
 
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("common_user")
+schema = SpyglassSchema("common_user")
 
 DEFAULT_ENV_ID = (
     dj.config["database.user"]

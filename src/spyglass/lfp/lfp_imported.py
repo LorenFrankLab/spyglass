@@ -3,19 +3,22 @@ import numpy as np
 import pynwb
 
 from spyglass.common.common_interval import IntervalList  # noqa: F401
-from spyglass.common.common_nwbfile import AnalysisNwbfile  # noqa: F401
-from spyglass.common.common_nwbfile import Nwbfile
+from spyglass.common.common_nwbfile import (
+    AnalysisNwbfile,  # noqa: F401
+    Nwbfile,
+)
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.lfp.lfp_electrode import LFPElectrodeGroup  # noqa: F401
 from spyglass.utils import logger
 from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils.dj_schema import SpyglassSchema
 from spyglass.utils.nwb_helper_fn import (
     estimate_sampling_rate,
     get_nwb_file,
     get_valid_intervals,
 )
 
-schema = dj.schema("lfp_imported")
+schema = SpyglassSchema("lfp_imported")
 
 
 @schema

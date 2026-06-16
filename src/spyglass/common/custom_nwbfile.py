@@ -2,6 +2,7 @@ import datajoint as dj
 
 from spyglass.common.common_nwbfile import Nwbfile  # noqa F401
 from spyglass.utils.dj_mixin import SpyglassAnalysis
+from spyglass.utils.dj_schema import SpyglassSchema
 
 db_prefix = dj.config.get("custom", {}).get("database.prefix")
 username = dj.config.get("database.user")
@@ -23,7 +24,7 @@ if not user_prefix:
     )
 
 # NOTE: For multiple custom analysis tables, set the prefix accordingly
-schema = dj.schema(f"{user_prefix}_nwbfile")
+schema = SpyglassSchema(f"{user_prefix}_nwbfile")
 
 
 @schema
