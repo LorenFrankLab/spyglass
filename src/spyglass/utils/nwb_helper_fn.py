@@ -493,17 +493,45 @@ def get_electrode_indices(nwb_object, electrode_ids):
     ]
 
 
-def _get_epoch_groups(position: pynwb.behavior.Position):
+def _get_epoch_groups(position: pynwb.behavior.Position) -> dict:
+    """Group spatial series indices by their epoch start time.
+
+    Supports both NWB timing conventions: explicit timestamps and
+    starting_time + rate.
+
+    Parameters
+    ----------
+    position : pynwb.behavior.Position
+        Position interface containing one or more SpatialSeries.
+
+    Returns
+    -------
+    dict
+        Mapping from epoch start time (float, seconds) to a list of
+        spatial series indices sharing that start time.
+    """
     epoch_start_time = {}
     for pos_epoch, spatial_series in enumerate(
         position.spatial_series.values()
     ):
-        epoch_start_time[pos_epoch] = spatial_series.timestamps[0]
+        timestamps = spatial_series.timestamps
+        start = (
+            timestamps[0]
+            if timestamps is not None
+            else spatial_series.starting_time
+        )
+        if start is None:
+            raise ValueError(
+                f"SpatialSeries '{spatial_series.name}' has neither "
+                "timestamps nor starting_time; cannot determine epoch start."
+            )
+        epoch_start_time[pos_epoch] = start
 
     return {
-        i: [j[0] for j in j]
-        for i, j in groupby(
-            sorted(epoch_start_time.items(), key=lambda x: x[1]), lambda x: x[1]
+        start_time: [item[0] for item in group]
+        for start_time, group in groupby(
+            sorted(epoch_start_time.items(), key=lambda x: x[1]),
+            lambda x: x[1],
         )
     }
 
@@ -541,7 +569,17 @@ def _get_pos_dict(
             spatial_series = all_spatial_series[index]
             valid_times = None
             if incl_times:  # get the valid intervals for the position data
-                timestamps = np.asarray(spatial_series.timestamps)
+                if spatial_series.timestamps is None:
+                    starting_time = spatial_series.starting_time
+                    rate = spatial_series.rate
+                    num_samples = spatial_series.data.shape[0]
+                    timestamps = np.linspace(
+                        starting_time,
+                        starting_time + (num_samples - 1) / rate,
+                        num_samples,
+                    )
+                else:
+                    timestamps = np.asarray(spatial_series.timestamps)
                 sampling_rate = estimate_sampling_rate(
                     timestamps, verbose=verbose, filename=session_id
                 )

@@ -196,14 +196,15 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
         electrode_list = np.array(electrode_list, dtype=int)[electrode_sort_ind]
         reference_electrode_list = reference_electrode_list[electrode_sort_ind]
 
-        # Warn if the sampling rate is not the same as the original
-        if lfp_band_sampling_rate is not None:
-            self._info_msg(
-                "It is recommended to use the same sampling rate as the original "
-                + "lfp data to avoid aliasing."
-            )
         # if no sampling rate is provided, use the default
         lfp_band_sampling_rate = lfp_band_sampling_rate or lfp_sampling_rate
+
+        # Warn if the sampling rate is greater than the original
+        if lfp_band_sampling_rate > lfp_sampling_rate:
+            self._info_msg(
+                "It is recommended to use a sampling rate less than or equal to the "
+                + "original lfp data to avoid aliasing."
+            )
 
         if lfp_band_sampling_rate > lfp_sampling_rate:
             raise ValueError(

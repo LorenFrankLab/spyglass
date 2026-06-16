@@ -248,8 +248,8 @@ def get_nwb_table(query_expression, tbl, attr_name, *attrs, **kwargs):
     """Get the NWB file name and path from the given DataJoint query.
 
     .. deprecated:: 0.6.0
-        This function has been integrated into FetchMixin.
-        Use table.fetch_nwb() instead, which now includes all this logic.
+        Use ``(table & key).fetch_nwb()`` instead. Migration guide:
+        https://lorenfranklab.github.io/spyglass/latest/Features/Mixin/
 
     Parameters
     ----------
@@ -339,8 +339,8 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
     """Get an NWB object from the given DataJoint query.
 
     .. deprecated:: 0.6.0
-        This function has been integrated into FetchMixin.
-        Use table.fetch_nwb() instead, which now includes all this logic.
+        Use ``(table & key).fetch_nwb()`` instead. Migration guide:
+        https://lorenfranklab.github.io/spyglass/latest/Features/Mixin/
 
     Parameters
     ----------
@@ -464,6 +464,55 @@ def get_child_tables(table):
     ]
 
 
+def _write_external_checksum(filepath, external_table, key):
+    """Write size + contents_hash for one external-table row.
+
+    Low-level helper. Callers are responsible for any access control
+    around mutating external metadata. ``_resolve_external_table``
+    layers an admin check + multi-table discovery on top of this;
+    callers that already know the exact row (e.g. retroactive
+    user-driven repairs) can call this directly.
+    """
+    key.update(
+        size=Path(filepath).stat().st_size,
+        contents_hash=dj.hash.uuid_from_file(filepath),
+    )
+    external_table.update1(key)
+
+
+def _update_analysis_file_checksum(abs_path):
+    """Update the analysis external-table checksum for one NWB file.
+
+    Searches all registered analysis external tables (like
+    ``_resolve_external_table``, but without its admin gate — this is a
+    sibling for user-driven retroactive repairs that already know the
+    exact file path on disk). Logs a warning and returns without raising
+    if the file is registered in zero external tables, so a stale
+    checksum doesn't surface as an opaque ``DataJointError`` after the
+    file has already been swapped on disk.
+    """
+    from spyglass.common.common_nwbfile import AnalysisNwbfile, AnalysisRegistry
+
+    abs_path = Path(abs_path)
+    anwb = AnalysisNwbfile()
+    rel_path = abs_path.relative_to(anwb._analysis_dir)
+    file_restr = f"filepath = '{str(rel_path)}'"
+
+    found = False
+    for ext_tbl in AnalysisRegistry().get_externals():
+        restr_external = ext_tbl & file_restr
+        if not bool(restr_external):
+            continue
+        found = True
+        _write_external_checksum(abs_path, ext_tbl, restr_external.fetch1())
+
+    if not found:
+        logger.warning(
+            f"No entries found in any analysis external table for "
+            f"file: {rel_path}; checksum not updated."
+        )
+
+
 def _resolve_external_table(
     filepath: str, file_name: str, location: str = "analysis"
 ):
@@ -528,14 +577,8 @@ def _resolve_external_table(
         )
         return
 
-    update_vals = dict(
-        size=Path(filepath).stat().st_size,
-        contents_hash=dj.hash.uuid_from_file(filepath),
-    )
     for to_update, table in zip(to_updates, tables_to_update):
-        key = to_update.fetch1()
-        key.update(update_vals)
-        table.update1(key)
+        _write_external_checksum(filepath, table, to_update.fetch1())
 
 
 def make_file_obj_id_unique(nwb_path: str):
@@ -562,6 +605,8 @@ def make_file_obj_id_unique(nwb_path: str):
         with h5py.File(nwb_path, "a") as f:
             f.attrs["object_id"] = new_id
     except (BlockingIOError, OSError):
+        from spyglass.common.common_usage import ExportErrorLog
+
         ExportErrorLog().insert1(
             {
                 "file": nwb_path,

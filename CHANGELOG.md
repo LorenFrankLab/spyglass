@@ -51,11 +51,58 @@ DLCProject().alter()
 
 ### Breaking Changes
 
+#### NwbfileHasher Now Includes Dataset Content (#1600)
+
+`NwbfileHasher` previously discarded the return value of `hash_dataset()`, so
+HDF5 Dataset values (the actual array data) were never incorporated into
+`SpikeSortingRecording.hash`. Only metadata (attrs, shape, dtype) was hashed.
+
+**Impact**: All V1 `SpikeSortingRecording` hashes computed before this fix are
+metadata-only. Running `RecordingRecompute.populate()` against a pre-fix stored
+hash will produce `matched=False` even when the file is identical, because the
+old and new hashers disagree on what to include.
+
+**If you have existing `matched=1` entries** from before this fix, those matches
+only verified metadata — Dataset content was not compared. These entries should
+be re-validated once all users have upgraded.
+
+**Backward compatibility**: Set `SPYGLASS_LEGACY_HASHES=true` in your shell
+environment to restore pre-fix (metadata-only) hashing in `RecordingRecompute`.
+This allows existing matched entries to be reproduced without recomputing, and
+is intended as a temporary bridge while labs transition:
+
+```bash
+SPYGLASS_LEGACY_HASHES=true python -c "
+from spyglass.spikesorting.v1.recompute import RecordingRecompute
+RecordingRecompute().populate(...)
+"
+```
+
 #### LFPBandV1 Fix
 
 If you were using a pre-release version of Spyglass 0.5.6 LFPBandV1 after April
 2025, you may have stored inaccurate interval list times due to #1481. To fix
-these, please run `LFPBandV1().fix_1481()` as shown in the release notes.
+these, please run the following after updating:
+
+```python
+from spyglass.lfp.analysis.v1 import LFPBandV1
+
+LFPBandV1().fix_1481()
+```
+
+#### AutomaticCuration Fix
+
+If you were using `v0.AutomaticCuration` after April 2025, you may have stored
+inaccurate labels due to #1513. To fix these, please run the following after
+updating:
+
+```python
+from spyglass.spikesorting.v0 import Fix1513Status
+
+Fix1513Status.populate()
+Fix1513Status.activate_pending_nwb_repairs()
+Fix1513Status.run_pending_repopulates()
+```
 
 #### Decoding Results Structure
 
@@ -98,11 +145,12 @@ for label, interval_data in results.groupby("interval_labels"):
 
 ### Documentation
 
-- Delete extra pyscripts that were renamed # 1363
+- Delete extra pyscripts that were renamed #1363
 - Add note on fetching changes to setup notebook #1371
 - Revise table field docstring heading and `mermaid` diagram generation #1402
 - Add pages for custom analysis tables and class inheritance structure #1435
 - Add support for bandstop filter type #1464
+- Add Interval and Populate migration guides #1615
 
 ### Infrastructure
 
@@ -148,7 +196,26 @@ for label, interval_data in results.groupby("interval_labels"):
 - Add `analysis_table` property to mixin for custom pipelines #1525
 - Quiet pytest output for expected warnings in test runs #1534
 - Fix update bug in `_resolve_external_tables` #1536
+- Fix `_get_epoch_groups` raising `TypeError` for `SpatialSeries` with
+    `starting_time + rate` (no timestamps) #1567
+- Fix `_get_pos_dict` raising `TypeError` for `SpatialSeries` with
+    `starting_time + rate` (no timestamps) #1571
+- Parallelize `AnalysisFileIssues` checks #1557
+- Tests update config sooner to avoid false-negative `test_mode` errors #1572
+- Fix typo in `env_defaults` key: `HD5_USE_FILE_LOCKING` →
+    `HDF5_USE_FILE_LOCKING` so the HDF5 library actually sees the intended
+    `FALSE` default #1575
+- Warn on no-operation restrictions #1586
+- Improved efficiency for writing multiple objects to analysis file #1594
+- Pin `scipy<1.13` for `spikeinterface==0.99.1` compatibility #1612
+- Fix `NwbfileHasher` to include HDF5 Dataset content in file hash; add
+    `SPYGLASS_LEGACY_HASHES` env var to `RecordingRecompute` for backward
+    compatibility with pre-fix hashes #1600
+- Fix redundant hash computation in `SpikeSortingRecording._make_file`:
+    `_update_external` no longer re-reads the NWB file to verify a hash that was
+    just computed by the caller #1600
 - Allow no database connection during import #1559
+- Fix bug from overlapping intervals in interval union #1520
 
 ### Pipelines
 
@@ -156,6 +223,7 @@ for label, interval_data in results.groupby("interval_labels"):
 
     - Add methods for calling moseq visualization functions #1374
     - Ensure latent moseq dimension is compatible with dataset #1511
+    - Add option to normalize keypoint spacing by body length #1569
 
 - Common
 
@@ -179,10 +247,9 @@ for label, interval_data in results.groupby("interval_labels"):
         files #1466
     - Allow ingestion of nwb files without behavior module #1441
     - Warn when ingesting ImageSeries without TaskEpoch #1461
-    - Support ingestion of multi-epoch video files #1548
+    - Support ingestion of multi-epoch video files #1548 \<<\<<\<<< HEAD
     - Fix bug with sgc.LabTeam().create_new_team when google_user_name is not
-        available #1546
-    - Fix bug from overlapping intervals in interval union #1520
+    - Fix bug with `LabTeam().create_new_team` when `google_user_name` is not
 
 - Decoding
 
@@ -195,9 +262,11 @@ for label, interval_data in results.groupby("interval_labels"):
         from multiple intervals are now concatenated along the `time` dimension
         with an `interval_labels` coordinate to track interval membership. This
         eliminates NaN padding and reduces memory usage. See migration guide
-        above.
+        above. \<<\<<\<<< HEAD
     - Fix fetching position df in
         SortedSpikesDecodingV1.get_ahead_behind_distance() #1540
+    - Fix fetching position dataframe in
+        `SortedSpikesDecodingV1.get_ahead_behind_distance()` #1540
 
 - LFP
 
@@ -211,6 +280,7 @@ for label, interval_data in results.groupby("interval_labels"):
     - Fix ingestion nwb files with position objects but no spatial series #1405
     - Ignore `percent_frames` when using `limit` in `DLCPosVideo` #1418
     - Increase `DLCProject.config_path` length #1534
+    - Add option to bound output of DLC to defined spatial region #1570
 
 - Spikesorting
 
@@ -219,6 +289,20 @@ for label, interval_data in results.groupby("interval_labels"):
     - Improve get_recording efficiency #1522
     - Raise error if `FigURLCurationSelection` finds no curation label #1531
     - Allow `CurationV1` to save without any spikes #1533
+    - Trigger recompute in `CurationV1.get_recording` when necessary #1561
+    - Drop spike sample indices that exceed the recording length in
+        `CurationV1.get_sorting` and `SpikeSorting.get_sorting`, fixing a
+        SpikeInterface `ValueError` caused by floating-point round-trip in the
+        seconds-to-samples conversion #1564
+    - Trigger recording recompute in `SpikeSortingRecording.populate` when
+        necessary #1588, #1599
+    - Restrict `ImportedSpikeSorting.Annotations` to the current session in
+        `make_df_from_annotations` so `fetch_nwb` works across multiple sessions
+        with overlapping unit ids #1581, #1592
+    - Fix `NwbfileHasher` to include HDF5 Dataset content in
+        `SpikeSortingRecording.hash`; previously only attrs/shape/dtype were
+        hashed so in-place Dataset edits were invisible to the hasher #1600
+    - Implement fix for `AutomaticCuration` incorrect labels #1537
 
 ## [0.5.5] (Aug 6, 2025)
 
@@ -241,6 +325,7 @@ for label, interval_data in results.groupby("interval_labels"):
 - Remove outdated code comments #1304
 - Add code coverage badge, and increase position coverage #1305, #1315
 - Force `TableChain` to follow shortest path #1356
+- Avoid database connections in import of `spyglass.settings` #1563
 
 ### Documentation
 
@@ -266,6 +351,7 @@ for label, interval_data in results.groupby("interval_labels"):
     - Prompt user to verify compatibility between new insert and existing table
         entries # 1318, #1350
     - Skip empty timeseries ingestion (`PositionSource`, `DioEvents`) #1347
+    - Reduce excess warnings/errors #1589
 - Position
     - Allow population of missing `PositionIntervalMap` entries during population
         of `DLCPoseEstimation` #1208

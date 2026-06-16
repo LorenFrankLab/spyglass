@@ -2,7 +2,7 @@ from typing import List
 
 import h5py
 
-from spyglass.utils.dj_helper_fn import ExportErrorLog, _resolve_external_table
+from spyglass.utils.dj_helper_fn import _resolve_external_table
 from spyglass.utils.h5py_helper_fn import (
     add_id_column_to_table,
     convert_dataset_type,
@@ -63,6 +63,9 @@ def update_analysis_for_dandi_standard(
             add_id_column_to_dynamic_tables(file)
 
     except BlockingIOError as e:
+        # import here to avoid circular import
+        from spyglass.common.common_usage import ExportErrorLog  # noqa
+
         ExportErrorLog().insert1(
             {
                 "file": filepath,
