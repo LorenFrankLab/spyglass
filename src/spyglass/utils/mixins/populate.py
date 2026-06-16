@@ -68,7 +68,9 @@ class PopulateMixin(BaseMixin):
                 from spyglass.common.common_usage import ActivityLog
 
                 ActivityLog().deprecate_log(
-                    "no_transaction_make", alt="tri-part make"
+                    f"no_transact:{self.full_table_name}"[:64],
+                    alt="tri-part make",
+                    doc="https://lorenfranklab.github.io/spyglass/latest/Features/Populate/",
                 )
 
         if use_transact is False and processes > 1:
