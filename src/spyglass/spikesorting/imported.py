@@ -151,9 +151,10 @@ class ImportedSpikeSorting(SpyglassIngestion, dj.Imported):
     def make_df_from_annotations(self):
         """Convert the annotations part table into a dataframe that can be
         concatenated to the spikes dataframe in the nwb file."""
+        annotation_query = self.Annotations & self.fetch("KEY")
         df = []
         for id, label, annotations in zip(
-            *self.Annotations.fetch("id", "label", "annotations")
+            *annotation_query.fetch("id", "label", "annotations")
         ):
             df.append(
                 dict(

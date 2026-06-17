@@ -594,6 +594,12 @@ def test_deprecated_methods_warn(pos_merge, caplog):
     """Deprecated merge_X methods log a deprecation naming Spyglass 0.7.0."""
     import logging
 
+    from spyglass.common import common_usage
+
+    # deprecate_log warns once per process; clear so this test sees the warning
+    common_usage._warned_functions.discard("merge_restrict")
+    common_usage._warned_functions.discard("merge_view")
+
     with caplog.at_level(logging.WARNING, logger="spyglass"):
         pos_merge.merge_restrict(True)
         pos_merge.merge_view(True)
