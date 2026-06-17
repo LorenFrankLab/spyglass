@@ -42,10 +42,11 @@ corresponding table entries.
     this table (eg. `pynwb.misc.Units` for `ImportedSpikesorting`).
 - `table_key_to_obj_attr`: A dict of dicts mapping table keys to NWB object values.
   There are several options for identifying object values:
-    - `str`: Spyglass wil take the object attribute of that name
-    - `Tuple[str, any]`: Spyglass wil take the object attribute matching the first
-      term, defaulting to the value of the second if unavailable
-    - `Callable`: A function that takes the nwb object and returns the value to insert
+    - `str`: Spyglass will take the object attribute of that name
+    - `Tuple[str, any]`: Spyglass will take the object attribute matching the first
+    term, defaulting to the value of the second if unavailable
+    - `Callable`: A function that takes the nwb object and returns the value to
+    insert
 
 With these defined the table entries are populated from the following methods:
 
