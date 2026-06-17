@@ -7,7 +7,7 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.19.1
 #   kernelspec:
-#     display_name: spyglass
+#     display_name: '1335'
 #     language: python
 #     name: python3
 # ---
@@ -208,7 +208,7 @@ LFPOutput & nwb_file_dict
 # `fetch1()` follows DataJoint convention
 
 # %%
-restrict = LFPOutput & "lfp_electrode_group_name='test'"
+restrict = LFPOutput & "lfp_electrode_group_name='test'" & dj.Top()
 restrict.fetch1()
 
 # %%
