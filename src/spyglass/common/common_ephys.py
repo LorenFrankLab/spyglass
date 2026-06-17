@@ -74,7 +74,7 @@ class ElectrodeGroup(SpyglassIngestion, dj.Imported):
         targeted_x = getattr(nwb_obj, "targeted_x", None)
         if targeted_x is not None:
             return "Right" if float(targeted_x) >= 0 else "Left"
-        return None
+        return "Unknown"
 
     def make(self, key):
         """Make without transaction
@@ -138,7 +138,7 @@ class Electrode(SpyglassIngestion, dj.Imported):
                 # non-default columns
                 "probe_shank": ("probe_shank", None),
                 "probe_electrode": ("probe_electrode", None),
-                "original_reference_electrode": ("ref_elect_id", None),
+                "original_reference_electrode": ("ref_elect_id", -1),
                 "bad_channel": self.bad_channel_as_string,
             },
             "group": {
@@ -169,7 +169,7 @@ class Electrode(SpyglassIngestion, dj.Imported):
 
     def device_probe_type_default_none(self, nwb_obj):
         """Fetch the probe type from the NWB object."""
-        if not (device := getattr(nwb_obj, "device")):
+        if not (device := getattr(nwb_obj, "device", None)):
             return None
         return getattr(device, "probe_type", None)
 
@@ -218,7 +218,20 @@ class Electrode(SpyglassIngestion, dj.Imported):
                 if e["electrode_id"] == entry["electrode_id"]
             ]
             if matching_configs:
-                entry.update(matching_configs[0])
+                cfg = matching_configs[0]
+                probe_fk = {
+                    k: cfg.get(k)
+                    for k in ("probe_id", "probe_shank", "probe_electrode")
+                    if k in cfg
+                }
+                if probe_fk and len(Probe.Electrode & probe_fk) == 0:
+                    warnings.warn(
+                        "No Probe.Electrode exists that matches the data: "
+                        + f"{probe_fk}. The config YAML for Electrode with electrode_id "
+                        + f"{entry['electrode_id']} will be ignored."
+                    )
+                else:
+                    entry.update(cfg)
         return entries
 
     @classmethod
