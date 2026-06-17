@@ -238,10 +238,7 @@ class Electrode(SpyglassIngestion, dj.Imported):
     def create_from_config(cls, nwb_file_name: str):
         from spyglass.common.common_usage import ActivityLog
 
-        ActivityLog().deprecate_log(
-            "Electrode.create_from_config",
-            alt="Electrode.create_from_config(nwb_file_name)",
-        )
+        ActivityLog().deprecate_log("Electrode.create_from_config")
 
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         config = get_config(nwb_file_abspath, calling_table=cls.__name__)
