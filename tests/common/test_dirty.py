@@ -832,6 +832,61 @@ def test_warn_countdown_uses_days_since_first_flag(caplog, warn_dirty_days):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+#     _warn_once import-time gating (mock-based, no DB)
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# _warn_once() is the synchronous, once-per-process warning hook called from
+# spyglass/__init__.py (and lazily by UserEnvironment.this_env). These tests
+# cover its gating; the CondaEnvCache is_stale() gating is covered by the
+# test_cache_stale_* / test_cache_no_conda_prefix tests above.
+
+
+def test_warn_once_idempotent():
+    """_warn_once calls warn_if_dirty only once per process."""
+    import spyglass.utils.git_utils as gu
+
+    gu._warned = False
+    calls = []
+    try:
+        with patch.object(gu, "get_install_info", return_value={}):
+            with patch.object(
+                gu,
+                "warn_if_dirty",
+                side_effect=lambda info: calls.append(info) or True,
+            ):
+                gu._warn_once()
+                gu._warn_once()
+        assert len(calls) == 1  # second call short-circuited by the flag
+        assert gu._warned is True
+    finally:
+        gu._warned = False
+
+
+def test_warn_once_retries_when_not_ready():
+    """A False result (DB not ready) leaves the flag unset for a later retry."""
+    import spyglass.utils.git_utils as gu
+
+    gu._warned = False
+    outcomes = iter([False, True])
+    calls = []
+
+    def fake_warn(info):
+        calls.append(info)
+        return next(outcomes)
+
+    try:
+        with patch.object(gu, "get_install_info", return_value={}):
+            with patch.object(gu, "warn_if_dirty", side_effect=fake_warn):
+                gu._warn_once()  # returns False -> not decisive
+                assert gu._warned is False
+                gu._warn_once()  # returns True -> decisive, flag set
+                assert gu._warned is True
+        assert len(calls) == 2
+    finally:
+        gu._warned = False
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 #     UserEnvironment integration (requires DB)
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -997,7 +1052,7 @@ def test_stale_install_flagged(user_env_tbl, stale_install_info):
 
 
 def test_clean_install_not_in_dirty_installs(user_env_tbl, clean_install_info):
-    """A clean install is NOT surfaced by dirty_installs() (8-A regression)."""
+    """A clean install is NOT surfaced by dirty_installs()."""
     with patch(
         "spyglass.common.common_user.get_install_info",
         return_value=clean_install_info,
@@ -1129,3 +1184,110 @@ def test_write_dirty_notifications_no_overdue(user_env_tbl):
     mock_result.fetch = MagicMock(return_value=[])
     with patch.object(user_env_tbl, "dirty_installs", return_value=mock_result):
         user_env_tbl.write_dirty_notifications()  # should return silently
+
+
+def test_write_dirty_notifications_writes_tsv(user_env_tbl, tmp_path):
+    """Overdue rows are written as TSV; the longest matching prefix wins."""
+    import spyglass.common.common_lab as _lab_mod
+
+    overdue_rows = [
+        {
+            "env_id": "alice_env_00",
+            "days_since_warn": 45,
+            "spyglass_commit": "aaa1111",
+            "dirty_path": "/home/alice/spyglass",
+        },
+        {
+            "env_id": "alice_bob_env_00",
+            "days_since_warn": 31,
+            "spyglass_commit": "bbb2222",
+            "dirty_path": "/home/alice_bob/sg",
+        },
+        {
+            "env_id": "carol_env_00",  # below threshold — filtered out
+            "days_since_warn": 10,
+            "spyglass_commit": "ccc3333",
+            "dirty_path": "/home/carol/sg",
+        },
+    ]
+    member_rows = [
+        {"datajoint_user_name": "alice", "google_user_name": "alice@lab.org"},
+        {"datajoint_user_name": "alice_bob", "google_user_name": "ab@lab.org"},
+        {"datajoint_user_name": "carol", "google_user_name": "carol@lab.org"},
+    ]
+    mock_result = MagicMock()
+    mock_result.fetch = MagicMock(return_value=overdue_rows)
+    out_file = tmp_path / "dirty.tsv"
+
+    with patch.object(user_env_tbl, "dirty_installs", return_value=mock_result):
+        with patch.object(
+            _lab_mod.LabMember.LabMemberInfo,
+            "fetch",
+            return_value=member_rows,
+        ):
+            user_env_tbl.write_dirty_notifications(str(out_file))
+
+    lines = [ln for ln in out_file.read_text().splitlines() if ln]
+    assert len(lines) == 2  # carol filtered out (10 < 30 days)
+    assert "alice@lab.org\t45\taaa1111\t/home/alice/spyglass" in lines
+    # Longest-prefix match: alice_bob_env_00 -> alice_bob, NOT alice.
+    assert "ab@lab.org\t31\tbbb2222\t/home/alice_bob/sg" in lines
+    assert not any("carol" in ln for ln in lines)
+
+
+def test_write_dirty_notifications_skips_unknown_user(
+    user_env_tbl, tmp_path, capsys
+):
+    """A row with no matching LabMemberInfo email is skipped (stderr note)."""
+    import spyglass.common.common_lab as _lab_mod
+
+    overdue_rows = [
+        {
+            "env_id": "ghost_env_00",
+            "days_since_warn": 60,
+            "spyglass_commit": "ddd4444",
+            "dirty_path": "/home/ghost/sg",
+        },
+    ]
+    member_rows = [
+        {"datajoint_user_name": "alice", "google_user_name": "alice@lab.org"},
+    ]
+    mock_result = MagicMock()
+    mock_result.fetch = MagicMock(return_value=overdue_rows)
+    out_file = tmp_path / "dirty.tsv"
+
+    with patch.object(user_env_tbl, "dirty_installs", return_value=mock_result):
+        with patch.object(
+            _lab_mod.LabMember.LabMemberInfo,
+            "fetch",
+            return_value=member_rows,
+        ):
+            user_env_tbl.write_dirty_notifications(str(out_file))
+
+    assert out_file.read_text().strip() == ""  # nothing written
+    assert "ghost_env_00" in capsys.readouterr().err
+
+
+def test_env_hash_clean_backward_compat(user_env_tbl, clean_install_info):
+    """Clean install (commit_hash=None) yields the pre-PR hash (dict untouched).
+
+    Protects existing recompute rows: folding spyglass_commit into the hash
+    must be a no-op when there is no commit, so a clean install hashes exactly
+    as it did before the column was added.
+    """
+    from hashlib import md5
+    from json import dumps as json_dumps
+
+    with patch(
+        "spyglass.common.common_user.get_install_info",
+        return_value=clean_install_info,
+    ):
+        for attr in ("env", "env_hash", "matching_env_id", "this_env"):
+            user_env_tbl.__dict__.pop(attr, None)
+        env_dict = user_env_tbl.parse_env_dict(user_env_tbl.env)
+        expected = md5(
+            json_dumps(env_dict, sort_keys=True).encode()
+        ).hexdigest()
+        got = user_env_tbl.env_hash
+
+    assert got == expected  # no spyglass_commit folded in for a clean install
