@@ -771,11 +771,29 @@ def build_analyzer(
     # spikeinterface-gui probe view both raise
     # ``could not broadcast input array from shape (3,) into shape (2,)`` on a
     # 3D probe. The in-plane (x, y) coordinates are unchanged by the projection,
-    # so sparsity, templates, and waveforms are unaffected; only the dropped
-    # all-zero z axis goes away. Done here (rather than at recording
-    # materialization) so the sort itself still sees the recording untouched.
+    # so sparsity, templates, and waveforms are unaffected ONLY when the z axis
+    # is degenerate (all-zero, as Spyglass stores it). Done here (rather than at
+    # recording materialization) so the sort itself still sees the recording
+    # untouched.
     probe = recording.get_probe()
     if probe.ndim == 3:
+        import numpy as _np
+
+        from spyglass.utils import logger
+
+        # Dropping a non-degenerate z axis would shift channel distances (and
+        # therefore sparsity), so the "x/y unchanged" guarantee above no longer
+        # holds. Frank-lab probes are planar (z=0); warn on a genuinely
+        # non-planar probe, which may need a different projection axis.
+        z = _np.asarray(probe.contact_positions)[:, 2]
+        if z.size and not _np.allclose(z, z[0]):
+            logger.warning(
+                "build_analyzer: projecting a 3D probe to 2D (axes='xy'), but "
+                "the contact z coordinates are not constant (range "
+                f"{float(z.max() - z.min()):.3g} um). Depth geometry is "
+                "discarded, which can shift channel distances and sparsity "
+                "relative to the 3D probe."
+            )
         recording = recording.set_probe(probe.to_2d())
 
     try:
