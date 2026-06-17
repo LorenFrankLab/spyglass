@@ -6,6 +6,7 @@ Reference material for executors implementing against external code or formats. 
 
 ## Contents
 
+- [SpikeInterface 0.104.3 — source-verified findings (read first)](#spikeinterface-01043--source-verified-findings-read-first)
 - [SpikeInterface 0.99 → 0.104 migration cheat sheet](#spikeinterface-099--0104-migration-cheat-sheet)
 - [SortingAnalyzer extension dependencies](#sortinganalyzer-extension-dependencies)
 - [Quality metric renames in 0.104](#quality-metric-renames-in-0104)
@@ -16,6 +17,90 @@ Reference material for executors implementing against external code or formats. 
 - [Motion correction presets](#motion-correction-presets)
 - [MEArec integration notes](#mearec-integration-notes)
 - [Spyglass NWB ingestion requirements (trodes_to_nwb compatibility)](#spyglass-nwb-ingestion-requirements-trodes_to_nwb-compatibility)
+
+---
+
+## SpikeInterface 0.104.3 — source-verified findings (read first)
+
+These are verified against the **installed** SI 0.104.3 source in the v2 env
+(`/Users/edeno/miniconda3/envs/spyglass_spikesorting_v2/lib/python3.11/site-packages/spikeinterface/`),
+not docs/training. **They correct or extend the doc-based sections below** — where
+they conflict, trust this section. (The full SI parameter tables for sorters /
+preprocessing / analyzer live in the sibling plan
+`.claude/docs/plans/spikesorting-v2-ux-followups/appendix.md`.)
+
+### `detect_threshold` units (sorters)
+MS4/MS5 `detect_threshold` is a **standard-deviation multiple of the ZCA-whitened
+signal** (MS4 default 3 ≈ 3σ; MS5 5.5 = same scale, more conservative), **not** a
+MAD multiplier. Traced: `mountainsort4/ms4alg.py:60` thresholds the raw whitened
+signal with no internal normalization; the wrapper whitens first via std-based ZCA
+(`whiten.py:256` `cov = data.T@data/N`); post-whiten std is empirically ≈1.0. **MAD
+is genuinely the clusterless `detect_peaks` path only** (`abs_thresholds =
+noise_levels × detect_threshold`: estimated `noise_levels` → per-channel MAD;
+`noise_levels=[1.0]` + `scale_to_uV` → true µV). Any "MAD multiplier" wording for
+MS4/MS5 is a misnomer.
+
+### SortingAnalyzer extension recompute cascade + determinism (Phase 2)
+**Supersedes the simplified DAG in [SortingAnalyzer extension dependencies](#sortinganalyzer-extension-dependencies).**
+Recomputing a parent **silently deletes its children** (recursive): `random_spikes`
+→ deletes `waveforms, templates, principal_components`; `waveforms` → deletes
+`templates, PCA`; `templates` → deletes ALL template-derived (`spike_amplitudes,
+spike_locations, unit_locations, template_similarity, template_metrics,
+amplitude_scalings`). Changing an extension's params also wipes its on-disk data.
+**Consequence for `AnalyzerCuration`:** compute waveforms/templates with the FINAL
+recipe first, then derive metrics — and note v2's committed `peak_amplitude_uv` is
+template-derived, so a waveform-recipe change rewrites a DB value.
+**Determinism:** `random_spikes`, `whiten`, and the nn_* metric all default
+`seed=None` (non-deterministic subsampling) — pin the seed (v2 uses 0) in any
+recompute or fixture hashes drift.
+**Silent incompleteness:** `quality_metrics`' PCA metrics run only if
+`principal_components` already exists (silent skip otherwise); snr/amplitude metrics
+silently use `noise_levels`/`spike_amplitudes`/`templates` if present. `depend_on`
+does **not** enforce this — compute the required extensions explicitly and assert
+their presence, or metric values silently change/omit.
+
+### Quality-metric porting traps (Phase 2)
+**Extends [Quality metric renames in 0.104](#quality-metric-renames-in-0104) — two breakers:**
+1. **`nn_isolation`/`nn_noise_overlap` no longer exist as metric names** — they're
+   the two output columns of a single metric **`nn_advanced`** in SI 0.104.3.
+   Requesting the old names in `compute_quality_metrics(metric_names=[...])` **raises
+   ValueError**. The v1 `getattr(sq, "nearest_neighbors_isolation")` chain resolves
+   only under SI 0.99. Request `nn_advanced`; read the two columns from the result.
+   Frank-lab params differ from SI defaults (`n_components=7` vs 10, `n_neighbors=5`
+   vs 4, `max_spikes=20000` vs 1000, `seed=0` vs None) — pass all explicitly.
+2. **Spyglass `isi_violation` ≠ SI `isi_violations_ratio`.** SI's *ratio* is the
+   Hill/UMS2000 **contamination-rate estimate** `n_viol·T / (2·N²·(τ−min_isi))`
+   (`misc_metrics.py` `isi_violations`) — unbounded, can exceed 1, "breaks down for
+   highly contaminated units" (SI docstring). Spyglass instead takes SI's raw
+   violation **count** and returns `count/(N−1)` (`v1/metric_utils.py:16-38`) — the
+   bounded observed fraction of too-short ISIs. So the Set-A gate `isi_violation >
+   0.0025` = "0.25% of ISIs violate" (the user's mooted 2% = `> 0.02`). **If Phase 2
+   uses SI's `isi_violation` column it gets the ratio, silently changing the gate's
+   meaning — replicate `count/(N−1)`.** Edge bug (#1556 class): a 0-spike unit gives
+   `(-1)/(-1)=1.0` (spurious 100% violation) that survives NaN sanitization.
+   Low-spike NaN: `nn_*` → NaN below `min_spikes=10` (so low-spike noisy units are
+   NOT auto-rejected, NaN compares False); `amplitude_cutoff` → NaN below ~500 spikes.
+   `peak_offset`/`peak_channel` are Frank-lab custom, not SI metrics.
+
+### Motion correction (Phase 3) — torch + single-segment
+**Extends [Motion correction presets](#motion-correction-presets).** `dredge`,
+`dredge_fast`, **and `rigid_fast`** all use `dredge_ap`, which **hard-requires torch**
+(`dredge.py:110-113`). Only **`kilosort_like`** (`iterative_template`) is torch-free;
+`nonrigid_accurate`/`nonrigid_fast_and_accurate` (`decentralized`) are torch-optional
+(numpy fallback). **No preset needs GPU** (CPU fallback). So the planned `rigid_fast`
+same-day concat default depends on torch (v2 already pins it). `correct_motion` code
+default is `dredge_fast` (docstring stale). **`estimate_motion` is single-segment
+only** (`assert num_segments==1`) — concat must estimate on one concatenated segment.
+SI explicitly says **do not whiten before motion estimation** — aligns with v2's
+deferred whitening (filter → motion → whiten → sort).
+
+### Ground-truth comparison (Phase 1/4 accuracy gates)
+`compare_sorter_to_ground_truth` defaults `match_score=0.5`, `delta_time=0.4 ms`.
+`accuracy = tp/(tp+fn+fp)`, `recall = tp/(tp+fn)`, `precision = tp/(tp+fp)`
+(`comparisontools.py:861`). **Unmatched GT units report all-zeros (not
+`miss_rate=1`)** — a pooled average is dragged toward 0 by undetected units; use
+`get_performance("by_unit")` per unit for the AUC/accuracy gate. `delta_frames`
+truncates; matching is boundary-inclusive.
 
 ---
 
@@ -48,7 +133,7 @@ Direct replacements when porting code from v1 to v2. Sources:
 
 ## SortingAnalyzer extension dependencies
 
-Extensions form a DAG. Phase 1 / 2 must compute parents before children.
+Extensions form a DAG. Phase 1 / 2 must compute parents before children. **This diagram is a simplification** — for the exact dependency edges, the recompute **silent-delete cascade** (recomputing a parent wipes its children, including the committed `peak_amplitude_uv`), and the seed-pinning / silent-incompleteness gotchas, see [§ SpikeInterface 0.104.3 source-verified findings](#spikeinterface-01043--source-verified-findings-read-first).
 
 ```
 random_spikes  ───┐
@@ -84,6 +169,8 @@ These break v1's `MetricParameters` blobs verbatim — Phase 2 introduces fresh 
 | `snr` (mean-based) | `snr` (median-based) | Same name, different formula. Numeric thresholds shift; recalibrate. |
 | `from spikeinterface.qualitymetrics import compute_snr` | Use `spikeinterface.metrics.quality.compute_quality_metrics(...)` for table-level v2 metrics; only import individual metric helpers from SI's documented metric submodules after checking the pinned 0.104 API. | Metrics were refactored in 0.104. |
 | `auto_label_units` | `unitrefine_label_units` | UnitRefine rebranded. |
+| `nn_isolation`, `nn_noise_overlap` (two metrics) | `nn_advanced` (one metric, two output columns) | **Requesting the old names raises `ValueError` in 0.104.** Request `nn_advanced`; read the `nn_isolation`/`nn_noise_overlap` columns from the result. PCA metric → needs `principal_components` and `skip_pc_metrics=False`. See source-verified findings above. |
+| `isi_violation` (Spyglass = custom fraction) | `isi_violation` column = SI's `isi_violations_ratio` | **Not the same number.** Spyglass = `count/(N−1)` (bounded observed fraction); SI's ratio = Hill/UMS2000 contamination estimate (unbounded). Replicate the count-based fraction; don't use SI's ratio column. |
 
 Source: SpikeInterface 0.104 release notes — https://spikeinterface.readthedocs.io/en/stable/releases/0.104.0.html
 
@@ -243,6 +330,8 @@ Available in `spikeinterface.preprocessing.correct_motion()` as of 0.104:
 | `medicine` | MEDiCINe | Alternative to DREDge | Medium |
 | `nonrigid_accurate` | Nonrigid with monopolar localization | High-density probes, severe drift | Very slow |
 | `nonrigid_fast_and_accurate` | Nonrigid DREDge/KS-like hybrid | High-density probes, severe drift | Medium/slow |
+
+**Torch / single-segment caveats (verified against source — see [source-verified findings](#spikeinterface-01043--source-verified-findings-read-first)):** `dredge`, `dredge_fast`, **and `rigid_fast`** all route through `dredge_ap`, which **hard-requires torch** (CPU is fine; no GPU needed). Only `kilosort_like` is torch-free; `nonrigid_accurate`/`nonrigid_fast_and_accurate` are torch-optional. v2 already pins torch, so this is satisfied — but `rigid_fast` is not the "dependency-free" option it looks like. Also `estimate_motion` is **single-segment only** (`assert num_segments == 1`), so the concat materializer must estimate on one concatenated segment, and SI explicitly says do not whiten before motion (v2 defers whitening — consistent).
 
 For Phase 3 default: `rigid_fast` (same-day, fast).
 For opt-in multi-day concat: caller must choose an explicit non-`auto` preset; `dredge_fast` or `dredge` are candidate presets, but sort-then-match remains the recommended cross-day workflow.
