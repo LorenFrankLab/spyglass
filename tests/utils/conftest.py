@@ -126,9 +126,7 @@ def graph_schema(SpyglassMixin, _Merge):
         ---
         -> ParentNode
         """
-        contents = [
-            (intermediate_id[0], parent_id[3])
-        ]
+        contents = [(intermediate_id[0], parent_id[3])]
 
     class PkNode(SpyglassMixin, dj.Lookup):
         definition = """

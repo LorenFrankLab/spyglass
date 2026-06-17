@@ -120,10 +120,10 @@ def test_rg_add_list(add_graph_rgs, add_graph_tables):
     ), "Unexpected child restricted table length for union of rg_1 and rg_2."
 
 
-def test_rg_revisits_with_expanded_restriction(graph_schema):
+def test_rg_revisits_with_expanded_restriction(graph_tables):
     from spyglass.utils.dj_graph import RestrGraph
 
-    tables = graph_schema
+    tables = graph_tables
     graph = RestrGraph(
         seed_table=tables["BranchNode"](),
         leaves=[
