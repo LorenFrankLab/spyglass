@@ -20,10 +20,16 @@ Detection logic
 4. ``has_local_changes`` — ``git diff --name-only HEAD -- src/`` returns
    non-empty output.  Scoped to ``src/`` so doc edits, notebook changes, and
    ``.claude/`` artefacts are intentionally ignored.
-5. ``is_official`` — ``not is_dev and not has_local_changes``.
+5. ``is_stale`` — HEAD's commit date is more than ``WARN_STALE_DAYS`` days
+   old, i.e. the clone has not fetched upstream in months.  Being a handful
+   of commits behind does not flag; only long-neglected clones do.
+6. ``is_official`` — ``not has_local_changes and not is_stale``.  Note this
+   is independent of ``is_dev``: a clone tracking ``master`` that is current
+   and unmodified is treated as official even though it is a dev build.
 """
 
 import re
+from datetime import datetime
 from functools import cached_property
 from pathlib import Path
 from subprocess import run as sub_run
@@ -35,6 +41,15 @@ _SUBPROCESS_KWARGS = dict(capture_output=True, text=True, timeout=10)
 
 # Days before a flagged dirty install triggers an admin notification.
 WARN_DIRTY_ENV_DAYS = 30
+
+# A clean install whose HEAD commit is older than this many days is treated as
+# "stale" (months behind upstream).  Being a few commits behind does not flag;
+# only an install that has not fetched upstream in a long time does.
+WARN_STALE_DAYS = 90
+
+# Set once per process after the first decisive dirty/stale warning so that the
+# import-time and lazy (this_env) callers do not double-warn.
+_warned = False
 
 # Matches the ``+g<hash>`` VCS suffix appended by setuptools-scm / hatch-vcs.
 _VCS_HASH_RE = re.compile(r"\+g([0-9a-f]+)$")
@@ -58,27 +73,34 @@ class _InstallInfoCache:
 _install_info = _InstallInfoCache()
 
 
-def warn_if_dirty(install_info: dict) -> None:
+def warn_if_dirty(install_info: dict) -> bool:
     """Warn non-admin users when running a non-official Spyglass install.
 
     Emits a ``logger.warning`` for two cases:
 
     * **Dirty** (``has_local_changes=True``): full countdown warning.
-    * **Dev** (``is_dev=True``, no local changes): softer "older commit"
-      advisory.
+    * **Stale** (``is_stale=True``, no local changes): softer "older commit"
+      advisory for clones that are months behind upstream.
 
-    Returns silently for official installs, admin users, or when the DB
-    is unreachable.  All ``spyglass.common`` imports are deferred inside
-    the function body to avoid a circular dependency (``common/`` already
-    imports from ``utils/``).
+    Returns silently for official installs and admin users.  All
+    ``spyglass.common`` imports are deferred inside the function body to avoid
+    a circular dependency (``common/`` already imports from ``utils/``).
 
     Parameters
     ----------
     install_info : dict
         The dict returned by :func:`get_install_info`.
+
+    Returns
+    -------
+    bool
+        ``True`` when a decision was reached (official, admin, or a warning
+        emitted); ``False`` when the call could not proceed because
+        ``spyglass.common`` / the DB was not importable yet — signalling the
+        caller it may retry later.
     """
     if install_info.get("is_official"):
-        return
+        return True
 
     # Deferred imports — common/ imports utils/, so top-level imports here
     # would create a circular dependency.
@@ -87,11 +109,11 @@ def warn_if_dirty(install_info: dict) -> None:
         from spyglass.common.common_lab import LabMember
         from spyglass.common.common_user import UserEnvironment
     except Exception:
-        return
+        return False  # not ready — let the caller retry later
 
     try:
         if LabMember().user_is_admin:
-            return
+            return True
     except Exception:
         pass  # DB unreachable — still show warning
 
@@ -105,8 +127,6 @@ def warn_if_dirty(install_info: dict) -> None:
             & "dirty_path IS NOT NULL"
         )
         if dirty:
-            from datetime import datetime
-
             first_flagged = min(dirty.fetch("timestamp"))
             days = (datetime.now() - first_flagged).days
     except Exception:
@@ -126,12 +146,32 @@ def warn_if_dirty(install_info: dict) -> None:
             "We will flag this issue for discussion if it is not "
             f"resolved within {N} days."
         )
-    elif install_info.get("is_dev"):
+    elif install_info.get("is_stale"):
         logger.warning(
             "Spyglass is being run from an older commit. Please consider "
             "updating to the latest version to ensure you have the latest "
             "features and bug fixes."
         )
+
+    return True
+
+
+def _warn_once() -> None:
+    """Run :func:`warn_if_dirty` at most once per process.
+
+    Used by both the import-time hook (``spyglass/__init__.py``) and the lazy
+    path (``UserEnvironment.this_env``).  The flag is only set when
+    ``warn_if_dirty`` reports a decisive result, so an early import-time call
+    that finds the DB not yet ready will be retried by the lazy path.
+    """
+    global _warned
+    if _warned:
+        return
+    try:
+        if warn_if_dirty(get_install_info()):
+            _warned = True
+    except Exception:
+        pass
 
 
 def get_install_info() -> dict:
@@ -154,9 +194,14 @@ def get_install_info() -> dict:
         ``True`` when ``git diff --name-only HEAD -- src/`` produces output,
         meaning tracked source files have been modified relative to HEAD.
         Always ``False`` when ``install_path`` is ``None``.
+    is_stale : bool
+        ``True`` when HEAD's commit date is more than ``WARN_STALE_DAYS`` days
+        old (the clone is months behind upstream).  Always ``False`` when
+        ``install_path`` is ``None``.
     is_official : bool
-        ``True`` only when both ``is_dev`` and ``has_local_changes`` are
-        ``False`` — i.e. an unmodified, tagged release install.
+        ``True`` only when both ``has_local_changes`` and ``is_stale`` are
+        ``False`` — i.e. a clean clone that is reasonably current (or a clean
+        pip-installed release).  Independent of ``is_dev``.
 
     Notes
     -----
@@ -191,21 +236,24 @@ def _compute_install_info() -> dict:
     except Exception:
         pass
 
-    # ── has_local_changes: only meaningful inside a git repo ─────────────────
+    # ── has_local_changes / is_stale: only meaningful inside a git repo ──────
     has_local_changes = False
+    is_stale = False
     if install_path is not None:
         # Obtain commit_hash from git if not already parsed from __version__
         if commit_hash is None:
             commit_hash = _git_short_hash(install_path)
 
         has_local_changes = _git_has_src_changes(install_path)
+        is_stale = _git_head_is_stale(install_path)
 
     return {
         "is_dev": is_dev,
         "commit_hash": commit_hash,
         "install_path": install_path,
         "has_local_changes": has_local_changes,
-        "is_official": not is_dev and not has_local_changes,
+        "is_stale": is_stale,
+        "is_official": not has_local_changes and not is_stale,
     }
 
 
@@ -253,4 +301,34 @@ def _git_has_src_changes(repo_root: str) -> bool:
         logger.debug("git not found; assuming no local changes")
     except Exception as exc:
         logger.debug(f"git diff failed: {exc}")
+    return False
+
+
+def _git_head_is_stale(repo_root: str) -> bool:
+    """Return ``True`` if HEAD's commit date is older than ``WARN_STALE_DAYS``.
+
+    Uses ``git log -1 --format=%ct HEAD`` (committer date, Unix epoch) as a
+    no-network proxy for "months behind upstream": a clone that fetches
+    regularly keeps a recent HEAD, while a long-neglected one does not.
+    Returns ``False`` (fail-safe — do not flag) on any error.
+    """
+    try:
+        result = sub_run(
+            ["git", "-C", repo_root, "log", "-1", "--format=%ct", "HEAD"],
+            **_SUBPROCESS_KWARGS,
+        )
+        if result.returncode != 0:
+            logger.debug(
+                f"git log exited {result.returncode}: {result.stderr.strip()}"
+            )
+            return False
+        stamp = result.stdout.strip()
+        if not stamp:
+            return False
+        head_date = datetime.fromtimestamp(int(stamp))
+        return (datetime.now() - head_date).days > WARN_STALE_DAYS
+    except FileNotFoundError:
+        logger.debug("git not found; assuming not stale")
+    except Exception as exc:
+        logger.debug(f"git log failed: {exc}")
     return False

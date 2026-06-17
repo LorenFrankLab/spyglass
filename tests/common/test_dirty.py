@@ -483,12 +483,20 @@ def test_pip_install_no_git(tmp_path, compute_install_info_fn):
 
 
 def test_dev_version_is_dev(compute_install_info_fn):
-    """A version string with '.dev' sets is_dev=True and is_official=False."""
+    """A '.dev' version sets is_dev=True; local edits make it non-official."""
+    # Mocked so the result does not depend on this checkout's working tree:
+    # a dirty diff + a recent HEAD date. is_official derives from edits/stale,
+    # not is_dev.
     with patch("spyglass.__version__", "0.5.6.dev42+gb3db6d09"):
         with patch("spyglass.__file__", __file__):
-            result = compute_install_info_fn()
+            with patch(
+                "spyglass.utils.git_utils.sub_run",
+                side_effect=[_proc("src/x.py\n"), _proc("4102444800")],
+            ):
+                result = compute_install_info_fn()
 
     assert result["is_dev"] is True
+    assert result["has_local_changes"] is True
     assert result["is_official"] is False
 
 
@@ -521,7 +529,8 @@ def test_git_dirty_sets_has_local_changes(compute_install_info_fn):
     with patch("spyglass.__version__", "0.5.6.dev1+gabc1234"):
         with patch("spyglass.__file__", __file__):
             with patch(
-                "spyglass.utils.git_utils.sub_run", side_effect=[dirty_proc]
+                "spyglass.utils.git_utils.sub_run",
+                side_effect=[dirty_proc, _proc("4102444800")],
             ):
                 result = compute_install_info_fn()
 
@@ -536,7 +545,8 @@ def test_git_clean_no_changes(compute_install_info_fn):
     with patch("spyglass.__version__", "0.5.6.dev1+gabc1234"):
         with patch("spyglass.__file__", __file__):
             with patch(
-                "spyglass.utils.git_utils.sub_run", side_effect=[clean_proc]
+                "spyglass.utils.git_utils.sub_run",
+                side_effect=[clean_proc, _proc("4102444800")],
             ):
                 result = compute_install_info_fn()
 
@@ -571,7 +581,7 @@ def test_git_short_hash_fallback(tmp_path, compute_install_info_fn):
         with patch("spyglass.__file__", str(fake_pkg)):
             with patch(
                 "spyglass.utils.git_utils.sub_run",
-                side_effect=[hash_proc, diff_proc],
+                side_effect=[hash_proc, diff_proc, _proc("4102444800")],
             ):
                 result = compute_install_info_fn()
 
@@ -590,7 +600,8 @@ def test_git_diff_nonzero_exit(tmp_path, compute_install_info_fn):
     with patch("spyglass.__version__", "0.5.6.dev1+gabc1234"):
         with patch("spyglass.__file__", str(fake_pkg)):
             with patch(
-                "spyglass.utils.git_utils.sub_run", side_effect=[error_proc]
+                "spyglass.utils.git_utils.sub_run",
+                side_effect=[error_proc, _proc("4102444800")],
             ):
                 result = compute_install_info_fn()
 
@@ -613,6 +624,53 @@ def test_git_diff_generic_exception(tmp_path, compute_install_info_fn):
                 result = compute_install_info_fn()
 
     assert result["has_local_changes"] is False
+
+
+def test_git_stale_old_head(tmp_path, compute_install_info_fn):
+    """A clean clone with a months-old HEAD is is_stale=True, not official."""
+    (tmp_path / ".git").mkdir()
+    fake_pkg = tmp_path / "spyglass" / "__init__.py"
+    fake_pkg.parent.mkdir(parents=True)
+    fake_pkg.write_text("")
+
+    clean_proc = _proc("")  # no local changes
+    old_proc = _proc("100000000")  # 1973 — well past the staleness threshold
+
+    with patch("spyglass.__version__", "0.5.6.dev1+gabc1234"):
+        with patch("spyglass.__file__", str(fake_pkg)):
+            with patch(
+                "spyglass.utils.git_utils.sub_run",
+                side_effect=[clean_proc, old_proc],
+            ):
+                result = compute_install_info_fn()
+
+    assert result["has_local_changes"] is False
+    assert result["is_stale"] is True
+    assert result["is_official"] is False
+
+
+def test_clean_current_clone_is_official(tmp_path, compute_install_info_fn):
+    """A clean, recently-fetched dev clone is official despite is_dev=True."""
+    (tmp_path / ".git").mkdir()
+    fake_pkg = tmp_path / "spyglass" / "__init__.py"
+    fake_pkg.parent.mkdir(parents=True)
+    fake_pkg.write_text("")
+
+    clean_proc = _proc("")  # no local changes
+    recent_proc = _proc("4102444800")  # year 2100 — not stale
+
+    with patch("spyglass.__version__", "0.5.6.dev42+gabc1234"):
+        with patch("spyglass.__file__", str(fake_pkg)):
+            with patch(
+                "spyglass.utils.git_utils.sub_run",
+                side_effect=[clean_proc, recent_proc],
+            ):
+                result = compute_install_info_fn()
+
+    assert result["is_dev"] is True
+    assert result["has_local_changes"] is False
+    assert result["is_stale"] is False
+    assert result["is_official"] is True  # being a few commits behind is fine
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -691,7 +749,7 @@ def test_warn_admin_skipped(caplog):
 
 
 def test_warn_dev_but_clean_emits_stale_warning(caplog):
-    """Dev build without local changes emits the softer 'older commit' advisory."""
+    """A clean-but-stale clone emits the softer 'older commit' advisory."""
     import spyglass.common.common_lab as _lab_mod
     import spyglass.common.common_user as _user_mod
 
@@ -699,6 +757,7 @@ def test_warn_dev_but_clean_emits_stale_warning(caplog):
         "is_official": False,
         "is_dev": True,
         "has_local_changes": False,
+        "is_stale": True,
         "install_path": "/home/user/spyglass",
         "commit_hash": "abc1234",
     }
@@ -769,18 +828,33 @@ def clean_install_info():
         "commit_hash": None,
         "install_path": None,
         "has_local_changes": False,
+        "is_stale": False,
         "is_official": True,
     }
 
 
 @pytest.fixture(scope="module")
 def dirty_install_info():
-    """Mock install info for a dirty/editable install."""
+    """Mock install info for a dirty/editable install (local edits)."""
     return {
         "is_dev": True,
         "commit_hash": "abcd1234",
         "install_path": "/home/user/spyglass",
         "has_local_changes": True,
+        "is_stale": False,
+        "is_official": False,
+    }
+
+
+@pytest.fixture(scope="module")
+def stale_install_info():
+    """Mock install info for a clean-but-stale install (months behind)."""
+    return {
+        "is_dev": True,
+        "commit_hash": "stale123",
+        "install_path": "/home/user/spyglass",
+        "has_local_changes": False,
+        "is_stale": True,
         "is_official": False,
     }
 
@@ -887,6 +961,39 @@ def test_dirty_installs_query(user_env_tbl, dirty_install_info):
     assert len(rows) >= 1
     assert "days_since_warn" in rows[0]
     assert isinstance(rows[0]["days_since_warn"], int)
+
+
+def test_stale_install_flagged(user_env_tbl, stale_install_info):
+    """A clean-but-stale install (no edits) still populates dirty_path."""
+    with patch(
+        "spyglass.common.common_user.get_install_info",
+        return_value=stale_install_info,
+    ):
+        for attr in ("env", "env_hash", "matching_env_id", "this_env"):
+            user_env_tbl.__dict__.pop(attr, None)
+        user_env_tbl.delete(safemode=False)
+        result = user_env_tbl.insert_current_env()
+
+    env_id = result["env_id"]
+    row = (user_env_tbl & f'env_id="{env_id}"').fetch1()
+    assert row["dirty_path"] == stale_install_info["install_path"]
+    assert row["spyglass_commit"] == stale_install_info["commit_hash"]
+
+
+def test_clean_install_not_in_dirty_installs(user_env_tbl, clean_install_info):
+    """A clean install is NOT surfaced by dirty_installs() (8-A regression)."""
+    with patch(
+        "spyglass.common.common_user.get_install_info",
+        return_value=clean_install_info,
+    ):
+        for attr in ("env", "env_hash", "matching_env_id", "this_env"):
+            user_env_tbl.__dict__.pop(attr, None)
+        user_env_tbl.delete(safemode=False)
+        result = user_env_tbl.insert_current_env()
+
+    env_id = result["env_id"]
+    dirty_ids = user_env_tbl.dirty_installs().fetch("env_id")
+    assert env_id not in dirty_ids
 
 
 def test_has_matching_env_same_hash(user_env_tbl):

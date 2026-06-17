@@ -13,8 +13,8 @@ from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.env_cache import _delim_split, _env_cache
 from spyglass.utils.git_utils import (
     WARN_DIRTY_ENV_DAYS,
+    _warn_once,
     get_install_info,
-    warn_if_dirty,
 )
 
 schema = dj.schema("common_user")
@@ -44,8 +44,6 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
     # Note: this tables establishes the convention of an environment ID that
     # substrings {user}_{env_name}_{num} where num is a two-digit number.
     # Substringing isn't ideal, but it simplifies downstream inherited keys.
-
-    _env_warned = False  # Suppress repeated warnings per process
 
     @cached_property
     def env(self) -> dict:
@@ -102,9 +100,7 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
     @cached_property
     def this_env(self) -> Optional[dict]:
         """Return the environment key. Cached to avoid rerunning insert."""
-        if not UserEnvironment._env_warned:
-            warn_if_dirty(get_install_info())
-            UserEnvironment._env_warned = True
+        _warn_once()
         if self.matching_env_id:
             return {"env_id": self.matching_env_id}
         del self.matching_env_id  # clear the cached property
@@ -155,13 +151,17 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
             return {"env_id": self.matching_env_id}
 
         info = get_install_info()
+        # Only flag the install path as "dirty" when the clone is actually
+        # modified or months behind upstream — a clean, current local clone
+        # (even an editable dev build) must not trigger escalation emails.
+        flagged = info.get("has_local_changes") or info.get("is_stale")
         self.insert1(
             {  # if current env not stored, but name taken, increment
                 "env_id": self._increment_id(env_id),
                 "env_hash": self.env_hash,
                 "env": self.env,
                 "has_editable": _env_cache.has_editable,
-                "dirty_path": info.get("install_path"),
+                "dirty_path": info.get("install_path") if flagged else None,
                 "spyglass_commit": info.get("commit_hash"),
             },
             skip_duplicates=False,

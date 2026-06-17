@@ -517,19 +517,3 @@ class CondaEnvCache:
 # ── Module-level singleton ────────────────────────────────────────────────────
 
 _env_cache = CondaEnvCache()
-
-
-def _trigger_env_logging() -> None:
-    """Background-thread target: insert current env into UserEnvironment.
-
-    Called on imports where the disk cache is already fresh — meaning a
-    previous import's background thread ran the conda subprocess and saved
-    the result.  All exceptions are swallowed so a failed DB connection
-    never surfaces as an import-time error.
-    """
-    try:
-        from spyglass.common.common_user import UserEnvironment
-
-        UserEnvironment().this_env
-    except Exception:
-        pass
