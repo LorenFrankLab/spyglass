@@ -3,21 +3,24 @@
 #   jupytext:
 #     text_representation:
 #       extension: .py
-#       format_name: light
-#       format_version: '1.5'
-#       jupytext_version: 1.17.2
+#       format_name: percent
+#       format_version: '1.3'
+#       jupytext_version: 1.19.1
 #   kernelspec:
-#     display_name: spy
+#     display_name: '1335'
 #     language: python
 #     name: python3
 # ---
 
+# %% [markdown]
 # # Merge Tables
 #
 
+# %% [markdown]
 # ## Intro
 #
 
+# %% [markdown]
 # _Developer Note:_ if you may make a PR in the future, be sure to copy this
 # notebook, and use the `gitignore` prefix `temp` to avoid future conflicts.
 #
@@ -39,17 +42,17 @@
 # ways, but with a unified end result that downstream pipelines can all access.
 #
 
+# %% [markdown]
 # ## Imports
 #
 
+# %% [markdown]
 # Let's start by importing the `spyglass` package, along with a few others.
 #
 
-# +
-import os
+# %%
 import datajoint as dj
 
-# ignore datajoint+jupyter async warnings
 import warnings
 
 warnings.simplefilter("ignore", category=DeprecationWarning)
@@ -59,24 +62,24 @@ warnings.simplefilter("ignore", category=UserWarning)
 import spyglass.common as sgc
 import spyglass.lfp as lfp
 from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
-from spyglass.utils.dj_merge_tables import delete_downstream_parts, Merge
-from spyglass.common.common_ephys import LFP as CommonLFP  # Upstream 1
+from spyglass.utils.dj_merge_tables import Merge
 from spyglass.lfp.lfp_merge import LFPOutput  # Merge Table
-from spyglass.lfp.v1.lfp import LFPV1  # Upstream 2
 
-# -
-
+# %% [markdown]
 # ## Example data
 #
 
-# Check to make sure the data inserted in the previour notebook is still there.
+# %% [markdown]
+# Check to make sure the data inserted in the previous notebook is still there.
 #
 
+# %%
 nwb_file_name = "minirec20230622.nwb"
 nwb_copy_file_name = get_nwb_copy_filename(nwb_file_name)
 nwb_file_dict = {"nwb_file_name": nwb_copy_file_name}
 sgc.Session & nwb_file_dict
 
+# %% [markdown]
 # If you haven't already done so, insert data into a Merge Table.
 #
 # _Note_: Some existing parents of Merge Tables perform the Merge Table insert as
@@ -85,11 +88,13 @@ sgc.Session & nwb_file_dict
 # <!-- TODO: Add entry to another parent to cover mutual exclusivity issues. -->
 #
 
+# %%
 sgc.FirFilterParameters().create_standard_filters()
 lfp.lfp_electrode.LFPElectrodeGroup.create_lfp_electrode_group(
     nwb_file_name=nwb_copy_file_name,
     group_name="test",
     electrode_list=[0],
+    skip_duplicates=True,
 )
 lfp_key = {
     "nwb_file_name": nwb_copy_file_name,
@@ -102,130 +107,205 @@ lfp.v1.LFPSelection.insert1(lfp_key, skip_duplicates=True)
 lfp.v1.LFPV1().populate(lfp_key)
 LFPOutput.insert([lfp_key], skip_duplicates=True)
 
+# %% [markdown]
 # ## Helper functions
 #
 
-# Merge Tables have multiple custom methods that begin with `merge`.
+# %% [markdown]
+# Merge Tables expose **instance methods** that operate on a restricted table.
+# The older `merge_*` class methods are deprecated (Spyglass 0.7.0) but still
+# work and emit a warning on first call.
 #
-# `help` can show us the docstring of each
+# <details>
+# <summary><b>Familiar with the old API? Click to see the migration table.</b></summary>
 #
+# | Old call | New equivalent |
+# |---|---|
+# | `T.merge_view(r)` | `(T & r).view()` |
+# | `T.merge_html(r)` | `(T & r).html()` |
+# | `T.merge_restrict(r)` | `T & r` |
+# | `T.merge_fetch(r, *attrs)` | `(T & r).fetch(*attrs)` |
+# | `T.merge_get_part(r, ...)` | `(T & r).get_part_table(...)` |
+# | `T.merge_get_parent(r, ...)` | `(T & r).get_parent_table(...)` |
+# | `T.merge_delete(r)` | `(T & r).delete()` |
+# | `T.merge_delete_parent(r, dry_run=True)` | `(T & r).delete_upstream(dry_run=True)` |
+# | `T.merge_populate(source, keys)` | `T.populate(source, keys)` |
+#
+# All `merge_*` methods still work but will be removed in Spyglass 0.7.0.
+#
+# </details>
 
-merge_methods = [d for d in dir(Merge) if d.startswith("merge")]
-print(merge_methods)
+# %%
+# New instance methods (preferred)
+new_methods = [
+    "view",
+    "html",
+    "get_part_table",
+    "get_parent_table",
+    "fetch",
+    "fetch1",
+    "super_fetch",
+    "delete",
+    "delete_upstream",
+    "populate",
+]
+print("New API:", new_methods)
 
-help(getattr(Merge, merge_methods[-1]))
+# Deprecated class methods (still work, emit warnings)
+deprecated = [d for d in dir(Merge) if d.startswith("merge_")]
+print("Deprecated:", deprecated)
 
+# %%
+help(LFPOutput.get_part_table)
+
+# %% [markdown]
 # ## Showing data
 #
 
-# `merge_view` shows a union of the master and all part tables.
-#
-# _Note_: Restrict Merge Tables with arguments, not the `&` operator.
-#
-# - Normally: `Table & "field='value'"`
-# - Instead: `MergeTable.merge_view(restriction="field='value'"`).
+# %% [markdown]
+# Merge tables behave like they're already joined with the parts.
 #
 
-LFPOutput.merge_view()
+# %%
+# %load_ext autoreload
+# %autoreload 2
 
-# UUIDs help retain unique entries across all part tables. We can fetch NWB file
-# by referencing this or other features.
+# %%
+LFPOutput()
+
+# %% [markdown]
+# This also works with `dj.Top`
+
+# %%
+LFPOutput & dj.Top()
+
+# %% [markdown]
+# To get the standard view of the table, use `T.super_view()`
+
+# %%
+LFPOutput().super_view()
+
+# %% [markdown]
+# Restrict Merge Tables with the standard `&` operator. Both dict and string
+# restrictions that reference part-table fields are **resolved automatically**:
 #
+# ```python
+# Merge & {"field": "value"}      # ✓ dict — resolves through parts
+# Merge & 'field LIKE "val%"'     # ✓ string — also resolves through parts
+# Merge & {"merge_id": some_uuid} # ✓ master field — unchanged
+# ```
 
-uuid_key = (LFPOutput & nwb_file_dict).fetch(limit=1, as_dict=True)[-1]
+# %%
+LFPOutput & nwb_file_dict
+
+# %% [markdown]
+# `fetch()` walks parts → returns part-table data
+
+# %%
+(LFPOutput & nwb_file_dict).fetch(as_dict=True)[0]
+
+# %% [markdown]
+# `fetch1()` follows DataJoint convention
+
+# %%
+restrict = LFPOutput & "lfp_electrode_group_name='test'" & dj.Top()
+restrict.fetch1()
+
+# %%
+LFPOutput.fetch("filter_name")
+
+# %%
+LFPOutput.fetch("filter_name", "lfp_sampling_rate")
+
+# %% [markdown]
+# `super_fetch()` stays on master → returns only merge_id and source
+
+# %%
+(LFPOutput & nwb_file_dict).super_fetch(as_dict=True)[0]
+
+# %% [markdown]
+# Fetch just the master primary key (bypasses part-walking)
+
+# %%
+uuid_key = (LFPOutput & nwb_file_dict).fetch("KEY", limit=1)[0]
 restrict = LFPOutput & uuid_key
 restrict
 
-result1 = restrict.fetch_nwb(restrict.fetch1("KEY"))
-result1
+# %% [markdown]
+# Fetch all part-table columns as a dict
 
-nwb_key = LFPOutput.merge_restrict(nwb_file_dict).fetch(as_dict=True)[0]
+# %%
+nwb_key = (LFPOutput & nwb_file_dict).fetch(as_dict=True)[0]
 nwb_key
 
-result2 = LFPOutput().fetch_nwb(nwb_key)
-result2 == result1
+# %%
+LFPOutput().fetch_nwb(nwb_key)[0]
 
+# %% [markdown]
 # ## Selecting data
 #
 
-# There are also functions for retrieving part/parent table(s) and fetching data.
+# %% [markdown]
+# - `get_part_table()` returns the Merge Part table for the current restriction.
+# - `get_parent_table()` returns the upstream source table (where the actual data
+# lives).
 #
-# These `get` functions will either return the part table of the Merge table or the parent table with the source information for that part.
-#
+# Both accept `join_master=True` to include `merge_id` / `source`.
 
-result4 = LFPOutput.merge_get_part(restriction=nwb_file_dict, join_master=True)
+# %%
+result4 = (LFPOutput & nwb_file_dict).get_part_table(join_master=True)
 result4
 
-result5 = LFPOutput.merge_get_parent(restriction='nwb_file_name LIKE "mini%"')
+# %%
+result5 = (LFPOutput & 'nwb_file_name LIKE "mini%"').get_parent_table()
 result5
 
-# `fetch` will collect all relevant entries and return them as a list in
-# the format specified by keyword arguments and one's DataJoint config.
-#
+# %%
+result5.full_table_name
 
-result6 = result5.fetch("lfp_sampling_rate")  # Sample rate for all mini* files
-result6
-
-# `merge_fetch` requires a restriction as the first argument. For no restriction,
-# use `True`.
-#
-
-result7 = LFPOutput.merge_fetch(True, "filter_name", "nwb_file_name")
-result7
-
-result8 = LFPOutput.merge_fetch(as_dict=True)
-result8
-
+# %% [markdown]
 # ## Deletion from Merge Tables
 #
 
-# When deleting from Merge Tables, we can either...
+# %% [markdown]
+# When deleting from Merge Tables, we have three options:
 #
-# 1. delete from the Merge Table itself with `merge_delete`, deleting both
-#    the master and part.
+# 1. **`(T & restriction).delete()`** — removes the master and part entries from
+#    the Merge Table. The upstream source data (e.g., `LFPV1`) is *not* removed.
 #
-# 2. use `merge_delete_parent` to delete from the parent sources, getting rid of
-#    the entries in the source table they came from.
+# 2. **`(T & restriction).delete_upstream(dry_run=True)`** — removes entries from
+#    the upstream source tables. Use `dry_run=True` (default) to preview first.
 #
-# 3. use `delete_downstream_parts` to find downstream part tables, like Merge
-#    Tables, and get rid full entries, avoiding orphaned master table entries.
+# 3. **`table.delete_downstream_parts(dry_run=True)`** — available on any
+#    upstream table; finds downstream Merge Table entries and removes them,
+#    preventing orphaned master rows.
 #
-# The two latter cases can be destructive, so we include an extra layer of
-# protection with `dry_run`. When true (by default), these functions return
-# a list of tables with the entries that would otherwise be deleted.
-#
+# The latter two are destructive. Call `delete_upstream` before `delete()` if
+# you want to also remove the upstream source data in the same session.
 
-LFPOutput.merge_delete(nwb_file_dict)  # Delete from merge table
+# %%
+# Preview: what would delete_upstream remove from the source tables?
+(LFPOutput & nwb_file_dict).delete_upstream(dry_run=True)
 
-LFPOutput.merge_delete_parent(restriction=nwb_file_dict, dry_run=True)
+# %%
+# Delete from the Merge Table (master + parts)
+(LFPOutput & nwb_file_dict).delete()
 
-# `delete_downstream_parts` is available from any other table in the pipeline,
-# but it does take some time to find the links downstream. If you're using this,
-# you can save time by reassigning your table to a variable, which will preserve
-# a copy of the previous search.
-#
-# Because the copy is stored, this function may not see additional merge tables
-# you've imported. To refresh this copy, set `reload_cache=True`
-#
-
-# +
-nwbfile = sgc.Nwbfile()
-
-(nwbfile & nwb_file_dict).delete_downstream_parts(
-    dry_run=True,
-    reload_cache=False,  # if still encountering errors, try setting this to True
-)
-# -
-
-# This function is run automatically whin you use `cautious_delete`, which
+# %% [markdown]
+# This function is run automatically when you use `cautious_delete`, which
 # checks team permissions before deleting.
 #
 
-(nwbfile & nwb_file_dict).cautious_delete()
+# %%
+from spyglass.common import Nwbfile
 
+(Nwbfile & nwb_file_dict).cautious_delete()
+
+# %% [markdown]
 # ## Up Next
 #
 
+# %% [markdown]
 # In the [next notebook](./10_Spike_Sorting.ipynb), we'll start working with
 # ephys data with spike sorting.
 #

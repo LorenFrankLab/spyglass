@@ -215,6 +215,11 @@ for label, interval_data in results.groupby("interval_labels"):
     `_update_external` no longer re-reads the NWB file to verify a hash that was
     just computed by the caller #1600
 - Kachery as optional dependency #1607
+- Align `Merge` table API with DataJoint builtins: `&` and `fetch`/`fetch1` now
+    resolve part-table fields automatically; add instance methods
+    (`get_part_table`, `get_parent_table`, `delete_upstream`, `view`, `html`,
+    `populate`, `super_fetch`, `super_restrict`). The `merge_X` class methods
+    are deprecated and will be removed in Spyglass 0.7.0 #1583
 
 ### Pipelines
 
