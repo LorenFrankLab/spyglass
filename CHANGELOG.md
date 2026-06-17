@@ -214,6 +214,7 @@ for label, interval_data in results.groupby("interval_labels"):
 - Fix redundant hash computation in `SpikeSortingRecording._make_file`:
     `_update_external` no longer re-reads the NWB file to verify a hash that was
     just computed by the caller #1600
+- Kachery as optional dependency #1607
 
 ### Pipelines
 
