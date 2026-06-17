@@ -464,6 +464,12 @@ def test_string_restrict_unknown_field_raises(pos_merge):
         pos_merge & "definitely_not_a_field = 1"
 
 
+def test_dict_restrict_unknown_field_raises(pos_merge):
+    """A dict field unknown to master and every part raises, not empty-table."""
+    with pytest.raises(dj.errors.DataJointError, match="Unknown field"):
+        pos_merge & {"definitely_not_a_field": 1}
+
+
 def test_string_restrict_quoted_literal_ignored(pos_merge):
     """A part-field name inside a quoted literal does not trigger resolution."""
     source_val = pos_merge.super_fetch(as_dict=True)[0]["source"]

@@ -234,14 +234,27 @@ class Merge(ExportMixin, dj.Manual):
         Raises
         ------
         DataJointError
-            If a string restriction references a field unknown to both the
-            master and every part table.
+            If a dict or string restriction references a field unknown to both
+            the master and every part table. Without this, an unknown field
+            would resolve to no parts and silently return an empty table.
         """
         should_resolve = self._has_non_master_fields(restriction) or (
             isinstance(restriction, str)
             and self._string_has_part_field(restriction)
         )
         if should_resolve:
+            if isinstance(restriction, dict):
+                unknown = [
+                    k
+                    for k in restriction
+                    if k not in self._get_all_heading_fields()
+                ]
+                if unknown:
+                    raise DataJointError(
+                        f"Unknown field(s) {unknown} in restriction "
+                        f"{restriction!r}: not attributes of the merge master "
+                        "or any part table."
+                    )
             merge_ids = self._resolve_restriction_to_merge_ids(restriction)
             restriction = (
                 [{RESERVED_PRIMARY_KEY: mid} for mid in merge_ids]
