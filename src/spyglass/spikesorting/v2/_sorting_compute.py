@@ -764,6 +764,20 @@ def build_analyzer(
     if job_kwargs is None:
         job_kwargs = _resolved_job_kwargs(sorter_row["job_kwargs"])
 
+    # Project the probe to 2D before building the analyzer. Spyglass electrode
+    # geometry is stored in 3D (the z coordinate is typically 0), but several
+    # SortingAnalyzer extensions and consumers assume 2D contact positions:
+    # ``unit_locations`` (monopolar_triangulation / center_of_mass) and the
+    # spikeinterface-gui probe view both raise
+    # ``could not broadcast input array from shape (3,) into shape (2,)`` on a
+    # 3D probe. The in-plane (x, y) coordinates are unchanged by the projection,
+    # so sparsity, templates, and waveforms are unaffected; only the dropped
+    # all-zero z axis goes away. Done here (rather than at recording
+    # materialization) so the sort itself still sees the recording untouched.
+    probe = recording.get_probe()
+    if probe.ndim == 3:
+        recording = recording.set_probe(probe.to_2d())
+
     try:
         analyzer = si.create_sorting_analyzer(
             sorting=sorting,
