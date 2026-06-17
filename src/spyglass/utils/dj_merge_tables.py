@@ -20,6 +20,9 @@ from spyglass.utils.mixins.export import ExportMixin
 RESERVED_PRIMARY_KEY = "merge_id"
 RESERVED_SECONDARY_KEY = "source"
 RESERVED_SK_LENGTH = 32
+# Spyglass version in which the deprecated ``merge_X`` methods are removed.
+# Single source of truth for the warning text (docstrings mirror this literal).
+_DEPRECATION_REMOVAL_VERSION = "0.7.0"
 MERGE_DEFINITION = (
     f"\n    {RESERVED_PRIMARY_KEY}: uuid\n    ---\n"
     + f"    {RESERVED_SECONDARY_KEY}: varchar({RESERVED_SK_LENGTH})\n    "
@@ -214,6 +217,25 @@ class Merge(ExportMixin, dj.Manual):
         string restrictions referencing part-table field names are resolved to
         matching ``merge_id`` sets before the master is restricted.
         ``dj.Top`` restrictions are delegated to DataJoint core unchanged.
+
+        Parameters
+        ----------
+        restriction : dict, str, list, or dj.condition
+            Restriction to apply. Part-table fields are resolved through parts;
+            master-only fields (``merge_id``, ``source``) restrict directly.
+        *args, **kwargs
+            Forwarded to ``ExportMixin.restrict``.
+
+        Returns
+        -------
+        Merge
+            The merge table restricted to matching ``merge_id`` rows.
+
+        Raises
+        ------
+        DataJointError
+            If a string restriction references a field unknown to both the
+            master and every part table.
         """
         should_resolve = self._has_non_master_fields(restriction) or (
             isinstance(restriction, str)
@@ -233,6 +255,17 @@ class Merge(ExportMixin, dj.Manual):
 
         Use when you intentionally want to restrict on master-only fields
         (``merge_id``, ``source``) without triggering part-table resolution.
+
+        Parameters
+        ----------
+        restriction : dict, str, list, or dj.condition
+            Restriction applied directly to the master heading. Part-table
+            fields are silently ignored (raw DataJoint behavior).
+
+        Returns
+        -------
+        Merge
+            The merge master restricted without part resolution.
         """
         return super().restrict(restriction)
 
@@ -245,6 +278,23 @@ class Merge(ExportMixin, dj.Manual):
         When the table was restricted with ``dj.Top``, the LIMIT is
         materialised into a merge_id set before part-walking so that the
         row-count contract is preserved.
+
+        Parameters
+        ----------
+        *attrs : str
+            Attributes to fetch. A request consisting only of master-only
+            attrs (``merge_id``, ``source``, ``KEY``) bypasses part-walking.
+        log_export : bool
+            Default True. During export, log this fetch as an export event.
+        **kwargs
+            Forwarded to the underlying DataJoint ``fetch`` (e.g. ``as_dict``,
+            ``format``, ``limit``).
+
+        Returns
+        -------
+        np.ndarray, list, or pd.DataFrame
+            Part-table contents, with type determined by ``kwargs``. Results
+            from multiple parts are concatenated preserving that type.
         """
         if attrs and all(
             a in self._MASTER_ONLY_ATTRS | self._DJ_SPECIAL_ATTRS for a in attrs
@@ -262,11 +312,31 @@ class Merge(ExportMixin, dj.Manual):
     def fetch1(self, *attrs, log_export=True, **kwargs):
         """Fetch exactly one entry, walking parts like fetch().
 
-        Follows DataJoint convention: returns a dict (no attrs), a scalar
-        (one attr), or a tuple (multiple attrs).  Raises DataJointError when
-        the restricted table contains ≠ 1 row, or when an output-shaping
-        kwarg (``as_dict``, ``format``) is passed — these conflict with the
-        dict/scalar/tuple contract; use ``fetch()`` for other formats.
+        Follows DataJoint convention for the return shape.
+
+        Parameters
+        ----------
+        *attrs : str
+            Attributes to fetch. Master-only attrs bypass part-walking.
+        log_export : bool
+            Default True. During export, log this fetch as an export event.
+        **kwargs
+            Forwarded to ``fetch``. Output-shaping kwargs (``as_dict``,
+            ``format``) are rejected — see Raises.
+
+        Returns
+        -------
+        dict, scalar, or tuple
+            A dict (no attrs), a scalar (one attr), or a tuple (multiple
+            attrs).
+
+        Raises
+        ------
+        DataJointError
+            If the restricted table contains ≠ 1 row; if an output-shaping
+            kwarg (``as_dict``, ``format``) is passed (use ``fetch()``
+            instead); or if the requested attributes cannot be retrieved from
+            any part table.
         """
         if attrs and all(
             a in self._MASTER_ONLY_ATTRS | self._DJ_SPECIAL_ATTRS for a in attrs
@@ -311,6 +381,16 @@ class Merge(ExportMixin, dj.Manual):
 
         Use when part-walking is unwanted, e.g. listing all merge_ids without
         resolving part tables.
+
+        Parameters
+        ----------
+        *args, **kwargs
+            Forwarded to ``ExportMixin.fetch`` (DataJoint ``fetch``).
+
+        Returns
+        -------
+        np.ndarray or list
+            Master-table contents (``merge_id``, ``source`` only).
         """
         return super().fetch(*args, **kwargs)
 
@@ -637,7 +717,9 @@ class Merge(ExportMixin, dj.Manual):
         """Log deprecation warning for a merge method (v0.7.0 removal)."""
         from spyglass.common.common_usage import ActivityLog
 
-        ActivityLog().deprecate_log(name=name, alt=alt, version="0.7.0")
+        ActivityLog().deprecate_log(
+            name=name, alt=alt, version=_DEPRECATION_REMOVAL_VERSION
+        )
 
     # ------------- Private implementation methods (no deprecation) -----------
 
@@ -741,6 +823,11 @@ class Merge(ExportMixin, dj.Manual):
             RESERVED_PRIMARY_KEY, as_dict=True
         )
 
+        logger.info(
+            f"Deleting {len(merge_ids)} merge_id(s) and "
+            + f"{len(part_parents)} upstream part-parent table(s)."
+        )
+
         super().delete((cls & merge_ids), **kwargs)
 
         if cls & merge_ids:
@@ -764,9 +851,6 @@ class Merge(ExportMixin, dj.Manual):
             Restriction to apply to the merged view
         """
 
-        # If we overwrite `preview`, we then encounter issues with operators
-        # getting passed a `Union`, which doesn't have a method we can
-        # intercept to manage master/parts
         cls._deprecate("merge_view", "(T & restriction).view()")
         return pprint(cls._merge_repr(restriction=restriction))
 
@@ -965,7 +1049,7 @@ class Merge(ExportMixin, dj.Manual):
         Example
         -------
             >>> (MergeTable & restriction).get_part_table()
-            >>> MergeTable().merge_get_part(restriction, join_master=True)
+            >>> (MergeTable & restriction).get_part_table(join_master=True)
 
         Raises
         ------
@@ -1218,11 +1302,9 @@ class Merge(ExportMixin, dj.Manual):
     def merge_populate(self, source: str, keys=None, **kwargs):
         """Populate source table and insert successes into merge.
 
-        Deprecated — use ``(T & restriction).populate(source, keys)``.
+        Deprecated — use ``T.populate(source, keys)``.
         """
-        self._deprecate(
-            "merge_populate", "(T & restriction).populate(source, keys)"
-        )
+        self._deprecate("merge_populate", "T.populate(source, keys)")
         parent_class = self.merge_get_parent_class(source)
         if parent_class is None:
             raise ValueError(f"No parent class found for source: {source}")
@@ -1294,7 +1376,16 @@ class Merge(ExportMixin, dj.Manual):
         """Return merged preview string for self.restriction.
 
         Respects ``dj.Top`` limits set via ``T & dj.Top(limit=n)``.
-        Returns None when the restricted view is empty.
+
+        Parameters
+        ----------
+        include_empties : bool
+            Default False. Include part tables with no matching rows.
+
+        Returns
+        -------
+        str or None
+            The merged preview string, or None when the view is empty.
         """
         query = self._merge_repr(
             restriction=self._resolve_top_restriction(),
@@ -1312,7 +1403,13 @@ class Merge(ExportMixin, dj.Manual):
         return super().__repr__()
 
     def super_view(self):
-        """Show master-only preview (no part-walking)."""
+        """Show master-only preview (no part-walking).
+
+        Returns
+        -------
+        str
+            The raw DataJoint master-table preview (``merge_id``, ``source``).
+        """
         return super().__repr__()
 
     def _repr_html_(self):
@@ -1331,6 +1428,17 @@ class Merge(ExportMixin, dj.Manual):
         Instance-method replacement for ``merge_html``. Use as
         ``(T & restriction).html()``.
         Respects ``dj.Top`` limits set via ``T & dj.Top(limit=n)``.
+
+        Parameters
+        ----------
+        include_empties : bool
+            Default False. Include part tables with no matching rows.
+
+        Returns
+        -------
+        IPython.core.display.HTML
+            The merged view as HTML; an empty-state placeholder when no rows
+            match.
         """
         query = self._merge_repr(
             restriction=self._resolve_top_restriction(),

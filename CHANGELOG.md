@@ -157,7 +157,11 @@ for label, interval_data in results.groupby("interval_labels"):
 - Fix typo in `env_defaults` key: `HD5_USE_FILE_LOCKING` →
     `HDF5_USE_FILE_LOCKING` so the HDF5 library actually sees the intended
     `FALSE` default #1575
-- Adjust `Merge` table API to align with DataJoint builtins #1583
+- Align `Merge` table API with DataJoint builtins: `&` and `fetch`/`fetch1` now
+    resolve part-table fields automatically; add instance methods
+    (`get_part_table`, `get_parent_table`, `delete_upstream`, `view`, `html`,
+    `populate`, `super_fetch`, `super_restrict`). The `merge_X` class methods
+    are deprecated and will be removed in Spyglass 0.7.0 #1583
 
 ### Pipelines
 
