@@ -76,8 +76,11 @@ their presence, or metric values silently change/omit.
    bounded observed fraction of too-short ISIs. So the Set-A gate `isi_violation >
    0.0025` = "0.25% of ISIs violate" (the user's mooted 2% = `> 0.02`). **If Phase 2
    uses SI's `isi_violation` column it gets the ratio, silently changing the gate's
-   meaning — replicate `count/(N−1)`.** Edge bug (#1556 class): a 0-spike unit gives
-   `(-1)/(-1)=1.0` (spurious 100% violation) that survives NaN sanitization.
+   meaning — replicate `count/(N−1)`.** Edge bug (#1556 class): a 1-spike unit gives
+   `0/0 = nan` (caught by NaN sanitization); a 0-spike unit hits the **high-level**
+   `compute_isi_violations` count=−1 sentinel (verified in source — note the
+   *low-level* `isi_violations` returns nan instead, so check the right function) →
+   `−1/(0−1) = 1.0`, a finite spurious value that survives NaN sanitization.
    Low-spike NaN: `nn_*` → NaN below `min_spikes=10` (so low-spike noisy units are
    NOT auto-rejected, NaN compares False); `amplitude_cutoff` → NaN below ~500 spikes.
    `peak_offset`/`peak_channel` are Frank-lab custom, not SI metrics.
@@ -121,7 +124,7 @@ Direct replacements when porting code from v1 to v2. Sources:
 | `return_scaled=True` | `return_in_uV=True` | Renamed across the API. |
 | `is_scaled` | `is_in_uV` | |
 | Manual chain: `bandpass → cmr → whiten` | `apply_preprocessing_pipeline(recording, {"bandpass_filter": {...}, "common_reference": {...}, "whiten": {...}})` | Declarative; serializable. New in 0.103. Import from `spikeinterface.preprocessing`. **Note**: v2 splits this into pre-motion (`bandpass + cmr`) and post-motion (`whiten`) stages — see `shared-contracts.md § Pydantic Parameter Schema Convention`. |
-| `sic.MergeUnitsSorting(sorting, merge_groups)` | Same class still exists in SI 0.104. For analyzer-backed curation, prefer `spikeinterface.curation.apply_curation(...)` when applying a full curation model. | `apply_merges_to_sorting` is not present in SI 0.104.3. |
+| `sic.MergeUnitsSorting(sorting, merge_groups)` | Same class still exists in SI 0.104. For analyzer-backed curation, prefer `spikeinterface.curation.apply_curation(...)` when applying a full curation model. | **Correction:** `apply_merges_to_sorting` **IS** present in SI 0.104.3 (`core/sorting_tools.py`, exported from `spikeinterface.core`) — it is what `apply_curation` calls internally. |
 | `sic.remove_excess_spikes(sorting, recording)` | Same name, same module. | Still present in 0.104. |
 | Auto-merge: `get_potential_auto_merge(we, ...)` | `compute_merge_unit_groups(analyzer, preset=...)` | Modern signature; preset-based. |
 | `set_global_job_kwargs(n_jobs=N)` | Same. | |
@@ -147,7 +150,7 @@ noise_levels  ────┘
 spike_amplitudes (needs templates)
 correlograms (needs random_spikes)
 isi_histograms (needs nothing else)
-spike_locations (needs random_spikes)
+spike_locations (needs templates)
 ```
 
 **For v2 `Sorting.make()`**: compute `random_spikes`, `noise_levels`, `templates`, `waveforms` at sort time (cheap and unblocks everything).
@@ -168,7 +171,7 @@ These break v1's `MetricParameters` blobs verbatim — Phase 2 introduces fresh 
 | `peak_trough_ratio` | `peak_to_trough_ratio` | Now absolute-valued; magnitudes differ from 0.99. |
 | `snr` (mean-based) | `snr` (median-based) | Same name, different formula. Numeric thresholds shift; recalibrate. |
 | `from spikeinterface.qualitymetrics import compute_snr` | Use `spikeinterface.metrics.quality.compute_quality_metrics(...)` for table-level v2 metrics; only import individual metric helpers from SI's documented metric submodules after checking the pinned 0.104 API. | Metrics were refactored in 0.104. |
-| `auto_label_units` | `unitrefine_label_units` | UnitRefine rebranded. |
+| `auto_label_units` | `model_based_label_units` | **Correction:** `auto_label_units` is a **deprecated alias for `model_based_label_units`** (its docstring says so). `unitrefine_label_units` is a *separate* function (the UnitRefine cascade classifier with a different signature), NOT the rename target. |
 | `nn_isolation`, `nn_noise_overlap` (two metrics) | `nn_advanced` (one metric, two output columns) | **Requesting the old names raises `ValueError` in 0.104.** Request `nn_advanced`; read the `nn_isolation`/`nn_noise_overlap` columns from the result. PCA metric → needs `principal_components` and `skip_pc_metrics=False`. See source-verified findings above. |
 | `isi_violation` (Spyglass = custom fraction) | `isi_violation` column = SI's `isi_violations_ratio` | **Not the same number.** Spyglass = `count/(N−1)` (bounded observed fraction); SI's ratio = Hill/UMS2000 contamination estimate (unbounded). Replicate the count-based fraction; don't use SI's ratio column. |
 

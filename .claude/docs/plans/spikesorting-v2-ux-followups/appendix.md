@@ -107,9 +107,11 @@ gate `> 0.0025` = "more than 0.25% of consecutive ISIs violate the 1.5 ms
 threshold," and the mooted **2% = `> 0.02`**. **If Phase 2b ports Set A onto a SI `SortingAnalyzer` via
 `compute_quality_metrics`, the `isi_violation` column will be SI's ratio (a
 different number, can exceed 1) unless the custom `count/(n−1)` fraction is
-replicated** — the gate would otherwise change meaning silently. Edge bug: a
-0-spike unit gives `(-1)/(-1)=1.0` (spurious 100% violation) that survives NaN
-sanitization and wrongly trips the noise gate (#1556 class).
+replicated** — the gate would otherwise change meaning silently. Edge bug (#1556
+class): a 1-spike unit gives `0/0 = nan` (caught by NaN sanitization); a 0-spike
+unit hits the **high-level** `compute_isi_violations` count=−1 sentinel (the
+*low-level* `isi_violations` returns nan instead — check the right function) →
+`−1/(0−1) = 1.0`, a finite spurious value that survives NaN sanitization.
 
 **`nn_isolation`/`nn_noise_overlap` are deprecated names** in SI 0.104.3 — now the
 two output columns of one metric **`nn_advanced`** (`metrics/quality/pca_metrics.py`).
