@@ -67,6 +67,7 @@ def add_graph_rgs(add_graph_tables):
 
     yield rg_1, rg_2, rg_3
 
+
 def test_rg_add(add_graph_rgs, add_graph_tables):
     """Test adding tables to RestrGraph."""
     tables = add_graph_tables
@@ -137,13 +138,13 @@ def test_rg_revisits_with_expanded_restriction(graph_schema):
     )
 
     parent_ids = set(
-        graph._get_ft(tables["ParentNode"].full_table_name, with_restr=True).fetch(
-            "parent_id"
-        )
+        graph._get_ft(
+            tables["ParentNode"].full_table_name, with_restr=True
+        ).fetch("parent_id")
     )
     assert parent_ids == {
-        1, # from the intermediate node
-        3, # from the branch node
+        1,  # from the intermediate node
+        3,  # from the branch node
     }, "Parent restriction should union from both sources."
 
 

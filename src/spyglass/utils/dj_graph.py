@@ -241,9 +241,7 @@ class AbstractGraph(ABC):
 
     def _get_restr(self, table):
         """Get restriction from graph node."""
-        if (
-            restr := self._get_node(ensure_names(table)).get("restr")
-        ) is None:
+        if (restr := self._get_node(ensure_names(table)).get("restr")) is None:
             restr_list = self._get_restr_list(table)
             if not restr_list:
                 return None
