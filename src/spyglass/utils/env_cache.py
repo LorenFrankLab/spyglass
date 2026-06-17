@@ -193,8 +193,12 @@ class CondaEnvCache:
     def load(self) -> bool:
         """Read raw conda and pip data from the disk cache.
 
-        Populates ``_cached_conda`` and ``_cached_pip`` from the YAML file.
-        Returns ``True`` on success, ``False`` on any error or missing key.
+        Populates ``_cached_conda`` from the YAML file. ``_cached_pip`` is set
+        only when the file actually carries a ``pip`` list; an absent/``None``
+        ``pip`` key leaves it as ``_NOT_COMPUTED`` so a ``with_pip`` caller will
+        run ``pip freeze`` rather than mistaking a conda-only cache for an
+        environment with no pip packages. Returns ``True`` on success,
+        ``False`` on any error or missing ``conda`` key.
         """
         try:
             with self._cache_path.open("r") as fh:
@@ -202,7 +206,8 @@ class CondaEnvCache:
             if not isinstance(data, dict) or "conda" not in data:
                 return False
             self._cached_conda = data["conda"]
-            self._cached_pip = data.get("pip", [])
+            if data.get("pip") is not None:
+                self._cached_pip = data["pip"]
             return True
         except Exception:
             return False
@@ -214,17 +219,17 @@ class CondaEnvCache:
         ``rename`` syscall that is atomic even under concurrent writers.
         Only the raw subprocess outputs are persisted; the merged result is
         always recomputed in-process.
+
+        The ``pip`` key is written only when ``pip freeze`` has actually run.
+        A conda-only fetch persists ``{conda}`` alone so a later ``with_pip``
+        reader knows pip is still missing rather than treating an empty list as
+        "no pip packages".
         """
         if self._cache_path is None or self._cached_conda is _NOT_COMPUTED:
             return
-        data = {
-            "conda": self._cached_conda,
-            "pip": (
-                self._cached_pip
-                if self._cached_pip is not _NOT_COMPUTED
-                else []
-            ),
-        }
+        data = {"conda": self._cached_conda}
+        if self._cached_pip is not _NOT_COMPUTED:
+            data["pip"] = self._cached_pip
         tmp = self._cache_path.with_suffix(f".{os.getpid()}.tmp")
         try:
             with tmp.open("w") as fh:
@@ -268,8 +273,11 @@ class CondaEnvCache:
               dependency list, and collect editable / non-standard installs
               into a ``custom`` section.  Pass ``True`` only when an accurate
               pip-inclusive picture is needed (``UserEnvironment``).
+
+        ``pip freeze`` is only ever run when ``with_pip=True``; conda-only
+        callers never pay that cost (nor its failure/noise) on a cold cache.
         """
-        self._ensure_raw()
+        self._ensure_raw(need_pip=with_pip)
         if not with_pip:
             return (
                 self._cached_conda
@@ -280,35 +288,44 @@ class CondaEnvCache:
 
     # ── Internal: raw-data layer ──────────────────────────────────────────────
 
-    def _ensure_raw(self) -> None:
-        """Ensure ``_cached_conda`` and ``_cached_pip`` are populated.
+    def _ensure_raw(self, need_pip: bool = False) -> None:
+        """Ensure raw data is populated, fetching ``pip freeze`` only if asked.
 
-        Order of precedence:
+        Order of precedence for each piece (conda always; pip only when
+        ``need_pip``):
         1. Already in-process — no I/O.
         2. Fresh disk cache — one file read.
-        3. Subprocess — both ``conda env export`` and ``pip freeze``;
-           result saved to disk.
+        3. Subprocess — ``conda env export`` and, when ``need_pip``,
+           ``pip freeze``.
+
+        Disk is (re)written only when something was fetched. A conda-only
+        fetch persists ``{conda}`` alone (no ``pip`` key); a later
+        ``with_pip`` caller — even in another process — sees ``_cached_pip``
+        absent, runs ``pip freeze``, and rewrites the complete file. This keeps
+        the disk format backward-compatible while never producing a partial
+        cache that a ``with_pip`` reader could mistake for "no pip packages".
         """
-        if self._cached_conda is not _NOT_COMPUTED:
-            return
-        if not self.is_stale() and self.load():
-            return
-        self._fetch_from_subprocess()
-        self.save()
+        fetched = False
+        if self._cached_conda is _NOT_COMPUTED:
+            if not self.is_stale() and self.load():
+                pass  # conda (and possibly pip) loaded from disk
+            else:
+                self._fetch_conda()
+                fetched = True
+        if need_pip and self._cached_pip is _NOT_COMPUTED:
+            self._fetch_pip()
+            fetched = True
+        if fetched:
+            self.save()
 
-    def _fetch_from_subprocess(self) -> None:
-        """Run ``conda env export`` and ``pip freeze``, storing raw outputs.
-
-        Populates ``_cached_conda`` (raw conda export dict) and
-        ``_cached_pip`` (raw pip freeze list).  Does **not** merge them —
-        call ``_get_merged()`` for that.
+    def _fetch_conda(self) -> None:
+        """Run ``conda env export``, storing the raw conda dict.
 
         Resets all state first so the method is safe to call more than once
         (e.g. in tests).
         """
         self._reset_state()
 
-        # ── conda env export ─────────────────────────────────────────────────
         conda_result = sub_run(["conda", "env", "export"], **SUBPROCESS_KWARGS)
         if conda_result.returncode != 0:
             logger.error(  # pragma: no cover
@@ -323,7 +340,12 @@ class CondaEnvCache:
             if k not in ("name", "prefix")
         }
 
-        # ── pip freeze ───────────────────────────────────────────────────────
+    def _fetch_pip(self) -> None:
+        """Run ``pip freeze``, storing the raw pip list.
+
+        Does not reset conda state — it augments an already-fetched (or
+        disk-loaded) conda export with pip data on demand.
+        """
         pip_result = sub_run(["pip", "freeze"], **SUBPROCESS_KWARGS)
         if pip_result.returncode != 0:
             logger.error(  # pragma: no cover

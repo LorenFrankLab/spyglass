@@ -162,9 +162,13 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         # modified or months behind upstream — a clean, current local clone
         # (even an editable dev build) must not trigger escalation emails.
         flagged = info.get("has_local_changes") or info.get("is_stale")
+        # If the name is taken, _increment_id yields a new suffix; capture it
+        # once so the inserted row and the returned id agree (callers query /
+        # delete by the returned id).
+        new_env_id = self._increment_id(env_id)
         self.insert1(
-            {  # if current env not stored, but name taken, increment
-                "env_id": self._increment_id(env_id),
+            {
+                "env_id": new_env_id,
                 "env_hash": self.env_hash,
                 "env": self.env,
                 "has_editable": _env_cache.has_editable,
@@ -174,7 +178,7 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
             skip_duplicates=False,
         )
         del self.matching_env_id  # clear the cached property
-        return {"env_id": env_id}
+        return {"env_id": new_env_id}
 
     def dirty_installs(self) -> "dj.expression.QueryExpression":
         """Return dirty-install entries with days_since_warn.

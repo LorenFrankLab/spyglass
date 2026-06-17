@@ -127,7 +127,7 @@ def _reset_user_env_cache(user_env_tbl):
 
 
 def test_cache_hit(tmp_path, make_cache):
-    """Subprocess is called only once even across multiple get() calls."""
+    """Conda-only get() runs conda once; the second call is fully cached."""
     cache, _ = make_cache(tmp_path)
     side_effects = [_proc(_CONDA_STDOUT), _proc(_PIP_STDOUT)]
 
@@ -137,8 +137,39 @@ def test_cache_hit(tmp_path, make_cache):
         first = cache.get()
         second = cache.get()
 
-    assert mock_run.call_count == 2  # conda + pip — not 4 (two full runs)
+    assert mock_run.call_count == 1  # conda only — pip freeze skipped
     assert first is second  # same in-process dict object
+
+
+def test_conda_only_skips_pip_freeze(tmp_path, make_cache):
+    """get() (conda-only) runs conda env export but never pip freeze."""
+    cache, cache_path = make_cache(tmp_path)
+
+    with patch(
+        "spyglass.utils.env_cache.sub_run",
+        side_effect=[_proc(_CONDA_STDOUT), _proc(_PIP_STDOUT)],
+    ) as mock_run:
+        cache.get()
+
+    assert [c.args[0][0] for c in mock_run.call_args_list] == ["conda"]
+    # Disk holds conda only — no partial pip list a with_pip reader could
+    # mistake for "no pip packages".
+    assert "pip" not in yaml.safe_load(cache_path.read_text())
+
+
+def test_with_pip_after_conda_only_fetches_pip(tmp_path, make_cache):
+    """A with_pip call after a conda-only call runs pip freeze and persists it."""
+    cache, cache_path = make_cache(tmp_path)
+
+    with patch(
+        "spyglass.utils.env_cache.sub_run",
+        side_effect=[_proc(_CONDA_STDOUT), _proc(_PIP_STDOUT)],
+    ) as mock_run:
+        cache.get()  # conda-only: conda export
+        cache.get(with_pip=True)  # now needs pip: pip freeze
+
+    assert [c.args[0][0] for c in mock_run.call_args_list] == ["conda", "pip"]
+    assert "pip" in yaml.safe_load(cache_path.read_text())  # disk completed
 
 
 def test_cache_with_pip_hit(tmp_path, make_cache):
@@ -205,7 +236,7 @@ def test_disk_cache_format(tmp_path, make_cache):
         "spyglass.utils.env_cache.sub_run",
         side_effect=[_proc(_CONDA_STDOUT), _proc(_PIP_STDOUT)],
     ):
-        cache.get()
+        cache.get(with_pip=True)
 
     assert cache_path.exists()
     on_disk = yaml.safe_load(cache_path.read_text())
@@ -242,7 +273,7 @@ def test_cache_stale_on_history_change(tmp_path, make_cache, not_computed):
     ) as mock_run:
         cache.get()
 
-    assert mock_run.call_count == 2  # subprocess re-run after staleness
+    assert mock_run.call_count == 1  # conda re-fetched after staleness
 
 
 def test_cache_loads_from_disk(tmp_path, make_cache):
