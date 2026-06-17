@@ -493,3 +493,161 @@ def test_html_empty_restriction(pos_merge):
 
     result = (pos_merge & "FALSE").html()
     assert isinstance(result, HTML), "html() on empty should return HTML."
+
+
+# ------------------- fetch error handling & dict safety ---------------------
+
+
+def test_fetch_reraises_unexpected_dj_error(pos_merge, monkeypatch):
+    """An operational (non-missing-attr) DataJointError is not swallowed."""
+
+    def boom(self, *args, **kwargs):
+        raise dj.errors.DataJointError("simulated connection failure")
+
+    for part in pos_merge.parts(as_objects=True):
+        monkeypatch.setattr(type(part), "fetch", boom)
+
+    with pytest.raises(dj.errors.DataJointError, match="simulated"):
+        pos_merge.fetch("nwb_file_name")
+
+
+def test_restrict_does_not_mutate_caller_dict(pos_merge, pos_interval_key):
+    """Restricting must not pop the source key from the caller's dict."""
+    nwb = pos_interval_key["nwb_file_name"]
+    src = pos_merge.super_fetch(as_dict=True)[0]["source"]
+    snapshot = {"source": src, "nwb_file_name": nwb}
+    _ = pos_merge & snapshot
+    assert "source" in snapshot, "restrict must not mutate the caller's dict."
+
+
+def test_fetch1_incompatible_kwarg(pos_merge, pos_merge_key):
+    """fetch1 rejects output-shaping kwargs with a clear error."""
+    mid = pos_merge_key["merge_id"]
+    with pytest.raises(dj.errors.DataJointError, match="does not support"):
+        (pos_merge & {"merge_id": mid}).fetch1(format="frame")
+
+
+# ------------------- populate() replacement & deprecation -------------------
+
+
+def _patch_populate_parent(pos_merge, monkeypatch, calls):
+    """Stub merge_get_parent_class + insert to record a populate() call."""
+
+    class FakeParent:
+        @staticmethod
+        def populate(*args, **kwargs):
+            calls["populate"] = (args, kwargs)
+
+        def __and__(self, other):
+            return self
+
+        def fetch(self, *args, **kwargs):
+            return [{"merge_id": "fake"}]
+
+    monkeypatch.setattr(
+        type(pos_merge),
+        "merge_get_parent_class",
+        lambda self, src: FakeParent(),
+    )
+
+    def fake_insert(self, rows, **kwargs):
+        calls["insert"] = (rows, kwargs)
+
+    monkeypatch.setattr(type(pos_merge), "insert", fake_insert)
+
+
+def test_populate_instance(pos_merge, monkeypatch):
+    """populate() forwards keys and inserts successes with skip_duplicates."""
+    calls = {}
+    _patch_populate_parent(pos_merge, monkeypatch, calls)
+
+    pos_merge.populate("AnySource", keys=[{"k": 1}])
+
+    assert calls["populate"][0][0] == [{"k": 1}], "keys forwarded to populate."
+    assert calls["insert"][0] == [{"merge_id": "fake"}], "successes inserted."
+    assert (
+        calls["insert"][1].get("skip_duplicates") is True
+    ), "insert must forward skip_duplicates=True."
+
+
+def test_merge_populate_deprecated(pos_merge, monkeypatch, caplog):
+    """Deprecated merge_populate still works and logs a 0.7.0 deprecation."""
+    import logging
+
+    calls = {}
+    _patch_populate_parent(pos_merge, monkeypatch, calls)
+
+    with caplog.at_level(logging.WARNING, logger="spyglass"):
+        pos_merge.merge_populate("AnySource", keys=[{"k": 1}])
+
+    assert calls["insert"][0] == [{"merge_id": "fake"}], "successes inserted."
+    assert "merge_populate" in caplog.text and "0.7.0" in caplog.text
+
+
+def test_deprecated_methods_warn(pos_merge, caplog):
+    """Deprecated merge_X methods log a deprecation naming Spyglass 0.7.0."""
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="spyglass"):
+        pos_merge.merge_restrict(True)
+        pos_merge.merge_view(True)
+
+    assert "0.7.0" in caplog.text, "Deprecation must name the 0.7.0 target."
+    assert "merge_restrict" in caplog.text
+    assert "merge_view" in caplog.text
+
+
+# ------------------- dj.Top order_by + restriction mixing -------------------
+
+
+def test_top_order_by_preserved(pos_merge):
+    """dj.Top(order_by=...) selects different rows, honored by part-walking."""
+    if len(pos_merge) < 2:
+        pytest.skip("Need at least 2 entries to test Top order_by.")
+    asc = pos_merge & dj.Top(limit=1, order_by="merge_id")
+    desc = pos_merge & dj.Top(limit=1, order_by="merge_id DESC")
+    asc_ids = asc._resolve_top_restriction()
+    desc_ids = desc._resolve_top_restriction()
+    assert len(asc_ids) == 1 and len(desc_ids) == 1, "Top(limit=1) → one id."
+    assert (
+        asc_ids != desc_ids
+    ), "order_by direction should select different row."
+
+
+def test_fetch1_count_zero_message(pos_merge):
+    """fetch1 on an empty restriction names the count, not a missing attr."""
+    with pytest.raises(dj.errors.DataJointError, match="expected exactly 1"):
+        (pos_merge & "FALSE").fetch1()
+
+
+def test_fetch1_missing_attr_message(pos_merge, pos_merge_key):
+    """fetch1 for an absent attr names retrieval failure, not the count."""
+    mid = pos_merge_key["merge_id"]
+    with pytest.raises(dj.errors.DataJointError, match="could not retrieve"):
+        (pos_merge & {"merge_id": mid}).fetch1("__nonexistent_attr__")
+
+
+def test_mixed_master_part_dict_restriction(pos_merge, pos_merge_key):
+    """A dict mixing master + part fields ANDs both — master key not dropped."""
+    mid = pos_merge_key["merge_id"]
+    row = (pos_merge & {"merge_id": mid}).fetch1()
+    nwb = row["nwb_file_name"]
+    match = pos_merge & {"merge_id": mid, "nwb_file_name": nwb}
+    assert len(match) == 1, "Matching master+part dict returns the row."
+    mismatch = pos_merge & {"merge_id": mid, "nwb_file_name": "__nope__.nwb"}
+    assert len(mismatch) == 0, "Master key must not be silently dropped."
+
+
+def test_string_restrict_and_two_part_fields(pos_merge, pos_merge_key):
+    """A string AND-ing two part fields resolves through parts correctly."""
+    mid = pos_merge_key["merge_id"]
+    row = (pos_merge & {"merge_id": mid}).fetch1()
+    master = set(pos_merge.heading.names)
+    part_fields = [
+        k for k in row if k not in master and isinstance(row[k], str)
+    ]
+    if len(part_fields) < 2:
+        pytest.skip("Need ≥2 string-valued part fields to test AND mixing.")
+    f1, f2 = part_fields[:2]
+    restr = f'{f1} = "{row[f1]}" AND {f2} = "{row[f2]}"'
+    assert len(pos_merge & restr) >= 1, "AND of two part fields should match."

@@ -264,12 +264,22 @@ class Merge(ExportMixin, dj.Manual):
 
         Follows DataJoint convention: returns a dict (no attrs), a scalar
         (one attr), or a tuple (multiple attrs).  Raises DataJointError when
-        the restricted table contains ≠ 1 row.
+        the restricted table contains ≠ 1 row, or when an output-shaping
+        kwarg (``as_dict``, ``format``) is passed — these conflict with the
+        dict/scalar/tuple contract; use ``fetch()`` for other formats.
         """
         if attrs and all(
             a in self._MASTER_ONLY_ATTRS | self._DJ_SPECIAL_ATTRS for a in attrs
         ):
             return super().fetch1(*attrs, log_export=log_export, **kwargs)
+
+        incompatible = {"as_dict", "format"} & set(kwargs)
+        if incompatible:
+            raise DataJointError(
+                f"Merge.fetch1 does not support {sorted(incompatible)}; it "
+                "always returns a dict (no attrs), a scalar (one attr), or a "
+                "tuple (multiple attrs). Use fetch() for other output formats."
+            )
 
         n = len(self)
         if n != 1:
@@ -281,7 +291,7 @@ class Merge(ExportMixin, dj.Manual):
             *attrs,
             log_export=log_export,
             as_dict=True,
-            **{k: v for k, v in kwargs.items() if k != "as_dict"},
+            **kwargs,
         )
         if not rows:
             raise DataJointError(
@@ -386,6 +396,7 @@ class Merge(ExportMixin, dj.Manual):
                 in part.full_table_name
             ]
         if isinstance(restriction, dict):  # restr by source already done above
+            restriction = dict(restriction)  # copy: don't mutate caller's dict
             _ = restriction.pop(cls()._reserved_sk, None)  # won't work for str
             # If a dict restriction has all invalid keys, it is treated as True
             if not add_invalid_restrict:
@@ -1149,13 +1160,25 @@ class Merge(ExportMixin, dj.Manual):
         )
 
         for part in parts:
-            try:
-                results.append(part.fetch(*attrs, **kwargs))
-            except DataJointError as e:
+            # A plain-name attr absent from this part's heading is the expected
+            # "wrong part" case — skip it.  Any other DataJointError (e.g. a
+            # dropped connection) is operational and must propagate.
+            missing = [
+                a
+                for a in attrs
+                if isinstance(a, str)
+                and re.fullmatch(r"\w+", a)
+                and a not in self._DJ_SPECIAL_ATTRS
+                and a not in part.heading.names
+            ]
+            if missing:
                 logger.warning(
-                    f"{e.args[0]} Skipping "
+                    f"Attribute(s) {missing} not in "
                     + to_camel_case(part.table_name.split("__")[-1])
+                    + ". Skipping."
                 )
+                continue
+            results.append(part.fetch(*attrs, **kwargs))
 
         if not results:
             logger.info(
