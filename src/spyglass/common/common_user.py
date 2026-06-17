@@ -88,7 +88,17 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
 
     @cached_property
     def env_hash(self) -> str:
-        """Compute an MD5 hash of the environment dictionary."""
+        """Compute an MD5 hash of the environment dictionary.
+
+        The Spyglass commit hash is folded in when present. For an editable /
+        local clone the conda+pip export does not capture the exact source
+        revision (an editable install shows as ``-e ...`` with no version), so
+        the commit is the only thing that distinguishes two otherwise-identical
+        environments running different code. Including it keeps the recompute
+        feature reproducible at the expense of a new row per commit on dev
+        installs. Clean releases have ``commit_hash=None``, so their hash is
+        unchanged and existing rows are unaffected.
+        """
         env_dict = self.parse_env_dict(self.env)
         commit = get_install_info().get("commit_hash")
         if commit:

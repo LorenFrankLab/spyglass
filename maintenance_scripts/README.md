@@ -22,6 +22,14 @@ regularly as cron jobs.
     - Provides `send_email_message <to> <cc> <subject> <body>` using `curl` and
         Gmail SMTPS, mirroring the approach in `check_disk_space.sh` with added CC
         support.
+    - Used to send dirty-install notifications: `cleanup.py` writes a row per
+        flagged user to `$DIRTY_ENVS_OUT`, and `run_jobs.sh` emails each user (CC
+        `$SPYGLASS_EMAIL_DEST`). A user is flagged when their logged Spyglass
+        clone has local source edits or is far behind upstream, and the flag has
+        stood for at least 30 days; users on a clean, current clone are never
+        emailed. Importing Spyglass logs the current environment and emits a
+        one-time warning for such installs, so the email is an escalation of a
+        warning the user has already seen.
 - `populate.py` - This script provides an example of how to run computations as
     part of cron jobs. This is not currently in use.
 - `run_jobs.sh` - This script ...
