@@ -24,8 +24,7 @@ Reference material for executors implementing against external code or formats. 
 
 These are verified against the **installed** SI 0.104.3 source in the v2 env
 (`/Users/edeno/miniconda3/envs/spyglass_spikesorting_v2/lib/python3.11/site-packages/spikeinterface/`),
-not docs/training. **They correct or extend the doc-based sections below** — where
-they conflict, trust this section. (The full SI parameter tables for sorters /
+not docs/training. (The full SI parameter tables for sorters /
 preprocessing / analyzer live in the sibling plan
 `.claude/docs/plans/spikesorting-v2-ux-followups/appendix.md`.)
 
@@ -41,7 +40,6 @@ noise_levels × detect_threshold`: estimated `noise_levels` → per-channel MAD;
 MS4/MS5 is a misnomer.
 
 ### SortingAnalyzer extension recompute cascade + determinism (Phase 2)
-**Supersedes the simplified DAG in [SortingAnalyzer extension dependencies](#sortinganalyzer-extension-dependencies).**
 Recomputing a parent **silently deletes its children** (recursive): `random_spikes`
 → deletes `waveforms, templates, principal_components`; `waveforms` → deletes
 `templates, PCA`; `templates` → deletes ALL template-derived (`spike_amplitudes,
@@ -60,7 +58,7 @@ does **not** enforce this — compute the required extensions explicitly and ass
 their presence, or metric values silently change/omit.
 
 ### Quality-metric porting traps (Phase 2)
-**Extends [Quality metric renames in 0.104](#quality-metric-renames-in-0104) — two breakers:**
+Two SI 0.104 facts a naive v1 port gets wrong:
 1. **`nn_isolation`/`nn_noise_overlap` no longer exist as metric names** — they're
    the two output columns of a single metric **`nn_advanced`** in SI 0.104.3.
    Requesting the old names in `compute_quality_metrics(metric_names=[...])` **raises
@@ -78,16 +76,15 @@ their presence, or metric values silently change/omit.
    uses SI's `isi_violation` column it gets the ratio, silently changing the gate's
    meaning — replicate `count/(N−1)`.** Edge bug (#1556 class): a 1-spike unit gives
    `0/0 = nan` (caught by NaN sanitization); a 0-spike unit hits the **high-level**
-   `compute_isi_violations` count=−1 sentinel (verified in source — note the
-   *low-level* `isi_violations` returns nan instead, so check the right function) →
-   `−1/(0−1) = 1.0`, a finite spurious value that survives NaN sanitization.
+   `compute_isi_violations` count=−1 sentinel →
+   `−1/(0−1) = 1.0`, a finite spurious value that survives NaN sanitization. (The
+   low-level `isi_violations` returns nan; Spyglass calls the high-level one.)
    Low-spike NaN: `nn_*` → NaN below `min_spikes=10` (so low-spike noisy units are
    NOT auto-rejected, NaN compares False); `amplitude_cutoff` → NaN below ~500 spikes.
    `peak_offset`/`peak_channel` are Frank-lab custom, not SI metrics.
 
 ### Motion correction (Phase 3) — torch + single-segment
-**Extends [Motion correction presets](#motion-correction-presets).** `dredge`,
-`dredge_fast`, **and `rigid_fast`** all use `dredge_ap`, which **hard-requires torch**
+`dredge`, `dredge_fast`, **and `rigid_fast`** all use `dredge_ap`, which **hard-requires torch**
 (`dredge.py:110-113`). Only **`kilosort_like`** (`iterative_template`) is torch-free;
 `nonrigid_accurate`/`nonrigid_fast_and_accurate` (`decentralized`) are torch-optional
 (numpy fallback). **No preset needs GPU** (CPU fallback). So the planned `rigid_fast`
@@ -124,7 +121,7 @@ Direct replacements when porting code from v1 to v2. Sources:
 | `return_scaled=True` | `return_in_uV=True` | Renamed across the API. |
 | `is_scaled` | `is_in_uV` | |
 | Manual chain: `bandpass → cmr → whiten` | `apply_preprocessing_pipeline(recording, {"bandpass_filter": {...}, "common_reference": {...}, "whiten": {...}})` | Declarative; serializable. New in 0.103. Import from `spikeinterface.preprocessing`. **Note**: v2 splits this into pre-motion (`bandpass + cmr`) and post-motion (`whiten`) stages — see `shared-contracts.md § Pydantic Parameter Schema Convention`. |
-| `sic.MergeUnitsSorting(sorting, merge_groups)` | Same class still exists in SI 0.104. For analyzer-backed curation, prefer `spikeinterface.curation.apply_curation(...)` when applying a full curation model. | **Correction:** `apply_merges_to_sorting` **IS** present in SI 0.104.3 (`core/sorting_tools.py`, exported from `spikeinterface.core`) — it is what `apply_curation` calls internally. |
+| `sic.MergeUnitsSorting(sorting, merge_groups)` | Same class still exists in SI 0.104. For analyzer-backed curation, prefer `spikeinterface.curation.apply_curation(...)` when applying a full curation model. | `apply_merges_to_sorting` is present in SI 0.104.3 (`core/sorting_tools.py`, exported from `spikeinterface.core`); it is what `apply_curation` calls internally. |
 | `sic.remove_excess_spikes(sorting, recording)` | Same name, same module. | Still present in 0.104. |
 | Auto-merge: `get_potential_auto_merge(we, ...)` | `compute_merge_unit_groups(analyzer, preset=...)` | Modern signature; preset-based. |
 | `set_global_job_kwargs(n_jobs=N)` | Same. | |
@@ -136,7 +133,7 @@ Direct replacements when porting code from v1 to v2. Sources:
 
 ## SortingAnalyzer extension dependencies
 
-Extensions form a DAG. Phase 1 / 2 must compute parents before children. **This diagram is a simplification** — for the exact dependency edges, the recompute **silent-delete cascade** (recomputing a parent wipes its children, including the committed `peak_amplitude_uv`), and the seed-pinning / silent-incompleteness gotchas, see [§ SpikeInterface 0.104.3 source-verified findings](#spikeinterface-01043--source-verified-findings-read-first).
+Extensions form a DAG. Phase 1 / 2 must compute parents before children. For the exact dependency edges, the recompute silent-delete cascade (recomputing a parent wipes its children, including the committed `peak_amplitude_uv`), and the seed-pinning / silent-incompleteness gotchas, see [§ SpikeInterface 0.104.3 source-verified findings](#spikeinterface-01043--source-verified-findings-read-first).
 
 ```
 random_spikes  ───┐
@@ -171,7 +168,7 @@ These break v1's `MetricParameters` blobs verbatim — Phase 2 introduces fresh 
 | `peak_trough_ratio` | `peak_to_trough_ratio` | Now absolute-valued; magnitudes differ from 0.99. |
 | `snr` (mean-based) | `snr` (median-based) | Same name, different formula. Numeric thresholds shift; recalibrate. |
 | `from spikeinterface.qualitymetrics import compute_snr` | Use `spikeinterface.metrics.quality.compute_quality_metrics(...)` for table-level v2 metrics; only import individual metric helpers from SI's documented metric submodules after checking the pinned 0.104 API. | Metrics were refactored in 0.104. |
-| `auto_label_units` | `model_based_label_units` | **Correction:** `auto_label_units` is a **deprecated alias for `model_based_label_units`** (its docstring says so). `unitrefine_label_units` is a *separate* function (the UnitRefine cascade classifier with a different signature), NOT the rename target. |
+| `auto_label_units` | `model_based_label_units` | `auto_label_units` is a **deprecated alias for `model_based_label_units`** (per its docstring). `unitrefine_label_units` is a *separate* function (the UnitRefine cascade classifier), not this rename target. |
 | `nn_isolation`, `nn_noise_overlap` (two metrics) | `nn_advanced` (one metric, two output columns) | **Requesting the old names raises `ValueError` in 0.104.** Request `nn_advanced`; read the `nn_isolation`/`nn_noise_overlap` columns from the result. PCA metric → needs `principal_components` and `skip_pc_metrics=False`. See source-verified findings above. |
 | `isi_violation` (Spyglass = custom fraction) | `isi_violation` column = SI's `isi_violations_ratio` | **Not the same number.** Spyglass = `count/(N−1)` (bounded observed fraction); SI's ratio = Hill/UMS2000 contamination estimate (unbounded). Replicate the count-based fraction; don't use SI's ratio column. |
 

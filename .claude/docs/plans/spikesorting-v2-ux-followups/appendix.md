@@ -110,7 +110,7 @@ different number, can exceed 1) unless the custom `count/(n−1)` fraction is
 replicated** — the gate would otherwise change meaning silently. Edge bug (#1556
 class): a 1-spike unit gives `0/0 = nan` (caught by NaN sanitization); a 0-spike
 unit hits the **high-level** `compute_isi_violations` count=−1 sentinel (the
-*low-level* `isi_violations` returns nan instead — check the right function) →
+*low-level* `isi_violations` returns nan; Spyglass calls the high-level one) →
 `−1/(0−1) = 1.0`, a finite spurious value that survives NaN sanitization.
 
 **`nn_isolation`/`nn_noise_overlap` are deprecated names** in SI 0.104.3 — now the

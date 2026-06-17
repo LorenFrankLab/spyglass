@@ -38,7 +38,7 @@ faithful end-to-end "production" preset can ship **once that phase lands**:
   unit `noise`/`reject` — `nn_noise_overlap > 0.03`, `isi_violation > 0.0025`,
   `peak_offset > 2`; `merge_params = {}`.
 
-**Porting Set A onto a SI 0.104 `SortingAnalyzer` — required corrections** (verified against source; full detail in [appendix.md](appendix.md)):
+**Porting Set A onto a SI 0.104 `SortingAnalyzer` — required handling** (verified against source; full detail in [appendix.md](appendix.md)):
 - **`isi_violation`:** do **not** use SI's `isi_violation`/`isi_violations_ratio` column — that's the Hill/UMS2000 contamination-rate estimate (unbounded, can exceed 1). Replicate Spyglass's fraction: take SI's violation **count** and compute `count / (n_spikes − 1)`. Otherwise the `> 0.0025` gate silently changes meaning. Guard the 0-spike `(-1)/(-1)=1.0` artifact.
 - **`nn_isolation`/`nn_noise_overlap`:** these names **raise** in SI 0.104 — request the single metric **`nn_advanced`** and read its two output columns; pass the Set-A params explicitly (`n_components=7`, `n_neighbors=5`, `max_spikes=20000`, `min_spikes=10`, `radius_um=100`, `seed=0`).
 - **Extension order + cascade:** compute `random_spikes → noise_levels → waveforms → templates → spike_amplitudes → principal_components` (PCA is required for `nn_advanced`, else it silently skips) with the **final** waveform recipe first — recomputing waveforms later cascade-deletes templates and everything template-derived, including the `peak_amplitude_uv` already committed at sort time.
