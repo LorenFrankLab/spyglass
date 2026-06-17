@@ -9,7 +9,6 @@ Run with: conda run -n dirty pytest tests/common/test_dirty.py --no-teardown
 
 import os
 import time
-from datetime import datetime, timedelta
 from subprocess import CompletedProcess
 from unittest.mock import MagicMock, patch
 
@@ -106,6 +105,20 @@ def make_cache(conda_env_cache_cls, not_computed):
         return cache, cache_path
 
     return _factory
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _reset_user_env_cache(user_env_tbl):
+    """Don't leak cached_property state to other test modules.
+
+    Tests here poke cached_property attrs on the session-scoped
+    ``user_env_tbl``. If this module ends with ``this_env`` cached but
+    ``matching_env_id`` popped, a later module's ``del ...matching_env_id``
+    raises ``AttributeError``. Clear all of them together on teardown.
+    """
+    yield
+    for attr in ("env", "env_hash", "matching_env_id", "this_env"):
+        user_env_tbl.__dict__.pop(attr, None)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -793,15 +806,18 @@ def test_warn_countdown_uses_days_since_first_flag(caplog, warn_dirty_days):
         "commit_hash": "abc1234",
     }
 
-    first_flagged = datetime.now() - timedelta(days=5)
-
     mock_lab = MagicMock()
     mock_lab.return_value.user_is_admin = False
 
+    # warn_if_dirty now computes the day count DB-side:
+    # dirty.proj(_d=DIRTY_DAYS_SQL).fetch("_d"); oldest row -> largest count.
+    mock_proj = MagicMock()
+    mock_proj.fetch = MagicMock(return_value=[5])  # days since first flag
+
     mock_dirty = MagicMock()
     mock_dirty.__bool__ = MagicMock(return_value=True)
-    mock_dirty.fetch = MagicMock(return_value=[first_flagged])
     mock_dirty.__and__ = MagicMock(return_value=mock_dirty)
+    mock_dirty.proj = MagicMock(return_value=mock_proj)
 
     mock_env = MagicMock()
     mock_env.__and__ = MagicMock(return_value=mock_dirty)

@@ -1,10 +1,9 @@
 import os
 import random
 import string
-import yaml
 from functools import cached_property
 from pathlib import Path
-from typing import Dict, Optional, Union, Tuple
+from typing import Dict, Optional, Tuple, Union
 from uuid import uuid4
 
 import datajoint as dj
@@ -13,6 +12,7 @@ import numpy as np
 import pandas as pd
 import pynwb
 import spikeinterface as si
+import yaml
 from datajoint.table import Table
 from hdmf.common import DynamicTable
 from pynwb.core import ScratchData

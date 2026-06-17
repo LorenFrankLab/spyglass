@@ -106,18 +106,25 @@ def warn_if_dirty(install_info: dict) -> bool:
     # would create a circular dependency.
     try:
         import datajoint as dj
+
         from spyglass.common.common_lab import LabMember
-        from spyglass.common.common_user import UserEnvironment
-    except Exception:
+        from spyglass.common.common_user import (
+            DIRTY_DAYS_SQL,
+            UserEnvironment,
+        )
+    except Exception as exc:
+        logger.debug(f"warn_if_dirty deferred import failed: {exc}")
         return False  # not ready — let the caller retry later
 
     try:
         if LabMember().user_is_admin:
             return True
-    except Exception:
-        pass  # DB unreachable — still show warning
+    except Exception as exc:
+        logger.debug(f"admin check failed: {exc}")  # DB down — warn anyway
 
-    # Find how long this user has had a dirty install logged
+    # Days since this user's dirty install was first logged. Computed DB-side
+    # (shared DIRTY_DAYS_SQL) so it agrees with the admin notification and is
+    # not skewed by client-vs-server timezone. Oldest row → largest count.
     days = 0
     try:
         dj_user = dj.config.get("database.user", "")
@@ -127,10 +134,10 @@ def warn_if_dirty(install_info: dict) -> bool:
             & "dirty_path IS NOT NULL"
         )
         if dirty:
-            first_flagged = min(dirty.fetch("timestamp"))
-            days = (datetime.now() - first_flagged).days
-    except Exception:
-        pass
+            day_vals = dirty.proj(_d=DIRTY_DAYS_SQL).fetch("_d")
+            days = int(max(day_vals)) if len(day_vals) else 0
+    except Exception as exc:
+        logger.debug(f"dirty day-count failed: {exc}")
 
     N = max(0, WARN_DIRTY_ENV_DAYS - days)
 
@@ -170,8 +177,8 @@ def _warn_once() -> None:
     try:
         if warn_if_dirty(get_install_info()):
             _warned = True
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug(f"_warn_once failed: {exc}")
 
 
 def get_install_info() -> dict:
@@ -233,8 +240,8 @@ def _compute_install_info() -> dict:
             if (candidate / ".git").exists():
                 install_path = str(candidate)
                 break
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug(f"could not locate install path: {exc}")
 
     # ── has_local_changes / is_stale: only meaningful inside a git repo ──────
     has_local_changes = False

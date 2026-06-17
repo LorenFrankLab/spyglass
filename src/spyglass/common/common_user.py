@@ -26,6 +26,11 @@ DEFAULT_ENV_ID = (
     + "_00"
 )
 
+# Single source of truth for "days since a dirty row was first logged",
+# computed DB-side (server NOW()) so the warning countdown and the admin
+# notification agree and neither is skewed by client-vs-server timezone.
+DIRTY_DAYS_SQL = "DATEDIFF(NOW(), `timestamp`)"
+
 
 @schema
 class UserEnvironment(SpyglassMixin, dj.Manual):
@@ -133,14 +138,6 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
 
         return f"{base_id}_{next_int:02d}"
 
-    def _parse_pip_line(self, line: str) -> bool:
-        """Compatibility shim — delegates to the shared env-cache parser.
-
-        ``_parse_pip_line`` was moved to ``CondaEnvCache``.
-        This shim keeps existing callers working without changes.
-        """
-        return _env_cache._parse_pip_line(line)
-
     def insert_current_env(self, env_id=DEFAULT_ENV_ID) -> dict:
         """Insert the current environment into the table."""
 
@@ -204,7 +201,7 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
                 ids = ", ".join(f'"{eid}"' for eid in excluded)
                 dirty = dirty & f"env_id NOT IN ({ids})"
 
-        return dirty.proj(..., days_since_warn="DATEDIFF(NOW(), `timestamp`)")
+        return dirty.proj(..., days_since_warn=DIRTY_DAYS_SQL)
 
     def write_dirty_notifications(self, out_path: str = None) -> None:
         """Write overdue dirty-install rows to out_path (or stdout if None).
