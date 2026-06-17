@@ -120,9 +120,9 @@ def test_manifest_stable_keys_unchanged(first_run):
     first_manifest, inputs = first_run
     second_manifest = run_v2_pipeline(**inputs)
     for key in _STABLE_KEYS:
-        assert second_manifest[key] == first_manifest[key], (
-            f"stable key {key!r} changed across runs"
-        )
+        assert (
+            second_manifest[key] == first_manifest[key]
+        ), f"stable key {key!r} changed across runs"
 
 
 @pytest.mark.database
@@ -203,7 +203,9 @@ def test_stage_error_carries_partial_manifest(first_run, monkeypatch):
 
     err = exc.value
     assert err.stage == "sorting"
-    assert {"recording_id", "artifact_detection_id"} <= set(err.partial_manifest)
+    assert {"recording_id", "artifact_detection_id"} <= set(
+        err.partial_manifest
+    )
     assert "sorting_id" not in err.partial_manifest
     assert err.__cause__ is sentinel
 
@@ -254,7 +256,10 @@ def test_zero_unit_warning_in_manifest(first_run):
     """
     _, inputs = first_run
     manifest = run_v2_pipeline(
-        **{**inputs, "pipeline_preset": "franklab_tetrode_clusterless_thresholder"}
+        **{
+            **inputs,
+            "pipeline_preset": "franklab_tetrode_clusterless_thresholder",
+        }
     )
     assert manifest["n_units"] == 0
     assert any("zero units" in w for w in manifest["warnings"]), manifest[

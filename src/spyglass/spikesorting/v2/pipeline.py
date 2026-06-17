@@ -641,7 +641,9 @@ def plot_sort_group_geometry(
             )
 
     coordinate_sources = {
-        row["coordinate_source"] for row in plottable if row["coordinate_source"]
+        row["coordinate_source"]
+        for row in plottable
+        if row["coordinate_source"]
     }
     x_suffix = ", offset per probe" if multi_probe else ""
     if coordinate_sources == {"probe"}:
@@ -910,7 +912,9 @@ def preflight_v2_pipeline(
     _check(
         "artifact_detection_params_exist",
         ArtifactDetectionParameters
-        & {"artifact_detection_params_name": bundle.artifact_detection_params_name},
+        & {
+            "artifact_detection_params_name": bundle.artifact_detection_params_name
+        },
         f"ArtifactDetectionParameters row {bundle.artifact_detection_params_name!r} "
         "is missing. Run initialize_v2_defaults().",
     )
@@ -1372,7 +1376,8 @@ def run_v2_pipeline(
             labels={},
             parent_curation_id=-1,
             description=(
-                description or f"run_v2_pipeline pipeline_preset={pipeline_preset}"
+                description
+                or f"run_v2_pipeline pipeline_preset={pipeline_preset}"
             ),
             reuse_existing=True,
         )

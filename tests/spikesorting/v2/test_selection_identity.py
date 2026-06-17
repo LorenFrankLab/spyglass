@@ -62,9 +62,9 @@ def test_deterministic_id_stable_across_uuid_vs_str():
     ``artifact_detection_id`` once forked a duplicate sort.
     """
     u = uuid.uuid4()
-    assert deterministic_id("sorting", {"artifact_detection_id": u}) == deterministic_id(
-        "sorting", {"artifact_detection_id": str(u)}
-    )
+    assert deterministic_id(
+        "sorting", {"artifact_detection_id": u}
+    ) == deterministic_id("sorting", {"artifact_detection_id": str(u)})
 
 
 def test_deterministic_id_stable_across_uuid_case():
@@ -380,7 +380,9 @@ def test_recording_selection_duplicate_pk_race_refetches(
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_sorting_selection_artifact_detection_vs_none_distinct(populated_sorting):
+def test_sorting_selection_artifact_detection_vs_none_distinct(
+    populated_sorting,
+):
     """An artifact-detection-backed and no-artifact-detection sort for the same
     (recording, sorter) get DISTINCT deterministic ids, and each matches
     the id computed directly from its logical identity."""
@@ -392,10 +394,12 @@ def test_sorting_selection_artifact_detection_vs_none_distinct(populated_sorting
     sorter, sorter_params_name = (SortingSelection & populated_sorting).fetch1(
         "sorter", "sorter_params_name"
     )
-    artifact_detection_id = SortingSelection.resolve_artifact_detection(populated_sorting)
-    assert artifact_detection_id is not None, (
-        "fixture sort should be artifact-detection-backed"
+    artifact_detection_id = SortingSelection.resolve_artifact_detection(
+        populated_sorting
     )
+    assert (
+        artifact_detection_id is not None
+    ), "fixture sort should be artifact-detection-backed"
 
     # The artifact-detection-backed fixture sort's PK is the deterministic id.
     assert populated_sorting["sorting_id"] == deterministic_id(
@@ -549,7 +553,9 @@ def test_direct_master_insert_rejected_all_masters(module, cls_name, extra):
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_artifact_detection_selection_duplicate_pk_race_refetches(populated_sorting):
+def test_artifact_detection_selection_duplicate_pk_race_refetches(
+    populated_sorting,
+):
     """ArtifactDetectionSelection duplicate-PK race loser refetches the winner's
     master+source row (no new row, no error)."""
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionSelection
@@ -559,7 +565,9 @@ def test_artifact_detection_selection_duplicate_pk_race_refetches(populated_sort
         "recording_id"
     )
     key = {"recording_id": rec_id, "artifact_detection_params_name": "none"}
-    pk = ArtifactDetectionSelection.insert_selection(key)  # the populated selection
+    pk = ArtifactDetectionSelection.insert_selection(
+        key
+    )  # the populated selection
 
     with mock.patch.object(
         ArtifactDetectionSelection, "_find_existing_pk", side_effect=[None, pk]
@@ -603,16 +611,24 @@ def test_artifact_detection_selection_orphan_master_raises_schema_bypass(
         },
     )
     ArtifactDetectionSelection.insert1(
-        {"artifact_detection_id": det_id, "artifact_detection_params_name": "default"},
+        {
+            "artifact_detection_id": det_id,
+            "artifact_detection_params_name": "default",
+        },
         allow_direct_insert=True,
     )
     try:
         with pytest.raises(SchemaBypassError, match="raw-insert orphan"):
             ArtifactDetectionSelection.insert_selection(
-                {"recording_id": rec_id, "artifact_detection_params_name": "default"}
+                {
+                    "recording_id": rec_id,
+                    "artifact_detection_params_name": "default",
+                }
             )
     finally:
-        (ArtifactDetectionSelection & {"artifact_detection_id": det_id}).delete(safemode=False)
+        (ArtifactDetectionSelection & {"artifact_detection_id": det_id}).delete(
+            safemode=False
+        )
 
 
 @pytest.mark.slow
@@ -627,7 +643,9 @@ def test_sorting_selection_duplicate_pk_race_refetches(populated_sorting):
     sorter, sorter_params_name = (SortingSelection & populated_sorting).fetch1(
         "sorter", "sorter_params_name"
     )
-    artifact_detection_id = SortingSelection.resolve_artifact_detection(populated_sorting)
+    artifact_detection_id = SortingSelection.resolve_artifact_detection(
+        populated_sorting
+    )
     key = {
         "recording_id": rec_id,
         "sorter": sorter,
@@ -737,7 +755,9 @@ def test_artifact_detection_selection_shared_group_writes_deterministic_pk(
         pk = ArtifactDetectionSelection.insert_selection(dict(select_key))
         assert pk == {"artifact_detection_id": expected}
         # Idempotent re-call returns the same id.
-        assert ArtifactDetectionSelection.insert_selection(dict(select_key)) == pk
+        assert (
+            ArtifactDetectionSelection.insert_selection(dict(select_key)) == pk
+        )
         # source_kind keeps it distinct from the recording-source id for the
         # same params + the member recording.
         rec_source_id = deterministic_id(
@@ -750,7 +770,9 @@ def test_artifact_detection_selection_shared_group_writes_deterministic_pk(
         )
         assert expected != rec_source_id
     finally:
-        (ArtifactDetectionSelection & {"artifact_detection_id": expected}).delete(safemode=False)
+        (
+            ArtifactDetectionSelection & {"artifact_detection_id": expected}
+        ).delete(safemode=False)
         (
             SharedArtifactGroup & {"shared_artifact_group_name": group_name}
         ).delete(safemode=False)

@@ -358,9 +358,7 @@ def canonical_artifact(params: dict) -> dict:
             else None
         ),
         "zscore_threshold": (
-            float(zscore_threshold)
-            if zscore_threshold is not None
-            else None
+            float(zscore_threshold) if zscore_threshold is not None else None
         ),
         "proportion_above_threshold": float(proportion_above_threshold),
         "removal_window_ms": float(p.get("removal_window_ms", 1.0)),

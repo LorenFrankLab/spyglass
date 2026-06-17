@@ -74,7 +74,10 @@ def planted_sort(dj_conn):
     if not (Recording & rec_pk):
         Recording.populate(rec_pk, reserve_jobs=False)
     art_pk = ArtifactDetectionSelection.insert_selection(
-        {"recording_id": rec_pk["recording_id"], "artifact_detection_params_name": "none"}
+        {
+            "recording_id": rec_pk["recording_id"],
+            "artifact_detection_params_name": "none",
+        }
     )
     if not (ArtifactDetection & art_pk):
         ArtifactDetection.populate(art_pk, reserve_jobs=False)
@@ -149,7 +152,9 @@ def test_cancelled_artifact_delete_preserves_interval_list(
     from spyglass.spikesorting.v2.artifact import ArtifactDetection
     from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.sorting import SortingSelection
-    from spyglass.spikesorting.v2.utils import artifact_detection_interval_list_name
+    from spyglass.spikesorting.v2.utils import (
+        artifact_detection_interval_list_name,
+    )
 
     art_id = SortingSelection.resolve_artifact_detection(planted_sort)
     assert art_id is not None, "planted sort must be artifact-backed"
@@ -166,7 +171,9 @@ def test_cancelled_artifact_delete_preserves_interval_list(
     ), "fixture should have an artifact IntervalList"
 
     monkeypatch.setattr("datajoint.table.user_choice", lambda *a, **k: "no")
-    (ArtifactDetection & {"artifact_detection_id": art_id}).delete(safemode=True)
+    (ArtifactDetection & {"artifact_detection_id": art_id}).delete(
+        safemode=True
+    )
 
     assert ArtifactDetection & {
         "artifact_detection_id": art_id

@@ -212,9 +212,13 @@ def test_artifact_thresholds_or_semantics():
     thresholds, so leaving stale thresholds set is not an error.
     """
     # amplitude-only
-    ArtifactDetectionParamsSchema(amplitude_threshold_uv=500.0, zscore_threshold=None)
+    ArtifactDetectionParamsSchema(
+        amplitude_threshold_uv=500.0, zscore_threshold=None
+    )
     # z-score-only
-    ArtifactDetectionParamsSchema(amplitude_threshold_uv=None, zscore_threshold=5.0)
+    ArtifactDetectionParamsSchema(
+        amplitude_threshold_uv=None, zscore_threshold=5.0
+    )
     # both thresholds at once -- the OR mode
     both = ArtifactDetectionParamsSchema(
         amplitude_threshold_uv=500.0, zscore_threshold=5.0
@@ -714,7 +718,9 @@ def test_shipped_rows_carry_current_params_schema_version(dj_conn):
     assert clusterless["params"]["schema_version"] == 4
 
     for name in ("default_franklab", "default_neuropixels", "no_filter"):
-        row = (PreprocessingParameters & {"preprocessing_params_name": name}).fetch1()
+        row = (
+            PreprocessingParameters & {"preprocessing_params_name": name}
+        ).fetch1()
         assert row["params_schema_version"] == 3, name
         assert row["params"]["schema_version"] == 3, name
 

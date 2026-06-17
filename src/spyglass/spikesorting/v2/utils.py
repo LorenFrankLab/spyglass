@@ -492,9 +492,7 @@ def resolve_group_reference(
     if explicit_ref is not _AUTO_REFERENCE:
         ref = -1 if explicit_ref is None else int(explicit_ref)
     else:
-        uniq = sorted(
-            {-1 if r is None else int(r) for r in configured_ref_ids}
-        )
+        uniq = sorted({-1 if r is None else int(r) for r in configured_ref_ids})
         if len(uniq) == 0:
             raise ValueError(
                 "SortGroupV2: electrode group "

@@ -113,9 +113,9 @@ def test_data_downloader_downloads_lazily_on_wait_for(tmp_path, monkeypatch):
     target = dd.FILE_PATHS[0]["target_name"]
     downloader.wait_for(target, timeout=5, interval=1)
 
-    assert any(target in " ".join(map(str, cmd)) for cmd in launched), (
-        f"wait_for did not trigger the deferred download for {target!r}"
-    )
+    assert any(
+        target in " ".join(map(str, cmd)) for cmd in launched
+    ), f"wait_for did not trigger the deferred download for {target!r}"
 
 
 # --------------------------------------------------------------------------
@@ -297,6 +297,6 @@ def test_filterwarnings_categories_are_resolvable():
                 "crashes. Qualify it as module.path.Category."
             )
             resolved = getattr(builtins, category)
-        assert isinstance(resolved, type) and issubclass(resolved, Warning), (
-            f"filterwarnings category {category!r} is not a Warning subclass"
-        )
+        assert isinstance(resolved, type) and issubclass(
+            resolved, Warning
+        ), f"filterwarnings category {category!r} is not a Warning subclass"

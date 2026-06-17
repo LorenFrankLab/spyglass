@@ -249,9 +249,7 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
             cls.SortGroupElectrode & {"nwb_file_name": nwb_file_name}
         )
         cascade = (
-            existing.cautious_delete(dry_run=True)
-            if sort_group_count
-            else None
+            existing.cautious_delete(dry_run=True) if sort_group_count else None
         )
         return DeletionPreview(
             nwb_file_name=nwb_file_name,
@@ -1038,7 +1036,11 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         if "preprocessing_params_name" in keys_minus_uuid:
             _ensure_lookup_row_exists(
                 PreprocessingParameters,
-                {"preprocessing_params_name": keys_minus_uuid["preprocessing_params_name"]},
+                {
+                    "preprocessing_params_name": keys_minus_uuid[
+                        "preprocessing_params_name"
+                    ]
+                },
                 helper_name="RecordingSelection.insert_selection",
                 insert_default_path="PreprocessingParameters.insert_default()",
             )

@@ -639,7 +639,9 @@ def _clean_session_v2(session_key):
         ).fetch("KEY", as_dict=True)
         if artifact_keys:
             (ArtifactDetection & artifact_keys).super_delete(warn=False)
-            (ArtifactDetectionSelection & artifact_keys).super_delete(warn=False)
+            (ArtifactDetectionSelection & artifact_keys).super_delete(
+                warn=False
+            )
 
     # Step 4: SharedArtifactGroup tables. The master FK's Session
     # and the Member part FK's Recording, so prior shared-group
@@ -690,7 +692,9 @@ def populated_recording(recording_selection_key):
 
 
 @pytest.mark.slow
-def test_artifact_detection_selection_inserts_master_and_source_part(populated_recording):
+def test_artifact_detection_selection_inserts_master_and_source_part(
+    populated_recording,
+):
     """``insert_selection`` writes exactly one master + one source row."""
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetectionParameters,
@@ -708,9 +712,10 @@ def test_artifact_detection_selection_inserts_master_and_source_part(populated_r
         & {"recording_id": populated_recording["recording_id"]}
     ).fetch("KEY", as_dict=True)
     for row in existing:
-        (ArtifactDetectionSelection & {"artifact_detection_id": row["artifact_detection_id"]}).super_delete(
-            warn=False
-        )
+        (
+            ArtifactDetectionSelection
+            & {"artifact_detection_id": row["artifact_detection_id"]}
+        ).super_delete(warn=False)
 
     pk = ArtifactDetectionSelection.insert_selection(key)
     assert isinstance(pk, dict)
@@ -747,7 +752,9 @@ def test_artifact_detection_selection_is_idempotent(populated_recording):
 
 
 @pytest.mark.slow
-def test_artifact_detection_selection_rejects_zero_and_two_sources(populated_recording):
+def test_artifact_detection_selection_rejects_zero_and_two_sources(
+    populated_recording,
+):
     """``insert_selection`` requires exactly one source key."""
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetectionParameters,
@@ -1083,10 +1090,14 @@ def test_artifact_detection_populates_and_writes_interval_list(
     ).fetch("KEY", as_dict=True)
     for row in existing:
         ArtifactDetection & row  # noqa: B018 -- silence linter on unused expr
-        (ArtifactDetection & {"artifact_detection_id": row["artifact_detection_id"]}).delete()
-        (ArtifactDetectionSelection & {"artifact_detection_id": row["artifact_detection_id"]}).super_delete(
-            warn=False
-        )
+        (
+            ArtifactDetection
+            & {"artifact_detection_id": row["artifact_detection_id"]}
+        ).delete()
+        (
+            ArtifactDetectionSelection
+            & {"artifact_detection_id": row["artifact_detection_id"]}
+        ).super_delete(warn=False)
 
     pk = ArtifactDetectionSelection.insert_selection(
         {
@@ -1148,10 +1159,14 @@ def test_artifact_detection_delete_removes_interval_list_row(
         & {"recording_id": populated_recording["recording_id"]}
     ).fetch("KEY", as_dict=True)
     for row in existing:
-        (ArtifactDetection & {"artifact_detection_id": row["artifact_detection_id"]}).delete()
-        (ArtifactDetectionSelection & {"artifact_detection_id": row["artifact_detection_id"]}).super_delete(
-            warn=False
-        )
+        (
+            ArtifactDetection
+            & {"artifact_detection_id": row["artifact_detection_id"]}
+        ).delete()
+        (
+            ArtifactDetectionSelection
+            & {"artifact_detection_id": row["artifact_detection_id"]}
+        ).super_delete(warn=False)
 
     pk = ArtifactDetectionSelection.insert_selection(
         {
@@ -1367,7 +1382,9 @@ def test_sorting_make_fetch_resolves_artifact_obs_intervals(populated_sorting):
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 
     # The sort is artifact-backed: exactly one ArtifactDetectionSource part row.
-    artifact_detection_id = SortingSelection.resolve_artifact_detection(populated_sorting)
+    artifact_detection_id = SortingSelection.resolve_artifact_detection(
+        populated_sorting
+    )
     assert artifact_detection_id is not None, (
         "populated_sorting must be artifact-backed for this guard to be "
         "meaningful (expected one ArtifactDetectionSource part row)."
@@ -1902,9 +1919,13 @@ def test_prune_orphaned_selections_finds_and_cleans(populated_recording):
     dry = ArtifactDetectionSelection.prune_orphaned_selections(dry_run=True)
     assert {"artifact_detection_id": orphan_artifact} in dry
     # Non-dry-run removes the orphan and returns it for review.
-    deleted = ArtifactDetectionSelection.prune_orphaned_selections(dry_run=False)
+    deleted = ArtifactDetectionSelection.prune_orphaned_selections(
+        dry_run=False
+    )
     assert {"artifact_detection_id": orphan_artifact} in deleted
-    assert not (ArtifactDetectionSelection & {"artifact_detection_id": orphan_artifact})
+    assert not (
+        ArtifactDetectionSelection & {"artifact_detection_id": orphan_artifact}
+    )
 
     dry = SortingSelection.prune_orphaned_selections(dry_run=True)
     assert {"sorting_id": orphan_sorting} in dry
@@ -2552,7 +2573,9 @@ def test_run_v2_pipeline_end_to_end_and_idempotent(polymer_smoke_session):
         pipeline_preset="franklab_tetrode_mountainsort5",
     )
     assert manifest2["recording_id"] == manifest["recording_id"]
-    assert manifest2["artifact_detection_id"] == manifest["artifact_detection_id"]
+    assert (
+        manifest2["artifact_detection_id"] == manifest["artifact_detection_id"]
+    )
     assert manifest2["sorting_id"] == manifest["sorting_id"]
     assert manifest2["curation_id"] == manifest["curation_id"]
     assert manifest2["merge_id"] == manifest["merge_id"]
@@ -2653,10 +2676,13 @@ def test_run_v2_pipeline_idempotent_row_counts(polymer_smoke_session):
     stage_counts = {
         "RecordingSelection": len(RecordingSelection & rec_logical),
         "ArtifactDetectionSelection": len(
-            ArtifactDetectionSelection * ArtifactDetectionSelection.RecordingSource
+            ArtifactDetectionSelection
+            * ArtifactDetectionSelection.RecordingSource
             & {
                 "recording_id": art_row["recording_id"],
-                "artifact_detection_params_name": art_row["artifact_detection_params_name"],
+                "artifact_detection_params_name": art_row[
+                    "artifact_detection_params_name"
+                ],
             }
         ),
         "SortingSelection": len(
@@ -2694,7 +2720,9 @@ def test_run_v2_pipeline_idempotent_row_counts(polymer_smoke_session):
 
 
 @pytest.mark.slow
-def test_artifact_detection_selection_resolve_source_detects_bypass(populated_recording):
+def test_artifact_detection_selection_resolve_source_detects_bypass(
+    populated_recording,
+):
     """``resolve_source`` raises ``SchemaBypassError`` when a master has
     zero source part rows (an integrity bug, e.g. from direct dj
     insert1 bypassing ``insert_selection``)."""
@@ -2721,11 +2749,13 @@ def test_artifact_detection_selection_resolve_source_detects_bypass(populated_re
     )
     try:
         with pytest.raises(SchemaBypassError, match="0 source part"):
-            ArtifactDetectionSelection.resolve_source({"artifact_detection_id": orphan_id})
+            ArtifactDetectionSelection.resolve_source(
+                {"artifact_detection_id": orphan_id}
+            )
     finally:
-        (ArtifactDetectionSelection & {"artifact_detection_id": orphan_id}).super_delete(
-            warn=False
-        )
+        (
+            ArtifactDetectionSelection & {"artifact_detection_id": orphan_id}
+        ).super_delete(warn=False)
 
 
 # ---------- Clusterless thresholder end-to-end ----------------------------
@@ -6849,7 +6879,10 @@ def test_sorting_selection_artifact_id_none_is_distinct_identity(
     recording_id = rec_row["recording_id"]
     sorter = backed_row["sorter"]
     sorter_params_name = backed_row["sorter_params_name"]
-    assert SortingSelection.resolve_artifact_detection(artifact_backed_pk) is not None, (
+    assert (
+        SortingSelection.resolve_artifact_detection(artifact_backed_pk)
+        is not None
+    ), (
         "populated_sorting must yield an artifact-backed row (an "
         "ArtifactDetectionSource part row) for this test to be meaningful."
     )
@@ -6886,7 +6919,9 @@ def test_sorting_selection_artifact_id_none_is_distinct_identity(
 
 
 @pytest.mark.slow
-def test_sorting_selection_artifact_detection_source_part_shape(populated_recording):
+def test_sorting_selection_artifact_detection_source_part_shape(
+    populated_recording,
+):
     """Artifact state lives on the ArtifactDetectionSource part, not a master FK.
 
     A no-artifact-detection selection has zero ArtifactDetectionSource rows; an
@@ -6929,11 +6964,15 @@ def test_sorting_selection_artifact_detection_source_part_shape(populated_record
 
     # Artifact-backed selection: exactly one ArtifactDetectionSource row.
     art_sort_pk = SortingSelection.insert_selection(
-        {**sorter_kwargs, "artifact_detection_id": art_pk["artifact_detection_id"]}
+        {
+            **sorter_kwargs,
+            "artifact_detection_id": art_pk["artifact_detection_id"],
+        }
     )
     assert len(SortingSelection.ArtifactDetectionSource & art_sort_pk) == 1
     assert (
-        SortingSelection.resolve_artifact_detection(art_sort_pk) == art_pk["artifact_detection_id"]
+        SortingSelection.resolve_artifact_detection(art_sort_pk)
+        == art_pk["artifact_detection_id"]
     )
 
     # ArtifactDetectionSource did NOT leak into the recording-source resolution.
@@ -8268,7 +8307,9 @@ def test_merge_dispatch_restrict_by_artifact_honored_in_v2(populated_sorting):
     # one IntervalList with the artifact-naming convention). The artifact
     # pass lives on the ArtifactDetectionSource part, not the master, so read it
     # through the resolver rather than a master column.
-    artifact_detection_id = SortingSelection.resolve_artifact_detection(populated_sorting)
+    artifact_detection_id = SortingSelection.resolve_artifact_detection(
+        populated_sorting
+    )
     artifact_name = artifact_detection_interval_list_name(artifact_detection_id)
 
     merge_ids = SpikeSortingOutput().get_restricted_merge_ids(
@@ -8482,7 +8523,9 @@ def test_shared_artifact_group_populate_end_to_end(
     # Exactly one IntervalList row (one member), keyed by the
     # member's nwb_file_name with the canonical artifact-named
     # convention.
-    interval_name = artifact_detection_interval_list_name(art_pk["artifact_detection_id"])
+    interval_name = artifact_detection_interval_list_name(
+        art_pk["artifact_detection_id"]
+    )
     nwb_file_name = polymer_smoke_session["nwb_file_name"]
     rows = (
         IntervalList
@@ -10452,7 +10495,9 @@ def test_artifact_delete_aborts_on_unexpected_resolve_error(
     def _boom(cls, key):
         raise RuntimeError("boom-unexpected-resolve")
 
-    monkeypatch.setattr(ArtifactDetectionSelection, "resolve_source", classmethod(_boom))
+    monkeypatch.setattr(
+        ArtifactDetectionSelection, "resolve_source", classmethod(_boom)
+    )
     with pytest.raises(RuntimeError, match="boom-unexpected-resolve"):
         (ArtifactDetection & art_pk).delete(safemode=False)
     # Aborted before super().delete(): the master row is still present.
@@ -11086,9 +11131,7 @@ def test_set_group_by_shank_explicit_none_overrides_config(
     by_shank = _electrodes_by_shank(nwb_file_name)
     all_eids = [eid for ids in by_shank.values() for eid in ids]
     # Config says global-median everywhere; the explicit override wins.
-    with _temp_original_reference(
-        nwb_file_name, {eid: -2 for eid in all_eids}
-    ):
+    with _temp_original_reference(nwb_file_name, {eid: -2 for eid in all_eids}):
         SortGroupV2.set_group_by_shank(
             nwb_file_name=nwb_file_name, reference_mode="none"
         )
@@ -12220,7 +12263,10 @@ def test_list_pipeline_presets_enumerates_all_pipeline_presets():
     pipeline preset added to ``_PIPELINE_PRESETS`` but missing from
     ``list_pipeline_presets()`` (or vice versa) fails here.
     """
-    from spyglass.spikesorting.v2.pipeline import _PIPELINE_PRESETS, list_pipeline_presets
+    from spyglass.spikesorting.v2.pipeline import (
+        _PIPELINE_PRESETS,
+        list_pipeline_presets,
+    )
 
     presets = list_pipeline_presets()
     assert set(presets) == set(
@@ -12281,7 +12327,9 @@ def test_run_v2_pipeline_idempotent_existing_root(polymer_smoke_session):
 
 
 @pytest.mark.slow
-def test_run_v2_pipeline_pipeline_preset_wiring_to_manifest(polymer_smoke_session):
+def test_run_v2_pipeline_pipeline_preset_wiring_to_manifest(
+    polymer_smoke_session,
+):
     """A29: the chosen pipeline preset's sorter is recorded in SortingSelection.
 
     Runs the MS5 pipeline preset (a runnable stand-in for the MS4 pipeline
@@ -12290,7 +12338,10 @@ def test_run_v2_pipeline_pipeline_preset_wiring_to_manifest(polymer_smoke_sessio
     ``sorter_params_name`` match the pipeline-preset bundle -- the
     pipeline-preset -> Lookup-row -> manifest wiring.
     """
-    from spyglass.spikesorting.v2.pipeline import _PIPELINE_PRESETS, run_v2_pipeline
+    from spyglass.spikesorting.v2.pipeline import (
+        _PIPELINE_PRESETS,
+        run_v2_pipeline,
+    )
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
     nwb_file_name, sort_group_id, team_name = _prepare_pipeline_session(
@@ -12563,7 +12614,9 @@ def test_shared_artifact_group_multi_member_union(
         RecordingSelection,
         SortGroupV2,
     )
-    from spyglass.spikesorting.v2.utils import artifact_detection_interval_list_name
+    from spyglass.spikesorting.v2.utils import (
+        artifact_detection_interval_list_name,
+    )
 
     nwb_file_name = polymer_smoke_session["nwb_file_name"]
     fs = 30000.0
@@ -12659,8 +12712,12 @@ def test_shared_artifact_group_multi_member_union(
             & {"shared_artifact_group_name": group_name}
         ).fetch("artifact_detection_id")
         for aid in stale_art_ids:
-            (ArtifactDetection & {"artifact_detection_id": aid}).delete(safemode=False)
-            (ArtifactDetectionSelection & {"artifact_detection_id": aid}).super_delete(warn=False)
+            (ArtifactDetection & {"artifact_detection_id": aid}).delete(
+                safemode=False
+            )
+            (
+                ArtifactDetectionSelection & {"artifact_detection_id": aid}
+            ).super_delete(warn=False)
         (
             SharedArtifactGroup & {"shared_artifact_group_name": group_name}
         ).super_delete(warn=False)
@@ -12687,7 +12744,9 @@ def test_shared_artifact_group_multi_member_union(
         )
         ArtifactDetection.populate(art_pk, reserve_jobs=False)
 
-        interval_name = artifact_detection_interval_list_name(art_pk["artifact_detection_id"])
+        interval_name = artifact_detection_interval_list_name(
+            art_pk["artifact_detection_id"]
+        )
         rows = (
             IntervalList
             & {

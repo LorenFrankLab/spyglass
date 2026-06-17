@@ -201,7 +201,10 @@ def test_detected_artifact_is_masked_out_of_the_sorted_recording(
     SorterParameters.insert_default()
 
     art_pk = ArtifactDetectionSelection.insert_selection(
-        {"recording_id": recording_id, "artifact_detection_params_name": params_name}
+        {
+            "recording_id": recording_id,
+            "artifact_detection_params_name": params_name,
+        }
     )
     ArtifactDetection.populate(art_pk, reserve_jobs=False)
 
@@ -441,7 +444,10 @@ def test_artifact_masking_preserves_clean_gt_spikes(
         skip_duplicates=True,
     )
     art_pk = ArtifactDetectionSelection.insert_selection(
-        {"recording_id": recording_id, "artifact_detection_params_name": params_name}
+        {
+            "recording_id": recording_id,
+            "artifact_detection_params_name": params_name,
+        }
     )
     ArtifactDetection.populate(art_pk, reserve_jobs=False)
 

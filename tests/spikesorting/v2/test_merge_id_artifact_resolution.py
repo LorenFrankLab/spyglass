@@ -58,10 +58,12 @@ def two_sorts_one_recording(populated_sorting):
     recording_id = SortingSelection.resolve_source(sort_artifact).key[
         "recording_id"
     ]
-    artifact_detection_id = SortingSelection.resolve_artifact_detection(sort_artifact)
-    assert artifact_detection_id is not None, (
-        "fixture sort must be artifact-detection-backed"
+    artifact_detection_id = SortingSelection.resolve_artifact_detection(
+        sort_artifact
     )
+    assert (
+        artifact_detection_id is not None
+    ), "fixture sort must be artifact-detection-backed"
     sorter, sorter_params_name = (SortingSelection & sort_artifact).fetch1(
         "sorter", "sorter_params_name"
     )
@@ -198,7 +200,9 @@ def test_merge_ids_no_artifact_sort_unaffected(two_sorts_one_recording):
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_insert_selection_dedup_accepts_str_artifact_detection_id(populated_sorting):
+def test_insert_selection_dedup_accepts_str_artifact_detection_id(
+    populated_sorting,
+):
     """``insert_selection`` with a str ``artifact_detection_id`` is idempotent.
 
     The find-existing dedup compares ``resolve_artifact_detection`` (a ``uuid.UUID``)
@@ -211,7 +215,9 @@ def test_insert_selection_dedup_accepts_str_artifact_detection_id(populated_sort
     recording_id = SortingSelection.resolve_source(populated_sorting).key[
         "recording_id"
     ]
-    artifact_detection_id = SortingSelection.resolve_artifact_detection(populated_sorting)
+    artifact_detection_id = SortingSelection.resolve_artifact_detection(
+        populated_sorting
+    )
     sorter, sorter_params_name = (SortingSelection & populated_sorting).fetch1(
         "sorter", "sorter_params_name"
     )
@@ -226,7 +232,9 @@ def test_insert_selection_dedup_accepts_str_artifact_detection_id(populated_sort
             "recording_id": recording_id,
             "sorter": sorter,
             "sorter_params_name": sorter_params_name,
-            "artifact_detection_id": str(artifact_detection_id),  # str, not UUID
+            "artifact_detection_id": str(
+                artifact_detection_id
+            ),  # str, not UUID
         }
     )
 

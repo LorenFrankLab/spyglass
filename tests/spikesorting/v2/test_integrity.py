@@ -150,12 +150,16 @@ def test_source_part_pattern_holds_for_artifact_and_sorting_selection(
     # The artifact pass is recorded on the zero-or-one ArtifactDetectionSource
     # part now (the master no longer carries a nullable artifact_detection_id FK).
     art_id = SortingSelection.resolve_artifact_detection(sort_master_pk)
-    art_master_rows = ArtifactDetectionSelection & {"artifact_detection_id": art_id}
+    art_master_rows = ArtifactDetectionSelection & {
+        "artifact_detection_id": art_id
+    }
     assert len(art_master_rows) == 1, (
         f"populated_sorting points at artifact_detection_id={art_id!r} but no "
         "ArtifactDetectionSelection master row exists for it; FK chain broken."
     )
-    rec_parts = ArtifactDetectionSelection.RecordingSource & {"artifact_detection_id": art_id}
+    rec_parts = ArtifactDetectionSelection.RecordingSource & {
+        "artifact_detection_id": art_id
+    }
     shared_parts = ArtifactDetectionSelection.SharedGroupSource & {
         "artifact_detection_id": art_id
     }

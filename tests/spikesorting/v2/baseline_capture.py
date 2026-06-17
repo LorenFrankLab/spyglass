@@ -105,9 +105,9 @@ def _ensure_sort_group(
         # group to it so the whole session is common-median referenced.
         e_groups = {
             str(g)
-            for g in (
-                Electrode & {"nwb_file_name": nwb_file_name}
-            ).fetch("electrode_group_name")
+            for g in (Electrode & {"nwb_file_name": nwb_file_name}).fetch(
+                "electrode_group_name"
+            )
         }
         SortGroup.set_group_by_shank(
             nwb_file_name=nwb_file_name,

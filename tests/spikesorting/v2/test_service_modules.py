@@ -313,7 +313,9 @@ def test_build_artifact_interval_rows_one_row_per_member():
     )
     assert [r["nwb_file_name"] for r in rows] == ["a.nwb", "b.nwb"]
     # Same interval name + valid_times across members.
-    assert {r["interval_list_name"] for r in rows} == {f"artifact_detection_{art_id}"}
+    assert {r["interval_list_name"] for r in rows} == {
+        f"artifact_detection_{art_id}"
+    }
     for r in rows:
         np.testing.assert_array_equal(r["valid_times"], valid_times)
 
@@ -335,7 +337,9 @@ def test_read_artifact_removed_intervals_missing_artifact_detection_id_raises_va
         read_artifact_removed_intervals,
     )
 
-    with pytest.raises(ValueError, match="must include 'artifact_detection_id'"):
+    with pytest.raises(
+        ValueError, match="must include 'artifact_detection_id'"
+    ):
         read_artifact_removed_intervals({})
 
 
@@ -447,7 +451,8 @@ def test_filtering_description_lists_only_steps_that_ran():
         == "none (raw, no preprocessing)"
     )
     assert (
-        filtering_description(bp, "none", no_ps) == "bandpass filter 300-6000 Hz"
+        filtering_description(bp, "none", no_ps)
+        == "bandpass filter 300-6000 Hz"
     )
     assert filtering_description(None, "global_median", no_ps) == (
         "common reference (global_median)"
@@ -465,7 +470,9 @@ def test_filtering_description_lists_only_steps_that_ran():
         "phase-shift (ADC); bandpass filter 300-6000 Hz; "
         "common reference (global_median)"
     )
-    assert "phase-shift" not in filtering_description(bp, "global_median", no_ps)
+    assert "phase-shift" not in filtering_description(
+        bp, "global_median", no_ps
+    )
 
 
 # --------------------------------------------------------------------------- #

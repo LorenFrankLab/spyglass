@@ -1946,7 +1946,10 @@ def test_artifact_detection_selection_raises_duplicate_selection_error():
     try:
         for aid in (aid1, aid2):
             ArtifactDetectionSelection.insert1(
-                {"artifact_detection_id": aid, "artifact_detection_params_name": params_name},
+                {
+                    "artifact_detection_id": aid,
+                    "artifact_detection_params_name": params_name,
+                },
                 allow_direct_insert=True,
             )
             ArtifactDetectionSelection.RecordingSource.insert1(
@@ -1959,16 +1962,22 @@ def test_artifact_detection_selection_raises_duplicate_selection_error():
     try:
         with pytest.raises(DuplicateSelectionError, match="master rows"):
             ArtifactDetectionSelection.insert_selection(
-                {"recording_id": rec_id, "artifact_detection_params_name": params_name}
+                {
+                    "recording_id": rec_id,
+                    "artifact_detection_params_name": params_name,
+                }
             )
     finally:
         conn.query("SET FOREIGN_KEY_CHECKS=0")
         try:
             (
-                ArtifactDetectionSelection.RecordingSource & {"recording_id": rec_id}
+                ArtifactDetectionSelection.RecordingSource
+                & {"recording_id": rec_id}
             ).delete_quick()
             for aid in (aid1, aid2):
-                (ArtifactDetectionSelection & {"artifact_detection_id": aid}).delete_quick()
+                (
+                    ArtifactDetectionSelection & {"artifact_detection_id": aid}
+                ).delete_quick()
         finally:
             conn.query("SET FOREIGN_KEY_CHECKS=1")
 
@@ -1986,7 +1995,9 @@ def test_artifact_detection_selection_requires_artifact_detection_params_name():
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionSelection
 
     with pytest.raises(ValueError, match="artifact_detection_params_name"):
-        ArtifactDetectionSelection.insert_selection({"recording_id": uuid.uuid4()})
+        ArtifactDetectionSelection.insert_selection(
+            {"recording_id": uuid.uuid4()}
+        )
 
 
 @pytest.mark.usefixtures("dj_conn")
@@ -2077,7 +2088,9 @@ def test_artifact_detection_delete_tolerates_already_gone_interval_list():
         ArtifactDetectionSelection,
     )
     from spyglass.spikesorting.v2.recording import RecordingSelection
-    from spyglass.spikesorting.v2.utils import artifact_detection_interval_list_name
+    from spyglass.spikesorting.v2.utils import (
+        artifact_detection_interval_list_name,
+    )
 
     nwb = "a25_delete_session_.nwb"
     rec_id = _plant_fake_recording(uuid.uuid4(), nwb, 30000.0)
@@ -2088,7 +2101,10 @@ def test_artifact_detection_delete_tolerates_already_gone_interval_list():
     conn.query("SET FOREIGN_KEY_CHECKS=0")
     try:
         ArtifactDetectionSelection.insert1(
-            {"artifact_detection_id": aid, "artifact_detection_params_name": params_name},
+            {
+                "artifact_detection_id": aid,
+                "artifact_detection_params_name": params_name,
+            },
             allow_direct_insert=True,
         )
         ArtifactDetectionSelection.RecordingSource.insert1(
@@ -2122,16 +2138,21 @@ def test_artifact_detection_delete_tolerates_already_gone_interval_list():
         ).delete_quick()
 
         # Must not raise even though the cleanup target is already gone.
-        (ArtifactDetection & {"artifact_detection_id": aid}).delete(safemode=False)
+        (ArtifactDetection & {"artifact_detection_id": aid}).delete(
+            safemode=False
+        )
         assert len(ArtifactDetection & {"artifact_detection_id": aid}) == 0
     finally:
         conn.query("SET FOREIGN_KEY_CHECKS=0")
         try:
             (ArtifactDetection & {"artifact_detection_id": aid}).delete_quick()
             (
-                ArtifactDetectionSelection.RecordingSource & {"artifact_detection_id": aid}
+                ArtifactDetectionSelection.RecordingSource
+                & {"artifact_detection_id": aid}
             ).delete_quick()
-            (ArtifactDetectionSelection & {"artifact_detection_id": aid}).delete_quick()
+            (
+                ArtifactDetectionSelection & {"artifact_detection_id": aid}
+            ).delete_quick()
         finally:
             conn.query("SET FOREIGN_KEY_CHECKS=1")
         _drop_fake_recording(rec_id)
@@ -2343,11 +2364,15 @@ def test_sorting_selection_rejects_cross_recording_artifact_detection_source():
             allow_direct_insert=True,
         )
         ArtifactDetectionSelection.RecordingSource.insert1(
-            {"artifact_detection_id": artifact_detection_id, "recording_id": rid_artifact},
+            {
+                "artifact_detection_id": artifact_detection_id,
+                "recording_id": rid_artifact,
+            },
             allow_direct_insert=True,
         )
         ArtifactDetection.insert1(
-            {"artifact_detection_id": artifact_detection_id}, allow_direct_insert=True
+            {"artifact_detection_id": artifact_detection_id},
+            allow_direct_insert=True,
         )
     finally:
         conn.query("SET FOREIGN_KEY_CHECKS=1")
@@ -2364,7 +2389,10 @@ def test_sorting_selection_rejects_cross_recording_artifact_detection_source():
                 }
             )
         assert (
-            len(SortingSelection.ArtifactDetectionSource & {"artifact_detection_id": artifact_detection_id})
+            len(
+                SortingSelection.ArtifactDetectionSource
+                & {"artifact_detection_id": artifact_detection_id}
+            )
             == 0
         )
     finally:
@@ -2374,17 +2402,26 @@ def test_sorting_selection_rejects_cross_recording_artifact_detection_source():
                 SortingSelection.RecordingSource & {"recording_id": rid_sort}
             ).fetch("KEY", as_dict=True)
             if sort_keys:
-                (SortingSelection.ArtifactDetectionSource & sort_keys).delete_quick()
+                (
+                    SortingSelection.ArtifactDetectionSource & sort_keys
+                ).delete_quick()
                 (
                     SortingSelection.RecordingSource
                     & {"recording_id": rid_sort}
                 ).delete_quick()
                 (SortingSelection & sort_keys).delete_quick()
-            (ArtifactDetection & {"artifact_detection_id": artifact_detection_id}).delete_quick()
             (
-                ArtifactDetectionSelection.RecordingSource & {"artifact_detection_id": artifact_detection_id}
+                ArtifactDetection
+                & {"artifact_detection_id": artifact_detection_id}
             ).delete_quick()
-            (ArtifactDetectionSelection & {"artifact_detection_id": artifact_detection_id}).delete_quick()
+            (
+                ArtifactDetectionSelection.RecordingSource
+                & {"artifact_detection_id": artifact_detection_id}
+            ).delete_quick()
+            (
+                ArtifactDetectionSelection
+                & {"artifact_detection_id": artifact_detection_id}
+            ).delete_quick()
         finally:
             conn.query("SET FOREIGN_KEY_CHECKS=1")
         _drop_fake_recording(rid_sort)
@@ -3267,7 +3304,9 @@ def test_obs_intervals_recorded_windows_fallback(populated_sorting):
         RecordingSelection,
     )
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
-    from spyglass.spikesorting.v2.utils import artifact_detection_interval_list_name
+    from spyglass.spikesorting.v2.utils import (
+        artifact_detection_interval_list_name,
+    )
 
     def _first_unit_obs_intervals(sort_pk):
         analysis_file_name = (Sorting & sort_pk).fetch1("analysis_file_name")
@@ -3299,8 +3338,12 @@ def test_obs_intervals_recorded_windows_fallback(populated_sorting):
         (SortingSelection & free_pk).delete(safemode=False)
 
     # --- artifact-backed fixture: obs_intervals from the IntervalList -----
-    artifact_detection_id = SortingSelection.resolve_artifact_detection(populated_sorting)
-    assert artifact_detection_id is not None, "fixture sort should be artifact-backed"
+    artifact_detection_id = SortingSelection.resolve_artifact_detection(
+        populated_sorting
+    )
+    assert (
+        artifact_detection_id is not None
+    ), "fixture sort should be artifact-backed"
     recording_id = SortingSelection.resolve_source(populated_sorting).key[
         "recording_id"
     ]
@@ -3311,7 +3354,9 @@ def test_obs_intervals_recorded_windows_fallback(populated_sorting):
         IntervalList
         & {
             "nwb_file_name": nwb_file_name,
-            "interval_list_name": artifact_detection_interval_list_name(artifact_detection_id),
+            "interval_list_name": artifact_detection_interval_list_name(
+                artifact_detection_id
+            ),
         }
     ).fetch1("valid_times")
     obs = _first_unit_obs_intervals(populated_sorting)

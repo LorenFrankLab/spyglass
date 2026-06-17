@@ -443,7 +443,9 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
 
 
 @schema
-class ArtifactDetectionSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
+class ArtifactDetectionSelection(
+    SelectionMasterInsertGuard, SpyglassMixin, dj.Manual
+):
     """One row per (parameters, source) artifact detection request.
 
     Source part rows make the input shape explicit: exactly one of
@@ -556,9 +558,7 @@ class ArtifactDetectionSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.M
             recording_id=key.get("recording_id"),
             shared_artifact_group_name=key.get("shared_artifact_group_name"),
         )
-        artifact_detection_id = deterministic_id(
-            "artifact_detection", identity
-        )
+        artifact_detection_id = deterministic_id("artifact_detection", identity)
         assert_supplied_id_matches(
             key.get("artifact_detection_id"),
             artifact_detection_id,
@@ -566,7 +566,10 @@ class ArtifactDetectionSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.M
         )
 
         existing = cls._find_existing_pk(
-            master_restriction, source_part, source_restriction, artifact_detection_id
+            master_restriction,
+            source_part,
+            source_restriction,
+            artifact_detection_id,
         )
         if existing is not None:
             return existing
@@ -611,7 +614,10 @@ class ArtifactDetectionSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.M
                 artifact_detection_id,
             )
             existing = cls._find_existing_pk(
-                master_restriction, source_part, source_restriction, artifact_detection_id
+                master_restriction,
+                source_part,
+                source_restriction,
+                artifact_detection_id,
             )
             if existing is not None:
                 return existing
@@ -731,9 +737,7 @@ class ArtifactDetectionSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.M
 
         master_key = {k: v for k, v in key.items() if k in cls.primary_key}
         rec_rows = (cls.RecordingSource & master_key).fetch(as_dict=True)
-        shared_rows = (cls.SharedGroupSource & master_key).fetch(
-            as_dict=True
-        )
+        shared_rows = (cls.SharedGroupSource & master_key).fetch(as_dict=True)
         total = len(rec_rows) + len(shared_rows)
         if total != 1:
             raise SchemaBypassError(

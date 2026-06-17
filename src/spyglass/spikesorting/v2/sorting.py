@@ -841,7 +841,9 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         master_ids = {
             cand["sorting_id"]
             for cand in candidates
-            if cls.resolve_artifact_detection({"sorting_id": cand["sorting_id"]})
+            if cls.resolve_artifact_detection(
+                {"sorting_id": cand["sorting_id"]}
+            )
             == artifact_detection_id
         }
         bypassed = [sid for sid in master_ids if sid != deterministic_id]
@@ -880,7 +882,9 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             SharedArtifactGroup,
         )
 
-        artifact_detection_key = {"artifact_detection_id": artifact_detection_id}
+        artifact_detection_key = {
+            "artifact_detection_id": artifact_detection_id
+        }
         if not (ArtifactDetection & artifact_detection_key):
             raise ValueError(
                 "SortingSelection.insert_selection: artifact_detection_id "
@@ -1229,7 +1233,10 @@ class Sorting(SpyglassMixin, dj.Computed):
         recording_id = source.key["recording_id"]
         recording = Recording().get_recording({"recording_id": recording_id})
 
-        if sel_row.get("artifact_detection_id") is not None and obs_intervals is not None:
+        if (
+            sel_row.get("artifact_detection_id") is not None
+            and obs_intervals is not None
+        ):
             recording = self._apply_artifact_mask(
                 recording=recording,
                 valid_times=obs_intervals,

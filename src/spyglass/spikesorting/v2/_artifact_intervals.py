@@ -374,7 +374,9 @@ def build_artifact_interval_rows(
     list[dict]
         One ``IntervalList`` row dict per target ``nwb_file_name``.
     """
-    from spyglass.spikesorting.v2.utils import artifact_detection_interval_list_name
+    from spyglass.spikesorting.v2.utils import (
+        artifact_detection_interval_list_name,
+    )
 
     interval_list_name = artifact_detection_interval_list_name(
         key["artifact_detection_id"]

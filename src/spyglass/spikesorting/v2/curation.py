@@ -1326,7 +1326,9 @@ class CurationV2(SpyglassMixin, dj.Manual):
         # is unambiguous and a malformed id fails fast here rather than
         # silently matching nothing.
         if key.get("artifact_detection_id") is not None:
-            key["artifact_detection_id"] = uuid.UUID(str(key["artifact_detection_id"]))
+            key["artifact_detection_id"] = uuid.UUID(
+                str(key["artifact_detection_id"])
+            )
 
         rec_restriction = {k: key[k] for k in rec_keys if k in key}
         rec_table = RecordingSelection & rec_restriction
@@ -1344,13 +1346,16 @@ class CurationV2(SpyglassMixin, dj.Manual):
         # "no artifact-detection pass" (anti-join to sorts with no part row),
         # NOT "match anything" -- only an absent key is a wildcard.
         sort_restriction = {
-            k: key[k] for k in sort_keys if k in key and k != "artifact_detection_id"
+            k: key[k]
+            for k in sort_keys
+            if k in key and k != "artifact_detection_id"
         }
         sort_master = sort_master & sort_restriction
         if "artifact_detection_id" in key:
             if key["artifact_detection_id"] is None:
                 sort_master = (
-                    sort_master - SortingSelection.ArtifactDetectionSource.proj()
+                    sort_master
+                    - SortingSelection.ArtifactDetectionSource.proj()
                 )
             else:
                 artifact_detection_source = (

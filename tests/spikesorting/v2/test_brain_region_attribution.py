@@ -281,7 +281,10 @@ def region_60s_sort(dj_conn):
     if not (Recording & rec_pk):
         Recording.populate(rec_pk, reserve_jobs=False)
     art_pk = ArtifactDetectionSelection.insert_selection(
-        {"recording_id": rec_pk["recording_id"], "artifact_detection_params_name": "none"}
+        {
+            "recording_id": rec_pk["recording_id"],
+            "artifact_detection_params_name": "none",
+        }
     )
     if not (ArtifactDetection & art_pk):
         ArtifactDetection.populate(art_pk, reserve_jobs=False)

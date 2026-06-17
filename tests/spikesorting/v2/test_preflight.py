@@ -93,7 +93,9 @@ def test_identity_payload_extraction_stable():
         ),
     )
     assert recording_id == uuid.UUID("dc4a5c37-7a80-54fc-b939-b6fbdaa0ec3a")
-    assert artifact_detection_id == uuid.UUID("4fcc28ef-8bc9-5510-8b6b-c6466817269e")
+    assert artifact_detection_id == uuid.UUID(
+        "4fcc28ef-8bc9-5510-8b6b-c6466817269e"
+    )
     assert sorting_id == uuid.UUID("94e2ce30-674c-54fd-994e-95ec6207fa33")
 
 
@@ -274,7 +276,9 @@ def test_preflight_sorter_misspelled(preflight_inputs, monkeypatch):
         sorter="not_a_real_sorter_xyz",
         sorter_params_name="default",
     )
-    monkeypatch.setitem(pl._PIPELINE_PRESETS, "_preflight_bogus_sorter", bogus_preset)
+    monkeypatch.setitem(
+        pl._PIPELINE_PRESETS, "_preflight_bogus_sorter", bogus_preset
+    )
 
     report = preflight_v2_pipeline(
         **{**preflight_inputs, "pipeline_preset": "_preflight_bogus_sorter"}
@@ -302,15 +306,17 @@ def test_preflight_warns_on_none_artifact_params(preflight_inputs, monkeypatch):
         sorter="mountainsort5",
         sorter_params_name="franklab_tetrode_hippocampus_30kHz_ms5",
     )
-    monkeypatch.setitem(pl._PIPELINE_PRESETS, "_preflight_none_artifact", none_preset)
+    monkeypatch.setitem(
+        pl._PIPELINE_PRESETS, "_preflight_none_artifact", none_preset
+    )
 
     report = preflight_v2_pipeline(
         **{**preflight_inputs, "pipeline_preset": "_preflight_none_artifact"}
     )
     assert report.ok is True
-    assert any("artifact" in w and "none" in w for w in report.warnings), (
-        report.warnings
-    )
+    assert any(
+        "artifact" in w and "none" in w for w in report.warnings
+    ), report.warnings
 
 
 @pytest.mark.database
@@ -393,7 +399,10 @@ def test_preflight_expected_ids_round_trip(preflight_session):
 
     manifest = run_v2_pipeline(**preflight_inputs)
     assert pre.expected_ids["recording_id"]["id"] == manifest["recording_id"]
-    assert pre.expected_ids["artifact_detection_id"]["id"] == manifest["artifact_detection_id"]
+    assert (
+        pre.expected_ids["artifact_detection_id"]["id"]
+        == manifest["artifact_detection_id"]
+    )
     assert pre.expected_ids["sorting_id"]["id"] == manifest["sorting_id"]
 
     post = preflight_v2_pipeline(**preflight_inputs)
