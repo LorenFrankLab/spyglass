@@ -862,6 +862,64 @@ def test_warn_countdown_uses_days_since_first_flag(caplog, warn_dirty_days):
     assert any(f"{expected_n} days" in r.message for r in caplog.records)
 
 
+def test_warn_logs_dirty_install(caplog):
+    """A flagged non-admin install logs itself so the 30-day clock starts."""
+    import spyglass.common.common_lab as _lab_mod
+    import spyglass.common.common_user as _user_mod
+    from spyglass.utils.git_utils import warn_if_dirty
+
+    info = {
+        "is_official": False,
+        "is_dev": True,
+        "has_local_changes": True,
+        "is_stale": False,
+        "install_path": "/home/user/spyglass",
+        "commit_hash": "abc1234",
+    }
+
+    mock_lab = MagicMock()
+    mock_lab.return_value.user_is_admin = False
+
+    mock_inst = MagicMock()  # the UserEnvironment() instance
+    mock_env = MagicMock(return_value=mock_inst)  # UserEnvironment() -> inst
+    mock_env.__and__ = MagicMock(return_value=mock_env)
+    mock_env.__bool__ = MagicMock(return_value=False)
+
+    with patch.object(_lab_mod, "LabMember", mock_lab):
+        with patch.object(_user_mod, "UserEnvironment", mock_env):
+            warn_if_dirty(info)
+
+    mock_inst.insert_current_env.assert_called_once()
+
+
+def test_warn_admin_not_logged(caplog):
+    """An admin install is neither warned nor logged."""
+    import spyglass.common.common_lab as _lab_mod
+    import spyglass.common.common_user as _user_mod
+    from spyglass.utils.git_utils import warn_if_dirty
+
+    info = {
+        "is_official": False,
+        "is_dev": True,
+        "has_local_changes": True,
+        "is_stale": False,
+        "install_path": "/home/admin/spyglass",
+        "commit_hash": "abc1234",
+    }
+
+    mock_lab = MagicMock()
+    mock_lab.return_value.user_is_admin = True
+
+    mock_inst = MagicMock()
+    mock_env = MagicMock(return_value=mock_inst)
+
+    with patch.object(_lab_mod, "LabMember", mock_lab):
+        with patch.object(_user_mod, "UserEnvironment", mock_env):
+            warn_if_dirty(info)
+
+    mock_inst.insert_current_env.assert_not_called()
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 #     _warn_once import-time gating (mock-based, no DB)
 # ═════════════════════════════════════════════════════════════════════════════

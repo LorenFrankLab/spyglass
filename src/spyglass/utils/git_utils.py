@@ -82,6 +82,11 @@ def warn_if_dirty(install_info: dict) -> bool:
     * **Stale** (``is_stale=True``, no local changes): softer "older commit"
       advisory for clones that are months behind upstream.
 
+    For a flagged non-admin install it also logs the current environment to
+    ``UserEnvironment`` (idempotent), so the 30-day escalation clock starts at
+    first warning rather than only when the user runs recompute. The countdown
+    shown to the user is derived from that logged timestamp.
+
     Returns silently for official installs and admin users.  All
     ``spyglass.common`` imports are deferred inside the function body to avoid
     a circular dependency (``common/`` already imports from ``utils/``).
@@ -121,6 +126,16 @@ def warn_if_dirty(install_info: dict) -> bool:
             return True
     except Exception as exc:
         logger.debug(f"admin check failed: {exc}")  # DB down — warn anyway
+
+    # Log this dirty/stale install so the 30-day escalation clock starts now
+    # rather than only when the user happens to run recompute. Idempotent
+    # (matching_env_id guards re-inserts) and uses the disk-cached conda
+    # export. Called directly, not via this_env, to avoid recursing into
+    # _warn_once.
+    try:
+        UserEnvironment().insert_current_env()
+    except Exception as exc:
+        logger.debug(f"dirty env logging failed: {exc}")
 
     # Days since this user's dirty install was first logged. Computed DB-side
     # (shared DIRTY_DAYS_SQL) so it agrees with the admin notification and is
