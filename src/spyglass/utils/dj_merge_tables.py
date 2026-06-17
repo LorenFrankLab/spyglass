@@ -140,12 +140,55 @@ class Merge(ExportMixin, dj.Manual):
             - master_names
         )
 
-    def _string_has_part_field(self, restriction: str) -> bool:
-        """True if a SQL string restriction references a part-table-only field."""
-        return any(
-            re.search(r"\b" + re.escape(f) + r"\b", restriction, re.IGNORECASE)
-            for f in self._get_part_only_fields()
+    def _get_all_heading_fields(self) -> frozenset:
+        """Field names known to the master heading or any part heading."""
+        self._ensure_dependencies_loaded()
+        return frozenset(self.heading.names) | frozenset(
+            name
+            for part in self.parts(as_objects=True)
+            for name in part.heading.names
         )
+
+    @staticmethod
+    def _strip_quoted(restriction: str) -> str:
+        """Drop quoted literals so field-name scanning ignores string values.
+
+        Without this, a master-field restriction whose value happens to mention
+        a part-field name (e.g. ``description = "see nwb_file_name docs"``)
+        would be misrouted through part resolution.
+        """
+        return re.sub(r"'[^']*'|\"[^\"]*\"", "", restriction)
+
+    # Comparison operators whose left-hand side is a field reference.
+    _RESTRICT_OPERATORS = r"!=|<=|>=|<>|=|<|>|\bLIKE\b|\bIN\b|\bIS\b"
+
+    def _string_has_part_field(self, restriction: str) -> bool:
+        """True if a SQL string restriction references a part-table-only field.
+
+        Field-name tokens are read from the left-hand side of comparison
+        operators, ignoring quoted literals.  A token that belongs to no
+        heading (master or any part) raises ``DataJointError`` rather than
+        passing through to DataJoint, which would silently drop the unknown
+        attribute and return the entire table.
+        """
+        stripped = self._strip_quoted(restriction)
+        part_only = {f.lower() for f in self._get_part_only_fields()}
+        known = {f.lower() for f in self._get_all_heading_fields()}
+        has_part_field = False
+        for token in re.findall(
+            r"\b([A-Za-z_]\w*)\s*(?:" + self._RESTRICT_OPERATORS + r")",
+            stripped,
+            re.IGNORECASE,
+        ):
+            field = token.lower()
+            if field not in known:
+                raise DataJointError(
+                    f"Unknown field {token!r} in restriction {restriction!r}: "
+                    "not an attribute of the merge master or any part table."
+                )
+            if field in part_only:
+                has_part_field = True
+        return has_part_field
 
     def _resolve_top_restriction(self):
         """Return restriction for part-walking, materializing _top if set.
@@ -1059,7 +1102,7 @@ class Merge(ExportMixin, dj.Manual):
 
     @classmethod
     def merge_fetch(
-        cls, restriction: str = True, *attrs, log_export=True, **kwargs
+        cls, *attrs, restriction: str = True, log_export=True, **kwargs
     ) -> list:
         """Perform a fetch across all parts. If >1 result, return as a list.
 
@@ -1266,14 +1309,13 @@ class Merge(ExportMixin, dj.Manual):
         ``(T & restriction).html()``.
         Respects ``dj.Top`` limits set via ``T & dj.Top(limit=n)``.
         """
-        return HTML(
-            repr_html(
-                self._merge_repr(
-                    restriction=self._resolve_top_restriction(),
-                    include_empties=include_empties,
-                )
-            )
+        query = self._merge_repr(
+            restriction=self._resolve_top_restriction(),
+            include_empties=include_empties,
         )
+        if query is None:
+            return HTML("<i>&lt;empty&gt;</i>")
+        return HTML(repr_html(query))
 
     def populate(self, source: str, keys=None, **kwargs):
         """Populate source table and insert successes into merge.
@@ -1309,7 +1351,8 @@ class Merge(ExportMixin, dj.Manual):
 
         DataJoint cascades master→part deletions automatically when deleting
         from the master table, so no need to delete Part rows separately.
-        `force_permission` is handled upstream by cautious_delete.
+        `force_permission` is forwarded to ``CautiousDeleteMixin.delete``
+        (downstream in the MRO), where it bypasses the delete-permission check.
         """
         if not len(self):
             return

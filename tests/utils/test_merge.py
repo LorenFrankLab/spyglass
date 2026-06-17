@@ -428,3 +428,68 @@ def test_top_repr_shows_limited_rows(pos_merge):
     assert len(top_repr) < len(
         full_repr
     ), "dj.Top repr should be shorter than full-table repr."
+
+
+# ------------------- delete force_permission forwarding ----------------------
+
+
+def test_delete_forwards_force_permission(graph_tables, monkeypatch):
+    """delete() forwards force_permission to the downstream delete."""
+    from spyglass.utils import _Merge
+
+    inst = graph_tables["MergeOutput"]()
+    key = inst.super_fetch(as_dict=True)[0]
+    restricted = inst & key
+
+    captured = {}
+    mro = type(inst).__mro__
+    super_cls = mro[mro.index(_Merge) + 1]
+
+    def fake_delete(self, *args, **kwargs):
+        captured["force_permission"] = kwargs.get("force_permission")
+
+    monkeypatch.setattr(super_cls, "delete", fake_delete, raising=False)
+    restricted.delete(force_permission=True, safemode=False)
+    assert (
+        captured.get("force_permission") is True
+    ), "force_permission must reach the downstream delete."
+
+
+# ------------------- string-restriction field validation --------------------
+
+
+def test_string_restrict_unknown_field_raises(pos_merge):
+    """A string field unknown to master and every part raises, not full-table."""
+    with pytest.raises(dj.errors.DataJointError, match="Unknown field"):
+        pos_merge & "definitely_not_a_field = 1"
+
+
+def test_string_restrict_quoted_literal_ignored(pos_merge):
+    """A part-field name inside a quoted literal does not trigger resolution."""
+    source_val = pos_merge.super_fetch(as_dict=True)[0]["source"]
+    restr = f'source = "{source_val} nwb_file_name"'
+    assert not pos_merge._string_has_part_field(
+        restr
+    ), "Field names inside quoted literals must be ignored."
+
+
+# ------------------- merge_fetch positional-arg compatibility ---------------
+
+
+def test_merge_fetch_positional_attrs(pos_merge):
+    """merge_fetch treats positional args as attrs (restriction kw-only)."""
+    result = pos_merge.merge_fetch("merge_id")
+    assert len(result) == len(
+        pos_merge
+    ), "Positional arg should be an attr, not the restriction."
+
+
+# ------------------- html() empty-restriction guard -------------------------
+
+
+def test_html_empty_restriction(pos_merge):
+    """html() on an empty restriction returns HTML, not AttributeError."""
+    from IPython.core.display import HTML
+
+    result = (pos_merge & "FALSE").html()
+    assert isinstance(result, HTML), "html() on empty should return HTML."
