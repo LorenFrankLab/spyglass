@@ -245,7 +245,7 @@ def get_fetching_table_from_stack(stack):
 def get_nwb_table(query_expression, tbl, attr_name, *attrs, **kwargs):
     """Get the NWB file name and path from the given DataJoint query.
 
-    .. deprecated:: 0.6.0
+    .. deprecated:: 0.6.1
         Use ``(table & key).fetch_nwb()`` instead. Migration guide:
         https://lorenfranklab.github.io/spyglass/latest/Features/Mixin/
 
@@ -336,7 +336,7 @@ def instance_table(table: Union[str, Type[dj.Table]]) -> dj.Table:
 def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
     """Get an NWB object from the given DataJoint query.
 
-    .. deprecated:: 0.6.0
+    .. deprecated:: 0.6.1
         Use ``(table & key).fetch_nwb()`` instead. Migration guide:
         https://lorenfranklab.github.io/spyglass/latest/Features/Mixin/
 
