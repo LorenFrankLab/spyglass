@@ -27,6 +27,7 @@ fi
 
 source $SPYGLASS_CONDA_PATH
 source "$SCRIPT_DIR/slack_utils.sh"
+source "$SCRIPT_DIR/email_utils.sh"
 SLACK_LOG="$SPYGLASS_LOG"
 
 EMAIL_TEMPLATE=$(cat <<-EOF
@@ -90,15 +91,32 @@ if $SPYGLASS_CHMOD_FILES; then
     { on_fail "Could not chmod new files in $SPYGLASS_BASE_PATH"; exit 1; }
 fi
 
-# Run cleanup script; capture any file issues to a temp file for Slack reporting
+# Run cleanup script; capture file issues (Slack) and dirty envs (email)
 FILE_ISSUES_OUT=$(mktemp)
-FILE_ISSUES_OUT="$FILE_ISSUES_OUT" conda_run python maintenance_scripts/cleanup.py
+DIRTY_ENVS_OUT=$(mktemp)
+FILE_ISSUES_OUT="$FILE_ISSUES_OUT" DIRTY_ENVS_OUT="$DIRTY_ENVS_OUT" \
+  conda_run python maintenance_scripts/cleanup.py
 
 if [[ -s "$FILE_ISSUES_OUT" ]]; then # If file exists and is nonempty
   send_slack_message "Spyglass file issues found:
 $(cat "$FILE_ISSUES_OUT")"
 fi
 rm -f "$FILE_ISSUES_OUT"
+
+# Send dirty-install email notifications (always CC admin)
+if [[ -s "$DIRTY_ENVS_OUT" ]]; then
+  while IFS=$'\t' read -r user_email days commit dirty_path; do
+    subject="[Spyglass] Dirty installation flagged — action required"
+    body="Your Spyglass repository at ${dirty_path} is not on an official \
+commit (${commit}). This was first flagged ${days} days ago.
+
+Please reset your repository to an official commit or open a pull request.
+Contact the support team if you need assistance."
+    send_email_message "$user_email" "$SPYGLASS_EMAIL_DEST" \
+      "$subject" "$body"
+  done < "$DIRTY_ENVS_OUT"
+fi
+rm -f "$DIRTY_ENVS_OUT"
 
 echo "SPYGLASS CRON JOB END"
 

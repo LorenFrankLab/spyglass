@@ -4,14 +4,18 @@ from hashlib import md5
 from json import dumps as json_dumps
 from os import environ as os_environ
 from pathlib import Path
-from pprint import pprint
-from subprocess import run as sub_run
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Union
 
 import datajoint as dj
 import yaml
 
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.env_cache import _delim_split, _env_cache
+from spyglass.utils.git_utils import (
+    WARN_DIRTY_ENV_DAYS,
+    _warn_once,
+    get_install_info,
+)
 
 schema = dj.schema("common_user")
 
@@ -21,7 +25,11 @@ DEFAULT_ENV_ID = (
     + os_environ.get("CONDA_DEFAULT_ENV", "base")
     + "_00"
 )
-SUBPROCESS_KWARGS = dict(capture_output=True, text=True, timeout=60)
+
+# Single source of truth for "days since a dirty row was first logged",
+# computed DB-side (server NOW()) so the warning countdown and the admin
+# notification agree and neither is skewed by client-vs-server timezone.
+DIRTY_DAYS_SQL = "DATEDIFF(NOW(), `timestamp`)"
 
 
 @schema
@@ -34,316 +42,31 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
     timestamp=CURRENT_TIMESTAMP: timestamp  # Automatic timestamp
     UNIQUE INDEX (env_hash)
     has_editable=0: bool  # Whether the environment has editable installs
+    dirty_path=null: varchar(255)  # Path of local Spyglass clone, if any
+    spyglass_commit=null: varchar(40)  # Short git hash of the Spyglass install
     """
 
     # Note: this tables establishes the convention of an environment ID that
     # substrings {user}_{env_name}_{num} where num is a two-digit number.
     # Substringing isn't ideal, but it simplifies downstream inherited keys.
 
-    _has_editable = False  # Flag to track if the env has editable installs
-    _conda_export = dict()  # Cached conda export
-    _conda_pip_dict = dict()  # Pip dependencies from conda export
-    _pip_freeze = list()  # Cached pip freeze output
-    _pip_custom = dict()  # Custom pip installs from the environment
-    _freeze_comments = dict()  # Comments from pip freeze
-    _conda_conflicts = dict()  # Conda and pip conflicts in the environment
-    _env_warned = False  # Suppress repeated warnings per process
-
-    def _get_conda_export(self) -> Tuple[dict, dict]:
-        """Fetch the current Conda environment export.
-
-        - Runs `conda env export` to get the current environment.
-        - Parses the output to extract dependencies, drop name and prefix.
-        - Extracts pip dependencies if present, converts them to a dict.
-
-        Returns
-        -------
-        conda_export : dict
-            The exported Conda environment as a dictionary.
-        conda_pip_dict : dict
-            A dictionary of pip dependencies: Dict[name, package==version]
-        """
-        conda_export = sub_run(["conda", "env", "export"], **SUBPROCESS_KWARGS)
-        if conda_export.returncode != 0:
-            logger.error(  # pragma: no cover
-                "Failed to retrieve the Conda environment. "
-                + "Recompute feature disabled."
-            )
-            return None  # pragma: no cover
-
-        self._conda_export = {
-            k: v
-            for k, v in yaml.safe_load(conda_export.stdout).items()
-            if k not in ["name", "prefix"]  # Exclude name and prefix
-        }
-
-        conda_pip_list = []
-        conda_deps = self._conda_export.get("dependencies", [])
-        for i, conda_dep in enumerate(conda_deps):
-            if isinstance(conda_dep, dict):  # extract pip dependencies
-                pip_obj = conda_deps.pop(i)  # remove from list
-                conda_pip_list = pip_obj.pop("pip", None)
-                break
-
-        self._conda_export["dependencies"] = conda_deps
-
-        if conda_pip_list:  # convert to dict
-            self._conda_pip_dict = {
-                dep.split("==", maxsplit=1)[0]: dep for dep in conda_pip_list
-            }
-
-    def _get_pip_freeze(self) -> List[str]:
-        """Fetch the pip freeze output."""
-        ret = sub_run(["pip", "freeze"], **SUBPROCESS_KWARGS)
-        if ret.returncode != 0:
-            logger.error(  # pragma: no cover
-                "Failed to retrieve the pip environment. "
-                + "Recompute feature disabled."
-            )
-            return None  # pragma: no cover
-
-        self._pip_freeze = [line.strip() for line in ret.stdout.splitlines()]
-
-    @property
-    def _ignored_conda_source(self):
-        """Regex pattern for conda-managed packages from accepted sources.
-
-        Expects each of these sources to be a directory in the path.
-        """
-        sources = "feedstock_root|croot|conda-bld|bld|builder"
-        return re.compile(rf"[/\\](?:{sources})[/\\]")
-
-    @property
-    def _basic_dep_format(self):
-        """Regex patterns for dependency formats.
-
-        Allowable formats with suffixes: a1, b2, rc3, .post4, dev5, etc.
-        Examples:
-        - package==1.2.3
-        - package==1.2.3a1 (alpha)
-        - package==1.2.3b2 (beta)
-        - package==1.2.3rc3 (release candidate)
-        - package==1.2.3.post4 (post-release)
-        - package==1.2.3.dev5 (developmental release)
-        - package==1.2.3+dfsg (Debian Free Software Guidelines)
-        - package==1.2.3+ds (Debian Source)
-        - package==1.2.3+ubuntu1.2 (Ubuntu-specific)
-        """
-        return re.compile(  # allows suffixes like a1, dev, post1, etc.
-            r"""^
-                (?P<pkg>[\w\d.-]+)                  # Package
-                ==                                  # `==` separator
-                (?P<ver>                            # Version
-                    \d+(?:\.\d+)*                   # Major.Minor.Patch
-                    (?:                             # Suffixes
-                        (?P<alpha>a\d+)|            # Alpha release (a1, a2, ...)
-                        (?P<beta>b\d+)|             # Beta release (b1, b2, ...)
-                        (?P<rc>rc\d+)|              # Release candidate (rc1, rc2, ...)
-                        (?P<post>\.post\d+)|        # Post-release (.post1, .post2, ...)
-                        (?P<dev>dev\d*)|            # Developmental release (dev, dev1, ...)
-                        (?P<dfsg>\+dfsg)|           # Debian Free Software Guidelines (+dfsg)
-                        (?P<ds>\+ds)|               # Debian Source (+ds)
-                        (?P<ubuntu>\+ubuntu\d+(?:\.\d+)*) # Ubuntu-specific (+ubuntu1.2)
-                    )
-                ?)
-            $""",
-            re.VERBOSE,
-        )
-
-    @property
-    def _comment_install(self):
-        """Regex pattern for custom pip installs in comments."""
-        return re.compile(
-            r"^\s*#.*?\((?P<pkg>[A-Za-z0-9_.-]+)==(?P<ver>[^)]+)\)$"
-        )
-
-    def _warn_if_custom_or_conflict(self):
-        # NOTE: allowed editable items...
-        # spyglass - this package is often installed as editable for fetching
-        #            updates without reinstalling.
-        # jsonschema - this package is often installed as editable in a tmp dir
-
-        if UserEnvironment._env_warned:
-            return
-        UserEnvironment._env_warned = True
-
-        pip_custom_no_spy = {
-            k: "".join(v)
-            for k, v in self._pip_custom.items()
-            if "spyglass" not in k and "jsonschema" not in k
-        }
-        if pip_custom_no_spy:
-            logger.warning(
-                "Custom pip installs found. "
-                + "Recompute feature may not work as expected."
-            )
-            pprint(pip_custom_no_spy, indent=4)
-
-        if self._conda_conflicts:
-            logger.warning(  # pragma: no cover
-                "Conda/pip conflicts in the environment.\n"
-                + "\tRecompute feature may not work as expected.\n"
-                + "\tUse `pip uninstall pkg` to defer to conda.\n"
-                + "\tConflicts as Package : [pip_version, conda_version]"
-            )
-            pprint(self._conda_conflicts, indent=4)
-
-    def _delim_split(
-        self, line: str = None, as_dict=False
-    ) -> Union[Tuple[str, str], dict]:
-
-        if isinstance(line, list):
-            ret = [self._delim_split(row) for row in line]
-            return {i[0]: i[1] for i in ret} if as_dict else ret
-
-        if line is None or not isinstance(line, str):
-            ret = "", None
-        else:
-            for delim in ["==", " @ ", "="]:
-                if delim in line:
-                    ret = line.split(delim, maxsplit=1)
-                    break
-            else:
-                ret = line, ""
-
-        return {ret[0]: ret[1]} if as_dict else tuple(ret)
-
-    def _parse_pip_line(self, line: str) -> bool:
-        """Parse a line from pip freeze output.
-
-        This method handles various formats of pip freeze output, including:
-        - Prebuilt conda packages in paths like `feedstock_root/`
-        - Basic dependency formats like `package==version`, checking conflicts
-        - Custom pip installs with `@` syntax, capturing local file paths
-        - Editable installs with `-e git+` syntax, capturing package names
-
-        Parameters
-        ----------
-        line : str
-            A line from the pip freeze output.
-
-        Returns
-        -------
-        bool
-            True if the line was successfully parsed and handled.
-
-        Raises
-        ------
-        ValueError
-            If the line is an editable path is found without preceding comment.
-        """
-        # ------------------- Ignore conda-managed packages -------------------
-        if self._ignored_conda_source.search(line):
-            return True  # ignore file-based conda-managed packages
-
-        if match := self._basic_dep_format.match(line):
-            package, pip_version = match.group("pkg", "ver")
-            conda_line = self._conda_pip_dict.get(package, None)
-            _, conda_version = self._delim_split(conda_line)
-
-            # --------------- if pip and conda agree, do nothing --------------
-            if line == conda_line:  # same package, same version
-                return True  # no conflict, same version
-
-            # ------- if conda version is none, set pip version in conda ------
-            if conda_version is None:  # append pip-only package
-                logger.debug(f"Pip-only package  : {line}")
-                self._conda_pip_dict[package.lower()] = line.lower()
-                return True  # successfully parsed basic dependency
-
-            # --- if conflicting versions, log conflict, overwrite with pip ---
-            logger.debug(f"Conda/pip conflict: {line}")
-            self._conda_conflicts[package] = [pip_version, conda_version]
-            self._conda_pip_dict[package] = line
-            return True  # successfully parsed basic dependency conflict
-
-        # ------- if filepath or git path, capture as custom pip install -------
-        if " @ " in line and ("file://" in line or "git+" in line):
-            # capture local file paths
-            dep_name, path = self._delim_split(line)
-            self._pip_custom[dep_name] = line
-            logger.debug(f"Custom pip install: {dep_name}")
-            return True  # likely versioned custom install, not 'editable'
-
-        # ------ if editable install from git, track and flag as editable ------
-        if line.startswith("-e git+") and "#egg=" in line:
-            url, package = line.split("#egg=", maxsplit=1)  # pragma: no cover
-            # conda convention uses dashes
-            logger.debug(f"Editable from git : {package}")
-            self._pip_custom[package.replace("_", "-")] = line
-            if "spyglass" not in package:  # allow spyglass editable from git
-                self._has_editable = True
-            return True  # editable install, no version info
-
-        # ------- if comment, then editable, track and flag as editable -------
-        if match := self._comment_install.match(line):
-            pkg = match.group("pkg").replace("_", "-")
-            self._freeze_comments[pkg] = match.group("ver")
-            return True  # comment install, successfully parsed
-
-        if match := re.compile(r"^-e[ ]+(?P<path>\S+)$").match(line):
-            path = match.group("path")  # editable path
-            path_name = Path(path).name.replace("_", "-")
-            comment = self._freeze_comments.get(path_name, None)
-            if comment is None:
-                raise ValueError(
-                    f"Editable path found w/o a preceding comment: {line}"
-                )
-            logger.info(f"Editable from path: {line}")
-            self._pip_custom[path_name] = f"{comment} @ {path}"
-            self._has_editable = True
-            return True  # editable install, from path with comment
-
-        logger.error(f"Failed to parse: {line}\nRecompute feature disabled.")
-        return False  # unrecognized line format
-
     @cached_property
     def env(self) -> dict:
-        """Fetch the current Conda environment as a string.
+        """Return the current conda environment as a merged dict.
 
-        This method retrieves the current Conda environment, parses it, and
-        augments with conflicts and editable installs from pip freeze.
-
-        It handles the following:
-        - `a==1.2.3` basic format, checking for a different pip version
-        - `a @ file://path/to/package` if trusted conda source, ignore. If
-           user path, add considered editablens install.
-        - `a @ git+https://` assumed to be a git hash, permitted
-        - `-e git+https://...#egg=package` treated as editable install
+        Delegates to the shared :data:`_env_cache` singleton and requests
+        the full pip-merged view (``with_pip=True``) so that pip-only
+        packages, conda/pip version conflicts, and editable installs are all
+        reflected.  The subprocess runs at most once per process.
 
         Returns
         -------
         dict
-            The Conda environment as a dictionary, including pip dependencies.
+            Keys: ``channels``, ``dependencies`` (conda + merged pip
+            sub-list), and optionally ``custom`` (editable / non-standard
+            installs).  Empty dict on subprocess failure.
         """
-
-        # ---------------- Start with Conda environment export ----------------
-        _ = self._get_conda_export()
-        if not self._conda_export:
-            return ""  # pragma: no cover
-
-        # ------------------------ Fetch pip editables ------------------------
-        _ = self._get_pip_freeze()
-        if not self._pip_freeze:
-            return ""  # pragma: no cover
-
-        for line in self._pip_freeze:
-            parsed = self._parse_pip_line(line)
-            if not parsed:
-                return ""  # pragma: no cover
-
-        _ = self._warn_if_custom_or_conflict()
-
-        # ------- Augment 'pip' section, add custom and freeze section -------
-        conda_deps = self._conda_export.pop("dependencies", [])
-        conda_deps.append({"pip": list(self._conda_pip_dict.values())})
-        self._conda_export["dependencies"] = conda_deps
-
-        if self._pip_custom:  # additional sections ignored on `env create -f`
-            self._conda_export["custom"] = self._pip_custom
-        self._conda_export["raw pip freeze"] = self._pip_freeze
-
-        return self._conda_export
+        return _env_cache.get(with_pip=True)
 
     def parse_env_dict(self, env: Optional[dict] = None) -> dict:
         """Convert the environment string to a dictionary."""
@@ -356,17 +79,31 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
 
         for dep in env.get("dependencies", []):
             if isinstance(dep, str):  # split conda by '='
-                deps.update(self._delim_split(dep, as_dict=True))
+                deps.update(_delim_split(dep, as_dict=True))
             elif isinstance(dep, dict):
                 for pip_dep in dep.values():
-                    deps.update(self._delim_split(pip_dep, as_dict=True))
+                    deps.update(_delim_split(pip_dep, as_dict=True))
 
         return deps
 
     @cached_property
     def env_hash(self) -> str:
-        """Compute an MD5 hash of the environment dictionary."""
-        env_json = json_dumps(self.parse_env_dict(self.env), sort_keys=True)
+        """Compute an MD5 hash of the environment dictionary.
+
+        The Spyglass commit hash is folded in when present. For an editable /
+        local clone the conda+pip export does not capture the exact source
+        revision (an editable install shows as ``-e ...`` with no version), so
+        the commit is the only thing that distinguishes two otherwise-identical
+        environments running different code. Including it keeps the recompute
+        feature reproducible at the expense of a new row per commit on dev
+        installs. Clean releases have ``commit_hash=None``, so their hash is
+        unchanged and existing rows are unaffected.
+        """
+        env_dict = self.parse_env_dict(self.env)
+        commit = get_install_info().get("commit_hash")
+        if commit:
+            env_dict["spyglass_commit"] = commit
+        env_json = json_dumps(env_dict, sort_keys=True)
         return md5(env_json.encode()).hexdigest()
 
     @cached_property
@@ -378,6 +115,7 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
     @cached_property
     def this_env(self) -> Optional[dict]:
         """Return the environment key. Cached to avoid rerunning insert."""
+        _warn_once()
         if self.matching_env_id:
             return {"env_id": self.matching_env_id}
         del self.matching_env_id  # clear the cached property
@@ -419,17 +157,148 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         if self.matching_env_id:  # if env is already stored
             return {"env_id": self.matching_env_id}
 
+        info = get_install_info()
+        # Only flag the install path as "dirty" when the clone is actually
+        # modified or months behind upstream — a clean, current local clone
+        # (even an editable dev build) must not trigger escalation emails.
+        flagged = info.get("has_local_changes") or info.get("is_stale")
+        # If the name is taken, _increment_id yields a new suffix; capture it
+        # once so the inserted row and the returned id agree (callers query /
+        # delete by the returned id).
+        new_env_id = self._increment_id(env_id)
         self.insert1(
-            {  # if current env not stored, but name taken, increment
-                "env_id": self._increment_id(env_id),
+            {
+                "env_id": new_env_id,
                 "env_hash": self.env_hash,
                 "env": self.env,
-                "has_editable": self._has_editable,
+                "has_editable": _env_cache.has_editable,
+                "dirty_path": info.get("install_path") if flagged else None,
+                "spyglass_commit": info.get("commit_hash"),
             },
             skip_duplicates=False,
         )
         del self.matching_env_id  # clear the cached property
-        return {"env_id": env_id}
+        return {"env_id": new_env_id}
+
+    def dirty_installs(self) -> "dj.expression.QueryExpression":
+        """Return dirty-install entries with days_since_warn.
+
+        A dirty row (``dirty_path IS NOT NULL``) is included only when it is:
+
+        * **Unresolved** — no clean row (``dirty_path IS NULL``) sharing the
+          same ``env_id`` base has a newer timestamp (the user has not returned
+          to a clean install since this row was logged), and
+        * **Active** — the row itself is no older than twice
+          ``WARN_DIRTY_ENV_DAYS``, i.e. this dirty environment was logged within
+          the grace window. Abandoned/superseded episodes age out, so the cron
+          never emails about long-stale dirty state. (A user who is still
+          actively dirty keeps producing fresh rows, which stay in window.)
+
+        Both filters are applied SQL-side so no rows are fetched or iterated in
+        Python: a ``DATEDIFF`` bound restricts to active rows, and resolution is
+        an antijoin against the newest clean timestamp per ``env_id`` base
+        (aggregated with ``MAX``). ``DATEDIFF``/``MAX`` use server ``NOW()`` to
+        avoid client/server timezone skew. The base is the id minus its trailing
+        ``_NN`` suffix (``REGEXP_REPLACE``).
+
+        Returns a DataJoint query expression.  Callers needing a DataFrame
+        can call ``.fetch(format='frame')`` on the result.
+        """
+        cutoff = 2 * WARN_DIRTY_ENV_DAYS
+        base_sql = "REGEXP_REPLACE(`env_id`, '_[0-9][0-9]$', '')"
+
+        # Active dirty rows: logged within twice the warn window.
+        dirty_active = (self & "dirty_path IS NOT NULL").proj(
+            ..., dirty_base=base_sql
+        ) & f"({DIRTY_DAYS_SQL}) <= {cutoff}"
+
+        # Newest clean-install timestamp per base.
+        last_clean = dj.U("dirty_base").aggr(
+            (self & "dirty_path IS NULL").proj(
+                "timestamp", dirty_base=base_sql
+            ),
+            last_clean="MAX(`timestamp`)",
+        )
+
+        # Drop dirty rows superseded by a newer clean install (self-resolved).
+        # Reduce to the primary key so the antijoin matches on key only.
+        resolved = (
+            (dirty_active * last_clean) & "last_clean > timestamp"
+        ).proj()
+
+        return (dirty_active - resolved).proj(
+            ..., days_since_warn=DIRTY_DAYS_SQL
+        )
+
+    def write_dirty_notifications(self, out_path: str = None) -> None:
+        """Write overdue dirty-install rows to out_path (or stdout if None).
+
+        Produces one tab-separated line per user where ``days_since_warn``
+        exceeds ``WARN_DIRTY_ENV_DAYS``:
+
+            user_email\\tdays_since_warn\\tspyglass_commit\\tdirty_path
+
+        Called by ``maintenance_scripts/cleanup.py``; output is consumed by
+        ``run_jobs.sh`` which sends emails via ``email_utils.sh``.  Users with
+        no ``LabMember.LabMemberInfo`` email record are skipped with a message
+        to stderr.
+
+        Parameters
+        ----------
+        out_path : str, optional
+            Destination file path.  Writes to stdout when ``None``.
+        """
+        import sys
+
+        from spyglass.common.common_lab import LabMember
+
+        overdue = [
+            row
+            for row in self.dirty_installs().fetch(as_dict=True)
+            if row["days_since_warn"] >= WARN_DIRTY_ENV_DAYS
+        ]
+        if not overdue:
+            return
+
+        member_rows = LabMember.LabMemberInfo.fetch(
+            "datajoint_user_name", "google_user_name", as_dict=True
+        )
+        email_by_dj_user = {
+            m["datajoint_user_name"]: m["google_user_name"]
+            for m in member_rows
+            if m["datajoint_user_name"]
+        }
+        known_users = sorted(email_by_dj_user, key=len, reverse=True)
+
+        out = open(out_path, "w") if out_path else sys.stdout
+        try:
+            for row in overdue:
+                env_id = row["env_id"]
+                dj_user = next(
+                    (u for u in known_users if env_id.startswith(u + "_")),
+                    None,
+                )
+                user_email = email_by_dj_user.get(dj_user) if dj_user else None
+                if user_email is None:
+                    print(
+                        f"No LabMemberInfo email for '{env_id}' — skipping.",
+                        file=sys.stderr,
+                    )
+                    continue
+                print(
+                    "\t".join(
+                        [
+                            user_email,
+                            str(row["days_since_warn"]),
+                            str(row["spyglass_commit"] or ""),
+                            str(row["dirty_path"] or ""),
+                        ]
+                    ),
+                    file=out,
+                )
+        finally:
+            if out_path:
+                out.close()
 
     def write_env_yaml(
         self,

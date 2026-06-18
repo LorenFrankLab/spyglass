@@ -1,10 +1,9 @@
 import os
 import random
 import string
-import subprocess
 from functools import cached_property
 from pathlib import Path
-from typing import Dict, Optional, Union, Tuple
+from typing import Dict, Optional, Tuple, Union
 from uuid import uuid4
 
 import datajoint as dj
@@ -13,6 +12,7 @@ import numpy as np
 import pandas as pd
 import pynwb
 import spikeinterface as si
+import yaml
 from datajoint.table import Table
 from hdmf.common import DynamicTable
 from pynwb.core import ScratchData
@@ -305,13 +305,12 @@ class AnalysisMixin(BaseMixin):
 
     def _logged_env_info(self) -> str:
         """Get the environment information for logging."""
+        from spyglass.utils.env_cache import _env_cache
+
         sg_version = self._spyglass_version
         env_info = f"spyglass={sg_version} \n\n"
         env_info += "Python Environment:\n"
-        python_env = subprocess.check_output(
-            ["conda", "env", "export"], text=True
-        )
-        env_info += python_env
+        env_info += yaml.dump(_env_cache.get())
         return env_info
 
     @classmethod

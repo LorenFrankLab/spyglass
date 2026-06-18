@@ -17,6 +17,22 @@ regularly as cron jobs.
         called either `temp` or `tmp`.
     - This script also fetches the latest version information from PyPI to update
         the `SpyglassVersions` table.
+- `email_utils.sh`
+    - Shared bash email utility sourced by `run_jobs.sh`.
+    - Provides `send_email_message <to> <cc> <subject> <body>` using `curl` and
+        Gmail SMTPS, mirroring the approach in `check_disk_space.sh` with added CC
+        support.
+    - Used to send dirty-install notifications: `cleanup.py` writes a row per
+        flagged user to `$DIRTY_ENVS_OUT`, and `run_jobs.sh` emails each user (CC
+        `$SPYGLASS_EMAIL_DEST`). A user is flagged when their logged Spyglass
+        clone has local source edits or is far behind upstream, and the flag has
+        stood for at least 30 days. Users on a clean, current clone are never
+        emailed; a flag is also dropped once the user returns to a clean install
+        (resolution), or if they have not imported Spyglass from that environment
+        within the last 60 days (twice the warn window — stale, likely-abandoned
+        clones age out). Importing Spyglass logs the current environment and emits
+        a one-time warning for flagged installs, so the email is an escalation of
+        a warning the user has already seen.
 - `populate.py` - This script provides an example of how to run computations as
     part of cron jobs. This is not currently in use.
 - `run_jobs.sh` - This script ...
@@ -115,5 +131,5 @@ the app password instead.
 [^1]: Depending your system, you may need to run the script as `sudo` to set the
     permissions.
 
-[^2]: You may want to run the cronjob from a dedicated conda environment to avoid
-    issues with local editable installs or other package conflicts.
+[^2]: You may want to run the cronjob from a dedicated conda environment to
+    avoid issues with local editable installs or other package conflicts.

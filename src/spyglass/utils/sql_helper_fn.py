@@ -177,16 +177,11 @@ class SQLDumpHelper:
         yml_path = Path(self._export_dir) / self.paper_id / "environment.yml"
         if yml_path.exists():
             return
-        command = f"conda env export > {yml_path}"
-        os_system(command)
+        from spyglass.utils.env_cache import _env_cache
 
-        # RENAME ENVIRONMENT NAME TO PAPER ID
-        with yml_path.open("r") as file:
-            yml = yaml.safe_load(file)
-        yml["name"] = self.paper_id
+        yml = {**_env_cache.get(), "name": self.paper_id}
         with yml_path.open("w") as file:
             yaml.dump(yml, file)
-
         self._logger.info(f"Conda environment exported to {yml_path}")
 
     def _write_table_dumps(
