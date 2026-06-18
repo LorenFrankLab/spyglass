@@ -28,6 +28,7 @@ Detection logic
    and unmodified is treated as official even though it is a dev build.
 """
 
+import os
 import re
 from datetime import datetime
 from functools import cached_property
@@ -73,6 +74,58 @@ class _InstallInfoCache:
 _install_info = _InstallInfoCache()
 
 
+def _dirty_marker_path() -> Optional[Path]:
+    """Path to the local "this clone has logged a dirty env" marker.
+
+    Scoped per (DataJoint user, conda env) under ``temp_dir``. Using the DB
+    user — not the OS login — keeps markers from clashing when many users share
+    one ``temp_dir`` (and even one OS account), and aligns the marker with how
+    dirty installs are keyed for warnings/emails (``env_id`` prefix). The DB
+    user is read from ``dj.config`` (no ``spyglass.common`` import), so the
+    clean-install fast path stays lightweight. ``None`` when ``temp_dir`` is
+    unavailable.
+    """
+    try:
+        import datajoint as dj
+
+        from spyglass.settings import temp_dir
+    except Exception:
+        return None
+    if not temp_dir:
+        return None
+    dj_user = dj.config.get("database.user", "") or "unknown"
+    conda_env = os.environ.get("CONDA_DEFAULT_ENV", "base")
+    return Path(temp_dir) / f".spyglass_dirty_{dj_user}_{conda_env}"
+
+
+def _dirty_marker_exists() -> bool:
+    """Return ``True`` if the local dirty marker is present."""
+    p = _dirty_marker_path()
+    return bool(p and p.exists())
+
+
+def _set_dirty_marker() -> None:
+    """Create the local dirty marker (best-effort)."""
+    p = _dirty_marker_path()
+    if p is None:
+        return
+    try:
+        p.touch()
+    except Exception as exc:
+        logger.debug(f"could not write dirty marker: {exc}")
+
+
+def _clear_dirty_marker() -> None:
+    """Remove the local dirty marker (best-effort)."""
+    p = _dirty_marker_path()
+    if p is None:
+        return
+    try:
+        p.unlink(missing_ok=True)
+    except Exception as exc:
+        logger.debug(f"could not clear dirty marker: {exc}")
+
+
 def warn_if_dirty(install_info: dict) -> bool:
     """Warn non-admin users when running a non-official Spyglass install.
 
@@ -82,10 +135,18 @@ def warn_if_dirty(install_info: dict) -> bool:
     * **Stale** (``is_stale=True``, no local changes): softer "older commit"
       advisory for clones that are months behind upstream.
 
-    For a flagged non-admin install it also logs the current environment to
-    ``UserEnvironment`` (idempotent), so the 30-day escalation clock starts at
-    first warning rather than only when the user runs recompute. The countdown
-    shown to the user is derived from that logged timestamp.
+    Logging behaviour (to keep the escalation clock honest while minimising
+    writes):
+
+    * **Flagged** install: log the current env to ``UserEnvironment``
+      (idempotent) and set a local marker, so the 30-day clock starts at first
+      warning rather than only at recompute. The countdown is derived from the
+      logged timestamp.
+    * **Clean** install: only if the local marker is present (this clone was
+      flagged here before) and the user's most-recent log is dirty within twice
+      the warn window, log the (clean) env to record the *resolution* — which
+      lets :meth:`UserEnvironment.dirty_installs` drop the now-stale dirty row.
+      A clean install with no marker skips the ``common`` import and DB entirely.
 
     Returns silently for official installs and admin users.  All
     ``spyglass.common`` imports are deferred inside the function body to avoid
@@ -104,7 +165,14 @@ def warn_if_dirty(install_info: dict) -> bool:
         ``spyglass.common`` / the DB was not importable yet — signalling the
         caller it may retry later.
     """
-    if install_info.get("is_official"):
+    flagged = install_info.get("has_local_changes") or install_info.get(
+        "is_stale"
+    )
+
+    # Fast path: a clean install that has never logged a dirty env from this
+    # clone (no marker) needs no warning and has no resolution to record —
+    # skip the common import / DB entirely.
+    if not flagged and not _dirty_marker_exists():
         return True
 
     # Deferred imports — common/ imports utils/, so top-level imports here
@@ -127,13 +195,40 @@ def warn_if_dirty(install_info: dict) -> bool:
     except Exception as exc:
         logger.debug(f"admin check failed: {exc}")  # DB down — warn anyway
 
-    # Log this dirty/stale install so the 30-day escalation clock starts now
-    # rather than only when the user happens to run recompute. Idempotent
-    # (matching_env_id guards re-inserts) and uses the disk-cached conda
-    # export. Called directly, not via this_env, to avoid recursing into
-    # _warn_once.
+    dj_user = dj.config.get("database.user", "")
+    user_restr = f"env_id LIKE '{dj_user}_%'"
+
+    if not flagged:
+        # Clean now, but the marker says this clone was flagged before. Record
+        # a resolution (log the clean env) when the most-recent log is dirty
+        # and within 2x the warn window, so dirty_installs() drops the stale
+        # dirty row. Clear the marker either way so future clean imports stay
+        # on the fast path.
+        try:
+            rows = (
+                (UserEnvironment & user_restr)
+                .proj("dirty_path", age_days=DIRTY_DAYS_SQL)
+                .fetch("dirty_path", "age_days", as_dict=True)
+            )
+            if rows:  # most-recent log == smallest age (DATEDIFF from NOW)
+                newest = min(rows, key=lambda r: r["age_days"])
+                if (
+                    newest["dirty_path"] is not None
+                    and newest["age_days"] <= 2 * WARN_DIRTY_ENV_DAYS
+                ):
+                    UserEnvironment().insert_current_env()
+        except Exception as exc:
+            logger.debug(f"resolution logging failed: {exc}")
+        _clear_dirty_marker()
+        return True
+
+    # Flagged: log the current env so the 30-day clock runs (idempotent via
+    # matching_env_id; disk-cached conda export; called directly, not via
+    # this_env, to avoid recursing into _warn_once) and mark this clone dirty
+    # so a later clean import records the resolution.
     try:
         UserEnvironment().insert_current_env()
+        _set_dirty_marker()
     except Exception as exc:
         logger.debug(f"dirty env logging failed: {exc}")
 
@@ -142,14 +237,9 @@ def warn_if_dirty(install_info: dict) -> bool:
     # not skewed by client-vs-server timezone. Oldest row → largest count.
     days = 0
     try:
-        dj_user = dj.config.get("database.user", "")
-        dirty = (
-            UserEnvironment
-            & f"env_id LIKE '{dj_user}_%'"
-            & "dirty_path IS NOT NULL"
-        )
+        dirty = UserEnvironment & user_restr & "dirty_path IS NOT NULL"
         if dirty:
-            day_vals = dirty.proj(_d=DIRTY_DAYS_SQL).fetch("_d")
+            day_vals = dirty.proj(age_days=DIRTY_DAYS_SQL).fetch("age_days")
             days = int(max(day_vals)) if len(day_vals) else 0
     except Exception as exc:
         logger.debug(f"dirty day-count failed: {exc}")

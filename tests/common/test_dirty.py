@@ -121,6 +121,16 @@ def _reset_user_env_cache(user_env_tbl):
         user_env_tbl.__dict__.pop(attr, None)
 
 
+@pytest.fixture(autouse=True)
+def _clear_dirty_marker_each_test():
+    """Keep the local dirty marker from leaking across tests."""
+    from spyglass.utils import git_utils
+
+    git_utils._clear_dirty_marker()
+    yield
+    git_utils._clear_dirty_marker()
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 #     CondaEnvCache (mock-based, no DB)
 # ═════════════════════════════════════════════════════════════════════════════
@@ -920,6 +930,141 @@ def test_warn_admin_not_logged(caplog):
     mock_inst.insert_current_env.assert_not_called()
 
 
+# ─── dirty-marker fast path / resolution logging ──────────────────────────────
+
+
+def test_warn_clean_no_marker_is_noop():
+    """A clean install with no local marker skips common/DB entirely."""
+    import spyglass.common.common_lab as _lab_mod
+    from spyglass.utils import git_utils
+    from spyglass.utils.git_utils import warn_if_dirty
+
+    info = {
+        "is_official": True,
+        "is_dev": False,
+        "has_local_changes": False,
+        "is_stale": False,
+        "install_path": None,
+        "commit_hash": None,
+    }
+
+    mock_lab = MagicMock()
+    with patch.object(git_utils, "_dirty_marker_exists", return_value=False):
+        with patch.object(_lab_mod, "LabMember", mock_lab):
+            result = warn_if_dirty(info)
+
+    assert result is True
+    mock_lab.assert_not_called()  # fast path: never imported/queried the DB
+
+
+def test_warn_flagged_sets_marker():
+    """A flagged install logs and sets the local dirty marker."""
+    import spyglass.common.common_lab as _lab_mod
+    import spyglass.common.common_user as _user_mod
+    from spyglass.utils import git_utils
+    from spyglass.utils.git_utils import warn_if_dirty
+
+    info = {
+        "is_official": False,
+        "is_dev": True,
+        "has_local_changes": True,
+        "is_stale": False,
+        "install_path": "/home/user/spyglass",
+        "commit_hash": "abc1234",
+    }
+
+    mock_lab = MagicMock()
+    mock_lab.return_value.user_is_admin = False
+
+    mock_env = MagicMock()
+    mock_env.__and__ = MagicMock(return_value=mock_env)
+    mock_env.__bool__ = MagicMock(return_value=False)
+
+    with patch.object(_lab_mod, "LabMember", mock_lab):
+        with patch.object(_user_mod, "UserEnvironment", mock_env):
+            warn_if_dirty(info)
+
+    assert git_utils._dirty_marker_exists() is True
+
+
+def test_warn_clean_with_marker_records_resolution():
+    """Clean + marker + recent dirty log → log the clean env, clear marker."""
+    import spyglass.common.common_lab as _lab_mod
+    import spyglass.common.common_user as _user_mod
+    from spyglass.utils import git_utils
+    from spyglass.utils.git_utils import warn_if_dirty
+
+    info = {
+        "is_official": True,
+        "is_dev": False,
+        "has_local_changes": False,
+        "is_stale": False,
+        "install_path": None,
+        "commit_hash": None,
+    }
+
+    mock_lab = MagicMock()
+    mock_lab.return_value.user_is_admin = False
+
+    # most-recent log: dirty, 10 days old (within 2x window)
+    mock_query = MagicMock()
+    mock_query.fetch = MagicMock(
+        return_value=[{"dirty_path": "/home/user/sg", "age_days": 10}]
+    )
+    mock_restr = MagicMock()
+    mock_restr.proj = MagicMock(return_value=mock_query)
+    mock_inst = MagicMock()
+    mock_env = MagicMock(return_value=mock_inst)
+    mock_env.__and__ = MagicMock(return_value=mock_restr)
+
+    git_utils._set_dirty_marker()
+    with patch.object(_lab_mod, "LabMember", mock_lab):
+        with patch.object(_user_mod, "UserEnvironment", mock_env):
+            warn_if_dirty(info)
+
+    mock_inst.insert_current_env.assert_called_once()  # resolution logged
+    assert git_utils._dirty_marker_exists() is False  # marker cleared
+
+
+def test_warn_clean_with_marker_stale_dirty_skips_log():
+    """Clean + marker but the dirty log is older than 2x window → no log."""
+    import spyglass.common.common_lab as _lab_mod
+    import spyglass.common.common_user as _user_mod
+    from spyglass.utils import git_utils
+    from spyglass.utils.git_utils import warn_if_dirty
+
+    info = {
+        "is_official": True,
+        "is_dev": False,
+        "has_local_changes": False,
+        "is_stale": False,
+        "install_path": None,
+        "commit_hash": None,
+    }
+
+    mock_lab = MagicMock()
+    mock_lab.return_value.user_is_admin = False
+
+    # most-recent log: dirty, 90 days old (beyond 2x window of 60)
+    mock_query = MagicMock()
+    mock_query.fetch = MagicMock(
+        return_value=[{"dirty_path": "/home/user/sg", "age_days": 90}]
+    )
+    mock_restr = MagicMock()
+    mock_restr.proj = MagicMock(return_value=mock_query)
+    mock_inst = MagicMock()
+    mock_env = MagicMock(return_value=mock_inst)
+    mock_env.__and__ = MagicMock(return_value=mock_restr)
+
+    git_utils._set_dirty_marker()
+    with patch.object(_lab_mod, "LabMember", mock_lab):
+        with patch.object(_user_mod, "UserEnvironment", mock_env):
+            warn_if_dirty(info)
+
+    mock_inst.insert_current_env.assert_not_called()  # too old to record
+    assert git_utils._dirty_marker_exists() is False  # marker still cleared
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 #     _warn_once import-time gating (mock-based, no DB)
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1154,6 +1299,53 @@ def test_clean_install_not_in_dirty_installs(user_env_tbl, clean_install_info):
     env_id = result["env_id"]
     dirty_ids = user_env_tbl.dirty_installs().fetch("env_id")
     assert env_id not in dirty_ids
+
+
+def test_dirty_installs_excludes_inactive(user_env_tbl):
+    """A dirty row older than 2x the warn window (no recent import) is dropped.
+
+    A second dirty row within the window is kept — the cron only emails users
+    who have imported within twice the grace window.
+    """
+    from datetime import datetime, timedelta
+
+    from spyglass.utils.git_utils import WARN_DIRTY_ENV_DAYS
+
+    user_env_tbl.delete(safemode=False)
+    base_env = {"channels": ["x"], "dependencies": ["p=1=py"]}
+    stale_ts = datetime.now() - timedelta(days=2 * WARN_DIRTY_ENV_DAYS + 5)
+    active_ts = datetime.now() - timedelta(days=WARN_DIRTY_ENV_DAYS + 5)
+
+    user_env_tbl.insert(
+        [
+            {
+                "env_id": "ghost_envstale_00",
+                "env_hash": "a" * 32,
+                "env": base_env,
+                "has_editable": False,
+                "dirty_path": "/old",
+                "spyglass_commit": "stale01",
+                "timestamp": stale_ts,
+            },
+            {
+                "env_id": "ghost_envactive_00",
+                "env_hash": "b" * 32,
+                "env": base_env,
+                "has_editable": False,
+                "dirty_path": "/recent",
+                "spyglass_commit": "active1",
+                "timestamp": active_ts,
+            },
+        ],
+        skip_duplicates=True,
+    )
+    try:
+        dirty_ids = list(user_env_tbl.dirty_installs().fetch("env_id"))
+        assert "ghost_envstale_00" not in dirty_ids  # aged out (inactive)
+        assert "ghost_envactive_00" in dirty_ids  # still within 2x window
+    finally:
+        for eid in ("ghost_envstale_00", "ghost_envactive_00"):
+            (user_env_tbl & f'env_id="{eid}"').delete(safemode=False)
 
 
 def test_has_matching_env_same_hash(user_env_tbl):

@@ -183,39 +183,52 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
     def dirty_installs(self) -> "dj.expression.QueryExpression":
         """Return dirty-install entries with days_since_warn.
 
-        Excludes env_id bases where the user has a more recent clean install
-        (``dirty_path IS NULL``), indicating the issue was self-resolved.
+        A dirty row (``dirty_path IS NOT NULL``) is included only when it is:
+
+        * **Unresolved** — no clean row (``dirty_path IS NULL``) sharing the
+          same ``env_id`` base has a newer timestamp (the user has not returned
+          to a clean install since this row was logged), and
+        * **Active** — the row itself is no older than twice
+          ``WARN_DIRTY_ENV_DAYS``, i.e. this dirty environment was logged within
+          the grace window. Abandoned/superseded episodes age out, so the cron
+          never emails about long-stale dirty state. (A user who is still
+          actively dirty keeps producing fresh rows, which stay in window.)
+
+        Both filters are applied SQL-side so no rows are fetched or iterated in
+        Python: a ``DATEDIFF`` bound restricts to active rows, and resolution is
+        an antijoin against the newest clean timestamp per ``env_id`` base
+        (aggregated with ``MAX``). ``DATEDIFF``/``MAX`` use server ``NOW()`` to
+        avoid client/server timezone skew. The base is the id minus its trailing
+        ``_NN`` suffix (``REGEXP_REPLACE``).
 
         Returns a DataJoint query expression.  Callers needing a DataFrame
         can call ``.fetch(format='frame')`` on the result.
         """
-        dirty = self & "dirty_path IS NOT NULL"
+        cutoff = 2 * WARN_DIRTY_ENV_DAYS
+        base_sql = "REGEXP_REPLACE(`env_id`, '_[0-9][0-9]$', '')"
 
-        if dirty and (clean := self & "dirty_path IS NULL"):
-            dirty_rows = dirty.fetch("env_id", "timestamp", as_dict=True)
-            clean_rows = clean.fetch("env_id", "timestamp", as_dict=True)
+        # Active dirty rows: logged within twice the warn window.
+        dirty_active = (self & "dirty_path IS NOT NULL").proj(
+            ..., dirty_base=base_sql
+        ) & f"({DIRTY_DAYS_SQL}) <= {cutoff}"
 
-            clean_by_base: dict = {}
-            for row in clean_rows:
-                m = re.match(r"^(.*?)(?:_\d{2})?$", row["env_id"])
-                base = m.group(1) if m else row["env_id"]
-                t = row["timestamp"]
-                if base not in clean_by_base or t > clean_by_base[base]:
-                    clean_by_base[base] = t
+        # Newest clean-install timestamp per base.
+        last_clean = dj.U("dirty_base").aggr(
+            (self & "dirty_path IS NULL").proj(
+                "timestamp", dirty_base=base_sql
+            ),
+            last_clean="MAX(`timestamp`)",
+        )
 
-            excluded = []
-            for row in dirty_rows:
-                m = re.match(r"^(.*?)(?:_\d{2})?$", row["env_id"])
-                base = m.group(1) if m else row["env_id"]
-                clean_ts = clean_by_base.get(base)
-                if clean_ts and clean_ts > row["timestamp"]:
-                    excluded.append(row["env_id"])
+        # Drop dirty rows superseded by a newer clean install (self-resolved).
+        # Reduce to the primary key so the antijoin matches on key only.
+        resolved = (
+            (dirty_active * last_clean) & "last_clean > timestamp"
+        ).proj()
 
-            if excluded:
-                ids = ", ".join(f'"{eid}"' for eid in excluded)
-                dirty = dirty & f"env_id NOT IN ({ids})"
-
-        return dirty.proj(..., days_since_warn=DIRTY_DAYS_SQL)
+        return (dirty_active - resolved).proj(
+            ..., days_since_warn=DIRTY_DAYS_SQL
+        )
 
     def write_dirty_notifications(self, out_path: str = None) -> None:
         """Write overdue dirty-install rows to out_path (or stdout if None).
