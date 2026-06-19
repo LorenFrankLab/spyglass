@@ -791,7 +791,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         Pure read accessor: it reads only existing master fields and part
         rows, computing nothing new. Accepts either a minimal curation key
         (``{"sorting_id", "curation_id"}``) or a full ``run_v2_pipeline``
-        manifest -- the manifest carries keys that are NOT part of the
+        run summary -- the run summary carries keys that are NOT part of the
         curation primary key (``pipeline_preset`` / ``recording_id`` /
         ``artifact_detection_id`` / ``n_units`` / ...), so it is normalized
         to the ``(sorting_id, curation_id)`` PK before any restriction.
@@ -799,7 +799,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         Parameters
         ----------
         curation_key
-            A curation key or a ``run_v2_pipeline`` manifest. Must carry both
+            A curation key or a ``run_v2_pipeline`` run summary. Must carry both
             ``sorting_id`` and ``curation_id`` (``curation_id`` is only unique
             within a sort).
 

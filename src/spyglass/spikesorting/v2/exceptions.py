@@ -118,20 +118,22 @@ class PreflightError(ValueError):
 class PipelineStageError(RuntimeError):
     """A run_v2_pipeline stage failed during populate/insert.
 
-    Names the failing stage and carries the partial manifest of stages that
-    completed before the failure, so callers can resume/inspect without
+    Names the failing stage and carries the partial run summary of stages
+    that completed before the failure, so callers can resume/inspect without
     re-deriving intermediate PKs. The original exception is chained
     (``raise PipelineStageError(...) from exc``) so the underlying traceback
     is preserved.
     """
 
-    def __init__(self, stage: str, partial_manifest: dict, message: str = ""):
+    def __init__(
+        self, stage: str, partial_run_summary: dict, message: str = ""
+    ):
         self.stage = stage
-        self.partial_manifest = partial_manifest
+        self.partial_run_summary = partial_run_summary
         super().__init__(
             f"run_v2_pipeline: stage {stage!r} failed"
             + (f": {message}" if message else "")
-            + f". Completed stages: {sorted(partial_manifest)}."
+            + f". Completed stages: {sorted(partial_run_summary)}."
         )
 
 
@@ -142,7 +144,7 @@ class ZeroUnitSortError(RuntimeError):
     that as an error (``run_v2_pipeline(..., require_units=True)``). Zero
     units is a legitimate result on a quiet shank, so it is graceful by
     default: ``run_v2_pipeline`` writes an EMPTY (but real) curation +
-    merge row and returns a full manifest with real ``curation_id`` /
+    merge row and returns a full run summary with real ``curation_id`` /
     ``merge_id`` and ``n_units=0`` (plus a warning). This is raised only
     when the caller requires units. Message names the recording/sort and
     suggests checking ``detect_threshold`` / the artifact mask.

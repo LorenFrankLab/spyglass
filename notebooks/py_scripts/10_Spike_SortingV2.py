@@ -131,10 +131,10 @@ report
 # idempotent call and registers the result on the `SpikeSortingOutput` merge
 # table. With `preflight=True` (the default) it re-runs the check above before
 # any populate. **Re-running with the same inputs is safe** — it finds the
-# existing rows and returns the same manifest (same `merge_id`) without
+# existing rows and returns the same run summary (same `merge_id`) without
 # inserting duplicates.
 
-manifest = run_v2_pipeline(
+run_summary = run_v2_pipeline(
     nwb_file_name=nwb_file_name,
     sort_group_id=sort_group_id,
     interval_list_name=interval_list_name,
@@ -142,11 +142,11 @@ manifest = run_v2_pipeline(
     pipeline_preset=pipeline_preset,
 )
 
-# ## 6. Read the manifest
+# ## 6. Read the run summary
 #
 # Besides the stable keys (`pipeline_preset` / `recording_id` /
 # `artifact_detection_id` / `sorting_id` / `curation_id` / `merge_id` /
-# `n_units`), the manifest carries
+# `n_units`), the run summary carries
 # per-stage observability: each `*_status` is `"computed"` if the stage did
 # work this call or `"reused"` if its row already existed; `stage_seconds` is
 # the wall-clock spent **this call** per stage (≈0 on an idempotent re-run, not
@@ -158,21 +158,21 @@ manifest = run_v2_pipeline(
 # so downstream code treats it like any other row. Pass `require_units=True` to
 # turn that into a hard error instead.
 
-print("merge_id (downstream key):", manifest["merge_id"])
-print("n_units                  :", manifest["n_units"])
+print("merge_id (downstream key):", run_summary["merge_id"])
+print("n_units                  :", run_summary["n_units"])
 print(
     "stage status             :",
     {
-        stage: manifest[f"{stage}_status"]
+        stage: run_summary[f"{stage}_status"]
         for stage in ("recording", "artifact_detection", "sorting", "curation")
     },
 )
-print("stage seconds            :", manifest["stage_seconds"])
-manifest
+print("stage seconds            :", run_summary["stage_seconds"])
+run_summary
 
 # ## 7. Inspect / curate
 #
-# `summarize_curation` accepts the manifest directly and returns a plain dict
+# `summarize_curation` accepts the run summary directly and returns a plain dict
 # (`n_units`, `labels`, `merge_groups`, `merges_applied`, `is_merge_preview`,
 # `merge_id`, ...). To curate further, reach for the intent-first wrappers on
 # `CurationV2` — `create_initial_curation`, `propose_merge_curation`,
@@ -181,7 +181,7 @@ manifest
 # > Interactive web curation (label/merge in a browser) is coming via FigPack
 # > in a later release; it will slot in here.
 
-CurationV2.summarize_curation(manifest)
+CurationV2.summarize_curation(run_summary)
 
 # ## 8. Downstream: choose the output accessor
 #
@@ -195,13 +195,13 @@ CurationV2.summarize_curation(manifest)
 # | Recording | `SpikeSortingOutput().get_recording({"merge_id": merge_id})` |
 # | Sorting | `SpikeSortingOutput().get_sorting({"merge_id": merge_id})` |
 # | Unit brain regions | `SpikeSortingOutput.get_unit_brain_regions({"merge_id": merge_id})` |
-# | Curation summary | `CurationV2.summarize_curation(manifest)` |
-# | Analyzer/debug internals | `Sorting().get_analyzer({"sorting_id": manifest["sorting_id"]})` |
+# | Curation summary | `CurationV2.summarize_curation(run_summary)` |
+# | Analyzer/debug internals | `Sorting().get_analyzer({"sorting_id": run_summary["sorting_id"]})` |
 #
 # Here we fetch spike times: one array of spike times (seconds) per unit.
 #
 
-merge_id = manifest["merge_id"]
+merge_id = run_summary["merge_id"]
 spike_times = SpikeSortingOutput().get_spike_times({"merge_id": merge_id})
 print(f"{len(spike_times)} unit(s)")
 spike_times

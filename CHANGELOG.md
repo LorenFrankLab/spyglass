@@ -278,7 +278,7 @@ dropping; `restrict_by_artifact=True` now honors the v2
   circuits and the Sorting row still commits with `n_units=0`.
   `run_v2_pipeline` then writes an EMPTY (but real) curation + merge
   row -- matching v1, which writes an empty Units table -- and returns
-  a full manifest with real `curation_id` / `merge_id` and `n_units=0`,
+  a full run summary with real `curation_id` / `merge_id` and `n_units=0`,
   so downstream consumers treat it like any other `SpikeSortingOutput`
   row instead of special-casing a `None` merge_id. Pass
   `require_units=True` to raise `ZeroUnitSortError` instead. Users with
@@ -959,16 +959,17 @@ for label, interval_data in results.groupby("interval_labels"):
         identity payloads (now extracted to shared builders in
         `_selection_identity`) and the same `installed_sorters()` sorter gate
         the populate path uses, so its checks cannot drift from the real run.
-    - Make the `run_v2_pipeline` manifest observable: each call now adds
+    - Make the `run_v2_pipeline` run summary observable: each call now adds
         per-stage `recording_status` / `artifact_detection_status` / `sorting_status` /
         `curation_status` (`"computed"` vs `"reused"`), a `stage_seconds` dict
         of monotonic wall-clock per stage **this call** (≈0 on an idempotent
         re-run, not cumulative compute), and a `warnings` list (e.g. the
-        zero-unit advisory). The seven existing manifest keys are unchanged,
-        and two identical runs still return equal manifests modulo
+        zero-unit advisory). The seven existing run-summary keys are
+        unchanged, and two identical runs still return equal run summaries
+        modulo
         `stage_seconds`/`*_status` with no duplicate rows. A failed stage now
         raises the new `PipelineStageError`, which names the stage and carries
-        the partial manifest of the stages that completed before it (the
+        the partial run summary of the stages that completed before it (the
         underlying error is chained). `ZeroUnitSortError` is unchanged (a
         graceful zero-unit result is not a stage failure).
     - Add intent-first curation wrappers on `CurationV2`:
@@ -978,7 +979,7 @@ for label, interval_data in results.groupby("interval_labels"):
         returns a notebook-printable dict (`n_units` / `labels` /
         `merge_groups` / `merges_applied` / `is_merge_preview` / `merge_id` /
         ...) and accepts either a minimal curation key or a full
-        `run_v2_pipeline` manifest. The wrappers are thin pass-throughs that
+        `run_v2_pipeline` run summary. The wrappers are thin pass-throughs that
         pre-fill `parent_curation_id` / `apply_merge` by name; the expert
         `insert_curation` (and its ≥2-member merge-group validation) is
         unchanged.

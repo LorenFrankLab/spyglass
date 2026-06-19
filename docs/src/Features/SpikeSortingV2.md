@@ -87,7 +87,7 @@ today:
 - `franklab_tetrode_clusterless_thresholder`
 
 The orchestrator is idempotent: re-running with the same inputs returns the
-same manifest (same `merge_id`, same intermediate PKs) without duplicating
+same run summary (same `merge_id`, same intermediate PKs) without duplicating
 rows.
 
 ## How
@@ -107,9 +107,9 @@ path is:
    parameter rows, and sorter binary are present in ~1 s, *before* any
    `populate`, returning a structured report with the exact fix for any missing
    prerequisite.
-4. **Pipeline** -- `run_v2_pipeline(...)` returns the manifest (key off
+4. **Pipeline** -- `run_v2_pipeline(...)` returns the run summary (key off
    `merge_id`).
-5. **Summary** -- `CurationV2.summarize_curation(manifest)`.
+5. **Summary** -- `CurationV2.summarize_curation(run_summary)`.
 6. **Fetch** -- `SpikeSortingOutput().get_spike_times({"merge_id": ...})`.
 
 Each step is detailed below.
@@ -149,27 +149,27 @@ sort_groups
 describe_pipeline_presets()
 
 # End-to-end populate + register on the merge table.
-manifest = run_v2_pipeline(
+run_summary = run_v2_pipeline(
     nwb_file_name=nwb_file_name,
     sort_group_id=sort_group_id,
     interval_list_name="raw data valid times",
     team_name="my_team",
     pipeline_preset="franklab_tetrode_mountainsort5",
 )
-merge_id = manifest["merge_id"]  # key off this downstream
+merge_id = run_summary["merge_id"]  # key off this downstream
 ```
 
 Besides the stable keys (`pipeline_preset` / `recording_id` /
 `artifact_detection_id` / `sorting_id` / `curation_id` / `merge_id` /
-`n_units`), the manifest carries per-stage observability:
+`n_units`), the run summary carries per-stage observability:
 `recording_status` / `artifact_detection_status` / `sorting_status` /
 `curation_status` (`"computed"` if the stage did work this call, `"reused"` if
 its row already existed), a `stage_seconds` dict of wall-clock per stage **this
 call** (keys `recording` / `artifact_detection` / `sorting` / `curation`; ≈0
 on an idempotent re-run, not cumulative compute), and a `warnings` list (e.g.
 a zero-unit advisory). A failed stage raises `PipelineStageError`, which names
-the stage and carries the partial manifest of the stages that completed before
-it.
+the stage and carries the partial run summary of the stages that completed
+before it.
 
 ### Choosing a sort group
 
@@ -229,16 +229,17 @@ describe_pipeline_presets()  # one row per pipeline preset
   ```
 
 - **A compute stage fails.** Catch `PipelineStageError`; `err.stage` names the
-  failed stage and `err.partial_manifest` shows which IDs were already created.
+  failed stage and `err.partial_run_summary` shows which IDs were already
+  created.
 
   ```python
   from spyglass.spikesorting.v2.exceptions import PipelineStageError
 
   try:
-      manifest = run_v2_pipeline(...)
+      run_summary = run_v2_pipeline(...)
   except PipelineStageError as err:
       print(err.stage)
-      print(err.partial_manifest)
+      print(err.partial_run_summary)
       raise
   ```
 
@@ -252,7 +253,7 @@ describe_pipeline_presets()  # one row per pipeline preset
 - **The sort returns zero units.** By default, `run_v2_pipeline` writes an
   empty-but-real curation and `merge_id`; this is valid for quiet shanks. Pass
   `require_units=True` only when zero units should abort the run.
-- **The output is unexpectedly sparse.** Check `manifest["warnings"]`, the
+- **The output is unexpectedly sparse.** Check `run_summary["warnings"]`, the
   chosen pipeline preset's threshold units in `describe_pipeline_presets()`,
   and whether artifact masking removed the interval you expected to sort.
 
@@ -265,23 +266,23 @@ the ten-parameter `insert_curation`:
 ```python
 from spyglass.spikesorting.v2.curation import CurationV2
 
-# Inspect what the pipeline produced (accepts the manifest directly).
-CurationV2.summarize_curation(manifest)
+# Inspect what the pipeline produced (accepts the run summary directly).
+CurationV2.summarize_curation(run_summary)
 
 # Record proposed merges WITHOUT applying them (reviewable; units keep ids).
 # Branch off the pipeline's root curation via parent_curation_id (unit ids
 # 3/7 are illustrative).
 prev = CurationV2.propose_merge_curation(
-    {"sorting_id": manifest["sorting_id"]},
+    {"sorting_id": run_summary["sorting_id"]},
     merge_groups=[[3, 7]],
-    parent_curation_id=manifest["curation_id"],
+    parent_curation_id=run_summary["curation_id"],
 )
 
 # Commit the merges into a new curation (merged unit set is final).
 CurationV2.create_merged_curation(
-    {"sorting_id": manifest["sorting_id"]},
+    {"sorting_id": run_summary["sorting_id"]},
     merge_groups=[[3, 7]],
-    parent_curation_id=manifest["curation_id"],
+    parent_curation_id=run_summary["curation_id"],
 )
 ```
 
@@ -513,7 +514,7 @@ Applying motion correction is out of scope by design.
 Both v1 (`CurationV1`) and v2 (`CurationV2`) curations register on the same
 `SpikeSortingOutput` merge table, so existing downstream code (decoding,
 ripple detection, etc.) keeps working unchanged. For most downstream work,
-carry `merge_id = manifest["merge_id"]` forward:
+carry `merge_id = run_summary["merge_id"]` forward:
 
 #### What do I call next?
 
@@ -523,8 +524,8 @@ carry `merge_id = manifest["merge_id"]` forward:
 | Recording | `SpikeSortingOutput().get_recording({"merge_id": merge_id})` |
 | Sorting | `SpikeSortingOutput().get_sorting({"merge_id": merge_id})` |
 | Unit brain regions | `SpikeSortingOutput.get_unit_brain_regions({"merge_id": merge_id})` |
-| Curation summary | `CurationV2.summarize_curation(manifest)` |
-| Analyzer/debug internals | `Sorting().get_analyzer({"sorting_id": manifest["sorting_id"]})` |
+| Curation summary | `CurationV2.summarize_curation(run_summary)` |
+| Analyzer/debug internals | `Sorting().get_analyzer({"sorting_id": run_summary["sorting_id"]})` |
 
 ```python
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput

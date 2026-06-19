@@ -335,7 +335,8 @@ def test_user_notebook_executes(first_hour):
 
     assert saw_parameters, "notebook is missing its 'parameters'-tagged cell"
     assert (
-        namespace["manifest"]["merge_id"] == first_hour["manifest"]["merge_id"]
+        namespace["run_summary"]["merge_id"]
+        == first_hour["manifest"]["merge_id"]
     )
     assert isinstance(namespace["spike_times"], list)
 

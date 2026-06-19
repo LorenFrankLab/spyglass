@@ -16,7 +16,7 @@ orchestrator looks them up at first call. Three presets ship today:
 
 The orchestrator is idempotent: re-running with the same inputs finds
 existing rows via the insert_selection helpers and returns the same
-manifest (with the same merge_id) without inserting duplicates.
+run summary (with the same merge_id) without inserting duplicates.
 """
 
 from __future__ import annotations
@@ -1029,7 +1029,7 @@ def preflight_v2_pipeline(
     )
 
 
-# Closed vocabulary for the per-stage ``*_status`` manifest keys. A stage is
+# Closed vocabulary for the per-stage ``*_status`` run-summary keys. A stage is
 # ``"computed"`` when its row did not exist before this call and populate /
 # insert_curation created it this call; ``"reused"`` when the row already
 # existed and the call no-opped. Test code asserts each status is a member.
@@ -1047,7 +1047,8 @@ def _run_stage(
     closure over the stage's ``populate`` / ``insert_curation`` call; its
     return value is passed back (the curation stage needs the returned key).
     A failure is re-raised as a chained :class:`PipelineStageError` carrying a
-    snapshot of ``partial`` (the manifest accumulated from earlier stages) so
+    snapshot of ``partial`` (the run summary accumulated from earlier stages)
+    so
     the caller sees which stage broke and what was already built.
 
     Returns ``(work_result, status, seconds)`` where ``seconds`` is monotonic
@@ -1079,7 +1080,7 @@ def run_v2_pipeline(
 
     Chains the v2 ``insert_selection`` + ``populate`` calls into one
     call. Idempotent: re-running with the same inputs returns the same
-    manifest (same merge_id, same intermediate PKs) without
+    run summary (same merge_id, same intermediate PKs) without
     duplicating rows.
 
     Prerequisites (set these up first, in order)
@@ -1147,7 +1148,7 @@ def run_v2_pipeline(
     Returns
     -------
     dict
-        Manifest with the following stage keys:
+        Run summary with the following stage keys:
             ``pipeline_preset``          : the pipeline-preset name
             ``recording_id``             : RecordingSelection PK
             ``artifact_detection_id``    : ArtifactDetectionSelection PK
@@ -1173,7 +1174,7 @@ def run_v2_pipeline(
             ``warnings``          : list of human-readable advisories raised
                 during the run (e.g. the zero-unit message); empty when
                 clean.
-        Two identical calls return equal manifests except for
+        Two identical calls return equal run summaries except for
         ``stage_seconds`` and the ``*_status`` values (the second reports
         ``"reused"``), inserting no duplicate rows.
 
@@ -1187,8 +1188,9 @@ def run_v2_pipeline(
         ``preflight=False``.
     PipelineStageError
         If a compute stage's ``populate`` / ``insert_curation`` fails. Names
-        the failing stage and carries the partial manifest of the stages that
-        completed before it (the original error is chained). Only the compute
+        the failing stage and carries the partial run summary of the stages
+        that completed before it (the original error is chained). Only the
+        compute
         stages are wrapped; an error from the cheap ``insert_selection``
         prelude surfaces as its own native exception (e.g.
         ``DuplicateSelectionError``).
@@ -1254,11 +1256,12 @@ def run_v2_pipeline(
     # Per-stage observability. For each stage: derive computed-vs-reused from
     # an existence check on the output row BEFORE populate, time the
     # populate/insert with a monotonic clock, and on failure raise a stage-
-    # aware PipelineStageError carrying the manifest built so far. The stable
-    # manifest keys are stable; *_status / stage_seconds / warnings are
+    # aware PipelineStageError carrying the run summary built so far. The
+    # stable run-summary keys are stable; *_status / stage_seconds / warnings
+    # are
     # additive. DataJoint's ``populate()`` is idempotent (no-ops on present
     # rows), so no separate guard is needed before each call.
-    manifest: dict[str, Any] = {"pipeline_preset": pipeline_preset}
+    run_summary: dict[str, Any] = {"pipeline_preset": pipeline_preset}
     stage_seconds: dict[str, float] = {}
     warnings_list: list[str] = []
 
@@ -1271,13 +1274,13 @@ def run_v2_pipeline(
             "team_name": team_name,
         }
     )
-    _, manifest["recording_status"], stage_seconds["recording"] = _run_stage(
+    _, run_summary["recording_status"], stage_seconds["recording"] = _run_stage(
         "recording",
         bool(Recording & recording_key),
         lambda: Recording.populate(recording_key, reserve_jobs=False),
-        manifest,
+        run_summary,
     )
-    manifest["recording_id"] = recording_key["recording_id"]
+    run_summary["recording_id"] = recording_key["recording_id"]
 
     artifact_detection_key = ArtifactDetectionSelection.insert_selection(
         {
@@ -1287,7 +1290,7 @@ def run_v2_pipeline(
     )
     (
         _,
-        manifest["artifact_detection_status"],
+        run_summary["artifact_detection_status"],
         stage_seconds["artifact_detection"],
     ) = _run_stage(
         "artifact_detection",
@@ -1295,9 +1298,9 @@ def run_v2_pipeline(
         lambda: ArtifactDetection.populate(
             artifact_detection_key, reserve_jobs=False
         ),
-        manifest,
+        run_summary,
     )
-    manifest["artifact_detection_id"] = artifact_detection_key[
+    run_summary["artifact_detection_id"] = artifact_detection_key[
         "artifact_detection_id"
     ]
 
@@ -1311,13 +1314,13 @@ def run_v2_pipeline(
             ],
         }
     )
-    _, manifest["sorting_status"], stage_seconds["sorting"] = _run_stage(
+    _, run_summary["sorting_status"], stage_seconds["sorting"] = _run_stage(
         "sorting",
         bool(Sorting & sorting_key),
         lambda: Sorting.populate(sorting_key, reserve_jobs=False),
-        manifest,
+        run_summary,
     )
-    manifest["sorting_id"] = sorting_key["sorting_id"]
+    run_summary["sorting_id"] = sorting_key["sorting_id"]
 
     # Zero units is a legitimate result on a quiet shank. Unless the
     # caller set require_units=True, proceed to build an empty (but real)
@@ -1339,7 +1342,7 @@ def run_v2_pipeline(
         # downstream consumers treat it like any other
         # SpikeSortingOutput row instead of special-casing a None
         # merge_id. The warning is both logged (console) and recorded on
-        # the manifest's ``warnings`` list (programmatic access).
+        # the run summary's ``warnings`` list (programmatic access).
         zero_unit_warning = (
             "run_v2_pipeline: zero units for recording_id="
             f"{recording_id} (sorting_id={sorting_key['sorting_id']}); "
@@ -1350,10 +1353,10 @@ def run_v2_pipeline(
         warnings_list.append(zero_unit_warning)
 
     # Record the now-known stable ``n_units`` and the ``warnings`` before the
-    # curation stage runs, so a curation-stage failure's partial manifest
+    # curation stage runs, so a curation-stage failure's partial run summary
     # carries them (not just the pre-sorting keys).
-    manifest["n_units"] = n_units
-    manifest["warnings"] = warnings_list
+    run_summary["n_units"] = n_units
+    run_summary["warnings"] = warnings_list
 
     # Idempotent curation: ``insert_curation`` owns the root-reuse logic.
     # With ``reuse_existing=True`` it returns the canonical (lowest
@@ -1385,18 +1388,19 @@ def run_v2_pipeline(
         # insert_curation (atomically), so the merge_id read-back is part of
         # the curation stage: a reused root whose registration is missing
         # (e.g. deleted out-of-band) then surfaces as a stage-aware
-        # PipelineStageError carrying the partial manifest, not a raw fetch1.
+        # PipelineStageError carrying the partial run summary, not a raw
+        # fetch1.
         merge_id = (SpikeSortingOutput.CurationV2 & curation_key).fetch1(
             "merge_id"
         )
         return curation_key, merge_id
 
     (curation_key, merge_id), curation_status, curation_seconds = _run_stage(
-        "curation", curation_exists, _curate_and_register, manifest
+        "curation", curation_exists, _curate_and_register, run_summary
     )
-    manifest["curation_status"] = curation_status
+    run_summary["curation_status"] = curation_status
     stage_seconds["curation"] = curation_seconds
-    manifest["curation_id"] = curation_key["curation_id"]
-    manifest["merge_id"] = merge_id
-    manifest["stage_seconds"] = stage_seconds
-    return manifest
+    run_summary["curation_id"] = curation_key["curation_id"]
+    run_summary["merge_id"] = merge_id
+    run_summary["stage_seconds"] = stage_seconds
+    return run_summary
