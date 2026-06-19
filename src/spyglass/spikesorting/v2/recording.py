@@ -901,6 +901,38 @@ class PreprocessingParameters(SpyglassMixin, dj.Lookup):
             None,
         ),
         (
+            # Production hippocampus recipe (June 2026): 600 Hz high-pass
+            # (hippocampal spikes are denser/narrower than cortical ones),
+            # 6000 Hz low-pass, 1.5 ms min-segment (production keeps the
+            # short interval slivers the 1.0 s shipped default drops). Filtering
+            # happens at this preproc stage; the MS4 sorter runs ``filter=False``
+            # (see _params/sorter.py), so the region high-pass lives on the
+            # preproc row, never the sorter row.
+            "franklab_hippocampus_2026_06",
+            PreprocessingParamsSchema.model_validate(
+                {
+                    "bandpass_filter": {"freq_min": 600.0, "freq_max": 6000.0},
+                    "min_segment_length": 0.0015,
+                }
+            ).model_dump(),
+            3,
+            None,
+        ),
+        (
+            # Production cortex recipe (June 2026): identical to the
+            # hippocampus recipe with a 300 Hz high-pass (cortical waveforms
+            # are wider).
+            "franklab_cortex_2026_06",
+            PreprocessingParamsSchema.model_validate(
+                {
+                    "bandpass_filter": {"freq_min": 300.0, "freq_max": 6000.0},
+                    "min_segment_length": 0.0015,
+                }
+            ).model_dump(),
+            3,
+            None,
+        ),
+        (
             "default_neuropixels",
             # Blessed Neuropixels recipe: bandpass + ADC phase-shift. The
             # phase-shift is a safe no-op until the recording carries an
