@@ -4923,6 +4923,25 @@ def test_clusterless_detect_peaks_strips_threshold_unit(dj_conn, monkeypatch):
     assert mk.get("detect_threshold") == 5.0
 
 
+def _stub_recording_with_2d_probe():
+    """Recording stub for the ``_build_analyzer`` unit tests below.
+
+    ``_build_analyzer`` projects the probe to 2D (via ``recording.get_probe()``)
+    before building the analyzer; these tests stub the analyzer factory, so the
+    recording only needs to report an already-planar probe (``ndim == 2``) so
+    the projection step is skipped.
+    """
+
+    class _Probe:
+        ndim = 2
+
+    class _Recording:
+        def get_probe(self):
+            return _Probe()
+
+    return _Recording()
+
+
 def test_build_analyzer_strips_random_seed(dj_conn, monkeypatch, tmp_path):
     """``_build_analyzer`` strips ``random_seed`` before
     ``SortingAnalyzer.compute``.
@@ -4958,7 +4977,7 @@ def test_build_analyzer_strips_random_seed(dj_conn, monkeypatch, tmp_path):
 
     Sorting._build_analyzer(
         _FakeSorting(),
-        None,
+        _stub_recording_with_2d_probe(),
         {"sorting_id": "test-sorting-id"},
         sorter_row={"job_kwargs": {}},
         job_kwargs={"random_seed": 7, "n_jobs": 1},
@@ -5012,7 +5031,7 @@ def test_build_analyzer_compute_args(dj_conn, monkeypatch, tmp_path):
 
     Sorting._build_analyzer(
         _FakeSorting(),
-        None,
+        _stub_recording_with_2d_probe(),
         {"sorting_id": "test-sorting-id"},
         sorter_row={"job_kwargs": {}},
         job_kwargs={"random_seed": 3, "n_jobs": 1},

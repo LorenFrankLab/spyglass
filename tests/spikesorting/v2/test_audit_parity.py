@@ -2428,6 +2428,24 @@ def test_sorting_selection_rejects_cross_recording_artifact_detection_source():
         _drop_fake_recording(rid_artifact)
 
 
+def _stub_recording_with_2d_probe():
+    """Recording stub whose probe is already planar (``ndim == 2``).
+
+    ``_build_analyzer`` projects the probe to 2D (via ``recording.get_probe()``)
+    before building the analyzer; this test stubs the analyzer factory, so the
+    recording only needs a planar probe for the projection step to be skipped.
+    """
+
+    class _Probe:
+        ndim = 2
+
+    class _Recording:
+        def get_probe(self):
+            return _Probe()
+
+    return _Recording()
+
+
 def test_build_analyzer_cleans_partial_folder_when_create_fails(
     monkeypatch, tmp_path
 ):
@@ -2462,7 +2480,7 @@ def test_build_analyzer_cleans_partial_folder_when_create_fails(
     with pytest.raises(RuntimeError, match="create_sorting_analyzer boom"):
         Sorting._build_analyzer(
             sorting=_OneUnitSorting(),
-            recording=object(),
+            recording=_stub_recording_with_2d_probe(),
             key={"sorting_id": uuid.uuid4()},
             sorter_row={"job_kwargs": None},
             job_kwargs={},
