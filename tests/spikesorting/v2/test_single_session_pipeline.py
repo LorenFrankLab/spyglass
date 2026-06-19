@@ -4999,9 +4999,12 @@ def test_build_analyzer_compute_args(dj_conn, monkeypatch, tmp_path):
     (dense templates -> wrong peak-channel attribution) or
     ``return_in_uV=True`` (peak amplitudes in raw counts, not µV) would
     pass that test. This pins both the ``create_sorting_analyzer`` kwargs
-    and the exact ``analyzer.compute`` extension list + per-extension
+    and the required ``analyzer.compute`` extensions + per-extension
     params (the persisted ``peak_amplitude_uv`` / peak channel depend on
-    every one of them).
+    them). The extension check is a subset, not exact equality, so adding a
+    future extension is not a regression; the downstream correctness of the
+    values they feed is covered by the real-analyzer outcome tests
+    (``test_units_audit``, ``test_analyzer_rebuild_is_seeded_reproducible``).
     """
     import spikeinterface as si
 
@@ -5046,24 +5049,34 @@ def test_build_analyzer_compute_args(dj_conn, monkeypatch, tmp_path):
     ), f"expected return_in_uV=True, got {ck}"
     assert ck.get("format") == "binary_folder"
 
-    # ``compute`` extension set (positional first arg).
+    # ``compute`` extension set (positional first arg). Assert the REQUIRED
+    # extensions are present rather than pinning the exact set: a removal
+    # still fails (it would break the persisted peak channel / amplitude),
+    # but adding a future extension (e.g. metrics) is not a regression.
     ca = captured["compute_args"]
     assert ca, "analyzer.compute was called with no positional extension list"
-    assert set(ca[0]) == {
+    required_extensions = {
         "random_spikes",
         "noise_levels",
         "templates",
         "waveforms",
-    }, f"unexpected extension set: {ca[0]}"
+    }
+    assert required_extensions <= set(ca[0]), (
+        f"missing required extension(s) {required_extensions - set(ca[0])}; "
+        f"got {ca[0]}"
+    )
 
     # Per-extension params: the seeded random-spikes subsample (honoring
-    # the per-row random_seed) and the waveform window.
+    # the per-row random_seed) and the waveform window. Assert the specific
+    # scientific values, not exact-dict equality, so an added SI param does
+    # not break the guard.
     ext_params = captured["compute_kwargs"]["extension_params"]
     assert (
         ext_params["random_spikes"]["seed"] == 3
     ), "random_spikes seed must honor the job_kwargs random_seed override"
     assert ext_params["random_spikes"]["max_spikes_per_unit"] == 500
-    assert ext_params["waveforms"] == {"ms_before": 1.0, "ms_after": 2.0}
+    assert ext_params["waveforms"]["ms_before"] == 1.0
+    assert ext_params["waveforms"]["ms_after"] == 2.0
     # The Spyglass-only random_seed knob is still stripped from the
     # forwarded job kwargs (SI.compute would reject it).
     assert "random_seed" not in captured["compute_kwargs"]
