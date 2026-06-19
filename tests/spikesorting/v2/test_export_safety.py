@@ -150,7 +150,7 @@ def test_v2_export_captures_curation_and_recording_files(export_smoke_session):
     cache in the final ``Export.File`` (v1 parity, via the FK cascade)."""
     paper_id = "v2_export_complete"
     manifest = _run_pipeline(
-        export_smoke_session, "franklab_tetrode_mountainsort5"
+        export_smoke_session, "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
     )
     assert manifest["n_units"] >= 1, "expected a populated sort"
     units_nwb, recording_nwb = _file_names(manifest)
@@ -193,7 +193,7 @@ def test_v2_zero_unit_export_path(export_smoke_session):
     units NWB is captured; the recording cache is still captured too."""
     paper_id = "v2_export_zero_unit"
     manifest = _run_pipeline(
-        export_smoke_session, "franklab_tetrode_clusterless_thresholder"
+        export_smoke_session, "franklab_clusterless_2026_06"
     )
     assert manifest["n_units"] == 0, (
         "shipped clusterless default should find zero units on the smoke "

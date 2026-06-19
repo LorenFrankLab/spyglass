@@ -54,9 +54,9 @@ def test_region_preproc_recipes_match_production(dj_conn):
 def test_production_artifact_recipes_match(dj_conn):
     """The 100/50 uV @0.7 artifact rows match the production recipes.
 
-    The shipped ``"default"`` row is v2's 500 uV bug-fix value, NOT a
-    production recipe; it is asserted to be unchanged here (a later sub-task
-    renames it honestly once nothing references the ``"default"`` name).
+    The shipped ``"default"`` row is v2's schema-default 500 uV value, NOT a
+    production recipe; it stays named ``"default"`` (the franklab presets use
+    the 100 uV production row instead) and is asserted unchanged here.
     """
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
 
@@ -105,3 +105,60 @@ def test_ms4_rate_keyed_recipes_match(dj_conn):
     # Region-agnostic: the two rate rows differ ONLY by the rate window.
     diff = {k for k in ms4_30 if ms4_30[k] != ms4_20[k]}
     assert diff == {"clip_size", "detect_interval"}
+
+
+@pytest.mark.database
+def test_presets_reference_shipped_rows(dj_conn):
+    """Every pipeline preset references param rows that actually ship.
+
+    This is the invariant a successful preflight depends on -- a preset must
+    not point at a Lookup row that ``insert_default`` does not create.
+    """
+    from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
+    from spyglass.spikesorting.v2.pipeline import _PIPELINE_PRESETS
+    from spyglass.spikesorting.v2.recording import PreprocessingParameters
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    preproc = {r[0] for r in PreprocessingParameters._DEFAULT_CONTENTS}
+    artifact = {r[0] for r in ArtifactDetectionParameters._DEFAULT_CONTENTS}
+    sorter = {(r[0], r[1]) for r in SorterParameters._DEFAULT_CONTENTS}
+
+    for name, p in _PIPELINE_PRESETS.items():
+        assert (
+            p.preprocessing_params_name in preproc
+        ), f"{name}: preproc {p.preprocessing_params_name!r} not shipped"
+        assert (
+            p.artifact_detection_params_name in artifact
+        ), f"{name}: artifact {p.artifact_detection_params_name!r} not shipped"
+        assert (
+            p.sorter,
+            p.sorter_params_name,
+        ) in sorter, (
+            f"{name}: sorter {(p.sorter, p.sorter_params_name)!r} absent"
+        )
+
+
+@pytest.mark.database
+def test_default_preset_is_production_ms4(dj_conn):
+    """run_v2_pipeline's default is the production tetrode-hippocampus MS4."""
+    import inspect
+
+    from spyglass.spikesorting.v2 import pipeline as pipeline_mod
+
+    default = (
+        inspect.signature(pipeline_mod.run_v2_pipeline)
+        .parameters["pipeline_preset"]
+        .default
+    )
+    assert default == "franklab_tetrode_hippocampus_30khz_ms4_2026_06"
+
+    preset = pipeline_mod._PIPELINE_PRESETS[default]
+    assert preset.sorter == "mountainsort4"
+    assert preset.recommendation_status == "production"
+    assert preset.target_region == "hippocampus"
+
+    ms5_name = "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
+    assert (
+        pipeline_mod._PIPELINE_PRESETS[ms5_name].recommendation_status
+        == "alternative"
+    )

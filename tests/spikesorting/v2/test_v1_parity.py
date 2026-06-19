@@ -66,8 +66,8 @@ def test_common_reference_field_removed_from_schema():
         CommonReferenceParams(reference="local")
 
 
-def test_default_franklab_whiten_none():
-    """``default_franklab`` preset ships ``whiten=None``.
+def test_default_whiten_none():
+    """``default`` preset ships ``whiten=None``.
 
     Matches the other two presets and the deferred-to-sorter
     reality. The WhitenParams schema is preserved as
@@ -77,7 +77,7 @@ def test_default_franklab_whiten_none():
         PreprocessingParameters,
     )
 
-    # Locate the default_franklab row in _DEFAULT_CONTENTS.
+    # Locate the default row in _DEFAULT_CONTENTS.
     contents = {
         name: params
         for (
@@ -87,12 +87,12 @@ def test_default_franklab_whiten_none():
             _job,
         ) in PreprocessingParameters._DEFAULT_CONTENTS
     }
-    assert "default_franklab" in contents
-    assert contents["default_franklab"]["whiten"] is None
+    assert "default" in contents
+    assert contents["default"]["whiten"] is None
 
 
 def test_phase_shift_preset_neuropixels_on_franklab_off():
-    """Phase-shift ships ON in ``default_neuropixels``, OFF in ``default_franklab``.
+    """Phase-shift ships ON in ``default_neuropixels``, OFF in ``default``.
 
     The franklab headline default stays a no-op (``phase_shift is None``);
     the blessed Neuropixels recipe enables it (``margin_ms == 100.0``) on top
@@ -114,7 +114,7 @@ def test_phase_shift_preset_neuropixels_on_franklab_off():
     }
 
     # franklab: phase-shift OFF.
-    assert contents["default_franklab"]["phase_shift"] is None
+    assert contents["default"]["phase_shift"] is None
 
     # neuropixels: phase-shift ON (margin 100 ms) + the same bandpass.
     np_params = contents["default_neuropixels"]
@@ -127,7 +127,7 @@ def test_phase_shift_preset_neuropixels_on_franklab_off():
     # The two presets differ ONLY by the phase-shift step.
     assert {k: v for k, v in np_params.items() if k != "phase_shift"} == {
         k: v
-        for k, v in contents["default_franklab"].items()
+        for k, v in contents["default"].items()
         if k != "phase_shift"
     }
 

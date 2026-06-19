@@ -71,7 +71,7 @@ def test_identity_payload_extraction_stable():
         "nwb_file_name": "preflight_pin_test_.nwb",
         "sort_group_id": 0,
         "interval_list_name": _INTERVAL,
-        "preprocessing_params_name": "default_franklab",
+        "preprocessing_params_name": "default",
         "team_name": "pin_team",
     }
     recording_id = deterministic_id(
@@ -88,15 +88,20 @@ def test_identity_payload_extraction_stable():
         sorting_identity_payload(
             recording_id=recording_id,
             sorter="mountainsort5",
-            sorter_params_name="franklab_tetrode_hippocampus_30kHz_ms5",
+            sorter_params_name="franklab_30khz_ms5_2026_06",
             artifact_detection_id=artifact_detection_id,
         ),
     )
-    assert recording_id == uuid.UUID("dc4a5c37-7a80-54fc-b939-b6fbdaa0ec3a")
+    # The literals derive from the dated catalog row names above
+    # (preproc "default", artifact "default", sorter
+    # "franklab_30khz_ms5_2026_06"); correcting/renaming a shipped row
+    # changes every derived id, so these are regenerated -- not loosened --
+    # whenever the catalog names change.
+    assert recording_id == uuid.UUID("6264f54c-7315-518e-b86e-e83903725387")
     assert artifact_detection_id == uuid.UUID(
-        "4fcc28ef-8bc9-5510-8b6b-c6466817269e"
+        "1364ddfe-466a-56ea-8f6a-12d122b523b7"
     )
-    assert sorting_id == uuid.UUID("94e2ce30-674c-54fd-994e-95ec6207fa33")
+    assert sorting_id == uuid.UUID("89b487d4-0b61-57d3-afbc-2d20521ec46c")
 
 
 @pytest.mark.unit
@@ -239,10 +244,10 @@ def test_preflight_sorter_not_installed(preflight_inputs, monkeypatch):
     monkeypatch.setattr(
         sis,
         "installed_sorters",
-        lambda: sorted(real_installed - {"mountainsort5"}),
+        lambda: sorted(real_installed - {"mountainsort4"}),
     )
 
-    report = preflight_v2_pipeline(**preflight_inputs)  # default = ms5
+    report = preflight_v2_pipeline(**preflight_inputs)  # default = ms4
     (sorter_check,) = [c for c in report.checks if c.name == "sorter_installed"]
     assert sorter_check.ok is False
     assert "installed_sorters()" in sorter_check.fix
@@ -250,13 +255,48 @@ def test_preflight_sorter_not_installed(preflight_inputs, monkeypatch):
     clusterless = preflight_v2_pipeline(
         **{
             **preflight_inputs,
-            "pipeline_preset": "franklab_tetrode_clusterless_thresholder",
+            "pipeline_preset": "franklab_clusterless_2026_06",
         }
     )
     (cl_check,) = [
         c for c in clusterless.checks if c.name == "sorter_installed"
     ]
     assert cl_check.ok is True
+
+
+@pytest.mark.database
+def test_preflight_sampling_rate_mismatch(preflight_inputs):
+    """A 20 kHz preset on the 30 kHz smoke recording fails the rate check.
+
+    The smoke fixture samples at 30 kHz; the 20 kHz MS4 preset's rate-keyed
+    sorter row holds its snippet window at 20 kHz, so preflight must flag the
+    mismatch (rather than letting the sort run with a mistuned window).
+    """
+    report = preflight_v2_pipeline(
+        **{
+            **preflight_inputs,
+            "pipeline_preset": "franklab_probe_cortex_20khz_ms4_2026_06",
+        }
+    )
+    (rate_check,) = [
+        c for c in report.checks if c.name == "sampling_rate_matches"
+    ]
+    assert rate_check.ok is False
+    assert report.ok is False
+    assert "20000" in rate_check.fix  # the preset's tuned rate
+    assert "describe_pipeline_presets()" in rate_check.fix
+
+    # The rate-matched 30 kHz cortex preset passes the same check.
+    matched = preflight_v2_pipeline(
+        **{
+            **preflight_inputs,
+            "pipeline_preset": "franklab_probe_cortex_30khz_ms4_2026_06",
+        }
+    )
+    (matched_check,) = [
+        c for c in matched.checks if c.name == "sampling_rate_matches"
+    ]
+    assert matched_check.ok is True
 
 
 @pytest.mark.database
@@ -271,7 +311,7 @@ def test_preflight_sorter_misspelled(preflight_inputs, monkeypatch):
     from spyglass.spikesorting.v2 import pipeline as pl
 
     bogus_preset = pl._PipelinePreset(
-        preprocessing_params_name="default_franklab",
+        preprocessing_params_name="default",
         artifact_detection_params_name="default",
         sorter="not_a_real_sorter_xyz",
         sorter_params_name="default",
@@ -301,10 +341,10 @@ def test_preflight_warns_on_none_artifact_params(preflight_inputs, monkeypatch):
     from spyglass.spikesorting.v2 import pipeline as pl
 
     none_preset = pl._PipelinePreset(
-        preprocessing_params_name="default_franklab",
+        preprocessing_params_name="default",
         artifact_detection_params_name="none",
         sorter="mountainsort5",
-        sorter_params_name="franklab_tetrode_hippocampus_30kHz_ms5",
+        sorter_params_name="franklab_30khz_ms5_2026_06",
     )
     monkeypatch.setitem(
         pl._PIPELINE_PRESETS, "_preflight_none_artifact", none_preset
@@ -358,20 +398,21 @@ def test_preflight_speed(preflight_inputs):
     """Preflight returns well under 1 s (guards against an accidental populate).
 
     A real populate/materialization of the smoke recording costs seconds to
-    minutes, so a sub-second bound catches an accidental one. We assert the
+    minutes, so a small fixed bound catches an accidental one. We assert the
     *best* of several runs rather than a single shot: on a loaded box (e.g. the
     full suite running in parallel) scheduler/GC/DB-contention jitter can add
-    tens of ms to any one call without reflecting preflight's real cost, and a
-    single timed call flaked at ~1.005 s. The minimum is a stable lower bound on
-    that cost and still blows past 1 s if preflight ever starts doing real work.
+    tens of ms to any one call without reflecting preflight's real cost. The
+    bound is 1.5 s -- preflight does a handful of read-only restrictions plus a
+    ``Raw`` sampling-rate lookup, all sub-second on a warm connection -- and
+    still blows past it if preflight ever starts doing real work.
     """
     preflight_v2_pipeline(**preflight_inputs)  # warm lazy imports
     best = float("inf")
-    for _ in range(3):
+    for _ in range(5):
         start = time.perf_counter()
         preflight_v2_pipeline(**preflight_inputs)
         best = min(best, time.perf_counter() - start)
-    assert best < 1.0, f"preflight best-of-3 took {best:.2f}s (expected < 1 s)"
+    assert best < 1.5, f"preflight best-of-5 took {best:.2f}s (expected < 1.5 s)"
 
 
 @pytest.mark.database

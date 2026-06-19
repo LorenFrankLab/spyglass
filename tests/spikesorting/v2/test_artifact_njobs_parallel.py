@@ -90,7 +90,7 @@ def test_parallel_artifact_detection_matches_serial(dj_conn):
                 "nwb_file_name": nwb,
                 "sort_group_id": sg,
                 "interval_list_name": "raw data valid times",
-                "preprocessing_params_name": "default_franklab",
+                "preprocessing_params_name": "default",
                 "team_name": "v2_test_team",
             }
         )

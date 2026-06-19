@@ -150,12 +150,14 @@ dropping; `restrict_by_artifact=True` now honors the v2
 **Migration notes for v1 users porting workflows to v2:**
 
 - **Default Lookup row names changed.** v1 shipped a single
-  `PreprocessingParameters` row named `"default"`; v2 ships
-  `"default_franklab"`, `"default_neuropixels"`, and `"no_filter"`.
-  v1's single `"franklab_tetrode_hippocampus_30KHz"` (capital K)
-  `SorterParameters` row is now `"franklab_tetrode_hippocampus_30kHz_ms4"`
-  (lowercase k + sorter suffix), with a sibling `_ms5` row. v1
-  notebooks referencing the old names by string must update.
+  `PreprocessingParameters` row named `"default"`; v2 ships `"default"`, the
+  production region recipes `"franklab_hippocampus_2026_06"` (600 Hz
+  high-pass) / `"franklab_cortex_2026_06"` (300 Hz), `"default_neuropixels"`,
+  and `"no_filter"`. v1's single `"franklab_tetrode_hippocampus_30KHz"`
+  (capital K) `SorterParameters` row is replaced by the rate-keyed
+  `"franklab_30khz_ms4_2026_06"` / `"franklab_20khz_ms4_2026_06"` MS4 rows,
+  with a `"franklab_30khz_ms5_2026_06"` MS5 sibling. v1 notebooks referencing
+  the old names by string must update.
 - **`PreprocessingParamsSchema` field renames + drops.** v1's
   top-level `frequency_min` / `frequency_max` / `margin_ms` / `seed`
   are now nested under `bandpass_filter.{freq_min, freq_max}` and the
@@ -223,14 +225,12 @@ dropping; `restrict_by_artifact=True` now honors the v2
   (`[str(c) for c in sort_group_channel_ids]`) instead of v1's raw
   integers. probeinterface accepts both; flagged for users who
   introspect contact_id types.
-- **`franklab_probe_ctx_30KHz` cortex preset is not shipped on v2.**
-  v1 had a `MountainSort4` Lookup row by this name; v2 ships only the
-  hippocampus + Neuropixels presets. Cortex-probe users must insert
-  their own row, e.g.
-  `SorterParameters().insert1({"sorter": "mountainsort4",
-  "sorter_params_name": "franklab_probe_ctx_30kHz_ms4", "params":
-  MountainSort4Schema(freq_min=300.0, freq_max=6000.0).model_dump(),
-  "params_schema_version": 1, "job_kwargs": None})`.
+- **Cortex-probe sorting ships via the region catalog.** v2's June 2026
+  catalog ships a `franklab_probe_cortex_30khz_ms4_2026_06` pipeline preset
+  (300 Hz high-pass `franklab_cortex_2026_06` preproc + the rate-keyed
+  `franklab_30khz_ms4_2026_06` MS4 row), replacing v1's single
+  `franklab_probe_ctx_30KHz` Lookup row. The region high-pass lives on the
+  preproc row because MS4 runs `filter=False`.
 - **`Sorting.get_sorting(as_dataframe=True)` and
   `CurationV2.get_sorting(as_dataframe=True)` DataFrame shape.**
   Like v1's `Curation.get_sorting(as_dataframe=True)`, v2 returns a
@@ -339,6 +339,36 @@ legacy v0/v1 path read raw ADC counts. v2 and v1 feature magnitudes are
 therefore not directly comparable — retrain clusterless decoders per pipeline
 version rather than mixing v1 and v2 marks.
 
+#### Spike Sorting v2 — production parameter catalog matches the Frank Lab
+
+The shipped v2 parameter rows and pipeline presets now match what the Frank
+Lab actually runs, corrected from v2's earlier schema-default placeholders:
+
+- **Region-based preprocessing.** Two dated production preproc rows set the
+  high-pass band by target region — `franklab_hippocampus_2026_06` (600 Hz)
+  and `franklab_cortex_2026_06` (300 Hz), both 6000 Hz low-pass, 1.5 ms
+  min-segment. (Hippocampal spikes are denser/narrower than cortical
+  waveforms.) The generic schema default keeps the name `default`.
+- **MountainSort4 is the production default.** `run_v2_pipeline` /
+  `preflight_v2_pipeline` now default to
+  `franklab_tetrode_hippocampus_30khz_ms4_2026_06`. The MS4 rows are
+  rate-keyed (`franklab_30khz_ms4_2026_06` / `franklab_20khz_ms4_2026_06`,
+  `adjacency_radius=100`); the MS5 row (`franklab_30khz_ms5_2026_06`) ships as
+  a `recommendation_status="alternative"`, not the default.
+- **Aggressive artifact thresholds.** Production artifact rows
+  `franklab_100uv_p07_2026_06` / `franklab_50uv_p07_2026_06` (100 / 50 µV at
+  0.7 proportion-above-threshold). The 500 µV schema default keeps the name
+  `default`.
+- **Seven pipeline presets** (tetrode/probe × hippocampus/cortex × 30/20 kHz
+  MS4, plus an MS5 alternative and a clusterless preset). Discover them with
+  `describe_pipeline_presets()` (now carrying `recommendation_status`,
+  `target_region`, `sampling_rate_hz`, `adjacency_radius_um`) and inspect the
+  underlying rows — with content fingerprints and preset usage — via
+  `describe_parameter_rows()`.
+- **MountainSort4/5 `detect_threshold` is σ of the whitened signal** (~3 for
+  MS4, ~5.5 for MS5), not a MAD multiplier and not an absolute voltage — the
+  preset `threshold_units` / `notes` are corrected accordingly.
+
 #### Spike Sorting v2 — v1→v2 migration reference (breaking changes)
 
 A consolidated, click-through enumeration of every user-visible v1→v2
@@ -370,18 +400,22 @@ cross-referenced here, not duplicated.
 - Preprocessing field renames `frequency_min`/`frequency_max` →
   `freq_min`/`freq_max`:
   [_params/preprocessing.py:22-23](./src/spyglass/spikesorting/v2/_params/preprocessing.py#L22-L23).
-- Franklab MS4 preset renamed
-  `franklab_tetrode_hippocampus_30KHz` → `franklab_tetrode_hippocampus_30kHz_ms4`
-  (and the cortex equivalent):
-  [sorting.py:142-201](./src/spyglass/spikesorting/v2/sorting.py#L142-L201).
-  v1-name alias rows ship for one release (lowercase-k + `_ms4` is the
-  canonical name); the aliases are dropped a release after this entry.
+- Franklab MS4 `SorterParameters` rows are rate-keyed dated rows:
+  `franklab_30khz_ms4_2026_06` / `franklab_20khz_ms4_2026_06`. MS4 runs
+  `filter=False`, so the row is region-agnostic — only the snippet window
+  (`clip_size` / `detect_interval`) rescales with sampling rate, and the
+  high-pass band lives on the preproc row. These supersede v1's
+  `franklab_tetrode_hippocampus_30KHz` / `franklab_probe_ctx_30KHz` and v2's
+  interim region-encoded `*_30kHz_ms4` rows; **no back-compat alias ships** —
+  update old strings to the dated names.
 - Other sorter default-row renames (NO alias row ships — update the
-  string): `clusterless_thresholder` row `default_clusterless` → `default`
-  (kept generic because the `franklab_tetrode_clusterless_thresholder`
-  pipeline preset points at `"default"`); `kilosort4` row `default` →
-  `franklab_neuropixels_default`. Select rows by the **(sorter,
-  sorter_params_name)** pair, so `"default"` is unambiguous per sorter.
+  string): MS5 `franklab_tetrode_hippocampus_30kHz_ms5` →
+  `franklab_30khz_ms5_2026_06`; `clusterless_thresholder` row
+  `default_clusterless` → `default` (kept generic because the
+  `franklab_clusterless_2026_06` pipeline preset points at `"default"`);
+  `kilosort4` row `default` → `franklab_neuropixels_default`. Select rows by
+  the **(sorter, sorter_params_name)** pair, so `"default"` is unambiguous
+  per sorter.
 - `SorterParameters.insert_default()` ships fewer rows out of the box than
   v1: it gates each default row on `spikeinterface.sorters.installed_sorters()`
   ([sorting.py:266-321](./src/spyglass/spikesorting/v2/sorting.py#L266-L321))
@@ -816,9 +850,9 @@ for label, interval_data in results.groupby("interval_labels"):
         decoding, ripple detection, brain-region lookup -- continue to
         key off `merge_id` unchanged). Ships a
         `spyglass.spikesorting.v2.pipeline.run_v2_pipeline` orchestrator
-        with three presets (`franklab_tetrode_mountainsort4`,
-        `franklab_tetrode_mountainsort5`,
-        `franklab_tetrode_clusterless_thresholder`); idempotent by design.
+        with the franklab production pipeline presets (the region × rate
+        MountainSort4 family, an MS5 alternative, and a clusterless preset;
+        see the production-catalog subsection above); idempotent by design.
         See [Spike Sorting v2](./Features/SpikeSortingV2.md). Active
         v0/v1 workflows continue to require the legacy SI 0.99
         environment
@@ -850,8 +884,8 @@ for label, interval_data in results.groupby("interval_labels"):
         per-channel sample delays of multiplexed ADCs (Neuropixels). It runs
         first (before the bandpass) and only when the recording carries an
         `inter_sample_shift` property; otherwise it logs a skip and is a
-        no-op, so it never fails on non-multiplexed data. Off in
-        `default_franklab`; **on in the `default_neuropixels` preset** (a
+        no-op, so it never fails on non-multiplexed data. Off in the
+        `default` preproc row; **on in the `default_neuropixels` preset** (a
         blessed Neuropixels recipe that stays a no-op until the property is
         ingested). `apply_pre_motion_preprocessing` now returns an
         applied-step report so the persisted `ElectricalSeries.filtering`

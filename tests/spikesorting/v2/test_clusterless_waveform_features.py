@@ -167,7 +167,7 @@ def _run_ms5(session):
         sort_group_id=sort_group_id,
         interval_list_name="raw data valid times",
         team_name=_TEAM,
-        pipeline_preset="franklab_tetrode_mountainsort5",
+        pipeline_preset="franklab_tetrode_hippocampus_30khz_ms5_2026_06",
         description="v2 waveform ms5",
     )
 
@@ -228,7 +228,7 @@ def _run_clusterless(session, *, tuned):
             "nwb_file_name": session["nwb_file_name"],
             "sort_group_id": sort_group_id,
             "interval_list_name": "raw data valid times",
-            "preprocessing_params_name": "default_franklab",
+            "preprocessing_params_name": "default",
             "team_name": _TEAM,
         }
     )

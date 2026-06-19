@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Mapping
 from contextlib import contextmanager
@@ -30,6 +31,10 @@ from spyglass.spikesorting.v2._signal_math import (  # noqa: F401
     _dedup_merged_spike_times,
     _get_recording_timestamps,
     _spike_times_to_frames,
+)
+from spyglass.spikesorting.v2._parameter_identity import parameter_fingerprint
+from spyglass.spikesorting.v2.exceptions import (
+    DuplicateParameterContentError,
 )
 
 if TYPE_CHECKING:
@@ -861,6 +866,130 @@ def validate_lookup_rows(
     return validated
 
 
+def _jsonable_blob(blob):
+    """Coerce a fetched DataJoint blob to JSON-native scalars/containers.
+
+    Validated insert rows carry plain Python scalars, but a blob fetched back
+    from the table can deserialize numbers as numpy scalars (or arrays). The
+    content fingerprint canonicalizes via ``json.dumps``, which rejects those,
+    so round-trip the blob with a duck-typed ``tolist()`` fallback (numpy
+    scalars and arrays both expose it) to get a value that fingerprints
+    identically to the plain-scalar insert form. ``None`` passes through.
+    """
+    if blob is None:
+        return None
+
+    def _coerce(obj):
+        if hasattr(obj, "tolist"):  # numpy scalar / ndarray, duck-typed
+            return obj.tolist()
+        raise TypeError(
+            f"non-JSON-serializable blob value of type {type(obj).__name__}"
+        )
+
+    return json.loads(json.dumps(blob, default=_coerce))
+
+
+def reject_duplicate_parameter_content(
+    table,
+    validated_rows,
+    *,
+    table_name: str,
+    name_attr: str,
+    sorter_keyed: bool = False,
+    allow_duplicate_params: bool = False,
+) -> None:
+    """Reject a validated row whose content duplicates an existing row name.
+
+    The duplicate-content guard shared by the three validated parameter
+    Lookups. After :func:`validate_lookup_rows` normalizes the batch,
+    fingerprint each incoming row (row NAME excluded; ``SorterParameters``
+    scoped per sorter via the fingerprint's ``sorter`` field) and compare
+    against the fingerprints already in the table plus earlier rows in the
+    same batch. A second NAME for content that already ships under a different
+    name forks provenance, so it raises
+    :class:`~spyglass.spikesorting.v2.exceptions.DuplicateParameterContentError`.
+    Re-inserting the SAME ``(name, content)`` pair is idempotent and never
+    trips the guard, so ``insert_default()`` stays re-runnable under
+    ``skip_duplicates=True``. ``allow_duplicate_params=True`` is the documented
+    escape hatch (the row then shows a ``duplicate_of`` in
+    ``describe_parameter_rows``).
+
+    Parameters
+    ----------
+    table : dj.Table
+        The Lookup table instance, queried for already-stored rows.
+    validated_rows : list[dict]
+        Output of :func:`validate_lookup_rows` (plain-scalar ``params``).
+    table_name : str
+        The fingerprint ``table`` field (e.g. ``"SorterParameters"``).
+    name_attr : str
+        The params-name primary-key column (e.g. ``"sorter_params_name"``).
+    sorter_keyed : bool, optional
+        ``True`` for ``SorterParameters`` so detection is scoped per sorter.
+    allow_duplicate_params : bool, optional
+        Opt out of the guard (the documented escape hatch).
+    """
+    if allow_duplicate_params:
+        return
+
+    def _version(row: dict) -> int:
+        # A dict insert may omit the ``params_schema_version`` column (the
+        # DataJoint column default fills it at write time, so the validated
+        # dict has no such key yet). The validated ``params`` blob always
+        # carries the authoritative inner ``schema_version``, and
+        # ``_assert_schema_version_matches`` keeps the outer column in
+        # lockstep with it, so fall back to the blob when the column is
+        # absent rather than KeyError-ing on a perfectly valid insert.
+        version = row.get("params_schema_version")
+        if version is None:
+            version = row["params"]["schema_version"]
+        return int(version)
+
+    def _fingerprint(row: dict) -> str:
+        return parameter_fingerprint(
+            table_name,
+            params=_jsonable_blob(row["params"]),
+            params_schema_version=_version(row),
+            job_kwargs=_jsonable_blob(row.get("job_kwargs")),
+            sorter=row.get("sorter") if sorter_keyed else None,
+        )
+
+    def _pk(row: dict):
+        # The identity DataJoint keys on: the params-name plus the sorter for
+        # the per-sorter SorterParameters table.
+        return (
+            (row["sorter"], row[name_attr]) if sorter_keyed else row[name_attr]
+        )
+
+    stored_rows = table.fetch(as_dict=True)
+    existing_pks = {_pk(row) for row in stored_rows}
+    # fingerprint -> the row name that first claimed it (stored rows first,
+    # then earlier rows in this same batch).
+    claimed: dict[str, str] = {}
+    for stored in stored_rows:
+        claimed.setdefault(_fingerprint(stored), stored[name_attr])
+
+    for row in validated_rows:
+        # A re-insert of an already-stored row (same primary key) is
+        # idempotent, not a new provenance fork: skip it so insert_default /
+        # initialize_v2_defaults stay re-runnable even after an opted-in
+        # duplicate has been added under another name.
+        if _pk(row) in existing_pks:
+            continue
+        name = row[name_attr]
+        fingerprint = _fingerprint(row)
+        prior = claimed.get(fingerprint)
+        if prior is not None and prior != name:
+            raise DuplicateParameterContentError(
+                f"{table_name}: row {name!r} duplicates the content of "
+                f"existing row {prior!r} (fingerprint {fingerprint[:12]}). A "
+                "second name for identical parameters forks provenance. Reuse "
+                f"{prior!r}, change the parameters, or pass "
+                "allow_duplicate_params=True to insert it anyway."
+            )
+        claimed.setdefault(fingerprint, name)
+
+
 def _insert_row_to_dict(row, attr_names) -> dict:
     """Normalize a DataJoint insert row to a mutable dict.
 
@@ -995,7 +1124,7 @@ def _ensure_lookup_row_exists(
         ``PreprocessingParameters``).
     restriction
         The dict identifying the required row (e.g.
-        ``{"preprocessing_params_name": "default_franklab"}``).
+        ``{"preprocessing_params_name": "default"}``).
     helper_name
         Name of the insert_selection helper calling us, for the error
         message (e.g. ``"RecordingSelection.insert_selection"``).

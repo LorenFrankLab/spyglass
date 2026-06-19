@@ -493,7 +493,7 @@ def test_make_fetch_remove_reincludes_nothing(handling_session):
                 "nwb_file_name": nwb,
                 "sort_group_id": sg0,
                 "interval_list_name": "raw data valid times",
-                "preprocessing_params_name": "default_franklab",
+                "preprocessing_params_name": "default",
                 "team_name": "v2_handling_team",
             }
         )
@@ -584,7 +584,7 @@ def test_interpolate_completes_probe_remove_omits(handling_session):
             "team_name": "v2_handling_team",
         }
         remove_pk = RecordingSelection.insert_selection(
-            {**common, "preprocessing_params_name": "default_franklab"}
+            {**common, "preprocessing_params_name": "default"}
         )
         interp_pk = RecordingSelection.insert_selection(
             {**common, "preprocessing_params_name": _INTERP_PARAMS}
@@ -721,7 +721,7 @@ def test_stale_group_post_flag_stays_member(handling_session):
 @pytest.mark.integration
 def test_remove_field_does_not_change_default_recording(handling_session):
     """A pre-field params blob (no ``bad_channel_handling`` key) materializes to
-    the SAME traces as ``default_franklab`` (which now carries
+    the SAME traces as ``default`` (which now carries
     ``bad_channel_handling='remove'``) -- the default-unchanged regression guard.
 
     Compared by trace equality, not ``cache_hash`` (which folds in per-write
@@ -754,7 +754,7 @@ def test_remove_field_does_not_change_default_recording(handling_session):
             "team_name": "v2_handling_team",
         }
         fl_pk = RecordingSelection.insert_selection(
-            {**common, "preprocessing_params_name": "default_franklab"}
+            {**common, "preprocessing_params_name": "default"}
         )
         Recording.populate(fl_pk, reserve_jobs=False)
         traces_fl = Recording().get_recording(fl_pk).get_traces()
@@ -763,6 +763,9 @@ def test_remove_field_does_not_change_default_recording(handling_session):
         legacy_blob.pop(
             "bad_channel_handling"
         )  # a row written before the field
+        # After validation this re-fills the default, so the blob is content-
+        # identical to the shipped ``default`` row (the point of the test).
+        # Opt out of the duplicate-content guard.
         PreprocessingParameters().insert1(
             {
                 "preprocessing_params_name": "_pytest_legacy_no_bad_channel_handling",
@@ -771,6 +774,7 @@ def test_remove_field_does_not_change_default_recording(handling_session):
                 "job_kwargs": None,
             },
             skip_duplicates=True,
+            allow_duplicate_params=True,
         )
         legacy_pk = RecordingSelection.insert_selection(
             {
@@ -785,7 +789,7 @@ def test_remove_field_does_not_change_default_recording(handling_session):
 
         assert np.array_equal(traces_legacy, traces_fl), (
             "A pre-field params blob materialized to different traces than "
-            "default_franklab; the bad_channel_handling field perturbed the "
+            "default; the bad_channel_handling field perturbed the "
             "default 'remove' path."
         )
 
@@ -824,7 +828,7 @@ def test_bad_marked_specific_reference_materializes(handling_session):
                 "nwb_file_name": nwb,
                 "sort_group_id": sg_id,
                 "interval_list_name": "raw data valid times",
-                "preprocessing_params_name": "default_franklab",
+                "preprocessing_params_name": "default",
                 "team_name": "v2_handling_team",
             }
         )

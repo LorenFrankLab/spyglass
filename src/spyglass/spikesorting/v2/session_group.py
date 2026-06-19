@@ -29,6 +29,7 @@ from spyglass.spikesorting.v2.recording import (
 from spyglass.spikesorting.v2.utils import (
     _assert_v2_db_safe,
     _validate_params,
+    reject_duplicate_parameter_content,
     validate_lookup_rows,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart
@@ -153,26 +154,38 @@ class MotionCorrectionParameters(SpyglassMixin, dj.Lookup):
         ),
     )
 
-    def insert1(self, row, **kwargs):
+    def insert1(self, row, allow_duplicate_params=False, **kwargs):
         """Validate and insert a single motion-correction parameter row."""
         # Delegate to ``insert`` so one validated path serves both.
-        self.insert([row], **kwargs)
+        self.insert(
+            [row], allow_duplicate_params=allow_duplicate_params, **kwargs
+        )
 
-    def insert(self, rows, **kwargs):
-        """Validate and insert motion-correction parameter rows."""
+    def insert(self, rows, allow_duplicate_params=False, **kwargs):
+        """Validate and insert motion-correction parameter rows.
+
+        ``allow_duplicate_params=True`` opts out of the duplicate-content
+        guard (a second name for an existing blob); see
+        ``reject_duplicate_parameter_content``.
+        """
         # Validate every row (incl. ``insert_default``'s positional
         # ``_DEFAULT_CONTENTS``) so a bulk insert can't bypass schema
         # validation or the outer-vs-inner params_schema_version drift
         # check.
-        super().insert(
-            validate_lookup_rows(
-                rows,
-                self.heading.names,
-                schema_for=lambda _row: MotionCorrectionParamsSchema,
-                table_name="MotionCorrectionParameters",
-            ),
-            **kwargs,
+        validated = validate_lookup_rows(
+            rows,
+            self.heading.names,
+            schema_for=lambda _row: MotionCorrectionParamsSchema,
+            table_name="MotionCorrectionParameters",
         )
+        reject_duplicate_parameter_content(
+            self,
+            validated,
+            table_name="MotionCorrectionParameters",
+            name_attr="motion_correction_params_name",
+            allow_duplicate_params=allow_duplicate_params,
+        )
+        super().insert(validated, **kwargs)
 
     @classmethod
     def insert_default(cls):

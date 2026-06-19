@@ -119,7 +119,7 @@ def test_offset_round_trips_through_populate(dj_conn, monkeypatch):
             "nwb_file_name": nwb,
             "sort_group_id": sg,
             "interval_list_name": "raw data valid times",
-            "preprocessing_params_name": "default_franklab",
+            "preprocessing_params_name": "default",
             "team_name": "v2_test_team",
         }
     )

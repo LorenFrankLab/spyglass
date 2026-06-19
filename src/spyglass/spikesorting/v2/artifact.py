@@ -65,6 +65,7 @@ from spyglass.spikesorting.v2.utils import (
     _get_recording_timestamps,
     _validate_params,
     find_orphaned_masters,
+    reject_duplicate_parameter_content,
     transaction_or_noop,
     validate_lookup_rows,
 )
@@ -180,25 +181,37 @@ class ArtifactDetectionParameters(SpyglassMixin, dj.Lookup):
         ),
     )
 
-    def insert1(self, row, **kwargs):
+    def insert1(self, row, allow_duplicate_params=False, **kwargs):
         """Insert one validated artifact-detection parameter row."""
         # Delegate to ``insert`` so one validated path serves both.
-        self.insert([row], **kwargs)
+        self.insert(
+            [row], allow_duplicate_params=allow_duplicate_params, **kwargs
+        )
 
-    def insert(self, rows, **kwargs):
-        """Insert artifact-detection parameter rows after validation."""
+    def insert(self, rows, allow_duplicate_params=False, **kwargs):
+        """Insert artifact-detection parameter rows after validation.
+
+        ``allow_duplicate_params=True`` opts out of the duplicate-content
+        guard (a second name for an existing blob); see
+        ``reject_duplicate_parameter_content``.
+        """
         # Validate every row (incl. ``insert_default``'s positional
         # ``_DEFAULT_CONTENTS``) so a bulk insert can't bypass schema
         # validation or the params_schema_version drift check.
-        super().insert(
-            validate_lookup_rows(
-                rows,
-                self.heading.names,
-                schema_for=lambda _row: ArtifactDetectionParamsSchema,
-                table_name="ArtifactDetectionParameters",
-            ),
-            **kwargs,
+        validated = validate_lookup_rows(
+            rows,
+            self.heading.names,
+            schema_for=lambda _row: ArtifactDetectionParamsSchema,
+            table_name="ArtifactDetectionParameters",
         )
+        reject_duplicate_parameter_content(
+            self,
+            validated,
+            table_name="ArtifactDetectionParameters",
+            name_attr="artifact_detection_params_name",
+            allow_duplicate_params=allow_duplicate_params,
+        )
+        super().insert(validated, **kwargs)
 
     @classmethod
     def insert_default(cls):

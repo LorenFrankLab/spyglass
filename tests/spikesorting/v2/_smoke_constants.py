@@ -12,10 +12,10 @@ parameter payload here keeps all four call sites
 lands in one place and the v1↔v2 parity gate stays meaningful.
 
 The ``V1_TO_V2_*_NAMES`` dicts encode the v1-vs-v2 row-name asymmetry
-that the v1↔v2 parity test crosses: v1 ships ``preproc_param_name=
-"default"`` / ``sorter_param_name="default_clusterless"`` while v2
-ships ``preprocessing_params_name="default_franklab"`` /
-``sorter_params_name="default"``. Captures done with v1's shipping
+that the v1↔v2 parity test crosses: v1 ships ``sorter_param_name=
+"default_clusterless"`` while v2 ships ``sorter_params_name="default"``.
+Both pipelines now ship the same preproc row name (``"default"``), so the
+preproc map is an identity passthrough. Captures done with v1's shipping
 default names get mapped to v2's equivalents at parity-test time.
 """
 
@@ -146,11 +146,10 @@ MS4_BANDS: dict = MS4_CALIBRATED
 
 #: v1 -> v2 ``preproc_param_name`` translation for shipped default
 #: rows. v1's ``"default"`` is the bandpass + common_reference
-#: configuration; v2 ships the same semantics under the explicit name
-#: ``"default_franklab"``.
-V1_TO_V2_PREPROC_PARAM_NAMES: dict = {
-    "default": "default_franklab",
-}
+#: configuration; v2 ships the same semantics under the same name
+#: ``"default"``, so the map is an empty identity passthrough -- kept as
+#: the documented hook for any future divergence.
+V1_TO_V2_PREPROC_PARAM_NAMES: dict = {}
 
 #: v1 -> v2 ``sorter_params_name`` translation for shipped default
 #: rows. v1's ``"default_clusterless"`` is the 100 uV +

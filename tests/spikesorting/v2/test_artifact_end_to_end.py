@@ -124,7 +124,7 @@ def artifact_e2e_session(dj_conn):
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": "raw data valid times",
-            "preprocessing_params_name": "default_franklab",
+            "preprocessing_params_name": "default",
             "team_name": "v2_test_team",
         }
     )
@@ -232,7 +232,7 @@ def test_detected_artifact_is_masked_out_of_the_sorted_recording(
         {
             "recording_id": recording_id,
             "sorter": "mountainsort5",
-            "sorter_params_name": "franklab_tetrode_hippocampus_30kHz_ms5",
+            "sorter_params_name": "franklab_30khz_ms5_2026_06",
             "artifact_detection_id": artifact_detection_id,
         }
     )
@@ -342,7 +342,7 @@ def gt60_recording(dj_conn):
             "nwb_file_name": nwb,
             "sort_group_id": sg,
             "interval_list_name": "raw data valid times",
-            "preprocessing_params_name": "default_franklab",
+            "preprocessing_params_name": "default",
             "team_name": "v2_test_team",
         }
     )

@@ -276,7 +276,7 @@ def populated_sorting(dj_conn):
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": "raw data valid times",
-            "preprocessing_params_name": "default_franklab",
+            "preprocessing_params_name": "default",
             "team_name": "v2_test_team",
         }
     )
@@ -294,7 +294,7 @@ def populated_sorting(dj_conn):
         {
             "recording_id": rec_pk["recording_id"],
             "sorter": "mountainsort5",
-            "sorter_params_name": "franklab_tetrode_hippocampus_30kHz_ms5",
+            "sorter_params_name": "franklab_30khz_ms5_2026_06",
             "artifact_detection_id": art_pk["artifact_detection_id"],
         }
     )

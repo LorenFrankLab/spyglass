@@ -47,53 +47,16 @@ def test_ms4_schema_accepts_adjacency_radius_minus_one():
         MountainSort4Schema(adjacency_radius=-2.0)
 
 
-# ---------- A2: Franklab MS4 v1-name back-compat aliases -------------------
-
-
-@pytest.mark.usefixtures("dj_conn")
-def test_franklab_ms4_v1_alias_rows_present():
-    """A2: v1's bare ``30KHz`` preset names still resolve on v2.
-
-    v2 renamed the Franklab MS4 presets to lowercase-k + ``_ms4``
-    (``v1/sorting.py:158,163`` -> ``franklab_*_30kHz_ms4``), silently
-    breaking v1 code that looks the row up by its old name. The catalog
-    ships back-compat alias rows carrying the IDENTICAL validated params
-    blob, so both the new and old names resolve to the same parameters.
-    """
-    import spikeinterface.sorters as sis
-
-    from spyglass.spikesorting.v2.sorting import SorterParameters
-
-    catalog = {
-        (row[0], row[1]): row for row in SorterParameters._DEFAULT_CONTENTS
-    }
-    pairs = [
-        (
-            "franklab_tetrode_hippocampus_30kHz_ms4",
-            "franklab_tetrode_hippocampus_30KHz",
-        ),
-        ("franklab_probe_ctx_30kHz_ms4", "franklab_probe_ctx_30KHz"),
-    ]
-    for ms4_name, alias_name in pairs:
-        ms4_row = catalog[("mountainsort4", ms4_name)]
-        alias_row = catalog[("mountainsort4", alias_name)]
-        # params blob (index 2) and schema_version (index 3) identical.
-        assert (
-            alias_row[2] == ms4_row[2]
-        ), f"alias {alias_name!r} params blob diverged from {ms4_name!r}"
-        assert alias_row[3] == ms4_row[3]
-
-    # When MS4 is installed the aliases actually land in the table, so a
-    # v1-style lookup by the old name resolves. (On the CI SI-0.104 image
-    # MS4 is not installed and insert_default skips every MS4 row -- the
-    # catalog assertion above is the install-independent invariant.)
-    if "mountainsort4" in sis.installed_sorters():
-        SorterParameters().insert_default()
-        for _, alias_name in pairs:
-            assert SorterParameters & {
-                "sorter": "mountainsort4",
-                "sorter_params_name": alias_name,
-            }, f"alias row {alias_name!r} did not insert with MS4 present"
+# ---------- A2: superseded Franklab MS4 v1-name aliases (retracted) --------
+#
+# v2 briefly shipped back-compat ``SorterParameters`` rows under v1's bare
+# ``franklab_tetrode_hippocampus_30KHz`` / ``franklab_probe_ctx_30KHz`` names
+# (and the region-encoded ``*_30kHz_ms4`` rows) so ported v1 lookups kept
+# resolving. The June 2026 catalog correction supersedes them: the MS4 rows
+# are now rate-keyed (``franklab_30khz_ms4_2026_06`` /
+# ``franklab_20khz_ms4_2026_06``) and the aliases are removed pre-release. The
+# A2 alias-parity test is intentionally gone; the Migration guide records the
+# rename instead of an alias.
 
 
 # ---------- A4: install-gating happens on the insert_default() path --------
@@ -192,21 +155,30 @@ def test_sorter_parameters_backfills_missing_schema_version():
             }
         ).fetch1("params_schema_version")
 
+    # The three rows are intentionally the SAME content under different names
+    # (this test exercises schema-version backfill, not the duplicate-content
+    # guard), so each opts out of the guard explicitly.
     # Omitted entirely -> backfilled from the blob's schema_version (4).
     omitted = dict(base, sorter_params_name="audit_a5_missing")
-    SorterParameters().insert1(omitted, skip_duplicates=True)
+    SorterParameters().insert1(
+        omitted, skip_duplicates=True, allow_duplicate_params=True
+    )
     assert _stored_version("audit_a5_missing") == 4
 
     # Explicit sentinel 0 is backfilled the same way.
     sentinel = dict(
         base, sorter_params_name="audit_a5_zero", params_schema_version=0
     )
-    SorterParameters().insert1(sentinel, skip_duplicates=True)
+    SorterParameters().insert1(
+        sentinel, skip_duplicates=True, allow_duplicate_params=True
+    )
     assert _stored_version("audit_a5_zero") == 4
 
     # The correct explicit version inserts cleanly and is preserved.
     ok = dict(base, sorter_params_name="audit_a5_ok", params_schema_version=4)
-    SorterParameters().insert1(ok, skip_duplicates=True)
+    SorterParameters().insert1(
+        ok, skip_duplicates=True, allow_duplicate_params=True
+    )
     assert _stored_version("audit_a5_ok") == 4
 
     # A wrong (non-sentinel) version that disagrees with the blob still
@@ -251,7 +223,11 @@ def test_sorter_parameters_rejects_unknown_sorter_name():
         "params": {},
         "job_kwargs": None,
     }
-    SorterParameters().insert1(ok, skip_duplicates=True)
+    # The bare-default content matches the shipped ``tridesclous2`` "default"
+    # row; this test checks sorter-name acceptance, not the duplicate guard.
+    SorterParameters().insert1(
+        ok, skip_duplicates=True, allow_duplicate_params=True
+    )
     assert SorterParameters & {
         "sorter": "tridesclous2",
         "sorter_params_name": "audit_a5_real",
@@ -440,7 +416,9 @@ def test_motion_correction_parameters_rejects_schema_version_drift():
     with pytest.raises(ValueError, match="schema_version"):
         MotionCorrectionParameters().insert1(drift_row, skip_duplicates=True)
 
-    # A consistent row still inserts cleanly.
+    # A consistent row still inserts cleanly. The bare-default blob matches
+    # the shipped ``"none"`` row, so opt out of the duplicate-content guard
+    # (this test checks the schema-version drift guard, not duplicate content).
     ok_params = MotionCorrectionParamsSchema().model_dump()
     ok_row = {
         "motion_correction_params_name": "audit_a14_ok",
@@ -448,7 +426,9 @@ def test_motion_correction_parameters_rejects_schema_version_drift():
         "params_schema_version": 1,
         "job_kwargs": None,
     }
-    MotionCorrectionParameters().insert1(ok_row, skip_duplicates=True)
+    MotionCorrectionParameters().insert1(
+        ok_row, skip_duplicates=True, allow_duplicate_params=True
+    )
     assert MotionCorrectionParameters & {
         "motion_correction_params_name": "audit_a14_ok"
     }
@@ -1761,7 +1741,7 @@ def _plant_fake_recording(recording_id, nwb_file_name, sampling_frequency):
                 "nwb_file_name": nwb_file_name,
                 "sort_group_id": 0,
                 "interval_list_name": "raw data valid times",
-                "preprocessing_params_name": "default_franklab",
+                "preprocessing_params_name": "default",
                 "team_name": "v2_a25_team",
             },
             allow_direct_insert=True,
@@ -2896,7 +2876,7 @@ def _fresh_unit_producing_selection(populated_sorting):
         {
             "recording_id": recording_id,
             "sorter": "mountainsort5",
-            "sorter_params_name": "franklab_tetrode_hippocampus_30kHz_ms5",
+            "sorter_params_name": "franklab_30khz_ms5_2026_06",
         }
     )
 

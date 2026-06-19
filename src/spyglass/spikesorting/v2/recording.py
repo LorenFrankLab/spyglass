@@ -58,6 +58,7 @@ from spyglass.spikesorting.v2.utils import (
     _validate_params,
     _validate_reference_fields,
     assert_reference_not_member,
+    reject_duplicate_parameter_content,
     resolve_group_reference,
     transaction_or_noop,
     validate_lookup_rows,
@@ -890,12 +891,13 @@ class PreprocessingParameters(SpyglassMixin, dj.Lookup):
     # mismatched one.
     _DEFAULT_CONTENTS: tuple = (
         (
-            "default_franklab",
-            # ``whiten`` defaults to None in the schema (whitening is
-            # deferred to the sorter -- the float64 path inside
-            # ``Sorting._run_sorter`` -- not applied at preprocessing),
-            # so the default-constructed schema already matches the
-            # production preset without an explicit override.
+            "default",
+            # v2's schema-default preproc (300 Hz / 6000 Hz bandpass, median
+            # reference, 1.0 s min-segment). Not a production recipe -- the
+            # franklab production presets use the dated region rows above; this
+            # is the generic default the clusterless preset and ad-hoc callers
+            # use. ``whiten`` defaults to None (whitening is deferred to the
+            # sorter), so the default-constructed schema needs no override.
             PreprocessingParamsSchema().model_dump(),
             3,
             None,
@@ -961,25 +963,37 @@ class PreprocessingParameters(SpyglassMixin, dj.Lookup):
         ),
     )
 
-    def insert1(self, row, **kwargs):
+    def insert1(self, row, allow_duplicate_params=False, **kwargs):
         """Insert one row through the validated bulk ``insert`` path."""
         # Delegate to ``insert`` so one validated path serves both.
-        self.insert([row], **kwargs)
+        self.insert(
+            [row], allow_duplicate_params=allow_duplicate_params, **kwargs
+        )
 
-    def insert(self, rows, **kwargs):
-        """Insert rows after Pydantic-validating each params blob."""
+    def insert(self, rows, allow_duplicate_params=False, **kwargs):
+        """Insert rows after Pydantic-validating each params blob.
+
+        ``allow_duplicate_params=True`` opts out of the duplicate-content
+        guard (a second name for an existing blob); see
+        ``reject_duplicate_parameter_content``.
+        """
         # Validate every row (incl. ``insert_default``'s positional
         # ``_DEFAULT_CONTENTS``) so a bulk insert can't bypass schema
         # validation or the params_schema_version drift check.
-        super().insert(
-            validate_lookup_rows(
-                rows,
-                self.heading.names,
-                schema_for=lambda _row: PreprocessingParamsSchema,
-                table_name="PreprocessingParameters",
-            ),
-            **kwargs,
+        validated = validate_lookup_rows(
+            rows,
+            self.heading.names,
+            schema_for=lambda _row: PreprocessingParamsSchema,
+            table_name="PreprocessingParameters",
         )
+        reject_duplicate_parameter_content(
+            self,
+            validated,
+            table_name="PreprocessingParameters",
+            name_attr="preprocessing_params_name",
+            allow_duplicate_params=allow_duplicate_params,
+        )
+        super().insert(validated, **kwargs)
 
     @classmethod
     def insert_default(cls):

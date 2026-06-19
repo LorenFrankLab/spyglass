@@ -717,7 +717,13 @@ def test_shipped_rows_carry_current_params_schema_version(dj_conn):
     assert clusterless["params_schema_version"] == 4
     assert clusterless["params"]["schema_version"] == 4
 
-    for name in ("default_franklab", "default_neuropixels", "no_filter"):
+    for name in (
+        "default",
+        "franklab_hippocampus_2026_06",
+        "franklab_cortex_2026_06",
+        "default_neuropixels",
+        "no_filter",
+    ):
         row = (
             PreprocessingParameters & {"preprocessing_params_name": name}
         ).fetch1()
@@ -852,9 +858,12 @@ def test_param_lookup_bulk_insert_validates(
         "super().insert (all-or-nothing)."
     )
 
-    # (2) A fully-valid batch lands every row.
+    # (2) A fully-valid batch lands every row. ``valid_a`` / ``valid_b`` are
+    #     intentionally identical content under two names (this test exercises
+    #     bulk *validation*, not the duplicate-content guard), so opt out of
+    #     the guard explicitly.
     try:
-        table.insert([valid_a, valid_b])
+        table.insert([valid_a, valid_b], allow_duplicate_params=True)
         assert len(table & restr(valid_a)) == 1
         assert len(table & restr(valid_b)) == 1
     finally:

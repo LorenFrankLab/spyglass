@@ -260,7 +260,7 @@ def test_zero_unit_warning_in_run_summary(first_run):
     run_summary = run_v2_pipeline(
         **{
             **inputs,
-            "pipeline_preset": "franklab_tetrode_clusterless_thresholder",
+            "pipeline_preset": "franklab_clusterless_2026_06",
         }
     )
     assert run_summary["n_units"] == 0

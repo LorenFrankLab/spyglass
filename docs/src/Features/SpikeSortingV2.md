@@ -79,12 +79,14 @@ curations all coexist under one merge surface.
 ### Pipeline orchestrator
 
 `spyglass.spikesorting.v2.pipeline.run_v2_pipeline` chains the per-stage
-`insert_selection` + `populate` calls into one call. Three pipeline presets ship
-today:
-
-- `franklab_tetrode_mountainsort4`
-- `franklab_tetrode_mountainsort5` (default)
-- `franklab_tetrode_clusterless_thresholder`
+`insert_selection` + `populate` calls into one call. The shipped presets are
+the dated June-2026 Frank Lab production recipes: a MountainSort4 family keyed
+by target region (hippocampus 600 Hz / cortex 300 Hz high-pass) and sampling
+rate (30 / 20 kHz), plus a MountainSort5 alternative and a clusterless preset.
+The default is the production MS4 recipe
+`franklab_tetrode_hippocampus_30khz_ms4_2026_06`. Call
+`describe_pipeline_presets()` for the catalog and `list_pipeline_presets()`
+for the names.
 
 The orchestrator is idempotent: re-running with the same inputs returns the
 same run summary (same `merge_id`, same intermediate PKs) without duplicating
@@ -154,7 +156,7 @@ run_summary = run_v2_pipeline(
     sort_group_id=sort_group_id,
     interval_list_name="raw data valid times",
     team_name="my_team",
-    pipeline_preset="franklab_tetrode_mountainsort5",
+    pipeline_preset="franklab_tetrode_hippocampus_30khz_ms4_2026_06",
 )
 merge_id = run_summary["merge_id"]  # key off this downstream
 ```
@@ -193,23 +195,59 @@ per probe, annotated with the `probe_id`), since `Probe.Electrode` coordinates
 are per-probe. For real analyses, choose `sort_group_id` intentionally from this
 table and plot rather than assuming `0` is the scientifically relevant shank.
 
-Available pipeline presets:
+Available pipeline presets (all dated `_2026_06`):
 
-- `franklab_tetrode_mountainsort4` -- legacy MountainSort4 (parity with v1)
-- `franklab_tetrode_mountainsort5` -- **recommended**, current MS5 defaults
-- `franklab_tetrode_clusterless_thresholder` -- peak-detection only (no
-    clustering), feeds the clusterless decoding pipeline
+- `franklab_tetrode_hippocampus_30khz_ms4_2026_06` -- **default**, production
+    MountainSort4 (hippocampus 600 Hz preproc, 30 kHz)
+- `franklab_probe_{hippocampus,cortex}_{30khz,20khz}_ms4_2026_06` -- the
+    production MS4 family by region (600/300 Hz high-pass) and rate
+- `franklab_tetrode_hippocampus_30khz_ms5_2026_06` -- MountainSort5
+    alternative (`recommendation_status="alternative"`)
+- `franklab_clusterless_2026_06` -- peak-detection only (no clustering), feeds
+    the clusterless decoding pipeline
 
-`list_pipeline_presets()` returns the same names at runtime;
+The tetrode- and probe-hippocampus 30 kHz presets resolve to the **same**
+parameter rows (the recipe is set by region + rate; `probe_type` is
+informational). `list_pipeline_presets()` returns the names at runtime;
 `describe_pipeline_presets()` returns a table of what each pipeline preset does
-(sorter, parameter rows, intended use, and detection-threshold units) so you
-can choose one without reading the module source:
+(`recommendation_status`, `target_region`, `sampling_rate_hz`,
+`adjacency_radius_um`, sorter, parameter rows, intended use, and the
+detection-threshold units) so you can choose one without reading the module
+source:
 
 ```python
 from spyglass.spikesorting.v2.pipeline import describe_pipeline_presets
 
 describe_pipeline_presets()  # one row per pipeline preset
 ```
+
+### Parameter names and fingerprints
+
+Shipped parameter-row names are **stable provenance**, not just labels. The
+`*_2026_06` suffix dates the recipe: a row named `franklab_hippocampus_2026_06`
+is the June 2026 Frank Lab hippocampus preprocessing recipe, and a future
+change ships under a **new** dated name rather than mutating the existing
+blob -- so a `recording_id` / `sorting_id` derived from a name stays
+reproducible. Two guards keep names honest:
+
+- **Content fingerprints.** Each row has a content fingerprint (the validated
+  `params` blob + schema version + job kwargs, with the row *name* excluded;
+  `SorterParameters` is scoped per sorter). `describe_parameter_rows()` shows
+  every row in the database with its fingerprint, whether it is a shipped
+  catalog default, which pipeline presets use it, and -- if its content
+  duplicates another row -- the name it duplicates:
+
+  ```python
+  from spyglass.spikesorting.v2.pipeline import describe_parameter_rows
+
+  describe_parameter_rows()  # table, parameter_name, fingerprint, usage, ...
+  ```
+
+- **Duplicate-content guard.** Inserting a second name for content that already
+  ships under a different name raises `DuplicateParameterContentError` (a second
+  name for the same blob forks provenance). Pass `allow_duplicate_params=True`
+  to opt in -- the row then shows a `duplicate_of` in
+  `describe_parameter_rows()`.
 
 ### Debugging cookbook
 
@@ -222,7 +260,7 @@ describe_pipeline_presets()  # one row per pipeline preset
       sort_group_id=sort_group_id,
       interval_list_name="raw data valid times",
       team_name="my_team",
-      pipeline_preset="franklab_tetrode_mountainsort5",
+      pipeline_preset="franklab_tetrode_hippocampus_30khz_ms4_2026_06",
   )
   for check in report.checks:
       print(check.name, check.ok, check.fix)
@@ -315,7 +353,7 @@ recording_key = RecordingSelection.insert_selection({
     "nwb_file_name": nwb_file_name,
     "sort_group_id": 0,
     "interval_list_name": "raw data valid times",
-    "preprocessing_params_name": "default_franklab",
+    "preprocessing_params_name": "franklab_hippocampus_2026_06",
     "team_name": "my_team",
 })
 Recording.populate(recording_key)
@@ -329,7 +367,7 @@ ArtifactDetection.populate(artifact_detection_key)
 sorting_key = SortingSelection.insert_selection({
     "recording_id": recording_key["recording_id"],
     "sorter": "mountainsort5",
-    "sorter_params_name": "franklab_tetrode_hippocampus_30kHz_ms5",
+    "sorter_params_name": "franklab_30khz_ms5_2026_06",
     "artifact_detection_id": artifact_detection_key["artifact_detection_id"],
 })
 Sorting.populate(sorting_key)
@@ -352,11 +390,12 @@ carries an `inter_sample_shift` property; on a recording without that property
 (any non-multiplexed acquisition, including Frank-lab polymer probes) it logs a
 skip and is a **no-op**, so enabling it never fails.
 
-It is **off in `default_franklab`** (the headline default is unchanged) and
-**on in the `default_neuropixels` preset** -- a blessed Neuropixels recipe
+It is **off in the `default` and region preproc rows** and **on in the
+`default_neuropixels` preset** -- a blessed Neuropixels recipe
 (`bandpass 300-6000 Hz` + phase-shift, `margin_ms=100`). Because Frank-lab smoke
 recordings carry no `inter_sample_shift`, `default_neuropixels` materializes
-**identically** to `default_franklab` on them (the phase-shift is skipped); it
+**identically** to the `default` preproc row on them (the phase-shift is
+skipped); it
 only does work once an acquisition system that ingests `inter_sample_shift` is
 used. To use it:
 

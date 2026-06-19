@@ -242,7 +242,7 @@ def test_canonical_sorter_unknown_sorter_keeps_payload_normalized():
 
 
 def test_canonical_preproc_v1_flat_matches_v2_nested_when_equivalent():
-    """v1 ships ``"default"`` flat; v2 ships ``"default_franklab"`` nested.
+    """v1 ships ``"default"`` flat; v2 ships ``"default"`` nested.
 
     Both encode the same SI-effective preprocessing (300-6000 Hz bandpass +
     common reference median, 1s min segment length). The canonical

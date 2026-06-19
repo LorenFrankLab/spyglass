@@ -52,7 +52,7 @@ _NOTEBOOK_PATH = (
 )
 _TEAM = "ux_smoke_team"
 _INTERVAL = "raw data valid times"
-_PIPELINE_PRESET = "franklab_tetrode_mountainsort5"
+_PIPELINE_PRESET = "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
 
 _STABLE_KEYS = (
     "pipeline_preset",

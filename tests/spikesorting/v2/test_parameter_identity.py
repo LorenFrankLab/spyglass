@@ -11,6 +11,8 @@ These tests are pure-stdlib and must not need a database.
 
 from __future__ import annotations
 
+import pytest
+
 from spyglass.spikesorting.v2._parameter_identity import (
     parameter_fingerprint,
     short_fingerprint,
@@ -159,3 +161,243 @@ def test_short_fingerprint_is_a_prefix():
     short = short_fingerprint(fp)
     assert fp.startswith(short)
     assert len(short) == 12
+
+
+def test_shipped_recipe_fingerprints_are_locked():
+    """The June 2026 production recipes have frozen content fingerprints.
+
+    Pinning the fingerprint of each dated recipe (computed DB-free from the
+    independent ``_recipe_constants`` literals) makes an in-place edit to a
+    shipped recipe fail loudly: a recipe change must ship under a NEW dated
+    name so a name-derived selection id stays reproducible, never mutate an
+    existing one. The parity tests separately tie these constants to the
+    shipped ``_DEFAULT_CONTENTS`` blobs, so the pair locks both the canonical
+    recipe and the rows that ship it.
+    """
+    from tests.spikesorting.v2 import _recipe_constants as rc
+
+    specs = [
+        (
+            "PreprocessingParameters",
+            rc.FRANKLAB_HIPPOCAMPUS_2026_06,
+            rc.FRANKLAB_HIPPOCAMPUS_2026_06_PARAMS,
+            3,
+            None,
+        ),
+        (
+            "PreprocessingParameters",
+            rc.FRANKLAB_CORTEX_2026_06,
+            rc.FRANKLAB_CORTEX_2026_06_PARAMS,
+            3,
+            None,
+        ),
+        (
+            "ArtifactDetectionParameters",
+            rc.FRANKLAB_100UV_P07_2026_06,
+            rc.FRANKLAB_100UV_P07_2026_06_PARAMS,
+            2,
+            None,
+        ),
+        (
+            "ArtifactDetectionParameters",
+            rc.FRANKLAB_50UV_P07_2026_06,
+            rc.FRANKLAB_50UV_P07_2026_06_PARAMS,
+            2,
+            None,
+        ),
+        (
+            "SorterParameters",
+            rc.FRANKLAB_30KHZ_MS4_2026_06,
+            rc.FRANKLAB_30KHZ_MS4_2026_06_PARAMS,
+            1,
+            "mountainsort4",
+        ),
+        (
+            "SorterParameters",
+            rc.FRANKLAB_20KHZ_MS4_2026_06,
+            rc.FRANKLAB_20KHZ_MS4_2026_06_PARAMS,
+            1,
+            "mountainsort4",
+        ),
+    ]
+    expected = {
+        rc.FRANKLAB_HIPPOCAMPUS_2026_06: "65a601c2cbe6",
+        rc.FRANKLAB_CORTEX_2026_06: "154a714d0114",
+        rc.FRANKLAB_100UV_P07_2026_06: "596d7894f2d0",
+        rc.FRANKLAB_50UV_P07_2026_06: "f26f082f82ea",
+        rc.FRANKLAB_30KHZ_MS4_2026_06: "a82767b225c3",
+        rc.FRANKLAB_20KHZ_MS4_2026_06: "0f29e8800e84",
+    }
+    for table, name, params, version, sorter in specs:
+        got = short_fingerprint(
+            parameter_fingerprint(
+                table,
+                params=params,
+                params_schema_version=version,
+                job_kwargs=None,
+                sorter=sorter,
+            )
+        )
+        assert got == expected[name], f"{name}: {got} != {expected[name]}"
+
+
+# ---------------------------------------------------------------------------
+# Duplicate-content guard + describe_parameter_rows (DB-backed). Each imports
+# the v2 schema modules lazily and takes ``dj_conn`` so the schema's
+# ``dj.schema(...)`` import has a live connection.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.database
+def test_duplicate_parameter_content_rejected(dj_conn):
+    """A second name for an existing preproc blob is rejected by default."""
+    from spyglass.spikesorting.v2.exceptions import (
+        DuplicateParameterContentError,
+    )
+    from spyglass.spikesorting.v2.recording import PreprocessingParameters
+
+    PreprocessingParameters.insert_default()
+    shipped = (
+        PreprocessingParameters & {"preprocessing_params_name": "default"}
+    ).fetch1()
+
+    with pytest.raises(
+        DuplicateParameterContentError, match="duplicates the content"
+    ):
+        PreprocessingParameters.insert1(
+            {
+                "preprocessing_params_name": "my_copy_of_default",
+                "params": shipped["params"],
+                "params_schema_version": shipped["params_schema_version"],
+                "job_kwargs": shipped["job_kwargs"],
+            }
+        )
+
+
+@pytest.mark.database
+def test_duplicate_parameter_content_escape_hatch(dj_conn):
+    """``allow_duplicate_params=True`` inserts the dup and marks duplicate_of."""
+    from spyglass.spikesorting.v2.pipeline import describe_parameter_rows
+    from spyglass.spikesorting.v2.recording import PreprocessingParameters
+
+    PreprocessingParameters.insert_default()
+    shipped = (
+        PreprocessingParameters & {"preprocessing_params_name": "default"}
+    ).fetch1()
+    dup_name = "my_copy_of_default"
+    try:
+        PreprocessingParameters.insert1(
+            {
+                "preprocessing_params_name": dup_name,
+                "params": shipped["params"],
+                "params_schema_version": shipped["params_schema_version"],
+                "job_kwargs": shipped["job_kwargs"],
+            },
+            allow_duplicate_params=True,
+        )
+        assert PreprocessingParameters & {
+            "preprocessing_params_name": dup_name
+        }
+        df = describe_parameter_rows()
+        dup = df.loc[df["parameter_name"] == dup_name].iloc[0]
+        assert dup["duplicate_of"] == "default"
+        assert "duplicate content" in dup["name_warnings"]
+    finally:
+        (
+            PreprocessingParameters
+            & {"preprocessing_params_name": dup_name}
+        ).delete(safemode=False)
+
+
+@pytest.mark.database
+def test_sorter_duplicate_rejected_scoped_by_sorter(dj_conn):
+    """A second name for an existing sorter blob (same sorter) is rejected.
+
+    Uses the always-available ``clusterless_thresholder`` row so the test does
+    not depend on an SI sorter binary being installed.
+    """
+    from spyglass.spikesorting.v2.exceptions import (
+        DuplicateParameterContentError,
+    )
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    SorterParameters.insert_default()
+    shipped = (
+        SorterParameters
+        & {
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": "default",
+        }
+    ).fetch1()
+
+    with pytest.raises(
+        DuplicateParameterContentError, match="duplicates the content"
+    ):
+        SorterParameters.insert1(
+            {
+                "sorter": "clusterless_thresholder",
+                "sorter_params_name": "my_clusterless_copy",
+                "params": shipped["params"],
+                "params_schema_version": shipped["params_schema_version"],
+                "job_kwargs": shipped["job_kwargs"],
+            }
+        )
+
+
+@pytest.mark.database
+def test_describe_parameter_rows_columns_and_usage(dj_conn):
+    """Documented columns + correct ``used_by_pipeline_presets`` per row."""
+    from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
+    from spyglass.spikesorting.v2.pipeline import (
+        _PARAMETER_ROW_COLUMNS,
+        describe_parameter_rows,
+    )
+    from spyglass.spikesorting.v2.recording import PreprocessingParameters
+
+    PreprocessingParameters.insert_default()
+    ArtifactDetectionParameters.insert_default()
+
+    df = describe_parameter_rows()
+    assert list(df.columns) == _PARAMETER_ROW_COLUMNS
+
+    def _cell(table, name, col):
+        sub = df[
+            (df["table"] == table) & (df["parameter_name"] == name)
+        ]
+        assert len(sub) == 1, f"{table}/{name}: expected one row"
+        return sub.iloc[0][col]
+
+    # The 100 uV production artifact row is bundled by every franklab MS4/MS5
+    # preset; the 50 uV row ships but no preset uses it.
+    used_100 = _cell(
+        "ArtifactDetectionParameters",
+        "franklab_100uv_p07_2026_06",
+        "used_by_pipeline_presets",
+    )
+    assert "franklab_tetrode_hippocampus_30khz_ms4_2026_06" in used_100
+    assert (
+        _cell(
+            "ArtifactDetectionParameters",
+            "franklab_50uv_p07_2026_06",
+            "used_by_pipeline_presets",
+        )
+        == []
+    )
+
+    # The clusterless preset is the only one on the generic 500 uV "default"
+    # artifact + "default" preproc rows.
+    assert _cell(
+        "ArtifactDetectionParameters", "default", "used_by_pipeline_presets"
+    ) == ["franklab_clusterless_2026_06"]
+    assert _cell(
+        "PreprocessingParameters", "default", "used_by_pipeline_presets"
+    ) == ["franklab_clusterless_2026_06"]
+
+    # The hippocampus region preproc row is a shipped catalog default.
+    assert bool(
+        _cell(
+            "PreprocessingParameters",
+            "franklab_hippocampus_2026_06",
+            "is_shipped_default",
+        )
+    )

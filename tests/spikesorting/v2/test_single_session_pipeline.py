@@ -206,7 +206,7 @@ def test_recording_selection_insert_is_idempotent(polymer_smoke_session):
         "nwb_file_name": nwb_file_name,
         "sort_group_id": int(sort_group_id),
         "interval_list_name": interval_list_name,
-        "preprocessing_params_name": "default_franklab",
+        "preprocessing_params_name": "default",
         "team_name": team_name,
     }
     pk_first = RecordingSelection.insert_selection(selection_key)
@@ -307,7 +307,7 @@ def recording_selection_key(polymer_smoke_session):
         "nwb_file_name": nwb_file_name,
         "sort_group_id": sort_group_id,
         "interval_list_name": "raw data valid times",
-        "preprocessing_params_name": "default_franklab",
+        "preprocessing_params_name": "default",
         "team_name": "v2_test_team",
     }
     return RecordingSelection.insert_selection(selection_key)
@@ -485,7 +485,7 @@ def test_tetrode_geometry_attached(tetrode_60s_session):
         "nwb_file_name": nwb_file_name,
         "sort_group_id": sort_group_id,
         "interval_list_name": "raw data valid times",
-        "preprocessing_params_name": "default_franklab",
+        "preprocessing_params_name": "default",
         "team_name": "v2_test_team",
     }
     rec_pk = RecordingSelection.insert_selection(selection_key)
@@ -928,7 +928,7 @@ def test_shared_artifact_group_insert_rejects_mismatched_durations(
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": truncated_interval,
-            "preprocessing_params_name": "default_franklab",
+            "preprocessing_params_name": "default",
             "team_name": "v2_test_team",
         }
     )
@@ -1014,7 +1014,7 @@ def test_shared_artifact_group_insert_rejects_mismatched_dtypes(
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": second_interval,
-            "preprocessing_params_name": "default_franklab",
+            "preprocessing_params_name": "default",
             "team_name": "v2_test_team",
         }
     )
@@ -1232,7 +1232,7 @@ def test_sorting_populates_with_mountainsort5(populated_recording):
         {
             "recording_id": populated_recording["recording_id"],
             "sorter": "mountainsort5",
-            "sorter_params_name": ("franklab_tetrode_hippocampus_30kHz_ms5"),
+            "sorter_params_name": ("franklab_30khz_ms5_2026_06"),
             "artifact_detection_id": art_pk["artifact_detection_id"],
         }
     )
@@ -1628,7 +1628,7 @@ def test_recording_over_request_clips_with_warning(
         "nwb_file_name": nwb_file_name,
         "sort_group_id": sort_group_id,
         "interval_list_name": over_request_interval_name,
-        "preprocessing_params_name": "default_franklab",
+        "preprocessing_params_name": "default",
         "team_name": "v2_test_team",
     }
     pk = RecordingSelection.insert_selection(selection_key)
@@ -1743,7 +1743,7 @@ def test_recording_over_request_multi_interval_clips_with_warning(
         "nwb_file_name": nwb_file_name,
         "sort_group_id": sort_group_id,
         "interval_list_name": multi_interval_name,
-        "preprocessing_params_name": "default_franklab",
+        "preprocessing_params_name": "default",
         "team_name": "v2_test_team",
     }
     pk = RecordingSelection.insert_selection(selection_key)
@@ -1911,7 +1911,7 @@ def test_prune_orphaned_selections_finds_and_cleans(populated_recording):
         {
             "sorting_id": orphan_sorting,
             "sorter": "mountainsort5",
-            "sorter_params_name": "franklab_tetrode_hippocampus_30kHz_ms5",
+            "sorter_params_name": "franklab_30khz_ms5_2026_06",
         },
         allow_direct_insert=True,
     )
@@ -1971,7 +1971,7 @@ def populated_sorting(populated_recording):
         {
             "recording_id": populated_recording["recording_id"],
             "sorter": "mountainsort5",
-            "sorter_params_name": ("franklab_tetrode_hippocampus_30kHz_ms5"),
+            "sorter_params_name": ("franklab_30khz_ms5_2026_06"),
             "artifact_detection_id": art_pk["artifact_detection_id"],
         }
     )
@@ -2498,7 +2498,7 @@ def test_run_v2_pipeline_end_to_end_and_idempotent(polymer_smoke_session):
     """``run_v2_pipeline`` chains recording -> artifact -> sort -> curation
     in one call and is idempotent on rerun.
 
-    Uses the ``franklab_tetrode_mountainsort5`` pipeline preset (matches the
+    Uses the ``franklab_tetrode_hippocampus_30khz_ms5_2026_06`` pipeline preset (matches the
     ``pipeline_preset=`` argument below). Idempotency on rerun is verified
     against MS5 by reusing the existing sorting_id rather than
     re-running the sorter, so MS5's clustering randomness does not
@@ -2538,7 +2538,7 @@ def test_run_v2_pipeline_end_to_end_and_idempotent(polymer_smoke_session):
         sort_group_id=sort_group_id,
         interval_list_name="raw data valid times",
         team_name="v2_test_team",
-        pipeline_preset="franklab_tetrode_mountainsort5",
+        pipeline_preset="franklab_tetrode_hippocampus_30khz_ms5_2026_06",
         description="pipeline e2e test",
     )
     # The stable manifest keys must always be present. The run also adds
@@ -2555,7 +2555,7 @@ def test_run_v2_pipeline_end_to_end_and_idempotent(polymer_smoke_session):
         "n_units",
     }
     assert stable_keys <= set(manifest.keys())
-    assert manifest["pipeline_preset"] == "franklab_tetrode_mountainsort5"
+    assert manifest["pipeline_preset"] == "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
     assert manifest["curation_id"] == 0  # root curation
     assert manifest["n_units"] >= 1
     # The smoke fixture's clusterless 100 uV default IS exercised in
@@ -2570,7 +2570,7 @@ def test_run_v2_pipeline_end_to_end_and_idempotent(polymer_smoke_session):
         sort_group_id=sort_group_id,
         interval_list_name="raw data valid times",
         team_name="v2_test_team",
-        pipeline_preset="franklab_tetrode_mountainsort5",
+        pipeline_preset="franklab_tetrode_hippocampus_30khz_ms5_2026_06",
     )
     assert manifest2["recording_id"] == manifest["recording_id"]
     assert (
@@ -2640,7 +2640,7 @@ def test_run_v2_pipeline_idempotent_row_counts(polymer_smoke_session):
         sort_group_id=sort_group_id,
         interval_list_name="raw data valid times",
         team_name="v2_test_team",
-        pipeline_preset="franklab_tetrode_mountainsort5",
+        pipeline_preset="franklab_tetrode_hippocampus_30khz_ms5_2026_06",
     )
     manifest = run_v2_pipeline(**kwargs)
     # Second run must be a pure no-op (MS5 reuses the existing sorting_id
@@ -2834,7 +2834,7 @@ def test_clusterless_thresholder_end_to_end(polymer_smoke_session):
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": "raw data valid times",
-            "preprocessing_params_name": "default_franklab",
+            "preprocessing_params_name": "default",
             "team_name": "v2_test_team",
         }
     )
@@ -2967,7 +2967,7 @@ def test_mountainsort5_ground_truth_polymer_60s(polymer_60s_session):
                 "nwb_file_name": nwb_file_name,
                 "sort_group_id": sg_id,
                 "interval_list_name": "raw data valid times",
-                "preprocessing_params_name": "default_franklab",
+                "preprocessing_params_name": "default",
                 "team_name": "v2_test_team",
             }
         )
@@ -2984,7 +2984,7 @@ def test_mountainsort5_ground_truth_polymer_60s(polymer_60s_session):
                 "recording_id": rec_pk["recording_id"],
                 "sorter": "mountainsort5",
                 "sorter_params_name": (
-                    "franklab_tetrode_hippocampus_30kHz_ms5"
+                    "franklab_30khz_ms5_2026_06"
                 ),
                 "artifact_detection_id": art_pk["artifact_detection_id"],
             }
@@ -3744,11 +3744,11 @@ def test_run_v2_pipeline_clusterless_preset(polymer_smoke_session):
             sort_group_id=sort_group_id,
             interval_list_name="raw data valid times",
             team_name="v2_test_team",
-            pipeline_preset="franklab_tetrode_clusterless_thresholder",
+            pipeline_preset="franklab_clusterless_2026_06",
         )
         assert (
             manifest["pipeline_preset"]
-            == "franklab_tetrode_clusterless_thresholder"
+            == "franklab_clusterless_2026_06"
         )
         for key in (
             "recording_id",
@@ -3814,7 +3814,7 @@ def test_run_v2_pipeline_clusterless_default_handles_zero_units_gracefully(
         sort_group_id=sort_group_id,
         interval_list_name="raw data valid times",
         team_name="v2_test_team",
-        pipeline_preset="franklab_tetrode_clusterless_thresholder",
+        pipeline_preset="franklab_clusterless_2026_06",
     )
 
     # A zero-unit sort still produces a COMPLETE, merge-keyable manifest:
@@ -3865,7 +3865,7 @@ def test_run_v2_pipeline_clusterless_default_handles_zero_units_gracefully(
             sort_group_id=sort_group_id,
             interval_list_name="raw data valid times",
             team_name="v2_test_team",
-            pipeline_preset="franklab_tetrode_clusterless_thresholder",
+            pipeline_preset="franklab_clusterless_2026_06",
             require_units=True,
         )
 
@@ -3962,7 +3962,7 @@ def test_sorting_make_rollback_cleans_units_nwb(
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": "raw data valid times",
-            "preprocessing_params_name": "default_franklab",
+            "preprocessing_params_name": "default",
             "team_name": "v2_test_team",
         }
     )
@@ -3980,7 +3980,7 @@ def test_sorting_make_rollback_cleans_units_nwb(
         {
             "recording_id": rec_pk["recording_id"],
             "sorter": "mountainsort5",
-            "sorter_params_name": "franklab_tetrode_hippocampus_30kHz_ms5",
+            "sorter_params_name": "franklab_30khz_ms5_2026_06",
             "artifact_detection_id": art_pk["artifact_detection_id"],
         }
     )
@@ -4117,7 +4117,7 @@ def test_boundary_spike_round_trip_does_not_raise(
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": "raw data valid times",
-            "preprocessing_params_name": "default_franklab",
+            "preprocessing_params_name": "default",
             "team_name": "v2_test_team",
         }
     )
@@ -4285,7 +4285,7 @@ def test_get_sorting_recovers_frames_across_disjoint_gap(
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": disjoint_name,
-            "preprocessing_params_name": "default_franklab",
+            "preprocessing_params_name": "default",
             "team_name": "v2_test_team",
         }
     )
@@ -4444,7 +4444,7 @@ def test_obs_intervals_no_artifact_respects_disjoint_gap(
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": disjoint_name,
-            "preprocessing_params_name": "default_franklab",
+            "preprocessing_params_name": "default",
             "team_name": "v2_test_team",
         }
     )
@@ -4562,7 +4562,7 @@ def test_get_merged_sorting_keeps_cross_gap_pair(
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": disjoint_name,
-            "preprocessing_params_name": "default_franklab",
+            "preprocessing_params_name": "default",
             "team_name": "v2_test_team",
         }
     )
@@ -5618,7 +5618,7 @@ def test_recording_make_rollback_cleans_analysis_nwb(
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": "raw data valid times",
-            "preprocessing_params_name": "default_franklab",
+            "preprocessing_params_name": "default",
             "team_name": "v2_test_team",
         }
     )
@@ -5731,7 +5731,7 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": "raw data valid times",
-            "preprocessing_params_name": "default_franklab",
+            "preprocessing_params_name": "default",
             "team_name": "v2_test_team",
         }
     )
@@ -5747,7 +5747,7 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
         {
             "recording_id": rec_pk["recording_id"],
             "sorter": "mountainsort5",
-            "sorter_params_name": ("franklab_tetrode_hippocampus_30kHz_ms5"),
+            "sorter_params_name": ("franklab_30khz_ms5_2026_06"),
             "artifact_detection_id": art_pk["artifact_detection_id"],
         }
     )
@@ -6025,7 +6025,7 @@ def test_lazy_vs_applied_merge_frames_equal(polymer_smoke_session, monkeypatch):
                 "nwb_file_name": nwb_file_name,
                 "sort_group_id": sort_group_id,
                 "interval_list_name": interval_name,
-                "preprocessing_params_name": "default_franklab",
+                "preprocessing_params_name": "default",
                 "team_name": "v2_test_team",
             }
         )
@@ -6462,7 +6462,7 @@ def test_applied_and_lazy_merge_ids_match_for_out_of_order_groups(
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": interval_name,
-            "preprocessing_params_name": "default_franklab",
+            "preprocessing_params_name": "default",
             "team_name": "v2_test_team",
         }
     )
@@ -6614,7 +6614,7 @@ def test_v2_sorting_nwb_excludes_parent_units(dj_conn, tmp_path, monkeypatch):
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": "raw data valid times",
-            "preprocessing_params_name": "default_franklab",
+            "preprocessing_params_name": "default",
             "team_name": "v2_test_team",
         }
     )
@@ -6873,7 +6873,7 @@ def test_sorting_selection_rejects_concat_source(dj_conn):
                 "concat_recording_id": "00000000-0000-0000-0000-000000000000",
                 "sorter": "mountainsort5",
                 "sorter_params_name": (
-                    "franklab_tetrode_hippocampus_30kHz_ms5"
+                    "franklab_30khz_ms5_2026_06"
                 ),
             }
         )
@@ -6986,7 +6986,7 @@ def test_sorting_selection_artifact_detection_source_part_shape(
     sorter_kwargs = {
         "recording_id": populated_recording["recording_id"],
         "sorter": "mountainsort5",
-        "sorter_params_name": "franklab_tetrode_hippocampus_30kHz_ms5",
+        "sorter_params_name": "franklab_30khz_ms5_2026_06",
     }
 
     # No-artifact-detection selection: zero ArtifactDetectionSource rows; resolve_artifact_detection None.
@@ -7109,7 +7109,7 @@ def test_recording_make_global_median_reference(polymer_smoke_session):
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": "raw data valid times",
-            "preprocessing_params_name": "default_franklab",
+            "preprocessing_params_name": "default",
             "team_name": "v2_test_team",
         }
     )
@@ -7158,7 +7158,7 @@ def test_recording_make_global_median_reference(polymer_smoke_session):
     # that median at ~0 (median is translation-equivariant). The old
     # reference-then-filter order (per-channel bandpass AFTER CMR) does not
     # preserve this, so a ~0 per-sample median is the numeric signature of
-    # the intentional v1-divergent order. (Requires the default_franklab
+    # the intentional v1-divergent order. (Requires the default
     # preset's operator="median"; an "average" operator would zero the per-
     # sample MEAN, not the median.)
     scale = max(1.0, float(_np.abs(traces_ref).max()))
@@ -7179,7 +7179,7 @@ def test_recording_no_filter_preset_skips_bandpass(polymer_smoke_session):
     ``bandpass_filter=None`` and ``_apply_pre_motion_preprocessing`` must
     SKIP the bandpass step (not silently pass a wide-band that still
     filters). This populates two recordings on the same data -- one with
-    the bandpassed ``default_franklab`` preset, one with ``no_filter`` --
+    the bandpassed ``default`` preset, one with ``no_filter`` --
     and pins: (1) the no_filter populate completes (the ``None`` guard
     does not crash), and (2) its traces differ materially from the
     bandpassed version, which only holds if the filter was actually
@@ -7215,9 +7215,9 @@ def test_recording_no_filter_preset_skips_bandpass(polymer_smoke_session):
         "interval_list_name": "raw data valid times",
         "team_name": "v2_test_team",
     }
-    # Bandpassed reference (default_franklab ships a real 300-6000 Hz band).
+    # Bandpassed reference (default ships a real 300-6000 Hz band).
     bp_pk = RecordingSelection.insert_selection(
-        {**common, "preprocessing_params_name": "default_franklab"}
+        {**common, "preprocessing_params_name": "default"}
     )
     Recording.populate(bp_pk, reserve_jobs=False)
     traces_bp = Recording().get_recording(bp_pk).get_traces()
@@ -7238,7 +7238,7 @@ def test_recording_no_filter_preset_skips_bandpass(polymer_smoke_session):
     # materially different from the bandpassed ones.
     delta = float(_np.abs(traces_nf - traces_bp).mean())
     assert delta > 1e-6, (
-        "no_filter and default_franklab recordings are indistinguishable "
+        "no_filter and default recordings are indistinguishable "
         f"(mean |diff| = {delta:.2e}); the bandpass was NOT skipped for "
         "no_filter. Check the `if bandpass_filter is not None` guard in "
         "_apply_pre_motion_preprocessing."
@@ -7256,7 +7256,7 @@ def test_phase_shift_field_does_not_change_default_recording(
 
     The optional ``phase_shift`` field defaults to ``None``, so a params blob
     written BEFORE the field existed (no ``phase_shift`` key) must materialize
-    to the **same traces** as the ``default_franklab`` preset (whose blob now
+    to the **same traces** as the ``default`` preset (whose blob now
     carries ``phase_shift=None``). Pins the headline behavior-preservation
     metric: adding the optional field changes nothing on the default path, and
     existing rows validate + materialize unchanged.
@@ -7300,9 +7300,9 @@ def test_phase_shift_field_does_not_change_default_recording(
         "team_name": "v2_test_team",
     }
 
-    # default_franklab (carries phase_shift=None in its blob).
+    # default (carries phase_shift=None in its blob).
     fl_pk = RecordingSelection.insert_selection(
-        {**common, "preprocessing_params_name": "default_franklab"}
+        {**common, "preprocessing_params_name": "default"}
     )
     Recording.populate(fl_pk, reserve_jobs=False)
     traces_fl = Recording().get_recording(fl_pk).get_traces()
@@ -7312,6 +7312,9 @@ def test_phase_shift_field_does_not_change_default_recording(
     # (phase_shift defaults to None) and must materialize identically.
     legacy_blob = PreprocessingParamsSchema().model_dump()
     legacy_blob.pop("phase_shift")
+    # After validation this re-fills phase_shift=None, so the blob is content-
+    # identical to the shipped ``default`` row -- which is exactly the point
+    # (it must materialize identically). Opt out of the duplicate guard.
     PreprocessingParameters.insert1(
         {
             "preprocessing_params_name": "_pytest_legacy_no_phase_shift",
@@ -7320,6 +7323,7 @@ def test_phase_shift_field_does_not_change_default_recording(
             "job_kwargs": None,
         },
         skip_duplicates=True,
+        allow_duplicate_params=True,
     )
     legacy_pk = RecordingSelection.insert_selection(
         {**common, "preprocessing_params_name": "_pytest_legacy_no_phase_shift"}
@@ -7329,7 +7333,7 @@ def test_phase_shift_field_does_not_change_default_recording(
 
     assert _np.array_equal(traces_legacy, traces_fl), (
         "A pre-field params blob (no phase_shift key) materialized to "
-        "different traces than default_franklab; the optional phase_shift "
+        "different traces than default; the optional phase_shift "
         "field perturbed the default path."
     )
 
@@ -7340,7 +7344,7 @@ def test_neuropixels_preset_phase_shift_inert_without_property(
 ):
     """The ``default_neuropixels`` preset is a safe no-op on non-multiplexed data.
 
-    ``default_neuropixels`` enables phase-shift; ``default_franklab`` does not,
+    ``default_neuropixels`` enables phase-shift; ``default`` does not,
     and the two presets are otherwise identical. The smoke fixture carries no
     ``inter_sample_shift`` property, so the requested phase-shift is **skipped**
     (with a logged warning) and the two presets must materialize to the **same
@@ -7380,7 +7384,7 @@ def test_neuropixels_preset_phase_shift_inert_without_property(
     }
 
     fl_pk = RecordingSelection.insert_selection(
-        {**common, "preprocessing_params_name": "default_franklab"}
+        {**common, "preprocessing_params_name": "default"}
     )
     Recording.populate(fl_pk, reserve_jobs=False)
     traces_fl = Recording().get_recording(fl_pk).get_traces()
@@ -7393,7 +7397,7 @@ def test_neuropixels_preset_phase_shift_inert_without_property(
     traces_np = Recording().get_recording(np_pk).get_traces()
 
     assert _np.array_equal(traces_np, traces_fl), (
-        "default_neuropixels and default_franklab produced different traces "
+        "default_neuropixels and default produced different traces "
         "on a fixture without inter_sample_shift; the phase-shift was NOT "
         "skipped (or the presets differ by more than phase-shift)."
     )
@@ -7449,7 +7453,7 @@ def test_recording_selection_raises_on_duplicate_logical_identity(
         "nwb_file_name": nwb_file_name,
         "sort_group_id": sort_group_id,
         "interval_list_name": "raw data valid times",
-        "preprocessing_params_name": "default_franklab",
+        "preprocessing_params_name": "default",
         "team_name": "v2_test_team",
     }
     # Bypass the helper to plant the duplicate (this is what the
@@ -7925,7 +7929,7 @@ def test_disjoint_sort_intervals_concatenated(polymer_smoke_session):
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": disjoint_interval_name,
-            "preprocessing_params_name": "default_franklab",
+            "preprocessing_params_name": "default",
             "team_name": "v2_test_team",
         }
     )
@@ -8040,7 +8044,7 @@ def test_artifact_valid_times_respect_disjoint_gap(polymer_smoke_session):
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": disjoint_name,
-            "preprocessing_params_name": "default_franklab",
+            "preprocessing_params_name": "default",
             "team_name": "v2_test_team",
         }
     )
@@ -8713,7 +8717,7 @@ def test_mountainsort5_ground_truth_neuropixels_60s(neuropixels_60s_session):
                 "nwb_file_name": nwb_file_name,
                 "sort_group_id": sg_id,
                 "interval_list_name": "raw data valid times",
-                "preprocessing_params_name": "default_franklab",
+                "preprocessing_params_name": "default",
                 "team_name": "v2_test_team",
             }
         )
@@ -8730,7 +8734,7 @@ def test_mountainsort5_ground_truth_neuropixels_60s(neuropixels_60s_session):
                 "recording_id": rec_pk["recording_id"],
                 "sorter": "mountainsort5",
                 "sorter_params_name": (
-                    "franklab_tetrode_hippocampus_30kHz_ms5"
+                    "franklab_30khz_ms5_2026_06"
                 ),
                 "artifact_detection_id": art_pk["artifact_detection_id"],
             }
@@ -9121,7 +9125,7 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
     # Map v1's row-name conventions to v2's equivalents. v1 ships
     # ``preproc_param_name="default"`` / ``sorter_param_name=
     # "default_clusterless"``; v2 ships ``preprocessing_params_name=
-    # "default_franklab"`` / ``sorter_params_name="default"``. The
+    # "default"`` / ``sorter_params_name="default"``. The
     # smoke row (``smoke_clusterless_5uv``) is consistently named
     # across both pipelines. Custom names that the lab user picks
     # are honored verbatim (fall-through in the mapping helpers).
@@ -9907,7 +9911,7 @@ def test_v2_real_data_v1_parity_mountainsort4(
 # v1 on the polymer MS4 path (test_v2_real_data_v1_parity_mountainsort4) is
 # the canonical v2-correctness gate for MS4.
 _MS4_GT_CASES = [
-    ("polymer_60s", "franklab_probe_ctx_30kHz_ms4"),
+    ("polymer_60s", "franklab_30khz_ms4_2026_06"),
 ]
 
 
@@ -9929,7 +9933,8 @@ def test_mountainsort4_ground_truth(
 
     Parametrization:
       * ``polymer_60s`` -- 128-channel polymer probe (4 shanks),
-        ``franklab_probe_ctx_30kHz_ms4`` params (freq 300-6000).
+        ``franklab_30khz_ms4_2026_06`` params (MS4 runs ``filter=False``;
+        the 300-6000 Hz band comes from the ``default`` preproc row).
 
     Tetrode coverage was attempted and removed (see comment above
     ``_MS4_GT_CASES``): MS4 fundamentally cannot resolve a 4-channel
@@ -9992,7 +9997,7 @@ def test_mountainsort4_ground_truth(
                 "nwb_file_name": nwb_file_name,
                 "sort_group_id": sg_id,
                 "interval_list_name": "raw data valid times",
-                "preprocessing_params_name": "default_franklab",
+                "preprocessing_params_name": "default",
                 "team_name": "v2_test_team",
             }
         )
@@ -10238,7 +10243,7 @@ def test_clusterless_thresholder_ground_truth(
                 "nwb_file_name": nwb_file_name,
                 "sort_group_id": sg_id,
                 "interval_list_name": "raw data valid times",
-                "preprocessing_params_name": "default_franklab",
+                "preprocessing_params_name": "default",
                 "team_name": "v2_test_team",
             }
         )
@@ -10727,7 +10732,7 @@ def test_recording_specific_reference_drops_ref_channel(polymer_smoke_session):
             "nwb_file_name": nwb_file_name,
             "sort_group_id": target_sg,
             "interval_list_name": "raw data valid times",
-            "preprocessing_params_name": "default_franklab",
+            "preprocessing_params_name": "default",
             "team_name": "v2_test_team",
         }
     )
@@ -11552,7 +11557,7 @@ def test_recording_multi_interval_saved_times_use_concat_path(
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": interval_name,
-            "preprocessing_params_name": "default_franklab",
+            "preprocessing_params_name": "default",
             "team_name": "v2_test_team",
         }
     )
@@ -11623,7 +11628,7 @@ def test_recording_fresh_write_cleanup_unlinks_staged_file(
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": "raw data valid times",
-            "preprocessing_params_name": "default_franklab",
+            "preprocessing_params_name": "default",
             "team_name": "v2_test_team",
         }
     )
@@ -12304,11 +12309,13 @@ def test_list_pipeline_presets_enumerates_all_pipeline_presets():
     assert set(presets) == set(
         _PIPELINE_PRESETS
     ), "list_pipeline_presets() must enumerate exactly the registered _PIPELINE_PRESETS keys"
-    # The three shipped pipeline presets are present (guards an accidental rename).
+    # Representative shipped pipeline presets (the MS4 default, the MS5
+    # alternative, and the clusterless preset) are present -- guards an
+    # accidental rename of the headline names.
     for name in (
-        "franklab_tetrode_mountainsort4",
-        "franklab_tetrode_mountainsort5",
-        "franklab_tetrode_clusterless_thresholder",
+        "franklab_tetrode_hippocampus_30khz_ms4_2026_06",
+        "franklab_tetrode_hippocampus_30khz_ms5_2026_06",
+        "franklab_clusterless_2026_06",
     ):
         assert name in presets
 
@@ -12334,7 +12341,7 @@ def test_run_v2_pipeline_idempotent_existing_root(polymer_smoke_session):
         sort_group_id=sort_group_id,
         interval_list_name="raw data valid times",
         team_name=team_name,
-        pipeline_preset="franklab_tetrode_clusterless_thresholder",
+        pipeline_preset="franklab_clusterless_2026_06",
     )
     try:
         first = run_v2_pipeline(**common)
@@ -12379,7 +12386,7 @@ def test_run_v2_pipeline_pipeline_preset_wiring_to_manifest(
     nwb_file_name, sort_group_id, team_name = _prepare_pipeline_session(
         polymer_smoke_session
     )
-    pipeline_preset_name = "franklab_tetrode_mountainsort5"
+    pipeline_preset_name = "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
     try:
         manifest = run_v2_pipeline(
             nwb_file_name=nwb_file_name,
@@ -12423,7 +12430,7 @@ def test_run_v2_pipeline_mountainsort4_pipeline_preset(polymer_smoke_session):
                 sort_group_id=sort_group_id,
                 interval_list_name="raw data valid times",
                 team_name=team_name,
-                pipeline_preset="franklab_tetrode_mountainsort4",
+                pipeline_preset="franklab_tetrode_hippocampus_30khz_ms4_2026_06",
             )
         except SpikeSortingError as exc:
             # Narrow to the sorter-RUNTIME failure only: mountainsort4 ships in
@@ -12437,7 +12444,7 @@ def test_run_v2_pipeline_mountainsort4_pipeline_preset(polymer_smoke_session):
         assert sel["sorter"] == "mountainsort4"
         assert (
             sel["sorter_params_name"]
-            == "franklab_tetrode_hippocampus_30kHz_ms4"
+            == "franklab_30khz_ms4_2026_06"
         )
     finally:
         _clean_session_v2(polymer_smoke_session)
@@ -12521,7 +12528,7 @@ def test_disjoint_multi_gap_readback_and_artifact(
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": disjoint_name,
-            "preprocessing_params_name": "default_franklab",
+            "preprocessing_params_name": "default",
             "team_name": "v2_test_team",
         }
     )
@@ -12694,7 +12701,7 @@ def test_shared_artifact_group_multi_member_union(
             "nwb_file_name": nwb_file_name,
             "sort_group_id": sort_group_id,
             "interval_list_name": second_interval,
-            "preprocessing_params_name": "default_franklab",
+            "preprocessing_params_name": "default",
             "team_name": "v2_test_team",
         }
     )

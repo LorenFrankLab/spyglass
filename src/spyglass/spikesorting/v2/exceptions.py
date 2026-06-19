@@ -18,6 +18,21 @@ class DuplicateSelectionError(ValueError):
     """
 
 
+class DuplicateParameterContentError(ValueError):
+    """Raise when a parameter row duplicates existing content under a new name.
+
+    A validated ``PreprocessingParameters`` / ``ArtifactDetectionParameters``
+    / ``SorterParameters`` insert carries a ``params`` blob whose content
+    fingerprint (name excluded; ``SorterParameters`` scoped per sorter)
+    already exists under a different row name. A second name for identical
+    content forks provenance -- two ``recording_id`` / ``sorting_id`` families
+    for the same science -- so it is rejected by default. Message names the
+    incoming name, the existing name, and the shared fingerprint. Pass
+    ``allow_duplicate_params=True`` to opt in (the row then shows a
+    ``duplicate_of`` in ``describe_parameter_rows()``).
+    """
+
+
 class SchemaBypassError(RuntimeError):
     """Raise when a source-part master row lacks exactly one source part.
 

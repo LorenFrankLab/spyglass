@@ -10,14 +10,29 @@ notebook. For the pipeline overview, see
 
 ## 1. What you call differently
 
-- **Sorter rows are named differently.** v1's
-  `franklab_tetrode_hippocampus_30KHz` (capital K) is now
-  `franklab_tetrode_hippocampus_30kHz_ms4` (lowercase k + sorter suffix),
-  with a sibling `_ms5` row. v1-name alias rows ship for one release, so
-  old strings keep resolving for now — but update to the canonical names.
-  Two more renames have **no alias** (update the string): the
-  `clusterless_thresholder` params row `default_clusterless` → `default`,
-  and the `kilosort4` params row `default` → `franklab_neuropixels_default`.
+- **Parameter rows are named differently — no back-compat aliases.** The
+  June 2026 catalog correction renames every Frank-lab row to a dated,
+  content-stable name and drops the brief v1-name alias shim, so old strings
+  no longer resolve — update them:
+    - `PreprocessingParameters`: v1's single `default` (and v2's interim
+      `default_franklab`) → `default`; the production region recipes are
+      `franklab_hippocampus_2026_06` (600 Hz high-pass) and
+      `franklab_cortex_2026_06` (300 Hz).
+    - `SorterParameters` (MountainSort4): the region-encoded
+      `franklab_tetrode_hippocampus_30kHz_ms4` / `franklab_probe_ctx_30kHz_ms4`
+      rows — and v1's bare `franklab_tetrode_hippocampus_30KHz` /
+      `franklab_probe_ctx_30KHz` — → the rate-keyed
+      `franklab_30khz_ms4_2026_06` / `franklab_20khz_ms4_2026_06`. MS4 runs
+      `filter=False`, so the row is region-agnostic; the high-pass band lives
+      on the preproc row, not the sorter row.
+    - `SorterParameters` (other): `franklab_tetrode_hippocampus_30kHz_ms5` →
+      `franklab_30khz_ms5_2026_06`; the `clusterless_thresholder` row
+      `default_clusterless` → `default`; the `kilosort4` row `default` →
+      `franklab_neuropixels_default`.
+    - `ArtifactDetectionParameters`: the production rows are
+      `franklab_100uv_p07_2026_06` / `franklab_50uv_p07_2026_06`; the 500 µV
+      schema default keeps the name `default`.
+
   Rows are keyed by the `(sorter, sorter_params_name)` pair, so a bare
   `"default"` is unambiguous per sorter.
 - **`apply_merge` is singular.** `CurationV2.insert_curation(...,

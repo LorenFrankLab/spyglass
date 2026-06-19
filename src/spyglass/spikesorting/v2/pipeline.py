@@ -9,10 +9,11 @@ auto-curation, concat sorts, cross-session matching, UI hooks) come
 in later versions.
 
 Pipeline presets are Pydantic-validated bundles of Lookup-row names; the
-orchestrator looks them up at first call. Three presets ship today:
-    franklab_tetrode_mountainsort4
-    franklab_tetrode_mountainsort5
-    franklab_tetrode_clusterless_thresholder
+orchestrator looks them up at first call. The shipped presets are the dated
+franklab production recipes -- MountainSort4 by target region (hippocampus
+600 Hz / cortex 300 Hz high-pass) and sampling rate, plus a MountainSort5
+alternative and a clusterless preset. Call ``describe_pipeline_presets()``
+for the catalog and ``list_pipeline_presets()`` for the names.
 
 The orchestrator is idempotent: re-running with the same inputs finds
 existing rows via the insert_selection helpers and returns the same
@@ -53,8 +54,21 @@ class _PipelinePreset(BaseModel):
     artifact_detection_params_name: str
     sorter: str
     sorter_params_name: str
+    # Discovery metadata (no runtime behavior) -- the axes a scientist picks a
+    # preset by. probe_type is informational: the recipe is set by target
+    # region (the preproc high-pass) and sampling rate (the sorter window),
+    # not by probe geometry, so e.g. the tetrode- and probe-hippocampus 30 kHz
+    # presets resolve to the SAME parameter rows.
+    probe_type: str = ""  # "tetrode" | "probe" | "" (not applicable)
+    target_region: str = ""  # "hippocampus" | "cortex" -> preproc high-pass
+    sampling_rate_hz: "int | None" = None
+    sorter_family: str = ""
+    adjacency_radius_um: "float | None" = (
+        None  # informational MS4 spatial radius
+    )
+    recommendation_status: str = ""  # production | alternative | experimental
     intended_use: str = ""  # one-line "when to reach for this pipeline preset"
-    threshold_units: str = ""  # detection-threshold units (MAD mult. / µV)
+    threshold_units: str = ""  # detection-threshold units (sigma / µV)
     notes: str = ""  # key assumptions (probe geometry, sampling rate, etc.)
 
 
@@ -67,8 +81,8 @@ def list_pipeline_presets() -> list[str]:
     Examples
     --------
     >>> from spyglass.spikesorting.v2.pipeline import list_pipeline_presets
-    >>> list_pipeline_presets()
-    ['franklab_tetrode_clusterless_thresholder', 'franklab_tetrode_mountainsort4', 'franklab_tetrode_mountainsort5']
+    >>> any("ms4_2026_06" in p for p in list_pipeline_presets())
+    True
     """
     return sorted(_PIPELINE_PRESETS)
 
@@ -87,23 +101,31 @@ def describe_pipeline_presets() -> "pd.DataFrame":
     Returns
     -------
     pandas.DataFrame
-        One row per pipeline preset, sorted by name, with columns
-        ``pipeline_preset``, ``sorter``, ``preprocessing_params_name``,
-        ``artifact_detection_params_name``, ``sorter_params_name``,
-        ``intended_use``, ``threshold_units``, and ``notes``. Call
-        ``.to_dict("records")`` for raw rows.
+        One row per pipeline preset, sorted by name, with discovery
+        metadata (``recommendation_status``, ``probe_type``,
+        ``target_region``, ``sampling_rate_hz``, ``sorter``,
+        ``sorter_family``, ``adjacency_radius_um``), the resolved row names
+        (``preprocessing_params_name`` / ``artifact_detection_params_name``
+        / ``sorter_params_name``), ``intended_use``, ``threshold_units``,
+        and ``notes``. Call ``.to_dict("records")`` for raw rows.
 
     Examples
     --------
     >>> from spyglass.spikesorting.v2.pipeline import describe_pipeline_presets
-    >>> describe_pipeline_presets()["pipeline_preset"].tolist()
-    ['franklab_tetrode_clusterless_thresholder', 'franklab_tetrode_mountainsort4', 'franklab_tetrode_mountainsort5']
+    >>> "recommendation_status" in describe_pipeline_presets().columns
+    True
     """
     import pandas as pd
 
     columns = [
         "pipeline_preset",
+        "recommendation_status",
+        "probe_type",
+        "target_region",
+        "sampling_rate_hz",
         "sorter",
+        "sorter_family",
+        "adjacency_radius_um",
         "preprocessing_params_name",
         "artifact_detection_params_name",
         "sorter_params_name",
@@ -114,19 +136,282 @@ def describe_pipeline_presets() -> "pd.DataFrame":
     rows = [
         {
             "pipeline_preset": name,
-            "sorter": pipeline_preset.sorter,
-            "preprocessing_params_name": pipeline_preset.preprocessing_params_name,
+            "recommendation_status": preset.recommendation_status,
+            "probe_type": preset.probe_type,
+            "target_region": preset.target_region,
+            "sampling_rate_hz": preset.sampling_rate_hz,
+            "sorter": preset.sorter,
+            "sorter_family": preset.sorter_family,
+            "adjacency_radius_um": preset.adjacency_radius_um,
+            "preprocessing_params_name": preset.preprocessing_params_name,
             "artifact_detection_params_name": (
-                pipeline_preset.artifact_detection_params_name
+                preset.artifact_detection_params_name
             ),
-            "sorter_params_name": pipeline_preset.sorter_params_name,
-            "intended_use": pipeline_preset.intended_use,
-            "threshold_units": pipeline_preset.threshold_units,
-            "notes": pipeline_preset.notes,
+            "sorter_params_name": preset.sorter_params_name,
+            "intended_use": preset.intended_use,
+            "threshold_units": preset.threshold_units,
+            "notes": preset.notes,
         }
-        for name, pipeline_preset in sorted(_PIPELINE_PRESETS.items())
+        for name, preset in sorted(_PIPELINE_PRESETS.items())
     ]
     return pd.DataFrame(rows, columns=columns)
+
+
+_PARAMETER_ROW_COLUMNS = [
+    "table",
+    "parameter_name",
+    "sorter",
+    "probe_type",
+    "sampling_rate_hz",
+    "adjacency_radius_um",
+    "params_schema_version",
+    "fingerprint",
+    "is_shipped_default",
+    "recommendation_status",
+    "used_by_pipeline_presets",
+    "duplicate_of",
+    "name_warnings",
+    "summary",
+]
+
+
+def describe_parameter_rows() -> "pd.DataFrame":
+    """Catalog the parameter-Lookup rows currently in the database.
+
+    One row per ``PreprocessingParameters`` / ``ArtifactDetectionParameters``
+    / ``SorterParameters`` row, with its content fingerprint (the row name
+    excluded; ``SorterParameters`` scoped per sorter), whether it is a shipped
+    catalog default, which pipeline presets reference it, and -- when its
+    content duplicates another row's -- the name it duplicates. Discovery
+    metadata that lives on the *presets* (``probe_type`` / ``sampling_rate_hz``
+    / ``recommendation_status``) is folded down onto each row from the presets
+    that use it (left blank / ``None`` when those presets disagree);
+    ``adjacency_radius_um`` is read straight from the ``SorterParameters``
+    blob.
+
+    Unlike the DB-free :func:`describe_pipeline_presets`, this reads the **live
+    tables**, so user-added rows appear -- call ``insert_default()`` on the
+    three parameter tables first to populate the shipped catalog.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Columns ``table``, ``parameter_name``, ``sorter``, ``probe_type``,
+        ``sampling_rate_hz``, ``adjacency_radius_um``, ``params_schema_version``,
+        ``fingerprint`` (short), ``is_shipped_default``,
+        ``recommendation_status``, ``used_by_pipeline_presets`` (list of preset
+        names), ``duplicate_of``, ``name_warnings``, and ``summary``; sorted by
+        ``(table, sorter, parameter_name)``.
+    """
+    import pandas as pd
+
+    from spyglass.spikesorting.v2._parameter_identity import (
+        parameter_fingerprint,
+        short_fingerprint,
+    )
+    from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
+    from spyglass.spikesorting.v2.recording import PreprocessingParameters
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+    from spyglass.spikesorting.v2.utils import _jsonable_blob
+
+    # Which presets reference each parameter row, per stage.
+    preproc_use: dict[str, list[str]] = {}
+    artifact_use: dict[str, list[str]] = {}
+    sorter_use: dict[tuple[str, str], list[str]] = {}
+    for preset_name, preset in _PIPELINE_PRESETS.items():
+        preproc_use.setdefault(
+            preset.preprocessing_params_name, []
+        ).append(preset_name)
+        artifact_use.setdefault(
+            preset.artifact_detection_params_name, []
+        ).append(preset_name)
+        sorter_use.setdefault(
+            (preset.sorter, preset.sorter_params_name), []
+        ).append(preset_name)
+
+    shipped_preproc = {r[0] for r in PreprocessingParameters._DEFAULT_CONTENTS}
+    shipped_artifact = {
+        r[0] for r in ArtifactDetectionParameters._DEFAULT_CONTENTS
+    }
+    shipped_sorter = {
+        (r[0], r[1]) for r in SorterParameters._DEFAULT_CONTENTS
+    }
+
+    def _str_axis(used_by: list[str], attr: str) -> str:
+        """Distinct non-blank preset values for ``attr``, comma-joined."""
+        vals = {getattr(_PIPELINE_PRESETS[u], attr) for u in used_by}
+        vals.discard("")
+        vals.discard(None)
+        return ", ".join(sorted(vals))
+
+    def _num_axis(used_by: list[str], attr: str):
+        """The single agreed preset value for a numeric ``attr``, else None."""
+        vals = {getattr(_PIPELINE_PRESETS[u], attr) for u in used_by}
+        vals.discard(None)
+        return next(iter(vals)) if len(vals) == 1 else None
+
+    def _preproc_summary(params: dict) -> str:
+        band = params.get("bandpass_filter")
+        seg = params.get("min_segment_length")
+        seg_str = f", min_segment {seg:g} s" if seg is not None else ""
+        if band:
+            return (
+                f"bandpass {band['freq_min']:g}-{band['freq_max']:g} Hz"
+                + seg_str
+            )
+        return "no bandpass" + seg_str
+
+    def _artifact_summary(params: dict) -> str:
+        if not params.get("detect", True):
+            return "artifact detection off"
+        amp = params.get("amplitude_threshold_uv")
+        zscore = params.get("zscore_threshold")
+        prop = params.get("proportion_above_threshold")
+        if amp is not None:
+            threshold = f"{amp:g} uV"
+        elif zscore is not None:
+            threshold = f"{zscore:g} z-score"
+        else:
+            threshold = "no threshold"
+        prop_str = (
+            f" @ {prop:g} proportion-above-threshold"
+            if prop is not None
+            else ""
+        )
+        return threshold + prop_str
+
+    def _sorter_summary(sorter: str, params: dict) -> str:
+        bits = [sorter]
+        threshold = params.get("detect_threshold")
+        if threshold is not None:
+            bits.append(f"detect_threshold {threshold:g}")
+        radius = params.get("adjacency_radius")
+        if radius is not None:
+            bits.append(f"adjacency_radius {radius:g} um")
+        return ", ".join(bits)
+
+    records: list[dict] = []
+    for row in PreprocessingParameters.fetch(as_dict=True):
+        params = _jsonable_blob(row["params"])
+        used = sorted(preproc_use.get(row["preprocessing_params_name"], []))
+        records.append(
+            {
+                "table": "PreprocessingParameters",
+                "parameter_name": row["preprocessing_params_name"],
+                "sorter": "",
+                "probe_type": _str_axis(used, "probe_type"),
+                "sampling_rate_hz": _num_axis(used, "sampling_rate_hz"),
+                "adjacency_radius_um": None,
+                "params_schema_version": int(row["params_schema_version"]),
+                "_fp": parameter_fingerprint(
+                    "PreprocessingParameters",
+                    params=params,
+                    params_schema_version=int(row["params_schema_version"]),
+                    job_kwargs=_jsonable_blob(row["job_kwargs"]),
+                ),
+                "is_shipped_default": (
+                    row["preprocessing_params_name"] in shipped_preproc
+                ),
+                "recommendation_status": _str_axis(
+                    used, "recommendation_status"
+                ),
+                "used_by_pipeline_presets": used,
+                "summary": _preproc_summary(params),
+            }
+        )
+    for row in ArtifactDetectionParameters.fetch(as_dict=True):
+        params = _jsonable_blob(row["params"])
+        used = sorted(
+            artifact_use.get(row["artifact_detection_params_name"], [])
+        )
+        records.append(
+            {
+                "table": "ArtifactDetectionParameters",
+                "parameter_name": row["artifact_detection_params_name"],
+                "sorter": "",
+                "probe_type": _str_axis(used, "probe_type"),
+                "sampling_rate_hz": _num_axis(used, "sampling_rate_hz"),
+                "adjacency_radius_um": None,
+                "params_schema_version": int(row["params_schema_version"]),
+                "_fp": parameter_fingerprint(
+                    "ArtifactDetectionParameters",
+                    params=params,
+                    params_schema_version=int(row["params_schema_version"]),
+                    job_kwargs=_jsonable_blob(row["job_kwargs"]),
+                ),
+                "is_shipped_default": (
+                    row["artifact_detection_params_name"] in shipped_artifact
+                ),
+                "recommendation_status": _str_axis(
+                    used, "recommendation_status"
+                ),
+                "used_by_pipeline_presets": used,
+                "summary": _artifact_summary(params),
+            }
+        )
+    for row in SorterParameters.fetch(as_dict=True):
+        params = _jsonable_blob(row["params"])
+        key = (row["sorter"], row["sorter_params_name"])
+        used = sorted(sorter_use.get(key, []))
+        radius = params.get("adjacency_radius")
+        records.append(
+            {
+                "table": "SorterParameters",
+                "parameter_name": row["sorter_params_name"],
+                "sorter": row["sorter"],
+                "probe_type": _str_axis(used, "probe_type"),
+                "sampling_rate_hz": _num_axis(used, "sampling_rate_hz"),
+                "adjacency_radius_um": (
+                    float(radius) if radius is not None else None
+                ),
+                "params_schema_version": int(row["params_schema_version"]),
+                "_fp": parameter_fingerprint(
+                    "SorterParameters",
+                    params=params,
+                    params_schema_version=int(row["params_schema_version"]),
+                    job_kwargs=_jsonable_blob(row["job_kwargs"]),
+                    sorter=row["sorter"],
+                ),
+                "is_shipped_default": key in shipped_sorter,
+                "recommendation_status": _str_axis(
+                    used, "recommendation_status"
+                ),
+                "used_by_pipeline_presets": used,
+                "summary": _sorter_summary(row["sorter"], params),
+            }
+        )
+
+    # Duplicate-content detection: rows sharing a fingerprint within the same
+    # (table, sorter) scope are content duplicates under different names.
+    names_by_fp: dict[tuple[str, str, str], list[str]] = {}
+    for rec in records:
+        names_by_fp.setdefault(
+            (rec["table"], rec["sorter"], rec["_fp"]), []
+        ).append(rec["parameter_name"])
+
+    for rec in records:
+        group = sorted(
+            names_by_fp[(rec["table"], rec["sorter"], rec["_fp"])]
+        )
+        others = [n for n in group if n != rec["parameter_name"]]
+        rec["duplicate_of"] = others[0] if others else None
+        rec["fingerprint"] = short_fingerprint(rec["_fp"])
+        warnings = []
+        if rec["duplicate_of"]:
+            warnings.append(f"duplicate content of {rec['duplicate_of']!r}")
+        if "franklab" in rec["parameter_name"] and not rec[
+            "is_shipped_default"
+        ]:
+            warnings.append("non-catalog row using the 'franklab' name")
+        rec["name_warnings"] = "; ".join(warnings)
+
+    frame = pd.DataFrame(
+        [{c: rec.get(c) for c in _PARAMETER_ROW_COLUMNS} for rec in records],
+        columns=_PARAMETER_ROW_COLUMNS,
+    )
+    return frame.sort_values(
+        ["table", "sorter", "parameter_name"]
+    ).reset_index(drop=True)
 
 
 _SORT_GROUP_COLUMNS = [
@@ -668,54 +953,107 @@ def plot_sort_group_geometry(
     return ax
 
 
-_PIPELINE_PRESETS: dict[str, _PipelinePreset] = {
-    "franklab_tetrode_mountainsort4": _PipelinePreset(
-        preprocessing_params_name="default_franklab",
-        artifact_detection_params_name="default",
+# Production region preproc + rate-keyed MS4 sorter rows the franklab MS4
+# presets bundle. probe_type is informational (the recipe is region + rate),
+# so the tetrode- and probe-hippocampus-30 kHz presets resolve identically.
+_REGION_PREPROC = {
+    "hippocampus": "franklab_hippocampus_2026_06",
+    "cortex": "franklab_cortex_2026_06",
+}
+_RATE_MS4_SORTER = {
+    30000: "franklab_30khz_ms4_2026_06",
+    20000: "franklab_20khz_ms4_2026_06",
+}
+_MS4_THRESHOLD_UNITS = "sigma of the whitened signal (~3)"
+_MS4_NOTES = (
+    "MountainSort4 detect_threshold is a multiple of the standard deviation "
+    "of the ZCA-whitened signal (~3), not an absolute voltage and not a MAD "
+    "multiplier. MS4 oversplits and does not track drift, so merge curation "
+    "is expected (Kilosort is the Neuropixels-density alternative)."
+)
+
+
+def _franklab_ms4_preset(
+    probe_type: str, region: str, rate_hz: int
+) -> "_PipelinePreset":
+    """Build a production MS4 preset for a (probe_type, region, rate)."""
+    return _PipelinePreset(
+        preprocessing_params_name=_REGION_PREPROC[region],
+        artifact_detection_params_name="franklab_100uv_p07_2026_06",
         sorter="mountainsort4",
-        sorter_params_name="franklab_tetrode_hippocampus_30kHz_ms4",
+        sorter_params_name=_RATE_MS4_SORTER[rate_hz],
+        probe_type=probe_type,
+        target_region=region,
+        sampling_rate_hz=rate_hz,
+        sorter_family="mountainsort4",
+        adjacency_radius_um=100.0,
+        recommendation_status="production",
         intended_use=(
-            "Frank-lab hippocampal tetrodes at 30 kHz; legacy MountainSort4 "
-            "(parity with v1)."
+            f"Frank-lab {region} {probe_type}s at {rate_hz // 1000} kHz "
+            "(MountainSort4 production recipe)."
         ),
-        threshold_units="MAD multiplier",
-        notes=(
-            "MountainSort detect_threshold is a median-absolute-deviation "
-            "multiplier on the per-channel noise floor, not an absolute "
-            "voltage."
-        ),
+        threshold_units=_MS4_THRESHOLD_UNITS,
+        notes=_MS4_NOTES,
+    )
+
+
+_PIPELINE_PRESETS: dict[str, _PipelinePreset] = {
+    "franklab_tetrode_hippocampus_30khz_ms4_2026_06": _franklab_ms4_preset(
+        "tetrode", "hippocampus", 30000
     ),
-    "franklab_tetrode_mountainsort5": _PipelinePreset(
-        preprocessing_params_name="default_franklab",
-        artifact_detection_params_name="default",
+    "franklab_probe_hippocampus_30khz_ms4_2026_06": _franklab_ms4_preset(
+        "probe", "hippocampus", 30000
+    ),
+    "franklab_probe_cortex_30khz_ms4_2026_06": _franklab_ms4_preset(
+        "probe", "cortex", 30000
+    ),
+    "franklab_probe_hippocampus_20khz_ms4_2026_06": _franklab_ms4_preset(
+        "probe", "hippocampus", 20000
+    ),
+    "franklab_probe_cortex_20khz_ms4_2026_06": _franklab_ms4_preset(
+        "probe", "cortex", 20000
+    ),
+    "franklab_tetrode_hippocampus_30khz_ms5_2026_06": _PipelinePreset(
+        preprocessing_params_name="franklab_hippocampus_2026_06",
+        artifact_detection_params_name="franklab_100uv_p07_2026_06",
         sorter="mountainsort5",
-        sorter_params_name="franklab_tetrode_hippocampus_30kHz_ms5",
+        sorter_params_name="franklab_30khz_ms5_2026_06",
+        probe_type="tetrode",
+        target_region="hippocampus",
+        sampling_rate_hz=30000,
+        sorter_family="mountainsort5",
+        recommendation_status="alternative",
         intended_use=(
-            "Frank-lab hippocampal tetrodes at 30 kHz; recommended default "
-            "(current MountainSort5 settings)."
+            "Frank-lab hippocampal tetrodes at 30 kHz, MountainSort5 -- a "
+            "production-grade alternative to the MS4 default."
         ),
-        threshold_units="MAD multiplier",
+        threshold_units="sigma of the whitened signal (~5.5)",
         notes=(
-            "MountainSort detect_threshold is a median-absolute-deviation "
-            "multiplier on the per-channel noise floor, not an absolute "
-            "voltage."
+            "MountainSort5 detect_threshold is a multiple of the standard "
+            "deviation of the whitened signal (~5.5, more conservative than "
+            "MS4's 3) -- the same sigma scale, not a MAD multiplier. MS4 is "
+            "the production default; MS5 has no attested probe usage."
         ),
     ),
-    "franklab_tetrode_clusterless_thresholder": _PipelinePreset(
-        preprocessing_params_name="default_franklab",
+    "franklab_clusterless_2026_06": _PipelinePreset(
+        preprocessing_params_name="default",
         artifact_detection_params_name="default",
         sorter="clusterless_thresholder",
         sorter_params_name="default",
+        target_region="hippocampus",
+        sorter_family="clusterless_thresholder",
+        recommendation_status="production",
         intended_use=(
             "Peak detection only (no clustering); feeds the clusterless "
             "decoding pipeline."
         ),
-        threshold_units="µV (100 µV default)",
+        threshold_units="µV (100 µV)",
         notes=(
             "The 'default' clusterless SorterParameters row sets "
-            "threshold_unit='uv' with detect_threshold=100, so the traces are "
-            "scaled to microvolts before detection -- a true 100 µV threshold, "
-            "not a MAD multiplier."
+            "threshold_unit='uv' with detect_threshold=100, so traces are "
+            "scaled to microvolts before detection -- a true 100 µV "
+            "threshold, not a MAD multiplier. Preproc/artifact rows are "
+            "unchanged from the prior clusterless preset."
         ),
     ),
 }
@@ -782,7 +1120,7 @@ def preflight_v2_pipeline(
     sort_group_id: int,
     interval_list_name: str,
     team_name: str,
-    pipeline_preset: str = "franklab_tetrode_mountainsort5",
+    pipeline_preset: str = "franklab_tetrode_hippocampus_30khz_ms4_2026_06",
 ) -> PreflightReport:
     """Read-only pre-populate configuration check for ``run_v2_pipeline``.
 
@@ -845,7 +1183,7 @@ def preflight_v2_pipeline(
 
     import spikeinterface.sorters as sis
 
-    from spyglass.common import IntervalList, LabTeam, Session
+    from spyglass.common import IntervalList, LabTeam, Raw, Session
     from spyglass.spikesorting.v2._selection_identity import (
         artifact_detection_identity_payload,
         deterministic_id,
@@ -929,6 +1267,34 @@ def preflight_v2_pipeline(
         f"sorter_params_name={bundle.sorter_params_name!r}) is missing. "
         "Run initialize_v2_defaults().",
     )
+
+    # 8b. sampling_rate_matches. The MS4/MS5 snippet window (clip_size /
+    # detect_interval on the rate-keyed sorter row) assumes a specific
+    # acquisition rate, so a 30 kHz preset on a 20 kHz recording (or the
+    # reverse) silently sorts with a mistuned window. The clusterless preset
+    # is rate-agnostic (sampling_rate_hz is None) and is skipped; the check is
+    # also skipped if Raw is not ingested yet (session_exists already covers
+    # that, so this would only add a confusing second failure).
+    if bundle.sampling_rate_hz is not None:
+        raw = Raw & {"nwb_file_name": nwb_file_name}
+        if raw:
+            actual_rate = float(raw.fetch1("sampling_rate"))
+            # 0.5% tolerance absorbs float drift in an estimated rate.
+            rate_ok = (
+                abs(actual_rate - bundle.sampling_rate_hz)
+                <= 0.005 * bundle.sampling_rate_hz
+            )
+            _check(
+                "sampling_rate_matches",
+                rate_ok,
+                f"recording {nwb_file_name!r} samples at {actual_rate:g} Hz "
+                f"but pipeline_preset {pipeline_preset!r} is tuned for "
+                f"{bundle.sampling_rate_hz} Hz: the rate-keyed sorter row "
+                f"{bundle.sorter_params_name!r} holds its clip_size / "
+                "detect_interval snippet window at that rate. Pick the "
+                "rate-matched preset (call describe_pipeline_presets() and "
+                "match sampling_rate_hz to the recording).",
+            )
 
     # 9. sorter_installed. Reuse the SAME strict gate insert_default uses:
     # the internal clusterless_thresholder (_NON_SI_SORTERS) is never an SI
@@ -1071,7 +1437,7 @@ def run_v2_pipeline(
     sort_group_id: int,
     interval_list_name: str,
     team_name: str,
-    pipeline_preset: str = "franklab_tetrode_mountainsort5",
+    pipeline_preset: str = "franklab_tetrode_hippocampus_30khz_ms4_2026_06",
     description: str = "",
     require_units: bool = False,
     preflight: bool = True,
@@ -1120,10 +1486,9 @@ def run_v2_pipeline(
         LabTeam owning the sort. Must already exist in
         ``common.LabTeam``.
     pipeline_preset
-        Pipeline-preset name from ``_PIPELINE_PRESETS``. Three presets ship today:
-        ``franklab_tetrode_mountainsort4``,
-        ``franklab_tetrode_mountainsort5`` (default), and
-        ``franklab_tetrode_clusterless_thresholder``. Call
+        Pipeline-preset name from ``_PIPELINE_PRESETS``. The default is
+        ``franklab_tetrode_hippocampus_30khz_ms4_2026_06`` (the production
+        MountainSort4 recipe). Call
         ``describe_pipeline_presets()`` for a table of what each one does (sorter,
         parameter rows, intended use, and threshold units), or
         ``list_pipeline_presets()`` for just the names.

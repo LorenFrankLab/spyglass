@@ -515,7 +515,7 @@ def test_direct_master_insert_rejected_without_flag(fresh_recording_identity):
                 "nwb_file_name": "x_.nwb",
                 "sort_group_id": 0,
                 "interval_list_name": "raw data valid times",
-                "preprocessing_params_name": "default_franklab",
+                "preprocessing_params_name": "default",
                 "team_name": "t",
             },
         ),

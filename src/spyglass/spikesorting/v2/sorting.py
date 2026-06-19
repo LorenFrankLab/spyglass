@@ -59,6 +59,7 @@ from spyglass.spikesorting.v2.utils import (
     _assert_v2_db_safe,
     _validate_params,
     find_orphaned_masters,
+    reject_duplicate_parameter_content,
     transaction_or_noop,
     unit_brain_region_df,
     validate_lookup_rows,
@@ -192,13 +193,20 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
     job_kwargs=null: blob
     """
 
-    def insert1(self, row, **kwargs):
+    def insert1(self, row, allow_duplicate_params=False, **kwargs):
         """Validate and insert a single row via the ``insert`` path."""
         # Delegate to ``insert`` so one validated path serves both.
-        self.insert([row], **kwargs)
+        self.insert(
+            [row], allow_duplicate_params=allow_duplicate_params, **kwargs
+        )
 
-    def insert(self, rows, **kwargs):
-        """Validate every row against its per-sorter schema, then insert."""
+    def insert(self, rows, allow_duplicate_params=False, **kwargs):
+        """Validate every row against its per-sorter schema, then insert.
+
+        ``allow_duplicate_params=True`` opts out of the duplicate-content
+        guard (a second name for an existing blob, scoped per sorter); see
+        ``reject_duplicate_parameter_content``.
+        """
         # Validate every row (incl. ``insert_default``'s positional
         # ``_DEFAULT_CONTENTS``) before it lands, dispatching the Pydantic
         # schema per ``sorter``. Two per-row guards run after that:
@@ -252,44 +260,24 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
                     row["params"]["schema_version"]
                 )
 
-        super().insert(
-            validate_lookup_rows(
-                rows,
-                self.heading.names,
-                schema_for=lambda row: _get_sorter_schema(row["sorter"]),
-                table_name="SorterParameters",
-                per_row_hook=_check_sorter_and_backfill_version,
-            ),
-            **kwargs,
+        validated = validate_lookup_rows(
+            rows,
+            self.heading.names,
+            schema_for=lambda row: _get_sorter_schema(row["sorter"]),
+            table_name="SorterParameters",
+            per_row_hook=_check_sorter_and_backfill_version,
         )
+        reject_duplicate_parameter_content(
+            self,
+            validated,
+            table_name="SorterParameters",
+            name_attr="sorter_params_name",
+            sorter_keyed=True,
+            allow_duplicate_params=allow_duplicate_params,
+        )
+        super().insert(validated, **kwargs)
 
     _DEFAULT_CONTENTS: tuple = (
-        (
-            "mountainsort4",
-            "franklab_tetrode_hippocampus_30kHz_ms4",
-            _validate_params(
-                _get_sorter_schema("mountainsort4"),
-                {"freq_min": 600.0, "freq_max": 6000.0},
-            ),
-            1,
-            None,
-        ),
-        (
-            # v1-parity port of the ``franklab_probe_ctx_30KHz`` row at
-            # ``v1/sorting.py:158-159`` (cortex-probe MS4 preset).
-            # Cortex probes have lower spike-band content than
-            # tetrodes; the ``freq_min=300`` floor catches more of
-            # the spectrum than the tetrode preset's ``freq_min=600``.
-            # Name normalized to v2's lowercase-k convention.
-            "mountainsort4",
-            "franklab_probe_ctx_30kHz_ms4",
-            _validate_params(
-                _get_sorter_schema("mountainsort4"),
-                {"freq_min": 300.0, "freq_max": 6000.0},
-            ),
-            1,
-            None,
-        ),
         (
             # Production MountainSort4 recipe (June 2026), 30 kHz. Rate-keyed:
             # the sorter runs ``filter=False`` (the preproc stage already
@@ -325,41 +313,10 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
             None,
         ),
         (
-            # Back-compat alias for v1's bare ``franklab_tetrode_hippocampus
-            # _30KHz`` row name at ``v1/sorting.py:158`` (uppercase K, no
-            # ``_ms4`` suffix). v2 normalized the name to lowercase-k +
-            # ``_ms4`` (to disambiguate the MS5 sibling), which silently
-            # broke ``(SorterParameters & {"sorter_params_name":
-            # "franklab_tetrode_hippocampus_30KHz"})`` for ported v1 code.
-            # Carries the IDENTICAL params blob as the ``_ms4`` row above
-            # so both names resolve to the same validated parameters. This
-            # is a one-release shim: a future v2.x release drops it after
-            # the CHANGELOG migration window passes.
-            "mountainsort4",
-            "franklab_tetrode_hippocampus_30KHz",
-            _validate_params(
-                _get_sorter_schema("mountainsort4"),
-                {"freq_min": 600.0, "freq_max": 6000.0},
-            ),
-            1,
-            None,
-        ),
-        (
-            # Back-compat alias for v1's bare ``franklab_probe_ctx_30KHz``
-            # row name at ``v1/sorting.py:163``. Same identical-params,
-            # one-release-shim rationale as the tetrode alias above.
-            "mountainsort4",
-            "franklab_probe_ctx_30KHz",
-            _validate_params(
-                _get_sorter_schema("mountainsort4"),
-                {"freq_min": 300.0, "freq_max": 6000.0},
-            ),
-            1,
-            None,
-        ),
-        (
+            # MS5 is region-agnostic (filter=False, like MS4), so the row is
+            # rate-keyed; 30 kHz uses the schema-default snippet window.
             "mountainsort5",
-            "franklab_tetrode_hippocampus_30kHz_ms5",
+            "franklab_30khz_ms5_2026_06",
             _validate_params(_get_sorter_schema("mountainsort5"), {}),
             1,
             None,
