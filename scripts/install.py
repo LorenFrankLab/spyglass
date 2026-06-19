@@ -608,8 +608,13 @@ class CondaManager:
 
         env_file_path = REPO_ROOT / env_file
 
+        # Let conda stream its own progress/prompts directly to the terminal.
+        # Capturing its output (the previous behavior) hid conda's
+        # confirmation prompt, so `conda env create` blocked invisibly on
+        # stdin and the installer appeared to stall with no report. "-y"
+        # auto-confirms so the command runs non-interactively.
         try:
-            with subprocess.Popen(
+            subprocess.run(
                 [
                     conda_cmd,
                     "env",
@@ -618,25 +623,10 @@ class CondaManager:
                     str(env_file_path),
                     "-n",
                     self.env_name,
+                    "-y",
                 ],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-            ) as process:
-                for line in process.stdout:
-                    if any(
-                        kw in line
-                        for kw in ["Solving", "Downloading", "Extracting"]
-                    ):
-                        print(".", end="", flush=True)
-                Console.print("")
-
-            if process.returncode != 0:
-                raise subprocess.CalledProcessError(
-                    process.returncode, conda_cmd
-                )
-
+                check=True,
+            )
             Console.success(f"Environment '{self.env_name}' created")
 
         except subprocess.CalledProcessError as e:

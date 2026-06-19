@@ -100,6 +100,78 @@ class TestCondaManagerGetCommand:
                 CondaManager.get_command()
 
 
+class TestCondaManagerCreate:
+    """Regression tests for the installer stalling during env creation.
+
+    ``conda env create`` prompts for confirmation by default. The original
+    implementation captured conda's stdout/stderr into a hidden pipe while
+    passing no auto-confirm flag, so conda blocked reading stdin with its
+    prompt invisible -- a silent deadlock users experienced as the installer
+    "stalling" with no output. ``create()`` must run non-interactively (``-y``)
+    and must not capture conda's output, so prompts/progress/errors stay
+    visible on the terminal.
+    """
+
+    @pytest.fixture
+    def mock_create(self):
+        """Isolate ``create()`` from real conda.
+
+        Stubs the existence/command lookups and neuters the legacy ``Popen``
+        path so neither the old nor new implementation can launch conda.
+        Yields the ``subprocess.run`` mock for assertions.
+        """
+        with (
+            patch("install.subprocess.run") as mock_run,
+            patch("install.subprocess.Popen") as mock_popen,
+            patch.object(CondaManager, "exists", return_value=False),
+            patch.object(CondaManager, "get_command", return_value="conda"),
+        ):
+            mock_run.return_value = Mock(returncode=0)
+            legacy = mock_popen.return_value.__enter__.return_value
+            legacy.stdout = iter(())
+            legacy.returncode = 0
+            yield mock_run
+
+    def test_passes_yes_flag_for_noninteractive_create(self, mock_create):
+        """create() auto-confirms so conda never blocks on its prompt."""
+        CondaManager("spyglass-test").create(
+            "environments/environment_min.yml", force=True
+        )
+
+        assert mock_create.called, (
+            "create() must run conda via streaming subprocess.run, "
+            "not a captured Popen pipe"
+        )
+        cmd = mock_create.call_args.args[0]
+        assert cmd[:3] == ["conda", "env", "create"]
+        assert "-y" in cmd or "--yes" in cmd, (
+            "env create must auto-confirm; otherwise conda blocks on its "
+            "'Proceed ([y]/n)?' prompt and the installer stalls silently"
+        )
+
+    def test_does_not_capture_conda_output(self, mock_create):
+        """Conda's output must stream to the terminal, not into a pipe."""
+        CondaManager("spyglass-test").create(
+            "environments/environment_min.yml", force=True
+        )
+
+        kwargs = mock_create.call_args.kwargs
+        assert not kwargs.get("capture_output", False)
+        assert kwargs.get("stdout") is None
+        assert kwargs.get("stderr") is None
+
+    def test_raises_helpful_error_on_failure(self, mock_create):
+        """A failed create surfaces an actionable RuntimeError."""
+        mock_create.side_effect = subprocess.CalledProcessError(1, "conda")
+
+        with pytest.raises(
+            RuntimeError, match="Failed to create environment"
+        ):
+            CondaManager("spyglass-test").create(
+                "environments/environment_min.yml", force=True
+            )
+
+
 # =============================================================================
 # Base Directory Resolution Tests
 # =============================================================================
