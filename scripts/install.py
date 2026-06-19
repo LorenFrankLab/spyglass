@@ -651,6 +651,10 @@ class CondaManager:
         package_spec = str(REPO_ROOT)
         if extras:
             package_spec = f"{package_spec}[{','.join(extras)}]"
+
+        # Stream pip's output directly to the terminal so progress and any
+        # errors stay visible; capturing it hid a multi-minute install behind
+        # a silent prompt, indistinguishable from a stall.
         try:
             subprocess.run(
                 [
@@ -664,45 +668,18 @@ class CondaManager:
                     package_spec,
                 ],
                 check=True,
-                capture_output=True,
-                text=True,
             )
             Console.success("Spyglass installed")
         except subprocess.CalledProcessError as e:
-            error_output = e.stderr if e.stderr else str(e)
-            error_lower = error_output.lower()
-
-            # Platform-specific disk space command
             disk_space_cmd = "dir" if sys.platform == "win32" else "df -h"
-
-            if "no space left" in error_lower or "disk" in error_lower:
-                primary_cause = "Disk space is full"
-                primary_fix = (
-                    f"Free up disk space: {disk_space_cmd} shows usage"
-                )
-            elif "connection" in error_lower or "timeout" in error_lower:
-                primary_cause = "Network connection issue"
-                primary_fix = "Check internet connection and retry"
-            elif "permission" in error_lower or "access" in error_lower:
-                primary_cause = "Permission denied"
-                primary_fix = "Check write permissions in the install directory"
-            else:
-                primary_cause = "Package installation failed"
-                primary_fix = (
-                    f"Update pip: {conda_cmd} run -n {self.env_name} "
-                    "pip install --upgrade pip"
-                )
-
             raise RuntimeError(
-                f"Failed to install spyglass package.\n\n"
-                f"Most likely cause: {primary_cause}\n"
-                f"Recommended fix: {primary_fix}\n\n"
-                f"If that doesn't help, try these steps:\n"
+                "Failed to install spyglass package. "
+                "See the pip output above for the specific error.\n\n"
+                "Common fixes:\n"
                 f"  1. Update pip: {conda_cmd} run -n {self.env_name} pip install --upgrade pip\n"
                 f"  2. Check disk space: {disk_space_cmd}\n"
-                f"  3. Check network connection\n"
-                f"  4. Retry the installation\n\n"
-                f"Error details: {error_output[:500]}"
+                "  3. Check network connection\n"
+                "  4. Retry the installation"
             ) from e
 
 

@@ -172,6 +172,60 @@ class TestCondaManagerCreate:
             )
 
 
+class TestCondaManagerInstallPackage:
+    """Tests for CondaManager.install_package().
+
+    Like environment creation, the editable install can run for a while;
+    capturing its output (the previous behavior) left users staring at a
+    silent terminal with no way to tell "slow" from "stalled". The install
+    must stream its output so progress and any pip errors stay visible.
+    """
+
+    @pytest.fixture
+    def mock_install(self):
+        """Isolate install_package() from a real conda/pip invocation."""
+        with (
+            patch("install.subprocess.run") as mock_run,
+            patch.object(CondaManager, "get_command", return_value="conda"),
+        ):
+            mock_run.return_value = Mock(returncode=0)
+            yield mock_run
+
+    def test_streams_output_not_captured(self, mock_install):
+        """pip output must stream to the terminal, not into a hidden pipe."""
+        CondaManager("spyglass-test").install_package()
+
+        assert mock_install.called
+        kwargs = mock_install.call_args.kwargs
+        assert not kwargs.get("capture_output", False)
+        assert kwargs.get("stdout") is None
+        assert kwargs.get("stderr") is None
+
+    def test_installs_editable_local_package(self, mock_install):
+        """Runs `pip install -e` inside the target environment."""
+        CondaManager("spyglass-test").install_package()
+
+        cmd = mock_install.call_args.args[0]
+        assert cmd[:5] == ["conda", "run", "-n", "spyglass-test", "pip"]
+        assert "install" in cmd and "-e" in cmd
+
+    def test_extras_appended_to_package_spec(self, mock_install):
+        """Optional extras are appended to the editable spec."""
+        CondaManager("spyglass-test").install_package(extras=["kachery-cloud"])
+
+        spec = mock_install.call_args.args[0][-1]
+        assert spec.endswith("[kachery-cloud]")
+
+    def test_raises_helpful_error_on_failure(self, mock_install):
+        """A failed install surfaces an actionable RuntimeError."""
+        mock_install.side_effect = subprocess.CalledProcessError(1, "pip")
+
+        with pytest.raises(
+            RuntimeError, match="Failed to install spyglass"
+        ):
+            CondaManager("spyglass-test").install_package()
+
+
 # =============================================================================
 # Base Directory Resolution Tests
 # =============================================================================
