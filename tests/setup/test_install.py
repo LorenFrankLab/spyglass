@@ -31,6 +31,7 @@ sys.path.insert(0, str(scripts_dir))
 
 from install import (
     CondaManager,
+    Console,
     DockerManager,
     Validators,
     build_directory_structure,
@@ -164,21 +165,59 @@ class TestCondaManagerCreate:
         """A failed create surfaces an actionable RuntimeError."""
         mock_create.side_effect = subprocess.CalledProcessError(1, "conda")
 
-        with pytest.raises(
-            RuntimeError, match="Failed to create environment"
-        ):
+        with pytest.raises(RuntimeError, match="Failed to create environment"):
             CondaManager("spyglass-test").create(
                 "environments/environment_min.yml", force=True
             )
+
+    def test_existing_env_declined_skips_create_and_remove(self):
+        """Declining the overwrite prompt must not destroy or recreate the env.
+
+        The overwrite path runs the destructive `conda env remove`; a user who
+        answers "no" must keep their environment untouched (no remove, no
+        create).
+        """
+        with (
+            patch("install.subprocess.run") as mock_run,
+            patch.object(CondaManager, "exists", return_value=True),
+            patch.object(CondaManager, "get_command", return_value="conda"),
+            patch.object(CondaManager, "remove") as mock_remove,
+            patch.object(Console, "prompt_yes_no", return_value=False),
+        ):
+            CondaManager("spyglass-test").create(
+                "environments/environment_min.yml", force=False
+            )
+
+        mock_remove.assert_not_called()
+        mock_run.assert_not_called()
+
+    def test_force_removes_existing_env_before_create(self):
+        """force=True removes the existing env, then creates a fresh one."""
+        with (
+            patch("install.subprocess.run") as mock_run,
+            patch.object(CondaManager, "exists", return_value=True),
+            patch.object(CondaManager, "get_command", return_value="conda"),
+            patch.object(CondaManager, "remove") as mock_remove,
+        ):
+            mock_run.return_value = Mock(returncode=0)
+            CondaManager("spyglass-test").create(
+                "environments/environment_min.yml", force=True
+            )
+
+        mock_remove.assert_called_once()
+        assert mock_run.call_args.args[0][:3] == ["conda", "env", "create"]
 
 
 class TestCondaManagerInstallPackage:
     """Tests for CondaManager.install_package().
 
     Like environment creation, the editable install can run for a while;
-    capturing its output (the previous behavior) left users staring at a
-    silent terminal with no way to tell "slow" from "stalled". The install
-    must stream its output so progress and any pip errors stay visible.
+    capturing its output left users staring at a silent terminal with no way
+    to tell "slow" from "stalled". The install must stream its output so
+    progress and any pip errors stay visible. Because the install runs via
+    ``conda run`` -- which buffers the child's stdout/stderr by default --
+    streaming requires both not capturing at the ``subprocess.run`` layer and
+    passing ``--no-capture-output`` to ``conda run``.
     """
 
     @pytest.fixture
@@ -200,14 +239,18 @@ class TestCondaManagerInstallPackage:
         assert not kwargs.get("capture_output", False)
         assert kwargs.get("stdout") is None
         assert kwargs.get("stderr") is None
+        # conda run buffers by default; this flag is what actually makes pip
+        # stream live through the wrapper.
+        assert "--no-capture-output" in mock_install.call_args.args[0]
 
     def test_installs_editable_local_package(self, mock_install):
         """Runs `pip install -e` inside the target environment."""
         CondaManager("spyglass-test").install_package()
 
         cmd = mock_install.call_args.args[0]
-        assert cmd[:5] == ["conda", "run", "-n", "spyglass-test", "pip"]
-        assert "install" in cmd and "-e" in cmd
+        assert cmd[:3] == ["conda", "run", "--no-capture-output"]
+        assert cmd[3:5] == ["-n", "spyglass-test"]
+        assert cmd[5:8] == ["pip", "install", "-e"]
 
     def test_extras_appended_to_package_spec(self, mock_install):
         """Optional extras are appended to the editable spec."""
@@ -220,9 +263,7 @@ class TestCondaManagerInstallPackage:
         """A failed install surfaces an actionable RuntimeError."""
         mock_install.side_effect = subprocess.CalledProcessError(1, "pip")
 
-        with pytest.raises(
-            RuntimeError, match="Failed to install spyglass"
-        ):
+        with pytest.raises(RuntimeError, match="Failed to install spyglass"):
             CondaManager("spyglass-test").install_package()
 
 

@@ -653,13 +653,17 @@ class CondaManager:
             package_spec = f"{package_spec}[{','.join(extras)}]"
 
         # Stream pip's output directly to the terminal so progress and any
-        # errors stay visible; capturing it hid a multi-minute install behind
-        # a silent prompt, indistinguishable from a stall.
+        # errors stay visible; hiding it made a multi-minute install
+        # indistinguishable from a stall. `conda run` buffers the child's
+        # output by default, so "--no-capture-output" is required for it to
+        # actually stream (not capturing at the subprocess layer is not
+        # enough on its own).
         try:
             subprocess.run(
                 [
                     conda_cmd,
                     "run",
+                    "--no-capture-output",
                     "-n",
                     self.env_name,
                     "pip",
