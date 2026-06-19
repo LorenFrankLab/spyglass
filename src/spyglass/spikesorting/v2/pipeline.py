@@ -59,7 +59,7 @@ class _PipelinePreset(BaseModel):
     # region (the preproc high-pass) and sampling rate (the sorter window),
     # not by probe geometry, so e.g. the tetrode- and probe-hippocampus 30 kHz
     # presets resolve to the SAME parameter rows.
-    probe_type: str = ""  # "tetrode" | "probe" | "" (not applicable)
+    probe_type: str = ""  # "tetrode" | "probe" | "neuropixels" | "" (n/a)
     target_region: str = ""  # "hippocampus" | "cortex" -> preproc high-pass
     sampling_rate_hz: "int | None" = None
     sorter_family: str = ""
@@ -250,14 +250,23 @@ def describe_parameter_rows() -> "pd.DataFrame":
         vals.discard(None)
         return next(iter(vals)) if len(vals) == 1 else None
 
+    def _num(value) -> str:
+        # describe reads extra="allow" blobs, so a knob can legitimately be a
+        # string / list / dict. Format numerics compactly, but fall back to
+        # str() instead of letting one odd user row raise and take down the
+        # whole catalog.
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return str(value)
+        return f"{value:g}"
+
     def _preproc_summary(params: dict) -> str:
         band = params.get("bandpass_filter")
         seg = params.get("min_segment_length")
-        seg_str = f", min_segment {seg:g} s" if seg is not None else ""
+        seg_str = f", min_segment {_num(seg)} s" if seg is not None else ""
         if band:
             return (
-                f"bandpass {band['freq_min']:g}-{band['freq_max']:g} Hz"
-                + seg_str
+                f"bandpass {_num(band['freq_min'])}-"
+                f"{_num(band['freq_max'])} Hz" + seg_str
             )
         return "no bandpass" + seg_str
 
@@ -267,14 +276,14 @@ def describe_parameter_rows() -> "pd.DataFrame":
         amp = params.get("amplitude_threshold_uv")
         zscore = params.get("zscore_threshold")
         prop = params.get("proportion_above_threshold")
+        thresholds = []
         if amp is not None:
-            threshold = f"{amp:g} uV"
-        elif zscore is not None:
-            threshold = f"{zscore:g} z-score"
-        else:
-            threshold = "no threshold"
+            thresholds.append(f"{_num(amp)} uV")
+        if zscore is not None:
+            thresholds.append(f"{_num(zscore)} z-score")
+        threshold = " + ".join(thresholds) if thresholds else "no threshold"
         prop_str = (
-            f" @ {prop:g} proportion-above-threshold"
+            f" @ {_num(prop)} proportion-above-threshold"
             if prop is not None
             else ""
         )
@@ -284,10 +293,10 @@ def describe_parameter_rows() -> "pd.DataFrame":
         bits = [sorter]
         threshold = params.get("detect_threshold")
         if threshold is not None:
-            bits.append(f"detect_threshold {threshold:g}")
+            bits.append(f"detect_threshold {_num(threshold)}")
         radius = params.get("adjacency_radius")
         if radius is not None:
-            bits.append(f"adjacency_radius {radius:g} um")
+            bits.append(f"adjacency_radius {_num(radius)} um")
         return ", ".join(bits)
 
     records: list[dict] = []

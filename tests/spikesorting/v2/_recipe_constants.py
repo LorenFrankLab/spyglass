@@ -35,12 +35,10 @@ FRANKLAB_CORTEX_2026_06 = "franklab_cortex_2026_06"
 FRANKLAB_30KHZ_MS4_2026_06 = "franklab_30khz_ms4_2026_06"
 FRANKLAB_20KHZ_MS4_2026_06 = "franklab_20khz_ms4_2026_06"
 
-# Artifact detection.
+# Artifact detection. (v2's 500 uV / 1.0 schema default stays named "default" --
+# it is NOT a production recipe and ships unchanged, so no constant is needed.)
 FRANKLAB_100UV_P07_2026_06 = "franklab_100uv_p07_2026_06"
 FRANKLAB_50UV_P07_2026_06 = "franklab_50uv_p07_2026_06"
-# v2's 500 uV / 1.0 bug-fix value (NOT a production recipe), renamed honestly
-# from the old ``"default"`` name.
-FRANKLAB_500UV_BUGFIX_2026_06 = "franklab_500uv_bugfix_2026_06"
 
 
 # --- Preprocessing params blobs ----------------------------------------------

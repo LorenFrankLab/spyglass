@@ -401,3 +401,74 @@ def test_describe_parameter_rows_columns_and_usage(dj_conn):
             "is_shipped_default",
         )
     )
+
+
+@pytest.mark.database
+def test_within_batch_duplicate_content_rejected(dj_conn):
+    """Two same-content/different-name rows in ONE insert() call collide.
+
+    Distinct from the incoming-vs-stored path: the guard also tracks the
+    fingerprints accumulated WITHIN the batch, so a single bulk insert of two
+    identical-content rows under different names is rejected even when neither
+    row exists in the table yet.
+    """
+    from spyglass.spikesorting.v2._params.preprocessing import (
+        PreprocessingParamsSchema,
+    )
+    from spyglass.spikesorting.v2.exceptions import (
+        DuplicateParameterContentError,
+    )
+    from spyglass.spikesorting.v2.recording import PreprocessingParameters
+
+    # Content that matches no shipped row (freq_min=777), so the only possible
+    # collision is between the two batch rows themselves.
+    blob = PreprocessingParamsSchema.model_validate(
+        {"bandpass_filter": {"freq_min": 777.0, "freq_max": 6000.0}}
+    ).model_dump()
+    rows = [
+        {
+            "preprocessing_params_name": "batch_dup_a",
+            "params": blob,
+            "params_schema_version": 3,
+            "job_kwargs": None,
+        },
+        {
+            "preprocessing_params_name": "batch_dup_b",
+            "params": blob,
+            "params_schema_version": 3,
+            "job_kwargs": None,
+        },
+    ]
+    # Raises before super().insert, so neither row lands (no cleanup needed).
+    with pytest.raises(DuplicateParameterContentError, match="batch_dup_a"):
+        PreprocessingParameters.insert(rows)
+
+
+@pytest.mark.database
+def test_duplicate_rejected_when_schema_version_column_omitted(dj_conn):
+    """A duplicate that OMITS params_schema_version is still caught.
+
+    Preproc / Artifact dict inserts may omit the ``params_schema_version``
+    column (the DataJoint column default fills it). The guard then resolves the
+    version from the validated blob's inner ``schema_version``, so the
+    fingerprint still matches the stored row and the duplicate is rejected --
+    exercising the column-omitted fallback that a KeyError would otherwise hit.
+    """
+    from spyglass.spikesorting.v2.exceptions import (
+        DuplicateParameterContentError,
+    )
+    from spyglass.spikesorting.v2.recording import PreprocessingParameters
+
+    PreprocessingParameters.insert_default()
+    shipped = (
+        PreprocessingParameters & {"preprocessing_params_name": "default"}
+    ).fetch1()
+    with pytest.raises(DuplicateParameterContentError, match="default"):
+        PreprocessingParameters.insert1(
+            {
+                "preprocessing_params_name": "omit_version_copy",
+                "params": shipped["params"],
+                # params_schema_version deliberately omitted
+                "job_kwargs": shipped["job_kwargs"],
+            }
+        )

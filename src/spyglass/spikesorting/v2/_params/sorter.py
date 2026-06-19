@@ -155,7 +155,9 @@ class Kilosort4Schema(BaseModel):
     Trade-off of ``extra="allow"``: typos in un-listed KS4 kwargs
     surface at SI sort time, not at Lookup insert time -- this is the
     accepted cost of not pinning KS4's large, fast-moving parameter
-    surface in the schema.
+    surface in the schema. The one exception is ``whiten`` (see
+    ``_reject_whiten``): KS4 has no such kwarg and a truthy value would
+    silently double-whiten via the runtime, so it is rejected at insert.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -165,6 +167,27 @@ class Kilosort4Schema(BaseModel):
     nblocks: int = Field(default=1, ge=0)
     max_cluster_subset: int = Field(default=25_000, ge=1)
     do_CAR: bool = True
+
+    @model_validator(mode="after")
+    def _reject_whiten(self):
+        """Reject a ``whiten`` key -- KS4 whitens internally, no such kwarg.
+
+        The v2 runtime runs its external float64 whitening whenever the
+        sorter params carry a truthy ``whiten`` (``_sorting_compute.py``).
+        KS4 also whitens internally (``skip_kilosort_preprocessing=False``),
+        so a ``whiten`` key here -- which ``extra="allow"`` would otherwise
+        pass through silently -- would double-whiten the signal. Whitening is
+        controlled via ``skip_kilosort_preprocessing`` / ``whitening_range``.
+        """
+        if "whiten" in self.model_dump():
+            raise ValueError(
+                "Kilosort4 has no 'whiten' parameter; it whitens internally. "
+                "Remove 'whiten' -- setting it triggers the v2 runtime's "
+                "external float64 whitening on top of KS4's own, "
+                "double-whitening the signal. Control whitening via "
+                "skip_kilosort_preprocessing / whitening_range."
+            )
+        return self
 
 
 class ClusterlessThresholderSchema(BaseModel):

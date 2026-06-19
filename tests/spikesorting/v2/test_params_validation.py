@@ -588,6 +588,22 @@ def test_kilosort4_schema_accepts_extra_kwargs():
     assert blob["nearest_chans"] == 10
 
 
+def test_kilosort4_schema_rejects_whiten():
+    """A ``whiten`` key on a KS4 row is rejected at validation.
+
+    KS4 has no ``whiten`` kwarg -- it whitens internally -- and the v2 runtime
+    runs its external float64 whitening whenever the sorter params carry a
+    truthy ``whiten`` (``_sorting_compute.py``). A ``whiten`` key, which
+    ``extra="allow"`` would otherwise pass through silently, would therefore
+    double-whiten the signal. The schema rejects it up front rather than
+    letting it surface as silently-wrong spike times at sort time. Any value
+    (even ``False``) is rejected, since KS4 has no such parameter at all.
+    """
+    for bad in (True, False, 1):
+        with pytest.raises(ValidationError, match="whiten"):
+            Kilosort4Schema.model_validate({"whiten": bad})
+
+
 @pytest.mark.parametrize(
     "schema_cls",
     [SpykingCircus2Schema, Tridesclous2Schema],
