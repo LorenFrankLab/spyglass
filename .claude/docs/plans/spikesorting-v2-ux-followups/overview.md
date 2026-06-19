@@ -7,12 +7,12 @@
 These items come from a UX audit of the v2 orchestration layer, refined by a DB
 mining pass (`lmf-db.cin.ucsf.edu`, 2026-06-16; 4,442 probe sortings) that
 established what the lab *actually* runs. The per-call ergonomics (preflight,
-idempotency, the run-summary return, error messages) are strong; the gaps are at
-the session level (one sort group per call), in onboarding (no interval
-discovery, "manifest" jargon), and — newly — in **parameter fidelity**: v2's
-shipped "franklab" defaults do not match the production recipes. The work ships
-across phase files 1, 2a, 2b, 3, 4 — all in the v2 user-facing surface. Phase 2b
-is gated and not a UX follow-up.
+idempotency, the run-summary return, error messages) are strong; the remaining
+gaps are at the session level (one sort group per call), in onboarding (no
+interval discovery, some residual "manifest" test/comment vocabulary), and —
+newly — in **parameter fidelity**: v2's shipped "franklab" defaults do not match
+the production recipes. The work ships across phase files 1, 2a, 2b, 3, 4 — all
+in the v2 user-facing surface. Phase 2b is gated and not a UX follow-up.
 
 **Decisions taken** (see Open Questions for the rest): adopt the real DB-attested
 recipes as v2's canonical catalog; **MountainSort4 is the production default for
@@ -22,10 +22,17 @@ for both tetrode and probe.
 
 ## Current codebase integration points
 
-**Phase 1 — run-summary rename:**
-- `src/spyglass/spikesorting/v2/pipeline.py:1257-1397` — `run_v2_pipeline` builds/returns the local `manifest` dict (rename local var + docstring `:1074-1197`; comments `:1028`, `:1253-1254`).
-- `src/spyglass/spikesorting/v2/exceptions.py:128-135` — `PipelineStageError.partial_manifest` (the one public API attribute).
-- `curation.py:794,802`; both notebooks + paired script; `docs/src/Features/SpikeSortingV2.md`; `CHANGELOG.md` (unreleased v2 section only); `tests/spikesorting/v2/test_pipeline_observability.py:183,206-241,299`.
+**Phase 1 — run-summary rename (mostly landed; residual cleanup only):**
+- Current branch already has `run_v2_pipeline` building/returning local
+  `run_summary`, and `PipelineStageError.partial_run_summary` is the public API
+  attribute. Do **not** reintroduce a deprecation alias.
+- Remaining work is a grep-driven cleanup of residual `manifest` wording in
+  v2 tests/comments and any user-facing docs/notebook cells that still use the
+  old noun. Known residual clusters include `tests/spikesorting/v2/test_single_session_pipeline.py`,
+  `test_ux_smoke.py`, `test_clusterless_waveform_features.py`, `test_export_safety.py`,
+  and some fixture scripts where "manifest" may refer to fixture provenance and
+  should be left alone after manual review.
+- The returned dict **keys** are already correct and stay unchanged.
 
 **Phase 2a — canonical names, fingerprints, and real-recipe correction:**
 - `recording.py:872-958` + `_params/preprocessing.py:30,160` — `default_franklab` is the schema default (300 Hz, `min_segment_length=1.0`); correct to the region recipes (hippocampus 600 Hz / cortex 300 Hz, both 1.5 ms).
@@ -41,9 +48,13 @@ for both tetrode and probe.
 
 **Phase 3 — interval discovery and polish:** `pipeline.py:146-177` (`describe_sort_groups` template), `:414`; surface the 2a/2b catalog via `describe_pipeline_presets()`; `sorting.py:1410/:1500-1548`, `curation.py:1033` (zero-unit cross-refs); `notebooks/...:65` placeholder; `session_group.py:96` gated stub.
 
-**Phase 4 — session runner:** `pipeline.py:1064-1397` (the per-group callee); `recording.py` `SortGroupV2`; `exceptions.py` (catches stage/preflight errors per group, **not** `ValueError`/`IntegrityError`).
+**Phase 4 — session runner:** `pipeline.py:1064-1397` (the per-group callee);
+`recording.py` `SortGroupV2`; `exceptions.py` (catches stage/preflight errors
+per group, **not** `ValueError`/`IntegrityError`). The implementation can land
+against today's `partial_run_summary`; docs/examples should wait for 2a's dated
+catalog so they do not teach old preset names.
 
-**Preserved unchanged:** the run-summary dict **keys** (`recording_id`, `merge_id`, `n_units`, `*_status`, `stage_seconds`, `warnings`). Phase 1 renames only the object's *noun*. **Phase 2a corrections change the derived ID *values*** for fresh runs (identity hashes the row name) — acceptable pre-release (no production rows/baselines depend on old IDs); the pinned-UUID test is regenerated, not loosened. Phase 2a does not change `merge_id` *consumers* and **does change scientific blobs deliberately** to match production (the whole point) — with parity tests asserting each corrected blob equals the real recipe.
+**Preserved unchanged:** the run-summary dict **keys** (`recording_id`, `merge_id`, `n_units`, `*_status`, `stage_seconds`, `warnings`). Phase 1 now means cleanup of the old noun, not a main API change. **Phase 2a corrections change the derived ID *values*** for fresh runs (identity hashes the row name) — acceptable pre-release (no production rows/baselines depend on old IDs); the pinned-UUID test is regenerated, not loosened. Phase 2a does not change `merge_id` *consumers* and **does change scientific blobs deliberately** to match production (the whole point) — with parity tests asserting each corrected blob equals the real recipe.
 
 ## The run-summary dict contract
 
@@ -53,7 +64,8 @@ Defined by `run_v2_pipeline`, documented at `pipeline.py:1143-1174`. Stable keys
 
 ### Goals
 
-- One word for the orchestrator's return object: **run summary**.
+- Keep one word for the orchestrator's return object: **run summary**. The core
+  API already uses it; remove only residual stale wording.
 - `interval_list_name` is discoverable like sort groups and presets.
 - Sorting a whole session is one call, with per-group outcomes and no whole-session abort.
 - **v2's shipped catalog matches production:** region-based preproc (hippocampus 600 Hz / cortex 300 Hz, 1.5 ms min-segment), the MS4 `franklab_probe_*` family by adjacency_radius × sampling rate, and the production artifact recipes (100/50 µV @ 0.7) — each blob parity-tested against the DB-attested recipe.
@@ -72,7 +84,9 @@ Defined by `run_v2_pipeline`, documented at `pipeline.py:1143-1174`. Stable keys
 
 ## Metrics
 
-- **Phase 1:** no behavior change; suite green; `partial_run_summary` is the attribute; no user-facing "manifest" remains.
+- **Phase 1:** no behavior change; `partial_run_summary` remains the attribute;
+  no stale "manifest" remains where it refers to the pipeline return object.
+  Manual review should preserve unrelated fixture/provenance "manifest" uses.
 - **Phase 2a:** region preproc rows = 600/300 Hz @ 1.5 ms; the MS4 `franklab_probe_*` family matches the DB radius/clip_size/detect_interval; production artifact = 100/50 µV @ 0.7; `run_v2_pipeline`/`preflight` default resolves to an MS4 preset and MS5 is `comparison`; `describe_pipeline_presets()` exposes `target_region`/`adjacency_radius_um`/`recommendation_status`; `describe_parameter_rows()` returns fingerprints; duplicate content rejected by default; pinned UUIDs regenerated; alias decision consistent across code/test/CHANGELOG/Migration; **parity tests assert each corrected blob equals the inlined real recipe.**
 - **Phase 2b (gated):** downstream recipes ship only after the analyzer-curation phase and match the inlined Set A values; unattested slots are flagged `experimental` / enumerated, never silently shipped.
 - **Phase 3:** `describe_intervals` returns the documented columns / empty-with-columns; docs surface the catalog via `describe_pipeline_presets()`; placeholder fixed.
@@ -82,7 +96,7 @@ Defined by `run_v2_pipeline`, documented at `pipeline.py:1143-1174`. Stable keys
 
 | Risk | Mitigation |
 | --- | --- |
-| The rename changes a run-summary **dict key**. | Phase 1 scopes to the noun + `partial_manifest`; keys are do-not-touch; observability tests pass unchanged but the attribute. |
+| The residual rename cleanup changes a run-summary **dict key**. | Phase 1 is now cleanup only; keys are do-not-touch. Existing observability tests already assert the stable key contract and `partial_run_summary`. |
 | **v2's shipped "franklab" defaults diverge from production** (300 Hz vs 600/300 region; 500 µV vs 100/50 @ 0.7; one probe row vs the radius×rate family; MS5 vs MS4), so dating them as-is would stamp false provenance. | Phase 2a **corrects the blobs to the DB-attested recipes before dating**, with parity tests comparing each against inlined real values; v2's deliberate divergences (500 µV bug-fix) are renamed honestly, not "production". |
 | **Corrections change derived selection IDs** (identity hashes the name), breaking pinned-UUID tests / orphaning rows. | Pre-release; pinned UUIDs regenerated (not loosened); full reference-site checklist updates every v2 site and leaves v0/v1 alone. |
 | **Dropping the MS4 alias shim contradicts a published migration commitment.** | Phase 2a reconciles code + `test_audit_parity` + CHANGELOG + Migration doc together: keep until the window passes or retract in all four. |
@@ -95,11 +109,13 @@ Defined by `run_v2_pipeline`, documented at `pipeline.py:1143-1174`. Stable keys
 ## Rollout Strategy
 
 Additive PRs / pre-release renames on the `spikesorting-v2` branch; v2 is
-pre-release, so renames and blob corrections need no deprecation window. Order:
-Phase 1 first (later code uses `partial_run_summary`); **Phase 2a** before Phase 3/4
-docs/examples (it carries the corrected catalog and the MS4 default); **Phase 2b**
-gated — its downstream half waits on the analyzer-curation phase, its unattested
-half on scientific sign-off; Phase 3 and Phase 4 follow 2a.
+pre-release, so blob corrections need no deprecation window. Order:
+finish the lightweight Phase 1 cleanup opportunistically; **Phase 2a** before
+Phase 3/4 docs/examples (it carries the corrected catalog and the MS4 default);
+**Phase 2b** gated — its downstream half waits on the analyzer-curation phase,
+its unattested half on scientific sign-off; Phase 3's `describe_intervals`
+helper and Phase 4's runner may be coded independently, but examples should use
+the 2a dated catalog.
 
 ## Open Questions
 
@@ -112,7 +128,8 @@ half on scientific sign-off; Phase 3 and Phase 4 follow 2a.
 
 ## Estimated Effort
 
-- Phase 1: ~0 net logic; rename across ~8 files + 1 test.
+- Phase 1: ~0 net logic; grep/manual-review cleanup of residual pipeline-return
+  "manifest" wording, preserving unrelated fixture manifest references.
 - Phase 2a: ~180-250 LOC (fingerprints + guard + `describe_parameter_rows` + preset metadata) + the blob-correction sweep (region preproc, MS4 probe family, production artifact, MS4 default) + ~180 LOC parity/infra tests + reference-site sweep + regenerated UUIDs + alias reconciliation + docs.
 - Phase 2b (gated): inlined recipes recorded now; rows + end-to-end preset ship later (waits on the analyzer-curation phase) + sign-off-gated unattested slots.
 - Phase 3: ~40-70 LOC + ~30 LOC tests + polish.

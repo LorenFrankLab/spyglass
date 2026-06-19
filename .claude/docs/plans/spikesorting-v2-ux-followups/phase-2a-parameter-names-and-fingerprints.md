@@ -13,6 +13,14 @@ usage). This phase corrects v2's blobs to match production, dates and
 fingerprints them, adds the duplicate-content guard and `describe_parameter_rows()`,
 and ships the real `franklab_probe_*` MS4 family.
 
+**2026-06-19 refresh:** the current branch still confirms the mismatch:
+`default_franklab` is built from `PreprocessingParamsSchema()` (300 Hz,
+`min_segment_length=1.0`), artifact `"default"` is 500 µV / 1.0, the pipeline
+default remains `franklab_tetrode_mountainsort5`, and the MountainSort preset
+metadata still labels `detect_threshold` as a MAD multiplier. The public
+run-summary rename has already landed, so 2a should be implemented after only a
+light Phase 1 cleanup.
+
 > **Source of truth (inline — the DB doc is not in-repo).** The real values
 > below are from the live Spyglass v1 Lookup tables as of 2026-06-16. Two
 > coherent end-to-end pipelines exist: **Set A "production"** (3,515 sorts, 27
@@ -20,6 +28,12 @@ and ships the real `franklab_probe_*` MS4 family.
 > Shin flex-probe / Berke lab). "Production" is *those two teams' convention*,
 > not lab-wide consensus — `recommendation_status` must say so, not imply a
 > blessing.
+
+Because the DB mining document is not in-repo, copy the recipe values that this
+phase relies on into versioned code/test constants (for example in the new
+`test_parameter_identity.py` or a small private test helper) and compare shipped
+rows against those constants. Do not leave the plan prose as the only durable
+source of truth for the June 2026 recipes.
 
 > **Critical — corrections change content-addressed selection IDs.** v2 identity
 > hashes the parameter-row **name** ([_selection_identity.py:171](../../../../src/spyglass/spikesorting/v2/_selection_identity.py#L171),
@@ -92,6 +106,13 @@ default (3000/1.0). Keep it, but name it honestly — it is not "production".)
   - Keep `no_artifact_detection` / `no_filter` literal-disable names (timeless).
   - **Parity check:** diff every corrected blob against the inlined real values; a dated `_2026_06` name must label the real 2026 recipe. Set `adjacency_radius` **explicitly to 100** on the shipped probe rows rather than relying on the MS4 schema default; verify what that default is and that each shipped blob matches radius / `clip_size` / `detect_interval` exactly.
 
+- **Persist the DB-attested recipe constants in tests.** The values above came
+  from a DB mining pass and must survive plan drift. Add explicit constants for
+  the June 2026 preproc, artifact, and sorter recipes in the test suite (or a
+  small in-repo helper imported by tests), and have the parity tests compare the
+  shipped rows to those constants rather than reusing the same factory call that
+  constructs the row.
+
 - **Make MS4 the production default.** Change `run_v2_pipeline` / `preflight_v2_pipeline` default `pipeline_preset` from the MS5 tetrode preset to the production MS4 preset (pick the tetrode-hippocampus MS4 as the conservative single-group default, or require explicit choice). Keep the MS5 tetrode row but mark it `recommendation_status="comparison"` — **not** recommended/default. Update the module docstring at [pipeline.py:11-19](../../../../src/spyglass/spikesorting/v2/pipeline.py#L11-L19) (no longer "Three presets ship today").
 
 - **Add preset-selection metadata** including the real axes: extend `_PipelinePreset` / `describe_pipeline_presets()` with `probe_type`, **`target_region`** (`hippocampus`/`cortex` — sets the preproc high-pass band, 600/300 Hz), `sampling_rate_hz`, `sorter_family`, **`adjacency_radius_um`** (informational — one radius, 100, ships), and `recommendation_status` (`"production"` | `"comparison"` | `"shipped_default"` | `"experimental"`). Provenance should name the convention ("production — Coulter/Chiang"), not imply lab consensus.
@@ -126,9 +147,9 @@ default (3000/1.0). Keep it, but name it honestly — it is not "production".)
 
 | Test | Asserts |
 | --- | --- |
-| `test_region_preproc_recipes` | Hippocampus preproc = 600 Hz HP, cortex preproc = 300 Hz HP, both 6000 LP / `min_segment_length=0.0015`; the effective high-pass matches the region band (filter applied at preproc, sorter `filter: False`). |
-| `test_probe_ms4_family_matches_db` | Each `franklab_probe_*_ms4_*` row equals its real `adjacency_radius`/`clip_size`/`detect_interval` from the table; shared core matches. |
-| `test_production_artifact_recipes` | `..._100uv_p07_...` and `..._50uv_p07_...` carry 100/50 µV @ 0.7; the renamed 500 µV row is not labeled production. |
+| `test_region_preproc_recipes` | Hippocampus preproc = 600 Hz HP, cortex preproc = 300 Hz HP, both 6000 LP / `min_segment_length=0.0015`; compared against independent June 2026 constants; the effective high-pass matches the region band (filter applied at preproc, sorter `filter: False`). |
+| `test_probe_ms4_family_matches_db` | Each `franklab_probe_*_ms4_*` row equals the independent June 2026 constants for `adjacency_radius`/`clip_size`/`detect_interval`; shared core matches. |
+| `test_production_artifact_recipes` | `..._100uv_p07_...` and `..._50uv_p07_...` match independent constants for 100/50 µV @ 0.7; the renamed 500 µV row is not labeled production. |
 | `test_ms4_is_probe_default` | `run_v2_pipeline`/`preflight` default resolves to an MS4 preset; MS5 rows carry `recommendation_status="comparison"`. |
 | `test_parameter_fingerprint_*` | Stable dict-order; excludes row name; sorter-context included. |
 | `test_duplicate_parameter_content_rejected` / `_escape_hatch` | Accidental duplicate rejected; `allow_duplicate_params=True` permits + marks `duplicate_of`. |

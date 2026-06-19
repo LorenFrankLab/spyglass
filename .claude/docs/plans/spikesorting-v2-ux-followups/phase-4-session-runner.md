@@ -8,9 +8,11 @@ collects `merge_id`s, and decides how to handle a mid-loop failure. Add a thin
 session-level wrapper that loops the existing single-group orchestrator over all
 (or selected) sort groups and returns a per-group outcome list.
 
-**Depends on Phase 1** (uses the renamed
-`PipelineStageError.partial_run_summary`) and **Phase 2a** (expects users to pick
-an explicit dated `pipeline_preset` from the canonical catalog).
+**Dependency note:** the code can land once the current
+`PipelineStageError.partial_run_summary` API is present (it already is on the
+2026-06-19 branch). Docs/notebook examples should wait for **Phase 2a** so users
+pick an explicit dated `pipeline_preset` from the canonical catalog instead of
+copying soon-to-be-renamed preset names.
 
 **Inputs to read first:**
 
@@ -46,8 +48,9 @@ an explicit dated `pipeline_preset` from the canonical catalog).
       Parameters
       ----------
       pipeline_preset
-          Dated pipeline-preset name to run, for example
-          ``"franklab_tetrode_30khz_ms5_2026_06"``. Required: the v2 catalog
+          Dated pipeline-preset name to run, for example one of the
+          ``franklab_*_YYYY_MM`` rows from ``describe_pipeline_presets()``.
+          Required: the v2 catalog
           contains probe- and sampling-rate-specific choices, so this wrapper
           does not silently pick a default for the whole session. Call
           ``describe_pipeline_presets()`` before choosing.
@@ -161,7 +164,15 @@ an explicit dated `pipeline_preset` from the canonical catalog).
 
   Use the module's existing logger (the file already logs; reuse that import rather than adding a new one). Add `run_v2_pipeline_session` to `__all__`/exports if the module maintains one.
 - **Catch scope:** catch exactly `PipelineStageError`, `PreflightError`, and `ZeroUnitSortError`. Do **not** catch `PipelineInputError` (it's the up-front validation this function itself raises) or bare `Exception` — an unexpected error should still surface. `run_v2_pipeline` can also raise bare `ValueError` (missing Lookup row) and `datajoint.errors.IntegrityError` (missing upstream when `preflight=False`); these are intentionally **not** caught — `continue_on_error` makes the batch resilient to per-group sort failures, not to misconfiguration that fails every group identically. Document this limit in the docstring (done in the reference implementation above).
-- **Demonstrate it in the user notebook.** In [10_Spike_SortingV2.ipynb](../../../../notebooks/10_Spike_SortingV2.ipynb) (and the paired script), add a short cell after the single-group run showing the whole-session form and an `outcome` roll-up, e.g. `pd.Series([r["outcome"] for r in summaries]).value_counts()`. The example should set `pipeline_preset` from the discovery table first, not rely on a default. Keep within the ≤10 code-cell budget — if needed, frame the session runner as the primary "run" cell and demote the single-group call to a one-line note.
+- **Demonstrate it in the user notebook.** After Phase 2a's dated catalog lands,
+  update [10_Spike_SortingV2.ipynb](../../../../notebooks/10_Spike_SortingV2.ipynb)
+  (and the paired script) with a short cell after the single-group run showing
+  the whole-session form and an `outcome` roll-up, e.g.
+  `pd.Series([r["outcome"] for r in summaries]).value_counts()`. The example
+  should set `pipeline_preset` from the discovery table first, not rely on a
+  default. Keep within the ≤10 code-cell budget — if needed, frame the session
+  runner as the primary "run" cell and demote the single-group call to a
+  one-line note.
 - **Docs:** add `run_v2_pipeline_session` to [docs/src/Features/SpikeSortingV2.md](../../../../docs/src/Features/SpikeSortingV2.md) (a "sort a whole session" subsection next to `run_v2_pipeline`) and a CHANGELOG line under the unreleased v2 section.
 
 ## Deliberately not in this phase
@@ -205,6 +216,7 @@ Before opening the PR for this phase, dispatch `code-reviewer` against the diff.
 - Validation slice passes; integration tests marked; the monkeypatched failure tests don't depend on a real failing sort.
 - Tests aren't trivial — the continue-on-error test asserts both the failed entry's contents and that other groups still succeeded, not just that a list came back.
 - Docstrings/test/module names don't reference this plan.
-- Depends-on-Phase-1: the code references `partial_run_summary`; verify Phase 1 has merged (or rebase) so there's no `partial_manifest` mismatch.
+- Dependency sanity: the code references the current `partial_run_summary` API;
+  verify no `partial_manifest` compatibility path was added or required.
 - Depends-on-Phase-2a: examples and tests use dated pipeline-preset names from the canonical catalog; no old `franklab_tetrode_mountainsort5` default should appear.
 - Docs (feature page, CHANGELOG, notebook) updated in this PR.

@@ -7,8 +7,9 @@ the v2 user-facing surface. Phase 2a owns the canonical preset/parameter catalog
 including Neuropixels/Kilosort4 names; this phase surfaces that catalog in docs
 and notebooks rather than adding new preset names.
 
-**Depends on Phase 2a** for the dated pipeline-preset names and discovery
-metadata.
+`describe_intervals()` itself can land independently. Docs/notebook examples that
+mention pipeline-preset names should wait for Phase 2a's dated catalog so this
+phase does not teach names that are about to change.
 
 **Inputs to read first:**
 
@@ -85,14 +86,13 @@ metadata.
       return df.sort_values("interval_list_name").reset_index(drop=True)
   ```
 
-- **Surface the canonical Neuropixels/KS4 preset.** Phase 2a adds
-  `franklab_neuropixels_ks4_2026_06` (built from existing reviewed rows); Phase 2b
-  may add the rate-split `franklab_neuropixels_30khz_ks4_2026_06` /
-  `..._20khz_ks4_2026_06`. In this phase, make sure docs/notebooks show how to find
-  whichever shipped with `describe_pipeline_presets()` instead of hardcoding a
-  short-lived `franklab_neuropixels_kilosort4` name. No new dependency: `kilosort`
-  stays optional; `preflight_v2_pipeline`'s `sorter_installed` check surfaces a
-  missing binary.
+- **Surface shipped KS4/Neuropixels rows by discovery, not invented names.**
+  After Phase 2a, make sure docs/notebooks show how to find any shipped
+  KS4/Neuropixels rows with `describe_pipeline_presets()` instead of hardcoding a
+  short-lived `franklab_neuropixels_kilosort4` name. If Phase 2a does not ship a
+  dated KS4/Neuropixels preset, this phase should say so plainly rather than
+  inventing one. No new dependency: `kilosort` stays optional;
+  `preflight_v2_pipeline`'s `sorter_installed` check surfaces a missing binary.
 - **Fix the notebook placeholder.** Change `nwb_file_name = "your_session_.nwb"` → `"your_session.nwb"` in [notebooks/py_scripts/10_Spike_SortingV2.py:65](../../../../notebooks/py_scripts/10_Spike_SortingV2.py#L65) and re-sync the paired [10_Spike_SortingV2.ipynb](../../../../notebooks/10_Spike_SortingV2.ipynb) via jupytext.
 - **Cross-reference the zero-unit methods.** Add one line to each docstring: in `Sorting.get_analyzer` ([sorting.py:1500](../../../../src/spyglass/spikesorting/v2/sorting.py#L1500)) note "for a zero-unit sort this raises; use `get_sorting` (returns an empty sorting) if only the unit list is needed"; in `Sorting.get_sorting` ([sorting.py:1410](../../../../src/spyglass/spikesorting/v2/sorting.py#L1410)) and `CurationV2.get_sorting` ([curation.py:1033](../../../../src/spyglass/spikesorting/v2/curation.py#L1033)) note "a zero-unit sort returns an empty sorting (with a warning); `get_analyzer` raises instead." (`get_analyzer` already half-documents this at [sorting.py:1506](../../../../src/spyglass/spikesorting/v2/sorting.py#L1506) — make the cross-reference symmetric.)
 - **Note the gated stub.** Add a one-line "gated until the concat materializer lands (raises `NotImplementedError` today)" to the user-facing docstrings of the `SessionGroup` / `ConcatenatedRecording` methods around [session_group.py:96](../../../../src/spyglass/spikesorting/v2/session_group.py#L96), so a user reading the method knows it is forward-declared, not broken.
@@ -110,7 +110,7 @@ metadata.
 | --- | --- |
 | `test_describe_intervals_columns_and_flag` | `describe_intervals(fixture_nwb)` returns exactly `_INTERVAL_COLUMNS`; `duration_s` > 0 and `is_artifact_interval is False` for the `"raw data valid times"` row. |
 | `test_describe_intervals_unknown_session_empty` | `describe_intervals("nope.nwb")` returns an empty frame with `_INTERVAL_COLUMNS` (no raise). |
-| `test_docs_reference_canonical_npx_preset` | Docs/notebook examples mention the dated Neuropixels/KS4 names and do not mention `franklab_neuropixels_kilosort4`. |
+| `test_docs_reference_canonical_npx_preset` | Docs/notebook examples use `describe_pipeline_presets()` for KS4/Neuropixels discovery and do not mention `franklab_neuropixels_kilosort4`; if no dated KS4/Neuropixels preset ships, docs say that rather than naming one. |
 
 Existing test home: extend [tests/spikesorting/v2/test_pipeline_presets.py](../../../../tests/spikesorting/v2/test_pipeline_presets.py) or the notebook/docs smoke tests. `describe_intervals` tests query `IntervalList` and should either use the DB fixture or monkeypatch `IntervalList.fetch`.
 
