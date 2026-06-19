@@ -1056,6 +1056,41 @@ _PIPELINE_PRESETS: dict[str, _PipelinePreset] = {
             "unchanged from the prior clusterless preset."
         ),
     ),
+    "franklab_neuropixels_ks4_2026_06": _PipelinePreset(
+        preprocessing_params_name="default_neuropixels",
+        artifact_detection_params_name="none",
+        sorter="kilosort4",
+        sorter_params_name="franklab_neuropixels_default",
+        probe_type="neuropixels",
+        sampling_rate_hz=30000,
+        sorter_family="kilosort4",
+        recommendation_status="experimental",
+        intended_use=(
+            "Neuropixels (30 kHz) with Kilosort4, matched to the AIND "
+            "aind-ephys-spikesort-kilosort4 recipe. Experimental -- "
+            "community-grounded, not Frank-lab-attested; KS4 is "
+            "non-deterministic and typically needs a GPU."
+        ),
+        threshold_units=(
+            "KS4 template-matching projection thresholds "
+            "(Th_universal=9 / Th_learned=8), not µV or a noise multiple"
+        ),
+        notes=(
+            "Sorter params match the AIND aind-ephys-spikesort-kilosort4 "
+            "params.json (and agree with int-brain-lab/ibl-sorter): the only "
+            "scientifically-meaningful deviation from stock KS4 is non-rigid "
+            "drift correction (nblocks=5 vs stock 1). KS4 does its own "
+            "high-pass + common-reference + ZCA whitening internally "
+            "(skip_kilosort_preprocessing=False, whitening_range=32); the row "
+            "carries no 'whiten' key, so v2's external float64 whitening stays "
+            "off and the signal is whitened EXACTLY ONCE (by KS4). The preproc "
+            "row applies the ADC phase-shift KS4 cannot, plus a bandpass; "
+            "because KS4 also common-references (do_CAR=true), set the sort "
+            "group's reference_mode='none' to avoid double-referencing before "
+            "KS4. Artifact detection is 'none' (KS4's internal preprocessing "
+            "and drift handling stand in for amplitude masking)."
+        ),
+    ),
 }
 
 

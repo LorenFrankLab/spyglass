@@ -162,3 +162,60 @@ def test_default_preset_is_production_ms4(dj_conn):
         pipeline_mod._PIPELINE_PRESETS[ms5_name].recommendation_status
         == "alternative"
     )
+
+
+@pytest.mark.database
+def test_neuropixels_ks4_recipe_matches_aind(dj_conn):
+    """The KS4 Neuropixels row matches the AIND capsule recipe + whitens once.
+
+    The shipped ``franklab_neuropixels_default`` (kilosort4) row mirrors the
+    AIND ``aind-ephys-spikesort-kilosort4`` ``params.json``: its only
+    scientifically-meaningful deviation from stock KS4 is non-rigid drift
+    correction (``nblocks=5`` vs stock ``1``), and it pins the whitening /
+    preprocessing config explicitly. Critically it carries NO ``whiten`` key:
+    v2's external float64 whitening only runs when the sorter params hold
+    ``whiten=True`` (``_sorting_compute.py``), so omitting it keeps the signal
+    whitened exactly once -- by KS4 -- with no double-whitening.
+    """
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    catalog = {
+        (row[0], row[1]): row[2] for row in SorterParameters._DEFAULT_CONTENTS
+    }
+    params = catalog[("kilosort4", "franklab_neuropixels_default")]
+
+    # AIND params.json deviations from / explicit pins over stock KS4.
+    assert params["nblocks"] == 5  # non-rigid drift (AIND); stock is 1
+    assert params["whitening_range"] == 32
+    assert params["skip_kilosort_preprocessing"] is False
+    assert params["highpass_cutoff"] == 300
+    assert params["do_correction"] is True
+    assert params["keep_good_only"] is False
+    # do_CAR / Th come from the schema defaults and match AIND.
+    assert params["do_CAR"] is True
+    assert params["Th_universal"] == 9.0
+    assert params["Th_learned"] == 8.0
+
+    # Whitening-correctness guard: no ``whiten`` key -> v2 does not externally
+    # whiten -> KS4 whitens exactly once.
+    assert "whiten" not in params
+
+
+@pytest.mark.database
+def test_neuropixels_ks4_preset_wiring(dj_conn):
+    """The experimental NP preset bundles the AIND-matched KS4 row + no-CAR-conflict notes."""
+    from spyglass.spikesorting.v2 import pipeline as pipeline_mod
+
+    preset = pipeline_mod._PIPELINE_PRESETS[
+        "franklab_neuropixels_ks4_2026_06"
+    ]
+    assert preset.sorter == "kilosort4"
+    assert preset.sorter_params_name == "franklab_neuropixels_default"
+    assert preset.preprocessing_params_name == "default_neuropixels"
+    assert preset.artifact_detection_params_name == "none"
+    assert preset.recommendation_status == "experimental"
+    assert preset.sampling_rate_hz == 30000
+    # The notes must flag the single-whitening guarantee and the reference
+    # caveat so a user does not double common-reference before KS4.
+    assert "whiten" in preset.notes.lower()
+    assert "reference_mode" in preset.notes

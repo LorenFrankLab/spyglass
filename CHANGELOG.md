@@ -359,15 +359,27 @@ Lab actually runs, corrected from v2's earlier schema-default placeholders:
   `franklab_100uv_p07_2026_06` / `franklab_50uv_p07_2026_06` (100 / 50 µV at
   0.7 proportion-above-threshold). The 500 µV schema default keeps the name
   `default`.
-- **Seven pipeline presets** (tetrode/probe × hippocampus/cortex × 30/20 kHz
-  MS4, plus an MS5 alternative and a clusterless preset). Discover them with
-  `describe_pipeline_presets()` (now carrying `recommendation_status`,
-  `target_region`, `sampling_rate_hz`, `adjacency_radius_um`) and inspect the
-  underlying rows — with content fingerprints and preset usage — via
-  `describe_parameter_rows()`.
+- **Pipeline presets** (tetrode/probe × hippocampus/cortex × 30/20 kHz MS4,
+  an MS5 alternative, a clusterless preset, and an **experimental Neuropixels
+  Kilosort4** preset). Discover them with `describe_pipeline_presets()` (now
+  carrying `recommendation_status`, `target_region`, `sampling_rate_hz`,
+  `adjacency_radius_um`) and inspect the underlying rows — with content
+  fingerprints and preset usage — via `describe_parameter_rows()`.
 - **MountainSort4/5 `detect_threshold` is σ of the whitened signal** (~3 for
   MS4, ~5.5 for MS5), not a MAD multiplier and not an absolute voltage — the
   preset `threshold_units` / `notes` are corrected accordingly.
+- **Experimental Neuropixels Kilosort4 recipe** (`franklab_neuropixels_default`
+  sorter row + `franklab_neuropixels_ks4_2026_06` preset,
+  `recommendation_status="experimental"`). Matched to the AIND
+  [`aind-ephys-spikesort-kilosort4`](https://github.com/AllenNeuralDynamics/aind-ephys-spikesort-kilosort4)
+  `params.json` (and consistent with
+  [`int-brain-lab/ibl-sorter`](https://github.com/int-brain-lab/ibl-sorter)):
+  the only meaningful deviation from stock KS4 is non-rigid drift correction
+  (`nblocks=5` vs stock `1`). KS4 does its own high-pass + common-reference +
+  ZCA whitening internally (`skip_kilosort_preprocessing=False`,
+  `whitening_range=32`); the row carries **no `whiten` key**, so v2's external
+  float64 whitening stays off and the signal is whitened exactly once (by KS4).
+  Community-grounded, not yet Frank-lab-attested.
 
 #### Spike Sorting v2 — v1→v2 migration reference (breaking changes)
 

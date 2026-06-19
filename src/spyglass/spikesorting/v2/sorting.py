@@ -322,9 +322,33 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
             None,
         ),
         (
+            # Kilosort4 Neuropixels recipe matched to the AIND
+            # aind-ephys-spikesort-kilosort4 capsule params.json (and
+            # int-brain-lab/ibl-sorter): the only scientifically-meaningful
+            # deviation from stock KS4 is non-rigid drift correction
+            # (``nblocks=5`` vs the stock ``1``); the rest pins KS4's stock
+            # whitening/preprocessing config explicitly. KS4 does its own
+            # high-pass + common-reference + ZCA whitening internally
+            # (``skip_kilosort_preprocessing=False``, ``whitening_range=32``).
+            # There is deliberately NO ``whiten`` key: KS4 has no such param,
+            # and the v2 runtime only runs its external float64 whitening when
+            # the sorter params carry ``whiten=True`` (see
+            # ``_sorting_compute.py``), so omitting it keeps the signal
+            # whitened exactly once (by KS4) -- adding ``whiten=True`` here
+            # would double-whiten.
             "kilosort4",
             "franklab_neuropixels_default",
-            _validate_params(_get_sorter_schema("kilosort4"), {}),
+            _validate_params(
+                _get_sorter_schema("kilosort4"),
+                {
+                    "nblocks": 5,
+                    "whitening_range": 32,
+                    "skip_kilosort_preprocessing": False,
+                    "highpass_cutoff": 300,
+                    "do_correction": True,
+                    "keep_good_only": False,
+                },
+            ),
             1,
             None,
         ),

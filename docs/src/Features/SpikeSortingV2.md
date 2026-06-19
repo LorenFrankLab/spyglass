@@ -205,6 +205,14 @@ Available pipeline presets (all dated `_2026_06`):
     alternative (`recommendation_status="alternative"`)
 - `franklab_clusterless_2026_06` -- peak-detection only (no clustering), feeds
     the clusterless decoding pipeline
+- `franklab_neuropixels_ks4_2026_06` -- **experimental** Neuropixels Kilosort4
+    recipe matched to the
+    [AIND `aind-ephys-spikesort-kilosort4`](https://github.com/AllenNeuralDynamics/aind-ephys-spikesort-kilosort4)
+    config (`nblocks=5` non-rigid drift; KS4 does its own high-pass + CAR +
+    whitening, so the signal is whitened exactly once). Community-grounded,
+    not Frank-lab-attested; KS4 needs a GPU and is non-deterministic. Because
+    KS4 common-references internally, set the sort group's
+    `reference_mode="none"` to avoid double-referencing.
 
 The tetrode- and probe-hippocampus 30 kHz presets resolve to the **same**
 parameter rows (the recipe is set by region + rate; `probe_type` is
