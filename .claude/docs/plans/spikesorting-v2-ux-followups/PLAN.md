@@ -1,15 +1,36 @@
 # Spike Sorting v2 — UX follow-ups Implementation Plan
 
-**Status:** Refreshed 2026-06-19 against the current branch.
+**Status (2026-06-19):** Phase 1 and Phase 2a are **complete and committed** on
+branch `spikesorting-v2`. Remaining work: Phase 3 (interval discovery + docs
+polish) and Phase 4 (session-level preflight + runner). Phase 2b stays gated.
 
-Branch audit summary: the public run-summary API rename has mostly already
-landed (`run_v2_pipeline` uses a `run_summary` local and
-`PipelineStageError.partial_run_summary` exists), but residual `manifest`
-language remains in tests/comments and possibly some non-primary docs. The
-worth-doing work is still Phase 2a (scientific catalog/provenance correction),
-Phase 3 (interval discovery + docs polish), and Phase 4 (session-level runner).
-Phase 2b remains gated and should not be implemented without the analyzer-curation
-phase and scientific sign-off.
+- **Phase 1 — run-summary rename: ✅ complete** (`db3cf1bf`, `c5710036`,
+  `8ac81914`).
+- **Phase 2a — parameter catalog + content identity: ✅ complete**
+  (`669789ac` → `ab877245` → `0f7eb32c` → `b2a01e65` → `a7b201cb`). Shipped:
+  region preproc (hippocampus 600 / cortex 300 Hz, 1.5 ms min-segment),
+  rate-keyed MS4 family with MS4 as the default, 100/50 µV artifact rows, dated
+  names + content fingerprints, the duplicate-content guard
+  (`allow_duplicate_params` escape hatch), `describe_parameter_rows()`, and a
+  preflight sampling-rate check. **Decisions that diverged from this plan as
+  written:** MS5 ships as `recommendation_status="alternative"` (NOT
+  "comparison"); the 500 µV artifact row keeps the name `default` (not renamed
+  "bugfix"); MS4 sorter rows are rate-keyed and region-agnostic (region lives
+  on the preproc row, since MS4 runs `filter=False`). An **experimental
+  Neuropixels Kilosort4 preset** (`franklab_neuropixels_ks4_2026_06`, matched
+  to the AIND `aind-ephys-spikesort-kilosort4` recipe — community-grounded, not
+  lab-attested) was brought forward from 2b.
+- **Phase 2b — gated.** NP-KS4 partially addressed above; the rest (Set A
+  downstream curation, tetrode-20 kHz, MS5 probe) stays deferred pending the
+  analyzer-curation phase + scientific sign-off.
+- **Phase 3 / Phase 4 — pending.**
+
+Branch audit summary: the public run-summary API rename has landed
+(`run_v2_pipeline` uses a `run_summary` local and
+`PipelineStageError.partial_run_summary` exists). The remaining worth-doing
+work is Phase 3 (interval discovery + docs polish) and Phase 4 (session-level
+preflight and runner). Phase 2b remains gated and should not be implemented
+without the analyzer-curation phase and scientific sign-off.
 
 Ordered, separately-shippable improvements to the `spyglass.spikesorting.v2`
 user-facing surface, identified in a UX audit of the orchestration layer:
@@ -22,11 +43,12 @@ MountainSort4 as the probe default; (2b) **gated** recipes that can't ship yet �
 Set A's downstream curation stages (need the analyzer-curation phase) and
 unattested recipes (need scientific sign-off); (3) close
 the interval-discovery and documentation-polish gaps on top of that canonical
-catalog; (4) add `run_v2_pipeline_session()`, a session-level batch runner that
-sorts every sort group in a session instead of forcing the user to loop one
-`sort_group_id` at a time. All changes are additive or pre-release renames; the
-returned-dict keys and `merge_id` consumers are unaffected (Phase 2a does change
-the derived ID *values* — acceptable pre-release; see overview).
+catalog; (4) add `preflight_v2_pipeline_session()` plus
+`run_v2_pipeline_session()`, so a user can validate and then sort every sort
+group in a session instead of forcing the user to loop one `sort_group_id` at a
+time. All changes are additive or pre-release renames; the returned-dict keys and
+`merge_id` consumers are unaffected (Phase 2a does change the derived ID *values*
+— acceptable pre-release; see overview).
 
 ## Reading order
 
@@ -40,8 +62,8 @@ For agent invocation, **load only the slice you need**:
 - [overview.md](overview.md) — scope, integration points, the run-summary dict contract, the name-based selection-identity caveat, risks, open questions.
 - [appendix.md](appendix.md) — SpikeInterface 0.104.3 deep reference (sorter/preproc/SortingAnalyzer/metrics/motion internals, with SI file:line and divergences). Load when implementing against SI — it resolves `detect_threshold` semantics, the `nn_advanced` rename, the custom `isi_violation` fraction, the analyzer recompute cascade, and the motion/torch dependencies.
 - Phases (each ships as a separable PR, in order):
-  - [phase-1-run-summary-rename.md](phase-1-run-summary-rename.md) — mostly landed; finish residual "manifest" → "run summary" cleanup in tests/comments/docs. No pipeline behavior change.
-  - [phase-2a-parameter-names-and-fingerprints.md](phase-2a-parameter-names-and-fingerprints.md) — correct v2's blobs to the DB-attested recipes (region preproc 600/300 Hz, MS4 `franklab_probe_*` family by radius × rate, 100/50 µV artifact), date/fingerprint them, MS4 probe default, duplicate-content guard, `describe_parameter_rows()`. **Lands before Phase 3/4** so the catalog is settled; corrections change derived selection IDs (see overview).
+  - ✅ **[phase-1-run-summary-rename.md](phase-1-run-summary-rename.md)** (complete) — residual "manifest" → "run summary" cleanup in tests/comments/docs. No pipeline behavior change.
+  - ✅ **[phase-2a-parameter-names-and-fingerprints.md](phase-2a-parameter-names-and-fingerprints.md)** (complete) — corrected v2's blobs to the DB-attested recipes (region preproc 600/300 Hz, rate-keyed MS4 family, 100/50 µV artifact), dated/fingerprinted, MS4 default, duplicate-content guard, `describe_parameter_rows()`, preflight sampling-rate check, + an experimental Neuropixels KS4 preset. See the Status block above for decisions that diverged from this file as written.
   - [phase-2b-deferred-and-unattested.md](phase-2b-deferred-and-unattested.md) — **GATED.** Recipes that can't ship yet: Set A's downstream curation stages (wait on the analyzer-curation phase) and unattested recipes — Neuropixels tuning, tetrode-20 kHz, MS5 probe (wait on scientific sign-off). Depends on 2a; not a UX follow-up.
   - [phase-3-discovery-and-polish.md](phase-3-discovery-and-polish.md) — `describe_intervals()`, notebook placeholder fix, zero-unit docstring cross-refs, gated-stub note, and docs/notebook surfacing of the canonical catalog. The helper itself can land independently; docs/notebook preset names should follow 2a.
-  - [phase-4-session-runner.md](phase-4-session-runner.md) — `run_v2_pipeline_session()` multi-sort-group batch runner with per-group outcome reporting. The code can land after the Phase 1 cleanup; docs/examples should follow 2a's dated preset names.
+  - [phase-4-session-runner.md](phase-4-session-runner.md) — `preflight_v2_pipeline_session()` read-only whole-session validation plus `run_v2_pipeline_session()` multi-sort-group batch runner with per-group outcome reporting. The code can land after the Phase 1 cleanup; docs/examples should follow 2a's dated preset names.

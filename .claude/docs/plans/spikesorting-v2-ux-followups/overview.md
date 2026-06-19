@@ -37,7 +37,7 @@ for both tetrode and probe.
 **Phase 2a — canonical names, fingerprints, and real-recipe correction:**
 - `recording.py:872-958` + `_params/preprocessing.py:30,160` — `default_franklab` is the schema default (300 Hz, `min_segment_length=1.0`); correct to the region recipes (hippocampus 600 Hz / cortex 300 Hz, both 1.5 ms).
 - `artifact.py:113-183` + `_params/artifact_detection.py:63,77` — `default` is 500 µV / 1.0; ship production `100uv_p07` / `50uv_p07`, rename the 500 µV row honestly.
-- `sorting.py:266-392` — ship the MS4 `franklab_probe_*` family (radius × rate); demote MS5 to `comparison`; reconcile the alias shim at `:294-325` (CHANGELOG:374, Migration:14-15, `test_audit_parity:60-90`).
+- `sorting.py:266-392` — ship the MS4 `franklab_probe_*` family (radius × rate); demote MS5 to `alternative`; reconcile the alias shim at `:294-325` (CHANGELOG:374, Migration:14-15, `test_audit_parity:60-90`).
 - `pipeline.py:669-719` (`_PIPELINE_PRESETS`), `:1069`/`:783` (`run_v2_pipeline`/`preflight` default → MS4), `:11-19` (module docstring), `:61-129` (`describe_*`).
 - `utils.py:821-863` (`validate_lookup_rows`, four tables), `:1000` (docstring name).
 - `_selection_identity.py:150-275` — identity hashes the row **name** (`:171/:221/:272`), so corrections change derived IDs → regenerate `tests/spikesorting/v2/test_preflight.py:95-97`; preset pins at `test_pipeline_presets.py:55,113-114`. **Leave v0/v1 sites alone** (`tests/conftest.py:1856`).
@@ -48,11 +48,13 @@ for both tetrode and probe.
 
 **Phase 3 — interval discovery and polish:** `pipeline.py:146-177` (`describe_sort_groups` template), `:414`; surface the 2a/2b catalog via `describe_pipeline_presets()`; `sorting.py:1410/:1500-1548`, `curation.py:1033` (zero-unit cross-refs); `notebooks/...:65` placeholder; `session_group.py:96` gated stub.
 
-**Phase 4 — session runner:** `pipeline.py:1064-1397` (the per-group callee);
-`recording.py` `SortGroupV2`; `exceptions.py` (catches stage/preflight errors
-per group, **not** `ValueError`/`IntegrityError`). The implementation can land
-against today's `partial_run_summary`; docs/examples should wait for 2a's dated
-catalog so they do not teach old preset names.
+**Phase 4 — session preflight + runner:** `pipeline.py:780-1040`
+(`preflight_v2_pipeline`, reused per group), `pipeline.py:1064-1397` (the
+per-group callee), `recording.py` `SortGroupV2`, `exceptions.py`
+(`PreflightError`, stage/preflight errors per group, **not**
+`ValueError`/`IntegrityError`). The implementation can land against today's
+`partial_run_summary`; docs/examples should wait for 2a's dated catalog so they
+do not teach old preset names.
 
 **Preserved unchanged:** the run-summary dict **keys** (`recording_id`, `merge_id`, `n_units`, `*_status`, `stage_seconds`, `warnings`). Phase 1 now means cleanup of the old noun, not a main API change. **Phase 2a corrections change the derived ID *values*** for fresh runs (identity hashes the row name) — acceptable pre-release (no production rows/baselines depend on old IDs); the pinned-UUID test is regenerated, not loosened. Phase 2a does not change `merge_id` *consumers* and **does change scientific blobs deliberately** to match production (the whole point) — with parity tests asserting each corrected blob equals the real recipe.
 
@@ -67,9 +69,10 @@ Defined by `run_v2_pipeline`, documented at `pipeline.py:1143-1174`. Stable keys
 - Keep one word for the orchestrator's return object: **run summary**. The core
   API already uses it; remove only residual stale wording.
 - `interval_list_name` is discoverable like sort groups and presets.
-- Sorting a whole session is one call, with per-group outcomes and no whole-session abort.
+- A whole session can be preflighted before compute, then sorted in one call,
+  with per-group outcomes and no avoidable mid-loop surprise.
 - **v2's shipped catalog matches production:** region-based preproc (hippocampus 600 Hz / cortex 300 Hz, 1.5 ms min-segment), the MS4 `franklab_probe_*` family by adjacency_radius × sampling rate, and the production artifact recipes (100/50 µV @ 0.7) — each blob parity-tested against the DB-attested recipe.
-- **MS4 is the probe default**; MS5 is `comparison`, not recommended.
+- **MS4 is the probe default**; MS5 is `alternative`, not recommended.
 - Parameter names are dated, immutable provenance labels with content fingerprints; accidental duplicate-content aliases are rejected unless `allow_duplicate_params=True` (which re-introduces the identity fork — the guard blocks only the accidental case).
 - Honest provenance: `recommendation_status` names the convention (production = Coulter/Chiang teams), not a lab-wide blessing.
 
@@ -77,7 +80,7 @@ Defined by `run_v2_pipeline`, documented at `pipeline.py:1143-1174`. Stable keys
 
 - No change to the run-summary dict keys or `run_v2_pipeline`'s signature/behavior (Phase 1).
 - No `SharedGroupSource` → `SharedArtifactSource` rename (Open Question 3).
-- No preflight-session wrapper; no surfacing of unapplied proposed merges (Open Question 4).
+- No surfacing of unapplied proposed merges (Open Question 4).
 - No new dependency (Kilosort4 stays optional).
 - **No shipping unreviewed or unattested recipes.** 2a ships only DB-attested recipes; anything without DB usage (Neuropixels tuning, tetrode-20 kHz, MS5 probe) is gated in 2b on sign-off.
 - **No faithful end-to-end "production" preset yet** — Set A's downstream curation stages need the analyzer-curation phase (2b).
@@ -87,10 +90,14 @@ Defined by `run_v2_pipeline`, documented at `pipeline.py:1143-1174`. Stable keys
 - **Phase 1:** no behavior change; `partial_run_summary` remains the attribute;
   no stale "manifest" remains where it refers to the pipeline return object.
   Manual review should preserve unrelated fixture/provenance "manifest" uses.
-- **Phase 2a:** region preproc rows = 600/300 Hz @ 1.5 ms; the MS4 `franklab_probe_*` family matches the DB radius/clip_size/detect_interval; production artifact = 100/50 µV @ 0.7; `run_v2_pipeline`/`preflight` default resolves to an MS4 preset and MS5 is `comparison`; `describe_pipeline_presets()` exposes `target_region`/`adjacency_radius_um`/`recommendation_status`; `describe_parameter_rows()` returns fingerprints; duplicate content rejected by default; pinned UUIDs regenerated; alias decision consistent across code/test/CHANGELOG/Migration; **parity tests assert each corrected blob equals the inlined real recipe.**
+- **Phase 2a:** region preproc rows = 600/300 Hz @ 1.5 ms; the MS4 `franklab_probe_*` family matches the DB radius/clip_size/detect_interval; production artifact = 100/50 µV @ 0.7; `run_v2_pipeline`/`preflight` default resolves to an MS4 preset and MS5 is `alternative`; `describe_pipeline_presets()` exposes `target_region`/`adjacency_radius_um`/`recommendation_status`; `describe_parameter_rows()` returns fingerprints; duplicate content rejected by default; pinned UUIDs regenerated; alias decision consistent across code/test/CHANGELOG/Migration; **parity tests assert each corrected blob equals the inlined real recipe.**
 - **Phase 2b (gated):** downstream recipes ship only after the analyzer-curation phase and match the inlined Set A values; unattested slots are flagged `experimental` / enumerated, never silently shipped.
 - **Phase 3:** `describe_intervals` returns the documented columns / empty-with-columns; docs surface the catalog via `describe_pipeline_presets()`; placeholder fixed.
-- **Phase 4:** explicit `pipeline_preset` required; per-group `outcome`; idempotent re-run all `"reused"`; `continue_on_error` collects one failure while others complete; `continue_on_error=False` re-raises.
+- **Phase 4:** explicit `pipeline_preset` required; `preflight_v2_pipeline_session`
+  returns a read-only per-group report with no populate/insert; runner can use
+  that report up front; per-group `outcome`; idempotent re-run all `"reused"`;
+  `continue_on_error` collects one failure while others complete;
+  `continue_on_error=False` re-raises.
 
 ## Risks and Mitigations
 
@@ -102,7 +109,9 @@ Defined by `run_v2_pipeline`, documented at `pipeline.py:1143-1174`. Stable keys
 | **Dropping the MS4 alias shim contradicts a published migration commitment.** | Phase 2a reconciles code + `test_audit_parity` + CHANGELOG + Migration doc together: keep until the window passes or retract in all four. |
 | Shipping a "production" preset that silently omits Set A's curation stages misleads users into thinking it reproduces production. | 2a presets are explicitly *partial* (recording+artifact+sort+root curation); the faithful end-to-end preset is gated in 2b on the analyzer-curation phase. |
 | Inventing MS5/Neuropixels/20 kHz-tetrode recipes nobody uses. | 2b gates all unattested recipes on scientific sign-off; the DB attests only the MS4 probe family + region preproc + production artifact, which is all 2a ships. |
-| `continue_on_error=True` doesn't catch `ValueError`/`IntegrityError`. | Intended (resilience = per-group sort failures, not misconfiguration); documented in the runner docstring + catch-scope note. |
+| Session preflight grows a second implementation of per-group checks. | Do not duplicate check logic: `preflight_v2_pipeline_session()` reuses `preflight_v2_pipeline()` for each target group and only adds target discovery / aggregation. |
+| A session can change between preflight and run. | Treat session preflight as a read-only advisory gate, like single-group preflight. The runner still surfaces native `ValueError`/`IntegrityError` if the DB changes before compute. |
+| `continue_on_error=True` doesn't catch `ValueError`/`IntegrityError`. | Intended (resilience = per-group sort/preflight failures, not misconfiguration); documented in the runner docstring + catch-scope note. |
 | `describe_intervals` clutters with `artifact_detection_*` rows. | `is_artifact_interval` flag; list all (transparent). |
 | Fingerprint canonicalization drifts. | DB-free tests for dict-order, name-exclusion, sorter-context, frozen shipped defaults. |
 
@@ -114,8 +123,8 @@ finish the lightweight Phase 1 cleanup opportunistically; **Phase 2a** before
 Phase 3/4 docs/examples (it carries the corrected catalog and the MS4 default);
 **Phase 2b** gated — its downstream half waits on the analyzer-curation phase,
 its unattested half on scientific sign-off; Phase 3's `describe_intervals`
-helper and Phase 4's runner may be coded independently, but examples should use
-the 2a dated catalog.
+helper and Phase 4's session preflight/runner may be coded independently, but
+examples should use the 2a dated catalog.
 
 ## Open Questions
 
@@ -133,4 +142,5 @@ the 2a dated catalog.
 - Phase 2a: ~180-250 LOC (fingerprints + guard + `describe_parameter_rows` + preset metadata) + the blob-correction sweep (region preproc, MS4 probe family, production artifact, MS4 default) + ~180 LOC parity/infra tests + reference-site sweep + regenerated UUIDs + alias reconciliation + docs.
 - Phase 2b (gated): inlined recipes recorded now; rows + end-to-end preset ship later (waits on the analyzer-curation phase) + sign-off-gated unattested slots.
 - Phase 3: ~40-70 LOC + ~30 LOC tests + polish.
-- Phase 4: ~70-110 LOC + ~80 LOC tests + a notebook cell.
+- Phase 4: ~140-220 LOC (shared target resolver + session preflight + runner)
+  + ~120 LOC tests + a notebook cell.
