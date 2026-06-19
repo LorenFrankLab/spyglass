@@ -291,6 +291,40 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
             None,
         ),
         (
+            # Production MountainSort4 recipe (June 2026), 30 kHz. Rate-keyed:
+            # the sorter runs ``filter=False`` (the preproc stage already
+            # bandpassed), so the sorter band is inert and the only
+            # rate-dependent knobs are ``clip_size`` / ``detect_interval``. The
+            # tetrode/probe/region distinction lives on the preproc row + the
+            # preset, not here. ``adjacency_radius`` is set explicitly to 100
+            # um (also the schema default).
+            "mountainsort4",
+            "franklab_30khz_ms4_2026_06",
+            _validate_params(
+                _get_sorter_schema("mountainsort4"),
+                {"adjacency_radius": 100.0},
+            ),
+            1,
+            None,
+        ),
+        (
+            # 20 kHz variant: ``clip_size=27`` / ``detect_interval=7`` hold the
+            # same ~1.33 ms physical window at the lower rate; everything else
+            # matches the 30 kHz row.
+            "mountainsort4",
+            "franklab_20khz_ms4_2026_06",
+            _validate_params(
+                _get_sorter_schema("mountainsort4"),
+                {
+                    "adjacency_radius": 100.0,
+                    "clip_size": 27,
+                    "detect_interval": 7,
+                },
+            ),
+            1,
+            None,
+        ),
+        (
             # Back-compat alias for v1's bare ``franklab_tetrode_hippocampus
             # _30KHz`` row name at ``v1/sorting.py:158`` (uppercase K, no
             # ``_ms4`` suffix). v2 normalized the name to lowercase-k +

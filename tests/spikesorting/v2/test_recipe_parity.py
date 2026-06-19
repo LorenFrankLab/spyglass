@@ -48,3 +48,60 @@ def test_region_preproc_recipes_match_production(dj_conn):
     assert hippo["bandpass_filter"]["freq_max"] == 6000.0
     assert hippo["min_segment_length"] == 0.0015
     assert cortex["min_segment_length"] == 0.0015
+
+
+@pytest.mark.database
+def test_production_artifact_recipes_match(dj_conn):
+    """The 100/50 uV @0.7 artifact rows match the production recipes.
+
+    The shipped ``"default"`` row is v2's 500 uV bug-fix value, NOT a
+    production recipe; it is asserted to be unchanged here (a later sub-task
+    renames it honestly once nothing references the ``"default"`` name).
+    """
+    from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
+
+    catalog = _catalog_by_name(ArtifactDetectionParameters._DEFAULT_CONTENTS)
+
+    assert (
+        catalog[rc.FRANKLAB_100UV_P07_2026_06]
+        == rc.FRANKLAB_100UV_P07_2026_06_PARAMS
+    )
+    assert (
+        catalog[rc.FRANKLAB_50UV_P07_2026_06]
+        == rc.FRANKLAB_50UV_P07_2026_06_PARAMS
+    )
+    assert catalog["default"]["amplitude_threshold_uv"] == 500.0
+    assert (
+        catalog[rc.FRANKLAB_100UV_P07_2026_06]["proportion_above_threshold"]
+        == 0.7
+    )
+
+
+@pytest.mark.database
+def test_ms4_rate_keyed_recipes_match(dj_conn):
+    """The rate-keyed MS4 rows match the recipes and are region-agnostic.
+
+    ``filter=False`` (the preproc stage filters, not the sorter) is the
+    load-bearing fact: the only difference between the 30 kHz and 20 kHz rows
+    is the rate window (``clip_size`` / ``detect_interval``), with no region
+    or probe-type encoding on the sorter row.
+    """
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    # SorterParameters rows are (sorter, name, params, schema_version, jk).
+    catalog = {
+        (row[0], row[1]): row[2] for row in SorterParameters._DEFAULT_CONTENTS
+    }
+    ms4_30 = catalog[("mountainsort4", rc.FRANKLAB_30KHZ_MS4_2026_06)]
+    ms4_20 = catalog[("mountainsort4", rc.FRANKLAB_20KHZ_MS4_2026_06)]
+
+    assert ms4_30 == rc.FRANKLAB_30KHZ_MS4_2026_06_PARAMS
+    assert ms4_20 == rc.FRANKLAB_20KHZ_MS4_2026_06_PARAMS
+
+    assert ms4_30["filter"] is False
+    assert ms4_30["adjacency_radius"] == 100.0
+    assert (ms4_30["clip_size"], ms4_30["detect_interval"]) == (40, 10)
+    assert (ms4_20["clip_size"], ms4_20["detect_interval"]) == (27, 7)
+    # Region-agnostic: the two rate rows differ ONLY by the rate window.
+    diff = {k for k in ms4_30 if ms4_30[k] != ms4_20[k]}
+    assert diff == {"clip_size", "detect_interval"}

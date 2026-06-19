@@ -155,6 +155,29 @@ class ArtifactDetectionParameters(SpyglassMixin, dj.Lookup):
             2,
             None,
         ),
+        (
+            # Production artifact recipe (June 2026): 100 uV amplitude
+            # threshold, 0.7 proportion-above-threshold, 1.0 ms removal window
+            # -- far more aggressive than the 500 uV shipped "default".
+            "franklab_100uv_p07_2026_06",
+            ArtifactDetectionParamsSchema(
+                amplitude_threshold_uv=100.0,
+                proportion_above_threshold=0.7,
+            ).model_dump(),
+            2,
+            None,
+        ),
+        (
+            # More aggressive 50 uV production variant (same proportion-above
+            # and removal window).
+            "franklab_50uv_p07_2026_06",
+            ArtifactDetectionParamsSchema(
+                amplitude_threshold_uv=50.0,
+                proportion_above_threshold=0.7,
+            ).model_dump(),
+            2,
+            None,
+        ),
     )
 
     def insert1(self, row, **kwargs):
