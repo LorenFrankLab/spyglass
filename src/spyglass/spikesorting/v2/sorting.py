@@ -426,7 +426,13 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
         hits an unhelpful "sorter not registered" error from SI. MS4 and
         KS4 are the common uninstalled cases (their Python wrappers exist
         even when the runtime/binary is absent, so ``available_sorters``
-        is too lax -- ``installed_sorters`` is the right gate).
+        is too lax). ``installed_sorters`` gates the row INSERT here -- a
+        mild check that only decides whether to ship the default params
+        row. It is NOT proof a sort will run: the mountainsort4 wrapper
+        imports even when its ``ml_ms4alg`` backend is absent/broken, so
+        ``installed_sorters`` over-reports runnability.
+        ``preflight_v2_pipeline``'s ``sorter_runtime_available`` check is
+        the actual runtime gate.
 
         ``clusterless_thresholder`` is never gated (it is a Spyglass
         peak-detection special case, not an SI registered sorter). The

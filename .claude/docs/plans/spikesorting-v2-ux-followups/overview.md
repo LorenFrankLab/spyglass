@@ -14,9 +14,21 @@ newly — in **parameter fidelity**: v2's shipped "franklab" defaults do not mat
 the production recipes. The work ships across phase files 1, 2a, 2b, 3, 4 — all
 in the v2 user-facing surface. Phase 2b is gated and not a UX follow-up.
 
+> **Update (PR-review fix, supersedes the MS4-default statements below):** the
+> shipped `run_v2_pipeline`/`preflight_v2_pipeline` **default is now the MS5
+> tetrode-hippocampus preset**, not MS4. MS4's `ml_ms4alg` backend is a
+> numpy<2-era package that does not install under the v2 `numpy>=2` baseline, and
+> `installed_sorters()` over-reports the MS4 wrapper as present, so an MS4 default
+> green-lit preflight then crashed. MS4 stays a selectable `"production"` preset;
+> the default is a runnability-driven choice. Preflight now has a
+> `sorter_runtime_available` check (imports the real backend). Wherever this doc
+> says "MS4 is the default," read "MS4 is the production recipe; MS5 is the
+> shipped default."
+
 **Decisions taken** (see Open Questions for the rest): adopt the real DB-attested
-recipes as v2's canonical catalog; **MountainSort4 is the production default for
-probes** (100% of real probe sortings are MS4; MS5 has zero probe usage); the
+recipes as v2's canonical catalog; **MountainSort4 is the production probe
+recipe** (100% of real probe sortings are MS4; MS5 has zero probe usage) — though
+the shipped function default is MS5 (see the update note above); the
 high-pass band is a **target-region** choice (hippocampus 600 Hz, cortex 300 Hz)
 for both tetrode and probe.
 
@@ -72,7 +84,10 @@ Defined by `run_v2_pipeline`, documented at `pipeline.py:1143-1174`. Stable keys
 - A whole session can be preflighted before compute, then sorted in one call,
   with per-group outcomes and no avoidable mid-loop surprise.
 - **v2's shipped catalog matches production:** region-based preproc (hippocampus 600 Hz / cortex 300 Hz, 1.5 ms min-segment), the MS4 `franklab_probe_*` family by adjacency_radius × sampling rate, and the production artifact recipes (100/50 µV @ 0.7) — each blob parity-tested against the DB-attested recipe.
-- **MS4 is the probe default**; MS5 is `alternative`, not recommended.
+- **MS5 is the shipped `run_v2_pipeline` default** (it runs under `numpy>=2`;
+  MS4's `ml_ms4alg` backend needs `numpy<2`). MS4 stays the `"production"` probe
+  recipe and MS5 keeps `recommendation_status="alternative"` — the default is a
+  separate, runnability-driven choice (see the update note at the top).
 - Parameter names are dated, immutable provenance labels with content fingerprints; accidental duplicate-content aliases are rejected unless `allow_duplicate_params=True` (which re-introduces the identity fork — the guard blocks only the accidental case).
 - Honest provenance: `recommendation_status` names the convention (production = Coulter/Chiang teams), not a lab-wide blessing.
 

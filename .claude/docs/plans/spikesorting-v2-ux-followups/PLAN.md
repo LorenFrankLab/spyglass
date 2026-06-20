@@ -68,8 +68,10 @@ user-facing surface, identified in a UX audit of the orchestration layer:
 API rename; (2a) correct v2's shipped "franklab" parameter blobs to the real
 DB-attested production recipes (region-based preproc — hippocampus 600 Hz /
 cortex 300 Hz, the MS4 `franklab_probe_*` family by adjacency_radius × rate,
-100/50 µV artifact), make them dated/fingerprinted/inspectable, and set
-MountainSort4 as the probe default; (2b) **gated** recipes that can't ship yet —
+100/50 µV artifact), make them dated/fingerprinted/inspectable (a later
+PR-review fix moved the shipped `run_v2_pipeline` default to MS5, since MS4's
+`ml_ms4alg` backend needs numpy<2 — MS4 stays the production probe recipe);
+(2b) **gated** recipes that can't ship yet —
 Set A's downstream curation stages (need the analyzer-curation phase) and
 unattested recipes (need scientific sign-off); (3) close
 the interval-discovery and documentation-polish gaps on top of that canonical

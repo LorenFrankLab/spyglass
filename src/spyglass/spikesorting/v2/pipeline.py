@@ -1422,10 +1422,11 @@ def preflight_v2_pipeline(
     # binary and is always available; otherwise the sorter must be in
     # installed_sorters(), distinguishing "known but not installed" from
     # "misspelled / unknown" for the fix message.
-    if (
+    sorter_installed_ok = (
         bundle.sorter in SorterParameters._NON_SI_SORTERS
         or bundle.sorter in set(sis.installed_sorters())
-    ):
+    )
+    if sorter_installed_ok:
         _check("sorter_installed", True, "")
     elif bundle.sorter in set(sis.available_sorters()):
         _check(
@@ -1445,30 +1446,33 @@ def preflight_v2_pipeline(
             "spelling or the preset.",
         )
 
-    # 9b. sorter_runtime_available. installed_sorters() only checks the SI
-    # wrapper; for sorters that call a separate algorithm backend at run time
-    # (see _SORTER_RUNTIME_BACKENDS) verify that backend imports too, so a green
-    # sorter_installed cannot precede a sort-time ModuleNotFoundError (the
-    # mountainsort4 / ml_ms4alg case).
+    # 9b. sorter_runtime_available. installed_sorters() only checks that the SI
+    # wrapper imports; for sorters that call a SEPARATE algorithm backend at run
+    # time (see _SORTER_RUNTIME_BACKENDS) actually import that backend, so a
+    # green sorter_installed cannot precede a sort-time failure -- whether the
+    # backend is absent OR present-but-broken (e.g. a numpy<2-era ml_ms4alg
+    # under the numpy>=2 baseline raising at import). Only runs when
+    # sorter_installed passed: if the wrapper itself is missing, a second
+    # "backend missing" failure would be contradictory ("listed as installed").
     backend_modules = _SORTER_RUNTIME_BACKENDS.get(bundle.sorter, ())
-    if backend_modules:
-        import importlib.util
+    if sorter_installed_ok and backend_modules:
+        import importlib
 
-        def _backend_missing(mod: str) -> bool:
+        broken_backends = []
+        for mod in backend_modules:
             try:
-                return importlib.util.find_spec(mod) is None
-            except ModuleNotFoundError:
-                return True
-
-        missing_backends = [m for m in backend_modules if _backend_missing(m)]
+                importlib.import_module(mod)
+            except Exception as exc:  # noqa: BLE001 - any import failure disqualifies
+                broken_backends.append(f"{mod} ({type(exc).__name__}: {exc})")
         _check(
             "sorter_runtime_available",
-            not missing_backends,
+            not broken_backends,
             f"sorter {bundle.sorter!r} is listed as installed but its runtime "
-            f"backend(s) {missing_backends} cannot be imported, so the sort "
-            f"would crash. Install {missing_backends} (mountainsort4 needs "
-            "ml_ms4alg, which requires numpy<2), or pick a preset whose sorter "
-            "runs in this environment (e.g. a MountainSort5 preset).",
+            "backend(s) cannot be imported, so the sort would crash: "
+            f"{'; '.join(broken_backends)}. Install/repair the backend "
+            "(mountainsort4 needs ml_ms4alg, which requires numpy<2), or pick a "
+            "preset whose sorter runs in this environment (e.g. a MountainSort5 "
+            "preset).",
         )
 
     # Non-blocking advisory: the "none" artifact params are a no-op
