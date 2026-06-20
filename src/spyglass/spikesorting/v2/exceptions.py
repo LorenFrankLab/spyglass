@@ -151,16 +151,28 @@ class PipelineStageError(RuntimeError):
     that completed before the failure, so callers can resume/inspect without
     re-deriving intermediate PKs. The original exception is chained
     (``raise PipelineStageError(...) from exc``) so the underlying traceback
-    is preserved.
+    is preserved; its class name is also recorded in ``original_type`` and
+    surfaced in this error's message, so the failing stage's ORIGINAL error
+    type survives even where only ``str(exc)`` is kept (the run summary's
+    ``error`` field) and ``__cause__`` is not inspected.
     """
 
     def __init__(
-        self, stage: str, partial_run_summary: dict, message: str = ""
+        self,
+        stage: str,
+        partial_run_summary: dict,
+        message: str = "",
+        *,
+        original_type: str | None = None,
     ):
         self.stage = stage
         self.partial_run_summary = partial_run_summary
+        # Class name of the wrapped exception (e.g. ``"RuntimeError"``);
+        # ``None`` when constructed directly without a cause.
+        self.original_type = original_type
         super().__init__(
             f"run_v2_pipeline: stage {stage!r} failed"
+            + (f" ({original_type})" if original_type else "")
             + (f": {message}" if message else "")
             + f". Completed stages: {sorted(partial_run_summary)}."
         )

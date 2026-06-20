@@ -1062,6 +1062,10 @@ def write_nwb_artifact(
         # recompute hashing path.
         cache_hash = _hash_nwb_recording(analysis_file_name)
     except Exception:
+        # Any write/hash failure: remove the partial analysis file before
+        # re-raising so a half-written artifact never lingers. The unlink is
+        # best-effort -- a cleanup failure is logged, not raised, so it cannot
+        # mask the original error.
         try:
             _abs = AnalysisNwbfile.get_abs_path(
                 analysis_file_name,

@@ -1298,6 +1298,11 @@ class Sorting(SpyglassMixin, dj.Computed):
                     analyzer_folder=analyzer_folder,
                 )
         except Exception:
+            # Any insert failure: roll back BOTH disk side-effects (the
+            # staged units NWB here, the analyzer folder below) before
+            # re-raising. Each unlink/rmtree is best-effort -- a cleanup
+            # failure is logged, not raised, so it cannot mask the original
+            # error.
             try:
                 abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
                 _pathlib.Path(abs_path).unlink(missing_ok=True)
@@ -1553,6 +1558,10 @@ class Sorting(SpyglassMixin, dj.Computed):
                 analyzer_folder=folder,
             )
         except Exception:
+            # Any build failure: remove the partial analyzer folder before
+            # re-raising so a half-built folder is never mistaken for a
+            # valid cache. The rmtree is best-effort -- a cleanup failure is
+            # logged, not raised, so it cannot mask the original error.
             try:
                 if folder.exists():
                     _shutil.rmtree(folder, ignore_errors=False)

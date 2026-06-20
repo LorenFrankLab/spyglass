@@ -1433,6 +1433,10 @@ class Recording(SpyglassMixin, dj.Computed):
                     }
                 )
         except Exception:
+            # Any failure during registration: the DB row never landed, so
+            # remove the orphan staged analysis file before re-raising. The
+            # unlink itself is best-effort -- a cleanup failure is logged, not
+            # raised, so it cannot mask the original error.
             try:
                 abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
                 _pathlib.Path(abs_path).unlink(missing_ok=True)

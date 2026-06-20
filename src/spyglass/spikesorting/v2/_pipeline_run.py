@@ -57,7 +57,16 @@ def _run_stage(
     try:
         result = work()
     except Exception as exc:  # noqa: BLE001 - re-raised as typed + chained
-        raise PipelineStageError(stage, dict(partial), str(exc)) from exc
+        # Broad on purpose: ANY stage failure must become a typed
+        # PipelineStageError so partial_run_summary resume / continue_on_error
+        # work. The original type + message are preserved (``original_type``
+        # + chained ``from exc``); the catch is NOT narrowed.
+        raise PipelineStageError(
+            stage,
+            dict(partial),
+            str(exc),
+            original_type=type(exc).__name__,
+        ) from exc
     return result, status, time.perf_counter() - start
 
 
