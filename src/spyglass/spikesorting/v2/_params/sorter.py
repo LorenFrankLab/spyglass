@@ -361,6 +361,57 @@ _SORTER_SCHEMAS: dict[str, type[BaseModel]] = {
     "clusterless_thresholder": ClusterlessThresholderSchema,
 }
 
+# Sorters that whiten internally and have NO ``whiten`` kwarg, so a truthy
+# ``whiten`` in their params would trigger the v2 runtime's external float64
+# whitening (``_sorting_compute.py``) on top of the sorter's own --
+# double-whitening the signal (or being rejected by SpikeInterface at sort
+# time as an invalid kwarg). Kilosort4 is guarded separately by
+# ``Kilosort4Schema._reject_whiten`` (it has its own typed schema); these three
+# fall through to ``GenericSorterParamsSchema`` (``extra="allow"``), which
+# would pass ``whiten`` through silently, so the guard must run at the
+# ``SorterParameters`` insert via :func:`reject_internal_whiten`. MountainSort
+# 4/5 are intentionally NOT here: they DO take ``whiten=True``, which the
+# runtime routes through the external float64 whitening (whitening the signal
+# exactly once).
+_INTERNAL_WHITEN_NO_KWARG_SORTERS: frozenset[str] = frozenset(
+    {"kilosort2_5", "kilosort3", "ironclust"}
+)
+
+
+def reject_internal_whiten(sorter: str, params: dict) -> None:
+    """Raise if an internally-whitening sorter is given a truthy ``whiten``.
+
+    ``kilosort2_5`` / ``kilosort3`` / ``ironclust`` whiten internally and have
+    no ``whiten`` parameter, but they validate against the permissive
+    ``GenericSorterParamsSchema`` (``extra="allow"``), so a ``whiten=True`` a
+    user copies from a Kilosort-style mental model would slip through and
+    trigger the v2 runtime's external float64 whitening on top of the sorter's
+    own. This mirrors ``Kilosort4Schema._reject_whiten`` for the sorters that
+    lack a dedicated typed schema. No-op for every other sorter (including
+    MountainSort 4/5, which use ``whiten=True`` deliberately).
+
+    Parameters
+    ----------
+    sorter : str
+        The ``sorter`` column value of a ``SorterParameters`` row.
+    params : dict
+        The (already schema-validated) ``params`` blob.
+
+    Raises
+    ------
+    ValueError
+        If ``sorter`` whitens internally and ``params`` carries a truthy
+        ``whiten``.
+    """
+    if sorter in _INTERNAL_WHITEN_NO_KWARG_SORTERS and params.get("whiten"):
+        raise ValueError(
+            f"Sorter {sorter!r} whitens internally and has no 'whiten' "
+            "parameter; a truthy 'whiten' triggers the v2 runtime's external "
+            "float64 whitening on top of the sorter's own, double-whitening "
+            "the signal (or is rejected by SpikeInterface at sort time). "
+            "Remove 'whiten' from the params blob."
+        )
+
 
 def _get_sorter_schema(sorter_name: str) -> type[BaseModel]:
     """Return the Pydantic schema for a sorter name.

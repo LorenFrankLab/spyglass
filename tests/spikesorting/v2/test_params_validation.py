@@ -729,6 +729,38 @@ def test_kilosort4_schema_rejects_whiten():
             Kilosort4Schema.model_validate({"whiten": bad})
 
 
+@pytest.mark.parametrize("sorter", ["kilosort2_5", "kilosort3", "ironclust"])
+def test_internal_whiten_sorters_reject_truthy_whiten(sorter):
+    """kilosort2_5 / kilosort3 / ironclust whiten internally and have no
+    ``whiten`` kwarg, so a truthy ``whiten`` would trigger the v2 runtime's
+    external float64 whitening on top of the sorter's own (double-whiten).
+    Unlike KS4 they fall through to the ``extra='allow'`` generic schema, so
+    the guard runs at ``SorterParameters`` insert via ``reject_internal_whiten``.
+    """
+    from spyglass.spikesorting.v2._params.sorter import reject_internal_whiten
+
+    with pytest.raises(ValueError, match="whitens internally"):
+        reject_internal_whiten(sorter, {"whiten": True})
+
+
+def test_internal_whiten_guard_allows_absent_or_falsy_whiten():
+    """An absent or falsy ``whiten`` is fine for the internal-whiten sorters."""
+    from spyglass.spikesorting.v2._params.sorter import reject_internal_whiten
+
+    reject_internal_whiten("kilosort2_5", {})
+    reject_internal_whiten("kilosort3", {"whiten": False})
+    reject_internal_whiten("ironclust", {"whiten": 0})
+
+
+def test_internal_whiten_guard_ignores_mountainsort():
+    """MS4/MS5 intentionally use ``whiten=True`` (routed through the external
+    float64 whitening), so the guard must NOT reject them."""
+    from spyglass.spikesorting.v2._params.sorter import reject_internal_whiten
+
+    reject_internal_whiten("mountainsort4", {"whiten": True})
+    reject_internal_whiten("mountainsort5", {"whiten": True})
+
+
 @pytest.mark.parametrize(
     "schema_cls",
     [SpykingCircus2Schema, Tridesclous2Schema],

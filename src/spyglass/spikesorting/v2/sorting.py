@@ -237,7 +237,10 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
         #    outer-vs-blob mismatch still raises.
         import spikeinterface.sorters as sis
 
-        from spyglass.spikesorting.v2._params.sorter import _SORTER_SCHEMAS
+        from spyglass.spikesorting.v2._params.sorter import (
+            _SORTER_SCHEMAS,
+            reject_internal_whiten,
+        )
 
         valid_sorters = (
             set(sis.available_sorters())
@@ -255,6 +258,12 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
                     f"Curated v2 sorters: {sorted(_SORTER_SCHEMAS)}; or any "
                     "sorter from spikeinterface.sorters.available_sorters()."
                 )
+            # Internally-whitening sorters that fall through to the permissive
+            # generic schema (kilosort2_5 / kilosort3 / ironclust) must not
+            # carry a truthy ``whiten`` -- it would double-whiten via the
+            # runtime's external float64 whitening. (KS4 self-guards in its
+            # typed schema; MS4/MS5 use whiten=True deliberately.)
+            reject_internal_whiten(sorter, row["params"])
             if int(row.get("params_schema_version", 0)) == 0:
                 row["params_schema_version"] = int(
                     row["params"]["schema_version"]
