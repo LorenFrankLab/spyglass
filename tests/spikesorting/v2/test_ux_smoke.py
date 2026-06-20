@@ -504,7 +504,14 @@ def test_plot_sort_group_geometry_multi_probe_offset(monkeypatch):
                 )
         return rows
 
-    monkeypatch.setattr(pl, "_sort_group_geometry_rows", _fake_rows)
+    # ``_sort_group_geometry_rows`` lives in (and is looked up from)
+    # ``_pipeline_geometry``; patch it there so the relocated
+    # ``plot_sort_group_geometry`` sees the fake rows.
+    monkeypatch.setattr(
+        "spyglass.spikesorting.v2._pipeline_geometry."
+        "_sort_group_geometry_rows",
+        _fake_rows,
+    )
     fig, ax = plt.subplots()
     with pytest.warns(UserWarning, match="probes present"):
         pl.plot_sort_group_geometry("any_.nwb", ax=ax)
