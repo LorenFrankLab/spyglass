@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import os
 from collections.abc import Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 import datajoint as dj
 import spikeinterface as si
@@ -32,7 +31,6 @@ from spyglass.spikesorting.v2._signal_math import (  # noqa: F401
     _get_recording_timestamps,
     _spike_times_to_frames,
 )
-from spyglass.spikesorting.v2._parameter_identity import parameter_fingerprint
 # Pure reference-resolution lives in _reference_resolution.py (DB-free);
 # re-exported so ``from .utils import resolve_group_reference`` (etc.) and the
 # ``ReferenceMode`` type keep working unchanged.
@@ -42,12 +40,24 @@ from spyglass.spikesorting.v2._reference_resolution import (  # noqa: F401
     assert_reference_not_member,
     resolve_group_reference,
 )
-from spyglass.spikesorting.v2.exceptions import (
-    DuplicateParameterContentError,
+# Parameter-Lookup validation lives in _lookup_validation.py and NWB /
+# recording-metadata helpers in _nwb_metadata_helpers.py (both import-light);
+# re-exported so existing ``from .utils import validate_lookup_rows`` /
+# ``electrode_table_region`` (etc.) call sites are unchanged.
+from spyglass.spikesorting.v2._lookup_validation import (  # noqa: F401
+    _assert_schema_version_matches,
+    _ensure_lookup_row_exists,
+    _insert_row_to_dict,
+    _jsonable_blob,
+    _validate_params,
+    reject_duplicate_parameter_content,
+    validate_lookup_rows,
 )
-
-if TYPE_CHECKING:
-    from pydantic import BaseModel
+from spyglass.spikesorting.v2._nwb_metadata_helpers import (  # noqa: F401
+    _hash_nwb_recording,
+    electrode_table_region,
+    resolve_conversion_and_offset,
+)
 
 
 @contextmanager
@@ -339,108 +349,6 @@ def write_buffer_gb(
     return min(cap_gb, seconds_gb)
 
 
-def resolve_conversion_and_offset(recording) -> tuple[float, float]:
-    """Resolve the ElectricalSeries ``(conversion, offset)`` for a recording.
-
-    v2 writes traces UNSCALED (``return_in_uV=False``), so the persisted
-    ElectricalSeries must carry BOTH the gain (as ``conversion``) and the
-    per-channel offset (as ``offset``) to recover physical volts on readback:
-    ``volts = raw * conversion + offset``. SpikeInterface stores per-channel
-    gain/offset in microvolts (``uV = raw*gain + offset``); a single NWB
-    ``conversion``/``offset`` scalar can only represent a UNIFORM gain/offset,
-    so heterogeneous values are rejected rather than silently mis-scaled.
-
-    Dropping the offset (the prior behavior, inherited from v1) silently biased
-    every channel by ``offset`` uV on readback for recordings with a non-zero
-    DC offset (e.g. Intan / Open Ephys). A non-positive gain (``0`` ->
-    all-zero recording, negative -> sign flip) is also rejected.
-
-    Returns
-    -------
-    (conversion, offset) : tuple of float
-        Volts-per-count and volts, for the ElectricalSeries.
-
-    Raises
-    ------
-    ValueError
-        If the recording has heterogeneous channel gains, a non-positive
-        channel gain, or heterogeneous channel offsets -- none of which a
-        single scalar ``conversion``/``offset`` can represent.
-    """
-    import numpy as np
-
-    gains = np.unique(recording.get_channel_gains())
-    if len(gains) != 1:
-        raise ValueError(
-            "resolve_conversion_and_offset: recording has heterogeneous "
-            f"channel gains {gains.tolist()}; v2 ElectricalSeries write "
-            "requires a single conversion factor. Verify probe metadata for "
-            "the sort group."
-        )
-    if gains[0] <= 0:
-        raise ValueError(
-            "resolve_conversion_and_offset: recording has a non-positive "
-            f"channel gain {float(gains[0])}; cannot scale to volts. Verify "
-            "probe metadata for the sort group."
-        )
-    offsets = np.unique(recording.get_channel_offsets())
-    if len(offsets) != 1:
-        raise ValueError(
-            "resolve_conversion_and_offset: recording has heterogeneous "
-            f"channel offsets {offsets.tolist()}; a single ElectricalSeries "
-            "offset cannot represent them."
-        )
-    return float(gains[0]) * 1e-6, float(offsets[0]) * 1e-6
-
-
-def electrode_table_region(nwbf, electrode_ids, description: str):
-    """Build an ElectricalSeries electrode-table region from electrode ids.
-
-    ``pynwb.NWBFile.create_electrode_table_region(region=...)`` interprets
-    ``region`` as ROW INDICES into the electrodes table, NOT electrode ids.
-    Passing spyglass ``electrode_id`` values directly is correct only when
-    ``electrode.id == row position``; for an electrodes table whose ids are
-    non-contiguous or reordered it silently points the ElectricalSeries at the
-    wrong electrode rows -- wrong channel locations and brain-region
-    attribution on readback. Map ids -> row indices via
-    ``get_electrode_indices`` so the region is correct for any electrodes
-    table, and fail loud on an unknown id rather than aliasing it.
-
-    Parameters
-    ----------
-    nwbf : pynwb.NWBFile
-        File whose ``electrodes`` table the region indexes into.
-    electrode_ids : iterable of int
-        Spyglass electrode ids (e.g. the recording's channel ids).
-    description : str
-        Region description.
-
-    Returns
-    -------
-    hdmf.common.table.DynamicTableRegion
-        Region over the NWB ``electrodes`` table rows that correspond to
-        ``electrode_ids``, for attaching to the ElectricalSeries.
-    """
-    from spyglass.utils.nwb_helper_fn import (
-        get_electrode_indices,
-        invalid_electrode_index,
-    )
-
-    ids = [int(e) for e in electrode_ids]
-    indices = get_electrode_indices(nwbf, ids)
-    missing = [
-        eid for eid, idx in zip(ids, indices) if idx == invalid_electrode_index
-    ]
-    if missing:
-        raise ValueError(
-            "electrode_table_region: electrode ids "
-            f"{missing} are not in the NWB electrodes table"
-        )
-    return nwbf.create_electrode_table_region(
-        region=[int(i) for i in indices], description=description
-    )
-
-
 def unit_brain_region_df(unit_relation, resolution: str):
     """Join a Unit-part relation against Electrode * BrainRegion.
 
@@ -565,301 +473,6 @@ def _assert_v2_db_safe() -> None:
     )
 
 
-def _validate_params(model_cls: type[BaseModel], payload: dict) -> dict:
-    """Validate a parameter payload against a Pydantic model.
-
-    Parameters
-    ----------
-    model_cls : type[pydantic.BaseModel]
-        The schema to validate against.
-    payload : dict
-        The raw parameter dict, typically a Lookup row's ``params`` blob.
-
-    Returns
-    -------
-    dict
-        The validated, normalized payload (``model_dump()`` output).
-
-    Raises
-    ------
-    pydantic.ValidationError
-        If ``payload`` does not satisfy ``model_cls``.
-    """
-    return model_cls.model_validate(payload).model_dump()
-
-
-def _assert_schema_version_matches(
-    row: dict, model_cls: type[BaseModel], *, table_name: str
-) -> None:
-    """Raise if outer and inner Pydantic ``schema_version`` disagree.
-
-    Each v2 Lookup table stores a ``params_schema_version`` column
-    alongside the validated ``params`` blob. The blob also carries a
-    ``schema_version`` field (Pydantic-validated). If a user inserts
-    a row where the two values disagree, downstream code that
-    branches on the outer column will silently route v2 rows to v1
-    behavior (or vice versa). This helper catches the drift at
-    insert time so the row never lands.
-
-    Parameters
-    ----------
-    row : dict
-        The full row dict being inserted. Must have a ``params``
-        entry that already contains a ``schema_version`` (i.e. the
-        caller has already run ``_validate_params``).
-    model_cls : type[pydantic.BaseModel]
-        The schema class. Its default ``schema_version`` is used as
-        the fallback when the row omits ``params_schema_version``.
-    table_name : str
-        Human-readable table name for the error message.
-
-    Raises
-    ------
-    ValueError
-        If ``row['params_schema_version']`` is set and does not match
-        ``row['params']['schema_version']``.
-    """
-    inner = int(row["params"]["schema_version"])
-    if "params_schema_version" not in row:
-        return
-    outer = int(row["params_schema_version"])
-    if inner != outer:
-        raise ValueError(
-            f"{table_name}.insert1: params_schema_version={outer} does "
-            f"not match the inner Pydantic schema_version={inner} on the "
-            "validated params blob. Drop the column or align it with the "
-            "blob's schema_version."
-        )
-
-
-def validate_lookup_rows(
-    rows, attr_names, *, schema_for, table_name, per_row_hook=None
-):
-    """Validate + normalize params-Lookup rows before a (bulk) insert.
-
-    Shared body of the four validated-Lookup ``insert`` overrides
-    (``PreprocessingParameters``, ``ArtifactDetectionParameters``,
-    ``SorterParameters``, ``MotionCorrectionParameters``): for each row,
-    normalize to a dict, validate its ``params`` blob against the row's
-    schema, run an optional per-row check, and assert the outer
-    ``params_schema_version`` agrees with the validated blob. Returns the
-    list of validated row dicts to hand to ``super().insert``. Each table's
-    ``insert1`` delegates to ``insert`` (so a single code path validates
-    both), mirroring ``CurationV2.UnitLabel``.
-
-    Parameters
-    ----------
-    rows : iterable
-        The rows handed to ``insert`` (mappings, positional sequences, or a
-        ``QueryExpression``); normalized per row via ``_insert_row_to_dict``.
-    attr_names : Sequence[str]
-        ``self.heading.names``, used to label positional rows.
-    schema_for : Callable[[dict], type[BaseModel]]
-        Picks the schema for a row -- a constant for the single-schema
-        tables, per-``sorter`` for ``SorterParameters``.
-    table_name : str
-        Table name for the drift-check error message.
-    per_row_hook : Callable[[dict, type[BaseModel]], None], optional
-        Extra table-specific step run after validation and before the
-        drift assertion. May mutate the row in place: ``SorterParameters``
-        uses it to reject unknown sorter names and to backfill
-        ``params_schema_version`` from the validated blob.
-    """
-    validated = []
-    for row in rows:
-        row = _insert_row_to_dict(row, attr_names)
-        schema_cls = schema_for(row)
-        row["params"] = _validate_params(schema_cls, row["params"])
-        if per_row_hook is not None:
-            per_row_hook(row, schema_cls)
-        _assert_schema_version_matches(row, schema_cls, table_name=table_name)
-        validated.append(row)
-    return validated
-
-
-def _jsonable_blob(blob):
-    """Coerce a fetched DataJoint blob to JSON-native scalars/containers.
-
-    Validated insert rows carry plain Python scalars, but a blob fetched back
-    from the table can deserialize numbers as numpy scalars (or arrays). The
-    content fingerprint canonicalizes via ``json.dumps``, which rejects those,
-    so round-trip the blob with a duck-typed ``tolist()`` fallback (numpy
-    scalars and arrays both expose it) to get a value that fingerprints
-    identically to the plain-scalar insert form. ``None`` passes through.
-    """
-    if blob is None:
-        return None
-
-    def _coerce(obj):
-        if hasattr(obj, "tolist"):  # numpy scalar / ndarray, duck-typed
-            return obj.tolist()
-        raise TypeError(
-            f"non-JSON-serializable blob value of type {type(obj).__name__}"
-        )
-
-    return json.loads(json.dumps(blob, default=_coerce))
-
-
-def reject_duplicate_parameter_content(
-    table,
-    validated_rows,
-    *,
-    table_name: str,
-    name_attr: str,
-    sorter_keyed: bool = False,
-    allow_duplicate_params: bool = False,
-) -> None:
-    """Reject a validated row whose content duplicates an existing row name.
-
-    The duplicate-content guard shared by the three validated parameter
-    Lookups. After :func:`validate_lookup_rows` normalizes the batch,
-    fingerprint each incoming row (row NAME excluded; ``SorterParameters``
-    scoped per sorter via the fingerprint's ``sorter`` field) and compare
-    against the fingerprints already in the table plus earlier rows in the
-    same batch. A second NAME for content that already ships under a different
-    name forks provenance, so it raises
-    :class:`~spyglass.spikesorting.v2.exceptions.DuplicateParameterContentError`.
-    Re-inserting the SAME ``(name, content)`` pair is idempotent and never
-    trips the guard, so ``insert_default()`` stays re-runnable under
-    ``skip_duplicates=True``. ``allow_duplicate_params=True`` is the documented
-    escape hatch (the row then shows a ``duplicate_of`` in
-    ``describe_parameter_rows``).
-
-    Parameters
-    ----------
-    table : dj.Table
-        The Lookup table instance, queried for already-stored rows.
-    validated_rows : list[dict]
-        Output of :func:`validate_lookup_rows` (plain-scalar ``params``).
-    table_name : str
-        The fingerprint ``table`` field (e.g. ``"SorterParameters"``).
-    name_attr : str
-        The params-name primary-key column (e.g. ``"sorter_params_name"``).
-    sorter_keyed : bool, optional
-        ``True`` for ``SorterParameters`` so detection is scoped per sorter.
-    allow_duplicate_params : bool, optional
-        Opt out of the guard (the documented escape hatch).
-    """
-    if allow_duplicate_params:
-        return
-
-    def _version(row: dict) -> int:
-        # A dict insert may omit the ``params_schema_version`` column (the
-        # DataJoint column default fills it at write time, so the validated
-        # dict has no such key yet). The validated ``params`` blob always
-        # carries the authoritative inner ``schema_version``, and
-        # ``_assert_schema_version_matches`` keeps the outer column in
-        # lockstep with it, so fall back to the blob when the column is
-        # absent rather than KeyError-ing on a perfectly valid insert.
-        version = row.get("params_schema_version")
-        if version is None:
-            version = row["params"]["schema_version"]
-        return int(version)
-
-    def _fingerprint(row: dict) -> str:
-        return parameter_fingerprint(
-            table_name,
-            params=_jsonable_blob(row["params"]),
-            params_schema_version=_version(row),
-            job_kwargs=_jsonable_blob(row.get("job_kwargs")),
-            sorter=row.get("sorter") if sorter_keyed else None,
-        )
-
-    def _pk(row: dict):
-        # The identity DataJoint keys on: the params-name plus the sorter for
-        # the per-sorter SorterParameters table.
-        return (
-            (row["sorter"], row[name_attr]) if sorter_keyed else row[name_attr]
-        )
-
-    stored_rows = table.fetch(as_dict=True)
-    existing_pks = {_pk(row) for row in stored_rows}
-    # fingerprint -> the row name that first claimed it (stored rows first,
-    # then earlier rows in this same batch).
-    claimed: dict[str, str] = {}
-    for stored in stored_rows:
-        claimed.setdefault(_fingerprint(stored), stored[name_attr])
-
-    for row in validated_rows:
-        # A re-insert of an already-stored row (same primary key) is
-        # idempotent, not a new provenance fork: skip it so insert_default /
-        # initialize_v2_defaults stay re-runnable even after an opted-in
-        # duplicate has been added under another name.
-        if _pk(row) in existing_pks:
-            continue
-        name = row[name_attr]
-        fingerprint = _fingerprint(row)
-        prior = claimed.get(fingerprint)
-        if prior is not None and prior != name:
-            raise DuplicateParameterContentError(
-                f"{table_name}: row {name!r} duplicates the content of "
-                f"existing row {prior!r} (fingerprint {fingerprint[:12]}). A "
-                "second name for identical parameters forks provenance. Reuse "
-                f"{prior!r}, change the parameters, or pass "
-                "allow_duplicate_params=True to insert it anyway."
-            )
-        claimed.setdefault(fingerprint, name)
-
-
-def _insert_row_to_dict(row, attr_names) -> dict:
-    """Normalize a DataJoint insert row to a mutable dict.
-
-    A bulk ``insert`` accepts both mapping rows (``{"sorter": ...}``,
-    what user code passes) and positional sequences (``("mountainsort4",
-    name, params, 1, None)``, what each Lookup's ``_DEFAULT_CONTENTS``
-    ships to ``insert_default``). The ``insert`` validation overrides
-    need a dict in both cases so they can read/rewrite ``row["params"]``;
-    a positional tuple is zipped against the table heading's attribute
-    order to recover the dict form. A ``QueryExpression`` passed to
-    ``insert`` is fine -- iterating it yields per-row dicts, which hit the
-    mapping branch.
-
-    A bare ``str``/``bytes`` row is rejected loudly: it is the shape that
-    leaks through when a caller passes a ``pandas.DataFrame`` or a CSV
-    path to ``insert`` (iterating those yields column-name strings /
-    characters), neither of which these validated Lookups support.
-    ``zip``-ing a string against the heading would otherwise produce a
-    silently malformed row.
-
-    Parameters
-    ----------
-    row : Mapping | Sequence
-        One row from the iterable handed to ``insert``.
-    attr_names : Sequence[str]
-        The table heading's attribute names in definition order
-        (``self.heading.names``), used to label a positional sequence.
-
-    Returns
-    -------
-    dict
-        A shallow-copied dict suitable for in-place ``params`` rewrite.
-
-    Raises
-    ------
-    TypeError
-        If ``row`` is a ``str``/``bytes`` (an unsupported insert form
-        for these validated Lookups).
-    """
-    if isinstance(row, Mapping):
-        return dict(row)
-    if isinstance(row, (str, bytes)):
-        raise TypeError(
-            "validated Lookup insert expects each row to be a mapping or "
-            f"a positional sequence; got {type(row).__name__}. Pass a list "
-            "of dicts -- DataFrame / CSV-path inserts are not supported "
-            "on these Pydantic-validated parameter tables."
-        )
-    values = tuple(row)
-    if len(values) != len(attr_names):
-        raise ValueError(
-            "validated Lookup positional insert row has the wrong length: "
-            f"expected {len(attr_names)} value(s) for attributes "
-            f"{tuple(attr_names)!r}, got {len(values)} value(s). Pass a mapping "
-            "row or align the positional tuple with the table heading."
-        )
-    return dict(zip(attr_names, values))
-
-
 def _assert_noise_levels_length(
     noise_levels: list[float] | None, n_channels: int
 ) -> None:
@@ -935,47 +548,6 @@ def _resolved_job_kwargs(*row_job_kwargs: dict | None) -> dict:
     return merged
 
 
-def _ensure_lookup_row_exists(
-    lookup_table,
-    restriction: dict,
-    *,
-    helper_name: str,
-    insert_default_path: str,
-) -> None:
-    """Pre-check that a Lookup-row FK target exists before insert_selection.
-
-    Without this guard, a missing Lookup row produces an opaque
-    DataJoint ``IntegrityError`` ("foreign key constraint fails")
-    that gives the user no hint about which Lookup table is empty or
-    how to populate it. Raise a clear ``ValueError`` instead so the
-    notebook user can fix the setup in one step.
-
-    Parameters
-    ----------
-    lookup_table
-        The Lookup table class whose row is required (e.g.
-        ``PreprocessingParameters``).
-    restriction
-        The dict identifying the required row (e.g.
-        ``{"preprocessing_params_name": "default"}``).
-    helper_name
-        Name of the insert_selection helper calling us, for the error
-        message (e.g. ``"RecordingSelection.insert_selection"``).
-    insert_default_path
-        Importable path that loads the default rows (e.g.
-        ``"PreprocessingParameters.insert_default()"``).
-    """
-    if not (lookup_table & restriction):
-        raise ValueError(
-            f"{helper_name}: required Lookup row not found in "
-            f"{lookup_table.__name__} for {restriction}. "
-            f"Run {insert_default_path} first to install the default "
-            "rows, or insert your custom row before retrying. The "
-            "one-shot `spyglass.spikesorting.v2.initialize_v2_defaults()`"
-            " installs every required default in one call."
-        )
-
-
 _ARTIFACT_DETECTION_INTERVAL_LIST_PREFIX = "artifact_detection_"
 
 
@@ -1043,25 +615,3 @@ def get_spiking_sorting_v2_merge_ids(
     return SpikeSortingOutput()._get_restricted_merge_ids_v2(
         restriction, as_dict=as_dict
     )
-
-
-def _hash_nwb_recording(analysis_file_name: str) -> str:
-    """Return a content hash of a recording's AnalysisNwbfile.
-
-    Delegates to ``AnalysisNwbfile().get_hash`` (the project's blessed
-    wrapper over ``NwbfileHasher``) so v2 verification uses the same
-    hashing path as the v1 recompute machinery.
-
-    Parameters
-    ----------
-    analysis_file_name : str
-        Name of the AnalysisNwbfile holding the preprocessed recording.
-
-    Returns
-    -------
-    str
-        The ``NwbfileHasher`` digest of the file.
-    """
-    from spyglass.common.common_nwbfile import AnalysisNwbfile
-
-    return AnalysisNwbfile().get_hash(analysis_file_name)

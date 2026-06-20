@@ -37,6 +37,8 @@ _DB_FREE_SERVICE_MODULES = [
     "bad_channels",
     "_curation_transforms",
     "_enums",
+    "_lookup_validation",
+    "_nwb_metadata_helpers",
     "_pipeline_presets",
     "_recipe_catalog",
     "_recording_materialization",
