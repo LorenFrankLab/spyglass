@@ -352,7 +352,7 @@ def test_user_notebook_executes(first_hour):
 @pytest.mark.integration
 def test_describe_units_reports_sort_time_quality(first_hour):
     """describe_units returns a per-unit sort-time snapshot for a real sort."""
-    from spyglass.spikesorting.v2.pipeline import _UNIT_COLUMNS
+    from spyglass.spikesorting.v2._pipeline_reporting import _UNIT_COLUMNS
 
     run_summary = first_hour["run_summary"]
     units = describe_units(run_summary["sorting_id"])

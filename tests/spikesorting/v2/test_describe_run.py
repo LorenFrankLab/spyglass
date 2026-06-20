@@ -13,7 +13,10 @@ import pandas as pd
 import pytest
 
 from spyglass.spikesorting.v2 import CurationLabel
-from spyglass.spikesorting.v2.pipeline import _RUN_COLUMNS, describe_run
+from spyglass.spikesorting.v2._pipeline_reporting import (
+    _RUN_COLUMNS,
+    describe_run,
+)
 
 
 def _run_summary(*, n_units=3, warnings=None):
