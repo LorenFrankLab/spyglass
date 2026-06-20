@@ -1071,8 +1071,6 @@ class Sorting(SpyglassMixin, dj.Computed):
             Carrier of the computed sorting, staged units NWB, analyzer
             folder, and lookups threaded into ``make_insert``.
         """
-        import shutil as _shutil
-
         recording_id = source.key["recording_id"]
         recording = Recording().get_recording({"recording_id": recording_id})
 
@@ -1128,27 +1126,13 @@ class Sorting(SpyglassMixin, dj.Computed):
             sorter_row=sorter_row,
             job_kwargs=job_kwargs,
         )
-        analysis_file_name = None
-        try:
-            analysis_file_name, units_object_id = self._write_units_nwb(
-                sorting=sorting_obj,
-                recording=recording,
-                nwb_file_name=nwb_file_name,
-                obs_intervals=obs_intervals,
-            )
-        except Exception:
-            # Mode A cleanup: analyzer folder was created but the
-            # units NWB write failed. Remove the analyzer folder so
-            # a half-built scratch dir does not leak.
-            try:
-                if analyzer_folder.exists():
-                    _shutil.rmtree(analyzer_folder, ignore_errors=False)
-            except Exception as cleanup_exc:  # pragma: no cover -- defensive
-                logger.error(
-                    "Sorting.make_compute: failed to remove analyzer "
-                    f"folder {analyzer_folder!r}: {cleanup_exc!r}"
-                )
-            raise
+        analysis_file_name, units_object_id = self._stage_sorting_artifact(
+            sorting=sorting_obj,
+            recording=recording,
+            nwb_file_name=nwb_file_name,
+            obs_intervals=obs_intervals,
+            analyzer_folder=analyzer_folder,
+        )
 
         return SortingComputed(
             sorting_obj=sorting_obj,
@@ -1204,61 +1188,139 @@ class Sorting(SpyglassMixin, dj.Computed):
         -------
         None
         """
+        try:
+            self._insert_sorting_rows_transaction(
+                key=key,
+                sorting_obj=sorting_obj,
+                analysis_file_name=analysis_file_name,
+                units_object_id=units_object_id,
+                analyzer_folder=analyzer_folder,
+                recording_id=recording_id,
+                nwb_file_name=nwb_file_name,
+            )
+        except Exception:
+            # Failure-mode B: registration failed after a successful
+            # make_compute -- roll back BOTH on-disk side effects (the staged
+            # units NWB and the analyzer folder) before propagating.
+            self._cleanup_staged_sorting_artifacts(
+                analyzer_folder=analyzer_folder,
+                analysis_file_name=analysis_file_name,
+            )
+            raise
+
+    def _stage_sorting_artifact(
+        self,
+        *,
+        sorting,
+        recording,
+        nwb_file_name,
+        obs_intervals,
+        analyzer_folder,
+    ):
+        """Stage the units NWB; clean the built analyzer if staging fails.
+
+        ``_build_analyzer`` has already written ``analyzer_folder`` on disk,
+        so a failure in the units-NWB write must remove it (failure-mode A)
+        before propagating -- DataJoint does not call ``make_insert`` once
+        ``make_compute`` raises. Returns ``(analysis_file_name,
+        units_object_id)``.
+        """
+        try:
+            return self._write_units_nwb(
+                sorting=sorting,
+                recording=recording,
+                nwb_file_name=nwb_file_name,
+                obs_intervals=obs_intervals,
+            )
+        except Exception:
+            # Mode A cleanup: the analyzer folder exists but the units NWB
+            # write failed; remove it so a half-built scratch dir doesn't leak.
+            self._cleanup_staged_sorting_artifacts(
+                analyzer_folder=analyzer_folder
+            )
+            raise
+
+    def _insert_sorting_rows_transaction(
+        self,
+        *,
+        key,
+        sorting_obj,
+        analysis_file_name,
+        units_object_id,
+        analyzer_folder,
+        recording_id,
+        nwb_file_name,
+    ):
+        """Register the AnalysisNwbfile + master + Unit rows atomically.
+
+        Runs the ``transaction_or_noop`` block: registers the staged
+        AnalysisNwbfile, inserts the Sorting master, and populates the Unit
+        part rows INSIDE the transaction so they commit atomically with the
+        master (splitting them across stages is forbidden).
+        ``transaction_or_noop`` is a no-op when the framework transaction is
+        already active (the tri-part dispatch path); it is kept so an
+        out-of-populate caller still gets atomic registration.
+        ``analyzer_folder`` is the transient folder ``_build_analyzer``
+        wrote (threaded from make_compute) to load each unit's peak channel;
+        it is NOT a stored column -- the canonical path is resolved from
+        sorting_id everywhere outside this single populate() invocation.
+        """
         import datetime as _dt
+
+        with transaction_or_noop(self.connection):
+            AnalysisNwbfile().add(nwb_file_name, analysis_file_name)
+            self.insert1(
+                {
+                    **key,
+                    "analysis_file_name": analysis_file_name,
+                    "object_id": units_object_id,
+                    "n_units": len(sorting_obj.unit_ids),
+                    "time_of_sort": _dt.datetime.now(),
+                }
+            )
+            self._populate_unit_part(
+                sorting=sorting_obj,
+                recording_id=recording_id,
+                nwb_file_name=nwb_file_name,
+                key=key,
+                analyzer_folder=analyzer_folder,
+            )
+
+    @staticmethod
+    def _cleanup_staged_sorting_artifacts(
+        *, analyzer_folder, analysis_file_name=None
+    ):
+        """Best-effort removal of a sort's on-disk side effects after failure.
+
+        Removes the staged units NWB (when ``analysis_file_name`` is given --
+        failure-mode B, registration failed after staging) and the analyzer
+        folder (failure-mode A, the units-NWB write failed after the analyzer
+        was built; or B). Each unlink/rmtree is best-effort: a cleanup failure
+        is logged, never raised, so it cannot mask the original error.
+        DataJoint cannot roll back these filesystem side effects, so the
+        caller invokes this in its ``except`` before re-raising.
+        """
         import pathlib as _pathlib
         import shutil as _shutil
 
-        # ``analyzer_folder`` is the transient folder ``_build_analyzer``
-        # wrote (threaded from make_compute), used to load the units' peak
-        # channels and for Mode-B rollback cleanup. It is NOT inserted as a
-        # column: the canonical path is resolved from sorting_id
-        # everywhere outside this single populate() invocation.
-        try:
-            # no-op when framework transaction is active; kept defensively
-            # so an out-of-populate caller still gets atomic registration.
-            with transaction_or_noop(self.connection):
-                AnalysisNwbfile().add(nwb_file_name, analysis_file_name)
-                self.insert1(
-                    {
-                        **key,
-                        "analysis_file_name": analysis_file_name,
-                        "object_id": units_object_id,
-                        "n_units": len(sorting_obj.unit_ids),
-                        "time_of_sort": _dt.datetime.now(),
-                    }
-                )
-                self._populate_unit_part(
-                    sorting=sorting_obj,
-                    recording_id=recording_id,
-                    nwb_file_name=nwb_file_name,
-                    key=key,
-                    analyzer_folder=analyzer_folder,
-                )
-        except Exception:
-            # Any insert failure: roll back BOTH disk side-effects (the
-            # staged units NWB here, the analyzer folder below) before
-            # re-raising. Each unlink/rmtree is best-effort -- a cleanup
-            # failure is logged, not raised, so it cannot mask the original
-            # error.
+        if analysis_file_name is not None:
             try:
                 abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
                 _pathlib.Path(abs_path).unlink(missing_ok=True)
             except Exception as cleanup_exc:  # pragma: no cover -- defensive
                 logger.error(
-                    "Sorting.make_insert: failed to clean up staged units "
-                    f"NWB {analysis_file_name!r}: {cleanup_exc!r}"
+                    "Sorting._cleanup_staged_sorting_artifacts: failed to "
+                    f"clean up staged units NWB {analysis_file_name!r}: "
+                    f"{cleanup_exc!r}"
                 )
-            # Mode B cleanup: analyzer folder also needs removal so a
-            # rolled-back populate does not leave a 5-50 GB orphan.
-            try:
-                if analyzer_folder.exists():
-                    _shutil.rmtree(analyzer_folder, ignore_errors=False)
-            except Exception as cleanup_exc:  # pragma: no cover -- defensive
-                logger.error(
-                    "Sorting.make_insert: failed to remove analyzer "
-                    f"folder {analyzer_folder!r}: {cleanup_exc!r}"
-                )
-            raise
+        try:
+            if analyzer_folder.exists():
+                _shutil.rmtree(analyzer_folder, ignore_errors=False)
+        except Exception as cleanup_exc:  # pragma: no cover -- defensive
+            logger.error(
+                "Sorting._cleanup_staged_sorting_artifacts: failed to remove "
+                f"analyzer folder {analyzer_folder!r}: {cleanup_exc!r}"
+            )
 
     # ---- Accessors -------------------------------------------------------
 
