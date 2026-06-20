@@ -426,6 +426,179 @@ def describe_parameter_rows() -> "pd.DataFrame":
     ).reset_index(drop=True)
 
 
+_PRESET_DETAIL_COLUMNS = [
+    "stage",
+    "params_row_name",
+    "key",
+    "value",
+    "params_schema_version",
+    "job_kwargs",
+]
+
+
+def describe_pipeline_preset(name: str) -> "pd.DataFrame":
+    """Unpack one pipeline preset into its full, validated parameter values.
+
+    The singular companion to :func:`describe_pipeline_presets`: where the
+    plural helper lists every preset and the parameter-row *names* each stage
+    uses, this resolves ONE preset to the actual VALUES of its preprocessing,
+    artifact-detection, and sorter parameter rows -- so you can see exactly what
+    ``run_v2_pipeline(..., pipeline_preset=name)`` will do before running it.
+
+    Unlike the DB-free :func:`describe_pipeline_presets`, this reads the live
+    parameter Lookup tables. If a referenced row is missing it raises a clear
+    "run ``initialize_v2_defaults()``" message rather than failing opaquely.
+
+    Parameters
+    ----------
+    name : str
+        A pipeline-preset name from :func:`list_pipeline_presets` /
+        :func:`describe_pipeline_presets`.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Long-format, one row per parameter, columns ``stage`` (``"preset"`` /
+        ``"preprocessing"`` / ``"artifact_detection"`` / ``"sorter"``),
+        ``params_row_name``, ``key`` (dotted path into the validated blob), and
+        ``value``. Parameter-row entries also carry ``params_schema_version`` and
+        ``job_kwargs`` so the display shows the full row resolved by the preset,
+        not just the core params blob. Preset entries include the human-facing
+        ``threshold_units`` field so detection thresholds are never unitless.
+    """
+    import pandas as pd
+
+    # Validate the name BEFORE importing the table modules: importing them
+    # triggers DataJoint ``@schema`` decoration (a DB connection), so an unknown
+    # name must reject first to keep that path database-free.
+    if name not in _PIPELINE_PRESETS:
+        raise ValueError(
+            f"unknown pipeline_preset {name!r}. Available pipeline presets: "
+            f"{sorted(_PIPELINE_PRESETS)}. Call describe_pipeline_presets() to "
+            "see what each one does."
+        )
+    preset = _PIPELINE_PRESETS[name]
+
+    from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
+    from spyglass.spikesorting.v2.recording import PreprocessingParameters
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+    from spyglass.spikesorting.v2.utils import _jsonable_blob
+
+    def _flatten(prefix, value):
+        if isinstance(value, dict):
+            for sub_key, sub_value in value.items():
+                key = f"{prefix}.{sub_key}" if prefix else str(sub_key)
+                yield from _flatten(key, sub_value)
+        else:
+            yield prefix, value
+
+    def _fetch_params(table, restriction, label):
+        rel = table & restriction
+        if not rel:
+            raise ValueError(
+                f"describe_pipeline_preset: {label} row {restriction!r} "
+                f"referenced by preset {name!r} is not in the database. Run "
+                "initialize_v2_defaults() to install the shipped parameter "
+                "catalog."
+            )
+        params, params_schema_version, job_kwargs = rel.fetch1(
+            "params", "params_schema_version", "job_kwargs"
+        )
+        return {
+            "params": _jsonable_blob(params),
+            "params_schema_version": int(params_schema_version),
+            "job_kwargs": _jsonable_blob(job_kwargs),
+        }
+
+    def _detail_row(
+        *,
+        stage,
+        params_row_name,
+        key,
+        value,
+        params_schema_version=None,
+        job_kwargs=None,
+    ):
+        return {
+            "stage": stage,
+            "params_row_name": params_row_name,
+            "key": key,
+            "value": value,
+            "params_schema_version": params_schema_version,
+            "job_kwargs": job_kwargs,
+        }
+
+    rows = [
+        _detail_row(
+            stage="preset",
+            params_row_name=name,
+            key=key,
+            value=value,
+        )
+        for key, value in (
+            ("sorter", preset.sorter),
+            ("target_region", preset.target_region),
+            ("sampling_rate_hz", preset.sampling_rate_hz),
+            ("recommendation_status", preset.recommendation_status),
+            ("threshold_units", preset.threshold_units),
+            ("intended_use", preset.intended_use),
+            ("notes", preset.notes),
+        )
+    ]
+    for stage, row_name, row in (
+        (
+            "preprocessing",
+            preset.preprocessing_params_name,
+            _fetch_params(
+                PreprocessingParameters,
+                {"preprocessing_params_name": preset.preprocessing_params_name},
+                "PreprocessingParameters",
+            ),
+        ),
+        (
+            "artifact_detection",
+            preset.artifact_detection_params_name,
+            _fetch_params(
+                ArtifactDetectionParameters,
+                {
+                    "artifact_detection_params_name": (
+                        preset.artifact_detection_params_name
+                    )
+                },
+                "ArtifactDetectionParameters",
+            ),
+        ),
+        (
+            "sorter",
+            preset.sorter_params_name,
+            _fetch_params(
+                SorterParameters,
+                {
+                    "sorter": preset.sorter,
+                    "sorter_params_name": preset.sorter_params_name,
+                },
+                "SorterParameters",
+            ),
+        ),
+    ):
+        for key, value in _flatten("", row["params"]):
+            rows.append(
+                _detail_row(
+                    stage=stage,
+                    params_row_name=row_name,
+                    key=key,
+                    value=value,
+                    params_schema_version=row["params_schema_version"],
+                    job_kwargs=row["job_kwargs"],
+                )
+            )
+    return pd.DataFrame(rows, columns=_PRESET_DETAIL_COLUMNS)
+
+
+# Alias: shorter discovery name for the same helper.
+describe_preset = describe_pipeline_preset
+
+
 _SORT_GROUP_COLUMNS = [
     "nwb_file_name",
     "sort_group_id",
@@ -547,6 +720,143 @@ def describe_sort_groups(nwb_file_name: str) -> "pd.DataFrame":
             }
         )
     return pd.DataFrame(rows, columns=_SORT_GROUP_COLUMNS)
+
+
+_UNIT_COLUMNS = [
+    "sorting_id",
+    "unit_id",
+    "n_spikes",
+    "firing_rate_hz",
+    "peak_amplitude_uv",
+    "peak_electrode_id",
+    "brain_region",
+]
+
+
+def _observed_duration_s(sorting_id) -> float:
+    """Seconds the sort actually observed, for a firing-rate denominator.
+
+    Mirrors ``Sorting.make_fetch``: when the sort ran artifact detection the
+    denominator is the artifact-removed ``valid_times`` total (the segments the
+    sorter actually saw), otherwise the materialized ``Recording.duration_s``.
+    Using the raw recording length would overstate the denominator -- and so
+    understate firing rate -- for artifact-masked sorts.
+    """
+    import numpy as np
+
+    from spyglass.common.common_interval import IntervalList
+    from spyglass.spikesorting.v2.recording import Recording, RecordingSelection
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+    from spyglass.spikesorting.v2.utils import (
+        artifact_detection_interval_list_name,
+    )
+
+    sorting_key = {"sorting_id": sorting_id}
+    recording_id = (SortingSelection.RecordingSource & sorting_key).fetch1(
+        "recording_id"
+    )
+    artifact_detection_id = SortingSelection.resolve_artifact_detection(
+        sorting_key
+    )
+    if artifact_detection_id is not None:
+        nwb_file_name = (
+            RecordingSelection & {"recording_id": recording_id}
+        ).fetch1("nwb_file_name")
+        valid_times = (
+            IntervalList
+            & {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": artifact_detection_interval_list_name(
+                    artifact_detection_id
+                ),
+            }
+        ).fetch1("valid_times")
+        return float(np.sum(np.diff(np.asarray(valid_times), axis=1)))
+    return float(
+        (Recording & {"recording_id": recording_id}).fetch1("duration_s")
+    )
+
+
+def describe_units(sorting_id) -> "pd.DataFrame":
+    """Return a per-unit, sort-time quality snapshot for one sort.
+
+    A read-only "what did this sort produce?" receipt built entirely from
+    metadata committed at sort time -- it computes no SpikeInterface extension
+    and loads no recording. Use it right after ``run_v2_pipeline``
+    (``describe_units(run_summary["sorting_id"])``) to sanity-check a sort
+    before the deeper analyzer-backed quality metrics (SNR / ISI / nearest-
+    neighbour), which arrive with the analyzer-driven curation in a later
+    release.
+
+    ``firing_rate_hz`` uses the duration the sort actually OBSERVED -- the
+    artifact-removed ``valid_times`` total when the sort ran artifact detection,
+    otherwise the materialized recording duration (see
+    :func:`_observed_duration_s`). ``peak_electrode_id`` and ``brain_region``
+    come from each unit's peak-amplitude ``Electrode`` row (anchored to the
+    first member for concat sorts).
+
+    Parameters
+    ----------
+    sorting_id
+        ``sorting_id`` of a populated ``Sorting`` row (e.g.
+        ``run_summary["sorting_id"]``).
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per unit, sorted by ``unit_id``. Empty, with the documented
+        columns, for a zero-unit sort. Columns are ``sorting_id``, ``unit_id``,
+        ``n_spikes``, ``firing_rate_hz``, ``peak_amplitude_uv``,
+        ``peak_electrode_id`` (the unit's peak-amplitude ``electrode_id``), and
+        ``brain_region``.
+    """
+    import pandas as pd
+
+    from spyglass.common.common_ephys import Electrode
+    from spyglass.common.common_region import BrainRegion
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    sorting_key = {"sorting_id": sorting_id}
+    if not (Sorting & sorting_key):
+        raise ValueError(
+            f"describe_units: sorting_id {sorting_id!r} is not in Sorting. "
+            "Populate the sort first (e.g. via run_v2_pipeline) and pass "
+            "run_summary['sorting_id']."
+        )
+
+    unit_rows = ((Sorting.Unit & sorting_key) * Electrode * BrainRegion).fetch(
+        as_dict=True
+    )
+    if not unit_rows:
+        return pd.DataFrame(columns=_UNIT_COLUMNS)
+
+    duration_s = _observed_duration_s(sorting_id)
+    if duration_s <= 0:
+        # Units present but zero observed seconds is a contradiction (an
+        # all-artifact mask or a truncated recording). Raise loudly rather than
+        # emitting an all-NaN firing_rate column that reads as a display quirk
+        # and hides the upstream defect.
+        raise ValueError(
+            f"describe_units: sorting_id {sorting_id!r} has {len(unit_rows)} "
+            f"unit(s) but its observed duration is {duration_s}s. A sort with "
+            "units cannot span zero observed time -- check the recording "
+            "duration and the artifact-detection interval."
+        )
+    rows = []
+    for unit in sorted(unit_rows, key=lambda row: int(row["unit_id"])):
+        n_spikes = int(unit["n_spikes"])
+        rows.append(
+            {
+                "sorting_id": sorting_id,
+                "unit_id": int(unit["unit_id"]),
+                "n_spikes": n_spikes,
+                "firing_rate_hz": n_spikes / duration_s,
+                "peak_amplitude_uv": float(unit["peak_amplitude_uv"]),
+                "peak_electrode_id": int(unit["electrode_id"]),
+                "brain_region": str(unit["region_name"]),
+            }
+        )
+    return pd.DataFrame(rows, columns=_UNIT_COLUMNS)
 
 
 def _sort_group_geometry_rows(nwb_file_name: str) -> list[dict[str, Any]]:
@@ -2162,11 +2472,11 @@ def run_v2_pipeline_session(
         A successful entry is the single-group run summary (see
         :func:`run_v2_pipeline`) plus ``sort_group_id`` and ``outcome="ok"``.
         A failed entry is ``{"sort_group_id", "pipeline_preset",
-        "outcome": "failed", "error", "partial_run_summary"}`` -- the
-        ``partial_run_summary`` carries the stages completed before a sort
-        failure (from :class:`PipelineStageError`) or ``None`` when the caught
-        error carries none (a preflight or zero-unit failure). Wrap with
-        ``pd.DataFrame(results)`` for a table.
+        "outcome": "failed", "error_type", "error", "partial_run_summary"}``
+        -- the ``partial_run_summary`` carries the stages completed before a
+        sort failure (from :class:`PipelineStageError`) or ``None`` when the
+        caught error carries none (a preflight or zero-unit failure). Wrap with
+        ``describe_run(results)`` for a receipt table.
 
     Raises
     ------
@@ -2228,6 +2538,7 @@ def run_v2_pipeline_session(
                         "sort_group_id": sort_group_id,
                         "pipeline_preset": pipeline_preset,
                         "outcome": "failed",
+                        "error_type": "PreflightError",
                         "error": "\n".join(row["errors"]),
                         "partial_run_summary": None,
                     }
@@ -2267,6 +2578,7 @@ def run_v2_pipeline_session(
                     "sort_group_id": sort_group_id,
                     "pipeline_preset": pipeline_preset,
                     "outcome": "failed",
+                    "error_type": type(exc).__name__,
                     "error": str(exc),
                     "partial_run_summary": getattr(
                         exc, "partial_run_summary", None
@@ -2281,4 +2593,250 @@ def run_v2_pipeline_session(
     # Stable, group-ordered result (preflight-failed entries were appended
     # first; restore ascending sort_group_id order).
     results.sort(key=lambda entry: entry["sort_group_id"])
+
+    # End-of-batch receipt in the log. Surfaces the outcomes that are easy to
+    # miss when scrolling a long run -- not just failures but zero-unit sorts
+    # and warnings too. ``describe_run(results)`` is the richer table form.
+    n_ok = sum(entry["outcome"] == "ok" for entry in results)
+    n_failed = sum(entry["outcome"] == "failed" for entry in results)
+    n_zero = 0
+    n_warn = 0
+    failed_details = []
+    for entry in results:
+        partial = (
+            entry.get("partial_run_summary")
+            if isinstance(entry.get("partial_run_summary"), dict)
+            else {}
+        )
+        n_units = _run_metadata(entry, partial, "n_units")
+        if n_units == 0:
+            n_zero += 1
+        if _run_warnings(entry, partial):
+            n_warn += 1
+        if entry["outcome"] == "failed":
+            error_type = entry.get("error_type") or "Error"
+            failed_details.append(
+                f"sort_group_id={entry['sort_group_id']}: {error_type}"
+            )
+    failed_suffix = (
+        f" ({', '.join(failed_details)})" if failed_details else ""
+    )
+    logger.info(
+        f"run_v2_pipeline_session: {len(results)} group(s): {n_ok} ok, "
+        f"{n_failed} failed{failed_suffix}, {n_zero} zero-unit, "
+        f"{n_warn} with warnings. "
+        "Call describe_run(results) for the per-group receipt."
+    )
     return results
+
+
+_RUN_COLUMNS = [
+    "row_type",
+    "sort_group_id",
+    "stage",
+    "status",
+    "seconds",
+    "n_units",
+    "merge_id",
+    "warning",
+    "error",
+]
+
+# Canonical stage order for the run receipt; extras (if any) append after.
+_RUN_STAGE_ORDER = (
+    "recording",
+    "artifact_detection",
+    "sorting",
+    "curation",
+    "merge",
+)
+
+
+def _run_blank_row() -> dict[str, Any]:
+    return {col: None for col in _RUN_COLUMNS}
+
+
+def _run_stage_seconds_total(summary) -> "float | None":
+    """Total wall-clock across a run summary's ``stage_seconds`` dict."""
+    if not isinstance(summary, dict):
+        return None
+    stage_seconds = summary.get("stage_seconds")
+    if not isinstance(stage_seconds, dict) or not stage_seconds:
+        return None
+    return float(sum(stage_seconds.values()))
+
+
+def _run_warnings(entry: dict, partial: dict | None = None) -> list[str]:
+    """Warnings from a session-result entry plus any partial summary."""
+    warnings: list[str] = []
+    for source in (entry.get("warnings"), (partial or {}).get("warnings")):
+        if not source:
+            continue
+        if isinstance(source, str):
+            warnings.append(source)
+        else:
+            warnings.extend(str(warning) for warning in source)
+    return warnings
+
+
+def _run_metadata(entry: dict, partial: dict | None, key: str):
+    """Read top-level metadata, falling back to a partial run summary."""
+    value = entry.get(key)
+    if value is None and isinstance(partial, dict):
+        value = partial.get(key)
+    return value
+
+
+def _describe_run_single_rows(
+    run_summary: dict, *, sort_group_id=None
+) -> list[dict[str, Any]]:
+    """Receipt rows for one ``run_v2_pipeline`` summary (summary, stages, warnings)."""
+    stage_seconds = run_summary.get("stage_seconds") or {}
+    stage_names = [
+        stage
+        for stage in _RUN_STAGE_ORDER
+        if f"{stage}_status" in run_summary or stage in stage_seconds
+    ]
+    stage_names += [s for s in stage_seconds if s not in stage_names]
+
+    rows = []
+    header = _run_blank_row()
+    header.update(
+        row_type="summary",
+        sort_group_id=sort_group_id,
+        seconds=_run_stage_seconds_total(run_summary),
+        n_units=run_summary.get("n_units"),
+        merge_id=run_summary.get("merge_id"),
+    )
+    rows.append(header)
+    for stage in stage_names:
+        row = _run_blank_row()
+        row.update(
+            row_type="stage",
+            sort_group_id=sort_group_id,
+            stage=stage,
+            status=run_summary.get(f"{stage}_status"),
+            seconds=stage_seconds.get(stage),
+        )
+        rows.append(row)
+    for warning in run_summary.get("warnings") or []:
+        row = _run_blank_row()
+        row.update(
+            row_type="warning",
+            sort_group_id=sort_group_id,
+            warning=str(warning),
+        )
+        rows.append(row)
+    return rows
+
+
+def describe_run(result) -> "pd.DataFrame":
+    """Render a ``run_v2_pipeline`` summary (or session result) as a receipt.
+
+    The post-run companion to the ``describe_*`` discovery helpers: it turns the
+    plain dict / list those runners return into a long-format DataFrame whose
+    rows are explicit, so the things easiest to overlook -- a zero-unit sort, a
+    warning, a failed group -- are first-class rows, not a value buried in a
+    nested dict. Warnings never disappear into a print statement.
+
+    Pass either a single ``run_v2_pipeline`` run summary (``dict``) or a
+    ``run_v2_pipeline_session`` result (``list`` of dicts). For the session
+    form, a leading ``summary`` row carries the ok / failed / zero-unit /
+    with-warnings counts and ``seconds`` is ``sum(stage_seconds.values())`` per
+    group; partial / missing summaries on failed groups are tolerated.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Columns ``row_type`` (``"summary"`` / ``"stage"`` / ``"group"`` /
+        ``"warning"``), ``sort_group_id``, ``stage``, ``status``, ``seconds``,
+        ``n_units``, ``merge_id``, ``warning``, ``error``.
+    """
+    import pandas as pd
+
+    if isinstance(result, dict):
+        return pd.DataFrame(
+            _describe_run_single_rows(result), columns=_RUN_COLUMNS
+        )
+    if isinstance(result, list):
+        rows = []
+        n_ok = n_failed = n_zero = n_warn = 0
+        total_seconds = 0.0
+        have_seconds = False
+        for entry in result:
+            outcome = entry.get("outcome")
+            sort_group_id = entry.get("sort_group_id")
+            partial = (
+                entry.get("partial_run_summary")
+                if outcome == "failed"
+                and isinstance(entry.get("partial_run_summary"), dict)
+                else None
+            )
+            warnings = _run_warnings(entry, partial)
+            n_units = _run_metadata(entry, partial, "n_units")
+            merge_id = _run_metadata(entry, partial, "merge_id")
+            if outcome == "failed":
+                n_failed += 1
+            elif outcome == "ok":
+                n_ok += 1
+            else:
+                # Don't silently count an unrecognized entry as ok -- that would
+                # inflate the ok tally and give false reassurance (e.g. a raw
+                # run summary mistakenly wrapped in a list has no 'outcome').
+                raise ValueError(
+                    "describe_run: session-result entry for sort_group_id="
+                    f"{sort_group_id!r} has outcome={outcome!r}; expected 'ok' "
+                    "or 'failed'. Pass a run_v2_pipeline_session result (list), "
+                    "or a single run_v2_pipeline summary as a dict."
+                )
+            # A ``require_units=True`` zero-unit group raises with no partial
+            # summary, so its n_units is None (not 0) and it is tallied under
+            # n_failed only; n_zero counts groups that completed with zero units.
+            if n_units == 0:
+                n_zero += 1
+            if warnings:
+                n_warn += 1
+
+            seconds = _run_stage_seconds_total(
+                entry if outcome != "failed" else partial
+            )
+            if seconds is not None:
+                total_seconds += seconds
+                have_seconds = True
+
+            group = _run_blank_row()
+            group.update(
+                row_type="group",
+                sort_group_id=sort_group_id,
+                status=outcome,
+                seconds=seconds,
+                n_units=n_units,
+                merge_id=merge_id,
+                error=entry.get("error"),
+            )
+            rows.append(group)
+            for warning in warnings:
+                row = _run_blank_row()
+                row.update(
+                    row_type="warning",
+                    sort_group_id=sort_group_id,
+                    warning=str(warning),
+                )
+                rows.append(row)
+
+        header = _run_blank_row()
+        header.update(
+            row_type="summary",
+            status=(
+                f"{n_ok} ok, {n_failed} failed, {n_zero} zero-unit, "
+                f"{n_warn} with warnings"
+            ),
+            seconds=total_seconds if have_seconds else None,
+        )
+        return pd.DataFrame([header] + rows, columns=_RUN_COLUMNS)
+
+    raise TypeError(
+        "describe_run: expected a run_v2_pipeline run summary (dict) or a "
+        "run_v2_pipeline_session result (list of dicts); got "
+        f"{type(result).__name__}."
+    )

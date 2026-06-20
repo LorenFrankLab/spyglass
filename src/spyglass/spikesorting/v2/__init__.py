@@ -5,10 +5,14 @@ helper modules are imported lazily by callers rather than re-exported here, so
 ``import spyglass.spikesorting.v2`` stays free of optional runtime
 dependencies (Pydantic, modern SpikeInterface) until a submodule is used.
 
-The ``initialize_v2_defaults`` helper is the only eager symbol: it installs
-every default Lookup row the pipeline needs in one call, removing the
-"forgot to call ``insert_default``" first-run friction.
+The eager symbols are kept dependency-light: ``initialize_v2_defaults``
+installs every default Lookup row the pipeline needs in one call (removing the
+"forgot to call ``insert_default``" first-run friction), and ``CurationLabel``
+is re-exported from the stdlib-only ``_enums`` module so notebook users can
+discover the canonical label set without importing a table module.
 """
+
+from spyglass.spikesorting.v2._enums import CurationLabel
 
 
 def initialize_v2_defaults() -> None:
@@ -44,4 +48,4 @@ def initialize_v2_defaults() -> None:
     MotionCorrectionParameters.insert_default()
 
 
-__all__ = ["initialize_v2_defaults"]
+__all__ = ["initialize_v2_defaults", "CurationLabel"]

@@ -337,6 +337,7 @@ def test_session_runner_preflight_continue(monkeypatch):
     assert by_id[0]["outcome"] == "ok" and by_id[0]["merge_id"] == "m0"
     assert by_id[1]["outcome"] == "failed"
     assert by_id[1]["partial_run_summary"] is None
+    assert by_id[1]["error_type"] == "PreflightError"
     assert "group 1 misconfigured" in by_id[1]["error"]
     assert by_id[1]["pipeline_preset"] == _PRESET
 
@@ -380,6 +381,7 @@ def test_session_runner_continue_on_error(monkeypatch):
     assert by_id[2]["outcome"] == "ok" and by_id[2]["merge_id"] == "m2"
     assert by_id[1]["outcome"] == "failed"
     assert by_id[1]["partial_run_summary"] == {"recording_id": "r1"}
+    assert by_id[1]["error_type"] == "PipelineStageError"
     assert "sorting" in by_id[1]["error"]
 
 
@@ -453,6 +455,7 @@ def test_session_runner_continue_on_error_zero_units(monkeypatch):
     assert by_id[0]["outcome"] == "ok" and by_id[0]["merge_id"] == "m0"
     assert by_id[1]["outcome"] == "failed"
     assert by_id[1]["partial_run_summary"] is None  # ZeroUnitSortError has none
+    assert by_id[1]["error_type"] == "ZeroUnitSortError"
     assert "zero units" in by_id[1]["error"]
 
 

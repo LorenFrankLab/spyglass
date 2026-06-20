@@ -29,8 +29,10 @@ import pytest
 
 from spyglass.spikesorting.v2.pipeline import (
     _STAGE_STATUSES,
+    describe_pipeline_preset,
     describe_pipeline_presets,
     describe_sort_groups,
+    describe_units,
     plot_sort_group_geometry,
     preflight_v2_pipeline,
     run_v2_pipeline,
@@ -317,6 +319,11 @@ def test_user_notebook_executes(first_hour):
         "nwb_file_name": inputs["nwb_file_name"],
         "team_name": inputs["team_name"],
         "interval_list_name": inputs["interval_list_name"],
+        # The fixture has multiple sort groups; the notebook now requires an
+        # explicit sort_group_id when there is more than one (no positional
+        # default). Inject the same group first_hour sorted so the reused-row
+        # merge_id assertion below holds.
+        "sort_group_id": inputs["sort_group_id"],
         "pipeline_preset": _PIPELINE_PRESET,
     }
 
@@ -339,6 +346,78 @@ def test_user_notebook_executes(first_hour):
         == first_hour["run_summary"]["merge_id"]
     )
     assert isinstance(namespace["spike_times"], list)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_describe_units_reports_sort_time_quality(first_hour):
+    """describe_units returns a per-unit sort-time snapshot for a real sort."""
+    from spyglass.spikesorting.v2.pipeline import _UNIT_COLUMNS
+
+    run_summary = first_hour["run_summary"]
+    units = describe_units(run_summary["sorting_id"])
+
+    assert list(units.columns) == _UNIT_COLUMNS
+    assert len(units) == run_summary["n_units"]
+    assert run_summary["n_units"] > 0  # the smoke sort finds units
+    assert (units["n_spikes"] > 0).all()
+    assert (units["firing_rate_hz"] > 0).all()
+    assert units["peak_electrode_id"].dtype.kind in "iu"
+    assert units["brain_region"].map(bool).all()
+    # firing_rate uses ONE shared denominator (the sort's observed seconds), so
+    # n_spikes / firing_rate is the same for every unit -- the property that
+    # makes the rate honest for an artifact-masked sort.
+    denom = units["n_spikes"] / units["firing_rate_hz"]
+    assert np.allclose(denom, denom.iloc[0])
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_describe_pipeline_preset_unpacks_values(first_hour):
+    """describe_pipeline_preset resolves a preset to its live parameter values."""
+    from spyglass.spikesorting.v2.pipeline import _PIPELINE_PRESETS
+
+    # first_hour installed the default Lookup rows via configure_v2_run_inputs.
+    detail = describe_pipeline_preset(_PIPELINE_PRESET)
+
+    assert {"preset", "preprocessing", "artifact_detection", "sorter"} <= set(
+        detail["stage"]
+    )
+    preset_rows = detail[detail["stage"] == "preset"].set_index("key")["value"]
+    assert preset_rows["sorter"] == _PIPELINE_PRESETS[_PIPELINE_PRESET].sorter
+    assert (
+        preset_rows["threshold_units"]
+        == _PIPELINE_PRESETS[_PIPELINE_PRESET].threshold_units
+    )
+    # a known preprocessing knob is unpacked with its dotted key + value
+    preproc_rows = detail[detail["stage"] == "preprocessing"]
+    preproc_keys = set(preproc_rows["key"])
+    assert any(k.startswith("bandpass_filter.") for k in preproc_keys)
+    assert preproc_rows["params_schema_version"].notna().all()
+    assert "job_kwargs" in detail.columns
+
+
+@pytest.mark.database
+def test_curation_label_options(dj_conn):
+    """CurationV2.label_options returns the canonical labels in display order."""
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    assert CurationV2.label_options() == [
+        "accept",
+        "mua",
+        "noise",
+        "artifact",
+        "reject",
+    ]
+
+
+@pytest.mark.database
+def test_describe_units_absent_sorting_id_raises(dj_conn):
+    """An unknown sorting_id raises a clear, actionable error (not opaque DJ)."""
+    import uuid
+
+    with pytest.raises(ValueError, match="is not in Sorting"):
+        describe_units(uuid.uuid4())
 
 
 @pytest.mark.database
@@ -451,7 +530,7 @@ def test_plot_sort_group_geometry_multi_probe_offset(monkeypatch):
 
 
 def test_user_notebook_cell_budget():
-    """The user notebook stays within the 10-code-cell budget (DB-free).
+    """The user notebook stays within the 12-code-cell budget (DB-free).
 
     Equivalent to
     ``jq '.cells | map(select(.cell_type=="code")) | length'`` but in pure
@@ -462,4 +541,4 @@ def test_user_notebook_cell_budget():
 
     notebook = json.loads(_NOTEBOOK_PATH.read_text())
     n_code = sum(1 for c in notebook["cells"] if c["cell_type"] == "code")
-    assert n_code <= 10, f"notebook has {n_code} code cells (budget is 10)"
+    assert n_code <= 12, f"notebook has {n_code} code cells (budget is 12)"

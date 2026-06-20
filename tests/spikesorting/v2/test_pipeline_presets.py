@@ -20,7 +20,9 @@ import pytest
 
 from spyglass.spikesorting.v2.pipeline import (
     _PIPELINE_PRESETS,
+    describe_pipeline_preset,
     describe_pipeline_presets,
+    describe_preset,
     list_pipeline_presets,
 )
 
@@ -216,3 +218,22 @@ def test_docs_reference_canonical_npx_preset():
     assert _CANONICAL_NPX_PRESET in doc_text
     assert _PLACEHOLDER_NPX_PRESET not in doc_text
     assert _PLACEHOLDER_NPX_PRESET not in notebook_text
+
+
+def test_describe_pipeline_preset_unknown_name_raises():
+    """An unknown preset name raises before any DB read, pointing at discovery.
+
+    The name check is the first thing ``describe_pipeline_preset`` does, so this
+    path is DB-free; only the value-unpack (a passing name) touches the Lookup
+    tables. The full-unpack happy path lives in the integration suite.
+    """
+    with pytest.raises(ValueError, match="unknown pipeline_preset"):
+        describe_pipeline_preset("definitely_not_a_preset")
+    # the message routes the user to the discovery helper
+    with pytest.raises(ValueError, match="describe_pipeline_presets"):
+        describe_pipeline_preset("definitely_not_a_preset")
+
+
+def test_describe_preset_is_alias():
+    """``describe_preset`` is the shorter discovery alias for the same helper."""
+    assert describe_preset is describe_pipeline_preset

@@ -785,6 +785,21 @@ class CurationV2(SpyglassMixin, dj.Manual):
         )
 
     @classmethod
+    def label_options(cls) -> list[str]:
+        """Return the canonical curation labels, in display order.
+
+        The recognition-over-recall companion to
+        ``insert_curation(labels=...)``: the exact strings accepted (validated)
+        for a unit label without ``allow_custom_labels=True``. Order matches the
+        ``CurationLabel`` enum definition. Labels are lowercase (e.g. ``"mua"``);
+        ``CurationLabel.mua`` is the typed equivalent for code that prefers an
+        enum member over a string literal.
+        """
+        from spyglass.spikesorting.v2._enums import CurationLabel
+
+        return [label.value for label in CurationLabel]
+
+    @classmethod
     def summarize_curation(cls, curation_key: dict) -> dict:
         """Return a notebook-printable summary of one curation.
 
