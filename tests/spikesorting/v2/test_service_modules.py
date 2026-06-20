@@ -40,6 +40,7 @@ _DB_FREE_SERVICE_MODULES = [
     "_pipeline_presets",
     "_recipe_catalog",
     "_recording_materialization",
+    "_reference_resolution",
     "_selection_identity",
     "_selection_plan",
     "_signal_math",
