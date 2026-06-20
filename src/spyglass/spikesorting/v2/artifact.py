@@ -55,6 +55,7 @@ from spyglass.spikesorting.v2._artifact_intervals import (
     scan_artifact_frames,
 )
 from spyglass.spikesorting.v2._params.artifact_detection import (
+    ARTIFACT_DETECTION_SCHEMA_VERSION,
     ArtifactDetectionParamsSchema,
 )
 from spyglass.spikesorting.v2._recipe_catalog import artifact_default_contents
@@ -131,17 +132,16 @@ class ArtifactDetectionParameters(SpyglassMixin, dj.Lookup):
     controls the worker-pool size (default 1, serial in-process, matching v1).
     """
 
-    definition = """
+    definition = f"""
     artifact_detection_params_name: varchar(64)
     ---
     params: blob
-    params_schema_version=2: int
+    params_schema_version={ARTIFACT_DETECTION_SCHEMA_VERSION}: int
     job_kwargs=null: blob  # SI job-kwargs for chunked scan; see docstring
     """
 
     # Row-level ``params_schema_version`` matches the inner
-    # ``ArtifactDetectionParamsSchema.schema_version`` (bumped to 2
-    # for ``min_length_s``).
+    # ``ArtifactDetectionParamsSchema.schema_version``.
     # The shipped rows are defined in
     # ``_recipe_catalog.artifact_default_contents`` (single source).
     _DEFAULT_CONTENTS: tuple = artifact_default_contents()

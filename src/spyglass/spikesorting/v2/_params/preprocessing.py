@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+PREPROCESSING_SCHEMA_VERSION = 3
+
 
 class BandpassFilterParams(BaseModel):
     """Bandpass filter cutoffs applied BEFORE referencing.
@@ -141,7 +143,7 @@ class PreprocessingParamsSchema(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
-    schema_version: int = 3
+    schema_version: int = PREPROCESSING_SCHEMA_VERSION
     phase_shift: PhaseShiftParams | None = Field(default=None)
     # phase_shift defaults to None: off in the franklab default and only a
     # no-op-until-present step for multiplexed-ADC (Neuropixels) recordings.

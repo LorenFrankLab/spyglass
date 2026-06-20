@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+ARTIFACT_DETECTION_SCHEMA_VERSION = 2
+
 
 class ArtifactDetectionParamsSchema(BaseModel):
     """Validated schema for the artifact-detection parameter blob.
@@ -43,7 +45,7 @@ class ArtifactDetectionParamsSchema(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
-    schema_version: int = 2
+    schema_version: int = ARTIFACT_DETECTION_SCHEMA_VERSION
     # Bumped to 2 by adding ``min_length_s``: the artifact-removed
     # valid_times are filtered to drop slivers shorter than this
     # many seconds before the sorter sees them. Default ``1.0``

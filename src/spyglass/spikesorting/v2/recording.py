@@ -31,6 +31,7 @@ from spyglass.common.common_nwbfile import (
     Nwbfile,
 )  # noqa: F401
 from spyglass.spikesorting.v2._params.preprocessing import (
+    PREPROCESSING_SCHEMA_VERSION,
     PreprocessingParamsSchema,
 )
 from spyglass.spikesorting.v2._recording_materialization import (
@@ -667,16 +668,16 @@ class PreprocessingParameters(SpyglassMixin, dj.Lookup):
     ``insert_default`` bulk-inserts the v2 default presets.
     """
 
-    definition = """
+    definition = f"""
     preprocessing_params_name: varchar(128)
     ---
     params: blob
-    params_schema_version=3: int
+    params_schema_version={PREPROCESSING_SCHEMA_VERSION}: int
     job_kwargs=null: blob
     """
 
     # Row-level ``params_schema_version`` must equal the inner
-    # ``PreprocessingParamsSchema.schema_version`` (3). The DataJoint
+    # ``PreprocessingParamsSchema.schema_version``. The DataJoint
     # column default tracks the schema version so a custom row that omits
     # the column is tagged with the current schema version, not a
     # mismatched one. The shipped rows are defined in

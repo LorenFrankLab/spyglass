@@ -20,6 +20,7 @@ import datajoint as dj
 from spyglass.common import IntervalList, LabTeam, Session  # noqa: F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile  # noqa: F401
 from spyglass.spikesorting.v2._params.motion_correction import (
+    MOTION_CORRECTION_SCHEMA_VERSION,
     MotionCorrectionParamsSchema,
 )
 from spyglass.spikesorting.v2.recording import (
@@ -126,11 +127,11 @@ class MotionCorrectionParameters(SpyglassMixin, dj.Lookup):
     materializer is implemented.
     """
 
-    definition = """
+    definition = f"""
     motion_correction_params_name: varchar(64)
     ---
     params: blob
-    params_schema_version=1: int
+    params_schema_version={MOTION_CORRECTION_SCHEMA_VERSION}: int
     job_kwargs=null: blob
     """
 
@@ -138,19 +139,19 @@ class MotionCorrectionParameters(SpyglassMixin, dj.Lookup):
         (
             "none",
             MotionCorrectionParamsSchema().model_dump(),
-            1,
+            MOTION_CORRECTION_SCHEMA_VERSION,
             None,
         ),
         (
             "auto_default",
             MotionCorrectionParamsSchema(preset="auto").model_dump(),
-            1,
+            MOTION_CORRECTION_SCHEMA_VERSION,
             None,
         ),
         (
             "rigid_fast_default",
             MotionCorrectionParamsSchema(preset="rigid_fast").model_dump(),
-            1,
+            MOTION_CORRECTION_SCHEMA_VERSION,
             None,
         ),
     )

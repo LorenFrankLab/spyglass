@@ -51,6 +51,21 @@ KS4_NEUROPIXELS = "franklab_neuropixels_default"
 # ---- Per-stage default-row builders ---------------------------------------
 
 
+def _params_schema_version(params: dict) -> int:
+    """Return the authoritative schema version from a validated params blob."""
+    return int(params["schema_version"])
+
+
+def _lookup_row(name: str, params: dict, job_kwargs=None) -> tuple:
+    """Build a parameter-lookup row with the version copied from ``params``."""
+    return (name, params, _params_schema_version(params), job_kwargs)
+
+
+def _sorter_row(sorter: str, name: str, params: dict, job_kwargs=None) -> tuple:
+    """Build a sorter-lookup row with the version copied from ``params``."""
+    return (sorter, name, params, _params_schema_version(params), job_kwargs)
+
+
 def preprocessing_default_contents() -> tuple:
     """Return ``PreprocessingParameters._DEFAULT_CONTENTS``.
 
@@ -58,7 +73,7 @@ def preprocessing_default_contents() -> tuple:
     params_schema_version, job_kwargs)``.
     """
     return (
-        (
+        _lookup_row(
             "default",
             # v2's schema-default preproc (300 Hz / 6000 Hz bandpass, median
             # reference, 1.0 s min-segment). Not a production recipe -- the
@@ -67,10 +82,8 @@ def preprocessing_default_contents() -> tuple:
             # use. ``whiten`` defaults to None (whitening is deferred to the
             # sorter), so the default-constructed schema needs no override.
             PreprocessingParamsSchema().model_dump(),
-            3,
-            None,
         ),
-        (
+        _lookup_row(
             # Production hippocampus recipe (June 2026): 600 Hz high-pass
             # (hippocampal spikes are denser/narrower than cortical ones),
             # 6000 Hz low-pass, 1.5 ms min-segment (production keeps the
@@ -85,10 +98,8 @@ def preprocessing_default_contents() -> tuple:
                     "min_segment_length": 0.0015,
                 }
             ).model_dump(),
-            3,
-            None,
         ),
-        (
+        _lookup_row(
             # Production cortex recipe (June 2026): identical to the
             # hippocampus recipe with a 300 Hz high-pass (cortical waveforms
             # are wider).
@@ -99,10 +110,8 @@ def preprocessing_default_contents() -> tuple:
                     "min_segment_length": 0.0015,
                 }
             ).model_dump(),
-            3,
-            None,
         ),
-        (
+        _lookup_row(
             NEUROPIXELS_PREPROC,
             # Blessed Neuropixels recipe: bandpass + ADC phase-shift. The
             # phase-shift is a safe no-op until the recording carries an
@@ -115,10 +124,8 @@ def preprocessing_default_contents() -> tuple:
                     "phase_shift": {"margin_ms": 100.0},
                 }
             ).model_dump(),
-            3,
-            None,
         ),
-        (
+        _lookup_row(
             "no_filter",
             # ``bandpass_filter=None`` is a real disable: the runtime
             # skips the filter step entirely, so "no_filter" applies no
@@ -126,8 +133,6 @@ def preprocessing_default_contents() -> tuple:
             PreprocessingParamsSchema.model_validate(
                 {"bandpass_filter": None}
             ).model_dump(),
-            3,
-            None,
         ),
     )
 
@@ -139,21 +144,17 @@ def artifact_default_contents() -> tuple:
     params_schema_version, job_kwargs)``.
     """
     return (
-        (
+        _lookup_row(
             "none",
             ArtifactDetectionParamsSchema(
                 detect=False, amplitude_threshold_uv=None
             ).model_dump(),
-            2,
-            None,
         ),
-        (
+        _lookup_row(
             "default",
             ArtifactDetectionParamsSchema().model_dump(),
-            2,
-            None,
         ),
-        (
+        _lookup_row(
             # Production artifact recipe (June 2026): 100 uV amplitude
             # threshold, 0.7 proportion-above-threshold, 1.0 ms removal window
             # -- far more aggressive than the 500 uV shipped "default".
@@ -162,10 +163,8 @@ def artifact_default_contents() -> tuple:
                 amplitude_threshold_uv=100.0,
                 proportion_above_threshold=0.7,
             ).model_dump(),
-            2,
-            None,
         ),
-        (
+        _lookup_row(
             # More aggressive 50 uV production variant (same proportion-above
             # and removal window).
             ARTIFACT_50UV,
@@ -173,8 +172,6 @@ def artifact_default_contents() -> tuple:
                 amplitude_threshold_uv=50.0,
                 proportion_above_threshold=0.7,
             ).model_dump(),
-            2,
-            None,
         ),
     )
 
@@ -186,7 +183,7 @@ def sorter_default_contents() -> tuple:
     params_schema_version, job_kwargs)``.
     """
     return (
-        (
+        _sorter_row(
             # Production MountainSort4 recipe (June 2026), 30 kHz. Rate-keyed:
             # the sorter runs ``filter=False`` (the preproc stage already
             # bandpassed), so the sorter band is inert and the only
@@ -200,10 +197,8 @@ def sorter_default_contents() -> tuple:
                 _get_sorter_schema("mountainsort4"),
                 {"adjacency_radius": 100.0},
             ),
-            1,
-            None,
         ),
-        (
+        _sorter_row(
             # 20 kHz variant: ``clip_size=27`` / ``detect_interval=7`` hold the
             # same ~1.33 ms physical window at the lower rate; everything else
             # matches the 30 kHz row.
@@ -217,19 +212,15 @@ def sorter_default_contents() -> tuple:
                     "detect_interval": 7,
                 },
             ),
-            1,
-            None,
         ),
-        (
+        _sorter_row(
             # MS5 is region-agnostic (filter=False, like MS4), so the row is
             # rate-keyed; 30 kHz uses the schema-default snippet window.
             "mountainsort5",
             MS5_30KHZ,
             _validate_params(_get_sorter_schema("mountainsort5"), {}),
-            1,
-            None,
         ),
-        (
+        _sorter_row(
             # Kilosort4 Neuropixels recipe matched to the AIND
             # aind-ephys-spikesort-kilosort4 capsule params.json (and
             # int-brain-lab/ibl-sorter): the only scientifically-meaningful
@@ -257,26 +248,24 @@ def sorter_default_contents() -> tuple:
                     "keep_good_only": False,
                 },
             ),
-            1,
-            None,
         ),
-        (
+        _sorter_row(
             "spykingcircus2",
             "default",
             _validate_params(_get_sorter_schema("spykingcircus2"), {}),
-            1,
-            None,
         ),
-        (
+        _sorter_row(
             "tridesclous2",
             "default",
             _validate_params(_get_sorter_schema("tridesclous2"), {}),
-            1,
-            None,
         ),
-        (
+        _sorter_row(
             "clusterless_thresholder",
             "default",
+            # ClusterlessThresholderSchema is currently schema_version=4:
+            # v2 dropped ``outputs`` / ``random_chunk_kwargs``;
+            # v3 made ``noise_levels`` optional (None -> SI MAD);
+            # v4 added ``threshold_unit``.
             _validate_params(
                 _get_sorter_schema("clusterless_thresholder"),
                 # ``threshold_unit="uv"`` makes the shipped
@@ -305,12 +294,6 @@ def sorter_default_contents() -> tuple:
                 # true 100 uV threshold.
                 {"threshold_unit": "uv", "noise_levels": [1.0]},
             ),
-            # ClusterlessThresholderSchema is at schema_version=4:
-            # v2 dropped ``outputs`` / ``random_chunk_kwargs``;
-            # v3 made ``noise_levels`` optional (None -> SI MAD);
-            # v4 added ``threshold_unit``.
-            4,
-            None,
         ),
     )
 

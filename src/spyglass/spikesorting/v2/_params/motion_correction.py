@@ -21,6 +21,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+MOTION_CORRECTION_SCHEMA_VERSION = 1
+
 # ``correct_motion`` presets exposed by SpikeInterface 0.104.
 #
 # The pinned signature was recorded at
@@ -85,7 +87,7 @@ class MotionCorrectionParamsSchema(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
-    schema_version: int = 1
+    schema_version: int = MOTION_CORRECTION_SCHEMA_VERSION
     preset: MotionPreset = "none"
     preset_kwargs: dict[str, Any] = Field(default_factory=dict)
 

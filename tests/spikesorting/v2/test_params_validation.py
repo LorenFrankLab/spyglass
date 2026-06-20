@@ -15,12 +15,15 @@ import pytest
 from pydantic import ValidationError
 
 from spyglass.spikesorting.v2._params.artifact_detection import (
+    ARTIFACT_DETECTION_SCHEMA_VERSION,
     ArtifactDetectionParamsSchema,
 )
 from spyglass.spikesorting.v2._params.motion_correction import (
+    MOTION_CORRECTION_SCHEMA_VERSION,
     MotionCorrectionParamsSchema,
 )
 from spyglass.spikesorting.v2._params.preprocessing import (
+    PREPROCESSING_SCHEMA_VERSION,
     PreprocessingParamsSchema,
 )
 from spyglass.spikesorting.v2._params.sorter import (
@@ -810,6 +813,40 @@ def test_schema_version_present_and_positive(schema_cls):
     blob = schema_cls().model_dump()
     assert isinstance(blob["schema_version"], int)
     assert blob["schema_version"] >= 1
+
+
+def test_schema_version_constants_match_schema_defaults():
+    """Named constants are the single source for table-definition defaults."""
+    assert (
+        PreprocessingParamsSchema().schema_version
+        == PREPROCESSING_SCHEMA_VERSION
+    )
+    assert (
+        ArtifactDetectionParamsSchema().schema_version
+        == ARTIFACT_DETECTION_SCHEMA_VERSION
+    )
+    assert (
+        MotionCorrectionParamsSchema().schema_version
+        == MOTION_CORRECTION_SCHEMA_VERSION
+    )
+
+
+def test_recipe_catalog_rows_copy_inner_schema_version():
+    """Recipe rows derive the outer version from the validated params blob."""
+    from spyglass.spikesorting.v2._recipe_catalog import (
+        artifact_default_contents,
+        preprocessing_default_contents,
+        sorter_default_contents,
+    )
+
+    for name, params, version, _job_kwargs in preprocessing_default_contents():
+        assert version == params["schema_version"], name
+
+    for name, params, version, _job_kwargs in artifact_default_contents():
+        assert version == params["schema_version"], name
+
+    for sorter, name, params, version, _job_kwargs in sorter_default_contents():
+        assert version == params["schema_version"], (sorter, name)
 
 
 # ---------- SortGroupV2 reference-mode validation ---------------------------

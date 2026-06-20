@@ -447,7 +447,15 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
                     f"({exc!r})."
                 )
                 continue
-            rows.append((sorter, "default", validated, 1, None))
+            rows.append(
+                (
+                    sorter,
+                    "default",
+                    validated,
+                    int(validated["schema_version"]),
+                    None,
+                )
+            )
         if skipped_not_installed:
             logger.info(
                 "insert_default_legacy_si_sorters: skipping "
