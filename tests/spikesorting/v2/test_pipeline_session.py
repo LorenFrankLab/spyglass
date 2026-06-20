@@ -124,11 +124,12 @@ def test_resolve_unknown_preset(monkeypatch):
 def test_preflight_session_all_groups(monkeypatch):
     """One ``group_reports`` entry per target, aggregated ``ok``; no DB."""
     monkeypatch.setattr(
-        pl, "_resolve_session_sort_group_ids", lambda **kw: [0, 1, 2]
+        "spyglass.spikesorting.v2._pipeline_preflight."
+        "_resolve_session_sort_group_ids",
+        lambda **kw: [0, 1, 2],
     )
     monkeypatch.setattr(
-        pl,
-        "preflight_v2_pipeline",
+        "spyglass.spikesorting.v2._pipeline_preflight.preflight_v2_pipeline",
         lambda *, sort_group_id, pipeline_preset, **kw: _ok_report(
             sort_group_id, pipeline_preset
         ),
@@ -168,7 +169,9 @@ def test_preflight_session_collects_group_errors(monkeypatch):
     warnings-only group does not flip it.
     """
     monkeypatch.setattr(
-        pl, "_resolve_session_sort_group_ids", lambda **kw: [0, 1, 2]
+        "spyglass.spikesorting.v2._pipeline_preflight."
+        "_resolve_session_sort_group_ids",
+        lambda **kw: [0, 1, 2],
     )
 
     def fake_preflight(*, sort_group_id, pipeline_preset, **kw):
@@ -183,7 +186,10 @@ def test_preflight_session_collects_group_errors(monkeypatch):
             )
         return _ok_report(sort_group_id, pipeline_preset)
 
-    monkeypatch.setattr(pl, "preflight_v2_pipeline", fake_preflight)
+    monkeypatch.setattr(
+        "spyglass.spikesorting.v2._pipeline_preflight.preflight_v2_pipeline",
+        fake_preflight,
+    )
 
     report = preflight_v2_pipeline_session(
         nwb_file_name="s.nwb",
@@ -350,7 +356,9 @@ def test_session_runner_continue_on_error(monkeypatch):
     ``partial_run_summary`` from the ``PipelineStageError``.
     """
     monkeypatch.setattr(
-        pl, "_resolve_session_sort_group_ids", lambda **kw: [0, 1, 2]
+        "spyglass.spikesorting.v2._pipeline_preflight."
+        "_resolve_session_sort_group_ids",
+        lambda **kw: [0, 1, 2],
     )
     monkeypatch.setattr(
         pl,
@@ -389,7 +397,9 @@ def test_session_runner_continue_on_error(monkeypatch):
 def test_session_runner_fail_fast(monkeypatch):
     """Without ``continue_on_error`` a per-group sort failure propagates."""
     monkeypatch.setattr(
-        pl, "_resolve_session_sort_group_ids", lambda **kw: [0, 1, 2]
+        "spyglass.spikesorting.v2._pipeline_preflight."
+        "_resolve_session_sort_group_ids",
+        lambda **kw: [0, 1, 2],
     )
     monkeypatch.setattr(
         pl,

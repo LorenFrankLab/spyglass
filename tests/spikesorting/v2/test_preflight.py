@@ -412,8 +412,7 @@ def test_preflight_sorter_runtime_backend_missing(preflight_inputs, monkeypatch)
         "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
     ].sorter
     monkeypatch.setattr(
-        pl,
-        "_SORTER_RUNTIME_BACKENDS",
+        "spyglass.spikesorting.v2._pipeline_preflight._SORTER_RUNTIME_BACKENDS",
         {default_sorter: ("definitely_absent_backend_xyz",)},
     )
 
