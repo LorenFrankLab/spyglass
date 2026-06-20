@@ -11,7 +11,9 @@ which stays **gated** (needs the analyzer-curation phase + scientific sign-off).
 - **Phase 2a — parameter catalog + content identity: ✅ complete**
   (`669789ac` → `ab877245` → `0f7eb32c` → `b2a01e65` → `a7b201cb`). Shipped:
   region preproc (hippocampus 600 / cortex 300 Hz, 1.5 ms min-segment),
-  rate-keyed MS4 family with MS4 as the default, 100/50 µV artifact rows, dated
+  rate-keyed MS4 family (MS4 was the default; a later PR-review fix moved the
+  shipped default to MS5 because MS4's ml_ms4alg backend needs numpy<2 -- see
+  below), 100/50 µV artifact rows, dated
   names + content fingerprints, the duplicate-content guard
   (`allow_duplicate_params` escape hatch), `describe_parameter_rows()`, and a
   preflight sampling-rate check. **Decisions that diverged from this plan as

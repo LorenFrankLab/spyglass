@@ -58,17 +58,18 @@ dj.config["display.limit"] = 12  # cap rows in table reprs
 # ## 1. Choose your session
 #
 # Point the notebook at the session you ingested with `insert_sessions`. A
-# full-session sort uses the `"raw data valid times"` interval and the
-# production MountainSort4 pipeline preset; change `pipeline_preset` to one
-# of the names from `describe_pipeline_presets()` below if you want a
-# different sorter (e.g. the MountainSort5 alternative, or a cortex/20 kHz
+# full-session sort uses the `"raw data valid times"` interval and the default
+# MountainSort5 pipeline preset (it runs under the `numpy>=2` baseline; the MS4
+# production recipe needs `numpy<2`). Change `pipeline_preset` to one of the
+# names from `describe_pipeline_presets()` below if you want a different sorter
+# (e.g. an MS4 production preset on a `numpy<2` install, or a cortex/20 kHz
 # preset).
 
 # + tags=["parameters"]
 nwb_file_name = "your_session.nwb"  # replace with your ingested session
 team_name = "my_team"
 interval_list_name = "raw data valid times"
-pipeline_preset = "franklab_tetrode_hippocampus_30khz_ms4_2026_06"
+pipeline_preset = "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
 # -
 
 # ## 2. One-time setup

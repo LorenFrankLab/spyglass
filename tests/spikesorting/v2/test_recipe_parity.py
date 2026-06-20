@@ -139,8 +139,17 @@ def test_presets_reference_shipped_rows(dj_conn):
 
 
 @pytest.mark.database
-def test_default_preset_is_production_ms4(dj_conn):
-    """run_v2_pipeline's default is the production tetrode-hippocampus MS4."""
+def test_default_preset_is_runnable_ms5(dj_conn):
+    """run_v2_pipeline defaults to the runnable MS5 tetrode-hippocampus recipe.
+
+    The shipped default is MountainSort5, not the production MountainSort4
+    recipe: MS4's ``ml_ms4alg`` backend is a numpy<2-era package that does not
+    install under the v2 ``numpy>=2`` baseline, so the default must be a sorter
+    that runs out of the box. The recommendation_status taxonomy is unchanged
+    (MS4 stays the "production" recipe, selectable but needing numpy<2; MS5
+    stays "alternative") -- the function default is a separate,
+    runnability-driven choice. ``preflight_v2_pipeline`` shares the default.
+    """
     import inspect
 
     from spyglass.spikesorting.v2 import pipeline as pipeline_mod
@@ -150,17 +159,24 @@ def test_default_preset_is_production_ms4(dj_conn):
         .parameters["pipeline_preset"]
         .default
     )
-    assert default == "franklab_tetrode_hippocampus_30khz_ms4_2026_06"
+    assert default == "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
+    assert (
+        inspect.signature(pipeline_mod.preflight_v2_pipeline)
+        .parameters["pipeline_preset"]
+        .default
+        == default
+    )
 
     preset = pipeline_mod._PIPELINE_PRESETS[default]
-    assert preset.sorter == "mountainsort4"
-    assert preset.recommendation_status == "production"
+    assert preset.sorter == "mountainsort5"
     assert preset.target_region == "hippocampus"
-
-    ms5_name = "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
+    # Taxonomy is unchanged: the default (MS5) keeps its "alternative" tier,
+    # and the MS4 family stays the "production" recipe.
+    assert preset.recommendation_status == "alternative"
+    ms4_name = "franklab_tetrode_hippocampus_30khz_ms4_2026_06"
     assert (
-        pipeline_mod._PIPELINE_PRESETS[ms5_name].recommendation_status
-        == "alternative"
+        pipeline_mod._PIPELINE_PRESETS[ms4_name].recommendation_status
+        == "production"
     )
 
 

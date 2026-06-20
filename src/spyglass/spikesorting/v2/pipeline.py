@@ -10,9 +10,12 @@ in later versions.
 
 Pipeline presets are Pydantic-validated bundles of Lookup-row names; the
 orchestrator looks them up at first call. The shipped presets are the dated
-franklab production recipes -- MountainSort4 by target region (hippocampus
-600 Hz / cortex 300 Hz high-pass) and sampling rate, plus a MountainSort5
-alternative and a clusterless preset. Call ``describe_pipeline_presets()``
+franklab production recipes -- the MountainSort4 family by target region
+(hippocampus 600 Hz / cortex 300 Hz high-pass) and sampling rate, a
+MountainSort5 preset, and a clusterless preset. The ``run_v2_pipeline``
+default is the MountainSort5 tetrode-hippocampus recipe: it runs under the v2
+``numpy>=2`` baseline, whereas MountainSort4's ``ml_ms4alg`` backend needs
+``numpy<2`` (see the MS4 preset notes). Call ``describe_pipeline_presets()``
 for the catalog and ``list_pipeline_presets()`` for the names.
 
 The orchestrator is idempotent: re-running with the same inputs finds
@@ -978,7 +981,12 @@ _MS4_NOTES = (
     "MountainSort4 detect_threshold is a multiple of the standard deviation "
     "of the ZCA-whitened signal (~3), not an absolute voltage and not a MAD "
     "multiplier. MS4 oversplits and does not track drift, so merge curation "
-    "is expected (Kilosort is the Neuropixels-density alternative)."
+    "is expected (Kilosort is the Neuropixels-density alternative). Runtime "
+    "note: MS4's algorithm backend (ml_ms4alg) is a numpy<2-era package that "
+    "does not install under the v2 numpy>=2 baseline, so these presets need a "
+    "numpy<2 environment; the shipped run_v2_pipeline default is the "
+    "MountainSort5 recipe, which runs as-is (preflight reports this via the "
+    "sorter_runtime_available check)."
 )
 
 
@@ -1033,15 +1041,20 @@ _PIPELINE_PRESETS: dict[str, _PipelinePreset] = {
         sorter_family="mountainsort5",
         recommendation_status="alternative",
         intended_use=(
-            "Frank-lab hippocampal tetrodes at 30 kHz, MountainSort5 -- a "
-            "production-grade alternative to the MS4 default."
+            "Frank-lab hippocampal tetrodes at 30 kHz, MountainSort5 -- the "
+            "shipped run_v2_pipeline default because it runs under the v2 "
+            "numpy>=2 baseline (the MS4 production recipe needs numpy<2)."
         ),
         threshold_units="sigma of the whitened signal (~5.5)",
         notes=(
             "MountainSort5 detect_threshold is a multiple of the standard "
             "deviation of the whitened signal (~5.5, more conservative than "
-            "MS4's 3) -- the same sigma scale, not a MAD multiplier. MS4 is "
-            "the production default; MS5 has no attested probe usage."
+            "MS4's 3) -- the same sigma scale, not a MAD multiplier. MS5 is the "
+            "shipped run_v2_pipeline default because it runs under numpy>=2; "
+            "MS4 is the Frank-lab production recipe but its ml_ms4alg backend "
+            "needs numpy<2. recommendation_status stays 'alternative' (MS5 has "
+            "no attested probe usage); the function default is a separate, "
+            "runnability-driven choice."
         ),
     ),
     "franklab_clusterless_2026_06": _PipelinePreset(
@@ -1100,6 +1113,20 @@ _PIPELINE_PRESETS: dict[str, _PipelinePreset] = {
             "and drift handling stand in for amplitude masking)."
         ),
     ),
+}
+
+
+# SpikeInterface's ``installed_sorters()`` reports a sorter as installed when
+# its thin wrapper imports, but some sorters call a separate algorithm backend
+# at run time that the wrapper does NOT import -- so the check over-reports. The
+# live example is ``mountainsort4``: its wrapper imports (so it appears in
+# ``installed_sorters()``), but the actual algorithm package ``ml_ms4alg`` is a
+# numpy<2-era build that no longer installs under the v2 ``numpy>=2`` baseline.
+# Map each such sorter to the backend module(s) preflight must additionally
+# verify, so a green ``sorter_installed`` cannot precede a sort-time
+# ``ModuleNotFoundError``.
+_SORTER_RUNTIME_BACKENDS: dict[str, tuple[str, ...]] = {
+    "mountainsort4": ("ml_ms4alg",),
 }
 
 
@@ -1203,7 +1230,7 @@ def preflight_v2_pipeline(
     sort_group_id: int,
     interval_list_name: str,
     team_name: str,
-    pipeline_preset: str = "franklab_tetrode_hippocampus_30khz_ms4_2026_06",
+    pipeline_preset: str = "franklab_tetrode_hippocampus_30khz_ms5_2026_06",
 ) -> PreflightReport:
     """Read-only pre-populate configuration check for ``run_v2_pipeline``.
 
@@ -1416,6 +1443,32 @@ def preflight_v2_pipeline(
             f"sorter {bundle.sorter!r} is not a known SpikeInterface sorter "
             "(spikeinterface.sorters.available_sorters()) -- check the "
             "spelling or the preset.",
+        )
+
+    # 9b. sorter_runtime_available. installed_sorters() only checks the SI
+    # wrapper; for sorters that call a separate algorithm backend at run time
+    # (see _SORTER_RUNTIME_BACKENDS) verify that backend imports too, so a green
+    # sorter_installed cannot precede a sort-time ModuleNotFoundError (the
+    # mountainsort4 / ml_ms4alg case).
+    backend_modules = _SORTER_RUNTIME_BACKENDS.get(bundle.sorter, ())
+    if backend_modules:
+        import importlib.util
+
+        def _backend_missing(mod: str) -> bool:
+            try:
+                return importlib.util.find_spec(mod) is None
+            except ModuleNotFoundError:
+                return True
+
+        missing_backends = [m for m in backend_modules if _backend_missing(m)]
+        _check(
+            "sorter_runtime_available",
+            not missing_backends,
+            f"sorter {bundle.sorter!r} is listed as installed but its runtime "
+            f"backend(s) {missing_backends} cannot be imported, so the sort "
+            f"would crash. Install {missing_backends} (mountainsort4 needs "
+            "ml_ms4alg, which requires numpy<2), or pick a preset whose sorter "
+            "runs in this environment (e.g. a MountainSort5 preset).",
         )
 
     # Non-blocking advisory: the "none" artifact params are a no-op
@@ -1700,7 +1753,7 @@ def run_v2_pipeline(
     sort_group_id: int,
     interval_list_name: str,
     team_name: str,
-    pipeline_preset: str = "franklab_tetrode_hippocampus_30khz_ms4_2026_06",
+    pipeline_preset: str = "franklab_tetrode_hippocampus_30khz_ms5_2026_06",
     description: str = "",
     require_units: bool = False,
     preflight: bool = True,
@@ -1750,10 +1803,12 @@ def run_v2_pipeline(
         ``common.LabTeam``.
     pipeline_preset
         Pipeline-preset name from ``_PIPELINE_PRESETS``. The default is
-        ``franklab_tetrode_hippocampus_30khz_ms4_2026_06`` (the production
-        MountainSort4 recipe). Call
-        ``describe_pipeline_presets()`` for a table of what each one does (sorter,
-        parameter rows, intended use, and threshold units), or
+        ``franklab_tetrode_hippocampus_30khz_ms5_2026_06`` (MountainSort5),
+        which runs under the v2 ``numpy>=2`` baseline; the MountainSort4
+        production recipe is selectable but its ``ml_ms4alg`` backend needs
+        ``numpy<2`` (preflight reports this via ``sorter_runtime_available``).
+        Call ``describe_pipeline_presets()`` for a table of what each one does
+        (sorter, parameter rows, intended use, and threshold units), or
         ``list_pipeline_presets()`` for just the names.
     description
         Free-text description passed to ``CurationV2.insert_curation``.

@@ -349,12 +349,19 @@ Lab actually runs, corrected from v2's earlier schema-default placeholders:
   and `franklab_cortex_2026_06` (300 Hz), both 6000 Hz low-pass, 1.5 ms
   min-segment. (Hippocampal spikes are denser/narrower than cortical
   waveforms.) The generic schema default keeps the name `default`.
-- **MountainSort4 is the production default.** `run_v2_pipeline` /
-  `preflight_v2_pipeline` now default to
-  `franklab_tetrode_hippocampus_30khz_ms4_2026_06`. The MS4 rows are
-  rate-keyed (`franklab_30khz_ms4_2026_06` / `franklab_20khz_ms4_2026_06`,
-  `adjacency_radius=100`); the MS5 row (`franklab_30khz_ms5_2026_06`) ships as
-  a `recommendation_status="alternative"`, not the default.
+- **MountainSort5 is the shipped default; MountainSort4 is the production
+  recipe (needs `numpy<2`).** `run_v2_pipeline` / `preflight_v2_pipeline`
+  default to `franklab_tetrode_hippocampus_30khz_ms5_2026_06` because it runs
+  under the v2 `numpy>=2` baseline. The MS4 family is rate-keyed
+  (`franklab_30khz_ms4_2026_06` / `franklab_20khz_ms4_2026_06`,
+  `adjacency_radius=100`) and remains the Frank-lab production recipe, but its
+  `ml_ms4alg` backend is a numpy<2-era package that does not install under
+  `numpy>=2`, so it needs a `numpy<2` environment. `recommendation_status` is
+  unchanged (MS4 = `"production"`, MS5 = `"alternative"`); the function default
+  is a separate, runnability-driven choice. Preflight catches an unrunnable
+  MS4 with a new `sorter_runtime_available` check — `installed_sorters()`
+  reports the MS4 wrapper as present even when `ml_ms4alg` is absent, so a
+  green `sorter_installed` would otherwise precede a sort-time crash.
 - **Aggressive artifact thresholds.** Production artifact rows
   `franklab_100uv_p07_2026_06` / `franklab_50uv_p07_2026_06` (100 / 50 µV at
   0.7 proportion-above-threshold). The 500 µV schema default keeps the name

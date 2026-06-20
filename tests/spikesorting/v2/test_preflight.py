@@ -274,10 +274,10 @@ def test_preflight_sorter_not_installed(preflight_inputs, monkeypatch):
     monkeypatch.setattr(
         sis,
         "installed_sorters",
-        lambda: sorted(real_installed - {"mountainsort4"}),
+        lambda: sorted(real_installed - {"mountainsort5"}),
     )
 
-    report = preflight_v2_pipeline(**preflight_inputs)  # default = ms4
+    report = preflight_v2_pipeline(**preflight_inputs)  # default = ms5
     (sorter_check,) = [c for c in report.checks if c.name == "sorter_installed"]
     assert sorter_check.ok is False
     assert "installed_sorters()" in sorter_check.fix
@@ -357,6 +357,64 @@ def test_preflight_sorter_misspelled(preflight_inputs, monkeypatch):
     assert check.ok is False
     assert "not a known SpikeInterface sorter" in check.fix
     assert "installed_sorters()" not in check.fix
+
+
+@pytest.mark.database
+def test_preflight_sorter_runtime_backend_missing(preflight_inputs, monkeypatch):
+    """A sorter whose runtime backend can't import fails sorter_runtime_available.
+
+    installed_sorters() only checks the thin SI wrapper; some sorters call a
+    separate backend at run time (mountainsort4 -> ml_ms4alg). Map the default
+    sorter to a guaranteed-absent backend so the check fires deterministically,
+    and confirm sorter_installed still passes -- proving this is a distinct,
+    stricter gate, not a duplicate of sorter_installed.
+    """
+    from spyglass.spikesorting.v2 import pipeline as pl
+
+    default_sorter = pl._PIPELINE_PRESETS[
+        "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
+    ].sorter
+    monkeypatch.setattr(
+        pl,
+        "_SORTER_RUNTIME_BACKENDS",
+        {default_sorter: ("definitely_absent_backend_xyz",)},
+    )
+
+    report = preflight_v2_pipeline(**preflight_inputs)
+    assert report.ok is False
+    (rt_check,) = [
+        c for c in report.checks if c.name == "sorter_runtime_available"
+    ]
+    assert rt_check.ok is False
+    assert "definitely_absent_backend_xyz" in rt_check.fix
+    (inst,) = [c for c in report.checks if c.name == "sorter_installed"]
+    assert inst.ok is True
+
+
+@pytest.mark.database
+def test_preflight_ms4_preset_gets_runtime_check(preflight_inputs):
+    """An MS4 preset is gated on its real ml_ms4alg backend (map wiring).
+
+    The mountainsort4 -> ml_ms4alg entry must actually be consulted: an MS4
+    preset gets a sorter_runtime_available check whose result tracks whether
+    ml_ms4alg is importable. Under the v2 numpy>=2 baseline ml_ms4alg does not
+    install, so the check fails there; tolerate an environment that has it.
+    """
+    import importlib.util
+
+    report = preflight_v2_pipeline(
+        **{
+            **preflight_inputs,
+            "pipeline_preset": "franklab_tetrode_hippocampus_30khz_ms4_2026_06",
+        }
+    )
+    (rt_check,) = [
+        c for c in report.checks if c.name == "sorter_runtime_available"
+    ]
+    has_backend = importlib.util.find_spec("ml_ms4alg") is not None
+    assert rt_check.ok == has_backend
+    if not has_backend:
+        assert "ml_ms4alg" in rt_check.fix
 
 
 @pytest.mark.database

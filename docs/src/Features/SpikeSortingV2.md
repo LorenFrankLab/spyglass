@@ -82,11 +82,13 @@ curations all coexist under one merge surface.
 `insert_selection` + `populate` calls into one call. The shipped presets are
 the dated June-2026 Frank Lab production recipes: a MountainSort4 family keyed
 by target region (hippocampus 600 Hz / cortex 300 Hz high-pass) and sampling
-rate (30 / 20 kHz), plus a MountainSort5 alternative and a clusterless preset.
-The default is the production MS4 recipe
-`franklab_tetrode_hippocampus_30khz_ms4_2026_06`. Call
-`describe_pipeline_presets()` for the catalog and `list_pipeline_presets()`
-for the names.
+rate (30 / 20 kHz), plus a MountainSort5 preset and a clusterless preset.
+The default is the MountainSort5 recipe
+`franklab_tetrode_hippocampus_30khz_ms5_2026_06`: it runs under the v2
+`numpy>=2` baseline, whereas the MS4 production recipe's `ml_ms4alg` backend
+needs `numpy<2` (preflight reports this via its `sorter_runtime_available`
+check). Call `describe_pipeline_presets()` for the catalog and
+`list_pipeline_presets()` for the names.
 
 The orchestrator is idempotent: re-running with the same inputs returns the
 same run summary (same `merge_id`, same intermediate PKs) without duplicating
@@ -156,7 +158,7 @@ run_summary = run_v2_pipeline(
     sort_group_id=sort_group_id,
     interval_list_name="raw data valid times",
     team_name="my_team",
-    pipeline_preset="franklab_tetrode_hippocampus_30khz_ms4_2026_06",
+    pipeline_preset="franklab_tetrode_hippocampus_30khz_ms5_2026_06",
 )
 merge_id = run_summary["merge_id"]  # key off this downstream
 ```
@@ -192,7 +194,7 @@ report = preflight_v2_pipeline_session(
     nwb_file_name=nwb_file_name,
     interval_list_name="raw data valid times",
     team_name="my_team",
-    pipeline_preset="franklab_tetrode_hippocampus_30khz_ms4_2026_06",
+    pipeline_preset="franklab_tetrode_hippocampus_30khz_ms5_2026_06",
 )
 assert report.ok, report.errors
 
@@ -200,7 +202,7 @@ results = run_v2_pipeline_session(
     nwb_file_name=nwb_file_name,
     interval_list_name="raw data valid times",
     team_name="my_team",
-    pipeline_preset="franklab_tetrode_hippocampus_30khz_ms4_2026_06",
+    pipeline_preset="franklab_tetrode_hippocampus_30khz_ms5_2026_06",
     sort_group_ids=None,        # None = every sort group; or pass a subset
     continue_on_error=True,     # record per-group failures instead of stopping
 )
@@ -245,12 +247,19 @@ table and plot rather than assuming `0` is the scientifically relevant shank.
 
 Available pipeline presets (all dated `_2026_06`):
 
-- `franklab_tetrode_hippocampus_30khz_ms4_2026_06` -- **default**, production
-    MountainSort4 (hippocampus 600 Hz preproc, 30 kHz)
+- `franklab_tetrode_hippocampus_30khz_ms5_2026_06` -- **default**,
+    MountainSort5 (hippocampus 600 Hz preproc, 30 kHz). It is the shipped
+    default because it runs under the v2 `numpy>=2` baseline;
+    `recommendation_status` stays `"alternative"` (the default is a
+    runnability-driven choice, separate from the scientific tier).
+- `franklab_tetrode_hippocampus_30khz_ms4_2026_06` -- production MountainSort4
+    (hippocampus 600 Hz preproc, 30 kHz). **Requires `numpy<2`**: MS4's
+    `ml_ms4alg` backend does not install under the v2 `numpy>=2` baseline, so
+    preflight fails it (`sorter_runtime_available`) unless `ml_ms4alg` is
+    present.
 - `franklab_probe_{hippocampus,cortex}_{30khz,20khz}_ms4_2026_06` -- the
-    production MS4 family by region (600/300 Hz high-pass) and rate
-- `franklab_tetrode_hippocampus_30khz_ms5_2026_06` -- MountainSort5
-    alternative (`recommendation_status="alternative"`)
+    production MS4 family by region (600/300 Hz high-pass) and rate (same
+    `numpy<2` / `ml_ms4alg` requirement)
 - `franklab_clusterless_2026_06` -- peak-detection only (no clustering), feeds
     the clusterless decoding pipeline
 - `franklab_neuropixels_ks4_2026_06` -- **experimental** Neuropixels Kilosort4
@@ -321,7 +330,7 @@ reproducible. Two guards keep names honest:
       sort_group_id=sort_group_id,
       interval_list_name="raw data valid times",
       team_name="my_team",
-      pipeline_preset="franklab_tetrode_hippocampus_30khz_ms4_2026_06",
+      pipeline_preset="franklab_tetrode_hippocampus_30khz_ms5_2026_06",
   )
   for check in report.checks:
       print(check.name, check.ok, check.fix)
