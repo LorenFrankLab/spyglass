@@ -3068,14 +3068,14 @@ def test_clusterless_default_row_ships_noise_levels_one():
     assert params["noise_levels"] == [1.0]
     # The shipped uv row carries detect_threshold=100 (the production
     # clusterless threshold) via the schema default, paired with its explicit
-    # threshold_unit='uv' (audit finding #7).
+    # threshold_unit='uv'.
     assert params["detect_threshold"] == 100.0
 
 
 def test_clusterless_schema_default_is_production_uv():
     """The clusterless schema's bare default is the production/real-data
     threshold (100 uV under the default 'uv' unit), and a microvolt-scale
-    threshold explicitly left in MAD units is rejected (audit finding #7).
+    threshold explicitly left in MAD units is rejected.
     The OLD default ``(detect_threshold=100, threshold_unit='mad')`` was a
     100x-MAD threshold that silently detected almost nothing.
     """
@@ -3117,7 +3117,7 @@ def test_filtering_description_reflects_actual_steps():
     """The persisted ``ElectricalSeries.filtering`` provenance is built from
     the preprocessing steps that ACTUALLY ran, not the old hardcoded
     "Bandpass filter + common reference" that misdescribed the no_filter /
-    reference_mode='none' artifact (audit finding #2).
+    reference_mode='none' artifact.
     """
     from spyglass.spikesorting.v2._params.preprocessing import (
         BandpassFilterParams,

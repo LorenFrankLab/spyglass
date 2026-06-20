@@ -303,7 +303,7 @@ def test_spike_times_to_frames_clamp_vs_raise_boundary():
 
 
 # --------------------------------------------------------------------------- #
-# E. detect_artifacts degenerate-configuration guards (audit #3, #5, #6)
+# E. detect_artifacts degenerate-configuration guards
 # --------------------------------------------------------------------------- #
 
 

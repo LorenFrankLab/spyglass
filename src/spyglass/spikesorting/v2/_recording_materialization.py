@@ -743,18 +743,17 @@ def apply_pre_motion_preprocessing(
     if validated.bandpass_filter is not None:
         # freq_max passes the Pydantic schema (which cannot know the
         # recording's sampling rate) but a value at/above Nyquist (fs/2) fails
-        # deep inside scipy's filter design far from the misconfiguration.
-        # Check it here, where fs is known, with an actionable message.
-        nyquist = recording.get_sampling_frequency() / 2.0
-        if validated.bandpass_filter.freq_max >= nyquist:
-            raise ValueError(
-                "apply_pre_motion_preprocessing: bandpass freq_max="
-                f"{validated.bandpass_filter.freq_max} Hz is at or above the "
-                f"Nyquist frequency ({nyquist} Hz = sampling_rate/2 = "
-                f"{recording.get_sampling_frequency()}/2) for this recording; "
-                "scipy's filter design requires freq_max < Nyquist. Lower "
-                "freq_max on the PreprocessingParameters row."
-            )
+        # deep inside scipy's filter design; reject it here with a clear
+        # message (shared with suggest_bad_channels).
+        from spyglass.spikesorting.v2._signal_math import (
+            assert_freq_max_below_nyquist,
+        )
+
+        assert_freq_max_below_nyquist(
+            validated.bandpass_filter.freq_max,
+            recording.get_sampling_frequency(),
+            context="apply_pre_motion_preprocessing: ",
+        )
         recording = sip.bandpass_filter(
             recording,
             freq_min=validated.bandpass_filter.freq_min,

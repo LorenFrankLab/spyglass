@@ -319,17 +319,18 @@ def suggest_bad_channels(
     #    Resolve every electrode_id -> SI channel id in a single NWB read (not
     #    once per shank).
     rec = read_raw_nwb_recording(Nwbfile.get_abs_path(nwb_file_name))
-    # ``bandpass[1]`` (freq_max) must be below the recording's Nyquist (fs/2);
-    # a value at/above it fails opaquely inside scipy's filter design. Check
-    # here, where fs is known, with an actionable message.
-    nyquist = rec.get_sampling_frequency() / 2.0
-    if bandpass[1] >= nyquist:
-        raise ValueError(
-            f"suggest_bad_channels: bandpass freq_max={bandpass[1]} Hz is at "
-            f"or above the Nyquist frequency ({nyquist} Hz = "
-            f"{rec.get_sampling_frequency()}/2) for {nwb_file_name!r}; pass a "
-            "bandpass with freq_max below Nyquist."
-        )
+    # freq_max must be below the recording's Nyquist (fs/2); a value at/above
+    # it fails opaquely inside scipy's filter design (shared check with
+    # apply_pre_motion_preprocessing).
+    from spyglass.spikesorting.v2._signal_math import (
+        assert_freq_max_below_nyquist,
+    )
+
+    assert_freq_max_below_nyquist(
+        bandpass[1],
+        rec.get_sampling_frequency(),
+        context=f"suggest_bad_channels ({nwb_file_name!r}): ",
+    )
     rec_f = sip.bandpass_filter(rec, freq_min=bandpass[0], freq_max=bandpass[1])
     all_ids = [eid for ids in shanks.values() for eid in ids]
     si_by_eid = dict(

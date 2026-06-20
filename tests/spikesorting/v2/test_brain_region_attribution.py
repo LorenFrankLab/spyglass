@@ -235,7 +235,7 @@ def test_get_unit_brain_regions_empty_include_labels_returns_all(
     "match nothing". A bare ``is not None`` check would build ``& []`` (an
     empty DataJoint OrList) and silently return zero units; the guard must
     distinguish ``None``/``[]`` (no filter) from a non-empty label set,
-    matching ``get_matchable_unit_ids``. Audit finding #1."""
+    matching ``get_matchable_unit_ids``."""
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import Sorting
 

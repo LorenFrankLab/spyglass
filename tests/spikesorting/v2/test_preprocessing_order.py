@@ -293,7 +293,7 @@ def test_bandpass_freq_max_at_or_above_nyquist_raises():
     """``freq_max`` >= Nyquist (fs/2) passes the Pydantic schema (which cannot
     know the recording's sampling rate) but must be rejected at materialization
     with a clear message, instead of failing deep inside scipy's filter design
-    far from the misconfiguration. Audit finding #8."""
+    far from the misconfiguration."""
     import numpy as np
     import spikeinterface as si
 

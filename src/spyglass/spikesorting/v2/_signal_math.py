@@ -10,6 +10,27 @@ access) and are re-exported from ``utils`` for backward compatibility.
 from __future__ import annotations
 
 
+def assert_freq_max_below_nyquist(
+    freq_max: float, sampling_frequency: float, *, context: str = ""
+) -> None:
+    """Raise if a bandpass ``freq_max`` is at or above the Nyquist (fs/2).
+
+    SciPy's filter design requires ``freq_max < fs/2``; a value at or above it
+    fails opaquely deep inside the design call, far from the misconfiguration.
+    Checking here -- where ``fs`` is known but the Pydantic schema is not --
+    gives an actionable message. ``context`` is prepended to name the call site
+    (e.g. ``"apply_pre_motion_preprocessing: "``).
+    """
+    nyquist = sampling_frequency / 2.0
+    if freq_max >= nyquist:
+        raise ValueError(
+            f"{context}bandpass freq_max={freq_max} Hz is at or above the "
+            f"Nyquist frequency ({nyquist} Hz = sampling_rate/2 = "
+            f"{sampling_frequency}/2); SciPy's filter design requires "
+            "freq_max < Nyquist. Lower freq_max below Nyquist."
+        )
+
+
 def _get_recording_timestamps(
     recording,
     override=None,

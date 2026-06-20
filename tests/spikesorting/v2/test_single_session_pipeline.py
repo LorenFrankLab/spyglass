@@ -6095,7 +6095,7 @@ def test_merge_group_contributor_fk_rejects_unknown_unit(populated_sorting):
     """A direct ``CurationV2.MergeGroup`` insert with a contributor that is
     not a real ``Sorting.Unit`` row raises ``IntegrityError``.
 
-    ``contributor_unit_id`` is a FK to ``Sorting.Unit`` (audit finding #6):
+    ``contributor_unit_id`` is a FK to ``Sorting.Unit``:
     ``insert_curation`` validates contributors in Python, but the schema
     must also reject a bogus contributor on a direct part-table insert that
     bypasses the helper -- otherwise merge provenance can be silently

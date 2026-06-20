@@ -202,7 +202,7 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
         f"min_length_s={validated.min_length_s}."
     )
 
-    # Degenerate-configuration guards (audit #5, #6). The z-score detector is
+    # Degenerate-configuration guards. The z-score detector is
     # cross-channel WITHIN a frame, so on a single-channel group it is
     # identically zero -- a z-score-only config would silently flag nothing.
     n_channels = recording.get_num_channels()
