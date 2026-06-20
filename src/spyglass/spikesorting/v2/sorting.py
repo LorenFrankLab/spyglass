@@ -32,7 +32,10 @@ from spyglass.common import IntervalList  # noqa: F401
 from spyglass.common.common_ephys import Electrode  # noqa: F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile  # noqa: F401
 from spyglass.spikesorting.v2._params.sorter import _get_sorter_schema
-from spyglass.spikesorting.v2._recipe_catalog import sorter_default_contents
+from spyglass.spikesorting.v2._recipe_catalog import (
+    _params_schema_version,
+    sorter_default_contents,
+)
 from spyglass.spikesorting.v2._sorting_compute import (
     _clusterless_noise_levels,  # noqa: F401  re-exported for tests
     apply_artifact_mask,
@@ -266,8 +269,8 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
             # typed schema; MS4/MS5 use whiten=True deliberately.)
             reject_internal_whiten(sorter, row["params"])
             if int(row.get("params_schema_version", 0)) == 0:
-                row["params_schema_version"] = int(
-                    row["params"]["schema_version"]
+                row["params_schema_version"] = _params_schema_version(
+                    row["params"]
                 )
 
         validated = validate_lookup_rows(
@@ -452,7 +455,7 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
                     sorter,
                     "default",
                     validated,
-                    int(validated["schema_version"]),
+                    _params_schema_version(validated),
                     None,
                 )
             )
