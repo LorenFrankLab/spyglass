@@ -27,8 +27,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from spyglass.spikesorting.v2._pipeline_run import _STAGE_STATUSES
 from spyglass.spikesorting.v2.pipeline import (
-    _STAGE_STATUSES,
     describe_pipeline_preset,
     describe_pipeline_presets,
     describe_sort_groups,

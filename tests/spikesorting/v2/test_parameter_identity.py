@@ -418,7 +418,7 @@ def test_sorter_duplicate_rejected_scoped_by_sorter(dj_conn):
 def test_describe_parameter_rows_columns_and_usage(dj_conn):
     """Documented columns + correct ``used_by_pipeline_presets`` per row."""
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
-    from spyglass.spikesorting.v2.pipeline import (
+    from spyglass.spikesorting.v2._pipeline_reporting import (
         _PARAMETER_ROW_COLUMNS,
         describe_parameter_rows,
     )

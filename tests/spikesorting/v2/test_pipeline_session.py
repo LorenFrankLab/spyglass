@@ -25,7 +25,11 @@ from pathlib import Path
 import datajoint as dj
 import pytest
 
+import spyglass.spikesorting.v2._pipeline_run as plr
 import spyglass.spikesorting.v2.pipeline as pl
+from spyglass.spikesorting.v2._pipeline_preflight import (
+    _resolve_session_sort_group_ids,
+)
 from spyglass.spikesorting.v2.exceptions import (
     PipelineInputError,
     PipelineStageError,
@@ -36,7 +40,6 @@ from spyglass.spikesorting.v2.pipeline import (
     PreflightCheck,
     PreflightReport,
     PreflightSessionReport,
-    _resolve_session_sort_group_ids,
     preflight_v2_pipeline_session,
     run_v2_pipeline_session,
 )
@@ -217,7 +220,7 @@ def test_session_runner_requires_pipeline_preset(monkeypatch):
     """The runner requires an explicit preset, before any DB or run."""
     _no_db(monkeypatch)
     monkeypatch.setattr(
-        pl,
+        plr,
         "run_v2_pipeline",
         lambda **kw: pytest.fail("run_v2_pipeline must not be called"),
     )
@@ -234,7 +237,7 @@ def test_session_runner_unknown_preset(monkeypatch):
     """An unknown preset is rejected before any group runs."""
     _no_db(monkeypatch)
     monkeypatch.setattr(
-        pl,
+        plr,
         "run_v2_pipeline",
         lambda **kw: pytest.fail("run_v2_pipeline must not be called"),
     )
@@ -279,16 +282,16 @@ def _session_report(group_oks: dict[int, bool]) -> PreflightSessionReport:
 def test_session_runner_preflight_fail_fast(monkeypatch):
     """A failed session preflight raises before any group is sorted."""
     monkeypatch.setattr(
-        pl, "_resolve_session_sort_group_ids", lambda **kw: [0, 1]
+        plr, "_resolve_session_sort_group_ids", lambda **kw: [0, 1]
     )
     monkeypatch.setattr(
-        pl,
+        plr,
         "preflight_v2_pipeline_session",
         lambda **kw: _session_report({0: True, 1: False}),
     )
     calls: list[int] = []
     monkeypatch.setattr(
-        pl,
+        plr,
         "run_v2_pipeline",
         lambda *, sort_group_id, **kw: calls.append(sort_group_id),
     )
@@ -313,10 +316,10 @@ def test_session_runner_preflight_continue(monkeypatch):
     preflight already covered the DB checks).
     """
     monkeypatch.setattr(
-        pl, "_resolve_session_sort_group_ids", lambda **kw: [0, 1]
+        plr, "_resolve_session_sort_group_ids", lambda **kw: [0, 1]
     )
     monkeypatch.setattr(
-        pl,
+        plr,
         "preflight_v2_pipeline_session",
         lambda **kw: _session_report({0: True, 1: False}),
     )
@@ -326,7 +329,7 @@ def test_session_runner_preflight_continue(monkeypatch):
         calls.append(kw)
         return {"merge_id": f"m{kw['sort_group_id']}", "n_units": 2}
 
-    monkeypatch.setattr(pl, "run_v2_pipeline", fake_run)
+    monkeypatch.setattr(plr, "run_v2_pipeline", fake_run)
 
     results = run_v2_pipeline_session(
         nwb_file_name="s.nwb",
@@ -356,12 +359,10 @@ def test_session_runner_continue_on_error(monkeypatch):
     ``partial_run_summary`` from the ``PipelineStageError``.
     """
     monkeypatch.setattr(
-        "spyglass.spikesorting.v2._pipeline_preflight."
-        "_resolve_session_sort_group_ids",
-        lambda **kw: [0, 1, 2],
+        plr, "_resolve_session_sort_group_ids", lambda **kw: [0, 1, 2]
     )
     monkeypatch.setattr(
-        pl,
+        plr,
         "preflight_v2_pipeline_session",
         lambda **kw: _session_report({0: True, 1: True, 2: True}),
     )
@@ -373,7 +374,7 @@ def test_session_runner_continue_on_error(monkeypatch):
             )
         return {"merge_id": f"m{sort_group_id}", "n_units": 3}
 
-    monkeypatch.setattr(pl, "run_v2_pipeline", fake_run)
+    monkeypatch.setattr(plr, "run_v2_pipeline", fake_run)
 
     results = run_v2_pipeline_session(
         nwb_file_name="s.nwb",
@@ -397,12 +398,10 @@ def test_session_runner_continue_on_error(monkeypatch):
 def test_session_runner_fail_fast(monkeypatch):
     """Without ``continue_on_error`` a per-group sort failure propagates."""
     monkeypatch.setattr(
-        "spyglass.spikesorting.v2._pipeline_preflight."
-        "_resolve_session_sort_group_ids",
-        lambda **kw: [0, 1, 2],
+        plr, "_resolve_session_sort_group_ids", lambda **kw: [0, 1, 2]
     )
     monkeypatch.setattr(
-        pl,
+        plr,
         "preflight_v2_pipeline_session",
         lambda **kw: _session_report({0: True, 1: True, 2: True}),
     )
@@ -414,7 +413,7 @@ def test_session_runner_fail_fast(monkeypatch):
             )
         return {"merge_id": f"m{sort_group_id}", "n_units": 3}
 
-    monkeypatch.setattr(pl, "run_v2_pipeline", fake_run)
+    monkeypatch.setattr(plr, "run_v2_pipeline", fake_run)
 
     with pytest.raises(PipelineStageError, match="sorting") as exc:
         run_v2_pipeline_session(
@@ -438,10 +437,10 @@ def test_session_runner_continue_on_error_zero_units(monkeypatch):
     carries no partial summary.
     """
     monkeypatch.setattr(
-        pl, "_resolve_session_sort_group_ids", lambda **kw: [0, 1]
+        plr, "_resolve_session_sort_group_ids", lambda **kw: [0, 1]
     )
     monkeypatch.setattr(
-        pl,
+        plr,
         "preflight_v2_pipeline_session",
         lambda **kw: _session_report({0: True, 1: True}),
     )
@@ -451,7 +450,7 @@ def test_session_runner_continue_on_error_zero_units(monkeypatch):
             raise ZeroUnitSortError("zero units on a quiet shank")
         return {"merge_id": f"m{sort_group_id}", "n_units": 4}
 
-    monkeypatch.setattr(pl, "run_v2_pipeline", fake_run)
+    monkeypatch.setattr(plr, "run_v2_pipeline", fake_run)
 
     results = run_v2_pipeline_session(
         nwb_file_name="s.nwb",
@@ -473,10 +472,10 @@ def test_session_runner_continue_on_error_zero_units(monkeypatch):
 def test_session_runner_preflight_false_skips_session_preflight(monkeypatch):
     """``preflight=False`` runs each group directly with ``preflight=False``."""
     monkeypatch.setattr(
-        pl, "_resolve_session_sort_group_ids", lambda **kw: [0, 1]
+        plr, "_resolve_session_sort_group_ids", lambda **kw: [0, 1]
     )
     monkeypatch.setattr(
-        pl,
+        plr,
         "preflight_v2_pipeline_session",
         lambda **kw: pytest.fail("session preflight must be skipped"),
     )
@@ -486,7 +485,7 @@ def test_session_runner_preflight_false_skips_session_preflight(monkeypatch):
         calls.append(kw)
         return {"merge_id": f"m{kw['sort_group_id']}"}
 
-    monkeypatch.setattr(pl, "run_v2_pipeline", fake_run)
+    monkeypatch.setattr(plr, "run_v2_pipeline", fake_run)
 
     results = run_v2_pipeline_session(
         nwb_file_name="s.nwb",

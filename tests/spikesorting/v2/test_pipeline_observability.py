@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 from spyglass.spikesorting.v2.exceptions import PipelineStageError
-from spyglass.spikesorting.v2.pipeline import (
+from spyglass.spikesorting.v2._pipeline_run import (
     _STAGE_STATUSES,
     run_v2_pipeline,
 )
