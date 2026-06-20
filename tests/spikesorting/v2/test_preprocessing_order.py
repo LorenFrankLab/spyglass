@@ -40,6 +40,12 @@ class _FakeRecording:
     def get_channel_ids(self):
         return list(self._ids)
 
+    def get_sampling_frequency(self):
+        # 30 kHz: well above 2x the default bandpass freq_max (6 kHz), so the
+        # Nyquist guard in apply_pre_motion_preprocessing is a no-op here. The
+        # dedicated above-Nyquist test uses a real low-rate NumpyRecording.
+        return 30000.0
+
     def get_property(self, key):
         return self._properties.get(key)
 
@@ -281,3 +287,26 @@ def test_phase_shift_off_by_default_ignores_property(monkeypatch):
 
     assert "phase_shift" not in [c[0] for c in calls]
     assert applied_steps["phase_shift"] is False
+
+
+def test_bandpass_freq_max_at_or_above_nyquist_raises():
+    """``freq_max`` >= Nyquist (fs/2) passes the Pydantic schema (which cannot
+    know the recording's sampling rate) but must be rejected at materialization
+    with a clear message, instead of failing deep inside scipy's filter design
+    far from the misconfiguration. Audit finding #8."""
+    import numpy as np
+    import spikeinterface as si
+
+    fs = 20000.0  # Nyquist = 10 kHz
+    rec = si.NumpyRecording(
+        traces_list=[np.zeros((6000, 4), dtype="float32")],
+        sampling_frequency=fs,
+    )
+    rec.set_channel_gains([1.0] * 4)
+    rec.set_channel_offsets([0.0] * 4)
+    validated = _validated(bandpass=True)
+    validated.bandpass_filter.freq_max = 12000.0  # above the 10 kHz Nyquist
+    with pytest.raises(ValueError, match="Nyquist"):
+        apply_pre_motion_preprocessing(
+            rec, "none", None, [0, 1, 2, 3], validated
+        )

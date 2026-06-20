@@ -107,6 +107,11 @@ class _FakeRecording:
     def get_channel_ids(self):
         return list(self._ids)
 
+    def get_sampling_frequency(self):
+        # 30 kHz: well above 2x the default bandpass freq_max (6 kHz), so the
+        # Nyquist guard in apply_pre_motion_preprocessing is a no-op here.
+        return 30000.0
+
     def get_property(self, key):
         return None
 
