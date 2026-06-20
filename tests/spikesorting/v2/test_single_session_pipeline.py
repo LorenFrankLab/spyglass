@@ -12309,9 +12309,9 @@ def test_list_pipeline_presets_enumerates_all_pipeline_presets():
     assert set(presets) == set(
         _PIPELINE_PRESETS
     ), "list_pipeline_presets() must enumerate exactly the registered _PIPELINE_PRESETS keys"
-    # Representative shipped pipeline presets (the MS4 default, the MS5
-    # alternative, and the clusterless preset) are present -- guards an
-    # accidental rename of the headline names.
+    # Representative shipped pipeline presets (the MS4 production preset, the MS5
+    # default, and the clusterless preset) are present -- guards an accidental
+    # rename of the headline names.
     for name in (
         "franklab_tetrode_hippocampus_30khz_ms4_2026_06",
         "franklab_tetrode_hippocampus_30khz_ms5_2026_06",
@@ -12411,57 +12411,64 @@ def test_run_v2_pipeline_mountainsort4_pipeline_preset(polymer_smoke_session):
     """A29: the franklab MS4 pipeline preset runs end-to-end where MS4 is runnable.
 
     ``mountainsort4`` appears in ``installed_sorters()`` but its ``ml_ms4alg``
-    backend is unavailable in the SI 0.104 test image, so this self-skips where
-    MS4 is not runnable. Two skip paths: the default preflight now imports the
-    backend and raises ``PreflightError`` (its ``sorter_runtime_available``
-    check) before the sort; if the backend is present but the sort still fails
-    at runtime, the sorting stage raises ``PipelineStageError``. Where MS4 IS
-    runnable it asserts the run_summary carries the MS4 sorter wiring.
+    backend is unavailable in the SI 0.104 test image. This inspects the
+    structured preflight report and self-skips ONLY when the sole failed check
+    is ``sorter_runtime_available`` (the ml_ms4alg backend gate) -- any other
+    preflight failure fails the test, so the narrow skip can't mask a real
+    regression. Where MS4 is runnable (preflight passes) it runs with
+    ``preflight=False`` and asserts the MS4 sorter wiring; if the sort then
+    crashes it skips only on the SpikeInterface sorter-runtime error chained
+    from the sorting stage.
     """
-    from spyglass.spikesorting.v2.exceptions import (
-        PipelineStageError,
-        PreflightError,
+    from spikeinterface.sorters.utils import SpikeSortingError
+
+    from spyglass.spikesorting.v2.exceptions import PipelineStageError
+    from spyglass.spikesorting.v2.pipeline import (
+        preflight_v2_pipeline,
+        run_v2_pipeline,
     )
-    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
     nwb_file_name, sort_group_id, team_name = _prepare_pipeline_session(
         polymer_smoke_session
     )
+    inputs = dict(
+        nwb_file_name=nwb_file_name,
+        sort_group_id=sort_group_id,
+        interval_list_name="raw data valid times",
+        team_name=team_name,
+        pipeline_preset="franklab_tetrode_hippocampus_30khz_ms4_2026_06",
+    )
     try:
+        # Inspect the structured report so the skip is narrow: skip ONLY when the
+        # lone failure is the ml_ms4alg backend gate, never when an unrelated
+        # check also failed (that would hide a real regression).
+        report = preflight_v2_pipeline(**inputs)
+        if not report.ok:
+            failed = {c.name for c in report.checks if not c.ok}
+            if failed == {"sorter_runtime_available"}:
+                pytest.skip(
+                    f"mountainsort4 ml_ms4alg backend unavailable: {report.errors}"
+                )
+            pytest.fail(f"unexpected preflight failure(s): {failed}")
+
+        # MS4 is runnable here; preflight already passed, so skip re-running it.
         try:
-            run_summary = run_v2_pipeline(
-                nwb_file_name=nwb_file_name,
-                sort_group_id=sort_group_id,
-                interval_list_name="raw data valid times",
-                team_name=team_name,
-                pipeline_preset="franklab_tetrode_hippocampus_30khz_ms4_2026_06",
-            )
-        except PreflightError as exc:
-            # New honest preflight: a missing/broken ml_ms4alg backend fails the
-            # sorter_runtime_available check before the sort. That IS "MS4 not
-            # runnable here" -> skip; any OTHER preflight failure is a real
-            # regression and must propagate.
-            if "ml_ms4alg" in str(exc) or "sorter_runtime_available" in str(
-                exc
-            ):
-                pytest.skip(f"mountainsort4 backend not available: {exc!r}")
-            raise
+            run_summary = run_v2_pipeline(**inputs, preflight=False)
         except PipelineStageError as exc:
-            # Backend present but the sort crashed at runtime: only the sorting
-            # stage's runtime failure is a skip; recording/artifact/curation
-            # stage failures are real regressions.
-            if exc.stage == "sorting":
-                pytest.skip(f"mountainsort4 runtime not available: {exc!r}")
+            # Backend present but the sort crashed at runtime. Skip ONLY when the
+            # sorting stage wrapped the SpikeInterface sorter-runtime error; any
+            # other stage, or a non-runtime cause, is a real regression.
+            if exc.stage == "sorting" and isinstance(
+                exc.__cause__, SpikeSortingError
+            ):
+                pytest.skip(f"mountainsort4 runtime failure: {exc!r}")
             raise
         sel = (
             SortingSelection & {"sorting_id": run_summary["sorting_id"]}
         ).fetch1()
         assert sel["sorter"] == "mountainsort4"
-        assert (
-            sel["sorter_params_name"]
-            == "franklab_30khz_ms4_2026_06"
-        )
+        assert sel["sorter_params_name"] == "franklab_30khz_ms4_2026_06"
     finally:
         _clean_session_v2(polymer_smoke_session)
 

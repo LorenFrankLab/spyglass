@@ -154,7 +154,7 @@ examples should use the 2a dated catalog.
 
 - Phase 1: ~0 net logic; grep/manual-review cleanup of residual pipeline-return
   "manifest" wording, preserving unrelated fixture manifest references.
-- Phase 2a: ~180-250 LOC (fingerprints + guard + `describe_parameter_rows` + preset metadata) + the blob-correction sweep (region preproc, MS4 probe family, production artifact, MS4 default) + ~180 LOC parity/infra tests + reference-site sweep + regenerated UUIDs + alias reconciliation + docs.
+- Phase 2a: ~180-250 LOC (fingerprints + guard + `describe_parameter_rows` + preset metadata) + the blob-correction sweep (region preproc, MS4 probe family, production artifact, the run_v2_pipeline default — later moved to MS5) + ~180 LOC parity/infra tests + reference-site sweep + regenerated UUIDs + alias reconciliation + docs.
 - Phase 2b (gated): inlined recipes recorded now; rows + end-to-end preset ship later (waits on the analyzer-curation phase) + sign-off-gated unattested slots.
 - Phase 3: ~40-70 LOC + ~30 LOC tests + polish.
 - Phase 4: ~140-220 LOC (shared target resolver + session preflight + runner)
