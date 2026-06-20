@@ -188,6 +188,93 @@ def test_detect_artifacts_disjoint_masks_chunk_boundary_artifact():
 
 
 # --------------------------------------------------------------------------- #
+# E. interval recovery: artifacts planted at KNOWN times/amplitudes are removed
+#    over [planted +/- removal_window/2], not merely "detection did not crash"
+# --------------------------------------------------------------------------- #
+
+
+def _removed_intervals(valid_times, t0, t_end):
+    """Complement of ``valid_times`` within ``[t0, t_end]``.
+
+    The removed (artifact) intervals, as an ``(n, 2)`` array -- exactly what
+    ``Sorting._apply_artifact_mask`` excises before a sort. ``valid_times`` is
+    assumed start-sorted and disjoint (the detector's contract, checked
+    separately by ``_assert_valid_times_well_formed``).
+    """
+    removed = []
+    cursor = t0
+    for start, end in valid_times:
+        if start > cursor:
+            removed.append([cursor, start])
+        cursor = max(cursor, end)
+    if cursor < t_end:
+        removed.append([cursor, t_end])
+    return np.asarray(removed)
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_detect_artifacts_recovers_planted_interval_times():
+    """Two artifacts planted at KNOWN times and a KNOWN amplitude are recovered
+    as two removed intervals, each tightly bracketing its planted epoch.
+
+    The interval-recovery counterpart to the frame-level gain test
+    (``test_artifact_gain.py``): it pins detected-vs-planted at the *seconds*
+    level, so a regression in the removal-window expansion, the join logic, or
+    the valid_times complement that mislocates, splits, merges, or over-/under-
+    removes an artifact is caught -- not just "populate did not crash".
+    """
+    from spyglass.spikesorting.v2.artifact import ArtifactDetection
+
+    fs = 30000.0
+    n, n_ch = 150000, 4  # 5.0 s
+    removal_window_ms = 1.0
+    traces = np.zeros((n, n_ch), dtype="float32")
+    # Two 10-frame artifacts ~2 s apart (>> the join window) at a known
+    # amplitude (5000 uV >> the 1000 uV threshold, so every channel is
+    # flagged). Inclusive frame spans [a0, a1].
+    planted_frames = [(45000, 45009), (105000, 105009)]  # ~1.5 s and ~3.5 s
+    for a0, a1 in planted_frames:
+        traces[a0 : a1 + 1, :] = 5000.0
+    rec = _rec(traces, fs=fs)
+    params = _artifact_params(removal_window_ms=removal_window_ms)
+
+    vt = ArtifactDetection._detect_artifacts(rec, params, job_kwargs=None)
+    times = rec.get_times()
+    _assert_valid_times_well_formed(
+        vt, times[0], times[-1], params.min_length_s
+    )
+
+    removed = _removed_intervals(vt, times[0], times[-1])
+    assert removed.shape[0] == len(planted_frames), (
+        f"expected {len(planted_frames)} recovered artifact intervals, got "
+        f"{removed.shape[0]}: {removed.tolist()} -- the two well-separated "
+        "artifacts must not be merged into one nor split into more"
+    )
+
+    # Each removed interval brackets its planted epoch, widened by ~half the
+    # removal window on each side (the documented expansion). Expressed in
+    # physical units (seconds) from the planted frames and the param -- NOT by
+    # re-running the detector's frame math -- so the assertion is independent
+    # of the implementation under test.
+    half_window_s = removal_window_ms * 1e-3 / 2.0
+    sample = 1.0 / fs
+    tol = 3 * sample  # grid snapping + the half-open [start, end) +1 sample
+    for (a0, a1), (rem_start, rem_end) in zip(planted_frames, removed):
+        planted_start, planted_end = times[a0], times[a1]
+        # The entire planted artifact is inside the removed interval.
+        assert rem_start <= planted_start and rem_end >= planted_end, (
+            f"planted [{planted_start:.5f}, {planted_end:.5f}] not contained "
+            f"in removed [{rem_start:.5f}, {rem_end:.5f}]"
+        )
+        # ...and the removal is TIGHT (half a window each side), not a giant
+        # over-removed chunk -- localization is correct.
+        assert rem_start == pytest.approx(
+            planted_start - half_window_s, abs=tol
+        )
+        assert rem_end == pytest.approx(planted_end + half_window_s, abs=tol)
+
+
+# --------------------------------------------------------------------------- #
 # D. L2 pin: _spike_times_to_frames clamp-vs-raise boundary
 # --------------------------------------------------------------------------- #
 
