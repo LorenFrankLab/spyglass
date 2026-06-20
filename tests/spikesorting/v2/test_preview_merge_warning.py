@@ -29,7 +29,7 @@ _FIXTURE_PATH = (
 @pytest.fixture(scope="module")
 def planted_two_unit_sort(dj_conn):
     """A populated Sorting with two planted units (so a merge group exists)."""
-    from tests.spikesorting.v2.test_single_session_pipeline import (
+    from tests.spikesorting.v2._ingest_helpers import (
         _clean_session_v2,
     )
 

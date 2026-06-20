@@ -166,7 +166,7 @@ def two_v2_merge_ids(dj_conn):
     counts, and the per-group electrode sets. Cleans the unique session on
     setup and teardown (the persistent test DB carries rows across runs).
     """
-    from tests.spikesorting.v2.test_single_session_pipeline import (
+    from tests.spikesorting.v2._ingest_helpers import (
         _clean_session_v2,
     )
 

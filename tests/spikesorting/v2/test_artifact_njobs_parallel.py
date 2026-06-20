@@ -53,7 +53,7 @@ def _insert_artifact_params(name, *, n_jobs):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_parallel_artifact_detection_matches_serial(dj_conn):
-    from tests.spikesorting.v2.test_single_session_pipeline import (
+    from tests.spikesorting.v2._ingest_helpers import (
         _clean_session_v2,
     )
 

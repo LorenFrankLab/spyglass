@@ -531,7 +531,7 @@ def test_preflight_expected_ids_round_trip(preflight_session):
     the run_summary the run returns, and a post-run preflight sees them as
     existing.
     """
-    from tests.spikesorting.v2.test_single_session_pipeline import (
+    from tests.spikesorting.v2._ingest_helpers import (
         _clean_session_v2,
     )
 

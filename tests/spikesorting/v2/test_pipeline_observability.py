@@ -83,7 +83,7 @@ def first_run(obs_session):
     the session first (so the first run genuinely computes every stage), then
     rebuilds the config (the cleanup cascade also drops SortGroupV2).
     """
-    from tests.spikesorting.v2.test_single_session_pipeline import (
+    from tests.spikesorting.v2._ingest_helpers import (
         _clean_session_v2,
     )
 

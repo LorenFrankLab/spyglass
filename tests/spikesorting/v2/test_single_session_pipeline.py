@@ -18,7 +18,10 @@ from pathlib import Path
 
 import pytest
 
-from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
+from tests.spikesorting.v2._ingest_helpers import (
+    _clean_session_v2,
+    copy_and_insert_nwb,
+)
 
 _FIXTURE_NAME = "mearec_polymer_smoke"
 _FIXTURE_PATH = (
@@ -564,111 +567,6 @@ def _clear_curations(sorting_key):
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
     clear_curations_for(sorting_key)
-
-
-def _clean_session_v2(session_key):
-    """Cascade-aware cleanup of every v2 row for a session.
-
-    The v2 source-polymorphic source-part pattern leaves
-    ``ArtifactDetectionSelection`` and ``SortingSelection`` MASTERS with no
-    direct FK to upstream tables (only their ``RecordingSource`` PARTS
-    carry the FK). DataJoint's cascade can't traverse that gap: a
-    ``super_delete(SortGroupV2 & session_key)`` raises ``Attempt to
-    delete part table ... before deleting from its master`` once the
-    cascade reaches ``ArtifactDetectionSelection.RecordingSource`` because
-    DataJoint refuses to drop a part without its master.
-
-    Tests historically worked around this with an order-of-declaration
-    convention (SortGroup tests run before tests that populate
-    ArtifactDetectionSelection, so the cascade chain stays empty). Anything that
-    runs the suite in a different order (``-k``, parallel sharding,
-    rerun-failed) tripped the same DataJoint error. This helper makes
-    the cleanup order-independent by walking the dependency graph
-    leaves-first and deleting source-polymorphic masters explicitly
-    before their upstream tables.
-
-    Parameters
-    ----------
-    session_key
-        Dict containing at least ``nwb_file_name``. All v2 rows tied to
-        this session are dropped.
-    """
-    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
-    from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
-        ArtifactDetectionSelection,
-        SharedArtifactGroup,
-    )
-    from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.recording import (
-        Recording,
-        RecordingSelection,
-        SortGroupV2,
-    )
-    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
-
-    # Step 1: drop any merge-master rows whose CurationV2 part points
-    # to a sorting derived from this session. The merge insert wraps
-    # the part FK in a transaction with the master, so cleanup must
-    # take the master first to satisfy the master-before-part rule.
-    rec_keys = (RecordingSelection & session_key).fetch("KEY", as_dict=True)
-    if rec_keys:
-        sorting_keys = (
-            SortingSelection.RecordingSource
-            & [{"recording_id": r["recording_id"]} for r in rec_keys]
-        ).fetch("KEY", as_dict=True)
-        if sorting_keys:
-            merge_ids = (SpikeSortingOutput.CurationV2 & sorting_keys).fetch(
-                "merge_id"
-            )
-            for mid in merge_ids:
-                (SpikeSortingOutput & {"merge_id": mid}).super_delete(
-                    warn=False
-                )
-            (CurationV2 & sorting_keys).super_delete(warn=False)
-            (Sorting & sorting_keys).super_delete(warn=False)
-            # Step 2: drop SortingSelection masters BEFORE removing
-            # Recording, otherwise the Recording cascade tries to
-            # delete the orphan RecordingSource part and fails.
-            (SortingSelection & sorting_keys).super_delete(warn=False)
-
-        # Step 3: same pattern for ArtifactDetection / ArtifactDetectionSelection.
-        artifact_keys = (
-            ArtifactDetectionSelection.RecordingSource
-            & [{"recording_id": r["recording_id"]} for r in rec_keys]
-        ).fetch("KEY", as_dict=True)
-        if artifact_keys:
-            (ArtifactDetection & artifact_keys).super_delete(warn=False)
-            (ArtifactDetectionSelection & artifact_keys).super_delete(
-                warn=False
-            )
-
-    # Step 4: SharedArtifactGroup tables. The master FK's Session
-    # and the Member part FK's Recording, so prior shared-group
-    # rows pointing at THIS session's Recording rows must be
-    # cleaned before we drop Recording -- otherwise DJ refuses to
-    # cascade through the part-without-master constraint. Delete
-    # master + Member explicitly (master first satisfies the
-    # master-before-part rule).
-    shared_groups = (SharedArtifactGroup & session_key).fetch(
-        "KEY", as_dict=True
-    )
-    if shared_groups:
-        # force_masters=True: the cascade reaches the source-polymorphic
-        # ``ArtifactDetectionSelection.SharedGroupSource`` part, whose master
-        # is ``ArtifactDetectionSelection`` (not ``SharedArtifactGroup``); without it
-        # DataJoint raises "delete part before master". Mirrors every other
-        # super_delete in this file (Recording/RecordingSource analog).
-        (SharedArtifactGroup & shared_groups).super_delete(
-            warn=False, force_masters=True
-        )
-
-    # Step 5: now the cascade is unblocked -- Recording, SortGroupV2
-    # can be deleted normally. We super_delete each so a leftover
-    # IntervalList row from a prior aborted test is also picked up.
-    (Recording & rec_keys).super_delete(warn=False) if rec_keys else None
-    (RecordingSelection & session_key).super_delete(warn=False)
-    (SortGroupV2 & session_key).super_delete(warn=False)
 
 
 # ---------- ArtifactDetectionSelection source-part pattern -------------------------

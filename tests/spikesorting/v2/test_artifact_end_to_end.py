@@ -86,7 +86,7 @@ def _synth_recording_with_transient():
 def artifact_e2e_session(dj_conn):
     """Ingest the smoke fixture under a unique session name + a populated
     Recording on sort group 0. Cleans the session on setup and teardown."""
-    from tests.spikesorting.v2.test_single_session_pipeline import (
+    from tests.spikesorting.v2._ingest_helpers import (
         _clean_session_v2,
     )
 
@@ -311,7 +311,7 @@ def gt60_recording(dj_conn):
 
     Yields (session_key, recording_id). Cleaned on teardown.
     """
-    from tests.spikesorting.v2.test_single_session_pipeline import (
+    from tests.spikesorting.v2._ingest_helpers import (
         _clean_session_v2,
     )
 

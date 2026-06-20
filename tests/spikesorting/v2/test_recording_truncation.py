@@ -27,7 +27,7 @@ _FIXTURE_PATH = (
 @pytest.fixture(scope="module")
 def truncation_session(dj_conn):
     """Ingest the smoke fixture under a unique session name; clean around."""
-    from tests.spikesorting.v2.test_single_session_pipeline import (
+    from tests.spikesorting.v2._ingest_helpers import (
         _clean_session_v2,
     )
 

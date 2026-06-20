@@ -133,7 +133,7 @@ def _drop_feature_rows():
 
 def _reset(session):
     """Drop feature rows then every v2 row for the session (prompt-free)."""
-    from tests.spikesorting.v2.test_single_session_pipeline import (
+    from tests.spikesorting.v2._ingest_helpers import (
         _clean_session_v2,
     )
 

@@ -29,7 +29,7 @@ from pathlib import Path
 import pytest
 
 from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
-from tests.spikesorting.v2.test_single_session_pipeline import (
+from tests.spikesorting.v2._ingest_helpers import (
     _clean_session_v2,
 )
 
