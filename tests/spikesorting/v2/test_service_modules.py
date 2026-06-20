@@ -37,9 +37,13 @@ _DB_FREE_SERVICE_MODULES = [
     "bad_channels",
     "_curation_transforms",
     "_enums",
+    "_pipeline_presets",
+    "_recipe_catalog",
     "_recording_materialization",
     "_selection_identity",
+    "_selection_plan",
     "_signal_math",
+    "_sort_group_planning",
     "_sorting_compute",
     "_units_nwb",
 ]

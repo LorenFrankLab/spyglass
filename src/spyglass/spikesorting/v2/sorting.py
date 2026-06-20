@@ -567,74 +567,19 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             If a deterministic master exists but its recording/artifact-detection
             source parts are missing/mismatched (a raw-insert orphan).
         """
-        has_recording = "recording_id" in key
-        has_concat = "concat_recording_id" in key
-        if has_recording == has_concat:
-            raise ValueError(
-                "SortingSelection.insert_selection requires exactly one "
-                "source key. Provide either recording_id (single-session) "
-                "or concat_recording_id (concat). Got: "
-                f"recording_id={'set' if has_recording else 'unset'}, "
-                f"concat_recording_id={'set' if has_concat else 'unset'}."
-            )
-        if has_concat:
-            raise NotImplementedError(
-                "SortingSelection.insert_selection: concatenated "
-                "recording sorting is not implemented yet. Use a single "
-                "recording_id source for now."
-            )
-
-        for required in ("sorter", "sorter_params_name"):
-            if required not in key:
-                raise ValueError(
-                    f"SortingSelection.insert_selection requires "
-                    f"{required!r} in key."
-                )
-
-        master_restriction = {
-            "sorter": key["sorter"],
-            "sorter_params_name": key["sorter_params_name"],
-        }
-        source_restriction = {"recording_id": key["recording_id"]}
-        artifact_detection_id = key.get("artifact_detection_id")
-        # ``resolve_artifact_detection`` reads the uuid column back as a
-        # ``uuid.UUID``; normalize a caller-supplied
-        # ``artifact_detection_id`` (which may be a str) so the find-existing
-        # comparison below is UUID-vs-UUID. A str would otherwise never equal
-        # the stored UUID, so an idempotent re-insert would miss its match and
-        # create a duplicate sort.
-        if artifact_detection_id is not None:
-            artifact_detection_id = uuid.UUID(str(artifact_detection_id))
-
-        # Deterministic, content-addressed sorting_id from the logical
-        # identity (recording source + sorter + the optional
-        # artifact-detection pass). ``artifact_detection_id=None`` is the
-        # single "no artifact-detection pass" form and cannot alias any real
-        # artifact_detection_id, so an artifact-detection-backed and an
-        # artifact-detection-free sort for the same (recording, sorter) are
-        # distinct, idempotent rows.
-        from spyglass.spikesorting.v2._selection_identity import (
-            assert_supplied_id_matches,
-            deterministic_id,
-            sorting_identity_payload,
+        from spyglass.spikesorting.v2._selection_plan import (
+            build_sorting_selection_plan,
         )
 
-        identity = sorting_identity_payload(
-            recording_id=key["recording_id"],
-            sorter=key["sorter"],
-            sorter_params_name=key["sorter_params_name"],
-            artifact_detection_id=artifact_detection_id,
-        )
-        sorting_id = deterministic_id("sorting", identity)
-        assert_supplied_id_matches(
-            key.get("sorting_id"), sorting_id, field="sorting_id"
-        )
+        # Pure half: validate inputs, normalize the artifact id, derive the
+        # deterministic sorting_id, and shape the master + source part rows.
+        plan = build_sorting_selection_plan(key)
 
         existing = cls._find_existing_pk(
-            master_restriction,
-            source_restriction,
-            artifact_detection_id,
-            sorting_id,
+            plan.master_restriction,
+            plan.source_restriction,
+            plan.artifact_detection_id,
+            plan.sorting_id,
         )
         if existing is not None:
             return existing
@@ -649,31 +594,23 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
 
         _ensure_lookup_row_exists(
             SorterParameters,
-            {
-                "sorter": key["sorter"],
-                "sorter_params_name": key["sorter_params_name"],
-            },
+            plan.master_restriction,
             helper_name="SortingSelection.insert_selection",
             insert_default_path="SorterParameters.insert_default()",
         )
         cls._validate_artifact_detection_source_for_recording(
-            recording_id=key["recording_id"],
-            artifact_detection_id=artifact_detection_id,
+            recording_id=plan.source_restriction["recording_id"],
+            artifact_detection_id=plan.artifact_detection_id,
         )
 
-        new_master_key = {**master_restriction, "sorting_id": sorting_id}
-        new_part_key = {"sorting_id": sorting_id, **source_restriction}
         try:
             with transaction_or_noop(cls.connection):
                 # allow_direct_insert: this helper IS the validation boundary.
-                cls.insert1(new_master_key, allow_direct_insert=True)
-                cls.RecordingSource.insert1(new_part_key)
-                if artifact_detection_id is not None:
+                cls.insert1(plan.master_row, allow_direct_insert=True)
+                cls.RecordingSource.insert1(plan.recording_source_row)
+                if plan.artifact_source_row is not None:
                     cls.ArtifactDetectionSource.insert1(
-                        {
-                            "sorting_id": sorting_id,
-                            "artifact_detection_id": artifact_detection_id,
-                        }
+                        plan.artifact_source_row
                     )
         except Exception as exc:  # noqa: BLE001 -- re-raised unless dup-PK
             if not _is_duplicate_key_error(exc):
@@ -684,13 +621,13 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             logger.debug(
                 "SortingSelection.insert_selection: lost deterministic-id "
                 "race on %s; returning the existing row.",
-                sorting_id,
+                plan.sorting_id,
             )
             existing = cls._find_existing_pk(
-                master_restriction,
-                source_restriction,
-                artifact_detection_id,
-                sorting_id,
+                plan.master_restriction,
+                plan.source_restriction,
+                plan.artifact_detection_id,
+                plan.sorting_id,
             )
             if existing is not None:
                 return existing
@@ -699,14 +636,14 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             # do not match the requested selection -- a raw-insert orphan. Surface
             # a clear schema-bypass error instead of the opaque duplicate.
             raise SchemaBypassError(
-                f"SortingSelection master {sorting_id} exists but its "
+                f"SortingSelection master {plan.sorting_id} exists but its "
                 "recording/artifact-detection source parts are missing or do not match "
                 "the requested selection: the master was inserted without "
                 "insert_selection (raw-insert orphan). Use insert_selection() "
                 "to create master+source atomically, or drop the orphan "
                 "master."
             ) from exc
-        return {k: new_master_key[k] for k in cls.primary_key}
+        return {k: plan.master_row[k] for k in cls.primary_key}
 
     @classmethod
     def _find_existing_pk(

@@ -513,64 +513,24 @@ class ArtifactDetectionSelection(
             If a deterministic master exists but its expected source part
             is missing/mismatched (a raw-insert orphan).
         """
-        has_recording = "recording_id" in key
-        has_shared = "shared_artifact_group_name" in key
-        if has_recording == has_shared:
-            raise ValueError(
-                "ArtifactDetectionSelection.insert_selection requires exactly one "
-                "source key. Provide either recording_id (single-recording "
-                "path) or shared_artifact_group_name (cross-recording "
-                "path), not both and not neither. Got: "
-                f"recording_id={'set' if has_recording else 'unset'}, "
-                f"shared_artifact_group_name="
-                f"{'set' if has_shared else 'unset'}."
-            )
-
-        master_field = "artifact_detection_params_name"
-        if master_field not in key:
-            raise ValueError(
-                "ArtifactDetectionSelection.insert_selection requires "
-                f"{master_field!r} in key."
-            )
-        master_restriction = {master_field: key[master_field]}
-
-        if has_recording:
-            source_part = cls.RecordingSource
-            source_restriction = {"recording_id": key["recording_id"]}
-        else:
-            source_part = cls.SharedGroupSource
-            source_restriction = {
-                "shared_artifact_group_name": key["shared_artifact_group_name"]
-            }
-
-        # Deterministic, content-addressed artifact_detection_id from the logical
-        # identity (params + source), built via the shared payload helper so
-        # preflight derives the identical id. ``source_kind`` is explicit so a
-        # recording source and a shared-group source never alias even if their
-        # source-identifier strings were to collide.
-        from spyglass.spikesorting.v2._selection_identity import (
-            artifact_detection_identity_payload,
-            assert_supplied_id_matches,
-            deterministic_id,
+        from spyglass.spikesorting.v2._selection_plan import (
+            build_artifact_detection_selection_plan,
         )
 
-        identity = artifact_detection_identity_payload(
-            artifact_detection_params_name=key[master_field],
-            recording_id=key.get("recording_id"),
-            shared_artifact_group_name=key.get("shared_artifact_group_name"),
-        )
-        artifact_detection_id = deterministic_id("artifact_detection", identity)
-        assert_supplied_id_matches(
-            key.get("artifact_detection_id"),
-            artifact_detection_id,
-            field="artifact_detection_id",
+        # Pure half: validate inputs, derive the deterministic
+        # artifact_detection_id, and shape the master + source part rows.
+        plan = build_artifact_detection_selection_plan(key)
+        source_part = (
+            cls.RecordingSource
+            if plan.source_kind == "recording"
+            else cls.SharedGroupSource
         )
 
         existing = cls._find_existing_pk(
-            master_restriction,
+            plan.master_restriction,
             source_part,
-            source_restriction,
-            artifact_detection_id,
+            plan.source_restriction,
+            plan.artifact_detection_id,
         )
         if existing is not None:
             return existing
@@ -585,24 +545,16 @@ class ArtifactDetectionSelection(
 
         _ensure_lookup_row_exists(
             ArtifactDetectionParameters,
-            master_restriction,
+            plan.master_restriction,
             helper_name="ArtifactDetectionSelection.insert_selection",
             insert_default_path="ArtifactDetectionParameters.insert_default()",
         )
 
-        new_master_key = {
-            **master_restriction,
-            "artifact_detection_id": artifact_detection_id,
-        }
-        new_part_key = {
-            "artifact_detection_id": artifact_detection_id,
-            **source_restriction,
-        }
         try:
             with transaction_or_noop(cls.connection):
                 # allow_direct_insert: this helper IS the validation boundary.
-                cls.insert1(new_master_key, allow_direct_insert=True)
-                source_part.insert1(new_part_key)
+                cls.insert1(plan.master_row, allow_direct_insert=True)
+                source_part.insert1(plan.source_row)
         except Exception as exc:  # noqa: BLE001 -- re-raised unless dup-PK
             if not _is_duplicate_key_error(exc):
                 raise
@@ -612,13 +564,13 @@ class ArtifactDetectionSelection(
             logger.debug(
                 "ArtifactDetectionSelection.insert_selection: lost deterministic-id "
                 "race on %s; returning the existing row.",
-                artifact_detection_id,
+                plan.artifact_detection_id,
             )
             existing = cls._find_existing_pk(
-                master_restriction,
+                plan.master_restriction,
                 source_part,
-                source_restriction,
-                artifact_detection_id,
+                plan.source_restriction,
+                plan.artifact_detection_id,
             )
             if existing is not None:
                 return existing
@@ -627,14 +579,14 @@ class ArtifactDetectionSelection(
             # raw-insert orphan. Surface a clear schema-bypass error
             # instead of the opaque duplicate-key error.
             raise SchemaBypassError(
-                f"ArtifactDetectionSelection master {artifact_detection_id} exists but has no "
+                f"ArtifactDetectionSelection master {plan.artifact_detection_id} exists but has no "
                 f"matching {source_part.__name__} row for "
-                f"{source_restriction}: the master was inserted without "
+                f"{plan.source_restriction}: the master was inserted without "
                 "insert_selection (raw-insert orphan). Use insert_selection() "
                 "to create master+source atomically, or drop the orphan "
                 "master."
             ) from exc
-        return {k: new_master_key[k] for k in cls.primary_key}
+        return {k: plan.master_row[k] for k in cls.primary_key}
 
     @classmethod
     def _find_existing_pk(
