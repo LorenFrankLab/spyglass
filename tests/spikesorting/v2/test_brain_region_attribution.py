@@ -228,6 +228,37 @@ def test_get_unit_brain_regions_include_labels(populated_sorting):
     assert "region_name" in none_match.columns
 
 
+def test_get_unit_brain_regions_empty_include_labels_returns_all(
+    populated_sorting,
+):
+    """An EMPTY ``include_labels`` is treated as no filter (all units), not as
+    "match nothing". A bare ``is not None`` check would build ``& []`` (an
+    empty DataJoint OrList) and silently return zero units; the guard must
+    distinguish ``None``/``[]`` (no filter) from a non-empty label set,
+    matching ``get_matchable_unit_ids``. Audit finding #1."""
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    _clear_curations(populated_sorting)
+    unit_ids = sorted(
+        int(u) for u in (Sorting.Unit & populated_sorting).fetch("unit_id")
+    )
+    if len(unit_ids) < 1:
+        pytest.skip("need >=1 unit to exercise the include_labels branch")
+
+    pk = CurationV2.insert_curation(
+        sorting_key=populated_sorting,
+        labels={unit_ids[0]: ["mua"]},
+    )
+
+    all_units = CurationV2().get_unit_brain_regions(pk)
+    empty_filter = CurationV2().get_unit_brain_regions(pk, include_labels=[])
+    assert {int(u) for u in empty_filter["unit_id"]} == set(unit_ids), (
+        "include_labels=[] must return all units (no filter), not zero"
+    )
+    assert len(empty_filter) == len(all_units)
+
+
 @pytest.fixture(scope="module")
 def region_60s_sort(dj_conn):
     """Sort shank 0 of the 60s polymer fixture and yield its sorting PK.

@@ -1555,8 +1555,10 @@ class CurationV2(SpyglassMixin, dj.Manual):
         key : dict
             Restriction selecting a single ``CurationV2`` row.
         include_labels : iterable of str or CurationLabel, optional
-            If provided, restrict to units carrying at least one of
-            these labels. Defaults to ``None`` (all units).
+            If a non-empty iterable, restrict to units carrying at least
+            one of these labels. ``None`` (the default) and an empty
+            iterable both mean no filter (all units), matching
+            ``get_matchable_unit_ids``.
         allow_anchor_member : bool, optional
             If ``True``, return anchor-member regions for concat-backed
             sortings instead of raising. Defaults to ``False``.
@@ -1593,14 +1595,19 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 lbl.value if isinstance(lbl, CurationLabel) else str(lbl)
                 for lbl in include_labels
             }
-            labeled = (
-                self.UnitLabel
-                & key
-                & [{"curation_label": v} for v in include_values]
-            ).fetch("unit_id")
-            unit_restriction = unit_restriction & [
-                {"unit_id": int(uid)} for uid in labeled
-            ]
+            # An empty label set means "no filter" (all units), NOT "match
+            # nothing": restricting with ``& []`` (an empty DataJoint OrList)
+            # would silently return zero rows. Guard on the materialized set's
+            # truthiness, matching ``get_matchable_unit_ids``.
+            if include_values:
+                labeled = (
+                    self.UnitLabel
+                    & key
+                    & [{"curation_label": v} for v in include_values]
+                ).fetch("unit_id")
+                unit_restriction = unit_restriction & [
+                    {"unit_id": int(uid)} for uid in labeled
+                ]
         return unit_brain_region_df(unit_restriction, resolution)
 
     def get_matchable_unit_ids(
