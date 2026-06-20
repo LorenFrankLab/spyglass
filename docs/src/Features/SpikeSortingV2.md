@@ -131,7 +131,7 @@ from spyglass.spikesorting.v2.pipeline import (
 from spyglass.spikesorting.v2.recording import SortGroupV2
 
 # Replace with the session you've already ingested via insert_sessions.
-nwb_file_name = "your_session_.nwb"
+nwb_file_name = "your_session.nwb"
 
 # One-shot install of every required default Lookup row
 # (PreprocessingParameters + ArtifactDetectionParameters + SorterParameters).
@@ -226,7 +226,12 @@ source:
 ```python
 from spyglass.spikesorting.v2.pipeline import describe_pipeline_presets
 
-describe_pipeline_presets()  # one row per pipeline preset
+presets = describe_pipeline_presets()  # one row per pipeline preset
+presets
+
+# Discover the shipped Neuropixels / Kilosort4 rows by filtering the catalog,
+# rather than hardcoding a name that may be re-dated:
+presets[presets["sorter_family"] == "kilosort4"]
 ```
 
 ### Parameter names and fingerprints

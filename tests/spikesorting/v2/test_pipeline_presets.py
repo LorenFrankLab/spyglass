@@ -13,6 +13,7 @@ SQL.
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import datajoint as dj
 import pytest
@@ -24,6 +25,20 @@ from spyglass.spikesorting.v2.pipeline import (
 )
 
 pytestmark = pytest.mark.unit
+
+# tests/spikesorting/v2/ -> repo root is parents[3].
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_FEATURE_DOC = _REPO_ROOT / "docs" / "src" / "Features" / "SpikeSortingV2.md"
+_NOTEBOOK_PY = (
+    _REPO_ROOT / "notebooks" / "py_scripts" / "10_Spike_SortingV2.py"
+)
+# The dated, content-fingerprinted Neuropixels/Kilosort4 preset actually in the
+# catalog. Docs/notebooks discover it via describe_pipeline_presets(); this is
+# the name they may reference, never an undated placeholder.
+_CANONICAL_NPX_PRESET = "franklab_neuropixels_ks4_2026_06"
+# A never-shipped placeholder name that must not appear in user docs -- it would
+# rot, since the catalog only exposes the dated preset above.
+_PLACEHOLDER_NPX_PRESET = "franklab_neuropixels_kilosort4"
 
 
 def _nullable_num_match(df_value, preset_value) -> bool:
@@ -173,3 +188,31 @@ def test_describe_pipeline_presets_builtins_populate_human_fields():
     for name in list_pipeline_presets():
         for col in ("intended_use", "threshold_units", "notes"):
             assert df.loc[name, col].strip(), f"{name}.{col} is blank"
+
+
+def test_docs_reference_canonical_npx_preset():
+    """User docs/notebook discover the KS4/Neuropixels preset, not a placeholder.
+
+    The dated, fingerprinted preset ``franklab_neuropixels_ks4_2026_06`` is the
+    one actually in the live catalog, so the docs surface it through
+    ``describe_pipeline_presets()`` rather than naming the never-shipped
+    ``franklab_neuropixels_kilosort4`` placeholder. This keeps the docs honest:
+    they only name a preset the catalog actually exposes, and teach discovery
+    rather than a name that could churn.
+    """
+    # The dated preset is a real catalog entry (so docs can't reference a
+    # non-existent name), and the placeholder never made it into the catalog.
+    assert _CANONICAL_NPX_PRESET in list_pipeline_presets()
+    assert _PLACEHOLDER_NPX_PRESET not in list_pipeline_presets()
+
+    doc_text = _FEATURE_DOC.read_text()
+    notebook_text = _NOTEBOOK_PY.read_text()
+
+    # Discovery, not a hardcoded list: both surfaces teach the accessor.
+    assert "describe_pipeline_presets()" in doc_text
+    assert "describe_pipeline_presets" in notebook_text
+
+    # The feature doc names the real dated preset, never the placeholder.
+    assert _CANONICAL_NPX_PRESET in doc_text
+    assert _PLACEHOLDER_NPX_PRESET not in doc_text
+    assert _PLACEHOLDER_NPX_PRESET not in notebook_text

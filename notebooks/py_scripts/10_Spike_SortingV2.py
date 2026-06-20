@@ -63,7 +63,7 @@ dj.config["display.limit"] = 12  # cap rows in table reprs
 # preset).
 
 # + tags=["parameters"]
-nwb_file_name = "your_session_.nwb"  # replace with your ingested session
+nwb_file_name = "your_session.nwb"  # replace with your ingested session
 team_name = "my_team"
 interval_list_name = "raw data valid times"
 pipeline_preset = "franklab_tetrode_hippocampus_30khz_ms4_2026_06"
