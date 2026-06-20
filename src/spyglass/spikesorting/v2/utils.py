@@ -1038,7 +1038,15 @@ def _insert_row_to_dict(row, attr_names) -> dict:
             "of dicts -- DataFrame / CSV-path inserts are not supported "
             "on these Pydantic-validated parameter tables."
         )
-    return dict(zip(attr_names, row))
+    values = tuple(row)
+    if len(values) != len(attr_names):
+        raise ValueError(
+            "validated Lookup positional insert row has the wrong length: "
+            f"expected {len(attr_names)} value(s) for attributes "
+            f"{tuple(attr_names)!r}, got {len(values)} value(s). Pass a mapping "
+            "row or align the positional tuple with the table heading."
+        )
+    return dict(zip(attr_names, values))
 
 
 def _assert_noise_levels_length(
@@ -1067,10 +1075,24 @@ def _assert_noise_levels_length(
         If ``noise_levels`` is non-``None`` and ``len(noise_levels)`` is
         neither 1 nor ``n_channels``.
     """
-    if noise_levels is not None and len(noise_levels) not in (1, n_channels):
+    if noise_levels is None:
+        return
+    if isinstance(noise_levels, (str, bytes)):
+        raise ValueError(
+            "clusterless noise_levels must be a numeric sequence with length "
+            "1 (broadcast) or n_channels; got a string/bytes value."
+        )
+    try:
+        length = len(noise_levels)
+    except TypeError as exc:
+        raise ValueError(
+            "clusterless noise_levels must be a numeric sequence with length "
+            "1 (broadcast) or n_channels; got a scalar value."
+        ) from exc
+    if length not in (1, n_channels):
         raise ValueError(
             "clusterless noise_levels must have length 1 (broadcast) or "
-            f"n_channels={n_channels}; got {len(noise_levels)}."
+            f"n_channels={n_channels}; got {length}."
         )
 
 
