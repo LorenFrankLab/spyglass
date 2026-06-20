@@ -81,7 +81,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
 
     definition = """
     -> Sorting
-    curation_id=0: int
+    curation_id: int
     ---
     parent_curation_id=-1: int
     -> AnalysisNwbfile
