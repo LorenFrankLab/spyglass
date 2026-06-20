@@ -1,8 +1,10 @@
 # Spike Sorting v2 — UX follow-ups Implementation Plan
 
 **Status (2026-06-19):** Phase 1 and Phase 2a are **complete and committed** on
-branch `spikesorting-v2`. Remaining work: Phase 3 (interval discovery + docs
-polish) and Phase 4 (session-level preflight + runner). Phase 2b stays gated.
+branch `spikesorting-v2`. Phase 3's docs/docstring polish landed, but its
+`describe_intervals` helper was **dropped by decision** (interval discovery is
+cross-pipeline — see the Phase 3 entry). Remaining work: Phase 4 (session-level
+preflight + runner). Phase 2b stays gated.
 
 - **Phase 1 — run-summary rename: ✅ complete** (`db3cf1bf`, `c5710036`,
   `8ac81914`).
@@ -23,14 +25,28 @@ polish) and Phase 4 (session-level preflight + runner). Phase 2b stays gated.
 - **Phase 2b — gated.** NP-KS4 partially addressed above; the rest (Set A
   downstream curation, tetrode-20 kHz, MS5 probe) stays deferred pending the
   analyzer-curation phase + scientific sign-off.
-- **Phase 3 / Phase 4 — pending.**
+- **Phase 3 — docs/docstring polish: ✅ landed, minus `describe_intervals`**
+  (`f9e7fb07` → `8efe1fb1`). Shipped: zero-unit `get_sorting`/`get_analyzer`
+  docstring cross-refs; gated-stub notes on the
+  `SessionGroup`/`ConcatenatedRecording` forward declarations; a
+  `describe_pipeline_presets()` filter example for discovering the experimental
+  Neuropixels/Kilosort4 preset by name (the dated
+  `franklab_neuropixels_ks4_2026_06` from 2a — no new preset names); and the
+  `your_session.nwb` notebook/doc placeholder fix. **Dropped by decision:** the
+  planned `describe_intervals(nwb_file_name)` helper. Summarizing a session's
+  `IntervalList` rows is cross-pipeline (every pipeline takes an
+  `interval_list_name`), so it does not belong on the spikesorting user surface;
+  if wanted later, add it as a generic `IntervalList`/`common` helper (mirroring
+  the existing `IntervalList.plot_intervals`). `interval_list_name` stays a
+  required arg.
+- **Phase 4 — pending.**
 
 Branch audit summary: the public run-summary API rename has landed
 (`run_v2_pipeline` uses a `run_summary` local and
 `PipelineStageError.partial_run_summary` exists). The remaining worth-doing
-work is Phase 3 (interval discovery + docs polish) and Phase 4 (session-level
-preflight and runner). Phase 2b remains gated and should not be implemented
-without the analyzer-curation phase and scientific sign-off.
+work is Phase 4 (session-level preflight and runner). Phase 2b remains gated
+and should not be implemented without the analyzer-curation phase and
+scientific sign-off.
 
 Ordered, separately-shippable improvements to the `spyglass.spikesorting.v2`
 user-facing surface, identified in a UX audit of the orchestration layer:
@@ -65,5 +81,5 @@ For agent invocation, **load only the slice you need**:
   - ✅ **[phase-1-run-summary-rename.md](phase-1-run-summary-rename.md)** (complete) — residual "manifest" → "run summary" cleanup in tests/comments/docs. No pipeline behavior change.
   - ✅ **[phase-2a-parameter-names-and-fingerprints.md](phase-2a-parameter-names-and-fingerprints.md)** (complete) — corrected v2's blobs to the DB-attested recipes (region preproc 600/300 Hz, rate-keyed MS4 family, 100/50 µV artifact), dated/fingerprinted, MS4 default, duplicate-content guard, `describe_parameter_rows()`, preflight sampling-rate check, + an experimental Neuropixels KS4 preset. See the Status block above for decisions that diverged from this file as written.
   - [phase-2b-deferred-and-unattested.md](phase-2b-deferred-and-unattested.md) — **GATED.** Recipes that can't ship yet: Set A's downstream curation stages (wait on the analyzer-curation phase) and unattested recipes — Neuropixels tuning, tetrode-20 kHz, MS5 probe (wait on scientific sign-off). Depends on 2a; not a UX follow-up.
-  - [phase-3-discovery-and-polish.md](phase-3-discovery-and-polish.md) — `describe_intervals()`, notebook placeholder fix, zero-unit docstring cross-refs, gated-stub note, and docs/notebook surfacing of the canonical catalog. The helper itself can land independently; docs/notebook preset names should follow 2a.
+  - ✅ **[phase-3-discovery-and-polish.md](phase-3-discovery-and-polish.md)** (landed, minus `describe_intervals`) — zero-unit docstring cross-refs, gated-stub notes, the notebook placeholder fix, and `describe_pipeline_presets()`-based surfacing of the canonical KS4/NPX preset. The planned `describe_intervals()` helper was **dropped by decision** (interval discovery is cross-pipeline; promote to a `common`/`IntervalList` helper if needed).
   - [phase-4-session-runner.md](phase-4-session-runner.md) — `preflight_v2_pipeline_session()` read-only whole-session validation plus `run_v2_pipeline_session()` multi-sort-group batch runner with per-group outcome reporting. The code can land after the Phase 1 cleanup; docs/examples should follow 2a's dated preset names.

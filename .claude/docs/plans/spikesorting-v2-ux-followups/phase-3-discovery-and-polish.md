@@ -2,6 +2,15 @@
 
 [← back to PLAN.md](PLAN.md) · [overview](overview.md)
 
+> **Update (post-implementation):** the `describe_intervals()` helper specified
+> below was **not shipped** — it was dropped by decision because summarizing a
+> session's `IntervalList` rows is cross-pipeline and does not belong on the
+> spikesorting user surface (promote it to a generic `common`/`IntervalList`
+> helper, mirroring `IntervalList.plot_intervals`, if wanted later). The rest of
+> this phase landed: the zero-unit docstring cross-refs, the gated-stub notes,
+> the notebook placeholder fix, and the `describe_pipeline_presets()`-based
+> KS4/Neuropixels discovery example. See PLAN.md for the as-shipped status.
+
 Close the interval-discovery onboarding gap and clear small audit nits, all in
 the v2 user-facing surface. Phase 2a owns the canonical preset/parameter catalog,
 including Neuropixels/Kilosort4 names; this phase surfaces that catalog in docs
