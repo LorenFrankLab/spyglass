@@ -1289,12 +1289,23 @@ def preflight_v2_pipeline(
 
     sort_group_id = int(sort_group_id)
 
-    # 2-5. Upstream session/interval/team/sort-group rows.
+    # 2-6. Upstream session/raw/interval/team/sort-group rows.
     _check(
         "session_exists",
         Session & {"nwb_file_name": nwb_file_name},
         f"session {nwb_file_name!r} is not ingested. Ingest it with "
         "insert_sessions(...) first.",
+    )
+    # ``RecordingSelection`` FKs ``Raw`` (not ``Session``), so a session whose
+    # ``Raw`` row is missing (e.g. a partial ingestion) would pass
+    # ``session_exists`` yet fail the recording insert with an opaque
+    # foreign-key error. Check ``Raw`` explicitly so preflight stays honest.
+    _check(
+        "raw_exists",
+        Raw & {"nwb_file_name": nwb_file_name},
+        f"Raw electrical-series row for {nwb_file_name!r} is missing (the "
+        "session is ingested but its Raw data is not). Re-run ingestion "
+        "(e.g. populate_all_common / insert_sessions) so Raw is populated.",
     )
     _check(
         "interval_exists",
@@ -1356,8 +1367,8 @@ def preflight_v2_pipeline(
     # acquisition rate, so a 30 kHz preset on a 20 kHz recording (or the
     # reverse) silently sorts with a mistuned window. The clusterless preset
     # is rate-agnostic (sampling_rate_hz is None) and is skipped; the check is
-    # also skipped if Raw is not ingested yet (session_exists already covers
-    # that, so this would only add a confusing second failure).
+    # also skipped if Raw is not ingested yet (raw_exists already reports that,
+    # so this would only add a confusing second failure).
     if bundle.sampling_rate_hz is not None:
         raw = Raw & {"nwb_file_name": nwb_file_name}
         if raw:

@@ -994,9 +994,9 @@ for label, interval_data in results.groupby("interval_labels"):
         columns) since `Probe.Electrode` coordinates are per-probe.
     - Add `preflight_v2_pipeline()` to `spyglass.spikesorting.v2.pipeline`
         and run it by default from `run_v2_pipeline(..., preflight=True)`. It
-        is a read-only, ~1 s configuration check that the session, interval,
-        team, sort-group, and preset parameter rows exist and the sorter
-        binary is installed, returning a structured `PreflightReport`
+        is a read-only, ~1 s configuration check that the session, raw,
+        interval, team, sort-group, and preset parameter rows exist and the
+        sorter binary is installed, returning a structured `PreflightReport`
         (`ok` / `errors` / `warnings` / `expected_ids`); `run_v2_pipeline`
         raises the new `PreflightError` with each failed check's fix before
         any populate, so a misconfigured run fails in seconds instead of

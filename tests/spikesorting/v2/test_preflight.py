@@ -201,6 +201,35 @@ def test_preflight_all_pass(preflight_inputs):
 
 
 @pytest.mark.database
+def test_preflight_missing_raw(preflight_inputs, monkeypatch):
+    """A session present but Raw absent fails raw_exists (not a false-negative).
+
+    ``RecordingSelection`` FKs ``Raw``, not ``Session``, so a partial ingestion
+    (Session row but no Raw) would otherwise pass preflight and crash at the
+    recording insert. Simulate the missing Raw by patching ``spyglass.common.Raw``
+    so its restriction is empty; ``Session`` is untouched, so ``session_exists``
+    still passes and ``raw_exists`` is the lone failure.
+    """
+    import spyglass.common as common
+
+    class _NoRaw:
+        def __and__(self, restriction):
+            return []  # empty -> falsy: simulates a missing Raw row
+
+    monkeypatch.setattr(common, "Raw", _NoRaw())
+
+    report = preflight_v2_pipeline(**preflight_inputs)
+    assert report.ok is False
+    (raw_check,) = [c for c in report.checks if c.name == "raw_exists"]
+    assert raw_check.ok is False
+    assert "Raw" in raw_check.fix
+    # session_exists used the real Session table, so it still passes -- proving
+    # raw_exists is a distinct check, not a duplicate of session_exists.
+    (session_check,) = [c for c in report.checks if c.name == "session_exists"]
+    assert session_check.ok is True
+
+
+@pytest.mark.database
 def test_preflight_missing_team(preflight_inputs):
     """A missing LabTeam fails team_exists; the other checks still run."""
     inputs = {**preflight_inputs, "team_name": "no_such_team_preflight"}
@@ -213,6 +242,7 @@ def test_preflight_missing_team(preflight_inputs):
     # Report is complete: every check ran, not just up to the first failure.
     assert {c.name for c in report.checks} >= {
         "session_exists",
+        "raw_exists",
         "interval_exists",
         "team_exists",
         "sort_group_exists",

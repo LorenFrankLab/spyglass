@@ -408,7 +408,7 @@ from spyglass.spikesorting.v2.sorting import (
 )
 from spyglass.spikesorting.v2.curation import CurationV2
 
-nwb_file_name = "your_session_.nwb"  # same session as above
+nwb_file_name = "your_session.nwb"  # same session as above
 
 recording_key = RecordingSelection.insert_selection({
     "nwb_file_name": nwb_file_name,
