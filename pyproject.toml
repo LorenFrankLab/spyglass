@@ -105,7 +105,12 @@ optional-dependencies.moseq-gpu = [
   "keypoint-moseq",
 ]
 optional-dependencies.spikesorting-v2 = [
-  "mountainsort4",      # v1 production sorter; pulls ml_ms4alg + isosplit5
+  # v1 production sorter. Installs the SI wrapper + isosplit5 (so it registers
+  # in installed_sorters()), but NOT ml_ms4alg -- MS4's actual algorithm backend
+  # is a numpy<2-era package that does not install under the v2 numpy>=2 baseline.
+  # So MS4 needs a numpy<2 env; preflight's sorter_runtime_available check gates
+  # this and the shipped run_v2_pipeline default is MS5 (which runs as-is).
+  "mountainsort4",
   "mountainsort5>=0.5", # default v2 sorter; pulls isosplit6 + scikit-learn
   # Drift/motion QC: DriftEstimate's default preset
   # (compute_motion preset="dredge_fast") requires torch. Pinned >=2 because
