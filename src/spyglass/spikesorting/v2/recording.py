@@ -52,14 +52,20 @@ from spyglass.spikesorting.v2._recording_materialization import (
 from spyglass.spikesorting.v2._recording_materialization import (
     filtering_description as _filtering_description_svc,
 )
+from spyglass.spikesorting.v2._sort_group_planning import (
+    _SortGroupPlan,
+    _build_sort_group_rows,
+    _electrode_group_sort_key,
+    _plan_sort_groups_by_column,
+    _plan_sort_groups_by_shank,
+    _reference_electrode_group,
+)
 from spyglass.spikesorting.v2.utils import (
     SelectionMasterInsertGuard,
     _assert_v2_db_safe,
     _validate_params,
     _validate_reference_fields,
-    assert_reference_not_member,
     reject_duplicate_parameter_content,
-    resolve_group_reference,
     transaction_or_noop,
     validate_lookup_rows,
 )
@@ -101,79 +107,6 @@ class DeletionPreview(NamedTuple):
     sort_group_rows: int
     electrode_rows: int
     cascade_summary: tuple
-
-
-def _electrode_group_sort_key(name):
-    """Sort key for ``electrode_group_name`` tolerant of non-numeric names.
-
-    NWB ``electrode_group_name`` is a free-form string. A plain
-    ``int(name)`` raises ``ValueError`` on names like ``"probeA"``; this
-    key sorts all-numeric names numerically (and ahead of any non-numeric
-    name), then non-numeric names lexically -- so purely numeric group
-    names keep their natural order while arbitrary names no longer crash.
-    ``isdecimal`` (not ``isdigit``) is the gate so the predicate matches
-    exactly the strings ``int()`` accepts.
-    """
-    text = str(name)
-    return (0, int(text)) if text.isdecimal() else (1, text)
-
-
-def _reference_electrode_group(all_electrodes, reference_electrode_id):
-    """Validate a ``"specific"`` reference electrode and return its group.
-
-    Looks the reference electrode up in the FULL (not bad-channel-filtered)
-    session electrode set -- so a configured reference flagged
-    ``bad_channel='True'`` is still found -- and enforces two invariants that
-    a resolved ``"specific"`` reference must satisfy before any row is
-    inserted:
-
-    * the id must exist, so a ``"specific"`` sort group never persists a
-      reference the recording cannot subtract (which would otherwise pass
-      group creation and only fail later inside ``Recording.populate``);
-    * it must belong to exactly one electrode group. The ``Electrode`` primary
-      key is ``(nwb_file_name, electrode_group_name, electrode_id)``, so the
-      same ``electrode_id`` can appear under more than one
-      ``electrode_group_name``; an ambiguous owner is rejected rather than
-      silently resolved to the first match (mirrors v1's intent).
-
-    ``set_group_by_shank`` uses the returned group to honor
-    ``omit_ref_electrode_group``; ``set_group_by_electrode_table_column``
-    calls it for the existence / uniqueness validation only.
-
-    Parameters
-    ----------
-    all_electrodes : numpy.recarray
-        Every ``Electrode`` row for the session (unfiltered), as returned by
-        ``Electrode().fetch()``.
-    reference_electrode_id : int
-        The resolved ``"specific"`` reference electrode id.
-
-    Returns
-    -------
-    str
-        The single ``electrode_group_name`` containing the reference
-        electrode.
-    """
-    match = all_electrodes["electrode_id"] == reference_electrode_id
-    owners = sorted(
-        {str(g) for g in all_electrodes["electrode_group_name"][match]}
-    )
-    if len(owners) == 0:
-        raise ValueError(
-            "SortGroupV2: reference electrode "
-            f"{reference_electrode_id} is not in the Electrode table for this "
-            "session; a 'specific' reference must name a real electrode (it "
-            "is subtracted from the recording, then dropped). Check the "
-            "reference electrode id."
-        )
-    if len(owners) > 1:
-        raise ValueError(
-            "SortGroupV2: reference electrode "
-            f"{reference_electrode_id} appears in multiple electrode groups "
-            f"{owners}; its owning electrode group is ambiguous. Disambiguate "
-            "the Electrode config or choose a unique reference electrode."
-        )
-    return owners[0]
 
 
 @schema
@@ -466,103 +399,15 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
             Electrode() & {"nwb_file_name": nwb_file_name}
         ).fetch()
 
-        # Enumerate (electrode_group, shank) groupings.
-        e_groups = sorted(
-            np.unique(electrodes["electrode_group_name"]).tolist(),
-            key=_electrode_group_sort_key,
+        proposed, skipped = _plan_sort_groups_by_shank(
+            electrodes,
+            all_electrodes,
+            nwb_file_name,
+            omit_ref_electrode_group=omit_ref_electrode_group,
+            omit_unitrode=omit_unitrode,
+            references=references,
+            override_pair=override_pair,
         )
-        # Each entry: (e_group, electrode_ids, resolved_mode, resolved_ref_id).
-        proposed: list[tuple[str, np.ndarray, str, int | None]] = []
-        skipped: list[dict] = []
-        for e_group in e_groups:
-            in_group = electrodes["electrode_group_name"] == e_group
-            shanks = np.unique(electrodes["probe_shank"][in_group])
-            for shank in shanks:
-                mask = in_group & (electrodes["probe_shank"] == shank)
-                electrode_ids = electrodes["electrode_id"][mask]
-                if omit_unitrode and len(electrode_ids) == 1:
-                    logger.warning(
-                        f"set_group_by_shank: skipping {nwb_file_name!r} "
-                        f"electrode group {e_group} shank {shank} -- "
-                        "single-channel unitrode."
-                    )
-                    skipped.append(
-                        {
-                            "electrode_group_name": str(e_group),
-                            "shank": int(shank),
-                            "reason": "unitrode",
-                        }
-                    )
-                    continue
-
-                # Resolve THIS group's reference (per group, not call-wide).
-                if override_pair is not None:
-                    resolved_mode, resolved_ref_id = override_pair
-                elif references is not None:
-                    if e_group not in references:
-                        raise ValueError(
-                            "set_group_by_shank: electrode group "
-                            f"{e_group!r} produces a sort group but is missing "
-                            "from `references`. Add a reference electrode id / "
-                            "sentinel for it, or omit `references` to inherit "
-                            "from the Electrode config."
-                        )
-                    resolved_mode, resolved_ref_id = resolve_group_reference(
-                        electrodes["original_reference_electrode"][mask],
-                        explicit_ref=references[e_group],
-                        group_label=str(e_group),
-                    )
-                else:
-                    resolved_mode, resolved_ref_id = resolve_group_reference(
-                        electrodes["original_reference_electrode"][mask],
-                        group_label=str(e_group),
-                    )
-
-                # A "specific" reference must name a real, unambiguous
-                # electrode; validate it (and locate its owning group)
-                # regardless of omit, so a bad id fails here instead of later
-                # inside Recording.populate.
-                if resolved_mode == "specific":
-                    ref_group = _reference_electrode_group(
-                        all_electrodes, resolved_ref_id
-                    )
-                    # omit_ref_electrode_group: skip the electrode group that
-                    # CONTAINS this group's resolved specific reference.
-                    if omit_ref_electrode_group and str(ref_group) == str(
-                        e_group
-                    ):
-                        logger.warning(
-                            f"set_group_by_shank: skipping "
-                            f"{nwb_file_name!r} electrode group "
-                            f"{e_group} -- contains the reference electrode."
-                        )
-                        skipped.append(
-                            {
-                                "electrode_group_name": str(e_group),
-                                "shank": int(shank),
-                                "reason": "reference_electrode_group",
-                            }
-                        )
-                        continue
-
-                # Fail early if the resolved specific reference is itself a
-                # member of the sort group we are about to insert (it would be
-                # subtracted then dropped, silently shrinking the group).
-                assert_reference_not_member(
-                    resolved_mode, resolved_ref_id, electrode_ids
-                )
-                proposed.append(
-                    (e_group, electrode_ids, resolved_mode, resolved_ref_id)
-                )
-
-        if not proposed:
-            raise ValueError(
-                f"set_group_by_shank: no sort groups produced for "
-                f"{nwb_file_name!r} after filtering. Loosen "
-                "omit_unitrode / omit_ref_electrode_group, or use "
-                "set_group_by_electrode_table_column to group by a "
-                "different column."
-            )
 
         # Pick sort_group_ids. Auto-allocation is only safe on a fresh
         # session; on rerun the caller must opt in via explicit
@@ -590,36 +435,24 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
             confirm=confirm,
         )
 
-        master_rows, part_rows = [], []
-        for group, sort_group_id in zip(proposed, sort_group_ids):
-            e_group, electrode_ids, resolved_mode, resolved_ref_id = group
-            master_rows.append(
-                {
-                    "nwb_file_name": nwb_file_name,
-                    "sort_group_id": sort_group_id,
-                    "reference_mode": resolved_mode,
-                    "reference_electrode_id": resolved_ref_id,
-                }
+        plans = [
+            _SortGroupPlan(
+                sort_group_id=sort_group_id,
+                reference_mode=resolved_mode,
+                reference_electrode_id=resolved_ref_id,
+                electrodes=[
+                    (e_group, electrode_id) for electrode_id in electrode_ids
+                ],
             )
-            for electrode_id in electrode_ids:
-                part_rows.append(
-                    {
-                        "nwb_file_name": nwb_file_name,
-                        "sort_group_id": sort_group_id,
-                        "electrode_group_name": e_group,
-                        "electrode_id": int(electrode_id),
-                    }
-                )
-
-        # Wrap master + part inserts in one transaction so a part-insert
-        # failure (e.g., FK violation on a stale Electrode row) rolls
-        # back the master rows too. ``transaction_or_noop`` is a no-op
-        # when the caller is already inside a transaction (populate
-        # cascade, post-cautious_delete state), avoiding the nested-
-        # transaction error DataJoint would otherwise raise.
-        with transaction_or_noop(cls.connection):
-            cls.insert(master_rows)
-            cls.SortGroupElectrode.insert(part_rows)
+            for (
+                e_group,
+                electrode_ids,
+                resolved_mode,
+                resolved_ref_id,
+            ), sort_group_id in zip(proposed, sort_group_ids)
+        ]
+        master_rows, part_rows = _build_sort_group_rows(nwb_file_name, plans)
+        cls._insert_sort_group_rows(master_rows, part_rows)
 
         # Surface the skips as a consolidated summary (not only buried
         # per-group warnings) and return them so a caller can inspect
@@ -758,64 +591,17 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
                 f"were requested. Lengths must match."
             )
 
-        # Each entry: (sort_group_id, group_electrodes, resolved_mode, resolved_ref_id).
-        proposed: list[tuple[int, np.ndarray, str, int | None]] = []
-        skipped: list[dict] = []
-        for sort_group_id, values in zip(sort_group_ids, groups):
-            mask = np.isin(electrodes[resolved_column], values)
-            group_electrodes = electrodes[mask]
-            if len(group_electrodes) == 0:
-                raise ValueError(
-                    f"set_group_by_electrode_table_column: sort group "
-                    f"{sort_group_id} (column={column!r}, values={list(values)}) "
-                    f"matched no electrodes for {nwb_file_name!r}."
-                )
-            if omit_unitrode and len(group_electrodes) == 1:
-                logger.warning(
-                    f"set_group_by_electrode_table_column: skipping sort "
-                    f"group {sort_group_id} -- single-channel unitrode."
-                )
-                skipped.append(
-                    {"sort_group_id": int(sort_group_id), "reason": "unitrode"}
-                )
-                continue
-
-            # Resolve THIS group's reference (per group, not call-wide): the
-            # call-wide override if given, else inherit from the group's
-            # members' configured original_reference_electrode.
-            if override_pair is not None:
-                resolved_mode, resolved_ref_id = override_pair
-            else:
-                resolved_mode, resolved_ref_id = resolve_group_reference(
-                    group_electrodes["original_reference_electrode"],
-                    group_label=str(sort_group_id),
-                )
-            # A "specific" reference must name a real, unambiguous session
-            # electrode -- fail here instead of later in Recording.populate.
-            if resolved_mode == "specific":
-                _reference_electrode_group(all_electrodes, resolved_ref_id)
-            # Fail early if the resolved specific reference is itself a member
-            # of the sort group (it would be subtracted then dropped).
-            assert_reference_not_member(
-                resolved_mode,
-                resolved_ref_id,
-                group_electrodes["electrode_id"],
-            )
-            proposed.append(
-                (
-                    sort_group_id,
-                    group_electrodes,
-                    resolved_mode,
-                    resolved_ref_id,
-                )
-            )
-
-        if not proposed:
-            raise ValueError(
-                f"set_group_by_electrode_table_column: no sort groups "
-                f"survived filtering for {nwb_file_name!r}. Loosen "
-                "omit_unitrode or revisit the groups list."
-            )
+        proposed, skipped = _plan_sort_groups_by_column(
+            electrodes,
+            all_electrodes,
+            nwb_file_name,
+            column,
+            resolved_column,
+            groups=groups,
+            sort_group_ids=sort_group_ids,
+            omit_unitrode=omit_unitrode,
+            override_pair=override_pair,
+        )
 
         cls._handle_existing(
             nwb_file_name=nwb_file_name,
@@ -825,38 +611,25 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
             confirm=confirm,
         )
 
-        master_rows, part_rows = [], []
-        for (
-            sort_group_id,
-            group_electrodes,
-            resolved_mode,
-            resolved_ref_id,
-        ) in proposed:
-            master_rows.append(
-                {
-                    "nwb_file_name": nwb_file_name,
-                    "sort_group_id": sort_group_id,
-                    "reference_mode": resolved_mode,
-                    "reference_electrode_id": resolved_ref_id,
-                }
+        plans = [
+            _SortGroupPlan(
+                sort_group_id=sort_group_id,
+                reference_mode=resolved_mode,
+                reference_electrode_id=resolved_ref_id,
+                electrodes=[
+                    (row["electrode_group_name"], row["electrode_id"])
+                    for row in group_electrodes
+                ],
             )
-            for elec_row in group_electrodes:
-                part_rows.append(
-                    {
-                        "nwb_file_name": nwb_file_name,
-                        "sort_group_id": sort_group_id,
-                        "electrode_group_name": elec_row[
-                            "electrode_group_name"
-                        ],
-                        "electrode_id": int(elec_row["electrode_id"]),
-                    }
-                )
-
-        # See set_group_by_shank for the rationale on wrapping these
-        # two inserts in a transaction_or_noop block.
-        with transaction_or_noop(cls.connection):
-            cls.insert(master_rows)
-            cls.SortGroupElectrode.insert(part_rows)
+            for (
+                sort_group_id,
+                group_electrodes,
+                resolved_mode,
+                resolved_ref_id,
+            ) in proposed
+        ]
+        master_rows, part_rows = _build_sort_group_rows(nwb_file_name, plans)
+        cls._insert_sort_group_rows(master_rows, part_rows)
 
         if skipped:
             logger.warning(
@@ -866,6 +639,21 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
                 "omit_unitrode=False to include them."
             )
         return skipped
+
+    @classmethod
+    def _insert_sort_group_rows(cls, master_rows, part_rows) -> None:
+        """Insert SortGroupV2 master + SortGroupElectrode part rows.
+
+        Wrap master + part inserts in one transaction so a part-insert
+        failure (e.g., FK violation on a stale Electrode row) rolls back
+        the master rows too. ``transaction_or_noop`` is a no-op when the
+        caller is already inside a transaction (populate cascade,
+        post-cautious_delete state), avoiding the nested-transaction error
+        DataJoint would otherwise raise.
+        """
+        with transaction_or_noop(cls.connection):
+            cls.insert(master_rows)
+            cls.SortGroupElectrode.insert(part_rows)
 
 
 @schema
