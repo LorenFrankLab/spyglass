@@ -52,6 +52,9 @@ from spyglass.spikesorting.v2._recording_materialization import (
 from spyglass.spikesorting.v2._recording_materialization import (
     filtering_description as _filtering_description_svc,
 )
+from spyglass.spikesorting.v2._recipe_catalog import (
+    preprocessing_default_contents,
+)
 from spyglass.spikesorting.v2._sort_group_planning import (
     _SortGroupPlan,
     _build_sort_group_rows,
@@ -676,80 +679,9 @@ class PreprocessingParameters(SpyglassMixin, dj.Lookup):
     # ``PreprocessingParamsSchema.schema_version`` (3). The DataJoint
     # column default tracks the schema version so a custom row that omits
     # the column is tagged with the current schema version, not a
-    # mismatched one.
-    _DEFAULT_CONTENTS: tuple = (
-        (
-            "default",
-            # v2's schema-default preproc (300 Hz / 6000 Hz bandpass, median
-            # reference, 1.0 s min-segment). Not a production recipe -- the
-            # franklab production presets use the dated region rows above; this
-            # is the generic default the clusterless preset and ad-hoc callers
-            # use. ``whiten`` defaults to None (whitening is deferred to the
-            # sorter), so the default-constructed schema needs no override.
-            PreprocessingParamsSchema().model_dump(),
-            3,
-            None,
-        ),
-        (
-            # Production hippocampus recipe (June 2026): 600 Hz high-pass
-            # (hippocampal spikes are denser/narrower than cortical ones),
-            # 6000 Hz low-pass, 1.5 ms min-segment (production keeps the
-            # short interval slivers the 1.0 s shipped default drops). Filtering
-            # happens at this preproc stage; the MS4 sorter runs ``filter=False``
-            # (see _params/sorter.py), so the region high-pass lives on the
-            # preproc row, never the sorter row.
-            "franklab_hippocampus_2026_06",
-            PreprocessingParamsSchema.model_validate(
-                {
-                    "bandpass_filter": {"freq_min": 600.0, "freq_max": 6000.0},
-                    "min_segment_length": 0.0015,
-                }
-            ).model_dump(),
-            3,
-            None,
-        ),
-        (
-            # Production cortex recipe (June 2026): identical to the
-            # hippocampus recipe with a 300 Hz high-pass (cortical waveforms
-            # are wider).
-            "franklab_cortex_2026_06",
-            PreprocessingParamsSchema.model_validate(
-                {
-                    "bandpass_filter": {"freq_min": 300.0, "freq_max": 6000.0},
-                    "min_segment_length": 0.0015,
-                }
-            ).model_dump(),
-            3,
-            None,
-        ),
-        (
-            "default_neuropixels",
-            # Blessed Neuropixels recipe: bandpass + ADC phase-shift. The
-            # phase-shift is a safe no-op until the recording carries an
-            # ``inter_sample_shift`` property (the runtime logs a skip and
-            # never fails), so selecting this preset never breaks a
-            # non-multiplexed recording.
-            PreprocessingParamsSchema.model_validate(
-                {
-                    "bandpass_filter": {"freq_min": 300.0, "freq_max": 6000.0},
-                    "phase_shift": {"margin_ms": 100.0},
-                }
-            ).model_dump(),
-            3,
-            None,
-        ),
-        (
-            "no_filter",
-            # ``bandpass_filter=None`` is a real disable: the runtime
-            # skips the filter step entirely, so "no_filter" applies no
-            # bandpass at all.
-            PreprocessingParamsSchema.model_validate(
-                {"bandpass_filter": None}
-            ).model_dump(),
-            3,
-            None,
-        ),
-    )
+    # mismatched one. The shipped rows are defined in
+    # ``_recipe_catalog.preprocessing_default_contents`` (single source).
+    _DEFAULT_CONTENTS: tuple = preprocessing_default_contents()
 
     def insert1(self, row, allow_duplicate_params=False, **kwargs):
         """Insert one row through the validated bulk ``insert`` path."""

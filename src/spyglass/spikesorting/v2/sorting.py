@@ -32,6 +32,7 @@ from spyglass.common import IntervalList  # noqa: F401
 from spyglass.common.common_ephys import Electrode  # noqa: F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile  # noqa: F401
 from spyglass.spikesorting.v2._params.sorter import _get_sorter_schema
+from spyglass.spikesorting.v2._recipe_catalog import sorter_default_contents
 from spyglass.spikesorting.v2._sorting_compute import (
     _clusterless_noise_levels,  # noqa: F401  re-exported for tests
     apply_artifact_mask,
@@ -286,134 +287,9 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
         )
         super().insert(validated, **kwargs)
 
-    _DEFAULT_CONTENTS: tuple = (
-        (
-            # Production MountainSort4 recipe (June 2026), 30 kHz. Rate-keyed:
-            # the sorter runs ``filter=False`` (the preproc stage already
-            # bandpassed), so the sorter band is inert and the only
-            # rate-dependent knobs are ``clip_size`` / ``detect_interval``. The
-            # tetrode/probe/region distinction lives on the preproc row + the
-            # preset, not here. ``adjacency_radius`` is set explicitly to 100
-            # um (also the schema default).
-            "mountainsort4",
-            "franklab_30khz_ms4_2026_06",
-            _validate_params(
-                _get_sorter_schema("mountainsort4"),
-                {"adjacency_radius": 100.0},
-            ),
-            1,
-            None,
-        ),
-        (
-            # 20 kHz variant: ``clip_size=27`` / ``detect_interval=7`` hold the
-            # same ~1.33 ms physical window at the lower rate; everything else
-            # matches the 30 kHz row.
-            "mountainsort4",
-            "franklab_20khz_ms4_2026_06",
-            _validate_params(
-                _get_sorter_schema("mountainsort4"),
-                {
-                    "adjacency_radius": 100.0,
-                    "clip_size": 27,
-                    "detect_interval": 7,
-                },
-            ),
-            1,
-            None,
-        ),
-        (
-            # MS5 is region-agnostic (filter=False, like MS4), so the row is
-            # rate-keyed; 30 kHz uses the schema-default snippet window.
-            "mountainsort5",
-            "franklab_30khz_ms5_2026_06",
-            _validate_params(_get_sorter_schema("mountainsort5"), {}),
-            1,
-            None,
-        ),
-        (
-            # Kilosort4 Neuropixels recipe matched to the AIND
-            # aind-ephys-spikesort-kilosort4 capsule params.json (and
-            # int-brain-lab/ibl-sorter): the only scientifically-meaningful
-            # deviation from stock KS4 is non-rigid drift correction
-            # (``nblocks=5`` vs the stock ``1``); the rest pins KS4's stock
-            # whitening/preprocessing config explicitly. KS4 does its own
-            # high-pass + common-reference + ZCA whitening internally
-            # (``skip_kilosort_preprocessing=False``, ``whitening_range=32``).
-            # There is deliberately NO ``whiten`` key: KS4 has no such param,
-            # and the v2 runtime only runs its external float64 whitening when
-            # the sorter params carry ``whiten=True`` (see
-            # ``_sorting_compute.py``), so omitting it keeps the signal
-            # whitened exactly once (by KS4) -- adding ``whiten=True`` here
-            # would double-whiten.
-            "kilosort4",
-            "franklab_neuropixels_default",
-            _validate_params(
-                _get_sorter_schema("kilosort4"),
-                {
-                    "nblocks": 5,
-                    "whitening_range": 32,
-                    "skip_kilosort_preprocessing": False,
-                    "highpass_cutoff": 300,
-                    "do_correction": True,
-                    "keep_good_only": False,
-                },
-            ),
-            1,
-            None,
-        ),
-        (
-            "spykingcircus2",
-            "default",
-            _validate_params(_get_sorter_schema("spykingcircus2"), {}),
-            1,
-            None,
-        ),
-        (
-            "tridesclous2",
-            "default",
-            _validate_params(_get_sorter_schema("tridesclous2"), {}),
-            1,
-            None,
-        ),
-        (
-            "clusterless_thresholder",
-            "default",
-            _validate_params(
-                _get_sorter_schema("clusterless_thresholder"),
-                # ``threshold_unit="uv"`` makes the shipped
-                # ``detect_threshold=100`` a TRUE 100 microvolt threshold:
-                # the runtime scales the recording to uV (via the stored
-                # NWB gain) before detection, rather than treating it as a
-                # MAD multiplier. (For Frank-lab data gain==1 uV/count so
-                # 100 "uv" == 100 counts == 100 uV either way.) This
-                # honors the label v1 used at
-                # ``src/spyglass/spikesorting/v1/sorting.py:177`` but never
-                # enforced (v1 thresholded in raw counts). The
-                # explicit ``noise_levels=[1.0]`` is the equivalent
-                # advanced override and is kept as a belt-and-suspenders
-                # regression guard against the 1,400x noise_levels
-                # divergence; the runtime uses it verbatim (explicit
-                # noise_levels take precedence over ``threshold_unit``).
-                # The smoke / synthetic-fixture rows set
-                # ``threshold_unit="mad"`` EXPLICITLY (no noise_levels) so SI
-                # computes per-channel MAD and the threshold tracks the
-                # recording's noise floor -- they do not rely on the 'uv'
-                # default unit.
-                #
-                # THIS shipped ``default`` row sets ``threshold_unit="uv"``
-                # explicitly and takes detect_threshold from the schema
-                # default (100); the runtime ``scale_to_uV`` makes that a
-                # true 100 uV threshold.
-                {"threshold_unit": "uv", "noise_levels": [1.0]},
-            ),
-            # ClusterlessThresholderSchema is at schema_version=4:
-            # v2 dropped ``outputs`` / ``random_chunk_kwargs``;
-            # v3 made ``noise_levels`` optional (None -> SI MAD);
-            # v4 added ``threshold_unit``.
-            4,
-            None,
-        ),
-    )
+    # The shipped rows are defined in
+    # ``_recipe_catalog.sorter_default_contents`` (single source).
+    _DEFAULT_CONTENTS: tuple = sorter_default_contents()
 
     # Sorter names in ``_DEFAULT_CONTENTS`` that are NOT SpikeInterface
     # registered sorters and so must never be gated on

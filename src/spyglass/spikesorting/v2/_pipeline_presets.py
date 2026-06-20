@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 
+from spyglass.spikesorting.v2._recipe_catalog import pipeline_preset_specs
+
 if TYPE_CHECKING:
     import pandas as pd
 
@@ -57,154 +59,13 @@ class _PipelinePreset(BaseModel):
     notes: str = ""  # key assumptions (probe geometry, sampling rate, etc.)
 
 
-# Production region preproc + rate-keyed MS4 sorter rows the franklab MS4
-# presets bundle. probe_type is informational (the recipe is region + rate),
-# so the tetrode- and probe-hippocampus-30 kHz presets resolve identically.
-_REGION_PREPROC = {
-    "hippocampus": "franklab_hippocampus_2026_06",
-    "cortex": "franklab_cortex_2026_06",
-}
-_RATE_MS4_SORTER = {
-    30000: "franklab_30khz_ms4_2026_06",
-    20000: "franklab_20khz_ms4_2026_06",
-}
-_MS4_THRESHOLD_UNITS = "sigma of the whitened signal (~3)"
-_MS4_NOTES = (
-    "MountainSort4 detect_threshold is a multiple of the standard deviation "
-    "of the ZCA-whitened signal (~3), not an absolute voltage and not a MAD "
-    "multiplier. MS4 oversplits and does not track drift, so merge curation "
-    "is expected (Kilosort is the Neuropixels-density alternative). Runtime "
-    "note: MS4's algorithm backend (ml_ms4alg) is a numpy<2-era package that "
-    "does not install under the v2 numpy>=2 baseline, so these presets need a "
-    "numpy<2 environment; the shipped run_v2_pipeline default is the "
-    "MountainSort5 recipe, which runs as-is (preflight reports this via the "
-    "sorter_runtime_available check)."
-)
-
-
-def _franklab_ms4_preset(
-    probe_type: str, region: str, rate_hz: int
-) -> "_PipelinePreset":
-    """Build a production MS4 preset for a (probe_type, region, rate)."""
-    return _PipelinePreset(
-        preprocessing_params_name=_REGION_PREPROC[region],
-        artifact_detection_params_name="franklab_100uv_p07_2026_06",
-        sorter="mountainsort4",
-        sorter_params_name=_RATE_MS4_SORTER[rate_hz],
-        probe_type=probe_type,
-        target_region=region,
-        sampling_rate_hz=rate_hz,
-        sorter_family="mountainsort4",
-        adjacency_radius_um=100.0,
-        recommendation_status="production",
-        intended_use=(
-            f"Frank-lab {region} {probe_type}s at {rate_hz // 1000} kHz "
-            "(MountainSort4 production recipe)."
-        ),
-        threshold_units=_MS4_THRESHOLD_UNITS,
-        notes=_MS4_NOTES,
-    )
-
-
+# The preset bundles + UX metadata are the single source of truth in
+# ``_recipe_catalog.pipeline_preset_specs`` (alongside the parameter-row
+# recipes they reference); build the validated ``_PipelinePreset`` objects
+# from those plain-dict specs here.
 _PIPELINE_PRESETS: dict[str, _PipelinePreset] = {
-    "franklab_tetrode_hippocampus_30khz_ms4_2026_06": _franklab_ms4_preset(
-        "tetrode", "hippocampus", 30000
-    ),
-    "franklab_probe_hippocampus_30khz_ms4_2026_06": _franklab_ms4_preset(
-        "probe", "hippocampus", 30000
-    ),
-    "franklab_probe_cortex_30khz_ms4_2026_06": _franklab_ms4_preset(
-        "probe", "cortex", 30000
-    ),
-    "franklab_probe_hippocampus_20khz_ms4_2026_06": _franklab_ms4_preset(
-        "probe", "hippocampus", 20000
-    ),
-    "franklab_probe_cortex_20khz_ms4_2026_06": _franklab_ms4_preset(
-        "probe", "cortex", 20000
-    ),
-    "franklab_tetrode_hippocampus_30khz_ms5_2026_06": _PipelinePreset(
-        preprocessing_params_name="franklab_hippocampus_2026_06",
-        artifact_detection_params_name="franklab_100uv_p07_2026_06",
-        sorter="mountainsort5",
-        sorter_params_name="franklab_30khz_ms5_2026_06",
-        probe_type="tetrode",
-        target_region="hippocampus",
-        sampling_rate_hz=30000,
-        sorter_family="mountainsort5",
-        recommendation_status="alternative",
-        intended_use=(
-            "Frank-lab hippocampal tetrodes at 30 kHz, MountainSort5 -- the "
-            "shipped run_v2_pipeline default because it runs under the v2 "
-            "numpy>=2 baseline (the MS4 production recipe needs numpy<2)."
-        ),
-        threshold_units="sigma of the whitened signal (~5.5)",
-        notes=(
-            "MountainSort5 detect_threshold is a multiple of the standard "
-            "deviation of the whitened signal (~5.5, more conservative than "
-            "MS4's 3) -- the same sigma scale, not a MAD multiplier. MS5 is the "
-            "shipped run_v2_pipeline default because it runs under numpy>=2; "
-            "MS4 is the Frank-lab production recipe but its ml_ms4alg backend "
-            "needs numpy<2. recommendation_status stays 'alternative' (MS5 has "
-            "no attested probe usage); the function default is a separate, "
-            "runnability-driven choice."
-        ),
-    ),
-    "franklab_clusterless_2026_06": _PipelinePreset(
-        preprocessing_params_name="default",
-        artifact_detection_params_name="default",
-        sorter="clusterless_thresholder",
-        sorter_params_name="default",
-        target_region="hippocampus",
-        sorter_family="clusterless_thresholder",
-        recommendation_status="production",
-        intended_use=(
-            "Peak detection only (no clustering); feeds the clusterless "
-            "decoding pipeline."
-        ),
-        threshold_units="µV (100 µV)",
-        notes=(
-            "The 'default' clusterless SorterParameters row sets "
-            "threshold_unit='uv' with detect_threshold=100, so traces are "
-            "scaled to microvolts before detection -- a true 100 µV "
-            "threshold, not a MAD multiplier. Preproc/artifact rows are "
-            "unchanged from the prior clusterless preset."
-        ),
-    ),
-    "franklab_neuropixels_ks4_2026_06": _PipelinePreset(
-        preprocessing_params_name="default_neuropixels",
-        artifact_detection_params_name="none",
-        sorter="kilosort4",
-        sorter_params_name="franklab_neuropixels_default",
-        probe_type="neuropixels",
-        sampling_rate_hz=30000,
-        sorter_family="kilosort4",
-        recommendation_status="experimental",
-        intended_use=(
-            "Neuropixels (30 kHz) with Kilosort4, matched to the AIND "
-            "aind-ephys-spikesort-kilosort4 recipe. Experimental -- "
-            "community-grounded, not Frank-lab-attested; KS4 is "
-            "non-deterministic and typically needs a GPU."
-        ),
-        threshold_units=(
-            "KS4 template-matching projection thresholds "
-            "(Th_universal=9 / Th_learned=8), not µV or a noise multiple"
-        ),
-        notes=(
-            "Sorter params match the AIND aind-ephys-spikesort-kilosort4 "
-            "params.json (and agree with int-brain-lab/ibl-sorter): the only "
-            "scientifically-meaningful deviation from stock KS4 is non-rigid "
-            "drift correction (nblocks=5 vs stock 1). KS4 does its own "
-            "high-pass + common-reference + ZCA whitening internally "
-            "(skip_kilosort_preprocessing=False, whitening_range=32); the row "
-            "carries no 'whiten' key, so v2's external float64 whitening stays "
-            "off and the signal is whitened EXACTLY ONCE (by KS4). The preproc "
-            "row applies the ADC phase-shift KS4 cannot, plus a bandpass; "
-            "because KS4 also common-references (do_CAR=true), set the sort "
-            "group's reference_mode='none' to avoid double-referencing before "
-            "KS4. Artifact detection is 'none' (KS4's internal preprocessing "
-            "and drift handling stand in for amplitude masking)."
-        ),
-    ),
+    name: _PipelinePreset(**spec)
+    for name, spec in pipeline_preset_specs().items()
 }
 
 

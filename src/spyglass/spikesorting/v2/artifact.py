@@ -57,6 +57,7 @@ from spyglass.spikesorting.v2._artifact_intervals import (
 from spyglass.spikesorting.v2._params.artifact_detection import (
     ArtifactDetectionParamsSchema,
 )
+from spyglass.spikesorting.v2._recipe_catalog import artifact_default_contents
 from spyglass.spikesorting.v2.recording import Recording
 from spyglass.spikesorting.v2.utils import (
     SelectionMasterInsertGuard,
@@ -141,45 +142,9 @@ class ArtifactDetectionParameters(SpyglassMixin, dj.Lookup):
     # Row-level ``params_schema_version`` matches the inner
     # ``ArtifactDetectionParamsSchema.schema_version`` (bumped to 2
     # for ``min_length_s``).
-    _DEFAULT_CONTENTS: tuple = (
-        (
-            "none",
-            ArtifactDetectionParamsSchema(
-                detect=False, amplitude_threshold_uv=None
-            ).model_dump(),
-            2,
-            None,
-        ),
-        (
-            "default",
-            ArtifactDetectionParamsSchema().model_dump(),
-            2,
-            None,
-        ),
-        (
-            # Production artifact recipe (June 2026): 100 uV amplitude
-            # threshold, 0.7 proportion-above-threshold, 1.0 ms removal window
-            # -- far more aggressive than the 500 uV shipped "default".
-            "franklab_100uv_p07_2026_06",
-            ArtifactDetectionParamsSchema(
-                amplitude_threshold_uv=100.0,
-                proportion_above_threshold=0.7,
-            ).model_dump(),
-            2,
-            None,
-        ),
-        (
-            # More aggressive 50 uV production variant (same proportion-above
-            # and removal window).
-            "franklab_50uv_p07_2026_06",
-            ArtifactDetectionParamsSchema(
-                amplitude_threshold_uv=50.0,
-                proportion_above_threshold=0.7,
-            ).model_dump(),
-            2,
-            None,
-        ),
-    )
+    # The shipped rows are defined in
+    # ``_recipe_catalog.artifact_default_contents`` (single source).
+    _DEFAULT_CONTENTS: tuple = artifact_default_contents()
 
     def insert1(self, row, allow_duplicate_params=False, **kwargs):
         """Insert one validated artifact-detection parameter row."""
