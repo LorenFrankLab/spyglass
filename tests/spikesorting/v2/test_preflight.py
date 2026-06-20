@@ -299,6 +299,47 @@ def test_preflight_empty_sort_group(preflight_inputs):
 
 
 @pytest.mark.database
+def test_preflight_missing_params_row_points_to_initialize_defaults(
+    preflight_inputs, monkeypatch
+):
+    """A preset referencing an uninstalled parameter row fails the matching
+    ``*_params_exist`` check and routes to ``initialize_v2_defaults()``.
+
+    Reproduces "I forgot to install the defaults": the preset points at a
+    ``PreprocessingParameters`` row that is not in the DB. Preflight must
+    flag the specific missing-row check up front (instead of crashing deep
+    in ``populate``) and tell the user how to fix it. A synthetic preset
+    (a copy of the runnable default with one bogus row name) drives the
+    missing-row branch without deleting any shared default row.
+    """
+    import spyglass.spikesorting.v2._pipeline_preflight as preflight_mod
+    from spyglass.spikesorting.v2.pipeline import _PIPELINE_PRESETS
+
+    base = _PIPELINE_PRESETS[
+        "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
+    ]
+    bogus = base.model_copy(
+        update={"preprocessing_params_name": "missing_preproc_preflight"}
+    )
+    monkeypatch.setattr(
+        preflight_mod,
+        "_PIPELINE_PRESETS",
+        {**_PIPELINE_PRESETS, "bogus_missing_row_preset": bogus},
+    )
+
+    report = preflight_v2_pipeline(
+        **{**preflight_inputs, "pipeline_preset": "bogus_missing_row_preset"}
+    )
+    assert report.ok is False
+    (check,) = [
+        c for c in report.checks if c.name == "preprocessing_params_exist"
+    ]
+    assert check.ok is False
+    assert "missing_preproc_preflight" in check.fix
+    assert "initialize_v2_defaults()" in check.fix
+
+
+@pytest.mark.database
 def test_preflight_sorter_not_installed(preflight_inputs, monkeypatch):
     """A spelled-valid sorter whose binary is absent fails the install gate.
 

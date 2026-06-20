@@ -310,3 +310,10 @@ def test_bandpass_freq_max_at_or_above_nyquist_raises():
         apply_pre_motion_preprocessing(
             rec, "none", None, [0, 1, 2, 3], validated
         )
+    # The boundary itself: freq_max EXACTLY AT Nyquist must also raise (the
+    # guard is ``freq_max >= fs/2``; scipy needs strictly ``< fs/2``).
+    validated.bandpass_filter.freq_max = fs / 2.0  # == 10 kHz Nyquist
+    with pytest.raises(ValueError, match="Nyquist"):
+        apply_pre_motion_preprocessing(
+            rec, "none", None, [0, 1, 2, 3], validated
+        )

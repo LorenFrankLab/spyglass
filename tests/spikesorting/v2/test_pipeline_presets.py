@@ -237,3 +237,33 @@ def test_describe_pipeline_preset_unknown_name_raises():
 def test_describe_preset_is_alias():
     """``describe_preset`` is the shorter discovery alias for the same helper."""
     assert describe_preset is describe_pipeline_preset
+
+
+@pytest.mark.database
+def test_describe_pipeline_preset_missing_row_points_to_initialize_defaults(
+    dj_conn, monkeypatch
+):
+    """A known preset whose referenced Lookup row is absent raises with a
+    ``run initialize_v2_defaults()`` pointer, not an opaque empty-fetch.
+
+    The name check passes (the preset is registered), so this exercises the
+    value-unpack path that reads the Lookup tables: a missing parameter row
+    must fail with actionable guidance. A synthetic preset (a copy of the
+    runnable default with one bogus row name) drives the missing-row branch
+    without deleting any shared default row.
+    """
+    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
+
+    base = presets_mod._PIPELINE_PRESETS[
+        "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
+    ]
+    bogus = base.model_copy(
+        update={"preprocessing_params_name": "missing_preproc_describe"}
+    )
+    monkeypatch.setattr(
+        presets_mod,
+        "_PIPELINE_PRESETS",
+        {**presets_mod._PIPELINE_PRESETS, "bogus_missing_row_preset": bogus},
+    )
+    with pytest.raises(ValueError, match="initialize_v2_defaults"):
+        describe_pipeline_preset("bogus_missing_row_preset")
