@@ -177,13 +177,15 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         # so the caller restricts by curation_id rather than silently
         # double-counting. (Only inspects when curation_id is unspecified.)
         if "curation_id" not in key:
-            per_sort: dict = {}
-            for c_row in curation_table.fetch(
-                "sorting_id", "curation_id", as_dict=True
-            ):
-                sid = str(c_row["sorting_id"])
-                per_sort[sid] = per_sort.get(sid, 0) + 1
-            multi = sorted(sid for sid, n in per_sort.items() if n > 1)
+            multi = sorted(
+                str(sid)
+                for sid in (
+                    dj.U("sorting_id").aggr(
+                        curation_table.proj(), n_curations="count(*)"
+                    )
+                    & "n_curations > 1"
+                ).fetch("sorting_id")
+            )
             if multi:
                 logger.warning(
                     "SpikeSortingOutput._get_restricted_merge_ids_v2: "
