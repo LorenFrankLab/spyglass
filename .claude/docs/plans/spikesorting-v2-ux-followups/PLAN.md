@@ -1,10 +1,10 @@
 # Spike Sorting v2 — UX follow-ups Implementation Plan
 
-**Status (2026-06-19):** Phase 1 and Phase 2a are **complete and committed** on
-branch `spikesorting-v2`. Phase 3's docs/docstring polish landed, but its
+**Status (2026-06-19):** Phases 1, 2a, 3, and 4 are **complete and committed**
+on branch `spikesorting-v2`. Phase 3's docs/docstring polish landed, but its
 `describe_intervals` helper was **dropped by decision** (interval discovery is
-cross-pipeline — see the Phase 3 entry). Remaining work: Phase 4 (session-level
-preflight + runner). Phase 2b stays gated.
+cross-pipeline — see the Phase 3 entry). The only remaining work is Phase 2b,
+which stays **gated** (needs the analyzer-curation phase + scientific sign-off).
 
 - **Phase 1 — run-summary rename: ✅ complete** (`db3cf1bf`, `c5710036`,
   `8ac81914`).
@@ -39,14 +39,26 @@ preflight + runner). Phase 2b stays gated.
   if wanted later, add it as a generic `IntervalList`/`common` helper (mirroring
   the existing `IntervalList.plot_intervals`). `interval_list_name` stays a
   required arg.
-- **Phase 4 — pending.**
+- **Phase 4 — session preflight + runner: ✅ complete** (`15941a14`). Shipped:
+  `preflight_v2_pipeline_session()` (read-only whole-session check aggregating
+  per-group `preflight_v2_pipeline` into a new `PreflightSessionReport`) and
+  `run_v2_pipeline_session()` (batch runner over all/selected sort groups with
+  per-group `outcome` reporting), plus a shared `_resolve_session_sort_group_ids`
+  target resolver. Both require an explicit `pipeline_preset`; the runner
+  fail-fasts or collects per-group preflight/sort failures
+  (`continue_on_error`), catching exactly `PipelineStageError` /
+  `PreflightError` / `ZeroUnitSortError` and letting input/unexpected errors
+  stop the batch. Sequential, `list[dict]` return. Docs + user notebook gained a
+  whole-session example. **Deliberately not done:** cross-group parallelism, a
+  DataFrame return type.
+
+All four UX-followup phases are now landed; only Phase 2b remains gated.
 
 Branch audit summary: the public run-summary API rename has landed
 (`run_v2_pipeline` uses a `run_summary` local and
-`PipelineStageError.partial_run_summary` exists). The remaining worth-doing
-work is Phase 4 (session-level preflight and runner). Phase 2b remains gated
-and should not be implemented without the analyzer-curation phase and
-scientific sign-off.
+`PipelineStageError.partial_run_summary` exists). Phase 2b remains gated and
+should not be implemented without the analyzer-curation phase and scientific
+sign-off.
 
 Ordered, separately-shippable improvements to the `spyglass.spikesorting.v2`
 user-facing surface, identified in a UX audit of the orchestration layer:
@@ -82,4 +94,4 @@ For agent invocation, **load only the slice you need**:
   - ✅ **[phase-2a-parameter-names-and-fingerprints.md](phase-2a-parameter-names-and-fingerprints.md)** (complete) — corrected v2's blobs to the DB-attested recipes (region preproc 600/300 Hz, rate-keyed MS4 family, 100/50 µV artifact), dated/fingerprinted, MS4 default, duplicate-content guard, `describe_parameter_rows()`, preflight sampling-rate check, + an experimental Neuropixels KS4 preset. See the Status block above for decisions that diverged from this file as written.
   - [phase-2b-deferred-and-unattested.md](phase-2b-deferred-and-unattested.md) — **GATED.** Recipes that can't ship yet: Set A's downstream curation stages (wait on the analyzer-curation phase) and unattested recipes — Neuropixels tuning, tetrode-20 kHz, MS5 probe (wait on scientific sign-off). Depends on 2a; not a UX follow-up.
   - ✅ **[phase-3-discovery-and-polish.md](phase-3-discovery-and-polish.md)** (landed, minus `describe_intervals`) — zero-unit docstring cross-refs, gated-stub notes, the notebook placeholder fix, and `describe_pipeline_presets()`-based surfacing of the canonical KS4/NPX preset. The planned `describe_intervals()` helper was **dropped by decision** (interval discovery is cross-pipeline; promote to a `common`/`IntervalList` helper if needed).
-  - [phase-4-session-runner.md](phase-4-session-runner.md) — `preflight_v2_pipeline_session()` read-only whole-session validation plus `run_v2_pipeline_session()` multi-sort-group batch runner with per-group outcome reporting. The code can land after the Phase 1 cleanup; docs/examples should follow 2a's dated preset names.
+  - ✅ **[phase-4-session-runner.md](phase-4-session-runner.md)** (complete) — `preflight_v2_pipeline_session()` read-only whole-session validation plus `run_v2_pipeline_session()` multi-sort-group batch runner with per-group outcome reporting (shared `_resolve_session_sort_group_ids`, `PreflightSessionReport`). Sequential, `list[dict]` return; explicit `pipeline_preset` required.
