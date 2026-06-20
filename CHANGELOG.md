@@ -1005,6 +1005,20 @@ for label, interval_data in results.groupby("interval_labels"):
         identity payloads (now extracted to shared builders in
         `_selection_identity`) and the same `installed_sorters()` sorter gate
         the populate path uses, so its checks cannot drift from the real run.
+    - Add `run_v2_pipeline_session()` and `preflight_v2_pipeline_session()`
+        to `spyglass.spikesorting.v2.pipeline` for whole-session work: a
+        real session has one sort group per shank, so these loop the
+        single-group runner/preflight over every (or a selected subset of)
+        `SortGroupV2` row and return one entry per group. Both require an
+        explicit `pipeline_preset` (no default is inferred for a batch).
+        `run_v2_pipeline_session` runs the whole-session preflight once up
+        front, then runs each group; `continue_on_error=True` records a
+        per-group `outcome="failed"` entry (with its `error` and
+        `partial_run_summary`) and continues, while `continue_on_error=False`
+        (default) fails fast. It is resilient to per-group preflight/sort
+        failures only — an unexpected error still stops the batch. Returns a
+        `list[dict]` (wrap with `pd.DataFrame(results)`); reuses
+        `preflight_v2_pipeline` rather than duplicating its checks.
     - Make the `run_v2_pipeline` run summary observable: each call now adds
         per-stage `recording_status` / `artifact_detection_status` / `sorting_status` /
         `curation_status` (`"computed"` vs `"reused"`), a `stage_seconds` dict

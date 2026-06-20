@@ -173,6 +173,54 @@ a zero-unit advisory). A failed stage raises `PipelineStageError`, which names
 the stage and carries the partial run summary of the stages that completed
 before it.
 
+### Sort a whole session
+
+A real session has one sort group per shank. Rather than hand-writing the loop,
+`run_v2_pipeline_session` runs every (or selected) sort group and returns one
+entry per group; `preflight_v2_pipeline_session` is the read-only whole-session
+check to run first. Both require an explicit `pipeline_preset` (a whole-session
+run infers no default):
+
+```python
+from spyglass.spikesorting.v2.pipeline import (
+    preflight_v2_pipeline_session,
+    run_v2_pipeline_session,
+)
+
+# Read-only: one PreflightReport per sort group, aggregated.
+report = preflight_v2_pipeline_session(
+    nwb_file_name=nwb_file_name,
+    interval_list_name="raw data valid times",
+    team_name="my_team",
+    pipeline_preset="franklab_tetrode_hippocampus_30khz_ms4_2026_06",
+)
+assert report.ok, report.errors
+
+results = run_v2_pipeline_session(
+    nwb_file_name=nwb_file_name,
+    interval_list_name="raw data valid times",
+    team_name="my_team",
+    pipeline_preset="franklab_tetrode_hippocampus_30khz_ms4_2026_06",
+    sort_group_ids=None,        # None = every sort group; or pass a subset
+    continue_on_error=True,     # record per-group failures instead of stopping
+)
+
+import pandas as pd
+pd.Series([r["outcome"] for r in results]).value_counts()
+```
+
+Each entry is the single-group run summary plus `sort_group_id` and an
+`outcome` of `"ok"`; a failed group (with `continue_on_error=True`) is
+`{"sort_group_id", "pipeline_preset", "outcome": "failed", "error",
+"partial_run_summary"}`. The runner loops sequentially (`run_v2_pipeline`
+already parallelizes the heavy populate internally) and, with
+`preflight=True` (default), runs the whole-session preflight once up front:
+with `continue_on_error=False` a failed-preflight group raises `PreflightError`
+before any compute; with `continue_on_error=True` it is recorded and the
+preflight-passing groups still run. `continue_on_error` makes the batch
+resilient to per-group preflight/sort failures only — an unexpected error (a
+missing Lookup row, a DB-state change) still stops the run.
+
 ### Choosing a sort group
 
 `set_group_by_shank` creates the rows; `describe_sort_groups` and

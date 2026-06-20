@@ -1159,6 +1159,45 @@ class PreflightReport:
         return self.ok
 
 
+@dataclass(frozen=True)
+class PreflightSessionReport:
+    """Result of ``preflight_v2_pipeline_session``: a whole-session check.
+
+    Aggregates a per-sort-group :class:`PreflightReport` into one object.
+    Truthy when *every* target group is runnable (``ok is True``), so a
+    notebook can ``if not preflight_v2_pipeline_session(...): ...``.
+
+    Attributes
+    ----------
+    ok
+        True when no target group has a blocking problem (``errors`` empty).
+    errors
+        Blocking-problem messages across all groups, each prefixed with its
+        ``sort_group_id``; non-empty iff ``ok`` is False.
+    warnings
+        Non-blocking advisories across all groups, each prefixed with its
+        ``sort_group_id``.
+    resolved_pipeline_preset
+        The pipeline-preset name that was checked for every group.
+    group_reports
+        One plain-dict entry per target sort group, with keys
+        ``sort_group_id``, ``ok``, ``errors``, ``warnings``, ``expected_ids``,
+        and ``checks`` (from the underlying :class:`PreflightReport`).
+        ``pandas`` is intentionally not imported here; wrap with
+        ``pd.DataFrame(report.group_reports)`` in a notebook when useful.
+    """
+
+    ok: bool
+    errors: list[str]
+    warnings: list[str]
+    resolved_pipeline_preset: str
+    group_reports: list[dict[str, Any]]
+
+    def __bool__(self) -> bool:
+        """Return ``True`` when every target group is runnable (``ok``)."""
+        return self.ok
+
+
 def preflight_v2_pipeline(
     nwb_file_name: str,
     sort_group_id: int,
@@ -1436,6 +1475,175 @@ def preflight_v2_pipeline(
         resolved_pipeline_preset=pipeline_preset,
         expected_ids=expected_ids,
         checks=checks,
+    )
+
+
+def _resolve_session_sort_group_ids(
+    nwb_file_name: str,
+    pipeline_preset: "str | None",
+    sort_group_ids: "list[int] | None",
+    caller: str,
+) -> list[int]:
+    """Validate session-runner inputs; return the target ``sort_group_id`` list.
+
+    Shared by :func:`preflight_v2_pipeline_session` and
+    :func:`run_v2_pipeline_session` so their input validation -- and its
+    wording -- is identical. Unlike the single-group helpers, the session
+    helpers do **not** infer a default preset: an explicit ``pipeline_preset``
+    is required. The preset checks run before any ``SortGroupV2`` access, so an
+    unknown/missing preset is rejected DB-free.
+
+    Parameters
+    ----------
+    nwb_file_name
+        Session whose ``SortGroupV2`` rows define the candidate targets.
+    pipeline_preset
+        Required pipeline-preset name; ``None`` is rejected.
+    sort_group_ids
+        Optional explicit subset. ``None`` means "every sort group in the
+        session". Normalized to a sorted, de-duplicated ``list[int]``.
+    caller
+        Name of the calling helper, used to prefix error messages.
+
+    Returns
+    -------
+    list[int]
+        Target ``sort_group_id`` values in ascending order.
+
+    Raises
+    ------
+    PipelineInputError
+        If ``pipeline_preset`` is ``None`` or unknown, the session has no
+        ``SortGroupV2`` rows, or a requested ``sort_group_ids`` entry is
+        absent.
+    """
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+
+    if pipeline_preset is None:
+        raise PipelineInputError(
+            f"{caller}: pipeline_preset is required -- a whole-session run does "
+            "not infer a default. Call describe_pipeline_presets() to choose "
+            "one, then pass pipeline_preset=..."
+        )
+    if pipeline_preset not in _PIPELINE_PRESETS:
+        raise PipelineInputError(
+            f"{caller}: unknown pipeline_preset {pipeline_preset!r}. Available "
+            f"pipeline presets: {sorted(_PIPELINE_PRESETS)}. Call "
+            "describe_pipeline_presets() to see what each preset does."
+        )
+
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    available = sorted(
+        int(g)
+        for g in (SortGroupV2 & {"nwb_file_name": nwb_file_name}).fetch(
+            "sort_group_id"
+        )
+    )
+    if not available:
+        raise PipelineInputError(
+            f"{caller}: no SortGroupV2 rows for {nwb_file_name!r}. Create sort "
+            "groups first with "
+            "SortGroupV2.set_group_by_shank(nwb_file_name=...)."
+        )
+
+    if sort_group_ids is None:
+        return available
+
+    available_set = set(available)
+    requested = sorted({int(g) for g in sort_group_ids})
+    missing = [g for g in requested if g not in available_set]
+    if missing:
+        raise PipelineInputError(
+            f"{caller}: sort_group_ids {missing} not found for "
+            f"{nwb_file_name!r}. Available sort_group_ids: {available}."
+        )
+    return requested
+
+
+def preflight_v2_pipeline_session(
+    nwb_file_name: str,
+    interval_list_name: str,
+    team_name: str,
+    pipeline_preset: "str | None" = None,
+    sort_group_ids: "list[int] | None" = None,
+) -> PreflightSessionReport:
+    """Read-only preflight for every target sort group in a session.
+
+    Runs :func:`preflight_v2_pipeline` once per target ``SortGroupV2`` row and
+    aggregates the per-group reports. Read-only and cheap: it inserts nothing,
+    calls no ``populate``, and -- unlike the single-group helper -- requires an
+    explicit ``pipeline_preset`` (it infers no default). It reuses the
+    single-group checks rather than duplicating them, so the two helpers cannot
+    drift.
+
+    Parameters
+    ----------
+    nwb_file_name, interval_list_name, team_name, pipeline_preset
+        The same inputs as :func:`run_v2_pipeline`, except ``pipeline_preset``
+        is required (no default).
+    sort_group_ids
+        Optional explicit subset of sort groups to check. ``None`` (default)
+        checks every ``SortGroupV2`` row for the session.
+
+    Returns
+    -------
+    PreflightSessionReport
+        Truthy when every target group is runnable. ``report.group_reports``
+        holds one plain-dict entry per group; ``report.errors`` /
+        ``report.warnings`` aggregate the per-group messages, each prefixed
+        with its ``sort_group_id``.
+
+    Raises
+    ------
+    PipelineInputError
+        From the shared target resolver: ``pipeline_preset`` is ``None`` or
+        unknown, the session has no sort groups, or a requested
+        ``sort_group_ids`` entry is absent. This is *not* swallowed -- a
+        misconfigured request is a caller error, not a per-group preflight
+        failure.
+    """
+    targets = _resolve_session_sort_group_ids(
+        nwb_file_name=nwb_file_name,
+        pipeline_preset=pipeline_preset,
+        sort_group_ids=sort_group_ids,
+        caller="preflight_v2_pipeline_session",
+    )
+
+    group_reports: list[dict[str, Any]] = []
+    errors: list[str] = []
+    warnings: list[str] = []
+    for sort_group_id in targets:
+        report = preflight_v2_pipeline(
+            nwb_file_name=nwb_file_name,
+            sort_group_id=sort_group_id,
+            interval_list_name=interval_list_name,
+            team_name=team_name,
+            pipeline_preset=pipeline_preset,
+        )
+        group_reports.append(
+            {
+                "sort_group_id": sort_group_id,
+                "ok": report.ok,
+                "errors": report.errors,
+                "warnings": report.warnings,
+                "expected_ids": report.expected_ids,
+                "checks": report.checks,
+            }
+        )
+        errors.extend(
+            f"sort_group_id={sort_group_id}: {e}" for e in report.errors
+        )
+        warnings.extend(
+            f"sort_group_id={sort_group_id}: {w}" for w in report.warnings
+        )
+
+    return PreflightSessionReport(
+        ok=not errors,
+        errors=errors,
+        warnings=warnings,
+        resolved_pipeline_preset=pipeline_preset,
+        group_reports=group_reports,
     )
 
 
@@ -1813,3 +2021,194 @@ def run_v2_pipeline(
     run_summary["merge_id"] = merge_id
     run_summary["stage_seconds"] = stage_seconds
     return run_summary
+
+
+def run_v2_pipeline_session(
+    nwb_file_name: str,
+    interval_list_name: str,
+    team_name: str,
+    pipeline_preset: "str | None" = None,
+    sort_group_ids: "list[int] | None" = None,
+    description: str = "",
+    require_units: bool = False,
+    preflight: bool = True,
+    continue_on_error: bool = False,
+) -> list[dict[str, Any]]:
+    """Sort every (or selected) sort group in a session in one call.
+
+    A thin batch wrapper over :func:`run_v2_pipeline`: it resolves the
+    session's target ``SortGroupV2`` rows and runs the single-group
+    orchestrator on each, returning one result entry per group. ``run_v2_pipeline``
+    already parallelizes the heavy ``populate`` internally; this wrapper loops
+    the groups **sequentially**.
+
+    Unlike :func:`run_v2_pipeline`, an explicit ``pipeline_preset`` is required
+    (a whole-session run infers no default). Choose one from
+    ``describe_pipeline_presets()``.
+
+    Preflight and error handling
+    ----------------------------
+    With ``preflight=True`` (default), :func:`preflight_v2_pipeline_session`
+    runs once up front. If any group fails preflight and
+    ``continue_on_error=False``, a :class:`PreflightError` is raised before any
+    group is sorted; with ``continue_on_error=True``, the failed groups get a
+    ``outcome="failed"`` entry and only the preflight-passing groups are run.
+    Either way, the groups that *are* run pass ``preflight=False`` to
+    :func:`run_v2_pipeline` (the session preflight already covered the checks;
+    with ``preflight=False`` here the caller has opted out entirely).
+
+    ``continue_on_error`` makes the batch resilient to per-group *preflight* and
+    *sort* failures only. Exactly :class:`PipelineStageError`,
+    :class:`PreflightError`, and :class:`ZeroUnitSortError` are caught per
+    group; everything else -- :class:`PipelineInputError` from input validation,
+    a bare ``ValueError`` from a missing Lookup row, ``datajoint``'s
+    ``IntegrityError`` from a missing upstream when ``preflight=False``, or any
+    unexpected bug -- propagates and stops the batch, since those signal a
+    misconfiguration or DB-state change that should not be silently skipped.
+
+    Parameters
+    ----------
+    nwb_file_name, interval_list_name, team_name, description, require_units
+        As in :func:`run_v2_pipeline`; applied to every group.
+    pipeline_preset
+        Required pipeline-preset name (no default). See
+        ``describe_pipeline_presets()``.
+    sort_group_ids
+        Optional explicit subset of sort groups to run. ``None`` (default)
+        runs every ``SortGroupV2`` row for the session.
+    preflight
+        If True (default), run the whole-session preflight once before compute
+        (see above). If False, skip it and run each group with
+        ``preflight=False``.
+    continue_on_error
+        If False (default), the first per-group preflight/sort failure
+        propagates (fail-fast). If True, failed groups yield an
+        ``outcome="failed"`` entry and the batch continues.
+
+    Returns
+    -------
+    list of dict
+        One entry per target group, in ascending ``sort_group_id`` order.
+        A successful entry is the single-group run summary (see
+        :func:`run_v2_pipeline`) plus ``sort_group_id`` and ``outcome="ok"``.
+        A failed entry is ``{"sort_group_id", "pipeline_preset",
+        "outcome": "failed", "error", "partial_run_summary"}`` -- the
+        ``partial_run_summary`` carries the stages completed before a sort
+        failure (from :class:`PipelineStageError`) or ``None`` when the caught
+        error carries none (a preflight or zero-unit failure). Wrap with
+        ``pd.DataFrame(results)`` for a table.
+
+    Raises
+    ------
+    PipelineInputError
+        From the shared target resolver: ``pipeline_preset`` is ``None`` or
+        unknown, the session has no sort groups, or a requested
+        ``sort_group_ids`` entry is absent. Never suppressed by
+        ``continue_on_error``.
+    PreflightError
+        If ``preflight=True``, a group fails preflight, and
+        ``continue_on_error=False`` -- raised before any group is sorted, with
+        the aggregated per-group fixes.
+    PipelineStageError, ZeroUnitSortError
+        Propagated from a per-group :func:`run_v2_pipeline` when
+        ``continue_on_error=False``.
+    """
+    from spyglass.spikesorting.v2.exceptions import (
+        PipelineStageError,
+        PreflightError,
+        ZeroUnitSortError,
+    )
+    from spyglass.utils import logger
+
+    targets = _resolve_session_sort_group_ids(
+        nwb_file_name=nwb_file_name,
+        pipeline_preset=pipeline_preset,
+        sort_group_ids=sort_group_ids,
+        caller="run_v2_pipeline_session",
+    )
+
+    results: list[dict[str, Any]] = []
+    failed_preflight_ids: set[int] = set()
+
+    # Up-front, read-only whole-session preflight (when requested).
+    if preflight:
+        session_report = preflight_v2_pipeline_session(
+            nwb_file_name=nwb_file_name,
+            interval_list_name=interval_list_name,
+            team_name=team_name,
+            pipeline_preset=pipeline_preset,
+            sort_group_ids=targets,
+        )
+        if not session_report.ok:
+            if not continue_on_error:
+                raise PreflightError("\n".join(session_report.errors))
+            # continue_on_error: record the failed groups, run only the rest.
+            for row in session_report.group_reports:
+                if row["ok"]:
+                    continue
+                sort_group_id = row["sort_group_id"]
+                failed_preflight_ids.add(sort_group_id)
+                logger.warning(
+                    "run_v2_pipeline_session: sort_group_id="
+                    f"{sort_group_id} failed preflight; skipping. "
+                    f"{row['errors']}"
+                )
+                results.append(
+                    {
+                        "sort_group_id": sort_group_id,
+                        "pipeline_preset": pipeline_preset,
+                        "outcome": "failed",
+                        "error": "\n".join(row["errors"]),
+                        "partial_run_summary": None,
+                    }
+                )
+
+    # Per-group compute. Groups covered by the session preflight (or skipped via
+    # preflight=False) run with preflight=False so the DB-only checks are not
+    # repeated; a per-group failure is caught only for the three pipeline error
+    # types, and only when continue_on_error is set.
+    for sort_group_id in targets:
+        if sort_group_id in failed_preflight_ids:
+            continue
+        try:
+            summary = run_v2_pipeline(
+                nwb_file_name=nwb_file_name,
+                sort_group_id=sort_group_id,
+                interval_list_name=interval_list_name,
+                team_name=team_name,
+                pipeline_preset=pipeline_preset,
+                description=description,
+                require_units=require_units,
+                preflight=False,
+            )
+        except (
+            PipelineStageError,
+            PreflightError,
+            ZeroUnitSortError,
+        ) as exc:
+            if not continue_on_error:
+                raise
+            logger.warning(
+                "run_v2_pipeline_session: sort_group_id="
+                f"{sort_group_id} failed: {exc!r}"
+            )
+            results.append(
+                {
+                    "sort_group_id": sort_group_id,
+                    "pipeline_preset": pipeline_preset,
+                    "outcome": "failed",
+                    "error": str(exc),
+                    "partial_run_summary": getattr(
+                        exc, "partial_run_summary", None
+                    ),
+                }
+            )
+        else:
+            results.append(
+                {**summary, "sort_group_id": sort_group_id, "outcome": "ok"}
+            )
+
+    # Stable, group-ordered result (preflight-failed entries were appended
+    # first; restore ascending sort_group_id order).
+    results.sort(key=lambda entry: entry["sort_group_id"])
+    return results

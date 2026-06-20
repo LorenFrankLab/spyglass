@@ -44,7 +44,9 @@ from spyglass.spikesorting.v2.pipeline import (
     describe_sort_groups,
     plot_sort_group_geometry,
     preflight_v2_pipeline,
+    preflight_v2_pipeline_session,
     run_v2_pipeline,
+    run_v2_pipeline_session,
 )
 from spyglass.spikesorting.v2.recording import SortGroupV2
 from spyglass.spikesorting.v2.sorting import Sorting  # noqa: F401
@@ -206,6 +208,36 @@ merge_id = run_summary["merge_id"]
 spike_times = SpikeSortingOutput().get_spike_times({"merge_id": merge_id})
 print(f"{len(spike_times)} unit(s)")
 spike_times
+
+
+# ## 9. Sort the whole session at once
+#
+# A real session has one sort group per shank. `run_v2_pipeline_session` loops
+# the single-group runner over all of them (run `preflight_v2_pipeline_session`
+# first for a read-only whole-session check), returning one entry per group with
+# an `outcome` of `"ok"` or `"failed"`. With `continue_on_error=True` a failed
+# group is recorded (with its `error` and `partial_run_summary`) instead of
+# stopping the batch. Pick `pipeline_preset` explicitly from
+# `describe_pipeline_presets()` — the session runner infers no default.
+
+import pandas as pd
+# Read-only whole-session check first (run_v2_pipeline_session also preflights
+# internally); inspect report.ok / report.errors before committing compute.
+session_report = preflight_v2_pipeline_session(
+    nwb_file_name=nwb_file_name,
+    interval_list_name=interval_list_name,
+    team_name=team_name,
+    pipeline_preset=pipeline_preset,
+)
+print("session preflight ok:", session_report.ok)
+session_results = run_v2_pipeline_session(
+    nwb_file_name=nwb_file_name,
+    interval_list_name=interval_list_name,
+    team_name=team_name,
+    pipeline_preset=pipeline_preset,
+    continue_on_error=True,
+)
+pd.Series([r["outcome"] for r in session_results]).value_counts()
 
 
 # ## Next steps
