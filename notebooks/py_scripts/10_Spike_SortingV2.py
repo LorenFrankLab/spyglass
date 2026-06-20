@@ -36,12 +36,15 @@
 import datajoint as dj
 
 from spyglass.common import LabTeam
+from spyglass.common.common_interval import IntervalList
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 from spyglass.spikesorting.v2 import initialize_v2_defaults
 from spyglass.spikesorting.v2.curation import CurationV2
 from spyglass.spikesorting.v2.pipeline import (
     describe_pipeline_presets,
+    describe_run,
     describe_sort_groups,
+    describe_units,
     plot_sort_group_geometry,
     preflight_v2_pipeline,
     preflight_v2_pipeline_session,
@@ -64,13 +67,25 @@ dj.config["display.limit"] = 12  # cap rows in table reprs
 # names from `describe_pipeline_presets()` below if you want a different sorter
 # (e.g. an MS4 production preset on a `numpy<2` install, or a cortex/20 kHz
 # preset).
+#
+# To see the intervals available for this session — the valid
+# `interval_list_name` values — list them with
+# `IntervalList & {"nwb_file_name": nwb_file_name}`. Leave `sort_group_id =
+# None` to auto-pick when the session has exactly one sort group; with more than
+# one, set it explicitly after reviewing the table and geometry plot in step 2
+# (don't just take the first row).
 
 # + tags=["parameters"]
 nwb_file_name = "your_session.nwb"  # replace with your ingested session
 team_name = "my_team"
 interval_list_name = "raw data valid times"
 pipeline_preset = "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
+# Sort group (shank) to sort. None auto-picks only when the session has exactly
+# one sort group; otherwise set it deliberately after reviewing step 2.
+sort_group_id = None
 # -
+
+IntervalList & {"nwb_file_name": nwb_file_name}
 
 # ## 2. One-time setup
 #
@@ -80,9 +95,9 @@ pipeline_preset = "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
 # groups are session-specific user input, so we create them here.
 # `describe_sort_groups()` and `plot_sort_group_geometry()` then show the membership,
 # metadata, and physical layout you should inspect before deciding which group
-# to sort. The walkthrough picks the first group only to keep the example
-# reproducible; for real analyses, set `sort_group_id` deliberately after
-# reviewing the table and geometry view.
+# to sort. With one sort group the cell auto-selects it; with several it makes
+# you set `sort_group_id` deliberately (above) rather than defaulting to the
+# first shank, and validates your choice against the available groups.
 #
 
 initialize_v2_defaults()
@@ -95,9 +110,30 @@ if not (SortGroupV2 & {"nwb_file_name": nwb_file_name}):
 sort_groups = describe_sort_groups(nwb_file_name)
 if sort_groups.empty:
     raise ValueError(f"No SortGroupV2 rows found for {nwb_file_name!r}.")
-sort_group_id = int(sort_groups.iloc[0]["sort_group_id"])
+available_sort_group_ids = [int(g) for g in sort_groups["sort_group_id"]]
 plot_sort_group_geometry(nwb_file_name)
 sort_groups
+
+
+# +
+# Validate the chosen sort group only after the table and geometry are visible.
+if sort_group_id is None:
+    if len(available_sort_group_ids) == 1:
+        sort_group_id = available_sort_group_ids[0]
+    else:
+        raise ValueError(
+            f"{nwb_file_name!r} has multiple sort groups "
+            f"{available_sort_group_ids}; set sort_group_id explicitly after "
+            "reviewing the table and geometry plot below — don't default to "
+            "the first shank."
+        )
+elif sort_group_id not in available_sort_group_ids:
+    raise ValueError(
+        f"sort_group_id={sort_group_id} is not one of "
+        f"{available_sort_group_ids} for {nwb_file_name!r}."
+    )
+sort_group_id
+# -
 
 
 # ## 3. Pick a Pipeline Preset
@@ -148,39 +184,39 @@ run_summary = run_v2_pipeline(
 
 # ## 6. Read the run summary
 #
-# Besides the stable keys (`pipeline_preset` / `recording_id` /
-# `artifact_detection_id` / `sorting_id` / `curation_id` / `merge_id` /
-# `n_units`), the run summary carries
-# per-stage observability: each `*_status` is `"computed"` if the stage did
-# work this call or `"reused"` if its row already existed; `stage_seconds` is
-# the wall-clock spent **this call** per stage (≈0 on an idempotent re-run, not
-# cumulative compute cost); `warnings` collects advisories. **Downstream code
-# keys off `merge_id`.**
+# `describe_run(run_summary)` renders the run as a receipt: a leading summary row
+# with `n_units` and the `merge_id` **downstream code keys off**, one row per
+# stage (its `*_status` is `"computed"` if the stage ran this call or `"reused"`
+# if its row already existed, with the wall-clock `seconds` spent **this call** —
+# ≈0 on an idempotent re-run, not cumulative cost), and one row per advisory
+# `warning`. Because warnings are their own rows, a **zero-unit** sort — a
+# legitimate quiet-shank result that still writes an empty-but-real curation +
+# merge row — is impossible to miss. Pass `require_units=True` to
+# `run_v2_pipeline` to turn zero units into a hard error instead.
 #
-# A sort that finds **zero units** is a legitimate result on a quiet shank: it
-# still produces an empty-but-real curation + merge row (with a loud warning),
-# so downstream code treats it like any other row. Pass `require_units=True` to
-# turn that into a hard error instead.
+# Below the receipt, `describe_units(...)` shows the per-unit, sort-time detail:
+# one row per unit with `n_spikes`, `firing_rate_hz` (over the duration the sort
+# actually observed — artifact-removed when masking ran, so the rate is not
+# inflated by blanked segments), `peak_amplitude_uv`, `peak_electrode_id`, and
+# `brain_region`. It reads only sort-time metadata (no waveform recompute);
+# deeper SNR / ISI / nearest-neighbour metrics arrive with the analyzer-driven
+# curation in a later release. The raw `run_summary` dict carries the same
+# fields programmatically (`run_summary["merge_id"]`, `run_summary["n_units"]`).
 
-print("merge_id (downstream key):", run_summary["merge_id"])
-print("n_units                  :", run_summary["n_units"])
-print(
-    "stage status             :",
-    {
-        stage: run_summary[f"{stage}_status"]
-        for stage in ("recording", "artifact_detection", "sorting", "curation")
-    },
-)
-print("stage seconds            :", run_summary["stage_seconds"])
-run_summary
+from IPython.display import display
+display(describe_run(run_summary))
+describe_units(run_summary["sorting_id"])
 
 # ## 7. Inspect / curate
 #
 # `summarize_curation` accepts the run summary directly and returns a plain dict
 # (`n_units`, `labels`, `merge_groups`, `merges_applied`, `is_merge_preview`,
-# `merge_id`, ...). To curate further, reach for the intent-first wrappers on
-# `CurationV2` — `create_initial_curation`, `propose_merge_curation`,
-# `create_merged_curation` — rather than the expert `insert_curation`.
+# `merge_id`, ...). The labels curation *accepts* are the canonical set
+# `CurationV2.label_options()` (the `CurationLabel` enum); custom labels are
+# possible only via `allow_custom_labels=True`. To curate further,
+# reach for the intent-first wrappers on `CurationV2` —
+# `create_initial_curation`, `propose_merge_curation`, `create_merged_curation`
+# — rather than the expert `insert_curation`.
 #
 # > Interactive web curation (label/merge in a browser) is coming via FigPack
 # > in a later release; it will slot in here.
@@ -217,11 +253,14 @@ spike_times
 # the single-group runner over all of them (run `preflight_v2_pipeline_session`
 # first for a read-only whole-session check), returning one entry per group with
 # an `outcome` of `"ok"` or `"failed"`. With `continue_on_error=True` a failed
-# group is recorded (with its `error` and `partial_run_summary`) instead of
-# stopping the batch. Pick `pipeline_preset` explicitly from
+# group is recorded (with `error_type`, `error`, and `partial_run_summary`)
+# instead of stopping the batch. Pick `pipeline_preset` explicitly from
 # `describe_pipeline_presets()` — the session runner infers no default.
+# `describe_run(session_results)` renders the whole batch as one receipt: a
+# summary row with the ok / failed / zero-unit / with-warnings counts, then a
+# row per group (and per warning), so failed and zero-unit groups don't hide in
+# a long list.
 
-import pandas as pd
 # Read-only whole-session check first (run_v2_pipeline_session also preflights
 # internally); inspect report.ok / report.errors before committing compute.
 session_report = preflight_v2_pipeline_session(
@@ -238,7 +277,7 @@ session_results = run_v2_pipeline_session(
     pipeline_preset=pipeline_preset,
     continue_on_error=True,
 )
-pd.Series([r["outcome"] for r in session_results]).value_counts()
+describe_run(session_results)
 
 
 # ## Next steps

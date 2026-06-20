@@ -121,11 +121,14 @@ Each step is detailed below.
 ### Single-session sort
 
 ```python
+from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_lab import LabTeam
 from spyglass.spikesorting.v2 import initialize_v2_defaults
 from spyglass.spikesorting.v2.pipeline import (
     describe_pipeline_presets,
+    describe_run,
     describe_sort_groups,
+    describe_units,
     plot_sort_group_geometry,
     preflight_v2_pipeline,
     run_v2_pipeline,
@@ -143,12 +146,17 @@ LabTeam.insert1(
     skip_duplicates=True,
 )
 
-# Build the sort groups (one per shank).
+# Intervals available for this session (the valid interval_list_name values):
+IntervalList & {"nwb_file_name": nwb_file_name}
+
+# Build the sort groups (one per shank), then choose one DELIBERATELY after
+# reviewing the table + geometry plot -- don't default to the first row.
+# (For "sort every shank", use run_v2_pipeline_session below instead.)
 SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
 sort_groups = describe_sort_groups(nwb_file_name)
-sort_group_id = int(sort_groups.iloc[0]["sort_group_id"])
 plot_sort_group_geometry(nwb_file_name)
-sort_groups
+sort_groups  # inspect membership, brain_region, and geometry, then:
+sort_group_id = ...  # e.g. the hippocampal shank you want to sort
 
 describe_pipeline_presets()
 
@@ -161,11 +169,21 @@ run_summary = run_v2_pipeline(
     pipeline_preset="franklab_tetrode_hippocampus_30khz_ms5_2026_06",
 )
 merge_id = run_summary["merge_id"]  # key off this downstream
+
+# Receipt: stages + warnings as explicit rows (a zero-unit sort can't hide in a
+# print), then the per-unit sort-time snapshot (n_spikes, firing_rate_hz over
+# the observed/artifact-removed duration, peak amplitude, peak channel, region).
+describe_run(run_summary)
+describe_units(run_summary["sorting_id"])
 ```
 
+`describe_run(run_summary)` renders the run as a receipt table: a summary row
+(`n_units`, `merge_id`), one row per stage (status + `seconds`), and one row per
+`warning` — so an easily-missed zero-unit advisory is its own row, not a value
+buried in the dict. The underlying `run_summary` dict carries the same data.
 Besides the stable keys (`pipeline_preset` / `recording_id` /
 `artifact_detection_id` / `sorting_id` / `curation_id` / `merge_id` /
-`n_units`), the run summary carries per-stage observability:
+`n_units`), it carries per-stage observability:
 `recording_status` / `artifact_detection_status` / `sorting_status` /
 `curation_status` (`"computed"` if the stage did work this call, `"reused"` if
 its row already existed), a `stage_seconds` dict of wall-clock per stage **this
@@ -207,14 +225,15 @@ results = run_v2_pipeline_session(
     continue_on_error=True,     # record per-group failures instead of stopping
 )
 
-import pandas as pd
-pd.Series([r["outcome"] for r in results]).value_counts()
+# One receipt for the whole batch: a summary row with the ok / failed /
+# zero-unit / with-warnings counts, then a row per group (and per warning).
+describe_run(results)
 ```
 
 Each entry is the single-group run summary plus `sort_group_id` and an
 `outcome` of `"ok"`; a failed group (with `continue_on_error=True`) is
-`{"sort_group_id", "pipeline_preset", "outcome": "failed", "error",
-"partial_run_summary"}`. The runner loops sequentially (`run_v2_pipeline`
+`{"sort_group_id", "pipeline_preset", "outcome": "failed", "error_type",
+"error", "partial_run_summary"}`. The runner loops sequentially (`run_v2_pipeline`
 already parallelizes the heavy populate internally) and, with
 `preflight=True` (default), runs the whole-session preflight once up front:
 with `continue_on_error=False` a failed-preflight group raises `PreflightError`
