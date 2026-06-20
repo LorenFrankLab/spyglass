@@ -754,26 +754,28 @@ def test_make_compute_purity_guard_actually_catches_regressions():
 
 
 def test_curation_v2_nwb_write_outside_transaction():
-    """CurationV2.insert_curation stages NWB BEFORE transaction.
+    """CurationV2 stages the curated-units NWB OUTSIDE / BEFORE the txn.
 
-    Manual-table insert_curation has no framework transaction; the
-    NWB write must happen OUTSIDE the explicit
-    ``transaction_or_noop`` block to keep the inner transaction
-    short.
+    Manual-table insert_curation has no framework transaction; the heavy
+    NWB write must happen OUTSIDE the explicit ``transaction_or_noop``
+    block to keep the inner transaction short. ``insert_curation`` is a
+    thin orchestrator that delegates staging to
+    ``_stage_curation_artifact`` and the atomic inserts to
+    ``_insert_curation_rows_transaction``; this test pins the invariant
+    across those helpers:
 
-    Strategy: walk the AST. Find the ``with transaction_or_noop(...)``
-    block (matches both the bare-name and ``alias = transaction_or_noop``
-    aliased forms by checking the resolved context-manager call's
-    function name). Inside that block's body, no NWB-write helper
-    or ``AnalysisNwbfile().create`` / ``pynwb.NWBHDF5IO`` call is
-    allowed. Outside it, the NWB-write helper must be called at
-    least once and before any ``with`` whose CM is
-    ``transaction_or_noop``.
+      * ``_insert_curation_rows_transaction`` opens the
+        ``transaction_or_noop`` block and performs NO NWB-write /
+        ``AnalysisNwbfile().create`` / ``NWBHDF5IO`` call inside it.
+      * ``_stage_curation_artifact`` performs the NWB staging call.
+      * ``insert_curation`` calls staging BEFORE the transaction helper.
+
+    Strategy: walk the AST of each method. The transaction-block scan and
+    the forbidden-call check run on ``_insert_curation_rows_transaction``;
+    the staging-call check runs on ``_stage_curation_artifact``; the
+    ordering check runs on ``insert_curation``.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
-
-    src = inspect.getsource(CurationV2.insert_curation)
-    tree = ast.parse(inspect.cleandoc(src))
 
     NWB_WRITE_NAMES = {"_stage_curated_units_nwb"}
 
@@ -811,10 +813,26 @@ def test_curation_v2_nwb_write_outside_transaction():
             return "NWBHDF5IO_direct"
         return None
 
+    def _callee_name(node):
+        """Return the called function/method name of a Call node."""
+        if not isinstance(node, ast.Call):
+            return None
+        func = node.func
+        if isinstance(func, ast.Name):
+            return func.id
+        if isinstance(func, ast.Attribute):
+            return func.attr
+        return None
+
+    # --- The transaction lives in _insert_curation_rows_transaction. ---
+    txn_src = inspect.getsource(
+        CurationV2._insert_curation_rows_transaction
+    )
+    txn_tree = ast.parse(inspect.cleandoc(txn_src))
     # Find every ``with`` block whose context manager is a
     # ``transaction_or_noop(...)`` call (or attribute thereof).
     txn_blocks = []
-    for node in ast.walk(tree):
+    for node in ast.walk(txn_tree):
         if not isinstance(node, ast.With):
             continue
         for item in node.items:
@@ -835,7 +853,7 @@ def test_curation_v2_nwb_write_outside_transaction():
                     break
 
     assert len(txn_blocks) >= 1, (
-        "CurationV2.insert_curation must use transaction_or_noop "
+        "_insert_curation_rows_transaction must use transaction_or_noop "
         "for atomic master+part inserts; no such ``with`` block "
         "was found."
     )
@@ -847,20 +865,48 @@ def test_curation_v2_nwb_write_outside_transaction():
                 forbidden = _is_forbidden_call(sub)
                 if forbidden is not None:
                     pytest.fail(
-                        f"CurationV2.insert_curation calls "
+                        f"_insert_curation_rows_transaction calls "
                         f"{forbidden!r} INSIDE a transaction_or_noop "
                         "block; the heavy NWB write must happen "
                         "OUTSIDE the transaction to keep it short."
                     )
 
-    # The stage helper MUST be called somewhere -- catches a refactor
-    # that quietly drops the call.
+    # --- The staging call lives in _stage_curation_artifact. ---
+    stage_src = inspect.getsource(CurationV2._stage_curation_artifact)
+    stage_tree = ast.parse(inspect.cleandoc(stage_src))
     has_stage_call = any(
         _is_forbidden_call(n) in NWB_WRITE_NAMES
-        for n in ast.walk(tree)
+        for n in ast.walk(stage_tree)
         if isinstance(n, ast.Call)
     )
     assert has_stage_call, (
-        "CurationV2.insert_curation does not call "
-        "_stage_curated_units_nwb; the NWB staging step is missing."
+        "_stage_curation_artifact does not call _stage_curated_units_nwb; "
+        "the NWB staging step is missing."
+    )
+
+    # --- The orchestrator stages BEFORE it commits. ---
+    orch_src = inspect.getsource(CurationV2.insert_curation)
+    orch_tree = ast.parse(inspect.cleandoc(orch_src))
+    stage_linenos = [
+        n.lineno
+        for n in ast.walk(orch_tree)
+        if _callee_name(n) == "_stage_curation_artifact"
+    ]
+    txn_linenos = [
+        n.lineno
+        for n in ast.walk(orch_tree)
+        if _callee_name(n) == "_insert_curation_rows_transaction"
+    ]
+    assert stage_linenos, (
+        "insert_curation does not call _stage_curation_artifact; the NWB "
+        "staging step is missing from the orchestrator."
+    )
+    assert txn_linenos, (
+        "insert_curation does not call _insert_curation_rows_transaction; "
+        "the atomic insert step is missing from the orchestrator."
+    )
+    assert min(stage_linenos) < min(txn_linenos), (
+        "insert_curation must stage the NWB (_stage_curation_artifact) "
+        "BEFORE committing rows (_insert_curation_rows_transaction) so the "
+        "heavy filesystem write stays outside the transaction."
     )

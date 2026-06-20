@@ -317,8 +317,6 @@ class CurationV2(SpyglassMixin, dj.Manual):
             without ``reuse_existing=True``; or if ``labels`` reference
             truly-stray unit_id(s) and ``permissive_labels`` is False.
         """
-        import pathlib as _pathlib
-
         sorting_id = sorting_key["sorting_id"]
         # Fetch the upstream Sorting.Unit rows once -- the parent
         # existence check and _build_curated_unit_rows would otherwise
@@ -336,6 +334,92 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 f"CurationV2.insert_curation: sorting_id {sorting_id} "
                 "not in Sorting. Populate Sorting first."
             )
+
+        labels, curation_source = cls._normalize_curation_inputs(
+            labels, curation_source, allow_custom_labels
+        )
+
+        existing_root = cls._validate_parent_or_reuse_root(
+            sorting_id=sorting_id,
+            parent_curation_id=parent_curation_id,
+            labels=labels,
+            merge_groups=merge_groups,
+            description=description,
+            apply_merge=apply_merge,
+            curation_source=curation_source,
+            reuse_existing=reuse_existing,
+        )
+        if existing_root is not None:
+            return existing_root
+
+        curation_id, unit_rows, kept_unit_to_contributors = (
+            cls._build_curation_insert_plan(
+                sorting_id=sorting_id,
+                sorting_units=sorting_units,
+                merge_groups=merge_groups,
+                apply_merge=apply_merge,
+                labels=labels,
+                permissive_labels=permissive_labels,
+            )
+        )
+
+        # Stage the curated-units NWB (filesystem side-effect; the DB
+        # row registration happens inside the transaction below so it
+        # rolls back atomically). Staging MUST run OUTSIDE the
+        # transaction to keep the inner transaction short -- pinned by
+        # ``test_v1_parity.test_curation_v2_nwb_write_outside_transaction``.
+        analysis_file_name, units_object_id, staged_parent_nwb = (
+            cls._stage_curation_artifact(
+                sorting_id=sorting_id,
+                kept_unit_to_contributors=kept_unit_to_contributors,
+                apply_merge=apply_merge,
+                labels=labels,
+                unit_rows=unit_rows,
+            )
+        )
+
+        try:
+            cls._insert_curation_rows_transaction(
+                sorting_id=sorting_id,
+                curation_id=curation_id,
+                parent_curation_id=parent_curation_id,
+                analysis_file_name=analysis_file_name,
+                units_object_id=units_object_id,
+                staged_parent_nwb=staged_parent_nwb,
+                apply_merge=apply_merge,
+                curation_source=curation_source,
+                description=description,
+                unit_rows=unit_rows,
+                labels=labels,
+                kept_unit_to_contributors=kept_unit_to_contributors,
+                allow_custom_labels=allow_custom_labels,
+            )
+        except Exception:
+            # The transaction rolled back the AnalysisNwbfile row and
+            # the CurationV2 rows together; only the file on disk is
+            # left to clean up.
+            cls._cleanup_staged_curation_file(analysis_file_name)
+            raise
+
+        return {"sorting_id": sorting_id, "curation_id": curation_id}
+
+    # ---- insert_curation steps (extracted helpers) -----------------------
+
+    @classmethod
+    def _normalize_curation_inputs(
+        cls,
+        labels: dict | None,
+        curation_source: str | CurationSource,
+        allow_custom_labels: bool,
+    ) -> tuple[dict, str]:
+        """Normalize + validate ``labels`` and ``curation_source``.
+
+        Returns ``(labels, curation_source)`` with ``labels`` coerced to a
+        ``{int unit_id: [label, ...]}`` dict (``None`` -> ``{}``) and
+        ``curation_source`` coerced to its canonical ``CurationSource``
+        value. Raises ``ValueError`` on a scalar label value, a label that
+        fails ``validate_labels``, or an invalid ``curation_source``.
+        """
         if labels is None:
             # ``None`` is semantically equivalent to "no labels" per
             # v1's ``CurationV1.insert_curation`` signature at
@@ -373,6 +457,30 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 f"Valid: {[m.value for m in CurationSource]}."
             ) from exc
 
+        return labels, curation_source
+
+    @classmethod
+    def _validate_parent_or_reuse_root(
+        cls,
+        sorting_id,
+        parent_curation_id: int,
+        labels: dict,
+        merge_groups,
+        description: str,
+        apply_merge: bool,
+        curation_source: str,
+        reuse_existing: bool,
+    ) -> dict | None:
+        """Validate the parent curation, or return an existing root to reuse.
+
+        For a child curation (``parent_curation_id != -1``) verifies the
+        parent row exists. For a root curation (``parent_curation_id ==
+        -1``) returns the canonical existing-root key when one already
+        exists (idempotent re-insert), or ``None`` to proceed with a fresh
+        insert. Raises ``ValueError`` if the named parent is missing, or if
+        a root already exists and the caller passed non-default parameters
+        without ``reuse_existing=True``.
+        """
         if parent_curation_id != -1:
             if not (
                 cls
@@ -441,7 +549,29 @@ class CurationV2(SpyglassMixin, dj.Manual):
                     "existing key without staging a new NWB."
                 )
                 return existing_root[0]
+        return None
 
+    @classmethod
+    def _build_curation_insert_plan(
+        cls,
+        sorting_id,
+        sorting_units: list[dict],
+        merge_groups,
+        apply_merge: bool,
+        labels: dict,
+        permissive_labels: bool,
+    ) -> tuple[int, list[dict], dict[int, list[int]]]:
+        """Resolve the curation_id and build the curated ``Unit`` rows.
+
+        Returns ``(curation_id, unit_rows, kept_unit_to_contributors)``.
+        ``curation_id`` auto-increments within the sort. ``unit_rows`` and
+        ``kept_unit_to_contributors`` come from
+        :meth:`_build_curated_unit_rows`. Labels referencing unit_ids that
+        are in neither the source sorting nor the written unit set are
+        rejected as typos unless ``permissive_labels`` (then warn-and-drop);
+        labels on absorbed merge contributors are always dropped with a
+        warning (v1 parity).
+        """
         # Resolve which curation_id to use (auto-increment within sort).
         existing_ids = (cls & {"sorting_id": sorting_id}).fetch("curation_id")
         curation_id = int(max(existing_ids)) + 1 if len(existing_ids) else 0
@@ -499,6 +629,28 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 f"sorting_id={sorting_id}."
             )
 
+        return curation_id, unit_rows, kept_unit_to_contributors
+
+    @classmethod
+    def _stage_curation_artifact(
+        cls,
+        sorting_id,
+        kept_unit_to_contributors: dict,
+        apply_merge: bool,
+        labels: dict,
+        unit_rows: list[dict],
+    ) -> tuple[str, str, str]:
+        """Stage the curated-units NWB and reconcile per-unit ``n_spikes``.
+
+        Delegates the NWB write to :meth:`_stage_curated_units_nwb`, then
+        overwrites each ``unit_rows`` entry's ``n_spikes`` (mutated in
+        place) with the staged train's actual post-dedup length so the
+        ``Unit.n_spikes == len(get_sorting train)`` invariant holds for
+        cross-unit duplicate removal. Returns ``(analysis_file_name,
+        units_object_id, staged_parent_nwb)``. This MUST run OUTSIDE the
+        DB transaction -- it is heavy filesystem IO and the caller cleans
+        up the staged file if the later insert fails.
+        """
         # Stage the curated-units NWB (filesystem side-effect; the DB
         # row registration happens inside the transaction block below
         # so it rolls back atomically with the other inserts).
@@ -521,122 +673,155 @@ class CurationV2(SpyglassMixin, dj.Manual):
         for row in unit_rows:
             if row["unit_id"] in n_spikes_by_uid:
                 row["n_spikes"] = n_spikes_by_uid[row["unit_id"]]
+        return analysis_file_name, units_object_id, staged_parent_nwb
 
-        try:
-            master_row = {
+    @classmethod
+    def _insert_curation_rows_transaction(
+        cls,
+        sorting_id,
+        curation_id: int,
+        parent_curation_id: int,
+        analysis_file_name: str,
+        units_object_id: str,
+        staged_parent_nwb: str,
+        apply_merge: bool,
+        curation_source: str,
+        description: str,
+        unit_rows: list[dict],
+        labels: dict,
+        kept_unit_to_contributors: dict,
+        allow_custom_labels: bool,
+    ) -> None:
+        """Insert the master/Unit/UnitLabel/MergeGroup rows atomically.
+
+        Runs the ``transaction_or_noop`` block: registers the already
+        staged AnalysisNwbfile row, inserts the CurationV2 master + part
+        rows, and registers the ``SpikeSortingOutput.CurationV2`` merge
+        row. The curated-units NWB was staged OUTSIDE this transaction
+        (see :meth:`_stage_curation_artifact`) so the transaction stays
+        short; on failure the caller removes the staged file (the DB rows
+        roll back here).
+        """
+        master_row = {
+            "sorting_id": sorting_id,
+            "curation_id": curation_id,
+            "parent_curation_id": parent_curation_id,
+            "analysis_file_name": analysis_file_name,
+            "object_id": units_object_id,
+            # Record user intent verbatim, matching v1's
+            # ``v1/curation.py:123`` semantic. ``apply_merge=True``
+            # with empty ``merge_groups`` stores True (intent was
+            # to merge, nothing to merge) rather than collapsing
+            # to the effective state -- consistent with v1 and
+            # avoids silent semantic divergence.
+            "merges_applied": bool(apply_merge),
+            "curation_source": curation_source,
+            "description": description,
+        }
+        # Labels attach to the units actually written. For
+        # apply_merge=False that is every original unit (v1 preview
+        # parity); for apply_merge=True it is the kept set, so a
+        # label on an absorbed contributor is dropped with the unit.
+        written_unit_ids = {row["unit_id"] for row in unit_rows}
+        unit_label_rows = [
+            {
                 "sorting_id": sorting_id,
                 "curation_id": curation_id,
-                "parent_curation_id": parent_curation_id,
-                "analysis_file_name": analysis_file_name,
-                "object_id": units_object_id,
-                # Record user intent verbatim, matching v1's
-                # ``v1/curation.py:123`` semantic. ``apply_merge=True``
-                # with empty ``merge_groups`` stores True (intent was
-                # to merge, nothing to merge) rather than collapsing
-                # to the effective state -- consistent with v1 and
-                # avoids silent semantic divergence.
-                "merges_applied": bool(apply_merge),
-                "curation_source": curation_source,
-                "description": description,
+                "unit_id": unit_id,
+                "curation_label": (
+                    label.value
+                    if isinstance(label, CurationLabel)
+                    else str(label)
+                ),
             }
-            # Labels attach to the units actually written. For
-            # apply_merge=False that is every original unit (v1 preview
-            # parity); for apply_merge=True it is the kept set, so a
-            # label on an absorbed contributor is dropped with the unit.
-            written_unit_ids = {row["unit_id"] for row in unit_rows}
-            unit_label_rows = [
-                {
-                    "sorting_id": sorting_id,
-                    "curation_id": curation_id,
-                    "unit_id": unit_id,
-                    "curation_label": (
-                        label.value
-                        if isinstance(label, CurationLabel)
-                        else str(label)
-                    ),
-                }
-                for unit_id, lbls in labels.items()
-                if unit_id in written_unit_ids
-                for label in lbls
-            ]
-            # Auto-register into SpikeSortingOutput.CurationV2 so
-            # downstream consumers (SortedSpikesGroup, decoding, etc.)
-            # see the curation without the user having to call the
-            # merge insert manually. Imported lazily to keep curation.py
-            # free of the merge-table dependency at module load. The
-            # merge insert MUST go through ``_merge_insert``, not direct
-            # ``insert1`` on the master + part -- the master row's
-            # ``merge_id`` is generated by ``_merge_insert`` from the
-            # part-row identity hash, and a hand-rolled UUID would fail
-            # the master FK referenced by the part.
-            from spyglass.spikesorting.spikesorting_merge import (
-                SpikeSortingOutput,
+            for unit_id, lbls in labels.items()
+            if unit_id in written_unit_ids
+            for label in lbls
+        ]
+        # Auto-register into SpikeSortingOutput.CurationV2 so
+        # downstream consumers (SortedSpikesGroup, decoding, etc.)
+        # see the curation without the user having to call the
+        # merge insert manually. Imported lazily to keep curation.py
+        # free of the merge-table dependency at module load. The
+        # merge insert MUST go through ``_merge_insert``, not direct
+        # ``insert1`` on the master + part -- the master row's
+        # ``merge_id`` is generated by ``_merge_insert`` from the
+        # part-row identity hash, and a hand-rolled UUID would fail
+        # the master FK referenced by the part.
+        from spyglass.spikesorting.spikesorting_merge import (
+            SpikeSortingOutput,
+        )
+
+        # Persist per-unit merge provenance for queryable
+        # bulk-audit. ``kept_unit_to_contributors`` carries 1-element
+        # self-entries for every ``CurationV2.Unit`` row that is not
+        # itself a merge target (unmerged units always, and -- for
+        # apply_merge=False preview -- the absorbed contributors that
+        # remain in Unit), so every Unit row has at least one
+        # MergeGroup row keyed by its own ``unit_id``. Joining
+        # ``Unit * MergeGroup`` on unit_id therefore preserves every
+        # unit in both modes.
+        merge_group_rows = [
+            {
+                "sorting_id": sorting_id,
+                "curation_id": curation_id,
+                "unit_id": kept_uid,
+                "contributor_unit_id": int(contributor_uid),
+            }
+            for kept_uid, contributors in kept_unit_to_contributors.items()
+            for contributor_uid in contributors
+        ]
+
+        with transaction_or_noop(cls.connection):
+            # Register the analysis file row FIRST inside the
+            # transaction so it rolls back atomically with the
+            # CurationV2 rows on any later failure.
+            AnalysisNwbfile().add(staged_parent_nwb, analysis_file_name)
+            cls.insert1(master_row)
+            cls.Unit.insert(unit_rows)
+            if unit_label_rows:
+                # Labels were already validated above via
+                # ``validate_labels``; forward ``allow_custom_labels``
+                # so the part-table override does not re-reject the
+                # custom labels the caller opted into.
+                cls.UnitLabel.insert(
+                    unit_label_rows,
+                    allow_custom_labels=allow_custom_labels,
+                )
+            if merge_group_rows:
+                cls.MergeGroup.insert(merge_group_rows)
+            SpikeSortingOutput._merge_insert(
+                [
+                    {
+                        "sorting_id": sorting_id,
+                        "curation_id": curation_id,
+                    }
+                ],
+                part_name="CurationV2",
+                skip_duplicates=True,
             )
 
-            # Persist per-unit merge provenance for queryable
-            # bulk-audit. ``kept_unit_to_contributors`` carries 1-element
-            # self-entries for every ``CurationV2.Unit`` row that is not
-            # itself a merge target (unmerged units always, and -- for
-            # apply_merge=False preview -- the absorbed contributors that
-            # remain in Unit), so every Unit row has at least one
-            # MergeGroup row keyed by its own ``unit_id``. Joining
-            # ``Unit * MergeGroup`` on unit_id therefore preserves every
-            # unit in both modes.
-            merge_group_rows = [
-                {
-                    "sorting_id": sorting_id,
-                    "curation_id": curation_id,
-                    "unit_id": kept_uid,
-                    "contributor_unit_id": int(contributor_uid),
-                }
-                for kept_uid, contributors in kept_unit_to_contributors.items()
-                for contributor_uid in contributors
-            ]
+    @classmethod
+    def _cleanup_staged_curation_file(cls, analysis_file_name: str) -> None:
+        """Delete a staged curated-units NWB after a failed insert.
 
-            with transaction_or_noop(cls.connection):
-                # Register the analysis file row FIRST inside the
-                # transaction so it rolls back atomically with the
-                # CurationV2 rows on any later failure.
-                AnalysisNwbfile().add(staged_parent_nwb, analysis_file_name)
-                cls.insert1(master_row)
-                cls.Unit.insert(unit_rows)
-                if unit_label_rows:
-                    # Labels were already validated above via
-                    # ``validate_labels``; forward ``allow_custom_labels``
-                    # so the part-table override does not re-reject the
-                    # custom labels the caller opted into.
-                    cls.UnitLabel.insert(
-                        unit_label_rows,
-                        allow_custom_labels=allow_custom_labels,
-                    )
-                if merge_group_rows:
-                    cls.MergeGroup.insert(merge_group_rows)
-                SpikeSortingOutput._merge_insert(
-                    [
-                        {
-                            "sorting_id": sorting_id,
-                            "curation_id": curation_id,
-                        }
-                    ],
-                    part_name="CurationV2",
-                    skip_duplicates=True,
-                )
-        except Exception:
-            # The transaction rolled back the AnalysisNwbfile row and
-            # the CurationV2 rows together; only the file on disk is
-            # left to clean up.
-            try:
-                abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
-                _pathlib.Path(abs_path).unlink(missing_ok=True)
-            except Exception as cleanup_exc:  # pragma: no cover -- defensive
-                logger.error(
-                    "CurationV2.insert_curation: failed to clean up "
-                    f"staged analysis file {analysis_file_name!r}: "
-                    f"{cleanup_exc!r}"
-                )
-            raise
+        The DB transaction already rolled back the ``AnalysisNwbfile`` row
+        and the ``CurationV2`` rows together; only the file on disk is
+        left to clean up (DataJoint cannot roll back filesystem side
+        effects). A failure to unlink is logged, not raised -- the
+        original insert error is what the caller re-raises.
+        """
+        import pathlib
 
-        return {"sorting_id": sorting_id, "curation_id": curation_id}
+        try:
+            abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+            pathlib.Path(abs_path).unlink(missing_ok=True)
+        except Exception as cleanup_exc:  # pragma: no cover -- defensive
+            logger.error(
+                "CurationV2.insert_curation: failed to clean up "
+                f"staged analysis file {analysis_file_name!r}: "
+                f"{cleanup_exc!r}"
+            )
 
     # ---- Friendly wrappers (intent-first sugar over insert_curation) -----
 
