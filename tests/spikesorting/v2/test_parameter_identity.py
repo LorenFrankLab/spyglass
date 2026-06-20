@@ -220,13 +220,18 @@ def test_shipped_recipe_fingerprints_are_locked():
             "mountainsort4",
         ),
     ]
+    # These frozen digests were regenerated when the canonical form gained
+    # numeric normalization (int-valued floats collapse to ints so 9 and 9.0
+    # fingerprint alike) + ``allow_nan=False``. The lock still serves its
+    # purpose: an in-place edit to a shipped recipe changes the recipe content
+    # and so the digest, failing here.
     expected = {
-        rc.FRANKLAB_HIPPOCAMPUS_2026_06: "65a601c2cbe6",
-        rc.FRANKLAB_CORTEX_2026_06: "154a714d0114",
-        rc.FRANKLAB_100UV_P07_2026_06: "596d7894f2d0",
-        rc.FRANKLAB_50UV_P07_2026_06: "f26f082f82ea",
-        rc.FRANKLAB_30KHZ_MS4_2026_06: "a82767b225c3",
-        rc.FRANKLAB_20KHZ_MS4_2026_06: "0f29e8800e84",
+        rc.FRANKLAB_HIPPOCAMPUS_2026_06: "370e76eab686",
+        rc.FRANKLAB_CORTEX_2026_06: "9c3db4b5b525",
+        rc.FRANKLAB_100UV_P07_2026_06: "6e6ddbc7e5b7",
+        rc.FRANKLAB_50UV_P07_2026_06: "a4a9158675e8",
+        rc.FRANKLAB_30KHZ_MS4_2026_06: "7bd8d640c764",
+        rc.FRANKLAB_20KHZ_MS4_2026_06: "6ae617642d8a",
     }
     for table, name, params, version, sorter in specs:
         got = short_fingerprint(
@@ -239,6 +244,71 @@ def test_shipped_recipe_fingerprints_are_locked():
             )
         )
         assert got == expected[name], f"{name}: {got} != {expected[name]}"
+
+
+def test_int_and_float_param_values_share_a_fingerprint():
+    """``9`` and ``9.0`` must produce the same content fingerprint.
+
+    The ``extra="allow"`` sorter schemas (Kilosort4, SpykingCircus2,
+    Tridesclous2, generic) pass user keys through uncoerced, so a blob may
+    carry ``60000`` under one name and ``60000.0`` under another for identical
+    science. A plain ``json.dumps`` renders those differently and forks the
+    fingerprint, defeating the duplicate-content guard. The canonical form
+    normalizes int-valued floats so the guard still fires.
+    """
+    common = dict(params_schema_version=1, job_kwargs=None, sorter="kilosort4")
+    fp_int = parameter_fingerprint(
+        "SorterParameters", params={"batch_size": 60000}, **common
+    )
+    fp_float = parameter_fingerprint(
+        "SorterParameters", params={"batch_size": 60000.0}, **common
+    )
+    assert fp_int == fp_float
+
+
+def test_numeric_normalization_is_recursive():
+    """Int/float equivalence holds inside nested dicts and lists."""
+    common = dict(params_schema_version=1, job_kwargs=None)
+    fp_floats = parameter_fingerprint(
+        "PreprocessingParameters",
+        params={"a": {"b": 5.0}, "c": [1.0, 2.0]},
+        **common,
+    )
+    fp_ints = parameter_fingerprint(
+        "PreprocessingParameters",
+        params={"a": {"b": 5}, "c": [1, 2]},
+        **common,
+    )
+    assert fp_floats == fp_ints
+
+
+def test_bool_is_not_collapsed_to_int_in_fingerprint():
+    """``True`` and ``1`` stay distinct -- different JSON types, different
+    intent (a boolean toggle is not the integer 1)."""
+    common = dict(params_schema_version=1, job_kwargs=None, sorter="kilosort4")
+    fp_true = parameter_fingerprint(
+        "SorterParameters", params={"flag": True}, **common
+    )
+    fp_one = parameter_fingerprint(
+        "SorterParameters", params={"flag": 1}, **common
+    )
+    assert fp_true != fp_one
+
+
+def test_nan_or_inf_param_is_rejected_not_silently_encoded():
+    """A NaN/Inf param value raises at fingerprint time rather than emitting
+    the invalid-JSON tokens ``NaN``/``Infinity`` no strict reader accepts."""
+    import math
+
+    for bad in (math.nan, math.inf, -math.inf):
+        with pytest.raises(ValueError):
+            parameter_fingerprint(
+                "SorterParameters",
+                params={"some_kwarg": bad},
+                params_schema_version=1,
+                job_kwargs=None,
+                sorter="kilosort4",
+            )
 
 
 # ---------------------------------------------------------------------------

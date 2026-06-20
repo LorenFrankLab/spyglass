@@ -28,20 +28,51 @@ import json
 _SHORT_FINGERPRINT_LENGTH = 12
 
 
+def _normalize_numbers(value):
+    """Collapse int-valued floats to ints so ``9`` and ``9.0`` canonicalize
+    alike, recursively through dicts and lists.
+
+    The ``extra="allow"`` sorter schemas (Kilosort4, SpykingCircus2,
+    Tridesclous2, generic) pass user keys through uncoerced, so a blob may
+    carry ``60000`` under one name and ``60000.0`` under another for identical
+    science. ``json.dumps`` renders those differently, which would fork the
+    content fingerprint and defeat the duplicate-content guard. ``bool`` is
+    left untouched (``True`` and ``1`` are distinct JSON types and distinct
+    intent), and non-integer / NaN / Inf floats (``is_integer()`` is False for
+    all of them) pass through so ``allow_nan=False`` can still reject NaN/Inf.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, dict):
+        return {key: _normalize_numbers(val) for key, val in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_normalize_numbers(item) for item in value]
+    return value
+
+
 def _canonical_content(payload: dict) -> str:
     """Return a byte-stable JSON string for a parameter row's content.
 
     Keys are sorted recursively and separators are fixed, so the output
     does not depend on dict insertion order or JSON spacing defaults. The
     ``params`` blob is assumed already schema-validated (plain JSON-native
-    scalars, lists, and nested dicts), so a plain ``json.dumps`` -- which
-    handles the floats and nested structure the selection-identity
-    ``_canonical_scalar`` rejects -- is the right canonical form. A
-    non-JSON-serializable value raises ``TypeError`` rather than being
-    silently coerced, surfacing an unexpected blob shape at fingerprint
-    time.
+    scalars, lists, and nested dicts). Numbers are normalized
+    (:func:`_normalize_numbers`) so an int and an int-valued float fingerprint
+    identically -- otherwise two semantically-identical ``extra="allow"`` blobs
+    (``60000`` vs ``60000.0``) would fork provenance. ``allow_nan=False`` makes
+    a NaN/Inf value raise ``ValueError`` at fingerprint time rather than
+    emitting the invalid-JSON tokens ``NaN``/``Infinity`` that no strict JSON
+    reader accepts; a non-JSON-serializable value still raises ``TypeError``,
+    surfacing an unexpected blob shape rather than being silently coerced.
     """
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return json.dumps(
+        _normalize_numbers(payload),
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
 
 
 def parameter_fingerprint(
