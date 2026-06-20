@@ -12,10 +12,11 @@ import pytest
 def test_preprocessing_params_schema_default():
     """The preprocessing schema has the expected default shape and guards.
 
-    ``schema_version`` is 2 (the v2 shipping schema): added
-    ``min_segment_length`` and removed the dead
-    ``common_reference.reference`` field. Defaults below reflect
-    the schema as shipped.
+    ``schema_version`` is 3 (the v2 shipping schema): v2 added
+    ``min_segment_length`` and removed the dead ``common_reference.reference``
+    field; v3 made ``bandpass_filter`` optional, defaulted ``whiten`` to
+    ``None``, and added the ``phase_shift`` and ``bad_channel_handling``
+    fields. Defaults below reflect the schema as shipped.
     """
     import pydantic
 
