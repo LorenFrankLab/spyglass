@@ -167,6 +167,63 @@ def test_truncation_tolerance_scales_with_interval_count():
         )
 
 
+@pytest.mark.usefixtures("dj_conn")
+def test_make_insert_raises_on_genuine_truncation():
+    """The FIRING side: a saved recording shorter than the intended duration
+    by more than the sample-grid tolerance raises ``RecordingTruncatedError``
+    and reports the missing seconds.
+
+    The no-false-positive tests above only assert the guard stays SILENT on
+    legitimate sliver / disjoint requests; none assert it still FIRES on a
+    genuine shortfall (dropped raw packets or interval misalignment), so a
+    regression that quietly stopped raising would pass every other test in
+    this module. This drives the real ``make_insert`` decision directly with a
+    deliberate expected-vs-saved mismatch: the truncation check runs before
+    any DB write or file registration, so the production method, the
+    production tolerance, and the production message are exercised without a
+    populate.
+    """
+    from spyglass.spikesorting.v2.exceptions import RecordingTruncatedError
+    from spyglass.spikesorting.v2.recording import Recording
+
+    fs = 30000.0
+    saved_start, saved_end = 0.0, 5.0  # 5.0 s actually saved
+    expected_saved_total = 10.0  # 10.0 s intended -> 5.0 s genuinely missing
+    n_intended_intervals = 1
+    # The shortfall must exceed the (n + 1.5)/fs grid tolerance to fire; a
+    # 5.0 s shortfall dwarfs the sub-millisecond tolerance.
+    tolerance = Recording._truncation_tolerance(n_intended_intervals, fs)
+    assert (expected_saved_total - (saved_end - saved_start)) > tolerance
+
+    with pytest.raises(RecordingTruncatedError) as excinfo:
+        Recording().make_insert(
+            key={"recording_id": "unused-before-raise"},
+            analysis_file_name="v2_truncation_guard_probe.nwb",
+            object_id="unused-before-raise",
+            cache_hash="unused-before-raise",
+            saved_start=saved_start,
+            saved_end=saved_end,
+            sampling_frequency=fs,
+            n_channels=4,
+            duration_s=saved_end - saved_start,
+            sel={
+                "nwb_file_name": "truncation_guard_probe.nwb",
+                "interval_list_name": "raw data valid times",
+            },
+            sort_valid_times=np.array([[saved_start, expected_saved_total]]),
+            expected_saved_total=expected_saved_total,
+            n_intended_intervals=n_intended_intervals,
+        )
+
+    message = str(excinfo.value)
+    # The message must surface the quantitative shortfall (5.0 s missing of the
+    # 10.0 s intended) so an operator can distinguish truncation from a
+    # misconfigured interval.
+    assert "Missing: 5.000000s" in message
+    assert "10.000000s" in message  # intended duration
+    assert "saved 5.000000s" in message
+
+
 @pytest.mark.slow
 @pytest.mark.integration
 def test_disjoint_multichunk_not_false_truncation(truncation_session):
