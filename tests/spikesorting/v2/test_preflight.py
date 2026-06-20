@@ -262,6 +262,43 @@ def test_preflight_missing_sort_group(preflight_inputs):
 
 
 @pytest.mark.database
+def test_preflight_empty_sort_group(preflight_inputs):
+    """A SortGroupV2 master with ZERO electrode members fails preflight.
+
+    Checking only the master is a false-green: the master exists, but
+    ``Recording.populate`` raises 'has zero electrodes' minutes into the run.
+    The ``sort_group_has_electrodes`` check catches it up front. Audit
+    finding #2."""
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    nwb_file_name = preflight_inputs["nwb_file_name"]
+    empty_sg_id = 987001
+    restr = {"nwb_file_name": nwb_file_name, "sort_group_id": empty_sg_id}
+    SortGroupV2.insert1(
+        {**restr, "reference_mode": "none"}, skip_duplicates=True
+    )
+    try:
+        report = preflight_v2_pipeline(
+            **{**preflight_inputs, "sort_group_id": empty_sg_id}
+        )
+        assert report.ok is False
+        # The master EXISTS -> sort_group_exists passes (this is the
+        # false-green the membership check closes)...
+        (exists_check,) = [
+            c for c in report.checks if c.name == "sort_group_exists"
+        ]
+        assert exists_check.ok is True
+        # ...but sort_group_has_electrodes catches the empty group.
+        (members_check,) = [
+            c for c in report.checks if c.name == "sort_group_has_electrodes"
+        ]
+        assert members_check.ok is False
+        assert "zero electrode" in members_check.fix
+    finally:
+        (SortGroupV2 & restr).delete_quick()
+
+
+@pytest.mark.database
 def test_preflight_sorter_not_installed(preflight_inputs, monkeypatch):
     """A spelled-valid sorter whose binary is absent fails the install gate.
 

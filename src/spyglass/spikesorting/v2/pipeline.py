@@ -1661,7 +1661,7 @@ def preflight_v2_pipeline(
         f"LabTeam {team_name!r} does not exist. Create it with "
         "LabTeam.insert1({'team_name': ..., 'team_description': ...}).",
     )
-    _check(
+    sort_group_exists = _check(
         "sort_group_exists",
         SortGroupV2
         & {"nwb_file_name": nwb_file_name, "sort_group_id": sort_group_id},
@@ -1669,6 +1669,24 @@ def preflight_v2_pipeline(
         f"{nwb_file_name!r}. Create sort groups first with "
         "SortGroupV2.set_group_by_shank(nwb_file_name=...).",
     )
+    # A SortGroupV2 master row can exist with ZERO electrode members (created
+    # then partially deleted, or a shank that resolved to an empty group);
+    # Recording.populate then raises "has zero electrodes" minutes into the
+    # run. Checking the master alone is a false-green. Only run this when the
+    # master exists, to avoid a confusing second failure when it is absent.
+    if sort_group_exists:
+        _check(
+            "sort_group_has_electrodes",
+            SortGroupV2.SortGroupElectrode
+            & {
+                "nwb_file_name": nwb_file_name,
+                "sort_group_id": sort_group_id,
+            },
+            f"SortGroupV2 sort_group_id={sort_group_id} for {nwb_file_name!r} "
+            "has zero electrode members; Recording.populate would raise 'has "
+            "zero electrodes'. Recreate it with "
+            "SortGroupV2.set_group_by_shank(nwb_file_name=...).",
+        )
 
     # 6-8. The preset's parameter Lookup rows.
     _check(
