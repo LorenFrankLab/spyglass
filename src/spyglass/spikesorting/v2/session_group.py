@@ -84,9 +84,10 @@ class SessionGroup(SpyglassMixin, dj.Manual):
     ) -> None:
         """Insert master + Member rows; derive dates from each Session.
 
-        The schema is final-shape so users can start declaring groups
-        for the concat workflow as soon as the Recording chain
-        materializes; this helper is forward-declared.
+        Gated until the concat materializer lands (raises
+        ``NotImplementedError`` today). The schema is final-shape so users
+        can start declaring groups for the concat workflow as soon as the
+        Recording chain materializes; this helper is forward-declared.
 
         Raises
         ------
@@ -216,8 +217,10 @@ class ConcatenatedRecordingSelection(SpyglassMixin, dj.Manual):
     def insert_selection(cls, key: dict) -> dict:
         """Find-existing-or-insert; return a single PK-only dict.
 
-        Forward-declared; the schema is in place so single-session
-        tables can FK ``concat_recording_id`` from day one.
+        Gated until the concat materializer lands (raises
+        ``NotImplementedError`` today). Forward-declared; the schema is in
+        place so single-session tables can FK ``concat_recording_id`` from
+        day one.
 
         Returns
         -------
@@ -272,6 +275,8 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
     def make(self, key):
         """Materialize the concatenated recording cache.
 
+        Gated until the concat materializer lands (raises
+        ``NotImplementedError`` today).
         Forward-declared. ``SortingSelection.insert_selection`` also
         rejects ``ConcatenatedRecordingSource`` requests with a matching
         error until the consumer lands; the schemas are in their final

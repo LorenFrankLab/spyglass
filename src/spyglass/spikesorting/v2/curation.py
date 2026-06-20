@@ -1058,6 +1058,9 @@ class CurationV2(SpyglassMixin, dj.Manual):
         (SortedSpikesGroup / decoding) read through this method, a warning is
         emitted in that case so the proposed merges are not silently ignored.
 
+        A zero-unit curation returns an empty sorting (with a warning);
+        ``Sorting.get_analyzer`` raises ``ZeroUnitAnalyzerError`` instead.
+
         Parameters
         ----------
         key : dict

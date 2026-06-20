@@ -1463,6 +1463,9 @@ class Sorting(SpyglassMixin, dj.Computed):
         accessor uses the same flag + index and adds a
         ``curation_label`` column joined from ``CurationV2.UnitLabel``.
 
+        A zero-unit sort returns an empty sorting (with a warning);
+        ``get_analyzer`` raises ``ZeroUnitAnalyzerError`` instead.
+
         Parameters
         ----------
         key : dict
@@ -1529,8 +1532,9 @@ class Sorting(SpyglassMixin, dj.Computed):
         build a ``SortingAnalyzer`` over zero units, so no folder was
         written by ``_build_analyzer`` (it returns the would-be path).
         Loading it would surface a confusing SI/file error; this raises
-        a clear signal instead. Use ``get_sorting()`` for the (empty)
-        unit list.
+        a clear signal instead. For a zero-unit sort this raises; use
+        ``get_sorting`` (which returns an empty sorting, with a warning,
+        rather than raising) if only the unit list is needed.
 
         This raise-vs-degrade split with ``get_sorting`` is intentional,
         not an inconsistency: a zero-unit *sorting* is a valid (empty)
