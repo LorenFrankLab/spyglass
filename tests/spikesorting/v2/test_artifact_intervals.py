@@ -300,3 +300,93 @@ def test_spike_times_to_frames_clamp_vs_raise_boundary():
         _spike_times_to_frames(
             timestamps, np.array([timestamps[-1] + 3.0 * dt]), n, 1
         )
+
+
+# --------------------------------------------------------------------------- #
+# E. detect_artifacts degenerate-configuration guards (audit #3, #5, #6)
+# --------------------------------------------------------------------------- #
+
+
+def test_detect_artifacts_warns_when_min_length_drops_all_valid_time(caplog):
+    """A short recording whose only valid slivers fall below ``min_length_s``
+    returns empty ``valid_times`` -- but must WARN at detection time (mirroring
+    the zero-artifacts warning), so the operator sees the cause here rather
+    than three stages later as an ``EmptyArtifactValidTimesError`` at sort
+    time."""
+    from spyglass.spikesorting.v2._artifact_intervals import detect_artifacts
+
+    fs = 30000.0
+    n, n_ch = 15000, 2  # 0.5 s -- every kept sliver is < min_length_s=1.0
+    traces = np.zeros((n, n_ch), dtype="float32")
+    traces[n // 2, :] = 5000.0  # one artifact frame, both channels
+    rec = _rec(traces, fs=fs)
+    params = _artifact_params(min_length_s=1.0)  # amplitude_threshold_uv=1000
+
+    with caplog.at_level("WARNING"):
+        vt = detect_artifacts(rec, params, context=" for unit-test")
+    assert vt.shape == (0, 2)
+    assert any("no valid time" in r.message.lower() for r in caplog.records), (
+        "expected an empty-valid-times warning; got "
+        f"{[r.message for r in caplog.records]}"
+    )
+
+
+def test_detect_artifacts_raises_on_single_channel_zscore_only():
+    """The z-score is computed ACROSS channels within a frame; on a 1-channel
+    group it is identically zero, so a z-score-only config would silently
+    detect nothing. Raise instead of returning a misleadingly-clean window."""
+    from spyglass.spikesorting.v2._artifact_intervals import detect_artifacts
+    from spyglass.spikesorting.v2.exceptions import SingleChannelZScoreError
+
+    rec = _rec(np.zeros((3000, 1), dtype="float32"))
+    params = _artifact_params(amplitude_threshold_uv=None, zscore_threshold=3.0)
+    with pytest.raises(SingleChannelZScoreError):
+        detect_artifacts(rec, params)
+
+
+def test_detect_artifacts_warns_zscore_inert_on_single_channel(caplog):
+    """With ``amplitude_threshold_uv`` also set, single-channel z-score is
+    inert (not fatal); warn that only the amplitude detector will fire."""
+    from spyglass.spikesorting.v2._artifact_intervals import detect_artifacts
+
+    rec = _rec(np.zeros((3000, 1), dtype="float32"))
+    params = _artifact_params(
+        amplitude_threshold_uv=1000.0, zscore_threshold=3.0
+    )
+    with caplog.at_level("WARNING"):
+        detect_artifacts(rec, params)
+    assert any("inert" in r.message.lower() for r in caplog.records)
+
+
+def test_detect_artifacts_warns_proportion_rounds_to_all_channels(caplog):
+    """On a 2-channel (stereotrode) group, ``proportion_above_threshold=0.7``
+    rounds up via ``ceil`` to requiring BOTH channels -- silently stricter
+    than the nominal 70%. Warn so the operator sees the realized
+    requirement."""
+    from spyglass.spikesorting.v2._artifact_intervals import detect_artifacts
+
+    rec = _rec(np.zeros((3000, 2), dtype="float32"))
+    params = _artifact_params(
+        proportion_above_threshold=0.7, amplitude_threshold_uv=1000.0
+    )
+    with caplog.at_level("WARNING"):
+        detect_artifacts(rec, params)
+    assert any(
+        "all" in r.message.lower() and "channel" in r.message.lower()
+        for r in caplog.records
+    )
+
+
+def test_detect_artifacts_no_proportion_warning_on_tetrode(caplog):
+    """On a tetrode (4 ch), ``0.7`` -> ``ceil(2.8)=3`` of 4 -- a genuine
+    majority, not silently promoted to all-channels -- so no 'rounds up'
+    warning fires."""
+    from spyglass.spikesorting.v2._artifact_intervals import detect_artifacts
+
+    rec = _rec(np.zeros((3000, 4), dtype="float32"))
+    params = _artifact_params(
+        proportion_above_threshold=0.7, amplitude_threshold_uv=1000.0
+    )
+    with caplog.at_level("WARNING"):
+        detect_artifacts(rec, params)
+    assert not any("rounds up" in r.message.lower() for r in caplog.records)

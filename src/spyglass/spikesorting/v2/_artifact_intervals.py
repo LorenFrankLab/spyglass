@@ -202,6 +202,47 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
         f"min_length_s={validated.min_length_s}."
     )
 
+    # Degenerate-configuration guards (audit #5, #6). The z-score detector is
+    # cross-channel WITHIN a frame, so on a single-channel group it is
+    # identically zero -- a z-score-only config would silently flag nothing.
+    n_channels = recording.get_num_channels()
+    if validated.zscore_threshold is not None and n_channels < 2:
+        if validated.amplitude_threshold_uv is None:
+            from spyglass.spikesorting.v2.exceptions import (
+                SingleChannelZScoreError,
+            )
+
+            raise SingleChannelZScoreError(
+                "ArtifactDetection: zscore_threshold is the only detector on a "
+                f"{n_channels}-channel recording{context}, but the z-score is "
+                "computed ACROSS channels within each frame -- with <2 "
+                "channels it is identically zero, so NO artifacts would be "
+                "detected. Use amplitude_threshold_uv for single-channel sort "
+                "groups."
+            )
+        logger.warning(
+            "ArtifactDetection: zscore_threshold is inert on a "
+            f"{n_channels}-channel recording{context} (the cross-channel "
+            "z-score is identically zero on one channel); only "
+            "amplitude_threshold_uv will fire."
+        )
+    # proportion_above_threshold rounds UP (ceil) to a channel count, so on a
+    # small group a sub-1.0 proportion can silently require ALL channels (e.g.
+    # 0.7 on a stereotrode -> ceil(1.4)=2 of 2 = 100%). Warn so the realized
+    # requirement is visible; the detection math itself is unchanged.
+    n_required = int(
+        _np.ceil(validated.proportion_above_threshold * n_channels)
+    )
+    if validated.proportion_above_threshold < 1.0 and n_required >= n_channels:
+        logger.warning(
+            "ArtifactDetection: proportion_above_threshold="
+            f"{validated.proportion_above_threshold} on a {n_channels}-channel "
+            f"group rounds up (ceil) to requiring ALL {n_channels} channels"
+            f"{context}; the effective threshold is stricter than the nominal "
+            "fraction. Lower proportion_above_threshold or accept the "
+            "all-channel requirement."
+        )
+
     # Chunked scan via ChunkRecordingExecutor (see
     # ``scan_artifact_frames``). The per-frame detection math --
     # µV traces (gain+offset applied by SpikeInterface), amplitude
@@ -338,7 +379,23 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
             for start, end in kept
             if (end - start) >= validated.min_length_s
         ]
-    return _np.asarray(kept) if kept else _np.empty((0, 2))
+    if not kept:
+        # Artifacts WERE found (we are past the zero-frames early return), but
+        # removal-window dilation + the min_length_s sliver filter dropped
+        # every valid interval. Warn here (mirroring the zero-frames warning)
+        # so the operator sees the cause at detection time rather than three
+        # stages later as an EmptyArtifactValidTimesError at sort time.
+        logger.warning(
+            "ArtifactDetection: after removing artifacts and dropping "
+            f"intervals shorter than min_length_s={validated.min_length_s}, "
+            f"NO valid time remains{context}. The sorter will reject this "
+            "recording (EmptyArtifactValidTimesError). Loosen the thresholds "
+            "(amplitude_threshold_uv / zscore_threshold / "
+            "proportion_above_threshold), reduce removal_window_ms, or lower "
+            "min_length_s."
+        )
+        return _np.empty((0, 2))
+    return _np.asarray(kept)
 
 
 def build_artifact_interval_rows(
