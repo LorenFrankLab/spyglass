@@ -2533,7 +2533,7 @@ def test_run_v2_pipeline_end_to_end_and_idempotent(polymer_smoke_session):
         sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
     )
 
-    manifest = run_v2_pipeline(
+    run_summary = run_v2_pipeline(
         nwb_file_name=nwb_file_name,
         sort_group_id=sort_group_id,
         interval_list_name="raw data valid times",
@@ -2541,7 +2541,7 @@ def test_run_v2_pipeline_end_to_end_and_idempotent(polymer_smoke_session):
         pipeline_preset="franklab_tetrode_hippocampus_30khz_ms5_2026_06",
         description="pipeline e2e test",
     )
-    # The stable manifest keys must always be present. The run also adds
+    # The stable run_summary keys must always be present. The run also adds
     # additive observability keys (``*_status`` / ``stage_seconds`` /
     # ``warnings``), asserted in ``test_pipeline_observability.py``; assert a
     # subset here so this e2e/idempotency test isn't coupled to them.
@@ -2554,31 +2554,31 @@ def test_run_v2_pipeline_end_to_end_and_idempotent(polymer_smoke_session):
         "merge_id",
         "n_units",
     }
-    assert stable_keys <= set(manifest.keys())
-    assert manifest["pipeline_preset"] == "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
-    assert manifest["curation_id"] == 0  # root curation
-    assert manifest["n_units"] >= 1
+    assert stable_keys <= set(run_summary.keys())
+    assert run_summary["pipeline_preset"] == "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
+    assert run_summary["curation_id"] == 0  # root curation
+    assert run_summary["n_units"] >= 1
     # The smoke fixture's clusterless 100 uV default IS exercised in
     # ``test_run_v2_pipeline_clusterless_default_handles_zero_units_
     # gracefully`` -- it confirms a zero-unit sort still yields an empty
     # (but real) curation + merge row. MS5 here is the populated-units
     # path.
 
-    # Idempotent: rerun returns the same manifest, no new rows.
-    manifest2 = run_v2_pipeline(
+    # Idempotent: rerun returns the same run_summary, no new rows.
+    run_summary2 = run_v2_pipeline(
         nwb_file_name=nwb_file_name,
         sort_group_id=sort_group_id,
         interval_list_name="raw data valid times",
         team_name="v2_test_team",
         pipeline_preset="franklab_tetrode_hippocampus_30khz_ms5_2026_06",
     )
-    assert manifest2["recording_id"] == manifest["recording_id"]
+    assert run_summary2["recording_id"] == run_summary["recording_id"]
     assert (
-        manifest2["artifact_detection_id"] == manifest["artifact_detection_id"]
+        run_summary2["artifact_detection_id"] == run_summary["artifact_detection_id"]
     )
-    assert manifest2["sorting_id"] == manifest["sorting_id"]
-    assert manifest2["curation_id"] == manifest["curation_id"]
-    assert manifest2["merge_id"] == manifest["merge_id"]
+    assert run_summary2["sorting_id"] == run_summary["sorting_id"]
+    assert run_summary2["curation_id"] == run_summary["curation_id"]
+    assert run_summary2["merge_id"] == run_summary["merge_id"]
 
     # Unknown pipeline preset raises PipelineInputError.
     with pytest.raises(PipelineInputError, match="unknown pipeline_preset"):
@@ -2642,12 +2642,12 @@ def test_run_v2_pipeline_idempotent_row_counts(polymer_smoke_session):
         team_name="v2_test_team",
         pipeline_preset="franklab_tetrode_hippocampus_30khz_ms5_2026_06",
     )
-    manifest = run_v2_pipeline(**kwargs)
+    run_summary = run_v2_pipeline(**kwargs)
     # Second run must be a pure no-op (MS5 reuses the existing sorting_id
     # rather than re-clustering, so this does not depend on sorter
     # determinism).
-    manifest2 = run_v2_pipeline(**kwargs)
-    assert manifest2["merge_id"] == manifest["merge_id"]
+    run_summary2 = run_v2_pipeline(**kwargs)
+    assert run_summary2["merge_id"] == run_summary["merge_id"]
 
     # Count by LOGICAL identity, not by the generated UUID PK. The PKs
     # (recording_id, artifact_detection_id, sorting_id, merge_id) are fresh
@@ -2657,20 +2657,20 @@ def test_run_v2_pipeline_idempotent_row_counts(polymer_smoke_session):
     # Each count below uses the same logical key ``insert_selection``
     # dedups on (and the root-curation identity the orchestrator reuses).
     rec_row = (
-        RecordingSelection & {"recording_id": manifest["recording_id"]}
+        RecordingSelection & {"recording_id": run_summary["recording_id"]}
     ).fetch1()
     rec_logical = {k: v for k, v in rec_row.items() if k != "recording_id"}
 
     art_row = (
         ArtifactDetectionSelection * ArtifactDetectionSelection.RecordingSource
-        & {"artifact_detection_id": manifest["artifact_detection_id"]}
+        & {"artifact_detection_id": run_summary["artifact_detection_id"]}
     ).fetch1()
 
     sort_row = (
         SortingSelection
         * SortingSelection.RecordingSource
         * SortingSelection.ArtifactDetectionSource
-        & {"sorting_id": manifest["sorting_id"]}
+        & {"sorting_id": run_summary["sorting_id"]}
     ).fetch1()
 
     stage_counts = {
@@ -2700,7 +2700,7 @@ def test_run_v2_pipeline_idempotent_row_counts(polymer_smoke_session):
         "CurationV2_root": len(
             CurationV2
             & {
-                "sorting_id": manifest["sorting_id"],
+                "sorting_id": run_summary["sorting_id"],
                 "parent_curation_id": -1,
             }
         ),
@@ -2708,8 +2708,8 @@ def test_run_v2_pipeline_idempotent_row_counts(polymer_smoke_session):
         "SpikeSortingOutput.CurationV2": len(
             SpikeSortingOutput.CurationV2
             & {
-                "sorting_id": manifest["sorting_id"],
-                "curation_id": manifest["curation_id"],
+                "sorting_id": run_summary["sorting_id"],
+                "curation_id": run_summary["curation_id"],
             }
         ),
     }
@@ -3739,7 +3739,7 @@ def test_run_v2_pipeline_clusterless_preset(polymer_smoke_session):
     )
 
     try:
-        manifest = run_v2_pipeline(
+        run_summary = run_v2_pipeline(
             nwb_file_name=nwb_file_name,
             sort_group_id=sort_group_id,
             interval_list_name="raw data valid times",
@@ -3747,7 +3747,7 @@ def test_run_v2_pipeline_clusterless_preset(polymer_smoke_session):
             pipeline_preset="franklab_clusterless_2026_06",
         )
         assert (
-            manifest["pipeline_preset"]
+            run_summary["pipeline_preset"]
             == "franklab_clusterless_2026_06"
         )
         for key in (
@@ -3758,8 +3758,8 @@ def test_run_v2_pipeline_clusterless_preset(polymer_smoke_session):
             "merge_id",
         ):
             assert (
-                manifest.get(key) is not None
-            ), f"Manifest missing {key!r}; got {manifest}."
+                run_summary.get(key) is not None
+            ), f"Run summary missing {key!r}; got {run_summary}."
     finally:
         # Restore the original 100 uV default row so subsequent
         # tests / sessions are not poisoned by the 5 uV value.
@@ -3780,7 +3780,7 @@ def test_run_v2_pipeline_clusterless_default_handles_zero_units_gracefully(
     finds zero peaks AND completes without crashing.
 
     A zero-unit sort yields an EMPTY (but real) curation + merge row --
-    matching v1's empty Units table -- so the manifest is complete
+    matching v1's empty Units table -- so the run_summary is complete
     (``curation_id`` + ``merge_id`` present, ``n_units=0``) and downstream
     code can treat it like any other ``SpikeSortingOutput`` row instead of
     special-casing a ``None`` merge_id.
@@ -3809,7 +3809,7 @@ def test_run_v2_pipeline_clusterless_default_handles_zero_units_gracefully(
     # Use the SHIPPED default (100 uV) which finds zero peaks on
     # the smoke fixture. NO row mutation -- this is the production-
     # contract test.
-    manifest = run_v2_pipeline(
+    run_summary = run_v2_pipeline(
         nwb_file_name=nwb_file_name,
         sort_group_id=sort_group_id,
         interval_list_name="raw data valid times",
@@ -3817,24 +3817,24 @@ def test_run_v2_pipeline_clusterless_default_handles_zero_units_gracefully(
         pipeline_preset="franklab_clusterless_2026_06",
     )
 
-    # A zero-unit sort still produces a COMPLETE, merge-keyable manifest:
+    # A zero-unit sort still produces a COMPLETE, merge-keyable run_summary:
     # an empty curation + merge row (v1 parity), not a partial None.
     for key in ("recording_id", "artifact_detection_id", "sorting_id"):
         assert (
-            manifest.get(key) is not None
-        ), f"Zero-unit manifest missing {key!r}; got {manifest}."
-    assert manifest["n_units"] == 0
-    assert manifest["curation_id"] is not None, (
+            run_summary.get(key) is not None
+        ), f"Zero-unit run_summary missing {key!r}; got {run_summary}."
+    assert run_summary["n_units"] == 0
+    assert run_summary["curation_id"] is not None, (
         f"Zero-unit sort should still write an empty curation row; "
-        f"got {manifest}."
+        f"got {run_summary}."
     )
-    assert manifest["merge_id"] is not None, (
+    assert run_summary["merge_id"] is not None, (
         "Zero-unit sort should still write an empty merge row so the "
-        f"result is merge-keyable; got {manifest}."
+        f"result is merge-keyable; got {run_summary}."
     )
 
     # Sorting row exists with ``n_units == 0``.
-    sort_pk = {"sorting_id": manifest["sorting_id"]}
+    sort_pk = {"sorting_id": run_summary["sorting_id"]}
     sort_row = (Sorting & sort_pk).fetch1()
     assert sort_row["n_units"] == 0, (
         f"Expected zero units from shipped clusterless default "
@@ -3887,8 +3887,8 @@ def test_run_v2_pipeline_clusterless_default_handles_zero_units_gracefully(
     # returns an empty sorting (it builds its OWN extractor, so it needs
     # the same zero-unit guard).
     curation_pk = {
-        "sorting_id": manifest["sorting_id"],
-        "curation_id": manifest["curation_id"],
+        "sorting_id": run_summary["sorting_id"],
+        "curation_id": run_summary["curation_id"],
     }
     assert len(CurationV2.Unit & curation_pk) == 0
     empty_curated = CurationV2().get_sorting(curation_pk)
@@ -12259,7 +12259,7 @@ def test_curation_label_column_added_only_with_nonempty_labels(
 # A29: pipeline.py untested branches.
 #
 # list_pipeline_presets enumeration, run_v2_pipeline idempotency (existing-root
-# short-circuit), and pipeline-preset -> manifest wiring. The franklab MS4
+# short-circuit), and pipeline-preset -> run_summary wiring. The franklab MS4
 # pipeline preset is exercised end-to-end where MS4 is runnable (it ships in
 # installed_sorters() but its runtime is unavailable in the SI 0.104 image, so
 # that test self-skips); a runnable MS5 substitute pins the wiring
@@ -12366,16 +12366,16 @@ def test_run_v2_pipeline_idempotent_existing_root(polymer_smoke_session):
 
 
 @pytest.mark.slow
-def test_run_v2_pipeline_pipeline_preset_wiring_to_manifest(
+def test_run_v2_pipeline_pipeline_preset_wiring_to_run_summary(
     polymer_smoke_session,
 ):
     """A29: the chosen pipeline preset's sorter is recorded in SortingSelection.
 
     Runs the MS5 pipeline preset (a runnable stand-in for the MS4 pipeline
-    preset, whose runtime is unavailable here) and asserts the manifest's
+    preset, whose runtime is unavailable here) and asserts the run_summary's
     ``sorting_id`` resolves to a SortingSelection whose ``sorter`` /
     ``sorter_params_name`` match the pipeline-preset bundle -- the
-    pipeline-preset -> Lookup-row -> manifest wiring.
+    pipeline-preset -> Lookup-row -> run_summary wiring.
     """
     from spyglass.spikesorting.v2.pipeline import (
         _PIPELINE_PRESETS,
@@ -12388,16 +12388,16 @@ def test_run_v2_pipeline_pipeline_preset_wiring_to_manifest(
     )
     pipeline_preset_name = "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
     try:
-        manifest = run_v2_pipeline(
+        run_summary = run_v2_pipeline(
             nwb_file_name=nwb_file_name,
             sort_group_id=sort_group_id,
             interval_list_name="raw data valid times",
             team_name=team_name,
             pipeline_preset=pipeline_preset_name,
         )
-        assert manifest["pipeline_preset"] == pipeline_preset_name
+        assert run_summary["pipeline_preset"] == pipeline_preset_name
         sel = (
-            SortingSelection & {"sorting_id": manifest["sorting_id"]}
+            SortingSelection & {"sorting_id": run_summary["sorting_id"]}
         ).fetch1()
         bundle = _PIPELINE_PRESETS[pipeline_preset_name]
         assert sel["sorter"] == bundle.sorter
@@ -12412,7 +12412,7 @@ def test_run_v2_pipeline_mountainsort4_pipeline_preset(polymer_smoke_session):
 
     ``mountainsort4`` appears in ``installed_sorters()`` but its runtime is not
     available in the SI 0.104 test image, so this self-skips on the sorter
-    failure. Where MS4 is runnable it asserts the manifest carries the MS4
+    failure. Where MS4 is runnable it asserts the run_summary carries the MS4
     sorter wiring.
     """
     from spikeinterface.sorters.utils import SpikeSortingError
@@ -12425,7 +12425,7 @@ def test_run_v2_pipeline_mountainsort4_pipeline_preset(polymer_smoke_session):
     )
     try:
         try:
-            manifest = run_v2_pipeline(
+            run_summary = run_v2_pipeline(
                 nwb_file_name=nwb_file_name,
                 sort_group_id=sort_group_id,
                 interval_list_name="raw data valid times",
@@ -12435,11 +12435,11 @@ def test_run_v2_pipeline_mountainsort4_pipeline_preset(polymer_smoke_session):
         except SpikeSortingError as exc:
             # Narrow to the sorter-RUNTIME failure only: mountainsort4 ships in
             # installed_sorters() but its runtime is unavailable in some
-            # images. Preset-lookup / manifest / DB / wiring regressions raise
+            # images. Preset-lookup / run_summary / DB / wiring regressions raise
             # other exception types and must FAIL, not skip.
             pytest.skip(f"mountainsort4 runtime not available: {exc!r}")
         sel = (
-            SortingSelection & {"sorting_id": manifest["sorting_id"]}
+            SortingSelection & {"sorting_id": run_summary["sorting_id"]}
         ).fetch1()
         assert sel["sorter"] == "mountainsort4"
         assert (

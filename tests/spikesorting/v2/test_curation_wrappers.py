@@ -61,10 +61,10 @@ def polymer_60s_sort(dj_conn):
     inputs = configure_v2_run_inputs(
         nwb_file_name, _TEAM, team_description="curation wrapper tests"
     )
-    manifest = run_v2_pipeline(
+    run_summary = run_v2_pipeline(
         **inputs, pipeline_preset="franklab_tetrode_hippocampus_30khz_ms5_2026_06"
     )
-    return {"sorting_id": manifest["sorting_id"]}
+    return {"sorting_id": run_summary["sorting_id"]}
 
 
 def _unit_ids(sort_pk) -> list[int]:
@@ -231,7 +231,7 @@ def test_propose_merge_off_existing_initial_curation(polymer_60s_sort):
 def test_summarize_curation_fields(populated_sorting):
     """``summarize_curation`` reports the curation's fields from the parts.
 
-    Also asserts a minimal curation key and a full pipeline manifest normalize
+    Also asserts a minimal curation key and a full pipeline run summary normalize
     to the same summary.
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
@@ -258,9 +258,9 @@ def test_summarize_curation_fields(populated_sorting):
     expected_merge = (SpikeSortingOutput.CurationV2 & key).fetch1("merge_id")
     assert summary["merge_id"] == expected_merge
 
-    # A full run_v2_pipeline manifest (extra, non-PK keys) normalizes to the
+    # A full run_v2_pipeline run summary (extra, non-PK keys) normalizes to the
     # same summary as the minimal curation key.
-    manifest_like = {
+    run_summary_like = {
         **key,
         "pipeline_preset": "irrelevant",
         "recording_id": "irrelevant",
@@ -268,7 +268,7 @@ def test_summarize_curation_fields(populated_sorting):
         "n_units": 999,
         "merge_id": "irrelevant",
     }
-    assert CurationV2.summarize_curation(manifest_like) == summary
+    assert CurationV2.summarize_curation(run_summary_like) == summary
 
 
 @pytest.mark.database

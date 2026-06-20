@@ -117,8 +117,8 @@ def first_hour(ux_session):
 
     Module-scoped so the single expensive MountainSort5 sort is shared across
     every assertion below. ``report_before`` is computed BEFORE the run (so the
-    preflight -> manifest ID round-trip is a genuine prediction on rows that do
-    not yet exist); ``manifest`` is the fresh, all-``computed`` run.
+    preflight -> run_summary ID round-trip is a genuine prediction on rows that do
+    not yet exist); ``run_summary`` is the fresh, all-``computed`` run.
     """
     inputs = configure_v2_run_inputs(
         ux_session,
@@ -129,11 +129,11 @@ def first_hour(ux_session):
     report_before = preflight_v2_pipeline(
         **inputs, pipeline_preset=_PIPELINE_PRESET
     )
-    manifest = run_v2_pipeline(**inputs, pipeline_preset=_PIPELINE_PRESET)
+    run_summary = run_v2_pipeline(**inputs, pipeline_preset=_PIPELINE_PRESET)
     return {
         "inputs": inputs,
         "report_before": report_before,
-        "manifest": manifest,
+        "run_summary": run_summary,
         "nwb_file_name": ux_session,
     }
 
@@ -188,7 +188,7 @@ def test_ux_smoke_first_hour(first_hour):
     assert isinstance(selected_group["bad_channel_count"], (int, np.integer))
 
     report = first_hour["report_before"]
-    manifest = first_hour["manifest"]
+    run_summary = first_hour["run_summary"]
 
     # 3. preflight passed and produced the expected_ids.
     assert report.ok is True, report.errors
@@ -198,38 +198,38 @@ def test_ux_smoke_first_hour(first_hour):
         "sorting_id",
     }
 
-    # 4. manifest carries all stable + additive keys with the right types,
+    # 4. run_summary carries all stable + additive keys with the right types,
     #    and the fresh run computed every stage.
     for key in (*_STABLE_KEYS, *_STATUS_KEYS, "stage_seconds", "warnings"):
-        assert key in manifest, f"missing manifest key {key!r}"
-    assert set(manifest["stage_seconds"]) == set(_STAGES)
-    assert all(isinstance(v, float) for v in manifest["stage_seconds"].values())
-    assert isinstance(manifest["warnings"], list)
+        assert key in run_summary, f"missing run_summary key {key!r}"
+    assert set(run_summary["stage_seconds"]) == set(_STAGES)
+    assert all(isinstance(v, float) for v in run_summary["stage_seconds"].values())
+    assert isinstance(run_summary["warnings"], list)
     for key in _STATUS_KEYS:
-        assert manifest[key] in _STAGE_STATUSES
-    assert all(manifest[k] == "computed" for k in _STATUS_KEYS), {
-        k: manifest[k] for k in _STATUS_KEYS
+        assert run_summary[key] in _STAGE_STATUSES
+    assert all(run_summary[k] == "computed" for k in _STATUS_KEYS), {
+        k: run_summary[k] for k in _STATUS_KEYS
     }
 
-    # 5. summarize_curation accepts the manifest directly and agrees with the
+    # 5. summarize_curation accepts the run_summary directly and agrees with the
     #    minimal curation key.
-    summary = CurationV2.summarize_curation(manifest)
-    assert summary["merge_id"] == manifest["merge_id"]
-    assert summary["curation_id"] == manifest["curation_id"]
-    assert summary["sorting_id"] == manifest["sorting_id"]
-    assert summary["n_units"] == manifest["n_units"]
+    summary = CurationV2.summarize_curation(run_summary)
+    assert summary["merge_id"] == run_summary["merge_id"]
+    assert summary["curation_id"] == run_summary["curation_id"]
+    assert summary["sorting_id"] == run_summary["sorting_id"]
+    assert summary["n_units"] == run_summary["n_units"]
     minimal_key = {
-        "sorting_id": manifest["sorting_id"],
-        "curation_id": manifest["curation_id"],
+        "sorting_id": run_summary["sorting_id"],
+        "curation_id": run_summary["curation_id"],
     }
     assert CurationV2.summarize_curation(minimal_key) == summary
 
     # 6. the sort resolves downstream and yields sane per-unit spike arrays.
     spike_times = SpikeSortingOutput().get_spike_times(
-        {"merge_id": manifest["merge_id"]}
+        {"merge_id": run_summary["merge_id"]}
     )
     assert isinstance(spike_times, list)
-    assert len(spike_times) == manifest["n_units"]
+    assert len(spike_times) == run_summary["n_units"]
     for arr in spike_times:
         assert isinstance(arr, np.ndarray)
         assert np.all(np.isfinite(arr))
@@ -238,7 +238,7 @@ def test_ux_smoke_first_hour(first_hour):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_ux_smoke_preflight_predicts_ids(first_hour):
-    """Preflight's ``expected_ids`` equal the PKs the manifest returns.
+    """Preflight's ``expected_ids`` equal the PKs the run_summary returns.
 
     Ties Phases 2 + 3 together at the user surface: the IDs were predicted
     before the run (the session was cleaned, so they did not yet exist), and
@@ -246,10 +246,10 @@ def test_ux_smoke_preflight_predicts_ids(first_hour):
     predicted (it is assigned by ``insert_curation``, not content-addressed).
     """
     report = first_hour["report_before"]
-    manifest = first_hour["manifest"]
+    run_summary = first_hour["run_summary"]
     for id_key in ("recording_id", "artifact_detection_id", "sorting_id"):
         assert (
-            report.expected_ids[id_key]["id"] == manifest[id_key]
+            report.expected_ids[id_key]["id"] == run_summary[id_key]
         ), f"preflight mispredicted {id_key}"
         assert (
             report.expected_ids[id_key]["exists"] is False
@@ -261,14 +261,14 @@ def test_ux_smoke_preflight_predicts_ids(first_hour):
 def test_ux_smoke_idempotent(first_hour):
     """A second identical run is idempotent.
 
-    Equal manifest modulo ``stage_seconds`` / ``*_status`` (now ``reused``),
+    Equal run_summary modulo ``stage_seconds`` / ``*_status`` (now ``reused``),
     inserting no duplicate selection rows.
     """
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionSelection
     from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
-    first_manifest = first_hour["manifest"]
+    first_run_summary = first_hour["run_summary"]
     inputs = first_hour["inputs"]
 
     counts_before = [
@@ -276,7 +276,7 @@ def test_ux_smoke_idempotent(first_hour):
         len(ArtifactDetectionSelection()),
         len(SortingSelection()),
     ]
-    second_manifest = run_v2_pipeline(
+    second_run_summary = run_v2_pipeline(
         **inputs, pipeline_preset=_PIPELINE_PRESET
     )
     counts_after = [
@@ -285,14 +285,14 @@ def test_ux_smoke_idempotent(first_hour):
         len(SortingSelection()),
     ]
     assert counts_after == counts_before, "re-run inserted duplicate rows"
-    assert all(second_manifest[k] == "reused" for k in _STATUS_KEYS), {
-        k: second_manifest[k] for k in _STATUS_KEYS
+    assert all(second_run_summary[k] == "reused" for k in _STATUS_KEYS), {
+        k: second_run_summary[k] for k in _STATUS_KEYS
     }
     stable_first = {
-        k: v for k, v in first_manifest.items() if k not in _VOLATILE_KEYS
+        k: v for k, v in first_run_summary.items() if k not in _VOLATILE_KEYS
     }
     stable_second = {
-        k: v for k, v in second_manifest.items() if k not in _VOLATILE_KEYS
+        k: v for k, v in second_run_summary.items() if k not in _VOLATILE_KEYS
     }
     assert stable_second == stable_first
 
@@ -336,7 +336,7 @@ def test_user_notebook_executes(first_hour):
     assert saw_parameters, "notebook is missing its 'parameters'-tagged cell"
     assert (
         namespace["run_summary"]["merge_id"]
-        == first_hour["manifest"]["merge_id"]
+        == first_hour["run_summary"]["merge_id"]
     )
     assert isinstance(namespace["spike_times"], list)
 

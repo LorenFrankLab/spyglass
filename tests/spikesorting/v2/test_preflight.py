@@ -451,7 +451,7 @@ def test_preflight_expected_ids_round_trip(preflight_session):
     """``expected_ids`` equals the PKs ``run_v2_pipeline`` actually produces.
 
     On a clean session ``exists`` is False pre-run; the deterministic ids match
-    the manifest the run returns, and a post-run preflight sees them as
+    the run_summary the run returns, and a post-run preflight sees them as
     existing.
     """
     from tests.spikesorting.v2.test_single_session_pipeline import (
@@ -468,13 +468,13 @@ def test_preflight_expected_ids_round_trip(preflight_session):
     for stage in ("recording_id", "artifact_detection_id", "sorting_id"):
         assert pre.expected_ids[stage]["exists"] is False
 
-    manifest = run_v2_pipeline(**preflight_inputs)
-    assert pre.expected_ids["recording_id"]["id"] == manifest["recording_id"]
+    run_summary = run_v2_pipeline(**preflight_inputs)
+    assert pre.expected_ids["recording_id"]["id"] == run_summary["recording_id"]
     assert (
         pre.expected_ids["artifact_detection_id"]["id"]
-        == manifest["artifact_detection_id"]
+        == run_summary["artifact_detection_id"]
     )
-    assert pre.expected_ids["sorting_id"]["id"] == manifest["sorting_id"]
+    assert pre.expected_ids["sorting_id"]["id"] == run_summary["sorting_id"]
 
     post = preflight_v2_pipeline(**preflight_inputs)
     for stage in ("recording_id", "artifact_detection_id", "sorting_id"):

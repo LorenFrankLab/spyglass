@@ -49,7 +49,7 @@ def export_smoke_session(dj_conn):
 
 
 def _run_pipeline(session, pipeline_preset):
-    """Run ``run_v2_pipeline`` end-to-end and return its manifest.
+    """Run ``run_v2_pipeline`` end-to-end and return its run summary.
 
     Cleans every v2 row for the session first so the sort is rebuilt
     deterministically regardless of test order.
@@ -80,19 +80,19 @@ def _run_pipeline(session, pipeline_preset):
     )
 
 
-def _file_names(manifest):
+def _file_names(run_summary):
     """Return (units_nwb, recording_nwb) AnalysisNwbfile names for a merge."""
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.recording import Recording
 
     cur_part = SpikeSortingOutput.CurationV2 & {
-        "merge_id": manifest["merge_id"]
+        "merge_id": run_summary["merge_id"]
     }
     cur_key = (CurationV2 & cur_part).fetch1("KEY")
     units_nwb = (CurationV2 & cur_key).fetch1("analysis_file_name")
     recording_nwb = (
-        Recording & {"recording_id": manifest["recording_id"]}
+        Recording & {"recording_id": run_summary["recording_id"]}
     ).fetch1("analysis_file_name")
     return units_nwb, recording_nwb
 
@@ -149,15 +149,15 @@ def test_v2_export_captures_curation_and_recording_files(export_smoke_session):
     """A v2 ``merge_id`` export captures the units NWB AND the recording
     cache in the final ``Export.File`` (v1 parity, via the FK cascade)."""
     paper_id = "v2_export_complete"
-    manifest = _run_pipeline(
+    run_summary = _run_pipeline(
         export_smoke_session, "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
     )
-    assert manifest["n_units"] >= 1, "expected a populated sort"
-    units_nwb, recording_nwb = _file_names(manifest)
+    assert run_summary["n_units"] >= 1, "expected a populated sort"
+    units_nwb, recording_nwb = _file_names(run_summary)
     assert units_nwb != recording_nwb, "units and recording must be distinct"
 
     try:
-        selection, final = _export_and_populate(manifest["merge_id"], paper_id)
+        selection, final = _export_and_populate(run_summary["merge_id"], paper_id)
 
         # The supported path captures BOTH analysis files in the final export.
         assert units_nwb in final, (
@@ -192,23 +192,23 @@ def test_v2_zero_unit_export_path(export_smoke_session):
     """A zero-unit curation exports without error and its empty-but-real
     units NWB is captured; the recording cache is still captured too."""
     paper_id = "v2_export_zero_unit"
-    manifest = _run_pipeline(
+    run_summary = _run_pipeline(
         export_smoke_session, "franklab_clusterless_2026_06"
     )
-    assert manifest["n_units"] == 0, (
+    assert run_summary["n_units"] == 0, (
         "shipped clusterless default should find zero units on the smoke "
-        f"fixture; got {manifest['n_units']}"
+        f"fixture; got {run_summary['n_units']}"
     )
     assert (
-        manifest["merge_id"] is not None
+        run_summary["merge_id"] is not None
     ), "zero-unit sort must be merge-keyable"
-    units_nwb, recording_nwb = _file_names(manifest)
+    units_nwb, recording_nwb = _file_names(run_summary)
 
     try:
         # also_spike_times exercises get_spike_times on the empty units
         # table -- must not raise KeyError: 'spike_times'.
         selection, final = _export_and_populate(
-            manifest["merge_id"], paper_id, also_spike_times=True
+            run_summary["merge_id"], paper_id, also_spike_times=True
         )
 
         # The empty-but-real units NWB is logged at the selection stage:

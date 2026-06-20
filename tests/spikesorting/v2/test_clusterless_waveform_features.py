@@ -150,7 +150,7 @@ def _sort_group_id(session):
 
 
 def _run_ms5(session):
-    """Clean + run the MountainSort5 pipeline preset; return its manifest."""
+    """Clean + run the MountainSort5 pipeline preset; return its run summary."""
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
@@ -468,11 +468,11 @@ def test_unit_waveform_features_v2_sparse_unit_ids(polymer_60s_session):
     clusterless decoding -- the thresholder always emits exactly one unit).
     """
     param_pk = _amplitude_param()
-    manifest = _run_ms5(polymer_60s_session)
+    run_summary = _run_ms5(polymer_60s_session)
     try:
-        if manifest["n_units"] < 2:
+        if run_summary["n_units"] < 2:
             pytest.skip(
-                f"MS5 produced {manifest['n_units']} unit(s) on the 60s "
+                f"MS5 produced {run_summary['n_units']} unit(s) on the 60s "
                 "polymer fixture; need >=2 to merge into a non-positional "
                 "survivor id."
             )
@@ -480,7 +480,7 @@ def test_unit_waveform_features_v2_sparse_unit_ids(polymer_60s_session):
         from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
         from spyglass.spikesorting.v2.sorting import Sorting
 
-        sort_pk = {"sorting_id": manifest["sorting_id"]}
+        sort_pk = {"sorting_id": run_summary["sorting_id"]}
         source_ids = sorted(
             int(u) for u in (Sorting.Unit & sort_pk).fetch("unit_id")
         )
@@ -492,7 +492,7 @@ def test_unit_waveform_features_v2_sparse_unit_ids(polymer_60s_session):
         # non-positional id.
         merge_id = _curation_merge_id(
             sort_pk,
-            parent_curation_id=manifest["curation_id"],
+            parent_curation_id=run_summary["curation_id"],
             merge_groups=[source_ids],
             apply_merge=True,
         )
