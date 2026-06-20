@@ -217,8 +217,8 @@ def test_is_duplicate_key_error_classifies_exceptions():
 
     # DataJoint maps MySQL errno 1062 -> DuplicateError: that is the race.
     assert _is_duplicate_key_error(dj.errors.DuplicateError("Duplicate entry"))
-    # FK violations surface as IntegrityError with no 1062 errno / "Duplicate
-    # entry" text -- they MUST propagate (Phase A step 5), not be swallowed.
+    # FK violations surface as IntegrityError with no 1062 errno -- they MUST
+    # propagate (Phase A step 5), not be swallowed.
     assert not _is_duplicate_key_error(
         dj.errors.IntegrityError(
             "Cannot add or update a child row: a foreign key constraint fails"
@@ -229,8 +229,9 @@ def test_is_duplicate_key_error_classifies_exceptions():
     assert _is_duplicate_key_error(
         dj.errors.IntegrityError(1062, "Duplicate entry 'x' for key 'PRIMARY'")
     )
-    # ...and the rendered "Duplicate entry" text is recognized too.
-    assert _is_duplicate_key_error(
+    # Rendered database messages alone are deliberately ignored: they vary by
+    # connector/version/locale and are not safe enough to recover from.
+    assert not _is_duplicate_key_error(
         dj.errors.IntegrityError("Duplicate entry 'x' for key 'PRIMARY'")
     )
     # CRITICAL false-positive guard: an FK-violation IntegrityError whose

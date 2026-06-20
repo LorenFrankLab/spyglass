@@ -31,6 +31,7 @@ from spyglass.spikesorting.v2._signal_math import (  # noqa: F401
     _get_recording_timestamps,
     _spike_times_to_frames,
 )
+
 # Pure reference-resolution lives in _reference_resolution.py (DB-free);
 # re-exported so ``from .utils import resolve_group_reference`` (etc.) and the
 # ``ReferenceMode`` type keep working unchanged.
@@ -40,6 +41,7 @@ from spyglass.spikesorting.v2._reference_resolution import (  # noqa: F401
     assert_reference_not_member,
     resolve_group_reference,
 )
+
 # Parameter-Lookup validation lives in _lookup_validation.py and NWB /
 # recording-metadata helpers in _nwb_metadata_helpers.py (both import-light);
 # re-exported so existing ``from .utils import validate_lookup_rows`` /
@@ -118,24 +120,16 @@ def _is_duplicate_key_error(exc: BaseException) -> bool:
     The ``IntegrityError`` branch is purely defensive -- for a raw
     connector error surfacing before DataJoint's translation (which strips
     the errno, so a *translated* 1062 never reaches ``IntegrityError`` at
-    all). It matches ONLY the structured errno (``exc.args[0] == 1062``) or
-    the specific ``"Duplicate entry"`` text, NEVER a bare ``"1062"``
-    substring: a free substring would false-positive on an FK message that
-    merely contains those digits (a constraint name, a rendered UUID) and
-    silently swallow a genuine integrity failure (e.g. an FK violation)
-    that must propagate rather than be treated as the recoverable
-    duplicate-PK race.
+    all). It matches ONLY the structured errno (``exc.args[0] == 1062``),
+    not rendered database messages. Message matching is connector- and
+    locale-sensitive, and a false positive would silently swallow a genuine
+    integrity failure (e.g. an FK violation) that must propagate rather
+    than be treated as the recoverable duplicate-PK race.
     """
     if isinstance(exc, dj.errors.DuplicateError):
         return True
     if isinstance(exc, dj.errors.IntegrityError):
-        # Structured errno from a raw/untranslated connector error.
-        if exc.args and exc.args[0] == 1062:
-            return True
-        # ER_DUP_ENTRY messages render as "Duplicate entry '...' for key
-        # '...'". This phrase is specific to duplicate keys; FK-violation
-        # messages ("a foreign key constraint fails") never contain it.
-        return any("Duplicate entry" in str(a) for a in exc.args)
+        return bool(exc.args and exc.args[0] == 1062)
     return False
 
 
