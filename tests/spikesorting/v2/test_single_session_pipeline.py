@@ -12410,13 +12410,18 @@ def test_run_v2_pipeline_pipeline_preset_wiring_to_run_summary(
 def test_run_v2_pipeline_mountainsort4_pipeline_preset(polymer_smoke_session):
     """A29: the franklab MS4 pipeline preset runs end-to-end where MS4 is runnable.
 
-    ``mountainsort4`` appears in ``installed_sorters()`` but its runtime is not
-    available in the SI 0.104 test image, so this self-skips on the sorter
-    failure. Where MS4 is runnable it asserts the run_summary carries the MS4
-    sorter wiring.
+    ``mountainsort4`` appears in ``installed_sorters()`` but its ``ml_ms4alg``
+    backend is unavailable in the SI 0.104 test image, so this self-skips where
+    MS4 is not runnable. Two skip paths: the default preflight now imports the
+    backend and raises ``PreflightError`` (its ``sorter_runtime_available``
+    check) before the sort; if the backend is present but the sort still fails
+    at runtime, the sorting stage raises ``PipelineStageError``. Where MS4 IS
+    runnable it asserts the run_summary carries the MS4 sorter wiring.
     """
-    from spikeinterface.sorters.utils import SpikeSortingError
-
+    from spyglass.spikesorting.v2.exceptions import (
+        PipelineStageError,
+        PreflightError,
+    )
     from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
@@ -12432,12 +12437,23 @@ def test_run_v2_pipeline_mountainsort4_pipeline_preset(polymer_smoke_session):
                 team_name=team_name,
                 pipeline_preset="franklab_tetrode_hippocampus_30khz_ms4_2026_06",
             )
-        except SpikeSortingError as exc:
-            # Narrow to the sorter-RUNTIME failure only: mountainsort4 ships in
-            # installed_sorters() but its runtime is unavailable in some
-            # images. Preset-lookup / run_summary / DB / wiring regressions raise
-            # other exception types and must FAIL, not skip.
-            pytest.skip(f"mountainsort4 runtime not available: {exc!r}")
+        except PreflightError as exc:
+            # New honest preflight: a missing/broken ml_ms4alg backend fails the
+            # sorter_runtime_available check before the sort. That IS "MS4 not
+            # runnable here" -> skip; any OTHER preflight failure is a real
+            # regression and must propagate.
+            if "ml_ms4alg" in str(exc) or "sorter_runtime_available" in str(
+                exc
+            ):
+                pytest.skip(f"mountainsort4 backend not available: {exc!r}")
+            raise
+        except PipelineStageError as exc:
+            # Backend present but the sort crashed at runtime: only the sorting
+            # stage's runtime failure is a skip; recording/artifact/curation
+            # stage failures are real regressions.
+            if exc.stage == "sorting":
+                pytest.skip(f"mountainsort4 runtime not available: {exc!r}")
+            raise
         sel = (
             SortingSelection & {"sorting_id": run_summary["sorting_id"]}
         ).fetch1()

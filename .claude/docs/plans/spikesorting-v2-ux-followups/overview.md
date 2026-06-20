@@ -50,7 +50,7 @@ for both tetrode and probe.
 - `recording.py:872-958` + `_params/preprocessing.py:30,160` — `default_franklab` is the schema default (300 Hz, `min_segment_length=1.0`); correct to the region recipes (hippocampus 600 Hz / cortex 300 Hz, both 1.5 ms).
 - `artifact.py:113-183` + `_params/artifact_detection.py:63,77` — `default` is 500 µV / 1.0; ship production `100uv_p07` / `50uv_p07`, rename the 500 µV row honestly.
 - `sorting.py:266-392` — ship the MS4 `franklab_probe_*` family (radius × rate); demote MS5 to `alternative`; reconcile the alias shim at `:294-325` (CHANGELOG:374, Migration:14-15, `test_audit_parity:60-90`).
-- `pipeline.py:669-719` (`_PIPELINE_PRESETS`), `:1069`/`:783` (`run_v2_pipeline`/`preflight` default → MS4), `:11-19` (module docstring), `:61-129` (`describe_*`).
+- `pipeline.py:669-719` (`_PIPELINE_PRESETS`), `:1069`/`:783` (`run_v2_pipeline`/`preflight` default → MS5; MS4 needs numpy<2), `:11-19` (module docstring), `:61-129` (`describe_*`).
 - `utils.py:821-863` (`validate_lookup_rows`, four tables), `:1000` (docstring name).
 - `_selection_identity.py:150-275` — identity hashes the row **name** (`:171/:221/:272`), so corrections change derived IDs → regenerate `tests/spikesorting/v2/test_preflight.py:95-97`; preset pins at `test_pipeline_presets.py:55,113-114`. **Leave v0/v1 sites alone** (`tests/conftest.py:1856`).
 
@@ -105,7 +105,7 @@ Defined by `run_v2_pipeline`, documented at `pipeline.py:1143-1174`. Stable keys
 - **Phase 1:** no behavior change; `partial_run_summary` remains the attribute;
   no stale "manifest" remains where it refers to the pipeline return object.
   Manual review should preserve unrelated fixture/provenance "manifest" uses.
-- **Phase 2a:** region preproc rows = 600/300 Hz @ 1.5 ms; the MS4 `franklab_probe_*` family matches the DB radius/clip_size/detect_interval; production artifact = 100/50 µV @ 0.7; `run_v2_pipeline`/`preflight` default resolves to an MS4 preset and MS5 is `alternative`; `describe_pipeline_presets()` exposes `target_region`/`adjacency_radius_um`/`recommendation_status`; `describe_parameter_rows()` returns fingerprints; duplicate content rejected by default; pinned UUIDs regenerated; alias decision consistent across code/test/CHANGELOG/Migration; **parity tests assert each corrected blob equals the inlined real recipe.**
+- **Phase 2a:** region preproc rows = 600/300 Hz @ 1.5 ms; the MS4 `franklab_probe_*` family matches the DB radius/clip_size/detect_interval; production artifact = 100/50 µV @ 0.7; `run_v2_pipeline`/`preflight` default resolves to **MS5** (PR-review fix; MS4's `ml_ms4alg` backend needs numpy<2) while MS4 stays `production` and MS5 `alternative`; `describe_pipeline_presets()` exposes `target_region`/`adjacency_radius_um`/`recommendation_status`; `describe_parameter_rows()` returns fingerprints; duplicate content rejected by default; pinned UUIDs regenerated; alias decision consistent across code/test/CHANGELOG/Migration; **parity tests assert each corrected blob equals the inlined real recipe.**
 - **Phase 2b (gated):** downstream recipes ship only after the analyzer-curation phase and match the inlined Set A values; unattested slots are flagged `experimental` / enumerated, never silently shipped.
 - **Phase 3:** `describe_intervals` returns the documented columns / empty-with-columns; docs surface the catalog via `describe_pipeline_presets()`; placeholder fixed.
 - **Phase 4:** explicit `pipeline_preset` required; `preflight_v2_pipeline_session`
@@ -135,7 +135,7 @@ Defined by `run_v2_pipeline`, documented at `pipeline.py:1143-1174`. Stable keys
 Additive PRs / pre-release renames on the `spikesorting-v2` branch; v2 is
 pre-release, so blob corrections need no deprecation window. Order:
 finish the lightweight Phase 1 cleanup opportunistically; **Phase 2a** before
-Phase 3/4 docs/examples (it carries the corrected catalog and the MS4 default);
+Phase 3/4 docs/examples (it carries the corrected catalog and the MS5 default);
 **Phase 2b** gated — its downstream half waits on the analyzer-curation phase,
 its unattested half on scientific sign-off; Phase 3's `describe_intervals`
 helper and Phase 4's session preflight/runner may be coded independently, but

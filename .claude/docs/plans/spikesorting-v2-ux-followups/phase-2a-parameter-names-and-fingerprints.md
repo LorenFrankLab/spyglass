@@ -2,6 +2,19 @@
 
 [← back to PLAN.md](PLAN.md) · [overview](overview.md)
 
+> **Update (post-implementation, supersedes the MS4-default tasks below):** a
+> later PR-review fix moved the shipped `run_v2_pipeline`/`preflight_v2_pipeline`
+> default to the **MS5** tetrode-hippocampus preset. MS4's `ml_ms4alg` backend is
+> a numpy<2-era package that does not install under the v2 `numpy>=2` baseline,
+> and `installed_sorters()` over-reports the MS4 wrapper as present, so an MS4
+> default green-lit preflight then crashed at sort time. MS4 stays the
+> `"production"` probe recipe (selectable, needs numpy<2); MS5 keeps
+> `recommendation_status="alternative"` — the function default is a separate,
+> runnability-driven choice, and preflight gained a `sorter_runtime_available`
+> check. Do **not** re-make MS4 the default. The shipped `recommendation_status`
+> values are `production`/`alternative`/`experimental` (not the
+> `comparison`/`shipped_default` the draft below proposed).
+
 Parameter row names are user-facing provenance, but today a v2 row can be called
 `"default"` / `"default_franklab"` regardless of what the blob contains, and —
 critically — **v2's shipped "franklab" defaults do not match what the lab
@@ -113,7 +126,7 @@ default (3000/1.0). Keep it, but name it honestly — it is not "production".)
   shipped rows to those constants rather than reusing the same factory call that
   constructs the row.
 
-- **Make MS4 the production default.** Change `run_v2_pipeline` / `preflight_v2_pipeline` default `pipeline_preset` from the MS5 tetrode preset to the production MS4 preset (pick the tetrode-hippocampus MS4 as the conservative single-group default, or require explicit choice). Keep the MS5 tetrode row but mark it `recommendation_status="comparison"` — **not** recommended/default. Update the module docstring at [pipeline.py:11-19](../../../../src/spyglass/spikesorting/v2/pipeline.py#L11-L19) (no longer "Three presets ship today").
+- **Make MS4 the production default.** ~~Change `run_v2_pipeline` / `preflight_v2_pipeline` default `pipeline_preset` ... to the production MS4 preset ... mark [MS5] `recommendation_status="comparison"`.~~ **SUPERSEDED (see the note at top):** the shipped default stayed/returned to **MS5** because MS4's `ml_ms4alg` backend needs numpy<2; MS5 keeps `recommendation_status="alternative"`, MS4 stays `"production"`. The module docstring update (no longer "Three presets ship today") still applies.
 
 - **Add preset-selection metadata** including the real axes: extend `_PipelinePreset` / `describe_pipeline_presets()` with `probe_type`, **`target_region`** (`hippocampus`/`cortex` — sets the preproc high-pass band, 600/300 Hz), `sampling_rate_hz`, `sorter_family`, **`adjacency_radius_um`** (informational — one radius, 100, ships), and `recommendation_status` (`"production"` | `"comparison"` | `"shipped_default"` | `"experimental"`). Provenance should name the convention ("production — Coulter/Chiang"), not imply lab consensus.
 
@@ -150,7 +163,7 @@ default (3000/1.0). Keep it, but name it honestly — it is not "production".)
 | `test_region_preproc_recipes` | Hippocampus preproc = 600 Hz HP, cortex preproc = 300 Hz HP, both 6000 LP / `min_segment_length=0.0015`; compared against independent June 2026 constants; the effective high-pass matches the region band (filter applied at preproc, sorter `filter: False`). |
 | `test_probe_ms4_family_matches_db` | Each `franklab_probe_*_ms4_*` row equals the independent June 2026 constants for `adjacency_radius`/`clip_size`/`detect_interval`; shared core matches. |
 | `test_production_artifact_recipes` | `..._100uv_p07_...` and `..._50uv_p07_...` match independent constants for 100/50 µV @ 0.7; the renamed 500 µV row is not labeled production. |
-| `test_ms4_is_probe_default` | `run_v2_pipeline`/`preflight` default resolves to an MS4 preset; MS5 rows carry `recommendation_status="comparison"`. |
+| `test_ms4_is_probe_default` | **SUPERSEDED** (see top note): the shipped test is `test_default_preset_is_runnable_ms5` — `run_v2_pipeline`/`preflight` default resolves to the **MS5** preset; MS4 stays `recommendation_status="production"`, MS5 `"alternative"`. |
 | `test_parameter_fingerprint_*` | Stable dict-order; excludes row name; sorter-context included. |
 | `test_duplicate_parameter_content_rejected` / `_escape_hatch` | Accidental duplicate rejected; `allow_duplicate_params=True` permits + marks `duplicate_of`. |
 | `test_describe_parameter_rows_columns_and_usage` | Documented columns incl. `adjacency_radius_um`/`recommendation_status`; `used_by_pipeline_presets` correct. |
@@ -168,7 +181,7 @@ No new data fixtures. DB-free unit tests for fingerprints, the parity-vs-real-re
 
 Dispatch `code-reviewer` before the PR. Confirm:
 - Every dated production row's blob **matches the inlined real recipe** (the parity tests are real comparisons, not tautologies); v2's deliberate divergences (500 µV) are named honestly, not "production".
-- MS4 is the probe default; MS5 is `comparison`; the `run_v2_pipeline`/`preflight` default and module docstring are updated.
+- ~~MS4 is the probe default; MS5 is `comparison`~~ **SUPERSEDED:** MS5 is the shipped `run_v2_pipeline`/`preflight` default (MS4 needs numpy<2); MS4 stays `production`, MS5 `alternative`; the module docstring is updated.
 - The reference-site checklist is complete; no v0/v1 name renamed; pinned UUIDs regenerated (not loosened); alias decision consistent across code/test/CHANGELOG/Migration.
 - Fingerprints DB-free, exclude row names; `params_schema_version` never bumped.
 - Docstrings/test/module names don't reference this plan; the pre-existing scaffolding-doc reference at `sorting.py:404` is noted for separate cleanup.
