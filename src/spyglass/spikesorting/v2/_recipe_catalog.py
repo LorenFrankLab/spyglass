@@ -8,9 +8,12 @@ tables derive their ``_DEFAULT_CONTENTS`` from the builders here
 ``_PIPELINE_PRESETS`` from :func:`pipeline_preset_specs` -- so a recipe is
 defined in exactly one place.
 
-Database-free: it builds the blobs from the ``_params`` Pydantic schemas
-only (no ``dj.schema`` activation), so it imports without a DB connection
-and the schema modules can import it without a cycle.
+No DB connection or ``dj.schema`` activation at import: it builds the
+blobs from the ``_params`` Pydantic schemas only, so it imports without a
+database connection and the schema modules import it without a cycle.
+("No DB" means no connection/activation -- NOT "no DataJoint installed":
+like every spyglass module it still transitively pulls DataJoint /
+SpikeInterface via the framework's package ``__init__``.)
 
 ``tests/spikesorting/v2/_recipe_constants.py`` keeps an INDEPENDENT
 hand-written copy of these recipe values that the parity tests compare

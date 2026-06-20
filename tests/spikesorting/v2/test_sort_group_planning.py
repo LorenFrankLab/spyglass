@@ -2,7 +2,8 @@
 
 ``SortGroupV2.set_group_by_shank`` /
 ``set_group_by_electrode_table_column`` are thin orchestrators over three
-pure (DataJoint-free) helpers extracted for testability:
+pure helpers (no DataJoint queries / no ``dj.schema`` activation)
+extracted for testability:
 
 * ``_plan_sort_groups_by_shank`` / ``_plan_sort_groups_by_column`` --
   enumerate groupings and resolve each group's reference, returning
@@ -12,9 +13,12 @@ pure (DataJoint-free) helpers extracted for testability:
 
 These tests drive those helpers directly with fabricated NumPy structured
 arrays (mimicking ``Electrode().fetch()``) -- no database fixture, no
-``populate``. The module import still activates the schema, so the
-``dj_conn`` fixture only needs to be live; the planners themselves issue
-no queries.
+``populate``, no queries. They import the DB-free ``_sort_group_planning``
+module (NOT a ``@schema`` module), so they need no ``dj.schema``
+activation or DB connection and run in well under a second. (Importing
+them still pulls DataJoint / SpikeInterface via the spyglass package
+``__init__`` -- "no DB" here means no connection / activation, not "no
+DataJoint installed".)
 """
 
 from __future__ import annotations

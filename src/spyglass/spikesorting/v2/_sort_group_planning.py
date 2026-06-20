@@ -2,11 +2,14 @@
 
 These functions resolve electrode-grouping decisions (by probe shank or
 by an arbitrary ``Electrode``-table column) and materialize the resulting
-table rows. They are deliberately free of any DataJoint table access --
-``SortGroupV2`` fetches the ``Electrode`` rows and runs the inserts;
-everything in between lives here so it is unit-testable without a
-database (mirrors the ``_curation_transforms`` / ``_signal_math`` service
-modules).
+table rows. They issue no DataJoint queries and trigger no ``dj.schema``
+activation -- ``SortGroupV2`` fetches the ``Electrode`` rows and runs the
+inserts; everything in between lives here so it is unit-testable without a
+live DB connection (the test imports THIS module, not a ``@schema``
+module, so collection needs no container). "No DB" means no connection /
+activation, NOT "no DataJoint installed" -- importing any spyglass module
+still pulls DataJoint / SpikeInterface via the package ``__init__``.
+Mirrors the ``_curation_transforms`` / ``_signal_math`` service modules.
 """
 
 from __future__ import annotations
