@@ -37,11 +37,67 @@ from spyglass.spikesorting.v2._params.sorter import (
 # ---------- preprocessing ---------------------------------------------------
 
 
-def test_preprocessing_defaults_round_trip():
-    """Default-constructed preprocessing params survive ``model_dump``."""
-    blob = PreprocessingParamsSchema().model_dump()
+def test_preprocessing_non_default_blob_round_trips():
+    """A fully NON-default blob survives ``dump -> validate -> dump`` unchanged.
+
+    A default-constructed model dumped then re-validated is equal essentially
+    by construction (near-tautological). Round-tripping a blob whose every
+    field diverges from the schema defaults gives the test teeth: a validator
+    or normalizer that mangles a real configured params blob is caught here,
+    cheaply, instead of at populate time.
+    """
+    schema = PreprocessingParamsSchema(
+        phase_shift={"margin_ms": 50.0},
+        bandpass_filter={"freq_min": 250.0, "freq_max": 5000.0},
+        common_reference={"operator": "average"},
+        whiten={"dtype": "float64"},
+        min_segment_length=0.0015,
+        bad_channel_handling="interpolate",
+    )
+    blob = schema.model_dump()
+    # Sanity: the blob really IS non-default, else the round-trip proves little.
+    assert blob != PreprocessingParamsSchema().model_dump()
+
     rebuilt = PreprocessingParamsSchema.model_validate(blob).model_dump()
     assert rebuilt == blob
+    # Each non-default value is preserved verbatim through the round-trip.
+    assert rebuilt["phase_shift"] == {"margin_ms": 50.0}
+    assert rebuilt["bandpass_filter"] == {"freq_min": 250.0, "freq_max": 5000.0}
+    assert rebuilt["common_reference"]["operator"] == "average"
+    assert rebuilt["whiten"] == {"dtype": "float64"}
+    assert rebuilt["min_segment_length"] == 0.0015
+    assert rebuilt["bad_channel_handling"] == "interpolate"
+
+
+@pytest.mark.parametrize("bad_min_segment", [-0.5, -1e-6])
+def test_preprocessing_rejects_negative_min_segment_length(bad_min_segment):
+    """``min_segment_length`` is non-negative (``ge=0``); negatives reject.
+
+    The field drops disjoint-interval slivers shorter than this many seconds
+    before the sorter; a negative value is meaningless and silently disabling
+    the filter via a bad row must fail loudly at insert, not at sort time.
+    """
+    with pytest.raises(ValidationError):
+        PreprocessingParamsSchema(min_segment_length=bad_min_segment)
+    # Zero is the documented "drop nothing" boundary and is accepted.
+    zero = PreprocessingParamsSchema(min_segment_length=0.0)
+    assert zero.min_segment_length == 0.0
+
+
+def test_preprocessing_rejects_unknown_bad_channel_handling():
+    """``bad_channel_handling`` is ``Literal['remove','interpolate']``.
+
+    A typo (e.g. ``'drop'``) must reject rather than silently fall through to
+    the default handling, which would change which channels reach the sorter.
+    """
+    with pytest.raises(ValidationError):
+        PreprocessingParamsSchema(bad_channel_handling="drop")
+    assert (
+        PreprocessingParamsSchema(
+            bad_channel_handling="interpolate"
+        ).bad_channel_handling
+        == "interpolate"
+    )
 
 
 def test_phase_shift_off_by_default():
@@ -327,6 +383,23 @@ def test_ms4_detect_sign_rejects_invalid_value():
         MountainSort4Schema(detect_sign=2)
 
 
+@pytest.mark.parametrize("bad_radius", [-0.5, -0.001, -0.999])
+def test_ms4_rejects_open_interval_adjacency_radius(bad_radius):
+    """``adjacency_radius`` in the open interval ``(-1, 0)`` is rejected.
+
+    ``-1`` is SpikeInterface's "use all channels" sentinel and ``>= 0`` is an
+    explicit radius; anything strictly between is meaningless. These values
+    pass the ``ge=-1.0`` Field bound, so the rejection here exercises the
+    custom ``_reject_open_interval_radius`` validator specifically (matched on
+    its message), not the Field constraint.
+    """
+    with pytest.raises(ValidationError, match="open interval"):
+        MountainSort4Schema(adjacency_radius=bad_radius)
+    # The sentinel and the lower explicit-radius boundary are both accepted.
+    assert MountainSort4Schema(adjacency_radius=-1.0).adjacency_radius == -1.0
+    assert MountainSort4Schema(adjacency_radius=0.0).adjacency_radius == 0.0
+
+
 def test_ms5_default_matches_appendix():
     """MS5 defaults mirror the appendix's empirically-validated row."""
     blob = MountainSort5Schema().model_dump()
@@ -436,6 +509,43 @@ def test_clusterless_threshold_unit_explicit():
         ClusterlessThresholderSchema(threshold_unit="microvolts")
 
 
+def test_clusterless_rejects_implausible_mad_threshold():
+    """A microvolt threshold left in MAD units is rejected at insert.
+
+    ``threshold_unit='mad'`` with no explicit ``noise_levels`` makes SI treat
+    ``detect_threshold`` as a MAD multiplier (real ones are ~3-15). A value
+    like 100 (a microvolt threshold copied into a MAD-mode row) makes the
+    effective threshold absurd and silently detects almost nothing -- a
+    zero-unit sort. The ``_guard_implausible_mad_threshold`` validator must
+    reject it, accept a plausible multiplier, and stay out of the way of the
+    explicit-``noise_levels`` advanced override.
+    """
+    # Reject: > _MAX_PLAUSIBLE_MAD_MULTIPLIER (50) in mad mode, no noise_levels.
+    with pytest.raises(ValidationError, match="implausibly large MAD"):
+        ClusterlessThresholderSchema(
+            detect_threshold=100.0, threshold_unit="mad"
+        )
+
+    # Accept: a plausible MAD multiplier in the same mode.
+    ok = ClusterlessThresholderSchema(
+        detect_threshold=5.0, threshold_unit="mad"
+    )
+    assert ok.detect_threshold == 5.0 and ok.threshold_unit == "mad"
+
+    # Bypass: an explicit noise_levels override is used verbatim, so a large
+    # value is intentional and the guard must NOT fire.
+    override = ClusterlessThresholderSchema(
+        detect_threshold=100.0, threshold_unit="mad", noise_levels=[1.0]
+    )
+    assert override.detect_threshold == 100.0
+
+    # Bypass: 'uv' mode never triggers the MAD guard, even at large thresholds.
+    uv = ClusterlessThresholderSchema(
+        detect_threshold=100.0, threshold_unit="uv"
+    )
+    assert uv.detect_threshold == 100.0
+
+
 def test_insert_row_to_dict_normalizes_and_rejects_bad_shapes():
     """``_insert_row_to_dict`` handles the supported insert row shapes.
 
@@ -463,6 +573,15 @@ def test_insert_row_to_dict_normalizes_and_rejects_bad_shapes():
     for bad in ("params", b"params"):
         with pytest.raises(TypeError, match="mapping or"):
             _insert_row_to_dict(bad, names)
+    # Positional rows must match the heading length exactly. ``zip`` would
+    # otherwise truncate extras silently or let missing attrs fail later with
+    # an opaque KeyError.
+    for bad in (
+        ("mountainsort4", "name"),
+        ("mountainsort4", "name", {"x": 1}, "ignored_extra"),
+    ):
+        with pytest.raises(ValueError, match="wrong length"):
+            _insert_row_to_dict(bad, names)
 
 
 def test_clusterless_noise_levels_length_guard():
@@ -486,6 +605,12 @@ def test_clusterless_noise_levels_length_guard():
     # A wrong explicit length raises and names the expected lengths.
     for bad in ([1.0, 2.0], [1.0, 2.0, 3.0], [1.0] * 5):
         with pytest.raises(ValueError, match="length 1.*or.*n_channels=4"):
+            _assert_noise_levels_length(bad, n_channels)
+    # Raw update1 / legacy-row bypasses can carry non-list shapes. Reject them
+    # here with the curated message rather than letting len()/np.asarray()
+    # produce misleading behavior downstream.
+    for bad in (1.0, "1234", b"1234"):
+        with pytest.raises(ValueError, match="numeric sequence"):
             _assert_noise_levels_length(bad, n_channels)
 
 
