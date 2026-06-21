@@ -14,7 +14,11 @@ database fixture.
 
 from __future__ import annotations
 
+import pytest
+
 from spyglass.spikesorting.v2.utils import split_leading_restrictions
+
+pytestmark = pytest.mark.unit
 
 
 def test_no_args_peels_nothing():

@@ -1023,9 +1023,8 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
 
         Thin delegator to
         :func:`._artifact_intervals.scan_artifact_frames`; kept as an
-        ``ArtifactDetection`` staticmethod because ``test_audit_parity``
-        calls ``ArtifactDetection._scan_artifact_frames(...)`` directly.
-        The chunked-scan memory contract (default 1 s chunk,
+        ``ArtifactDetection`` staticmethod for the public/tested chunked
+        artifact-scan boundary. The chunked-scan memory contract (default 1 s chunk,
         ``ChunkRecordingExecutor`` over the ``_artifact_compute`` kernels)
         lives in the service module.
         """

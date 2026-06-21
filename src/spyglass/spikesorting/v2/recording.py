@@ -1778,10 +1778,10 @@ class Recording(SpyglassMixin, dj.Computed):
 
         Thin delegator to
         :func:`._recording_geometry.spikeinterface_channel_ids`;
-        kept as a ``Recording`` staticmethod because ``test_audit_parity``
-        calls it directly. Resolves the raw NWB electrodes-table
-        ``channel_name`` mapping (or the integer 1-1 fallback) in the
-        service module.
+        kept as a ``Recording`` staticmethod for the public/tested
+        channel-name resolution boundary. Resolves the raw NWB
+        electrodes-table ``channel_name`` mapping (or the integer 1-1
+        fallback) in the service module.
         """
         return spikeinterface_channel_ids(nwb_file_name, spyglass_ids)
 
