@@ -2753,7 +2753,7 @@ def test_clusterless_singleton_noise_levels_broadcast(monkeypatch):
     the scalar to one value per channel. We capture the ``method_kwargs``
     that reach ``detect_peaks`` and assert the length + fill.
     """
-    import numpy as _np
+    import numpy as np
     import spikeinterface as si
     import spikeinterface.sortingcomponents.peak_detection as pd_mod
 
@@ -2775,7 +2775,7 @@ def test_clusterless_singleton_noise_levels_broadcast(monkeypatch):
     def _capture_detect(recording, *, method, method_kwargs, job_kwargs):
         captured["noise_levels"] = method_kwargs.get("noise_levels")
         # Return an empty detection so the wrapper builds an empty sorting.
-        return _np.zeros(
+        return np.zeros(
             0, dtype=[("sample_index", "int64"), ("channel_index", "int64")]
         )
 
@@ -2794,12 +2794,12 @@ def test_clusterless_singleton_noise_levels_broadcast(monkeypatch):
 
     nl = captured["noise_levels"]
     assert nl is not None
-    nl = _np.asarray(nl)
+    nl = np.asarray(nl)
     assert nl.shape == (n_channels,), (
         f"singleton noise_levels must broadcast to n_channels={n_channels}, "
         f"got shape {nl.shape}"
     )
-    assert _np.allclose(nl, 1.0)
+    assert np.allclose(nl, 1.0)
 
 
 @pytest.mark.usefixtures("dj_conn")
@@ -2812,7 +2812,7 @@ def test_apply_artifact_mask_full_coverage_short_circuits():
     The contrast call (valid_times dropping the second half) returns a
     DIFFERENT object, proving the short-circuit is meaningful.
     """
-    import numpy as _np
+    import numpy as np
     import spikeinterface as si
 
     from spyglass.spikesorting.v2.sorting import Sorting
@@ -2822,7 +2822,7 @@ def test_apply_artifact_mask_full_coverage_short_circuits():
     )
     ts = rec.get_times()
 
-    full = _np.asarray([[ts[0], ts[-1]]])
+    full = np.asarray([[ts[0], ts[-1]]])
     out_full = Sorting._apply_artifact_mask(rec, full)
     assert out_full is rec, (
         "full-coverage valid_times must short-circuit to the original "
@@ -2831,7 +2831,7 @@ def test_apply_artifact_mask_full_coverage_short_circuits():
 
     # Contrast: dropping the second half leaves an artifact gap -> a wrapped
     # recording, not the original object.
-    partial = _np.asarray([[ts[0], ts[len(ts) // 2]]])
+    partial = np.asarray([[ts[0], ts[len(ts) // 2]]])
     out_partial = Sorting._apply_artifact_mask(rec, partial)
     assert out_partial is not rec
 
@@ -3430,7 +3430,7 @@ def test_clusterless_runtime_strips_stale_fields(monkeypatch):
     so a stale row does not crash the sort. We capture ``method_kwargs`` and
     assert the stale keys are gone.
     """
-    import numpy as _np
+    import numpy as np
     import spikeinterface as si
     import spikeinterface.sortingcomponents.peak_detection as pd_mod
 
@@ -3449,7 +3449,7 @@ def test_clusterless_runtime_strips_stale_fields(monkeypatch):
 
     def _capture_detect(recording, *, method, method_kwargs, job_kwargs):
         captured["method_kwargs"] = dict(method_kwargs)
-        return _np.zeros(
+        return np.zeros(
             0, dtype=[("sample_index", "int64"), ("channel_index", "int64")]
         )
 

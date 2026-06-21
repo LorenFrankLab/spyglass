@@ -243,7 +243,7 @@ def test_prune_orphaned_selections_finds_and_cleans(populated_recording):
     Recording that removes the source-part row but leaves the master).
     The helper backs the validation-goal-#8 cleanup path.
     """
-    import uuid as _uuid
+    import uuid
 
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetectionParameters,
@@ -260,7 +260,7 @@ def test_prune_orphaned_selections_finds_and_cleans(populated_recording):
     # Inject orphans directly via dj.Manual.insert1 (bypassing
     # insert_selection -- this is what an upstream cascade-delete leaves
     # behind in production).
-    orphan_artifact = _uuid.uuid4()
+    orphan_artifact = uuid.uuid4()
     ArtifactDetectionSelection().insert1(
         {
             "artifact_detection_id": orphan_artifact,
@@ -268,7 +268,7 @@ def test_prune_orphaned_selections_finds_and_cleans(populated_recording):
         },
         allow_direct_insert=True,
     )
-    orphan_sorting = _uuid.uuid4()
+    orphan_sorting = uuid.uuid4()
     # The SortingSelection master has no artifact_detection_id FK (artifact state
     # lives on the ArtifactDetectionSource part); a master row with no source part
     # is exactly the orphan this exercises.
@@ -462,7 +462,7 @@ def test_sorting_make_rollback_cleans_units_nwb(
     populated_recording module fixture's row still being live
     (other tests in the module may have wiped it).
     """
-    import pathlib as _pathlib
+    import pathlib
 
     from spyglass.common.common_lab import LabTeam
     from spyglass.common.common_nwbfile import AnalysisNwbfile
@@ -530,9 +530,9 @@ def test_sorting_make_rollback_cleans_units_nwb(
     # broken populate runs so we can detect any orphan file that
     # appears AFTER the rollback. The except block in Sorting.make
     # is responsible for unlinking the staged file before re-raising.
-    from spyglass.settings import analysis_dir as _ad
+    from spyglass.settings import analysis_dir as ad
 
-    analysis_dir = _pathlib.Path(_ad)
+    analysis_dir = pathlib.Path(ad)
     before = (
         {p.name for p in analysis_dir.rglob("*.nwb")}
         if analysis_dir.exists()
@@ -1278,11 +1278,11 @@ def test_write_units_nwb_handles_zero_unit_sorter(populated_recording):
         # Tidy up the staged file. _write_units_nwb does not register
         # the file (the caller does so inside a transaction); we
         # unlink the bare file since no DJ row was registered.
-        import pathlib as _pathlib
+        import pathlib
 
         abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
-        if _pathlib.Path(abs_path).exists():
-            _pathlib.Path(abs_path).unlink()
+        if pathlib.Path(abs_path).exists():
+            pathlib.Path(abs_path).unlink()
 
 
 @pytest.mark.slow

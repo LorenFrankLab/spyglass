@@ -277,7 +277,7 @@ def test_get_recording_currently_raises_checksum_on_missing_cache(
     current source and is deliberately deferred to main-epic recompute (see
     the module's "Deliberately deferred" note).
     """
-    import shutil as _shutil
+    import shutil
 
     from datajoint.errors import DataJointError
 
@@ -300,7 +300,7 @@ def test_get_recording_currently_raises_checksum_on_missing_cache(
     # non-identical bytes, so restore the original afterward or later tests
     # reusing this shared row would themselves fail the checksum read.
     backup = str(abs_path) + ".a18t1.bak"
-    _shutil.copy2(abs_path, backup)
+    shutil.copy2(abs_path, backup)
 
     try:
         Path(abs_path).unlink()
@@ -316,7 +316,7 @@ def test_get_recording_currently_raises_checksum_on_missing_cache(
             f"{analysis_file_name!r}; got: {msg!r}"
         )
     finally:
-        _shutil.move(backup, abs_path)
+        shutil.move(backup, abs_path)
 
 
 @pytest.mark.slow
@@ -349,7 +349,7 @@ def test_rebuild_nwb_artifact_reaches_hash_then_raises_checksum(
     The skills directive for A18 is explicit that the verify-current-failure
     tests must exercise the raising path -- this one does.
     """
-    import shutil as _shutil
+    import shutil
 
     from datajoint.errors import DataJointError
 
@@ -365,7 +365,7 @@ def test_rebuild_nwb_artifact_reaches_hash_then_raises_checksum(
     # back it up so later tests reusing this shared row read the original
     # (checksum-valid) bytes.
     backup = str(abs_path) + ".a18t2.bak"
-    _shutil.copy2(abs_path, backup)
+    shutil.copy2(abs_path, backup)
 
     calls = {"n": 0}
     real_hash = v2_utils._hash_nwb_recording
@@ -391,7 +391,7 @@ def test_rebuild_nwb_artifact_reaches_hash_then_raises_checksum(
             "this does not pin the intended (rebuild-reached-hashing) state."
         )
     finally:
-        _shutil.move(backup, abs_path)
+        shutil.move(backup, abs_path)
 
 
 @pytest.mark.slow
@@ -852,7 +852,7 @@ def test_recording_make_rollback_cleans_analysis_nwb(
     ``Recording.make`` is responsible for unlinking the staged
     preprocessed NWB.
     """
-    import pathlib as _pathlib
+    import pathlib
 
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults
@@ -887,9 +887,9 @@ def test_recording_make_rollback_cleans_analysis_nwb(
     )
     (Recording & rec_pk).super_delete(warn=False, force_masters=True)
 
-    from spyglass.settings import analysis_dir as _ad
+    from spyglass.settings import analysis_dir as ad
 
-    analysis_dir = _pathlib.Path(_ad)
+    analysis_dir = pathlib.Path(ad)
     before = (
         {p.name for p in analysis_dir.rglob("*.nwb")}
         if analysis_dir.exists()
@@ -1302,7 +1302,7 @@ def test_recording_selection_raises_on_duplicate_logical_identity(
     broke, would let downstream consumers index ``[0]`` on
     duplicate rows.
     """
-    import uuid as _uuid
+    import uuid
 
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults
@@ -1337,11 +1337,11 @@ def test_recording_selection_raises_on_duplicate_logical_identity(
     # guard exists to catch in case some script uses raw dj.insert).
     planted_ids = []
     RecordingSelection().insert1(
-        {**logical_identity, "recording_id": _uuid.uuid4()},
+        {**logical_identity, "recording_id": uuid.uuid4()},
         allow_direct_insert=True,
     )
     RecordingSelection().insert1(
-        {**logical_identity, "recording_id": _uuid.uuid4()},
+        {**logical_identity, "recording_id": uuid.uuid4()},
         allow_direct_insert=True,
     )
     planted_ids = list(

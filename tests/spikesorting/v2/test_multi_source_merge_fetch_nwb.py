@@ -130,7 +130,7 @@ def test_spikesortingoutput_multi_source_fetch_nwb_aligned(
     ImportedSpikeSorting: default WARNS and fetches across both;
     multi_source=True returns one merge_id per file, each aligned to its
     owning source's file (and silences the warning)."""
-    import logging as _logging
+    import logging
 
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 
@@ -142,7 +142,7 @@ def test_spikesortingoutput_multi_source_fetch_nwb_aligned(
 
     # Default (multi_source=False): a 2-source restriction now WARNS (not
     # raises) and fetches across both sources.
-    with caplog.at_level(_logging.WARNING):
+    with caplog.at_level(logging.WARNING):
         nwb_default, mids_default = (SpikeSortingOutput & merge_keys).fetch_nwb(
             return_merge_ids=True
         )

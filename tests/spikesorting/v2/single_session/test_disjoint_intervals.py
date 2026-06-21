@@ -187,7 +187,7 @@ def test_get_sorting_recovers_frames_across_disjoint_gap(
     correctly either way; only the FRAME indices expose the bug, so this
     test asserts on frames.
     """
-    import uuid as _uuid
+    import uuid
 
     import numpy as np
 
@@ -232,7 +232,7 @@ def test_get_sorting_recovers_frames_across_disjoint_gap(
     sort_group_id = int(
         sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
     )
-    disjoint_name = f"v2_disjoint_readback_{_uuid.uuid4().hex[:8]}"
+    disjoint_name = f"v2_disjoint_readback_{uuid.uuid4().hex[:8]}"
     IntervalList.insert1(
         {
             "nwb_file_name": nwb_file_name,
@@ -350,7 +350,7 @@ def test_obs_intervals_no_artifact_respects_disjoint_gap(
     firing-rate window). The artifact-backed path was already gap-split;
     this pins the no-ArtifactDetectionSource fallback.
     """
-    import uuid as _uuid
+    import uuid
 
     import numpy as np
     import pynwb
@@ -392,7 +392,7 @@ def test_obs_intervals_no_artifact_respects_disjoint_gap(
     sort_group_id = int(
         sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
     )
-    disjoint_name = f"v2_disjoint_obs_{_uuid.uuid4().hex[:8]}"
+    disjoint_name = f"v2_disjoint_obs_{uuid.uuid4().hex[:8]}"
     IntervalList.insert1(
         {
             "nwb_file_name": nwb_file_name,
@@ -472,7 +472,7 @@ def test_get_merged_sorting_keeps_cross_gap_pair(
     wrongly drop one; the abs-time dedup keeps both (and matches the
     apply_merge=True stored train). Regression for the lazy-merge fix.
     """
-    import uuid as _uuid
+    import uuid
 
     import numpy as np
 
@@ -510,7 +510,7 @@ def test_get_merged_sorting_keeps_cross_gap_pair(
     sort_group_id = int(
         sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
     )
-    disjoint_name = f"v2_disjoint_merge_{_uuid.uuid4().hex[:8]}"
+    disjoint_name = f"v2_disjoint_merge_{uuid.uuid4().hex[:8]}"
     IntervalList.insert1(
         {
             "nwb_file_name": nwb_file_name,
@@ -614,7 +614,7 @@ def test_disjoint_sort_intervals_concatenated(polymer_smoke_session):
     Without the consolidate-and-concatenate pattern, both
     assertions fail (the gap is included).
     """
-    import uuid as _uuid
+    import uuid
 
     import numpy as np
     import pynwb
@@ -671,7 +671,7 @@ def test_disjoint_sort_intervals_concatenated(polymer_smoke_session):
     sort_group_id = int(
         sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
     )
-    disjoint_interval_name = f"v2_disjoint_test_{_uuid.uuid4().hex[:8]}"
+    disjoint_interval_name = f"v2_disjoint_test_{uuid.uuid4().hex[:8]}"
     IntervalList.insert1(
         {
             "nwb_file_name": nwb_file_name,
@@ -742,7 +742,7 @@ def test_artifact_valid_times_respect_disjoint_gap(polymer_smoke_session):
     per-chunk subtraction is pinned by the synthetic ``_detect_artifacts``
     test in ``test_disjoint_artifact.py``.
     """
-    import uuid as _uuid
+    import uuid
 
     import numpy as np
 
@@ -787,7 +787,7 @@ def test_artifact_valid_times_respect_disjoint_gap(polymer_smoke_session):
     sort_group_id = int(
         sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
     )
-    disjoint_name = f"v2_disjoint_artifact_{_uuid.uuid4().hex[:8]}"
+    disjoint_name = f"v2_disjoint_artifact_{uuid.uuid4().hex[:8]}"
     IntervalList.insert1(
         {
             "nwb_file_name": nwb_file_name,
@@ -844,7 +844,7 @@ def test_disjoint_multi_gap_readback_and_artifact(
     readback must stay correct past the second gap, not only the first).
     Closes review "not-checked" item #6.
     """
-    import uuid as _uuid
+    import uuid
 
     from spyglass.common.common_interval import IntervalList
     from spyglass.common.common_lab import LabTeam
@@ -892,7 +892,7 @@ def test_disjoint_multi_gap_readback_and_artifact(
     c3 = (t0 + 2.60, t0 + 3.65)
     disjoint_times = np.array([list(c1), list(c2), list(c3)])
 
-    disjoint_name = f"v2_multigap_{_uuid.uuid4().hex[:8]}"
+    disjoint_name = f"v2_multigap_{uuid.uuid4().hex[:8]}"
     IntervalList.insert1(
         {
             "nwb_file_name": nwb_file_name,

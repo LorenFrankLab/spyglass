@@ -435,48 +435,48 @@ def test_filter_units():
     schema (hence ``dj_conn``), but the test calls the pure static method
     with no populate.
     """
-    import numpy as _np
+    import numpy as np
 
     from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup
 
     f = SortedSpikesGroup.filter_units
 
     # No include/exclude -> every unit kept (the ``all_units`` preset).
-    _np.testing.assert_array_equal(
+    np.testing.assert_array_equal(
         f([["noise"], ["accept"], []], [], []),
-        _np.array([True, True, True]),
+        np.array([True, True, True]),
     )
 
     # Exclude noise/mua (the ``default_exclusion`` preset): units carrying
     # either label are dropped; unlabeled / other-labeled units survive.
-    _np.testing.assert_array_equal(
+    np.testing.assert_array_equal(
         f([["noise"], ["accept"], ["mua"], []], [], ["noise", "mua"]),
-        _np.array([False, True, False, True]),
+        np.array([False, True, False, True]),
     )
 
     # A group whose every unit is noise/mua collapses to all-False -- this
     # is exactly why filtering the shared base-env fixtures empties the
     # group and the production guard keeps it off under pytest.
-    _np.testing.assert_array_equal(
+    np.testing.assert_array_equal(
         f([["noise"], ["mua"]], [], ["noise", "mua"]),
-        _np.array([False, False]),
+        np.array([False, False]),
     )
 
     # Include filter: keep only units carrying an include label.
-    _np.testing.assert_array_equal(
+    np.testing.assert_array_equal(
         f([["accept"], ["noise"], ["accept", "mua"]], ["accept"], []),
-        _np.array([True, False, True]),
+        np.array([True, False, True]),
     )
 
     # Include + exclude combined: exclude wins for a unit that carries both
     # an include and an exclude label.
-    _np.testing.assert_array_equal(
+    np.testing.assert_array_equal(
         f([["accept"], ["accept", "noise"]], ["accept"], ["noise"]),
-        _np.array([True, False]),
+        np.array([True, False]),
     )
 
     # A bare-string label (not wrapped in a list) is treated as one label.
-    _np.testing.assert_array_equal(
+    np.testing.assert_array_equal(
         f(["noise", "accept"], [], ["noise"]),
-        _np.array([False, True]),
+        np.array([False, True]),
     )

@@ -145,7 +145,7 @@ def test_mearec_fixture_gain_required(monkeypatch, dtype):
     ground-truth tests. No DB or real fixture needed: a tiny in-memory SI
     recording with no gain set stands in for the extractor.
     """
-    import neuroconv.datainterfaces as _ndi
+    import neuroconv.datainterfaces as ndi
     import numpy as np
     import spikeinterface as si
 
@@ -162,7 +162,7 @@ def test_mearec_fixture_gain_required(monkeypatch, dtype):
         def __init__(self, *args, **kwargs):
             self.recording_extractor = gainless
 
-    monkeypatch.setattr(_ndi, "MEArecRecordingInterface", _FakeInterface)
+    monkeypatch.setattr(ndi, "MEArecRecordingInterface", _FakeInterface)
 
     with pytest.raises(RuntimeError, match="microvolt"):
         mearec_to_nwb._read_recording_traces(Path("nonexistent_fixture.h5"))

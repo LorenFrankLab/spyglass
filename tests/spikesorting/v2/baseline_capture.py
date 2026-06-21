@@ -38,7 +38,7 @@ import json
 import os
 import pickle
 import sys
-from importlib.metadata import version as _pkg_version
+from importlib.metadata import version as pkg_version
 from pathlib import Path
 
 # The bootstrap must run before importing Spyglass, so resolve and import the
@@ -691,8 +691,8 @@ def run_baseline_capture(
         "sorter_param_name": sorter_param_name,
         "preproc_param_name": "default",
         "artifact_param_name": artifact_param_name,
-        "spikeinterface_version": _pkg_version("spikeinterface"),
-        "spyglass_version": _pkg_version("spyglass-neuro"),
+        "spikeinterface_version": pkg_version("spikeinterface"),
+        "spyglass_version": pkg_version("spyglass-neuro"),
         **_capture_source_provenance(),
         **fingerprints,
     }

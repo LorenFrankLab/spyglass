@@ -600,13 +600,13 @@ def test_direct_master_insert_rejected_all_masters(module, cls_name, extra):
     write, so the bogus-FK row never reaches MySQL.
     """
     import importlib
-    import uuid as _uuid
+    import uuid
 
     import datajoint as dj
 
     cls = getattr(importlib.import_module(module), cls_name)
     pk_field = cls.primary_key[0]
-    row = {pk_field: _uuid.uuid4(), **extra}
+    row = {pk_field: uuid.uuid4(), **extra}
     with pytest.raises(dj.errors.DataJointError, match="is not supported"):
         cls.insert1(row)
     assert len(cls & {pk_field: row[pk_field]}) == 0

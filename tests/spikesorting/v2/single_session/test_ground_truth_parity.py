@@ -580,7 +580,7 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
           for ``(mearec_polymer_smoke, 0)`` only; other
           parametrizations skip with a clear message.
     """
-    import json as _json
+    import json
     import os
     import pickle
     from pathlib import Path as _Path
@@ -681,8 +681,8 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
             f"{regen_hint}"
         ) from exc
     try:
-        meta = _json.loads(meta_json.read_text())
-    except _json.JSONDecodeError as exc:
+        meta = json.loads(meta_json.read_text())
+    except json.JSONDecodeError as exc:
         raise RuntimeError(
             f"v1 baseline meta at {meta_json} is malformed "
             f"({type(exc).__name__}: {exc}). {regen_hint}"
@@ -842,7 +842,7 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
     # downstream spike-time comparison. See
     # ``.claude/docs/plans/spikesorting-v2/parity-extensions.md`` §
     # "Invariant fingerprinting".
-    import hashlib as _hashlib
+    import hashlib
 
     from spyglass.common import Electrode, IntervalList
     from spyglass.spikesorting.v2.utils import (
@@ -898,7 +898,7 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
         decimals=3,
     )
     v2_fingerprints = {
-        "nwb_sha256": _hashlib.sha256(nwb_path.read_bytes()).hexdigest(),
+        "nwb_sha256": hashlib.sha256(nwb_path.read_bytes()).hexdigest(),
         "sort_group_electrode_ids": sorted(
             int(eid)
             for eid in (
@@ -1163,7 +1163,7 @@ def test_v2_real_data_v1_parity_mountainsort4(
     sorter set (overridable to FAIL via
     ``SPIKESORTING_V2_REQUIRE_MS4=1``).
     """
-    import json as _json
+    import json
     import os
     import pickle
     from pathlib import Path as _Path
@@ -1178,9 +1178,9 @@ def test_v2_real_data_v1_parity_mountainsort4(
     )
 
     # MS4 install gate (v2 side; v1 install is checked at capture time).
-    import spikeinterface.sorters as _ss
+    import spikeinterface.sorters as ss
 
-    if "mountainsort4" not in _ss.installed_sorters():
+    if "mountainsort4" not in ss.installed_sorters():
         msg = (
             "mountainsort4 not in spikeinterface.sorters.installed_sorters(); "
             "skipping. Set SPIKESORTING_V2_REQUIRE_MS4=1 to make this a "
@@ -1246,7 +1246,7 @@ def test_v2_real_data_v1_parity_mountainsort4(
 
     with open(spikes_pkl, "rb") as fh:
         v1_spike_times = pickle.load(fh)
-    meta = _json.loads(meta_json.read_text())
+    meta = json.loads(meta_json.read_text())
 
     if meta.get("sorter") != "mountainsort4":
         pytest.skip(
@@ -1343,7 +1343,7 @@ def test_v2_real_data_v1_parity_mountainsort4(
     ArtifactDetection.populate(art_pk, reserve_jobs=False)
 
     # --- v1↔v2 invariant fingerprint check (same shape as clusterless) ---
-    import hashlib as _hashlib
+    import hashlib
 
     from spyglass.common import Electrode, IntervalList
     from spyglass.spikesorting.v2.utils import (
@@ -1391,7 +1391,7 @@ def test_v2_real_data_v1_parity_mountainsort4(
         decimals=3,
     )
     v2_fingerprints = {
-        "nwb_sha256": _hashlib.sha256(fixture_path.read_bytes()).hexdigest(),
+        "nwb_sha256": hashlib.sha256(fixture_path.read_bytes()).hexdigest(),
         "sort_group_electrode_ids": sorted(
             int(eid)
             for eid in (

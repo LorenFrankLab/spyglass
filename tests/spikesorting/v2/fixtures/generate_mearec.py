@@ -590,7 +590,7 @@ def generate_fixtures(
     pathlib.Path
         The written manifest path.
     """
-    from importlib.metadata import version as _pkg_version
+    from importlib.metadata import version as pkg_version
 
     profile, specs = _profiles()[profile_name]
     if only:
@@ -607,9 +607,9 @@ def generate_fixtures(
 
     manifest: dict = {
         "profile": profile.name,
-        "mearec_version": _pkg_version("MEArec"),
-        "neuroconv_version": _pkg_version("neuroconv"),
-        "spikeinterface_version": _pkg_version("spikeinterface"),
+        "mearec_version": pkg_version("MEArec"),
+        "neuroconv_version": pkg_version("neuroconv"),
+        "spikeinterface_version": pkg_version("spikeinterface"),
         "fixtures": {},
     }
     # When ``--only`` filters to a subset of fixtures, preserve existing

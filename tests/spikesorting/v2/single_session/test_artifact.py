@@ -151,9 +151,9 @@ def test_shared_artifact_group_insert_validates_inputs(populated_recording):
         )
 
     # Non-existent recording_id -> ValueError.
-    import uuid as _uuid
+    import uuid
 
-    bogus_rid = _uuid.uuid4()
+    bogus_rid = uuid.uuid4()
     with pytest.raises(ValueError, match="not in Recording"):
         SharedArtifactGroup.insert_group(
             "bogus_recording",
@@ -523,7 +523,7 @@ def test_artifact_detection_selection_resolve_source_detects_bypass(
     """``resolve_source`` raises ``SchemaBypassError`` when a master has
     zero source part rows (an integrity bug, e.g. from direct dj
     insert1 bypassing ``insert_selection``)."""
-    import uuid as _uuid
+    import uuid
 
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetectionParameters,
@@ -532,7 +532,7 @@ def test_artifact_detection_selection_resolve_source_detects_bypass(
     from spyglass.spikesorting.v2.exceptions import SchemaBypassError
 
     ArtifactDetectionParameters.insert_default()
-    orphan_id = _uuid.uuid4()
+    orphan_id = uuid.uuid4()
     # Insert master with NO source part to simulate bypass. The master
     # insert guard requires allow_direct_insert=True for this deliberate
     # raw insert (the bypass the resolve_source check exists to catch).

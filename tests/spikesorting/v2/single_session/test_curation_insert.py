@@ -458,16 +458,16 @@ def test_curation_v2_insert_rollback_cleans_units_nwb(
     except block must unlink the staged units NWB so the file
     system doesn't accumulate orphans on each retry.
     """
-    import pathlib as _pathlib
+    import pathlib
 
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.curation import CurationV2
 
     _clear_curations(populated_sorting)
 
-    from spyglass.settings import analysis_dir as _ad
+    from spyglass.settings import analysis_dir as ad
 
-    analysis_dir = _pathlib.Path(_ad)
+    analysis_dir = pathlib.Path(ad)
     before = (
         {p.name for p in analysis_dir.rglob("*.nwb")}
         if analysis_dir.exists()

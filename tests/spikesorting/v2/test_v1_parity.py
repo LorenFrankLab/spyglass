@@ -656,7 +656,7 @@ def test_make_compute_purity_guard_actually_catches_regressions():
     that narrows the guard would silently leave production
     refactors un-guarded.
     """
-    import ast as _ast
+    import ast
     import textwrap
 
     REGRESSION_SAMPLES = {
@@ -698,47 +698,47 @@ def test_make_compute_purity_guard_actually_catches_regressions():
     def _guard_walks(src: str) -> bool:
         """Return True iff the AST walk (mirror of the real guard)
         would have failed on this source."""
-        tree = _ast.parse(textwrap.dedent(src))
+        tree = ast.parse(textwrap.dedent(src))
         tainted = set(forbidden_receiver_types)
-        for n in _ast.walk(tree):
-            if isinstance(n, _ast.Assign) and isinstance(n.value, _ast.Call):
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Assign) and isinstance(n.value, ast.Call):
                 cf = n.value.func
                 if (
-                    isinstance(cf, _ast.Name)
+                    isinstance(cf, ast.Name)
                     and cf.id in forbidden_receiver_types
                 ):
                     for tgt in n.targets:
-                        if isinstance(tgt, _ast.Name):
+                        if isinstance(tgt, ast.Name):
                             tainted.add(tgt.id)
-        for n in _ast.walk(tree):
-            if not isinstance(n, _ast.Call):
+        for n in ast.walk(tree):
+            if not isinstance(n, ast.Call):
                 continue
             f = n.func
-            if not isinstance(f, _ast.Attribute):
+            if not isinstance(f, ast.Attribute):
                 continue
             if f.attr in forbidden_attrs:
-                if isinstance(f.value, _ast.Name) and f.value.id == "self":
+                if isinstance(f.value, ast.Name) and f.value.id == "self":
                     return True
-                if isinstance(f.value, _ast.Name) and f.value.id in tainted:
+                if isinstance(f.value, ast.Name) and f.value.id in tainted:
                     return True
                 if (
-                    isinstance(f.value, _ast.Call)
-                    and isinstance(f.value.func, _ast.Name)
+                    isinstance(f.value, ast.Call)
+                    and isinstance(f.value.func, ast.Name)
                     and f.value.func.id in forbidden_receiver_types
                 ):
                     return True
             if f.attr == "add":
                 if (
-                    isinstance(f.value, _ast.Call)
-                    and isinstance(f.value.func, _ast.Name)
+                    isinstance(f.value, ast.Call)
+                    and isinstance(f.value.func, ast.Name)
                     and f.value.func.id == "AnalysisNwbfile"
                 ):
                     return True
-                if isinstance(f.value, _ast.Name) and f.value.id in tainted:
+                if isinstance(f.value, ast.Name) and f.value.id in tainted:
                     return True
             if (
-                isinstance(f.value, _ast.Attribute)
-                and isinstance(f.value.value, _ast.Name)
+                isinstance(f.value, ast.Attribute)
+                and isinstance(f.value.value, ast.Name)
                 and f.value.value.id == "self"
                 and f.value.attr == "connection"
             ):

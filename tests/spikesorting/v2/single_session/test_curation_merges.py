@@ -295,7 +295,7 @@ def test_lazy_vs_applied_merge_frames_equal(polymer_smoke_session, monkeypatch):
     otherwise untested. Both the lazy and the stored paths must produce the
     same frames, and that frame set must equal the hand-computed merge.
     """
-    import uuid as _uuid
+    import uuid
 
     import numpy as np
     import spikeinterface as si
@@ -445,7 +445,7 @@ def test_lazy_vs_applied_merge_frames_equal(polymer_smoke_session, monkeypatch):
     # plus distinct spikes; merged = [100, 500, 600, 900].
     state["u0"] = np.array([100, 500, 900])
     state["u1"] = np.array([101, 600])
-    contig_name = f"v2_lvam_contig_{_uuid.uuid4().hex[:8]}"
+    contig_name = f"v2_lvam_contig_{uuid.uuid4().hex[:8]}"
     _, contig_sort_pk = _build_sort(
         contig_name, np.array([[t0, min(t0 + 2.9, t_end)]])
     )
@@ -457,7 +457,7 @@ def test_lazy_vs_applied_merge_frames_equal(polymer_smoke_session, monkeypatch):
     # within-chunk coincidence (100 & 101 -> dedup) AND a frame-adjacent
     # but cross-gap pair (k & k+1 -> NOT deduped). merged = [100, k, k+1].
     chunk1_end, gap_end, chunk2_end = t0 + 1.2, t0 + 1.7, min(t0 + 2.9, t_end)
-    disjoint_name = f"v2_lvam_disjoint_{_uuid.uuid4().hex[:8]}"
+    disjoint_name = f"v2_lvam_disjoint_{uuid.uuid4().hex[:8]}"
     disjoint_rec_pk, disjoint_sort_pk = _build_sort(
         disjoint_name,
         np.array([[t0, chunk1_end], [gap_end, chunk2_end]]),
@@ -722,7 +722,7 @@ def test_applied_and_lazy_merge_ids_match_for_out_of_order_groups(
     the ``build_curated_unit_rows`` id assignment; this pins the >=2-group
     lazy ``get_merge_groups`` order_by path (audit test-hardening #16).
     """
-    import uuid as _uuid
+    import uuid
 
     import numpy as np
     import spikeinterface as si
@@ -793,7 +793,7 @@ def test_applied_and_lazy_merge_ids_match_for_out_of_order_groups(
     t0 = float(raw_times[0][0])
     t_end = float(raw_times[-1][-1])
 
-    interval_name = f"v2_oo_merge_{_uuid.uuid4().hex[:8]}"
+    interval_name = f"v2_oo_merge_{uuid.uuid4().hex[:8]}"
     IntervalList.insert1(
         {
             "nwb_file_name": nwb_file_name,
