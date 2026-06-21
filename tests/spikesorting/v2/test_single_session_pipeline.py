@@ -1894,7 +1894,7 @@ def test_curation_v2_insert_root_unlabeled(populated_sorting):
     assert len(CurationV2 & pk) == 1
     # Pin not just the count but the actual unit_id set: a regression
     # that produced the wrong unit ids (e.g., an off-by-one on
-    # _build_curated_unit_rows) would pass a count-only check.
+    # build_curated_unit_rows) would pass a count-only check.
     expected_unit_ids = set(
         int(u) for u in (Sorting.Unit & populated_sorting).fetch("unit_id")
     )
@@ -3454,7 +3454,7 @@ def test_curation_v2_all_units_labeled_noise(populated_sorting):
     The curated Units NWB still contains every unit because the
     label filter is applied at the *consumer* (``get_matchable_*``)
     rather than at NWB-write time; the empty-units guard in
-    ``_stage_curated_units_nwb`` is exercised by the sibling test
+    ``write_curated_units_nwb`` is exercised by the sibling test
     ``test_curation_v2_stages_empty_units_nwb_on_zero_kept_units``.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -3500,38 +3500,35 @@ def test_curation_v2_all_units_labeled_noise(populated_sorting):
 def test_curation_v2_stages_empty_units_nwb_on_zero_kept_units(
     populated_sorting, monkeypatch
 ):
-    """``_stage_curated_units_nwb`` initializes an empty
+    """``write_curated_units_nwb`` initializes an empty
     ``pynwb.misc.Units`` when ``kept_unit_to_contributors`` is
     empty, so ``nwbf.units.object_id`` does not raise
     ``AttributeError``.
 
     Pynwb leaves ``nwbf.units = None`` if no ``add_unit`` is
-    called. The v2 guard at ``curation.py:_stage_curated_units_nwb``
+    called. The v2 guard in ``_units_nwb.write_curated_units_nwb``
     initializes an empty ``Units`` table explicitly in this case.
     This test forces the empty-kept path via monkeypatch (the
     natural way to hit it -- a sorting with zero units -- is
     rejected upstream by ``Sorting.make``).
     """
+    from spyglass.spikesorting.v2 import curation as curation_module
     from spyglass.spikesorting.v2.curation import CurationV2
 
     _clear_curations(populated_sorting)
 
-    # Patch _build_curated_unit_rows to return empty so the
-    # NWB-staging call enters the kept_unit_to_contributors={}
-    # branch. No call to add_unit will run, so the guard at
-    # ``if nwbf.units is None`` is the only thing preventing the
-    # AttributeError at ``nwbf.units.object_id``.
-    original = CurationV2._build_curated_unit_rows.__func__
-
+    # Patch the build_curated_unit_rows service function (called by
+    # _build_curation_insert_plan) to return empty so the NWB-staging call
+    # enters the kept_unit_to_contributors={} branch. No call to add_unit
+    # will run, so the guard at ``if nwbf.units is None`` is the only thing
+    # preventing the AttributeError at ``nwbf.units.object_id``.
     def _empty_rows(
-        cls, sorting_id, sorting_units, merge_groups, curation_id, apply_merge
+        sorting_id, sorting_units, merge_groups, curation_id, apply_merge
     ):
         return [], {}
 
     monkeypatch.setattr(
-        CurationV2,
-        "_build_curated_unit_rows",
-        classmethod(_empty_rows),
+        curation_module, "build_curated_unit_rows", _empty_rows
     )
 
     pk = CurationV2.insert_curation(
@@ -3543,11 +3540,6 @@ def test_curation_v2_stages_empty_units_nwb_on_zero_kept_units(
     # transaction. The curated NWB has zero Unit part rows.
     assert len(CurationV2 & pk) == 1
     assert len(CurationV2.Unit & pk) == 0
-
-    # Restore (monkeypatch handles teardown; explicit for clarity).
-    monkeypatch.setattr(
-        CurationV2, "_build_curated_unit_rows", classmethod(original)
-    )
 
 
 # ---------- run_v2_pipeline preset coverage ------------------------------
@@ -5576,10 +5568,10 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
     and whose merged spike train is the sorted union of its contributors.
     Surviving source units are written first; merged ids are appended.
 
-    Exercises ``_build_curated_unit_rows`` with a non-empty merge
+    Exercises ``build_curated_unit_rows`` with a non-empty merge
     list (amplitude-inheritance: kept unit gets electrode/amplitude
     from the highest-amplitude contributor) AND
-    ``_stage_curated_units_nwb`` with ``apply_merge=True``
+    ``write_curated_units_nwb`` with ``apply_merge=True``
     (concatenated + sorted spike trains).
 
     Uses the 60s polymer fixture rather than the smoke fixture
@@ -6034,7 +6026,7 @@ def test_lazy_vs_applied_merge_frames_equal(polymer_smoke_session, monkeypatch):
 
 
 def test_curation_n_spikes_matches_apply_merge(dj_conn):
-    """``_build_curated_unit_rows`` writes the v1-parity unit set +
+    """``build_curated_unit_rows`` writes the v1-parity unit set +
     ``n_spikes`` for each ``apply_merge`` mode.
 
     ``apply_merge=True`` collapses a merge group to a fresh
@@ -6048,7 +6040,9 @@ def test_curation_n_spikes_matches_apply_merge(dj_conn):
     logic (the ``apply_merge=True`` end-to-end half is covered by
     ``test_curation_v2_insert_with_merge_groups_apply_merges``).
     """
-    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2._curation_transforms import (
+        build_curated_unit_rows,
+    )
 
     def _unit(uid, n_spikes, amp):
         return {
@@ -6065,7 +6059,7 @@ def test_curation_n_spikes_matches_apply_merge(dj_conn):
     merge_groups = [[0, 1]]
 
     def n_spikes_by_unit(apply_merge):
-        rows, _ = CurationV2._build_curated_unit_rows(
+        rows, _ = build_curated_unit_rows(
             sorting_id="s",
             sorting_units=sorting_units,
             merge_groups=merge_groups,
@@ -6125,7 +6119,7 @@ def test_merge_group_contributor_fk_rejects_unknown_unit(populated_sorting):
 
 
 def test_curation_two_merge_groups_assign_ids_in_canonical_min_order(dj_conn):
-    """``_build_curated_unit_rows`` assigns fresh merged ids in ascending
+    """``build_curated_unit_rows`` assigns fresh merged ids in ascending
     MIN-CONTRIBUTOR order, INDEPENDENT of user-input group order (C3). For
     user input ``[[2, 3], [0, 1]]`` the smallest-min group ``[0, 1]`` gets
     the first new id ``max(source unit_ids) + 1``, and ``[2, 3]`` gets the
@@ -6139,7 +6133,9 @@ def test_curation_two_merge_groups_assign_ids_in_canonical_min_order(dj_conn):
     -- spike content and unit count are identical -- and matching the
     applied and lazy paths is the more important contract.
     """
-    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2._curation_transforms import (
+        build_curated_unit_rows,
+    )
 
     def _unit(uid, n_spikes, amp):
         return {
@@ -6163,7 +6159,7 @@ def test_curation_two_merge_groups_assign_ids_in_canonical_min_order(dj_conn):
     # gets the first new id even though the user listed ``[2, 3]`` first.
     merge_groups = [[2, 3], [0, 1]]
 
-    rows, kept = CurationV2._build_curated_unit_rows(
+    rows, kept = build_curated_unit_rows(
         sorting_id="s",
         sorting_units=sorting_units,
         merge_groups=merge_groups,
@@ -6184,7 +6180,7 @@ def test_curation_two_merge_groups_assign_ids_in_canonical_min_order(dj_conn):
     # apply_merge=False with the same input: heads are min(group) for
     # each multi-group, so kept_to_contributors keys (after sort + sym
     # aug) are deterministic regardless of input order.
-    rows_preview, kept_preview = CurationV2._build_curated_unit_rows(
+    rows_preview, kept_preview = build_curated_unit_rows(
         sorting_id="s",
         sorting_units=sorting_units,
         merge_groups=merge_groups,
@@ -6209,9 +6205,11 @@ def test_merged_unit_inherits_max_amplitude_contributor_electrode():
     IS the region attribution -- a ``max -> min`` regression would silently
     mis-attribute every merged unit's brain region while n_spikes / id
     assertions still pass (audit test-hardening #8). Deterministic via
-    ``_build_curated_unit_rows`` (no populate).
+    ``build_curated_unit_rows`` (no populate).
     """
-    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2._curation_transforms import (
+        build_curated_unit_rows,
+    )
 
     def _unit(uid, n_spikes, amp, electrode_id):
         return {
@@ -6230,7 +6228,7 @@ def test_merged_unit_inherits_max_amplitude_contributor_electrode():
         _unit(0, 100, 30.0, 10),
         _unit(1, 50, 80.0, 20),
     ]
-    rows, _ = CurationV2._build_curated_unit_rows(
+    rows, _ = build_curated_unit_rows(
         sorting_id="s",
         sorting_units=sorting_units,
         merge_groups=[[0, 1]],
@@ -6251,7 +6249,7 @@ def test_merged_unit_inherits_max_amplitude_contributor_electrode():
         _unit(0, 100, 90.0, 10),
         _unit(1, 50, 25.0, 20),
     ]
-    rows_rev, _ = CurationV2._build_curated_unit_rows(
+    rows_rev, _ = build_curated_unit_rows(
         sorting_id="s",
         sorting_units=sorting_units_rev,
         merge_groups=[[0, 1]],
@@ -6271,7 +6269,7 @@ def test_applied_and_lazy_merge_ids_match_for_out_of_order_groups(
     apply_merge=True stored sorting and the apply_merge=False lazy
     ``get_merged_sorting`` assign the SAME fresh id to the SAME content
     group, frame-for-frame. Existing tests cover the single-group case and
-    the ``_build_curated_unit_rows`` id assignment; this pins the >=2-group
+    the ``build_curated_unit_rows`` id assignment; this pins the >=2-group
     lazy ``get_merge_groups`` order_by path (audit test-hardening #16).
     """
     import uuid as _uuid
@@ -6568,7 +6566,9 @@ def test_curation_merge_ids_assigned_in_canonical_min_order(dj_conn):
     user-iteration order) changes only which group gets ``max+1`` for
     reordered input, never spike content or unit count.
     """
-    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2._curation_transforms import (
+        build_curated_unit_rows,
+    )
 
     def _unit(uid, n_spikes, amp):
         return {
@@ -6583,7 +6583,7 @@ def test_curation_merge_ids_assigned_in_canonical_min_order(dj_conn):
     sorting_units = [_unit(i, 10 * (i + 1), 50.0 - i) for i in range(5)]
     # User lists the bigger-min group FIRST; canonical assignment ignores
     # this order and numbers by ascending min(group).
-    _, kept = CurationV2._build_curated_unit_rows(
+    _, kept = build_curated_unit_rows(
         sorting_id="s",
         sorting_units=sorting_units,
         merge_groups=[[3, 4], [0, 1]],
@@ -6603,7 +6603,9 @@ def test_curation_rejects_invalid_merge_groups(dj_conn):
     silently no-op or fall through to staging that would double-count
     contributors. Covers the empty/singleton shape contract too.
     """
-    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2._curation_transforms import (
+        build_curated_unit_rows,
+    )
 
     def _unit(uid):
         return {
@@ -6637,7 +6639,7 @@ def test_curation_rejects_invalid_merge_groups(dj_conn):
     for apply_merge in (True, False):
         for sorting_units, merge_groups, match in cases:
             with pytest.raises(ValueError, match=match):
-                CurationV2._build_curated_unit_rows(
+                build_curated_unit_rows(
                     sorting_id="s",
                     sorting_units=sorting_units,
                     merge_groups=merge_groups,

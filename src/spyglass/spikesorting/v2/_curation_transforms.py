@@ -137,7 +137,7 @@ def build_curated_unit_rows(
     unit). Each merge group must have at least 2 members; empty or
     singleton groups raise ``ValueError``.
 
-    ``n_spikes`` is computed to match what ``_stage_curated_units_nwb``
+    ``n_spikes`` is computed to match what ``write_curated_units_nwb``
     writes for the SAME ``apply_merge``: the merged sum only when the
     merged spike train is actually staged (``apply_merge and
     len(contribs) > 1``), otherwise the kept (head) unit's own count.
@@ -304,7 +304,7 @@ def build_curated_unit_rows(
     #     (v1 preview parity, ``v1/curation.py:359``); the proposed
     #     merges live in MergeGroup for lazy application via
     #     get_merged_sorting. n_spikes is each unit's own count,
-    #     matching the train _stage_curated_units_nwb writes.
+    #     matching the train write_curated_units_nwb writes.
     if apply_merge:
         specs = []
         for kept_uid, contribs in kept_to_contributors.items():

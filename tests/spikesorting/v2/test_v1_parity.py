@@ -777,16 +777,16 @@ def test_curation_v2_nwb_write_outside_transaction():
     """
     from spyglass.spikesorting.v2.curation import CurationV2
 
-    NWB_WRITE_NAMES = {"_stage_curated_units_nwb"}
+    NWB_WRITE_NAMES = {"write_curated_units_nwb"}
 
     def _is_forbidden_call(node):
         """True if node is a Call that writes NWB or stages units."""
         if not isinstance(node, ast.Call):
             return None
         func = node.func
-        # Direct helper call: ``_stage_curated_units_nwb(...)`` or
-        # ``self._stage_curated_units_nwb(...)`` or
-        # ``cls._stage_curated_units_nwb(...)``
+        # Direct staging call: ``write_curated_units_nwb(...)`` (the
+        # DB-free service function ``_stage_curation_artifact`` calls
+        # directly), or an attribute form ``x.write_curated_units_nwb(...)``.
         if isinstance(func, ast.Name) and func.id in NWB_WRITE_NAMES:
             return func.id
         if isinstance(func, ast.Attribute) and func.attr in NWB_WRITE_NAMES:
@@ -880,7 +880,7 @@ def test_curation_v2_nwb_write_outside_transaction():
         if isinstance(n, ast.Call)
     )
     assert has_stage_call, (
-        "_stage_curation_artifact does not call _stage_curated_units_nwb; "
+        "_stage_curation_artifact does not call write_curated_units_nwb; "
         "the NWB staging step is missing."
     )
 

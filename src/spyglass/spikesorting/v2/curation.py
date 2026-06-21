@@ -312,10 +312,10 @@ class CurationV2(SpyglassMixin, dj.Manual):
         """
         sorting_id = sorting_key["sorting_id"]
         # Fetch the upstream Sorting.Unit rows once -- the parent
-        # existence check and _build_curated_unit_rows would otherwise
+        # existence check and build_curated_unit_rows would otherwise
         # query the same restriction twice.
         # ``order_by="unit_id"`` makes the row order explicit -- DataJoint
-        # gives no order guarantee without it. _build_curated_unit_rows
+        # gives no order guarantee without it. build_curated_unit_rows
         # treats this iteration as the canonical "source order" that
         # drives the NWB write order (surviving units first), so an
         # unordered fetch would silently leak DB row-order quirks.
@@ -559,7 +559,8 @@ class CurationV2(SpyglassMixin, dj.Manual):
         Returns ``(curation_id, unit_rows, kept_unit_to_contributors)``.
         ``curation_id`` auto-increments within the sort. ``unit_rows`` and
         ``kept_unit_to_contributors`` come from
-        :meth:`_build_curated_unit_rows`. Labels referencing unit_ids that
+        :func:`._curation_transforms.build_curated_unit_rows`. Labels
+        referencing unit_ids that
         are in neither the source sorting nor the written unit set are
         rejected as typos unless ``permissive_labels`` (then warn-and-drop);
         labels on absorbed merge contributors are always dropped with a
@@ -573,7 +574,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         # need its peak Electrode FK + amplitude (inherited from the
         # highest-amplitude contributor if it was the head of a merge
         # group).
-        unit_rows, kept_unit_to_contributors = cls._build_curated_unit_rows(
+        unit_rows, kept_unit_to_contributors = build_curated_unit_rows(
             sorting_id=sorting_id,
             sorting_units=sorting_units,
             merge_groups=merge_groups or [],
@@ -635,7 +636,8 @@ class CurationV2(SpyglassMixin, dj.Manual):
     ) -> tuple[str, str, str]:
         """Stage the curated-units NWB and reconcile per-unit ``n_spikes``.
 
-        Delegates the NWB write to :meth:`_stage_curated_units_nwb`, then
+        Delegates the NWB write to
+        :func:`._units_nwb.write_curated_units_nwb`, then
         overwrites each ``unit_rows`` entry's ``n_spikes`` (mutated in
         place) with the staged train's actual post-dedup length so the
         ``Unit.n_spikes == len(get_sorting train)`` invariant holds for
@@ -652,14 +654,14 @@ class CurationV2(SpyglassMixin, dj.Manual):
             units_object_id,
             staged_parent_nwb,
             n_spikes_by_uid,
-        ) = cls._stage_curated_units_nwb(
+        ) = write_curated_units_nwb(
             sorting_id=sorting_id,
             kept_unit_to_contributors=kept_unit_to_contributors,
             apply_merge=apply_merge,
             labels=labels,
         )
         # ``n_spikes`` must equal the length of the STORED (post-dedup)
-        # train. ``_build_curated_unit_rows`` estimated it from the raw
+        # train. ``build_curated_unit_rows`` estimated it from the raw
         # contributor sum; override with the staged train's actual length
         # so cross-unit duplicate removal (apply_merge=True) keeps the
         # ``Unit.n_spikes == len(get_sorting train)`` invariant.
@@ -1093,106 +1095,6 @@ class CurationV2(SpyglassMixin, dj.Manual):
             "merge_id": merge_id,
             "description": str(description),
         }
-
-    # ---- Curated-unit construction --------------------------------------
-
-    @classmethod
-    def _build_curated_unit_rows(
-        cls,
-        sorting_id,
-        sorting_units: list[dict],
-        merge_groups: list[list[int]],
-        curation_id: int,
-        apply_merge: bool,
-    ) -> tuple[list[dict], dict[int, list[int]]]:
-        """Resolve the post-merge ``CurationV2.Unit`` rows.
-
-        Thin orchestrator over
-        :func:`._curation_transforms.build_curated_unit_rows`, which owns
-        the merge-group validation, ``kept_unit_to_contributors`` mapping,
-        and per-unit row construction (DB-free, parity-critical). The
-        classmethod is kept as the surface ``insert_curation`` calls and
-        the v2 tests call / monkeypatch; the logic lives in the service
-        module.
-
-        ``sorting_units`` is the pre-fetched ``Sorting.Unit`` rows for
-        ``sorting_id``; the caller fetches once and threads through to
-        avoid re-querying.
-
-        Parameters
-        ----------
-        sorting_id
-            ``sorting_id`` of the upstream Sorting row.
-        sorting_units : list of dict
-            Pre-fetched ``Sorting.Unit`` rows for ``sorting_id``.
-        merge_groups : list of list of int
-            Merge groups, each a list of ``unit_id`` ints (>=2 each).
-        curation_id : int
-            ``curation_id`` to stamp on the resulting rows.
-        apply_merge : bool
-            If True, build the merged (committed) unit set; if False,
-            keep every original unit and record proposed merges.
-
-        Returns
-        -------
-        tuple of (list of dict, dict[int, list[int]])
-            ``(unit_rows, kept_unit_to_contributors)``. See
-            :func:`._curation_transforms.build_curated_unit_rows` for the
-            element semantics.
-        """
-        return build_curated_unit_rows(
-            sorting_id=sorting_id,
-            sorting_units=sorting_units,
-            merge_groups=merge_groups,
-            curation_id=curation_id,
-            apply_merge=apply_merge,
-        )
-
-    @classmethod
-    def _stage_curated_units_nwb(
-        cls,
-        sorting_id,
-        kept_unit_to_contributors: dict,
-        apply_merge: bool,
-        labels: dict,
-    ) -> tuple[str, str, str, dict]:
-        """Write the curated-units NWB.
-
-        Thin delegator to :func:`._units_nwb.write_curated_units_nwb`;
-        kept as a ``CurationV2`` classmethod because ``insert_curation``
-        calls ``cls._stage_curated_units_nwb(...)`` and the v1-parity AST
-        test (``test_v1_parity.py``) asserts that call by name. The NWB
-        staging IO -- resolving the source sort's units NWB, the
-        ``apply_merge`` cross-unit dedup, and the ragged ``curation_label``
-        column -- lives in the service module.
-
-        Parameters
-        ----------
-        sorting_id
-            ``sorting_id`` of the upstream Sorting row.
-        kept_unit_to_contributors : dict
-            ``{kept_unit_id: [contributor_unit_id, ...]}`` from
-            ``_build_curated_unit_rows``.
-        apply_merge : bool
-            If True, write the merged unit set (contributors absorbed,
-            cross-unit dedup applied); if False, write every original
-            unit.
-        labels : dict
-            ``{unit_id: [label, ...]}`` written as the ragged
-            ``curation_label`` NWB column.
-
-        Returns
-        -------
-        tuple of (str, str, str, dict)
-            ``(analysis_file_name, units_object_id, nwb_file_name,
-            n_spikes_by_uid)``.
-        """
-        return write_curated_units_nwb(
-            sorting_id=sorting_id,
-            kept_unit_to_contributors=kept_unit_to_contributors,
-            apply_merge=apply_merge,
-            labels=labels,
-        )
 
     # ---- Accessors -------------------------------------------------------
 
