@@ -91,6 +91,42 @@ class AnalysisFileIssues(dj.Manual):
         except Exception as e:
             logger.warning(f"Could not fetch v1 recompute deleted files: {e}")
 
+        deleted.update(AnalysisFileIssues._get_v2_deleted_files())
+
+        return deleted
+
+    @staticmethod
+    def _get_v2_deleted_files() -> set:
+        """Return v2 analysis file names intentionally deleted by recompute.
+
+        Companion to ``_get_recompute_deleted`` for the v2 spike-sorting
+        recompute machinery: ``RecordingArtifactRecompute.delete_files`` removes
+        a recording's ``AnalysisNwbfile`` after a verified, current-environment
+        match and sets ``deleted=1``. Without this companion the file-tracking
+        infrastructure would flag those intentionally-deleted v2 files as
+        orphans. (The ``SortingAnalyzerRecompute`` trio deletes regeneratable
+        analyzer FOLDERS, not ``AnalysisNwbfile`` rows, so it is not relevant
+        to analysis-file tracking.)
+
+        Returns
+        -------
+        deleted : set of str
+            v2 analysis file names that were intentionally deleted.
+        """
+        deleted = set()
+        try:
+            from spyglass.spikesorting.v2.recompute import (
+                RecordingArtifactRecompute as V2RecordingArtifactRecompute,
+            )
+
+            deleted.update(
+                (V2RecordingArtifactRecompute().with_names & "deleted=1").fetch(
+                    "analysis_file_name"
+                )
+            )
+        except Exception as e:
+            logger.warning(f"Could not fetch v2 recompute deleted files: {e}")
+
         return deleted
 
     @staticmethod
