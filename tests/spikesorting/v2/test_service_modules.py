@@ -51,7 +51,10 @@ _DB_FREE_SERVICE_MODULES = [
     "_shared_artifact_group",
     "_signal_math",
     "_sort_group_planning",
-    "_sorting_compute",
+    "_sorting_analyzer",
+    "_sorting_artifact_mask",
+    "_sorting_dispatch",
+    "_sorting_units",
     "_units_nwb",
 ]
 
@@ -397,13 +400,13 @@ def test_dedup_merged_spike_times_empty():
 
 
 # --------------------------------------------------------------------------- #
-# _sorting_compute contracts (pure precedence + input-validation guards)
+# _sorting_dispatch / _sorting_artifact_mask contracts (precedence + guards)
 # --------------------------------------------------------------------------- #
 
 
 def test_clusterless_noise_levels_precedence():
     """Explicit noise_levels win; else uv->[1.0], mad->None."""
-    from spyglass.spikesorting.v2._sorting_compute import (
+    from spyglass.spikesorting.v2._sorting_dispatch import (
         _clusterless_noise_levels,
     )
 
@@ -415,7 +418,9 @@ def test_clusterless_noise_levels_precedence():
 
 def test_apply_artifact_mask_rejects_malformed_valid_times():
     """The complement walker rejects inputs that would silently under-mask."""
-    from spyglass.spikesorting.v2._sorting_compute import apply_artifact_mask
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        apply_artifact_mask,
+    )
     from spyglass.spikesorting.v2.exceptions import (
         EmptyArtifactValidTimesError,
     )
@@ -698,7 +703,7 @@ def test_explicit_time_vector_recording_is_not_linearized():
 
 
 # --------------------------------------------------------------------------- #
-# _sorting_compute.build_sorting_unit_rows contracts (pure)
+# _sorting_units.build_sorting_unit_rows contracts (pure)
 # --------------------------------------------------------------------------- #
 
 
@@ -706,7 +711,7 @@ def test_build_sorting_unit_rows_constructs_rows_from_peak_metadata():
     """One ``Sorting.Unit`` row per unit, carrying the peak channel's Electrode
     FK fields, the peak amplitude (as float), and the precomputed spike count,
     merged onto the base key."""
-    from spyglass.spikesorting.v2._sorting_compute import (
+    from spyglass.spikesorting.v2._sorting_units import (
         build_sorting_unit_rows,
     )
 
@@ -759,7 +764,7 @@ def test_build_sorting_unit_rows_constructs_rows_from_peak_metadata():
 def test_build_sorting_unit_rows_rejects_peak_channel_outside_sort_group():
     """A unit whose peak channel is not in the sort group's electrode map is a
     channel-id mismatch -- raise rather than build an invalid Electrode FK."""
-    from spyglass.spikesorting.v2._sorting_compute import (
+    from spyglass.spikesorting.v2._sorting_units import (
         build_sorting_unit_rows,
     )
 
@@ -779,7 +784,7 @@ def test_build_sorting_unit_rows_rejects_peak_channel_outside_sort_group():
 def test_build_sorting_unit_rows_raises_typed_error_on_non_integer_unit_id():
     """A sorter unit id that does not convert to int raises the typed
     NonIntegerUnitIDError (not a bare ValueError)."""
-    from spyglass.spikesorting.v2._sorting_compute import (
+    from spyglass.spikesorting.v2._sorting_units import (
         build_sorting_unit_rows,
     )
     from spyglass.spikesorting.v2.exceptions import NonIntegerUnitIDError

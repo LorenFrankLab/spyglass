@@ -721,7 +721,7 @@ def test_kilosort4_schema_rejects_whiten():
 
     KS4 has no ``whiten`` kwarg -- it whitens internally -- and the v2 runtime
     runs its external float64 whitening whenever the sorter params carry a
-    truthy ``whiten`` (``_sorting_compute.py``). A ``whiten`` key, which
+    truthy ``whiten`` (``_sorting_dispatch.py``). A ``whiten`` key, which
     ``extra="allow"`` would otherwise pass through silently, would therefore
     double-whiten the signal. The schema rejects it up front rather than
     letting it surface as silently-wrong spike times at sort time. Any value

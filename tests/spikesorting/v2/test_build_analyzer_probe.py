@@ -15,7 +15,7 @@ from __future__ import annotations
 import pytest
 import spikeinterface.full as si
 
-from spyglass.spikesorting.v2._sorting_compute import build_analyzer
+from spyglass.spikesorting.v2._sorting_analyzer import build_analyzer
 
 
 @pytest.fixture

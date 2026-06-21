@@ -173,7 +173,7 @@ class Kilosort4Schema(BaseModel):
         """Reject a ``whiten`` key -- KS4 whitens internally, no such kwarg.
 
         The v2 runtime runs its external float64 whitening whenever the
-        sorter params carry a truthy ``whiten`` (``_sorting_compute.py``).
+        sorter params carry a truthy ``whiten`` (``_sorting_dispatch.py``).
         KS4 also whitens internally (``skip_kilosort_preprocessing=False``),
         so a ``whiten`` key here -- which ``extra="allow"`` would otherwise
         pass through silently -- would double-whiten the signal. Whitening is
@@ -363,7 +363,7 @@ _SORTER_SCHEMAS: dict[str, type[BaseModel]] = {
 
 # Sorters that whiten internally and have NO ``whiten`` kwarg, so a truthy
 # ``whiten`` in their params would trigger the v2 runtime's external float64
-# whitening (``_sorting_compute.py``) on top of the sorter's own --
+# whitening (``_sorting_dispatch.py``) on top of the sorter's own --
 # double-whitening the signal (or being rejected by SpikeInterface at sort
 # time as an invalid kwarg). Kilosort4 is guarded separately by
 # ``Kilosort4Schema._reject_whiten`` (it has its own typed schema); these three

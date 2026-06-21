@@ -15,7 +15,7 @@ none of that at import, so ``Recording`` becomes a thin orchestrator (fetch ->
 call these -> insert / verify). Same "thin DataJoint shell over pure/IO
 services" direction as ``_artifact_compute`` / ``_selection_identity`` /
 ``_analyzer_cache`` / ``_curation_transforms`` / ``_units_nwb`` /
-``_sorting_compute``.
+``_sorting_dispatch``.
 
 DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
 connection at import: all SpikeInterface / numpy / probeinterface / spyglass

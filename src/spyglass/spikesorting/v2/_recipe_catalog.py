@@ -232,7 +232,7 @@ def sorter_default_contents() -> tuple:
             # There is deliberately NO ``whiten`` key: KS4 has no such param,
             # and the v2 runtime only runs its external float64 whitening when
             # the sorter params carry ``whiten=True`` (see
-            # ``_sorting_compute.py``), so omitting it keeps the signal
+            # ``_sorting_dispatch.py``), so omitting it keeps the signal
             # whitened exactly once (by KS4) -- adding ``whiten=True`` here
             # would double-whiten.
             "kilosort4",

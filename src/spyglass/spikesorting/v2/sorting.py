@@ -36,15 +36,17 @@ from spyglass.spikesorting.v2._recipe_catalog import (
     _params_schema_version,
     sorter_default_contents,
 )
-from spyglass.spikesorting.v2._sorting_compute import (
+from spyglass.spikesorting.v2._sorting_analyzer import build_analyzer
+from spyglass.spikesorting.v2._sorting_artifact_mask import apply_artifact_mask
+from spyglass.spikesorting.v2._sorting_dispatch import (
     _clusterless_noise_levels,  # noqa: F401  re-exported for tests
-    _to_int_unit_id,  # noqa: F401  re-exported for tests
-    apply_artifact_mask,
-    build_analyzer,
-    build_sorting_unit_rows,
     remove_excess_spikes,
     run_clusterless_thresholder,
     run_si_sorter,
+)
+from spyglass.spikesorting.v2._sorting_units import (
+    _to_int_unit_id,  # noqa: F401  re-exported for tests
+    build_sorting_unit_rows,
 )
 from spyglass.spikesorting.v2._units_nwb import (
     abs_spike_times_dataframe,
@@ -1807,7 +1809,7 @@ class Sorting(SpyglassMixin, dj.Computed):
     ):
         """Zero out the complement of ``valid_times`` on the recording.
 
-        Thin delegator to :func:`._sorting_compute.apply_artifact_mask`;
+        Thin delegator to :func:`._sorting_artifact_mask.apply_artifact_mask`;
         kept as a ``Sorting`` staticmethod because ``make_compute`` calls
         ``self._apply_artifact_mask(...)`` and the v2 tests call
         ``Sorting._apply_artifact_mask`` directly. The complement-walk
@@ -1861,7 +1863,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         """Run Spyglass's clusterless-thresholder peak-detection path.
 
         Thin delegator to
-        :func:`._sorting_compute.run_clusterless_thresholder`; kept as a
+        :func:`._sorting_dispatch.run_clusterless_thresholder`; kept as a
         ``Sorting`` staticmethod because ``_run_sorter`` dispatches to
         ``Sorting._run_clusterless_thresholder`` and the v2 tests call it
         directly. The detect_peaks pipeline -- noise_levels/threshold_unit
@@ -1884,7 +1886,7 @@ class Sorting(SpyglassMixin, dj.Computed):
     ):
         """Run an SI registered sorter under a managed scratch dir.
 
-        Thin delegator to :func:`._sorting_compute.run_si_sorter`; kept as
+        Thin delegator to :func:`._sorting_dispatch.run_si_sorter`; kept as
         a ``Sorting`` staticmethod because ``_run_sorter`` dispatches to
         ``Sorting._run_si_sorter`` and the v2 tests call it directly. The
         managed ``TemporaryDirectory`` scratch, external float64 whitening,
@@ -1903,7 +1905,7 @@ class Sorting(SpyglassMixin, dj.Computed):
     def _remove_excess_spikes(sorting, recording):
         """Drop spikes whose sample index is outside the recording window.
 
-        Thin delegator to :func:`._sorting_compute.remove_excess_spikes`;
+        Thin delegator to :func:`._sorting_dispatch.remove_excess_spikes`;
         kept as a ``Sorting`` staticmethod because ``make_compute`` calls
         ``self._remove_excess_spikes(...)``.
         """
@@ -1921,7 +1923,7 @@ class Sorting(SpyglassMixin, dj.Computed):
     ):
         """Build the binary-folder SortingAnalyzer + base extensions.
 
-        Thin delegator to :func:`._sorting_compute.build_analyzer`; kept as
+        Thin delegator to :func:`._sorting_analyzer.build_analyzer`; kept as
         a ``Sorting`` staticmethod because ``make_compute`` /
         ``_rebuild_analyzer_folder`` call ``self._build_analyzer(...)`` and
         the v2 tests call it directly. The analyzer creation, seeded
