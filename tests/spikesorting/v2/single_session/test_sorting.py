@@ -793,7 +793,7 @@ def test_build_analyzer_compute_args(dj_conn, monkeypatch, tmp_path):
     them). The extension check is a subset, not exact equality, so adding a
     future extension is not a regression; the downstream correctness of the
     values they feed is covered by the real-analyzer outcome tests
-    (``test_units_audit``, ``test_analyzer_rebuild_is_seeded_reproducible``).
+    (``test_unit_conventions``, ``test_analyzer_rebuild_is_seeded_reproducible``).
     """
     import spikeinterface as si
 
