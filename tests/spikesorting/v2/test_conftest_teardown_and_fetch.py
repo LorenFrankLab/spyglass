@@ -213,15 +213,18 @@ def test_require_fixtures_gate_still_exits_nonzero():
     it to catch a fixture whose download failed. Run a child pytest that requires a
     genuinely-absent fixture and assert it exits non-zero with a pointed message.
     """
-    # Target this very module: the gate fires in pytest_sessionstart regardless
-    # of which path is collected, and a self-reference can't break for an
-    # unrelated sibling rename.
+    # Target this very module by its absolute path (``__file__``) so the
+    # reference can never rot when the file is renamed. The gate fires in the
+    # package ``pytest_sessionstart`` regardless of which path is collected;
+    # using a real, collectable module guarantees the ONLY reason for a
+    # non-zero exit is the gate -- a bogus path would exit non-zero on its own
+    # and mask a weakened gate (false green).
     proc = subprocess.run(
         [
             sys.executable,
             "-m",
             "pytest",
-            "tests/spikesorting/v2/test_harness.py",
+            __file__,
             "--collect-only",
             "--no-docker",
             "-p",
@@ -240,10 +243,16 @@ def test_require_fixtures_gate_still_exits_nonzero():
         text=True,
     )
 
+    out = proc.stdout + proc.stderr
     assert proc.returncode != 0, (
-        "gate did not fail on a missing required fixture:\n" + proc.stdout
+        "gate did not fail on a missing required fixture:\n" + out
     )
-    assert "no_such_fixture_xyz" in (proc.stdout + proc.stderr)
+    # The non-zero exit must come from the gate, not a file-not-found / collection
+    # error -- otherwise this test would stay green even if the gate regressed.
+    assert "Required v2 fixtures are absent" in out, (
+        "exit was not the honest-green fixture gate:\n" + out
+    )
+    assert "no_such_fixture_xyz" in out
 
 
 def _clean_env():
