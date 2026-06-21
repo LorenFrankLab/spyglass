@@ -13,17 +13,19 @@ matrix (truly-stray raise vs warn-and-drop, absorbed-contributor drop)
 unit-testable without a DataJoint transaction.
 
 Dependency-light: imports only :mod:`_curation_transforms` (DB-free) and
-the spyglass logger.
+stdlib logging.
 """
 
 from __future__ import annotations
 
+import logging
 from typing import NamedTuple
 
 from spyglass.spikesorting.v2._curation_transforms import (
     build_curated_unit_rows,
 )
-from spyglass.utils import logger
+
+logger = logging.getLogger("spyglass")
 
 
 class CurationInsertPlan(NamedTuple):

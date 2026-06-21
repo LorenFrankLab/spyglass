@@ -7,9 +7,9 @@ These tests drive the builder + the stray-label decision matrix directly --
 no DataJoint, no transaction -- so the misconfiguration paths (truly-stray
 vs absorbed-contributor labels, raise vs warn-and-drop) are pinned cheaply.
 
-``_curation_plan`` imports only ``_curation_transforms`` (DB-free), so this
-file needs no database fixture; the import-boundary contract is separately
-enforced by ``test_service_modules`` (``_curation_plan`` is in
+``_curation_plan`` imports only ``_curation_transforms`` plus stdlib logging,
+so this file needs no database fixture; the import-boundary contract is
+separately enforced by ``test_service_modules`` (``_curation_plan`` is in
 ``_DB_FREE_SERVICE_MODULES``).
 """
 
@@ -21,6 +21,8 @@ from spyglass.spikesorting.v2._curation_plan import (
     build_curation_insert_plan,
     validate_label_unit_ids,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _unit(uid, amp=10.0, n=100, eid=0):
@@ -49,9 +51,11 @@ def _validate(labels, source, written, *, permissive=False):
     )
 
 
-def test_labels_on_written_units_pass():
+def test_labels_on_written_units_pass(caplog):
     """Keys that are all in the written set never raise or warn."""
-    _validate({0: ["mua"], 1: ["noise"]}, source={0, 1}, written={0, 1})
+    with caplog.at_level("WARNING", logger="spyglass"):
+        _validate({0: ["mua"], 1: ["noise"]}, source={0, 1}, written={0, 1})
+    assert not [r for r in caplog.records if r.name == "spyglass"]
 
 
 def test_truly_stray_label_raises_by_default():
@@ -60,15 +64,26 @@ def test_truly_stray_label_raises_by_default():
         _validate({9: ["mua"]}, source={0, 1}, written={0, 1})
 
 
-def test_truly_stray_label_warn_and_drop_when_permissive():
+def test_truly_stray_label_warn_and_drop_when_permissive(caplog):
     """``permissive_labels=True`` downgrades the typo raise to warn-and-drop."""
-    _validate({9: ["mua"]}, source={0, 1}, written={0, 1}, permissive=True)
+    with caplog.at_level("WARNING", logger="spyglass"):
+        _validate({9: ["mua"]}, source={0, 1}, written={0, 1}, permissive=True)
+    messages = [r.getMessage() for r in caplog.records if r.name == "spyglass"]
+    assert any(
+        "neither in Sorting.Unit" in msg and "ignored" in msg
+        for msg in messages
+    )
 
 
-def test_absorbed_contributor_label_warns_not_raises():
+def test_absorbed_contributor_label_warns_not_raises(caplog):
     """A key in the source but absorbed (not written) warns, never raises --
     even with permissive_labels=False."""
-    _validate({1: ["mua"]}, source={0, 1}, written={0}, permissive=False)
+    with caplog.at_level("WARNING", logger="spyglass"):
+        _validate({1: ["mua"]}, source={0, 1}, written={0}, permissive=False)
+    messages = [r.getMessage() for r in caplog.records if r.name == "spyglass"]
+    assert any(
+        "absorbed contributor" in msg and "[1]" in msg for msg in messages
+    )
 
 
 # ---------- build_curation_insert_plan -------------------------------------
