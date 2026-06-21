@@ -29,21 +29,33 @@ path resolution + file create). It also lazily imports the
 from __future__ import annotations
 
 
-def raw_eseries_uses_explicit_timestamps(nwb_file_abs_path: str) -> bool:
-    """Return whether the raw acquisition ElectricalSeries stores timestamps.
+def raw_eseries_path_and_timestamp_mode(nwb_file_abs_path: str) -> tuple[str, bool]:
+    """Return the raw acquisition ElectricalSeries path + timestamp mode.
 
     Rate-based ElectricalSeries store ``starting_time`` + ``rate`` and do not
     need SpikeInterface to load a full time vector. Timestamp-based series carry
     a ``timestamps`` dataset and must preserve that explicit vector to avoid
-    treating irregular/dropped-sample timing as affine.
+    treating irregular/dropped-sample timing as affine. The path resolution
+    mirrors ``get_raw_eseries_path``: choose the first acquisition
+    ElectricalSeries, matching Raw ingest.
     """
     import h5py
 
-    from spyglass.utils.nwb_helper_fn import get_raw_eseries_path
-
-    series_path = get_raw_eseries_path(nwb_file_abs_path)
     with h5py.File(nwb_file_abs_path, "r") as nwb_file:
-        return "timestamps" in nwb_file[series_path]
+        acquisition = nwb_file.get("acquisition")
+        if acquisition is not None:
+            for name, obj in acquisition.items():
+                neurodata_type = obj.attrs.get("neurodata_type", b"")
+                if isinstance(neurodata_type, bytes):
+                    neurodata_type = neurodata_type.decode()
+                if neurodata_type == "ElectricalSeries":
+                    return f"acquisition/{name}", "timestamps" in obj
+    raise ValueError(f"No acquisition ElectricalSeries found in {nwb_file_abs_path}.")
+
+
+def raw_eseries_uses_explicit_timestamps(nwb_file_abs_path: str) -> bool:
+    """Return whether the raw acquisition ElectricalSeries stores timestamps."""
+    return raw_eseries_path_and_timestamp_mode(nwb_file_abs_path)[1]
 
 
 def write_nwb_artifact(

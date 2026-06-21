@@ -128,6 +128,14 @@ class _LazyAffineTimestamps:
     def __len__(self):
         return self.n_frames
 
+    @staticmethod
+    def _unsupported_index(item):
+        raise TypeError(
+            "_LazyAffineTimestamps supports only integer and slice indexing; "
+            f"got {type(item).__name__}. Convert to a NumPy array first for "
+            "boolean or fancy indexing."
+        )
+
     def __getitem__(self, item):
         import numpy as np
 
@@ -138,6 +146,10 @@ class _LazyAffineTimestamps:
             )
             return self.t_start + frames / self.sampling_frequency
 
+        if isinstance(item, (bool, np.bool_)) or not isinstance(
+            item, (int, np.integer)
+        ):
+            self._unsupported_index(item)
         idx = int(item)
         if idx < 0:
             idx += self.n_frames
@@ -163,6 +175,14 @@ class _LazyConcatenatedTimestamps:
 
     def __len__(self):
         return self.shape[0]
+
+    @staticmethod
+    def _unsupported_index(item):
+        raise TypeError(
+            "_LazyConcatenatedTimestamps supports only integer and slice "
+            f"indexing; got {type(item).__name__}. Convert to a NumPy array "
+            "first for boolean or fancy indexing."
+        )
 
     def __getitem__(self, item):
         import numpy as np
@@ -193,6 +213,10 @@ class _LazyConcatenatedTimestamps:
                 else np.asarray([], dtype=np.float64)
             )
 
+        if isinstance(item, (bool, np.bool_)) or not isinstance(
+            item, (int, np.integer)
+        ):
+            self._unsupported_index(item)
         idx = int(item)
         if idx < 0:
             idx += len(self)

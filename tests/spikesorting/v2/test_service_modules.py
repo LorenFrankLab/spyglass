@@ -543,6 +543,23 @@ def test_lazy_timestamp_override_indexes_and_slices_regular_grid():
     np.testing.assert_allclose(override[1:4], np.array([12.5, 13.0, 15.0]))
 
 
+def test_lazy_timestamp_override_rejects_fancy_indexing_clearly():
+    """Lazy timestamp overrides intentionally support only the current streaming
+    consumers' int/slice indexing; unsupported indexing should fail explicitly."""
+    from spyglass.spikesorting.v2._recording_restriction import (
+        _lazy_timestamp_override,
+    )
+
+    override = _lazy_timestamp_override(
+        np.array([[0, 3]]),
+        sampling_frequency=1.0,
+        t_start=0.0,
+    )
+
+    with pytest.raises(TypeError, match="integer and slice indexing"):
+        override[np.array([True, False, True])]
+
+
 def test_get_recording_timestamps_preserves_lazy_override():
     """A lazy override must not be forced through np.asarray before the NWB
     chunk iterator has a chance to stream it."""
@@ -566,6 +583,7 @@ def test_raw_eseries_timestamp_mode_detects_rate_vs_explicit(tmp_path):
     import h5py
 
     from spyglass.spikesorting.v2._recording_nwb import (
+        raw_eseries_path_and_timestamp_mode,
         raw_eseries_uses_explicit_timestamps,
     )
 
@@ -585,8 +603,15 @@ def test_raw_eseries_timestamp_mode_detects_rate_vs_explicit(tmp_path):
     _write(rate_path, explicit=False)
     _write(explicit_path, explicit=True)
 
+    assert raw_eseries_path_and_timestamp_mode(str(rate_path)) == (
+        "acquisition/e-series",
+        False,
+    )
+    assert raw_eseries_path_and_timestamp_mode(str(explicit_path)) == (
+        "acquisition/e-series",
+        True,
+    )
     assert raw_eseries_uses_explicit_timestamps(str(rate_path)) is False
-    assert raw_eseries_uses_explicit_timestamps(str(explicit_path)) is True
 
 
 def test_lazy_regular_path_matches_eager_on_nonzero_start_recording():

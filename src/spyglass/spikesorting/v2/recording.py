@@ -41,7 +41,7 @@ from spyglass.spikesorting.v2._recording_geometry import (
     spikeinterface_channel_ids,
 )
 from spyglass.spikesorting.v2._recording_nwb import (
-    raw_eseries_uses_explicit_timestamps,
+    raw_eseries_path_and_timestamp_mode,
     write_nwb_artifact,
 )
 from spyglass.spikesorting.v2._recording_preprocessing import (
@@ -1654,9 +1654,13 @@ class Recording(SpyglassMixin, dj.Computed):
         # Rate-based raw ElectricalSeries can reconstruct selected timestamps
         # lazily from (t_start, sampling_frequency, frame index). Explicit
         # timestamp series may be irregular, so keep the old eager load there.
-        load_time_vector = raw_eseries_uses_explicit_timestamps(raw_path)
+        raw_series_path, load_time_vector = raw_eseries_path_and_timestamp_mode(
+            raw_path
+        )
         recording = read_raw_nwb_recording(
-            raw_path, load_time_vector=load_time_vector
+            raw_path,
+            load_time_vector=load_time_vector,
+            electrical_series_path=raw_series_path,
         )
         sampling_frequency = float(recording.get_sampling_frequency())
 

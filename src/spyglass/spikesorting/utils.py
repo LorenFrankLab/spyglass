@@ -257,7 +257,9 @@ def _check_artifact_thresholds(
     return amplitude_thresh, zscore_thresh, proportion_above_thresh
 
 
-def read_raw_nwb_recording(nwb_file_abs_path, load_time_vector=False):
+def read_raw_nwb_recording(
+    nwb_file_abs_path, load_time_vector=False, electrical_series_path=None
+):
     """Read the raw acquisition ElectricalSeries as a SpikeInterface recording.
 
     A version-agnostic wrapper over
@@ -277,6 +279,9 @@ def read_raw_nwb_recording(nwb_file_abs_path, load_time_vector=False):
         Absolute path to the NWB file to read.
     load_time_vector : bool, optional
         Passed through to ``read_nwb_recording``. Defaults to False.
+    electrical_series_path : str, optional
+        In-file path of the raw acquisition ElectricalSeries. When omitted,
+        this helper resolves it with ``get_raw_eseries_path``.
 
     Returns
     -------
@@ -289,7 +294,9 @@ def read_raw_nwb_recording(nwb_file_abs_path, load_time_vector=False):
 
     from spyglass.utils.nwb_helper_fn import get_raw_eseries_path
 
-    series_path = get_raw_eseries_path(nwb_file_abs_path)
+    series_path = electrical_series_path or get_raw_eseries_path(
+        nwb_file_abs_path
+    )
     params = inspect.signature(se.read_nwb_recording).parameters
     kwargs = {"load_time_vector": load_time_vector}
     if "electrical_series_path" in params:  # SpikeInterface >= 0.100
