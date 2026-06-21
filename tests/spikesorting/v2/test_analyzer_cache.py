@@ -1,4 +1,4 @@
-"""Phase B (increment 1): analyzer-cache path policy.
+"""Analyzer-cache path policy.
 
 The SortingAnalyzer folder is regeneratable scratch whose location is a pure
 function of ``sorting_id`` + one configured root. These tests pin that

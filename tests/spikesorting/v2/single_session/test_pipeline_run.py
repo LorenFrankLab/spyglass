@@ -10,7 +10,7 @@ from tests.spikesorting.v2._ingest_helpers import (
 
 
 # ===========================================================================
-# A29: pipeline.py untested branches.
+# pipeline.py untested branches.
 #
 # list_pipeline_presets enumeration, run_v2_pipeline idempotency (existing-root
 # short-circuit), and pipeline-preset -> run_summary wiring. The franklab MS4
@@ -494,7 +494,7 @@ def test_run_v2_pipeline_clusterless_default_handles_zero_units_gracefully(
         f"Expected zero units from shipped clusterless default "
         f"on the smoke fixture, got n_units={sort_row['n_units']}. "
         "Either the smoke fixture's amplitudes changed (unlikely) "
-        "or the unit-conversion semantics shifted -- audit the "
+        "or the unit-conversion semantics shifted -- check the "
         "detect_threshold units."
     )
     assert len(Sorting.Unit & sort_pk) == 0, (
@@ -549,16 +549,16 @@ def test_run_v2_pipeline_clusterless_default_handles_zero_units_gracefully(
     assert empty_curated.get_num_units() == 0
 
     # get_merged_sorting must also handle the zero-unit curation without
-    # reaching the ``max(unit_ids) + 1`` path on an empty unit set (audit
-    # test-hardening #14); the root curation (merges_applied=0, no proposed
-    # merges) returns the empty base sorting.
+    # reaching the ``max(unit_ids) + 1`` path on an empty unit set; the
+    # root curation (merges_applied=0, no proposed merges) returns the
+    # empty base sorting.
     empty_merged = CurationV2().get_merged_sorting(curation_pk)
     assert empty_merged.get_num_units() == 0
 
 
 @pytest.mark.usefixtures("dj_conn")
 def test_list_pipeline_presets_enumerates_all_pipeline_presets():
-    """A29: ``list_pipeline_presets()`` returns exactly the names in ``_PIPELINE_PRESETS``.
+    """``list_pipeline_presets()`` returns exactly the names in ``_PIPELINE_PRESETS``.
 
     Behavioral (not a signature check): the helper must enumerate every
     registered pipeline preset so a notebook user can discover them. A
@@ -587,7 +587,7 @@ def test_list_pipeline_presets_enumerates_all_pipeline_presets():
 
 @pytest.mark.slow
 def test_run_v2_pipeline_idempotent_existing_root(polymer_smoke_session):
-    """A29: re-running ``run_v2_pipeline`` returns the same curation via the
+    """Re-running ``run_v2_pipeline`` returns the same curation via the
     existing-root short-circuit, and a child curation does not divert it.
 
     The orchestrator looks for a root (``parent_curation_id=-1``) curation and
@@ -634,7 +634,7 @@ def test_run_v2_pipeline_idempotent_existing_root(polymer_smoke_session):
 def test_run_v2_pipeline_pipeline_preset_wiring_to_run_summary(
     polymer_smoke_session,
 ):
-    """A29: the chosen pipeline preset's sorter is recorded in SortingSelection.
+    """The chosen pipeline preset's sorter is recorded in SortingSelection.
 
     Runs the MS5 pipeline preset (a runnable stand-in for the MS4 pipeline
     preset, whose runtime is unavailable here) and asserts the run_summary's
@@ -673,7 +673,7 @@ def test_run_v2_pipeline_pipeline_preset_wiring_to_run_summary(
 
 @pytest.mark.slow
 def test_run_v2_pipeline_mountainsort4_pipeline_preset(polymer_smoke_session):
-    """A29: the franklab MS4 pipeline preset runs end-to-end where MS4 is runnable.
+    """The franklab MS4 pipeline preset runs end-to-end where MS4 is runnable.
 
     ``mountainsort4`` appears in ``installed_sorters()`` but its ``ml_ms4alg``
     backend is unavailable in the SI 0.104 test image. This inspects the

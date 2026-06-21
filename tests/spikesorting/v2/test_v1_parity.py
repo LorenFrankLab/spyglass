@@ -371,8 +371,8 @@ def test_get_spiking_sorting_v2_merge_ids_resolves_restriction(
 def test_no_phase_label_leakage_in_runtime_code():
     """Zero plan-phase / review-code identifier hits in v2 artifacts.
 
-    The shared-contracts "Code Artifact Naming" invariant forbids
-    plan-process identifiers in runtime code AND user-facing docs:
+    Shipped runtime code AND user-facing docs must not reference
+    internal plan-process identifiers:
       - plan-phase / plan-task labels (``Phase N``, ``phase-N``, ``Task N``)
       - review/audit codes (``A4``, ``R5``, ``C3``, ``N19``, ``B3`` ...) --
         a single uppercase letter from the review namespaces followed by a
@@ -433,7 +433,7 @@ def test_no_phase_label_leakage_in_runtime_code():
 
     assert not offenders, (
         "plan-phase / review-code leakage in v2 runtime or user-facing "
-        f"docs (Code Artifact Naming invariant): {offenders}"
+        f"docs: {offenders}"
     )
 
 

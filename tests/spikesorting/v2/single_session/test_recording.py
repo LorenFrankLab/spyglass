@@ -119,11 +119,11 @@ def test_recording_populates_and_round_trips(
         f"Recording.duration_s = {row['duration_s']}; expected "
         f"~{expected_duration} from IntervalList valid_times span."
     )
-    # ``cache_hash`` is an ``NwbfileHasher`` digest. The
-    # exact digest length (currently 32-char MD5 hex) is not pinned
-    # by the plan; the ``char(64)`` schema column is headroom for a
-    # future hash change. Assert non-empty rather than a fixed
-    # length so a hash-algorithm swap does not break this test.
+    # ``cache_hash`` is an ``NwbfileHasher`` digest. The exact digest
+    # length (currently 32-char MD5 hex) is intentionally not pinned; the
+    # ``char(64)`` schema column is headroom for a future hash change.
+    # Assert non-empty rather than a fixed length so a hash-algorithm swap
+    # does not break this test.
     assert isinstance(row["cache_hash"], str) and row["cache_hash"]
 
     rec = Recording().get_recording(recording_selection_key)
@@ -259,23 +259,21 @@ def test_write_nwb_artifact_rejects_heterogeneous_gains(
 def test_get_recording_currently_raises_checksum_on_missing_cache(
     populated_recording,
 ):
-    """A18 Test 1 (verify-current-failure): ``get_recording`` raises a
-    checksum ``DataJointError`` when the cache file is missing and must be
-    rebuilt.
+    """``get_recording`` raises a checksum ``DataJointError`` when the cache
+    file is missing and must be rebuilt.
 
     Pins TODAY's behavior: the on-demand rebuild is NOT byte-deterministic
-    versus the external-store checksum (the recompute byte-determinism work
-    is deferred to main-epic Phase 2 ``RecordingArtifactRecompute*`` -- see
-    overview decision 3 / the deferred C2 note). So when the canonical cache
-    is absent, ``get_recording`` rebuilds the file, then re-resolves it with
-    checksum validation, and DataJoint rejects the rebuilt-but-not-identical
-    bytes. This test locks that failure mode: a future regression that
-    silently returned the drifted rebuilt bytes (skipping the checksum) would
-    flip this assertion and be caught.
+    versus the external-store checksum (a future byte-deterministic
+    ``RecordingArtifactRecompute`` path is not yet implemented). So when the
+    canonical cache is absent, ``get_recording`` rebuilds the file, then
+    re-resolves it with checksum validation, and DataJoint rejects the
+    rebuilt-but-not-identical bytes. This test locks that failure mode: a
+    future regression that silently returned the drifted rebuilt bytes
+    (skipping the checksum) would flip this assertion and be caught.
 
-    The happy-path "rebuild succeeds, hash matches" test cannot pass against
-    current source and is deliberately deferred to main-epic recompute (see
-    the module's "Deliberately deferred" note).
+    The happy-path "rebuild succeeds, hash matches" case cannot pass against
+    current source (it needs the byte-deterministic recompute path) and is
+    therefore intentionally not asserted here.
     """
     import shutil
 
@@ -299,7 +297,7 @@ def test_get_recording_currently_raises_checksum_on_missing_cache(
     # Back up the valid cache: the rebuild overwrites it in place with
     # non-identical bytes, so restore the original afterward or later tests
     # reusing this shared row would themselves fail the checksum read.
-    backup = str(abs_path) + ".a18t1.bak"
+    backup = str(abs_path) + ".missing_cache_rebuild.bak"
     shutil.copy2(abs_path, backup)
 
     try:
@@ -323,13 +321,13 @@ def test_get_recording_currently_raises_checksum_on_missing_cache(
 def test_rebuild_nwb_artifact_reaches_hash_then_raises_checksum(
     populated_recording, monkeypatch
 ):
-    """A18 Test 2 (verify-current-failure): ``_rebuild_nwb_artifact`` runs the
-    rebuild pipeline far enough to call ``_hash_nwb_recording`` on the rebuilt
-    artifact, then raises a checksum ``DataJointError``.
+    """``_rebuild_nwb_artifact`` runs the rebuild pipeline far enough to call
+    ``_hash_nwb_recording`` on the rebuilt artifact, then raises a checksum
+    ``DataJointError``.
 
-    The plan anticipated the direct rebuild "running to completion" (only
-    ``get_recording``'s reader rejecting the bytes), but ground truth is
-    stronger evidence: ``_write_nwb_artifact`` finishes its write and then
+    A naive expectation is that the direct rebuild "runs to completion" with
+    only ``get_recording``'s reader rejecting the bytes, but the actual
+    behavior is stronger: ``_write_nwb_artifact`` finishes its write and then
     calls ``_hash_nwb_recording`` to record the rebuilt ``cache_hash`` -- and
     ``_hash_nwb_recording`` reads the file through the checksum-validated
     ``get_abs_path``, which rejects the rebuilt-but-not-byte-identical file.
@@ -343,11 +341,11 @@ def test_rebuild_nwb_artifact_reaches_hash_then_raises_checksum(
     (1) the rebuild machinery is exercised up to and including the
     ``_hash_nwb_recording`` verification call (counter asserts it is reached),
     and (2) the rebuild is non-functional versus the external-store checksum
-    today (it raises rather than persisting drifted bytes). When main-epic
-    Phase 2 ``RecordingArtifactRecompute*`` makes the rebuild byte-deterministic
-    (or reconciles the checksum), this test flips to the deferred happy path.
-    The skills directive for A18 is explicit that the verify-current-failure
-    tests must exercise the raising path -- this one does.
+    today (it raises rather than persisting drifted bytes). When a future
+    byte-deterministic ``RecordingArtifactRecompute`` path makes the rebuild
+    byte-deterministic (or reconciles the checksum), this test will flip to
+    asserting the happy path. The point of this test is that the
+    current-failure path must exercise the raising behavior -- this one does.
     """
     import shutil
 
@@ -364,7 +362,7 @@ def test_rebuild_nwb_artifact_reaches_hash_then_raises_checksum(
     # The rebuild overwrites the canonical file in place before it raises;
     # back it up so later tests reusing this shared row read the original
     # (checksum-valid) bytes.
-    backup = str(abs_path) + ".a18t2.bak"
+    backup = str(abs_path) + ".rebuild_hash_checksum.bak"
     shutil.copy2(abs_path, backup)
 
     calls = {"n": 0}
@@ -928,7 +926,7 @@ def test_recording_make_rollback_cleans_analysis_nwb(
     )
 
 
-# ---------- L5-A: global-median reference (reference_mode) ------------
+# ---------- global-median reference (reference_mode) ------------
 
 
 @pytest.mark.slow
@@ -1052,7 +1050,7 @@ def test_recording_make_global_median_reference(polymer_smoke_session):
 def test_recording_no_filter_preset_skips_bandpass(polymer_smoke_session):
     """The ``no_filter`` preset materializes an UNfiltered recording.
 
-    T5 made ``bandpass_filter`` optional: the ``no_filter`` preset ships
+    ``bandpass_filter`` is optional: the ``no_filter`` preset ships
     ``bandpass_filter=None`` and ``_apply_pre_motion_preprocessing`` must
     SKIP the bandpass step (not silently pass a wide-band that still
     filters). This populates two recordings on the same data -- one with
@@ -1122,7 +1120,7 @@ def test_recording_no_filter_preset_skips_bandpass(polymer_smoke_session):
     )
 
 
-# ---------- L5-A2: ADC phase-shift no-op regressions -------------------
+# ---------- ADC phase-shift no-op regressions -------------------
 
 
 @pytest.mark.slow
@@ -1284,7 +1282,7 @@ def test_neuropixels_preset_phase_shift_inert_without_property(
     ), "the absent-property phase-shift skip was not logged during populate"
 
 
-# ---------- L5-B: DuplicateSelectionError on insert_selection -----------
+# ---------- DuplicateSelectionError on insert_selection -----------
 
 
 @pytest.mark.slow
@@ -1370,9 +1368,10 @@ def test_cache_hash_uses_nwbfile_hasher(populated_recording):
 
     An earlier cache_hash was ``hashlib.sha256(data.tobytes())``
     -- content-blind to timestamps, electrodes, and conversion
-    metadata. shared-contracts.md "Recording Cache Format" binds
-    cache_hash to ``NwbfileHasher`` (Spyglass's content hasher
-    used by the v1 recompute machinery). This test independently
+    metadata. The recording-cache contract binds cache_hash to
+    ``NwbfileHasher`` (Spyglass's content hasher used by the v1
+    recompute machinery), so the digest covers the full NWB content
+    rather than just the raw data bytes. This test independently
     recomputes the hash and asserts the stored value matches -- a
     regression to the data-only sha256 would silently pass the
     existing ``isinstance(cache_hash, str)`` check.
@@ -1513,7 +1512,7 @@ def test_recording_specific_reference_drops_ref_channel(polymer_smoke_session):
 def test_recording_multi_interval_saved_times_use_concat_path(
     polymer_smoke_session,
 ):
-    """A27: a multi-interval (disjoint) selection derives ``saved_times`` from
+    """A multi-interval (disjoint) selection derives ``saved_times`` from
     the gap-EXCLUDED concat path, not the gap-spanning override.
 
     For ``n_selected_intervals > 1`` the recording is built with
@@ -1521,8 +1520,8 @@ def test_recording_multi_interval_saved_times_use_concat_path(
     0-based concat times whose span excludes the inter-segment gap. The row's
     ``duration_s`` must therefore equal the SUM of the kept-interval durations
     (gap-excluded), clearly shorter than the wall-clock envelope
-    (last_end - first_start). This is the persisted half of the C1 guard
-    rationale.
+    (last_end - first_start). This pins the persisted side of the
+    gap-exclusion guarantee for disjoint multi-interval selections.
     """
     import numpy as np
 
@@ -1565,13 +1564,13 @@ def test_recording_multi_interval_saved_times_use_concat_path(
     gap_excluded = (seg1[1] - seg1[0]) + (seg2[1] - seg2[0])
     envelope = seg2[1] - seg1[0]
 
-    interval_name = "v2_a27_multi_valid"
+    interval_name = "v2_multi_interval_valid"
     IntervalList.insert1(
         {
             "nwb_file_name": nwb_file_name,
             "interval_list_name": interval_name,
             "valid_times": np.asarray([seg1, seg2]),
-            "pipeline": "v2_a27_multi",
+            "pipeline": "v2_multi_interval",
         },
         skip_duplicates=True,
     )
@@ -1616,7 +1615,7 @@ def test_recording_multi_interval_saved_times_use_concat_path(
 def test_recording_fresh_write_cleanup_unlinks_staged_file(
     polymer_smoke_session, monkeypatch
 ):
-    """A27: a failure AFTER the fresh ``_write_nwb_artifact`` unlinks the
+    """A failure AFTER the fresh ``_write_nwb_artifact`` unlinks the
     staged file (no half-written artifact outlives a failed compute).
 
     On the fresh-write path (``existing_analysis_file_name is None``), if a
@@ -1712,8 +1711,9 @@ def test_recording_fresh_write_cleanup_unlinks_staged_file(
 def test_recording_rebuild_path_keeps_existing_file_on_failure(
     populated_sorting, monkeypatch
 ):
-    """A27 (complement): a post-write failure on the REBUILD path
-    (``existing_analysis_file_name`` set) does NOT unlink the file.
+    """A post-write failure on the REBUILD path (the complement of the
+    fresh-write case: ``existing_analysis_file_name`` set) does NOT unlink
+    the file.
 
     The fresh-write path unlinks a staged file on failure; the rebuild path
     must not, because there the file IS the canonical cache (a mid-write

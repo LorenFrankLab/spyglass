@@ -78,8 +78,7 @@ def test_base_intervals_from_timestamps_three_chunks_two_gaps():
     Every existing disjoint fixture is a single gap (two chunks); this
     pins the ``zip(starts, ends)`` indexing on the multi-gap path. With
     chunk lengths 80 / 120 / 100 the per-chunk bounds must come from the
-    correct sample offsets, not a hard-coded 2-chunk assumption. (Closes
-    review "not-checked" item #6.)
+    correct sample offsets, not a hard-coded 2-chunk assumption.
     """
     from spyglass.spikesorting.v2.utils import _base_intervals_from_timestamps
 

@@ -10,8 +10,7 @@ normalize either v1's flat-dict / legacy-keys schema or v2's
 Pydantic-validated nested schema into a single canonical dict so the
 fingerprint check is a pure value comparison.
 
-JSON serialization rules (see ``parity-extensions.md`` §
-"Serialization rules"):
+JSON serialization rules:
 
 * numpy scalars cast to Python scalars before serialization;
 * numpy arrays serialize as

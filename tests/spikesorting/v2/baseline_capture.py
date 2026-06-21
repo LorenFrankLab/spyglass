@@ -341,11 +341,10 @@ def _read_spike_times(curation_key: dict) -> tuple[dict, float]:
 def _capture_source_provenance() -> dict:
     """Record the v1-spyglass source location + commit + harness commit.
 
-    Phase A's capture scripts run from the v2 checkout's repo root (the
-    pinned ``/tmp/spyglass-master`` worktree in the plan was aspirational
-    -- master doesn't carry the v2 test tree). The actual ``spyglass``
-    that imports is whichever ``site-packages`` Spyglass is dev-installed
-    against in the ``spyglass-v1-parity`` conda env. Stamping
+    The capture script runs from the v2 checkout's repo root (master does
+    not carry the v2 test tree). The actual ``spyglass`` that imports is
+    whichever ``site-packages`` Spyglass is dev-installed against in the
+    ``spyglass-v1-parity`` conda env. Stamping
     (a) the resolved spyglass source path and (b) the git HEAD sha of
     BOTH that path AND the test-harness checkout into baseline metadata
     so reviewers can verify which sources the capture actually used.
@@ -406,9 +405,9 @@ def _compute_invariant_fingerprints(
     sort-group electrodes, same bad-channel mask, same effective
     preproc / artifact / sorter kwargs, same artifact-removed
     valid times). The v2 parity test reconstructs its own state and
-    asserts each fingerprint matches before comparing spike times.
-    Contract: see ``.claude/docs/plans/spikesorting-v2/parity-extensions.md``
-    § "Invariant fingerprinting".
+    asserts each fingerprint matches before comparing spike times; a
+    mismatch on any fingerprint fails the parity gate up front rather
+    than letting a divergent input masquerade as a spike-time mismatch.
     """
     import numpy as np
 

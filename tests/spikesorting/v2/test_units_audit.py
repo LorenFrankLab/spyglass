@@ -88,7 +88,7 @@ def test_clusterless_missing_threshold_unit_defaults_to_uv(
     is scaled to microvolts, NOT thresholded in raw counts. Guards the runtime
     fallback against silently disagreeing with the schema default: with the old
     'mad' fallback the detector would see 200 raw counts instead of 100 uV on
-    this 0.5 uV/count rig (audit follow-up P1).
+    this 0.5 uV/count rig.
     """
     import spikeinterface.sortingcomponents.peak_detection as pd_mod
 
@@ -126,8 +126,8 @@ def test_clusterless_runtime_rejects_invalid_threshold_unit(
 ):
     """A clusterless params blob carrying an INVALID ``threshold_unit`` (e.g.
     "microvolts" or "UV" from an ``update1`` write or a pre-validator row)
-    raises at sort time rather than silently falling through to MAD behavior
-    (audit follow-up P2). The schema's ``Literal["uv", "mad"]`` enforces this at
+    raises at sort time rather than silently falling through to MAD behavior.
+    The schema's ``Literal["uv", "mad"]`` enforces this at
     insert, but make/sort-time consumes the fetched blob WITHOUT re-validating,
     and ``_clusterless_noise_levels`` returns ``None`` for any non-"uv" value --
     so without this guard a typo silently changes what ``detect_threshold``

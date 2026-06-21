@@ -140,10 +140,10 @@ def test_assert_v2_db_safe_override_permits_nonlocal(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# A24: the two CRITICAL untested branches (utils.py). Hermetic -- they touch
-# only in-memory SI objects and monkeypatched config, so they live here (no
-# DB fixture) rather than in the dj_conn-marked integrity module, ensuring the
-# CRITICAL coverage runs even in a no-database test slice.
+# The two critical recording-timestamp branches (utils.py). Hermetic -- they
+# touch only in-memory SI objects and monkeypatched config, so they live here
+# (no DB fixture) rather than in the dj_conn-marked integrity module, ensuring
+# the coverage runs even in a no-database test slice.
 # ---------------------------------------------------------------------------
 
 
@@ -221,12 +221,12 @@ def test_safe_db_hosts_allowlist_is_exhaustively_parametrized():
 
 @pytest.mark.parametrize("safe_host", _PARAMETRIZED_SAFE_HOSTS)
 def test_assert_v2_db_safe_localhost_passes(safe_host, monkeypatch):
-    """A24: a safe (local) host returns silently.
+    """A safe (local) host returns silently.
 
-    The ``host in _SAFE_DB_HOSTS: return`` pass-through branch was the untested
-    half of the guard (the existing scaffold tests cover the raise and the
-    override). With the override env var cleared, every safe-host allowlist
-    member must return ``None`` without raising.
+    The ``host in _SAFE_DB_HOSTS: return`` pass-through branch is the other
+    half of the guard (alongside the raise and the override). With the
+    override env var cleared, every safe-host allowlist member must return
+    ``None`` without raising.
     """
     from spyglass.spikesorting.v2.utils import (
         _OVERRIDE_ENV,
@@ -244,13 +244,13 @@ def test_assert_v2_db_safe_localhost_passes(safe_host, monkeypatch):
 def test_assert_v2_db_safe_override_non_one_value_still_raises(
     non_bypass, monkeypatch
 ):
-    """A24: the override only bypasses when set to exactly ``"1"``.
+    """The override only bypasses when set to exactly ``"1"``.
 
-    Existing coverage pins ``override == "1"`` permitting a non-local host.
-    The audit found the *strictness* of that check untested: a value other
-    than ``"1"`` (``"0"``, ``""``, ``"true"``) must NOT bypass. We also assert
-    the raised message names both the offending host and the override env var,
-    so an operator sees how to deliberately bypass.
+    Existing coverage pins ``override == "1"`` permitting a non-local host;
+    this pins the *strictness* of that check: a value other than ``"1"``
+    (``"0"``, ``""``, ``"true"``) must NOT bypass. We also assert the raised
+    message names both the offending host and the override env var, so an
+    operator sees how to deliberately bypass.
     """
     from spyglass.spikesorting.v2.utils import (
         _OVERRIDE_ENV,

@@ -16,7 +16,7 @@ artifact-detection identity, so None is not a wildcard).
 
 It also normalizes a str/UUID ``artifact_detection_id`` to ``uuid.UUID`` (the column
 is a uuid); the same str-vs-UUID class is fixed in
-``SortingSelection.insert_selection``'s idempotency dedup (Task 4).
+``SortingSelection.insert_selection``'s idempotency dedup.
 
 These tests build a second sort on the same recording as the package-scoped
 ``populated_sorting`` (which is artifact-detection-backed) so the two differ
@@ -109,7 +109,7 @@ def two_sorts_one_recording(populated_sorting):
 @pytest.mark.integration
 def test_merge_ids_artifact_restriction_is_exclusive(two_sorts_one_recording):
     """Restricting by ``artifact_detection_id`` returns only the matching sort's
-    merge_id -- not both sorts on the recording (the A1 fix)."""
+    merge_id -- not both sorts on the recording."""
     from spyglass.spikesorting.v2.utils import (
         get_spiking_sorting_v2_merge_ids,
     )

@@ -1,4 +1,4 @@
-"""Phase A: deterministic, content-addressed selection identities.
+"""Deterministic, content-addressed selection identities.
 
 Two layers:
 
@@ -263,7 +263,7 @@ def test_selection_identity_import_pulls_no_db_layer_modules():
             "DuplicateError", ("Duplicate entry",), True, id="duplicate-error"
         ),
         # FK violations surface as IntegrityError with no 1062 errno -- they
-        # MUST propagate (Phase A step 5), not be swallowed.
+        # MUST propagate, not be swallowed.
         pytest.param(
             "IntegrityError",
             (
@@ -550,7 +550,7 @@ def test_recording_selection_rejects_single_nondeterministic_row(
     """A SINGLE raw-inserted row with a random recording_id for this logical
     identity is rejected, not returned.
 
-    Phase A's invariant is that the logical identity maps to ONE
+    The invariant is that the logical identity maps to ONE
     content-addressed id. A pre-determinism / raw-insert row with a
     different (random) recording_id violates that, so insert_selection
     raises instead of silently adopting it as canonical.

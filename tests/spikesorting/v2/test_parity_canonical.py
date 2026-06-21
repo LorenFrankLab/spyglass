@@ -166,8 +166,8 @@ def test_canonical_sorter_clusterless_v1_and_v2_match():
 def test_canonical_sorter_clusterless_noise_levels_none_equals_absent():
     """``noise_levels=None`` means "auto-estimate"; absent means the same.
 
-    The Pydantic-schema default for ``noise_levels`` was ``None``
-    after followup #11 closed the 1,400x divergence bug; the v1 row
+    The Pydantic-schema default for ``noise_levels`` is ``None``
+    (auto-estimate), which closed the 1,400x divergence bug; the v1 row
     omits the field entirely. Canonical form treats them as
     equivalent so the fingerprint check does not regress that fix.
     """

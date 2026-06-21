@@ -842,7 +842,6 @@ def test_disjoint_multi_gap_readback_and_artifact(
     chunk -- none spanning either gap -- and ``get_sorting`` recovers a
     spike planted in EACH chunk exactly (the per-chunk ``searchsorted``
     readback must stay correct past the second gap, not only the first).
-    Closes review "not-checked" item #6.
     """
     import uuid
 

@@ -278,9 +278,9 @@ def test_sort_group_reference_mode_enforced(polymer_smoke_session):
 
 
 # ===========================================================================
-# A27: recording.py untested branches.
+# Edge-case coverage for SortGroupV2 reference handling and group construction.
 #
-# reference_mode validation (post-T2: the integer sentinel was replaced by a
+# reference_mode validation (the integer sentinel was replaced by a
 # ``reference_mode`` varchar validated against the ReferenceMode Literal),
 # the all-shanks-filtered guard, the omit_ref no-op under the default mode,
 # additive inserts, length-mismatch, and the empty-match guard on the
@@ -293,9 +293,9 @@ def test_sort_group_reference_mode_enforced(polymer_smoke_session):
 
 @pytest.mark.usefixtures("dj_conn")
 def test_sort_group_rejects_invalid_reference_mode():
-    """A27/T2: ``SortGroupV2.insert1`` rejects an unknown ``reference_mode``.
+    """``SortGroupV2.insert1`` rejects an unknown ``reference_mode``.
 
-    The integer ``sort_reference_electrode_id`` sentinel was replaced (T2) by
+    The integer ``sort_reference_electrode_id`` sentinel was replaced by
     a ``reference_mode`` varchar validated against the ``ReferenceMode``
     Literal at the insert boundary. An invalid mode (here ``"banana"``)
     raises before any DB write -- the varchar's typo guard standing in for a
@@ -315,7 +315,7 @@ def test_sort_group_rejects_invalid_reference_mode():
 
 @pytest.mark.usefixtures("dj_conn")
 def test_sort_group_reference_electrode_id_consistency():
-    """A27/T2: ``reference_electrode_id`` is non-null iff mode=='specific'.
+    """``reference_electrode_id`` is non-null iff mode=='specific'.
 
     The split's second invariant: a 'specific' reference needs a channel to
     subtract, and a non-specific mode must not carry a stray channel id the
@@ -346,7 +346,7 @@ def test_sort_group_reference_electrode_id_consistency():
 
 @pytest.mark.slow
 def test_set_group_by_shank_all_shanks_filtered_raises(polymer_smoke_session):
-    """A27: when every shank is filtered out, ``set_group_by_shank`` raises.
+    """When every shank is filtered out, ``set_group_by_shank`` raises.
 
     The smoke fixture's 4 shanks all live in one electrode group ("0"), so
     ``omit_ref_electrode_group=True`` with ``reference_mode='specific'`` and a
@@ -804,7 +804,7 @@ def test_reference_electrode_group_existence_and_uniqueness():
 def test_set_group_by_shank_additive_insert_with_explicit_ids(
     polymer_smoke_session,
 ):
-    """A27: explicit non-overlapping ``sort_group_ids`` opt into an additive
+    """Explicit non-overlapping ``sort_group_ids`` opt into an additive
     insert that coexists with prior rows.
 
     The default rerun refuses to silently extend (covered elsewhere); passing
@@ -844,7 +844,7 @@ def test_set_group_by_shank_additive_insert_with_explicit_ids(
 
 @pytest.mark.slow
 def test_set_group_by_shank_length_mismatch_raises(polymer_smoke_session):
-    """A27: ``sort_group_ids`` whose length differs from the derived group
+    """``sort_group_ids`` whose length differs from the derived group
     count raises.
 
     The fixture derives 4 groups from shank metadata; passing only two ids
@@ -865,7 +865,7 @@ def test_set_group_by_shank_length_mismatch_raises(polymer_smoke_session):
 def test_set_group_by_electrode_table_column_empty_match_raises(
     polymer_smoke_session,
 ):
-    """A27: a ``groups`` sublist matching zero electrodes raises.
+    """A ``groups`` sublist matching zero electrodes raises.
 
     ``set_group_by_electrode_table_column`` with a value that no electrode
     carries produces an empty group, which is a user error (typo'd id) the

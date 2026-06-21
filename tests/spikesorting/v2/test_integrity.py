@@ -10,8 +10,9 @@ exercise as a focused gate:
   ``make``. The reason is to move the long-running compute step
   OUTSIDE the framework transaction so it does not hold row locks.
 - **Source-part FK consistency**: every ``ArtifactDetectionSelection`` and
-  ``SortingSelection`` master row has EXACTLY one source-part row
-  (the invariant from shared-contracts.md "Source Part Pattern").
+  ``SortingSelection`` master row has EXACTLY one source-part row (the
+  source of the selection is recorded in exactly one source-part table,
+  never zero and never more than one).
 - **Merge-table CurationV2 part is correctly wired**:
   ``SpikeSortingOutput.CurationV2`` is the only v2 routing entry;
   v1's ``CurationV1`` and v0's ``CuratedSpikeSorting`` keep their
@@ -112,7 +113,8 @@ def test_source_part_pattern_holds_for_artifact_and_sorting_selection(
     reachable from the populated fixture has EXACTLY one source-
     part row.
 
-    Invariant from shared-contracts.md "Source Part Pattern". The
+    Each selection master records its source in exactly one source-part
+    table -- never zero, never more than one. The
     iteration is scoped to masters reachable from ``populated_
     sorting`` so other tests that intentionally inject orphans
     (e.g. ``test_prune_orphaned_selections_finds_master_without_part``

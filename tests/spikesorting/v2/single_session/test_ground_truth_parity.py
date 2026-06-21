@@ -276,7 +276,7 @@ def test_mountainsort5_ground_truth_neuropixels_60s(neuropixels_60s_session):
     Dense-probe informational correctness coverage. Mirrors
     ``test_mountainsort5_ground_truth_polymer_60s`` but with the
     informational dense-probe correctness coverage. Primary count
-    gate is the plan-specified ``accuracy >= 0.7`` for at least
+    gate is the ``accuracy >= 0.7`` acceptance gate for at least
     three-quarters of planted units, plus precision / recall /
     mean-accuracy floors on the well-detected subset (matching
     the polymer gate's secondary floors). The threshold may only
@@ -447,7 +447,7 @@ def test_mountainsort5_ground_truth_neuropixels_60s(neuropixels_60s_session):
         f"regenerate the fixture before trusting this gate.{summary}"
     )
 
-    # Plan-required informational threshold: at least three
+    # Informational threshold: at least three
     # quarters of planted units detected at accuracy >= 0.7. The
     # threshold may only be loosened with calibration evidence
     # committed to ``fixtures_manifest.json`` showing the actual
@@ -461,7 +461,7 @@ def test_mountainsort5_ground_truth_neuropixels_60s(neuropixels_60s_session):
     assert n_well_detected >= threshold, (
         f"MS5 on the 60s Neuropixels fixture detected {n_well_detected} "
         f"of {n_planted} planted units at accuracy >= 0.7; "
-        f"plan threshold requires >= {threshold} (3/4 of planted, "
+        f"threshold requires >= {threshold} (3/4 of planted, "
         f"ceil-rounded so non-multiples of 4 don't quietly pass below 75 %)."
         f"{summary}"
     )
@@ -529,7 +529,7 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
     median is non-linear, so global-median output intentionally diverges from
     v1. Do not add a global-median case to this matrix expecting a match; that
     divergence is guarded instead by
-    ``test_recording_make_global_median_reference`` (Pin 3) and documented in
+    ``test_recording_make_global_median_reference`` and documented in
     the migration guide. (``baseline_capture.py --reference-mode global_median``
     can capture a v1 reference-first global-median baseline for manual
     divergence inspection.)
@@ -552,8 +552,9 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
     ``canonical_sorter_params``) matches the v1 baseline. A
     fingerprint mismatch FAILs with a path-tagged diff so an
     input-layer skew never gets conflated with an output-layer
-    regression. See ``.claude/docs/plans/spikesorting-v2/parity-extensions.md``
-    § "Invariant fingerprinting".
+    regression. (Documented rule: assert every input-layer invariant
+    matches the v1 baseline BEFORE comparing spike outputs, so an
+    input skew is never mistaken for an output regression.)
 
     Sidecar history: the smoke parity row (``smoke_clusterless_5uv``)
     must NOT carry ``noise_levels`` -- that lets SI compute its own
@@ -563,7 +564,7 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
     (the production default for the 100 uV ``default_clusterless``
     row), the smoke threshold becomes raw uV and produces ~1,400x
     more detections than v1. The schema v3 + tolerance-aware
-    matcher landed in followup #11 to close that divergence; the
+    matcher closes that divergence; the
     canonical-sorter fingerprint check guarantees it stays closed.
 
     Env vars:
@@ -839,9 +840,9 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
     # sort so an input-layer skew (different electrodes, different
     # bad-channel mask, schema-incompatible params, divergent
     # artifact valid_times) is never silently absorbed into the
-    # downstream spike-time comparison. See
-    # ``.claude/docs/plans/spikesorting-v2/parity-extensions.md`` §
-    # "Invariant fingerprinting".
+    # downstream spike-time comparison. (Documented rule: assert every
+    # input-layer invariant matches the v1 baseline before comparing
+    # spike outputs.)
     import hashlib
 
     from spyglass.common import Electrode, IntervalList
@@ -995,9 +996,10 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
 
     # Per-unit asymmetric per-spike comparison.
     #
-    # Clusterless contract (parity-extensions.md § "Documented v2
-    # divergences"): every v1 spike must match a v2 spike within
-    # ±1.5 samples. Budgets account for the SI 0.99 → 0.104
+    # Clusterless contract (documented v2 divergence: every v1 spike
+    # must match a v2 spike within
+    # ±1.5 samples, with a bounded v2-extras budget). Budgets account
+    # for the SI 0.99 → 0.104
     # ``locally_exclusive`` numba kernel rewrite ([SI PR #4341](
     # https://github.com/SpikeInterface/spikeinterface/pull/4341)
     # "more accurate for corner cases: ratio not raw amplitude;
@@ -1148,7 +1150,7 @@ def test_v2_real_data_v1_parity_mountainsort4(
     Contract: aggregate bands (NOT per-spike, unlike clusterless),
     sourced from
     :data:`tests.spikesorting.v2._smoke_constants.MS4_BANDS`. After
-    Phase B11 calibration on shanks 0 and 2 (two repeats per side)
+    calibration on shanks 0 and 2 (two repeats per side)
     these are:
 
     * ``|v2_n_units - v1_n_units| ≤ max(10% of v1_n_units, 2)``
@@ -1497,7 +1499,7 @@ def test_v2_real_data_v1_parity_mountainsort4(
         f"  v2: n_units={v2_n}, median_fr={v2_fr:.3f} Hz"
     )
 
-    # MS4_BANDS = MS4_CALIBRATED post-Phase B11 (n_units ± 10% or
+    # MS4_BANDS = MS4_CALIBRATED (n_units ± 10% or
     # ± 2, median_fr ± 10% rel). See MS4_VARIANCE_TABLE for the
     # calibration measurements.
     n_band = max(

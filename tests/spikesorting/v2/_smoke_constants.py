@@ -80,17 +80,17 @@ MS4_60S_POLYMER_PARAMS: dict = {
 #: MS4 is stochastic (no seed control) AND its SI wrapper rewrote
 #: between 0.99 → 0.104 (the C++ MS4 1.0.7 binary itself is byte-
 #: identical across envs; differences come from SI-side wrapping).
-#: Superseded by :data:`MS4_CALIBRATED` after Phase B11 measurement;
-#: kept for reference.
+#: Superseded by :data:`MS4_CALIBRATED` once the within-version
+#: variance was measured; kept for reference.
 MS4_BROAD_TRIAGE: dict = {
     "n_units_rel_band": 0.50,
     "n_units_abs_band": 2,
     "median_fr_rel_band": 0.30,
 }
 
-#: Phase B11 calibration of MS4 within-version variance, measured on
-#: ``mearec_polymer_128ch_60s`` shanks 0 and 2 via the B10 protocol
-#: (2 runs per side per shank). Schema:
+#: Calibration of MS4 within-version variance, measured on
+#: ``mearec_polymer_128ch_60s`` shanks 0 and 2 (2 runs per side per
+#: shank). Schema:
 #:
 #:     {(fixture_stem, "ms4", shank): {kind: {"d_n_units": int,
 #:                                            "d_median_fr_hz": float}}}
@@ -118,7 +118,7 @@ MS4_VARIANCE_TABLE: dict[tuple[str, str, int], dict] = {
 }
 
 #: Calibrated MS4 parity bands derived from :data:`MS4_VARIANCE_TABLE`
-#: per the Phase B11 rule ``band = max(v1v1, v2v2) + fixed_margin``
+#: via the rule ``band = max(v1v1, v2v2) + fixed_margin``
 #: where ``fixed_margin = (1 unit, 5 percentage points FR)``:
 #:
 #:   * n_units: max(0, 1) drift + 1-unit margin = 2 absolute (5% of
@@ -169,10 +169,9 @@ V1_TO_V2_SORTER_PARAM_NAMES: dict = {
 #: Each entry MUST be evidence-backed: the reason string should cite
 #: the MEArec generator log (planted-unit counts per shank) AND the
 #: capture-side output (``v1 sort produced 0/1 unit on this shank``).
-#: A label without evidence is not acceptable -- see
-#: ``parity-extensions.md`` § "Result taxonomy".
+#: A degenerate-case label without that evidence is not acceptable.
 #:
-#: Populated during capture-side triage (Phase A10 / B-side captures).
+#: Populated during capture-side triage.
 #: An unlisted case with missing baseline artifacts under an active
 #: ``SPIKESORTING_V2_BASELINE_ROOT`` is a FAIL, not a SKIP, because a
 #: broken tmux capture must not pass silently.

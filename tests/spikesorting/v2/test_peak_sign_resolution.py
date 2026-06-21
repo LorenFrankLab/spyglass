@@ -99,8 +99,8 @@ def test_peak_sign_pos_attributes_positive_going_channel():
     v2 threads the sorter's configured ``peak_sign`` into
     ``get_template_extremum_channel`` (via ``resolve_peak_sign``) so a
     positive-going detection lands on its true peak channel; a revert to SI
-    defaults would silently mis-attribute it to the most-negative channel
-    (audit test-hardening #9). The existing peak-amplitude test runs on a
+    defaults would silently mis-attribute it to the most-negative channel.
+    The existing peak-amplitude test runs on a
     trough-aligned fixture where ``pos == neg``, so this is the only case
     that exercises the configured sign actually changing the answer. Hermetic
     synthetic analyzer -- no DB / full pipeline.

@@ -784,10 +784,10 @@ def test_detect_artifacts_finds_known_transient(dj_conn):
         "artifact span)."
     )
     # Second valid interval starts AT the first sample AFTER the
-    # expanded artifact span (the half-open fix from the prior
-    # review: the saved interval starts at
-    # ``timestamps[end_f + 1]``, so the LAST artifact frame is
-    # NOT silently included in the next valid interval).
+    # expanded artifact span (half-open boundary: the saved
+    # interval starts at ``timestamps[end_f + 1]``, so the LAST
+    # artifact frame is NOT silently included in the next valid
+    # interval).
     assert valid_times[1][0] == pytest.approx(
         timestamps[expected_end_open_f], abs=1e-9
     ), (
@@ -1142,7 +1142,7 @@ def test_detect_artifacts_below_proportion_threshold_ignored(dj_conn):
     assert valid_times[0][1] == pytest.approx(timestamps[-1], abs=1e-9)
 
 
-# ---------- L5-C: ArtifactDetection.delete ownership rows -----------------
+# ---------- ArtifactDetection.delete ownership rows -----------------------
 
 
 @pytest.mark.slow
@@ -1232,7 +1232,7 @@ def test_artifact_detection_delete_requires_interval_ownership_part_rows(
         (IntervalList & part_rows).delete_quick()
 
 
-# ---------- L1-D: artifact at recording boundary boundary clamp ----------
+# ---------- artifact at recording boundary boundary clamp ----------------
 
 
 def test_detect_artifacts_clamps_artifact_at_recording_end(dj_conn):
@@ -1399,7 +1399,7 @@ def test_shared_artifact_group_populate_end_to_end(
     )
 
 
-# ---------- MEDIUM error-handling fixes ----------------------------------
+# ---------- error-handling context in warnings and reads -----------------
 
 
 def test_artifact_empty_warning_has_context(dj_conn, monkeypatch):
@@ -1577,7 +1577,7 @@ def test_shared_artifact_group_multi_member_union(
     # Custom param: detect with proportion 0.4 so 4 of 8 union channels
     # (member A's) suffice to flag a frame; min_length 0.1 s so both
     # post-split halves survive.
-    params_name = "phase4_union_test"
+    params_name = "multi_member_union_test"
     ArtifactDetectionParameters.insert1(
         {
             "artifact_detection_params_name": params_name,

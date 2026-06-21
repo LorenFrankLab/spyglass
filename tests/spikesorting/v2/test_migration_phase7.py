@@ -1,14 +1,14 @@
-"""Hermetic (no-DB) tests for the Phase 7 migration deliverables.
+"""Hermetic (no-DB) tests for the v1->v2 migration surface.
 
 Covers:
 
-- A33: the four stub modules (``metric_curation``, ``figpack_curation``,
+- The four stub modules (``metric_curation``, ``figpack_curation``,
   ``unit_matching``, ``matcher_protocol``) must raise an informative
   ``ImportError`` on public-name access -- whether the caller wrote
   ``from m import X`` or ``import m; m.X`` -- while a bare
   ``import m`` (no attribute access) still succeeds, and dunder probes
   by the import machinery do NOT leak into the error message.
-- A32: ``CHANGELOG.md`` carries the v1->v2 breaking-changes section.
+- ``CHANGELOG.md`` carries the v1->v2 breaking-changes section.
 
 These tests need no DataJoint server: importing a v2 submodule triggers
 the package ``__init__`` (SpikeInterface import only) but never opens a
@@ -67,7 +67,7 @@ def _from_import(module_path: str, name: str) -> None:
 def test_stub_module_from_import_raises_with_custom_message(
     module_path, symbol, v1_hint
 ):
-    """A33: ``from m import X`` keeps the custom hint (v1-fallback case)."""
+    """``from m import X`` keeps the custom hint (v1-fallback case)."""
     with pytest.raises(ImportError) as excinfo:
         _from_import(module_path, symbol)
     message = str(excinfo.value)
@@ -77,13 +77,13 @@ def test_stub_module_from_import_raises_with_custom_message(
 
 @pytest.mark.parametrize("module_path, symbol", STUB_MODULES_NO_V1_FALLBACK)
 def test_stub_module_from_import_no_v1_fallback_claim(module_path, symbol):
-    """A33: v2-only stubs name the symbol but claim no v1 fallback."""
+    """v2-only stubs name the symbol but claim no v1 fallback."""
     with pytest.raises(ImportError) as excinfo:
         _from_import(module_path, symbol)
     message = str(excinfo.value)
     assert symbol in message
     assert "spikesorting.v1" not in message
-    # Names a roadmap status rather than a (non-existent) v1 fallback.
+    # Points to a future v2 release rather than a (non-existent) v1 fallback.
     assert "future v2 release" in message
 
 
@@ -93,7 +93,7 @@ def test_stub_module_from_import_no_v1_fallback_claim(module_path, symbol):
 def test_stub_module_attribute_access_raises_with_custom_message(
     module_path, symbol, v1_hint
 ):
-    """A33: ``import m; m.X`` shares the custom message with from-import."""
+    """``import m; m.X`` shares the custom message with from-import."""
     module = importlib.import_module(module_path)
     with pytest.raises(ImportError) as excinfo:
         getattr(module, symbol)
@@ -104,7 +104,7 @@ def test_stub_module_attribute_access_raises_with_custom_message(
 
 @pytest.mark.parametrize("module_path", ALL_STUB_MODULES)
 def test_stub_module_bare_import_succeeds(module_path):
-    """A33: a bare import (no attribute access) loads with a docstring."""
+    """A bare import (no attribute access) loads with a docstring."""
     module = importlib.import_module(module_path)
     assert module.__doc__
     assert module.__doc__.strip()
@@ -112,7 +112,7 @@ def test_stub_module_bare_import_succeeds(module_path):
 
 @pytest.mark.parametrize("module_path", ALL_STUB_MODULES)
 def test_stub_module_from_import_does_not_leak_dunder_in_message(module_path):
-    """A33: a missing public name reports itself, never a dunder probe."""
+    """A missing public name reports itself, never a dunder probe."""
     with pytest.raises(ImportError) as excinfo:
         _from_import(module_path, "DoesNotExist")
     message = str(excinfo.value)
@@ -127,7 +127,7 @@ def _repo_root() -> Path:
 
 
 def test_changelog_contains_v2_breaking_section():
-    """A32: CHANGELOG carries the v2 breaking section with each category."""
+    """CHANGELOG carries the v2 breaking section with each category."""
     changelog = (_repo_root() / "CHANGELOG.md").read_text()
     lower = changelog.lower()
     # The section exists and is anchored under a v2 breaking-changes heading.

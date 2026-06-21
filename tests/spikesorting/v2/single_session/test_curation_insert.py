@@ -808,7 +808,7 @@ def test_insert_curation_rejects_scalar_string_label(populated_sorting):
 
 
 def test_insert_curation_rejects_invalid_curation_source(populated_sorting):
-    """A28: an unknown ``curation_source`` raises naming the valid options.
+    """An unknown ``curation_source`` raises naming the valid options.
 
     ``curation_source`` is coerced through the ``CurationSource`` enum so a typo
     fails at the Python boundary (with the valid set) rather than at the
@@ -827,9 +827,9 @@ def test_insert_curation_rejects_invalid_curation_source(populated_sorting):
 def test_insert_curation_idempotent_root_rejects_nondefault_args(
     populated_sorting_with_curation, populated_sorting
 ):
-    """A28/E5 (LIVE): a second root insert with non-default args raises.
+    """(LIVE) A second root insert with non-default args raises.
 
-    Post-E5, returning the existing root while silently dropping the caller's
+    Returning the existing root while silently dropping the caller's
     new labels/merge_groups/description is a footgun, so it raises unless
     ``reuse_existing=True``. The fixture already inserted a root; a second
     call passing a description must raise, and ``reuse_existing=True`` must
@@ -838,7 +838,7 @@ def test_insert_curation_idempotent_root_rejects_nondefault_args(
     from spyglass.spikesorting.v2.curation import CurationV2
 
     existing = populated_sorting_with_curation
-    # Non-default args + no reuse -> raises (E5 footgun guard).
+    # Non-default args + no reuse -> raises (silent-drop footgun guard).
     with pytest.raises(ValueError, match="already exists"):
         CurationV2.insert_curation(
             sorting_key=populated_sorting,
@@ -856,8 +856,7 @@ def test_insert_curation_idempotent_root_rejects_nondefault_args(
 def test_insert_curation_idempotent_root_rejects_apply_merge_and_metrics(
     populated_sorting_with_curation, populated_sorting
 ):
-    """Review finding: the existing-root guard also covers apply_merge /
-    curation_source.
+    """The existing-root guard also covers apply_merge / curation_source.
 
     ``merges_applied`` and the curation provenance record user intent, so a
     second root insert that flips ``apply_merge=True`` (or sets a
@@ -888,7 +887,7 @@ def test_insert_curation_idempotent_root_rejects_apply_merge_and_metrics(
 def test_insert_curation_root_reuse_deterministic_with_multiple_roots(
     populated_sorting_with_curation,
 ):
-    """Review finding: reuse picks the canonical lowest-curation_id root.
+    """Reuse picks the canonical lowest-curation_id root.
 
     A raw/manual insert can leave a SECOND root (parent_curation_id=-1).
     ``order_by="curation_id"`` makes ``insert_curation(reuse_existing=True)``
@@ -921,7 +920,7 @@ def test_insert_curation_root_reuse_deterministic_with_multiple_roots(
 
 
 def test_get_analyzer_accepts_non_sorting_id_restriction(populated_sorting):
-    """Review finding: get_analyzer resolves sorting_id from the matched row.
+    """get_analyzer resolves sorting_id from the matched row.
 
     A restriction that selects a single ``Sorting`` row WITHOUT a literal
     ``sorting_id`` key (here the unique ``object_id``) must load / rebuild
@@ -940,7 +939,7 @@ def test_get_analyzer_accepts_non_sorting_id_restriction(populated_sorting):
 
 
 def test_insert_curation_rejects_missing_sorting_id():
-    """A28: a ``sorting_id`` not in ``Sorting`` raises a clear ValueError.
+    """A ``sorting_id`` not in ``Sorting`` raises a clear ValueError.
 
     Translates what would be a raw FK IntegrityError into a "populate Sorting
     first" message.
@@ -955,7 +954,7 @@ def test_insert_curation_rejects_missing_sorting_id():
 
 @pytest.mark.usefixtures("dj_conn")
 def test_curation_get_unit_brain_regions_concat_raises():
-    """A28: the CurationV2 accessor raises ``ConcatBrainRegionAmbiguousError``
+    """The CurationV2 accessor raises ``ConcatBrainRegionAmbiguousError``
     for a concat-backed sorting (mirror of the Sorting accessor).
 
     The guard reads the sorting's source before touching ``CurationV2.Unit``,
@@ -1008,7 +1007,7 @@ def test_curation_get_unit_brain_regions_concat_raises():
 def test_curation_get_unit_brain_regions_concat_anchor_member_df(
     populated_sorting,
 ):
-    """A28: ``CurationV2.get_unit_brain_regions(..., allow_anchor_member=True)``
+    """``CurationV2.get_unit_brain_regions(..., allow_anchor_member=True)``
     returns the ``unit_brain_region_df`` DataFrame labeled ``anchor_member``.
 
     The opt-in path returns the DataFrame (NOT a ``SourceResolution``), same
@@ -1103,7 +1102,7 @@ def test_curation_get_unit_brain_regions_concat_anchor_member_df(
 def test_insert_curation_empty_labels_skip_unit_label_insert(
     populated_sorting_with_curation,
 ):
-    """A28: with empty labels the ``UnitLabel`` insert is skipped, while the
+    """With empty labels the ``UnitLabel`` insert is skipped, while the
     ``MergeGroup`` self-entries are still written.
 
     The ``if unit_label_rows:`` / ``if merge_group_rows:`` guards skip a
@@ -1127,7 +1126,7 @@ def test_insert_curation_empty_labels_skip_unit_label_insert(
 def test_curation_label_column_added_only_with_nonempty_labels(
     populated_sorting,
 ):
-    """A28: the units NWB carries a ``curation_label`` column iff at least one
+    """The units NWB carries a ``curation_label`` column iff at least one
     unit has a non-empty label.
 
     Adding the column for an all-empty curation would trip pynwb's empty-list

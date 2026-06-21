@@ -119,9 +119,9 @@ def test_data_downloader_downloads_lazily_on_wait_for(tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------
-# Item B path 1: the v2 smoke fixture is fetched only when a collected test
-# needs the DB, not unconditionally at session start (which downloaded a 57MB
-# fixture even for pure-helper unit runs that consume nothing).
+# The v2 smoke fixture is fetched only when a collected test needs the DB, not
+# unconditionally at session start (which downloaded a 57MB fixture even for
+# pure-helper unit runs that consume nothing).
 # --------------------------------------------------------------------------
 
 
@@ -209,8 +209,8 @@ def test_item_consumes_smoke_fixture_only_for_real_consumers(tmp_path):
 def test_require_fixtures_gate_still_exits_nonzero():
     """The honest-green gate must fail loudly when a required fixture is absent.
 
-    The Item B change must not weaken this into a silent skip: CI relies on it to
-    catch a fixture whose download failed. Run a child pytest that requires a
+    The lazy-fetch change must not weaken this into a silent skip: CI relies on
+    it to catch a fixture whose download failed. Run a child pytest that requires a
     genuinely-absent fixture and assert it exits non-zero with a pointed message.
     """
     # Target this very module: the gate fires in pytest_sessionstart regardless
@@ -257,9 +257,9 @@ def _clean_env():
 
 
 # --------------------------------------------------------------------------
-# Item C: every category named in ``filterwarnings`` must stay resolvable, so
-# toggling ``-p no:warnings`` (a developer wanting to see warnings) does not
-# break collection. pytest resolves a bare category against ``builtins``; a bare
+# Every category named in ``filterwarnings`` must stay resolvable, so toggling
+# ``-p no:warnings`` (a developer wanting to see warnings) does not break
+# collection. pytest resolves a bare category against ``builtins``; a bare
 # *custom* category therefore fails with AttributeError.
 # --------------------------------------------------------------------------
 

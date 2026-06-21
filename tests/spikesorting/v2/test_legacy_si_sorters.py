@@ -1,4 +1,4 @@
-"""DB-gated test for A34's opt-in legacy-sorter back-compat helper.
+"""DB-gated test for the opt-in legacy-sorter back-compat helper.
 
 ``SorterParameters.insert_default_legacy_si_sorters()`` replicates v1's
 auto-insert of ``('<sorter>', 'default')`` rows for SI sorters outside
@@ -6,7 +6,7 @@ v2's curated set, so v1 workflows that name a non-curated sorter via
 ``('kilosort2_5', 'default')`` keep resolving after porting.
 
 This test requests ``dj_conn`` directly (function-scoped) so the rest of
-the Phase 7 migration tests stay hermetic / DB-free.
+the migration tests stay hermetic / DB-free.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import pytest
 
 
 def test_insert_default_legacy_si_sorters_skip_on_missing_sorter(dj_conn):
-    """A34: the call is safe, idempotent, and lands a back-compat row.
+    """The call is safe, idempotent, and lands a back-compat row.
 
     Asserts that after the opt-in call, an installed non-curated SI
     sorter has a ``('<sorter>', 'default')`` row, that the call raises
@@ -32,7 +32,8 @@ def test_insert_default_legacy_si_sorters_skip_on_missing_sorter(dj_conn):
     candidates = sorted(set(sis.installed_sorters()) - curated)
     if not candidates:
         pytest.skip(
-            "no installed non-curated SI sorter available to exercise A34"
+            "no installed non-curated SI sorter available to exercise "
+            "the legacy back-compat helper"
         )
 
     # First call populates; second call must be a no-op (idempotent).
@@ -63,7 +64,7 @@ def test_insert_default_legacy_si_sorters_skip_on_missing_sorter(dj_conn):
 def test_insert_default_legacy_si_sorters_skips_not_installed(
     dj_conn, monkeypatch
 ):
-    """A34: an available-but-not-installed sorter gets no 'default' row.
+    """An available-but-not-installed sorter gets no 'default' row.
 
     ``get_default_sorter_params`` succeeds for wrapper-only sorters whose
     binary is absent, so the helper must gate on ``installed_sorters()``

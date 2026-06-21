@@ -1,6 +1,6 @@
 """Direct service-level tests for the DB-free spikesorting-v2 modules.
 
-Phase C extracted the table-class internals into dependency-light service
+The table-class internals are factored into dependency-light service
 modules. These tests exercise the extracted pure / IO functions DIRECTLY
 (not through the DataJoint table classes) and assert the load-bearing
 property the whole extraction rests on: the ``_*`` service modules import

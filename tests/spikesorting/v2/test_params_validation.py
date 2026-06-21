@@ -416,8 +416,8 @@ def test_ms4_rejects_open_interval_adjacency_radius(bad_radius):
     assert MountainSort4Schema(adjacency_radius=0.0).adjacency_radius == 0.0
 
 
-def test_ms5_default_matches_appendix():
-    """MS5 defaults mirror the appendix's empirically-validated row."""
+def test_ms5_default_values():
+    """MS5 defaults mirror the empirically-validated reference row."""
     blob = MountainSort5Schema().model_dump()
     assert blob["scheme"] == "2"
     assert blob["detect_threshold"] == 5.5
@@ -455,8 +455,8 @@ def test_ms5_schema_accepts_and_defaults_filter_whiten():
         MountainSort5Schema(filterr=True)
 
 
-def test_ks4_defaults_match_appendix():
-    """KS4 defaults mirror the appendix's documented kwargs."""
+def test_ks4_default_values():
+    """KS4 defaults mirror the documented reference kwargs."""
     blob = Kilosort4Schema().model_dump()
     assert blob["Th_universal"] == 9.0
     assert blob["Th_learned"] == 8.0
@@ -816,12 +816,12 @@ def test_uncurated_sorter_schemas_accept_arbitrary_kwargs(schema_cls):
 def test_schema_version_present_and_positive(schema_cls):
     """Every v2 Pydantic schema carries a positive ``schema_version`` int.
 
-    Pydantic Parameter Schema Convention requires this field so the
-    Lookup row can store the schema generation number alongside the
-    blob; a model-breaking change bumps the version and adds a
-    LegacyParams shim rather than silently overwriting old rows.
-    The exact value differs per schema (preprocessing + artifact +
-    clusterless were bumped to 2 when their field sets changed).
+    Every params schema must carry this field so the Lookup row can store
+    the schema generation number alongside the blob; a model-breaking
+    change bumps the version and adds a LegacyParams shim rather than
+    silently overwriting old rows. The exact value differs per schema
+    (preprocessing + artifact + clusterless were bumped to 2 when their
+    field sets changed).
     """
     blob = schema_cls().model_dump()
     assert isinstance(blob["schema_version"], int)

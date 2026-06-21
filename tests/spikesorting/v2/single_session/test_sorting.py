@@ -241,7 +241,7 @@ def test_prune_orphaned_selections_finds_and_cleans(populated_recording):
     Source-part atomicity is enforced at insert time, so orphans only
     arise from upstream maintenance (e.g. a cascade delete from
     Recording that removes the source-part row but leaves the master).
-    The helper backs the validation-goal-#8 cleanup path.
+    The helper backs the orphan-master cleanup path.
     """
     import uuid
 
@@ -1100,7 +1100,7 @@ def test_sorting_selection_artifact_id_none_is_distinct_identity(
     artifact_backed_pk = populated_sorting
     # Derive recording_id + sorter + params from the fixture row so this
     # test does not silently drift if ``populated_sorting`` changes its
-    # sorter/params choice (Finding #3 from review).
+    # sorter/params choice.
     backed_row = (SortingSelection & artifact_backed_pk).fetch1()
     rec_row = (SortingSelection.RecordingSource & artifact_backed_pk).fetch1()
     recording_id = rec_row["recording_id"]
@@ -1208,7 +1208,7 @@ def test_sorting_selection_artifact_detection_source_part_shape(
     assert resolved.key == {"recording_id": populated_recording["recording_id"]}
 
 
-# ---------- L5-D: _write_units_nwb zero-unit guard (sorting layer) -------
+# ---------- _write_units_nwb zero-unit guard (sorting layer) -------------
 
 
 @pytest.mark.slow

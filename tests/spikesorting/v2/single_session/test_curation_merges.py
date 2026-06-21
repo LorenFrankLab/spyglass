@@ -570,7 +570,7 @@ def test_merge_group_contributor_fk_rejects_unknown_unit(populated_sorting):
 
 def test_curation_two_merge_groups_assign_ids_in_canonical_min_order(dj_conn):
     """``build_curated_unit_rows`` assigns fresh merged ids in ascending
-    MIN-CONTRIBUTOR order, INDEPENDENT of user-input group order (C3). For
+    MIN-CONTRIBUTOR order, INDEPENDENT of user-input group order. For
     user input ``[[2, 3], [0, 1]]`` the smallest-min group ``[0, 1]`` gets
     the first new id ``max(source unit_ids) + 1``, and ``[2, 3]`` gets the
     next one. This matches the lazy ``get_merged_sorting`` preview path
@@ -654,7 +654,7 @@ def test_merged_unit_inherits_max_amplitude_contributor_electrode():
     reached through the unit's Electrode FK, so this electrode inheritance
     IS the region attribution -- a ``max -> min`` regression would silently
     mis-attribute every merged unit's brain region while n_spikes / id
-    assertions still pass (audit test-hardening #8). Deterministic via
+    assertions still pass. Deterministic via
     ``build_curated_unit_rows`` (no populate).
     """
     from spyglass.spikesorting.v2._curation_transforms import (
@@ -720,7 +720,7 @@ def test_applied_and_lazy_merge_ids_match_for_out_of_order_groups(
     ``get_merged_sorting`` assign the SAME fresh id to the SAME content
     group, frame-for-frame. Existing tests cover the single-group case and
     the ``build_curated_unit_rows`` id assignment; this pins the >=2-group
-    lazy ``get_merge_groups`` order_by path (audit test-hardening #16).
+    lazy ``get_merge_groups`` order_by path.
     """
     import uuid
 
@@ -879,12 +879,12 @@ def test_applied_and_lazy_merge_ids_match_for_out_of_order_groups(
 @pytest.mark.integration
 def test_v2_sorting_nwb_excludes_parent_units(dj_conn, tmp_path, monkeypatch):
     """The v2 Sorting analysis NWB contains ONLY the v2 sorted units, never
-    the raw NWB's parent ``/units`` table (#1437). Plant a non-empty
+    the raw NWB's parent ``/units`` table. Plant a non-empty
     ``/units`` on a copy of the fixture, run Recording->Artifact->Sorting with
     a planted 2-unit sorter, then assert the analysis NWB's unit ids equal
-    exactly ``Sorting.Unit`` and contain NONE of the planted parent ids
-    (audit test-hardening #11). All MEArec fixtures keep the parent ``/units``
-    empty, so this is the only exercise of the strip invariant.
+    exactly ``Sorting.Unit`` and contain NONE of the planted parent ids.
+    All MEArec fixtures keep the parent ``/units``
+    empty, so this is the only exercise of the parent-units strip invariant.
     """
     from pathlib import Path
 
@@ -932,7 +932,10 @@ def test_v2_sorting_nwb_excludes_parent_units(dj_conn, tmp_path, monkeypatch):
     _clean_session_v2(session)
     initialize_v2_defaults()
     LabTeam.insert1(
-        {"team_name": "v2_test_team", "team_description": "v2 #1437"},
+        {
+            "team_name": "v2_test_team",
+            "team_description": "v2 parent-units strip",
+        },
         skip_duplicates=True,
     )
     SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
@@ -998,7 +1001,7 @@ def test_v2_sorting_nwb_excludes_parent_units(dj_conn, tmp_path, monkeypatch):
     assert nwb_unit_ids == v2_unit_ids
     assert not (
         set(parent_ids) & nwb_unit_ids
-    ), "parent /units leaked into the v2 Sorting analysis NWB (#1437)"
+    ), "parent /units leaked into the v2 Sorting analysis NWB"
 
     _clean_session_v2(session)
 
@@ -1009,7 +1012,7 @@ def test_curation_merge_ids_assigned_in_canonical_min_order(dj_conn):
     match the lazy ``get_merged_sorting`` preview path (which numbers merges
     in ``get_merge_groups`` / ascending-kept-uid order). This is what makes
     ``apply_merge=True`` and an ``apply_merge=False`` preview assign the SAME
-    fresh id to the SAME content group -- the preview==apply contract (C3).
+    fresh id to the SAME content group -- the preview==apply contract.
 
     The merged-unit integer id is an arbitrary fresh ``max(unit_ids)+1``
     label; canonicalizing its assignment order (rather than following v1's
@@ -1156,7 +1159,7 @@ def test_si_merge_units_drops_same_sample_unless_delta_is_none(dj_conn):
     )
     assert n_zero == 1, (
         "delta_time_ms=0 should still drop the same-sample duplicate "
-        f"(got {n_zero}); SI behavior has changed, re-audit "
+        f"(got {n_zero}); SI behavior has changed, re-check "
         "get_merged_sorting."
     )
 
@@ -1190,7 +1193,7 @@ def test_merges_applied_records_user_intent(populated_sorting):
 
 
 def test_insert_curation_rejects_merge_group_overlap(populated_sorting):
-    """A28: a unit appearing in two merge groups raises.
+    """A unit appearing in two merge groups raises.
 
     A unit can belong to at most one merge group; an overlap is a user error
     the validator rejects (the overlap check runs against ``Sorting.Unit``
@@ -1237,7 +1240,7 @@ def test_insert_curation_rejects_merge_group_overlap(populated_sorting):
 
 
 def test_insert_curation_rejects_singleton_merge_group(populated_sorting):
-    """A28: a singleton merge group is rejected upstream (layered defense).
+    """A singleton merge group is rejected upstream (layered defense).
 
     A single-unit "merge group" is a likely typo (v1 silently renamed it);
     v2 raises at the >=2-members gate before ``next_merged_id`` is reached, so
@@ -1259,7 +1262,7 @@ def test_insert_curation_rejects_singleton_merge_group(populated_sorting):
 def test_get_merged_sorting_returns_base_when_no_merges(
     populated_sorting_with_curation,
 ):
-    """A28: ``get_merged_sorting`` returns the base sorting unchanged when no
+    """``get_merged_sorting`` returns the base sorting unchanged when no
     merge group has more than one contributor.
 
     The fixture's root curation has no merges, so the lazy-merge path
@@ -1277,7 +1280,7 @@ def test_get_merged_sorting_returns_base_when_no_merges(
 def test_get_merged_sorting_returns_base_when_merges_applied(
     populated_sorting_with_curation,
 ):
-    """A28: ``get_merged_sorting`` returns the base verbatim when
+    """``get_merged_sorting`` returns the base verbatim when
     ``merges_applied`` is set (the base is already merged at insert).
 
     The MEArec smoke sort has a single unit, so a real 2-unit merge cannot be
