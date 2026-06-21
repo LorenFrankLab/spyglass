@@ -38,8 +38,10 @@ from spyglass.spikesorting.v2._recipe_catalog import (
 )
 from spyglass.spikesorting.v2._sorting_compute import (
     _clusterless_noise_levels,  # noqa: F401  re-exported for tests
+    _to_int_unit_id,  # noqa: F401  re-exported for tests
     apply_artifact_mask,
     build_analyzer,
+    build_sorting_unit_rows,
     remove_excess_spikes,
     run_clusterless_thresholder,
     run_si_sorter,
@@ -149,26 +151,6 @@ class SortingComputed(NamedTuple):
     analyzer_folder: Path
     recording_id: str
     nwb_file_name: str
-
-
-def _to_int_unit_id(unit_id):
-    """Coerce a sorter unit id to int, or raise the typed NonIntegerUnitIDError.
-
-    v2's ``Sorting.Unit`` PK stores int unit ids; a sorter that emits a
-    non-convertible id (e.g. a string label like ``"noise_3"``) must be
-    remapped before insertion. Raising the typed error -- not a bare
-    ``int()`` ValueError -- lets callers and tests discriminate this case.
-    """
-    from spyglass.spikesorting.v2.exceptions import NonIntegerUnitIDError
-
-    try:
-        return int(unit_id)
-    except (TypeError, ValueError) as exc:
-        raise NonIntegerUnitIDError(
-            f"Sorting.make: sorter returned unit_id {unit_id!r} that does "
-            "not convert to int. v2's Sorting.Unit stores int unit_ids; "
-            "remap before insertion if the sorter emits non-convertible IDs."
-        ) from exc
 
 
 _assert_v2_db_safe()
@@ -2057,32 +2039,22 @@ class Sorting(SpyglassMixin, dj.Computed):
             int(row["electrode_id"]): row for row in sg_electrodes
         }
 
-        rows = []
-        for unit_id in sorting.unit_ids:
-            int_unit_id = _to_int_unit_id(unit_id)
-            peak_chan = int(peak_channels[unit_id])
-            if peak_chan not in electrode_by_id:
-                raise RuntimeError(
-                    f"Sorting.make: peak channel {peak_chan} for unit "
-                    f"{int_unit_id} is not in sort group "
-                    f"{sort_group_id} for {nwb_file_name!r}. Sort group "
-                    "/ recording channel-id mismatch."
-                )
-            n_spikes = int(len(sorting.get_unit_spike_train(unit_id=unit_id)))
-            rows.append(
-                {
-                    **key,
-                    "unit_id": int_unit_id,
-                    **{
-                        k: electrode_by_id[peak_chan][k]
-                        for k in (
-                            "nwb_file_name",
-                            "electrode_group_name",
-                            "electrode_id",
-                        )
-                    },
-                    "peak_amplitude_uv": float(peak_amplitudes[unit_id]),
-                    "n_spikes": n_spikes,
-                }
-            )
+        # Spike counts come from the in-memory sorting; the remaining row
+        # construction (Electrode FK resolution, peak-amplitude/n_spikes
+        # assembly, channel-mismatch guard) is pure and lives in
+        # ``build_sorting_unit_rows``.
+        n_spikes_by_unit = {
+            unit_id: int(len(sorting.get_unit_spike_train(unit_id=unit_id)))
+            for unit_id in sorting.unit_ids
+        }
+        rows = build_sorting_unit_rows(
+            unit_ids=sorting.unit_ids,
+            peak_channels=peak_channels,
+            peak_amplitudes=peak_amplitudes,
+            n_spikes_by_unit=n_spikes_by_unit,
+            electrode_by_id=electrode_by_id,
+            key=key,
+            sort_group_id=sort_group_id,
+            nwb_file_name=nwb_file_name,
+        )
         Sorting.Unit.insert(rows)

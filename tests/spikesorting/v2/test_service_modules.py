@@ -498,6 +498,106 @@ def test_save_expectation_flags_request_past_raw_coverage():
     assert exp.over_request == pytest.approx(4.0)  # 10 - 6 past coverage
 
 
+# --------------------------------------------------------------------------- #
+# _sorting_compute.build_sorting_unit_rows contracts (pure)
+# --------------------------------------------------------------------------- #
+
+
+def test_build_sorting_unit_rows_constructs_rows_from_peak_metadata():
+    """One ``Sorting.Unit`` row per unit, carrying the peak channel's Electrode
+    FK fields, the peak amplitude (as float), and the precomputed spike count,
+    merged onto the base key."""
+    from spyglass.spikesorting.v2._sorting_compute import (
+        build_sorting_unit_rows,
+    )
+
+    electrode_by_id = {
+        10: {
+            "nwb_file_name": "x.nwb",
+            "electrode_group_name": "0",
+            "electrode_id": 10,
+            "ignored_extra_column": "dropped",
+        },
+        20: {
+            "nwb_file_name": "x.nwb",
+            "electrode_group_name": "1",
+            "electrode_id": 20,
+        },
+    }
+    rows = build_sorting_unit_rows(
+        unit_ids=[0, 1],
+        peak_channels={0: 10, 1: 20},
+        peak_amplitudes={0: 50.0, 1: 30.5},
+        n_spikes_by_unit={0: 100, 1: 40},
+        electrode_by_id=electrode_by_id,
+        key={"sorting_id": "s"},
+        sort_group_id=0,
+        nwb_file_name="x.nwb",
+    )
+
+    assert rows == [
+        {
+            "sorting_id": "s",
+            "unit_id": 0,
+            "nwb_file_name": "x.nwb",
+            "electrode_group_name": "0",
+            "electrode_id": 10,
+            "peak_amplitude_uv": 50.0,
+            "n_spikes": 100,
+        },
+        {
+            "sorting_id": "s",
+            "unit_id": 1,
+            "nwb_file_name": "x.nwb",
+            "electrode_group_name": "1",
+            "electrode_id": 20,
+            "peak_amplitude_uv": 30.5,
+            "n_spikes": 40,
+        },
+    ]
+
+
+def test_build_sorting_unit_rows_rejects_peak_channel_outside_sort_group():
+    """A unit whose peak channel is not in the sort group's electrode map is a
+    channel-id mismatch -- raise rather than build an invalid Electrode FK."""
+    from spyglass.spikesorting.v2._sorting_compute import (
+        build_sorting_unit_rows,
+    )
+
+    with pytest.raises(RuntimeError, match="not in sort group"):
+        build_sorting_unit_rows(
+            unit_ids=[0],
+            peak_channels={0: 99},  # 99 not in electrode_by_id
+            peak_amplitudes={0: 50.0},
+            n_spikes_by_unit={0: 100},
+            electrode_by_id={10: {"nwb_file_name": "x.nwb"}},
+            key={"sorting_id": "s"},
+            sort_group_id=0,
+            nwb_file_name="x.nwb",
+        )
+
+
+def test_build_sorting_unit_rows_raises_typed_error_on_non_integer_unit_id():
+    """A sorter unit id that does not convert to int raises the typed
+    NonIntegerUnitIDError (not a bare ValueError)."""
+    from spyglass.spikesorting.v2._sorting_compute import (
+        build_sorting_unit_rows,
+    )
+    from spyglass.spikesorting.v2.exceptions import NonIntegerUnitIDError
+
+    with pytest.raises(NonIntegerUnitIDError):
+        build_sorting_unit_rows(
+            unit_ids=["noise_3"],
+            peak_channels={"noise_3": 10},
+            peak_amplitudes={"noise_3": 50.0},
+            n_spikes_by_unit={"noise_3": 100},
+            electrode_by_id={10: {"nwb_file_name": "x.nwb"}},
+            key={"sorting_id": "s"},
+            sort_group_id=0,
+            nwb_file_name="x.nwb",
+        )
+
+
 def test_filtering_description_lists_only_steps_that_ran():
     from types import SimpleNamespace
 
