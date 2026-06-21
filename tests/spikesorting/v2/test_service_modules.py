@@ -35,6 +35,7 @@ _DB_FREE_SERVICE_MODULES = [
     "_artifact_compute",
     "_artifact_intervals",
     "bad_channels",
+    "_curation_plan",
     "_curation_transforms",
     "_enums",
     "_lookup_validation",

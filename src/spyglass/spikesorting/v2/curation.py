@@ -25,7 +25,6 @@ import datajoint as dj
 from spyglass.common.common_ephys import Electrode  # noqa: F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile  # noqa: F401
 from spyglass.spikesorting.v2._curation_transforms import (
-    build_curated_unit_rows,
     validate_curation_label_rows,
     validate_labels,
 )
@@ -546,73 +545,31 @@ class CurationV2(SpyglassMixin, dj.Manual):
     ) -> tuple[int, list[dict], dict[int, list[int]]]:
         """Resolve the curation_id and build the curated ``Unit`` rows.
 
-        Returns ``(curation_id, unit_rows, kept_unit_to_contributors)``.
-        ``curation_id`` auto-increments within the sort. ``unit_rows`` and
-        ``kept_unit_to_contributors`` come from
-        :func:`._curation_transforms.build_curated_unit_rows`. Labels
-        referencing unit_ids that
-        are in neither the source sorting nor the written unit set are
-        rejected as typos unless ``permissive_labels`` (then warn-and-drop);
-        labels on absorbed merge contributors are always dropped with a
-        warning.
+        Resolves the auto-increment ``curation_id`` (the one DB-coupled
+        step) and delegates row shaping + label-key validation to the
+        DB-free :func:`._curation_plan.build_curation_insert_plan`. Returns
+        ``(curation_id, unit_rows, kept_unit_to_contributors)`` -- the
+        :class:`._curation_plan.CurationInsertPlan` namedtuple, which
+        unpacks positionally.
         """
-        # Resolve which curation_id to use (auto-increment within sort).
+        from spyglass.spikesorting.v2._curation_plan import (
+            build_curation_insert_plan,
+        )
+
+        # Resolve which curation_id to use (auto-increment within sort) --
+        # the one DB-coupled step; the rest of the plan is pure.
         existing_ids = (cls & {"sorting_id": sorting_id}).fetch("curation_id")
         curation_id = int(max(existing_ids)) + 1 if len(existing_ids) else 0
 
-        # Resolve the post-merge unit set. For every "kept" unit, we
-        # need its peak Electrode FK + amplitude (inherited from the
-        # highest-amplitude contributor if it was the head of a merge
-        # group).
-        unit_rows, kept_unit_to_contributors = build_curated_unit_rows(
+        return build_curation_insert_plan(
             sorting_id=sorting_id,
             sorting_units=sorting_units,
-            merge_groups=merge_groups or [],
-            curation_id=curation_id,
+            merge_groups=merge_groups,
             apply_merge=apply_merge,
+            labels=labels,
+            permissive_labels=permissive_labels,
+            curation_id=curation_id,
         )
-
-        # Validate labels against ``source_unit_ids ∪ written_unit_ids``.
-        # Labels are written by iterating the final unit_ids, so labels
-        # keyed on absorbed contributors are silently dropped. Two kinds
-        # of "stray":
-        #   - TRULY stray (typo): keys not in source AND not in written
-        #     -- nothing they could ever have referred to. Raise by
-        #     default (typo protection); ``permissive_labels=True``
-        #     restores warn-and-drop.
-        #   - ABSORBED-source: keys that exist in source but are
-        #     contributors absorbed into a merge (so not in written).
-        #     Always warn and drop -- the label cannot attach to the
-        #     merged unit, but callers passing original-id labels
-        #     should not break.
-        written_unit_ids = {row["unit_id"] for row in unit_rows}
-        source_unit_ids = {int(r["unit_id"]) for r in sorting_units}
-        label_keys = set(labels)
-        truly_stray = label_keys - (source_unit_ids | written_unit_ids)
-        absorbed_label_ids = label_keys & (source_unit_ids - written_unit_ids)
-        if truly_stray:
-            message = (
-                "CurationV2.insert_curation: labels reference unit_id(s) "
-                f"{sorted(truly_stray)} that are neither in Sorting.Unit "
-                "nor in the curated unit set for "
-                f"sorting_id={sorting_id} (apply_merge={apply_merge}). "
-                f"Curated unit_ids: {sorted(written_unit_ids)}."
-            )
-            if not permissive_labels:
-                raise ValueError(
-                    f"{message} Pass permissive_labels=True to ignore "
-                    "stray labels instead of raising."
-                )
-            logger.warning(f"{message} Those labels are ignored.")
-        if absorbed_label_ids:
-            logger.warning(
-                "CurationV2.insert_curation: labels keyed on absorbed "
-                f"contributor unit(s) {sorted(absorbed_label_ids)} are "
-                "dropped -- they cannot attach to the merged unit. "
-                f"sorting_id={sorting_id}."
-            )
-
-        return curation_id, unit_rows, kept_unit_to_contributors
 
     @classmethod
     def _stage_curation_artifact(
