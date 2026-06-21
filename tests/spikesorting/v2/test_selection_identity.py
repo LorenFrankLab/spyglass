@@ -26,10 +26,12 @@ from unittest import mock
 import pytest
 
 from spyglass.spikesorting.v2._selection_identity import (
+    RECORDING_IDENTITY_FIELDS,
     V2_SELECTION_NAMESPACE,
     assert_supplied_id_matches,
     canonical_identity,
     deterministic_id,
+    recording_identity_payload,
 )
 
 # --------------------------------------------------------------------------
@@ -160,6 +162,48 @@ def test_assert_supplied_id_matches_rejects_mismatch():
     target = uuid.uuid4()
     with pytest.raises(ValueError, match="does not match the deterministic"):
         assert_supplied_id_matches(uuid.uuid4(), target, field="recording_id")
+
+
+def test_recording_identity_payload_rejects_extra_fields():
+    """Joined/fetched dicts must not change the deterministic recording id."""
+    key = {
+        "nwb_file_name": "session.nwb",
+        "sort_group_id": 3,
+        "interval_list_name": "raw data valid times",
+        "preprocessing_params_name": "default",
+        "team_name": "team",
+        "analysis_file_name": "joined-extra.nwb",
+    }
+
+    with pytest.raises(ValueError, match="unknown field"):
+        recording_identity_payload(key)
+
+
+def test_recording_identity_payload_requires_schema_fields():
+    key = {
+        "nwb_file_name": "session.nwb",
+        "sort_group_id": 3,
+        "interval_list_name": "raw data valid times",
+        "preprocessing_params_name": "default",
+    }
+
+    with pytest.raises(ValueError, match="requires field"):
+        recording_identity_payload(key)
+
+
+def test_recording_identity_payload_plucks_ordered_schema_fields():
+    key = {
+        "recording_id": uuid.uuid4(),
+        "nwb_file_name": "session.nwb",
+        "sort_group_id": 3,
+        "interval_list_name": "raw data valid times",
+        "preprocessing_params_name": "default",
+        "team_name": "team",
+    }
+
+    payload = recording_identity_payload(key)
+    assert tuple(payload) == RECORDING_IDENTITY_FIELDS
+    assert "recording_id" not in payload
 
 
 def test_selection_identity_import_pulls_no_db_layer_modules():
@@ -342,6 +386,22 @@ def test_recording_selection_rejects_mismatched_supplied_id(
     bad = {**fresh_recording_identity, "recording_id": uuid.uuid4()}
     with pytest.raises(ValueError, match="does not match the deterministic"):
         RecordingSelection.insert_selection(bad)
+    assert len(RecordingSelection & fresh_recording_identity) == 0
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_recording_selection_rejects_extra_fields(fresh_recording_identity):
+    """Joined/fetched columns are rejected before UUID derivation or insert."""
+    from spyglass.spikesorting.v2.recording import RecordingSelection
+
+    noisy = {
+        **fresh_recording_identity,
+        "analysis_file_name": "joined-extra.nwb",
+    }
+
+    with pytest.raises(ValueError, match="unknown field"):
+        RecordingSelection.insert_selection(noisy)
     assert len(RecordingSelection & fresh_recording_identity) == 0
 
 

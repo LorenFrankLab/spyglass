@@ -1098,24 +1098,44 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         only if the cascade actually removed the masters -- drop the
         matching IntervalList rows via
         :func:`._artifact_intervals.remove_artifact_interval_rows`.
+
+        A leading positional restriction is accepted as a compatibility guard
+        for the easy-to-mistype ``ArtifactDetection().delete(restriction)``
+        form. DataJoint's own ``delete`` does not take restrictions
+        positionally, and Spyglass's cautious-delete layer would otherwise
+        treat that dict as ``force_permission``.
         """
+        restriction_args = []
+        while args and isinstance(args[0], (dict, list, str)):
+            restriction_args.append(args[0])
+            args = args[1:]
+        if restriction_args:
+            target = self
+            for restriction in restriction_args:
+                target = target & restriction
+            return target.delete(*args, safemode=safemode, **kwargs)
+
         # Collect the IntervalList rows to clean up BEFORE we delete the
         # master rows -- the source-part join no longer resolves after
-        # the master is gone.
-        interval_rows_to_remove = collect_artifact_interval_rows_to_remove(
-            self.fetch(as_dict=True)
-        )
+        # the master is gone. Keep the rows paired with their master PK, so
+        # cleanup follows the rows that actually disappeared rather than the
+        # post-delete length of ``self``.
+        delete_targets = [
+            (
+                {k: row[k] for k in self.primary_key},
+                collect_artifact_interval_rows_to_remove([row]),
+            )
+            for row in self.fetch(as_dict=True)
+        ]
 
         if safemode is None:
             super().delete(*args, **kwargs)
         else:
             super().delete(*args, safemode=safemode, **kwargs)
 
-        # If the cascade was cancelled (user answered "no" to the prompt) or
-        # the restriction matched nothing, the master rows remain in place --
-        # the delete is atomic, so a single check suffices. Do NOT orphan the
-        # artifact IntervalList rows for masters the user chose to keep.
-        if len(self) > 0:
-            return
-
-        remove_artifact_interval_rows(interval_rows_to_remove)
+        # Remove IntervalList rows only for masters that were actually deleted.
+        # A cancelled safemode prompt or a no-match restriction leaves the
+        # master row in place; preserving its IntervalList keeps the DB coherent.
+        for master_key, interval_rows_to_remove in delete_targets:
+            if not (ArtifactDetection & master_key):
+                remove_artifact_interval_rows(interval_rows_to_remove)

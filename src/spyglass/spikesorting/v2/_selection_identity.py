@@ -37,6 +37,14 @@ import uuid
 # stable across processes, machines, and Python versions.
 V2_SELECTION_NAMESPACE = uuid.UUID("b44d4765-4714-5c69-96d5-97feb2217e86")
 
+RECORDING_IDENTITY_FIELDS = (
+    "nwb_file_name",
+    "sort_group_id",
+    "interval_list_name",
+    "preprocessing_params_name",
+    "team_name",
+)
+
 
 def _maybe_uuid(value: str) -> uuid.UUID | None:
     """Return the ``uuid.UUID`` for a UUID-ish string, else ``None``."""
@@ -151,10 +159,14 @@ def recording_identity_payload(key: dict) -> dict:
     """Build a ``RecordingSelection`` logical-identity payload.
 
     The identity is the full FK set (Raw, SortGroupV2, IntervalList,
-    PreprocessingParameters, LabTeam) -- i.e. every supplied field except
-    the content-addressed ``recording_id`` PK itself. Single source of
-    truth shared by ``RecordingSelection.insert_selection`` and
-    ``preflight_v2_pipeline`` so the two cannot derive different ids for
+    PreprocessingParameters, LabTeam) -- exactly
+    :data:`RECORDING_IDENTITY_FIELDS`. The content-addressed
+    ``recording_id`` PK is accepted for caller-supplied-id validation but
+    does not participate in the payload. Extra fields are rejected rather
+    than hashed: passing a joined/fetched dict with non-schema columns must
+    not silently produce a different UUID and then fail at ``insert1``.
+    Single source of truth shared by ``RecordingSelection.insert_selection``
+    and ``preflight_v2_pipeline`` so the two cannot derive different ids for
     the same selection.
 
     Parameters
@@ -166,9 +178,32 @@ def recording_identity_payload(key: dict) -> dict:
     Returns
     -------
     dict
-        ``key`` with the content-addressed ``recording_id`` removed.
+        The canonical FK identity payload, ordered as
+        :data:`RECORDING_IDENTITY_FIELDS`.
+
+    Raises
+    ------
+    ValueError
+        If a required identity field is missing, or if ``key`` contains a
+        field other than the identity fields and optional ``recording_id``.
     """
-    return {k: v for k, v in key.items() if k != "recording_id"}
+    allowed = set(RECORDING_IDENTITY_FIELDS) | {"recording_id"}
+    extra = sorted(set(key) - allowed)
+    if extra:
+        raise ValueError(
+            "RecordingSelection.insert_selection received unknown field(s) "
+            f"{extra}. Pass only {list(RECORDING_IDENTITY_FIELDS)} and the "
+            "optional recording_id; extra joined/fetched columns would change "
+            "the deterministic recording_id."
+        )
+    missing = [field for field in RECORDING_IDENTITY_FIELDS if field not in key]
+    if missing:
+        raise ValueError(
+            "RecordingSelection.insert_selection requires field(s) "
+            f"{missing}. Required identity fields are "
+            f"{list(RECORDING_IDENTITY_FIELDS)}."
+        )
+    return {field: key[field] for field in RECORDING_IDENTITY_FIELDS}
 
 
 def artifact_detection_identity_payload(

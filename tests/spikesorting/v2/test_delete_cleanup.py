@@ -182,3 +182,83 @@ def test_cancelled_artifact_delete_preserves_interval_list(
         "cancelled artifact delete removed the IntervalList row for a master "
         "the user chose to keep"
     )
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_unrestricted_artifact_delete_with_arg_cleans_interval_list(
+    planted_sort,
+):
+    """``ArtifactDetection().delete(restr)`` cleans only actually-deleted rows.
+
+    Regression for the cleanup bypass where ``delete`` checked ``len(self)``
+    after the cascade. When ``self`` is the unrestricted table instance, that
+    length includes unrelated artifact rows, so the old code returned early and
+    left the deleted row's artifact-removed IntervalList behind.
+    """
+    from spyglass.common import IntervalList
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactDetectionSelection,
+    )
+    from spyglass.spikesorting.v2.recording import RecordingSelection
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+    from spyglass.spikesorting.v2.utils import (
+        artifact_detection_interval_list_name,
+    )
+
+    original_art_id = SortingSelection.resolve_artifact_detection(planted_sort)
+    assert original_art_id is not None, "planted sort must be artifact-backed"
+    rec_id = SortingSelection.resolve_source(planted_sort).key["recording_id"]
+    nwb = (RecordingSelection & {"recording_id": rec_id}).fetch1(
+        "nwb_file_name"
+    )
+
+    target_pk = ArtifactDetectionSelection.insert_selection(
+        {
+            "recording_id": rec_id,
+            "artifact_detection_params_name": "default",
+        }
+    )
+    target_art_id = target_pk["artifact_detection_id"]
+    assert target_art_id != original_art_id
+    interval_restr = {
+        "nwb_file_name": nwb,
+        "interval_list_name": artifact_detection_interval_list_name(
+            target_art_id
+        ),
+    }
+
+    # Clean any leftovers from a prior interrupted run before planting the row.
+    (ArtifactDetection & target_pk).delete(safemode=False)
+    (IntervalList & interval_restr).delete_quick()
+
+    try:
+        ArtifactDetection.insert1(target_pk, allow_direct_insert=True)
+        IntervalList.insert1(
+            {
+                **interval_restr,
+                "valid_times": np.empty((0, 2)),
+            },
+            allow_direct_insert=True,
+        )
+        assert ArtifactDetection & {"artifact_detection_id": original_art_id}, (
+            "fixture should leave an unrelated ArtifactDetection row in the "
+            "unrestricted table"
+        )
+
+        ArtifactDetection().delete(
+            {"artifact_detection_id": target_art_id}, safemode=False
+        )
+
+        assert not (ArtifactDetection & target_pk)
+        assert not (IntervalList & interval_restr), (
+            "unrestricted ArtifactDetection().delete(restr) left the deleted "
+            "row's artifact IntervalList behind"
+        )
+        assert ArtifactDetection & {"artifact_detection_id": original_art_id}
+    finally:
+        (ArtifactDetection & target_pk).delete(safemode=False)
+        (IntervalList & interval_restr).delete_quick()
+        (ArtifactDetectionSelection.RecordingSource & target_pk).delete_quick()
+        (ArtifactDetectionSelection & target_pk).delete_quick()
