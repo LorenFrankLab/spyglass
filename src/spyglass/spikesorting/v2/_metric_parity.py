@@ -75,14 +75,23 @@ def compare_to_v1_baseline(
         ``matched`` is False if any check fails; ``failures`` carries a
         per-metric / per-unit diff report.
     """
-    common = sorted(set(v2_metrics.index) & set(v1_metrics.index))
+    v1_units = set(v1_metrics.index)
+    v2_units = set(v2_metrics.index)
+    common = sorted(v1_units & v2_units)
     failures: list[str] = []
 
+    # A run that drops or adds units must not pass on overlap alone -- report
+    # the asymmetry as a failure, not just compare the intersection.
+    missing_in_v2 = sorted(v1_units - v2_units)
+    extra_in_v2 = sorted(v2_units - v1_units)
+    if missing_in_v2:
+        failures.append(f"units in v1 baseline missing from v2: {missing_in_v2}")
+    if extra_in_v2:
+        failures.append(f"units in v2 not in v1 baseline: {extra_in_v2}")
+
     if not common:
-        return ParityReport(
-            matched=False,
-            failures=["no common unit ids between v1 baseline and v2 metrics"],
-        )
+        failures.append("no common unit ids between v1 baseline and v2 metrics")
+        return ParityReport(matched=False, failures=failures)
 
     # num_spikes: exact integer.
     if "num_spikes" in v1_metrics and "num_spikes" in v2_metrics:

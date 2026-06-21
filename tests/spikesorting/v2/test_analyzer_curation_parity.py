@@ -55,6 +55,18 @@ def test_parity_comparator_passes_and_fails():
     assert any("snr" in f for f in bad.failures)
 
 
+def test_parity_comparator_flags_missing_and_extra_units():
+    """A run that drops/adds units fails even if the overlap matches exactly."""
+    v1 = _frame([4.0, 6.0], [0.0, 0.0], [1.0, 2.0], [100, 200])
+    # v2 keeps unit 0 (identical), drops unit 1, and adds a new unit 2.
+    v2 = _frame([4.0, 9.0], [0.0, 0.0], [1.0, 9.0], [100, 900])
+    v2.index = pd.Index([0, 2], name="unit_id")
+    report = compare_to_v1_baseline(v2, v1)
+    assert not report.matched
+    assert any("missing from v2: [1]" in f for f in report.failures)
+    assert any("not in v1 baseline: [2]" in f for f in report.failures)
+
+
 def test_parity_comparator_no_common_units():
     a = _frame([4.0], [0.0], [1.0], [100])
     b = _frame([4.0], [0.0], [1.0], [100])
@@ -90,29 +102,58 @@ def test_v2_analyzer_curation_vs_v1():
 
     with open(_BASELINE, "rb") as handle:
         baseline = pickle.load(handle)
-    v1_metrics = (
-        baseline["metrics"]
-        if isinstance(baseline, dict) and "metrics" in baseline
-        else baseline
-    )
-    v1_metrics = (
-        v1_metrics
-        if isinstance(v1_metrics, pd.DataFrame)
-        else pd.DataFrame(v1_metrics)
-    )
-
-    # Populate the v2 AnalyzerCuration on the matching real sort and fetch its
-    # metrics. The capture must record the sort identity (an "analyzer_curation"
-    # selection key) alongside the metrics for the replay to find the sort.
-    if not (isinstance(baseline, dict) and baseline.get("analyzer_curation_key")):
+    if not (isinstance(baseline, dict) and "sort_identity" in baseline):
         pytest.skip(
-            "Baseline pickle lacks the 'analyzer_curation_key' replay metadata "
-            "(baseline_capture.py must be extended to capture v1 MetricCuration "
-            "metrics plus the matching v2 selection key)."
+            "Baseline pickle predates the metrics+sort_identity format; "
+            "re-run baseline_capture.py to regenerate it."
         )
-    from spyglass.spikesorting.v2.metric_curation import AnalyzerCuration
+    v1_metrics = baseline["metrics"]
+    if not isinstance(v1_metrics, pd.DataFrame):
+        v1_metrics = pd.DataFrame(v1_metrics)
+    identity = baseline["sort_identity"]
 
-    sel = baseline["analyzer_curation_key"]
+    # Replay under SI 0.104: re-ingest the real NWB, run the v2 pipeline on the
+    # captured sort group, then populate AnalyzerCuration and compare. Note the
+    # v1 (SI 0.99) and v2 (SI 0.104) sorts must use a comparable sorter for the
+    # exact num_spikes/isi_violation parity to hold; if they diverge across SI
+    # versions the comparator's tolerances are the calibration point (per the
+    # plan's "tighten/relax only with recorded baseline evidence").
+    from pathlib import Path
+
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2._pipeline_run import run_v2_pipeline
+    from spyglass.spikesorting.v2.metric_curation import (
+        AnalyzerCuration,
+        AnalyzerCurationSelection,
+    )
+    from tests.spikesorting.v2._ingest_helpers import (
+        configure_v2_run_inputs,
+        copy_and_insert_nwb,
+    )
+
+    nwb_file_name = copy_and_insert_nwb(
+        Path(os.environ["SPIKESORTING_V2_REAL_NWB_PATH"])
+    )
+    configure_v2_run_inputs(
+        nwb_file_name,
+        identity["team_name"],
+        interval_list_name=identity["interval_list_name"],
+    )
+    initialize_v2_defaults()
+    summary = run_v2_pipeline(
+        nwb_file_name,
+        identity["sort_group_id"],
+        identity["interval_list_name"],
+        identity["team_name"],
+    )
+    sel = AnalyzerCurationSelection.insert_selection(
+        {
+            "sorting_id": summary["sorting_id"],
+            "curation_id": summary["curation_id"],
+            "metric_params_name": "franklab_default",
+            "auto_curation_rules_name": "none",
+        }
+    )
     AnalyzerCuration.populate(sel, reserve_jobs=False)
     v2_metrics = AnalyzerCuration.get_metrics(sel)
     report = compare_to_v1_baseline(v2_metrics, v1_metrics)
