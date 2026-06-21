@@ -107,8 +107,8 @@ class CurationV2(SpyglassMixin, dj.Manual):
 
         A unit may carry multiple labels (e.g. ``mua`` + ``artifact``);
         unlabeled units have zero ``UnitLabel`` rows. The NWB units table
-        still gets a ``curation_label`` indexed column so v1-style
-        consumers see empty lists for unlabeled units.
+        still gets a ``curation_label`` indexed column so consumers
+        reading the NWB see empty lists for unlabeled units.
 
         ``curation_label`` is a ``varchar(32)`` validated against the
         canonical ``CurationLabel`` set at insert time on EVERY insert
@@ -151,13 +151,11 @@ class CurationV2(SpyglassMixin, dj.Manual):
     class MergeGroup(SpyglassMixinPart):
         """Per-merge-group provenance: kept unit <- contributor units.
 
-        Restores v1's merge-group recoverability lost when v2
-        replaced v1's ``merge_groups`` NWB column with a per-unit
-        kept-set. v1 stored merge groups as a single list-of-lists
-        column on the units NWB; v2 stores them here as queryable
-        part rows so bulk-audit queries ("show me every (kept_unit,
-        contributor) pair across sortings") and provenance retrieval
-        ("for this paper, list every merge decision") are easy.
+        Merge groups are stored here as queryable part rows (one row
+        per kept-unit/contributor pair) so bulk-audit queries ("show me
+        every (kept_unit, contributor) pair across sortings") and
+        provenance retrieval ("for this paper, list every merge
+        decision") are easy.
 
         ``contributor_unit_id`` is a DataJoint FK to ``Sorting.Unit``
         (declared ``-> Sorting.Unit.proj(contributor_unit_id='unit_id')``).
@@ -218,8 +216,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
             Dict ``unit_id -> [label, ...]``. Each label is validated
             against the ``CurationLabel`` enum. ``None`` (the default)
             and ``{}`` are equivalent and produce a curation with no
-            ``UnitLabel`` rows -- matches v1's permissive default at
-            ``v1/curation.py:49``.
+            ``UnitLabel`` rows.
         parent_curation_id
             ``-1`` for a root curation; otherwise must reference an
             existing CurationV2 row for the same sorting.
@@ -231,9 +228,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
             contributor. For ``apply_merge=True`` the merged unit gets a
             fresh id ``max(source unit_ids) + 1``, assigned in ASCENDING
             MIN-CONTRIBUTOR order (``sorted(groups, key=min)``), INDEPENDENT
-            of the order the caller lists the groups -- a deliberate
-            departure from v1's user-iteration order (``v1/curation.py:359``;
-            see feature-parity.md). The lazy preview path
+            of the order the caller lists the groups. The lazy preview path
             (``get_merged_sorting`` on an apply_merge=False curation) numbers
             merges the same way, so the applied and lazy paths assign the
             SAME fresh id to the SAME content group (guarded by
@@ -256,11 +251,9 @@ class CurationV2(SpyglassMixin, dj.Manual):
             preserved -- and the proposed merges are recorded in
             ``CurationV2.MergeGroup`` for lazy application via
             ``get_merged_sorting()`` (so a preview can be reviewed before
-            committing). Matches v1's ``apply_merge`` semantics at
-            ``v1/curation.py:359`` for non-degenerate input. (v2 rejects
-            empty and singleton merge groups, which v1 silently accepted
-            as no-ops/renames -- a deliberate deviation that surfaces
-            likely typos.)
+            committing). Empty and singleton merge groups are rejected
+            (rather than treated as no-ops/renames) to surface likely
+            typos.
         description
             Free-text curation description.
         curation_source
@@ -282,8 +275,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
             warns and drops them instead. Labels on absorbed
             contributors (present in the source sorting but merged away
             for ``apply_merge=True``) are ALWAYS silently dropped with a
-            warning (v1 parity, ``v1/curation.py:391``); this flag does
-            not affect that path.
+            warning; this flag does not affect that path.
         allow_custom_labels
             If False (default), every label value must be in the
             canonical ``CurationLabel`` set or ``ValueError`` is raised
@@ -414,10 +406,9 @@ class CurationV2(SpyglassMixin, dj.Manual):
         fails ``validate_labels``, or an invalid ``curation_source``.
         """
         if labels is None:
-            # ``None`` is semantically equivalent to "no labels" per
-            # v1's ``CurationV1.insert_curation`` signature at
-            # ``v1/curation.py:49``. Normalize to ``{}`` so the rest
-            # of the helper does not need an extra None check.
+            # ``None`` is semantically equivalent to "no labels".
+            # Normalize to ``{}`` so the rest of the helper does not
+            # need an extra None check.
             labels = {}
         # Reject a scalar string label value BEFORE coercing to list:
         # ``list("custom_tag")`` would silently split into per-character
@@ -491,8 +482,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         else:
             # Idempotency: if a root curation already exists for this
             # sorting_id, return its key without staging a new NWB or
-            # creating a duplicate row. Matches v1's pattern at
-            # ``v1/curation.py:88-93``; without this, every repeat
+            # creating a duplicate row. Without this, every repeat
             # call grows another row + analysis file + merge-table
             # entry.
             # ``order_by="curation_id"`` makes the reused root deterministic:
@@ -564,7 +554,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         are in neither the source sorting nor the written unit set are
         rejected as typos unless ``permissive_labels`` (then warn-and-drop);
         labels on absorbed merge contributors are always dropped with a
-        warning (v1 parity).
+        warning.
         """
         # Resolve which curation_id to use (auto-increment within sort).
         existing_ids = (cls & {"sorting_id": sorting_id}).fetch("curation_id")
@@ -582,10 +572,10 @@ class CurationV2(SpyglassMixin, dj.Manual):
             apply_merge=apply_merge,
         )
 
-        # Validate labels against ``source_unit_ids ∪ written_unit_ids``
-        # (v1 parity, ``v1/curation.py:391``: v1 writes labels by
-        # iterating final unit_ids, silently dropping labels keyed on
-        # absorbed contributors). Two kinds of "stray":
+        # Validate labels against ``source_unit_ids ∪ written_unit_ids``.
+        # Labels are written by iterating the final unit_ids, so labels
+        # keyed on absorbed contributors are silently dropped. Two kinds
+        # of "stray":
         #   - TRULY stray (typo): keys not in source AND not in written
         #     -- nothing they could ever have referred to. Raise by
         #     default (typo protection); ``permissive_labels=True``
@@ -593,7 +583,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         #   - ABSORBED-source: keys that exist in source but are
         #     contributors absorbed into a merge (so not in written).
         #     Always warn and drop -- the label cannot attach to the
-        #     merged unit, but v1 callers passing original-id labels
+        #     merged unit, but callers passing original-id labels
         #     should not break.
         written_unit_ids = {row["unit_id"] for row in unit_rows}
         source_unit_ids = {int(r["unit_id"]) for r in sorting_units}
@@ -618,8 +608,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
             logger.warning(
                 "CurationV2.insert_curation: labels keyed on absorbed "
                 f"contributor unit(s) {sorted(absorbed_label_ids)} are "
-                "dropped -- they cannot attach to the merged unit (v1 "
-                "parity: v1 also silently ignored these). "
+                "dropped -- they cannot attach to the merged unit. "
                 f"sorting_id={sorting_id}."
             )
 
@@ -703,20 +692,19 @@ class CurationV2(SpyglassMixin, dj.Manual):
             "parent_curation_id": parent_curation_id,
             "analysis_file_name": analysis_file_name,
             "object_id": units_object_id,
-            # Record user intent verbatim, matching v1's
-            # ``v1/curation.py:123`` semantic. ``apply_merge=True``
+            # Record user intent verbatim. ``apply_merge=True``
             # with empty ``merge_groups`` stores True (intent was
             # to merge, nothing to merge) rather than collapsing
-            # to the effective state -- consistent with v1 and
-            # avoids silent semantic divergence.
+            # to the effective state, avoiding silent semantic
+            # divergence.
             "merges_applied": bool(apply_merge),
             "curation_source": curation_source,
             "description": description,
         }
         # Labels attach to the units actually written. For
-        # apply_merge=False that is every original unit (v1 preview
-        # parity); for apply_merge=True it is the kept set, so a
-        # label on an absorbed contributor is dropped with the unit.
+        # apply_merge=False that is every original unit; for
+        # apply_merge=True it is the kept set, so a label on an
+        # absorbed contributor is dropped with the unit.
         written_unit_ids = {row["unit_id"] for row in unit_rows}
         unit_label_rows = [
             {
@@ -1102,13 +1090,11 @@ class CurationV2(SpyglassMixin, dj.Manual):
     def get_recording(cls, key: dict) -> "si.BaseRecording":
         """Return the cached preprocessed recording for a CurationV2 row.
 
-        Mirrors ``CurationV1.get_recording`` at
-        ``v1/curation.py:163-179``. Resolves the upstream
-        ``Recording`` via ``SortingSelection.resolve_source`` and
-        delegates to ``Recording().get_recording`` (which already
-        applies the ``is_filtered=True`` annotation). Repeating
-        the annotation here is harmless and matches v1's exact
-        call surface.
+        Resolves the upstream ``Recording`` via
+        ``SortingSelection.resolve_source`` and delegates to
+        ``Recording().get_recording`` (which already applies the
+        ``is_filtered=True`` annotation). Repeating the annotation
+        here is harmless.
 
         ``@classmethod`` so the merge-table dispatcher's
         ``source_table.get_recording(merge_key)`` call (which binds
@@ -1174,10 +1160,9 @@ class CurationV2(SpyglassMixin, dj.Manual):
     ) -> "si.BaseSorting | pd.DataFrame":
         """Return the curated SpikeInterface BaseSorting (or DataFrame).
 
-        With ``as_dataframe=True`` returns a pandas DataFrame mirroring
-        v1's ``Curation.fetch_nwb`` convenience -- one row per unit
-        with the spike-times list, useful for ad-hoc inspection that
-        does not need a full SI sorting object.
+        With ``as_dataframe=True`` returns a pandas DataFrame with one
+        row per unit and the spike-times list, useful for ad-hoc
+        inspection that does not need a full SI sorting object.
 
         ``@classmethod`` so the merge-table dispatcher binds
         correctly when called as
@@ -1185,7 +1170,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
 
         Like ``Sorting.get_sorting``, the SI-object path maps the stored
         ABSOLUTE spike times back to recording frames via
-        ``np.searchsorted`` (v1-parity) rather than SI's affine
+        ``np.searchsorted`` rather than SI's affine
         ``NwbSortingExtractor``, so disjoint-interval sorts recover the
         original frames. ``as_dataframe=True`` returns the absolute
         seconds read straight from the curated units NWB plus the
@@ -1267,16 +1252,14 @@ class CurationV2(SpyglassMixin, dj.Manual):
         import pandas as pd
 
         # Join the ``curation_label`` lists from ``UnitLabel`` so the
-        # returned DataFrame mirrors v1's ``Curation.fetch_nwb`` shape
-        # (``v1/curation.py:197-209`` returns ``nwbf.units.to_dataframe()``
-        # which carries the ``curation_label`` column). External
-        # notebook code reading ``df["curation_label"]`` works on v2
-        # rows without poking at the part table directly.
+        # returned DataFrame carries a ``curation_label`` column.
+        # External notebook code reading ``df["curation_label"]`` works
+        # without poking at the part table directly.
         unit_ids = list(abs_times)
         labels_by_unit = cls._labels_by_unit(key)
-        # Index by ``unit_id`` (matches v1's ``nwb.units.to_dataframe()``
-        # shape, the same indexing Sorting.get_sorting(as_dataframe=True)
-        # uses); see that method's docstring for the rationale.
+        # Index by ``unit_id`` (the same indexing
+        # Sorting.get_sorting(as_dataframe=True) uses); see that
+        # method's docstring for the rationale.
         return pd.DataFrame(
             {
                 "spike_times": [abs_times[u] for u in unit_ids],
@@ -1347,8 +1330,8 @@ class CurationV2(SpyglassMixin, dj.Manual):
         (``strict=False``) when the key names no v2 column.
 
         Unknown restriction keys raise ``ValueError`` when ``strict`` (the
-        default -- a deliberate v2 query, where an unknown key is a typo, as
-        v1 dropping bad keys quietly returned wrong-but-non-empty results);
+        default -- a deliberate query, where an unknown key is a typo;
+        silently dropping it would return wrong-but-non-empty results);
         when ``strict=False`` (the multi-source ``get_restricted_merge_ids``
         dispatch) an unknown key instead returns ``None`` (the caller then
         contributes no v2 rows), since it names another pipeline's column and
@@ -1421,9 +1404,8 @@ class CurationV2(SpyglassMixin, dj.Manual):
         if unknown:
             if not strict:
                 # Lenient multi-source-dispatch path: an unknown key names a
-                # non-v2 (v0/v1) column, so this is not a v2 query. Return
-                # ``None`` so the caller contributes no v2 rows -- mirroring
-                # how the v0/v1 resolvers drop keys their tables lack. The
+                # column from another pipeline, so this is not a v2 query.
+                # Return ``None`` so the caller contributes no v2 rows. The
                 # strict raise is reserved for a deliberate v2 query
                 # (sources=['v2'] or a direct resolve_restriction), where an
                 # unknown key is a typo.
@@ -1594,9 +1576,8 @@ class CurationV2(SpyglassMixin, dj.Manual):
     def get_merged_sorting(cls, key: dict) -> "si.BaseSorting":
         """Return the curated BaseSorting with merge groups applied.
 
-        Matches v1's semantic at ``v1/curation.py:228-266``: a curation
-        built with ``apply_merge=False`` (preview) still carries every
-        original unit, so the proposed merges recorded in
+        A curation built with ``apply_merge=False`` (preview) still
+        carries every original unit, so the proposed merges recorded in
         ``CurationV2.MergeGroup`` are applied lazily here without
         re-running the sort. The lazy merge is rebuilt from absolute
         spike times so disjoint-recording wall-clock gaps are respected.
@@ -1768,11 +1749,10 @@ class CurationV2(SpyglassMixin, dj.Manual):
     def get_sort_group_info(cls, key: dict) -> "dj.Table":
         """Return ALL electrodes in the sort group joined to BrainRegion.
 
-        Fix for the v1 ``fetch(limit=1)`` multi-region under-reporting
-        bug: this returns a DataJoint relation (not a DataFrame, not
-        single-row) covering EVERY electrode in the sort group so a
-        multi-region probe surfaces every represented region. Callers
-        can chain restrictions / fetches on the returned relation.
+        Returns a DataJoint relation (not a DataFrame, not single-row)
+        covering EVERY electrode in the sort group so a multi-region
+        probe surfaces every represented region. Callers can chain
+        restrictions / fetches on the returned relation.
 
         ``@classmethod`` so the merge-table dispatcher at
         ``spikesorting_merge.py:346`` (which calls

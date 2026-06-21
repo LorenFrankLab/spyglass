@@ -54,12 +54,12 @@ def _assert_schema_version_matches(
 ) -> None:
     """Raise if outer and inner Pydantic ``schema_version`` disagree.
 
-    Each v2 Lookup table stores a ``params_schema_version`` column
+    Each Lookup table stores a ``params_schema_version`` column
     alongside the validated ``params`` blob. The blob also carries a
     ``schema_version`` field (Pydantic-validated). If a user inserts
     a row where the two values disagree, downstream code that
-    branches on the outer column will silently route v2 rows to v1
-    behavior (or vice versa). This helper catches the drift at
+    branches on the outer column will silently route the row to the
+    wrong schema version's behavior. This helper catches the drift at
     insert time so the row never lands.
 
     Parameters

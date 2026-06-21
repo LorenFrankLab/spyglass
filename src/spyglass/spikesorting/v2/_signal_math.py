@@ -56,10 +56,6 @@ def _get_recording_timestamps(
        ``get_recording``) leave ``override=None`` and get the
        segment-aware ``get_times()`` concatenation.
 
-    Mirrors v1's helper at
-    ``src/spyglass/spikesorting/utils.py:260-279`` with the
-    additional ``override`` plumbing.
-
     Parameters
     ----------
     recording : si.BaseRecording
@@ -101,21 +97,13 @@ def _get_recording_timestamps(
 
 
 def _consolidate_intervals(intervals, timestamps):
-    """Convert ``(start_time, stop_time)`` intervals to frame indices.
+    """Convert ``(start_time, stop_time)`` second intervals to frame indices.
 
-    Ports v1's helper at
-    ``src/spyglass/spikesorting/v1/recording.py:715`` with the
-    off-by-one bug **fixed**: v1 computed
-    ``stop_indices = searchsorted(side="right") - 1`` (an INCLUSIVE
-    end index), then passed that value to
-    ``frame_slice(end_frame=stop)`` whose ``end_frame`` is
-    EXCLUSIVE. Net effect: v1 silently dropped the last sample
-    (~33 us at 30 kHz) of every disjoint interval. The v2 port
-    keeps ``side="right"`` semantics and uses the result directly
-    as the exclusive end -- matching SI's convention. Document the
-    v1 divergence in the docstring; the join-overlap condition is
-    adjusted accordingly (``stop >= next_start`` instead of
-    v1's ``stop >= next_start - 1``).
+    Sorts and merges overlapping/adjacent intervals, then maps each onto a
+    half-open ``[start_frame, end_frame_exclusive)`` pair. The end uses
+    ``searchsorted(side="right")`` -- the count of timestamps ``<= stop_time``
+    -- which is exactly the exclusive end ``frame_slice`` expects, so the
+    final sample of each interval is retained.
 
     Parameters
     ----------
@@ -141,14 +129,13 @@ def _consolidate_intervals(intervals, timestamps):
     if intervals.shape[1] != 2:
         raise ValueError("Input array must have shape (N_Intervals, 2).")
 
-    # Sort defensively; v1 did the same. Stable ordering by start.
+    # Sort defensively; stable ordering by start.
     if not _np.all(intervals[:-1] <= intervals[1:]):
         intervals = intervals[_np.argsort(intervals[:, 0])]
 
     start_indices = _np.searchsorted(timestamps, intervals[:, 0], side="left")
-    # Exclusive end -- ``side="right"`` returns the count of
-    # timestamps <= value, which is exactly the half-open end SI's
-    # ``frame_slice`` expects. v1 subtracted 1 here (bug).
+    # Exclusive end: ``side="right"`` returns the count of timestamps <= value,
+    # which is exactly the half-open end ``frame_slice`` expects.
     stop_indices = _np.searchsorted(timestamps, intervals[:, 1], side="right")
 
     consolidated = []
@@ -157,9 +144,7 @@ def _consolidate_intervals(intervals, timestamps):
         next_start = int(next_start)
         next_stop = int(next_stop)
         # Overlap / adjacency in exclusive-end form: next_start <= stop
-        # (== means strictly adjacent). v1 used ``stop >= next_start - 1``
-        # because its ``stop`` was inclusive; the conditions are
-        # equivalent under the off-by-one rewrite.
+        # (== means strictly adjacent).
         if next_start <= stop:
             stop = max(stop, next_stop)
         else:
@@ -287,9 +272,9 @@ def _spike_times_to_frames(recording_times, spike_times, n_samples, unit_id):
 
 
 # Coincidence window (ms) for cross-unit duplicate-spike removal when
-# merging units. Matches SpikeInterface's ``MergeUnitsSorting`` default
-# (the value v1's lazy ``get_merged_sorting`` used). A neuron's refractory
-# period (~1-2 ms) means a genuine spike train never has a sub-0.4 ms pair,
+# merging units. Matches SpikeInterface's ``MergeUnitsSorting`` default.
+# A neuron's refractory period (~1-2 ms) means a genuine spike train never
+# has a sub-0.4 ms pair,
 # so this only removes double-detections of one physical event shared
 # across merged contributors. Lives here next to
 # ``_dedup_merged_spike_times`` -- the algorithm it parameterizes -- so the
@@ -312,11 +297,9 @@ def _dedup_merged_spike_times(times_list, delta_s):
     within-unit close pair is a genuine event and is never touched
     (``diff(membership) == 0`` keeps it). The first spike is always kept.
 
-    v1's lazy ``get_merged_sorting`` applied this via SI's default
-    ``delta_time_ms=0.4``; v2 applies it on BOTH the lazy path and the
-    ``apply_merge=True`` staged path so the stored and previewed merged
-    trains agree and neither keeps the double-detection artifacts. v1's
-    *applied* (np.concatenate) path did NOT dedup -- v2 corrects that.
+    Applied on BOTH the lazy preview path and the ``apply_merge=True`` staged
+    path so the previewed and stored merged trains agree and neither retains
+    the double-detection artifacts.
 
     Parameters
     ----------
@@ -361,10 +344,9 @@ def _base_intervals_from_timestamps(timestamps, fs):
     by ~1 sample period while an inter-chunk wall-clock gap shows up as a
     diff > 1.5 sample periods (a missing sample). Returns one
     ``[start, end]`` (inclusive first/last sample times, seconds) per
-    chunk so an artifact complement built per chunk never spans a gap --
-    the v1-parity behavior (v1 subtracts artifacts from the explicit
-    ``sort_interval_valid_times`` at ``v1/artifact.py:327``). A contiguous
-    recording yields a single ``[t0, t_end]`` interval, so this is a no-op
+    chunk so an artifact complement built per chunk never spans a gap. A
+    contiguous recording yields a single ``[t0, t_end]`` interval, so this is
+    a no-op
     for the common single-interval case.
 
     The ``1.5 / fs`` threshold is robust against sub-sample timestamp

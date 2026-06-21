@@ -9,9 +9,8 @@ part of normal ``trodes_to_nwb`` output -- is added in a SIDECAR
 ``ProcessingModule("ground_truth")`` so the simulation's planted spikes are
 readable via :func:`get_ground_truth_units_table` for sort-accuracy oracles.
 Keeping planted units OUT of ``nwbfile.units`` leaves the canonical units slot
-free for real sorter outputs (the v1 baseline-capture path writes to
-``nwbfile.units`` directly and would fail HDMF's "units already set" guard
-otherwise).
+free for real sorter outputs: code that writes a sorting to ``nwbfile.units``
+directly would otherwise fail HDMF's "units already set" guard.
 
 The electrode/probe layout mirrors the Frank-lab reference probe metadata
 (``trodes_to_nwb`` ``device_metadata/probe_metadata``). The recording traces are
@@ -700,15 +699,12 @@ def _add_ground_truth_units(nwbfile, ground_truth: _GroundTruth) -> None:
     This keeps the top-level ``nwbfile.units`` attribute free, which
     matters because:
 
-    - master Spyglass's v1 ``SpikeSorting._write_sorting_to_nwb`` calls
-      ``nwbf.units = pynwb.misc.Units(...)`` on the analysis NWB
-      inherited from the source; if the source ships planted units the
-      assignment fails with ``AttributeError: can't set attribute
-      'units' -- already set``, blocking the v1 baseline-capture
-      workflow used by the v1↔v2 parity gate.
-    - ``ImportedSpikeSorting.insert_from_nwbfile`` historically reads
-      ``nwbfile.units``; leaving GT there silently pollutes the
-      v2-merge dispatcher with rows that look like real sorter output.
+    - A sorter that assigns ``nwbf.units = pynwb.misc.Units(...)`` on an
+      analysis NWB inherited from the source fails with
+      ``AttributeError: can't set attribute 'units' -- already set`` when
+      the source already ships planted units.
+    - Code that reads ``nwbfile.units`` to ingest a sorting would treat
+      planted ground-truth rows as if they were real sorter output.
 
     Consumers read via :func:`get_ground_truth_units_table` rather than
     poking the processing module directly so the sidecar layout can
@@ -784,9 +780,9 @@ def _add_behavior_stub(
     The trace is ``(n_samples, 2)`` at the recording's sampling rate,
     matching the ephys time-base byte for byte. Constant x=0, y=0
     explicitly signals "no real trajectory" to anyone reading the
-    file. Spyglass parses this through its standard Position path,
-    so the fixture works under master spyglass + SI 0.99 (the v1
-    parity capture environment) as well as the v2 ingestion paths.
+    file. Spyglass parses this through its standard Position path, so
+    the fixture ingests under both older (SpikeInterface 0.99) and
+    current Spyglass environments.
 
     Parameters
     ----------

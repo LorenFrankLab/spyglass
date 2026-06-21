@@ -548,16 +548,14 @@ _ARTIFACT_DETECTION_INTERVAL_LIST_PREFIX = "artifact_detection_"
 def artifact_detection_interval_list_name(artifact_detection_id) -> str:
     """Return the ``IntervalList.interval_list_name`` for an artifact detection.
 
-    Centralizes the v2 convention
+    Centralizes the convention
     ``f"artifact_detection_{artifact_detection_id}"`` so the prefix lives in
     one place; ``parse_artifact_detection_interval_list_name`` is its inverse.
 
-    NOTE: v2 prefixes the name with ``artifact_detection_``; v1 wrote the bare
-    ``str(artifact_detection_id)`` (``v1/artifact.py:200``). The prefix is
-    intentional -- it disambiguates artifact-detection-derived IntervalList rows
-    from sort_valid_times / lfp / etc. rows when grepping by name. A
-    ported v1 query that looks rows up by the bare UUID returns empty;
-    use this helper (or its inverse) instead.
+    The ``artifact_detection_`` prefix is intentional -- it disambiguates
+    artifact-detection-derived IntervalList rows from sort_valid_times / lfp /
+    etc. rows when grepping by name. A query that looks rows up by the bare
+    UUID returns empty; use this helper (or its inverse) instead.
     """
     return f"{_ARTIFACT_DETECTION_INTERVAL_LIST_PREFIX}{artifact_detection_id}"
 
@@ -581,16 +579,15 @@ def get_spiking_sorting_v2_merge_ids(
 ) -> list:
     """Return merge ids for a v2 spike-sorting restriction.
 
-    Notebook-discoverable parallel of v1's
-    ``get_spiking_sorting_v1_merge_ids``
-    (``src/spyglass/spikesorting/v1/utils.py:37-109``); thin wrapper
-    over ``SpikeSortingOutput()._get_restricted_merge_ids_v2`` so
+    Notebook-discoverable parallel of ``get_spiking_sorting_v1_merge_ids``;
+    thin wrapper over ``SpikeSortingOutput()._get_restricted_merge_ids_v2`` so
     users can do ``get_spiking_sorting_v2_merge_ids(restriction)``
     without poking at the private merge-table method directly.
 
-    ``as_dict`` is an enhancement over v1's surface (v1 always
-    returned a plain list of UUIDs); the default ``False`` matches
-    v1's behavior so a v1 caller copied verbatim works unchanged.
+    ``as_dict=True`` returns ``{"merge_id": uuid}`` dicts; the default
+    ``False`` returns a plain list of UUIDs, matching the
+    ``get_spiking_sorting_v1_merge_ids`` return shape so a caller copied
+    verbatim works unchanged.
 
     Parameters
     ----------

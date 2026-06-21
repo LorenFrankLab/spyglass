@@ -129,7 +129,7 @@ class ArtifactDetectionParameters(SpyglassMixin, dj.Lookup):
     memory-relevant key is the chunk size -- ``chunk_duration`` (e.g. ``"1s"``,
     the default), ``chunk_size`` (frames), or ``chunk_memory`` -- which bounds
     peak working set at ``~4 × chunk_frames × n_channels × 4 bytes``. ``n_jobs``
-    controls the worker-pool size (default 1, serial in-process, matching v1).
+    controls the worker-pool size (default 1, serial in-process).
     """
 
     definition = f"""

@@ -273,10 +273,7 @@ def sorter_default_contents() -> tuple:
                 # the runtime scales the recording to uV (via the stored
                 # NWB gain) before detection, rather than treating it as a
                 # MAD multiplier. (For Frank-lab data gain==1 uV/count so
-                # 100 "uv" == 100 counts == 100 uV either way.) This
-                # honors the label v1 used at
-                # ``src/spyglass/spikesorting/v1/sorting.py:177`` but never
-                # enforced (v1 thresholded in raw counts). The
+                # 100 "uv" == 100 counts == 100 uV either way.) The
                 # explicit ``noise_levels=[1.0]`` is the equivalent
                 # advanced override and is kept as a belt-and-suspenders
                 # regression guard against the 1,400x noise_levels

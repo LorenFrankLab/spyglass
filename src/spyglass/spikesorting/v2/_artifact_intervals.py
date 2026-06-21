@@ -49,15 +49,13 @@ def scan_artifact_frames(recording, validated, job_kwargs=None):
     indices into one ascending array. Peak working set is bounded by the
     chunk size -- roughly ``4 × chunk_frames × n_channels × 4 bytes`` (raw
     int slice + float32 µV copy + abs + z-score intermediate) -- rather than
-    by the full recording, which the predecessor full-``get_traces`` load
-    materialized at ``~4 × n_samples × n_channels × 4 bytes`` (≈27 GB for a
-    1-hour 64-channel 30 kHz recording). Restores v1's chunked path
-    (``v1/artifact.py:_get_artifact_times`` +
-    ``spikesorting/utils.py:_compute_artifact_chunk``) self-contained in v2.
+    by the full recording, which a full-``get_traces`` load would
+    materialize at ``~4 × n_samples × n_channels × 4 bytes`` (≈27 GB for a
+    1-hour 64-channel 30 kHz recording).
 
     ``job_kwargs`` is the merged SI job-kwargs blob; only recognized
     ``job_keys`` (``n_jobs``, ``chunk_duration``, ``pool_engine``, ...) are
-    forwarded to the executor. ``n_jobs=1`` (the default, matching v1) runs
+    forwarded to the executor. ``n_jobs=1`` (the default) runs
     serially in-process and passes the live recording to each worker; a
     multi-process pool receives the ``to_dict()`` blob instead.
 
@@ -180,8 +178,7 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
     # detect=False / zero-artifact returns AND the artifact complement
     # below never span an inter-chunk gap (which would inflate
     # obs_intervals duration and let sub-min_length slivers survive by
-    # borrowing gap time). v1 subtracts artifacts from the explicit
-    # ``sort_interval_valid_times`` (``v1/artifact.py:327``).
+    # borrowing gap time).
     base_intervals = _base_intervals_from_timestamps(timestamps, fs)
     if not validated.detect:
         logger.info(
@@ -191,8 +188,7 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
         return _np.asarray(base_intervals)
 
     # Log the threshold configuration so a population report can
-    # audit which detection mode actually fired per row. Matches
-    # v1's logger.info at v1/artifact.py:258-261.
+    # audit which detection mode actually fired per row.
     logger.info(
         "ArtifactDetection: scanning with "
         f"amplitude_threshold_uv={validated.amplitude_threshold_uv}, "
@@ -253,15 +249,13 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
     # worker. The z-score is computed on each frame's own columns, so
     # chunk boundaries (which split the time axis) leave the flagged
     # frame set unchanged; this is the equivalence the regression test
-    # pins. v1 OR-combined the two detectors at
-    # ``spikesorting/utils.py:198``; the worker preserves that (an AND
-    # would make the dual-threshold mode strictly less sensitive than
-    # either single-threshold mode).
+    # pins. The worker OR-combines the two detectors (an AND would make
+    # the dual-threshold mode strictly less sensitive than either
+    # single-threshold mode).
     frames_above = scan_artifact_frames(recording, validated, job_kwargs)
     if len(frames_above) == 0:
-        # Matches v1's warning at v1/artifact.py:318 so a
-        # downstream consumer noticing "all valid times" can see
-        # whether detection was attempted-and-empty vs skipped.
+        # Warn so a downstream consumer noticing "all valid times" can
+        # see whether detection was attempted-and-empty vs skipped.
         logger.warning(
             "ArtifactDetection: scan found zero artifact frames"
             f"{context} (amplitude_threshold_uv="
@@ -291,9 +285,8 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
     # into spans, but NEVER across a timestamp gap: two artifacts in
     # different chunks are frame-adjacent yet seconds apart in
     # wall-clock, so joining them would create a span straddling the
-    # gap that over-masks the earlier chunk's tail. v1's effective
-    # join is in timestamp space (after time-based window expansion),
-    # so a large disjoint gap is never bridged.
+    # gap that over-masks the earlier chunk's tail. The gap-aware
+    # guard below keeps the join from bridging a large disjoint gap.
     spans = []
     cur_start = frames_above[0]
     cur_end = frames_above[0]
@@ -311,10 +304,9 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
     # side, for the same reason: a frame-space window (``end_f +
     # half_window_frames``) on an artifact near a chunk edge would
     # reach into the neighboring chunk's first samples across the gap
-    # and -- after per-chunk clipping -- remove them. v1's window is
-    # time-based (``timestamps[end] + half_win`` seconds), which
-    # cannot cross a gap orders of magnitude larger than the window;
-    # capping at the chunk frame bounds reproduces that.
+    # and -- after per-chunk clipping -- remove them. Capping the
+    # window at the chunk frame bounds keeps it from crossing a gap
+    # orders of magnitude larger than the window.
     artifact_intervals = []
     for start_f, end_f in spans:
         left = gap_after[gap_after < start_f]
@@ -371,9 +363,7 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
     # recording with frequent artifacts leaves millisecond-scale
     # slivers between artifact intervals that downstream
     # ``Sorting._apply_artifact_mask`` iterates one by one; SI
-    # sorters may also crash on micro-intervals. Matches v1's
-    # hardcoded ``min_length=1`` at
-    # ``src/spyglass/spikesorting/v1/artifact.py:327-328``.
+    # sorters may also crash on micro-intervals.
     if kept:
         kept = [
             [start, end]

@@ -16,13 +16,11 @@ class ArtifactDetectionParamsSchema(BaseModel):
     channels, then writes the artifact-removed valid times into
     ``common.IntervalList`` for the sorter to read.
 
-    Fields replace v1's threshold names (``zscore_thresh``,
-    ``amplitude_thresh_uV``, ``proportion_above_thresh``) with explicit v2
-    names (``zscore_threshold``, ``amplitude_threshold_uv``,
-    ``proportion_above_threshold``), while preserving the same default
-    semantics. v2 also adds ``detect`` (so the ``"none"`` preset is a typed
-    ``detect=False`` rather than an absent-fields blob) and ``join_window_ms``
-    (artifact intervals closer than this are merged into one).
+    The threshold fields are ``zscore_threshold``,
+    ``amplitude_threshold_uv``, and ``proportion_above_threshold``.
+    ``detect`` makes the ``"none"`` preset a typed ``detect=False`` rather
+    than an absent-fields blob, and ``join_window_ms`` merges artifact
+    intervals closer than this into one.
 
     Detector note: ``zscore_threshold`` is a per-frame *cross-channel*
     z-score (across channels within a frame), so it flags single-channel
@@ -48,19 +46,14 @@ class ArtifactDetectionParamsSchema(BaseModel):
     schema_version: int = ARTIFACT_DETECTION_SCHEMA_VERSION
     # Bumped to 2 by adding ``min_length_s``: the artifact-removed
     # valid_times are filtered to drop slivers shorter than this
-    # many seconds before the sorter sees them. Default ``1.0``
-    # matches v1's hardcoded value at
-    # ``src/spyglass/spikesorting/v1/artifact.py:327-328``.
+    # many seconds before the sorter sees them. Default ``1.0``.
     #
-    # ``amplitude_threshold_uv=500.0`` is v2's bug-fix default (matches
-    # v1's effective Intan-probe behavior within ~15%) and
-    # ``proportion_above_threshold`` is ``1.0`` (v1's principled "all
-    # channels must exceed" default; a 0.5 default had no documented
-    # justification). The CHANGELOG entry explains the v1 unit-
-    # conversion bug that motivated keeping 500 uV; users with
-    # custom v1 thresholds should translate
-    # ``v1_value * probe_gain_uV_per_count`` to the v2-equivalent uV
-    # value.
+    # ``amplitude_threshold_uv=500.0`` is a true-microvolt threshold and
+    # ``proportion_above_threshold`` is ``1.0`` (the principled "all
+    # channels must exceed" default). The threshold is interpreted in uV,
+    # so a workflow migrating from a raw-count threshold should translate
+    # ``raw_count_value * probe_gain_uV_per_count`` to the equivalent uV
+    # value (e.g. for an Intan ~0.195 uV/count probe).
     detect: bool = True
     amplitude_threshold_uv: float | None = Field(default=500.0, ge=0.0)
     zscore_threshold: float | None = Field(

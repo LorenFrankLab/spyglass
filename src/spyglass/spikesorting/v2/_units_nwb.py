@@ -70,8 +70,9 @@ def numpysorting_from_abs_times(abs_times, recording_row, fs):
 
     Maps each unit's absolute spike times to recording frame indices
     with ``np.searchsorted`` against the recording's (possibly
-    gap-preserving) timestamps -- the v1-parity readback that an
-    affine inverse breaks across wall-clock gaps.
+    gap-preserving) timestamps. Searching the actual timestamp vector
+    is correct across wall-clock gaps, where an affine ``t_start + i/fs``
+    inverse would land on the wrong frame.
 
     Parameters
     ----------
@@ -256,21 +257,19 @@ def write_sorting_units_nwb(
     """Write a fresh AnalysisNwbfile containing only the v2 Units table.
 
     Spike times are stored in the recording's absolute timeline
-    (``timestamps[sample_index]``) -- matching v1's convention --
-    so downstream consumers can compare directly against the
-    Recording's IntervalList valid_times. ``AnalysisNwbfile().create``
-    already strips any parent ``/units`` from the analysis NWB so
-    the v2 sort outputs are the only Units rows in the file
-    (addresses #1437).
+    (``timestamps[sample_index]``) so downstream consumers can compare
+    directly against the Recording's IntervalList valid_times.
+    ``AnalysisNwbfile().create`` already strips any parent ``/units``
+    from the analysis NWB so the sort outputs are the only Units rows
+    in the file (addresses #1437).
 
     Every unit row carries ``obs_intervals`` (the artifact-
     removed valid-time window the sort observed) and a
-    ``curation_label`` placeholder list (``["uncurated"]``).
-    Both columns mirror v1 at ``v1/sorting.py:583-598``;
-    external readers that grep for either column on a
-    pre-curation NWB now find them. ``obs_intervals`` defaults
-    to the recording's full timestamp envelope when no artifact
-    mask was applied (``obs_intervals=None``).
+    ``curation_label`` placeholder list (``["uncurated"]``), so
+    external readers that grep for either column on a pre-curation
+    NWB find them. ``obs_intervals`` defaults to the recording's full
+    timestamp envelope when no artifact mask was applied
+    (``obs_intervals=None``).
     """
     import numpy as _np
     import pynwb
@@ -292,8 +291,7 @@ def write_sorting_units_nwb(
         # per recorded chunk rather than a single envelope spanning the
         # gaps (which would inflate the observation duration). For a
         # contiguous recording this collapses to a single
-        # ``[t0, t_end]``, unchanged. (v1's FK was mandatory, so it
-        # always had artifact-removed intervals here.)
+        # ``[t0, t_end]``, unchanged.
         from spyglass.spikesorting.v2.utils import (
             _base_intervals_from_timestamps,
         )
@@ -311,20 +309,17 @@ def write_sorting_units_nwb(
     ) as io:
         nwbf = io.read()
         # ``curation_label`` is a scalar ``"uncurated"`` at sort
-        # time, matching v1's pre-curation NWB shape at
-        # ``v1/sorting.py:583-598``. External readers expecting
-        # v1's shape do
-        # ``nwb.units["curation_label"][i] == "uncurated"`` and
-        # would silently fail an equality check against a list.
+        # time, so external readers can do
+        # ``nwb.units["curation_label"][i] == "uncurated"`` -- an
+        # equality check that would silently fail against a list.
         # ``CurationV2.insert_curation`` rewrites this to the
-        # indexed ragged-list shape at post-curation time, which
-        # is the v1-curated shape. The pre-vs-post shape
-        # discontinuity is inherited from v1 and is intentional.
+        # indexed ragged-list shape at post-curation time. The
+        # pre-vs-post shape discontinuity is intentional.
         #
         # ``add_unit_column`` must be declared BEFORE any
         # ``add_unit`` call that passes the column as a kwarg;
         # pynwb rejects the kwarg as "extra keys" otherwise.
-        # The scalar shape (no ``index=True``) matches v1.
+        # The scalar shape uses no ``index=True``.
         if len(sorting.unit_ids) > 0:
             nwbf.add_unit_column(
                 name="curation_label",
@@ -338,7 +333,7 @@ def write_sorting_units_nwb(
             spike_indices = sorting.get_unit_spike_train(unit_id=unit_id)
             # Map sample indices into the recording's wall-clock so
             # the stored spike times match Recording.get_times()
-            # exactly. v1 uses this same convention.
+            # exactly.
             spike_times = timestamps[spike_indices]
             nwbf.add_unit(
                 spike_times=spike_times,
@@ -348,8 +343,7 @@ def write_sorting_units_nwb(
             )
         # pynwb leaves ``nwbf.units = None`` if no add_unit() was
         # called, so a zero-unit sort would crash on .object_id.
-        # Initialize an empty Units table explicitly (v1 has the
-        # same guard at v1/sorting.py:578).
+        # Initialize an empty Units table explicitly.
         if nwbf.units is None:
             nwbf.units = pynwb.misc.Units(
                 name="units",
@@ -448,9 +442,9 @@ def write_curated_units_nwb(
         # Resolve which units get written + their spike trains:
         #   apply_merge=True  -> kept units; a merged head gets the
         #     concatenated contributor trains.
-        #   apply_merge=False -> every original unit 1:1 (v1 preview
-        #     parity, ``v1/curation.py:359``); proposed merges stay in
-        #     MergeGroup for lazy application via get_merged_sorting.
+        #   apply_merge=False -> every original unit 1:1 (preview);
+        #     proposed merges stay in MergeGroup for lazy application
+        #     via get_merged_sorting.
         if apply_merge:
             write_specs = []
             for kept_uid, contribs in kept_unit_to_contributors.items():
@@ -458,8 +452,8 @@ def write_curated_units_nwb(
                     # Membership-aware 0.4 ms dedup of cross-unit
                     # double-detections (a neuron's refractory period
                     # makes any sub-0.4 ms cross-unit pair one physical
-                    # spike). Matches v1's lazy get_merged_sorting and
-                    # v2's own get_merged_sorting, so the stored
+                    # spike). Uses the same dedup as the lazy
+                    # get_merged_sorting, so the stored
                     # (apply_merge=True) train equals the previewed one.
                     spike_times = _dedup_merged_spike_times(
                         [abs_times_by_uid[int(u)] for u in contribs],
@@ -485,23 +479,19 @@ def write_curated_units_nwb(
         if write_specs:
             # ``curation_label`` is written as an ``index=True``
             # (ragged) column with a per-unit list of label
-            # strings, matching v1's ``v1/curation.py:398-403``
-            # shape. External readers (e.g.
-            # ``v1/figurl_curation.py:83-101`` which does
-            # ``list(nwb_sorting.get('curation_label', []))``)
-            # expect a list per unit and would misparse a
+            # strings. External readers do
+            # ``list(nwb_sorting.get('curation_label', []))`` and
+            # expect a list per unit -- they would misparse a
             # comma-separated string by splitting on every
             # character. The ``CurationV2.UnitLabel`` docstring
             # already described this shape.
             #
-            # v1's pattern is to call ``add_unit(...)`` first,
-            # then add the column with ``data=label_values``
-            # AFTER -- this gives pynwb a full per-unit
-            # list-of-lists to infer dtype from. If we
-            # pre-declare the column and pass labels per
-            # ``add_unit``, pynwb fails dtype inference when
-            # all labels happen to be empty (the no-labels
-            # case).
+            # Call ``add_unit(...)`` for every unit FIRST, then add
+            # the column with ``data=label_values`` AFTER -- this
+            # gives pynwb a full per-unit list-of-lists to infer
+            # dtype from. Pre-declaring the column and passing labels
+            # per ``add_unit`` makes pynwb fail dtype inference when
+            # all labels happen to be empty (the no-labels case).
             all_labels: list[list[str]] = []
             for unit_id, spike_times in write_specs:
                 lbl_list = labels.get(int(unit_id), [])
@@ -527,8 +517,7 @@ def write_curated_units_nwb(
                         "Curation label list from "
                         "CurationV2.insert_curation; one entry "
                         "per label, empty list if unlabeled. "
-                        "Indexed (ragged) column matching v1's "
-                        "shape at v1/curation.py:398-403."
+                        "Indexed (ragged) column."
                     ),
                     data=all_labels,
                     index=True,

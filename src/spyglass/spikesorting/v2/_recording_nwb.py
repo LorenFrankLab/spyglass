@@ -70,22 +70,20 @@ def write_nwb_artifact(
 
     Streams the ``(n_samples, n_channels)`` trace array and the
     ``(n_samples,)`` timestamps vector into the ElectricalSeries
-    via HDMF's ``GenericDataChunkIterator`` (``buffer_gb=5``,
-    matching v1's production choice). Without streaming, a
-    30 kHz x 128 ch x 1 h recording (~110 GB float64) would have
-    to materialize in RAM before the NWB write, which OOMs on
-    any lab workstation.
+    via HDMF's ``GenericDataChunkIterator`` (``buffer_gb=5``).
+    Without streaming, a 30 kHz x 128 ch x 1 h recording
+    (~110 GB float64) would have to materialize in RAM before the
+    NWB write, which OOMs on any lab workstation.
 
     Returns ``(analysis_file_name, electrical_series_object_id,
     cache_hash)``. The ``cache_hash`` is computed **after** the
     write via ``_hash_nwb_recording`` -- the ``NwbfileHasher``
-    digest of the file we just persisted. The v1 recompute machinery
-    uses the same hashing path, so v2 verification does not maintain a
-    parallel implementation.
+    digest of the file we just persisted -- so the cached artifact
+    can be re-verified on readback.
 
     Writes the file to disk only; the caller registers the
     ``AnalysisNwbfile`` row inside its DataJoint transaction so
-    the file registration and the v2 row commit atomically.
+    the file registration and the table row commit atomically.
 
     Parameters
     ----------
@@ -146,8 +144,8 @@ def write_nwb_artifact(
         # ElectricalSeries must carry gain (as ``conversion``) AND offset
         # (as ``offset``) to recover real volts on readback:
         # ``volts = raw * conversion + offset``. The resolver rejects
-        # heterogeneous gain/offset and non-positive gain (v1 silently
-        # picked gains[0] and dropped offset entirely).
+        # heterogeneous gain/offset and non-positive gain so a per-channel
+        # gain or a missing offset cannot silently corrupt the scaling.
         conversion, es_offset = resolve_conversion_and_offset(recording)
 
         # The data iterator drives ``recording.get_traces(...)``
@@ -208,8 +206,7 @@ def write_nwb_artifact(
         # Hash the persisted file (not in-memory bytes) so the
         # digest reflects what was actually written --
         # timestamps, electrodes, conversion, ElectricalSeries
-        # metadata -- not just trace data. Matches the v1
-        # recompute hashing path.
+        # metadata -- not just trace data.
         cache_hash = _hash_nwb_recording(analysis_file_name)
     except Exception:
         # Any write/hash failure: remove the partial analysis file before

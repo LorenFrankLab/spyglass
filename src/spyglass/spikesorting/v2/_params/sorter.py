@@ -1,20 +1,20 @@
 """Validated parameter schemas for the sorter parameter table.
 
-One schema per supported v2 sorter, plus a generic ``extra="allow"``
+One schema per supported sorter, plus a generic ``extra="allow"``
 fallback for any SpikeInterface sorter the installed environment
-exposes but the v2 pipeline does not ship a dedicated default for.
+exposes but this pipeline does not ship a dedicated default for.
 
 Strictness policy:
     MountainSort4Schema, MountainSort5Schema, Kilosort4Schema, and
     ClusterlessThresholderSchema use ``extra="forbid"`` because their
-    field lists come from documented APIs (v1 mountain_default block and
-    appendix.md). A typo in one of their kwargs raises at Lookup insert
-    time -- the typo-catching is the value-add over the generic schema.
+    field lists come from documented APIs. A typo in one of their kwargs
+    raises at Lookup insert time -- the typo-catching is the value-add
+    over the generic schema.
 
     SpykingCircus2Schema and Tridesclous2Schema use ``extra="allow"``
-    because the v2 plan does not curate their fields; they exist as
-    dedicated dispatch slots for ``_get_sorter_schema``. SI's runtime
-    validates the final kwargs dict at sort time.
+    because their fields are not curated here; they exist as dedicated
+    dispatch slots for ``_get_sorter_schema``. SI's runtime validates the
+    final kwargs dict at sort time.
 
     GenericSorterParamsSchema is the ``extra="allow"`` fallback for any
     SI sorter outside the dedicated set.
@@ -47,20 +47,13 @@ _MAX_PLAUSIBLE_MAD_MULTIPLIER = 50.0
 class MountainSort4Schema(BaseModel):
     """Validated schema for MountainSort 4.
 
-    Mirrors v1's ``mountain_default`` block at
-    ``src/spyglass/spikesorting/v1/sorting.py:145-153`` without the
-    runtime ``tempdir`` field-mutation hack. ``freq_min=600`` and
-    ``freq_max=6000`` defaults match v1's tetrode preset row at
-    ``v1/sorting.py:158-159`` (the ``mountain_default`` block itself
-    did NOT include ``freq_min`` / ``freq_max`` -- those keys came
-    from the tetrode preset); v2's schema-level defaults choose the
-    tetrode preset values so a user constructing
-    ``MountainSort4Schema()`` without arguments gets v1's most-used
-    Frank-lab production preset implicitly. MS4 is not deterministic
-    and the SI 0.104 wrapper still lists it even when the runtime
-    is not installed; the per-platform install evidence is recorded
-    in the v2 resolver notes. ``extra="forbid"`` catches typos like
-    ``detect_signe`` against the v1-documented field set.
+    The ``freq_min=600`` / ``freq_max=6000`` schema-level defaults are the
+    Frank-lab tetrode bandpass preset, so a user constructing
+    ``MountainSort4Schema()`` without arguments gets the most-used
+    production preset implicitly. MS4 is not deterministic and the SI 0.104
+    wrapper still lists it even when the runtime is not installed.
+    ``extra="forbid"`` catches typos like ``detect_signe`` against the
+    documented field set.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -102,26 +95,20 @@ class MountainSort4Schema(BaseModel):
 class MountainSort5Schema(BaseModel):
     """Validated schema for MountainSort 5.
 
-    Defaults follow ``appendix.md § MountainSort 5 install + params``.
-    MS5 has no ``tempdir`` parameter (the v1 ``sorter_params.pop(
-    'tempdir', None)`` hack is gone), and assumes the input recording
-    has already been bandpass-filtered and whitened by the upstream
-    recording stage. ``extra="forbid"`` catches typos against the
-    documented MS5 field set.
+    MS5 assumes the input recording has already been bandpass-filtered and
+    whitened by the upstream recording stage. ``extra="forbid"`` catches
+    typos against the documented MS5 field set.
 
-    ``filter`` / ``whiten`` mirror ``MountainSort4Schema`` so MS5 is
-    handled identically to MS4 by the runtime. The SI 0.104 MS5 wrapper
-    defaults both to ``True`` (verified against
-    ``Mountainsort5Sorter._default_params``); this schema overrides
-    ``filter`` to ``False`` because the v2 recording stage already
-    bandpass-filters the input (300-6000 Hz + median CAR) -- leaving MS5's
-    internal filter on would double-filter the recording, narrowing the
-    spike band twice. ``whiten`` stays ``True``: in the Spyglass runtime a
-    truthy ``whiten`` routes through the external float64 whitening pin in
-    ``Sorting._run_si_sorter`` (which then disables MS5's internal
-    whitening so the recording is whitened exactly once), matching v1 and
-    the MS4 path. Both toggles are exposed so a user feeding MS5 an
-    un-preprocessed recording can re-enable the internal filter.
+    The SI 0.104 MS5 wrapper defaults both ``filter`` and ``whiten`` to
+    ``True`` (verified against ``Mountainsort5Sorter._default_params``); this
+    schema overrides ``filter`` to ``False`` because the recording stage
+    already bandpass-filters the input (300-6000 Hz + median CAR) -- leaving
+    MS5's internal filter on would double-filter the recording, narrowing the
+    spike band twice. ``whiten`` stays ``True``: a truthy ``whiten`` routes
+    through the external float64 whitening pin in ``Sorting._run_si_sorter``
+    (which then disables MS5's internal whitening so the recording is whitened
+    exactly once), matching the MS4 path. Both toggles are exposed so a user
+    feeding MS5 an un-preprocessed recording can re-enable the internal filter.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -141,16 +128,12 @@ class MountainSort5Schema(BaseModel):
 class Kilosort4Schema(BaseModel):
     """Validated schema for Kilosort 4.
 
-    Documents the v2-relevant kwargs from ``appendix.md § Kilosort 4
-    install + params``. KS4 has a large parameter surface; this schema
-    types the most-used knobs but uses ``extra="allow"`` so users who
-    need an undocumented KS4 kwarg (``batch_size``, ``nearest_chans``,
-    etc.) can pass it through to SI without an upstream schema PR.
-    Matches v1's escape hatch at ``v1/sorting.py:184-189`` which
-    expanded sorter contents via ``sis.get_default_sorter_params``.
-    KS4 is not a deterministic fallback (CPU/GPU runtime differences
-    can change spike times) and may require GPU for non-trivial
-    recordings.
+    KS4 has a large parameter surface; this schema types the most-used
+    knobs but uses ``extra="allow"`` so users who need an undocumented KS4
+    kwarg (``batch_size``, ``nearest_chans``, etc.) can pass it through to
+    SI without an upstream schema PR. KS4 is not a deterministic fallback
+    (CPU/GPU runtime differences can change spike times) and may require
+    GPU for non-trivial recordings.
 
     Trade-off of ``extra="allow"``: typos in un-listed KS4 kwargs
     surface at SI sort time, not at Lookup insert time -- this is the
@@ -196,19 +179,14 @@ class ClusterlessThresholderSchema(BaseModel):
     Not a SpikeInterface registered sorter; ``clusterless_thresholder``
     is a Spyglass-specific peak-detection path built on
     ``spikeinterface.sortingcomponents.peak_detection.detect_peaks``.
-    Default values mirror v1's ``default_clusterless`` row at
-    ``src/spyglass/spikesorting/v1/sorting.py:177``. ``extra="forbid"``
-    catches typos against the v1-documented field set.
+    ``extra="forbid"`` catches typos against the documented field set.
 
-    Dropped two dead fields from v1's row shape:
+    Two fields that carried no effect are intentionally absent:
 
     * ``outputs`` was a Spyglass routing hint; the runtime always
-      treats the detector output as a sorting and never reads this
-      field. Removed.
-    * ``random_chunk_kwargs`` was renamed to ``random_slices_kwargs``
-      and is now managed internally by SI 0.104 ``detect_peaks``; the
-      v1 field had no effect in the prior strip-and-call path.
-      Removed.
+      treats the detector output as a sorting and never reads it.
+    * ``random_chunk_kwargs`` (renamed ``random_slices_kwargs``) is now
+      managed internally by SI 0.104 ``detect_peaks``.
 
     ``threshold_unit`` is the primary, self-documenting knob for how
     ``detect_threshold`` is interpreted:
@@ -219,12 +197,10 @@ class ClusterlessThresholderSchema(BaseModel):
       (``scale_to_uV``, using the stored NWB gain) before ``detect_peaks``,
       so a value of ``100`` means 100 uV. For Frank-lab data (gain == 1
       uV/count) this equals the raw-count value; for non-unity-gain rigs
-      (e.g. Intan ~0.195 uV/count) it is the corrected behavior. This
-      honors the label v1 used at ``src/spyglass/spikesorting/v1/
-      sorting.py:177`` but never enforced (v1 thresholded in raw counts --
-      v2 diverges here). Requires the recording to carry channel gains (it
-      always does after the v2 ElectricalSeries write); otherwise the
-      runtime raises. This is the production Frank-lab default (100 uV).
+      (e.g. Intan ~0.195 uV/count) it is the corrected behavior. Requires
+      the recording to carry channel gains (it always does after the
+      ElectricalSeries write); otherwise the runtime raises. This is the
+      production Frank-lab default (100 uV).
     * ``"mad"`` -- the threshold is in MAD multiples; SI estimates
       per-channel MAD (``noise_levels`` left unset). Tracks the
       recording's actual noise floor; right for synthetic / low-amplitude
@@ -276,9 +252,9 @@ class ClusterlessThresholderSchema(BaseModel):
     )
     # Only ``locally_exclusive`` is wired: the runtime always builds
     # ``radius_um`` into ``method_kwargs`` (spatial exclusion), which the
-    # other SI ``detect_peaks`` methods (e.g. ``by_channel``) reject. v1
-    # advertised a ``"global"`` option that was never a valid SI method --
-    # it would fail at ``detect_peaks`` time -- so it is not offered here.
+    # other SI ``detect_peaks`` methods (e.g. ``by_channel``) reject. A
+    # ``"global"`` option is deliberately not offered -- it is not a valid
+    # SI method and would fail at ``detect_peaks`` time.
     method: Literal["locally_exclusive"] = "locally_exclusive"
     peak_sign: Literal["neg", "pos", "both"] = "neg"
     exclude_sweep_ms: float = Field(default=0.1, gt=0.0)
@@ -318,7 +294,7 @@ class ClusterlessThresholderSchema(BaseModel):
 class SpykingCircus2Schema(BaseModel):
     """Validated schema for SpykingCircus 2.
 
-    The v2 default set does not curate SC2 fields; the schema exists so
+    SC2 fields are not curated here; the schema exists so
     ``_get_sorter_schema('spykingcircus2')`` dispatches to a dedicated
     class rather than the generic fallback. Users supply SC2-specific
     kwargs through ``extra="allow"``; SI validates at sort time.
@@ -340,10 +316,10 @@ class Tridesclous2Schema(BaseModel):
 
 
 class GenericSorterParamsSchema(BaseModel):
-    """Fallback schema for installed SI sorters with no dedicated v2 model.
+    """Fallback schema for installed SI sorters with no dedicated model.
 
-    Preserves v1's "try any installed SpikeInterface sorter" escape hatch
-    without auto-inserting defaults for every sorter
+    Lets a user run any installed SpikeInterface sorter without
+    auto-inserting defaults for every sorter
     ``spikeinterface.sorters.available_sorters()`` reports. Users supply
     the full SI kwargs dict; SI validates at sort time.
     """
@@ -417,8 +393,8 @@ def _get_sorter_schema(sorter_name: str) -> type[BaseModel]:
     """Return the Pydantic schema for a sorter name.
 
     Falls back to ``GenericSorterParamsSchema`` for any sorter outside the
-    dedicated v2 set, so the v1 "try any installed SI sorter" escape hatch
-    keeps working. ``SorterParameters.insert1`` is responsible for the
+    dedicated set, so any installed SI sorter can still be run.
+    ``SorterParameters.insert1`` is responsible for the
     additional check that the sorter name resolves to a known SI sorter or
     the Spyglass-specific ``clusterless_thresholder`` path; the schema
     itself does not enforce that, because the dispatch happens before any

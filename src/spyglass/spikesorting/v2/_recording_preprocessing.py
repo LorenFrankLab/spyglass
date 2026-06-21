@@ -41,11 +41,10 @@ def apply_pre_motion_preprocessing(
 
     Optional ADC phase-shift runs FIRST, then the bandpass filter
     (temporal), then referencing (spatial). Bandpass-before-reference is
-    the signal-processing-preferred order and intentionally diverges from
-    v1, which referenced first. The two are not commutative on the
-    global-median branch (the per-sample median is non-linear), so v2 and v1
-    differ numerically there; on the ``specific`` / ``none`` paths the steps
-    are linear and commute, so output is identical to the old order.
+    the signal-processing-preferred order. The two steps do not commute on
+    the global-median branch (the per-sample median is non-linear), so the
+    order is significant there; on the ``specific`` / ``none`` paths the
+    steps are linear and commute, so the order does not affect the output.
     Whitening stays deferred to the sorter stage so motion correction never
     sees whitened data (SpikeInterface docs flag whitening as destructive for
     motion estimators).

@@ -83,10 +83,9 @@ def assert_reference_not_member(
 
     The write path subtracts the specific reference from every channel and then
     REMOVES it from the recording. If the reference electrode is itself a member
-    of the sort group, that silently drops a channel the user meant to sort
-    (a 4-wire tetrode would sort on 3). v1 silently dropped it via
-    ``setdiff1d``; v2 fails loud. No-op for non-``'specific'`` modes (which
-    carry no reference electrode).
+    of the sort group, that would silently drop a channel the user meant to sort
+    (a 4-wire tetrode would sort on 3), so this fails loud instead. No-op for
+    non-``'specific'`` modes (which carry no reference electrode).
 
     Parameters
     ----------
@@ -121,8 +120,8 @@ def assert_reference_not_member(
 # Private sentinel for "derive the reference from the per-electrode config"
 # in :func:`resolve_group_reference`. A distinct object (not ``None``) so an
 # explicit/configured ``None`` can still mean "no reference" -- ``None`` is a
-# real, v1-compatible sentinel value (``original_reference_electrode`` is
-# nullable), so it cannot double as the "auto-derive" marker.
+# real sentinel value (``original_reference_electrode`` is nullable), so it
+# cannot double as the "auto-derive" marker.
 _AUTO_REFERENCE = object()
 
 
@@ -140,7 +139,7 @@ def resolve_group_reference(
     ``ReferenceMode`` values -- never ``"auto"`` -- so the resolved pair can
     be written straight into a ``SortGroupV2`` master row.
 
-    Sentinels (v1-compatible): ``None`` or ``-1`` -> ``("none", None)``;
+    Sentinels: ``None`` or ``-1`` -> ``("none", None)``;
     ``-2`` -> ``("global_median", None)``; ``>= 0`` -> ``("specific", id)``.
 
     Parameters
@@ -165,9 +164,9 @@ def resolve_group_reference(
     ------
     ValueError
         On the auto path, if the members carry mixed
-        ``original_reference_electrode`` values (cannot pick one reference;
-        v1 silently fell through here). For any path, if the resolved
-        sentinel is a negative value other than ``-1`` / ``-2``.
+        ``original_reference_electrode`` values (cannot pick one reference).
+        For any path, if the resolved sentinel is a negative value other
+        than ``-1`` / ``-2``.
 
     Notes
     -----

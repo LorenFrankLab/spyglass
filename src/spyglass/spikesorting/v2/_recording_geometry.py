@@ -37,9 +37,8 @@ def spikeinterface_channel_ids(nwb_file_name: str, spyglass_ids):
     SpikeInterface 0.104's ``read_nwb_recording`` uses the raw NWB
     electrodes table's ``channel_name`` string column as the
     channel id if present; otherwise integer ``electrode_id`` is
-    the channel id (the 1-1 fallback). Matches v1's lookup at
-    ``v1/recording.py:683-712`` so production NWBs that carry a
-    ``channel_name`` column resolve correctly. The Frank-lab
+    the channel id (the 1-1 fallback). Production NWBs that carry a
+    ``channel_name`` column resolve correctly through it. The Frank-lab
     MEArec fixture lacks the column and falls through to the
     integer path.
 
@@ -135,9 +134,8 @@ def maybe_apply_tetrode_geometry(
 ):
     """Attach the ``tetrode_12.5`` probe geometry when the sort group fits.
 
-    Matches v1's patch at ``v1/recording.py:630-643``: sort groups
-    of exactly 4 channels on a single ``tetrode_12.5`` probe and
-    a single electrode group get an explicit
+    Sort groups of exactly 4 channels on a single ``tetrode_12.5``
+    probe and a single electrode group get an explicit
     ``(0,0)-(0,12.5)-(12.5,0)-(12.5,12.5)`` µm probe with 6.25 µm
     contact radius. Covers legacy Frank-lab NWBs where contact
     positions were never written into the electrode table.

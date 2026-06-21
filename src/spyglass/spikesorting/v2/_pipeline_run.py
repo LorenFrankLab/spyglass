@@ -162,9 +162,8 @@ def run_v2_pipeline(
             ``merge_id``                 : SpikeSortingOutput master PK
             ``n_units``                  : unit count (0 on a zero-unit sort)
         Downstream consumers should key off ``merge_id``. A zero-unit
-        sort yields an empty curation/merge row (matching v1's empty
-        Units table), not ``None``, so the result is always
-        merge-keyable.
+        sort yields an empty (but real) curation/merge row, not
+        ``None``, so the result is always merge-keyable.
 
         Plus per-stage observability keys (additive; the keys above are
         unchanged):
@@ -343,8 +342,7 @@ def run_v2_pipeline(
             )
         # Fall through to the normal curation + merge insert. A
         # zero-unit sort yields an EMPTY (but real) curation + merge row
-        # -- matching v1, which writes an empty Units table -- so
-        # downstream consumers treat it like any other
+        # so downstream consumers treat it like any other
         # SpikeSortingOutput row instead of special-casing a None
         # merge_id. The warning is both logged (console) and recorded on
         # the run summary's ``warnings`` list (programmatic access).

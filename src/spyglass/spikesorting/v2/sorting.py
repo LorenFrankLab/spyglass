@@ -168,8 +168,8 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
     default rows for MS4, MS5, KS4, SC2, TDC2, and
     ``clusterless_thresholder``. Users can insert additional rows for any
     installed SI sorter; the generic ``extra="allow"`` schema is the
-    fallback dispatch for non-default sorters, preserving v1's "try any
-    installed sorter" escape hatch.
+    fallback dispatch for non-default sorters, the "try any installed
+    sorter" escape hatch.
     """
 
     definition = """
@@ -201,7 +201,7 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
         #
         # 1. Sorter-name typo guard. ``_get_sorter_schema`` falls back to
         #    the permissive ``GenericSorterParamsSchema`` for any unknown
-        #    sorter (the v1 "try any installed SI sorter" escape hatch), so a
+        #    sorter (the "try any installed SI sorter" escape hatch), so a
         #    typo like ``"mountainSort4"`` would otherwise validate cleanly
         #    here and fail only much later at ``Sorting.populate`` with an
         #    opaque SI "sorter not registered" error. Reject a name that is
@@ -288,12 +288,10 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
     def insert_default(cls):
         """Insert v2 default sorter rows if missing.
 
-        The default-content catalog mirrors the designs.md
-        ``SorterParameters`` section and includes MS4, MS5, KS4, SC2,
+        The default-content catalog includes MS4, MS5, KS4, SC2,
         TDC2, and clusterless_thresholder. Rows whose SpikeInterface
         sorter is NOT in ``spikeinterface.sorters.installed_sorters()``
-        are skipped (logged at INFO), mirroring v1's availability gate
-        at ``v1/sorting.py:184-189`` -- otherwise a user who inserts an
+        are skipped (logged at INFO) -- otherwise a user who inserts an
         uninstalled sorter's default row and then populates ``Sorting``
         hits an unhelpful "sorter not registered" error from SI. MS4 and
         KS4 are the common uninstalled cases (their Python wrappers exist
@@ -362,13 +360,12 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
 
         - **Not installed.** Gated on
           ``spikeinterface.sorters.installed_sorters()`` -- the SAME gate
-          ``insert_default`` uses (see ``v1/sorting.py:184-189`` and the
-          install-gate rationale at :meth:`insert_default`). v1 auto-
-          inserted for every ``available_sorters()`` entry, but
-          ``get_default_sorter_params`` succeeds for wrapper-only sorters
-          whose binary is absent (e.g. ``kilosort2_5``, ``ironclust``), so
-          enumerating ``available_sorters()`` alone would ship rows that
-          fail at ``Sorting.populate`` time with an unhelpful "sorter not
+          ``insert_default`` uses (see the install-gate rationale at
+          :meth:`insert_default`). ``get_default_sorter_params`` succeeds
+          for wrapper-only sorters whose binary is absent (e.g.
+          ``kilosort2_5``, ``ironclust``), so enumerating
+          ``available_sorters()`` alone would ship rows that fail at
+          ``Sorting.populate`` time with an unhelpful "sorter not
           installed" error. Inserting only *installed* sorters keeps the
           back-compat value (rows a user can actually run) without that
           trap.
@@ -877,7 +874,7 @@ class Sorting(SpyglassMixin, dj.Computed):
     -> AnalysisNwbfile
     object_id: varchar(72)
     n_units: int
-    time_of_sort: datetime    # populate wall-clock; native DataJoint datetime (v1 stored a Unix-epoch int at v1/sorting.py:239 -- a DataJoint-type workaround no longer needed)
+    time_of_sort: datetime    # wall-clock time the sort was populated
     """
     # The SortingAnalyzer cache folder is intentionally NOT a column: it is
     # large (5-50 GB) regeneratable scratch resolved at runtime from
@@ -987,10 +984,9 @@ class Sorting(SpyglassMixin, dj.Computed):
         # segments of the recording the sort actually observed --
         # without this column the units NWB looks like the unit
         # was observed across the full session even where the
-        # artifact mask blanked the signal. Matches v1 at
-        # ``v1/sorting.py:597``. When ``artifact_detection_id`` is unset the
-        # caller (make_compute) falls back to the recording's
-        # full timestamp envelope.
+        # artifact mask blanked the signal. When
+        # ``artifact_detection_id`` is unset the caller (make_compute)
+        # falls back to the recording's full timestamp envelope.
         if sel_row.get("artifact_detection_id") is not None:
             from spyglass.spikesorting.v2.utils import (
                 artifact_detection_interval_list_name,
@@ -1331,25 +1327,21 @@ class Sorting(SpyglassMixin, dj.Computed):
         wall-clock gaps that ``concatenate_recordings(ignore_times=True)``
         drops -- so the inverse map (absolute time -> recording frame)
         must use ``np.searchsorted`` against the actual recording
-        timestamps, exactly as v1 does
-        (``v1/sorting.py:spike_times_to_valid_samples`` +
-        ``v1/curation.py:get_sorting``). An affine
+        timestamps. An affine
         ``round((t - t_start) * fs)`` inverse (SI's ``NwbSortingExtractor``)
         is correct only on a uniform grid and shifts every frame after a
         gap by the accumulated gap (and can push frames past the
         gap-excluded sample count), so it is NOT used here.
 
-        Returns a ``NumpySorting`` (segment frame indices, ``t_start=0``)
-        matching v1's ``NumpySorting.from_unit_dict`` shape, so
-        ``get_unit_spike_train(uid)`` yields the original recording
+        Returns a ``NumpySorting`` (segment frame indices, ``t_start=0``),
+        so ``get_unit_spike_train(uid)`` yields the original recording
         frames and a downstream ``extract_waveforms`` / analyzer build
         aligns to the right samples.
 
         ``as_dataframe=True`` returns a pandas DataFrame whose
         **index is the unit_id** and which carries a ``spike_times``
         column (the stored ABSOLUTE seconds, read straight from the
-        units NWB) -- mirrors v1's ``nwb.units.to_dataframe()`` shape at
-        ``v1/curation.py:197-209``. The ``CurationV2.get_sorting``
+        units NWB). The ``CurationV2.get_sorting``
         accessor uses the same flag + index and adds a
         ``curation_label`` column joined from ``CurationV2.UnitLabel``.
 
@@ -1407,7 +1399,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         ``test_recording_timestamps_reads_persisted_vector`` calls
         ``Sorting._recording_timestamps`` directly. The IO (reading only
         the persisted, gap-preserving ``ElectricalSeries`` timestamps for
-        the v1-parity ``np.searchsorted`` readback) lives in the service
+        the ``np.searchsorted`` readback) lives in the service
         module.
         """
         return recording_timestamps(recording_row)
@@ -2005,8 +1997,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         # ``peak_sign`` / MountainSort ``detect_sign``) rather than
         # SpikeInterface's ``"neg"`` default, so a positive-going detection
         # attributes each unit to its true peak channel instead of the
-        # most-negative one. v1 makes this configurable via the
-        # ``peak_channel`` metric params; v2 threads it here at sort time.
+        # most-negative one. The polarity is threaded here at sort time.
         sorter_params = (
             SortingSelection * SorterParameters
             & {"sorting_id": key["sorting_id"]}

@@ -402,9 +402,8 @@ def restrict_recording(
     ``apply_pre_motion_preprocessing``.
 
     Uses ``ChannelSliceRecording`` directly because SI 0.104
-    dropped the ``recording.channel_slice(...)`` method that
-    was available on v1's SI 0.99 -- the constructor accepts
-    the same kwargs.
+    dropped the ``recording.channel_slice(...)`` method; the
+    constructor accepts the same kwargs.
 
     Parameters
     ----------
@@ -459,7 +458,6 @@ def restrict_recording(
     # run+sleep+run epoch group), frame-slice each chunk
     # separately and concatenate; a single ``frame_slice`` on the
     # outer envelope silently sorts the inter-chunk gaps too.
-    # Matches ``v1/recording.py:556-583``.
     intersection = Interval(sort_valid_times).intersect(
         Interval(raw_valid_times), min_length=min_segment_length
     )
@@ -522,9 +520,7 @@ def restrict_recording(
         # ``recording.get_times()`` on the time-stripped concat
         # and get a synthetic 0-based array. Build the
         # concatenated-interval timestamps from ``times[s:e]``
-        # slices (matching v1's
-        # ``timestamps.extend(all_timestamps[start:end])``
-        # pattern) and return them so the caller can pass the
+        # slices and return them so the caller can pass the
         # array through to ``write_nwb_artifact`` as
         # ``timestamps_override``.
         sliced = [

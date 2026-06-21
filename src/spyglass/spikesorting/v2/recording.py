@@ -139,10 +139,10 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
     must either supply non-overlapping ``sort_group_ids`` or opt in
     explicitly to a cautious delete via
     ``delete_existing_entries=True, confirm=True`` (after reviewing
-    the ``DeletionPreview``). This fixes a v1 regression where
-    ``set_group_by_shank`` silently dropped and re-created sort groups
-    on rerun, cascading deletes through every downstream Sorting and
-    CurationV1 row without warning.
+    the ``DeletionPreview``). This prevents a rerun of
+    ``set_group_by_shank`` from silently dropping and re-creating sort
+    groups, which would cascade deletes through every downstream Sorting
+    and Curation row without warning.
     """
 
     definition = """
@@ -220,8 +220,7 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         insert) or set ``delete_existing_entries=True, confirm=True``
         after reviewing the deletion preview. Auto-allocation is allowed
         ONLY on the first call for a session; on rerun it would silently
-        pad ``sort_group_id`` values, exactly the v1 regression this
-        guard was added to fix.
+        pad ``sort_group_id`` values, which this guard refuses.
         """
         # Intra-list duplicate check: ``set(new_sort_group_ids)`` below
         # loses the duplicate, and the ``zip`` in the caller would
@@ -307,10 +306,10 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
 
         Referencing is resolved **per sort group**. By default each group
         inherits its members' configured reference
-        (``Electrode.original_reference_electrode``) -- the same useful
-        default v1 has -- mapped to a ``reference_mode`` via the v1-compatible
-        sentinels: ``-1`` / ``None`` -> ``"none"``, ``-2`` ->
-        ``"global_median"``, ``>= 0`` -> ``"specific"`` (that electrode).
+        (``Electrode.original_reference_electrode``), mapped to a
+        ``reference_mode`` via the sentinels: ``-1`` / ``None`` ->
+        ``"none"``, ``-2`` -> ``"global_median"``, ``>= 0`` ->
+        ``"specific"`` (that electrode).
 
         Parameters
         ----------
@@ -319,13 +318,13 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         omit_ref_electrode_group
             If True, an electrode group is skipped when one of its sort
             groups resolves to a ``"specific"`` reference electrode that
-            lives in that same electrode group (mirrors v1).
+            lives in that same electrode group.
         omit_unitrode
             If True, sort groups with only one channel after filtering
             are skipped (a unitrode usually means a broken shank).
         references
             Optional per-group reference override, keyed by
-            ``electrode_group_name`` (v1's ``references`` dict). The value is
+            ``electrode_group_name``. The value is
             a reference electrode id / sentinel applied to every sort group in
             that electrode group, bypassing config inheritance. Every
             electrode group that produces a sort group must be a key, else a
@@ -367,9 +366,9 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         # Reference resolution inputs. Three mutually-constrained paths:
         #   * default (references is None, reference_mode is None): auto-derive
         #     each group's reference from its members' configured
-        #     original_reference_electrode (v1's useful default).
+        #     original_reference_electrode.
         #   * references mapping: per-group explicit reference id / sentinel,
-        #     keyed by electrode_group_name (v1's `references` dict).
+        #     keyed by electrode_group_name.
         #   * call-wide override (reference_mode[/reference_electrode_id]):
         #     force one mode on every group this call creates.
         if references is not None and reference_mode is not None:
@@ -501,7 +500,7 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         Like ``set_group_by_shank``, referencing is resolved **per sort
         group**: by default each group inherits its members' configured
         reference (``Electrode.original_reference_electrode``), mapped to a
-        ``reference_mode`` via the v1-compatible sentinels (``-1`` / ``None``
+        ``reference_mode`` via the sentinels (``-1`` / ``None``
         -> ``"none"``, ``-2`` -> ``"global_median"``, ``>= 0`` ->
         ``"specific"``). A per-group ``references`` mapping is intentionally
         **not** offered here (unlike ``set_group_by_shank``); use the call-wide
@@ -976,9 +975,8 @@ class Recording(SpyglassMixin, dj.Computed):
     need it), streams one ``ElectricalSeries`` into a fresh
     ``AnalysisNwbfile``, validates the saved timestamp range covers the
     requested ``IntervalList.valid_times``, and records an
-    ``NwbfileHasher`` digest of the persisted file (the same hashing path
-    the v1 recompute machinery uses, so verification is not
-    reimplemented). The populate body is split into ``make_fetch`` /
+    ``NwbfileHasher`` digest of the persisted file so the cached artifact
+    can be re-verified. The populate body is split into ``make_fetch`` /
     ``make_compute`` / ``make_insert`` so the long-running write does
     not hold a DB transaction. ``get_recording`` exposes the cached
     artifact and rebuilds on disk if missing, without deleting the
@@ -1110,9 +1108,9 @@ class Recording(SpyglassMixin, dj.Computed):
         preprocessing_job_kwargs = preprocessing_row.get("job_kwargs")
         # Per-channel ``probe_type`` + ``electrode_group_name`` for the
         # sort group, used by ``make_compute`` to decide whether the
-        # legacy ``tetrode_12.5`` probe-geometry patch (v1 parity at
-        # ``v1/recording.py:630-643``) applies. Fetched here so
-        # ``make_compute`` stays DB-I/O free per the tri-part contract.
+        # legacy ``tetrode_12.5`` probe-geometry patch applies. Fetched
+        # here so ``make_compute`` stays DB-I/O free per the tri-part
+        # contract.
         probe_types, electrode_group_names = self._fetch_sort_group_probe_info(
             nwb_file_name, channel_ids
         )
@@ -1501,8 +1499,7 @@ class Recording(SpyglassMixin, dj.Computed):
             electrical_series_path=row["electrical_series_path"],
             load_time_vector=True,
         )
-        # Matches v1's annotation at ``v1/curation.py:178``. The
-        # cached preprocessed artifact is bandpass-filtered + common-
+        # The cached preprocessed artifact is bandpass-filtered + common-
         # referenced; without this annotation a downstream SI
         # consumer (e.g. a sorter that auto-applies a bandpass) may
         # re-filter the already-filtered recording. The same call
@@ -1647,10 +1644,10 @@ class Recording(SpyglassMixin, dj.Computed):
         from spyglass.spikesorting.utils import read_raw_nwb_recording
         from spyglass.spikesorting.v2.utils import _get_recording_timestamps
 
-        # Read via the shared raw-acquisition wrapper (as v0/v1 do) so the raw
-        # ElectricalSeries is named explicitly: SI >= 0.100 raises (and 0.99.x
-        # silently mis-picks) when a raw file also stores LFP under
-        # ``processing`` and the series is not named.
+        # Read via the shared raw-acquisition wrapper so the raw
+        # ElectricalSeries is named explicitly: SI >= 0.100 raises when a
+        # raw file also stores LFP under ``processing`` and the series is
+        # not named.
         # Rate-based raw ElectricalSeries can reconstruct selected timestamps
         # lazily from (t_start, sampling_frequency, frame index). Explicit
         # timestamp series may be irregular, so keep the old eager load there.

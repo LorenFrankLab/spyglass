@@ -15,7 +15,7 @@ from __future__ import annotations
 def resolve_conversion_and_offset(recording) -> tuple[float, float]:
     """Resolve the ElectricalSeries ``(conversion, offset)`` for a recording.
 
-    v2 writes traces UNSCALED (``return_in_uV=False``), so the persisted
+    Traces are written UNSCALED (``return_in_uV=False``), so the persisted
     ElectricalSeries must carry BOTH the gain (as ``conversion``) and the
     per-channel offset (as ``offset``) to recover physical volts on readback:
     ``volts = raw * conversion + offset``. SpikeInterface stores per-channel
@@ -23,10 +23,10 @@ def resolve_conversion_and_offset(recording) -> tuple[float, float]:
     ``conversion``/``offset`` scalar can only represent a UNIFORM gain/offset,
     so heterogeneous values are rejected rather than silently mis-scaled.
 
-    Dropping the offset (the prior behavior, inherited from v1) silently biased
-    every channel by ``offset`` uV on readback for recordings with a non-zero
-    DC offset (e.g. Intan / Open Ephys). A non-positive gain (``0`` ->
-    all-zero recording, negative -> sign flip) is also rejected.
+    The offset must be carried because recordings with a non-zero DC offset
+    (e.g. Intan / Open Ephys) would otherwise be biased by ``offset`` uV per
+    channel on readback. A non-positive gain (``0`` -> all-zero recording,
+    negative -> sign flip) is also rejected.
 
     Returns
     -------
@@ -118,8 +118,8 @@ def _hash_nwb_recording(analysis_file_name: str) -> str:
     """Return a content hash of a recording's AnalysisNwbfile.
 
     Delegates to ``AnalysisNwbfile().get_hash`` (the project's blessed
-    wrapper over ``NwbfileHasher``) so v2 verification uses the same
-    hashing path as the v1 recompute machinery.
+    wrapper over ``NwbfileHasher``) so recording verification uses the
+    same hashing path as the rest of the project.
 
     Parameters
     ----------

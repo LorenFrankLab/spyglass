@@ -10,21 +10,16 @@ PREPROCESSING_SCHEMA_VERSION = 3
 class BandpassFilterParams(BaseModel):
     """Bandpass filter cutoffs applied BEFORE referencing.
 
-    The v2 runtime bandpass-filters first, then references -- the
-    signal-processing-preferred order and an **intentional divergence from
-    v1**, which referenced first (``v1/recording.py:643-671``). The order is
-    NOT commutative on the global-median common-reference branch (the
-    per-sample median is non-linear), so v2 and v1 differ numerically there;
-    on the ``specific`` / ``none`` paths the steps are linear and commute, so
-    output is identical to either order.
+    The runtime bandpass-filters first, then references -- the
+    signal-processing-preferred order. The order is NOT commutative on the
+    global-median common-reference branch (the per-sample median is
+    non-linear), so reference-then-filter would differ numerically there; on
+    the ``specific`` / ``none`` paths the steps are linear and commute, so
+    output is identical either way.
 
-    Defaults ``freq_min=300.0``, ``freq_max=6000.0`` mirror v1's
-    ``default`` ``SpikeSortingPreprocessingParameters`` row at
-    ``src/spyglass/spikesorting/v1/recording.py:131-132``. v1 had no
-    standalone schema defaults (``frequency_min`` / ``frequency_max``
-    were always required keys on the params blob); v2 promotes them
-    to schema-level defaults so a user constructing
-    ``PreprocessingParamsSchema()`` without arguments gets v1's
+    Defaults ``freq_min=300.0``, ``freq_max=6000.0`` are the Frank-lab
+    production bandpass, exposed as schema-level defaults so a user
+    constructing ``PreprocessingParamsSchema()`` without arguments gets the
     production preset implicitly.
     """
 
@@ -60,22 +55,18 @@ class PhaseShiftParams(BaseModel):
 class CommonReferenceParams(BaseModel):
     """Common-reference re-referencing options.
 
-    v2 selects the reference mode from the ``SortGroupV2.reference_mode``
+    The reference mode is selected from the ``SortGroupV2.reference_mode``
     column in ``Recording._apply_pre_motion_preprocessing`` (single for
     ``"specific"`` -- subtract the named ``reference_electrode_id`` --
-    global for ``"global_median"``, none for ``"none"``). The
-    ``reference`` field of v1's preprocessing params is intentionally not
-    exposed in v2 because no production v1 workflow used it -- v1
-    hardcoded the same dispatch (see
-    ``src/spyglass/spikesorting/v1/recording.py:597-619``).
-    Promoted from "silent runtime override" to "field removed" so
-    the schema does not lie about what the runtime honors.
+    global for ``"global_median"``, none for ``"none"``). A free-standing
+    ``reference`` field is intentionally not exposed because that dispatch
+    fully determines the reference, so a params-blob field would only be a
+    silent runtime override; removing it keeps the schema honest about what
+    the runtime honors.
 
-    ``operator`` IS used on the global-median branch and stays.
-    Note: v1 hardcoded ``operator="median"`` at
-    ``v1/recording.py:611``; v2 exposes the choice as a user knob.
-    The default ``"median"`` preserves v1's behavior; passing
-    ``"average"`` is a v2-only capability.
+    ``operator`` IS used on the global-median branch and stays, exposed as a
+    user knob. The default ``"median"`` is the production behavior; passing
+    ``"average"`` selects mean common-average referencing instead.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -151,7 +142,7 @@ class PreprocessingParamsSchema(BaseModel):
         default_factory=BandpassFilterParams
     )
     # bandpass_filter=None disables filtering entirely (the "no_filter"
-    # preset); the default still ships v1's production bandpass.
+    # preset); the default ships the production bandpass.
     common_reference: CommonReferenceParams = Field(
         default_factory=CommonReferenceParams
     )
@@ -161,9 +152,8 @@ class PreprocessingParamsSchema(BaseModel):
     # handles the rest), so the schema does not claim it is on.
     min_segment_length: float = Field(default=1.0, ge=0.0)
     # Drop disjoint-interval slivers shorter than this many seconds
-    # before the sorter sees them. Matches v1's default at
-    # ``src/spyglass/spikesorting/v1/recording.py:135``; passed through
-    # to ``sort_interval.intersect(..., min_length=...)``.
+    # before the sorter sees them; passed through to
+    # ``sort_interval.intersect(..., min_length=...)``.
     bad_channel_handling: Literal["remove", "interpolate"] = "remove"
     # How curated ``Electrode.bad_channel='True'`` flags are handled at
     # materialization. ``"remove"`` (default) is byte-identical to today: the

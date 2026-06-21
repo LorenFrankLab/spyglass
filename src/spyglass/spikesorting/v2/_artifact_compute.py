@@ -20,10 +20,9 @@ HPC compute node) cannot reach the database, and avoids one redundant DB
 connection per worker. ``artifact.py`` re-exports both names, so existing
 ``from ...v2.artifact import _compute_artifact_chunk`` call sites keep working.
 
-This is the v2-local, DB-free counterpart of v1's
-``spikesorting/utils.py:_init_artifact_worker`` / ``_compute_artifact_chunk``
-(v2 keeps its own copy rather than importing the v1-era helper, which itself
-pulls DataJoint).
+These kernels are kept as a self-contained, DB-free copy so the
+spawn-workers need no DB connection -- importing an equivalent helper from a
+schema module would pull DataJoint back in at spawn-import time.
 """
 
 from __future__ import annotations
@@ -39,12 +38,11 @@ def _init_artifact_worker(
 ):
     """Per-worker initializer for the chunked artifact scan.
 
-    Mirrors v1's ``spikesorting/utils.py:_init_artifact_worker`` (this is a
-    self-contained v2 copy -- v2 must not import the v1 helper). On a
-    multi-process pool the ``recording`` arrives as a ``to_dict()`` blob and is
-    re-hydrated with ``si.load`` (SI 0.104 renamed v1's ``load_extractor``);
-    on the single-process / thread path the live recording object is passed
-    straight through. ``n_required`` is constant across chunks, so it is
+    On a multi-process pool the ``recording`` arrives as a ``to_dict()`` blob
+    and is re-hydrated with ``si.load`` (the SI 0.104+ name for the former
+    ``load_extractor``); on the single-process / thread path the live
+    recording object is passed straight through. ``n_required`` is constant
+    across chunks, so it is
     resolved once here and cached in the worker context rather than
     recomputed per chunk.
 

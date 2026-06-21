@@ -30,7 +30,7 @@ from __future__ import annotations
 
 # Sorters that ship as MATLAB containers in SpikeInterface. These need
 # ``singularity_image=True`` and a small kwarg-strip carve-out so the
-# v1-style default Lookup rows survive containerization. The check is
+# default Lookup rows survive containerization. The check is
 # name-only; users who insert custom rows for other MATLAB sorters can
 # extend this set.
 MATLAB_SORTERS = ("kilosort2_5", "kilosort3", "ironclust")
@@ -81,10 +81,8 @@ def run_clusterless_thresholder(
     ``threshold_unit="uv"`` this method scales the recording to
     microvolts (``scale_to_uV``, using the stored NWB gain) before
     ``detect_peaks``, so ``detect_threshold`` is a TRUE microvolt
-    threshold -- honoring the label v1 used at ``v1/sorting.py:177``
-    but never actually enforced (v1 thresholded in raw counts). For
-    Frank-lab data gain==1 uV/count so this is a no-op; for
-    non-unity-gain rigs it is the fix. A scalar (singleton list) is
+    threshold. For Frank-lab data gain==1 uV/count so this is a no-op;
+    for non-unity-gain rigs it is the fix. A scalar (singleton list) is
     broadcast to length ``n_channels``
     because SI's ``locally_exclusive`` indexes ``noise_levels[chan]
     * detect_threshold`` per channel. When the params row omits
@@ -93,8 +91,7 @@ def run_clusterless_thresholder(
     derives ``[1.0]`` and scales to microvolts as above; ``"mad"``
     (what the ``smoke_clusterless_5uv`` / synthetic-fixture rows set
     EXPLICITLY) leaves it unset so SI computes per-channel MAD and
-    ``detect_threshold`` is a MAD multiplier -- which is what the v1
-    baseline-capture script relies on to find any peaks on the
+    ``detect_threshold`` is a MAD multiplier, which finds peaks on the
     low-amplitude MEArec fixture.
 
     Parameters
@@ -124,11 +121,11 @@ def run_clusterless_thresholder(
     from spyglass.spikesorting.v2.utils import _assert_noise_levels_length
 
     params = dict(sorter_params)
-    # v1-era kwarg rename: SI 0.99 ``local_radius_um`` became
+    # SI kwarg rename: SI 0.99 ``local_radius_um`` became
     # ``radius_um`` in 0.101+.
     if "local_radius_um" in params:
         params["radius_um"] = params.pop("local_radius_um")
-    # SI 0.104 ``detect_peaks`` rejects v1's stale routing hints
+    # SI 0.104 ``detect_peaks`` rejects stale routing hints
     # via the new ``(method, method_kwargs, job_kwargs)`` shape:
     # ``outputs`` was a Spyglass-only routing hint, and
     # ``random_chunk_kwargs`` was renamed to
@@ -146,7 +143,7 @@ def run_clusterless_thresholder(
     #
     # The fallback is "uv" (matching ClusterlessThresholderSchema's
     # default), NOT "mad": a row missing ``threshold_unit`` -- a legacy
-    # pre-v4 row, or a v1-parity default-shaped row carrying only
+    # pre-v4 row, or a default-shaped row carrying only
     # noise_levels=[1.0] -- is interpreted as a microvolt threshold and
     # scaled, not silently thresholded in native counts (which on Intan
     # 0.195 uV/count data would make "100" ~19.5 uV instead of 100 uV).
@@ -250,8 +247,7 @@ def run_clusterless_thresholder(
         # noise_levels=[1.0], detect_threshold is then a genuine
         # microvolt threshold. For Frank-lab data (gain==1 uV/count) this
         # is a no-op; for non-unity-gain rigs (e.g. Intan ~0.195) it
-        # converts a previously raw-count threshold into true uV.
-        # Diverges from v1, which always thresholded in raw counts.
+        # converts a raw-count threshold into true uV.
         import spikeinterface.preprocessing as sip
 
         if recording.get_channel_gains() is None:
@@ -294,12 +290,12 @@ def run_si_sorter(
     subprocesses with a different uid (rootless container, slurm
     scenarios) can write into it.
 
-    External float64 whitening matches v1 (``v1/sorting.py:428-430``):
-    if the sorter asks for whitening, run it externally at float64
-    and turn the sorter's internal whitening off so we do not
-    whiten twice. Runs AFTER the upstream artifact mask was
-    applied in ``Sorting.make_compute`` -- artifact-masked frames
-    should not bias whitening's covariance estimate.
+    External float64 whitening: if the sorter asks for whitening,
+    run it externally at float64 and turn the sorter's internal
+    whitening off so we do not whiten twice. Runs AFTER the upstream
+    artifact mask was applied in ``Sorting.make_compute`` --
+    artifact-masked frames should not bias whitening's covariance
+    estimate.
 
     MATLAB sorters (Kilosort 2.5 / 3, IronClust) get
     ``singularity_image=True`` and the strip-kwargs carve-out:
@@ -379,9 +375,8 @@ def run_si_sorter(
             # User override: set ``random_seed`` in the per-row
             # ``SorterParameters.job_kwargs`` blob to use a
             # different seed (for robustness studies / variance
-            # characterization). Spyglass's default 0 matches v1
-            # SI 0.99 behavior so re-runs of a parameter row are
-            # reproducible by default.
+            # characterization). Spyglass's default 0 makes re-runs
+            # of a parameter row reproducible by default.
             _random_seed = (job_kwargs or {}).get("random_seed", 0)
             recording = sip.whiten(
                 recording, dtype=_np.float64, seed=_random_seed

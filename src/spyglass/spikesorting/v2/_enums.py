@@ -44,10 +44,8 @@ class CurationSource(str, Enum):
 class CurationLabel(str, Enum):
     """Curation labels recognized by ``CurationV2.insert_curation``.
 
-    Members match the v1 convention list at
-    ``src/spyglass/spikesorting/v1/curation.py``; v2 promotes the
-    list from a docstring to a validated set so a typo raises at
-    insert time. The backing ``CurationV2.UnitLabel.curation_label``
+    The members are a validated set so a typo raises at insert
+    time. The backing ``CurationV2.UnitLabel.curation_label``
     column is a ``varchar(32)``, not a MySQL enum: DataJoint *can*
     declare an enum column (``curation_source`` on ``CurationV2`` is
     one), but v2 chooses varchar because the label set is open-ended --

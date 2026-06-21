@@ -7,23 +7,15 @@ timestamps vector into the ``AnalysisNwbfile`` via HDMF's
 x 1 h recordings (~110 GB float64) would have to materialize in RAM
 before the NWB write, which OOMs on any lab workstation.
 
-The iterators are direct ports of v1's
-``SpikeInterfaceRecordingDataChunkIterator`` and
-``TimestampsDataChunkIterator`` from
-``spyglass.spikesorting.v1.recording``. The only intentional change to
-the trace iterator is the SpikeInterface 0.104 kwarg rename
-``return_scaled`` -> ``return_in_uV``, propagated through ``_get_data``.
+The trace iterator reads ``(n_samples, n_channels)`` slices via the
+recording's ``get_traces(...)``, using the SpikeInterface 0.104
+``return_in_uV`` kwarg.
 
-The timestamps iterator **narrows the public call surface, but keeps the
-internal shim**. v1 makes the *caller* wrap a 1D timestamps vector in a
-``BaseRecording`` subclass (``TimestampsExtractor``) purely to satisfy the
-``TimestampsDataChunkIterator`` constructor signature. v2's constructor
-takes ``timestamps`` and ``sampling_frequency`` directly and builds the
-wrapper itself: the ``_TimestampsExtractor`` / ``_TimestampsSegment``
-indirection is retained as a private detail (HDMF's base iterator hooks
-still expect a recording-segment-like object), it is just no longer the
-caller's responsibility. The underlying chunked output shape and
-semantics are unchanged; only the call surface is smaller.
+The timestamps iterator takes a 1D ``timestamps`` vector and
+``sampling_frequency`` directly and builds its own recording-segment
+wrapper internally: the ``_TimestampsExtractor`` / ``_TimestampsSegment``
+indirection is a private detail (HDMF's base iterator hooks expect a
+recording-segment-like object), not the caller's responsibility.
 """
 
 from __future__ import annotations
@@ -40,8 +32,9 @@ class SpikeInterfaceRecordingDataChunkIterator(GenericDataChunkIterator):
 
     Reads ``(n_samples, n_channels)`` slices via the recording's
     ``get_traces(...)`` so the NWB writer can stream the dataset
-    without materializing the full array. ``buffer_gb=5`` matches v1's
-    production choice; smaller buffers trade RAM for write throughput.
+    without materializing the full array. A ``buffer_gb=5`` default
+    balances RAM against write throughput; smaller buffers trade RAM
+    for write throughput.
     """
 
     def __init__(
@@ -126,11 +119,9 @@ class _TimestampsSegment(si.BaseRecordingSegment):
             sampling_frequency=sampling_frequency,
             t_start=t_start,
         )
-        # v1 assigns ``self._timeseries = timestamps`` (no copy) and trusts the
-        # caller's dtype. v2 preserves that no-copy behavior for lazy timestamp
-        # vectors so long recordings can stream generated timestamps chunk by
-        # chunk; eager array-like inputs still route through ``np.asarray`` for a
-        # deterministic dtype.
+        # Keep lazy timestamp vectors uncopied so long recordings can stream
+        # generated timestamps chunk by chunk; eager array-like inputs still
+        # route through ``np.asarray`` for a deterministic dtype.
         self._dtype = np.dtype(dtype)
         self._timeseries = (
             timestamps
@@ -176,12 +167,12 @@ class _TimestampsExtractor(si.BaseRecording):
 class TimestampsDataChunkIterator(GenericDataChunkIterator):
     """HDMF chunked iterator over a 1D ``(n_samples,)`` timestamps vector.
 
-    Unlike v1's version, the constructor takes the raw timestamps
-    array + sampling frequency directly. The internal
-    ``_TimestampsExtractor`` indirection is kept private because HDMF's
-    base iterator hooks expect a recording-segment-like object; callers
-    should not import it. ``timestamps`` may also be a Spyglass lazy timestamp
-    vector; in that case only the chunks requested by HDMF are materialized.
+    The constructor takes the raw timestamps array + sampling frequency
+    directly. The internal ``_TimestampsExtractor`` indirection is kept
+    private because HDMF's base iterator hooks expect a
+    recording-segment-like object; callers should not import it.
+    ``timestamps`` may also be a Spyglass lazy timestamp vector; in that
+    case only the chunks requested by HDMF are materialized.
     """
 
     def __init__(

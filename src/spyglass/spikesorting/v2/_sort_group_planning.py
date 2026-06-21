@@ -56,7 +56,7 @@ def _reference_electrode_group(all_electrodes, reference_electrode_id):
       key is ``(nwb_file_name, electrode_group_name, electrode_id)``, so the
       same ``electrode_id`` can appear under more than one
       ``electrode_group_name``; an ambiguous owner is rejected rather than
-      silently resolved to the first match (mirrors v1's intent).
+      silently resolved to the first match.
 
     ``set_group_by_shank`` uses the returned group to honor
     ``omit_ref_electrode_group``; ``set_group_by_electrode_table_column``

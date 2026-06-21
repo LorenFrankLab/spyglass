@@ -130,12 +130,12 @@ def build_curated_unit_rows(
     Each kept unit's Electrode FK + peak amplitude come from the
     contributor with the largest ``peak_amplitude_uv``. The merged-unit
     ``unit_id`` depends on ``apply_merge``: a fresh
-    ``max(source unit_ids) + 1`` for ``apply_merge=True`` (v1 parity,
-    ``v1/curation.py:361``); ``min(group)`` for ``apply_merge=False``
-    (the proposed merge leader, kept as a regular Unit row alongside
-    the absorbed contributors so the preview retains every original
-    unit). Each merge group must have at least 2 members; empty or
-    singleton groups raise ``ValueError``.
+    ``max(source unit_ids) + 1`` for ``apply_merge=True``;
+    ``min(group)`` for ``apply_merge=False`` (the proposed merge
+    leader, kept as a regular Unit row alongside the absorbed
+    contributors so the preview retains every original unit). Each
+    merge group must have at least 2 members; empty or singleton
+    groups raise ``ValueError``.
 
     ``n_spikes`` is computed to match what ``write_curated_units_nwb``
     writes for the SAME ``apply_merge``: the merged sum only when the
@@ -180,9 +180,8 @@ def build_curated_unit_rows(
     # Build mapping ``kept_unit_id -> contributors``:
     #   apply_merge=True multi-contributor group: kept id is a fresh
     #     ``max(source unit_ids) + 1`` (sequentially incremented per
-    #     multi-merge group), matching v1's
-    #     ``np.max(units_dict.keys()) + 1`` pattern. The user's first
-    #     element is one of the contributors, NOT the kept id.
+    #     multi-merge group). The user's first element is one of the
+    #     contributors, NOT the kept id.
     #   apply_merge=False: kept id is ``min(group)`` -- the proposed
     #     merge leader recorded in MergeGroup until the merge is
     #     applied via get_merged_sorting.
@@ -199,12 +198,11 @@ def build_curated_unit_rows(
     # stores ``min(group)`` as each kept id). Numbering the applied
     # path the same way guarantees apply_merge=True and the lazy
     # preview assign the SAME fresh id to the SAME content group, even
-    # when the user lists groups out of min order. v2 departs here from
-    # v1's user-iteration-order labels (``v1/curation.py:359``): the
-    # merged-unit integer id is an arbitrary fresh label, so spike
-    # content and unit count are unchanged -- only which group gets
-    # ``max+1`` for reordered input differs, and matching the two
-    # paths is the more important contract.
+    # when the user lists groups out of min order. The merged-unit
+    # integer id is an arbitrary fresh label, so spike content and unit
+    # count are unchanged regardless of input order -- only which group
+    # receives ``max+1`` differs for reordered input, and matching the
+    # two paths is the more important contract.
     # Validate merge groups and stage their (key, contributors) pairs
     # WITHOUT inserting them yet -- kept_to_contributors's insertion
     # order is "surviving source units first (in original source
@@ -223,9 +221,9 @@ def build_curated_unit_rows(
     merged_ids: set[int] = set()
     for int_group in normalized_groups:
         if len(int_group) < 2:
-            # Empty or singleton "merge groups" aren't merges. v1
-            # would either no-op (empty) or silently rename the
-            # singleton to max+1; surface the likely typo instead.
+            # Empty or singleton "merge groups" aren't merges.
+            # Silently no-oping (empty) or renaming the singleton to
+            # max+1 would hide a likely typo; raise instead.
             raise ValueError(
                 f"CurationV2.insert_curation: merge_groups contains "
                 f"a group with fewer than 2 members ({int_group}); "
@@ -301,10 +299,9 @@ def build_curated_unit_rows(
     #     its contributors (peak channel inherited from the
     #     highest-amplitude contributor, n_spikes = summed train).
     #   apply_merge=False -> every original unit passes through 1:1
-    #     (v1 preview parity, ``v1/curation.py:359``); the proposed
-    #     merges live in MergeGroup for lazy application via
-    #     get_merged_sorting. n_spikes is each unit's own count,
-    #     matching the train write_curated_units_nwb writes.
+    #     (preview); the proposed merges live in MergeGroup for lazy
+    #     application via get_merged_sorting. n_spikes is each unit's
+    #     own count, matching the train write_curated_units_nwb writes.
     if apply_merge:
         specs = []
         for kept_uid, contribs in kept_to_contributors.items():

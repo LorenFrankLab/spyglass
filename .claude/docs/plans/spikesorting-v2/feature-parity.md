@@ -1,8 +1,8 @@
 # Feature parity with v1
 
-[← back to PLAN.md](PLAN.md)
+[← back to PLAN.md](PLAN.md) · [v1-v2-divergences.md](v1-v2-divergences.md) — per-behavior catalog of intentional v1→v2 departures
 
-This page is the parity contract. It distinguishes behavior v2 must preserve from intentional table/API departures. When in doubt, implementers should preserve downstream behavior and user workflows, not v1's exact table names.
+This page is the parity contract. It distinguishes behavior v2 must preserve from intentional table/API departures. When in doubt, implementers should preserve downstream behavior and user workflows, not v1's exact table names. For the detailed, code-level catalog of where and why v2 diverges from v1 (with v1 file:line anchors), see [v1-v2-divergences.md](v1-v2-divergences.md).
 
 Runtime compatibility boundary: v2 is the supported runtime path under the
 SpikeInterface 0.104 environment introduced by Phase 0c. Existing v0/v1 rows
