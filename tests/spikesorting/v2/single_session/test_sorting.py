@@ -1229,7 +1229,7 @@ def test_write_units_nwb_handles_zero_unit_sorter(populated_recording):
     CurationV2) would crash on real datasets where the sorter
     finds no units.
     """
-    import numpy as _np
+    import numpy as np
     import pynwb
     import spikeinterface as si
 

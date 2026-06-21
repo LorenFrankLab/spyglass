@@ -408,7 +408,7 @@ def test_recording_over_request_clips_with_warning(
     packets) still raises ``RecordingTruncatedError`` in ``make_insert``; that
     path is distinct from this over-request clip.
     """
-    import numpy as _np
+    import numpy as np
 
     from spyglass.common import IntervalList
     from spyglass.common.common_lab import LabTeam
@@ -448,7 +448,7 @@ def test_recording_over_request_clips_with_warning(
         {
             "nwb_file_name": nwb_file_name,
             "interval_list_name": over_request_interval_name,
-            "valid_times": _np.asarray([[0.0, raw_end + 1.0]]),
+            "valid_times": np.asarray([[0.0, raw_end + 1.0]]),
             "pipeline": "v2_test_over_request",
         },
         skip_duplicates=True,
@@ -516,7 +516,7 @@ def test_recording_over_request_multi_interval_clips_with_warning(
     likewise excludes gaps (both sides do), so the warning fires on the ~1 s
     past-coverage span, not on the gap.
     """
-    import numpy as _np
+    import numpy as np
 
     from spyglass.common import IntervalList
     from spyglass.common.common_lab import LabTeam
@@ -561,7 +561,7 @@ def test_recording_over_request_multi_interval_clips_with_warning(
         {
             "nwb_file_name": nwb_file_name,
             "interval_list_name": multi_interval_name,
-            "valid_times": _np.asarray(
+            "valid_times": np.asarray(
                 [[raw_start, seg1_end], [seg2_start, raw_end + over_request_s]]
             ),
             "pipeline": "v2_test_over_request",
@@ -955,7 +955,7 @@ def test_recording_make_global_median_reference(polymer_smoke_session):
        (per-channel bandpass AFTER CMR) does not preserve that, so a
        ~0 per-sample median pins the intentional v1-divergent order.
     """
-    import numpy as _np
+    import numpy as np
 
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults
@@ -1022,7 +1022,7 @@ def test_recording_make_global_median_reference(polymer_smoke_session):
     # global-median reference subtracts the per-sample channel
     # median; even after bandpass that produces a measurable shift
     # in the recording's first moment vs the unreferenced version.
-    delta = float(_np.abs(traces_ref - traces_unref).mean())
+    delta = float(np.abs(traces_ref - traces_unref).mean())
     assert delta > 1e-6, (
         f"Global-median (-2) and no-reference (-1) recordings are "
         f"indistinguishable (mean |diff| = {delta:.2e}). The -2 "
@@ -1038,9 +1038,9 @@ def test_recording_make_global_median_reference(polymer_smoke_session):
     # the intentional v1-divergent order. (Requires the default
     # preset's operator="median"; an "average" operator would zero the per-
     # sample MEAN, not the median.)
-    scale = max(1.0, float(_np.abs(traces_ref).max()))
-    per_sample_median = _np.median(traces_ref, axis=1)
-    max_abs_median = float(_np.abs(per_sample_median).max())
+    scale = max(1.0, float(np.abs(traces_ref).max()))
+    per_sample_median = np.median(traces_ref, axis=1)
+    max_abs_median = float(np.abs(per_sample_median).max())
     assert max_abs_median < 1e-3 * scale, (
         "global-median recording's per-sample cross-channel median is "
         f"{max_abs_median:.3e} (scale {scale:.3e}); expected ~0, which "
@@ -1064,7 +1064,7 @@ def test_recording_no_filter_preset_skips_bandpass(polymer_smoke_session):
     or inverted, no_filter would still bandpass and the two recordings
     would be (nearly) identical.
     """
-    import numpy as _np
+    import numpy as np
 
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults
@@ -1113,7 +1113,7 @@ def test_recording_no_filter_preset_skips_bandpass(polymer_smoke_session):
     # (2) skipping the bandpass leaves low-frequency / DC content the
     # 300 Hz high-pass would have removed, so the unfiltered traces are
     # materially different from the bandpassed ones.
-    delta = float(_np.abs(traces_nf - traces_bp).mean())
+    delta = float(np.abs(traces_nf - traces_bp).mean())
     assert delta > 1e-6, (
         "no_filter and default recordings are indistinguishable "
         f"(mean |diff| = {delta:.2e}); the bandpass was NOT skipped for "
@@ -1145,7 +1145,7 @@ def test_phase_shift_field_does_not_change_default_recording(
     preprocessing produce different hashes; the preprocessed traces are the
     behavioral output to compare.
     """
-    import numpy as _np
+    import numpy as np
 
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults
@@ -1208,7 +1208,7 @@ def test_phase_shift_field_does_not_change_default_recording(
     Recording.populate(legacy_pk, reserve_jobs=False)
     traces_legacy = Recording().get_recording(legacy_pk).get_traces()
 
-    assert _np.array_equal(traces_legacy, traces_fl), (
+    assert np.array_equal(traces_legacy, traces_fl), (
         "A pre-field params blob (no phase_shift key) materialized to "
         "different traces than default; the optional phase_shift "
         "field perturbed the default path."
@@ -1232,7 +1232,7 @@ def test_neuropixels_preset_phase_shift_inert_without_property(
     ``test_phase_shift_field_does_not_change_default_recording`` for why
     ``cache_hash`` is not stable across two fresh writes).
     """
-    import numpy as _np
+    import numpy as np
 
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults
@@ -1273,7 +1273,7 @@ def test_neuropixels_preset_phase_shift_inert_without_property(
         Recording.populate(np_pk, reserve_jobs=False)
     traces_np = Recording().get_recording(np_pk).get_traces()
 
-    assert _np.array_equal(traces_np, traces_fl), (
+    assert np.array_equal(traces_np, traces_fl), (
         "default_neuropixels and default produced different traces "
         "on a fixture without inter_sample_shift; the phase-shift was NOT "
         "skipped (or the presets differ by more than phase-shift)."
@@ -1524,7 +1524,7 @@ def test_recording_multi_interval_saved_times_use_concat_path(
     (last_end - first_start). This is the persisted half of the C1 guard
     rationale.
     """
-    import numpy as _np
+    import numpy as np
 
     from spyglass.common import IntervalList
     from spyglass.common.common_lab import LabTeam
@@ -1570,7 +1570,7 @@ def test_recording_multi_interval_saved_times_use_concat_path(
         {
             "nwb_file_name": nwb_file_name,
             "interval_list_name": interval_name,
-            "valid_times": _np.asarray([seg1, seg2]),
+            "valid_times": np.asarray([seg1, seg2]),
             "pipeline": "v2_a27_multi",
         },
         skip_duplicates=True,

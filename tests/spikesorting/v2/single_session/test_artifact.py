@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import numpy as _np
+import numpy as np
 import pytest
 
 from tests.spikesorting.v2.single_session._helpers import (
@@ -231,7 +231,7 @@ def test_shared_artifact_group_insert_rejects_mismatched_durations(
         }
     ).fetch1("valid_times")
     t0 = float(raw_times[0][0])
-    truncated = _np.asarray([[t0, t0 + 1.5]])  # 1.5s vs full ~4s
+    truncated = np.asarray([[t0, t0 + 1.5]])  # 1.5s vs full ~4s
     truncated_interval = "v2_shared_group_test_truncated"
     IntervalList.insert1(
         {
@@ -323,7 +323,7 @@ def test_shared_artifact_group_insert_rejects_mismatched_dtypes(
         {
             "nwb_file_name": nwb_file_name,
             "interval_list_name": second_interval,
-            "valid_times": _np.asarray([[t0, t0 + 2.5]]),
+            "valid_times": np.asarray([[t0, t0 + 2.5]]),
             "pipeline": "shared_group_dtype_test",
         },
         skip_duplicates=True,
@@ -349,7 +349,7 @@ def test_shared_artifact_group_insert_rejects_mismatched_dtypes(
         def __init__(self, n_samples, dtype_str):
             self._n = n_samples
             self._dtype = dtype_str
-            self._times = _np.arange(n_samples, dtype=_np.float64) / 30000.0
+            self._times = np.arange(n_samples, dtype=np.float64) / 30000.0
 
         def get_num_samples(self):
             return self._n
@@ -715,7 +715,7 @@ def test_detect_artifacts_finds_known_transient(dj_conn):
     returned ``valid_times`` has exactly two intervals straddling
     the planted transient and excludes the artifact samples.
     """
-    import numpy as _np
+    import numpy as np
     import spikeinterface as si
 
     from spyglass.spikesorting.v2._params.artifact_detection import (
@@ -729,7 +729,7 @@ def test_detect_artifacts_finds_known_transient(dj_conn):
     fs = 30_000.0
     n_samples = 5000
     n_channels = 4
-    traces = _np.zeros((n_samples, n_channels), dtype=_np.float32)
+    traces = np.zeros((n_samples, n_channels), dtype=np.float32)
     traces[1000:1200, :] = 200.0
     rec = si.NumpyRecording(traces_list=[traces], sampling_frequency=fs)
     rec.set_channel_gains([1.0] * n_channels)
@@ -804,7 +804,7 @@ def test_detect_artifacts_no_threshold_crossings(dj_conn):
     ``detect=False`` guard. Complements the synthetic-transient
     test by covering the "detection ran but found nothing" path.
     """
-    import numpy as _np
+    import numpy as np
     import spikeinterface as si
 
     from spyglass.spikesorting.v2._params.artifact_detection import (
@@ -815,7 +815,7 @@ def test_detect_artifacts_no_threshold_crossings(dj_conn):
     # Recording with all-zero traces -- nothing can exceed any
     # positive threshold.
     rec = si.NumpyRecording(
-        traces_list=[_np.zeros((2000, 4), dtype=_np.float32)],
+        traces_list=[np.zeros((2000, 4), dtype=np.float32)],
         sampling_frequency=30_000.0,
     )
     rec.set_channel_gains([1.0] * 4)
@@ -848,14 +848,14 @@ def test_detect_artifacts_zscore_only_detection(dj_conn):
     a 10-sample artifact on ONE channel (the others stay quiet at
     the artifact frames). Cross-channel z on that channel = high.
     """
-    import numpy as _np
+    import numpy as np
 
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
     )
     from spyglass.spikesorting.v2.artifact import ArtifactDetection
 
-    rng = _np.random.default_rng(42)
+    rng = np.random.default_rng(42)
     # 32 channels so the cross-channel z-score on a single-channel
     # excursion can plausibly exceed ``zscore_threshold``. With N
     # channels and one channel at X while the rest are near zero,
@@ -866,7 +866,7 @@ def test_detect_artifacts_zscore_only_detection(dj_conn):
     # the achievable range with headroom.
     n_samples, n_channels = 5000, 32
     traces = rng.normal(0.0, 0.5, size=(n_samples, n_channels)).astype(
-        _np.float32
+        np.float32
     )
     # Single-channel artifact: channel 0 spikes to 500 uV at frames
     # 2000-2009; the other 31 channels stay quiet.
@@ -917,7 +917,7 @@ def test_detect_artifacts_amplitude_and_zscore_combined(dj_conn):
     baseline still flags via amplitude, so the test outcome is the
     same regardless of the z-score axis change.
     """
-    import numpy as _np
+    import numpy as np
 
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
@@ -930,7 +930,7 @@ def test_detect_artifacts_amplitude_and_zscore_combined(dj_conn):
     # frames 3000-3099 trips both amplitude and (in v1's
     # cross-channel form, briefly) z-score. Under OR everything
     # is artifact.
-    traces = _np.full((n_samples, n_channels), 80.0, dtype=_np.float32)
+    traces = np.full((n_samples, n_channels), 80.0, dtype=np.float32)
     traces[3000:3100, :] = 200.0
     rec = _build_synthetic_rec(traces)
 
@@ -969,7 +969,7 @@ def test_detect_artifacts_join_window_merges_runs(dj_conn):
     merge into one. With a smaller join window, the runs stay
     separate.
     """
-    import numpy as _np
+    import numpy as np
 
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
@@ -977,7 +977,7 @@ def test_detect_artifacts_join_window_merges_runs(dj_conn):
     from spyglass.spikesorting.v2.artifact import ArtifactDetection
 
     n_samples, n_channels = 5000, 4
-    traces = _np.zeros((n_samples, n_channels), dtype=_np.float32)
+    traces = np.zeros((n_samples, n_channels), dtype=np.float32)
     traces[1000:1100, :] = 100.0  # artifact A
     traces[1110:1210, :] = 100.0  # artifact B; 10 frames after A
     rec = _build_synthetic_rec(traces)
@@ -1082,7 +1082,7 @@ def test_detect_artifacts_below_proportion_threshold_ignored(dj_conn):
     fire: the single-channel transient does not meet the cross-
     channel quorum.
     """
-    import numpy as _np
+    import numpy as np
 
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
@@ -1090,7 +1090,7 @@ def test_detect_artifacts_below_proportion_threshold_ignored(dj_conn):
     from spyglass.spikesorting.v2.artifact import ArtifactDetection
 
     n_samples, n_channels = 5000, 4
-    traces = _np.zeros((n_samples, n_channels), dtype=_np.float32)
+    traces = np.zeros((n_samples, n_channels), dtype=np.float32)
     # ONE channel has a 200 uV transient at frames 1000-1099; the
     # other three channels stay at zero. 1 of 4 channels is below
     # the 2-of-4 requirement.
@@ -1221,7 +1221,7 @@ def test_detect_artifacts_clamps_artifact_at_recording_end(dj_conn):
     prior test puts a transient near the end of the recording, so
     this clamp branch was unexercised.
     """
-    import numpy as _np
+    import numpy as np
 
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
@@ -1229,7 +1229,7 @@ def test_detect_artifacts_clamps_artifact_at_recording_end(dj_conn):
     from spyglass.spikesorting.v2.artifact import ArtifactDetection
 
     n_samples, n_channels = 1000, 4
-    traces = _np.zeros((n_samples, n_channels), dtype=_np.float32)
+    traces = np.zeros((n_samples, n_channels), dtype=np.float32)
     # Transient at the very end of the recording.
     traces[990:1000, :] = 200.0
     rec = _build_synthetic_rec(traces)
@@ -1343,7 +1343,7 @@ def test_shared_artifact_group_populate_end_to_end(
     # member nwb_file_name for shared-group sources. Today single
     # member -> single entry in the dict; the value array equals
     # the IntervalList row's valid_times.
-    import numpy as _np
+    import numpy as np
 
     shared_intervals = ArtifactDetection().get_artifact_removed_intervals(
         art_pk
@@ -1353,7 +1353,7 @@ def test_shared_artifact_group_populate_end_to_end(
         "expected dict for shared-group source."
     )
     assert nwb_file_name in shared_intervals
-    _np.testing.assert_array_equal(
+    np.testing.assert_array_equal(
         shared_intervals[nwb_file_name], rows[0]["valid_times"]
     )
 
@@ -1497,7 +1497,7 @@ def test_shared_artifact_group_multi_member_union(
     art_lo, art_hi = 45000, 45050  # transient at 1.5 s
 
     def _synth_recording(with_artifact):
-        traces = _np.zeros((n_samples, n_ch), dtype=_np.int16)
+        traces = np.zeros((n_samples, n_ch), dtype=np.int16)
         if with_artifact:
             traces[art_lo:art_hi, :] = 5000
         rec = si.NumpyRecording([traces], sampling_frequency=fs)
@@ -1521,7 +1521,7 @@ def test_shared_artifact_group_multi_member_union(
         {
             "nwb_file_name": nwb_file_name,
             "interval_list_name": second_interval,
-            "valid_times": _np.asarray([[t0, t0 + 2.5]]),
+            "valid_times": np.asarray([[t0, t0 + 2.5]]),
             "pipeline": "shared_group_union_test",
         },
         skip_duplicates=True,
@@ -1656,6 +1656,6 @@ def test_shared_artifact_group_multi_member_union(
         # shared row; the per-member dict has one session entry equal to it).
         shared = ArtifactDetection().get_artifact_removed_intervals(art_pk)
         assert isinstance(shared, dict) and nwb_file_name in shared
-        _np.testing.assert_array_equal(shared[nwb_file_name], valid_times)
+        np.testing.assert_array_equal(shared[nwb_file_name], valid_times)
     finally:
         _clear_shared_group()

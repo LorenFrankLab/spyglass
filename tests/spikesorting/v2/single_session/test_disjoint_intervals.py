@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import numpy as _np
+import numpy as np
 import pytest
 
 from tests.spikesorting.v2._ingest_helpers import _clean_session_v2
@@ -41,7 +41,7 @@ def test_boundary_spike_round_trip_does_not_raise(
     ``CurationV2.insert_curation`` + ``CurationV2.get_sorting`` so
     both production read paths are covered.
     """
-    import numpy as _np
+    import numpy as np
 
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults
@@ -117,8 +117,8 @@ def test_boundary_spike_round_trip_does_not_raise(
         # sample. The boundary one is what tests SI's read-side
         # bounds check; the earlier one keeps the unit "real" so
         # downstream analyzer math doesn't degenerate.
-        samples = _np.array([100, n_samples - 1], dtype=_np.int64)
-        labels = _np.zeros(samples.size, dtype=_np.int32)
+        samples = np.array([100, n_samples - 1], dtype=np.int64)
+        labels = np.zeros(samples.size, dtype=np.int32)
         return si.NumpySorting.from_samples_and_labels(
             samples_list=[samples],
             labels_list=[labels],
@@ -189,7 +189,7 @@ def test_get_sorting_recovers_frames_across_disjoint_gap(
     """
     import uuid as _uuid
 
-    import numpy as _np
+    import numpy as np
 
     from spyglass.common.common_interval import IntervalList
     from spyglass.common.common_lab import LabTeam
@@ -227,7 +227,7 @@ def test_get_sorting_recovers_frames_across_disjoint_gap(
     assert (t_end - t0) >= 2.9, "smoke fixture too short for disjoint test"
     # Two 1.2 s chunks separated by a 0.5 s wall-clock gap.
     chunk1_end, gap_end, chunk2_end = t0 + 1.2, t0 + 1.7, min(t0 + 2.9, t_end)
-    disjoint_times = _np.array([[t0, chunk1_end], [gap_end, chunk2_end]])
+    disjoint_times = np.array([[t0, chunk1_end], [gap_end, chunk2_end]])
 
     sort_group_id = int(
         sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
@@ -279,8 +279,8 @@ def test_get_sorting_recovers_frames_across_disjoint_gap(
         import spikeinterface as si
 
         n_samples = int(recording.get_num_samples())
-        samples = _np.array([100, n_samples - 100], dtype=_np.int64)
-        rec_times = _np.asarray(recording.get_times())
+        samples = np.array([100, n_samples - 100], dtype=np.int64)
+        rec_times = np.asarray(recording.get_times())
         planted["samples"] = samples
         # The affine inverse of the post-gap frame's absolute time; if
         # this still equals the original frame the gap is too small to
@@ -291,7 +291,7 @@ def test_get_sorting_recovers_frames_across_disjoint_gap(
                 * recording.get_sampling_frequency()
             )
         )
-        labels = _np.zeros(samples.size, dtype=_np.int32)
+        labels = np.zeros(samples.size, dtype=np.int32)
         return si.NumpySorting.from_samples_and_labels(
             samples_list=[samples],
             labels_list=[labels],
@@ -308,10 +308,10 @@ def test_get_sorting_recovers_frames_across_disjoint_gap(
     ), "test setup: gap too small to expose the affine shift"
 
     si_sorting = Sorting().get_sorting(sort_pk)
-    frames = _np.asarray(si_sorting.get_unit_spike_train(unit_id=0))
-    _np.testing.assert_array_equal(
-        _np.sort(frames),
-        _np.sort(planted["samples"]),
+    frames = np.asarray(si_sorting.get_unit_spike_train(unit_id=0))
+    np.testing.assert_array_equal(
+        np.sort(frames),
+        np.sort(planted["samples"]),
         err_msg=(
             "Sorting.get_sorting did not recover the original frames "
             "across the wall-clock gap (affine readback shifts post-gap "
@@ -327,10 +327,10 @@ def test_get_sorting_recovers_frames_across_disjoint_gap(
         description="disjoint frame-readback test",
     )
     cur_sorting = CurationV2().get_sorting(curation_pk)
-    cur_frames = _np.asarray(cur_sorting.get_unit_spike_train(unit_id=0))
-    _np.testing.assert_array_equal(
-        _np.sort(cur_frames),
-        _np.sort(planted["samples"]),
+    cur_frames = np.asarray(cur_sorting.get_unit_spike_train(unit_id=0))
+    np.testing.assert_array_equal(
+        np.sort(cur_frames),
+        np.sort(planted["samples"]),
         err_msg="CurationV2.get_sorting lost frames across the gap",
     )
 
@@ -352,7 +352,7 @@ def test_obs_intervals_no_artifact_respects_disjoint_gap(
     """
     import uuid as _uuid
 
-    import numpy as _np
+    import numpy as np
     import pynwb
 
     from spyglass.common.common_interval import IntervalList
@@ -387,7 +387,7 @@ def test_obs_intervals_no_artifact_respects_disjoint_gap(
     assert (t_end - t0) >= 2.9, "smoke fixture too short for disjoint test"
     chunk1_end, gap_end, chunk2_end = t0 + 1.2, t0 + 1.7, min(t0 + 2.9, t_end)
     gap_mid = 0.5 * (chunk1_end + gap_end)
-    disjoint_times = _np.array([[t0, chunk1_end], [gap_end, chunk2_end]])
+    disjoint_times = np.array([[t0, chunk1_end], [gap_end, chunk2_end]])
 
     sort_group_id = int(
         sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
@@ -428,8 +428,8 @@ def test_obs_intervals_no_artifact_respects_disjoint_gap(
         import spikeinterface as si
 
         n_samples = int(recording.get_num_samples())
-        samples = _np.array([100, n_samples - 100], dtype=_np.int64)
-        labels = _np.zeros(samples.size, dtype=_np.int32)
+        samples = np.array([100, n_samples - 100], dtype=np.int64)
+        labels = np.zeros(samples.size, dtype=np.int32)
         return si.NumpySorting.from_samples_and_labels(
             samples_list=[samples],
             labels_list=[labels],
@@ -445,7 +445,7 @@ def test_obs_intervals_no_artifact_respects_disjoint_gap(
     analysis_file_name = (Sorting & sort_pk).fetch1("analysis_file_name")
     abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
     with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
-        obs = _np.asarray(io.read().units["obs_intervals"][0])
+        obs = np.asarray(io.read().units["obs_intervals"][0])
 
     assert obs.shape == (2, 2), (
         "no-artifact obs_intervals over a disjoint recording must be one "
@@ -474,7 +474,7 @@ def test_get_merged_sorting_keeps_cross_gap_pair(
     """
     import uuid as _uuid
 
-    import numpy as _np
+    import numpy as np
 
     from spyglass.common.common_interval import IntervalList
     from spyglass.common.common_lab import LabTeam
@@ -506,7 +506,7 @@ def test_get_merged_sorting_keeps_cross_gap_pair(
     t_end = float(raw_times[-1][-1])
     assert (t_end - t0) >= 2.9, "smoke fixture too short for disjoint test"
     chunk1_end, gap_end, chunk2_end = t0 + 1.2, t0 + 1.7, min(t0 + 2.9, t_end)
-    disjoint_times = _np.array([[t0, chunk1_end], [gap_end, chunk2_end]])
+    disjoint_times = np.array([[t0, chunk1_end], [gap_end, chunk2_end]])
     sort_group_id = int(
         sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
     )
@@ -545,17 +545,17 @@ def test_get_merged_sorting_keeps_cross_gap_pair(
     ):
         import spikeinterface as si
 
-        ts = _np.asarray(recording.get_times())
+        ts = np.asarray(recording.get_times())
         fs_local = recording.get_sampling_frequency()
         k = int(
-            _np.flatnonzero(_np.diff(ts) > 1.5 / fs_local)[0]
+            np.flatnonzero(np.diff(ts) > 1.5 / fs_local)[0]
         )  # chunk1 last
         # unit 0: a chunk-1 spike + chunk-1's LAST frame; unit 1: chunk-2's
         # FIRST frame + a later chunk-2 spike. Frames k and k+1 are adjacent
         # but separated by the wall-clock gap.
         planted["k"] = k
-        u0 = _np.array([100, k], dtype=_np.int64)
-        u1 = _np.array([k + 1, k + 1 + 100], dtype=_np.int64)
+        u0 = np.array([100, k], dtype=np.int64)
+        u1 = np.array([k + 1, k + 1 + 100], dtype=np.int64)
         return si.NumpySorting.from_unit_dict(
             [{0: u0, 1: u1}], sampling_frequency=fs_local
         )
@@ -616,7 +616,7 @@ def test_disjoint_sort_intervals_concatenated(polymer_smoke_session):
     """
     import uuid as _uuid
 
-    import numpy as _np
+    import numpy as np
     import pynwb
 
     from spyglass.common.common_interval import IntervalList
@@ -666,7 +666,7 @@ def test_disjoint_sort_intervals_concatenated(polymer_smoke_session):
     chunk1_end = t0 + 1.2
     gap_end = t0 + 1.7
     chunk2_end = min(t0 + 2.9, t_end)
-    disjoint_times = _np.array([[t0, chunk1_end], [gap_end, chunk2_end]])
+    disjoint_times = np.array([[t0, chunk1_end], [gap_end, chunk2_end]])
 
     sort_group_id = int(
         sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
@@ -699,7 +699,7 @@ def test_disjoint_sort_intervals_concatenated(polymer_smoke_session):
         series_path = row["electrical_series_path"]
         series_name = series_path.rsplit("/", 1)[-1]
         series = nwbf.acquisition[series_name]
-        written_times = _np.asarray(series.timestamps[:])
+        written_times = np.asarray(series.timestamps[:])
 
     # The written length should be approximately
     # (chunk1 duration + chunk2 duration) * fs, not the full
@@ -718,7 +718,7 @@ def test_disjoint_sort_intervals_concatenated(polymer_smoke_session):
     in_gap = (written_times > chunk1_end + tol) & (
         written_times < gap_end - tol
     )
-    assert not _np.any(in_gap), (
+    assert not np.any(in_gap), (
         f"Found {int(in_gap.sum())} written timestamps inside the "
         f"disjoint gap ({chunk1_end}, {gap_end}); the "
         "_consolidate_intervals + concatenate_recordings split was "
@@ -744,7 +744,7 @@ def test_artifact_valid_times_respect_disjoint_gap(polymer_smoke_session):
     """
     import uuid as _uuid
 
-    import numpy as _np
+    import numpy as np
 
     from spyglass.common.common_interval import IntervalList
     from spyglass.common.common_lab import LabTeam
@@ -782,7 +782,7 @@ def test_artifact_valid_times_respect_disjoint_gap(polymer_smoke_session):
     assert (t_end - t0) >= 2.9, "smoke fixture too short for disjoint test"
     chunk1_end, gap_end, chunk2_end = t0 + 1.2, t0 + 1.7, min(t0 + 2.9, t_end)
     gap_mid = 0.5 * (chunk1_end + gap_end)
-    disjoint_times = _np.array([[t0, chunk1_end], [gap_end, chunk2_end]])
+    disjoint_times = np.array([[t0, chunk1_end], [gap_end, chunk2_end]])
 
     sort_group_id = int(
         sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
@@ -890,7 +890,7 @@ def test_disjoint_multi_gap_readback_and_artifact(
     c1 = (t0, t0 + 1.05)
     c2 = (t0 + 1.30, t0 + 2.35)
     c3 = (t0 + 2.60, t0 + 3.65)
-    disjoint_times = _np.array([list(c1), list(c2), list(c3)])
+    disjoint_times = np.array([list(c1), list(c2), list(c3)])
 
     disjoint_name = f"v2_multigap_{_uuid.uuid4().hex[:8]}"
     IntervalList.insert1(
@@ -952,13 +952,13 @@ def test_disjoint_multi_gap_readback_and_artifact(
         }
     )
     rec = Recording().get_recording(rec_pk)
-    times = _np.asarray(rec.get_times())
+    times = np.asarray(rec.get_times())
     fs = rec.get_sampling_frequency()
-    gaps = _np.flatnonzero(_np.diff(times) > 1.5 / fs)
+    gaps = np.flatnonzero(np.diff(times) > 1.5 / fs)
     assert len(gaps) == 2, f"expected two gaps, found {len(gaps)}"
     k1, k2 = int(gaps[0]), int(gaps[1])  # last frame of chunks 1, 2
-    planted_frames = _np.sort(
-        _np.array([50, k1 + 10, k2 + 10], dtype=_np.int64)
+    planted_frames = np.sort(
+        np.array([50, k1 + 10, k2 + 10], dtype=np.int64)
     )
     # Sanity: one frame in each chunk.
     assert 50 < k1 and k1 + 10 < k2 and k2 + 10 < times.size
@@ -968,7 +968,7 @@ def test_disjoint_multi_gap_readback_and_artifact(
     ):
         import spikeinterface as si
 
-        labels = _np.zeros(planted_frames.size, dtype=_np.int32)
+        labels = np.zeros(planted_frames.size, dtype=np.int32)
         return si.NumpySorting.from_samples_and_labels(
             samples_list=[planted_frames],
             labels_list=[labels],
@@ -980,8 +980,8 @@ def test_disjoint_multi_gap_readback_and_artifact(
     )
     Sorting.populate(sort_pk, reserve_jobs=False)
     si_sorting = Sorting().get_sorting(sort_pk)
-    frames = _np.sort(_np.asarray(si_sorting.get_unit_spike_train(unit_id=0)))
-    _np.testing.assert_array_equal(
+    frames = np.sort(np.asarray(si_sorting.get_unit_spike_train(unit_id=0)))
+    np.testing.assert_array_equal(
         frames,
         planted_frames,
         err_msg=(

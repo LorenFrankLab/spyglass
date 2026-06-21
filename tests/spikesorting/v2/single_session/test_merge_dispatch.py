@@ -64,7 +64,7 @@ def test_spike_sorting_output_get_spike_times_v2_dispatch(populated_sorting):
     so a change to the v2 Units-NWB layout that breaks
     ``fetch_nwb`` immediately fails the suite.
     """
-    import numpy as _np
+    import numpy as np
 
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -113,7 +113,7 @@ def test_spike_sorting_output_get_spike_times_v2_dispatch(populated_sorting):
     rec_t_end = float(rec.get_times()[-1])
 
     for unit_idx, times in enumerate(spike_times):
-        arr = _np.asarray(times)
+        arr = np.asarray(times)
         assert arr.dtype.kind == "f", (
             f"Unit {unit_idx}: spike times dtype kind "
             f"{arr.dtype.kind!r}, expected 'f' (float seconds)."
@@ -414,7 +414,7 @@ def test_merge_dispatch_consumer_api_works_on_v2_merge_id(
     finite. Parametrized so the same shape contract is verified
     on both with identical setup.
     """
-    import numpy as _np
+    import numpy as np
 
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -427,18 +427,18 @@ def test_merge_dispatch_consumer_api_works_on_v2_merge_id(
     n_units = int((Sorting & populated_sorting).fetch1("n_units"))
     assert n_units >= 1
 
-    time_array = _np.arange(0.0, 4.0, 0.1)
+    time_array = np.arange(0.0, 4.0, 0.1)
     method = getattr(SpikeSortingOutput(), method_name)
     result = method({"merge_id": merge_id}, time_array)
     assert result.shape == (len(time_array), n_units), (
         f"{method_name} returned shape {result.shape}; expected "
         f"({len(time_array)}, {n_units}). v2 dispatch regression."
     )
-    assert _np.all(result >= 0), (
+    assert np.all(result >= 0), (
         f"{method_name} returned negative values somewhere; "
         "the indicator/rate contract is non-negative."
     )
-    assert _np.all(_np.isfinite(result))
+    assert np.all(np.isfinite(result))
 
 
 @pytest.mark.slow
@@ -456,7 +456,7 @@ def test_sorted_spikes_group_works_with_v2_merge_id(populated_sorting):
     the actual SortedSpikesGroup surface, not just the
     SpikeSortingOutput primitive APIs.
     """
-    import numpy as _np
+    import numpy as np
 
     from spyglass.spikesorting.analysis.v1.group import (
         SortedSpikesGroup,
@@ -519,23 +519,23 @@ def test_sorted_spikes_group_works_with_v2_merge_id(populated_sorting):
         assert entry["spikesorting_merge_id"] == merge_id
 
     # 2. get_spike_indicator: (n_time, n_units) shape, non-negative.
-    time_array = _np.arange(0.0, 4.0, 0.1)
+    time_array = np.arange(0.0, 4.0, 0.1)
     indicator = SortedSpikesGroup.get_spike_indicator(group_key, time_array)
     n_units = int((Sorting & populated_sorting).fetch1("n_units"))
     assert indicator.shape == (len(time_array), n_units)
-    assert _np.all(indicator >= 0)
+    assert np.all(indicator >= 0)
 
     # 3. get_firing_rate per-unit AND multiunit (MUA).
     fr_per_unit = SortedSpikesGroup.get_firing_rate(
         group_key, time_array, multiunit=False
     )
     assert fr_per_unit.shape == (len(time_array), n_units)
-    assert _np.all(fr_per_unit >= 0)
+    assert np.all(fr_per_unit >= 0)
 
     fr_mua = SortedSpikesGroup.get_firing_rate(
         group_key, time_array, multiunit=True
     )
     # Multiunit firing rate is a single trace per group.
     assert fr_mua.shape == (len(time_array), 1)
-    assert _np.all(fr_mua >= 0)
-    assert _np.all(_np.isfinite(fr_mua))
+    assert np.all(fr_mua >= 0)
+    assert np.all(np.isfinite(fr_mua))

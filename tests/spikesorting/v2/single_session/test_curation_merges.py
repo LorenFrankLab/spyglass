@@ -29,7 +29,7 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
     few to test merging. The 60s recording yields ~26 units (one
     sort group, all 4 shanks aggregated through the same flow).
     """
-    import numpy as _np
+    import numpy as np
 
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults
@@ -150,13 +150,13 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
     from spyglass.spikesorting.v2.utils import _dedup_merged_spike_times
 
     src_sorting = Sorting().get_sorting(sort_pk)
-    src_head = _np.asarray(
+    src_head = np.asarray(
         src_sorting.get_unit_spike_train(unit_id=head, return_times=True)
     )
-    src_absorbed = _np.asarray(
+    src_absorbed = np.asarray(
         src_sorting.get_unit_spike_train(unit_id=absorbed, return_times=True)
     )
-    raw_concat = _np.sort(_np.concatenate([src_head, src_absorbed]))
+    raw_concat = np.sort(np.concatenate([src_head, src_absorbed]))
     expected_merged = _dedup_merged_spike_times(
         [src_head, src_absorbed], 0.4e-3
     )
@@ -169,7 +169,7 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
     )
 
     curated_sorting = CurationV2().get_sorting(pk)
-    merged_times = _np.asarray(
+    merged_times = np.asarray(
         curated_sorting.get_unit_spike_train(
             unit_id=merged_id, return_times=True
         )
@@ -178,7 +178,7 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
         f"Merged unit ({merged_id}) has {len(merged_times)} spikes; "
         f"expected {len(expected_merged)} (0.4 ms-deduped union)."
     )
-    _np.testing.assert_array_equal(merged_times, expected_merged)
+    np.testing.assert_array_equal(merged_times, expected_merged)
 
     # n_spikes on CurationV2.Unit for the merged id matches its train
     # (end-to-end half of the n_spikes invariant under v1 parity).
@@ -271,13 +271,13 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
     # train must equal the apply_merge=True stored train sample-for-sample
     # -- both ids are ``max(units) + 1`` (= merged_id). A count-only check
     # would pass even if the two paths binned spikes to different frames.
-    lazy_merged_frames = _np.sort(
-        _np.asarray(merged_lazy.get_unit_spike_train(unit_id=merged_id))
+    lazy_merged_frames = np.sort(
+        np.asarray(merged_lazy.get_unit_spike_train(unit_id=merged_id))
     )
-    applied_merged_frames = _np.sort(
-        _np.asarray(curated_sorting.get_unit_spike_train(unit_id=merged_id))
+    applied_merged_frames = np.sort(
+        np.asarray(curated_sorting.get_unit_spike_train(unit_id=merged_id))
     )
-    _np.testing.assert_array_equal(lazy_merged_frames, applied_merged_frames)
+    np.testing.assert_array_equal(lazy_merged_frames, applied_merged_frames)
 
 
 @pytest.mark.slow
@@ -297,7 +297,7 @@ def test_lazy_vs_applied_merge_frames_equal(polymer_smoke_session, monkeypatch):
     """
     import uuid as _uuid
 
-    import numpy as _np
+    import numpy as np
     import spikeinterface as si
 
     from spyglass.common.common_interval import IntervalList
@@ -335,11 +335,11 @@ def test_lazy_vs_applied_merge_frames_equal(polymer_smoke_session, monkeypatch):
         sorter, sorter_params, recording, sorting_id, *, job_kwargs=None
     ):
         u0, u1 = state["u0"], state["u1"]
-        samples = _np.concatenate([u0, u1]).astype(_np.int64)
-        labels = _np.concatenate(
-            [_np.zeros(len(u0)), _np.ones(len(u1))]
-        ).astype(_np.int32)
-        order = _np.argsort(samples)
+        samples = np.concatenate([u0, u1]).astype(np.int64)
+        labels = np.concatenate(
+            [np.zeros(len(u0)), np.ones(len(u1))]
+        ).astype(np.int32)
+        order = np.argsort(samples)
         return si.NumpySorting.from_samples_and_labels(
             samples_list=[samples[order]],
             labels_list=[labels[order]],
@@ -404,28 +404,28 @@ def test_lazy_vs_applied_merge_frames_equal(polymer_smoke_session, monkeypatch):
             description="applied merge",
         )
         merged_id = 2  # max(0, 1) + 1
-        lazy_frames = _np.sort(
-            _np.asarray(
+        lazy_frames = np.sort(
+            np.asarray(
                 CurationV2()
                 .get_merged_sorting(preview_pk)
                 .get_unit_spike_train(unit_id=merged_id)
             )
         )
-        applied_frames = _np.sort(
-            _np.asarray(
+        applied_frames = np.sort(
+            np.asarray(
                 CurationV2()
                 .get_sorting(applied_pk)
                 .get_unit_spike_train(unit_id=merged_id)
             )
         )
-        _np.testing.assert_array_equal(
+        np.testing.assert_array_equal(
             lazy_frames,
             applied_frames,
             err_msg="lazy preview merged frames != apply_merge=True stored",
         )
-        _np.testing.assert_array_equal(
+        np.testing.assert_array_equal(
             lazy_frames,
-            _np.asarray(expected_frames, dtype=lazy_frames.dtype),
+            np.asarray(expected_frames, dtype=lazy_frames.dtype),
             err_msg="merged frames do not match the hand-computed merge",
         )
 
@@ -443,11 +443,11 @@ def test_lazy_vs_applied_merge_frames_equal(polymer_smoke_session, monkeypatch):
     # --- Contiguous half: one interval, uniform timeline. Plant u0/u1
     # with a within-chunk cross-unit coincidence (100 & 101) that dedups,
     # plus distinct spikes; merged = [100, 500, 600, 900].
-    state["u0"] = _np.array([100, 500, 900])
-    state["u1"] = _np.array([101, 600])
+    state["u0"] = np.array([100, 500, 900])
+    state["u1"] = np.array([101, 600])
     contig_name = f"v2_lvam_contig_{_uuid.uuid4().hex[:8]}"
     _, contig_sort_pk = _build_sort(
-        contig_name, _np.array([[t0, min(t0 + 2.9, t_end)]])
+        contig_name, np.array([[t0, min(t0 + 2.9, t_end)]])
     )
     Sorting.populate(contig_sort_pk, reserve_jobs=False)
     _assert_lazy_equals_applied(contig_sort_pk, [100, 500, 600, 900])
@@ -460,17 +460,17 @@ def test_lazy_vs_applied_merge_frames_equal(polymer_smoke_session, monkeypatch):
     disjoint_name = f"v2_lvam_disjoint_{_uuid.uuid4().hex[:8]}"
     disjoint_rec_pk, disjoint_sort_pk = _build_sort(
         disjoint_name,
-        _np.array([[t0, chunk1_end], [gap_end, chunk2_end]]),
+        np.array([[t0, chunk1_end], [gap_end, chunk2_end]]),
     )
     rec = Recording().get_recording(disjoint_rec_pk)
-    times = _np.asarray(rec.get_times())
+    times = np.asarray(rec.get_times())
     fs = rec.get_sampling_frequency()
-    gaps = _np.flatnonzero(_np.diff(times) > 1.5 / fs)
+    gaps = np.flatnonzero(np.diff(times) > 1.5 / fs)
     assert len(gaps) == 1, f"expected one gap, found {len(gaps)}"
     k = int(gaps[0])  # chunk-1's last frame
     assert k >= 200, "chunk 1 too short to plant frame 100/101"
-    state["u0"] = _np.array([100, k])
-    state["u1"] = _np.array([101, k + 1])
+    state["u0"] = np.array([100, k])
+    state["u1"] = np.array([101, k + 1])
     Sorting.populate(disjoint_sort_pk, reserve_jobs=False)
     _assert_lazy_equals_applied(disjoint_sort_pk, [100, k, k + 1])
 
@@ -724,7 +724,7 @@ def test_applied_and_lazy_merge_ids_match_for_out_of_order_groups(
     """
     import uuid as _uuid
 
-    import numpy as _np
+    import numpy as np
     import spikeinterface as si
 
     from spyglass.common.common_interval import IntervalList
@@ -757,22 +757,22 @@ def test_applied_and_lazy_merge_ids_match_for_out_of_order_groups(
     # Four planted units with well-separated frames (no coincidences -> no
     # cross-unit dedup), so each merged train is just the sorted union.
     planted = {
-        0: _np.array([100, 700]),
-        1: _np.array([300, 900]),
-        2: _np.array([200, 800]),
-        3: _np.array([400, 1000]),
+        0: np.array([100, 700]),
+        1: np.array([300, 900]),
+        2: np.array([200, 800]),
+        3: np.array([400, 1000]),
     }
 
     def _planted_four_unit_sorter(
         sorter, sorter_params, recording, sorting_id, *, job_kwargs=None
     ):
-        samples = _np.concatenate([planted[u] for u in (0, 1, 2, 3)]).astype(
-            _np.int64
+        samples = np.concatenate([planted[u] for u in (0, 1, 2, 3)]).astype(
+            np.int64
         )
-        labels = _np.concatenate(
-            [_np.full(len(planted[u]), u) for u in (0, 1, 2, 3)]
-        ).astype(_np.int32)
-        order = _np.argsort(samples)
+        labels = np.concatenate(
+            [np.full(len(planted[u]), u) for u in (0, 1, 2, 3)]
+        ).astype(np.int32)
+        order = np.argsort(samples)
         return si.NumpySorting.from_samples_and_labels(
             samples_list=[samples[order]],
             labels_list=[labels[order]],
@@ -798,7 +798,7 @@ def test_applied_and_lazy_merge_ids_match_for_out_of_order_groups(
         {
             "nwb_file_name": nwb_file_name,
             "interval_list_name": interval_name,
-            "valid_times": _np.array([[t0, min(t0 + 2.9, t_end)]]),
+            "valid_times": np.array([[t0, min(t0 + 2.9, t_end)]]),
             "pipeline": "v2_oo_merge_test",
         },
         skip_duplicates=True,
@@ -853,22 +853,22 @@ def test_applied_and_lazy_merge_ids_match_for_out_of_order_groups(
     lazy = CurationV2().get_merged_sorting(preview_pk)
 
     def _frames(sorting, uid):
-        return _np.sort(_np.asarray(sorting.get_unit_spike_train(unit_id=uid)))
+        return np.sort(np.asarray(sorting.get_unit_spike_train(unit_id=uid)))
 
     # Canonical-min id assignment, regardless of input order: [0,1] (min 0)
     # -> max(0..3)+1 = 4, [2,3] (min 2) -> 5. Same fresh id -> same content
     # group on BOTH the applied and lazy paths.
     expected = {
-        4: _np.sort(_np.concatenate([planted[0], planted[1]])),
-        5: _np.sort(_np.concatenate([planted[2], planted[3]])),
+        4: np.sort(np.concatenate([planted[0], planted[1]])),
+        5: np.sort(np.concatenate([planted[2], planted[3]])),
     }
     for fresh_id, exp in expected.items():
-        _np.testing.assert_array_equal(
+        np.testing.assert_array_equal(
             _frames(applied, fresh_id),
             _frames(lazy, fresh_id),
             err_msg=f"applied vs lazy frames differ for merged id {fresh_id}",
         )
-        _np.testing.assert_array_equal(
+        np.testing.assert_array_equal(
             _frames(applied, fresh_id),
             exp.astype(_frames(applied, fresh_id).dtype),
             err_msg=f"merged id {fresh_id} frames != hand-computed union",
@@ -888,7 +888,7 @@ def test_v2_sorting_nwb_excludes_parent_units(dj_conn, tmp_path, monkeypatch):
     """
     from pathlib import Path
 
-    import numpy as _np
+    import numpy as np
     import pynwb
     import spikeinterface as si
 
@@ -945,8 +945,8 @@ def test_v2_sorting_nwb_excludes_parent_units(dj_conn, tmp_path, monkeypatch):
     def _planted_two_unit_sorter(
         sorter, sorter_params, recording, sorting_id, *, job_kwargs=None
     ):
-        samples = _np.array([200, 400, 600, 800], dtype=_np.int64)
-        labels = _np.array([0, 1, 0, 1], dtype=_np.int32)
+        samples = np.array([200, 400, 600, 800], dtype=np.int64)
+        labels = np.array([0, 1, 0, 1], dtype=np.int32)
         return si.NumpySorting.from_samples_and_labels(
             [samples], [labels], recording.get_sampling_frequency()
         )
@@ -1109,13 +1109,13 @@ def test_si_merge_units_drops_same_sample_unless_delta_is_none(dj_conn):
     that locks the SI contract our code depends on; if SI changes its
     handling of ``delta_time_ms=0`` (or ``None``), this fails loudly.
     """
-    import numpy as _np
+    import numpy as np
     import spikeinterface as si
     import spikeinterface.curation as sc
 
     ns = si.NumpySorting.from_unit_dict(
         # Two contributors share sample 10 -- the exact-coincident case.
-        {0: _np.array([10]), 1: _np.array([10])},
+        {0: np.array([10]), 1: np.array([10])},
         sampling_frequency=30000.0,
     )
     new_id_none = list(

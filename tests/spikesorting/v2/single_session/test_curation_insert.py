@@ -599,10 +599,10 @@ def test_curation_label_post_curation_is_indexed_ragged_list(populated_sorting):
     # both forms preserve the multi-label invariant. A scalar
     # (regression to non-indexed column) would NOT be iterable
     # over individual label strings.
-    import numpy as _np
+    import numpy as np
 
     labeled_value = df.loc[units[0], "curation_label"]
-    assert isinstance(labeled_value, (list, _np.ndarray)), (
+    assert isinstance(labeled_value, (list, np.ndarray)), (
         f"curation_label for labeled unit is {type(labeled_value)}; "
         "expected list / ndarray (ragged column from index=True). "
         "Regression to a non-indexed column."
