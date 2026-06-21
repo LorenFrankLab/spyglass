@@ -174,21 +174,19 @@ def _spike_times_to_frames(recording_times, spike_times, n_samples, unit_id):
     timeline (``timestamps[frame]``). For disjoint sort intervals that
     timeline is non-uniform (it carries the wall-clock gaps that
     ``concatenate_recordings(ignore_times=True)`` drops), so the inverse
-    map must be ``np.searchsorted`` against the actual timestamps -- NOT
-    an affine ``round((t - t_start) * fs)``, which would shift every
-    frame after a gap by the accumulated gap and can push frames past
-    ``n_samples``. This mirrors v1's ``spike_times_to_valid_samples``
-    (``v1/sorting.py:29``) so v2 ``get_sorting`` recovers the same frame
-    indices v1 did.
+    map must compare against the actual timestamps -- NOT an affine
+    ``round((t - t_start) * fs)``, which would shift every frame after a
+    gap by the accumulated gap and can push frames past ``n_samples``.
+    Bracket each spike with ``np.searchsorted`` and return the nearest
+    timestamp so tiny serialization/round-trip noise (e.g.
+    ``timestamps[i] + 1e-12``) does not shift the frame by +1.
 
-    ``side='left'``: a spike exactly equal to ``recording_times[-1]``
-    maps to ``n_samples - 1`` (valid). Floating-point rounding can still
-    land a near-final spike at ``n_samples`` (one past the end), which
-    SpikeInterface rejects; those out-of-bounds frames are CLAMPED to the
-    last sample (with a warning) rather than dropped, so the returned
+    A spike more than two typical sample periods from its nearest timestamp
+    raises: that is an alignment/units error (or a spike in a disjoint
+    wall-clock gap), not floating-point roundoff. Near-boundary spikes within
+    that tolerance are snapped to the nearest valid sample so the returned
     frame count always matches ``spike_times`` -- dropping them desyncs
-    downstream per-spike features (v1 dropped, but v1's consumer path did
-    not have the v2 analyzer 1:1 alignment check).
+    downstream per-spike features.
 
     Parameters
     ----------
@@ -204,58 +202,84 @@ def _spike_times_to_frames(recording_times, spike_times, n_samples, unit_id):
     Returns
     -------
     np.ndarray, shape (n_spikes,)
-        Frame indices in ``[0, n_samples)``. A near-final spike whose absolute
-        time floating-point-rounds just past the last timestamp is clamped to
-        ``n_samples - 1`` (count preserved, so downstream per-spike features
-        stay aligned). A spike genuinely beyond the recording raises.
+        Frame indices in ``[0, n_samples)``. A spike whose absolute time
+        floating-point-rounds slightly away from the stored timestamp is
+        snapped to the nearest sample (count preserved, so downstream
+        per-spike features stay aligned). A spike genuinely outside the
+        recording or inside a disjoint gap raises.
 
     Raises
     ------
     ValueError
-        If a spike time is more than a couple of sample periods past the final
-        timestamp -- an upstream alignment/units error, not FP rounding.
+        If a spike time is more than a couple of sample periods from the
+        nearest timestamp -- an upstream alignment/units error, not FP
+        rounding.
     """
     import numpy as _np
 
-    from spyglass.utils import logger
+    recording_times = _np.asarray(recording_times, dtype=float)
+    spike_times = _np.atleast_1d(_np.asarray(spike_times, dtype=float))
+    n_samples = int(n_samples)
+    if spike_times.size == 0:
+        return _np.asarray([], dtype=_np.int64)
+    if recording_times.size != n_samples:
+        raise ValueError(
+            "_spike_times_to_frames: recording_times length "
+            f"({recording_times.size}) does not match n_samples ({n_samples})."
+        )
+    if n_samples == 0:
+        raise ValueError(
+            f"Unit {unit_id} has spike times but the recording has zero samples."
+        )
 
-    spike_times = _np.asarray(spike_times)
-    spike_frames = _np.searchsorted(recording_times, spike_times)
-    excess_mask = spike_frames >= n_samples
-    n_excess = int(excess_mask.sum())
-    if n_excess > 0:
-        # ``searchsorted`` caps frames at ``n_samples`` (one past the end), so
-        # an excess frame is ALWAYS exactly ``n_samples`` regardless of how far
-        # past the end the spike time is. Discriminate in SECONDS: a spike a
-        # hair past the last timestamp is floating-point rounding (safe to
-        # clamp), but a spike genuinely seconds beyond the recording is an
-        # alignment/units bug that must surface, not be silently absorbed into
-        # the last sample.
-        last_t = float(recording_times[-1])
-        dt = (
-            float(recording_times[-1] - recording_times[-2])
-            if recording_times.size >= 2
-            else 0.0
+    insert_indices = _np.searchsorted(recording_times, spike_times, side="left")
+    right_indices = _np.clip(insert_indices, 0, n_samples - 1)
+    left_indices = _np.clip(insert_indices - 1, 0, n_samples - 1)
+
+    left_dist = _np.abs(spike_times - recording_times[left_indices])
+    right_dist = _np.abs(recording_times[right_indices] - spike_times)
+    use_left = left_dist < right_dist
+    spike_frames = _np.where(use_left, left_indices, right_indices).astype(
+        _np.int64, copy=False
+    )
+    nearest_dist = _np.where(use_left, left_dist, right_dist)
+
+    if recording_times.size >= 2:
+        diffs = _np.diff(recording_times)
+        positive_diffs = diffs[diffs > 0]
+        sample_period = (
+            float(_np.median(positive_diffs)) if positive_diffs.size else 0.0
         )
-        tol = 2.0 * dt  # a couple of sample periods covers FP rounding
-        max_excess_s = float(_np.max(spike_times[excess_mask])) - last_t
-        if max_excess_s > tol:
-            raise ValueError(
-                f"Unit {unit_id} has spike time(s) {max_excess_s:.6g}s beyond "
-                f"the recording end ({last_t:.6g}s) -- more than {tol:.6g}s "
-                "past the final sample, so this is an alignment/units error, "
-                "not floating-point rounding. Inspect the upstream spike times."
-            )
+    else:
+        sample_period = 0.0
+    tol = 2.0 * sample_period  # a couple of sample periods covers FP roundoff
+
+    far_mask = nearest_dist > tol
+    if bool(far_mask.any()):
+        worst = int(_np.argmax(nearest_dist))
+        nearest_t = float(recording_times[spike_frames[worst]])
+        raise ValueError(
+            f"Unit {unit_id} has spike time(s) up to "
+            f"{float(nearest_dist[worst]):.6g}s from the nearest recording "
+            f"sample (spike_time={float(spike_times[worst]):.6g}s, "
+            f"nearest_timestamp={nearest_t:.6g}s) -- more than {tol:.6g}s "
+            "from any sample, so this is an alignment/units error, not "
+            "floating-point rounding. Inspect the upstream spike times."
+        )
+
+    outside_mask = (spike_times < recording_times[0]) | (
+        spike_times > recording_times[-1]
+    )
+    n_outside = int(outside_mask.sum())
+    if n_outside > 0:
+        from spyglass.utils import logger
+
         logger.warning(
-            f"Unit {unit_id} has {n_excess} spike(s) whose searchsorted "
-            "frame landed at n_samples (floating-point rounding of the final "
-            "spike's absolute time). Clamping to the last sample to keep the "
-            "frame count aligned with the persisted spike_times -- dropping "
-            "them would desync downstream per-spike features (the "
-            "UnitWaveformFeatures n_feat==n_spikes check)."
+            f"Unit {unit_id} has {n_outside} spike(s) just outside the "
+            "recording timestamp envelope but within floating-point tolerance. "
+            "Snapping to the nearest sample to keep the frame count aligned "
+            "with the persisted spike_times."
         )
-        spike_frames = spike_frames.copy()
-        spike_frames[excess_mask] = n_samples - 1
     return spike_frames
 
 

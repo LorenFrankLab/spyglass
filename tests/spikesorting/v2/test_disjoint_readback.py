@@ -8,8 +8,8 @@ recording's timeline is a uniform ``t_start + i/fs`` grid. For DISJOINT
 sort intervals, v2 persists gap-preserving (non-uniform) timestamps, so
 affine inversion shifts every frame after a gap by the accumulated
 wall-clock gap -- and can push frames past the gap-excluded sample
-count. v1 maps back with ``np.searchsorted`` against the actual
-timestamps, recovering the original frame exactly.
+count. v2 maps back against the actual timestamps, recovering the
+original frame exactly.
 
 The hermetic test here pins the readback helper's math; the slow
 integration test (``test_get_sorting_recovers_frames_across_gap``)
@@ -24,7 +24,7 @@ import pytest
 
 
 def test_spike_times_to_frames_recovers_frames_on_gap_timeline():
-    """searchsorted readback recovers original frames where affine fails.
+    """Timestamp readback recovers original frames where affine fails.
 
     Build a non-uniform (gap-preserving) timeline: 100 contiguous
     samples, then a 5-second wall-clock gap, then 100 more contiguous
@@ -59,6 +59,57 @@ def test_spike_times_to_frames_recovers_frames_on_gap_timeline():
         timestamps, stored_spike_times, n_samples, unit_id=0
     )
     np.testing.assert_array_equal(frames, planted_frames)
+
+
+def test_spike_times_to_frames_uses_nearest_sample_for_roundoff():
+    """Tiny positive float jitter maps to the original sample, not +1.
+
+    A strict ``searchsorted(..., side='left')`` maps
+    ``timestamps[i] + epsilon`` to frame ``i + 1``. The readback path should
+    instead choose the physically closest timestamp so harmless
+    serialization/round-trip noise does not shift every spike one sample late.
+    """
+    from spyglass.spikesorting.v2.utils import _spike_times_to_frames
+
+    fs = 30000.0
+    dt = 1.0 / fs
+    chunk = np.arange(100) * dt
+    t0 = 10.0
+    gap = 5.0
+    timestamps = np.concatenate([t0 + chunk, t0 + chunk[-1] + gap + dt + chunk])
+    n_samples = timestamps.size
+    planted_frames = np.array([10, 50, 150], dtype=np.int64)
+    jittered_spike_times = timestamps[planted_frames] + 1e-12
+
+    strict_left = np.searchsorted(timestamps, jittered_spike_times)
+    assert not np.array_equal(strict_left, planted_frames), (
+        "test setup: strict searchsorted should shift at least one jittered "
+        "spike to the following frame"
+    )
+
+    frames = _spike_times_to_frames(
+        timestamps, jittered_spike_times, n_samples, unit_id=0
+    )
+    np.testing.assert_array_equal(frames, planted_frames)
+
+
+def test_spike_times_to_frames_rejects_spikes_in_disjoint_gap():
+    """Nearest-neighbor readback must not hide spikes inside wall-clock gaps."""
+    from spyglass.spikesorting.v2.utils import _spike_times_to_frames
+
+    fs = 30000.0
+    dt = 1.0 / fs
+    chunk = np.arange(100) * dt
+    t0 = 10.0
+    gap = 5.0
+    timestamps = np.concatenate([t0 + chunk, t0 + chunk[-1] + gap + dt + chunk])
+    n_samples = timestamps.size
+    gap_spike_time = timestamps[99] + gap / 2.0
+
+    with pytest.raises(ValueError, match="alignment/units error"):
+        _spike_times_to_frames(
+            timestamps, np.array([gap_spike_time]), n_samples, unit_id=2
+        )
 
 
 def test_spike_times_to_frames_clamps_out_of_bounds():
