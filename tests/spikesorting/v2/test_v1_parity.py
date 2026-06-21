@@ -4,7 +4,7 @@ Tests in this module verify that v2 behavior matches v1's documented
 contract on points where the earlier v2 work silently diverged. Each
 test is short, focused, and either pure-Python or DB-tier without
 populate -- the heavier integration / regression tests live in
-``test_single_session_pipeline.py``.
+the ``single_session/`` suite.
 
 Where a test pins down the fix for a specific v1↔v2 divergence the
 docstring cites the v1 source line so a future reviewer can confirm
@@ -534,9 +534,9 @@ def test_make_compute_is_pure():
     This is a defense-in-depth AST guard, not the load-bearing test:
     the behavioral counterparts that actually prove a failed populate
     leaves no orphaned NWB/DB state are
-    ``test_single_session_pipeline.py::test_sorting_make_rollback_cleans_units_nwb``
-    and its siblings (``test_recording_make_rollback_cleans_analysis_nwb``,
-    ``test_curation_v2_insert_rollback_cleans_units_nwb``).
+    ``single_session/test_sorting.py::test_sorting_make_rollback_cleans_units_nwb``
+    and its siblings (``test_recording.py::test_recording_make_rollback_cleans_analysis_nwb``,
+    ``test_curation_insert.py::test_curation_v2_insert_rollback_cleans_units_nwb``).
     """
     from spyglass.spikesorting.v2 import artifact, recording, sorting
 

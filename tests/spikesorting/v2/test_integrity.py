@@ -1,7 +1,7 @@
 """Cross-table integrity gate for v2 spike-sorting tables.
 
 Tests verify cross-table invariants and transactional atomicity that
-the per-table tests in ``test_single_session_pipeline.py`` do not
+the per-table tests in the ``single_session/`` suite do not
 exercise as a focused gate:
 
 - **Tri-part dispatch active**: ``Recording`` / ``ArtifactDetection``

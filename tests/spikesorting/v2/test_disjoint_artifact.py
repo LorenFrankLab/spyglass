@@ -13,7 +13,7 @@ subtracts artifacts per chunk (v1 subtracts from the explicit
 The hermetic tests here pin the discontinuity-split helper; the
 DB-gated tests exercise ``_detect_artifacts`` / ``_apply_artifact_mask``
 on a synthetic disjoint recording. A full-pipeline integration test
-lives in ``test_single_session_pipeline.py``.
+lives in ``single_session/test_disjoint_intervals.py``.
 """
 
 from __future__ import annotations

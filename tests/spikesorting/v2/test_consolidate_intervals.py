@@ -9,7 +9,7 @@ dropping the last sample of every interval; the v2 port drops the ``- 1`` so
 the end is the true exclusive bound. These tests pin the exact integer pairs
 (off-by-one fix, adjacency-merge, defensive reorder, single-sample interval),
 replacing the integration-only ±5%/±1500-sample check in
-``test_single_session_pipeline.py::test_disjoint_sort_intervals_concatenated``.
+``single_session/test_disjoint_intervals.py::test_disjoint_sort_intervals_concatenated``.
 
 Pure / synthetic -- no database. A simple ``timestamps = arange(10)`` grid is
 used so the frame index equals the integer time, making every expected

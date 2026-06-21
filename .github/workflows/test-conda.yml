@@ -265,7 +265,7 @@ jobs:
     - name: Download 60s polymer fixture (scheduled / manual full runs)
       # Pulled into the suite only on the nightly cron / manual dispatch -- it
       # un-skips the merge frame-equality check, the MS5 ground-truth accuracy
-      # gate (test_single_session_pipeline.py), and the clusterless sparse-id
+      # gate (single_session/test_ground_truth_parity.py), and the clusterless sparse-id
       # case. Per-PR runs skip those via their ``*_PATH.exists()`` guards;
       # their behaviour is also covered per-PR on the smoke fixture (e.g.
       # test_lazy_vs_applied_merge_frames_equal), so nothing is silently

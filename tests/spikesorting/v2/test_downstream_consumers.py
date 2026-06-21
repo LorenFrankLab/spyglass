@@ -45,7 +45,7 @@ def _make_v2_root_curation(populated_sorting):
     cleanup walks merge -> curation -> sorting in master-before-part
     order because DataJoint refuses to drop a part-table row before
     its master (the same cascade rule ``_clean_session_v2`` follows
-    in test_single_session_pipeline.py).
+    in the ``single_session/`` suite).
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.curation import CurationV2

@@ -3,7 +3,7 @@
 These tests exercise the Pydantic models in
 ``spyglass.spikesorting.v2._params`` directly (no DataJoint server required)
 so schema-regression catches happen before the slower
-``test_single_session_pipeline`` integration suite ever spins up. The
+``single_session/`` integration suite ever spins up. The
 DataJoint-level "reject bogus values at insert" assertion lives in the
 integration suite once the Lookup tables exist; this file owns the cheap,
 fast schema round-trip and rejection cases.
