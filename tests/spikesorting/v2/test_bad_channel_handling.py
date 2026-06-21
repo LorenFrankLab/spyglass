@@ -724,7 +724,9 @@ def test_stale_group_post_flag_stays_member(handling_session):
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_remove_field_does_not_change_default_recording(handling_session):
+def test_remove_field_does_not_change_default_recording(
+    handling_session, request
+):
     """A pre-field params blob (no ``bad_channel_handling`` key) materializes to
     the SAME traces as ``default`` (which now carries
     ``bad_channel_handling='remove'``) -- the default-unchanged regression guard.
@@ -780,6 +782,22 @@ def test_remove_field_does_not_change_default_recording(handling_session):
             },
             skip_duplicates=True,
             allow_duplicate_params=True,
+        )
+        # This row is content-identical to ``default`` by construction. Drop it
+        # at teardown so it does not leak into the shared DB and make the
+        # duplicate-content guard tests order-dependent -- they assume
+        # ``default`` is the unique content-twin, and a lingering twin makes the
+        # guard report this row instead. ``_clean_sort_groups`` cascades away the
+        # RecordingSelection rows that reference it, but not the Lookup row.
+        request.addfinalizer(
+            lambda: (
+                PreprocessingParameters
+                & {
+                    "preprocessing_params_name": (
+                        "_pytest_legacy_no_bad_channel_handling"
+                    )
+                }
+            ).super_delete(warn=False)
         )
         legacy_pk = RecordingSelection.insert_selection(
             {
