@@ -109,7 +109,7 @@ def describe_parameter_rows() -> "pd.DataFrame":
         return ", ".join(sorted(vals))
 
     def _num_axis(used_by: list[str], attr: str):
-        """The single agreed preset value for a numeric ``attr``, else None."""
+        """Return the single agreed preset value for a numeric ``attr``, else None."""
         vals = {getattr(_PIPELINE_PRESETS[u], attr) for u in used_by}
         vals.discard(None)
         return next(iter(vals)) if len(vals) == 1 else None

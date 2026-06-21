@@ -30,7 +30,7 @@ _SORT_GROUP_COLUMNS = [
 
 
 def _missing(value) -> bool:
-    """True when ``value`` is ``None`` or a pandas/NumPy NA/NaN."""
+    """Return True when ``value`` is ``None`` or a pandas/NumPy NA/NaN."""
     import pandas as pd
 
     return value is None or bool(pd.isna(value))

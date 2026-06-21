@@ -29,13 +29,13 @@ _SHORT_FINGERPRINT_LENGTH = 12
 
 
 def _normalize_numbers(value):
-    """Collapse int-valued floats to ints so ``9`` and ``9.0`` canonicalize
-    alike, recursively through dicts and lists.
+    """Collapse int-valued floats to ints so ``9`` and ``9.0`` canonicalize alike.
 
-    The ``extra="allow"`` sorter schemas (Kilosort4, SpykingCircus2,
-    Tridesclous2, generic) pass user keys through uncoerced, so a blob may
-    carry ``60000`` under one name and ``60000.0`` under another for identical
-    science. ``json.dumps`` renders those differently, which would fork the
+    Recurses through dicts and lists. The ``extra="allow"`` sorter schemas
+    (Kilosort4, SpykingCircus2, Tridesclous2, generic) pass user keys through
+    uncoerced, so a blob may carry ``60000`` under one name and ``60000.0``
+    under another for identical science. ``json.dumps`` renders those
+    differently, which would fork the
     content fingerprint and defeat the duplicate-content guard. ``bool`` is
     left untouched (``True`` and ``1`` are distinct JSON types and distinct
     intent), and non-integer / NaN / Inf floats (``is_integer()`` is False for
