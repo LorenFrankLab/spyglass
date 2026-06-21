@@ -1,4 +1,4 @@
-"""``SortingAnalyzer`` cache build/rebuild behind ``Sorting``.
+"""``SortingAnalyzer`` cache access/build/rebuild behind ``Sorting``.
 
 ``build_analyzer`` builds the binary-folder ``SortingAnalyzer`` and its base
 extensions (``random_spikes`` / ``noise_levels`` / ``templates`` /
@@ -7,7 +7,9 @@ deterministic-seed pins, the 3D->2D probe projection, the zero-unit
 short-circuit, and partial-folder cleanup on failure. The table threads the
 fetched ``SorterParameters`` row and resolved job kwargs in (the tri-part
 ``make_fetch``/``make_compute``/``make_insert`` contract forbids DB I/O inside
-compute).
+compute). ``load_or_rebuild_analyzer`` and ``rebuild_analyzer_folder`` keep the
+cache-miss / reconstruction policy out of ``sorting.py`` so future analyzer
+extension growth can be added behind the same boundary.
 
 Why this lives in its own module rather than in ``sorting.py``:
 ``sorting.py`` is a DataJoint *schema* module -- importing it activates
@@ -28,6 +30,152 @@ cycle.
 """
 
 from __future__ import annotations
+
+
+def load_or_rebuild_analyzer(sorting_table, key):
+    """Return the SortingAnalyzer for ``key``, rebuilding the cache if needed.
+
+    Parameters
+    ----------
+    sorting_table
+        ``Sorting`` table/relation instance. Passed in so this service module
+        does not import the schema module at import time.
+    key : dict
+        Restriction selecting a single ``Sorting`` row.
+
+    Returns
+    -------
+    spikeinterface.SortingAnalyzer
+        Loaded analyzer. Missing analyzer folders are rebuilt in place from
+        the canonical stored sorting.
+
+    Raises
+    ------
+    ZeroUnitAnalyzerError
+        If the selected sort has zero units; SI cannot build a valid analyzer
+        over an empty sorting.
+    """
+    from spyglass.spikesorting.v2.exceptions import ZeroUnitAnalyzerError
+
+    # Resolve the canonical sorting_id from the matched row rather than
+    # assuming ``key`` literally carries "sorting_id" -- a general
+    # restriction (e.g. {"object_id": ...} or any single-row selector)
+    # must work too. ``fetch1`` enforces that the restriction selects
+    # exactly one Sorting row, so the resolved id is unambiguous.
+    sorting_id, n_units = (sorting_table & key).fetch1(
+        "sorting_id", "n_units"
+    )
+    if int(n_units) == 0:
+        raise ZeroUnitAnalyzerError(
+            "Sorting.get_analyzer: sorting_id="
+            f"{sorting_id!r} has zero units; no "
+            "SortingAnalyzer exists (SI cannot build one over zero "
+            "units). Use get_sorting() if you only need the empty "
+            "unit list, or re-sort with a lower detect_threshold."
+        )
+
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+
+    folder = analyzer_path(sorting_id)
+    if not folder.exists():
+        rebuild_analyzer_folder(sorting_table, {"sorting_id": sorting_id})
+    return si.load_sorting_analyzer(folder)
+
+
+def rebuild_analyzer_folder(sorting_table, key) -> None:
+    """Rebuild the analyzer folder for an existing ``Sorting`` row.
+
+    Reloads the canonical sorting from the units NWB so the rebuilt analyzer is
+    bit-equivalent to the one ``Sorting.make`` wrote -- not a fresh, possibly
+    nondeterministic, sort.
+
+    ``key`` must carry a literal ``sorting_id`` because the path policy and
+    selection fetches are keyed by that id. Public callers should resolve a
+    general restriction through :func:`load_or_rebuild_analyzer` first.
+    """
+    import shutil
+
+    from spyglass.common.common_interval import IntervalList
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+    from spyglass.spikesorting.v2.utils import (
+        artifact_detection_interval_list_name,
+    )
+    from spyglass.utils import logger
+
+    sel_row = (SortingSelection & key).fetch1()
+    # Resolve the artifact-detection id from the ArtifactDetectionSource
+    # part (the master has no artifact_detection_id FK); without this the
+    # artifact-mask gate below would never fire and a rebuilt analyzer for
+    # an artifact-backed sort would omit the mask, diverging from what
+    # Sorting.make wrote.
+    sel_row["artifact_detection_id"] = (
+        SortingSelection.resolve_artifact_detection(key)
+    )
+    source = SortingSelection.resolve_source(key)
+    if source.kind != "recording":
+        raise NotImplementedError(
+            "Sorting._rebuild_analyzer_folder: concat source not yet "
+            "implemented."
+        )
+    recording = Recording().get_recording(
+        {"recording_id": source.key["recording_id"]}
+    )
+    if sel_row.get("artifact_detection_id") is not None:
+        nwb_file_name = (
+            RecordingSelection
+            & {"recording_id": source.key["recording_id"]}
+        ).fetch1("nwb_file_name")
+        valid_times = (
+            IntervalList
+            & {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": artifact_detection_interval_list_name(
+                    sel_row["artifact_detection_id"]
+                ),
+            }
+        ).fetch1("valid_times")
+        recording = sorting_table._apply_artifact_mask(
+            recording=recording,
+            valid_times=valid_times,
+            artifact_detection_id=sel_row["artifact_detection_id"],
+            recording_id=source.key["recording_id"],
+        )
+    sorting_obj = sorting_table.get_sorting(key)
+    # ``_build_analyzer`` writes a folder to disk; a mid-rebuild failure would
+    # otherwise leak a partial scratch folder. Removing it before re-raising
+    # keeps the rebuild path's invariant ("analyzer folder reflects the
+    # canonical sort") true under failure.
+    folder = analyzer_path(key["sorting_id"])
+    try:
+        # Pass the already-resolved folder so the build target equals the path
+        # this method cleans up on failure (one resolution).
+        sorting_table._build_analyzer(
+            sorting=sorting_obj,
+            recording=recording,
+            key=key,
+            analyzer_folder=folder,
+        )
+    except Exception:
+        # Any build failure: remove the partial analyzer folder before
+        # re-raising so a half-built folder is never mistaken for a valid cache.
+        # The rmtree is best-effort -- a cleanup failure is logged, not raised,
+        # so it cannot mask the original error.
+        try:
+            if folder.exists():
+                shutil.rmtree(folder, ignore_errors=False)
+        except Exception as cleanup_exc:  # pragma: no cover -- defensive
+            logger.error(
+                "Sorting._rebuild_analyzer_folder: failed to remove "
+                f"partial analyzer folder {folder!r}: {cleanup_exc!r}"
+            )
+        raise
 
 
 def build_analyzer(

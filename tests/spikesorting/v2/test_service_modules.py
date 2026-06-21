@@ -975,6 +975,33 @@ def test_build_sorting_unit_rows_raises_typed_error_on_non_integer_unit_id():
 
 
 # --------------------------------------------------------------------------- #
+# _sorting_analyzer analyzer access contracts
+# --------------------------------------------------------------------------- #
+
+
+def test_load_or_rebuild_analyzer_raises_zero_unit_without_path_io():
+    """Zero-unit analyzer access fails before touching SI or cache paths."""
+    from spyglass.spikesorting.v2._sorting_analyzer import (
+        load_or_rebuild_analyzer,
+    )
+    from spyglass.spikesorting.v2.exceptions import ZeroUnitAnalyzerError
+
+    class _ZeroUnitSortingRelation:
+        def __and__(self, key):
+            assert key == {"sorting_id": "zero"}
+            return self
+
+        def fetch1(self, *attrs):
+            assert attrs == ("sorting_id", "n_units")
+            return "zero", 0
+
+    with pytest.raises(ZeroUnitAnalyzerError, match="zero units"):
+        load_or_rebuild_analyzer(
+            _ZeroUnitSortingRelation(), {"sorting_id": "zero"}
+        )
+
+
+# --------------------------------------------------------------------------- #
 # _analyzer_cache.classify_orphaned_analyzer_folders contracts (pure)
 # --------------------------------------------------------------------------- #
 

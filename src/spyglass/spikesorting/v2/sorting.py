@@ -36,7 +36,11 @@ from spyglass.spikesorting.v2._recipe_catalog import (
     _params_schema_version,
     sorter_default_contents,
 )
-from spyglass.spikesorting.v2._sorting_analyzer import build_analyzer
+from spyglass.spikesorting.v2._sorting_analyzer import (
+    build_analyzer,
+    load_or_rebuild_analyzer,
+    rebuild_analyzer_folder,
+)
 from spyglass.spikesorting.v2._sorting_artifact_mask import apply_artifact_mask
 from spyglass.spikesorting.v2._sorting_dispatch import (
     _clusterless_noise_levels,  # noqa: F401  re-exported for tests
@@ -1440,32 +1444,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             The loaded ``SortingAnalyzer`` for the sort, rebuilt in
             place if its folder was missing.
         """
-        import spikeinterface as si
-
-        from spyglass.spikesorting.v2.exceptions import (
-            ZeroUnitAnalyzerError,
-        )
-        from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
-
-        # Resolve the canonical sorting_id from the matched row rather than
-        # assuming ``key`` literally carries "sorting_id" -- a general
-        # restriction (e.g. {"object_id": ...} or any single-row selector)
-        # must work too. ``fetch1`` enforces that the restriction selects
-        # exactly one Sorting row, so the resolved id is unambiguous.
-        sorting_id, n_units = (self & key).fetch1("sorting_id", "n_units")
-        if int(n_units) == 0:
-            raise ZeroUnitAnalyzerError(
-                "Sorting.get_analyzer: sorting_id="
-                f"{sorting_id!r} has zero units; no "
-                "SortingAnalyzer exists (SI cannot build one over zero "
-                "units). Use get_sorting() if you only need the empty "
-                "unit list, or re-sort with a lower detect_threshold."
-            )
-
-        folder = analyzer_path(sorting_id)
-        if not folder.exists():
-            self._rebuild_analyzer_folder({"sorting_id": sorting_id})
-        return si.load_sorting_analyzer(folder)
+        return load_or_rebuild_analyzer(self, key)
 
     def _rebuild_analyzer_folder(self, key) -> None:
         """Rebuild the analyzer folder for an existing Sorting row.
@@ -1480,84 +1459,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         restriction and hands this private helper a normalized
         ``{"sorting_id": ...}``; callers should do the same.
         """
-        import shutil
-
-        from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
-
-        sel_row = (SortingSelection & key).fetch1()
-        # Resolve the artifact-detection id from the ArtifactDetectionSource
-        # part (the master has no artifact_detection_id FK); without this the
-        # artifact-mask gate below would never fire and a rebuilt analyzer for
-        # an artifact-backed sort would omit the mask, diverging from what
-        # Sorting.make wrote.
-        sel_row["artifact_detection_id"] = (
-            SortingSelection.resolve_artifact_detection(key)
-        )
-        source = SortingSelection.resolve_source(key)
-        if source.kind != "recording":
-            raise NotImplementedError(
-                "Sorting._rebuild_analyzer_folder: concat source not yet "
-                "implemented."
-            )
-        recording = Recording().get_recording(
-            {"recording_id": source.key["recording_id"]}
-        )
-        if sel_row.get("artifact_detection_id") is not None:
-            from spyglass.common.common_interval import IntervalList
-            from spyglass.spikesorting.v2.recording import RecordingSelection
-            from spyglass.spikesorting.v2.utils import (
-                artifact_detection_interval_list_name,
-            )
-
-            nwb_file_name = (
-                RecordingSelection
-                & {"recording_id": source.key["recording_id"]}
-            ).fetch1("nwb_file_name")
-            valid_times = (
-                IntervalList
-                & {
-                    "nwb_file_name": nwb_file_name,
-                    "interval_list_name": artifact_detection_interval_list_name(
-                        sel_row["artifact_detection_id"]
-                    ),
-                }
-            ).fetch1("valid_times")
-            recording = self._apply_artifact_mask(
-                recording=recording,
-                valid_times=valid_times,
-                artifact_detection_id=sel_row["artifact_detection_id"],
-                recording_id=source.key["recording_id"],
-            )
-        sorting_obj = self.get_sorting(key)
-        # ``_build_analyzer`` writes a folder to disk; a mid-rebuild
-        # failure would otherwise leak a partial scratch folder.
-        # Removing it before re-raising keeps the rebuild path's
-        # invariant ("analyzer folder reflects the canonical sort")
-        # true under failure.
-        folder = analyzer_path(key["sorting_id"])
-        try:
-            # Pass the already-resolved folder so the build target equals
-            # the path this method cleans up on failure (one resolution).
-            self._build_analyzer(
-                sorting=sorting_obj,
-                recording=recording,
-                key=key,
-                analyzer_folder=folder,
-            )
-        except Exception:
-            # Any build failure: remove the partial analyzer folder before
-            # re-raising so a half-built folder is never mistaken for a
-            # valid cache. The rmtree is best-effort -- a cleanup failure is
-            # logged, not raised, so it cannot mask the original error.
-            try:
-                if folder.exists():
-                    shutil.rmtree(folder, ignore_errors=False)
-            except Exception as cleanup_exc:  # pragma: no cover -- defensive
-                logger.error(
-                    "Sorting._rebuild_analyzer_folder: failed to remove "
-                    f"partial analyzer folder {folder!r}: {cleanup_exc!r}"
-                )
-            raise
+        return rebuild_analyzer_folder(self, key)
 
     def delete(self, *args, safemode=None, **kwargs):
         """Cascade-delete + analyzer-cache cleanup on disk.
