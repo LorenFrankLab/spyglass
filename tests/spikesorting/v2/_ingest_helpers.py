@@ -19,6 +19,8 @@ import inspect
 import shutil
 from pathlib import Path
 
+import numpy as np
+
 
 def copy_and_insert_nwb(
     nwb_source: Path | str, dest_name: str | None = None
@@ -249,3 +251,65 @@ def _clean_session_v2(session_key):
     (Recording & rec_keys).super_delete(warn=False) if rec_keys else None
     (RecordingSelection & session_key).super_delete(warn=False)
     (SortGroupV2 & session_key).super_delete(warn=False)
+
+
+def _synthetic_artifact_recording():
+    """8-channel, 90 000-sample (3 s @ 30 kHz) recording with two planted
+    artifact runs -- one common-mode amplitude burst, one single-channel
+    z-score outlier -- plus heterogeneous gains so the µV scaling matters.
+    """
+    import spikeinterface as si
+
+    fs = 30_000.0
+    n_samples = 90_000
+    n_channels = 8
+    rng = np.random.default_rng(0)
+    # Small baseline noise that never trips either threshold.
+    traces = rng.normal(0.0, 2.0, size=(n_samples, n_channels)).astype(
+        np.float32
+    )
+    # Common-mode amplitude burst across all channels (trips amplitude).
+    traces[20_000:20_300, :] += 300.0
+    # Single-channel transient (trips the across-channel z-score).
+    traces[60_000:60_120, 3] += 400.0
+    rec = si.NumpyRecording(traces_list=[traces], sampling_frequency=fs)
+    # Heterogeneous gains: the chunk worker and the reference must apply the
+    # SAME per-channel gain, so a wrong gain broadcast surfaces as inequality.
+    rec.set_channel_gains([1.0, 0.5, 2.0, 0.25, 1.0, 1.5, 0.8, 1.2])
+    return rec
+
+
+def _plant_concat_sorting_selection(sid):
+    """Land a concat-source ``SortingSelection`` (no ``RecordingSource``).
+
+    ``insert_selection`` rejects concat today, so the only way to get a
+    ``ConcatenatedRecordingSource`` part is the FK-checks-off bypass. The
+    caller cleans up ``SortingSelection & {sid}``.
+    """
+    import uuid
+
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        SortingSelection,
+    )
+
+    SorterParameters.insert_default()
+    SortingSelection.insert1(
+        {
+            "sorting_id": sid,
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": "default",
+        },
+        allow_direct_insert=True,
+    )
+    conn = dj.conn()
+    conn.query("SET FOREIGN_KEY_CHECKS=0")
+    try:
+        SortingSelection.ConcatenatedRecordingSource.insert1(
+            {"sorting_id": sid, "concat_recording_id": uuid.uuid4()},
+            allow_direct_insert=True,
+        )
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=1")

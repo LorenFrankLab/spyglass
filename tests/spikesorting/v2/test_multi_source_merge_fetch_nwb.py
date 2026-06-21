@@ -30,16 +30,13 @@ from pathlib import Path
 
 import pytest
 
+from tests.spikesorting.v2._ingest_helpers import (
+    clear_curations_for as _clear_curations_for,
+)
+
 _SMOKE = (
     Path(__file__).resolve().parent / "fixtures" / "mearec_polymer_smoke.nwb"
 )
-
-
-def _clear_curations_for(sorting_key):
-    """Drop a sorting's CurationV2 rows + merge masters (shared helper)."""
-    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
-
-    clear_curations_for(sorting_key)
 
 
 def _build_units_nwb(dst: Path) -> Path:

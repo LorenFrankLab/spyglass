@@ -27,12 +27,9 @@ from __future__ import annotations
 
 import pytest
 
-
-def _clear_curations_for(sorting_key):
-    """Drop a sorting's CurationV2 rows + merge masters (shared helper)."""
-    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
-
-    clear_curations_for(sorting_key)
+from tests.spikesorting.v2._ingest_helpers import (
+    clear_curations_for as _clear_curations_for,
+)
 
 
 @pytest.fixture(scope="module")

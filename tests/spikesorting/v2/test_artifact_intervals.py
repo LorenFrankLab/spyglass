@@ -17,6 +17,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from tests.spikesorting.v2._ingest_helpers import _synthetic_artifact_recording
+
 
 def _rec(traces, fs=30000.0, gain=1.0, times=None):
     import spikeinterface as si
@@ -448,32 +450,6 @@ def _in_memory_artifact_frames_reference(recording, validated):
         channel_hit = above_z
 
     return (channel_hit.sum(axis=1) >= n_required).nonzero()[0]
-
-
-def _synthetic_artifact_recording():
-    """8-channel, 90 000-sample (3 s @ 30 kHz) recording with two planted
-    artifact runs -- one common-mode amplitude burst, one single-channel
-    z-score outlier -- plus heterogeneous gains so the µV scaling matters.
-    """
-    import spikeinterface as si
-
-    fs = 30_000.0
-    n_samples = 90_000
-    n_channels = 8
-    rng = np.random.default_rng(0)
-    # Small baseline noise that never trips either threshold.
-    traces = rng.normal(0.0, 2.0, size=(n_samples, n_channels)).astype(
-        np.float32
-    )
-    # Common-mode amplitude burst across all channels (trips amplitude).
-    traces[20_000:20_300, :] += 300.0
-    # Single-channel transient (trips the across-channel z-score).
-    traces[60_000:60_120, 3] += 400.0
-    rec = si.NumpyRecording(traces_list=[traces], sampling_frequency=fs)
-    # Heterogeneous gains: the chunk worker and the reference must apply the
-    # SAME per-channel gain, so a wrong gain broadcast surfaces as inequality.
-    rec.set_channel_gains([1.0, 0.5, 2.0, 0.25, 1.0, 1.5, 0.8, 1.2])
-    return rec
 
 
 @pytest.mark.parametrize(

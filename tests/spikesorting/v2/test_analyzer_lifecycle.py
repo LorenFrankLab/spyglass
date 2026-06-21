@@ -11,6 +11,10 @@ from __future__ import annotations
 
 import pytest
 
+from tests.spikesorting.v2._ingest_helpers import (
+    _plant_concat_sorting_selection,
+)
+
 
 def _stub_recording_with_2d_probe():
     """Recording stub whose probe is already planar (``ndim == 2``).
@@ -28,42 +32,6 @@ def _stub_recording_with_2d_probe():
             return _Probe()
 
     return _Recording()
-
-
-def _plant_concat_sorting_selection(sid):
-    """Land a concat-source ``SortingSelection`` (no ``RecordingSource``).
-
-    ``insert_selection`` rejects concat today, so the only way to get a
-    ``ConcatenatedRecordingSource`` part is the FK-checks-off bypass. The
-    caller cleans up ``SortingSelection & {sid}``.
-    """
-    import uuid
-
-    import datajoint as dj
-
-    from spyglass.spikesorting.v2.sorting import (
-        SorterParameters,
-        SortingSelection,
-    )
-
-    SorterParameters.insert_default()
-    SortingSelection.insert1(
-        {
-            "sorting_id": sid,
-            "sorter": "clusterless_thresholder",
-            "sorter_params_name": "default",
-        },
-        allow_direct_insert=True,
-    )
-    conn = dj.conn()
-    conn.query("SET FOREIGN_KEY_CHECKS=0")
-    try:
-        SortingSelection.ConcatenatedRecordingSource.insert1(
-            {"sorting_id": sid, "concat_recording_id": uuid.uuid4()},
-            allow_direct_insert=True,
-        )
-    finally:
-        conn.query("SET FOREIGN_KEY_CHECKS=1")
 
 
 def _fresh_unit_producing_selection(populated_sorting):

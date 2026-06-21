@@ -20,6 +20,10 @@ from pathlib import Path
 import datajoint as dj
 import pytest
 
+from tests.spikesorting.v2._ingest_helpers import (
+    clear_curations_for as _clear_curations_for,
+)
+
 # These files are scripts and helper modules, not pytest test modules; the
 # leading ``test_`` is part of the component name (the standalone test
 # environment bootstrap). Excluding them keeps ``--doctest-modules`` from
@@ -301,13 +305,6 @@ def populated_sorting(dj_conn):
     if not (Sorting & sort_pk):
         Sorting.populate(sort_pk, reserve_jobs=False)
     yield sort_pk
-
-
-def _clear_curations_for(sorting_key):
-    """Drop a sorting's CurationV2 rows + merge masters (shared helper)."""
-    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
-
-    clear_curations_for(sorting_key)
 
 
 @pytest.fixture
