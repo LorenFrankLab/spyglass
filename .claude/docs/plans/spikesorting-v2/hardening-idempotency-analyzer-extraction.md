@@ -8,8 +8,8 @@ green. Remaining work is test-hardening + docs, not new architecture — see
 **Implementation status (as-built)** immediately below. The original
 forward-looking plan text is preserved unchanged after that section for
 provenance; where it says "do X" / "steps", read it as "X was done".
-**Scope:** Three independent post-audit hardening tracks on top of completed Phases 0–1
-(+ partial 1b) and the [AUDIT-REPORT.md](AUDIT-REPORT.md) remediations. This is **not**
+**Scope:** Three independent post-audit hardening tracks on top of completed Phases 0–1b
+and the [AUDIT-REPORT.md](AUDIT-REPORT.md) remediations. This is **not**
 part of the numbered phase roadmap in [PLAN.md](PLAN.md); it is pre-release architecture
 hardening before v2 becomes public API.
 **Relationship:** Complements [ARCHITECTURE-EVALUATION.md](ARCHITECTURE-EVALUATION.md)

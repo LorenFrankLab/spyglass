@@ -5,7 +5,7 @@
 **Status:** COMPLETE. Deep-dive verified on the 4 boundary concerns; REVIEW-REPORT.md triaged
 and folded in here (then deleted as superseded).
 **Scope:** Architecture (layering, cohesion, coupling, contracts) of `src/spyglass/spikesorting/v2/`.
-Phases 0–1 + partial 1b landed; 2–5 forward-declared in final-shape schema with gated bodies.
+Phases 0–1b landed; 2–5 forward-declared in final-shape schema with gated bodies.
 **Method:** Hypothesis-driven; parallel evidence agents + direct reads + direct grep/code
 verification of every load-bearing claim. Confidence levels explicit.
 

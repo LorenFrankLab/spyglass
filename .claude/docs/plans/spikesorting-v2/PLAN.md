@@ -1,6 +1,11 @@
 # Spike Sorting v2 Implementation Plan
 
-**Status:** Phase 0a / 0b / 0c and Phase 1 complete. Phase 1b runtime-regressions partially landed (R17 `_hash_nwb_recording` contract complete; see [recording.py:1923](../../../../src/spyglass/spikesorting/v2/recording.py#L1923)); other 1b items pending. Phases 2 (AnalyzerCuration), 3 (SessionGroup / ConcatenatedRecording), 4 (UnitMatch), 5 (UX / FigPack) pending. The review-fixes child plan (completed; its planning artifacts have been removed) addressed correctness/schema findings on top of the completed phases.
+**Status:** Phase 0a / 0b / 0c, Phase 1, and Phase 1b runtime-regressions
+are complete. Phases 2 (AnalyzerCuration), 3 (SessionGroup /
+ConcatenatedRecording), 4 (UnitMatch), and 5 (UX / FigPack) are pending.
+The review-fixes child plan (completed; its planning artifacts have been
+removed) addressed correctness/schema findings on top of the completed phases.
+Phase 2 is now the next implementation phase.
 
 **Current UX addendum:** the separate `spikesorting-v2-ux-hardening` plan has
 landed a minimal first-hour single-session path on top of the Phase 1 MVP:
@@ -12,7 +17,7 @@ single-session notebook. Post-sort SpikeInterface quality metrics, analyzer
 extension growth, auto-labels, merge suggestions, and BurstPair-style plots
 remain Phase 2 `AnalyzerCuration` work, not ad hoc additions to `pipeline.py`.
 
-**Current pre-Phase-2 code audit (2026-06-21):** the Phase 2+ plan still
+**Current pre-Phase-2 code audit (2026-06-21):** with Phase 1b complete, the Phase 2+ plan still
 matches the current tree, with these implementation guardrails. The
 Phase-2/4/5 modules (`metric_curation.py`, `unit_matching.py`,
 `matcher_protocol.py`, `figpack_curation.py`) are import-safe placeholders that
@@ -100,4 +105,4 @@ Phase 3 SessionGroup + ConcatenatedRecording
                           -> Phase 5b UX/FigPack tables/notebooks/docs
 ```
 
-Execution happens on the long-lived `spikesorting-v2` integration branch with checkpoint commits. Phase 1 is the first runtime v2 pipeline checkpoint and requires Phase 0a, Phase 0b, and Phase 0c. Phase 0c is a hard gate because Phase 1 imports and runs SpikeInterface 0.104 APIs while legacy v0/v1 active-runtime workflows must either be guarded with clear legacy-environment messages or explicitly proven compatible. Phase 1b is a hard gate before Phase 2 and Phase 3 because both later phases populate against `Recording` / `Sorting` at lab-relevant scales (Phase 2 builds analyzer extensions on top of the cached `ElectricalSeries`; Phase 3 concatenates per-member `Recording` rows), and the Phase 1 in-memory write OOMs before either can run on real chronic data. Checkpoint commits may be grouped into larger review PRs if the gating order and validation evidence remain clear.
+Execution happens on the long-lived `spikesorting-v2` integration branch with checkpoint commits. Phase 1 is the first runtime v2 pipeline checkpoint and requires Phase 0a, Phase 0b, and Phase 0c. Phase 0c is a hard gate because Phase 1 imports and runs SpikeInterface 0.104 APIs while legacy v0/v1 active-runtime workflows must either be guarded with clear legacy-environment messages or explicitly proven compatible. Phase 1b was the hard gate before Phase 2 and Phase 3 because both later phases populate against `Recording` / `Sorting` at lab-relevant scales (Phase 2 builds analyzer extensions on top of the cached `ElectricalSeries`; Phase 3 concatenates per-member `Recording` rows), and the Phase 1 in-memory write OOMed before either could run on real chronic data. With Phase 1b complete, that gate is satisfied and Phase 2 may start. Checkpoint commits may be grouped into larger review PRs if the gating order and validation evidence remain clear.
