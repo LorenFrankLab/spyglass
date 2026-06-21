@@ -89,7 +89,7 @@ def detect_bad_channels(recording, **overrides) -> dict:
     params["method"] = "coherence+psd"  # hard-pin; override cannot replace
     bad_ids, labels = sip.detect_bad_channels(recording, **params)
     return {
-        "bad_channel_ids": [c for c in bad_ids],
+        "bad_channel_ids": list(bad_ids),
         "labels": {
             c: str(label)
             for c, label in zip(recording.get_channel_ids(), labels)

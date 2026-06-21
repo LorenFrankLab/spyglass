@@ -419,11 +419,9 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         # _handle_existing).
         explicit_sort_group_ids = sort_group_ids is not None
         if sort_group_ids is None:
-            existing_ids = (cls & {"nwb_file_name": nwb_file_name}).fetch(
-                "sort_group_id"
+            sort_group_ids = cls._next_sort_group_ids(
+                nwb_file_name, len(proposed)
             )
-            start = int(max(existing_ids)) + 1 if len(existing_ids) else 0
-            sort_group_ids = list(range(start, start + len(proposed)))
         elif len(sort_group_ids) != len(proposed):
             raise ValueError(
                 f"set_group_by_shank: sort_group_ids has length "
@@ -583,11 +581,9 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
 
         explicit_sort_group_ids = sort_group_ids is not None
         if sort_group_ids is None:
-            existing_ids = (cls & {"nwb_file_name": nwb_file_name}).fetch(
-                "sort_group_id"
+            sort_group_ids = cls._next_sort_group_ids(
+                nwb_file_name, len(groups)
             )
-            start = int(max(existing_ids)) + 1 if len(existing_ids) else 0
-            sort_group_ids = list(range(start, start + len(groups)))
         elif len(sort_group_ids) != len(groups):
             raise ValueError(
                 f"set_group_by_electrode_table_column: sort_group_ids has "
@@ -643,6 +639,21 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
                 "omit_unitrode=False to include them."
             )
         return skipped
+
+    @classmethod
+    def _next_sort_group_ids(cls, nwb_file_name: str, count: int) -> list[int]:
+        """Auto-allocate ``count`` sort_group_ids after the session's max.
+
+        Returns the next ``count`` integers starting from
+        ``max(existing) + 1`` (or 0 on a fresh session) so additive inserts
+        never collide with prior rows on rerun. Shared by both
+        ``set_group_by_*`` constructors.
+        """
+        existing_ids = (cls & {"nwb_file_name": nwb_file_name}).fetch(
+            "sort_group_id"
+        )
+        start = int(max(existing_ids)) + 1 if len(existing_ids) else 0
+        return list(range(start, start + count))
 
     @classmethod
     def _insert_sort_group_rows(cls, master_rows, part_rows) -> None:
@@ -920,6 +931,27 @@ class RecordingComputed(NamedTuple):
     sort_valid_times: np.ndarray
     expected_saved_total: float
     n_intended_intervals: int
+
+
+def _unlink_staged_analysis_file(
+    analysis_file_name: str, *, context: str
+) -> None:
+    """Best-effort removal of an orphaned staged ``AnalysisNwbfile``.
+
+    Failure paths write the artifact to disk before (or instead of) its
+    DataJoint row landing; this unlinks that orphan so the cleanup tooling
+    does not have to chase it. Best-effort: a cleanup failure is logged,
+    never raised, so it cannot mask the original error. ``context`` names
+    the calling method for the log line.
+    """
+    try:
+        abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+        Path(abs_path).unlink(missing_ok=True)
+    except Exception as cleanup_exc:  # pragma: no cover -- defensive
+        logger.error(
+            f"{context}: failed to clean up staged analysis file "
+            f"{analysis_file_name!r}: {cleanup_exc!r}"
+        )
 
 
 @schema
@@ -1201,7 +1233,7 @@ class Recording(SpyglassMixin, dj.Computed):
 
         # The duration we INTENDED to save: the sort interval intersected
         # with the raw valid times AND filtered by ``min_segment_length`` --
-        # the SAME filtering ``_restrict_recording`` applies to build the
+        # the SAME filtering ``restrict_recording`` applies to build the
         # recording. The truncation check in ``make_insert`` compares the
         # actually-saved duration against this (not against the raw requested
         # chunks) so intentionally-dropped sub-``min_segment_length`` slivers
@@ -1367,8 +1399,6 @@ class Recording(SpyglassMixin, dj.Computed):
             If the saved duration falls short of ``expected_saved_total``
             by more than the sample-grid tolerance.
         """
-        import pathlib as _pathlib
-
         from spyglass.spikesorting.v2.exceptions import (
             RecordingTruncatedError,
         )
@@ -1380,36 +1410,33 @@ class Recording(SpyglassMixin, dj.Computed):
         # Truncation check: compare the SAVED duration against the duration
         # we INTENDED to save -- the sort interval intersected with the raw
         # valid times AND filtered by ``min_segment_length`` (computed in
-        # ``make_compute`` the same way ``_restrict_recording`` filters).
+        # ``make_compute`` the same way ``restrict_recording`` filters).
         # Comparing against the raw requested chunks instead would
         # spuriously flag (a) inter-chunk gaps on the disjoint path and
         # (b) intentionally-dropped sub-``min_segment_length`` slivers as
         # truncation. Using ``expected_saved_total`` leaves the guard
         # firing only on genuine packet loss / interval misalignment.
-        saved_total = float(saved_end - saved_start)
+        # ``duration_s`` is the persisted span (``saved_end - saved_start``,
+        # computed once in ``_compute_recording_artifact``); reuse it as the
+        # SAVED duration here rather than recomputing the same difference.
         tolerance = self._truncation_tolerance(
             n_intended_intervals, sampling_frequency
         )
-        missing = expected_saved_total - saved_total
+        missing = expected_saved_total - duration_s
         if missing > tolerance:
             # File written but never registered: clean it up before
             # raising so the AnalysisNwbfile cleanup tooling does not
             # have to chase an orphan from a request-time validation.
-            try:
-                abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
-                _pathlib.Path(abs_path).unlink(missing_ok=True)
-            except Exception as cleanup_exc:  # pragma: no cover -- defensive
-                logger.error(
-                    "Recording.make_insert: failed to clean up unregistered "
-                    f"analysis file {analysis_file_name!r}: {cleanup_exc!r}"
-                )
+            _unlink_staged_analysis_file(
+                analysis_file_name, context="Recording.make_insert"
+            )
             raise RecordingTruncatedError(
                 "Recording.make wrote a shorter recording than expected. "
                 f"After min_segment_length filtering, IntervalList "
                 f"{interval_list_name!r} in {nwb_file_name!r} should yield "
                 f"{expected_saved_total:.6f}s across "
                 f"{len(sort_valid_times)} requested chunk(s); saved "
-                f"{saved_total:.6f}s (range {saved_start} -> {saved_end}). "
+                f"{duration_s:.6f}s (range {saved_start} -> {saved_end}). "
                 f"Missing: {missing:.6f}s. Check the raw NWB for dropped "
                 "packets or interval misalignment."
             )
@@ -1438,14 +1465,9 @@ class Recording(SpyglassMixin, dj.Computed):
             # remove the orphan staged analysis file before re-raising. The
             # unlink itself is best-effort -- a cleanup failure is logged, not
             # raised, so it cannot mask the original error.
-            try:
-                abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
-                _pathlib.Path(abs_path).unlink(missing_ok=True)
-            except Exception as cleanup_exc:  # pragma: no cover -- defensive
-                logger.error(
-                    "Recording.make_insert: failed to clean up staged "
-                    f"analysis file {analysis_file_name!r}: {cleanup_exc!r}"
-                )
+            _unlink_staged_analysis_file(
+                analysis_file_name, context="Recording.make_insert"
+            )
             raise
 
     # ---- Public accessors ------------------------------------------------
@@ -1629,8 +1651,6 @@ class Recording(SpyglassMixin, dj.Computed):
         NOT unlink -- a mid-write failure surfaces via the hash
         mismatch check in the caller.
         """
-        import pathlib as _pathlib
-
         from spyglass.spikesorting.utils import read_raw_nwb_recording
         from spyglass.spikesorting.v2.utils import _get_recording_timestamps
 
@@ -1642,7 +1662,7 @@ class Recording(SpyglassMixin, dj.Computed):
         sampling_frequency = float(recording.get_sampling_frequency())
 
         recording, timestamps_override, n_selected_intervals = (
-            self._restrict_recording(
+            restrict_recording(
                 recording=recording,
                 nwb_file_name=nwb_file_name,
                 interval_list_name=interval_list_name,
@@ -1656,7 +1676,7 @@ class Recording(SpyglassMixin, dj.Computed):
                 bad_channel_ids=bad_channel_ids,
             )
         )
-        recording, applied_steps = self._apply_pre_motion_preprocessing(
+        recording, applied_steps = apply_pre_motion_preprocessing(
             recording=recording,
             reference_mode=reference_mode,
             reference_electrode_id=reference_electrode_id,
@@ -1720,17 +1740,10 @@ class Recording(SpyglassMixin, dj.Computed):
                 existing_analysis_file_name is None
                 and analysis_file_name is not None
             ):
-                try:
-                    abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
-                    _pathlib.Path(abs_path).unlink(missing_ok=True)
-                except (
-                    Exception
-                ) as cleanup_exc:  # pragma: no cover -- defensive
-                    logger.error(
-                        "Recording._compute_recording_artifact: failed to "
-                        "clean up staged analysis file "
-                        f"{analysis_file_name!r}: {cleanup_exc!r}"
-                    )
+                _unlink_staged_analysis_file(
+                    analysis_file_name,
+                    context="Recording._compute_recording_artifact",
+                )
             raise
 
         return (
@@ -1744,58 +1757,16 @@ class Recording(SpyglassMixin, dj.Computed):
             duration_s,
         )
 
-    @classmethod
-    def _restrict_recording(
-        cls,
-        recording,
-        nwb_file_name: str,
-        interval_list_name: str,
-        sort_group_channel_ids: list,
-        reference_mode: str,
-        reference_electrode_id: int | None,
-        sort_valid_times,
-        raw_valid_times,
-        *,
-        min_segment_length: float = 1.0,
-        bad_channel_handling: str = "remove",
-        bad_channel_ids=(),
-    ):
-        """Slice the SI recording in time and channels.
-
-        Thin delegator to
-        :func:`._recording_materialization.restrict_recording`; kept as a
-        ``Recording`` classmethod because ``_compute_recording_artifact``
-        calls ``self._restrict_recording(...)``. The time/channel slicing,
-        the disjoint-interval concat + ``timestamps_override``
-        construction, the reference-channel handling, and the ``interpolate``
-        re-inclusion of interior curated-bad channels live in the service
-        module. Returns ``(recording, timestamps_override,
-        n_selected_intervals)``.
-        """
-        return restrict_recording(
-            recording,
-            nwb_file_name,
-            interval_list_name,
-            sort_group_channel_ids,
-            reference_mode,
-            reference_electrode_id,
-            sort_valid_times,
-            raw_valid_times,
-            min_segment_length=min_segment_length,
-            bad_channel_handling=bad_channel_handling,
-            bad_channel_ids=bad_channel_ids,
-        )
-
     @staticmethod
     def _spikeinterface_channel_ids(nwb_file_name: str, spyglass_ids):
         """Map Spyglass electrode_ids onto SpikeInterface channel ids.
 
         Thin delegator to
         :func:`._recording_materialization.spikeinterface_channel_ids`;
-        kept as a ``Recording`` staticmethod because ``_restrict_recording``
-        and ``test_audit_parity`` call it. Resolves the raw NWB
-        electrodes-table ``channel_name`` mapping (or the integer 1-1
-        fallback) in the service module.
+        kept as a ``Recording`` staticmethod because ``test_audit_parity``
+        calls it directly. Resolves the raw NWB electrodes-table
+        ``channel_name`` mapping (or the integer 1-1 fallback) in the
+        service module.
         """
         return spikeinterface_channel_ids(nwb_file_name, spyglass_ids)
 
@@ -1840,39 +1811,6 @@ class Recording(SpyglassMixin, dj.Computed):
         )
 
     @staticmethod
-    def _apply_pre_motion_preprocessing(
-        recording,
-        reference_mode: str,
-        reference_electrode_id: int | None,
-        sort_group_channel_ids: list,
-        validated: PreprocessingParamsSchema,
-        bad_channel_handling: str = "remove",
-        bad_channel_ids=(),
-    ):
-        """Apply the pre-motion preprocessing stack (phase-shift, filter, ref).
-
-        Thin delegator to
-        :func:`._recording_materialization.apply_pre_motion_preprocessing`;
-        kept as a ``Recording`` staticmethod because
-        ``_compute_recording_artifact`` calls
-        ``self._apply_pre_motion_preprocessing(...)`` and the v2 tests call
-        it directly. The optional phase-shift -> bandpass -> bad-channel
-        handling -> common-reference stack (whitening deferred to the sorter so
-        motion correction never sees whitened data) lives in the service
-        module. Returns ``(recording, applied_steps)`` -- the applied-step
-        report feeds ``_filtering_description``.
-        """
-        return apply_pre_motion_preprocessing(
-            recording,
-            reference_mode,
-            reference_electrode_id,
-            sort_group_channel_ids,
-            validated,
-            bad_channel_handling=bad_channel_handling,
-            bad_channel_ids=bad_channel_ids,
-        )
-
-    @staticmethod
     def _filtering_description(
         bandpass_filter, reference_mode: str, applied_steps: dict
     ) -> str:
@@ -1883,7 +1821,7 @@ class Recording(SpyglassMixin, dj.Computed):
         ``Recording`` staticmethod because ``_compute_recording_artifact``
         calls ``self._filtering_description(...)`` and the v2 tests call it
         directly. ``applied_steps`` is the report from
-        ``_apply_pre_motion_preprocessing`` so a requested-but-skipped
+        ``apply_pre_motion_preprocessing`` so a requested-but-skipped
         phase-shift is not falsely listed.
         """
         return _filtering_description_svc(

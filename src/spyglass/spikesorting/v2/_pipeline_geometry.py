@@ -29,6 +29,18 @@ _SORT_GROUP_COLUMNS = [
 ]
 
 
+def _missing(value) -> bool:
+    """True when ``value`` is ``None`` or a pandas/NumPy NA/NaN."""
+    import pandas as pd
+
+    return value is None or bool(pd.isna(value))
+
+
+def _nullable_int(value):
+    """Coerce a possibly-missing numeric to ``int``, or ``None`` if missing."""
+    return None if _missing(value) else int(value)
+
+
 def describe_sort_groups(nwb_file_name: str) -> "pd.DataFrame":
     """Return a notebook-friendly summary of v2 sort groups for a session.
 
@@ -60,11 +72,6 @@ def describe_sort_groups(nwb_file_name: str) -> "pd.DataFrame":
     from spyglass.common.common_ephys import Electrode
     from spyglass.common.common_region import BrainRegion
     from spyglass.spikesorting.v2.recording import SortGroupV2
-
-    def _nullable_int(value):
-        if value is None or pd.isna(value):
-            return None
-        return int(value)
 
     def _sorted_nullable_ints(values):
         normalized = {_nullable_int(value) for value in values}
@@ -140,20 +147,10 @@ def describe_sort_groups(nwb_file_name: str) -> "pd.DataFrame":
 
 def _sort_group_geometry_rows(nwb_file_name: str) -> list[dict[str, Any]]:
     """Return DB-backed electrode geometry rows for sort-group plotting."""
-    import pandas as pd
-
     from spyglass.common.common_device import Probe
     from spyglass.common.common_ephys import Electrode
     from spyglass.common.common_region import BrainRegion
     from spyglass.spikesorting.v2.recording import SortGroupV2
-
-    def _missing(value) -> bool:
-        return value is None or bool(pd.isna(value))
-
-    def _nullable_int(value):
-        if _missing(value):
-            return None
-        return int(value)
 
     master_rows = (SortGroupV2 & {"nwb_file_name": nwb_file_name}).fetch(
         as_dict=True
@@ -358,11 +355,7 @@ def plot_sort_group_geometry(
         side-by-side along x (x positions are display-shifted per probe;
         within-probe geometry and y depths are unchanged).
     """
-    import pandas as pd
     import matplotlib.pyplot as plt
-
-    def _missing(value) -> bool:
-        return value is None or bool(pd.isna(value))
 
     if ax is None:
         _, ax = plt.subplots(figsize=(7, 5), constrained_layout=True)
