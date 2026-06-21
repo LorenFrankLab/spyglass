@@ -1602,6 +1602,15 @@ class Sorting(SpyglassMixin, dj.Computed):
         folder on populate failure. This override closes the third
         lifecycle event: row deletion.
 
+        A leading positional restriction is accepted as a compatibility guard
+        for the easy-to-mistype ``Sorting().delete(restriction)`` form. DataJoint's
+        own ``delete`` does not take restrictions positionally, and Spyglass's
+        cautious-delete layer would otherwise read that dict as a truthy
+        ``force_permission`` (``cautious_delete(self, force_permission=False,
+        ...)``) and cascade-delete EVERY row of the unrestricted instance --
+        destroying each row's 5-50 GB analyzer folder. Mirrors
+        ``ArtifactDetection.delete``'s guard.
+
         Parameters
         ----------
         *args
@@ -1613,6 +1622,16 @@ class Sorting(SpyglassMixin, dj.Computed):
         **kwargs
             Keyword arguments forwarded to ``super().delete``.
         """
+        restriction_args = []
+        while args and isinstance(args[0], (dict, list, str)):
+            restriction_args.append(args[0])
+            args = args[1:]
+        if restriction_args:
+            target = self
+            for restriction in restriction_args:
+                target = target & restriction
+            return target.delete(*args, safemode=safemode, **kwargs)
+
         from spyglass.spikesorting.v2._analyzer_cache import (
             remove_analyzer_cache,
         )

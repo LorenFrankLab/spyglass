@@ -262,3 +262,45 @@ def test_unrestricted_artifact_delete_with_arg_cleans_interval_list(
         (IntervalList & interval_restr).delete_quick()
         (ArtifactDetectionSelection.RecordingSource & target_pk).delete_quick()
         (ArtifactDetectionSelection & target_pk).delete_quick()
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_unrestricted_sorting_delete_with_positional_restriction_restricts(
+    planted_sort,
+):
+    """``Sorting().delete(restr)`` treats a leading positional dict as a
+    RESTRICTION, not as cautious-delete's ``force_permission``.
+
+    ``cautious_delete(self, force_permission=False, ...)`` reads its first
+    positional argument as ``force_permission``. So without a guard,
+    ``Sorting().delete({...}, safemode=False)`` on the UNRESTRICTED instance
+    passes the dict through as a truthy ``force_permission``, bypasses the
+    permission check, and deletes EVERY ``Sorting`` row -- destroying each
+    row's 5-50 GB analyzer folder. Mirrors ``ArtifactDetection.delete``'s
+    positional-restriction guard: a restriction that matches NOTHING must
+    delete nothing, so the planted row and its analyzer folder survive.
+    """
+    import uuid
+
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    folder = analyzer_path(planted_sort["sorting_id"])
+    assert Sorting & planted_sort, "fixture should have a planted Sorting row"
+    assert folder.exists(), "fixture should have created the analyzer folder"
+
+    # A sorting_id that matches no row. With the shim this restricts the
+    # delete to the empty set (a no-op); without it, the dict is read as
+    # force_permission and the unrestricted instance deletes every row.
+    nonexistent = uuid.UUID("00000000-0000-0000-0000-000000000000")
+    Sorting().delete({"sorting_id": nonexistent}, safemode=False)
+
+    assert Sorting & planted_sort, (
+        "Sorting().delete({nonexistent}) deleted the planted row -- the "
+        "leading dict was treated as force_permission, not a restriction"
+    )
+    assert folder.exists(), (
+        "Sorting().delete({nonexistent}) destroyed the planted analyzer "
+        "folder for a row that should not have matched the restriction"
+    )
