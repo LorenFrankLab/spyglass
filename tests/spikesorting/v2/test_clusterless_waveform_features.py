@@ -567,17 +567,17 @@ def test_unit_waveform_features_zero_unit_v2(wave_session):
 
 @_skip_if_legacy
 @pytest.mark.slow
-def test_unit_waveform_features_v2_full_waveform_and_rejects_spike_location(
+def test_unit_waveform_features_v2_full_waveform_and_spike_location(
     wave_session,
 ):
-    """v2 supports ``full_waveform`` and rejects ``spike_location``.
+    """v2 supports both ``full_waveform`` and ``spike_location``.
 
     Shares one tuned clusterless sort. ``full_waveform`` writes a
     ``(n_spikes, n_time*n_channels)`` column aligned 1:1 with ``spike_times``.
-    ``spike_location`` -- which ships in a default ``WaveformFeaturesParams``
-    row, so a v2 user can easily select it -- is not wired for v2; ``make``
-    must raise ``NotImplementedError`` before building an analyzer rather than
-    crashing deep in SpikeInterface.
+    ``spike_location`` (an optional clusterless mark) writes a
+    ``(n_spikes, 2 or 3)`` column per unit -- the v2 SortingAnalyzer path
+    computes it lazily from the ``spike_locations`` extension, so ``make``
+    completes without ``NotImplementedError``.
     """
     from spyglass.decoding.v1.waveform_features import (
         UnitWaveformFeatures,
@@ -649,14 +649,28 @@ def test_unit_waveform_features_v2_full_waveform_and_rejects_spike_location(
             f"{fw.shape}"
         )
 
-        # spike_location: unsupported for v2; make() raises before SI work
+        # spike_location: supported for v2; writes a (n_spikes, 2 or 3) column
+        # per unit aligned 1:1 with spike_times, alongside amplitude.
         loc_sel = {
             "spikesorting_merge_id": merge_id,
             "features_param_name": loc_param,
         }
         UnitWaveformFeaturesSelection().insert1(loc_sel, skip_duplicates=True)
-        with pytest.raises(NotImplementedError, match="spike_location"):
-            UnitWaveformFeatures().make(loc_sel)
+        UnitWaveformFeatures.populate(loc_sel, reserve_jobs=False)
+        loc_df = _units_dataframe(
+            (UnitWaveformFeatures & loc_sel).fetch_nwb()[0]
+        )
+        assert "spike_location" in loc_df.columns, "spike_location missing"
+        assert "amplitude" in loc_df.columns, "amplitude missing"
+        loc_row = loc_df.loc[0]
+        loc = np.asarray(loc_row["spike_location"])
+        n_spikes = np.asarray(loc_row["spike_times"]).shape[0]
+        assert loc.ndim == 2 and loc.shape[0] == n_spikes, (
+            f"spike_location {loc.shape} must align 1:1 with {n_spikes} spikes"
+        )
+        assert loc.shape[1] in (2, 3), (
+            f"spike_location must be 2D or 3D coordinates; got {loc.shape}"
+        )
     finally:
         for p in (fw_param, loc_param):
             (UnitWaveformFeatures & {"features_param_name": p}).delete_quick()

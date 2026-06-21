@@ -180,21 +180,21 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
             # would mis-index here.
             from spyglass.spikesorting.v2.curation import CurationV2
 
-            # The v2 SortingAnalyzer path serves only the
-            # ``get_waveforms``-based features (amplitude, full_waveform).
-            # ``spike_location`` needs the analyzer object directly (not the
-            # adapter surface) and is not consumed by clusterless decoding;
-            # reject it explicitly rather than crash deep inside SI.
+            # The v2 SortingAnalyzer path serves the ``get_waveforms``-based
+            # features (amplitude, full_waveform) plus ``spike_location`` (an
+            # optional clusterless mark), which the accessor computes lazily
+            # from the analyzer's ``spike_locations`` extension. Any other
+            # feature is rejected explicitly rather than crashing deep in SI.
             unsupported = set(params["waveform_features_params"]) - {
                 "amplitude",
                 "full_waveform",
+                "spike_location",
             }
             if unsupported:
                 raise NotImplementedError(
                     f"Waveform features {sorted(unsupported)} are not yet "
                     "supported for v2 (SI 0.104) sources; supported: "
-                    "{'amplitude', 'full_waveform'}. Clusterless decoding "
-                    "uses 'amplitude'."
+                    "{'amplitude', 'full_waveform', 'spike_location'}."
                 )
 
             # CurationV2 owns the v2 source-part walk (sorter + nwb_file_name);
@@ -497,6 +497,8 @@ class _AnalyzerWaveformAccessor:
             if analyzer is not None
             else None
         )
+        # Lazily filled on the first ``get_spike_locations`` call.
+        self._spike_locations_by_unit = None
 
     def get_waveforms(self, unit_id) -> np.ndarray:
         """Per-spike waveforms for ``unit_id``, ``(n_spikes, n_samples, n_ch)``.
@@ -510,6 +512,45 @@ class _AnalyzerWaveformAccessor:
                 "zero-unit accessor; there are no waveforms to return."
             )
         return self._waveforms.get_waveforms_one_unit(unit_id)
+
+    def get_spike_locations(self, unit_id) -> np.ndarray:
+        """Per-spike locations for ``unit_id``, shape ``(n_spikes, 2 or 3)``.
+
+        Lazily computes the ``spike_locations`` extension (and its
+        ``templates`` parent) on first call, then caches the per-unit result.
+        The analyzer is single-segment (the recording is concatenated
+        upstream), so every spike for a unit lands in one array aligned 1:1
+        with that unit's ``spike_times``.
+        """
+        if self._analyzer is None:
+            raise RuntimeError(
+                "_AnalyzerWaveformAccessor.get_spike_locations called on a "
+                "zero-unit accessor; there are no spike locations to return."
+            )
+        if self._spike_locations_by_unit is None:
+            if not self._analyzer.has_extension("templates"):
+                self._analyzer.compute("templates")
+            if not self._analyzer.has_extension("spike_locations"):
+                self._analyzer.compute("spike_locations")
+            by_segment = self._analyzer.get_extension(
+                "spike_locations"
+            ).get_data(outputs="by_unit")
+            merged: dict = {}
+            # ``by_unit`` is keyed {segment: {unit_id: structured (x,y[,z])}}.
+            # Concatenate across segments (single-segment here) and convert the
+            # structured array to a plain (n_spikes, ndim) float array.
+            for segment in by_segment.values():
+                for uid, structured in segment.items():
+                    columns = np.column_stack(
+                        [structured[name] for name in structured.dtype.names]
+                    )
+                    merged[uid] = (
+                        columns
+                        if uid not in merged
+                        else np.concatenate([merged[uid], columns], axis=0)
+                    )
+            self._spike_locations_by_unit = merged
+        return self._spike_locations_by_unit[unit_id]
 
 
 def _get_full_waveform(
@@ -534,26 +575,39 @@ def _get_full_waveform(
 
 
 def _get_spike_locations(
-    waveform_extractor: si.WaveformExtractor, unit_id: int, **kwargs
+    waveform_extractor: "_AnalyzerWaveformAccessor",
+    unit_id: int,
+    **kwargs,
 ) -> np.ndarray:
-    """Returns the spike locations in 2D or 3D space.
+    """Returns per-spike locations in 2D or 3D space, shape (n_spikes, 2 or 3).
+
+    For v2 sources this reads the SortingAnalyzer's ``spike_locations``
+    extension via the accessor's ``get_spike_locations``. The legacy v0/v1
+    ``WaveformExtractor`` path (SI < 0.101) has no such accessor and is no
+    longer supported under SI 0.104 -- the old
+    ``si.postprocessing.compute_spike_locations(waveform_extractor)`` call was
+    doubly broken (``si.postprocessing`` is not bound on a plain ``import
+    spikeinterface as si``, and 0.104 takes a ``SortingAnalyzer``, not a
+    ``WaveformExtractor``).
 
     Parameters
     ----------
-    waveform_extractor : si.WaveformExtractor
-        _description_
+    waveform_extractor : _AnalyzerWaveformAccessor
+        The v2 SortingAnalyzer adapter (must expose ``get_spike_locations``).
     unit_id : int
-        Not used but needed for the function signature
+        Unit whose per-spike locations to return.
 
     Returns
     -------
-    spike_locations: np.ndarray, shape (n_spikes, 2 or 3)
-        spike locations in 2D or 3D space
+    np.ndarray, shape (n_spikes, 2 or 3)
+        Per-spike locations, aligned 1:1 with the unit's ``spike_times``.
     """
-    spike_locations = si.postprocessing.compute_spike_locations(
-        waveform_extractor
+    if hasattr(waveform_extractor, "get_spike_locations"):
+        return np.asarray(waveform_extractor.get_spike_locations(unit_id))
+    raise NotImplementedError(
+        "spike_location is supported only for v2 (SortingAnalyzer) sources; "
+        "the legacy WaveformExtractor path was removed in SpikeInterface 0.104."
     )
-    return np.array(spike_locations.tolist())
 
 
 WAVEFORM_FEATURE_FUNCTIONS = {
