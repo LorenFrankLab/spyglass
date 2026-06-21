@@ -414,14 +414,15 @@ def test_curation_v2_stages_empty_units_nwb_on_zero_kept_units(
     natural way to hit it -- a sorting with zero units -- is
     rejected upstream by ``Sorting.make``).
     """
-    from spyglass.spikesorting.v2 import curation as curation_module
+    from spyglass.spikesorting.v2 import _curation_plan
     from spyglass.spikesorting.v2.curation import CurationV2
 
     _clear_curations(populated_sorting)
 
-    # Patch the build_curated_unit_rows service function (called by
-    # _build_curation_insert_plan) to return empty so the NWB-staging call
-    # enters the kept_unit_to_contributors={} branch. No call to add_unit
+    # Patch build_curated_unit_rows where ``build_curation_insert_plan`` now
+    # calls it -- the ``_curation_plan`` service module (the insert path was
+    # extracted out of ``curation.py``) -- to return empty so the NWB-staging
+    # call enters the kept_unit_to_contributors={} branch. No call to add_unit
     # will run, so the guard at ``if nwbf.units is None`` is the only thing
     # preventing the AttributeError at ``nwbf.units.object_id``.
     def _empty_rows(
@@ -430,7 +431,7 @@ def test_curation_v2_stages_empty_units_nwb_on_zero_kept_units(
         return [], {}
 
     monkeypatch.setattr(
-        curation_module, "build_curated_unit_rows", _empty_rows
+        _curation_plan, "build_curated_unit_rows", _empty_rows
     )
 
     pk = CurationV2.insert_curation(
