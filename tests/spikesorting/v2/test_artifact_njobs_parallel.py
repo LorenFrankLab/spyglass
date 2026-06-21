@@ -127,12 +127,102 @@ def test_parallel_artifact_detection_matches_serial(dj_conn):
             ).fetch1("valid_times")
 
         # n_jobs=2 completed (no cross-process re-hydration crash) AND the
-        # flagged valid_times are identical to the serial scan.
+        # flagged valid_times are identical to the serial scan. This run
+        # exercises the cross-process re-hydration of a REAL cached NWB-backed
+        # recording; the smoke fixture is artifact-free so both sides return a
+        # single whole-recording interval. The non-vacuous chunk-seam
+        # determinism (an artifact straddling a chunk boundary, detected
+        # identically serial vs parallel) is pinned by
+        # ``test_chunk_seam_detection_is_deterministic_serial_vs_parallel``.
         np.testing.assert_array_equal(
             results["v2_njobs_serial"], results["v2_njobs_parallel"]
         )
     finally:
         _clean_session_v2(session)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_chunk_seam_detection_is_deterministic_serial_vs_parallel(
+    dj_conn, tmp_path
+):
+    """A real artifact straddling a chunk boundary is detected identically by
+    a single-pass serial scan and a small-chunk multi-process scan.
+
+    The production scan is frame-local (each frame's flag depends only on that
+    frame's across-channel values), so the chunked output is meant to be
+    frame-identical to a single pass regardless of where chunk boundaries
+    fall. The fixture-based test above can only confirm this on artifact-free
+    data, where both sides trivially return one whole-recording interval. This
+    test makes the comparison non-vacuous: a 200 uV transient spans frames
+    1000-1199, and a ``chunk_size`` of 1100 frames places a chunk boundary at
+    frame 1100 -- INSIDE the transient. A seam bug (a chunk dropping or
+    double-counting its boundary frame, or mis-concatenating per-chunk flags)
+    would shift the assembled valid-time boundary and break the equality.
+
+    The recording is saved to disk so it is serializable: ``ensure_n_jobs``
+    silently downgrades ``n_jobs>1`` to 1 for a non-serializable
+    ``NumpyRecording``, which would make the "parallel" run secretly serial.
+    """
+    import numpy as np
+    import spikeinterface as si
+    from spikeinterface.core.job_tools import ensure_n_jobs
+
+    from spyglass.spikesorting.v2._params.artifact_detection import (
+        ArtifactDetectionParamsSchema,
+    )
+    from spyglass.spikesorting.v2.artifact import ArtifactDetection
+
+    fs = 30_000.0
+    n_samples = 5000
+    n_channels = 4
+    transient = slice(1000, 1200)  # 200 frames, all channels, 200 uV
+    traces = np.zeros((n_samples, n_channels), dtype=np.float32)
+    traces[transient, :] = 200.0
+
+    rec_mem = si.NumpyRecording(traces_list=[traces], sampling_frequency=fs)
+    rec_mem.set_channel_gains([1.0] * n_channels)  # gain 1 -> traces are uV
+    rec_mem.set_channel_offsets([0.0] * n_channels)
+    # Persist to disk so the recording round-trips cross-process; otherwise
+    # n_jobs=2 would silently fall back to serial.
+    rec_disk = rec_mem.save(folder=str(tmp_path / "rec"), overwrite=True)
+    rec_disk.set_channel_gains([1.0] * n_channels)
+    rec_disk.set_channel_offsets([0.0] * n_channels)
+    assert rec_disk.check_serializability(
+        "pickle"
+    ) or rec_disk.check_serializability("json"), (
+        "saved recording is not serializable; n_jobs=2 would downgrade to "
+        "serial and the chunk-seam comparison would be meaningless"
+    )
+    assert ensure_n_jobs(rec_disk, n_jobs=2) == 2, (
+        "n_jobs=2 was downgraded; cannot exercise the multi-process seam path"
+    )
+
+    params = ArtifactDetectionParamsSchema(
+        detect=True,
+        amplitude_threshold_uv=50.0,
+        zscore_threshold=None,
+        proportion_above_threshold=0.5,
+        removal_window_ms=0.05,
+        join_window_ms=0.0,
+        min_length_s=0.001,
+    )
+
+    # Reference: single pass (the default 1 s chunk == 30000 frames spans the
+    # whole 5000-sample recording), serial.
+    reference = ArtifactDetection._detect_artifacts(rec_mem, params)
+    # Test: chunk boundary at frame 1100 (inside the transient), multi-process.
+    parallel = ArtifactDetection._detect_artifacts(
+        rec_disk, params, job_kwargs={"chunk_size": 1100, "n_jobs": 2}
+    )
+
+    # Non-vacuity: the transient actually split the timeline into two valid
+    # windows -- otherwise "equal" would compare two whole-recording intervals.
+    assert reference.shape == (2, 2), (
+        "expected the planted transient to split the recording into two valid "
+        f"intervals; got {reference.shape} -- comparison would be vacuous"
+    )
+    np.testing.assert_array_equal(parallel, reference)
 
 
 def test_artifact_compute_kernels_import_without_db():
