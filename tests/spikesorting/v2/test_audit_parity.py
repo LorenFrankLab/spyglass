@@ -128,7 +128,7 @@ def test_sorter_parameters_skips_uninstalled_sorters(monkeypatch):
 
 
 @pytest.mark.usefixtures("dj_conn")
-def test_sorter_parameters_backfills_missing_schema_version():
+def test_sorter_parameters_backfills_missing_schema_version(request):
     """A5: a custom row may omit ``params_schema_version``; it is backfilled.
 
     The column default is the sentinel 0 ("unspecified"). The validated
@@ -145,6 +145,23 @@ def test_sorter_parameters_backfills_missing_schema_version():
         "params": {"detect_threshold": 100.0, "threshold_unit": "uv"},
         "job_kwargs": None,
     }
+
+    # The rows below are default-content forks under custom names (this test
+    # exercises schema-version backfill, not the duplicate guard). Delete them
+    # after the test so they cannot shadow ``clusterless_thresholder/default``
+    # and poison a later ``insert_default()`` (see audit_a5_real below).
+    request.addfinalizer(
+        lambda: (
+            SorterParameters
+            & [
+                {
+                    "sorter": "clusterless_thresholder",
+                    "sorter_params_name": name,
+                }
+                for name in ("audit_a5_missing", "audit_a5_zero", "audit_a5_ok")
+            ]
+        ).delete(safemode=False)
+    )
 
     def _stored_version(name):
         return (
@@ -191,7 +208,7 @@ def test_sorter_parameters_backfills_missing_schema_version():
 
 
 @pytest.mark.usefixtures("dj_conn")
-def test_sorter_parameters_rejects_unknown_sorter_name():
+def test_sorter_parameters_rejects_unknown_sorter_name(request):
     """A typo'd sorter name is rejected at insert, not at populate time.
 
     ``_get_sorter_schema`` falls back to the permissive generic schema for
@@ -227,6 +244,18 @@ def test_sorter_parameters_rejects_unknown_sorter_name():
     # row; this test checks sorter-name acceptance, not the duplicate guard.
     SorterParameters().insert1(
         ok, skip_duplicates=True, allow_duplicate_params=True
+    )
+    # Delete it after the test (even if a later assertion fails): this is a
+    # same-content fork under a custom name, and if left behind it shadows
+    # ``tridesclous2/default``. A later ``SorterParameters.insert_default()``
+    # on a box where tridesclous2 is installed would then raise
+    # ``DuplicateParameterContentError`` -- poisoning every downstream test
+    # that installs defaults.
+    request.addfinalizer(
+        lambda: (
+            SorterParameters
+            & {"sorter": "tridesclous2", "sorter_params_name": "audit_a5_real"}
+        ).delete(safemode=False)
     )
     assert SorterParameters & {
         "sorter": "tridesclous2",
@@ -390,7 +419,7 @@ def test_initialize_v2_defaults_installs_motion_correction_presets():
 
 
 @pytest.mark.usefixtures("dj_conn")
-def test_motion_correction_parameters_rejects_schema_version_drift():
+def test_motion_correction_parameters_rejects_schema_version_drift(request):
     """A14: outer/inner schema-version drift is caught at insert time.
 
     ``MotionCorrectionParameters.insert1`` validated the ``params`` blob
@@ -428,6 +457,15 @@ def test_motion_correction_parameters_rejects_schema_version_drift():
     }
     MotionCorrectionParameters().insert1(
         ok_row, skip_duplicates=True, allow_duplicate_params=True
+    )
+    # Delete this default-content fork after the test: left behind it shadows
+    # the shipped ``none`` row and a later ``insert_default()`` would raise
+    # DuplicateParameterContentError (see audit_a5_real).
+    request.addfinalizer(
+        lambda: (
+            MotionCorrectionParameters
+            & {"motion_correction_params_name": "audit_a14_ok"}
+        ).delete(safemode=False)
     )
     assert MotionCorrectionParameters & {
         "motion_correction_params_name": "audit_a14_ok"
