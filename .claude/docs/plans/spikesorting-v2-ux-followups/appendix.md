@@ -28,7 +28,7 @@ mechanism is std-via-ZCA.
 **`filter`/`whiten` flags unconditionally apply** inside the sorter wrapper — they
 do **not** detect prior preprocessing. SI defaults `filter=True, whiten=True`. v2
 sets `filter=False` (recording already bandpassed) and runs whitening once,
-externally, at float64 with a pinned seed (`_sorting_compute.py:528-553`), then
+externally, at float64 with a pinned seed (`_sorting_dispatch.py`), then
 passes `whiten=False` to the sorter. Sound (avoids double-filter/double-whiten).
 MS4 also needs a `np.Inf=np.inf` shim under numpy≥2 (v2 patches it).
 
@@ -150,7 +150,7 @@ Spyglass v1's Set-A path calls SI metric *functions* directly with a
 - **Torch dependence:** `dredge`/`dredge_fast`/**`rigid_fast`** all use `dredge_ap` which **hard-requires torch** (`dredge.py:110-113`). Only **`kilosort_like`** (`iterative_template`) is torch-free; `nonrigid_accurate`/`nonrigid_fast_and_accurate` (`decentralized`) are torch-**optional** (numpy fallback). **No preset requires GPU** (CPU fallback). v2's shipped concat default is `rigid_fast` → torch needed (v2 already pins torch).
 - **`estimate_motion` is single-segment only** (`assert num_segments==1`) — concat must estimate on one concatenated segment. **Whiten AFTER motion** (SI explicit: do not whiten before motion estimation) — aligns with v2's deferred whitening.
 - **`compare_sorter_to_ground_truth`** defaults `match_score=0.5, delta_time=0.4 ms`. `accuracy = tp/(tp+fn+fp)`, `recall = tp/(tp+fn)`, `precision = tp/(tp+fp)`. **Unmatched GT units report all-zeros (not miss_rate=1)** → a pooled average is dragged toward 0 by undetected units; use `get_performance("by_unit")` per unit for the gate. `delta_frames` truncates; matching is boundary-inclusive.
-- **`detect_peaks`** (clusterless): `abs_thresholds = noise_levels × detect_threshold`. Estimated `noise_levels` → per-channel **MAD** → `detect_threshold` is a MAD multiplier; `noise_levels=[1.0]` + `scale_to_uV` → a true **µV** threshold. **v2's `threshold_unit` ('uv'/'mad') matches this exactly** (`_sorting_compute.py`); the `'uv'` path raises if the recording carries no channel gains. Concat motion + `ConcatenatedRecording` are still `NotImplementedError`-gated in v2.
+- **`detect_peaks`** (clusterless): `abs_thresholds = noise_levels × detect_threshold`. Estimated `noise_levels` → per-channel **MAD** → `detect_threshold` is a MAD multiplier; `noise_levels=[1.0]` + `scale_to_uV` → a true **µV** threshold. **v2's `threshold_unit` ('uv'/'mad') matches this exactly** (`_sorting_dispatch.py`); the `'uv'` path raises if the recording carries no channel gains. Concat motion + `ConcatenatedRecording` are still `NotImplementedError`-gated in v2.
 
 ## Cross-cutting: determinism
 

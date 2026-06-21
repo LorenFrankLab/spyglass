@@ -60,9 +60,10 @@ blocks, so mkdocstrings renders **no parameter table**. Concentrated in:
 - Service modules where most functions document params only in prose:
   [`_selection_identity.py`](../../../../src/spyglass/spikesorting/v2/_selection_identity.py),
   [`_units_nwb.py`](../../../../src/spyglass/spikesorting/v2/_units_nwb.py),
-  [`_sorting_compute.py`](../../../../src/spyglass/spikesorting/v2/_sorting_compute.py)
-  (`run_clusterless_thresholder`, `run_si_sorter`, `build_analyzer`,
-  `remove_excess_spikes`),
+  [`_sorting_dispatch.py`](../../../../src/spyglass/spikesorting/v2/_sorting_dispatch.py)
+  (`run_clusterless_thresholder`, `run_si_sorter`, `remove_excess_spikes`),
+  [`_sorting_analyzer.py`](../../../../src/spyglass/spikesorting/v2/_sorting_analyzer.py)
+  (`build_analyzer`),
   [`_artifact_intervals.py`](../../../../src/spyglass/spikesorting/v2/_artifact_intervals.py)
   (`scan_artifact_frames`, `detect_artifacts`, `build_artifact_interval_rows`).
 
@@ -137,7 +138,7 @@ and the `unit_matching.py` / `metric_curation.py` / `figpack_curation.py`
 | recording.py, sorting.py, curation.py, artifact.py | ~100% | Excellent; gaps are tri-part `make_*` Parameters/Returns |
 | pipeline.py, __init__.py, _enums.py | ~100% | Excellent (`run_v2_pipeline`/`PreflightReport` are model docstrings) except the one High `Raises` defect |
 | utils.py, _signal_math.py, _params/sorter.py | ~100% | Excellent; `_signal_math.py` & `sorter.py` are the shape/section gold standard |
-| `_selection_identity.py`, `_units_nwb.py`, the split `_recording_*` service modules, `_sorting_compute.py`, `_artifact_intervals.py` | 100% | Good content; prose-instead-of-sections concentrated here |
+| `_selection_identity.py`, `_units_nwb.py`, the split `_recording_*` service modules, the split `_sorting_*` service modules, `_artifact_intervals.py` | 100% | Good content; prose-instead-of-sections concentrated here |
 | `_fixtures/mearec_to_nwb.py` | 100% | Excellent; only an incomplete `Raises` |
 | exceptions.py | 100% | Good content; all D205/D209 nits live here |
 
