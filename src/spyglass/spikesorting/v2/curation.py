@@ -29,6 +29,7 @@ from spyglass.spikesorting.v2._curation_transforms import (
     validate_curation_label_rows,
     validate_labels,
 )
+from spyglass.spikesorting.v2._signal_math import _MERGE_DEDUP_DELTA_MS
 from spyglass.spikesorting.v2._units_nwb import (
     build_lazy_merged_sorting,
     numpysorting_from_abs_times,
@@ -55,14 +56,6 @@ if TYPE_CHECKING:
 
 _assert_v2_db_safe()
 schema = dj.schema("spikesorting_v2_curation")
-
-# Coincidence window (ms) for cross-unit duplicate-spike removal when
-# merging units. Matches SpikeInterface's ``MergeUnitsSorting`` default
-# (the value v1's lazy ``get_merged_sorting`` used). A neuron's
-# refractory period (~1-2 ms) means a genuine spike train never has a
-# sub-0.4 ms pair, so this only removes double-detections of one physical
-# event shared across merged contributors.
-_MERGE_DEDUP_DELTA_MS = 0.4
 
 
 @schema

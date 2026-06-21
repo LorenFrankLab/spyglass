@@ -400,7 +400,7 @@ def write_curated_units_nwb(
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
     from spyglass.spikesorting.v2._enums import CurationLabel
-    from spyglass.spikesorting.v2.curation import _MERGE_DEDUP_DELTA_MS
+    from spyglass.spikesorting.v2._signal_math import _MERGE_DEDUP_DELTA_MS
     from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
     from spyglass.spikesorting.v2.utils import _dedup_merged_spike_times

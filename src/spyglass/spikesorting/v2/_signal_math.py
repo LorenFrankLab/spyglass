@@ -283,6 +283,19 @@ def _spike_times_to_frames(recording_times, spike_times, n_samples, unit_id):
     return spike_frames
 
 
+# Coincidence window (ms) for cross-unit duplicate-spike removal when
+# merging units. Matches SpikeInterface's ``MergeUnitsSorting`` default
+# (the value v1's lazy ``get_merged_sorting`` used). A neuron's refractory
+# period (~1-2 ms) means a genuine spike train never has a sub-0.4 ms pair,
+# so this only removes double-detections of one physical event shared
+# across merged contributors. Lives here next to
+# ``_dedup_merged_spike_times`` -- the algorithm it parameterizes -- so the
+# ``curation`` schema module and ``_units_nwb`` import it from this pure
+# layer rather than the lower-level ``_units_nwb`` reaching back into the
+# schema module.
+_MERGE_DEDUP_DELTA_MS = 0.4
+
+
 def _dedup_merged_spike_times(times_list, delta_s):
     """Membership-aware duplicate-spike removal for a merged unit.
 
