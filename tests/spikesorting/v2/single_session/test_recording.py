@@ -1203,14 +1203,26 @@ def test_phase_shift_field_does_not_change_default_recording(
     legacy_pk = RecordingSelection.insert_selection(
         {**common, "preprocessing_params_name": "_pytest_legacy_no_phase_shift"}
     )
-    Recording.populate(legacy_pk, reserve_jobs=False)
-    traces_legacy = Recording().get_recording(legacy_pk).get_traces()
+    try:
+        Recording.populate(legacy_pk, reserve_jobs=False)
+        traces_legacy = Recording().get_recording(legacy_pk).get_traces()
 
-    assert np.array_equal(traces_legacy, traces_fl), (
-        "A pre-field params blob (no phase_shift key) materialized to "
-        "different traces than default; the optional phase_shift "
-        "field perturbed the default path."
-    )
+        assert np.array_equal(traces_legacy, traces_fl), (
+            "A pre-field params blob (no phase_shift key) materialized to "
+            "different traces than default; the optional phase_shift "
+            "field perturbed the default path."
+        )
+    finally:
+        # Clean up the throwaway params row + its lineage: it has the SAME
+        # content as 'default', so leaking it would make a later
+        # describe_parameter_rows duplicate-of resolution ambiguous in another
+        # test (a cross-test isolation bug).
+        (Recording & legacy_pk).delete_quick()
+        (RecordingSelection & legacy_pk).delete_quick()
+        (
+            PreprocessingParameters
+            & {"preprocessing_params_name": "_pytest_legacy_no_phase_shift"}
+        ).delete_quick()
 
 
 @pytest.mark.slow
