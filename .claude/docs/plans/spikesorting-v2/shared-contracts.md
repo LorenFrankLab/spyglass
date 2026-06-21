@@ -516,11 +516,15 @@ class CurationLabel(str, Enum):
     reject = "reject"
 ```
 
-`CurationV2.insert_curation()` requires `labels: dict[int, list[CurationLabel | str]]` and validates each value against the enum, raising on unknown labels. This matches the convention list at [`src/spyglass/spikesorting/v1/curation.py:26`](../../../../src/spyglass/spikesorting/v1/curation.py#L26) but enforces it instead of merely documenting it.
+`CurationV2.insert_curation()` requires `labels: dict[int, list[CurationLabel | str]]` and validates each value against the enum, raising on unknown labels unless the caller passes `allow_custom_labels=True`. This matches the convention list at [`src/spyglass/spikesorting/v1/curation.py:26`](../../../../src/spyglass/spikesorting/v1/curation.py#L26) but enforces it instead of merely documenting it.
 
 Labels are stored in `CurationV2.UnitLabel`, one row per `(unit_id, curation_label)`. Unlabeled units have no `UnitLabel` rows. This preserves v1's multi-label semantics without packing lists into a scalar column.
 
-Free-form `dj.Manual` inserts bypassing the helper remain permitted (DataJoint can't enforce enums on varchar columns); downstream filters fall back to the v1 convention list for unrecognized labels.
+Direct `CurationV2.UnitLabel.insert()` / `insert1()` calls are validated too.
+They use the same canonical-label guard and the same `allow_custom_labels=True`
+escape hatch as `insert_curation()`, so typo protection is not limited to the
+high-level helper. The column remains `varchar(32)` (not a MySQL enum) because
+labs may intentionally add custom labels without a forbidden `ALTER TABLE`.
 
 ---
 
@@ -925,7 +929,7 @@ build on the corrected baseline; the forward-compat table reflects it.
 
 - Phase 2: `QualityMetricParameters`, `AutoCurationRules`, `AutoCurationRules.Rule`, `AnalyzerCurationSelection`, `AnalyzerCuration`, `RecordingArtifactVersions`, `RecordingArtifactRecomputeSelection`, `RecordingArtifactRecompute`, `RecordingArtifactRecompute.Name`, `RecordingArtifactRecompute.Hash`, `SortingAnalyzerVersions`, `SortingAnalyzerRecomputeSelection`, `SortingAnalyzerRecompute`, `SortingAnalyzerRecompute.Name`, `SortingAnalyzerRecompute.Hash`.
 - Phase 4: `MatcherParameters`, `UnitMatchSelection`, `UnitMatchSelection.MemberCuration`, `UnitMatch`, `UnitMatch.Pair`, `TrackedUnit`, `TrackedUnit.Member`.
-- Phase 5: `FigPackCurationSelection`, `FigPackCuration`, plus all `_params/preset.py` registrations.
+- Phase 5: `FigPackCurationSelection`, `FigPackCuration`, plus preset registrations in `_pipeline_presets.py` / `_recipe_catalog.py` (there is no `_params/preset.py`).
 
 **Invariant — do not weaken (binds from the post-review-fixes baseline onward)**: A reviewer of any implementation PR **at or after Phase 2** must check that NO existing v2 table from an earlier checkpoint is modified except by adding rows to its `contents` (for Lookup tables) or by adding rows via `make()` (for Computed tables). Adding columns, changing types, renaming columns, or altering FK structures is FORBIDDEN. The corrected post-review-fixes baseline above is the contract that lets this work. (The review-fixes checkpoint itself is the sole, deliberate exception — it is the last pass that may alter table shape, precisely because it is pre-Phase-2 and v2 is unreleased.)
 

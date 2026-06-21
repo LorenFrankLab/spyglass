@@ -6,10 +6,13 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
 
 ## Executor Checklist
 
+- Replace the current import-safe `metric_curation.py` placeholder with the real
+  table module, and update/remove that module's placeholder assertions in
+  `tests/spikesorting/v2/test_legacy_stub_imports.py` in the same PR.
 - Implement metric/auto-curation parameter schemas and default rows.
 - Implement `AnalyzerCurationSelection`, `AnalyzerCuration`, `materialize_curation()`, and the v1 notebook-facing fetch/promote helpers.
 - Port the BurstPair visualization workflow into `AnalyzerCuration` methods without adding a separate BurstPair table.
-- Implement the v2 clusterless `spike_location` decoding mark via the `spike_locations` SortingAnalyzer extension + waveform-feature adapter, and retire the dead legacy `_get_spike_locations` helper.
+- Implement the v2 clusterless `spike_location` decoding mark via the `spike_locations` SortingAnalyzer extension + waveform-feature adapter, retire the dead legacy `_get_spike_locations` helper, and flip the existing v2 decoding test that currently asserts `spike_location` raises `NotImplementedError`.
 - Implement recording/analyzer recompute verification tables and safe deletion gates in the isolated integration database; do not test delete paths against production storage.
 - Preserve NaN sanitization, empty-unit, recursive-auto-curation, and label-rule invariants from `shared-contracts.md`.
 - Run the Phase 2 validation goals plus `code_graph.py describe/path` for new tables.
@@ -49,6 +52,7 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
 - **Implement `_params/metric_curation.py`** with Pydantic models:
   - `QualityMetricParamsSchema` — `metric_names: list[str]`, `metric_kwargs: dict[str, dict]`, `skip_pc_metrics: bool = True`. The stored `metric_kwargs` dict is passed to SpikeInterface as the `metric_params=` argument. Validate each metric name against SI 0.104's exported list using `from spikeinterface.metrics.quality import get_quality_metric_list`; fall back to `spikeinterface.qualitymetrics` only if resolver testing proves that namespace is still needed for the pinned 0.104 patch range.
   - `AutoCurationRulesSchema` — validates `auto_merge_preset: Literal["similarity_correlograms", "temporal_splits", "x_contaminations", "feature_neighbors", "slay", "none"]`, `auto_merge_kwargs: dict`, and ordered rule rows shaped like `{"rule_index": 0, "rule_name": "snr_noise", "metric_name": "snr", "operator": "<", "threshold": 2.0, "label": "noise"}`. `slay` is included because SI 0.104.3 exposes it in `compute_merge_unit_groups` docs; re-verify if the pinned patch release changes.
+  - Current helper note: `validate_lookup_rows()` is optimized for `params`-blob Lookup tables. `QualityMetricParameters` and `AutoCurationRules` are structured Lookups in the design (typed columns + `Rule` part rows), so this phase should add explicit validation paths for those tables rather than contorting their schema around that helper. The schema is a pure Phase-2 addition, so choose and document the final row shape before writing tests.
 
 - **Implement `metric_curation.py`** per [designs.md § AnalyzerCuration](designs.md#analyzercuration-replaces-v1-metriccuration--burstpair). Specific:
   - `QualityMetricParameters` Lookup with three default rows: `("franklab_default", ...)`, `("neuropixels_default", ...)`, `("minimal", {"metric_names": ["snr", "isi_violation", "firing_rate"], ...})`.

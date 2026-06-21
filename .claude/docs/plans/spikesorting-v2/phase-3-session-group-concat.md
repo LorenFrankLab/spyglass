@@ -7,9 +7,16 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
 ## Executor Checklist
 
 - Keep schemas unchanged from the **post-review-fixes baseline** (NOT the original Phase 1 shape — review-fixes already corrected `SortingSelection` to use the optional `ArtifactDetectionSource` part, `SortGroupV2.reference_mode`, etc.); this checkpoint is method-body-only against that corrected baseline.
+- Treat the existing `session_group.py` classes as forward-declared schemas:
+  `SessionGroup.create_group`, `SessionGroup.is_multi_day`,
+  `ConcatenatedRecordingSelection.insert_selection`, and
+  `ConcatenatedRecording.make` currently raise `NotImplementedError`, and tests
+  pin parts of that gated behavior. This phase replaces those bodies and updates
+  the tests from "gated" assertions to behavior assertions.
 - Implement `SessionGroup.create_group()` validation and date derivation. A member is a `(nwb_file_name, sort_group_id, interval_list_name, team_name)` sorting member, not necessarily a whole NWB file.
 - Implement `ConcatenatedRecording.make()` by fetching the selection row first, then using it for member and parameter restrictions.
 - Lift the concat-source gate in `SortingSelection.insert_selection()` while keeping the source-part guard and the concat-artifact guard (concat rows must have **no `ArtifactDetectionSource` row**).
+- Remove `Sorting.key_source = SortingSelection - SortingSelection.ConcatenatedRecordingSource` so concat-backed rows are handed to `Sorting.populate()` once the runtime path exists.
 - Add concat recording loading, sorting dispatch, parent-anchor resolution, and `split_sorting_by_session()`.
 - Run concat/motion-correction populates in the isolated integration database with temporary analysis directories; production-connected checks are optional smoke only.
 - Run the Phase 3 validation goals plus `code_graph.py describe/path` to prove schema shape is unchanged **from the post-review-fixes baseline**.
@@ -34,7 +41,7 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
 
 ## Tasks
 
-- **Method-body changes only.** Phase 3 modifies Phase-1-declared code in `session_group.py` and `sorting.py`: implement `ConcatenatedRecording.make()`, lift `SortingSelection.insert_selection()`'s concat rejection, add `Sorting.make()` recording-resolution dispatch, and add `SessionGroup.create_group()` multi-day validation. Definition strings stay unchanged.
+- **Method-body changes only.** Phase 3 modifies Phase-1-declared code in `session_group.py` and `sorting.py`: implement `ConcatenatedRecording.make()`, lift `SortingSelection.insert_selection()`'s concat rejection, remove the concat-source `Sorting.key_source` antijoin, add `Sorting.make()` recording-resolution dispatch, and add `SessionGroup.create_group()` multi-day validation. Definition strings stay unchanged.
 - **Implement Phase-3 method bodies on the Phase-1-declared `session_group.py` schema:**
   - `SessionGroup` Manual with `Member` Part. The master PK is `(session_group_owner, session_group_name)`, where `session_group_owner` is a projected `LabTeam.team_name`; per-member `team_name` remains on `Member` because collaborations may mix teams and concat selection must find each member's intended `RecordingSelection`. If a member dict omits `team_name`, `create_group()` defaults it to `session_group_owner`; mixed-team groups override it per member. A member is a sorting member tuple, not a whole-day abstraction: one NWB/day may contribute multiple members through different intervals or sort groups, and long recordings split across several NWB files may contribute several members. Recording dates are derived from `Session.session_start_time` when validating or reading the group, not stored on Member rows.
   - `create_group(session_group_owner, session_group_name, members, description="", allow_multi_day=False)` — atomic insert + Member rows. **Same-day is the default**; multi-day requires `allow_multi_day=True` and an explicit motion-correction preset on the downstream `ConcatenatedRecording` (no auto-DREDge). The error message for multi-day-without-opt-in points users at sort-then-match as the recommended cross-day path. See [designs.md § SessionGroup + ConcatenatedRecording](designs.md#sessiongroup--concatenatedrecording).

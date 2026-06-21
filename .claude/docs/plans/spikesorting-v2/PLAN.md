@@ -12,6 +12,22 @@ single-session notebook. Post-sort SpikeInterface quality metrics, analyzer
 extension growth, auto-labels, merge suggestions, and BurstPair-style plots
 remain Phase 2 `AnalyzerCuration` work, not ad hoc additions to `pipeline.py`.
 
+**Current pre-Phase-2 code audit (2026-06-21):** the Phase 2+ plan still
+matches the current tree, with these implementation guardrails. The
+Phase-2/4/5 modules (`metric_curation.py`, `unit_matching.py`,
+`matcher_protocol.py`, `figpack_curation.py`) are import-safe placeholders that
+raise informative `ImportError` on public-name access; the phase that replaces
+each placeholder must update `tests/spikesorting/v2/test_legacy_stub_imports.py`
+in the same PR. `SessionGroup`, `MotionCorrectionParameters`,
+`ConcatenatedRecordingSelection`, `ConcatenatedRecording`, and
+`SortingSelection.ConcatenatedRecordingSource` already have final schema shape;
+Phase 3 is method-body work plus lifting the runtime gates. The current
+`run_v2_pipeline()` is the single-session runner with `require_units=False`
+already implemented; Phase 5 extends that runner rather than reintroducing the
+zero-unit policy. The v2 decoding path currently rejects `spike_location` by
+test; Phase 2 owns flipping that test to the supported `spike_locations`
+extension path.
+
 A next-generation spike sorting pipeline for Spyglass that (1) targets SpikeInterface ≥0.104 with the SortingAnalyzer API, keeps the v1 production sorters (MountainSort 4 and `clusterless_thresholder`), adds MS5 and KS4, and preserves a custom-row path for other SpikeInterface sorters, (2) supports cross-session unit tracking via a pluggable matcher backend (UnitMatchPy first, DeepUnitMatch via the same plugin slot later), (3) handles chronic recordings — same-day concatenation as the default path, with multi-day opt-in (sort-then-match via Phase 4 UnitMatch is the recommended cross-day workflow) — (4) makes unit → brain region tracing first-class via a `Sorting.Unit` part table populated at sort time (fixes the v1 multi-region under-reporting bug), (5) reduces user-facing table touchpoints from ~7 to ~2 via a `run_v2_pipeline()` convenience API with Pydantic-validated parameters and FigPack as the curation UI, and (6) plugs into the existing `SpikeSortingOutput` merge table so downstream consumers (decoding, ripple, MUA, `SortedSpikesGroup`) keep working unchanged. **Zero schema migration**: every table is final from the phase that introduces it. v0 and v1 stay in-tree indefinitely.
 
 ## Reading order
