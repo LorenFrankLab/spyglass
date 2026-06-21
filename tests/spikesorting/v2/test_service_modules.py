@@ -679,6 +679,21 @@ def test_validate_shared_group_members_returns_single_session():
     assert nwb == "s.nwb"
 
 
+def test_validate_shared_group_members_accepts_one_shot_iterable():
+    """The helper documents an iterable input, so one-shot iterators must work
+    even though validation needs two passes over the member metadata."""
+    from spyglass.spikesorting.v2._shared_artifact_group import (
+        validate_shared_artifact_group_members,
+    )
+
+    rows = (
+        {"nwb_file_name": "s.nwb", "sampling_frequency": fs}
+        for fs in (30000.0, 30000.0)
+    )
+
+    assert validate_shared_artifact_group_members(rows) == "s.nwb"
+
+
 def test_validate_shared_group_members_rejects_multiple_sessions():
     """Members spanning more than one session raise -- a shared artifact pass
     is meaningless across sessions (IntervalList is keyed by nwb_file_name)."""

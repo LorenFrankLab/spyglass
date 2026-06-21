@@ -40,6 +40,7 @@ def validate_shared_artifact_group_members(member_meta) -> str:
         If members span more than one session, or have differing sampling
         frequencies (``si.aggregate_channels`` requires identical fs).
     """
+    member_meta = list(member_meta)
     sessions = {m["nwb_file_name"] for m in member_meta}
     if len(sessions) != 1:
         raise ValueError(
