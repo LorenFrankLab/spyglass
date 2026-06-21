@@ -6,7 +6,7 @@
     a wide table, one row per unit, one column per quality metric. NaN is
     preserved on disk as a native HDF5 float (HDF5 cannot store ``None`` in a
     numeric column); ``None`` is surfaced on the read path (and for the
-    Phase-5 FigPack JSON) by ``sanitize_for_json``.
+    FigPack JSON export) by ``sanitize_for_json``.
 
 ``merge_suggestions``
     a long table ``(merge_group_index, unit_id)`` -- one row per (group,

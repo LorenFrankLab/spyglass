@@ -554,11 +554,15 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
                 return AnalyzerCurationComputed(analysis_file_name, *object_ids)
 
             metrics_df = self._compute_metrics(
-                analyzer, metric_names, metric_kwargs, skip_pc_metrics
+                analyzer,
+                metric_names,
+                metric_kwargs,
+                skip_pc_metrics,
+                job_kwargs,
             )
             labels_by_unit = apply_label_rules(metrics_df, rule_rows)
             merge_groups = self._compute_merge_groups(
-                analyzer, auto_merge_preset, auto_merge_kwargs
+                analyzer, auto_merge_preset, auto_merge_kwargs, job_kwargs
             )
             object_ids = write_analyzer_curation_tables(
                 abs_path,
@@ -607,16 +611,31 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def _compute_metrics(
-        analyzer, metric_names, metric_kwargs, skip_pc_metrics
+        analyzer, metric_names, metric_kwargs, skip_pc_metrics, job_kwargs=None
     ):
-        """Compute extensions + quality metrics, adding Spyglass isi_violation."""
+        """Compute extensions + quality metrics, adding Spyglass isi_violation.
+
+        ``job_kwargs`` (resolved n_jobs / chunk_duration / progress_bar) are
+        forwarded to the heavy extension computation so chronic runs honor the
+        configured concurrency.
+        """
         import numpy as np
         from spikeinterface.metrics.quality import compute_quality_metrics
 
+        # ``random_seed`` is an extension param, not a ChunkRecordingExecutor
+        # job kwarg (mirrors build_analyzer), so drop it before compute().
+        compute_kwargs = {
+            k: v for k, v in (job_kwargs or {}).items() if k != "random_seed"
+        }
         extensions = list(_CURATION_EXTENSIONS)
         if not skip_pc_metrics:
             extensions.append("principal_components")
-        analyzer.compute(extensions)
+        # Add only extensions not already present: recomputing one would
+        # cascade-delete its children, and re-populating the same sort under a
+        # second metric-params row must be idempotent (mirrors add_extensions).
+        to_add = [e for e in extensions if not analyzer.has_extension(e)]
+        if to_add:
+            analyzer.compute(to_add, **compute_kwargs)
         metrics_df = compute_quality_metrics(
             analyzer,
             metric_names=metric_names,
@@ -639,7 +658,9 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
         return metrics_df
 
     @staticmethod
-    def _compute_merge_groups(analyzer, auto_merge_preset, auto_merge_kwargs):
+    def _compute_merge_groups(
+        analyzer, auto_merge_preset, auto_merge_kwargs, job_kwargs=None
+    ):
         """Return proposed merge groups for a preset (``[]`` for 'none')."""
         if auto_merge_preset == "none":
             return []
@@ -649,6 +670,7 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
             analyzer,
             preset=auto_merge_preset,
             compute_needed_extensions=False,
+            job_kwargs=job_kwargs or {},
             **(auto_merge_kwargs or {}),
         )
         return [[int(u) for u in group] for group in groups]

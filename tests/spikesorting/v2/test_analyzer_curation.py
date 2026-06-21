@@ -279,3 +279,65 @@ def test_analyzer_curation_viz_renders(
         peaks = ac.investigate_pair_peaks(sel, pair)
         assert peaks is not None
         plt.close(peaks)
+
+
+@pytest.mark.db_unit
+def test_compute_merge_groups_suggests_planted_oversplit(dj_conn):
+    """Auto-merge proposes a group for a planted duplicate/oversplit pair.
+
+    Builds a synthetic analyzer whose units 0 and 1 are one cell split in two
+    (same waveform), then drives AnalyzerCuration's auto-merge wrapper. The
+    ``x_contaminations`` preset reliably catches a temporal oversplit on
+    synthetic data; the wrapper must return the pair as python ints, and the
+    ``none`` preset must short-circuit to an empty list.
+    """
+    import numpy as np  # noqa: F401
+    import spikeinterface.full as si
+
+    from spyglass.spikesorting.v2.metric_curation import AnalyzerCuration
+
+    rec, gt = si.generate_ground_truth_recording(
+        durations=[60.0], num_units=3, seed=0, sampling_frequency=30000.0
+    )
+    fs = rec.get_sampling_frequency()
+    st0 = gt.get_unit_spike_train(gt.get_unit_ids()[0])
+    half = len(st0) // 2
+    sort = si.NumpySorting.from_unit_dict(
+        {
+            0: st0[:half],
+            1: st0[half:],  # same waveform as unit 0 -> an oversplit
+            2: gt.get_unit_spike_train(gt.get_unit_ids()[1]),
+        },
+        sampling_frequency=fs,
+    )
+    analyzer = si.create_sorting_analyzer(
+        sort, rec, sparse=True, format="memory"
+    )
+    analyzer.compute(
+        [
+            "random_spikes",
+            "noise_levels",
+            "templates",
+            "waveforms",
+            "correlograms",
+            "template_similarity",
+            "unit_locations",
+            "spike_amplitudes",
+            "principal_components",
+        ],
+        extension_params={
+            "random_spikes": {"seed": 0},
+            "principal_components": {"n_components": 3},
+        },
+    )
+
+    groups = AnalyzerCuration._compute_merge_groups(
+        analyzer, "x_contaminations", {}
+    )
+    assert groups, "auto-merge should propose the planted oversplit"
+    flat = [u for group in groups for u in group]
+    assert 0 in flat and 1 in flat
+    # Wrapper coerces SI's np.int64 unit ids to python ints.
+    assert all(isinstance(u, int) for group in groups for u in group)
+    # 'none' short-circuits without calling SI.
+    assert AnalyzerCuration._compute_merge_groups(analyzer, "none", {}) == []
