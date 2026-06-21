@@ -96,17 +96,52 @@ class RecordingSaveExpectation(NamedTuple):
     over_request: float
 
 
-class _LazyAffineTimestamps:
-    """Array-like timestamps for a regular sample grid.
+class _LazyTimestamps:
+    """Shared base for the lazy, array-like timestamp vectors.
 
-    The object intentionally implements only the small NumPy-like surface the
-    NWB timestamp iterator and ``Recording._compute_recording_artifact`` need:
-    ``shape``, ``len()``, integer indexing, and slice indexing. Slices allocate
-    only the requested chunk, so a 12-hour rate-based recording does not need a
-    full ``float64`` timestamp vector in RAM before the streaming write.
+    Subclasses set ``shape``/``dtype`` and define ``__getitem__``; they expose
+    only the small NumPy-like surface the NWB timestamp iterator and
+    ``Recording._compute_recording_artifact`` need: ``shape``, ``len()``,
+    integer indexing, and slice indexing. Slices allocate only the requested
+    chunk, so a 12-hour rate-based recording does not need a full ``float64``
+    timestamp vector in RAM before the streaming write. ``_spyglass_lazy_
+    timestamps`` is the duck-type marker the write path checks (the timestamps
+    chunk iterator and ``_get_recording_timestamps``) to pass the object through
+    untouched instead of forcing it through ``np.asarray``.
     """
 
     _spyglass_lazy_timestamps = True
+    shape: tuple[int, ...]  # set by each subclass's __init__
+
+    def __len__(self):
+        return self.shape[0]
+
+    def _as_scalar_index(self, item, length: int) -> int:
+        """Validate and normalize a scalar index; reject bool/fancy indexing."""
+        import numpy as np
+
+        if isinstance(item, (bool, np.bool_)) or not isinstance(
+            item, (int, np.integer)
+        ):
+            raise TypeError(
+                f"{type(self).__name__} supports only integer and slice "
+                f"indexing; got {type(item).__name__}. Convert to a NumPy "
+                "array first for boolean or fancy indexing."
+            )
+        idx = int(item)
+        if idx < 0:
+            idx += length
+        if idx < 0 or idx >= length:
+            raise IndexError(item)
+        return idx
+
+
+class _LazyAffineTimestamps(_LazyTimestamps):
+    """Array-like timestamps for a regular sample grid.
+
+    ``timestamps[k] == t_start + (start_frame + k) / sampling_frequency``;
+    only the requested slice/element is allocated.
+    """
 
     def __init__(
         self,
@@ -125,17 +160,6 @@ class _LazyAffineTimestamps:
         self.shape = (self.n_frames,)
         self.dtype = np.dtype(np.float64)
 
-    def __len__(self):
-        return self.n_frames
-
-    @staticmethod
-    def _unsupported_index(item):
-        raise TypeError(
-            "_LazyAffineTimestamps supports only integer and slice indexing; "
-            f"got {type(item).__name__}. Convert to a NumPy array first for "
-            "boolean or fancy indexing."
-        )
-
     def __getitem__(self, item):
         import numpy as np
 
@@ -146,23 +170,13 @@ class _LazyAffineTimestamps:
             )
             return self.t_start + frames / self.sampling_frequency
 
-        if isinstance(item, (bool, np.bool_)) or not isinstance(
-            item, (int, np.integer)
-        ):
-            self._unsupported_index(item)
-        idx = int(item)
-        if idx < 0:
-            idx += self.n_frames
-        if idx < 0 or idx >= self.n_frames:
-            raise IndexError(item)
+        idx = self._as_scalar_index(item, self.n_frames)
         frame = self.start_frame + idx
         return self.t_start + frame / self.sampling_frequency
 
 
-class _LazyConcatenatedTimestamps:
+class _LazyConcatenatedTimestamps(_LazyTimestamps):
     """Array-like concatenation of lazy timestamp slices."""
-
-    _spyglass_lazy_timestamps = True
 
     def __init__(self, parts):
         import numpy as np
@@ -172,17 +186,6 @@ class _LazyConcatenatedTimestamps:
         self.offsets = np.cumsum([0] + lengths)
         self.shape = (int(self.offsets[-1]),)
         self.dtype = np.dtype(np.float64)
-
-    def __len__(self):
-        return self.shape[0]
-
-    @staticmethod
-    def _unsupported_index(item):
-        raise TypeError(
-            "_LazyConcatenatedTimestamps supports only integer and slice "
-            f"indexing; got {type(item).__name__}. Convert to a NumPy array "
-            "first for boolean or fancy indexing."
-        )
 
     def __getitem__(self, item):
         import numpy as np
@@ -213,15 +216,7 @@ class _LazyConcatenatedTimestamps:
                 else np.asarray([], dtype=np.float64)
             )
 
-        if isinstance(item, (bool, np.bool_)) or not isinstance(
-            item, (int, np.integer)
-        ):
-            self._unsupported_index(item)
-        idx = int(item)
-        if idx < 0:
-            idx += len(self)
-        if idx < 0 or idx >= len(self):
-            raise IndexError(item)
+        idx = self._as_scalar_index(item, len(self))
         part_idx = int(np.searchsorted(self.offsets, idx, side="right") - 1)
         return self.parts[part_idx][idx - int(self.offsets[part_idx])]
 
@@ -233,13 +228,7 @@ def _recording_has_explicit_time_vector(recording) -> bool:
         # Conservative fallback: without the public predicate, keep the older
         # full-vector path so irregular timestamps are not treated as affine.
         return True
-    try:
-        return bool(has_time_vector(segment_index=0))
-    except TypeError:
-        try:
-            return bool(has_time_vector(0))
-        except TypeError:
-            return bool(has_time_vector())
+    return bool(has_time_vector(segment_index=0))
 
 
 def _recording_start_time(recording) -> float | None:
@@ -247,19 +236,13 @@ def _recording_start_time(recording) -> float | None:
     get_start_time = getattr(recording, "get_start_time", None)
     if get_start_time is None:
         return None
-    try:
-        start = get_start_time(segment_index=0)
-    except TypeError:
-        start = get_start_time(0)
+    start = get_start_time(segment_index=0)
     return None if start is None else float(start)
 
 
 def _recording_num_frames(recording) -> int:
-    """Return the single-segment frame count across SI method spellings."""
-    try:
-        return int(recording.get_num_frames(segment_index=0))
-    except TypeError:
-        return int(recording.get_num_frames())
+    """Return the recording's single-segment frame count."""
+    return int(recording.get_num_frames(segment_index=0))
 
 
 def _consolidate_regular_intervals(
@@ -521,6 +504,16 @@ def restrict_recording(
         times = _get_recording_timestamps(recording)
         intervals_in_frames = _consolidate_intervals(valid_times, times)
 
+    # ``_lazy_timestamp_override`` handles single- and multi-interval inputs
+    # uniformly (one affine vector vs a lazy concatenation), so the lazy
+    # override is built once; only the eager path differs per branch below.
+    if use_lazy_regular_timestamps:
+        timestamps_override = _lazy_timestamp_override(
+            intervals_in_frames,
+            sampling_frequency=sampling_frequency,
+            t_start=t_start,
+        )
+
     if len(intervals_in_frames) > 1:
         # ``concatenate_recordings`` defaults to ``ignore_times=True``,
         # which strips the wall-clock timestamps off each
@@ -538,13 +531,7 @@ def restrict_recording(
             recording.frame_slice(start_frame=int(s), end_frame=int(e))
             for s, e in intervals_in_frames
         ]
-        if use_lazy_regular_timestamps:
-            timestamps_override = _lazy_timestamp_override(
-                intervals_in_frames,
-                sampling_frequency=sampling_frequency,
-                t_start=t_start,
-            )
-        else:
+        if not use_lazy_regular_timestamps:
             timestamps_override = np.concatenate(
                 [times[int(s) : int(e)] for s, e in intervals_in_frames]
             )
@@ -556,13 +543,7 @@ def restrict_recording(
         # explicitly (rather than reading the frame-sliced
         # recording's ``get_times()``) so the persisted per-interval
         # timestamps match the multi-interval path above.
-        if use_lazy_regular_timestamps:
-            timestamps_override = _lazy_timestamp_override(
-                intervals_in_frames,
-                sampling_frequency=sampling_frequency,
-                t_start=t_start,
-            )
-        else:
+        if not use_lazy_regular_timestamps:
             timestamps_override = times[int(s) : int(e)]
 
     assert_reference_not_member(
