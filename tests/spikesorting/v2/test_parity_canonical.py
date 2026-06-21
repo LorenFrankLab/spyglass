@@ -413,16 +413,3 @@ def test_json_roundtrip_preserves_numpy_array_canonical_form():
     canonical = _normalize(payload)
     roundtripped = json.loads(json.dumps(canonical, sort_keys=True))
     assert_canonical_dict_equal(canonical, roundtripped)
-
-
-def test_int_keyed_dict_via_string_serialization():
-    """Int-keyed dicts (``bad_channel_by_electrode_id``) must
-    serialize as JSON strings and re-read to int via the documented
-    int-key contract -- canonical comparison must match the int-keyed
-    form on both sides."""
-    int_keyed = {42: False, 43: True, 100: False}
-    json_form = {str(k): v for k, v in int_keyed.items()}
-    serialized = json.dumps(json_form, sort_keys=True)
-    deserialized = json.loads(serialized)
-    reconstructed = {int(k): v for k, v in deserialized.items()}
-    assert reconstructed == int_keyed

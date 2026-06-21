@@ -48,7 +48,7 @@ def test_assert_safe_base_dir_rejects_out_of_bounds(tmp_path_factory):
         ),
         (
             lambda tmp: tmp / "v2_smoke",
-            lambda r: r.parent.name == r.parent.name,  # under tmp_path
+            lambda r: r.name == "v2_smoke",  # the resolved leaf is preserved
         ),
     ],
     ids=["repo_tests_data", "system_tempdir"],

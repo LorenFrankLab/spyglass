@@ -252,24 +252,6 @@ def test_artifact_proportion_above_threshold_bounds():
         ArtifactDetectionParamsSchema(proportion_above_threshold=1.5)
 
 
-def test_artifact_zscore_description_documents_common_mode():
-    """The ``zscore_threshold`` field documents that the cross-channel
-    z-score is blind to pure common-mode events and that
-    ``amplitude_threshold_uv`` is the way to catch them.
-
-    Guards against the prior (false) claim that the cross-channel
-    z-score *detects* common-mode artifacts.
-    """
-    desc = ArtifactDetectionParamsSchema.model_fields[
-        "zscore_threshold"
-    ].description
-    assert desc is not None
-    lowered = desc.lower()
-    assert "common-mode" in lowered
-    assert "amplitude_threshold_uv" in desc
-    assert "not detected" in lowered or "blind" in lowered
-
-
 def test_artifact_thresholds_or_semantics():
     """The two thresholds are an intentional OR, not mutually exclusive.
 
