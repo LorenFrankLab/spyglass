@@ -51,7 +51,7 @@ def read_units_abs_spike_times(abs_path) -> dict:
         ``{unit_id (int): absolute spike times (np.ndarray of seconds)}``;
         ``{}`` for an empty or absent Units table.
     """
-    import numpy as _np
+    import numpy as np
     import pynwb
 
     with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
@@ -60,7 +60,7 @@ def read_units_abs_spike_times(abs_path) -> dict:
             return {}
         units_df = nwbf.units.to_dataframe()
     return {
-        int(uid): _np.asarray(st, dtype=float)
+        int(uid): np.asarray(st, dtype=float)
         for uid, st in units_df["spike_times"].items()
     }
 
@@ -144,7 +144,7 @@ def build_lazy_merged_sorting(
         ``max(unit_ids) + 1`` id in ``units_to_merge`` order (matching the
         prior SI ``MergeUnitsSorting`` id assignment).
     """
-    import numpy as _np
+    import numpy as np
     import spikeinterface as si
 
     from spyglass.spikesorting.v2._signal_math import (
@@ -152,7 +152,7 @@ def build_lazy_merged_sorting(
         _spike_times_to_frames,
     )
 
-    n_samples = int(_np.asarray(timestamps).size)
+    n_samples = int(np.asarray(timestamps).size)
     merged_members = {int(u) for g in units_to_merge for u in g}
     units_dict: dict = {}
     # Non-merged units: map their own absolute times to frames (the same
@@ -160,14 +160,14 @@ def build_lazy_merged_sorting(
     for uid, st in abs_times.items():
         if int(uid) not in merged_members:
             units_dict[int(uid)] = _spike_times_to_frames(
-                timestamps, _np.asarray(st), n_samples, int(uid)
+                timestamps, np.asarray(st), n_samples, int(uid)
             )
     # Each merge group -> abs-time-deduped train mapped to frames, under a
     # fresh ``max(unit_ids) + 1`` id (in units_to_merge order).
     next_id = max(int(u) for u in abs_times) + 1
     for contribs in units_to_merge:
         deduped_abs = _dedup_merged_spike_times(
-            [_np.asarray(abs_times[int(u)]) for u in contribs], delta_s
+            [np.asarray(abs_times[int(u)]) for u in contribs], delta_s
         )
         units_dict[next_id] = _spike_times_to_frames(
             timestamps, deduped_abs, n_samples, next_id
@@ -238,7 +238,7 @@ def recording_timestamps(recording_row):
     np.ndarray, shape (n_samples,)
         The recording's wall-clock timestamps, in seconds (float64).
     """
-    import numpy as _np
+    import numpy as np
     import pynwb
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
@@ -248,7 +248,7 @@ def recording_timestamps(recording_row):
     with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
         nwbf = io.read()
         series = nwbf.acquisition[series_name]
-        return _np.asarray(series.timestamps[:], dtype=_np.float64)
+        return np.asarray(series.timestamps[:], dtype=np.float64)
 
 
 def write_sorting_units_nwb(
@@ -271,7 +271,7 @@ def write_sorting_units_nwb(
     timestamp envelope when no artifact mask was applied
     (``obs_intervals=None``).
     """
-    import numpy as _np
+    import numpy as np
     import pynwb
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
@@ -296,13 +296,13 @@ def write_sorting_units_nwb(
             _base_intervals_from_timestamps,
         )
 
-        obs_intervals_arr = _np.asarray(
+        obs_intervals_arr = np.asarray(
             _base_intervals_from_timestamps(
                 timestamps, recording.get_sampling_frequency()
             )
         )
     else:
-        obs_intervals_arr = _np.asarray(obs_intervals)
+        obs_intervals_arr = np.asarray(obs_intervals)
 
     with pynwb.NWBHDF5IO(
         path=analysis_abs_path, mode="a", load_namespaces=True
@@ -389,7 +389,7 @@ def write_curated_units_nwb(
     ``CurationV2.MergeGroup`` and is reconstructed by
     ``get_merged_sorting`` on demand.
     """
-    import numpy as _np
+    import numpy as np
     import pynwb
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
@@ -500,7 +500,7 @@ def write_curated_units_nwb(
                 ]
                 all_labels.append(label_list)
                 nwbf.add_unit(
-                    spike_times=_np.asarray(spike_times, dtype=_np.float64),
+                    spike_times=np.asarray(spike_times, dtype=np.float64),
                     id=int(unit_id),
                 )
             # Only add the column when at least one unit

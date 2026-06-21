@@ -90,7 +90,7 @@ def build_analyzer(
         The analyzer cache folder path. For a zero-unit sort the folder
         is returned without being built.
     """
-    import shutil as _shutil
+    import shutil
 
     import spikeinterface as si
 
@@ -150,7 +150,7 @@ def build_analyzer(
     # untouched.
     probe = recording.get_probe()
     if probe.ndim == 3:
-        import numpy as _np
+        import numpy as np
 
         from spyglass.utils import logger
 
@@ -158,8 +158,8 @@ def build_analyzer(
         # therefore sparsity), so the "x/y unchanged" guarantee above no longer
         # holds. Frank-lab probes are planar (z=0); warn on a genuinely
         # non-planar probe, which may need a different projection axis.
-        z = _np.asarray(probe.contact_positions)[:, 2]
-        if z.size and not _np.allclose(z, z[0]):
+        z = np.asarray(probe.contact_positions)[:, 2]
+        if z.size and not np.allclose(z, z[0]):
             logger.warning(
                 "build_analyzer: projecting a 3D probe to 2D (axes='xy'), but "
                 "the contact z coordinates are not constant (range "
@@ -221,7 +221,7 @@ def build_analyzer(
     except Exception:
         try:
             if folder.exists():
-                _shutil.rmtree(folder, ignore_errors=False)
+                shutil.rmtree(folder, ignore_errors=False)
         except Exception as cleanup_exc:  # pragma: no cover -- defensive
             logger.error(
                 "Sorting._build_analyzer: failed to remove partial "

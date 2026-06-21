@@ -200,7 +200,7 @@ def maybe_apply_tetrode_geometry(
             logger.info("_maybe_apply_tetrode_geometry skipped: %s", reason)
             return recording
 
-    import numpy as _np
+    import numpy as np
     import probeinterface as pi
 
     tetrode = pi.Probe(ndim=2)
@@ -211,7 +211,7 @@ def maybe_apply_tetrode_geometry(
         shape_params={"radius": 6.25},
     )
     tetrode.set_contact_ids([str(c) for c in sort_group_channel_ids])
-    tetrode.set_device_channel_indices(_np.arange(4))
+    tetrode.set_device_channel_indices(np.arange(4))
     return recording.set_probe(tetrode, in_place=True)
 
 

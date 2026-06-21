@@ -112,7 +112,7 @@ def run_clusterless_thresholder(
         A single-unit sorting wrapping the detected peak sample
         indices.
     """
-    import numpy as _np
+    import numpy as np
     import spikeinterface as si
     from spikeinterface.sortingcomponents.peak_detection import (
         detect_peaks,
@@ -224,9 +224,9 @@ def run_clusterless_thresholder(
         # any other explicit length is a configuration error (it
         # would otherwise mis-index inside SI's ``locally_exclusive``).
         _assert_noise_levels_length(nl_in, n_channels)
-        nl = _np.asarray(nl_in, dtype=_np.float64)
+        nl = np.asarray(nl_in, dtype=np.float64)
         if nl.size == 1:
-            nl = _np.full(n_channels, float(nl[0]), dtype=_np.float64)
+            nl = np.full(n_channels, float(nl[0]), dtype=np.float64)
         params["noise_levels"] = nl
 
     method = params.pop("method", "locally_exclusive")
@@ -269,7 +269,7 @@ def run_clusterless_thresholder(
     # already returns sample indices.
     return si.NumpySorting.from_samples_and_labels(
         samples_list=detected["sample_index"],
-        labels_list=_np.zeros(len(detected), dtype=_np.int32),
+        labels_list=np.zeros(len(detected), dtype=np.int32),
         sampling_frequency=recording.get_sampling_frequency(),
     )
 
@@ -326,16 +326,16 @@ def run_si_sorter(
     import os
     import tempfile
 
-    import numpy as _np
-    import spikeinterface as _si
+    import numpy as np
+    import spikeinterface as si
     import spikeinterface.sorters as sis
 
-    from spyglass.settings import temp_dir as _spyglass_temp_dir
+    from spyglass.settings import temp_dir as spyglass_temp_dir
     from spyglass.utils import logger
 
     sorter_temp_dir = tempfile.TemporaryDirectory(
         prefix=f"sort_{sorting_id}_",
-        dir=_spyglass_temp_dir,
+        dir=spyglass_temp_dir,
     )
     patched_numpy_inf = False
     try:
@@ -353,8 +353,8 @@ def run_si_sorter(
         # ``np.Inf`` always aliased, so the patch is value-safe; only
         # its lifetime is scoped. TODO: drop once SI's MS4 wrapper /
         # spikeextractors stops referencing the removed alias.
-        if sorter.lower() == "mountainsort4" and not hasattr(_np, "Inf"):
-            _np.Inf = _np.inf
+        if sorter.lower() == "mountainsort4" and not hasattr(np, "Inf"):
+            np.Inf = np.inf
             patched_numpy_inf = True
 
         if sorter_params.get("whiten", False):
@@ -379,7 +379,7 @@ def run_si_sorter(
             # of a parameter row reproducible by default.
             _random_seed = (job_kwargs or {}).get("random_seed", 0)
             recording = sip.whiten(
-                recording, dtype=_np.float64, seed=_random_seed
+                recording, dtype=np.float64, seed=_random_seed
             )
             sorter_params = {**sorter_params, "whiten": False}
 
@@ -400,9 +400,9 @@ def run_si_sorter(
         # pin); strip before installing as a job kwarg because
         # SI's ``set_global_job_kwargs`` rejects unknown keys.
         sj_kwargs.pop("random_seed", None)
-        previous_global = dict(_si.get_global_job_kwargs())
+        previous_global = dict(si.get_global_job_kwargs())
         if sj_kwargs:
-            _si.set_global_job_kwargs(**sj_kwargs)
+            si.set_global_job_kwargs(**sj_kwargs)
         run_kwargs = dict(
             sorter_name=sorter,
             recording=recording,
@@ -435,8 +435,8 @@ def run_si_sorter(
                 # that exception must propagate, not a secondary
                 # ``set_global_job_kwargs`` error.
                 try:
-                    _si.reset_global_job_kwargs()
-                    _si.set_global_job_kwargs(**previous_global)
+                    si.reset_global_job_kwargs()
+                    si.set_global_job_kwargs(**previous_global)
                 except Exception as restore_exc:
                     logger.warning(
                         "Sorting._run_si_sorter: failed to restore SI "
@@ -447,8 +447,8 @@ def run_si_sorter(
     finally:
         # Undo the scoped ``np.Inf`` patch so the global numpy
         # module is left exactly as the rest of the process saw it.
-        if patched_numpy_inf and hasattr(_np, "Inf"):
-            del _np.Inf
+        if patched_numpy_inf and hasattr(np, "Inf"):
+            del np.Inf
         # ``TemporaryDirectory`` auto-cleans on garbage collection,
         # but the explicit ``.cleanup()`` in a ``finally`` makes
         # the cleanup point obvious and survives worker-process

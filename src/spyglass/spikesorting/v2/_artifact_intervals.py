@@ -164,7 +164,7 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
         Artifact-removed valid times in seconds, shape
         ``(n_intervals, 2)``.
     """
-    import numpy as _np
+    import numpy as np
 
     from spyglass.spikesorting.v2._signal_math import (
         assert_positive_sampling_frequency,
@@ -191,7 +191,7 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
             "ArtifactDetection: detect=False; returning the recorded "
             "window(s) as valid intervals."
         )
-        return _np.asarray(base_intervals)
+        return np.asarray(base_intervals)
 
     # Log the threshold configuration so a population report can
     # audit which detection mode actually fired per row.
@@ -234,7 +234,7 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
     # 0.7 on a stereotrode -> ceil(1.4)=2 of 2 = 100%). Warn so the realized
     # requirement is visible; the detection math itself is unchanged.
     n_required = int(
-        _np.ceil(validated.proportion_above_threshold * n_channels)
+        np.ceil(validated.proportion_above_threshold * n_channels)
     )
     if validated.proportion_above_threshold < 1.0 and n_required >= n_channels:
         logger.warning(
@@ -270,12 +270,12 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
             f"{validated.proportion_above_threshold}); returning the "
             "recorded window(s) as valid intervals."
         )
-        return _np.asarray(base_intervals)
+        return np.asarray(base_intervals)
 
     half_window_frames = int(
-        _np.ceil(validated.removal_window_ms * 1e-3 * fs / 2)
+        np.ceil(validated.removal_window_ms * 1e-3 * fs / 2)
     )
-    join_window_frames = int(_np.ceil(validated.join_window_ms * 1e-3 * fs))
+    join_window_frames = int(np.ceil(validated.join_window_ms * 1e-3 * fs))
 
     # Inter-chunk wall-clock gaps: frame index of the last sample
     # before each gap (diff > 1.5 sample periods). Frame indices are
@@ -284,7 +284,7 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
     # otherwise an artifact near a chunk edge bridges/spills into the
     # neighboring chunk across the gap.
     n = len(timestamps)
-    gap_after = _np.flatnonzero(_np.diff(timestamps) > 1.5 * (1.0 / fs))
+    gap_after = np.flatnonzero(np.diff(timestamps) > 1.5 * (1.0 / fs))
 
     # Build artifact intervals in frame indices, then convert to
     # seconds and subtract per base chunk. Join nearby artifact frames
@@ -297,7 +297,7 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
     cur_start = frames_above[0]
     cur_end = frames_above[0]
     for f in frames_above[1:]:
-        crosses_gap = bool(_np.any((gap_after >= cur_end) & (gap_after < f)))
+        crosses_gap = bool(np.any((gap_after >= cur_end) & (gap_after < f)))
         if f - cur_end <= join_window_frames and not crosses_gap:
             cur_end = f
         else:
@@ -391,8 +391,8 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
             "proportion_above_threshold), reduce removal_window_ms, or lower "
             "min_length_s."
         )
-        return _np.empty((0, 2))
-    return _np.asarray(kept)
+        return np.empty((0, 2))
+    return np.asarray(kept)
 
 
 def build_artifact_interval_rows(

@@ -41,10 +41,10 @@ def assert_positive_sampling_frequency(
     silently yields an infinite / NaN sample period and mis-maps every frame
     instead of failing. ``context`` is prepended to name the call site.
     """
-    import numpy as _np
+    import numpy as np
 
     fs = float(sampling_frequency)
-    if not _np.isfinite(fs) or fs <= 0.0:
+    if not np.isfinite(fs) or fs <= 0.0:
         raise ValueError(
             f"{context}sampling frequency must be a finite positive number; "
             f"got {sampling_frequency!r}."
@@ -63,12 +63,12 @@ def assert_monotonic_timestamps(timestamps, *, context: str = "") -> None:
     duplicates); only a strictly backward step is rejected. ``context`` is
     prepended to name the call site.
     """
-    import numpy as _np
+    import numpy as np
 
-    ts = _np.asarray(timestamps)
+    ts = np.asarray(timestamps)
     if ts.size == 0:
         raise ValueError(f"{context}timestamp vector is empty.")
-    if not _np.all(_np.isfinite(ts)):
+    if not np.all(np.isfinite(ts)):
         # ``np.diff`` across a NaN is NaN and ``NaN < 0`` is False, so the
         # backward-step check below silently passes a NaN-containing (and
         # NaN-masked out-of-order) vector -- yet ``searchsorted`` sorts NaN as
@@ -78,7 +78,7 @@ def assert_monotonic_timestamps(timestamps, *, context: str = "") -> None:
             "searchsorted-based frame mapping would silently mis-slice the "
             "recording (NaN sorts as +inf)."
         )
-    if ts.size > 1 and bool(_np.any(_np.diff(ts) < 0)):
+    if ts.size > 1 and bool(np.any(np.diff(ts) < 0)):
         raise ValueError(
             f"{context}timestamps must be monotonically non-decreasing "
             "(searchsorted-based frame mapping would otherwise silently "
@@ -126,12 +126,12 @@ def _get_recording_timestamps(
         ``(total_frames,)`` wall-clock seconds. Lazy timestamp overrides are
         returned as-is; otherwise the return is a ``numpy.ndarray``.
     """
-    import numpy as _np
+    import numpy as np
 
     if override is not None:
         if getattr(override, "_spyglass_lazy_timestamps", False):
             return override
-        return _np.asarray(override)
+        return np.asarray(override)
 
     num_segments = recording.get_num_segments()
     if num_segments <= 1:
@@ -140,10 +140,10 @@ def _get_recording_timestamps(
     frames_per_segment = [0] + [
         recording.get_num_frames(segment_index=i) for i in range(num_segments)
     ]
-    cumsum_frames = _np.cumsum(frames_per_segment)
+    cumsum_frames = np.cumsum(frames_per_segment)
     total_frames = int(cumsum_frames[-1])
 
-    timestamps = _np.zeros((total_frames,), dtype=_np.float64)
+    timestamps = np.zeros((total_frames,), dtype=np.float64)
     for i in range(num_segments):
         start_index = int(cumsum_frames[i])
         end_index = int(cumsum_frames[i + 1])
@@ -178,25 +178,25 @@ def _consolidate_intervals(intervals, timestamps):
         end_frame_exclusive)`` integer pairs suitable for
         ``recording.frame_slice(start_frame=..., end_frame=...)``.
     """
-    import numpy as _np
+    import numpy as np
 
-    intervals = _np.asarray(intervals)
+    intervals = np.asarray(intervals)
     if intervals.ndim == 1:
         intervals = intervals.reshape(-1, 2)
     if intervals.shape[1] != 2:
         raise ValueError("Input array must have shape (N_Intervals, 2).")
 
     # Sort defensively; stable ordering by start.
-    if not _np.all(intervals[:-1] <= intervals[1:]):
-        intervals = intervals[_np.argsort(intervals[:, 0])]
+    if not np.all(intervals[:-1] <= intervals[1:]):
+        intervals = intervals[np.argsort(intervals[:, 0])]
 
     assert_monotonic_timestamps(
         timestamps, context="_consolidate_intervals: "
     )
-    start_indices = _np.searchsorted(timestamps, intervals[:, 0], side="left")
+    start_indices = np.searchsorted(timestamps, intervals[:, 0], side="left")
     # Exclusive end: ``side="right"`` returns the count of timestamps <= value,
     # which is exactly the half-open end ``frame_slice`` expects.
-    stop_indices = _np.searchsorted(timestamps, intervals[:, 1], side="right")
+    stop_indices = np.searchsorted(timestamps, intervals[:, 1], side="right")
 
     consolidated = []
     start, stop = int(start_indices[0]), int(stop_indices[0])
@@ -212,7 +212,7 @@ def _consolidate_intervals(intervals, timestamps):
             start, stop = next_start, next_stop
 
     consolidated.append((start, stop))
-    return _np.asarray(consolidated, dtype=_np.int64)
+    return np.asarray(consolidated, dtype=np.int64)
 
 
 def _spike_times_to_frames(recording_times, spike_times, n_samples, unit_id):
@@ -263,13 +263,13 @@ def _spike_times_to_frames(recording_times, spike_times, n_samples, unit_id):
         nearest timestamp -- an upstream alignment/units error, not FP
         rounding.
     """
-    import numpy as _np
+    import numpy as np
 
-    recording_times = _np.asarray(recording_times, dtype=float)
-    spike_times = _np.atleast_1d(_np.asarray(spike_times, dtype=float))
+    recording_times = np.asarray(recording_times, dtype=float)
+    spike_times = np.atleast_1d(np.asarray(spike_times, dtype=float))
     n_samples = int(n_samples)
     if spike_times.size == 0:
-        return _np.asarray([], dtype=_np.int64)
+        return np.asarray([], dtype=np.int64)
     if recording_times.size != n_samples:
         raise ValueError(
             "_spike_times_to_frames: recording_times length "
@@ -283,23 +283,23 @@ def _spike_times_to_frames(recording_times, spike_times, n_samples, unit_id):
     assert_monotonic_timestamps(
         recording_times, context=f"_spike_times_to_frames (unit {unit_id}): "
     )
-    insert_indices = _np.searchsorted(recording_times, spike_times, side="left")
-    right_indices = _np.clip(insert_indices, 0, n_samples - 1)
-    left_indices = _np.clip(insert_indices - 1, 0, n_samples - 1)
+    insert_indices = np.searchsorted(recording_times, spike_times, side="left")
+    right_indices = np.clip(insert_indices, 0, n_samples - 1)
+    left_indices = np.clip(insert_indices - 1, 0, n_samples - 1)
 
-    left_dist = _np.abs(spike_times - recording_times[left_indices])
-    right_dist = _np.abs(recording_times[right_indices] - spike_times)
+    left_dist = np.abs(spike_times - recording_times[left_indices])
+    right_dist = np.abs(recording_times[right_indices] - spike_times)
     use_left = left_dist < right_dist
-    spike_frames = _np.where(use_left, left_indices, right_indices).astype(
-        _np.int64, copy=False
+    spike_frames = np.where(use_left, left_indices, right_indices).astype(
+        np.int64, copy=False
     )
-    nearest_dist = _np.where(use_left, left_dist, right_dist)
+    nearest_dist = np.where(use_left, left_dist, right_dist)
 
     if recording_times.size >= 2:
-        diffs = _np.diff(recording_times)
+        diffs = np.diff(recording_times)
         positive_diffs = diffs[diffs > 0]
         sample_period = (
-            float(_np.median(positive_diffs)) if positive_diffs.size else 0.0
+            float(np.median(positive_diffs)) if positive_diffs.size else 0.0
         )
     else:
         sample_period = 0.0
@@ -307,7 +307,7 @@ def _spike_times_to_frames(recording_times, spike_times, n_samples, unit_id):
 
     far_mask = nearest_dist > tol
     if bool(far_mask.any()):
-        worst = int(_np.argmax(nearest_dist))
+        worst = int(np.argmax(nearest_dist))
         nearest_t = float(recording_times[spike_frames[worst]])
         raise ValueError(
             f"Unit {unit_id} has spike time(s) up to "
@@ -376,25 +376,25 @@ def _dedup_merged_spike_times(times_list, delta_s):
     np.ndarray
         Sorted, deduplicated merged spike times (seconds).
     """
-    import numpy as _np
+    import numpy as np
 
-    arrays = [_np.asarray(t, dtype=float) for t in times_list]
-    concat = _np.concatenate(arrays) if arrays else _np.asarray([], dtype=float)
+    arrays = [np.asarray(t, dtype=float) for t in times_list]
+    concat = np.concatenate(arrays) if arrays else np.asarray([], dtype=float)
     if concat.size == 0:
         return concat
     order = concat.argsort(kind="mergesort")
     times_sorted = concat[order]
-    membership = _np.concatenate(
-        [_np.full(arr.shape, i) for i, arr in enumerate(arrays)]
+    membership = np.concatenate(
+        [np.full(arr.shape, i) for i, arr in enumerate(arrays)]
     )[order]
     # Keep a spike iff it is far enough from the previous one OR shares
     # the previous one's contributor (mirrors SI's
     # ``(diff(times) > delta) | (diff(membership) == 0)``); always keep
     # the first.
-    keep = _np.nonzero(
-        (_np.diff(times_sorted) > delta_s) | (_np.diff(membership) == 0)
+    keep = np.nonzero(
+        (np.diff(times_sorted) > delta_s) | (np.diff(membership) == 0)
     )[0]
-    keep = _np.concatenate([[0], keep + 1])
+    keep = np.concatenate([[0], keep + 1])
     return times_sorted[keep]
 
 
@@ -430,9 +430,9 @@ def _base_intervals_from_timestamps(timestamps, fs):
         ``[[start, end], ...]`` inclusive per-chunk bounds; ``[]`` for an
         empty input.
     """
-    import numpy as _np
+    import numpy as np
 
-    ts = _np.asarray(timestamps, dtype=float)
+    ts = np.asarray(timestamps, dtype=float)
     if ts.size == 0:
         return []
     assert_monotonic_timestamps(
@@ -444,7 +444,7 @@ def _base_intervals_from_timestamps(timestamps, fs):
     sample_period = 1.0 / float(fs)
     # Index i marks a gap when ts[i+1] - ts[i] exceeds 1.5 sample periods
     # (i.e. at least one sample of wall-clock time is missing).
-    gap_after = _np.flatnonzero(_np.diff(ts) > 1.5 * sample_period)
+    gap_after = np.flatnonzero(np.diff(ts) > 1.5 * sample_period)
     starts = [0, *(int(i) + 1 for i in gap_after)]
     ends = [*(int(i) for i in gap_after), ts.size - 1]
     return [[float(ts[s]), float(ts[e])] for s, e in zip(starts, ends)]

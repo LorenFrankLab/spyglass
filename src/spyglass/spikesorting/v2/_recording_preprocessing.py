@@ -84,7 +84,7 @@ def apply_pre_motion_preprocessing(
         Interior curated-bad electrode ids to interpolate on the
         ``"interpolate"`` path. Default ``()``.
     """
-    import numpy as _np
+    import numpy as np
     import spikeinterface.preprocessing as sip
 
     from spyglass.utils import logger
@@ -134,7 +134,7 @@ def apply_pre_motion_preprocessing(
             recording,
             freq_min=validated.bandpass_filter.freq_min,
             freq_max=validated.bandpass_filter.freq_max,
-            dtype=_np.float64,
+            dtype=np.float64,
         )
 
     # 1b. Bad-channel handling: between filter and reference (matches the
@@ -190,7 +190,7 @@ def apply_pre_motion_preprocessing(
             recording,
             reference="single",
             ref_channel_ids=[int(reference_electrode_id)],
-            dtype=_np.float64,
+            dtype=np.float64,
         )
         # Drop the reference channel from the recording surface so
         # the sorter only sees the actual sort-group channels
@@ -228,7 +228,7 @@ def apply_pre_motion_preprocessing(
             recording,
             reference="global",
             operator=validated.common_reference.operator,
-            dtype=_np.float64,
+            dtype=np.float64,
         )
     elif reference_mode != "none":
         raise ValueError(

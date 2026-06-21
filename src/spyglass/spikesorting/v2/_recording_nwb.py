@@ -104,7 +104,7 @@ def write_nwb_artifact(
         ``ElectricalSeries.filtering`` describing the preprocessing
         steps that actually ran (from :func:`filtering_description`).
     """
-    import numpy as _np
+    import numpy as np
     import pynwb
 
     from spyglass.spikesorting.v2._nwb_iterators import (
@@ -122,7 +122,7 @@ def write_nwb_artifact(
         write_buffer_gb,
     )
 
-    import pathlib as _pathlib
+    import pathlib
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
     from spyglass.spikesorting.v2.recording import _ELECTRICAL_SERIES_NAME
@@ -223,7 +223,7 @@ def write_nwb_artifact(
                 analysis_file_name,
                 from_schema=bool(existing_analysis_file_name),
             )
-            _pathlib.Path(_abs).unlink(missing_ok=True)
+            pathlib.Path(_abs).unlink(missing_ok=True)
         except Exception as cleanup_exc:  # pragma: no cover -- defensive
             logger.error(
                 "Recording._write_nwb_artifact: failed to clean up "

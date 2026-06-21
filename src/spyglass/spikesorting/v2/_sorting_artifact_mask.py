@@ -74,7 +74,7 @@ def apply_artifact_mask(
         practice; this guards a hand-built curation override. Strict
         input is intentional -- silent sort/merge is deferred.)
     """
-    import numpy as _np
+    import numpy as np
     import spikeinterface.preprocessing as sip
 
     from spyglass.spikesorting.v2._signal_math import (
@@ -85,7 +85,7 @@ def apply_artifact_mask(
         EmptyArtifactValidTimesError,
     )
 
-    valid_times = _np.asarray(valid_times, dtype=float)
+    valid_times = np.asarray(valid_times, dtype=float)
     if valid_times.size == 0:
         raise EmptyArtifactValidTimesError(
             "Artifact-removed valid_times is empty for "
@@ -103,14 +103,14 @@ def apply_artifact_mask(
         )
     starts = valid_times[:, 0]
     ends = valid_times[:, 1]
-    if _np.any(ends < starts):
+    if np.any(ends < starts):
         raise ValueError(
             "_apply_artifact_mask: valid_times has an interval whose "
             "end precedes its start; each interval must be "
             "(start <= end)."
         )
     if valid_times.shape[0] > 1 and (
-        _np.any(_np.diff(starts) < 0) or _np.any(starts[1:] < ends[:-1])
+        np.any(np.diff(starts) < 0) or np.any(starts[1:] < ends[:-1])
     ):
         raise ValueError(
             "_apply_artifact_mask: valid_times must be sorted by start "
@@ -132,13 +132,13 @@ def apply_artifact_mask(
     cursor = timestamps[0]
     for vs, ve in valid_times:
         if vs > cursor:
-            start = int(_np.searchsorted(timestamps, cursor))
-            end = int(_np.searchsorted(timestamps, vs))
+            start = int(np.searchsorted(timestamps, cursor))
+            end = int(np.searchsorted(timestamps, vs))
             if end > start:
                 frame_ranges.append((start, end))
         cursor = max(cursor, ve)
     if cursor < timestamps[-1]:
-        start = int(_np.searchsorted(timestamps, cursor))
+        start = int(np.searchsorted(timestamps, cursor))
         end = len(timestamps)
         if end > start:
             frame_ranges.append((start, end))
@@ -168,8 +168,8 @@ def apply_artifact_mask(
     if not frame_ranges:
         return recording
 
-    artifact_frames = _np.concatenate(
-        [_np.arange(s, e, dtype=_np.int64) for s, e in frame_ranges]
+    artifact_frames = np.concatenate(
+        [np.arange(s, e, dtype=np.int64) for s, e in frame_ranges]
     )
     # SI's ``list_triggers`` is documented as a list-of-arrays, one
     # per event channel. We pass a single numpy array wrapping ALL

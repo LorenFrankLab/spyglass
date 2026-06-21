@@ -1256,7 +1256,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         it is NOT a stored column -- the canonical path is resolved from
         sorting_id everywhere outside this single populate() invocation.
         """
-        import datetime as _dt
+        import datetime as dt
 
         with transaction_or_noop(self.connection):
             AnalysisNwbfile().add(nwb_file_name, analysis_file_name)
@@ -1266,7 +1266,7 @@ class Sorting(SpyglassMixin, dj.Computed):
                     "analysis_file_name": analysis_file_name,
                     "object_id": units_object_id,
                     "n_units": len(sorting_obj.unit_ids),
-                    "time_of_sort": _dt.datetime.now(),
+                    "time_of_sort": dt.datetime.now(),
                 }
             )
             self._populate_unit_part(
@@ -1291,13 +1291,13 @@ class Sorting(SpyglassMixin, dj.Computed):
         DataJoint cannot roll back these filesystem side effects, so the
         caller invokes this in its ``except`` before re-raising.
         """
-        import pathlib as _pathlib
-        import shutil as _shutil
+        import pathlib
+        import shutil
 
         if analysis_file_name is not None:
             try:
                 abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
-                _pathlib.Path(abs_path).unlink(missing_ok=True)
+                pathlib.Path(abs_path).unlink(missing_ok=True)
             except Exception as cleanup_exc:  # pragma: no cover -- defensive
                 logger.error(
                     "Sorting._cleanup_staged_sorting_artifacts: failed to "
@@ -1306,7 +1306,7 @@ class Sorting(SpyglassMixin, dj.Computed):
                 )
         try:
             if analyzer_folder.exists():
-                _shutil.rmtree(analyzer_folder, ignore_errors=False)
+                shutil.rmtree(analyzer_folder, ignore_errors=False)
         except Exception as cleanup_exc:  # pragma: no cover -- defensive
             logger.error(
                 "Sorting._cleanup_staged_sorting_artifacts: failed to remove "
@@ -1479,7 +1479,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         restriction and hands this private helper a normalized
         ``{"sorting_id": ...}``; callers should do the same.
         """
-        import shutil as _shutil
+        import shutil
 
         from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
@@ -1550,7 +1550,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             # logged, not raised, so it cannot mask the original error.
             try:
                 if folder.exists():
-                    _shutil.rmtree(folder, ignore_errors=False)
+                    shutil.rmtree(folder, ignore_errors=False)
             except Exception as cleanup_exc:  # pragma: no cover -- defensive
                 logger.error(
                     "Sorting._rebuild_analyzer_folder: failed to remove "
@@ -1676,7 +1676,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             is resolved from ``sorting_id`` (there is no stored
             ``analyzer_folder`` column).
         """
-        import shutil as _shutil
+        import shutil
 
         import datajoint as dj
 
@@ -1736,7 +1736,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         )
         if dj.utils.user_choice(msg).lower() in ("y", "yes"):
             for folder in disk_side:
-                _shutil.rmtree(folder, ignore_errors=False)
+                shutil.rmtree(folder, ignore_errors=False)
             logger.info(
                 "Sorting.find_orphaned_analyzer_folders: deleted "
                 f"{len(disk_side)} disk-side orphan folder(s)."
@@ -1982,7 +1982,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         if sorting.get_num_units() == 0:
             return
 
-        import numpy as _np
+        import numpy as np
         import spikeinterface as si
         from spikeinterface.core import template_tools
 
