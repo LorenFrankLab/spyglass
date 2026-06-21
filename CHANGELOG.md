@@ -75,6 +75,38 @@ justification.
 
 Upstream issue filed on LorenFrankLab/spyglass to track v1's bug.
 
+#### Spike Sorting v2: analyzer-driven curation + recompute verification
+
+`AnalyzerCuration` consolidates v1's `MetricCuration` + `BurstPair` into one
+computed table that walks a sort's `SortingAnalyzer` extensions to compute
+SpikeInterface 0.104 quality metrics, propose merges (via
+`compute_merge_unit_groups` presets), and propose auto-curation labels.
+Proposals are written to three NWB tables (`quality_metrics`,
+`merge_suggestions`, `proposed_labels`); `materialize_curation()` commits them
+into a child `CurationV2` row (`curation_source='analyzer_curation'`).
+
+- New parameter Lookups: `QualityMetricParameters` (validates metric names
+  against the installed SpikeInterface; `franklab_default` / `neuropixels_default`
+  / `minimal` rows) and `AutoCurationRules` (+ ordered `Rule` part), inserted via
+  `AutoCurationRules.insert_rules(master, rule_rows)`.
+- `isi_violation` reproduces Spyglass's bounded `count / (n_spikes - 1)`
+  fraction, not SI's unbounded `isi_violations_ratio`; the 0.99
+  `nn_isolation` / `nn_noise_overlap` metric names are replaced by the
+  `nn_advanced` PCA metric's two output columns.
+- Fetch/notebook parity: `get_metrics` / `get_labels` / `get_merge_groups` /
+  `get_waveforms`, the static `plot_units_qc` population QC plot, and the ported
+  BurstPair views (`plot_correlograms`, `investigate_pair_xcorrel`,
+  `investigate_pair_peaks`, `plot_peak_over_time`).
+- `Sorting.add_extensions()` adds analyzer extensions in place, idempotently.
+- The clusterless `spike_location` decoding mark is now supported for v2
+  (`CurationV2`) sources; the dead legacy `_get_spike_locations` helper is
+  retired.
+- New recompute-verification tables (`RecordingArtifact*`,
+  `SortingAnalyzer*` trios) regenerate and content-compare large artifacts so
+  `delete_files()` reclaims disk only after a current-environment match (stale
+  matches raise `StaleEnvMatchedError`). See
+  [SpikeSortingV2StorageManagement.md](./Features/SpikeSortingV2StorageManagement.md).
+
 #### Spike Sorting v2: streaming Recording write, parallel populate, and v1-parity restorations
 
 This is a focused fix-up between the initial v2 landing and the

@@ -419,6 +419,67 @@ control); they pre-fill `parent_curation_id` / `apply_merge` by name.
 `summarize_curation` returns a plain dict (`n_units`, `labels`, `merge_groups`,
 `merges_applied`, `is_merge_preview`, `merge_id`, ...) for notebook printing.
 
+### Quality metrics and auto-curation (`AnalyzerCuration`)
+
+`AnalyzerCuration` replaces v1's `MetricCuration` + `BurstPair`. It walks a
+sort's `SortingAnalyzer` extensions to compute SpikeInterface quality metrics,
+propose merges, and propose auto-curation labels. The proposals are written to
+NWB; turning them into a new `CurationV2` row is an explicit step
+(`materialize_curation`).
+
+```python
+from spyglass.spikesorting.v2.metric_curation import (
+    AnalyzerCuration,
+    AnalyzerCurationSelection,
+    QualityMetricParameters,
+    AutoCurationRules,
+)
+
+# Default Lookup rows are installed by initialize_v2_defaults().
+QualityMetricParameters().show_available_metrics()  # SI metric names you can request
+
+# Select a (CurationV2 row x metric-params x auto-rules) and populate.
+sel = AnalyzerCurationSelection.insert_selection(
+    {
+        "sorting_id": run_summary["sorting_id"],
+        "curation_id": run_summary["curation_id"],
+        "metric_params_name": "franklab_default",      # snr/isi/firing/nn_advanced (PCA)
+        "auto_curation_rules_name": "v1_default_nn_noise",  # nn_noise_overlap > 0.1 -> noise/reject
+    }
+)
+AnalyzerCuration.populate(sel)
+
+metrics = AnalyzerCuration.get_metrics(sel)          # DataFrame, NaN -> None on read
+labels = AnalyzerCuration.get_labels(sel)            # {unit_id: [label, ...]}
+merges = AnalyzerCuration.get_merge_groups(sel)      # [[unit_id, ...], ...]
+
+# Commit the proposals into a child CurationV2 (curation_source='analyzer_curation').
+child = AnalyzerCuration().materialize_curation(sel)
+```
+
+Notes:
+
+- `metric_names` is validated against the installed SpikeInterface at insert.
+  The 0.99 names `nn_isolation` / `nn_noise_overlap` are gone -- request the
+  `nn_advanced` PCA metric (with `skip_pc_metrics=False`) and threshold its
+  `nn_noise_overlap` output column in a rule.
+- `isi_violation` is Spyglass's bounded `count / (n_spikes - 1)` fraction, not
+  SI's unbounded `isi_violations_ratio`.
+- `AutoCurationRules` is inserted via `insert_rules(master, rule_rows)` (direct
+  `insert1` is blocked) so the master row and its ordered rule rows validate
+  together.
+
+#### Population QC plot and burst-pair views
+
+`AnalyzerCuration.plot_units_qc(sel)` renders the population QC overview --
+one histogram per quality metric (NaN dropped) plus a unit-depth scatter
+colored by a chosen metric -- the "do these units look reasonable?" companion
+to the per-unit `describe_units` table. The v1 `BurstPair` notebook workflow is
+ported onto `AnalyzerCuration` as `plot_correlograms`,
+`investigate_pair_xcorrel`, `investigate_pair_peaks`, and `plot_peak_over_time`
+(reading the analyzer's `correlograms` / `waveforms` extensions; no separate
+`BurstPair` table).
+
 ### Stage-by-stage (custom pipeline preset)
 
 `run_v2_pipeline` is a convenience wrapper. The underlying stages can be
