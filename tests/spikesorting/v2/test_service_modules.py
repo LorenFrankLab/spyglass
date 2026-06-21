@@ -502,6 +502,176 @@ def test_save_expectation_flags_request_past_raw_coverage():
     assert exp.over_request == pytest.approx(4.0)  # 10 - 6 past coverage
 
 
+def test_regular_interval_consolidation_matches_timestamp_search():
+    """The lazy regular-grid path must match the established searchsorted path
+    without materializing the full timestamp vector."""
+    from spyglass.spikesorting.v2._recording_restriction import (
+        _consolidate_regular_intervals,
+    )
+    from spyglass.spikesorting.v2.utils import _consolidate_intervals
+
+    timestamps = 10.0 + np.arange(12, dtype=float) / 2.0
+    intervals = np.array([[11.0, 12.0], [13.0, 13.5], [12.5, 12.5]])
+
+    expected = _consolidate_intervals(intervals, timestamps)
+    out = _consolidate_regular_intervals(
+        intervals,
+        n_samples=len(timestamps),
+        sampling_frequency=2.0,
+        t_start=10.0,
+    )
+
+    np.testing.assert_array_equal(out, expected)
+
+
+def test_lazy_timestamp_override_indexes_and_slices_regular_grid():
+    """Lazy timestamp overrides expose array-like indexing while allocating only
+    requested slices."""
+    from spyglass.spikesorting.v2._recording_restriction import (
+        _lazy_timestamp_override,
+    )
+
+    override = _lazy_timestamp_override(
+        np.array([[4, 7], [10, 12]]),
+        sampling_frequency=2.0,
+        t_start=10.0,
+    )
+
+    assert override.shape == (5,)
+    assert override[0] == pytest.approx(12.0)  # frame 4 at 2 Hz from t=10
+    assert override[-1] == pytest.approx(15.5)  # frame 11
+    np.testing.assert_allclose(override[1:4], np.array([12.5, 13.0, 15.0]))
+
+
+def test_get_recording_timestamps_preserves_lazy_override():
+    """A lazy override must not be forced through np.asarray before the NWB
+    chunk iterator has a chance to stream it."""
+    from spyglass.spikesorting.v2._recording_restriction import (
+        _lazy_timestamp_override,
+    )
+    from spyglass.spikesorting.v2.utils import _get_recording_timestamps
+
+    override = _lazy_timestamp_override(
+        np.array([[0, 3]]),
+        sampling_frequency=1.0,
+        t_start=5.0,
+    )
+
+    assert _get_recording_timestamps(None, override=override) is override
+
+
+def test_raw_eseries_timestamp_mode_detects_rate_vs_explicit(tmp_path):
+    """Rate-based raw series can skip eager SI time-vector loading; explicit
+    timestamp series cannot."""
+    import h5py
+
+    from spyglass.spikesorting.v2._recording_nwb import (
+        raw_eseries_uses_explicit_timestamps,
+    )
+
+    def _write(path, *, explicit):
+        with h5py.File(path, "w") as nwb_file:
+            acq = nwb_file.create_group("acquisition")
+            series = acq.create_group("e-series")
+            series.attrs["neurodata_type"] = "ElectricalSeries"
+            if explicit:
+                series.create_dataset("timestamps", data=np.arange(3.0))
+            else:
+                starting_time = series.create_dataset("starting_time", data=0.0)
+                starting_time.attrs["rate"] = 30000.0
+
+    rate_path = tmp_path / "rate.nwb"
+    explicit_path = tmp_path / "explicit.nwb"
+    _write(rate_path, explicit=False)
+    _write(explicit_path, explicit=True)
+
+    assert raw_eseries_uses_explicit_timestamps(str(rate_path)) is False
+    assert raw_eseries_uses_explicit_timestamps(str(explicit_path)) is True
+
+
+def test_lazy_regular_path_matches_eager_on_nonzero_start_recording():
+    """The lazy regular-grid path reproduces the eager ``get_times()`` path
+    byte-for-byte on a real SI recording whose ``t_start`` is non-zero.
+
+    Pins SpikeInterface's affine timestamp origin (``get_start_time`` /
+    ``get_times``): a future SI change that shifted the regular-grid origin --
+    or a recording read that dropped ``starting_time`` -- would diverge here
+    rather than silently persisting wall-clock timestamps that start at the
+    wrong offset (the smoke fixtures all start at 0.0, so nothing else catches
+    it). Two disjoint intervals also exercise the multi-interval concat path.
+    """
+    from spikeinterface.core import NumpyRecording
+
+    from spyglass.spikesorting.v2._recording_restriction import (
+        _consolidate_regular_intervals,
+        _lazy_timestamp_override,
+        _recording_has_explicit_time_vector,
+        _recording_num_frames,
+        _recording_start_time,
+    )
+    from spyglass.spikesorting.v2.utils import _consolidate_intervals
+
+    fs, n_frames, t_start = 2.0, 12, 10.0
+    rec = NumpyRecording(
+        traces_list=[np.zeros((n_frames, 2), dtype="float32")],
+        sampling_frequency=fs,
+        t_starts=[t_start],
+    )
+    # A regular recording must route to the lazy path with the true t_start.
+    assert _recording_has_explicit_time_vector(rec) is False
+    assert _recording_start_time(rec) == pytest.approx(t_start)
+    assert _recording_num_frames(rec) == n_frames
+
+    valid_times = np.array([[10.5, 11.5], [13.0, 14.5]])
+    eager_times = rec.get_times(segment_index=0)
+
+    eager_frames = _consolidate_intervals(valid_times, eager_times)
+    lazy_frames = _consolidate_regular_intervals(
+        valid_times,
+        n_samples=_recording_num_frames(rec),
+        sampling_frequency=fs,
+        t_start=_recording_start_time(rec),
+    )
+    np.testing.assert_array_equal(lazy_frames, eager_frames)
+
+    eager_override = np.concatenate(
+        [eager_times[int(s) : int(e)] for s, e in eager_frames]
+    )
+    lazy_override = _lazy_timestamp_override(
+        lazy_frames, sampling_frequency=fs, t_start=t_start
+    )
+    # Materialize via the slice path the NWB chunk iterator actually uses, and
+    # require byte-identity (the persisted timestamps feed the cache hash).
+    np.testing.assert_array_equal(lazy_override[:], eager_override)
+    # First/last reads are the truncation-guard accessors.
+    assert float(lazy_override[0]) == float(eager_override[0])
+    assert float(lazy_override[-1]) == float(eager_override[-1])
+
+
+def test_explicit_time_vector_recording_is_not_linearized():
+    """A recording carrying an explicit (irregular) time vector takes the eager
+    path -- the affine lazy reconstruction would silently overwrite irregular
+    wall-clock timestamps with a regular grid.
+    """
+    from spikeinterface.core import NumpyRecording
+
+    from spyglass.spikesorting.v2._recording_restriction import (
+        _recording_has_explicit_time_vector,
+    )
+
+    fs, n_frames, t_start = 2.0, 12, 10.0
+    rec = NumpyRecording(
+        traces_list=[np.zeros((n_frames, 2), dtype="float32")],
+        sampling_frequency=fs,
+    )
+    # A jittered, strictly-increasing vector that is NOT an affine grid.
+    irregular = t_start + np.cumsum(
+        np.full(n_frames, 1.0 / fs) + np.linspace(0.0, 0.05, n_frames)
+    )
+    rec.set_times(irregular, segment_index=0)
+    assert _recording_has_explicit_time_vector(rec) is True
+
+
 # --------------------------------------------------------------------------- #
 # _sorting_compute.build_sorting_unit_rows contracts (pure)
 # --------------------------------------------------------------------------- #

@@ -96,6 +96,206 @@ class RecordingSaveExpectation(NamedTuple):
     over_request: float
 
 
+class _LazyAffineTimestamps:
+    """Array-like timestamps for a regular sample grid.
+
+    The object intentionally implements only the small NumPy-like surface the
+    NWB timestamp iterator and ``Recording._compute_recording_artifact`` need:
+    ``shape``, ``len()``, integer indexing, and slice indexing. Slices allocate
+    only the requested chunk, so a 12-hour rate-based recording does not need a
+    full ``float64`` timestamp vector in RAM before the streaming write.
+    """
+
+    _spyglass_lazy_timestamps = True
+
+    def __init__(
+        self,
+        *,
+        start_frame: int,
+        n_frames: int,
+        sampling_frequency: float,
+        t_start: float = 0.0,
+    ):
+        import numpy as np
+
+        self.start_frame = int(start_frame)
+        self.n_frames = int(n_frames)
+        self.sampling_frequency = float(sampling_frequency)
+        self.t_start = float(t_start)
+        self.shape = (self.n_frames,)
+        self.dtype = np.dtype(np.float64)
+
+    def __len__(self):
+        return self.n_frames
+
+    def __getitem__(self, item):
+        import numpy as np
+
+        if isinstance(item, slice):
+            start, stop, step = item.indices(self.n_frames)
+            frames = self.start_frame + np.arange(
+                start, stop, step, dtype=np.float64
+            )
+            return self.t_start + frames / self.sampling_frequency
+
+        idx = int(item)
+        if idx < 0:
+            idx += self.n_frames
+        if idx < 0 or idx >= self.n_frames:
+            raise IndexError(item)
+        frame = self.start_frame + idx
+        return self.t_start + frame / self.sampling_frequency
+
+
+class _LazyConcatenatedTimestamps:
+    """Array-like concatenation of lazy timestamp slices."""
+
+    _spyglass_lazy_timestamps = True
+
+    def __init__(self, parts):
+        import numpy as np
+
+        self.parts = tuple(parts)
+        lengths = [len(part) for part in self.parts]
+        self.offsets = np.cumsum([0] + lengths)
+        self.shape = (int(self.offsets[-1]),)
+        self.dtype = np.dtype(np.float64)
+
+    def __len__(self):
+        return self.shape[0]
+
+    def __getitem__(self, item):
+        import numpy as np
+
+        if isinstance(item, slice):
+            start, stop, step = item.indices(len(self))
+            if step != 1:
+                return np.asarray(
+                    [self[i] for i in range(start, stop, step)],
+                    dtype=np.float64,
+                )
+            chunks = []
+            for part, part_start, part_stop in zip(
+                self.parts, self.offsets[:-1], self.offsets[1:]
+            ):
+                overlap_start = max(start, int(part_start))
+                overlap_stop = min(stop, int(part_stop))
+                if overlap_start < overlap_stop:
+                    chunks.append(
+                        part[
+                            overlap_start - int(part_start) : overlap_stop
+                            - int(part_start)
+                        ]
+                    )
+            return (
+                np.concatenate(chunks)
+                if chunks
+                else np.asarray([], dtype=np.float64)
+            )
+
+        idx = int(item)
+        if idx < 0:
+            idx += len(self)
+        if idx < 0 or idx >= len(self):
+            raise IndexError(item)
+        part_idx = int(np.searchsorted(self.offsets, idx, side="right") - 1)
+        return self.parts[part_idx][idx - int(self.offsets[part_idx])]
+
+
+def _recording_has_explicit_time_vector(recording) -> bool:
+    """Return whether the SI recording carries explicit per-frame timestamps."""
+    has_time_vector = getattr(recording, "has_time_vector", None)
+    if has_time_vector is None:
+        # Conservative fallback: without the public predicate, keep the older
+        # full-vector path so irregular timestamps are not treated as affine.
+        return True
+    try:
+        return bool(has_time_vector(segment_index=0))
+    except TypeError:
+        try:
+            return bool(has_time_vector(0))
+        except TypeError:
+            return bool(has_time_vector())
+
+
+def _recording_start_time(recording) -> float | None:
+    """Best-effort public lookup of a regular recording's first timestamp."""
+    get_start_time = getattr(recording, "get_start_time", None)
+    if get_start_time is None:
+        return None
+    try:
+        start = get_start_time(segment_index=0)
+    except TypeError:
+        start = get_start_time(0)
+    return None if start is None else float(start)
+
+
+def _recording_num_frames(recording) -> int:
+    """Return the single-segment frame count across SI method spellings."""
+    try:
+        return int(recording.get_num_frames(segment_index=0))
+    except TypeError:
+        return int(recording.get_num_frames())
+
+
+def _consolidate_regular_intervals(
+    intervals, *, n_samples: int, sampling_frequency: float, t_start: float
+):
+    """Convert intervals to frame bounds without materializing timestamps.
+
+    Equivalent to ``_consolidate_intervals(intervals, t_start + arange(n)/fs)``
+    for a regular one-segment recording.
+    """
+    import numpy as np
+
+    intervals = np.asarray(intervals)
+    if intervals.ndim == 1:
+        intervals = intervals.reshape(-1, 2)
+    if intervals.shape[1] != 2:
+        raise ValueError("Input array must have shape (N_Intervals, 2).")
+
+    if not np.all(intervals[:-1] <= intervals[1:]):
+        intervals = intervals[np.argsort(intervals[:, 0])]
+
+    rel_start = (intervals[:, 0] - t_start) * sampling_frequency
+    rel_stop = (intervals[:, 1] - t_start) * sampling_frequency
+    start_indices = np.ceil(rel_start).astype(np.int64)
+    stop_indices = (np.floor(rel_stop).astype(np.int64) + 1).astype(np.int64)
+
+    start_indices = np.clip(start_indices, 0, int(n_samples))
+    stop_indices = np.clip(stop_indices, 0, int(n_samples))
+
+    consolidated = []
+    start, stop = int(start_indices[0]), int(stop_indices[0])
+    for next_start, next_stop in zip(start_indices, stop_indices):
+        next_start = int(next_start)
+        next_stop = int(next_stop)
+        if next_start <= stop:
+            stop = max(stop, next_stop)
+        else:
+            consolidated.append((start, stop))
+            start, stop = next_start, next_stop
+
+    consolidated.append((start, stop))
+    return np.asarray(consolidated, dtype=np.int64)
+
+
+def _lazy_timestamp_override(
+    intervals_in_frames, *, sampling_frequency: float, t_start: float
+):
+    """Build a lazy timestamp vector for selected regular-frame intervals."""
+    parts = [
+        _LazyAffineTimestamps(
+            start_frame=int(start),
+            n_frames=int(stop) - int(start),
+            sampling_frequency=sampling_frequency,
+            t_start=t_start,
+        )
+        for start, stop in intervals_in_frames
+    ]
+    return parts[0] if len(parts) == 1 else _LazyConcatenatedTimestamps(parts)
+
+
 def compute_recording_save_expectation(
     intended_intervals, sort_valid_times, min_segment_length: float
 ) -> RecordingSaveExpectation:
@@ -174,8 +374,9 @@ def restrict_recording(
       ``frame_slice``; several yield
       ``concatenate_recordings(sliced)``.
     - ``timestamps_override`` is the persisted wall-clock timestamp
-      vector -- ``times[s:e]`` for the single-interval path, the
-      concatenated per-interval slices for the multi-interval path.
+      vector -- a lazy affine vector for regular single-segment recordings,
+      ``times[s:e]`` for explicit-timestamp single intervals, and the
+      concatenated per-interval slices for explicit-timestamp multi-intervals.
       It carries the wall-clock gaps (for the concat) that SI's
       ``frame_slice`` /
       ``concatenate_recordings(ignore_times=True)`` drop from
@@ -247,11 +448,6 @@ def restrict_recording(
         assert_reference_not_member,
     )
 
-    # Route through ``_get_recording_timestamps`` so multi-segment
-    # NWBs concatenate correctly. The single-segment path is
-    # identical to ``recording.get_times()`` (delegation).
-    times = _get_recording_timestamps(recording)
-
     # When the requested sort interval is disjoint (e.g., a
     # run+sleep+run epoch group), frame-slice each chunk
     # separately and concatenate; a single ``frame_slice`` on the
@@ -274,7 +470,32 @@ def restrict_recording(
             f"(min_segment_length={min_segment_length}s). Lower the "
             "threshold or fix the upstream IntervalList."
         )
-    intervals_in_frames = _consolidate_intervals(valid_times, times)
+
+    t_start = (
+        _recording_start_time(recording)
+        if recording.get_num_segments() == 1
+        else None
+    )
+    use_lazy_regular_timestamps = (
+        recording.get_num_segments() == 1
+        and t_start is not None
+        and not _recording_has_explicit_time_vector(recording)
+    )
+    if use_lazy_regular_timestamps:
+        sampling_frequency = float(recording.get_sampling_frequency())
+        intervals_in_frames = _consolidate_regular_intervals(
+            valid_times,
+            n_samples=_recording_num_frames(recording),
+            sampling_frequency=sampling_frequency,
+            t_start=t_start,
+        )
+    else:
+        # Explicit/irregular timestamps and multi-segment recordings keep the
+        # established vector-search path. That preserves wall-clock correctness
+        # for recordings where sample index is not an affine function of time.
+        # Rate-based single-segment recordings skip this allocation above.
+        times = _get_recording_timestamps(recording)
+        intervals_in_frames = _consolidate_intervals(valid_times, times)
 
     if len(intervals_in_frames) > 1:
         # ``concatenate_recordings`` defaults to ``ignore_times=True``,
@@ -293,9 +514,16 @@ def restrict_recording(
             recording.frame_slice(start_frame=int(s), end_frame=int(e))
             for s, e in intervals_in_frames
         ]
-        timestamps_override = np.concatenate(
-            [times[int(s) : int(e)] for s, e in intervals_in_frames]
-        )
+        if use_lazy_regular_timestamps:
+            timestamps_override = _lazy_timestamp_override(
+                intervals_in_frames,
+                sampling_frequency=sampling_frequency,
+                t_start=t_start,
+            )
+        else:
+            timestamps_override = np.concatenate(
+                [times[int(s) : int(e)] for s, e in intervals_in_frames]
+            )
         recording = concatenate_recordings(sliced)
     else:
         s, e = intervals_in_frames[0]
@@ -304,7 +532,14 @@ def restrict_recording(
         # explicitly (rather than reading the frame-sliced
         # recording's ``get_times()``) so the persisted per-interval
         # timestamps match the multi-interval path above.
-        timestamps_override = times[int(s) : int(e)]
+        if use_lazy_regular_timestamps:
+            timestamps_override = _lazy_timestamp_override(
+                intervals_in_frames,
+                sampling_frequency=sampling_frequency,
+                t_start=t_start,
+            )
+        else:
+            timestamps_override = times[int(s) : int(e)]
 
     assert_reference_not_member(
         reference_mode, reference_electrode_id, sort_group_channel_ids

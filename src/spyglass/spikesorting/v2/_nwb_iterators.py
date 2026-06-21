@@ -126,14 +126,17 @@ class _TimestampsSegment(si.BaseRecordingSegment):
             sampling_frequency=sampling_frequency,
             t_start=t_start,
         )
-        # v1 assigns ``self._timeseries = timestamps`` (no copy) and
-        # trusts the caller's dtype. v2 routes through
-        # ``np.asarray(..., dtype=dtype)`` so a caller passing the
-        # wrong dtype gets a deterministic promotion instead of a
-        # mismatch surfacing later in ``_get_dtype``. ``np.asarray``
-        # is a no-op (no copy) when ``timestamps`` is already
-        # ``dtype=float64``, which is the production path.
-        self._timeseries = np.asarray(timestamps, dtype=dtype)
+        # v1 assigns ``self._timeseries = timestamps`` (no copy) and trusts the
+        # caller's dtype. v2 preserves that no-copy behavior for lazy timestamp
+        # vectors so long recordings can stream generated timestamps chunk by
+        # chunk; eager array-like inputs still route through ``np.asarray`` for a
+        # deterministic dtype.
+        self._dtype = np.dtype(dtype)
+        self._timeseries = (
+            timestamps
+            if getattr(timestamps, "_spyglass_lazy_timestamps", False)
+            else np.asarray(timestamps, dtype=self._dtype)
+        )
 
     def get_num_samples(self) -> int:
         return self._timeseries.shape[0]
@@ -148,7 +151,9 @@ class _TimestampsSegment(si.BaseRecordingSegment):
         # return it directly. The old ``np.squeeze`` was a no-op for normal
         # chunks but collapsed a length-1 tail (``n_samples % buffer == 1``)
         # to a 0-d scalar, which only survived by HDMF's broadcast-assignment.
-        return self._timeseries[start_frame:end_frame]
+        return np.asarray(
+            self._timeseries[start_frame:end_frame], dtype=self._dtype
+        )
 
 
 class _TimestampsExtractor(si.BaseRecording):
@@ -175,12 +180,13 @@ class TimestampsDataChunkIterator(GenericDataChunkIterator):
     array + sampling frequency directly. The internal
     ``_TimestampsExtractor`` indirection is kept private because HDMF's
     base iterator hooks expect a recording-segment-like object; callers
-    should not import it.
+    should not import it. ``timestamps`` may also be a Spyglass lazy timestamp
+    vector; in that case only the chunks requested by HDMF are materialized.
     """
 
     def __init__(
         self,
-        timestamps: np.ndarray,
+        timestamps,
         sampling_frequency: float,
         buffer_gb: Optional[float] = None,
         buffer_shape: Optional[tuple] = None,
@@ -193,8 +199,10 @@ class TimestampsDataChunkIterator(GenericDataChunkIterator):
 
         Parameters
         ----------
-        timestamps : np.ndarray, shape (n_samples,)
-            The wall-clock timestamps vector to stream.
+        timestamps : array-like, shape (n_samples,)
+            The wall-clock timestamps vector to stream. Lazy timestamp vectors
+            are consumed chunk-by-chunk without first converting the whole
+            object to a NumPy array.
         sampling_frequency : float
             Sampling frequency of the recording, in Hz.
         buffer_gb : float, optional

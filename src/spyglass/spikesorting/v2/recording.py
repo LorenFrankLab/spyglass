@@ -40,7 +40,10 @@ from spyglass.spikesorting.v2._recording_geometry import (
     maybe_apply_tetrode_geometry,
     spikeinterface_channel_ids,
 )
-from spyglass.spikesorting.v2._recording_nwb import write_nwb_artifact
+from spyglass.spikesorting.v2._recording_nwb import (
+    raw_eseries_uses_explicit_timestamps,
+    write_nwb_artifact,
+)
 from spyglass.spikesorting.v2._recording_preprocessing import (
     apply_pre_motion_preprocessing,
 )
@@ -1648,7 +1651,13 @@ class Recording(SpyglassMixin, dj.Computed):
         # ElectricalSeries is named explicitly: SI >= 0.100 raises (and 0.99.x
         # silently mis-picks) when a raw file also stores LFP under
         # ``processing`` and the series is not named.
-        recording = read_raw_nwb_recording(raw_path, load_time_vector=True)
+        # Rate-based raw ElectricalSeries can reconstruct selected timestamps
+        # lazily from (t_start, sampling_frequency, frame index). Explicit
+        # timestamp series may be irregular, so keep the old eager load there.
+        load_time_vector = raw_eseries_uses_explicit_timestamps(raw_path)
+        recording = read_raw_nwb_recording(
+            raw_path, load_time_vector=load_time_vector
+        )
         sampling_frequency = float(recording.get_sampling_frequency())
 
         recording, timestamps_override, n_selected_intervals = (
@@ -1716,10 +1725,19 @@ class Recording(SpyglassMixin, dj.Computed):
                 saved_times = _get_recording_timestamps(
                     recording, override=timestamps_override
                 )
+                saved_start = float(saved_times[0])
+                saved_end = float(saved_times[-1])
             else:
-                saved_times = _get_recording_timestamps(recording)
-            saved_start = float(saved_times[0])
-            saved_end = float(saved_times[-1])
+                # ``concatenate_recordings(ignore_times=True)`` gives a
+                # synthetic contiguous 0-based time axis. Avoid materializing
+                # that full vector just to read the first/last value.
+                n_samples = int(recording.get_num_samples(segment_index=0))
+                saved_start = 0.0
+                saved_end = (
+                    0.0
+                    if n_samples == 0
+                    else (n_samples - 1) / sampling_frequency
+                )
             n_channels = int(recording.get_num_channels())
             duration_s = float(saved_end - saved_start)
         except Exception:

@@ -64,19 +64,22 @@ def _get_recording_timestamps(
     ----------
     recording : si.BaseRecording
         Source recording whose timestamps are needed.
-    override : numpy.ndarray, optional
+    override : array-like, optional
         Pre-computed persisted timestamps to return verbatim. Callers
         that have the persisted timestamp vector pass it here so this
         helper does not re-derive it from the recording.
 
     Returns
     -------
-    numpy.ndarray
-        ``(total_frames,)`` float array of wall-clock seconds.
+    array-like
+        ``(total_frames,)`` wall-clock seconds. Lazy timestamp overrides are
+        returned as-is; otherwise the return is a ``numpy.ndarray``.
     """
     import numpy as _np
 
     if override is not None:
+        if getattr(override, "_spyglass_lazy_timestamps", False):
+            return override
         return _np.asarray(override)
 
     num_segments = recording.get_num_segments()

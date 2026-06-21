@@ -29,6 +29,23 @@ path resolution + file create). It also lazily imports the
 from __future__ import annotations
 
 
+def raw_eseries_uses_explicit_timestamps(nwb_file_abs_path: str) -> bool:
+    """Return whether the raw acquisition ElectricalSeries stores timestamps.
+
+    Rate-based ElectricalSeries store ``starting_time`` + ``rate`` and do not
+    need SpikeInterface to load a full time vector. Timestamp-based series carry
+    a ``timestamps`` dataset and must preserve that explicit vector to avoid
+    treating irregular/dropped-sample timing as affine.
+    """
+    import h5py
+
+    from spyglass.utils.nwb_helper_fn import get_raw_eseries_path
+
+    series_path = get_raw_eseries_path(nwb_file_abs_path)
+    with h5py.File(nwb_file_abs_path, "r") as nwb_file:
+        return "timestamps" in nwb_file[series_path]
+
+
 def write_nwb_artifact(
     recording,
     nwb_file_name: str,
@@ -67,11 +84,11 @@ def write_nwb_artifact(
     existing_analysis_file_name : str, optional
         When set, write into the existing slot (the recompute /
         rebuild path) rather than minting a new analysis file.
-    timestamps_override : numpy.ndarray, optional
-        Pre-computed persisted timestamps, shape ``(n_samples,)``.
-        ``None`` lets the helper concatenate per-segment
-        ``recording.get_times()`` via
-        :func:`_get_recording_timestamps`.
+    timestamps_override : array-like, optional
+        Pre-computed persisted timestamps, shape ``(n_samples,)``. May be a
+        lazy timestamp vector; the chunk iterator materializes only requested
+        slices. ``None`` lets the helper concatenate per-segment
+        ``recording.get_times()`` via :func:`_get_recording_timestamps`.
     filtering_description : str
         Keyword-only. Provenance string written to
         ``ElectricalSeries.filtering`` describing the preprocessing
