@@ -419,12 +419,15 @@ def test_curation_v2_stages_empty_units_nwb_on_zero_kept_units(
 
     _clear_curations(populated_sorting)
 
-    # Patch build_curated_unit_rows where ``build_curation_insert_plan`` now
-    # calls it -- the ``_curation_plan`` service module (the insert path was
-    # extracted out of ``curation.py``) -- to return empty so the NWB-staging
-    # call enters the kept_unit_to_contributors={} branch. No call to add_unit
-    # will run, so the guard at ``if nwbf.units is None`` is the only thing
-    # preventing the AttributeError at ``nwbf.units.object_id``.
+    # Patch build_curated_unit_rows where ``build_curation_insert_plan`` calls
+    # it (the ``_curation_plan`` service module; the insert path was extracted
+    # out of ``curation.py``) to return an empty plan. ``apply_merge=True`` is
+    # required: only then does ``write_curated_units_nwb`` build ``write_specs``
+    # from ``kept_unit_to_contributors`` (now empty) instead of from the source
+    # units, so it reaches the empty-Units guard that initializes a bare
+    # ``pynwb.misc.Units`` -- the thing preventing the AttributeError at
+    # ``nwbf.units.object_id``. Under the default ``apply_merge=False`` the
+    # writer uses every source unit and never reaches that guard.
     def _empty_rows(
         sorting_id, sorting_units, merge_groups, curation_id, apply_merge
     ):
@@ -438,9 +441,11 @@ def test_curation_v2_stages_empty_units_nwb_on_zero_kept_units(
         sorting_key=populated_sorting,
         labels={},
         description="empty-kept rollback guard regression",
+        apply_merge=True,
     )
     # The CurationV2 row exists; no AttributeError raised inside the
-    # transaction. The curated NWB has zero Unit part rows.
+    # transaction (the empty-Units guard fired). The curated NWB has zero Unit
+    # part rows.
     assert len(CurationV2 & pk) == 1
     assert len(CurationV2.Unit & pk) == 0
 
