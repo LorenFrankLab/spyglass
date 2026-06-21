@@ -252,42 +252,75 @@ def test_selection_identity_import_pulls_no_db_layer_modules():
     )
 
 
-def test_is_duplicate_key_error_classifies_exceptions():
+# Each case builds its exception lazily inside the test (where ``datajoint``
+# is imported) from ``(error_name, args)`` so the parametrize decorator stays
+# pure data and the module-under-test's import boundary is unaffected.
+@pytest.mark.parametrize(
+    "error_name, args, expected",
+    [
+        # DataJoint maps MySQL errno 1062 -> DuplicateError: that is the race.
+        pytest.param(
+            "DuplicateError", ("Duplicate entry",), True, id="duplicate-error"
+        ),
+        # FK violations surface as IntegrityError with no 1062 errno -- they
+        # MUST propagate (Phase A step 5), not be swallowed.
+        pytest.param(
+            "IntegrityError",
+            (
+                "Cannot add or update a child row: a foreign key constraint "
+                "fails",
+            ),
+            False,
+            id="fk-integrity-error",
+        ),
+        # Defensive: a raw, untranslated connector error carrying the
+        # structured errno 1062 as the first arg is recognized.
+        pytest.param(
+            "IntegrityError",
+            (1062, "Duplicate entry 'x' for key 'PRIMARY'"),
+            True,
+            id="structured-errno-1062",
+        ),
+        # Rendered database messages alone are deliberately ignored: they vary
+        # by connector/version/locale and are not safe enough to recover from.
+        pytest.param(
+            "IntegrityError",
+            ("Duplicate entry 'x' for key 'PRIMARY'",),
+            False,
+            id="rendered-duplicate-message-only",
+        ),
+        # CRITICAL false-positive guard: an FK-violation IntegrityError whose
+        # message merely CONTAINS the digits "1062" (in a constraint name, a
+        # rendered UUID) must NOT be treated as a duplicate -- a bare "1062"
+        # substring match would silently swallow a real FK error.
+        pytest.param(
+            "IntegrityError",
+            (
+                "a foreign key constraint fails (`db`.`t`, "
+                "CONSTRAINT `fk_1062`)",
+            ),
+            False,
+            id="fk-error-containing-1062-substring",
+        ),
+    ],
+)
+def test_is_duplicate_key_error_classifies_datajoint_exceptions(
+    error_name, args, expected
+):
     """``_is_duplicate_key_error`` is True only for a duplicate PRIMARY-KEY
     violation, never for an FK / missing-source-part ``IntegrityError``."""
     import datajoint as dj
 
     from spyglass.spikesorting.v2.utils import _is_duplicate_key_error
 
-    # DataJoint maps MySQL errno 1062 -> DuplicateError: that is the race.
-    assert _is_duplicate_key_error(dj.errors.DuplicateError("Duplicate entry"))
-    # FK violations surface as IntegrityError with no 1062 errno -- they MUST
-    # propagate (Phase A step 5), not be swallowed.
-    assert not _is_duplicate_key_error(
-        dj.errors.IntegrityError(
-            "Cannot add or update a child row: a foreign key constraint fails"
-        )
-    )
-    # Defensive: a raw, untranslated connector error carrying the structured
-    # errno 1062 as the first arg is recognized.
-    assert _is_duplicate_key_error(
-        dj.errors.IntegrityError(1062, "Duplicate entry 'x' for key 'PRIMARY'")
-    )
-    # Rendered database messages alone are deliberately ignored: they vary by
-    # connector/version/locale and are not safe enough to recover from.
-    assert not _is_duplicate_key_error(
-        dj.errors.IntegrityError("Duplicate entry 'x' for key 'PRIMARY'")
-    )
-    # CRITICAL false-positive guard: an FK-violation IntegrityError whose
-    # message merely CONTAINS the digits "1062" (in a constraint name, a
-    # rendered UUID) must NOT be treated as a duplicate -- a bare "1062"
-    # substring match would silently swallow a real FK error.
-    assert not _is_duplicate_key_error(
-        dj.errors.IntegrityError(
-            "a foreign key constraint fails (`db`.`t`, CONSTRAINT `fk_1062`)"
-        )
-    )
-    # An unrelated exception is not a duplicate-key error.
+    error = getattr(dj.errors, error_name)(*args)
+    assert _is_duplicate_key_error(error) is expected
+
+
+def test_is_duplicate_key_error_ignores_unrelated_exception():
+    """An unrelated exception is not a duplicate-key error."""
+    from spyglass.spikesorting.v2.utils import _is_duplicate_key_error
+
     assert not _is_duplicate_key_error(ValueError("unrelated"))
 
 

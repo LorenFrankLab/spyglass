@@ -309,9 +309,9 @@ def test_motion_none_preset_rejects_kwargs():
         )
 
 
-def test_motion_accepts_si_native_preset():
-    """All SI 0.104 native presets are accepted."""
-    for preset in (
+@pytest.mark.parametrize(
+    "preset",
+    [
         "dredge",
         "medicine",
         "dredge_fast",
@@ -320,23 +320,29 @@ def test_motion_accepts_si_native_preset():
         "rigid_fast",
         "kilosort_like",
         "auto",
-    ):
-        blob = MotionCorrectionParamsSchema(preset=preset).model_dump()
-        assert blob["preset"] == preset
+    ],
+)
+def test_motion_accepts_si_native_preset(preset):
+    """All SI 0.104 native presets are accepted."""
+    blob = MotionCorrectionParamsSchema(preset=preset).model_dump()
+    assert blob["preset"] == preset
 
 
-def test_motion_rejects_forbidden_kwargs():
-    """Forbidden kwargs change return type or write untracked artifacts."""
-    for forbidden in (
+@pytest.mark.parametrize(
+    "forbidden",
+    [
         "output_motion",
         "output_motion_info",
         "folder",
         "overwrite",
-    ):
-        with pytest.raises(ValidationError):
-            MotionCorrectionParamsSchema(
-                preset="rigid_fast", preset_kwargs={forbidden: True}
-            )
+    ],
+)
+def test_motion_rejects_forbidden_kwargs(forbidden):
+    """Forbidden kwargs change return type or write untracked artifacts."""
+    with pytest.raises(ValidationError):
+        MotionCorrectionParamsSchema(
+            preset="rigid_fast", preset_kwargs={forbidden: True}
+        )
 
 
 def test_motion_rejects_unknown_preset():
@@ -716,7 +722,8 @@ def test_kilosort4_schema_accepts_extra_kwargs():
     assert blob["nearest_chans"] == 10
 
 
-def test_kilosort4_schema_rejects_whiten():
+@pytest.mark.parametrize("bad", [True, False, 1])
+def test_kilosort4_schema_rejects_whiten(bad):
     """A ``whiten`` key on a KS4 row is rejected at validation.
 
     KS4 has no ``whiten`` kwarg -- it whitens internally -- and the v2 runtime
@@ -727,9 +734,8 @@ def test_kilosort4_schema_rejects_whiten():
     letting it surface as silently-wrong spike times at sort time. Any value
     (even ``False``) is rejected, since KS4 has no such parameter at all.
     """
-    for bad in (True, False, 1):
-        with pytest.raises(ValidationError, match="whiten"):
-            Kilosort4Schema.model_validate({"whiten": bad})
+    with pytest.raises(ValidationError, match="whiten"):
+        Kilosort4Schema.model_validate({"whiten": bad})
 
 
 @pytest.mark.parametrize("sorter", ["kilosort2_5", "kilosort3", "ironclust"])

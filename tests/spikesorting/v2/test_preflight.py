@@ -669,6 +669,10 @@ def test_run_pipeline_preflight_bypass(preflight_inputs):
         "team_name": "no_such_team_preflight",
         "preflight": False,
     }
-    with pytest.raises(Exception) as exc:
+    # The bypass path skips the team-existence check, so the missing
+    # ``team_name`` surfaces as the raw DataJoint FK violation from
+    # ``RecordingSelection.insert_selection``'s ``insert1`` (an
+    # ``IntegrityError``) -- specifically NOT a curated ``PreflightError``.
+    with pytest.raises(dj.errors.IntegrityError) as exc:
         run_v2_pipeline(**inputs)
     assert not isinstance(exc.value, PreflightError)

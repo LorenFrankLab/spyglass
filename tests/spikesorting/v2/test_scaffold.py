@@ -205,7 +205,22 @@ def test_get_recording_timestamps_override_returned_verbatim():
     assert not np.array_equal(out, rec.get_times())
 
 
-def test_assert_v2_db_safe_localhost_passes(monkeypatch):
+# Explicit copy of the safe-host allowlist so each host is its own collected
+# test; ``test_safe_db_hosts_allowlist_is_exhaustively_parametrized`` below
+# fails loudly if ``_SAFE_DB_HOSTS`` grows a member this list does not cover.
+_PARAMETRIZED_SAFE_HOSTS = ["localhost", "127.0.0.1", "::1"]
+
+
+def test_safe_db_hosts_allowlist_is_exhaustively_parametrized():
+    """Guard: the parametrized safe-host list must mirror ``_SAFE_DB_HOSTS`` so
+    a future addition to the allowlist cannot slip past the per-host test."""
+    from spyglass.spikesorting.v2.utils import _SAFE_DB_HOSTS
+
+    assert set(_PARAMETRIZED_SAFE_HOSTS) == set(_SAFE_DB_HOSTS)
+
+
+@pytest.mark.parametrize("safe_host", _PARAMETRIZED_SAFE_HOSTS)
+def test_assert_v2_db_safe_localhost_passes(safe_host, monkeypatch):
     """A24: a safe (local) host returns silently.
 
     The ``host in _SAFE_DB_HOSTS: return`` pass-through branch was the untested
@@ -215,19 +230,20 @@ def test_assert_v2_db_safe_localhost_passes(monkeypatch):
     """
     from spyglass.spikesorting.v2.utils import (
         _OVERRIDE_ENV,
-        _SAFE_DB_HOSTS,
         _assert_v2_db_safe,
     )
 
     monkeypatch.delenv(_OVERRIDE_ENV, raising=False)
-    for safe_host in sorted(_SAFE_DB_HOSTS):
-        monkeypatch.setitem(dj.config, "database.host", safe_host)
-        assert (
-            _assert_v2_db_safe() is None
-        ), f"safe host {safe_host!r} should pass the DB-safety guard"
+    monkeypatch.setitem(dj.config, "database.host", safe_host)
+    assert (
+        _assert_v2_db_safe() is None
+    ), f"safe host {safe_host!r} should pass the DB-safety guard"
 
 
-def test_assert_v2_db_safe_override_non_one_value_still_raises(monkeypatch):
+@pytest.mark.parametrize("non_bypass", ["0", "", "true", "yes"])
+def test_assert_v2_db_safe_override_non_one_value_still_raises(
+    non_bypass, monkeypatch
+):
     """A24: the override only bypasses when set to exactly ``"1"``.
 
     Existing coverage pins ``override == "1"`` permitting a non-local host.
@@ -243,15 +259,14 @@ def test_assert_v2_db_safe_override_non_one_value_still_raises(monkeypatch):
 
     bad_host = "prod.example.org"
     monkeypatch.setitem(dj.config, "database.host", bad_host)
-    for non_bypass in ("0", "", "true", "yes"):
-        monkeypatch.setenv(_OVERRIDE_ENV, non_bypass)
-        with pytest.raises(RuntimeError) as excinfo:
-            _assert_v2_db_safe()
-        message = str(excinfo.value)
-        assert (
-            bad_host in message
-        ), f"raised message must name the offending host {bad_host!r}"
-        assert _OVERRIDE_ENV in message, (
-            "raised message must name the override env var so an operator "
-            "knows how to bypass deliberately"
-        )
+    monkeypatch.setenv(_OVERRIDE_ENV, non_bypass)
+    with pytest.raises(RuntimeError) as excinfo:
+        _assert_v2_db_safe()
+    message = str(excinfo.value)
+    assert (
+        bad_host in message
+    ), f"raised message must name the offending host {bad_host!r}"
+    assert _OVERRIDE_ENV in message, (
+        "raised message must name the override env var so an operator "
+        "knows how to bypass deliberately"
+    )

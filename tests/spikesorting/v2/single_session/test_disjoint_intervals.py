@@ -882,11 +882,9 @@ def test_disjoint_multi_gap_readback_and_artifact(
     t0 = float(raw_times[0][0])
     t_end = float(raw_times[-1][-1])
     # Three 1.05 s chunks separated by two 0.25 s gaps (3.65 s total).
-    if (t_end - t0) < 3.7:
-        pytest.skip(
-            f"smoke fixture window {t_end - t0:.2f}s too short for a "
-            "3-chunk (2-gap) disjoint test (need >= 3.7s)."
-        )
+    assert (
+        t_end - t0
+    ) >= 3.7, "smoke fixture too short for a 3-chunk (2-gap) disjoint test"
     c1 = (t0, t0 + 1.05)
     c2 = (t0 + 1.30, t0 + 2.35)
     c3 = (t0 + 2.60, t0 + 3.65)

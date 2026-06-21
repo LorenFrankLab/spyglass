@@ -1046,7 +1046,39 @@ def test_curation_merge_ids_assigned_in_canonical_min_order(dj_conn):
     assert kept[6] == [3, 4], kept
 
 
-def test_curation_rejects_invalid_merge_groups(dj_conn):
+@pytest.mark.parametrize("apply_merge", [True, False])
+@pytest.mark.parametrize(
+    "unit_ids, merge_groups, match",
+    [
+        # Shape (>= 2 members), regardless of apply_merge.
+        pytest.param([0, 1], [[0]], "fewer than 2", id="singleton-group"),
+        pytest.param([0, 1], [[]], "fewer than 2", id="empty-group"),
+        pytest.param(
+            [0, 1], [[0, 1], []], "fewer than 2", id="trailing-empty-group"
+        ),
+        # Intra-group duplicates: list-length check alone would miss
+        # ``[0, 0]`` (would silently double-count contributor 0).
+        pytest.param(
+            [0, 1], [[0, 0]], "duplicate members", id="duplicate-pair"
+        ),
+        pytest.param(
+            [0, 1], [[0, 0, 1]], "duplicate members", id="duplicate-in-triple"
+        ),
+        # Zero-unit sort with non-empty merge_groups: the validation
+        # runs before the empty-by-id early return, so the id check
+        # fires.
+        pytest.param(
+            [], [[0, 1]], "not in Sorting.Unit", id="zero-unit-unknown-ids"
+        ),
+        # Empty/singleton groups on a zero-unit sort still raise their
+        # shape error before the id check is reached.
+        pytest.param([], [[]], "fewer than 2", id="zero-unit-empty-group"),
+        pytest.param([], [[0]], "fewer than 2", id="zero-unit-singleton-group"),
+    ],
+)
+def test_curation_rejects_invalid_merge_groups(
+    unit_ids, merge_groups, match, apply_merge, dj_conn
+):
     """All merge-group validation runs BEFORE any early return -- a
     zero-unit sort with non-empty merge_groups, intra-group duplicates,
     and references to nonexistent unit_ids all raise rather than
@@ -1067,35 +1099,15 @@ def test_curation_rejects_invalid_merge_groups(dj_conn):
             "electrode_id": uid,
         }
 
-    nonempty = [_unit(0), _unit(1)]
-    cases = [
-        # Shape (>= 2 members), regardless of apply_merge.
-        (nonempty, [[0]], "fewer than 2"),
-        (nonempty, [[]], "fewer than 2"),
-        (nonempty, [[0, 1], []], "fewer than 2"),
-        # Intra-group duplicates: list-length check alone would miss
-        # ``[0, 0]`` (would silently double-count contributor 0).
-        (nonempty, [[0, 0]], "duplicate members"),
-        (nonempty, [[0, 0, 1]], "duplicate members"),
-        # Zero-unit sort with non-empty merge_groups: the validation
-        # runs before the empty-by-id early return, so the id check
-        # fires.
-        ([], [[0, 1]], "not in Sorting.Unit"),
-        # Empty/singleton groups on a zero-unit sort still raise their
-        # shape error before the id check is reached.
-        ([], [[]], "fewer than 2"),
-        ([], [[0]], "fewer than 2"),
-    ]
-    for apply_merge in (True, False):
-        for sorting_units, merge_groups, match in cases:
-            with pytest.raises(ValueError, match=match):
-                build_curated_unit_rows(
-                    sorting_id="s",
-                    sorting_units=sorting_units,
-                    merge_groups=merge_groups,
-                    curation_id=0,
-                    apply_merge=apply_merge,
-                )
+    sorting_units = [_unit(uid) for uid in unit_ids]
+    with pytest.raises(ValueError, match=match):
+        build_curated_unit_rows(
+            sorting_id="s",
+            sorting_units=sorting_units,
+            merge_groups=merge_groups,
+            curation_id=0,
+            apply_merge=apply_merge,
+        )
 
 
 def test_si_merge_units_drops_same_sample_unless_delta_is_none(dj_conn):

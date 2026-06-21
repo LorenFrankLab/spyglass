@@ -744,7 +744,6 @@ def test_build_analyzer_strips_random_seed(dj_conn, monkeypatch, tmp_path):
     """
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2 import utils as v2_utils
     from spyglass.spikesorting.v2.sorting import Sorting
 
     monkeypatch.setattr(
@@ -798,7 +797,6 @@ def test_build_analyzer_compute_args(dj_conn, monkeypatch, tmp_path):
     """
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2 import utils as v2_utils
     from spyglass.spikesorting.v2.sorting import Sorting
 
     monkeypatch.setattr(
@@ -904,7 +902,6 @@ def test_analyzer_rebuild_is_seeded_reproducible(
         template_tools,
     )
 
-    from spyglass.spikesorting.v2 import utils as v2_utils
     from spyglass.spikesorting.v2.sorting import Sorting
 
     recording, sorting = generate_ground_truth_recording(
@@ -997,7 +994,6 @@ def test_analyzer_random_seed_override_is_honored(
     import spikeinterface as si
     from spikeinterface.core import generate_ground_truth_recording
 
-    from spyglass.spikesorting.v2 import utils as v2_utils
     from spyglass.spikesorting.v2.sorting import Sorting
 
     recording, sorting = generate_ground_truth_recording(

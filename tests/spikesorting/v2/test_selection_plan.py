@@ -26,6 +26,11 @@ from spyglass.spikesorting.v2._selection_plan import (
     build_sorting_selection_plan,
 )
 
+# Every test in this module drives the pure ``_selection_plan`` builders
+# directly -- no DataJoint connection, no I/O -- so the whole file qualifies as
+# ``unit`` and is collected (not skipped) under ``pytest -m unit``.
+pytestmark = pytest.mark.unit
+
 _REC = "11111111-1111-1111-1111-111111111111"
 _ART = "22222222-2222-2222-2222-222222222222"
 
