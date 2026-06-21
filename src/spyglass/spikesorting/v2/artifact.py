@@ -248,6 +248,9 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
             sessions makes the artifact-removed valid times
             undefined.
         """
+        from spyglass.spikesorting.v2._shared_artifact_group import (
+            validate_shared_artifact_group_members,
+        )
         from spyglass.spikesorting.v2.recording import (
             Recording,
             RecordingSelection,
@@ -310,34 +313,21 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
             str(r["recording_id"]): r for r in per_member_selection_rows
         }
 
-        sessions = {
-            sel_by_id[str(rid)]["nwb_file_name"] for rid in member_recording_ids
-        }
-        if len(sessions) != 1:
-            raise ValueError(
-                "SharedArtifactGroup.insert_group: members span "
-                f"{len(sessions)} sessions ({sorted(sessions)}); a shared "
-                "artifact-detection pass only makes sense within one "
-                "session because the detection writes IntervalList rows "
-                "keyed by (nwb_file_name, interval_list_name)."
-            )
-        (nwb_file_name,) = sessions
-
-        # Sampling frequency must match: SI's ``aggregate_channels``
-        # requires identical fs. A typo in upstream preprocessing params
-        # could silently produce different ``sampling_frequency``
-        # values on the same NWB; catch it here.
-        sampling_frequencies = {
-            float(rec_by_id[str(rid)]["sampling_frequency"])
-            for rid in member_recording_ids
-        }
-        if len(sampling_frequencies) != 1:
-            raise ValueError(
-                "SharedArtifactGroup.insert_group: members have "
-                f"differing sampling frequencies "
-                f"{sorted(sampling_frequencies)}; "
-                "``si.aggregate_channels`` requires identical fs."
-            )
+        # Cheap pre-load consistency: one session AND one sampling frequency
+        # (SI's ``aggregate_channels`` requires identical fs). Validated BEFORE
+        # loading any member's (5-50 GB) recording for the exact-timestamp check
+        # below, so a misconfigured group is rejected without the load cost.
+        nwb_file_name = validate_shared_artifact_group_members(
+            [
+                {
+                    "nwb_file_name": sel_by_id[str(rid)]["nwb_file_name"],
+                    "sampling_frequency": rec_by_id[str(rid)][
+                        "sampling_frequency"
+                    ],
+                }
+                for rid in member_recording_ids
+            ]
+        )
 
         # Exact time-axis check. Equal sample counts alone are not enough:
         # two interval selections from the same session can have the same

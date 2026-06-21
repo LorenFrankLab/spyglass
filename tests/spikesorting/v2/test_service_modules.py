@@ -45,6 +45,7 @@ _DB_FREE_SERVICE_MODULES = [
     "_reference_resolution",
     "_selection_identity",
     "_selection_plan",
+    "_shared_artifact_group",
     "_signal_math",
     "_sort_group_planning",
     "_sorting_compute",
@@ -655,6 +656,59 @@ def test_classify_orphans_keeps_referenced_folders_and_present_rows():
     )
 
     assert result == {"db_side": [], "disk_side": []}
+
+
+# --------------------------------------------------------------------------- #
+# _shared_artifact_group.validate_shared_artifact_group_members (pure)
+# --------------------------------------------------------------------------- #
+
+
+def test_validate_shared_group_members_returns_single_session():
+    """Members in one session at one sampling frequency validate and yield the
+    shared nwb_file_name."""
+    from spyglass.spikesorting.v2._shared_artifact_group import (
+        validate_shared_artifact_group_members,
+    )
+
+    nwb = validate_shared_artifact_group_members(
+        [
+            {"nwb_file_name": "s.nwb", "sampling_frequency": 30000.0},
+            {"nwb_file_name": "s.nwb", "sampling_frequency": 30000.0},
+        ]
+    )
+    assert nwb == "s.nwb"
+
+
+def test_validate_shared_group_members_rejects_multiple_sessions():
+    """Members spanning more than one session raise -- a shared artifact pass
+    is meaningless across sessions (IntervalList is keyed by nwb_file_name)."""
+    from spyglass.spikesorting.v2._shared_artifact_group import (
+        validate_shared_artifact_group_members,
+    )
+
+    with pytest.raises(ValueError, match="members span 2 sessions"):
+        validate_shared_artifact_group_members(
+            [
+                {"nwb_file_name": "a.nwb", "sampling_frequency": 30000.0},
+                {"nwb_file_name": "b.nwb", "sampling_frequency": 30000.0},
+            ]
+        )
+
+
+def test_validate_shared_group_members_rejects_differing_sampling_frequency():
+    """Members with differing sampling frequencies raise -- aggregate_channels
+    requires identical fs."""
+    from spyglass.spikesorting.v2._shared_artifact_group import (
+        validate_shared_artifact_group_members,
+    )
+
+    with pytest.raises(ValueError, match="differing sampling frequencies"):
+        validate_shared_artifact_group_members(
+            [
+                {"nwb_file_name": "s.nwb", "sampling_frequency": 30000.0},
+                {"nwb_file_name": "s.nwb", "sampling_frequency": 20000.0},
+            ]
+        )
 
 
 def test_filtering_description_lists_only_steps_that_ran():
