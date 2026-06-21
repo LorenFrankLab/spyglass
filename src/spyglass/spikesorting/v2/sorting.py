@@ -1689,31 +1689,31 @@ class Sorting(SpyglassMixin, dj.Computed):
         from spyglass.spikesorting.v2._analyzer_cache import (
             analyzer_cache_root,
             analyzer_path,
+            classify_orphaned_analyzer_folders,
         )
 
-        # DB-side: units-bearing rows whose COMPUTED cache folder is gone on
-        # disk. The folder is derived from sorting_id (no stored column); the
-        # n_units==0 carve-out excludes legitimately folder-less rows.
-        db_side = [
-            {
-                "sorting_id": sid,
-                "computed_analyzer_path": str(analyzer_path(sid)),
-            }
-            for sid in (cls & "n_units > 0").fetch("sorting_id")
-            if not analyzer_path(sid).exists()
-        ]
-
-        # Disk-side: folders under the analyzer root that no row (any n_units)
-        # references. The reference set is the computed path of every row.
-        referenced = {
+        # Gather the DB / filesystem facts, then classify (the orphan set logic
+        # is pure and DB-free in ``classify_orphaned_analyzer_folders``). The
+        # folder is derived from sorting_id (no stored column); the n_units==0
+        # carve-out excludes legitimately folder-less rows from the DB-side set.
+        units_bearing = []
+        for sid in (cls & "n_units > 0").fetch("sorting_id"):
+            path = analyzer_path(sid)
+            units_bearing.append((sid, str(path), path.exists()))
+        referenced_paths = {
             str(analyzer_path(sid)) for sid in cls.fetch("sorting_id")
         }
         analyzer_root = analyzer_cache_root()
-        disk_side = []
-        if analyzer_root.exists():
-            for child in sorted(analyzer_root.iterdir()):
-                if child.is_dir() and str(child) not in referenced:
-                    disk_side.append(str(child))
+        disk_dir_paths = (
+            [str(c) for c in sorted(analyzer_root.iterdir()) if c.is_dir()]
+            if analyzer_root.exists()
+            else []
+        )
+        classification = classify_orphaned_analyzer_folders(
+            units_bearing, referenced_paths, disk_dir_paths
+        )
+        db_side = classification["db_side"]
+        disk_side = classification["disk_side"]
 
         logger.info(
             "Sorting.find_orphaned_analyzer_folders: "

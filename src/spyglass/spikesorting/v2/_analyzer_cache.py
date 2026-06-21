@@ -104,3 +104,49 @@ def remove_analyzer_cache(sorting_id, *, missing_ok: bool = True) -> bool:
         raise FileNotFoundError(folder)
     shutil.rmtree(folder, ignore_errors=False)
     return True
+
+
+def classify_orphaned_analyzer_folders(
+    units_bearing,
+    referenced_paths,
+    disk_dir_paths,
+) -> dict:
+    """Classify analyzer-folder leaks into DB-side and disk-side orphans.
+
+    Pure (DB-free) set logic for ``Sorting.find_orphaned_analyzer_folders``; the
+    caller gathers the DB / filesystem facts (which sorting_ids bear units,
+    whether each computed folder exists, which folders sit under the analyzer
+    root) and this function classifies them.
+
+    A **DB-side orphan** is a units-bearing ``Sorting`` row whose computed
+    analyzer folder is gone on disk (regeneratable scratch removed out of band);
+    reported only, never auto-deleted. A **disk-side orphan** is an on-disk
+    folder under the analyzer root that no row references (the row was deleted
+    via a path that bypassed the ``Sorting.delete`` override). Input order of
+    ``units_bearing`` and ``disk_dir_paths`` is preserved.
+
+    Parameters
+    ----------
+    units_bearing : iterable of (sorting_id, computed_path, exists)
+        The ``n_units > 0`` rows: each ``sorting_id``, its computed analyzer
+        path (as a string), and whether that path currently exists on disk.
+    referenced_paths : iterable of str
+        Computed analyzer paths of EVERY ``Sorting`` row (any ``n_units``); a
+        disk folder in this set is referenced and not an orphan.
+    disk_dir_paths : iterable of str
+        Directory paths found directly under the analyzer root.
+
+    Returns
+    -------
+    dict
+        ``{"db_side": [{"sorting_id", "computed_analyzer_path"}, ...],
+        "disk_side": [folder_path_str, ...]}``.
+    """
+    db_side = [
+        {"sorting_id": sorting_id, "computed_analyzer_path": computed_path}
+        for sorting_id, computed_path, exists in units_bearing
+        if not exists
+    ]
+    referenced = set(referenced_paths)
+    disk_side = [path for path in disk_dir_paths if path not in referenced]
+    return {"db_side": db_side, "disk_side": disk_side}
