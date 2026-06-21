@@ -26,7 +26,7 @@ move).
   `reference_electrode_id`: write the per-group resolved values instead.
 - `v2/utils.py:329` — `assert_reference_not_member`: already raises when a
   `"specific"` reference is a sort-group member. Reuse it at group-creation
-  time (it currently only runs at materialization, `_recording_materialization.py:183`).
+  time (it currently only runs at materialization, `_recording_restriction.py:154`).
 - `v2/utils.py:201` — `_validate_reference_fields`: unchanged. Still the
   insert-time guard that `reference_mode ∈ {none, global_median, specific}`
   and `reference_electrode_id` is non-null **iff** `specific`. The resolver's
@@ -42,12 +42,12 @@ move).
 
 **Phase 2 — filter-before-reference (runtime + provenance):**
 
-- `v2/_recording_materialization.py:341` — `apply_pre_motion_preprocessing`:
+- `v2/_recording_preprocessing.py:31` — `apply_pre_motion_preprocessing`:
   currently reference→filter (`:362-398`). Reorder to filter→reference→drop-ref.
-- `v2/_recording_materialization.py:402` — `filtering_description`: currently
+- `v2/_recording_preprocessing.py:243` — `filtering_description`: currently
   lists `common reference …; bandpass filter …` (`:415-423`). Reorder to
   `bandpass filter …; common reference …`.
-- `v2/_recording_materialization.py:60` — `restrict_recording`: **untouched.**
+- `v2/_recording_restriction.py:154` — `restrict_recording`: **untouched.**
   It already includes the specific reference channel in the slice (`:186-201`)
   and calls `assert_reference_not_member` (`:183`); the ref channel is dropped
   after referencing inside `apply_pre_motion_preprocessing`. Confirm the
@@ -170,6 +170,6 @@ recording artifact.
   `v2/utils.py` (resolver + reuse of `assert_reference_not_member`), plus
   ~150 LOC of pure-resolver unit tests and fixture/expectation updates.
 - Phase 2: ~40 LOC of runtime/provenance change in
-  `v2/_recording_materialization.py`, docstring corrections in
+  the split `v2/_recording_*` service modules, docstring corrections in
   `_params/preprocessing.py`, ~80 LOC of order tests, plus baseline regen and
   doc/CHANGELOG entries.

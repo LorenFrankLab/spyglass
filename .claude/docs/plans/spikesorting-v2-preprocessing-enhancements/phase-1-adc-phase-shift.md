@@ -20,11 +20,11 @@ group (which carry no such property and leave `phase_shift=None`).
 - [src/spyglass/spikesorting/v2/_params/preprocessing.py:83](../../../../src/spyglass/spikesorting/v2/_params/preprocessing.py#L83) —
   `PreprocessingParamsSchema`: fields (`:114-132`), `to_pre_motion_dict`
   (`:134`). The new sub-model is added here next to `BandpassFilterParams`.
-- [src/spyglass/spikesorting/v2/_recording_materialization.py:342](../../../../src/spyglass/spikesorting/v2/_recording_materialization.py#L342) —
+- [src/spyglass/spikesorting/v2/_recording_preprocessing.py:31](../../../../src/spyglass/spikesorting/v2/_recording_preprocessing.py#L31) —
   `apply_pre_motion_preprocessing`: bandpass at `:369` ("# 1. Bandpass filter
   first"), reference at `:380`. Phase-shift is inserted as a **new step 0**
   before `:369`.
-- [src/spyglass/spikesorting/v2/_recording_materialization.py:435](../../../../src/spyglass/spikesorting/v2/_recording_materialization.py#L435) —
+- [src/spyglass/spikesorting/v2/_recording_preprocessing.py:243](../../../../src/spyglass/spikesorting/v2/_recording_preprocessing.py#L243) —
   `filtering_description`: provenance string to extend.
 - [src/spyglass/spikesorting/v2/recording.py:870](../../../../src/spyglass/spikesorting/v2/recording.py#L870) —
   `PreprocessingParameters._DEFAULT_CONTENTS`: the shipped presets
@@ -79,7 +79,7 @@ group (which carry no such property and leave `phase_shift=None`).
   unchanged; dev rows regenerated).
 
 - **Return an applied-step report from `apply_pre_motion_preprocessing`**
-  ([_recording_materialization.py:342](../../../../src/spyglass/spikesorting/v2/_recording_materialization.py#L342)).
+  ([_recording_preprocessing.py:31](../../../../src/spyglass/spikesorting/v2/_recording_preprocessing.py#L31)).
   Change the return from `recording` to `(recording, applied_steps)` where
   `applied_steps` is a dict the function fills as it goes (e.g.
   `{"phase_shift": bool, "bandpass": bool, "reference": reference_mode}`;
@@ -118,7 +118,7 @@ group (which carry no such property and leave `phase_shift=None`).
   ```
 
 - **Extend `filtering_description`**
-  ([_recording_materialization.py:435](../../../../src/spyglass/spikesorting/v2/_recording_materialization.py#L435))
+  ([_recording_preprocessing.py:243](../../../../src/spyglass/spikesorting/v2/_recording_preprocessing.py#L243))
   to take the `applied_steps` report (replacing the bare `bandpass_filter` /
   `reference_mode` args, or in addition to them) and prepend `"phase-shift
   (ADC)"` to the steps list **only when `applied_steps["phase_shift"]` is True**,

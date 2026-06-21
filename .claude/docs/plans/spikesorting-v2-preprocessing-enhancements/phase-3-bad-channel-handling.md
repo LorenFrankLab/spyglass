@@ -64,13 +64,13 @@ today — phase 3 adds no reference-quality check).
 
 - [src/spyglass/spikesorting/v2/_params/preprocessing.py:114](../../../../src/spyglass/spikesorting/v2/_params/preprocessing.py#L114) —
   `PreprocessingParamsSchema` fields; `to_pre_motion_dict` (`:134`).
-- [src/spyglass/spikesorting/v2/_recording_materialization.py:61](../../../../src/spyglass/spikesorting/v2/_recording_materialization.py#L61) —
+- [src/spyglass/spikesorting/v2/_recording_restriction.py:154](../../../../src/spyglass/spikesorting/v2/_recording_restriction.py#L154) —
   `restrict_recording`: the channel-slice (`:184-203`). The `specific` branch
   already shows how to add channels to the slice; `interpolate` adds the group's
   curated-bad channels the same way. (`:101`/`:198`: this codebase slices via
   `ChannelSliceRecording`, since SI 0.104 dropped `Recording.channel_slice` —
   phase 3 only extends the existing `slice_ids`, it adds no new slicing.)
-- [src/spyglass/spikesorting/v2/_recording_materialization.py:342](../../../../src/spyglass/spikesorting/v2/_recording_materialization.py#L342) —
+- [src/spyglass/spikesorting/v2/_recording_preprocessing.py:31](../../../../src/spyglass/spikesorting/v2/_recording_preprocessing.py#L31) —
   `apply_pre_motion_preprocessing`: bandpass at `:369`, reference at `:380`.
   Handling goes **between** them.
 - [src/spyglass/spikesorting/v2/recording.py:1075](../../../../src/spyglass/spikesorting/v2/recording.py#L1075) —
@@ -213,7 +213,7 @@ today — phase 3 adds no reference-quality check).
     `apply_pre_motion_preprocessing`.
 
 - **`restrict_recording`: include curated-bad channels on the interpolate path**
-  ([_recording_materialization.py:184](../../../../src/spyglass/spikesorting/v2/_recording_materialization.py#L184)).
+  ([_recording_restriction.py:154](../../../../src/spyglass/spikesorting/v2/_recording_restriction.py#L154)).
   Add `bad_channel_handling` and `bad_channel_ids` params. When
   `bad_channel_handling == "interpolate"`, union `bad_channel_ids` (the *interior*
   curated-bad set computed in `make_fetch`) into `slice_ids` (alongside the
@@ -222,7 +222,7 @@ today — phase 3 adds no reference-quality check).
   channels only; the curated-bad are not re-added).
 
 - **`apply_pre_motion_preprocessing`: the handling step**
-  ([_recording_materialization.py:342](../../../../src/spyglass/spikesorting/v2/_recording_materialization.py#L342)).
+  ([_recording_preprocessing.py:31](../../../../src/spyglass/spikesorting/v2/_recording_preprocessing.py#L31)).
   Add `bad_channel_handling` and `bad_channel_ids` params (it already receives
   `reference_mode` / `reference_electrode_id`). Insert **after** the bandpass
   (`:369`) and **before** the reference (`:380`). Only the `interpolate` path
@@ -266,7 +266,7 @@ today — phase 3 adds no reference-quality check).
   present and get filled.
 
 - **`filtering_description`**
-  ([_recording_materialization.py:435](../../../../src/spyglass/spikesorting/v2/_recording_materialization.py#L435))
+  ([_recording_preprocessing.py:243](../../../../src/spyglass/spikesorting/v2/_recording_preprocessing.py#L243))
   — read the `applied_steps["bad_channels"]` report (not the params) and append
   `"interpolate N bad channels"` **only when N > 0** (with the actual count that
   ran) so the NWB provenance reflects reality. On the default `remove` path the

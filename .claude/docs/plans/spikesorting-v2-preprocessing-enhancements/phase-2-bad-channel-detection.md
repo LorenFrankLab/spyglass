@@ -26,7 +26,7 @@ contract in phase 3).
   `Electrode`: PK `(nwb_file_name, electrode_group_name, electrode_id)`,
   `bad_channel = "False": enum("True","False")` (`:87`), and `probe_shank`. The
   helper reads electrode→shank grouping here and writes `bad_channel`.
-- [src/spyglass/spikesorting/v2/_recording_materialization.py:206](../../../../src/spyglass/spikesorting/v2/_recording_materialization.py#L206) —
+- [src/spyglass/spikesorting/v2/_recording_geometry.py:34](../../../../src/spyglass/spikesorting/v2/_recording_geometry.py#L34) —
   `spikeinterface_channel_ids`: how spyglass `electrode_id`s map to SI channel
   ids (reused so detection results map back to electrode ids).
 - SpikeInterface `spikeinterface.preprocessing.detect_bad_channels(recording,
@@ -41,7 +41,7 @@ contract in phase 3).
 
 - **New DB-free service module `v2/_bad_channels.py`** with the pure detection
   wrapper. It must NOT register a `dj.schema` or touch the DB (mirror
-  `_recording_materialization.py`'s "DB-free at import" contract):
+  the "DB-free at import" contract of the split `_recording_*` service modules):
 
   ```python
   """Bad-channel detection wrapper (SpikeInterface coherence+psd)."""

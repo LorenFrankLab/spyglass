@@ -19,13 +19,13 @@ is specific to the global-median branch.)
 
 **Inputs to read first:**
 
-- [src/spyglass/spikesorting/v2/_recording_materialization.py:341](../../../../src/spyglass/spikesorting/v2/_recording_materialization.py#L341) —
+- [src/spyglass/spikesorting/v2/_recording_preprocessing.py:31](../../../../src/spyglass/spikesorting/v2/_recording_preprocessing.py#L31) —
   `apply_pre_motion_preprocessing`: current order is reference (`:362-387`)
   then bandpass (`:389-398`); the specific-reference drop is `:369-374`.
-- [src/spyglass/spikesorting/v2/_recording_materialization.py:402](../../../../src/spyglass/spikesorting/v2/_recording_materialization.py#L402) —
+- [src/spyglass/spikesorting/v2/_recording_preprocessing.py:243](../../../../src/spyglass/spikesorting/v2/_recording_preprocessing.py#L243) —
   `filtering_description`: current step order `common reference …` then
   `bandpass …` (`:415-423`).
-- [src/spyglass/spikesorting/v2/_recording_materialization.py:60](../../../../src/spyglass/spikesorting/v2/_recording_materialization.py#L60) —
+- [src/spyglass/spikesorting/v2/_recording_restriction.py:154](../../../../src/spyglass/spikesorting/v2/_recording_restriction.py#L154) —
   `restrict_recording`: **read but do not change.** It already adds the
   specific reference channel to the slice (`:186-201`) and asserts the
   reference is not a sort-group member (`:183`). The reorder relies on this:
@@ -52,7 +52,7 @@ is specific to the global-median branch.)
 ## Tasks
 
 - **Reorder `apply_pre_motion_preprocessing`
-  ([_recording_materialization.py:341](../../../../src/spyglass/spikesorting/v2/_recording_materialization.py#L341)):**
+  ([_recording_preprocessing.py:31](../../../../src/spyglass/spikesorting/v2/_recording_preprocessing.py#L31)):**
   apply bandpass first, then reference, then drop the specific ref channel. The
   drop logic and the `reference="single"` / `reference="global"` calls are
   unchanged — only their position relative to the filter moves.
@@ -123,7 +123,7 @@ is specific to the global-median branch.)
   ```
 
 - **Reorder `filtering_description`
-  ([_recording_materialization.py:402](../../../../src/spyglass/spikesorting/v2/_recording_materialization.py#L402)):**
+  ([_recording_preprocessing.py:243](../../../../src/spyglass/spikesorting/v2/_recording_preprocessing.py#L243)):**
   list bandpass first, then common reference, matching the new apply order.
 
   ```python

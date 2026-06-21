@@ -27,7 +27,7 @@ All four phases are **implemented and landed** on `spikesorting-v2`. Summary:
 | **0 — docstring cleanup** | ✅ Done | Module docstrings corrected (no more "stub raises NotImplementedError" overclaim for implemented methods). |
 | **A — deterministic selection identity** | ✅ Done | `_selection_identity.py` (UUID5 `deterministic_id` / `assert_supplied_id_matches`); `RecordingSelection` / `ArtifactDetectionSelection` / `SortingSelection` `insert_selection` rewritten to content-addressed IDs with duplicate-PK race recovery + source-part collision checks. |
 | **B — analyzer cache contract** | ✅ Done | `_analyzer_cache.py` (`analyzer_path` / root resolution); `Sorting.analyzer_folder` is transient state (threaded `make_compute → make_insert`), not a persisted absolute path; orphan scan computes the canonical path. |
-| **C — service extraction** | ✅ Done | DB-free service modules: `_artifact_compute`, `_artifact_intervals`, `_curation_transforms`, `_units_nwb` (incl. `build_lazy_merged_sorting`), `_sorting_compute`, `_recording_materialization`, `_signal_math`, `_enums`, `_analyzer_cache`, `_selection_identity`. Table classes are thin orchestrators; delegators kept only where a test / external caller pins the surface. |
+| **C — service extraction** | ✅ Done | DB-free service modules: `_artifact_compute`, `_artifact_intervals`, `_curation_transforms`, `_units_nwb` (incl. `build_lazy_merged_sorting`), `_sorting_compute`, `_recording_restriction`, `_recording_geometry`, `_recording_preprocessing`, `_recording_nwb`, `_signal_math`, `_enums`, `_analyzer_cache`, `_selection_identity`. Table classes are thin orchestrators; delegators kept only where a test / external caller pins the surface. |
 
 **Deliberately NOT done (rejected, do not re-attempt):** the broad
 `_curation_queries.py` extraction (resolve_restriction / get_sort_metadata /
@@ -356,7 +356,7 @@ nice-to-have cleanup.
    NWB.
 5. `_sorting_compute.py` — artifact-mask application, sorter dispatch, analyzer build, zero-unit
    analyzer behavior. Sequence this after Phase B so the cache contract is settled first.
-6. `_recording_materialization.py` — preprocessing execution, NWB write/rebuild validation, and
+6. the split `_recording_*` service modules — preprocessing execution, NWB write/rebuild validation, and
    cache-hash verification. This is high value but should come after the narrower extractions
    establish the pattern.
 

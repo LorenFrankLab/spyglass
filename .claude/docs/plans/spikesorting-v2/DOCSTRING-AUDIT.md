@@ -69,8 +69,8 @@ blocks, so mkdocstrings renders **no parameter table**. Concentrated in:
 **Pattern 2 — partial `Parameters` sections (worse than none — looks complete).**
 Verified directly:
 
-- [`restrict_recording`](../../../../src/spyglass/spikesorting/v2/_recording_materialization.py#L61) — documents **2 of 11** params.
-- [`write_nwb_artifact`](../../../../src/spyglass/spikesorting/v2/_recording_materialization.py#L770) — omits the **required keyword-only** `filtering_description`.
+- [`restrict_recording`](../../../../src/spyglass/spikesorting/v2/_recording_restriction.py#L154) — documents **2 of 11** params.
+- [`write_nwb_artifact`](../../../../src/spyglass/spikesorting/v2/_recording_nwb.py#L32) — omits the **required keyword-only** `filtering_description`.
 - [`insert_curation`](../../../../src/spyglass/spikesorting/v2/curation.py#L196) — omits `reuse_existing`.
 
 **Pattern 3 — value-returning public functions with no `Returns` section**
@@ -106,7 +106,7 @@ use them as templates.)
   closing quotes (12)** — overwhelmingly
   [exceptions.py](../../../../src/spyglass/spikesorting/v2/exceptions.py)
   (13,19,25,33,43,49,58,68,76,82,109,120) plus utils.py:113,675.
-- **D401 non-imperative summary (5)** — _recording_materialization.py:425 ·
+- **D401 non-imperative summary (5)** — _recording_preprocessing.py:243 ·
   curation.py:1094 · recording.py:1478 · session_group.py:94 · utils.py:69.
 - **D105 magic method (1)** — pipeline.py:761.
 - **Non-standard section heading** —
@@ -137,7 +137,7 @@ and the `unit_matching.py` / `metric_curation.py` / `figpack_curation.py`
 | recording.py, sorting.py, curation.py, artifact.py | ~100% | Excellent; gaps are tri-part `make_*` Parameters/Returns |
 | pipeline.py, __init__.py, _enums.py | ~100% | Excellent (`run_v2_pipeline`/`PreflightReport` are model docstrings) except the one High `Raises` defect |
 | utils.py, _signal_math.py, _params/sorter.py | ~100% | Excellent; `_signal_math.py` & `sorter.py` are the shape/section gold standard |
-| `_selection_identity.py`, `_units_nwb.py`, `_recording_materialization.py`, `_sorting_compute.py`, `_artifact_intervals.py` | 100% | Good content; prose-instead-of-sections concentrated here |
+| `_selection_identity.py`, `_units_nwb.py`, the split `_recording_*` service modules, `_sorting_compute.py`, `_artifact_intervals.py` | 100% | Good content; prose-instead-of-sections concentrated here |
 | `_fixtures/mearec_to_nwb.py` | 100% | Excellent; only an incomplete `Raises` |
 | exceptions.py | 100% | Good content; all D205/D209 nits live here |
 

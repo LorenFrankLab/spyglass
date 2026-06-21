@@ -26,7 +26,7 @@ working tree at planning time; re-confirm before editing (files move).
   single `bad_channel_handling` field (no detection sub-model — detection is
   phase 2). Per the pre-release schema policy these are edited in place with
   **no** `params_schema_version` bump (it stays `3`); dev rows are regenerated.
-- `v2/_recording_materialization.py:342` — `apply_pre_motion_preprocessing`:
+- `v2/_recording_preprocessing.py:31` — `apply_pre_motion_preprocessing`:
   the runtime stack. Current order is bandpass (`:369`) then reference
   (`:380`), and it returns only `recording`. **Phase 1** inserts phase-shift as
   a new step *before* the bandpass **and changes the return to
@@ -38,16 +38,16 @@ working tree at planning time; re-confirm before editing (files move).
   (`:1722`) from bandpass/reference only. **Phase 1** updates this call site
   (and the `_rebuild_nwb_artifact` path) to capture `applied_steps` and pass it
   to `_filtering_description`.
-- `v2/_recording_materialization.py:61` — `restrict_recording`: builds the
+- `v2/_recording_restriction.py:154` — `restrict_recording`: builds the
   channel slice (`:184-203`). It already adds the `specific` reference channel
   to the slice; **phase 3** additionally re-includes the sort group's
   **interior** bad channels on the `interpolate` path so they are present to
   fill (scoped by spatial **adjacency** to the good channels — not the whole
   shank, and not a bounding-box span).
-- `v2/_recording_materialization.py:435` — `filtering_description`: the NWB
+- `v2/_recording_preprocessing.py:243` — `filtering_description`: the NWB
   provenance string. **Phase 1** and **phase 3** append their steps so the
   persisted `ElectricalSeries.filtering` lists what actually ran.
-- `v2/_recording_materialization.py:206/232/272` —
+- `v2/_recording_geometry.py:34/74/130` —
   `spikeinterface_channel_ids`, `fetch_sort_group_probe_info`,
   `maybe_apply_tetrode_geometry`: channel/probe-geometry helpers. Interpolation
   (phase 3) and motion estimation (phase 4) need real channel **locations**;
@@ -311,7 +311,7 @@ see no change.
   ~80 LOC tests (stub call-order + preset checks + the NP-preset no-op regression).
 - Phase 2: ~120 LOC (detection wrapper + persist helper + report), ~120 LOC
   tests (synthetic dead-channel fixture + DB integration).
-- Phase 3: ~70 LOC across `_recording_materialization.py` (slice + interpolate
+- Phase 3: ~70 LOC across the split `_recording_*` service modules (slice + interpolate
   handling) + `make_fetch` (pitch-adjacent re-inclusion) + schema (one field),
   ~120 LOC tests (order stubs + pitch/finite unit + interpolate integration +
   default-unchanged + bad-reference regressions). Smaller than before now that
