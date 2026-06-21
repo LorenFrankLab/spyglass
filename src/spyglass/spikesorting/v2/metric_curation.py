@@ -754,6 +754,114 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
             allow_custom_labels=allow_custom_labels,
         )
 
+    # ---- visualization (notebook-facing) ---------------------------------
+
+    def _analyzer_for(self, key):
+        sorting_id = (AnalyzerCurationSelection & key).fetch1("sorting_id")
+        return Sorting().get_analyzer({"sorting_id": sorting_id})
+
+    def plot_units_qc(
+        self, key, *, metric_names=None, color_metric: str = "snr"
+    ):
+        """Static population QC overview: metric histograms + depth scatter.
+
+        The at-a-glance "do these units look reasonable as a population?"
+        view (complement to the per-unit ``describe_units`` table). Renders one
+        histogram per quality metric (NaN values dropped) and a scatter placing
+        each unit at its estimated probe position colored by ``color_metric``.
+        A zero-unit sort returns an empty, labeled figure rather than raising.
+
+        Returns
+        -------
+        matplotlib.figure.Figure
+        """
+        from spyglass.spikesorting.v2._metric_curation_plots import (
+            plot_units_qc_figure,
+        )
+
+        metrics = self.get_metrics(key)
+        try:
+            analyzer = self._analyzer_for(key)
+            if not analyzer.has_extension("unit_locations"):
+                analyzer.compute("unit_locations")
+            locations = analyzer.get_extension("unit_locations").get_data()
+            unit_ids = list(analyzer.unit_ids)
+        except ZeroUnitAnalyzerError:
+            locations, unit_ids = None, []
+        return plot_units_qc_figure(
+            metrics,
+            locations,
+            unit_ids,
+            metric_names=metric_names,
+            color_metric=color_metric,
+        )
+
+    def get_correlograms(self, key, *, window_ms=100.0, bin_ms=5.0):
+        """Return ``(ccgs, bins, unit_ids)`` from the correlograms extension."""
+        from spyglass.spikesorting.v2._metric_curation_plots import (
+            correlograms_from_analyzer,
+        )
+
+        return correlograms_from_analyzer(
+            self._analyzer_for(key), window_ms=window_ms, bin_ms=bin_ms
+        )
+
+    def plot_correlograms(
+        self, key, *, unit_ids=None, window_ms=100.0, bin_ms=5.0
+    ):
+        """Plot autocorrelograms (one panel per unit). Ported BurstPair view."""
+        from spyglass.spikesorting.v2._metric_curation_plots import (
+            plot_autocorrelograms_figure,
+        )
+
+        ccgs, bins, ids = self.get_correlograms(
+            key, window_ms=window_ms, bin_ms=bin_ms
+        )
+        return plot_autocorrelograms_figure(ccgs, bins, ids, unit_ids=unit_ids)
+
+    def investigate_pair_xcorrel(
+        self, key, pairs, *, window_ms=100.0, bin_ms=5.0
+    ):
+        """Plot cross-correlograms for unit pairs (ported BurstPair view)."""
+        from spyglass.spikesorting.v2._metric_curation_plots import (
+            plot_pair_correlograms_figure,
+            validate_unit_pairs,
+        )
+
+        ccgs, bins, ids = self.get_correlograms(
+            key, window_ms=window_ms, bin_ms=bin_ms
+        )
+        used = validate_unit_pairs(ids, pairs)
+        return plot_pair_correlograms_figure(ccgs, bins, ids, used)
+
+    def investigate_pair_peaks(self, key, pairs):
+        """Plot per-channel peak-amplitude histograms for unit pairs."""
+        from spyglass.spikesorting.utils_burst import plot_burst_pair_peaks
+        from spyglass.spikesorting.v2._metric_curation_plots import (
+            peak_amplitudes_from_analyzer,
+            validate_unit_pairs,
+        )
+
+        analyzer = self._analyzer_for(key)
+        used = validate_unit_pairs(list(analyzer.unit_ids), pairs)
+        peak_amps, _ = peak_amplitudes_from_analyzer(analyzer)
+        return plot_burst_pair_peaks(used, peak_amps)
+
+    def plot_peak_over_time(self, key, pairs, overlap: bool = True):
+        """Plot peak amplitude over time for unit pairs (ported BurstPair view)."""
+        from spyglass.spikesorting.utils_burst import plot_burst_peak_over_time
+        from spyglass.spikesorting.v2._metric_curation_plots import (
+            peak_amplitudes_from_analyzer,
+            validate_unit_pairs,
+        )
+
+        analyzer = self._analyzer_for(key)
+        used = validate_unit_pairs(list(analyzer.unit_ids), pairs)
+        peak_amps, peak_times = peak_amplitudes_from_analyzer(analyzer)
+        return plot_burst_peak_over_time(
+            peak_amps, peak_times, used, overlap=overlap
+        )
+
 
 class _WaveformsAccessor:
     """Narrow ``WaveformExtractor``-shaped view over a SortingAnalyzer.

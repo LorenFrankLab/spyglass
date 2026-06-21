@@ -239,3 +239,43 @@ def test_analyzer_curation_selection_warns_on_auto_source(
             }
         )
     assert any("analyzer_curation" in r.message for r in caplog.records)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_analyzer_curation_viz_renders(
+    populated_sorting_with_curation, analyzer_curation_defaults
+):
+    """plot_units_qc + ported BurstPair viz render against a real sort."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from spyglass.spikesorting.v2.metric_curation import AnalyzerCuration
+
+    sel = _populate_analyzer_curation(
+        populated_sorting_with_curation, "minimal", "none"
+    )
+    ac = AnalyzerCuration()
+
+    fig = ac.plot_units_qc(sel)
+    assert fig is not None
+    plt.close(fig)
+
+    # Ported BurstPair views read the analyzer's correlograms/waveforms.
+    unit_ids = list(
+        ac.get_metrics(sel).index
+    )
+    acg = ac.plot_correlograms(sel, unit_ids=unit_ids[:2])
+    assert acg is not None
+    plt.close(acg)
+
+    if len(unit_ids) >= 2:
+        pair = [(unit_ids[0], unit_ids[1])]
+        xcorr = ac.investigate_pair_xcorrel(sel, pair)
+        assert xcorr is not None
+        plt.close(xcorr)
+        peaks = ac.investigate_pair_peaks(sel, pair)
+        assert peaks is not None
+        plt.close(peaks)
