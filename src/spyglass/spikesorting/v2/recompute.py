@@ -123,16 +123,26 @@ class RecordingArtifactRecomputeSelection(SpyglassMixin, dj.Manual):
 
     @classmethod
     def remove_matched(cls, restriction=True, *, dry_run: bool = True) -> int:
-        """Remove selection rows whose artifact already matched (any env).
+        """Remove redundant selection rows for already-verified artifacts.
 
-        The v2 analog of v1 ``remove_matched``: drop redundant attempts for
-        artifacts already verified.
+        Mirrors v1 ``remove_matched``: drop selections that target a recording
+        with a matched recompute (in ANY env) but are NOT themselves the
+        matched attempt. Those redundant selections carry no dependent
+        recompute row, so ``delete_quick`` cannot hit the Recompute->Selection
+        FK. Selections whose own recompute matched are kept -- they are the
+        verification record.
         """
         matched = RecordingArtifactRecompute & "matched=1"
-        redundant = (cls & restriction & matched.proj()) & matched.proj()
+        artifact_pk = RecordingArtifactVersions.primary_key
+        matched_artifacts = (dj.U(*artifact_pk) & matched).fetch(
+            "KEY", as_dict=True
+        )
+        redundant = (cls & restriction & matched_artifacts) - matched.proj()
         count = len(redundant)
         if dry_run or count == 0:
-            logger.info(f"remove_matched: {count} redundant rows (dry_run).")
+            logger.info(
+                f"remove_matched: {count} redundant rows (dry_run={dry_run})."
+            )
             return count
         redundant.delete_quick()
         return count
@@ -199,6 +209,15 @@ class RecordingArtifactRecompute(SpyglassMixin, dj.Computed):
             stored_hashes = hash_recording_traces(stored, rounding=rounding)
             new_hashes = _recompute_recording_trace_hashes(rec_key, rounding)
         except Exception as err:  # noqa: BLE001 - record the failure, retryable
+            # A regeneration failure (SI pin mismatch, missing probe info, ...)
+            # is a legitimate matched=0 outcome for this QC table. Log the full
+            # traceback first so a masked code defect / disk error is still
+            # debuggable -- the err_msg column truncates to 255 chars.
+            logger.error(
+                f"RecordingArtifactRecompute regeneration failed for "
+                f"{rec_key}; recording matched=0 (retryable).",
+                exc_info=True,
+            )
             self.insert1(
                 {
                     **key,
@@ -215,8 +234,14 @@ class RecordingArtifactRecompute(SpyglassMixin, dj.Computed):
         return _reclaimable_disk(self.with_names & restriction)
 
     def recheck(self, key) -> bool:
-        """Rerun the comparison for one row (after env/file changes)."""
-        (self & key).delete_quick()
+        """Rerun the comparison for one row (after env/file changes).
+
+        Uses cautious ``delete`` (not ``delete_quick``) so the row's
+        ``Name`` / ``Hash`` diff part rows cascade and the team-permission
+        guard applies; ``safemode=False`` skips the prompt for this
+        programmatic recheck. Then re-populates.
+        """
+        (self & key).delete(safemode=False)
         self.populate(key, reserve_jobs=False)
         return bool((self & key & "matched=1"))
 
@@ -251,6 +276,7 @@ class RecordingArtifactRecompute(SpyglassMixin, dj.Computed):
             days_since_creation=days_since_creation,
             file_attr="analysis_file_name",
             path_fn=lambda fname: AnalysisNwbfile.get_abs_path(fname),
+            artifact_pk=Recording.primary_key,
         )
 
 
@@ -358,12 +384,24 @@ class SortingAnalyzerRecomputeSelection(SpyglassMixin, dj.Manual):
 
     @classmethod
     def remove_matched(cls, restriction=True, *, dry_run: bool = True) -> int:
-        """Remove selection rows whose analyzer already matched (any env)."""
+        """Remove redundant selection rows for already-verified analyzers.
+
+        Mirrors v1 ``remove_matched`` (see the recording variant): drop
+        selections targeting a sort with a matched recompute (any env) that are
+        not themselves the matched attempt, so ``delete_quick`` cannot hit the
+        Recompute->Selection FK.
+        """
         matched = SortingAnalyzerRecompute & "matched=1"
-        redundant = (cls & restriction & matched.proj()) & matched.proj()
+        artifact_pk = SortingAnalyzerVersions.primary_key
+        matched_artifacts = (dj.U(*artifact_pk) & matched).fetch(
+            "KEY", as_dict=True
+        )
+        redundant = (cls & restriction & matched_artifacts) - matched.proj()
         count = len(redundant)
         if dry_run or count == 0:
-            logger.info(f"remove_matched: {count} redundant rows (dry_run).")
+            logger.info(
+                f"remove_matched: {count} redundant rows (dry_run={dry_run})."
+            )
             return count
         redundant.delete_quick()
         return count
@@ -425,6 +463,11 @@ class SortingAnalyzerRecompute(SpyglassMixin, dj.Computed):
                 sort_key, rounding
             )
         except Exception as err:  # noqa: BLE001 - record the failure
+            logger.error(
+                f"SortingAnalyzerRecompute regeneration failed for "
+                f"{sort_key}; recording matched=0 (retryable).",
+                exc_info=True,
+            )
             self.insert1(
                 {
                     **key,
@@ -437,14 +480,20 @@ class SortingAnalyzerRecompute(SpyglassMixin, dj.Computed):
         _insert_comparison(self, key, stored_hashes, new_hashes, created_at)
 
     def get_disk_space(self, restriction=True) -> str:
-        """Report reclaimable disk for unmatched, not-yet-deleted analyzers."""
+        """Report reclaimable disk for matched, not-yet-deleted analyzers.
+
+        Only ``matched=1`` analyzers are deletable by ``delete_files``, so only
+        those are reclaimable; one folder is counted once even across multiple
+        env rows.
+        """
         from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
         total = 0
-        for key in (self & restriction & "matched=0 AND deleted=0").fetch(
-            "KEY", as_dict=True
-        ):
-            sid = self.get_parent_key(key)["sorting_id"]
+        reclaimable = self & restriction & "matched=1 AND deleted=0"
+        for sid in {
+            self.get_parent_key(key)["sorting_id"]
+            for key in reclaimable.fetch("KEY", as_dict=True)
+        }:
             folder = analyzer_path(sid)
             if folder.exists():
                 total += sum(
@@ -453,8 +502,12 @@ class SortingAnalyzerRecompute(SpyglassMixin, dj.Computed):
         return f"Total: {total} bytes"
 
     def recheck(self, key) -> bool:
-        """Rerun the comparison for one row."""
-        (self & key).delete_quick()
+        """Rerun the comparison for one row.
+
+        Uses cautious ``delete`` (not ``delete_quick``) so the diff part rows
+        cascade and the team-permission guard applies, then re-populates.
+        """
+        (self & key).delete(safemode=False)
         self.populate(key, reserve_jobs=False)
         return bool((self & key & "matched=1"))
 
@@ -488,6 +541,7 @@ class SortingAnalyzerRecompute(SpyglassMixin, dj.Computed):
             force_stale_env=force_stale_env,
             days_since_creation=days_since_creation,
             folder_fn=_folder_path,
+            artifact_pk=Sorting.primary_key,
         )
 
 
@@ -552,33 +606,59 @@ def _insert_comparison(table, key, stored_hashes, new_hashes, created_at):
         table.Hash().insert([{**key, "name": n} for n in differing])
 
 
-def _matched_current_env(recompute_table, key, *, force_stale_env: bool):
-    """Raise StaleEnvMatchedError unless ``key`` matched in the current env."""
+def _authorize_artifacts_for_deletion(
+    recompute_table, restriction, *, force_stale_env, artifact_pk
+):
+    """Return ``(authorized_artifact_keys, matched_query)`` for deletion.
+
+    Authorization is at the ARTIFACT level, not per recompute row: an artifact
+    (one ``recording_id`` / ``sorting_id``) is authorized when it has a
+    ``matched=1``, not-yet-deleted recompute row in the CURRENT
+    ``UserEnvironment``. An artifact whose matched rows are ALL in stale envs
+    raises ``StaleEnvMatchedError`` (unless ``force_stale_env``, which
+    authorizes it with an audit log line). Keying on the artifact -- rather than
+    the full recompute row including ``env_id`` -- means a stale-env row never
+    blocks an artifact that also has a current-env match.
+    """
     current_env = _current_env_id()
-    in_current_env = recompute_table & key & "matched=1" & {
-        "env_id": current_env
-    }
-    if in_current_env:
-        return True
-    stale = sorted(
-        set((recompute_table & key & "matched=1").fetch("env_id"))
-    )
-    if force_stale_env:
-        logger.warning(
-            f"force_stale_env=True: deleting {key} authorized by stale-env "
-            f"matches {stale} (current env {current_env!r} has no match). "
-            "Audit-logged."
-        )
-        return True
-    raise StaleEnvMatchedError(
-        f"No matched recompute in current env {current_env!r} for {key}. "
-        f"Stale-env matches: {stale}. Rerun the recompute under the current "
-        "environment, or pass force_stale_env=True (audit-logged)."
-    )
+    matched = recompute_table & restriction & "matched=1 AND deleted=0"
+    authorized = []
+    for artifact in (dj.U(*artifact_pk) & matched).fetch("KEY", as_dict=True):
+        artifact_rows = matched & artifact
+        if artifact_rows & {"env_id": current_env}:
+            authorized.append(artifact)
+            continue
+        stale = sorted(set(artifact_rows.fetch("env_id")))
+        if force_stale_env:
+            logger.warning(
+                f"force_stale_env=True: {artifact} authorized by stale-env "
+                f"matches {stale} (current env {current_env!r} has no match). "
+                "Audit-logged."
+            )
+            authorized.append(artifact)
+        else:
+            raise StaleEnvMatchedError(
+                f"No matched recompute in current env {current_env!r} for "
+                f"{artifact}. Stale-env matches: {stale}. Rerun the recompute "
+                "under the current environment, or pass force_stale_env=True "
+                "(audit-logged)."
+            )
+    return authorized, matched
 
 
 def _recent_cutoff(days_since_creation: int):
     return dt.datetime.now() - dt.timedelta(days=days_since_creation)
+
+
+def _too_recent_or_unknown(matched_rows, cutoff) -> bool:
+    """True if any matched row's ``created_at`` is NULL or newer than cutoff.
+
+    A destructive op should not proceed on an unknown (NULL) or too-recent age.
+    """
+    return any(
+        created_at is None or created_at > cutoff
+        for created_at in matched_rows.fetch("created_at")
+    )
 
 
 def _delete_files(
@@ -591,26 +671,37 @@ def _delete_files(
     days_since_creation,
     file_attr,
     path_fn,
+    artifact_pk,
 ):
-    """Shared recording delete-gate: matched=1 + current-env + age, then unlink."""
-    query = recompute_table & restriction & "matched=1 AND deleted=0"
+    """Artifact-level recording delete gate: current-env match + age, unlink once."""
     cutoff = _recent_cutoff(days_since_creation)
+    authorized, matched = _authorize_artifacts_for_deletion(
+        recompute_table,
+        restriction,
+        force_stale_env=force_stale_env,
+        artifact_pk=artifact_pk,
+    )
     deleted = []
-    for key in query.fetch("KEY", as_dict=True):
-        created_at = (recompute_table & key).fetch1("created_at")
-        if created_at is not None and created_at > cutoff:
+    for artifact in authorized:
+        artifact_rows = matched & artifact
+        if _too_recent_or_unknown(artifact_rows, cutoff):
             continue
-        _matched_current_env(
-            recompute_table, key, force_stale_env=force_stale_env
-        )
-        parent_key = recompute_table.get_parent_key(key)
-        fname = (parent_table & parent_key).fetch1(file_attr)
+        fname = (parent_table & artifact).fetch1(file_attr)
         abs_path = Path(path_fn(fname))
         if dry_run:
             deleted.append(str(abs_path))
             continue
-        recompute_table.update1({**key, "deleted": 1})
         abs_path.unlink(missing_ok=True)
+        if abs_path.exists():
+            logger.warning(
+                f"delete_files: file not removed: {abs_path}; leaving "
+                "deleted=0 so a later cleanup retries."
+            )
+            continue
+        # Mark every matched row for this artifact deleted, only after the file
+        # is gone (the file is per-artifact; the flag is per recompute row).
+        for key in artifact_rows.fetch("KEY", as_dict=True):
+            recompute_table.update1({**key, "deleted": 1})
         deleted.append(str(abs_path))
     return deleted
 
@@ -623,33 +714,45 @@ def _delete_analyzer_folders(
     force_stale_env,
     days_since_creation,
     folder_fn,
+    artifact_pk,
 ):
-    """Shared analyzer delete-gate: matched=1 + current-env + age, then rmtree."""
-    query = recompute_table & restriction & "matched=1 AND deleted=0"
+    """Artifact-level analyzer delete gate: current-env match + age, rmtree once."""
     cutoff = _recent_cutoff(days_since_creation)
+    authorized, matched = _authorize_artifacts_for_deletion(
+        recompute_table,
+        restriction,
+        force_stale_env=force_stale_env,
+        artifact_pk=artifact_pk,
+    )
     deleted = []
-    for key in query.fetch("KEY", as_dict=True):
-        created_at = (recompute_table & key).fetch1("created_at")
-        if created_at is not None and created_at > cutoff:
+    for artifact in authorized:
+        artifact_rows = matched & artifact
+        if _too_recent_or_unknown(artifact_rows, cutoff):
             continue
-        _matched_current_env(
-            recompute_table, key, force_stale_env=force_stale_env
-        )
-        sorting_id = recompute_table.get_parent_key(key)["sorting_id"]
-        folder = Path(folder_fn(sorting_id))
+        folder = Path(folder_fn(artifact["sorting_id"]))
         if dry_run:
             deleted.append(str(folder))
             continue
-        recompute_table.update1({**key, "deleted": 1})
         shutil.rmtree(folder, ignore_errors=True)
+        if folder.exists():
+            # Do NOT mark deleted -- the folder is still on disk; leaving
+            # deleted=0 lets a later cleanup retry rather than silently
+            # suppressing it.
+            logger.warning(
+                f"delete_files: analyzer folder not removed: {folder}; "
+                "leaving deleted=0 so a later cleanup retries."
+            )
+            continue
+        for key in artifact_rows.fetch("KEY", as_dict=True):
+            recompute_table.update1({**key, "deleted": 1})
         deleted.append(str(folder))
     return deleted
 
 
 def _reclaimable_disk(query) -> str:
-    """Sum on-disk bytes of unmatched, not-yet-deleted recording artifacts."""
+    """Sum on-disk bytes of matched (reclaimable), not-yet-deleted artifacts."""
     total = 0
-    for row in (query & "matched=0 AND deleted=0").fetch(
+    for row in (query & "matched=1 AND deleted=0").fetch(
         "analysis_file_name", as_dict=True
     ):
         abs_path = Path(AnalysisNwbfile.get_abs_path(row["analysis_file_name"]))

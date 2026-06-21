@@ -56,9 +56,44 @@ def _assert_temp_base_dir():
     )
 
 
+@pytest.fixture
+def clean_recompute(populated_sorting):
+    """Clear all recompute state for the shared sort before AND after a test.
+
+    The package-scoped ``populated_sorting`` is reused across recompute tests;
+    leftover Versions/Selection/Recompute rows (some planted directly) make a
+    sibling test's ``fetch1`` ambiguous. This wipes that state -- diff part
+    rows first (``delete_quick`` does not cascade), then masters -- so each
+    integration test starts from a known-empty slate regardless of order.
+    """
+    from spyglass.common.common_user import UserEnvironment
+    from spyglass.spikesorting.v2 import recompute as rc
+
+    rec_key = _recording_key(populated_sorting)
+    sort_key = {"sorting_id": populated_sorting["sorting_id"]}
+
+    def _clear():
+        for recompute_tbl, restr in (
+            (rc.RecordingArtifactRecompute, rec_key),
+            (rc.SortingAnalyzerRecompute, sort_key),
+        ):
+            (recompute_tbl.Name & restr).delete_quick()
+            (recompute_tbl.Hash & restr).delete_quick()
+            (recompute_tbl & restr).delete_quick()
+        (rc.RecordingArtifactRecomputeSelection & rec_key).delete_quick()
+        (rc.SortingAnalyzerRecomputeSelection & sort_key).delete_quick()
+        (rc.RecordingArtifactVersions & rec_key).delete_quick()
+        (rc.SortingAnalyzerVersions & sort_key).delete_quick()
+        (UserEnvironment & {"env_id": "planted_stale_env_00"}).delete_quick()
+
+    _clear()
+    yield
+    _clear()
+
+
 @pytest.mark.slow
 @pytest.mark.integration
-def test_recording_recompute_matches_and_delete_gate(populated_sorting):
+def test_recording_recompute_matches_and_delete_gate(populated_sorting, clean_recompute):
     """Versions inventory + recompute matched=1 in the current env; the delete
     gate lists the artifact, refuses a stale-env match, and force overrides."""
     _assert_temp_base_dir()
@@ -134,7 +169,7 @@ def test_recording_recompute_matches_and_delete_gate(populated_sorting):
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_recording_recompute_refuses_unmatched(populated_sorting):
+def test_recording_recompute_refuses_unmatched(populated_sorting, clean_recompute):
     """delete_files never selects a matched=0 artifact."""
     _assert_temp_base_dir()
     from spyglass.spikesorting.v2.recompute import (
@@ -168,7 +203,7 @@ def test_recording_recompute_refuses_unmatched(populated_sorting):
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_sorting_analyzer_recompute_matches(populated_sorting):
+def test_sorting_analyzer_recompute_matches(populated_sorting, clean_recompute):
     """Analyzer versions inventory + a fresh rebuild matches the stored data."""
     _assert_temp_base_dir()
     from spyglass.spikesorting.v2.recompute import (
@@ -188,7 +223,7 @@ def test_sorting_analyzer_recompute_matches(populated_sorting):
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_file_tracking_excludes_v2_deleted_files(populated_sorting):
+def test_file_tracking_excludes_v2_deleted_files(populated_sorting, clean_recompute):
     """A v2 recompute-deleted artifact is excluded from orphan detection.
 
     The file-tracking ``deleted`` set (used to skip intentionally-removed
@@ -228,3 +263,96 @@ def test_file_tracking_excludes_v2_deleted_files(populated_sorting):
         assert fname in AnalysisFileIssues._get_recompute_deleted()
     finally:
         (RecordingArtifactRecompute & sel_key).delete_quick()
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_recording_recompute_mismatch_records_hash_rows(
+    populated_sorting, clean_recompute, monkeypatch
+):
+    """A content mismatch yields matched=0 plus a Hash diff part row."""
+    _assert_temp_base_dir()
+    from spyglass.spikesorting.v2 import recompute as rc
+
+    rec_key = _recording_key(populated_sorting)
+    rc.RecordingArtifactVersions.populate(rec_key, reserve_jobs=False)
+    rc.RecordingArtifactRecomputeSelection.attempt_all(rec_key)
+    sel_key = (rc.RecordingArtifactRecomputeSelection & rec_key).fetch1("KEY")
+    (rc.RecordingArtifactRecompute & sel_key).delete_quick()
+
+    # Force the regenerated traces to differ from the stored ones so make()
+    # records matched=0 and a Hash row (without re-running the real recompute).
+    monkeypatch.setattr(
+        rc,
+        "_recompute_recording_trace_hashes",
+        lambda rk, rounding: {"segment_0": "deadbeefmismatch"},
+    )
+    rc.RecordingArtifactRecompute.populate(rec_key, reserve_jobs=False)
+    row = rc.RecordingArtifactRecompute & sel_key
+    assert row.fetch1("matched") == 0
+    assert rc.RecordingArtifactRecompute.Hash & sel_key
+    # A matched=0 artifact is never deletable.
+    assert (
+        rc.RecordingArtifactRecompute().delete_files(
+            rec_key, dry_run=True, days_since_creation=0
+        )
+        == []
+    )
+    (rc.RecordingArtifactRecompute.Hash & sel_key).delete_quick()
+    (rc.RecordingArtifactRecompute & sel_key).delete_quick()
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_recording_recompute_mixed_env_deletes(
+    populated_sorting, clean_recompute
+):
+    """An artifact with BOTH a current-env and a stale-env match still deletes.
+
+    The artifact-level gate must authorize on the current-env match and not
+    false-raise on the co-present stale-env row. get_disk_space reports the
+    matched (reclaimable) artifact.
+    """
+    _assert_temp_base_dir()
+    from spyglass.common.common_user import UserEnvironment
+    from spyglass.spikesorting.v2.recompute import (
+        RecordingArtifactRecompute,
+        RecordingArtifactRecomputeSelection,
+        RecordingArtifactVersions,
+        _artifact_created_at,
+    )
+
+    rec_key = _recording_key(populated_sorting)
+    RecordingArtifactVersions.populate(rec_key, reserve_jobs=False)
+    RecordingArtifactRecomputeSelection.attempt_all(rec_key)
+    RecordingArtifactRecompute.populate(rec_key, reserve_jobs=False)
+    assert RecordingArtifactRecompute & rec_key & "matched=1"  # current env
+
+    # Plant a co-present stale-env matched row for the SAME artifact.
+    stale_env = "planted_stale_env_00"
+    UserEnvironment().insert1(
+        {"env_id": stale_env, "env_hash": "0" * 32, "env": {"x": 1},
+         "has_editable": 0},
+        skip_duplicates=True,
+    )
+    sel_key = (RecordingArtifactRecomputeSelection & rec_key).fetch1("KEY")
+    stale_sel = {
+        **{k: v for k, v in sel_key.items() if k != "env_id"},
+        "env_id": stale_env,
+    }
+    RecordingArtifactRecomputeSelection.insert1(stale_sel, skip_duplicates=True)
+    RecordingArtifactRecompute.insert1(
+        {**stale_sel, "matched": 1,
+         "created_at": _artifact_created_at(rec_key), "deleted": 0},
+        allow_direct_insert=True,
+    )
+
+    # get_disk_space reports the matched (reclaimable) artifact.
+    space = RecordingArtifactRecompute().get_disk_space(rec_key)
+    assert "Total:" in space
+
+    # Current-env match authorizes deletion; the stale row must not block it.
+    listed = RecordingArtifactRecompute().delete_files(
+        rec_key, dry_run=True, days_since_creation=0
+    )
+    assert listed, "current-env match should authorize despite the stale row"
