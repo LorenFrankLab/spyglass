@@ -940,6 +940,26 @@ class RecordingComputed(NamedTuple):
     n_intended_intervals: int
 
 
+class RecordingArtifactResult(NamedTuple):
+    """Outputs of :meth:`Recording._compute_recording_artifact`.
+
+    Internal helper result -- NOT a tri-part contract object, so it is never
+    splatted into ``make_*``. ``make_compute`` reads these fields by name to
+    build :class:`RecordingComputed`, and ``_rebuild_nwb_artifact`` reads only
+    ``cache_hash``. Typed/named so the eight values are not threaded through
+    brittle positional unpacking.
+    """
+
+    analysis_file_name: str
+    object_id: str
+    cache_hash: str
+    sampling_frequency: float
+    saved_start: float
+    saved_end: float
+    n_channels: int
+    duration_s: float
+
+
 def _unlink_staged_analysis_file(
     analysis_file_name: str, *, context: str
 ) -> None:
@@ -1213,16 +1233,7 @@ class Recording(SpyglassMixin, dj.Computed):
         _resolved_job_kwargs(preprocessing_job_kwargs)
 
         raw_path = Nwbfile().get_abs_path(sel["nwb_file_name"])
-        (
-            analysis_file_name,
-            object_id,
-            cache_hash,
-            sampling_frequency,
-            saved_start,
-            saved_end,
-            n_channels,
-            duration_s,
-        ) = self._compute_recording_artifact(
+        artifact = self._compute_recording_artifact(
             raw_path=raw_path,
             nwb_file_name=sel["nwb_file_name"],
             interval_list_name=sel["interval_list_name"],
@@ -1270,7 +1281,7 @@ class Recording(SpyglassMixin, dj.Computed):
         # ``make_insert`` still raises RecordingTruncatedError for TRUE
         # truncation (saved < expectation, i.e. dropped packets), which this
         # warning does not mask.
-        if expectation.over_request > 1.5 / sampling_frequency:
+        if expectation.over_request > 1.5 / artifact.sampling_frequency:
             logger.warning(
                 f"Recording.make: IntervalList {sel['interval_list_name']!r} in "
                 f"{sel['nwb_file_name']!r} requests "
@@ -1281,14 +1292,14 @@ class Recording(SpyglassMixin, dj.Computed):
             )
 
         return RecordingComputed(
-            analysis_file_name=analysis_file_name,
-            object_id=object_id,
-            cache_hash=cache_hash,
-            saved_start=saved_start,
-            saved_end=saved_end,
-            sampling_frequency=sampling_frequency,
-            n_channels=n_channels,
-            duration_s=duration_s,
+            analysis_file_name=artifact.analysis_file_name,
+            object_id=artifact.object_id,
+            cache_hash=artifact.cache_hash,
+            saved_start=artifact.saved_start,
+            saved_end=artifact.saved_end,
+            sampling_frequency=artifact.sampling_frequency,
+            n_channels=artifact.n_channels,
+            duration_s=artifact.duration_s,
             sel=sel,
             sort_valid_times=sort_valid_times,
             expected_saved_total=expectation.expected_saved_total,
@@ -1526,16 +1537,7 @@ class Recording(SpyglassMixin, dj.Computed):
         fetched = self.make_fetch(key)
         row = (self & key).fetch1()
         raw_path = Nwbfile().get_abs_path(fetched.sel["nwb_file_name"])
-        (
-            _,
-            _,
-            rebuilt_hash,
-            _,
-            _,
-            _,
-            _,
-            _,
-        ) = self._compute_recording_artifact(
+        rebuilt = self._compute_recording_artifact(
             raw_path=raw_path,
             nwb_file_name=fetched.sel["nwb_file_name"],
             interval_list_name=fetched.sel["interval_list_name"],
@@ -1550,10 +1552,10 @@ class Recording(SpyglassMixin, dj.Computed):
             bad_channel_ids=fetched.bad_channel_ids,
             existing_analysis_file_name=row["analysis_file_name"],
         )
-        if rebuilt_hash != row["cache_hash"]:
+        if rebuilt.cache_hash != row["cache_hash"]:
             logger.warning(
                 "Recording._rebuild_nwb_artifact: rebuilt cache_hash "
-                f"{rebuilt_hash} does not match stored {row['cache_hash']} "
+                f"{rebuilt.cache_hash} does not match stored {row['cache_hash']} "
                 "for analysis_file_name="
                 f"{row['analysis_file_name']!r}. The DataJoint row was not "
                 "deleted; inspect upstream raw NWB / SI version before "
@@ -1578,7 +1580,7 @@ class Recording(SpyglassMixin, dj.Computed):
         electrode_group_names: tuple,
         bad_channel_ids: tuple = (),
         existing_analysis_file_name: str | None = None,
-    ) -> tuple[str, str, str, float, float, float, int, float]:
+    ) -> RecordingArtifactResult:
         """Open raw NWB, run preprocessing, stream to AnalysisNwbfile.
 
         Pipeline body shared between ``make_compute`` (fresh write,
@@ -1755,15 +1757,15 @@ class Recording(SpyglassMixin, dj.Computed):
                 )
             raise
 
-        return (
-            analysis_file_name,
-            object_id,
-            cache_hash,
-            sampling_frequency,
-            saved_start,
-            saved_end,
-            n_channels,
-            duration_s,
+        return RecordingArtifactResult(
+            analysis_file_name=analysis_file_name,
+            object_id=object_id,
+            cache_hash=cache_hash,
+            sampling_frequency=sampling_frequency,
+            saved_start=saved_start,
+            saved_end=saved_end,
+            n_channels=n_channels,
+            duration_s=duration_s,
         )
 
     @staticmethod

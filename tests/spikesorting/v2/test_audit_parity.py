@@ -3532,6 +3532,36 @@ def test_sorting_computed_matches_make_insert_signature():
     assert tuple(params[2:]) == SortingComputed._fields
 
 
+def test_recording_artifact_result_field_contract():
+    """``_compute_recording_artifact`` returns a typed ``RecordingArtifactResult``
+    (NamedTuple) rather than a bare 8-tuple, so ``make_compute`` and
+    ``_rebuild_nwb_artifact`` read its fields by name instead of by position.
+
+    Pin the field set in its established order, and require every field to also
+    be a ``RecordingComputed`` field -- ``make_compute`` transfers them by name
+    into the tri-part contract NamedTuple, so a rename/removal in either type
+    would silently break that mapping.
+    """
+    from spyglass.spikesorting.v2.recording import (
+        RecordingArtifactResult,
+        RecordingComputed,
+    )
+
+    assert RecordingArtifactResult._fields == (
+        "analysis_file_name",
+        "object_id",
+        "cache_hash",
+        "sampling_frequency",
+        "saved_start",
+        "saved_end",
+        "n_channels",
+        "duration_s",
+    )
+    assert set(RecordingArtifactResult._fields) <= set(
+        RecordingComputed._fields
+    )
+
+
 @pytest.mark.slow
 @pytest.mark.integration
 def test_changed_analyzer_root_causes_miss_and_rebuild(
