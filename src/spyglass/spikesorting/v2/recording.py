@@ -36,6 +36,7 @@ from spyglass.spikesorting.v2._params.preprocessing import (
 )
 from spyglass.spikesorting.v2._recording_materialization import (
     apply_pre_motion_preprocessing,
+    compute_recording_save_expectation,
     fetch_interior_bad_channel_ids,
     fetch_sort_group_probe_info,
     maybe_apply_tetrode_geometry,
@@ -1234,10 +1235,11 @@ class Recording(SpyglassMixin, dj.Computed):
         # The duration we INTENDED to save: the sort interval intersected
         # with the raw valid times AND filtered by ``min_segment_length`` --
         # the SAME filtering ``restrict_recording`` applies to build the
-        # recording. The truncation check in ``make_insert`` compares the
-        # actually-saved duration against this (not against the raw requested
-        # chunks) so intentionally-dropped sub-``min_segment_length`` slivers
-        # are not mis-flagged as truncation.
+        # recording. ``Interval`` opens a DB connection on import, so the
+        # intersect stays here; the pure duration / over-request arithmetic
+        # (compared against the saved duration by the ``make_insert`` truncation
+        # guard, so intentionally-dropped slivers are not mis-flagged) lives in
+        # ``compute_recording_save_expectation``.
         from spyglass.common.common_interval import Interval
 
         intended_intervals = (
@@ -1248,45 +1250,29 @@ class Recording(SpyglassMixin, dj.Computed):
             )
             .times
         )
-        expected_saved_total = float(
-            sum(end - start for start, end in intended_intervals)
+        expectation = compute_recording_save_expectation(
+            intended_intervals,
+            sort_valid_times,
+            preprocessing_params.min_segment_length,
         )
-        # Number of CONSOLIDATED intended intervals (post intersect +
-        # min_segment_length filtering). The truncation tolerance in
-        # ``make_insert`` scales with this: each interval's [start, end] is
-        # snapped to the raw sample grid independently, so the per-boundary
-        # quantization error (up to ~1 sample/interval) ACCUMULATES across
-        # disjoint epochs. A fixed 1.5-sample slack false-positives on a
-        # legitimate multi-epoch sort (~13% single-interval, rising with
-        # interval count) and then deletes the just-written file.
-        n_intended_intervals = len(intended_intervals)
 
         # A sort interval that runs PAST the raw recording's coverage is clipped
         # to what exists (the intersect above) rather than erroring -- but the
-        # clip must be surfaced, not silent (#1585). Compare the
-        # min_segment_length-filtered REQUEST against the raw-clipped
-        # expectation; a positive gap is the over-requested span that was
-        # dropped. Inter-segment gaps and sub-min_segment slivers cancel out
-        # (both are excluded from each side), so this fires only on a genuine
-        # request-past-coverage. ``make_insert`` still raises
-        # RecordingTruncatedError for TRUE truncation (saved < this expectation,
-        # i.e. dropped packets), which this warning does not mask.
-        requested_saved_total = float(
-            sum(
-                end - start
-                for start, end in sort_valid_times
-                if (end - start) >= preprocessing_params.min_segment_length
-            )
-        )
-        over_request = requested_saved_total - expected_saved_total
-        if over_request > 1.5 / sampling_frequency:
+        # clip must be surfaced, not silent (#1585). ``over_request`` is the
+        # min_segment_length-filtered REQUEST minus the raw-clipped expectation;
+        # inter-segment gaps and sub-min_segment slivers cancel out (excluded
+        # from both sides), so it fires only on a genuine request-past-coverage.
+        # ``make_insert`` still raises RecordingTruncatedError for TRUE
+        # truncation (saved < expectation, i.e. dropped packets), which this
+        # warning does not mask.
+        if expectation.over_request > 1.5 / sampling_frequency:
             logger.warning(
                 f"Recording.make: IntervalList {sel['interval_list_name']!r} in "
                 f"{sel['nwb_file_name']!r} requests "
-                f"{requested_saved_total:.6f}s but the raw recording covers "
-                f"only {expected_saved_total:.6f}s after min_segment_length "
-                f"filtering; clipping to raw coverage "
-                f"({over_request:.6f}s past the recording dropped)."
+                f"{expectation.requested_saved_total:.6f}s but the raw recording "
+                f"covers only {expectation.expected_saved_total:.6f}s after "
+                f"min_segment_length filtering; clipping to raw coverage "
+                f"({expectation.over_request:.6f}s past the recording dropped)."
             )
 
         return RecordingComputed(
@@ -1300,8 +1286,8 @@ class Recording(SpyglassMixin, dj.Computed):
             duration_s=duration_s,
             sel=sel,
             sort_valid_times=sort_valid_times,
-            expected_saved_total=expected_saved_total,
-            n_intended_intervals=n_intended_intervals,
+            expected_saved_total=expectation.expected_saved_total,
+            n_intended_intervals=expectation.n_intended_intervals,
         )
 
     @staticmethod

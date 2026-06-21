@@ -444,6 +444,60 @@ def test_truncation_tolerance_scales_with_interval_count():
     assert truncation_tolerance(20, fs) == pytest.approx(21.5 / fs)
 
 
+def test_save_expectation_sums_disjoint_intended_intervals():
+    """Disjoint intended epochs: the expected duration is the sum of every
+    epoch and the interval count is preserved."""
+    from spyglass.spikesorting.v2._recording_materialization import (
+        compute_recording_save_expectation,
+    )
+
+    intended = np.array([[0.0, 1.0], [2.0, 3.5]])
+    sort = np.array([[0.0, 1.0], [2.0, 3.5]])
+    exp = compute_recording_save_expectation(intended, sort, 0.0)
+
+    assert exp.n_intended_intervals == 2
+    assert exp.expected_saved_total == pytest.approx(2.5)  # 1.0 + 1.5
+    assert exp.requested_saved_total == pytest.approx(2.5)
+    assert exp.over_request == pytest.approx(0.0)
+
+
+def test_save_expectation_drops_sub_min_segment_slivers():
+    """A requested epoch shorter than min_segment_length is excluded from the
+    request total (the intersect already dropped it from the intended set), so
+    it is not flagged as over-request -- it was intentionally dropped."""
+    from spyglass.spikesorting.v2._recording_materialization import (
+        compute_recording_save_expectation,
+    )
+
+    # The intersect already dropped the 0.05 s sliver from the intended set.
+    intended = np.array([[0.0, 1.0]])
+    sort = np.array([[0.0, 1.0], [2.0, 2.05]])  # second epoch is a 0.05 s sliver
+    exp = compute_recording_save_expectation(intended, sort, 0.1)
+
+    assert exp.n_intended_intervals == 1
+    assert exp.expected_saved_total == pytest.approx(1.0)
+    assert exp.requested_saved_total == pytest.approx(1.0)  # sliver excluded
+    assert exp.over_request == pytest.approx(0.0)
+
+
+def test_save_expectation_flags_request_past_raw_coverage():
+    """A sort interval running past the raw recording is clipped to raw in the
+    intended set; over_request is the dropped past-coverage span (the warning
+    trigger)."""
+    from spyglass.spikesorting.v2._recording_materialization import (
+        compute_recording_save_expectation,
+    )
+
+    intended = np.array([[0.0, 6.0]])  # intersect clipped [0, 10] to raw [0, 6]
+    sort = np.array([[0.0, 10.0]])
+    exp = compute_recording_save_expectation(intended, sort, 0.001)
+
+    assert exp.n_intended_intervals == 1
+    assert exp.expected_saved_total == pytest.approx(6.0)  # clipped to raw
+    assert exp.requested_saved_total == pytest.approx(10.0)  # full request
+    assert exp.over_request == pytest.approx(4.0)  # 10 - 6 past coverage
+
+
 def test_filtering_description_lists_only_steps_that_ran():
     from types import SimpleNamespace
 

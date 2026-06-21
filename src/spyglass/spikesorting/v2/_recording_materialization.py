@@ -35,6 +35,8 @@ then ``recording`` is fully imported, so there is no import cycle.
 
 from __future__ import annotations
 
+from typing import NamedTuple
+
 
 def truncation_tolerance(
     n_intended_intervals: int, sampling_frequency: float
@@ -69,6 +71,91 @@ def truncation_tolerance(
         Tolerance in seconds for the ``make_insert`` truncation guard.
     """
     return (n_intended_intervals + 1.5) / sampling_frequency
+
+
+class RecordingSaveExpectation(NamedTuple):
+    """Intended-vs-requested save durations for the truncation guards.
+
+    Attributes
+    ----------
+    expected_saved_total : float
+        Seconds the sort intervals cover AFTER intersecting with the raw valid
+        times and dropping sub-``min_segment_length`` slivers -- the same
+        filtering ``restrict_recording`` applies, so it matches what is actually
+        written. The ``make_insert`` truncation guard compares the saved
+        duration against this (not the raw request) so intentionally-dropped
+        slivers are not mis-flagged as truncation.
+    n_intended_intervals : int
+        Number of consolidated intended intervals; the truncation tolerance
+        scales with this (per-boundary sample-grid error accumulates).
+    requested_saved_total : float
+        Seconds the sort intervals request AFTER ``min_segment_length``
+        filtering but WITHOUT clipping to raw coverage.
+    over_request : float
+        ``requested_saved_total - expected_saved_total``: the span requested
+        past the raw recording's coverage. A positive value is the clip
+        ``make_compute`` surfaces as a warning.
+    """
+
+    expected_saved_total: float
+    n_intended_intervals: int
+    requested_saved_total: float
+    over_request: float
+
+
+def compute_recording_save_expectation(
+    intended_intervals, sort_valid_times, min_segment_length: float
+) -> RecordingSaveExpectation:
+    """Resolve the intended/requested save durations for a sort interval.
+
+    Pure (DB-free) duration arithmetic for the ``make_insert`` truncation and
+    over-request guards. The caller passes ``intended_intervals`` -- the result
+    of ``Interval(sort_valid_times).intersect(Interval(raw_valid_times),
+    min_length=min_segment_length).times``, the SAME filtering
+    ``restrict_recording`` applies to build the recording -- so ``Interval``
+    (which opens a DB connection on import) stays at the call site and this
+    helper has no DB dependency.
+
+    ``expected_saved_total`` sums those intended intervals; ``requested_saved_
+    total`` sums the raw request after ``min_segment_length`` filtering but
+    WITHOUT the raw clip. A positive ``over_request`` is exactly the span a sort
+    interval asked for past the raw recording's coverage. Inter-segment gaps and
+    sub-``min_segment_length`` slivers cancel out (excluded from both sides), so
+    ``over_request`` fires only on a genuine request-past-coverage, not on
+    intentional drops.
+
+    Parameters
+    ----------
+    intended_intervals : array-like, shape (k, 2)
+        Sort intervals already intersected with the raw valid times and
+        min_segment_length-filtered (what will actually be saved).
+    sort_valid_times : array-like, shape (n, 2)
+        The originally requested sort intervals ``[start, end]`` in seconds,
+        before the raw-coverage clip.
+    min_segment_length : float
+        Minimum interval length (seconds); shorter requested slivers are
+        excluded from ``requested_saved_total`` (mirroring the intersect's drop).
+
+    Returns
+    -------
+    RecordingSaveExpectation
+    """
+    expected_saved_total = float(
+        sum(end - start for start, end in intended_intervals)
+    )
+    requested_saved_total = float(
+        sum(
+            end - start
+            for start, end in sort_valid_times
+            if (end - start) >= min_segment_length
+        )
+    )
+    return RecordingSaveExpectation(
+        expected_saved_total=expected_saved_total,
+        n_intended_intervals=len(intended_intervals),
+        requested_saved_total=requested_saved_total,
+        over_request=requested_saved_total - expected_saved_total,
+    )
 
 
 def restrict_recording(
