@@ -41,7 +41,10 @@ _DB_FREE_SERVICE_MODULES = [
     "_nwb_metadata_helpers",
     "_pipeline_presets",
     "_recipe_catalog",
-    "_recording_materialization",
+    "_recording_geometry",
+    "_recording_nwb",
+    "_recording_preprocessing",
+    "_recording_restriction",
     "_reference_resolution",
     "_selection_identity",
     "_selection_plan",
@@ -431,12 +434,12 @@ def test_apply_artifact_mask_rejects_malformed_valid_times():
 
 
 # --------------------------------------------------------------------------- #
-# _recording_materialization contracts (pure)
+# _recording_restriction / _recording_preprocessing contracts (pure)
 # --------------------------------------------------------------------------- #
 
 
 def test_truncation_tolerance_scales_with_interval_count():
-    from spyglass.spikesorting.v2._recording_materialization import (
+    from spyglass.spikesorting.v2._recording_restriction import (
         truncation_tolerance,
     )
 
@@ -448,7 +451,7 @@ def test_truncation_tolerance_scales_with_interval_count():
 def test_save_expectation_sums_disjoint_intended_intervals():
     """Disjoint intended epochs: the expected duration is the sum of every
     epoch and the interval count is preserved."""
-    from spyglass.spikesorting.v2._recording_materialization import (
+    from spyglass.spikesorting.v2._recording_restriction import (
         compute_recording_save_expectation,
     )
 
@@ -466,7 +469,7 @@ def test_save_expectation_drops_sub_min_segment_slivers():
     """A requested epoch shorter than min_segment_length is excluded from the
     request total (the intersect already dropped it from the intended set), so
     it is not flagged as over-request -- it was intentionally dropped."""
-    from spyglass.spikesorting.v2._recording_materialization import (
+    from spyglass.spikesorting.v2._recording_restriction import (
         compute_recording_save_expectation,
     )
 
@@ -485,7 +488,7 @@ def test_save_expectation_flags_request_past_raw_coverage():
     """A sort interval running past the raw recording is clipped to raw in the
     intended set; over_request is the dropped past-coverage span (the warning
     trigger)."""
-    from spyglass.spikesorting.v2._recording_materialization import (
+    from spyglass.spikesorting.v2._recording_restriction import (
         compute_recording_save_expectation,
     )
 
@@ -729,7 +732,7 @@ def test_validate_shared_group_members_rejects_differing_sampling_frequency():
 def test_filtering_description_lists_only_steps_that_ran():
     from types import SimpleNamespace
 
-    from spyglass.spikesorting.v2._recording_materialization import (
+    from spyglass.spikesorting.v2._recording_preprocessing import (
         filtering_description,
     )
 

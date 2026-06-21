@@ -38,7 +38,7 @@ def test_shank_pitch_is_full_shank_spacing():
     independent of how few a sort group keeps; NaN -> None; < 2 -> None."""
     import numpy as np
 
-    from spyglass.spikesorting.v2._recording_materialization import (
+    from spyglass.spikesorting.v2._recording_geometry import (
         _shank_pitch,
     )
 
@@ -65,7 +65,7 @@ def test_interior_bad_channel_ids_pitch_anchored():
     dropped; a bad channel embedded in a dense good run is kept."""
     import numpy as np
 
-    from spyglass.spikesorting.v2._recording_materialization import (
+    from spyglass.spikesorting.v2._recording_geometry import (
         _interior_bad_channel_ids,
     )
 
@@ -179,7 +179,7 @@ def _validated(operator="median"):
 
 
 def test_interpolate_runs_between_filter_and_reference(monkeypatch):
-    from spyglass.spikesorting.v2._recording_materialization import (
+    from spyglass.spikesorting.v2._recording_preprocessing import (
         apply_pre_motion_preprocessing,
     )
 
@@ -208,7 +208,7 @@ def test_interpolate_runs_between_filter_and_reference(monkeypatch):
 
 
 def test_remove_default_is_a_noop(monkeypatch):
-    from spyglass.spikesorting.v2._recording_materialization import (
+    from spyglass.spikesorting.v2._recording_preprocessing import (
         apply_pre_motion_preprocessing,
     )
 
@@ -225,7 +225,7 @@ def test_remove_default_is_a_noop(monkeypatch):
 
 
 def test_reference_is_never_interpolated(monkeypatch):
-    from spyglass.spikesorting.v2._recording_materialization import (
+    from spyglass.spikesorting.v2._recording_preprocessing import (
         apply_pre_motion_preprocessing,
     )
 
@@ -251,7 +251,7 @@ def test_reference_is_never_interpolated(monkeypatch):
 
 
 def test_interpolate_needs_channel_locations(monkeypatch):
-    from spyglass.spikesorting.v2._recording_materialization import (
+    from spyglass.spikesorting.v2._recording_preprocessing import (
         apply_pre_motion_preprocessing,
     )
 
@@ -272,7 +272,7 @@ def test_interpolate_needs_channel_locations(monkeypatch):
 
 
 def test_invalid_bad_channel_handling_raises(monkeypatch):
-    from spyglass.spikesorting.v2._recording_materialization import (
+    from spyglass.spikesorting.v2._recording_preprocessing import (
         apply_pre_motion_preprocessing,
     )
 
@@ -295,7 +295,7 @@ def test_filtering_description_interpolate_branch():
     """`filtering_description` appends the interpolate clause only when N > 0
     (so `remove` provenance/cache_hash is unchanged), singular vs plural, and
     positioned between bandpass and reference."""
-    from spyglass.spikesorting.v2._recording_materialization import (
+    from spyglass.spikesorting.v2._recording_preprocessing import (
         filtering_description,
     )
 

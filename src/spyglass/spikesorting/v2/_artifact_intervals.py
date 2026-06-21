@@ -19,7 +19,8 @@ construction needs none of that at import, so ``ArtifactDetection``
 becomes a thin orchestrator. Same "thin DataJoint shell over pure/IO
 services" direction as ``_artifact_compute`` / ``_selection_identity`` /
 ``_analyzer_cache`` / ``_curation_transforms`` / ``_units_nwb`` /
-``_sorting_compute`` / ``_recording_materialization``.
+``_sorting_compute`` / ``_recording_restriction`` / ``_recording_geometry`` /
+``_recording_preprocessing`` / ``_recording_nwb``.
 
 DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
 connection at import: all numpy / SpikeInterface / spyglass dependencies

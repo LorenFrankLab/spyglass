@@ -18,7 +18,7 @@ connection at import: SpikeInterface / spyglass (``Electrode``,
 dependencies are imported lazily inside the functions. ``suggest_bad_channels``
 does touch the DB at CALL time (an ``Electrode`` fetch, plus ``Electrode.update1``
 when ``write=True``) via those lazy imports -- mirroring
-``_recording_materialization.py``'s contract.
+``_recording_geometry.py``'s contract.
 """
 
 from __future__ import annotations
@@ -286,7 +286,7 @@ def suggest_bad_channels(
     from spyglass.common.common_ephys import Electrode
     from spyglass.common.common_nwbfile import Nwbfile
     from spyglass.spikesorting.utils import read_raw_nwb_recording
-    from spyglass.spikesorting.v2._recording_materialization import (
+    from spyglass.spikesorting.v2._recording_geometry import (
         spikeinterface_channel_ids,
     )
 

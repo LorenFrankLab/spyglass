@@ -34,16 +34,15 @@ from spyglass.spikesorting.v2._params.preprocessing import (
     PREPROCESSING_SCHEMA_VERSION,
     PreprocessingParamsSchema,
 )
-from spyglass.spikesorting.v2._recording_materialization import (
-    apply_pre_motion_preprocessing,
-    compute_recording_save_expectation,
+from spyglass.spikesorting.v2._recording_geometry import (
     fetch_interior_bad_channel_ids,
     fetch_sort_group_probe_info,
     maybe_apply_tetrode_geometry,
-    restrict_recording,
     spikeinterface_channel_ids,
-    truncation_tolerance,
-    write_nwb_artifact,
+)
+from spyglass.spikesorting.v2._recording_nwb import write_nwb_artifact
+from spyglass.spikesorting.v2._recording_preprocessing import (
+    apply_pre_motion_preprocessing,
 )
 
 # Aliased: the bare ``filtering_description`` name would be shadowed by the
@@ -51,8 +50,13 @@ from spyglass.spikesorting.v2._recording_materialization import (
 # delegator (and the same-named local in ``_compute_recording_artifact``),
 # a latent readability hazard. The ``_filtering_description`` delegator
 # calls this alias.
-from spyglass.spikesorting.v2._recording_materialization import (
+from spyglass.spikesorting.v2._recording_preprocessing import (
     filtering_description as _filtering_description_svc,
+)
+from spyglass.spikesorting.v2._recording_restriction import (
+    compute_recording_save_expectation,
+    restrict_recording,
+    truncation_tolerance,
 )
 from spyglass.spikesorting.v2._recipe_catalog import (
     preprocessing_default_contents,
@@ -1297,7 +1301,7 @@ class Recording(SpyglassMixin, dj.Computed):
         """Sample-grid tolerance for the ``make_insert`` truncation guard.
 
         Thin delegator to
-        :func:`._recording_materialization.truncation_tolerance`; kept as a
+        :func:`._recording_restriction.truncation_tolerance`; kept as a
         ``Recording`` staticmethod because ``make_insert`` calls
         ``self._truncation_tolerance(...)`` and
         ``test_truncation_tolerance_scales_with_interval_count`` calls
@@ -1748,7 +1752,7 @@ class Recording(SpyglassMixin, dj.Computed):
         """Map Spyglass electrode_ids onto SpikeInterface channel ids.
 
         Thin delegator to
-        :func:`._recording_materialization.spikeinterface_channel_ids`;
+        :func:`._recording_geometry.spikeinterface_channel_ids`;
         kept as a ``Recording`` staticmethod because ``test_audit_parity``
         calls it directly. Resolves the raw NWB electrodes-table
         ``channel_name`` mapping (or the integer 1-1 fallback) in the
@@ -1763,7 +1767,7 @@ class Recording(SpyglassMixin, dj.Computed):
         """Fetch per-channel ``probe_type`` + ``electrode_group_name``.
 
         Thin delegator to
-        :func:`._recording_materialization.fetch_sort_group_probe_info`;
+        :func:`._recording_geometry.fetch_sort_group_probe_info`;
         kept as a ``Recording`` staticmethod because ``make_fetch`` calls
         ``self._fetch_sort_group_probe_info(...)`` and
         ``test_fetch_sort_group_probe_info_stable_order`` calls it directly.
@@ -1782,7 +1786,7 @@ class Recording(SpyglassMixin, dj.Computed):
         """Attach the ``tetrode_12.5`` probe geometry when the sort group fits.
 
         Thin delegator to
-        :func:`._recording_materialization.maybe_apply_tetrode_geometry`;
+        :func:`._recording_geometry.maybe_apply_tetrode_geometry`;
         kept as a ``Recording`` staticmethod because
         ``_compute_recording_artifact`` calls
         ``self._maybe_apply_tetrode_geometry(...)`` and the v2 tests call it
@@ -1803,7 +1807,7 @@ class Recording(SpyglassMixin, dj.Computed):
         """``ElectricalSeries.filtering`` provenance from steps ACTUALLY run.
 
         Thin delegator to
-        :func:`._recording_materialization.filtering_description`; kept as a
+        :func:`._recording_preprocessing.filtering_description`; kept as a
         ``Recording`` staticmethod because ``_compute_recording_artifact``
         calls ``self._filtering_description(...)`` and the v2 tests call it
         directly. ``applied_steps`` is the report from
@@ -1826,7 +1830,7 @@ class Recording(SpyglassMixin, dj.Computed):
         """Write the preprocessed recording into an ``AnalysisNwbfile``.
 
         Thin delegator to
-        :func:`._recording_materialization.write_nwb_artifact`; kept as a
+        :func:`._recording_nwb.write_nwb_artifact`; kept as a
         ``Recording`` staticmethod because ``_compute_recording_artifact``
         calls ``self._write_nwb_artifact(...)`` and the v2 tests both
         monkeypatch ``Recording._write_nwb_artifact`` (the staged-file

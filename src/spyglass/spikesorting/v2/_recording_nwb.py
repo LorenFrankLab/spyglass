@@ -1,0 +1,204 @@
+"""NWB-write service behind ``Recording``.
+
+``write_nwb_artifact`` streams the preprocessed traces and the wall-clock
+timestamps vector into an ``AnalysisNwbfile`` for ``Recording.make_compute``
+(and the rebuild path), then hashes the persisted file for the cache contract.
+The table threads already-fetched DB state in (the tri-part
+``make_fetch``/``make_compute``/``make_insert`` contract forbids DB I/O inside
+compute), and the file row is registered by the caller inside its DataJoint
+transaction, so this write path stays a thin file-write service.
+
+Why this lives in its own module rather than in ``recording.py``:
+``recording.py`` is a DataJoint *schema* module -- importing it activates
+``dj.schema(...)`` and the source-part dependencies. The NWB-write logic needs
+none of that at import, so ``Recording`` becomes a thin orchestrator (fetch ->
+call these -> insert / verify). Same "thin DataJoint shell over pure/IO
+services" direction as ``_artifact_compute`` / ``_selection_identity`` /
+``_analyzer_cache`` / ``_curation_transforms`` / ``_units_nwb`` /
+``_sorting_compute``.
+
+DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
+connection at import: all SpikeInterface / numpy / pynwb / spyglass
+dependencies are imported lazily inside the function. ``write_nwb_artifact``
+touches the DB / DataJoint at CALL time via lazy imports (``AnalysisNwbfile``
+path resolution + file create). It also lazily imports the
+``_ELECTRICAL_SERIES_NAME`` constant from ``recording`` at call time -- by then
+``recording`` is fully imported, so there is no import cycle.
+"""
+
+from __future__ import annotations
+
+
+def write_nwb_artifact(
+    recording,
+    nwb_file_name: str,
+    existing_analysis_file_name: str | None = None,
+    timestamps_override=None,
+    *,
+    filtering_description: str,
+) -> tuple[str, str, str]:
+    """Write the preprocessed recording into an ``AnalysisNwbfile``.
+
+    Streams the ``(n_samples, n_channels)`` trace array and the
+    ``(n_samples,)`` timestamps vector into the ElectricalSeries
+    via HDMF's ``GenericDataChunkIterator`` (``buffer_gb=5``,
+    matching v1's production choice). Without streaming, a
+    30 kHz x 128 ch x 1 h recording (~110 GB float64) would have
+    to materialize in RAM before the NWB write, which OOMs on
+    any lab workstation.
+
+    Returns ``(analysis_file_name, electrical_series_object_id,
+    cache_hash)``. The ``cache_hash`` is computed **after** the
+    write via ``_hash_nwb_recording`` -- the ``NwbfileHasher``
+    digest of the file we just persisted. The v1 recompute machinery
+    uses the same hashing path, so v2 verification does not maintain a
+    parallel implementation.
+
+    Writes the file to disk only; the caller registers the
+    ``AnalysisNwbfile`` row inside its DataJoint transaction so
+    the file registration and the v2 row commit atomically.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        The preprocessed recording to materialize.
+    nwb_file_name : str
+        Parent NWB filename (passed to ``AnalysisNwbfile().create``).
+    existing_analysis_file_name : str, optional
+        When set, write into the existing slot (the recompute /
+        rebuild path) rather than minting a new analysis file.
+    timestamps_override : numpy.ndarray, optional
+        Pre-computed persisted timestamps, shape ``(n_samples,)``.
+        ``None`` lets the helper concatenate per-segment
+        ``recording.get_times()`` via
+        :func:`_get_recording_timestamps`.
+    filtering_description : str
+        Keyword-only. Provenance string written to
+        ``ElectricalSeries.filtering`` describing the preprocessing
+        steps that actually ran (from :func:`filtering_description`).
+    """
+    import numpy as _np
+    import pynwb
+
+    from spyglass.spikesorting.v2._nwb_iterators import (
+        SpikeInterfaceRecordingDataChunkIterator,
+        TimestampsDataChunkIterator,
+    )
+    from spyglass.spikesorting.v2.utils import (
+        _get_recording_timestamps,
+        _hash_nwb_recording,
+        electrode_table_region,
+        resolve_conversion_and_offset,
+        write_buffer_gb,
+    )
+
+    import pathlib as _pathlib
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2.recording import _ELECTRICAL_SERIES_NAME
+    from spyglass.utils import logger
+
+    # ``AnalysisNwbfile().create`` writes a stub file to disk
+    # before we open it for the streaming write. Track the
+    # filename from the first byte on disk and unlink on any
+    # failure between here and the post-write hash, so a
+    # partial / aborted write never outlives this call.
+    analysis_file_name = AnalysisNwbfile().create(
+        nwb_file_name=nwb_file_name,
+        recompute_file_name=existing_analysis_file_name,
+    )
+    try:
+        analysis_abs_path = AnalysisNwbfile.get_abs_path(
+            analysis_file_name,
+            from_schema=bool(existing_analysis_file_name),
+        )
+
+        # Traces are written unscaled (return_in_uV=False), so the
+        # ElectricalSeries must carry gain (as ``conversion``) AND offset
+        # (as ``offset``) to recover real volts on readback:
+        # ``volts = raw * conversion + offset``. The resolver rejects
+        # heterogeneous gain/offset and non-positive gain (v1 silently
+        # picked gains[0] and dropped offset entirely).
+        conversion, es_offset = resolve_conversion_and_offset(recording)
+
+        # The data iterator drives ``recording.get_traces(...)``
+        # per chunk and never materializes the whole array. The
+        # timestamps iterator wraps a 1D vector; resolve through
+        # ``_get_recording_timestamps`` so multi-segment NWBs and
+        # persisted-timestamps overrides both flow through correctly.
+        sampling_frequency = float(recording.get_sampling_frequency())
+        timestamps = _get_recording_timestamps(
+            recording, override=timestamps_override
+        )
+        # Bound the buffers to ~a fixed duration of data so a narrow sort
+        # group (e.g. a 4-ch tetrode) does not buffer the whole recording
+        # in one 5 GB chunk; wide groups stay capped at 5 GB.
+        data_iterator = SpikeInterfaceRecordingDataChunkIterator(
+            recording=recording,
+            return_in_uV=False,
+            buffer_gb=write_buffer_gb(
+                recording.get_num_channels(), sampling_frequency
+            ),
+        )
+        timestamps_iterator = TimestampsDataChunkIterator(
+            timestamps=timestamps,
+            sampling_frequency=sampling_frequency,
+            buffer_gb=write_buffer_gb(1, sampling_frequency),
+        )
+
+        with pynwb.NWBHDF5IO(
+            path=analysis_abs_path, mode="a", load_namespaces=True
+        ) as io:
+            nwbfile = io.read()
+            # ``recording.get_channel_ids()`` are spyglass electrode ids;
+            # map them to electrodes-table ROW INDICES (not raw ids) so a
+            # non-contiguous / reordered electrodes table does not silently
+            # mis-point the ElectricalSeries at the wrong electrodes.
+            table_region = electrode_table_region(
+                nwbfile,
+                recording.get_channel_ids(),
+                "Sort group electrodes",
+            )
+            series = pynwb.ecephys.ElectricalSeries(
+                name=_ELECTRICAL_SERIES_NAME,
+                data=data_iterator,
+                electrodes=table_region,
+                timestamps=timestamps_iterator,
+                filtering=filtering_description,
+                description=(
+                    f"Pre-motion preprocessed recording from "
+                    f"{nwb_file_name} for spike sorting"
+                ),
+                conversion=conversion,
+                offset=es_offset,
+            )
+            nwbfile.add_acquisition(series)
+            object_id = nwbfile.acquisition[_ELECTRICAL_SERIES_NAME].object_id
+            io.write(nwbfile)
+
+        # Hash the persisted file (not in-memory bytes) so the
+        # digest reflects what was actually written --
+        # timestamps, electrodes, conversion, ElectricalSeries
+        # metadata -- not just trace data. Matches the v1
+        # recompute hashing path.
+        cache_hash = _hash_nwb_recording(analysis_file_name)
+    except Exception:
+        # Any write/hash failure: remove the partial analysis file before
+        # re-raising so a half-written artifact never lingers. The unlink is
+        # best-effort -- a cleanup failure is logged, not raised, so it cannot
+        # mask the original error.
+        try:
+            _abs = AnalysisNwbfile.get_abs_path(
+                analysis_file_name,
+                from_schema=bool(existing_analysis_file_name),
+            )
+            _pathlib.Path(_abs).unlink(missing_ok=True)
+        except Exception as cleanup_exc:  # pragma: no cover -- defensive
+            logger.error(
+                "Recording._write_nwb_artifact: failed to clean up "
+                f"partial analysis file {analysis_file_name!r}: "
+                f"{cleanup_exc!r}"
+            )
+        raise
+
+    return analysis_file_name, object_id, cache_hash
