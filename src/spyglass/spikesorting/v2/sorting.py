@@ -68,6 +68,7 @@ from spyglass.spikesorting.v2.utils import (
     _validate_params,
     find_orphaned_masters,
     reject_duplicate_parameter_content,
+    split_leading_restrictions,
     transaction_or_noop,
     unit_brain_region_df,
     validate_lookup_rows,
@@ -1598,10 +1599,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         **kwargs
             Keyword arguments forwarded to ``super().delete``.
         """
-        restriction_args = []
-        while args and isinstance(args[0], (dict, list, str)):
-            restriction_args.append(args[0])
-            args = args[1:]
+        restriction_args, args = split_leading_restrictions(args)
         if restriction_args:
             target = self
             for restriction in restriction_args:

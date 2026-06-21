@@ -133,6 +133,42 @@ def _is_duplicate_key_error(exc: BaseException) -> bool:
     return False
 
 
+def split_leading_restrictions(args: tuple) -> tuple[list, tuple]:
+    """Peel leading restriction positionals off a ``delete`` arg tuple.
+
+    DataJoint's ``delete`` takes no positional restrictions; Spyglass's
+    cautious-delete layer reads the first positional as the truthy
+    ``force_permission`` and would then cascade-delete EVERY row of the
+    unrestricted instance. The v2 table ``delete`` overrides
+    (``Sorting`` / ``ArtifactDetection``, each guarding a 5-50 GB
+    per-row on-disk artifact) defend against the easy-to-mistype
+    ``Table().delete(restriction)`` form by peeling every leading
+    ``dict`` / ``list`` / ``str`` positional into a restriction list and
+    re-dispatching ``(self & r1 & r2 & ...).delete(*rest)``.
+
+    This is the pure half of that guard: it does not touch the DB.
+
+    Parameters
+    ----------
+    args : tuple
+        The ``*args`` a ``delete`` override received.
+
+    Returns
+    -------
+    restrictions : list
+        The leading restriction positionals, in order. Empty when ``args``
+        does not start with a restriction (a normal ``.delete()`` call).
+    remaining : tuple
+        The rest of ``args`` after the leading restrictions, untouched.
+    """
+    restrictions = []
+    remaining = args
+    while remaining and isinstance(remaining[0], (dict, list, str)):
+        restrictions.append(remaining[0])
+        remaining = remaining[1:]
+    return restrictions, remaining
+
+
 class SelectionMasterInsertGuard:
     """Reject a direct ``insert`` into a deterministic-id selection master.
 

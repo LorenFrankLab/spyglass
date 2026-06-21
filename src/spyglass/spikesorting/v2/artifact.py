@@ -72,6 +72,7 @@ from spyglass.spikesorting.v2.utils import (
     _validate_params,
     find_orphaned_masters,
     reject_duplicate_parameter_content,
+    split_leading_restrictions,
     transaction_or_noop,
     validate_lookup_rows,
 )
@@ -1117,10 +1118,7 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         and Spyglass's cautious-delete layer would otherwise treat that dict
         as ``force_permission``.
         """
-        restriction_args = []
-        while args and isinstance(args[0], (dict, list, str)):
-            restriction_args.append(args[0])
-            args = args[1:]
+        restriction_args, args = split_leading_restrictions(args)
         if restriction_args:
             target = self
             for restriction in restriction_args:
