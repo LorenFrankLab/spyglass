@@ -230,7 +230,11 @@ def test_unrestricted_artifact_delete_with_arg_cleans_interval_list(
     }
 
     # Clean any leftovers from a prior interrupted run before planting the row.
-    (ArtifactDetection & target_pk).delete(safemode=False)
+    # Use super_delete because the strict ownership invariant means a broken
+    # master without its part row should not be cleaned through the public
+    # delete override.
+    if ArtifactDetection & target_pk:
+        (ArtifactDetection & target_pk).super_delete(warn=False)
     (IntervalList & interval_restr).delete_quick()
 
     try:
@@ -241,6 +245,9 @@ def test_unrestricted_artifact_delete_with_arg_cleans_interval_list(
                 "valid_times": np.empty((0, 2)),
             },
             allow_direct_insert=True,
+        )
+        ArtifactDetection.ArtifactRemovedInterval.insert1(
+            {**target_pk, **interval_restr}
         )
         assert ArtifactDetection & {"artifact_detection_id": original_art_id}, (
             "fixture should leave an unrelated ArtifactDetection row in the "
@@ -258,7 +265,8 @@ def test_unrestricted_artifact_delete_with_arg_cleans_interval_list(
         )
         assert ArtifactDetection & {"artifact_detection_id": original_art_id}
     finally:
-        (ArtifactDetection & target_pk).delete(safemode=False)
+        if ArtifactDetection & target_pk:
+            (ArtifactDetection & target_pk).super_delete(warn=False)
         (IntervalList & interval_restr).delete_quick()
         (ArtifactDetectionSelection.RecordingSource & target_pk).delete_quick()
         (ArtifactDetectionSelection & target_pk).delete_quick()

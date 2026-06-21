@@ -947,15 +947,19 @@ class RecordingArtifactResult(NamedTuple):
     splatted into ``make_*``. ``make_compute`` reads these fields by name to
     build :class:`RecordingComputed`, and ``_rebuild_nwb_artifact`` reads only
     ``cache_hash``. Typed/named so the eight values are not threaded through
-    brittle positional unpacking.
+    brittle positional unpacking. Field order intentionally matches
+    ``RecordingComputed``'s first eight fields (pinned by
+    ``test_recording_artifact_result_field_contract``) so the by-name transfer
+    stays order-independent and a future positional splat would still bind
+    correctly.
     """
 
     analysis_file_name: str
     object_id: str
     cache_hash: str
-    sampling_frequency: float
     saved_start: float
     saved_end: float
+    sampling_frequency: float
     n_channels: int
     duration_s: float
 

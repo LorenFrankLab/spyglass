@@ -68,6 +68,16 @@ def assert_monotonic_timestamps(timestamps, *, context: str = "") -> None:
     ts = _np.asarray(timestamps)
     if ts.size == 0:
         raise ValueError(f"{context}timestamp vector is empty.")
+    if not _np.all(_np.isfinite(ts)):
+        # ``np.diff`` across a NaN is NaN and ``NaN < 0`` is False, so the
+        # backward-step check below silently passes a NaN-containing (and
+        # NaN-masked out-of-order) vector -- yet ``searchsorted`` sorts NaN as
+        # +inf and mis-brackets every spike after it. Reject non-finite first.
+        raise ValueError(
+            f"{context}timestamps contain non-finite values (NaN/inf); "
+            "searchsorted-based frame mapping would silently mis-slice the "
+            "recording (NaN sorts as +inf)."
+        )
     if ts.size > 1 and bool(_np.any(_np.diff(ts) < 0)):
         raise ValueError(
             f"{context}timestamps must be monotonically non-decreasing "
@@ -157,7 +167,9 @@ def _consolidate_intervals(intervals, timestamps):
         helper sorts and consolidates overlapping/adjacent
         intervals before returning.
     timestamps : numpy.ndarray
-        Strictly increasing wall-clock timestamps for the recording.
+        Monotonically non-decreasing wall-clock timestamps for the recording
+        (validated by ``assert_monotonic_timestamps`` before the searchsorted
+        frame mapping).
 
     Returns
     -------
@@ -423,6 +435,9 @@ def _base_intervals_from_timestamps(timestamps, fs):
     ts = _np.asarray(timestamps, dtype=float)
     if ts.size == 0:
         return []
+    assert_monotonic_timestamps(
+        ts, context="_base_intervals_from_timestamps: "
+    )
     fs = assert_positive_sampling_frequency(
         fs, context="_base_intervals_from_timestamps: "
     )

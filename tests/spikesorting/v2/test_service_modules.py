@@ -334,6 +334,44 @@ def test_build_artifact_interval_rows_one_row_per_member():
         np.testing.assert_array_equal(r["valid_times"], valid_times)
 
 
+def test_build_artifact_interval_part_rows_owns_interval_rows():
+    """Ownership rows carry the ArtifactDetection PK + IntervalList PK only."""
+    from spyglass.spikesorting.v2._artifact_intervals import (
+        build_artifact_interval_part_rows,
+    )
+
+    art_id = uuid.UUID("00000000-0000-0000-0000-0000000000bc")
+    interval_rows = [
+        {
+            "nwb_file_name": "a.nwb",
+            "interval_list_name": f"artifact_detection_{art_id}",
+            "valid_times": np.array([[0.0, 1.0]]),
+            "pipeline": "spikesorting_artifact_detection_v2",
+        },
+        {
+            "nwb_file_name": "b.nwb",
+            "interval_list_name": f"artifact_detection_{art_id}",
+            "valid_times": np.array([[0.0, 1.0]]),
+            "pipeline": "spikesorting_artifact_detection_v2",
+        },
+    ]
+
+    assert build_artifact_interval_part_rows(
+        {"artifact_detection_id": art_id}, interval_rows
+    ) == [
+        {
+            "artifact_detection_id": art_id,
+            "nwb_file_name": "a.nwb",
+            "interval_list_name": f"artifact_detection_{art_id}",
+        },
+        {
+            "artifact_detection_id": art_id,
+            "nwb_file_name": "b.nwb",
+            "interval_list_name": f"artifact_detection_{art_id}",
+        },
+    ]
+
+
 # --------------------------------------------------------------------------- #
 # Validation-order pin (needs the artifact schema module -> DB session).
 # --------------------------------------------------------------------------- #
@@ -392,6 +430,13 @@ def test_assert_monotonic_timestamps_rejects_empty_and_backward_steps():
         assert_monotonic_timestamps(np.array([]), context="ctx: ")
     with pytest.raises(ValueError, match="monotonic"):
         assert_monotonic_timestamps(np.array([0.0, 2.0, 1.0]), context="ctx: ")
+    # A NaN must NOT slip through: ``np.diff`` across NaN is NaN and
+    # ``NaN < 0`` is False, so a NaN-masked vector would otherwise pass the
+    # backward-step check yet mis-slice via searchsorted (NaN sorts as +inf).
+    with pytest.raises(ValueError, match="non-finite"):
+        assert_monotonic_timestamps(
+            np.array([0.0, 1.0, np.nan, 0.5, 2.0]), context="ctx: "
+        )
 
 
 def test_consolidate_intervals_rejects_nonmonotonic_timestamps():
@@ -512,6 +557,22 @@ def test_apply_artifact_mask_rejects_malformed_valid_times():
         apply_artifact_mask(
             rec, np.array([[0.0, 0.05], [0.02, 0.08]])
         )  # overlapping / unsorted
+
+
+def test_apply_artifact_mask_rejects_nonmonotonic_recording_times():
+    """The mask walks the recording timeline with ``searchsorted``, so a
+    backward-stepping ``get_times()`` would silently mis-mask. Pins that the
+    monotonic guard is actually wired into this boundary (not just the pure
+    ``_signal_math`` helpers)."""
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        apply_artifact_mask,
+    )
+
+    times = np.arange(100, dtype=float) / 1000.0
+    times[50] = times[49] - 0.05  # inject a backward step
+    rec = _rec(np.zeros((100, 2), dtype="float32"), times=times)
+    with pytest.raises(ValueError, match="monotonic"):
+        apply_artifact_mask(rec, np.array([[0.0, 0.05]]))
 
 
 # --------------------------------------------------------------------------- #

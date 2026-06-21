@@ -7386,80 +7386,21 @@ def test_recording_selection_raises_on_duplicate_logical_identity(
             )
 
 
-# ---------- L5-C: ArtifactDetection.delete handles orphans ---------------
+# ---------- L5-C: ArtifactDetection.delete ownership rows -----------------
 
 
 @pytest.mark.slow
-def test_artifact_detection_delete_handles_orphan_source_part(
+def test_artifact_detection_delete_uses_interval_ownership_part_rows(
     populated_recording, monkeypatch
 ):
-    """``ArtifactDetection.delete`` skips an orphan whose source part can no
-    longer be resolved, and still deletes the master.
+    """``ArtifactDetection.delete`` cleans via owned IntervalList part rows.
 
-    An orphan master (its source-part row cascade-deleted via some upstream
-    path) makes ``resolve_source`` raise ``SchemaBypassError`` -- zero source
-    rows. ``ArtifactDetection.delete``'s IntervalList-cleanup loop catches
-    exactly that (``except SchemaBypassError``, narrowed by Phase 1 E3), logs,
-    skips that row's paired IntervalList cleanup, and lets the master delete
-    proceed. We patch ``resolve_source`` to raise the real orphan exception so
-    a regression that re-raised it (instead of skipping) would fail here.
-
-    Companion ``test_artifact_detection_delete_aborts_on_unexpected_resolve_error``
-    pins the other side of E3's narrowed except: a NON-orphan (unexpected)
-    error must propagate and abort the delete rather than be swallowed.
+    Delete cleanup should not reconstruct artifact interval ownership from the
+    source selector or interval naming convention. The generated
+    ``ArtifactRemovedInterval`` rows are the contract. Patching source
+    resolution to fail makes this test a regression pin for that boundary.
     """
-    from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
-        ArtifactDetectionParameters,
-        ArtifactDetectionSelection,
-    )
-    from spyglass.spikesorting.v2.exceptions import SchemaBypassError
-
-    ArtifactDetectionParameters.insert_default()
-    art_pk = ArtifactDetectionSelection.insert_selection(
-        {
-            "recording_id": populated_recording["recording_id"],
-            "artifact_detection_params_name": "none",
-        }
-    )
-    ArtifactDetection.populate(art_pk, reserve_jobs=False)
-
-    # An orphan source part is exactly what resolve_source reports as
-    # SchemaBypassError (zero/multiple source rows); simulate that shape.
-    def _orphan_resolve(cls, key):
-        raise SchemaBypassError("simulated orphan: zero source part rows")
-
-    monkeypatch.setattr(
-        ArtifactDetectionSelection,
-        "resolve_source",
-        classmethod(_orphan_resolve),
-    )
-
-    # The delete completes without raising; the orphan row's cleanup is
-    # skipped but the master delete proceeds.
-    (ArtifactDetection & art_pk).delete(safemode=False)
-    assert len(ArtifactDetection & art_pk) == 0, (
-        "ArtifactDetection row should be deleted even when resolve_source "
-        "reports an orphan; the SchemaBypassError branch must not "
-        "short-circuit the master delete."
-    )
-
-
-@pytest.mark.slow
-def test_artifact_detection_delete_aborts_on_unexpected_resolve_error(
-    populated_recording, monkeypatch
-):
-    """``ArtifactDetection.delete`` aborts (does NOT swallow) an UNEXPECTED
-    ``resolve_source`` error, leaving the master in place.
-
-    Phase 1 E3 narrowed the cleanup-loop except to ``SchemaBypassError`` (the
-    orphan shape). Any other exception is a genuine bug: swallowing it would
-    silently delete the master and orphan its IntervalList rows. The narrowed
-    except must let it propagate BEFORE ``super().delete()`` runs, so the
-    master survives and the operator sees the failure. ``SchemaBypassError``
-    subclasses ``RuntimeError``, so a bare ``RuntimeError`` is genuinely
-    outside the caught type.
-    """
+    from spyglass.common import IntervalList
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetection,
         ArtifactDetectionParameters,
@@ -7474,9 +7415,13 @@ def test_artifact_detection_delete_aborts_on_unexpected_resolve_error(
         }
     )
     ArtifactDetection.populate(art_pk, reserve_jobs=False)
+    part_rows = (
+        ArtifactDetection.ArtifactRemovedInterval & art_pk
+    ).fetch("nwb_file_name", "interval_list_name", as_dict=True)
+    assert part_rows, "ArtifactDetection.populate must insert ownership rows"
 
     def _unexpected_resolve(cls, key):
-        raise RuntimeError("unexpected resolve_source bug")
+        raise RuntimeError("delete cleanup must not resolve source rows")
 
     monkeypatch.setattr(
         ArtifactDetectionSelection,
@@ -7484,13 +7429,51 @@ def test_artifact_detection_delete_aborts_on_unexpected_resolve_error(
         classmethod(_unexpected_resolve),
     )
 
-    with pytest.raises(RuntimeError, match="unexpected resolve_source bug"):
-        (ArtifactDetection & art_pk).delete(safemode=False)
-    # Abort happened before the master delete -- the row must still exist.
-    assert len(ArtifactDetection & art_pk) == 1, (
-        "an unexpected resolve_source error must abort the delete before the "
-        "master is removed, not silently orphan it"
+    (ArtifactDetection & art_pk).delete(safemode=False)
+    assert len(ArtifactDetection & art_pk) == 0
+    assert len(IntervalList & part_rows) == 0
+
+
+@pytest.mark.slow
+def test_artifact_detection_delete_requires_interval_ownership_part_rows(
+    populated_recording,
+):
+    """A row without ownership parts is invalid and must fail loudly.
+
+    We intentionally do not reconstruct missing ownership from
+    ``artifact_detection_id``-derived interval names. That would reintroduce
+    the generic ``IntervalList.cleanup`` orphan problem this part table fixes.
+    """
+    from spyglass.common import IntervalList
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactDetectionParameters,
+        ArtifactDetectionSelection,
     )
+
+    ArtifactDetectionParameters.insert_default()
+    art_pk = ArtifactDetectionSelection.insert_selection(
+        {
+            "recording_id": populated_recording["recording_id"],
+            "artifact_detection_params_name": "none",
+        }
+    )
+    ArtifactDetection.populate(art_pk, reserve_jobs=False)
+    part_rows = (
+        ArtifactDetection.ArtifactRemovedInterval & art_pk
+    ).fetch("nwb_file_name", "interval_list_name", as_dict=True)
+    assert part_rows, "ArtifactDetection.populate must insert ownership rows"
+
+    (ArtifactDetection.ArtifactRemovedInterval & art_pk).delete_quick()
+
+    try:
+        with pytest.raises(ValueError, match="no ArtifactRemovedInterval"):
+            (ArtifactDetection & art_pk).delete(safemode=False)
+        assert len(ArtifactDetection & art_pk) == 1
+    finally:
+        if ArtifactDetection & art_pk:
+            (ArtifactDetection & art_pk).super_delete(warn=False)
+        (IntervalList & part_rows).delete_quick()
 
 
 # ---------- L5-D: _write_units_nwb zero-unit guard (sorting layer) -------
@@ -8472,6 +8455,14 @@ def test_shared_artifact_group_populate_end_to_end(
     ).fetch(as_dict=True)
     assert len(rows) == 1
     assert rows[0]["pipeline"] == "spikesorting_artifact_detection_v2"
+    assert (
+        ArtifactDetection.ArtifactRemovedInterval
+        & {
+            "artifact_detection_id": art_pk["artifact_detection_id"],
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": interval_name,
+        }
+    ), "ArtifactDetection.populate did not insert the IntervalList ownership part row"
 
     # ``get_artifact_removed_intervals`` returns a dict keyed by
     # member nwb_file_name for shared-group sources. Today single
@@ -10405,13 +10396,15 @@ def test_set_group_by_column_surfaces_unitrode_skip(polymer_smoke_session):
 
 
 @pytest.mark.slow
-def test_artifact_delete_aborts_on_unexpected_resolve_error(
+def test_artifact_read_aborts_on_unexpected_resolve_error(
     populated_recording, monkeypatch
 ):
-    """An UNEXPECTED resolve_source error during ``delete()`` aborts the
-    delete (master not removed) rather than swallowing it and orphaning
-    IntervalList rows. Only the documented SchemaBypassError is
-    tolerated.
+    """An unexpected source-resolution error during read propagates.
+
+    Delete cleanup uses ``ArtifactRemovedInterval`` ownership rows and does
+    not resolve the source anymore. Reading still resolves the source to
+    choose the return shape, so unexpected resolver failures should remain
+    visible to the caller.
     """
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetection,
@@ -10436,8 +10429,7 @@ def test_artifact_delete_aborts_on_unexpected_resolve_error(
         ArtifactDetectionSelection, "resolve_source", classmethod(_boom)
     )
     with pytest.raises(RuntimeError, match="boom-unexpected-resolve"):
-        (ArtifactDetection & art_pk).delete(safemode=False)
-    # Aborted before super().delete(): the master row is still present.
+        ArtifactDetection().get_artifact_removed_intervals(art_pk)
     assert len(ArtifactDetection & art_pk) == 1
 
 

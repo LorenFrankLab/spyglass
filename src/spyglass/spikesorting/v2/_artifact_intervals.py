@@ -3,10 +3,11 @@
 These functions are the interval core behind ``ArtifactDetection``:
 building the artifact-removed ``valid_times`` from a preprocessed
 recording (``scan_artifact_frames`` -> ``detect_artifacts``), building the
-``IntervalList`` row contents (``build_artifact_interval_rows``), reading
+``IntervalList`` row contents (``build_artifact_interval_rows``), building
+the ownership part rows (``build_artifact_interval_part_rows``), reading
 those rows back (``read_artifact_removed_intervals``), and the delete-time
 IntervalList cleanup policy (``collect_artifact_interval_rows_to_remove``
-+ ``remove_artifact_interval_rows``). The two construction functions are
++ ``remove_artifact_interval_rows``). The construction functions are
 pure (non-DB) compute over SpikeInterface objects -- aside from
 ``detect_artifacts``'s diagnostic ``logger`` calls; the persistence
 functions touch the DB at CALL time via lazy imports so the table class
@@ -27,10 +28,10 @@ connection at import: all numpy / SpikeInterface / spyglass dependencies
 are imported lazily inside the functions. The persistence functions
 (``read_artifact_removed_intervals``, ``collect_artifact_interval_rows_to_remove``,
 ``remove_artifact_interval_rows``) DO touch the DB at call time -- they
-lazy-import ``common.IntervalList``, the v2 ``recording`` tables, and
-``ArtifactDetectionSelection`` / ``SharedArtifactGroup`` back from ``artifact``
-(a backward import that is cycle-free because ``artifact`` is fully
-imported by call time). The pure-compute kernels live in
+lazy-import ``common.IntervalList``, the v2 ``recording.RecordingSelection``,
+plus ``ArtifactDetection`` / ``ArtifactDetectionSelection`` /
+``SharedArtifactGroup`` back from ``artifact`` (a backward import that is
+cycle-free because ``artifact`` is fully imported by call time). The pure-compute kernels live in
 ``_artifact_compute``; ``scan_artifact_frames`` drives them through
 SpikeInterface's ``ChunkRecordingExecutor``.
 """
@@ -434,10 +435,6 @@ def build_artifact_interval_rows(
     interval_list_name = artifact_detection_interval_list_name(
         key["artifact_detection_id"]
     )
-    # Backwards compat: callers that constructed
-    # ``ArtifactComputed`` without ``per_member_nwb_files``
-    # (older test stubs) fall back to the single
-    # ``nwb_file_name``.
     targets = per_member_nwb_files or (nwb_file_name,)
     return [
         {
@@ -447,6 +444,34 @@ def build_artifact_interval_rows(
             "pipeline": "spikesorting_artifact_detection_v2",
         }
         for member_nwb in targets
+    ]
+
+
+def build_artifact_interval_part_rows(key, interval_rows):
+    """Build ``ArtifactDetection.ArtifactRemovedInterval`` ownership rows.
+
+    Parameters
+    ----------
+    key : dict
+        Restriction carrying ``artifact_detection_id``.
+    interval_rows : iterable of dict
+        Rows produced by :func:`build_artifact_interval_rows`.
+
+    Returns
+    -------
+    list[dict]
+        One part row per generated ``IntervalList`` row. Each row carries
+        only the ``ArtifactDetection`` PK plus the ``IntervalList`` PK, so
+        it is safe to pass to the part table without relying on
+        ``ignore_extra_fields``.
+    """
+    return [
+        {
+            "artifact_detection_id": key["artifact_detection_id"],
+            "nwb_file_name": row["nwb_file_name"],
+            "interval_list_name": row["interval_list_name"],
+        }
+        for row in interval_rows
     ]
 
 
@@ -491,14 +516,12 @@ def read_artifact_removed_intervals(key, as_dict=False):
         to its ``(n_intervals, 2)`` array.
     """
     from spyglass.common import IntervalList
+    from spyglass.spikesorting.v2.artifact import ArtifactDetection
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetectionSelection,
         SharedArtifactGroup,
     )
     from spyglass.spikesorting.v2.recording import RecordingSelection
-    from spyglass.spikesorting.v2.utils import (
-        artifact_detection_interval_list_name,
-    )
 
     # Validate the key BEFORE resolving the source so a missing
     # ``artifact_detection_id`` surfaces this clear ValueError rather than a
@@ -509,14 +532,27 @@ def read_artifact_removed_intervals(key, as_dict=False):
             "must include 'artifact_detection_id'."
         )
     source = ArtifactDetectionSelection.resolve_source(key)
-    interval_list_name = artifact_detection_interval_list_name(
-        key["artifact_detection_id"]
-    )
+    part_rows = (
+        ArtifactDetection.ArtifactRemovedInterval & key
+    ).fetch("nwb_file_name", "interval_list_name", as_dict=True)
+    if not part_rows:
+        raise ValueError(
+            "ArtifactDetection.get_artifact_removed_intervals: "
+            f"{key!r} has no ArtifactRemovedInterval part rows. "
+            "ArtifactDetection rows must own their generated IntervalList "
+            "rows through the part table; re-populate this artifact "
+            "detection."
+        )
 
     if source.kind == "recording":
-        nwb_file_name = (
-            RecordingSelection & {"recording_id": source.key["recording_id"]}
-        ).fetch1("nwb_file_name")
+        if len(part_rows) != 1:
+            raise ValueError(
+                "ArtifactDetection.get_artifact_removed_intervals: "
+                f"recording-backed {key!r} has {len(part_rows)} "
+                "ArtifactRemovedInterval part rows; expected exactly one."
+            )
+        nwb_file_name = part_rows[0]["nwb_file_name"]
+        interval_list_name = part_rows[0]["interval_list_name"]
         valid_times = (
             IntervalList
             & {
@@ -541,16 +577,9 @@ def read_artifact_removed_intervals(key, as_dict=False):
         }
     ).fetch("nwb_file_name", as_dict=True)
     member_nwb_files = list(dict.fromkeys(m["nwb_file_name"] for m in members))
-    rows = (
-        IntervalList
-        & [
-            {
-                "nwb_file_name": nwb,
-                "interval_list_name": interval_list_name,
-            }
-            for nwb in member_nwb_files
-        ]
-    ).fetch("nwb_file_name", "valid_times", as_dict=True)
+    rows = (IntervalList & part_rows).fetch(
+        "nwb_file_name", "valid_times", as_dict=True
+    )
     result = {row["nwb_file_name"]: row["valid_times"] for row in rows}
     # Match the single-recording ``fetch1`` loudness: a member whose
     # artifact-removed IntervalList row is absent would otherwise be
@@ -565,7 +594,7 @@ def read_artifact_removed_intervals(key, as_dict=False):
             f"artifact group {source.key['shared_artifact_group_name']!r}"
             f" is missing artifact-removed IntervalList row(s) for "
             f"member(s) {missing} "
-            f"(interval_list_name={interval_list_name!r}). The "
+            f"(part rows={part_rows!r}). The "
             "ArtifactDetection row may be partially deleted; "
             "re-populate it."
         )
@@ -575,25 +604,17 @@ def read_artifact_removed_intervals(key, as_dict=False):
 def collect_artifact_interval_rows_to_remove(rows):
     """Resolve the artifact ``IntervalList`` rows paired with master rows.
 
-    Layer-2 delete-cleanup helper: DataJoint does not cascade through
-    ``interval_list_name``-keyed dependencies, so the artifact-removed
-    IntervalList rows must be cleaned up explicitly when an
-    ``ArtifactDetection`` master is deleted. Given the master row dicts
-    (fetched BEFORE the master delete, while the source-part join still
-    resolves), returns the list of ``{nwb_file_name, interval_list_name}``
-    restrictions the caller should remove after the master delete commits.
-
-    A genuinely broken source (zero/multiple source part rows -- the only
-    thing ``resolve_source`` raises) cannot be resolved to its IntervalList
-    target; that row is logged and skipped (its IntervalList rows are left
-    in place) rather than aborting the whole cleanup. Any OTHER exception
-    propagates.
+    Layer-2 delete-cleanup helper: fetches the owned
+    ``ArtifactRemovedInterval`` part rows BEFORE the master delete, while
+    they still exist, and returns the matching
+    ``{nwb_file_name, interval_list_name}`` restrictions. The caller removes
+    those ``IntervalList`` rows after the master delete succeeds.
 
     Parameters
     ----------
     rows : list of dict
         ``ArtifactDetection`` master row dicts, fetched before the
-        master delete while the source-part join still resolves.
+        master delete while the ownership part rows still exist.
 
     Returns
     -------
@@ -601,76 +622,21 @@ def collect_artifact_interval_rows_to_remove(rows):
         ``{nwb_file_name, interval_list_name}`` restrictions to remove
         after the master delete commits.
     """
-    from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetectionSelection,
-        SharedArtifactGroup,
-    )
-    from spyglass.spikesorting.v2.exceptions import SchemaBypassError
-    from spyglass.spikesorting.v2.recording import RecordingSelection
-    from spyglass.spikesorting.v2.utils import (
-        artifact_detection_interval_list_name,
-    )
-    from spyglass.utils import logger
+    from spyglass.spikesorting.v2.artifact import ArtifactDetection
 
     interval_rows_to_remove = []
     for row in rows:
-        try:
-            source = ArtifactDetectionSelection.resolve_source(row)
-        except SchemaBypassError as resolve_exc:
-            # A genuinely broken source (zero/multiple source part
-            # rows -- the only thing ``resolve_source`` raises) cannot
-            # be resolved to its IntervalList target. Log, skip ITS
-            # paired cleanup, and let the master delete proceed. Any
-            # OTHER exception is an unexpected bug: DO NOT swallow it
-            # (a broad ``except`` would silently orphan IntervalList
-            # rows). Let it propagate to abort the delete BEFORE the
-            # master is removed, so the operator sees the failure.
-            logger.error(
-                "ArtifactDetection.delete: resolve_source failed for "
-                f"{ {k: row[k] for k in ('artifact_detection_id',)} }; leaving "
-                f"IntervalList rows in place. Underlying error: "
-                f"{resolve_exc!r}"
+        part_rows = (
+            ArtifactDetection.ArtifactRemovedInterval & row
+        ).fetch("nwb_file_name", "interval_list_name", as_dict=True)
+        if not part_rows:
+            raise ValueError(
+                "ArtifactDetection.delete: "
+                f"{row!r} has no ArtifactRemovedInterval part rows. "
+                "Refusing to guess interval ownership from naming; repair "
+                "or re-populate the artifact detection before deleting it."
             )
-            continue
-        interval_list_name = artifact_detection_interval_list_name(
-            row["artifact_detection_id"]
-        )
-        if source.kind == "recording":
-            nwb_file_name = (
-                RecordingSelection
-                & {"recording_id": source.key["recording_id"]}
-            ).fetch1("nwb_file_name")
-            interval_rows_to_remove.append(
-                {
-                    "nwb_file_name": nwb_file_name,
-                    "interval_list_name": interval_list_name,
-                }
-            )
-        elif source.kind == "shared_artifact_group":
-            # ``make_insert`` wrote one IntervalList row per
-            # distinct member ``nwb_file_name``; collect them
-            # all for cleanup. The Member -> RecordingSelection
-            # join surfaces the per-member nwb_file_name set.
-            members = (
-                SharedArtifactGroup.Member * RecordingSelection
-                & {
-                    "shared_artifact_group_name": source.key[
-                        "shared_artifact_group_name"
-                    ]
-                }
-            ).fetch("nwb_file_name", as_dict=True)
-            seen = set()
-            for m in members:
-                nwb = m["nwb_file_name"]
-                if nwb in seen:
-                    continue
-                seen.add(nwb)
-                interval_rows_to_remove.append(
-                    {
-                        "nwb_file_name": nwb,
-                        "interval_list_name": interval_list_name,
-                    }
-                )
+        interval_rows_to_remove.extend(part_rows)
     return interval_rows_to_remove
 
 

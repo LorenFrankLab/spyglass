@@ -6,12 +6,15 @@ Tables (all final-shape under the zero-migration policy):
     ArtifactDetectionSelection        -- source parts encode input shape.
         .RecordingSource              -- single-recording path (default).
         .SharedGroupSource          -- cross-recording path (#928).
-    ArtifactDetection                 -- writes IntervalList rows; no part.
+    ArtifactDetection                 -- writes IntervalList rows.
+        .ArtifactRemovedInterval      -- relational owner of each written row.
 
-Artifact-removed valid times live in ``common.IntervalList`` rather than
-a dedicated part table -- the UUID-suffixed name prevents collision with
-human-authored session intervals while letting downstream
-IntervalList-querying code consume them through the standard interface.
+Artifact-removed valid times live in ``common.IntervalList`` (the
+UUID-suffixed name prevents collision with human-authored session intervals,
+and downstream IntervalList-querying code consumes them through the standard
+interface); the ``ArtifactDetection.ArtifactRemovedInterval`` part table owns
+each generated row relationally so generic IntervalList cleanup treats them
+as live children, not orphans.
 
 ``ArtifactDetectionParameters.insert1`` Pydantic-validates the
 ``params`` blob. ``insert_selection`` resolves a selection to a single
@@ -47,6 +50,7 @@ from spyglass.spikesorting.v2._artifact_compute import (  # noqa: F401
 # (``_detect_artifacts`` / ``_scan_artifact_frames`` are called directly on the
 # class, and ``get_artifact_removed_intervals`` is called on instances).
 from spyglass.spikesorting.v2._artifact_intervals import (
+    build_artifact_interval_part_rows,
     build_artifact_interval_rows,
     collect_artifact_interval_rows_to_remove,
     detect_artifacts,
@@ -712,12 +716,28 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
     ``f"artifact_detection_{artifact_detection_id}"`` at the end of ``make()`` -- one row per
     affected session. Single-recording detections write exactly one row;
     cross-recording detections write one row per distinct member
-    ``nwb_file_name``.
+    ``nwb_file_name``. The ``ArtifactRemovedInterval`` part table owns those
+    generated ``IntervalList`` rows relationally so Spyglass cleanup sees them
+    as live children rather than generic orphan intervals.
     """
 
     definition = """
     -> ArtifactDetectionSelection
     """
+
+    class ArtifactRemovedInterval(SpyglassMixinPart):
+        """Generated artifact-removed ``IntervalList`` row.
+
+        One part row is inserted for each ``IntervalList`` row written by
+        ``make_insert``. The FK gives the otherwise name-addressed artifact
+        intervals a relational owner, so generic ``IntervalList.cleanup`` does
+        not delete live artifact intervals.
+        """
+
+        definition = """
+        -> master
+        -> IntervalList
+        """
 
     # Tri-part dispatch enables non-daemon parallel populate via
     # Spyglass's ``PopulateMixin`` and -- more importantly -- moves
@@ -988,11 +1008,13 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         interval_rows = build_artifact_interval_rows(
             key, valid_times, nwb_file_name, per_member_nwb_files
         )
+        part_rows = build_artifact_interval_part_rows(key, interval_rows)
         # no-op when framework transaction is active; kept defensively
         # so an out-of-populate caller still gets atomic registration.
         with transaction_or_noop(self.connection):
             IntervalList.insert(interval_rows)
             self.insert1(key)
+            self.ArtifactRemovedInterval.insert(part_rows)
 
     @staticmethod
     def _scan_artifact_frames(recording, validated, job_kwargs=None):
@@ -1083,17 +1105,17 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         dependencies, so the cleanup is explicit. We collect the artifact
         ``IntervalList`` rows up front (via
         :func:`._artifact_intervals.collect_artifact_interval_rows_to_remove`,
-        BEFORE the master delete, while the source-part join still
-        resolves), delete the master row(s) via ``super().delete``, then --
+        BEFORE the master delete, while the ownership part rows still
+        resolve), delete the master row(s) via ``super().delete``, then --
         only if the cascade actually removed the masters -- drop the
         matching IntervalList rows via
         :func:`._artifact_intervals.remove_artifact_interval_rows`.
 
-        A leading positional restriction is accepted as a compatibility guard
-        for the easy-to-mistype ``ArtifactDetection().delete(restriction)``
-        form. DataJoint's own ``delete`` does not take restrictions
-        positionally, and Spyglass's cautious-delete layer would otherwise
-        treat that dict as ``force_permission``.
+        A leading positional restriction is accepted for the
+        easy-to-mistype ``ArtifactDetection().delete(restriction)`` form.
+        DataJoint's own ``delete`` does not take restrictions positionally,
+        and Spyglass's cautious-delete layer would otherwise treat that dict
+        as ``force_permission``.
         """
         restriction_args = []
         while args and isinstance(args[0], (dict, list, str)):
@@ -1106,10 +1128,10 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
             return target.delete(*args, safemode=safemode, **kwargs)
 
         # Collect the IntervalList rows to clean up BEFORE we delete the
-        # master rows -- the source-part join no longer resolves after
-        # the master is gone. Keep the rows paired with their master PK, so
-        # cleanup follows the rows that actually disappeared rather than the
-        # post-delete length of ``self``.
+        # master rows -- the ownership part rows no longer resolve after the
+        # master is gone. Keep the rows paired with their master PK, so cleanup
+        # follows the rows that actually disappeared rather than the post-delete
+        # length of ``self``.
         delete_targets = [
             (
                 {k: row[k] for k in self.primary_key},

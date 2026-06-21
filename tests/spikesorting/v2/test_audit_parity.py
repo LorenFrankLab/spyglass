@@ -2141,19 +2141,32 @@ def test_artifact_detection_delete_tolerates_already_gone_interval_list():
             },
             allow_direct_insert=True,
         )
+        ArtifactDetection.ArtifactRemovedInterval.insert1(
+            {
+                "artifact_detection_id": aid,
+                "nwb_file_name": nwb,
+                "interval_list_name": ilist_name,
+            }
+        )
     finally:
         conn.query("SET FOREIGN_KEY_CHECKS=1")
 
     try:
         # Pre-delete the IntervalList row so delete() hits the already-gone
-        # (len == 0) branch.
-        (
-            IntervalList
-            & {
-                "nwb_file_name": nwb,
-                "interval_list_name": ilist_name,
-            }
-        ).delete_quick()
+        # (len == 0) branch. Disable FK checks here so the ownership part row
+        # remains; this models an out-of-band broken interval row while
+        # preserving the strict ArtifactRemovedInterval ownership invariant.
+        conn.query("SET FOREIGN_KEY_CHECKS=0")
+        try:
+            (
+                IntervalList
+                & {
+                    "nwb_file_name": nwb,
+                    "interval_list_name": ilist_name,
+                }
+            ).delete_quick()
+        finally:
+            conn.query("SET FOREIGN_KEY_CHECKS=1")
 
         # Must not raise even though the cleanup target is already gone.
         (ArtifactDetection & {"artifact_detection_id": aid}).delete(
@@ -2171,6 +2184,156 @@ def test_artifact_detection_delete_tolerates_already_gone_interval_list():
             (
                 ArtifactDetectionSelection & {"artifact_detection_id": aid}
             ).delete_quick()
+        finally:
+            conn.query("SET FOREIGN_KEY_CHECKS=1")
+        _drop_fake_recording(rec_id)
+
+
+def test_artifact_detection_delete_refuses_master_without_part_rows():
+    """Strict ownership: deleting an ``ArtifactDetection`` master that owns NO
+    ``ArtifactRemovedInterval`` part row raises rather than guessing interval
+    ownership from naming -- the data-loss guard the part-table refactor adds.
+    The refused delete must leave the master in place.
+
+    Builds a DEDICATED selection on a planted recording (FK-off) with a
+    zero-row master and NO part row, so the shared populated fixture is
+    untouched.
+    """
+    import uuid
+
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactDetectionSelection,
+    )
+
+    nwb = "ownership_nopart_session_.nwb"
+    rec_id = _plant_fake_recording(uuid.uuid4(), nwb, 30000.0)
+    aid = uuid.uuid4()
+    conn = dj.conn()
+    conn.query("SET FOREIGN_KEY_CHECKS=0")
+    try:
+        ArtifactDetectionSelection.insert1(
+            {
+                "artifact_detection_id": aid,
+                "artifact_detection_params_name": "v2_ownership_nopart_params",
+            },
+            allow_direct_insert=True,
+        )
+        ArtifactDetectionSelection.RecordingSource.insert1(
+            {"artifact_detection_id": aid, "recording_id": rec_id},
+            allow_direct_insert=True,
+        )
+        ArtifactDetection.insert1(
+            {"artifact_detection_id": aid}, allow_direct_insert=True
+        )
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+    try:
+        with pytest.raises(ValueError, match="Refusing to guess"):
+            (ArtifactDetection & {"artifact_detection_id": aid}).delete(
+                safemode=False
+            )
+        assert len(ArtifactDetection & {"artifact_detection_id": aid}) == 1
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=0")
+        try:
+            (ArtifactDetection & {"artifact_detection_id": aid}).delete_quick()
+            (
+                ArtifactDetectionSelection.RecordingSource
+                & {"artifact_detection_id": aid}
+            ).delete_quick()
+            (
+                ArtifactDetectionSelection & {"artifact_detection_id": aid}
+            ).delete_quick()
+        finally:
+            conn.query("SET FOREIGN_KEY_CHECKS=1")
+        _drop_fake_recording(rec_id)
+
+
+def test_read_artifact_removed_intervals_rejects_multiple_recording_part_rows():
+    """A recording-backed ``ArtifactDetection`` must own exactly one
+    ``IntervalList`` row; two ownership part rows is a corrupted state, and the
+    read path raises rather than silently picking one.
+    """
+    import uuid
+
+    import datajoint as dj
+
+    from spyglass.common import IntervalList
+    from spyglass.spikesorting.v2._artifact_intervals import (
+        read_artifact_removed_intervals,
+    )
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactDetectionSelection,
+    )
+
+    nwb = "ownership_twopart_session_.nwb"
+    rec_id = _plant_fake_recording(uuid.uuid4(), nwb, 30000.0)
+    aid = uuid.uuid4()
+    inames = [f"artifact_detection_{aid}_{s}" for s in ("a", "b")]
+    conn = dj.conn()
+    conn.query("SET FOREIGN_KEY_CHECKS=0")
+    try:
+        ArtifactDetectionSelection.insert1(
+            {
+                "artifact_detection_id": aid,
+                "artifact_detection_params_name": "v2_ownership_twopart_params",
+            },
+            allow_direct_insert=True,
+        )
+        ArtifactDetectionSelection.RecordingSource.insert1(
+            {"artifact_detection_id": aid, "recording_id": rec_id},
+            allow_direct_insert=True,
+        )
+        ArtifactDetection.insert1(
+            {"artifact_detection_id": aid}, allow_direct_insert=True
+        )
+        for iname in inames:
+            IntervalList.insert1(
+                {
+                    "nwb_file_name": nwb,
+                    "interval_list_name": iname,
+                    "valid_times": np.empty((0, 2)),
+                },
+                allow_direct_insert=True,
+            )
+            ArtifactDetection.ArtifactRemovedInterval.insert1(
+                {
+                    "artifact_detection_id": aid,
+                    "nwb_file_name": nwb,
+                    "interval_list_name": iname,
+                }
+            )
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+    try:
+        with pytest.raises(ValueError, match="expected exactly one"):
+            read_artifact_removed_intervals({"artifact_detection_id": aid})
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=0")
+        try:
+            (
+                ArtifactDetection.ArtifactRemovedInterval
+                & {"artifact_detection_id": aid}
+            ).delete_quick()
+            (ArtifactDetection & {"artifact_detection_id": aid}).delete_quick()
+            (
+                ArtifactDetectionSelection.RecordingSource
+                & {"artifact_detection_id": aid}
+            ).delete_quick()
+            (
+                ArtifactDetectionSelection & {"artifact_detection_id": aid}
+            ).delete_quick()
+            for iname in inames:
+                (
+                    IntervalList
+                    & {"nwb_file_name": nwb, "interval_list_name": iname}
+                ).delete_quick()
         finally:
             conn.query("SET FOREIGN_KEY_CHECKS=1")
         _drop_fake_recording(rec_id)
@@ -3537,10 +3700,11 @@ def test_recording_artifact_result_field_contract():
     (NamedTuple) rather than a bare 8-tuple, so ``make_compute`` and
     ``_rebuild_nwb_artifact`` read its fields by name instead of by position.
 
-    Pin the field set in its established order, and require every field to also
-    be a ``RecordingComputed`` field -- ``make_compute`` transfers them by name
-    into the tri-part contract NamedTuple, so a rename/removal in either type
-    would silently break that mapping.
+    Pin the field set in order, AND pin that it equals ``RecordingComputed``'s
+    first eight fields. ``make_compute`` transfers them by name into the tri-part
+    contract NamedTuple, so the prefix-equality keeps that mapping order-safe and
+    guarantees a future positional ``RecordingComputed(*artifact, ...)`` splat
+    would still bind correctly; a reorder/rename in either type fails here.
     """
     from spyglass.spikesorting.v2.recording import (
         RecordingArtifactResult,
@@ -3551,15 +3715,13 @@ def test_recording_artifact_result_field_contract():
         "analysis_file_name",
         "object_id",
         "cache_hash",
-        "sampling_frequency",
         "saved_start",
         "saved_end",
+        "sampling_frequency",
         "n_channels",
         "duration_s",
     )
-    assert set(RecordingArtifactResult._fields) <= set(
-        RecordingComputed._fields
-    )
+    assert RecordingArtifactResult._fields == RecordingComputed._fields[:8]
 
 
 @pytest.mark.slow
