@@ -1,11 +1,14 @@
-"""Units-audit pins for the v2 pipeline.
+"""Unit-convention pins for the v2 pipeline.
 
 Locks the unit conventions a silent error would corrupt:
 * clusterless ``threshold_unit="uv"`` is a TRUE microvolt threshold (the
   detector's input is scaled to uV via the stored gain), and requires gains;
-* ``firing_rate_from_spike_indicator`` returns spikes/second.
+* ``firing_rate_from_spike_indicator`` returns spikes/second;
+* the clusterless-runtime threshold-unit defaulting and validation.
 
-Hermetic -- in-memory SpikeInterface objects, no DB.
+Most tests are hermetic (in-memory SpikeInterface objects); the
+clusterless-runtime and shipped-default-row cases take ``dj_conn`` because
+importing the v2 ``sorting`` schema module activates ``dj.schema``.
 """
 
 from __future__ import annotations

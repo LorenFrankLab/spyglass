@@ -9,8 +9,8 @@ vs absorbed-contributor labels, raise vs warn-and-drop) are pinned cheaply.
 
 ``_curation_plan`` imports only ``_curation_transforms`` plus stdlib logging,
 so this file needs no database fixture; the import-boundary contract is
-separately enforced by ``test_service_modules`` (``_curation_plan`` is in
-``_DB_FREE_SERVICE_MODULES``).
+separately enforced by ``test_service_import_contracts`` (``_curation_plan`` is
+in ``_DB_FREE_SERVICE_MODULES``).
 """
 
 from __future__ import annotations

@@ -219,8 +219,9 @@ def test_detect_artifacts_recovers_planted_interval_times():
     """Two artifacts planted at KNOWN times and a KNOWN amplitude are recovered
     as two removed intervals, each tightly bracketing its planted epoch.
 
-    The interval-recovery counterpart to the frame-level gain test
-    (``test_artifact_gain.py``): it pins detected-vs-planted at the *seconds*
+    The interval-recovery counterpart to the frame-level gain tests
+    (``test_gain_conversion_*`` in this module): it pins detected-vs-planted at
+    the *seconds*
     level, so a regression in the removal-window expansion, the join logic, or
     the valid_times complement that mislocates, splits, merges, or over-/under-
     removes an artifact is caught -- not just "populate did not crash".

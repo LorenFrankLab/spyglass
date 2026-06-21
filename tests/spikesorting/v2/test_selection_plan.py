@@ -10,8 +10,8 @@ normalization) are pinned cheaply.
 
 The module under test imports only ``_selection_identity`` (DB-free), so
 this file needs no database fixture; the import-boundary contract is
-separately enforced by ``test_service_modules`` (``_selection_plan`` is in
-``_DB_FREE_SERVICE_MODULES``).
+separately enforced by ``test_service_import_contracts`` (``_selection_plan`` is
+in ``_DB_FREE_SERVICE_MODULES``).
 """
 
 from __future__ import annotations
