@@ -239,7 +239,7 @@ Source: https://kilosort.readthedocs.io/en/latest/parameters.html
 
 **Repo**: https://github.com/EnnyvanBeest/UnitMatch (Python port under `UnitMatch_python/`)
 
-**PyPI page**: https://pypi.org/project/UnitMatchPy/ (current checked version during planning: 3.3.1, released April 2026; the plan pins `UnitMatchPy>=3.3,<4` which covers 3.3.x patch releases). PyPI metadata currently declares `python>=3.9,<3.13` and `numpy<2.0`, so Phase 4a must run a resolver check against the v2 SpikeInterface environment before adding the optional extra.
+**PyPI page**: https://pypi.org/project/UnitMatchPy/ (the plan pins `UnitMatchPy>=3.2.6,<3.2.8` — the 3.2.6/3.2.7 line is the last to declare `numpy>=2.0,<3.0`, so it coexists with the v2 numpy>=2 baseline; 3.2.8+ and all 3.3.x reactively flipped their metadata to `numpy<2.0` per upstream issue #134 and are excluded). The 3.2.6/3.2.7 metadata declares `python>=3.9,<3.13`; Phase 4a must still run a resolver check against the v2 SpikeInterface environment before adding the optional extra.
 
 **Import caveat verified against UnitMatchPy 3.3.1**: the package import name is capitalized (`UnitMatchPy`), not `unitmatchpy`. `import UnitMatchPy` imports `UnitMatchPy.GUI`, which requires `_tkinter`; Python builds without Tk support fail at top-level import. Normal submodule imports also execute package `__init__.py`, so they can hit the same GUI failure. Phase 4a must either run in a Tk-enabled env or load the non-GUI modules by file path / upstream patch before schema work starts.
 

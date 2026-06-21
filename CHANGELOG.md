@@ -742,7 +742,7 @@ for label, interval_data in results.groupby("interval_labels"):
     build, roundtrip, and ingest through Spyglass under probeinterface
     0.3.2 + SI 0.104). Adds a `spikesorting-v2` optional extra
     (`mountainsort5>=0.5`) and a
-    `spikesorting-v2-matching` optional extra (`UnitMatchPy>=3.3,<4`,
+    `spikesorting-v2-matching` optional extra (`UnitMatchPy>=3.2.6,<3.2.8`,
     `mat73`). v0/v1 DataJoint schemas are unchanged and existing rows
     remain queryable through `SpikeSortingOutput`, but **active v0/v1
     spike-sorting workflows (Waveforms, MetricCuration, BurstPair,

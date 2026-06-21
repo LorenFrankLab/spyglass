@@ -6,7 +6,7 @@ The MVP. Builds the complete single-session sort pipeline: preprocessing → art
 
 **PREREQUISITES — must be merged before Phase 1 lands** (see [Phase 0c — SpikeInterface 0.104 compatibility boundary](phase-0c-si-0104-prerequisite.md)):
 
-1. `pyproject.toml` SI pin bumped to `>=0.104,<0.105`; `mountainsort5>=0.5` added; MS4 runtime status resolved; optional `spikesorting-v2-matching` extra includes `UnitMatchPy>=3.3,<4` and `mat73` if resolver checks pass.
+1. `pyproject.toml` SI pin bumped to `>=0.104,<0.105`; `mountainsort5>=0.5` added; MS4 runtime status resolved; optional `spikesorting-v2-matching` extra includes `UnitMatchPy>=3.2.6,<3.2.8` and `mat73` if resolver checks pass.
 2. Phase 0c legacy audit complete: v0/v1 active-runtime paths are either guarded as legacy-SI-0.99-only or explicitly ported with schema-neutral compatibility shims.
 3. Existing v0/v1 merge/query paths that do not invoke unsupported WaveformExtractor-era recomputation remain queryable under the new environment, or failures have explicit legacy-environment messages.
 4. Phase 0b MEArec fixtures generated; real-data v1 baseline captured when `SPIKESORTING_V2_REAL_NWB_PATH` is available in a legacy SI 0.99 environment, or explicitly documented as skipped. Any real-data metadata lookup uses the isolated integration database unless `SPYGLASS_ALLOW_PRODUCTION_SMOKE=1` is explicitly set for read-only production metadata lookup.
