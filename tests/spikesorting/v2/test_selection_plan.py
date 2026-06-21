@@ -22,11 +22,70 @@ import pytest
 
 from spyglass.spikesorting.v2._selection_plan import (
     build_artifact_detection_selection_plan,
+    build_recording_selection_plan,
     build_sorting_selection_plan,
 )
 
 _REC = "11111111-1111-1111-1111-111111111111"
 _ART = "22222222-2222-2222-2222-222222222222"
+
+_FULL_REC = {
+    "nwb_file_name": "mearec.nwb",
+    "sort_group_id": 0,
+    "interval_list_name": "raw data valid times",
+    "preprocessing_params_name": "default",
+    "team_name": "test_team",
+}
+
+
+# ---------- build_recording_selection_plan ---------------------------------
+
+
+def test_recording_plan_shapes_master_row_and_restriction():
+    """A full FK set yields the identity restriction plus a master row that
+    carries the deterministic recording_id; the FK set IS the restriction."""
+    plan = build_recording_selection_plan(dict(_FULL_REC))
+    assert isinstance(plan.recording_id, uuid.UUID)
+    assert plan.master_restriction == _FULL_REC
+    assert plan.master_row == {**_FULL_REC, "recording_id": plan.recording_id}
+
+
+def test_recording_plan_is_deterministic():
+    """Identical FK sets derive the identical recording_id."""
+    assert (
+        build_recording_selection_plan(dict(_FULL_REC)).recording_id
+        == build_recording_selection_plan(dict(_FULL_REC)).recording_id
+    )
+
+
+def test_recording_plan_rejects_unknown_field():
+    """An extra (joined/fetched) field is rejected, not silently hashed into
+    a different recording_id."""
+    with pytest.raises(ValueError, match="unknown field"):
+        build_recording_selection_plan(
+            {**_FULL_REC, "analysis_file_name": "x"}
+        )
+
+
+def test_recording_plan_requires_all_identity_fields():
+    """A missing identity field raises rather than deriving a partial id."""
+    incomplete = {k: v for k, v in _FULL_REC.items() if k != "team_name"}
+    with pytest.raises(ValueError, match="requires field"):
+        build_recording_selection_plan(incomplete)
+
+
+def test_recording_plan_accepts_matching_supplied_id():
+    """An explicit recording_id equal to the derived id is accepted."""
+    det = build_recording_selection_plan(dict(_FULL_REC)).recording_id
+    plan = build_recording_selection_plan({**_FULL_REC, "recording_id": det})
+    assert plan.recording_id == det
+
+
+def test_recording_plan_rejects_mismatched_supplied_id():
+    """An explicit recording_id that disagrees with the derived id raises."""
+    wrong = uuid.UUID("99999999-9999-9999-9999-999999999999")
+    with pytest.raises(ValueError):
+        build_recording_selection_plan({**_FULL_REC, "recording_id": wrong})
 
 
 # ---------- build_sorting_selection_plan -----------------------------------

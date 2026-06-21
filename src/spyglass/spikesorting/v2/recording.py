@@ -796,40 +796,38 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             ``{"recording_id": <uuid>}`` -- never a list, never the full
             row.
         """
-        from spyglass.spikesorting.v2._selection_identity import (
-            assert_supplied_id_matches,
-            deterministic_id,
-            recording_identity_payload,
+        from spyglass.spikesorting.v2._selection_plan import (
+            build_recording_selection_plan,
         )
         from spyglass.spikesorting.v2.utils import (
             _ensure_lookup_row_exists,
             _is_duplicate_key_error,
         )
 
-        keys_minus_uuid = recording_identity_payload(key)
-        recording_id = deterministic_id("recording", keys_minus_uuid)
-        assert_supplied_id_matches(
-            key.get("recording_id"), recording_id, field="recording_id"
-        )
+        # Pure half: validate the FK set, derive the deterministic
+        # recording_id, and shape the row to insert (steps 1 + 3 above).
+        plan = build_recording_selection_plan(key)
 
-        existing = cls._find_existing_pk(keys_minus_uuid, recording_id)
+        existing = cls._find_existing_pk(
+            plan.master_restriction, plan.recording_id
+        )
         if existing is not None:
             return existing
 
         # Translate the would-be DataJoint FK IntegrityError into a
         # clear "missing default row" message before the insert attempts.
-        if "preprocessing_params_name" in keys_minus_uuid:
+        if "preprocessing_params_name" in plan.master_restriction:
             _ensure_lookup_row_exists(
                 PreprocessingParameters,
                 {
-                    "preprocessing_params_name": keys_minus_uuid[
+                    "preprocessing_params_name": plan.master_restriction[
                         "preprocessing_params_name"
                     ]
                 },
                 helper_name="RecordingSelection.insert_selection",
                 insert_default_path="PreprocessingParameters.insert_default()",
             )
-        new_key = {**keys_minus_uuid, "recording_id": recording_id}
+        new_key = plan.master_row
         try:
             # allow_direct_insert: this helper IS the validation boundary.
             cls.insert1(new_key, allow_direct_insert=True)
@@ -842,9 +840,11 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             logger.debug(
                 "RecordingSelection.insert_selection: lost deterministic-id "
                 "race on %s; returning the existing row.",
-                recording_id,
+                plan.recording_id,
             )
-            existing = cls._find_existing_pk(keys_minus_uuid, recording_id)
+            existing = cls._find_existing_pk(
+                plan.master_restriction, plan.recording_id
+            )
             if existing is None:
                 raise
             return existing

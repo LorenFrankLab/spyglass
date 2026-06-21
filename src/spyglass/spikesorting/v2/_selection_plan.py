@@ -1,12 +1,13 @@
 """Pure builders for the v2 selection insert plans.
 
-``SortingSelection`` / ``ArtifactDetectionSelection`` ``insert_selection``
-are split into a pure half (here) and a DB half (the orchestrator). The
-builders validate the selection request, normalize ids, compute the
-deterministic content-addressed primary key, and assemble the master +
-source part rows to insert. The orchestrator then runs find-existing,
-the FK pre-checks, and the atomic insert transaction (with duplicate-PK
-race recovery) on the returned plan.
+``RecordingSelection`` / ``SortingSelection`` /
+``ArtifactDetectionSelection`` ``insert_selection`` are split into a pure
+half (here) and a DB half (the orchestrator). The builders validate the
+selection request, normalize ids, compute the deterministic content-
+addressed primary key, and assemble the master + source part rows to
+insert. The orchestrator then runs find-existing, the FK pre-checks, and
+the atomic insert transaction (with duplicate-PK race recovery) on the
+returned plan.
 
 Isolating the pure half makes the input-validation + identity + row-shaping
 logic unit-testable without a DataJoint transaction -- so the
@@ -26,8 +27,23 @@ from spyglass.spikesorting.v2._selection_identity import (
     artifact_detection_identity_payload,
     assert_supplied_id_matches,
     deterministic_id,
+    recording_identity_payload,
     sorting_identity_payload,
 )
+
+
+class RecordingSelectionPlan(NamedTuple):
+    """The row + restriction a ``RecordingSelection`` insert needs.
+
+    ``RecordingSelection`` has no source part: its logical identity is the
+    full FK set (Raw, SortGroupV2, IntervalList, PreprocessingParameters,
+    LabTeam), which doubles as ``master_restriction`` for find-existing.
+    ``master_row`` is that FK set plus the content-addressed ``recording_id``.
+    """
+
+    recording_id: uuid.UUID
+    master_restriction: dict
+    master_row: dict
 
 
 class SortingSelectionPlan(NamedTuple):
@@ -63,6 +79,37 @@ class ArtifactDetectionSelectionPlan(NamedTuple):
     source_restriction: dict
     master_row: dict
     source_row: dict
+
+
+def build_recording_selection_plan(key: dict) -> RecordingSelectionPlan:
+    """Validate a ``RecordingSelection`` request and build its insert plan.
+
+    The logical identity is the full FK set (Raw, SortGroupV2, IntervalList,
+    PreprocessingParameters, LabTeam); the ``recording_id`` PK is content-
+    addressed from it via :func:`deterministic_id`. Field validation
+    (unknown-field rejection, required-field checks) is delegated to
+    :func:`recording_identity_payload`, the single source of truth shared
+    with ``preflight_v2_pipeline`` so the two cannot derive different ids.
+
+    Raises
+    ------
+    ValueError
+        If a required identity field is missing, if ``key`` carries a field
+        other than the identity fields and the optional ``recording_id``, or
+        if an explicit ``recording_id`` does not equal the derived
+        deterministic id.
+    """
+    master_restriction = recording_identity_payload(key)
+    recording_id = deterministic_id("recording", master_restriction)
+    assert_supplied_id_matches(
+        key.get("recording_id"), recording_id, field="recording_id"
+    )
+    master_row = {**master_restriction, "recording_id": recording_id}
+    return RecordingSelectionPlan(
+        recording_id=recording_id,
+        master_restriction=master_restriction,
+        master_row=master_row,
+    )
 
 
 def build_sorting_selection_plan(key: dict) -> SortingSelectionPlan:
