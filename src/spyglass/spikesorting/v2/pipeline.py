@@ -59,3 +59,16 @@ from spyglass.spikesorting.v2._pipeline_run import (
     run_v2_pipeline,
     run_v2_pipeline_session,
 )
+from spyglass.spikesorting.v2._pipeline_types import (
+    PipelineOutcome,
+    PipelineStageSeconds,
+    RunV2PipelineInputs,
+    RunV2PipelineRequiredInputs,
+    RunV2PipelineSessionFailed,
+    RunV2PipelineSessionInputs,
+    RunV2PipelineSessionOk,
+    RunV2PipelineSessionRequiredInputs,
+    RunV2PipelineSessionResult,
+    RunV2PipelineSummary,
+    StageStatus,
+)

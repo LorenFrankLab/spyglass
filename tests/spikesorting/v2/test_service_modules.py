@@ -40,6 +40,7 @@ _DB_FREE_SERVICE_MODULES = [
     "_lookup_validation",
     "_nwb_metadata_helpers",
     "_pipeline_presets",
+    "_pipeline_types",
     "_recipe_catalog",
     "_recording_geometry",
     "_recording_nwb",
@@ -104,6 +105,39 @@ def test_service_module_imports_without_db_layer(modname):
         f"{modname} must import without a DB dependency\n"
         f"stdout={result.stdout}\nstderr={result.stderr}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# Pipeline typed contracts (pure metadata; no DB / no NWB IO)
+# --------------------------------------------------------------------------- #
+
+
+def test_pipeline_type_contracts_are_reexported_from_facade():
+    """Typed pipeline contracts are discoverable beside ``run_v2_pipeline``."""
+    from spyglass.spikesorting.v2 import _pipeline_types as pipeline_types
+    from spyglass.spikesorting.v2 import pipeline
+
+    for name in pipeline_types.__all__:
+        assert getattr(pipeline, name) is getattr(pipeline_types, name)
+
+    assert pipeline_types.RunV2PipelineInputs.__required_keys__ == {
+        "nwb_file_name",
+        "sort_group_id",
+        "interval_list_name",
+        "team_name",
+    }
+    assert pipeline_types.RunV2PipelineInputs.__optional_keys__ == {
+        "pipeline_preset",
+        "description",
+        "require_units",
+        "preflight",
+    }
+    assert pipeline_types.RunV2PipelineSessionInputs.__required_keys__ == {
+        "nwb_file_name",
+        "interval_list_name",
+        "team_name",
+        "pipeline_preset",
+    }
 
 
 # --------------------------------------------------------------------------- #

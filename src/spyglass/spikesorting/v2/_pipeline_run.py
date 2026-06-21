@@ -10,7 +10,8 @@ also imports the two shared run-summary helpers from ``_pipeline_reporting``.
 from __future__ import annotations
 
 import time
-from typing import Any
+from collections.abc import Callable
+from typing import Any, cast
 
 from spyglass.spikesorting.v2._pipeline_preflight import (
     _resolve_session_sort_group_ids,
@@ -22,18 +23,26 @@ from spyglass.spikesorting.v2._pipeline_reporting import (
     _run_metadata,
     _run_warnings,
 )
+from spyglass.spikesorting.v2._pipeline_types import (
+    RunV2PipelineSessionResult,
+    RunV2PipelineSummary,
+    StageStatus,
+)
 
 
 # Closed vocabulary for the per-stage ``*_status`` run-summary keys. A stage is
 # ``"computed"`` when its row did not exist before this call and populate /
 # insert_curation created it this call; ``"reused"`` when the row already
 # existed and the call no-opped. Test code asserts each status is a member.
-_STAGE_STATUSES = frozenset({"computed", "reused"})
+_STAGE_STATUSES: frozenset[StageStatus] = frozenset({"computed", "reused"})
 
 
 def _run_stage(
-    stage: str, exists: bool, work, partial: dict
-) -> tuple[Any, str, float]:
+    stage: str,
+    exists: bool,
+    work: Callable[[], Any],
+    partial: dict[str, Any],
+) -> tuple[Any, StageStatus, float]:
     """Time a pipeline stage's ``work()``; classify it; wrap failures.
 
     ``exists`` is the result of a pre-``work`` existence check on the stage's
@@ -52,7 +61,7 @@ def _run_stage(
     """
     from spyglass.spikesorting.v2.exceptions import PipelineStageError
 
-    status = "reused" if exists else "computed"
+    status: StageStatus = "reused" if exists else "computed"
     start = time.perf_counter()
     try:
         result = work()
@@ -79,7 +88,7 @@ def run_v2_pipeline(
     description: str = "",
     require_units: bool = False,
     preflight: bool = True,
-) -> dict[str, Any]:
+) -> RunV2PipelineSummary:
     """End-to-end single-session sort: recording -> artifact detection -> sort -> curation.
 
     Chains the v2 ``insert_selection`` + ``populate`` calls into one
@@ -152,7 +161,7 @@ def run_v2_pipeline(
 
     Returns
     -------
-    dict
+    RunV2PipelineSummary
         Run summary with the following stage keys:
             ``pipeline_preset``          : the pipeline-preset name
             ``recording_id``             : RecordingSelection PK
@@ -406,7 +415,7 @@ def run_v2_pipeline(
     run_summary["curation_id"] = curation_key["curation_id"]
     run_summary["merge_id"] = merge_id
     run_summary["stage_seconds"] = stage_seconds
-    return run_summary
+    return cast(RunV2PipelineSummary, run_summary)
 
 
 def run_v2_pipeline_session(
@@ -419,7 +428,7 @@ def run_v2_pipeline_session(
     require_units: bool = False,
     preflight: bool = True,
     continue_on_error: bool = False,
-) -> list[dict[str, Any]]:
+) -> list[RunV2PipelineSessionResult]:
     """Sort every (or selected) sort group in a session in one call.
 
     A thin batch wrapper over :func:`run_v2_pipeline`: it resolves the
@@ -473,7 +482,7 @@ def run_v2_pipeline_session(
 
     Returns
     -------
-    list of dict
+    list[RunV2PipelineSessionResult]
         One entry per target group, in ascending ``sort_group_id`` order.
         A successful entry is the single-group run summary (see
         :func:`run_v2_pipeline`) plus ``sort_group_id`` and ``outcome="ok"``.
@@ -633,4 +642,4 @@ def run_v2_pipeline_session(
         f"{n_warn} with warnings. "
         "Call describe_run(results) for the per-group receipt."
     )
-    return results
+    return cast(list[RunV2PipelineSessionResult], results)
