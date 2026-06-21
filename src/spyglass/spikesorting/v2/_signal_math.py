@@ -31,6 +31,51 @@ def assert_freq_max_below_nyquist(
         )
 
 
+def assert_positive_sampling_frequency(
+    sampling_frequency, *, context: str = ""
+) -> float:
+    """Return ``sampling_frequency`` as a float, or raise if not finite and > 0.
+
+    Frame <-> time conversion divides by the sampling frequency (or by the
+    sample period ``1/fs``), so a zero, negative, NaN, or infinite value
+    silently yields an infinite / NaN sample period and mis-maps every frame
+    instead of failing. ``context`` is prepended to name the call site.
+    """
+    import numpy as _np
+
+    fs = float(sampling_frequency)
+    if not _np.isfinite(fs) or fs <= 0.0:
+        raise ValueError(
+            f"{context}sampling frequency must be a finite positive number; "
+            f"got {sampling_frequency!r}."
+        )
+    return fs
+
+
+def assert_monotonic_timestamps(timestamps, *, context: str = "") -> None:
+    """Raise if ``timestamps`` is empty or steps backward.
+
+    ``searchsorted``-based frame mapping (``_consolidate_intervals`` /
+    ``_spike_times_to_frames``) and the first/last-sample reads assume a
+    non-empty, monotonically non-decreasing wall-clock vector; an out-of-order
+    or empty vector silently mis-slices the recording rather than failing.
+    Equal consecutive timestamps are allowed (``searchsorted`` handles
+    duplicates); only a strictly backward step is rejected. ``context`` is
+    prepended to name the call site.
+    """
+    import numpy as _np
+
+    ts = _np.asarray(timestamps)
+    if ts.size == 0:
+        raise ValueError(f"{context}timestamp vector is empty.")
+    if ts.size > 1 and bool(_np.any(_np.diff(ts) < 0)):
+        raise ValueError(
+            f"{context}timestamps must be monotonically non-decreasing "
+            "(searchsorted-based frame mapping would otherwise silently "
+            "mis-slice the recording); found a backward step."
+        )
+
+
 def _get_recording_timestamps(
     recording,
     override=None,
@@ -133,6 +178,9 @@ def _consolidate_intervals(intervals, timestamps):
     if not _np.all(intervals[:-1] <= intervals[1:]):
         intervals = intervals[_np.argsort(intervals[:, 0])]
 
+    assert_monotonic_timestamps(
+        timestamps, context="_consolidate_intervals: "
+    )
     start_indices = _np.searchsorted(timestamps, intervals[:, 0], side="left")
     # Exclusive end: ``side="right"`` returns the count of timestamps <= value,
     # which is exactly the half-open end ``frame_slice`` expects.
@@ -220,6 +268,9 @@ def _spike_times_to_frames(recording_times, spike_times, n_samples, unit_id):
             f"Unit {unit_id} has spike times but the recording has zero samples."
         )
 
+    assert_monotonic_timestamps(
+        recording_times, context=f"_spike_times_to_frames (unit {unit_id}): "
+    )
     insert_indices = _np.searchsorted(recording_times, spike_times, side="left")
     right_indices = _np.clip(insert_indices, 0, n_samples - 1)
     left_indices = _np.clip(insert_indices - 1, 0, n_samples - 1)
@@ -372,6 +423,9 @@ def _base_intervals_from_timestamps(timestamps, fs):
     ts = _np.asarray(timestamps, dtype=float)
     if ts.size == 0:
         return []
+    fs = assert_positive_sampling_frequency(
+        fs, context="_base_intervals_from_timestamps: "
+    )
     sample_period = 1.0 / float(fs)
     # Index i marks a gap when ts[i+1] - ts[i] exceeds 1.5 sample periods
     # (i.e. at least one sample of wall-clock time is missing).

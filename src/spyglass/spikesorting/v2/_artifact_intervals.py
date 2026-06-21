@@ -165,13 +165,18 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
     """
     import numpy as _np
 
+    from spyglass.spikesorting.v2._signal_math import (
+        assert_positive_sampling_frequency,
+    )
     from spyglass.spikesorting.v2.utils import (
         _base_intervals_from_timestamps,
     )
     from spyglass.utils import logger
 
     timestamps = recording.get_times()
-    fs = recording.get_sampling_frequency()
+    fs = assert_positive_sampling_frequency(
+        recording.get_sampling_frequency(), context="detect_artifacts: "
+    )
     # Recorded chunks, split at wall-clock discontinuities. For a
     # contiguous recording this is a single ``[t0, t_end]``; for
     # disjoint sort intervals it is one interval per chunk, so the

@@ -448,6 +448,9 @@ def restrict_recording(
     from spyglass.spikesorting.v2._recording_geometry import (
         spikeinterface_channel_ids,
     )
+    from spyglass.spikesorting.v2._signal_math import (
+        assert_positive_sampling_frequency,
+    )
     from spyglass.spikesorting.v2.utils import (
         _consolidate_intervals,
         _get_recording_timestamps,
@@ -487,7 +490,9 @@ def restrict_recording(
         and not _recording_has_explicit_time_vector(recording)
     )
     if use_lazy_regular_timestamps:
-        sampling_frequency = float(recording.get_sampling_frequency())
+        sampling_frequency = assert_positive_sampling_frequency(
+            recording.get_sampling_frequency(), context="restrict_recording: "
+        )
         intervals_in_frames = _consolidate_regular_intervals(
             valid_times,
             n_samples=_recording_num_frames(recording),

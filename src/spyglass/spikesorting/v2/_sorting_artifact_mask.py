@@ -77,6 +77,10 @@ def apply_artifact_mask(
     import numpy as _np
     import spikeinterface.preprocessing as sip
 
+    from spyglass.spikesorting.v2._signal_math import (
+        assert_monotonic_timestamps,
+        assert_positive_sampling_frequency,
+    )
     from spyglass.spikesorting.v2.exceptions import (
         EmptyArtifactValidTimesError,
     )
@@ -116,6 +120,7 @@ def apply_artifact_mask(
         )
 
     timestamps = recording.get_times()
+    assert_monotonic_timestamps(timestamps, context="apply_artifact_mask: ")
     # Walk the valid intervals left-to-right, collecting the
     # complement (artifact gaps) as a list of (start_frame,
     # end_frame) pairs. Each pair is materialized via
@@ -147,7 +152,9 @@ def apply_artifact_mask(
     # has ~1-sample spacing to its neighbor, so it is kept. (A 1-sample
     # artifact landing exactly on a chunk's final sample is the lone
     # uncovered edge; negligible at the chunk boundary.)
-    sample_period = 1.0 / float(recording.get_sampling_frequency())
+    sample_period = 1.0 / assert_positive_sampling_frequency(
+        recording.get_sampling_frequency(), context="apply_artifact_mask: "
+    )
     frame_ranges = [
         (s, e)
         for (s, e) in frame_ranges

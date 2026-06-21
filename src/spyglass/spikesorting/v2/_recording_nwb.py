@@ -111,6 +111,9 @@ def write_nwb_artifact(
         SpikeInterfaceRecordingDataChunkIterator,
         TimestampsDataChunkIterator,
     )
+    from spyglass.spikesorting.v2._signal_math import (
+        assert_positive_sampling_frequency,
+    )
     from spyglass.spikesorting.v2.utils import (
         _get_recording_timestamps,
         _hash_nwb_recording,
@@ -153,7 +156,9 @@ def write_nwb_artifact(
         # timestamps iterator wraps a 1D vector; resolve through
         # ``_get_recording_timestamps`` so multi-segment NWBs and
         # persisted-timestamps overrides both flow through correctly.
-        sampling_frequency = float(recording.get_sampling_frequency())
+        sampling_frequency = assert_positive_sampling_frequency(
+            recording.get_sampling_frequency(), context="write_nwb_artifact: "
+        )
         timestamps = _get_recording_timestamps(
             recording, override=timestamps_override
         )
