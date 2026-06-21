@@ -23,12 +23,9 @@ from pathlib import Path
 import pytest
 
 # (module path, a representative public symbol, v1 fallback submodule hint)
+# ``metric_curation`` is intentionally absent: it is now a real v2 table module
+# (AnalyzerCuration replaces v1 MetricCuration + BurstPair), no longer a stub.
 STUB_MODULES_WITH_V1_FALLBACK = [
-    (
-        "spyglass.spikesorting.v2.metric_curation",
-        "MetricCuration",
-        "spikesorting.v1.metric_curation",
-    ),
     (
         "spyglass.spikesorting.v2.figpack_curation",
         "FigURLCuration",

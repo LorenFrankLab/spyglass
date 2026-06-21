@@ -36,6 +36,10 @@ def initialize_v2_defaults() -> None:
     >>> initialize_v2_defaults()
     """
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
+    from spyglass.spikesorting.v2.metric_curation import (
+        AutoCurationRules,
+        QualityMetricParameters,
+    )
     from spyglass.spikesorting.v2.recording import PreprocessingParameters
     from spyglass.spikesorting.v2.session_group import (
         MotionCorrectionParameters,
@@ -46,6 +50,8 @@ def initialize_v2_defaults() -> None:
     ArtifactDetectionParameters.insert_default()
     SorterParameters.insert_default()
     MotionCorrectionParameters.insert_default()
+    QualityMetricParameters.insert_default()
+    AutoCurationRules.insert_default()
 
 
 __all__ = ["initialize_v2_defaults", "CurationLabel"]
