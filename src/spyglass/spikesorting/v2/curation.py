@@ -1246,6 +1246,27 @@ class CurationV2(SpyglassMixin, dj.Manual):
         return recording
 
     @classmethod
+    def _load_curation_recording_meta(cls, key):
+        """Fetch the master row + upstream recording metadata for a curation.
+
+        Returns ``(row, recording_row, fs, abs_path)``: the ``CurationV2``
+        master row, the upstream ``Recording`` row, its sampling frequency,
+        and the curated-units NWB path. Shared by ``get_sorting`` and
+        ``get_merged_sorting`` so the master row is fetched ONCE and its
+        ``sorting_id`` threaded into ``_upstream_recording_row`` (skipping a
+        redundant lookup). The curated-units NWB itself is NOT read here --
+        callers read it lazily so ``get_sorting`` can short-circuit a
+        zero-unit curation without touching the filesystem.
+        """
+        row = (cls & key).fetch1()
+        recording_row = cls._upstream_recording_row(
+            key, sorting_id=row["sorting_id"]
+        )
+        fs = float(recording_row["sampling_frequency"])
+        abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
+        return row, recording_row, fs, abs_path
+
+    @classmethod
     def get_sorting(
         cls, key: dict, as_dataframe: bool = False
     ) -> "si.BaseSorting | pd.DataFrame":
@@ -1295,10 +1316,9 @@ class CurationV2(SpyglassMixin, dj.Manual):
         """
         import spikeinterface as si
 
-        row = (cls & key).fetch1()
-        abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
-        recording_row = cls._upstream_recording_row(key)
-        fs = float(recording_row["sampling_frequency"])
+        row, recording_row, fs, abs_path = cls._load_curation_recording_meta(
+            key
+        )
 
         # A curation created with apply_merge=False records PROPOSED merges in
         # MergeGroup but does NOT apply them: get_sorting (what consumers such
@@ -1307,7 +1327,9 @@ class CurationV2(SpyglassMixin, dj.Manual):
         # silently misled; the decoding CONSUMERS additionally RAISE via
         # SpikeSortingOutput.assert_decoding_merge_ids_ok so a preview curation
         # never reaches a decode.
-        if cls.has_unapplied_proposed_merges(key):
+        if cls.has_unapplied_proposed_merges(
+            key, merges_applied=row["merges_applied"]
+        ):
             logger.warning(
                 "CurationV2.get_sorting: curation "
                 f"(sorting_id={row['sorting_id']}, "
@@ -1362,7 +1384,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         )
 
     @classmethod
-    def has_unapplied_proposed_merges(cls, key) -> bool:
+    def has_unapplied_proposed_merges(cls, key, *, merges_applied=None) -> bool:
         """Return whether a curation has a proposed but unapplied merge.
 
         A curation created with ``apply_merge=False`` records proposed merges in
@@ -1376,6 +1398,10 @@ class CurationV2(SpyglassMixin, dj.Manual):
         ----------
         key : dict
             Restriction selecting a single ``CurationV2`` row.
+        merges_applied : bool, optional
+            The row's ``merges_applied`` value when the caller already holds
+            it; passing it skips the redundant scalar fetch. ``None`` (default)
+            fetches it from ``key``.
 
         Returns
         -------
@@ -1383,7 +1409,9 @@ class CurationV2(SpyglassMixin, dj.Manual):
             ``True`` if the curation was not applied and has at least one
             >1-contributor merge group; ``False`` otherwise.
         """
-        if bool((cls & key).fetch1("merges_applied")):
+        if merges_applied is None:
+            merges_applied = (cls & key).fetch1("merges_applied")
+        if bool(merges_applied):
             return False
         return any(
             len(contribs) > 1 for contribs in cls.get_merge_groups(key).values()
@@ -1713,10 +1741,9 @@ class CurationV2(SpyglassMixin, dj.Manual):
         # spurious "merges NOT applied" warning -- we ARE applying them). The
         # merge is applied in ABSOLUTE time (gap-correct on disjoint
         # recordings) inside the compute core; see its docstring.
-        row = (cls & key).fetch1()
-        recording_row = cls._upstream_recording_row(key)
-        fs = float(recording_row["sampling_frequency"])
-        abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
+        _row, recording_row, fs, abs_path = cls._load_curation_recording_meta(
+            key
+        )
         abs_times = read_units_abs_spike_times(abs_path)
         timestamps = recording_timestamps(recording_row)
         return build_lazy_merged_sorting(
@@ -1894,7 +1921,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         )
 
     @classmethod
-    def _upstream_recording_row(cls, key) -> dict:
+    def _upstream_recording_row(cls, key, *, sorting_id=None) -> dict:
         """Fetch the upstream Recording row for a CurationV2 key.
 
         Used by ``get_sorting`` to recover the recording's
@@ -1905,10 +1932,12 @@ class CurationV2(SpyglassMixin, dj.Manual):
 
         ``key`` may be a single dict or the list-of-dict form the
         merge dispatcher passes; the restriction-based fetch
-        normalizes both.
+        normalizes both. Pass ``sorting_id`` when the caller already
+        holds the master row to skip the redundant ``sorting_id`` lookup.
         """
         from spyglass.spikesorting.v2.recording import Recording
 
-        sorting_id = (cls & key).fetch1("sorting_id")
+        if sorting_id is None:
+            sorting_id = (cls & key).fetch1("sorting_id")
         source = SortingSelection.resolve_source({"sorting_id": sorting_id})
         return (Recording & source.key).fetch1()
