@@ -101,12 +101,12 @@ Phase 1 is large. The implementer may land it as one change set or as the follow
   - `get_sort_group_info(key) -> dj.Table` — returns ALL electrodes in the sort group joined to `Electrode * BrainRegion`, NOT `fetch(limit=1)`. This is the fix for the v1 multi-region under-reporting bug. Returns a DataJoint relation (not a DataFrame) so callers can chain restrictions.
 
 - **Implement a MINIMAL `run_v2_pipeline()` orchestrator** in `src/spyglass/spikesorting/v2/pipeline.py`. Phase 1 ships a usable single-call API so the MVP is actually usable without writing the orchestration boilerplate; Phase 5 extends it with metrics + concat + FigPack and adds `run_v2_unit_match()` for the sort-then-match workflow. Phase 1 scope:
-  - Signature: `run_v2_pipeline(nwb_file_name, sort_group_id, interval_list_name, team_name, pipeline_preset="franklab_tetrode_mountainsort5") -> dict`.
+  - Signature: `run_v2_pipeline(nwb_file_name, sort_group_id, interval_list_name, team_name, pipeline_preset="franklab_tetrode_hippocampus_30khz_ms5_2026_06") -> dict`.
   - Internally chains: `RecordingSelection.insert_selection` → `Recording.populate` → `ArtifactDetectionSelection.insert_selection` → `ArtifactDetection.populate` → `SortingSelection.insert_selection` → `Sorting.populate` → `CurationV2.insert_curation` → auto-registration in `SpikeSortingOutput.CurationV2`.
   - NO metrics / auto-curation hookup (Phase 2 adds).
   - NO concat support (Phase 3 extends).
   - NO matcher / FigPack (Phases 4–5).
-  - Phase 1 ships **3 presets**: `franklab_tetrode_mountainsort4`, `franklab_tetrode_mountainsort5`, `franklab_tetrode_clusterless_thresholder`. The preset is a Pydantic-validated bundle of Lookup-row names; the orchestrator looks them up at first call.
+  - Phase 1 ships the dated franklab presets (e.g. `franklab_tetrode_hippocampus_30khz_ms4_2026_06`, `franklab_tetrode_hippocampus_30khz_ms5_2026_06`, `franklab_clusterless_2026_06`; the shipped catalog in `_recipe_catalog.py` later expanded to the full `*_ms4_2026_06` family + `franklab_neuropixels_ks4_2026_06`). The preset is a Pydantic-validated bundle of Lookup-row names; the orchestrator looks them up at first call.
   - Returns a manifest dict listing every `(stage, key)` tuple inserted/populated plus the final `merge_id`.
   - Idempotent: re-running with the same inputs finds the same existing rows and returns the same manifest, no duplicates.
 

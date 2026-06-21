@@ -1599,7 +1599,7 @@ def run_v2_pipeline(
     team_name: str | None = None,
     concat_session_group_owner: str | None = None,
     concat_session_group_name: str | None = None,
-    pipeline_preset: str = "franklab_tetrode_mountainsort5",
+    pipeline_preset: str = "franklab_tetrode_hippocampus_30khz_ms5_2026_06",
     skip_artifact: bool = False,
     auto_curate: bool = False,
     figpack: bool = False,
@@ -1692,12 +1692,13 @@ def run_v2_unit_match(
 - **Idempotent.** Re-running with same inputs finds existing rows, no duplicates.
 - **Manifest return.** Every touchpoint logged. Notebook prints it after running.
 - **Presets are named bundles** — no inline parameter editing. Custom presets are inserted by adding rows to each Lookup table once.
-- **Preset naming convention**: built-in presets use `{lab}_{probe_or_modality}_{sorter_or_workflow}` plus an optional topology suffix, e.g. `franklab_tetrode_mountainsort5`, `franklab_probe_kilosort4`, `franklab_tetrode_clusterless_thresholder`, `franklab_tetrode_mountainsort5_sameday_concat`.
+- **Preset naming convention**: built-in presets use the dated `{lab}_{probe_or_modality}_{region}_{rate}_{sorter}_{date}` pattern (shipped in `_recipe_catalog.py`), e.g. `franklab_tetrode_hippocampus_30khz_ms5_2026_06`, `franklab_neuropixels_ks4_2026_06`, `franklab_clusterless_2026_06`. (A same-day-concat preset following the same pattern is planned but not yet shipped.)
 - **Workflow separation.** `concat_session_group_owner` + `concat_session_group_name` means "sort this concatenated recording"; `run_v2_unit_match()` means "match these explicitly pinned per-member curations." The public API does not overload one `session_group_name` argument for both.
 
 ```python
-PRESETS = {
-    "franklab_tetrode_mountainsort5": {
+PRESETS = {  # illustrative shape only -- the shipped catalog lives in
+             # _recipe_catalog.py with dated keys; values below are schematic
+    "franklab_tetrode_hippocampus_30khz_ms5_2026_06": {
         "preprocessing_params_name": "default_franklab",
         "artifact_detection_params_name": "default",
         "sorter": "mountainsort5",
@@ -1706,9 +1707,9 @@ PRESETS = {
         "auto_curation_rules_name": "v1_default_nn_noise",
         "motion_correction_params_name": None,
     },
-    "franklab_probe_kilosort4": {...},
-    "franklab_tetrode_clusterless_thresholder": {...},
-    "franklab_tetrode_mountainsort5_sameday_concat": {
+    "franklab_neuropixels_ks4_2026_06": {...},
+    "franklab_clusterless_2026_06": {...},
+    "<franklab same-day-concat preset -- planned, not yet shipped>": {
         "preprocessing_params_name": "default_franklab",
         # artifact_detection_params_name is None for concat presets: concat sorts run
         # NO artifact detection (the concat SortingSelection has no
