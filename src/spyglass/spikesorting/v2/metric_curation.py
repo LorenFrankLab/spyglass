@@ -376,9 +376,11 @@ class AutoCurationRules(SpyglassMixin, dj.Lookup):
         """Return master rows whose Rule rows are malformed or missing.
 
         Direct inserts into ``AutoCurationRules.Rule`` bypass whole-payload
-        validation; this surfaces masters with no rule rows (when a preset is
-        ``none``, so no auto-merge either) or rule rows that fail the rule
-        schema, for use in an integrity check.
+        validation; this surfaces a CUSTOM rows-set that does nothing (preset
+        ``none`` and no rules) or rule rows that fail the rule schema, for use
+        in an integrity check. The shipped ``"none"`` default is the documented
+        inert "skip auto-curation" sentinel, so it is exempt from the
+        no-effect flag.
         """
         from spyglass.spikesorting.v2._params.metric_curation import (
             AutoCurationRuleSchema,
@@ -390,7 +392,11 @@ class AutoCurationRules(SpyglassMixin, dj.Lookup):
             rules = (cls.Rule & {"auto_curation_rules_name": name}).fetch(
                 as_dict=True
             )
-            if master["auto_merge_preset"] == "none" and not rules:
+            if (
+                name != "none"
+                and master["auto_merge_preset"] == "none"
+                and not rules
+            ):
                 offenders.append(
                     {"auto_curation_rules_name": name, "issue": "no_effect"}
                 )
@@ -427,28 +433,42 @@ class AnalyzerCurationSelection(SpyglassMixin, dj.Manual):
     def insert_selection(cls, key: dict) -> dict:
         """Insert or find an analyzer-curation selection; return PK-only dict.
 
-        Warns (does not raise) when the upstream ``CurationV2`` was itself
-        produced by auto-curation -- running metrics over post-merge templates
-        is usually not intended, but is occasionally deliberate.
+        The ``analyzer_curation_id`` PK is content-addressed (a ``uuid5`` of
+        the logical identity ``(sorting_id, curation_id, metric_params_name,
+        auto_curation_rules_name)``) via the shared deterministic-selection
+        contract, so the same logical selection always maps to one id. The PK
+        uniqueness constraint -- not a check-then-insert dedup -- is the
+        concurrency guard: two concurrent callers compute the same id, the DB
+        accepts one, and the loser refetches it.
+
+        Raises ``DuplicateSelectionError`` if any existing row for this
+        identity carries a non-deterministic id (a raw ``dj.insert`` bypass or
+        a legacy row). Warns (does not raise) when the upstream ``CurationV2``
+        was itself produced by auto-curation -- running metrics over post-merge
+        templates is usually not intended, but is occasionally deliberate.
         """
+        from spyglass.spikesorting.v2._selection_identity import (
+            assert_supplied_id_matches,
+            deterministic_id,
+        )
+        from spyglass.spikesorting.v2.utils import _is_duplicate_key_error
+
         identity = {
             "sorting_id": key["sorting_id"],
             "curation_id": key["curation_id"],
             "metric_params_name": key["metric_params_name"],
             "auto_curation_rules_name": key["auto_curation_rules_name"],
         }
-        existing = (cls & identity).fetch("KEY", as_dict=True)
-        if len(existing) == 1:
-            return existing[0]
-        if len(existing) > 1:  # pragma: no cover - guarded by unique identity
-            from spyglass.spikesorting.v2.exceptions import (
-                DuplicateSelectionError,
-            )
+        analyzer_curation_id = deterministic_id("analyzer_curation", identity)
+        assert_supplied_id_matches(
+            key.get("analyzer_curation_id"),
+            analyzer_curation_id,
+            field="analyzer_curation_id",
+        )
 
-            raise DuplicateSelectionError(
-                "AnalyzerCurationSelection has duplicate selection rows for "
-                f"{identity}."
-            )
+        existing = cls._find_existing_pk(identity, analyzer_curation_id)
+        if existing is not None:
+            return existing
 
         upstream_source = (
             CurationV2
@@ -462,9 +482,42 @@ class AnalyzerCurationSelection(SpyglassMixin, dj.Manual):
                 "usually not intended."
             )
 
-        new_key = {**identity, "analyzer_curation_id": uuid.uuid4()}
-        cls.insert1(new_key)
-        return {"analyzer_curation_id": new_key["analyzer_curation_id"]}
+        new_key = {**identity, "analyzer_curation_id": analyzer_curation_id}
+        try:
+            cls.insert1(new_key, allow_direct_insert=True)
+        except Exception as exc:  # noqa: BLE001 - re-raised unless dup-PK race
+            if not _is_duplicate_key_error(exc):
+                raise
+            existing = cls._find_existing_pk(identity, analyzer_curation_id)
+            if existing is None:
+                raise
+            return existing
+        return {"analyzer_curation_id": analyzer_curation_id}
+
+    @classmethod
+    def _find_existing_pk(cls, identity, deterministic_id):
+        """Return the PK-only dict for ``identity`` or None; guard bad ids."""
+        from spyglass.spikesorting.v2.exceptions import (
+            DuplicateSelectionError,
+        )
+
+        existing_ids = (cls & identity).fetch("analyzer_curation_id")
+        bypassed = [
+            aid
+            for aid in existing_ids
+            if uuid.UUID(str(aid)) != deterministic_id
+        ]
+        if bypassed:
+            raise DuplicateSelectionError(
+                "AnalyzerCurationSelection has duplicate selection rows for "
+                f"{identity} with non-deterministic id(s) {sorted(map(str, bypassed))} "
+                f"(expected the content-addressed {deterministic_id}). This is "
+                "an integrity bug -- a row was inserted bypassing "
+                "insert_selection."
+            )
+        if len(existing_ids):
+            return {"analyzer_curation_id": deterministic_id}
+        return None
 
 
 @schema

@@ -341,3 +341,61 @@ def test_compute_merge_groups_suggests_planted_oversplit(dj_conn):
     assert all(isinstance(u, int) for group in groups for u in group)
     # 'none' short-circuits without calling SI.
     assert AnalyzerCuration._compute_merge_groups(analyzer, "none", {}) == []
+
+
+@pytest.mark.db_unit
+def test_auto_curation_rules_none_default_passes_integrity(dj_conn):
+    """The shipped 'none' inert default is exempt; a custom no-op is flagged."""
+    from spyglass.spikesorting.v2.metric_curation import AutoCurationRules
+
+    AutoCurationRules.insert_default()
+    offenders = AutoCurationRules.check_rule_integrity()
+    flagged = {o["auto_curation_rules_name"] for o in offenders}
+    assert "none" not in flagged  # canonical inert sentinel is not malformed
+
+    # A CUSTOM preset='none' + no-rules set genuinely does nothing -> flagged.
+    name = "custom_noop_rules"
+    (AutoCurationRules & {"auto_curation_rules_name": name}).delete_quick()
+    AutoCurationRules.insert_rules(
+        {"auto_curation_rules_name": name, "auto_merge_preset": "none"}, []
+    )
+    try:
+        offenders = AutoCurationRules.check_rule_integrity()
+        custom = [
+            o for o in offenders if o["auto_curation_rules_name"] == name
+        ]
+        assert custom and custom[0]["issue"] == "no_effect"
+    finally:
+        (AutoCurationRules & {"auto_curation_rules_name": name}).delete_quick()
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_analyzer_curation_selection_idempotent_content_addressed(
+    populated_sorting_with_curation, analyzer_curation_defaults
+):
+    """insert_selection is content-addressed: repeat calls return one id."""
+    from spyglass.spikesorting.v2._selection_identity import deterministic_id
+    from spyglass.spikesorting.v2.metric_curation import (
+        AnalyzerCurationSelection,
+    )
+
+    key = {
+        **populated_sorting_with_curation,
+        "metric_params_name": "minimal",
+        "auto_curation_rules_name": "none",
+    }
+    sel1 = AnalyzerCurationSelection.insert_selection(key)
+    sel2 = AnalyzerCurationSelection.insert_selection(key)  # idempotent refetch
+    assert sel1 == sel2
+
+    identity = {
+        "sorting_id": key["sorting_id"],
+        "curation_id": key["curation_id"],
+        "metric_params_name": "minimal",
+        "auto_curation_rules_name": "none",
+    }
+    expected = deterministic_id("analyzer_curation", identity)
+    assert str(sel1["analyzer_curation_id"]) == str(expected)
+    assert len(AnalyzerCurationSelection & sel1) == 1  # no duplicate row
+    (AnalyzerCurationSelection & sel1).delete_quick()
