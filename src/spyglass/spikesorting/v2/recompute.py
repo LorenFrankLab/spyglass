@@ -607,8 +607,9 @@ def _insert_comparison(table, key, stored_hashes, new_hashes, created_at):
 def _authorize_artifacts_for_deletion(
     recompute_table, restriction, *, force_stale_env, artifact_pk
 ):
-    """Return ``(authorized_artifact_keys, matched_query)`` for deletion.
+    """Return ``(authorized, matched_query)`` for deletion.
 
+    ``authorized`` is a list of ``(artifact_key, authorizing_rows)`` tuples.
     Authorization is at the ARTIFACT level, not per recompute row: an artifact
     (one ``recording_id`` / ``sorting_id``) is authorized when it has a
     ``matched=1``, not-yet-deleted recompute row in the CURRENT
@@ -617,14 +618,20 @@ def _authorize_artifacts_for_deletion(
     authorizes it with an audit log line). Keying on the artifact -- rather than
     the full recompute row including ``env_id`` -- means a stale-env row never
     blocks an artifact that also has a current-env match.
+
+    ``authorizing_rows`` is the subset of rows that grant the authorization
+    (the current-env rows when present, else the stale rows under
+    ``force_stale_env``). The age gate is applied to ONLY these rows, so a
+    stale/recent sibling row never blocks an otherwise-authorized artifact.
     """
     current_env = _current_env_id()
     matched = recompute_table & restriction & "matched=1 AND deleted=0"
     authorized = []
     for artifact in (dj.U(*artifact_pk) & matched).fetch("KEY", as_dict=True):
         artifact_rows = matched & artifact
-        if artifact_rows & {"env_id": current_env}:
-            authorized.append(artifact)
+        current_rows = artifact_rows & {"env_id": current_env}
+        if current_rows:
+            authorized.append((artifact, current_rows))
             continue
         stale = sorted(set(artifact_rows.fetch("env_id")))
         if force_stale_env:
@@ -633,7 +640,7 @@ def _authorize_artifacts_for_deletion(
                 f"matches {stale} (current env {current_env!r} has no match). "
                 "Audit-logged."
             )
-            authorized.append(artifact)
+            authorized.append((artifact, artifact_rows))
         else:
             raise StaleEnvMatchedError(
                 f"No matched recompute in current env {current_env!r} for "
@@ -680,9 +687,10 @@ def _delete_files(
         artifact_pk=artifact_pk,
     )
     deleted = []
-    for artifact in authorized:
-        artifact_rows = matched & artifact
-        if _too_recent_or_unknown(artifact_rows, cutoff):
+    for artifact, authorizing_rows in authorized:
+        # Age-gate the AUTHORIZING rows only -- a stale/recent sibling row must
+        # not block an artifact a valid current-env row authorizes.
+        if _too_recent_or_unknown(authorizing_rows, cutoff):
             continue
         fname = (parent_table & artifact).fetch1(file_attr)
         abs_path = Path(path_fn(fname))
@@ -698,7 +706,7 @@ def _delete_files(
             continue
         # Mark every matched row for this artifact deleted, only after the file
         # is gone (the file is per-artifact; the flag is per recompute row).
-        for key in artifact_rows.fetch("KEY", as_dict=True):
+        for key in (matched & artifact).fetch("KEY", as_dict=True):
             recompute_table.update1({**key, "deleted": 1})
         deleted.append(str(abs_path))
     return deleted
@@ -723,9 +731,8 @@ def _delete_analyzer_folders(
         artifact_pk=artifact_pk,
     )
     deleted = []
-    for artifact in authorized:
-        artifact_rows = matched & artifact
-        if _too_recent_or_unknown(artifact_rows, cutoff):
+    for artifact, authorizing_rows in authorized:
+        if _too_recent_or_unknown(authorizing_rows, cutoff):
             continue
         folder = Path(folder_fn(artifact["sorting_id"]))
         if dry_run:
@@ -741,19 +748,24 @@ def _delete_analyzer_folders(
                 "leaving deleted=0 so a later cleanup retries."
             )
             continue
-        for key in artifact_rows.fetch("KEY", as_dict=True):
+        for key in (matched & artifact).fetch("KEY", as_dict=True):
             recompute_table.update1({**key, "deleted": 1})
         deleted.append(str(folder))
     return deleted
 
 
 def _reclaimable_disk(query) -> str:
-    """Sum on-disk bytes of matched (reclaimable), not-yet-deleted artifacts."""
+    """Sum on-disk bytes of matched (reclaimable), not-yet-deleted artifacts.
+
+    Dedupes by ``analysis_file_name`` so an artifact with multiple matched env
+    rows is counted once (the file is per-artifact, not per recompute row).
+    """
     total = 0
-    for row in (query & "matched=1 AND deleted=0").fetch(
-        "analysis_file_name", as_dict=True
-    ):
-        abs_path = Path(AnalysisNwbfile.get_abs_path(row["analysis_file_name"]))
+    file_names = set(
+        (query & "matched=1 AND deleted=0").fetch("analysis_file_name")
+    )
+    for file_name in file_names:
+        abs_path = Path(AnalysisNwbfile.get_abs_path(file_name))
         if abs_path.exists():
             total += abs_path.stat().st_size
     return f"Total: {bytes_to_human_readable(total)}"

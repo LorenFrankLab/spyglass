@@ -319,7 +319,6 @@ def test_recording_recompute_mixed_env_deletes(
         RecordingArtifactRecompute,
         RecordingArtifactRecomputeSelection,
         RecordingArtifactVersions,
-        _artifact_created_at,
     )
 
     rec_key = _recording_key(populated_sorting)
@@ -328,7 +327,13 @@ def test_recording_recompute_mixed_env_deletes(
     RecordingArtifactRecompute.populate(rec_key, reserve_jobs=False)
     assert RecordingArtifactRecompute & rec_key & "matched=1"  # current env
 
-    # Plant a co-present stale-env matched row for the SAME artifact.
+    # Disk space with only the single current-env matched row (baseline for the
+    # no-double-count check below).
+    space_single = RecordingArtifactRecompute().get_disk_space(rec_key)
+
+    # Plant a co-present stale-env matched row for the SAME artifact, with an
+    # UNKNOWN (NULL) created_at -- under per-row age-gating this would have
+    # blocked the artifact; it must not, because the current-env row authorizes.
     stale_env = "planted_stale_env_00"
     UserEnvironment().insert1(
         {"env_id": stale_env, "env_hash": "0" * 32, "env": {"x": 1},
@@ -342,16 +347,19 @@ def test_recording_recompute_mixed_env_deletes(
     }
     RecordingArtifactRecomputeSelection.insert1(stale_sel, skip_duplicates=True)
     RecordingArtifactRecompute.insert1(
-        {**stale_sel, "matched": 1,
-         "created_at": _artifact_created_at(rec_key), "deleted": 0},
+        {**stale_sel, "matched": 1, "created_at": None, "deleted": 0},
         allow_direct_insert=True,
     )
 
-    # get_disk_space reports the matched (reclaimable) artifact.
-    space = RecordingArtifactRecompute().get_disk_space(rec_key)
-    assert "Total:" in space
+    # get_disk_space must NOT double-count the one file across the two env rows.
+    space_mixed = RecordingArtifactRecompute().get_disk_space(rec_key)
+    assert space_mixed == space_single, (
+        f"disk space double-counted across env rows: {space_mixed} != "
+        f"{space_single}"
+    )
 
-    # Current-env match authorizes deletion; the stale row must not block it.
+    # Current-env match authorizes deletion; the NULL-age stale row must not
+    # block it (age-gate applies only to the authorizing current-env row).
     listed = RecordingArtifactRecompute().delete_files(
         rec_key, dry_run=True, days_since_creation=0
     )
