@@ -4,8 +4,10 @@ The chunked scan re-hydrates the recording in each worker process via
 ``recording.to_dict()`` -> ``si.load(dict)`` (artifact.py
 ``_init_artifact_worker``). That path was untested: it could (a) crash if a
 cached NWB-backed recording doesn't round-trip cross-process under SI 0.104,
-or (b) silently fall back to serial if the recording isn't serializable
-(``ensure_n_jobs`` downgrades ``n_jobs`` to 1). This test runs detection at
+or (b) fail to re-hydrate in a spawned worker if the cached recording isn't
+pickle-serializable (``ensure_n_jobs`` admits a memory-serializable recording,
+but the worker pool still needs the ``to_dict()`` blob to load). This test runs
+detection at
 ``n_jobs=2`` on a REAL cached recording (a NumpyRecording would not exercise
 the cross-process path -- it isn't json/pickle serializable) and asserts the
 flagged valid_times are identical to the serial run.
@@ -97,15 +99,16 @@ def test_parallel_artifact_detection_matches_serial(dj_conn):
         if not (Recording & rec_pk):
             Recording.populate(rec_pk, reserve_jobs=False)
 
-        # The cached recording must be serializable, else ensure_n_jobs
-        # silently downgrades n_jobs>1 to 1 and "parallel" never happens.
+        # The cached recording must be pickle-serializable, else the spawned
+        # worker pool can't re-hydrate it from to_dict() and the n_jobs=2 run
+        # errors out instead of running in parallel.
         rec_obj = Recording().get_recording(rec_pk)
         serializable = rec_obj.check_serializability(
             "json"
         ) or rec_obj.check_serializability("pickle")
         assert serializable, (
-            "cached recording is not serializable; n_jobs>1 artifact "
-            "detection would silently fall back to serial (no parallelism)"
+            "cached recording is not pickle-serializable; the n_jobs>1 worker "
+            "pool could not re-hydrate it cross-process"
         )
 
         results = {}
@@ -160,9 +163,11 @@ def test_chunk_seam_detection_is_deterministic_serial_vs_parallel(
     double-counting its boundary frame, or mis-concatenating per-chunk flags)
     would shift the assembled valid-time boundary and break the equality.
 
-    The recording is saved to disk so it is serializable: ``ensure_n_jobs``
-    silently downgrades ``n_jobs>1`` to 1 for a non-serializable
-    ``NumpyRecording``, which would make the "parallel" run secretly serial.
+    The recording is saved to disk so it is pickle-serializable. An in-memory
+    ``NumpyRecording`` is memory-serializable (so ``ensure_n_jobs`` admits
+    ``n_jobs>1``) but cannot round-trip into a spawned worker via
+    ``to_dict()`` -> ``si.load``, so the multi-process scan needs a
+    file-backed recording.
     """
     import numpy as np
     import spikeinterface as si
@@ -183,19 +188,20 @@ def test_chunk_seam_detection_is_deterministic_serial_vs_parallel(
     rec_mem = si.NumpyRecording(traces_list=[traces], sampling_frequency=fs)
     rec_mem.set_channel_gains([1.0] * n_channels)  # gain 1 -> traces are uV
     rec_mem.set_channel_offsets([0.0] * n_channels)
-    # Persist to disk so the recording round-trips cross-process; otherwise
-    # n_jobs=2 would silently fall back to serial.
+    # Persist to disk so the recording round-trips cross-process into spawned
+    # workers (an in-memory NumpyRecording is not pickle-serializable).
     rec_disk = rec_mem.save(folder=str(tmp_path / "rec"), overwrite=True)
     rec_disk.set_channel_gains([1.0] * n_channels)
     rec_disk.set_channel_offsets([0.0] * n_channels)
     assert rec_disk.check_serializability(
         "pickle"
     ) or rec_disk.check_serializability("json"), (
-        "saved recording is not serializable; n_jobs=2 would downgrade to "
-        "serial and the chunk-seam comparison would be meaningless"
+        "saved recording is not pickle-serializable; the n_jobs=2 worker pool "
+        "could not re-hydrate it and the chunk-seam comparison would be vacuous"
     )
     assert ensure_n_jobs(rec_disk, n_jobs=2) == 2, (
-        "n_jobs=2 was downgraded; cannot exercise the multi-process seam path"
+        "ensure_n_jobs did not return 2; the multi-process seam path would "
+        "not be exercised"
     )
 
     params = ArtifactDetectionParamsSchema(
