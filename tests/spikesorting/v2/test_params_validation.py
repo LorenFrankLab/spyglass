@@ -214,11 +214,18 @@ def test_artifact_default_field_values():
 
 
 def test_artifact_none_preset_disables_detection():
-    """``detect=False`` lets all threshold fields be None."""
+    """``detect=False`` lets all threshold fields be None and they round-trip.
+
+    Turning detection off relaxes the ``detect=True`` requirement of at least
+    one threshold: both thresholds may be None and persist as None. Asserting
+    only ``detect is False`` would merely echo the constructor argument.
+    """
     blob = ArtifactDetectionParamsSchema(
-        detect=False, amplitude_threshold_uv=None
+        detect=False, amplitude_threshold_uv=None, zscore_threshold=None
     ).model_dump()
     assert blob["detect"] is False
+    assert blob["amplitude_threshold_uv"] is None
+    assert blob["zscore_threshold"] is None
 
 
 def test_artifact_detect_true_requires_a_threshold():

@@ -643,13 +643,18 @@ def test_apply_artifact_mask_zeroes_artifact_frames(populated_recording):
 
         # Boundary check: frame ``artifact_end_f`` (the half-open end)
         # is the first VALID frame after the gap and should NOT be
-        # forced to zero by the masker. (We compare to the unmasked
-        # value because the underlying preprocessed signal may be 0
-        # by coincidence at a single sample; the assertion catches
-        # off-by-one boundary regressions only if at least one of
-        # the test channels at this frame is non-zero in the source.)
+        # forced to zero by the masker. We compare to the unmasked
+        # value, but first assert the source sample is non-zero so the
+        # comparison cannot pass vacuously (if the preprocessed signal
+        # were 0 here by coincidence, masked == unmasked would be
+        # trivially true and the off-by-one guard would be inert).
         unmasked_boundary = recording.get_traces(
             start_frame=artifact_end_f, end_frame=artifact_end_f + 1
+        )
+        assert np.abs(unmasked_boundary).max() > 0, (
+            f"source sample at boundary frame {artifact_end_f} is all-zero; "
+            "the masked-vs-unmasked comparison below would be vacuous -- pick "
+            "a boundary frame whose preprocessed signal is non-zero"
         )
         masked_boundary = masked.get_traces(
             start_frame=artifact_end_f, end_frame=artifact_end_f + 1
@@ -896,26 +901,29 @@ def test_detect_artifacts_zscore_only_detection(dj_conn):
 
 
 def test_detect_artifacts_amplitude_and_zscore_combined(dj_conn):
-    """``_detect_artifacts`` OR-combines thresholds when both are set.
+    """``_detect_artifacts`` OR-combines the amplitude and z-score detectors.
 
-    v2 matches v1's OR semantics (``np.logical_or(above_z,
-    above_a)`` at ``spikesorting/utils.py:198``). Under OR a frame is flagged
-    if EITHER detector trips, so this test's synthetic 80 uV
-    baseline (which clears the 50 uV amplitude threshold on every
-    channel everywhere) flags the entire recording: the baseline
-    frames trip amplitude alone, and the 200 uV step deviation at
-    frames 3000-3099 trips both detectors. Net result:
-    ``valid_times`` is empty (whole recording flagged as artifact)
-    under OR; an earlier AND combine flagged only the step region.
-    Keeping the synthetic setup unchanged so the test name and data
-    continue to point at the AND-vs-OR semantics directly; the
-    assertion is what flips.
+    v2 matches v1's per-channel OR (``above_amp | above_z`` in
+    ``_artifact_compute._compute_artifact_chunk``): a channel is flagged when
+    EITHER detector trips, then a frame is an artifact when enough channels
+    are hit. This test discriminates OR from a hypothetical AND by giving each
+    detector its OWN region that the other detector cannot see:
 
-    The cross-channel z-score is also active here: the z-score is
-    computed across channels per frame (uniform baseline -> ~0
-    z-score), not per channel over time. Combined with OR, the
-    baseline still flags via amplitude, so the test outcome is the
-    same regardless of the z-score axis change.
+    * frames 1000-1099 -- every channel at 100 uV: trips amplitude (>50 uV)
+      but NOT the across-channel z-score (uniform row -> ~0 cross-channel z);
+    * frames 3000-3099 -- channel 0 alone at 20 uV: trips the across-channel
+      z-score (one channel deviates) but NOT amplitude (20 < 50 uV).
+
+    Under OR both regions are flagged, so the recording splits into three valid
+    segments. Under AND neither would be flagged (each region is seen by only
+    one detector), and a regression that broke EITHER branch would leave that
+    branch's region covered. The previous version used an 80 uV uniform
+    baseline that tripped amplitude on every frame, so the z-score branch
+    contributed nothing and the test passed on amplitude alone.
+
+    Background, channel count, z-score threshold, and proportion match
+    ``test_detect_artifacts_zscore_only_detection`` (a passing test), so the
+    uncorrelated background is known not to spuriously trip the z-score.
     """
     import numpy as np
 
@@ -924,37 +932,53 @@ def test_detect_artifacts_amplitude_and_zscore_combined(dj_conn):
     )
     from spyglass.spikesorting.v2.artifact import ArtifactDetection
 
-    n_samples, n_channels = 5000, 4
-    # 80 uV uniform baseline clears the 50 uV amplitude threshold
-    # on every channel for every frame; the 200 uV step at
-    # frames 3000-3099 trips both amplitude and (in v1's
-    # cross-channel form, briefly) z-score. Under OR everything
-    # is artifact.
-    traces = np.full((n_samples, n_channels), 80.0, dtype=np.float32)
-    traces[3000:3100, :] = 200.0
+    rng = np.random.default_rng(42)
+    n_samples, n_channels = 5000, 32
+    traces = rng.normal(0.0, 0.5, size=(n_samples, n_channels)).astype(
+        np.float32
+    )
+    # Amplitude-only region: uniform 100 uV (>50 uV amplitude; uniform across
+    # channels -> ~0 cross-channel z, so the z-score detector ignores it).
+    traces[1000:1100, :] = 100.0
+    # Z-score-only region: channel 0 deviates to 20 uV (<50 uV amplitude, so
+    # the amplitude detector ignores it; one deviating channel -> high
+    # cross-channel z). The other channels stay at background.
+    traces[3000:3100, 0] = 20.0
     rec = _build_synthetic_rec(traces)
 
     params = ArtifactDetectionParamsSchema(
         detect=True,
         amplitude_threshold_uv=50.0,
-        zscore_threshold=5.0,
-        proportion_above_threshold=0.5,
+        zscore_threshold=4.0,
+        proportion_above_threshold=1.0 / n_channels,  # any 1 channel
         removal_window_ms=0.05,
         join_window_ms=0.0,
         min_length_s=0.001,  # default 1.0 would wipe synthetic-recording intervals
     )
     valid_times = ArtifactDetection._detect_artifacts(rec, params)
+    timestamps = rec.get_times()
 
-    # OR mode: baseline trips amplitude alone -> every frame is
-    # flagged. ``valid_times`` is shape (0, 2). v1 parity restored
-    # after an earlier silent flip to AND.
-    assert valid_times.shape == (0, 2), (
-        f"OR-mode (amplitude OR z-score) expected to flag the entire "
-        f"recording given the 80 uV uniform baseline clears the 50 uV "
-        f"amplitude threshold on every channel; got shape "
-        f"{valid_times.shape}. v2 enforces v1's OR semantics; if "
-        f"this fails with shape (2, 2), an AND combine has silently "
-        f"regressed."
+    def _covered(t):
+        return any(lo <= t <= hi for lo, hi in valid_times)
+
+    # Under OR, BOTH single-detector regions are excised while a quiet
+    # background frame stays valid. An AND combine would leave both regions
+    # covered; a broken amplitude or z-score branch would leave its region
+    # covered.
+    assert not _covered(timestamps[1050]), (
+        "amplitude-only region (frames 1000-1099) is still valid -- the "
+        "amplitude branch did not contribute, or the combine became AND"
+    )
+    assert not _covered(timestamps[3050]), (
+        "z-score-only region (frames 3000-3099) is still valid -- the "
+        "z-score branch did not contribute, or the combine became AND"
+    )
+    assert _covered(timestamps[500]), (
+        "a quiet background frame was flagged; detection is over-triggering"
+    )
+    assert valid_times.shape == (3, 2), (
+        "expected 3 valid intervals around the two single-detector regions, "
+        f"got shape {valid_times.shape}"
     )
 
 
