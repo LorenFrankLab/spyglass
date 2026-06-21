@@ -1446,6 +1446,55 @@ class Sorting(SpyglassMixin, dj.Computed):
         """
         return load_or_rebuild_analyzer(self, key)
 
+    def add_extensions(
+        self, key: dict, extensions: list[str], **kwargs
+    ) -> list[str]:
+        """Add SortingAnalyzer extensions in place; return the ones computed.
+
+        Convenience for callers (and ``AnalyzerCuration``) that need
+        extensions beyond the sort-time base set. Only extensions NOT already
+        present are computed, so the call is idempotent and never recomputes
+        ``waveforms`` / ``templates`` (recomputing a parent cascade-deletes its
+        derived extensions and rewrites the committed ``peak_amplitude_uv``). A
+        different waveform window is a sort-time (``SorterParameters``)
+        decision, not an analyzer-curation recompute.
+
+        Job kwargs are resolved from this sort's ``SorterParameters`` row
+        (per the Job-Kwargs Resolution convention); explicit ``kwargs`` win on
+        conflict. The computed extensions persist to the on-disk analyzer
+        folder (SI's ``binary_folder`` format saves them automatically).
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``Sorting`` row.
+        extensions : list of str
+            SortingAnalyzer extension names to add.
+        **kwargs
+            Job kwargs that override the resolved per-row defaults.
+
+        Returns
+        -------
+        list of str
+            The extensions actually computed (already-present ones are
+            skipped); empty when every requested extension already exists.
+        """
+        from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
+
+        analyzer = self.get_analyzer(key)
+        to_add = [
+            ext for ext in extensions if not analyzer.has_extension(ext)
+        ]
+        if not to_add:
+            return []
+        sorter_job_kwargs = (
+            SorterParameters & (SortingSelection & key)
+        ).fetch1("job_kwargs")
+        resolved = _resolved_job_kwargs(sorter_job_kwargs)
+        resolved.update(kwargs)
+        analyzer.compute(to_add, **resolved)
+        return to_add
+
     def _rebuild_analyzer_folder(self, key) -> None:
         """Rebuild the analyzer folder for an existing Sorting row.
 
