@@ -32,6 +32,38 @@ cycle.
 from __future__ import annotations
 
 
+def ensure_extensions(analyzer, names, *, job_kwargs=None):
+    """Compute only the SortingAnalyzer extensions not already present.
+
+    Idempotent: an already-present extension is never recomputed (recomputing a
+    parent cascade-deletes its children and rewrites template-derived values).
+    ``random_seed`` is stripped from ``job_kwargs`` because it is an extension
+    param, not a ``ChunkRecordingExecutor`` job kwarg (mirrors the detect_peaks
+    / build_analyzer convention).
+
+    Parameters
+    ----------
+    analyzer : si.SortingAnalyzer
+        The analyzer to add extensions to (modified in place / on disk).
+    names : list of str
+        Extension names to ensure are present.
+    job_kwargs : dict, optional
+        Resolved concurrency kwargs forwarded to ``analyzer.compute``.
+
+    Returns
+    -------
+    list of str
+        The extensions actually computed (already-present ones are skipped).
+    """
+    compute_kwargs = {
+        k: v for k, v in (job_kwargs or {}).items() if k != "random_seed"
+    }
+    to_add = [name for name in names if not analyzer.has_extension(name)]
+    if to_add:
+        analyzer.compute(to_add, **compute_kwargs)
+    return to_add
+
+
 def load_or_rebuild_analyzer(sorting_table, key):
     """Return the SortingAnalyzer for ``key``, rebuilding the cache if needed.
 

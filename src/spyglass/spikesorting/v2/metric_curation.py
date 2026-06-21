@@ -107,6 +107,7 @@ class AnalyzerCurationComputed(NamedTuple):
     metrics_object_id: str
     merge_suggestions_object_id: str
     proposed_labels_object_id: str
+    nwb_file_name: str
 
 
 @schema
@@ -151,27 +152,24 @@ class QualityMetricParameters(SpyglassMixin, dj.Lookup):
             "amplitude_cutoff",
             "nn_advanced",
         ]
-        return [
+        # franklab and neuropixels share the same full metric set today; build
+        # both from one payload so they cannot silently drift (a probe-specific
+        # divergence would be expressed as an explicit override here).
+        full_metric_kwargs = {
+            "snr": {"peak_sign": "neg"},
+            "isi_violation": isi_kwargs,
+            "nn_advanced": nn_kwargs,
+        }
+        rows = [
             {
-                "metric_params_name": "franklab_default",
+                "metric_params_name": name,
                 "metric_names": full_metrics,
-                "metric_kwargs": {
-                    "snr": {"peak_sign": "neg"},
-                    "isi_violation": isi_kwargs,
-                    "nn_advanced": nn_kwargs,
-                },
+                "metric_kwargs": full_metric_kwargs,
                 "skip_pc_metrics": False,
-            },
-            {
-                "metric_params_name": "neuropixels_default",
-                "metric_names": full_metrics,
-                "metric_kwargs": {
-                    "snr": {"peak_sign": "neg"},
-                    "isi_violation": isi_kwargs,
-                    "nn_advanced": nn_kwargs,
-                },
-                "skip_pc_metrics": False,
-            },
+            }
+            for name in ("franklab_default", "neuropixels_default")
+        ]
+        rows.append(
             {
                 "metric_params_name": "minimal",
                 "metric_names": ["snr", "isi_violation", "firing_rate"],
@@ -180,8 +178,9 @@ class QualityMetricParameters(SpyglassMixin, dj.Lookup):
                     "isi_violation": isi_kwargs,
                 },
                 "skip_pc_metrics": True,
-            },
-        ]
+            }
+        )
+        return rows
 
     def insert1(self, row, **kwargs):
         """Validate one row's params then insert it."""
@@ -551,7 +550,9 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
                     f"{sorting_id}; writing empty metric/merge/label tables."
                 )
                 object_ids = self._write_empty(abs_path)
-                return AnalyzerCurationComputed(analysis_file_name, *object_ids)
+                return AnalyzerCurationComputed(
+                    analysis_file_name, *object_ids, nwb_file_name
+                )
 
             metrics_df = self._compute_metrics(
                 analyzer,
@@ -571,7 +572,9 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
                 labels_by_unit=labels_by_unit,
                 unit_ids=[int(u) for u in metrics_df.index],
             )
-            return AnalyzerCurationComputed(analysis_file_name, *object_ids)
+            return AnalyzerCurationComputed(
+                analysis_file_name, *object_ids, nwb_file_name
+            )
         except Exception:
             self._cleanup_staged_file(analysis_file_name)
             raise
@@ -583,15 +586,16 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
         metrics_object_id,
         merge_suggestions_object_id,
         proposed_labels_object_id,
+        nwb_file_name,
     ) -> None:
         """Register the analysis file and insert the row.
 
         Runs inside the framework's tri-part insert transaction (DataJoint
         opens it around ``make_insert``), so no explicit transaction is opened
-        here. On failure the staged analysis file is removed before re-raising.
+        here. ``nwb_file_name`` is threaded from ``make_fetch`` via the compute
+        carrier rather than re-walking the recording lineage in the transaction
+        phase. On failure the staged analysis file is removed before re-raising.
         """
-        sorting_id = (AnalyzerCurationSelection & key).fetch1("sorting_id")
-        nwb_file_name = _nwb_file_name_for_sorting({"sorting_id": sorting_id})
         try:
             AnalysisNwbfile().add(nwb_file_name, analysis_file_name)
             self.insert1(
@@ -622,20 +626,16 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
         import numpy as np
         from spikeinterface.metrics.quality import compute_quality_metrics
 
-        # ``random_seed`` is an extension param, not a ChunkRecordingExecutor
-        # job kwarg (mirrors build_analyzer), so drop it before compute().
-        compute_kwargs = {
-            k: v for k, v in (job_kwargs or {}).items() if k != "random_seed"
-        }
+        from spyglass.spikesorting.v2._sorting_analyzer import (
+            ensure_extensions,
+        )
+
         extensions = list(_CURATION_EXTENSIONS)
         if not skip_pc_metrics:
             extensions.append("principal_components")
-        # Add only extensions not already present: recomputing one would
-        # cascade-delete its children, and re-populating the same sort under a
-        # second metric-params row must be idempotent (mirrors add_extensions).
-        to_add = [e for e in extensions if not analyzer.has_extension(e)]
-        if to_add:
-            analyzer.compute(to_add, **compute_kwargs)
+        # Idempotent add (skips present extensions, strips random_seed); the
+        # resolved job_kwargs drive the heavy extension compute.
+        ensure_extensions(analyzer, extensions, job_kwargs=job_kwargs)
         metrics_df = compute_quality_metrics(
             analyzer,
             metric_names=metric_names,
@@ -801,11 +801,14 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
             plot_units_qc_figure,
         )
 
+        from spyglass.spikesorting.v2._sorting_analyzer import (
+            ensure_extensions,
+        )
+
         metrics = self.get_metrics(key)
         try:
             analyzer = self._analyzer_for(key)
-            if not analyzer.has_extension("unit_locations"):
-                analyzer.compute("unit_locations")
+            ensure_extensions(analyzer, ["unit_locations"])
             locations = analyzer.get_extension("unit_locations").get_data()
             unit_ids = list(analyzer.unit_ids)
         except ZeroUnitAnalyzerError:

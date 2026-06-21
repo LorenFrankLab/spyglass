@@ -181,30 +181,47 @@ def correlograms_from_analyzer(
     return np.asarray(ccgs), np.asarray(bins), list(analyzer.unit_ids)
 
 
-def plot_autocorrelograms_figure(ccgs, bins, ids, unit_ids=None):
-    """Render an autocorrelogram (ACG) grid, one panel per unit."""
+def _plot_correlogram_grid(ccgs, bins, panels, *, n_cols, panel_size):
+    """Render a grid of correlogram bar plots.
+
+    ``panels`` is a list of ``(row_index, col_index, title)`` -- ``ccgs[row,
+    col, :]`` is the histogram for each cell. Shared by the autocorrelogram
+    (i==j) and cross-correlogram (pair) views.
+    """
     import matplotlib.pyplot as plt
 
-    show = list(unit_ids) if unit_ids is not None else list(ids)
-    index_of = {unit_id: i for i, unit_id in enumerate(ids)}
-    n = len(show)
-    n_cols = min(4, max(1, n))
+    n = len(panels)
+    n_cols = min(n_cols, max(1, n))
     n_rows = math.ceil(n / n_cols)
     fig, axes = plt.subplots(
-        n_rows, n_cols, figsize=(3 * n_cols, 2 * n_rows), squeeze=False
+        n_rows,
+        n_cols,
+        figsize=(panel_size[0] * n_cols, panel_size[1] * n_rows),
+        squeeze=False,
     )
     centers = (bins[:-1] + bins[1:]) / 2.0
     width = bins[1] - bins[0]
-    for k, unit_id in enumerate(show):
+    for k, (row, col, title) in enumerate(panels):
         ax = axes[k // n_cols][k % n_cols]
-        i = index_of[unit_id]
-        ax.bar(centers, ccgs[i, i, :], width=width)
-        ax.set_title(f"unit {unit_id} ACG")
+        ax.bar(centers, ccgs[row, col, :], width=width)
+        ax.set_title(title)
         ax.set_xlabel("ms")
     for k in range(n, n_rows * n_cols):
         axes[k // n_cols][k % n_cols].set_axis_off()
     fig.tight_layout()
     return fig
+
+
+def plot_autocorrelograms_figure(ccgs, bins, ids, unit_ids=None):
+    """Render an autocorrelogram (ACG) grid, one panel per unit."""
+    show = list(unit_ids) if unit_ids is not None else list(ids)
+    index_of = {unit_id: i for i, unit_id in enumerate(ids)}
+    panels = [
+        (index_of[u], index_of[u], f"unit {u} ACG") for u in show
+    ]
+    return _plot_correlogram_grid(
+        ccgs, bins, panels, n_cols=4, panel_size=(3, 2)
+    )
 
 
 def plot_pair_correlograms_figure(ccgs, bins, ids, pairs):
@@ -214,26 +231,13 @@ def plot_pair_correlograms_figure(ccgs, bins, ids, pairs):
     1-based contiguous unit ids; v2 sorts can have arbitrary unit ids, so the
     pair is mapped through the analyzer's unit-id order.
     """
-    import matplotlib.pyplot as plt
-
     index_of = {unit_id: i for i, unit_id in enumerate(ids)}
-    n = len(pairs)
-    n_cols = min(3, max(1, n))
-    n_rows = math.ceil(n / n_cols)
-    fig, axes = plt.subplots(
-        n_rows, n_cols, figsize=(4 * n_cols, 3 * n_rows), squeeze=False
+    panels = [
+        (index_of[a], index_of[b], f"{a} x {b}") for a, b in pairs
+    ]
+    return _plot_correlogram_grid(
+        ccgs, bins, panels, n_cols=3, panel_size=(4, 3)
     )
-    centers = (bins[:-1] + bins[1:]) / 2.0
-    width = bins[1] - bins[0]
-    for k, (unit_a, unit_b) in enumerate(pairs):
-        ax = axes[k // n_cols][k % n_cols]
-        ax.bar(centers, ccgs[index_of[unit_a], index_of[unit_b], :], width=width)
-        ax.set_title(f"{unit_a} x {unit_b}")
-        ax.set_xlabel("ms")
-    for k in range(n, n_rows * n_cols):
-        axes[k // n_cols][k % n_cols].set_axis_off()
-    fig.tight_layout()
-    return fig
 
 
 def peak_amplitudes_from_analyzer(analyzer):
@@ -259,17 +263,12 @@ def peak_amplitudes_from_analyzer(analyzer):
 
 
 def validate_unit_pairs(unit_ids, pairs):
-    """Return pairs whose members are real unit ids (orientation preserved)."""
+    """Return the pairs, raising if any member is not a real unit id."""
     unit_set = set(unit_ids)
-    validated = []
     for a, b in pairs:
-        if a in unit_set and b in unit_set:
-            validated.append((a, b))
-        elif b in unit_set and a in unit_set:  # pragma: no cover - symmetric
-            validated.append((b, a))
-        else:
+        if a not in unit_set or b not in unit_set:
             raise ValueError(
                 f"Pair {(a, b)} references unit id(s) not in this sort "
                 f"{sorted(unit_set)}."
             )
-    return validated
+    return list(pairs)

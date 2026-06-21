@@ -48,6 +48,7 @@ from spyglass.spikesorting.v2.recording import (
 )
 from spyglass.spikesorting.v2.sorting import Sorting
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
+from spyglass.utils.dj_helper_fn import bytes_to_human_readable
 
 schema = dj.schema("spikesorting_v2_recompute")
 
@@ -275,7 +276,7 @@ class RecordingArtifactRecompute(SpyglassMixin, dj.Computed):
             force_stale_env=force_stale_env,
             days_since_creation=days_since_creation,
             file_attr="analysis_file_name",
-            path_fn=lambda fname: AnalysisNwbfile.get_abs_path(fname),
+            path_fn=AnalysisNwbfile.get_abs_path,
             artifact_pk=Recording.primary_key,
         )
 
@@ -499,7 +500,7 @@ class SortingAnalyzerRecompute(SpyglassMixin, dj.Computed):
                 total += sum(
                     f.stat().st_size for f in folder.rglob("*") if f.is_file()
                 )
-        return f"Total: {total} bytes"
+        return f"Total: {bytes_to_human_readable(total)}"
 
     def recheck(self, key) -> bool:
         """Rerun the comparison for one row.
@@ -531,16 +532,13 @@ class SortingAnalyzerRecompute(SpyglassMixin, dj.Computed):
         """
         from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
-        def _folder_path(sorting_id):
-            return analyzer_path(sorting_id)
-
         return _delete_analyzer_folders(
             self,
             restriction,
             dry_run=dry_run,
             force_stale_env=force_stale_env,
             days_since_creation=days_since_creation,
-            folder_fn=_folder_path,
+            folder_fn=analyzer_path,
             artifact_pk=Sorting.primary_key,
         )
 
@@ -758,4 +756,4 @@ def _reclaimable_disk(query) -> str:
         abs_path = Path(AnalysisNwbfile.get_abs_path(row["analysis_file_name"]))
         if abs_path.exists():
             total += abs_path.stat().st_size
-    return f"Total: {total} bytes"
+    return f"Total: {bytes_to_human_readable(total)}"

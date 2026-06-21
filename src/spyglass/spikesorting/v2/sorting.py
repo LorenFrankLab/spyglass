@@ -1479,21 +1479,18 @@ class Sorting(SpyglassMixin, dj.Computed):
             The extensions actually computed (already-present ones are
             skipped); empty when every requested extension already exists.
         """
+        from spyglass.spikesorting.v2._sorting_analyzer import (
+            ensure_extensions,
+        )
         from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
 
         analyzer = self.get_analyzer(key)
-        to_add = [
-            ext for ext in extensions if not analyzer.has_extension(ext)
-        ]
-        if not to_add:
-            return []
         sorter_job_kwargs = (
             SorterParameters & (SortingSelection & key)
         ).fetch1("job_kwargs")
         resolved = _resolved_job_kwargs(sorter_job_kwargs)
         resolved.update(kwargs)
-        analyzer.compute(to_add, **resolved)
-        return to_add
+        return ensure_extensions(analyzer, extensions, job_kwargs=resolved)
 
     def _rebuild_analyzer_folder(self, key) -> None:
         """Rebuild the analyzer folder for an existing Sorting row.
