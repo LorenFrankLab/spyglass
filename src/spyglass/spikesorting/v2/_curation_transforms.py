@@ -72,7 +72,7 @@ def validate_curation_label_rows(
         if "curation_label" not in row:
             continue
         label = row["curation_label"]
-        label_value = label.value if isinstance(label, CurationLabel) else label
+        label_value = CurationLabel.normalize(label)
         if label_value not in valid:
             raise ValueError(
                 f"CurationV2.UnitLabel: curation_label {label!r} is not in "
@@ -107,7 +107,7 @@ def validate_labels(labels: dict, allow_custom_labels: bool = False) -> None:
         if allow_custom_labels:
             continue
         for lbl in lbls:
-            label_value = lbl.value if isinstance(lbl, CurationLabel) else lbl
+            label_value = CurationLabel.normalize(lbl)
             if label_value not in valid:
                 raise ValueError(
                     f"CurationV2.insert_curation: label {lbl!r} for "

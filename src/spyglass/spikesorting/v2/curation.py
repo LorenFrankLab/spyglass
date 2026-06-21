@@ -721,11 +721,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 "sorting_id": sorting_id,
                 "curation_id": curation_id,
                 "unit_id": unit_id,
-                "curation_label": (
-                    label.value
-                    if isinstance(label, CurationLabel)
-                    else str(label)
-                ),
+                "curation_label": CurationLabel.normalize(label),
             }
             for unit_id, lbls in labels.items()
             if unit_id in written_unit_ids
@@ -978,6 +974,40 @@ class CurationV2(SpyglassMixin, dj.Manual):
         return [label.value for label in CurationLabel]
 
     @classmethod
+    def _labels_by_unit(cls, key) -> dict[int, list[str]]:
+        """Group ``UnitLabel`` rows under ``key`` into ``{unit_id: [label]}``.
+
+        Single source for the per-unit label grouping both
+        ``summarize_curation`` and ``get_sorting`` (DataFrame form) return.
+        """
+        labels: dict[int, list[str]] = {}
+        for lr in (cls.UnitLabel & key).fetch(
+            "unit_id", "curation_label", as_dict=True
+        ):
+            labels.setdefault(int(lr["unit_id"]), []).append(
+                str(lr["curation_label"])
+            )
+        return labels
+
+    @classmethod
+    def _unit_ids_with_labels(cls, key, values: set) -> set[int]:
+        """``unit_id`` set under ``key`` carrying at least one of ``values``.
+
+        ``values`` is a set of canonical label strings (see
+        :meth:`CurationLabel.normalize`). An empty ``values`` returns an
+        empty set; the caller decides whether "no labels requested" means
+        all units (include filter) or none (exclude filter). Shared by
+        ``get_unit_brain_regions`` (intersect) and ``get_matchable_unit_ids``
+        (subtract).
+        """
+        if not values:
+            return set()
+        matched = (
+            cls.UnitLabel & key & [{"curation_label": v} for v in values]
+        ).fetch("unit_id")
+        return {int(u) for u in matched}
+
+    @classmethod
     def summarize_curation(cls, curation_key: dict) -> dict:
         """Return a notebook-printable summary of one curation.
 
@@ -1036,14 +1066,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
             "merges_applied", "description"
         )
 
-        label_rows = (cls.UnitLabel & pk).fetch(
-            "unit_id", "curation_label", as_dict=True
-        )
-        labels: dict[int, list[str]] = {}
-        for lr in label_rows:
-            labels.setdefault(int(lr["unit_id"]), []).append(
-                str(lr["curation_label"])
-            )
+        labels = cls._labels_by_unit(pk)
 
         # Defensive: a curation may not be merge-registered in edge cases;
         # return None rather than letting fetch1 raise on zero rows.
@@ -1326,14 +1349,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         # notebook code reading ``df["curation_label"]`` works on v2
         # rows without poking at the part table directly.
         unit_ids = list(abs_times)
-        label_rows = (cls.UnitLabel & key).fetch(
-            "unit_id", "curation_label", as_dict=True
-        )
-        labels_by_unit: dict[int, list[str]] = {}
-        for lr in label_rows:
-            labels_by_unit.setdefault(int(lr["unit_id"]), []).append(
-                str(lr["curation_label"])
-            )
+        labels_by_unit = cls._labels_by_unit(key)
         # Index by ``unit_id`` (matches v1's ``nwb.units.to_dataframe()``
         # shape, the same indexing Sorting.get_sorting(as_dataframe=True)
         # uses); see that method's docstring for the rationale.
@@ -1770,21 +1786,16 @@ class CurationV2(SpyglassMixin, dj.Manual):
         unit_restriction = self.Unit & key
         if include_labels is not None:
             include_values = {
-                lbl.value if isinstance(lbl, CurationLabel) else str(lbl)
-                for lbl in include_labels
+                CurationLabel.normalize(lbl) for lbl in include_labels
             }
             # An empty label set means "no filter" (all units), NOT "match
             # nothing": restricting with ``& []`` (an empty DataJoint OrList)
             # would silently return zero rows. Guard on the materialized set's
             # truthiness, matching ``get_matchable_unit_ids``.
             if include_values:
-                labeled = (
-                    self.UnitLabel
-                    & key
-                    & [{"curation_label": v} for v in include_values]
-                ).fetch("unit_id")
+                labeled = self._unit_ids_with_labels(key, include_values)
                 unit_restriction = unit_restriction & [
-                    {"unit_id": int(uid)} for uid in labeled
+                    {"unit_id": uid} for uid in labeled
                 ]
         return unit_brain_region_df(unit_restriction, resolution)
 
@@ -1817,20 +1828,11 @@ class CurationV2(SpyglassMixin, dj.Manual):
         import numpy as np
 
         exclude_values = {
-            lbl.value if isinstance(lbl, CurationLabel) else str(lbl)
-            for lbl in exclude_labels
+            CurationLabel.normalize(lbl) for lbl in exclude_labels
         }
         all_units = (self.Unit & key).fetch("unit_id")
-        if exclude_values:
-            excluded = (
-                self.UnitLabel
-                & key
-                & [{"curation_label": v} for v in exclude_values]
-            ).fetch("unit_id")
-            excluded_set = {int(u) for u in excluded}
-            kept = [int(u) for u in all_units if int(u) not in excluded_set]
-        else:
-            kept = [int(u) for u in all_units]
+        excluded_set = self._unit_ids_with_labels(key, exclude_values)
+        kept = [int(u) for u in all_units if int(u) not in excluded_set]
         return np.asarray(sorted(kept), dtype=int)
 
     @classmethod

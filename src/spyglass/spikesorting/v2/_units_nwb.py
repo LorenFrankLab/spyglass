@@ -506,8 +506,7 @@ def write_curated_units_nwb(
             for unit_id, spike_times in write_specs:
                 lbl_list = labels.get(int(unit_id), [])
                 label_list = [
-                    (lbl.value if isinstance(lbl, CurationLabel) else str(lbl))
-                    for lbl in lbl_list
+                    CurationLabel.normalize(lbl) for lbl in lbl_list
                 ]
                 all_labels.append(label_list)
                 nwbf.add_unit(

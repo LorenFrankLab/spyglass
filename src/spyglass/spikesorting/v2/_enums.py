@@ -64,3 +64,14 @@ class CurationLabel(str, Enum):
     noise = "noise"
     artifact = "artifact"
     reject = "reject"
+
+    @classmethod
+    def normalize(cls, label) -> str:
+        """Coerce a label to its canonical string value.
+
+        Accepts a ``CurationLabel`` member (returns its ``.value``) or any
+        other value (returns ``str(label)``). Single source of truth for the
+        ``label.value if isinstance(...) else str(label)`` coercion the insert
+        and accessor paths apply at every label boundary.
+        """
+        return label.value if isinstance(label, cls) else str(label)
