@@ -1073,3 +1073,142 @@ def test_param_lookup_bulk_insert_validates(
         assert len(table & restr(valid_b)) == 1
     finally:
         (table & [restr(valid_a), restr(valid_b)]).delete_quick()
+
+
+# ---------- quality-metric / auto-curation params ---------------------------
+
+
+from spyglass.spikesorting.v2._params.metric_curation import (  # noqa: E402
+    AUTO_CURATION_RULES_SCHEMA_VERSION,
+    QUALITY_METRIC_SCHEMA_VERSION,
+    AutoCurationRulesSchema,
+    QualityMetricParamsSchema,
+)
+
+
+def test_quality_metric_params_non_default_round_trips():
+    """A configured quality-metric blob survives dump -> validate -> dump."""
+    schema = QualityMetricParamsSchema(
+        metric_names=["snr", "isi_violation", "firing_rate", "nn_advanced"],
+        metric_kwargs={
+            "nn_advanced": {
+                "n_components": 7,
+                "n_neighbors": 5,
+                "max_spikes": 20000,
+                "min_spikes": 10,
+                "seed": 0,
+            }
+        },
+        skip_pc_metrics=False,
+    )
+    blob = schema.model_dump()
+    assert blob != QualityMetricParamsSchema(metric_names=["snr"]).model_dump()
+    rebuilt = QualityMetricParamsSchema.model_validate(blob).model_dump()
+    assert rebuilt == blob
+    assert rebuilt["schema_version"] == QUALITY_METRIC_SCHEMA_VERSION
+
+
+def test_quality_metric_params_default_skip_pc_true():
+    """``skip_pc_metrics`` defaults to True (PCA metrics off unless asked)."""
+    assert QualityMetricParamsSchema(metric_names=["snr"]).skip_pc_metrics
+
+
+def test_quality_metric_params_rejects_unknown_metric_name():
+    """An unknown metric name fails validation against SI's exported list."""
+    with pytest.raises(ValidationError):
+        QualityMetricParamsSchema(metric_names=["snr", "not_a_real_metric"])
+
+
+@pytest.mark.parametrize("old_name", ["nn_isolation", "nn_noise_overlap"])
+def test_quality_metric_params_rejects_renamed_nn_metric(old_name):
+    """The 0.99 nn metric *names* are rejected; message points at nn_advanced."""
+    with pytest.raises(ValidationError) as excinfo:
+        QualityMetricParamsSchema(metric_names=[old_name])
+    assert "nn_advanced" in str(excinfo.value)
+
+
+def test_quality_metric_params_rejects_empty_metric_names():
+    """At least one metric name is required."""
+    with pytest.raises(ValidationError):
+        QualityMetricParamsSchema(metric_names=[])
+
+
+def test_auto_curation_rules_non_default_round_trips():
+    """A configured rules payload (master + rule rows) round-trips."""
+    schema = AutoCurationRulesSchema(
+        auto_merge_preset="similarity_correlograms",
+        auto_merge_kwargs={"resolve_graph": True},
+        rules=[
+            {
+                "rule_index": 0,
+                "rule_name": "nn_noise",
+                "metric_name": "nn_noise_overlap",
+                "operator": ">",
+                "threshold": 0.1,
+                "label": "noise",
+            },
+            {
+                "rule_index": 1,
+                "rule_name": "nn_reject",
+                "metric_name": "nn_noise_overlap",
+                "operator": ">",
+                "threshold": 0.1,
+                "label": "reject",
+            },
+        ],
+    )
+    blob = schema.model_dump()
+    rebuilt = AutoCurationRulesSchema.model_validate(blob).model_dump()
+    assert rebuilt == blob
+    assert rebuilt["schema_version"] == AUTO_CURATION_RULES_SCHEMA_VERSION
+    assert [r["rule_index"] for r in rebuilt["rules"]] == [0, 1]
+
+
+def test_auto_curation_rules_allows_none_preset_no_rules():
+    """``auto_merge_preset='none'`` with no rules is the inert default."""
+    schema = AutoCurationRulesSchema(auto_merge_preset="none", rules=[])
+    assert schema.auto_merge_preset == "none"
+    assert schema.rules == []
+
+
+def test_auto_curation_rules_rejects_bad_preset():
+    """An unknown auto-merge preset is rejected (Literal guard)."""
+    with pytest.raises(ValidationError):
+        AutoCurationRulesSchema(auto_merge_preset="not_a_preset", rules=[])
+
+
+def test_auto_curation_rules_rejects_bad_operator():
+    """A rule with an unsupported operator is rejected."""
+    with pytest.raises(ValidationError):
+        AutoCurationRulesSchema(
+            auto_merge_preset="none",
+            rules=[
+                {
+                    "rule_index": 0,
+                    "rule_name": "snr_noise",
+                    "metric_name": "snr",
+                    "operator": "=<",
+                    "threshold": 2.0,
+                    "label": "noise",
+                }
+            ],
+        )
+
+
+def test_auto_curation_rules_rejects_duplicate_rule_index():
+    """Two rules with the same rule_index are rejected (ordering ambiguity)."""
+    rule = {
+        "rule_name": "snr_noise",
+        "metric_name": "snr",
+        "operator": "<",
+        "threshold": 2.0,
+        "label": "noise",
+    }
+    with pytest.raises(ValidationError):
+        AutoCurationRulesSchema(
+            auto_merge_preset="none",
+            rules=[
+                {**rule, "rule_index": 0},
+                {**rule, "rule_index": 0},
+            ],
+        )
