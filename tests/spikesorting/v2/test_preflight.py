@@ -201,17 +201,17 @@ def test_preflight_all_pass(preflight_inputs):
 
 
 @pytest.mark.database
-def test_preflight_gates_analyzer_waveform_params_row(preflight_inputs):
+def test_preflight_gates_analyzer_waveform_params_row(
+    preflight_inputs, monkeypatch
+):
     """Preflight checks the region-resolved analyzer-waveform recipe row.
 
     The display analyzer recipe is FK-required on the Sorting row, so a missing
     AnalyzerWaveformParameters row would crash deep in make_fetch. Preflight
     must gate it up front like the other params rows: assert the
-    ``analyzer_waveform_params_exist`` check is present and passes when the
-    defaults are installed. (The missing-row failure message is covered by the
-    shared ``*_params_exist`` failure path in
-    ``test_preflight_missing_params_row_points_to_initialize_defaults``;
-    ``_check`` blanks ``fix`` on a passing check, so it is not asserted here.)
+    ``analyzer_waveform_params_exist`` check is present, passes when the
+    defaults are installed, and fails clearly when the region resolver points at
+    an uninstalled row.
     """
     report = preflight_v2_pipeline(**preflight_inputs)
     (check,) = [
@@ -220,6 +220,27 @@ def test_preflight_gates_analyzer_waveform_params_row(preflight_inputs):
         if c.name == "analyzer_waveform_params_exist"
     ]
     assert check.ok is True
+
+    import spyglass.spikesorting.v2._recipe_catalog as catalog_mod
+
+    monkeypatch.setattr(
+        catalog_mod,
+        "waveform_params_for_preprocessing",
+        lambda _name: (
+            "missing_waveform_preflight",
+            "missing_metric_waveform_preflight",
+        ),
+    )
+    missing = preflight_v2_pipeline(**preflight_inputs)
+    assert missing.ok is False
+    (missing_check,) = [
+        c
+        for c in missing.checks
+        if c.name == "analyzer_waveform_params_exist"
+    ]
+    assert missing_check.ok is False
+    assert "missing_waveform_preflight" in missing_check.fix
+    assert "initialize_v2_defaults()" in missing_check.fix
 
 
 @pytest.mark.database
