@@ -46,6 +46,22 @@
   re-extracts its **own** 0.5/0.5 waveforms via `_fetch_waveform_v2`, independent
   of the metric-curation analyzer. **Untouched**; this is why the analyzer
   window change is isolated to curation.
+- `src/spyglass/spikesorting/v2/metric_curation.py:776-818` — `_compute_metrics`
+  (Phase 2 splits it display/whitened). Phase 4 **joins** the already-computed
+  display `template_metrics` columns onto the display-side metric frame; the
+  `template_metric_columns` it surfaces is threaded via `AnalyzerCurationFetched`.
+- `src/spyglass/spikesorting/v2/_params/metric_curation.py:62-137` —
+  `QualityMetricParamsSchema`. Phase 4 **adds** a validated `template_metric_columns`
+  field (SI **output-column** names, e.g. `trough_half_width`, validated against
+  `ComputeTemplateMetrics.get_metric_columns(single_channel_names)`) + an
+  `_available_template_metric_columns()` helper; a matching
+  `template_metric_columns: blob` column is added to the `QualityMetricParameters`
+  def.
+- `src/spyglass/spikesorting/v2/_metric_curation_nwb.py:53-74` —
+  `build_quality_metrics_table` (column-generic write) + `read_quality_metrics` /
+  `get_metrics` (column-generic read). Phase 4 **hardens** the per-cell `float()`
+  cast at `:72` against a non-scalar template column; the surfaced columns flow
+  through unchanged.
 
 ## Scope and dependency policy
 
@@ -65,6 +81,11 @@
 - Surface the polymer MS4 recipe as the documented recommended-science option,
   keeping a runnable MS5 preset as the default (MS4 needs `numpy<2`).
 - Document the auto → manual-merge → auto curation loop.
+- Expose SpikeInterface waveform-shape (template) metrics — spike width and
+  related shape measures — as columns in the per-unit metric table, configurable
+  per `QualityMetricParameters` row, so downstream consumers can classify cell
+  types (e.g. hippocampal interneuron vs pyramidal) with region-appropriate
+  thresholds of their own.
 
 ### Non-Goals
 
@@ -75,6 +96,11 @@
 - Region windows cover **hippocampus and cortex only** — other/unknown regions
   and multi-region sorts fall back to the wider cortex window rather than getting
   their own tuned window (out of scope; a future tracked row away).
+- **No putative cell-type classifier and no cell-type / rate×width threshold
+  rules.** Phase 4 exposes the shape metrics; it does not classify. Region-specific
+  cutoffs (hippocampus ≠ cortex ≠ striatum) are downstream/user-side — a shipped
+  hippocampal boundary would silently mislabel every other region. No conjunctive
+  (multi-metric AND) auto-curation rule type is added either.
 
 ## Metrics
 
@@ -90,6 +116,10 @@
   `v1-v2-divergences.md`; no silent change.
 - **Cache correctness:** for one `sorting_id`, the whitened and unwhitened
   analyzers resolve to distinct folders and never overwrite each other.
+- **Exposure (Phase 4):** `get_metrics` returns waveform-shape columns
+  (`trough_half_width`, `peak_to_trough_duration`, ...) alongside the quality
+  metrics, read from the display (unwhitened) analyzer; no shipped auto-curation
+  rule thresholds any of them.
 
 ## Risks and Mitigations
 
@@ -127,6 +157,7 @@ named, selectable row (not removed) alongside the new Frank-lab default.
 
 ## Estimated Effort
 
-~600 LOC across three phases. Phase 1 ~200 (table + cache key + wiring + tests),
+~750 LOC across four phases. Phase 1 ~200 (table + cache key + wiring + tests),
 Phase 2 ~250 (whitened build + burst routing + recompute coverage + tests),
-Phase 3 ~150 (preset default + rule set + docs + tests).
+Phase 3 ~150 (preset default + rule set + docs + tests), Phase 4 ~150 (template
+metric param + column join + writer guard + notebook/docs + tests).

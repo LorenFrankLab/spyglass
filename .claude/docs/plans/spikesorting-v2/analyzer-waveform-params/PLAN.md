@@ -9,8 +9,10 @@ analyzer into an unwhitened "actual waveform" recipe for display and a whitened
 recipe for cluster metrics, ship a default auto-curation rule set that uses the
 lab's ~2% ISI policy, document the polymer MS4 recipe as the recommended-science
 option (keeping a runnable MS5 preset as the default, since MS4 needs
-`numpy<2`), and document the auto → manual-merge → auto curation loop in the
-user notebook.
+`numpy<2`), document the auto → manual-merge → auto curation loop in the
+user notebook, and expose SpikeInterface waveform-shape (template) metrics in the
+per-unit metric table so downstream consumers can classify cell types with
+region-appropriate thresholds (the pipeline ships no cell-type thresholds).
 
 ## Reading order
 
@@ -29,6 +31,7 @@ For agent invocation, **load only the slice you need**:
   - [phase-1-params-surface.md](phase-1-params-surface.md) — tracked `AnalyzerWaveformParameters` table + region-specific display rows + cache key + region resolution (preprocessing-recipe → row, stored on `Sorting`).
   - [phase-2-whitened-metric-analyzer.md](phase-2-whitened-metric-analyzer.md) — whitened metric analyzer, display/metric routing (incl. BurstPair legs), recompute coverage.
   - [phase-3-defaults-rules-docs.md](phase-3-defaults-rules-docs.md) — auto-curation rules (`franklab_default_auto_curation_2026_06`), MS5 default + MS4 recommendation, curation-loop docs + notebook.
+  - [phase-4-waveform-shape-metrics.md](phase-4-waveform-shape-metrics.md) — expose SI template (waveform-shape) metric **columns** in the per-unit metric table for downstream, region-specific cell typing; configurable `template_metric_columns` (SI output-column names, e.g. `trough_half_width`); no cell-type thresholds shipped. Depends on Phase 2 (display-analyzer routing); independent of Phase 3.
 
 ## Deliberately not in this plan
 
