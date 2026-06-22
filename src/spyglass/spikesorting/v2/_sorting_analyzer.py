@@ -354,7 +354,7 @@ def build_analyzer(
             sorting=sorting,
             recording=recording,
             sparse=True,
-            format="binary_folder",
+            format="zarr",
             folder=folder,
             return_in_uV=True,
             overwrite=True,

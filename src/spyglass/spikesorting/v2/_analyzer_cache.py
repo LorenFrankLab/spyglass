@@ -57,16 +57,19 @@ def analyzer_cache_root() -> Path:
 def analyzer_path(sorting_id) -> Path:
     """Return the canonical analyzer-cache folder for a ``sorting_id``.
 
-    ``analyzer_cache_root() / f"{sorting_id}.analyzer"``. Deterministic in
+    ``analyzer_cache_root() / f"{sorting_id}.zarr"``. Deterministic in
     ``sorting_id`` + the configured root, so every code path resolves the
-    same folder without the ``Sorting`` row needing to store it.
+    same folder without the ``Sorting`` row needing to store it. The ``.zarr``
+    suffix matches the SI ``zarr`` store ``create_sorting_analyzer`` writes (SI
+    forces the ``.zarr`` suffix) and lets ``load_sorting_analyzer`` auto-detect
+    the format.
 
     Returns
     -------
     pathlib.Path
         The analyzer-cache folder path for this ``sorting_id``.
     """
-    return analyzer_cache_root() / f"{sorting_id}.analyzer"
+    return analyzer_cache_root() / f"{sorting_id}.zarr"
 
 
 def remove_analyzer_cache(sorting_id, *, missing_ok: bool = True) -> bool:

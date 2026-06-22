@@ -835,7 +835,7 @@ def test_build_analyzer_compute_args(dj_conn, monkeypatch, tmp_path):
     assert (
         ck.get("return_in_uV") is True
     ), f"expected return_in_uV=True, got {ck}"
-    assert ck.get("format") == "binary_folder"
+    assert ck.get("format") == "zarr"
 
     # ``compute`` extension set (positional first arg). Assert the REQUIRED
     # extensions are present rather than pinning the exact set: a removal

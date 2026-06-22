@@ -866,7 +866,7 @@ class Sorting(SpyglassMixin, dj.Computed):
 
     ``make()`` applies post-motion preprocessing, runs the sorter,
     removes excess spikes, builds a
-    ``SortingAnalyzer(format="binary_folder", sparse=True)``, computes
+    ``SortingAnalyzer(format="zarr", sparse=True)``, computes
     the base extensions (``random_spikes``, ``noise_levels``,
     ``templates``, ``waveforms``), writes a fresh/whitelisted
     ``AnalysisNwbfile`` containing only the v2 sorting Units (NOT the
@@ -1462,7 +1462,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         Job kwargs are resolved from this sort's ``SorterParameters`` row
         (per the Job-Kwargs Resolution convention); explicit ``kwargs`` win on
         conflict. The computed extensions persist to the on-disk analyzer
-        folder (SI's ``binary_folder`` format saves them automatically).
+        folder (SI's ``zarr`` format saves them automatically).
 
         Parameters
         ----------

@@ -27,7 +27,7 @@ def test_analyzer_cache_root_honors_config(restore_custom_config):
 
     dj.config["custom"]["spikesorting_v2_analyzer_dir"] = "/tmp/v2_custom_an"
     assert analyzer_cache_root() == Path("/tmp/v2_custom_an")
-    assert analyzer_path("abc") == Path("/tmp/v2_custom_an/abc.analyzer")
+    assert analyzer_path("abc") == Path("/tmp/v2_custom_an/abc.zarr")
 
 
 def test_analyzer_cache_root_falls_back_to_temp_dir(restore_custom_config):
@@ -38,7 +38,7 @@ def test_analyzer_cache_root_falls_back_to_temp_dir(restore_custom_config):
     dj.config["custom"].pop("spikesorting_v2_analyzer_dir", None)
     expected = Path(temp_dir) / "spikesorting_v2" / "analyzers"
     assert analyzer_cache_root() == expected
-    assert analyzer_path("s1") == expected / "s1.analyzer"
+    assert analyzer_path("s1") == expected / "s1.zarr"
 
 
 def test_empty_config_value_falls_back(restore_custom_config):
@@ -138,7 +138,7 @@ def recording_3d_and_sorting():
 class TestBuildAnalyzerProbeProjection:
     def test_analyzer_probe_is_2d(self, recording_3d_and_sorting, tmp_path):
         recording, sorting = recording_3d_and_sorting
-        folder = tmp_path / "sort.analyzer"
+        folder = tmp_path / "sort.zarr"
 
         build_analyzer(
             sorting,
@@ -158,7 +158,7 @@ class TestBuildAnalyzerProbeProjection:
         # Without the 2D projection this raises ValueError:
         # "could not broadcast input array from shape (3,) into shape (2,)".
         recording, sorting = recording_3d_and_sorting
-        folder = tmp_path / "sort.analyzer"
+        folder = tmp_path / "sort.zarr"
 
         build_analyzer(
             sorting,

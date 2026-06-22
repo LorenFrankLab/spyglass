@@ -574,9 +574,9 @@ def _recompute_analyzer_hashes(sort_key: dict, rounding: int):
             stored.sorting,
             stored.recording,
             sort_key,
-            analyzer_folder=Path(tmp) / "analyzer",
+            analyzer_folder=Path(tmp) / "analyzer.zarr",
         )
-        fresh = si.load_sorting_analyzer(Path(tmp) / "analyzer")
+        fresh = si.load_sorting_analyzer(Path(tmp) / "analyzer.zarr")
         new_hashes = hash_extension_data(fresh, rounding=rounding)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
