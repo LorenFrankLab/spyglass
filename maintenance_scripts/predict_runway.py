@@ -6,12 +6,15 @@ to `used_bytes` over a rolling window, and prints a one-line runway estimate
 suitable for appending to Slack / email alerts.
 
 Usage:
-    python predict_runway.py [--plot] [CSV_PATH [DRIVE_PATH]]
+    python predict_runway.py [--plot] [--validate] [CSV_PATH [DRIVE_PATH]]
 
 Flags:
-    --plot   Generate a multi-panel usage-history PNG alongside the runway
-             estimate. Saved to <csv_dir>/spyglass_disk.png; path printed to
-             stderr so it goes to the log without polluting the runway line.
+    --plot      Generate a usage-history PNG alongside the runway estimate.
+                Saved to <csv_dir>/spyglass_disk.png; path printed to stderr.
+    --validate  Walk-forward cross-validation: at each historical date,
+                replicate what predict() would have done, project forward
+                30/60/90 days, and compare against actuals. Prints a
+                summary table to stdout.
 
 Environment variables (override defaults):
     SPACE_CSV_LOG       path to the CSV log (required if not passed as arg)
@@ -91,6 +94,126 @@ def predict(csv_path: Path, drive: str, window_days: int, min_days: int) -> str:
             return _format_runway(runway_days)
 
     return "stable"
+
+
+def validate(
+    csv_path: Path,
+    drive: str = "/stelmo/nwb",
+    horizons: tuple[int, ...] = (30, 60, 90),
+    window_days: int = 90,
+    min_days: int = 30,
+    step_days: int = 7,
+) -> list[dict]:
+    """Walk-forward cross-validation of the slope model.
+
+    At each prediction date (stepped weekly through the history), replicates
+    exactly what ``predict()`` would have done — same window-fallback logic,
+    same slope formula — projects forward by ``horizon`` days, then compares
+    against the nearest actual observation.
+
+    Parameters
+    ----------
+    csv_path : Path
+    drive : str
+    horizons : tuple of int
+        Forecast horizons in days to evaluate.
+    window_days : int
+        Longest window (matches ``SPACE_RUNWAY_DAYS``).
+    min_days : int
+        Shortest window (matches ``SPACE_RUNWAY_MIN``).
+    step_days : int
+        Gap between successive prediction dates (weekly reduces redundancy).
+
+    Returns
+    -------
+    list of dict
+        One entry per horizon with keys:
+        ``horizon_days``, ``n``, ``mae_tib``, ``rmse_tib``.
+    """
+    rows: list[tuple[datetime, int, int]] = []
+    with open(csv_path) as fh:
+        for r in csv.DictReader(fh):
+            if r["path"] != drive:
+                continue
+            ts = datetime.fromisoformat(r["timestamp"])
+            avail = int(r["avail_bytes"])
+            total = int(r["total_bytes"])
+            rows.append((ts, avail, total - avail))
+    rows.sort(key=lambda r: r[0])
+
+    if len(rows) < 2:
+        return []
+
+    TiB = 1024**4
+    mid = (window_days + min_days) // 2
+    windows = sorted({window_days, mid, min_days}, reverse=True)
+
+    results = []
+    for horizon in horizons:
+        errors: list[float] = []
+
+        t = rows[0][0] + timedelta(days=windows[0])
+        t_end = rows[-1][0] - timedelta(days=horizon)
+
+        while t <= t_end:
+            # Snap to the last actual observation at or before t.
+            past = [r for r in rows if r[0] <= t]
+            if not past:
+                t += timedelta(days=step_days)
+                continue
+            t_snap = past[-1][0]
+
+            # Replicate predict()'s window-fallback logic.
+            predicted_used = None
+            for window in windows:
+                cutoff = t_snap - timedelta(days=window)
+                w = [r for r in rows if cutoff <= r[0] <= t_snap]
+                if len(w) < 2:
+                    continue
+                t0 = w[0][0]
+                xs = [(r[0] - t0).total_seconds() / 86400 for r in w]
+                ys = [r[2] for r in w]
+                slope = _linear_slope(xs, ys)
+                if slope > 0 or window == windows[-1]:
+                    xbar = sum(xs) / len(xs)
+                    ybar = sum(ys) / len(ys)
+                    intercept = ybar - slope * xbar
+                    x_horizon = xs[-1] + horizon
+                    predicted_used = intercept + slope * x_horizon
+                    break
+
+            if predicted_used is None:
+                t += timedelta(days=step_days)
+                continue
+
+            # Find the nearest actual observation to t_snap + horizon.
+            target = t_snap + timedelta(days=horizon)
+            future = [r for r in rows if r[0] >= target]
+            if not future:
+                t += timedelta(days=step_days)
+                continue
+            nearest = future[0]
+            if (nearest[0] - target).days > 3:
+                t += timedelta(days=step_days)
+                continue
+
+            errors.append(predicted_used - nearest[2])
+            t += timedelta(days=step_days)
+
+        if errors:
+            abs_errs = [abs(e) for e in errors]
+            mae = sum(abs_errs) / len(abs_errs) / TiB
+            rmse = (sum(e**2 for e in errors) / len(errors)) ** 0.5 / TiB
+            results.append(
+                {
+                    "horizon_days": horizon,
+                    "n": len(errors),
+                    "mae_tib": mae,
+                    "rmse_tib": rmse,
+                }
+            )
+
+    return results
 
 
 def plot_history(
@@ -227,6 +350,7 @@ def plot_history(
 def main() -> None:
     raw_args = sys.argv[1:]
     do_plot = "--plot" in raw_args
+    do_validate = "--validate" in raw_args
     args = [a for a in raw_args if not a.startswith("--")]
 
     raw = args[0] if args else os.environ.get("SPACE_CSV_LOG", "")
@@ -258,6 +382,23 @@ def main() -> None:
 
     result = predict(csv_path, drive, window_days, min_days)
     print(f"data runway: {result}", end="")
+
+    if do_validate:
+        vrows = validate(
+            csv_path, drive, window_days=window_days, min_days=min_days
+        )
+        if vrows:
+            print(f"\n\nWalk-forward validation — {drive} (step 7d):")
+            print(f"  {'horizon':>8}  {'n':>5}  {'MAE':>10}  {'RMSE':>10}")
+            for r in vrows:
+                print(
+                    f"  {r['horizon_days']:>5}d"
+                    f"     {r['n']:>5}"
+                    f"  {r['mae_tib']:>7.1f} TiB"
+                    f"  {r['rmse_tib']:>7.1f} TiB"
+                )
+        else:
+            print("\n\nValidation: not enough data")
 
     if do_plot:
         try:
