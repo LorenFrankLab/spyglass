@@ -35,10 +35,18 @@
   `isi_violation > 0.02` rule.
 - `src/spyglass/spikesorting/v2/_pipeline_run.py:87` — `run_v2_pipeline`
   `pipeline_preset` default **stays an MS5** preset (runs under `numpy>=2`).
-  Optionally relabel to a probe-MS5 for the polymer lab. MS4
-  (`franklab_probe_hippocampus_30khz_ms4_2026_06`, `_recipe_catalog.py:357`) is
-  documented as the recommended-science option for `numpy<2`, NOT the default —
-  an MS4 default would fail preflight on every modern install.
+  Optionally relabel to a probe-MS5 for the polymer lab. Local MS4
+  (`franklab_probe_hippocampus_30khz_ms4_2026_06`, `_recipe_catalog.py:357`)
+  still requires a compatible host runtime, but Phase 3a adds a containerized
+  MS4 row/preset so the recommended-science option is runnable from modern
+  `numpy>=2` Spyglass environments when Docker/Singularity is available.
+- `src/spyglass/spikesorting/v2/sorting.py:168-351`,
+  `src/spyglass/spikesorting/v2/_sorting_dispatch.py:277-423`, and
+  `src/spyglass/spikesorting/v2/_pipeline_preflight.py` — `SorterParameters`,
+  `run_si_sorter`, and preflight. Phase 3a **adds** tracked
+  `execution_params` to `SorterParameters` and routes SI Docker/Singularity
+  kwargs through the DB-free sorter dispatch, rather than hiding container
+  choices in scientific sorter params or `job_kwargs`.
 - `src/spyglass/spikesorting/v1/metric_curation.py:67-110` — v1
   `WaveformParameters` (the tracked table v2 regressed from). **Reference only**;
   untouched.
@@ -76,6 +84,9 @@
   `plot_template_metrics`, `plot_potential_merges`, `export_report`,
   `export_to_phy`). Phase 5 exposes the useful subset through Spyglass keys
   with local `matplotlib` defaults.
+- `<si>/src/spikeinterface/sorters/runsorter.py:103-206,319-690` — SI's
+  `run_sorter(..., docker_image=..., singularity_image=...)` container path.
+  Phase 3a exposes this as first-class sorter execution provenance.
 
 ## Scope and dependency policy
 
@@ -94,7 +105,9 @@
 - Ship a default auto-curation rule set that thresholds `isi_violation > 0.02`
   (the lab's ~2% policy), not only `nn_noise_overlap`.
 - Surface the polymer MS4 recipe as the documented recommended-science option,
-  keeping a runnable MS5 preset as the default (MS4 needs `numpy<2`).
+  keeping a runnable MS5 preset as the default. Local MS4 remains constrained by
+  the host runtime, but containerized MS4 is a first-class opt-in path for
+  modern `numpy>=2` Spyglass environments.
 - Document the auto → manual-merge → auto curation loop.
 - Expose SpikeInterface waveform-shape (template) metrics — spike width and
   related shape measures — as columns in the per-unit metric table, configurable
@@ -112,8 +125,9 @@
 
 - No migration of existing v1 `WaveformParameters` / curation rows.
 - No change to decoding's separate waveform extraction (`waveform_features.py`).
-- Not making MS4 runnable under `numpy>=2` — preflight keeps guarding it and MS5
-  stays the runnable fallback.
+- No default switch to MS4. MS5 stays the default; local MS4 still needs a
+  compatible host runtime, and containerized MS4 is opt-in and requires
+  Docker/Singularity plus a pinned image.
 - Region windows cover **hippocampus and cortex only** — other/unknown regions
   and multi-region sorts fall back to the wider cortex window rather than getting
   their own tuned window (out of scope; a future tracked row away).
@@ -149,6 +163,10 @@
   location/merge widgets and exports read the display analyzer; official metric
   plots read `AnalyzerCuration.get_metrics`; no default visualization path uses
   the whitened metric analyzer.
+- **Sorter execution provenance (Phase 3a):** local vs Docker vs Singularity
+  execution is recorded in `SorterParameters.execution_params`; local and
+  containerized rows with identical scientific params have distinct
+  `sorter_params_name` values and therefore distinct `sorting_id` provenance.
 
 ## Risks and Mitigations
 
@@ -156,18 +174,22 @@
 | --- | --- |
 | Cache-key change desyncs the recompute trio (it rebuilds + hashes the analyzer) | Recompute resolves the same `waveform_params_name`; Phase 2 adds recompute coverage and a cache-collision test |
 | `peak_amplitude_uv` is a persisted field that shifts | Documented in divergences; recompute baseline recaptured in Phase 2 |
-| MS4 needs `numpy<2`, so it cannot be the runnable default | MS5 stays the default; MS4 is documented (docstring + `describe_pipeline_presets`) as the recommended-science option to *select* on `numpy<2`; preflight guards a selected-but-unavailable MS4 |
+| MS4 local runtime constraints make it a bad universal default | MS5 stays the default; containerized MS4 is documented (docstring + `describe_pipeline_presets`) as the first-class recommended-science option for modern hosts, local MS4 remains available for compatible environments, and preflight guards selected-but-unavailable local or container runtimes |
+| Container execution could become an untracked runtime override or silently fall back to local sorting | Phase 3a stores backend/image in `SorterParameters.execution_params`, uses distinct sorter row names, rejects container kwargs from scientific params/job kwargs, and preflight fails clearly if Docker/Singularity is unavailable |
+| Container rows look pinned by image but float the installed SpikeInterface version | Shipped/recommended container rows must use `installation_mode="no-install"` with a baked SI runtime or pin `spikeinterface_version`; unpinned custom `auto` rows are labeled exploratory/non-reproducible |
+| Replacing the old MATLAB sorter name-based Singularity fallback breaks custom Kilosort/IronClust rows silently | Phase 3a makes this an explicit behavior change: MATLAB-backed legacy sorters require tracked Docker/Singularity execution or fail preflight/dispatch clearly; no silent local fallback |
 | 20000-spike analyzer build is slower / larger | Phase 1 smoke-tests the base build's time + memory on a real-data slice (it ships the 20000 default); Phase 2 measures the whitened build's additional cost |
 | Hippocampus 0.5/0.5 display windows are shorter than SI's broad waveform defaults | This is intentional for hippocampal dense/tight waveforms. Phase 4 validates that surfaced template-shape metrics do not boundary-clip on representative hippocampal fixtures; cortex and unknown/multi-region sorts keep the wider 1.0/2.0 fallback |
 | SI widget/export wrappers accidentally use the whitened metric analyzer, recompute merge candidates, hide behind hard-to-discover table methods, miss required extensions, or default to a web backend | Phase 5 wrapper tests assert display-analyzer routing, persisted `get_merge_groups` use, a discoverable `v2.visualization` facade, extension ensure-or-clear-error behavior, `matplotlib` defaults, explicit `sortingview` opt-in, and no populate-side plotting/export |
 
 ## Rollout Strategy
 
-v2 is pre-release and the schema freeze is lifted (project policy:
-`memory/spikesorting-v2-schema-policy`), so table definitions change in place
-with **no** deprecation period and **no** `params_schema_version` bump. New
-default rows are added; the existing `v1_default_nn_noise` rule set is kept as a
-named, selectable row (not removed) alongside the new Frank-lab default.
+v2 is pre-release and the parent plan's pre-production direct-edit policy
+applies, so the table definition changes in this subplan land in place with
+**no** deprecation period. Per-phase tasks specify whether a schema-version
+field changes or stays pinned. New default rows are added; the existing
+`v1_default_nn_noise` rule set is kept as a named, selectable row (not removed)
+alongside the new Frank-lab default.
 
 ## Open Questions
 
@@ -188,8 +210,9 @@ named, selectable row (not removed) alongside the new Frank-lab default.
 
 ## Estimated Effort
 
-~950 LOC across five phases. Phase 1 ~200 (table + cache key + wiring + tests),
+~1130 LOC across six slices. Phase 1 ~200 (table + cache key + wiring + tests),
 Phase 2 ~250 (whitened build + burst routing + recompute coverage + tests),
+Phase 3a ~180 (sorter execution params + container dispatch/preflight + tests),
 Phase 3 ~150 (preset default + rule set + docs + tests), Phase 4 ~150 (template
 metric param + column join + writer guard + notebook/docs + tests), Phase 5 ~200
 (SI widget/export wrappers + notebook/docs + routing/backend tests).

@@ -33,7 +33,9 @@ it resolved. The whitened metric recipe is Phase 2.
   `_params/analyzer_waveform.py`, with fields per
   [the contract](shared-contracts.md#analyzerwaveformparameters-table)
   (`ms_before=1.0`, `ms_after=2.0`, `max_spikes_per_unit=20000`, `whiten=False`,
-  `purpose="display"`). Mirror `_params/sorter.py`'s validate-and-dump style.
+  `purpose="display"`). Add the contract's model validator so
+  `purpose="display"` requires `whiten=False` and `purpose="metric"` requires
+  `whiten=True`. Mirror `_params/sorter.py`'s validate-and-dump style.
 - **Add the `AnalyzerWaveformParameters` `dj.Lookup`** in `sorting.py` (analyzer
   is a `Sorting`-level concern; `metric_curation.py` already imports from
   `sorting.py`, so no import cycle). Definition + `insert_default` inserting the
@@ -155,6 +157,7 @@ it resolved. The whitened metric recipe is Phase 2.
 | --- | --- |
 | `test_analyzer_waveform_params_default_rows` | the four region rows exist — hippocampus display/metric at 0.5/0.5, cortex display/metric at 1.0/2.0, all 20000; `whiten` False(display)/True(metric) (`db_unit`) |
 | `test_analyzer_waveform_params_schema_rejects_extra` | unknown key raises at validation (`extra="forbid"`) |
+| `test_analyzer_waveform_params_schema_rejects_purpose_whiten_mismatch` | `purpose="display", whiten=True` and `purpose="metric", whiten=False` both raise at validation |
 | `test_analyzer_path_includes_params_name` | `analyzer_path(sid, "franklab_hippocampus_actual_waveforms") != analyzer_path(sid, "franklab_cortex_actual_waveforms")`; both under the configured root |
 | `test_remove_analyzer_cache_removes_all_recipes` | with two `{sid}__*.zarr` folders on disk, `remove_analyzer_cache(sid)` deletes BOTH (glob), and a different sort's folder is untouched (`db_unit`, tmp cache root) |
 | `test_orphan_detection_retains_display_recipe` | a `{sid}__{display_name}.zarr` matching `Sorting.display_waveform_params_name` is NOT orphaned; a `{sid}__stray.zarr` IS (Phase 2 extends this to retain `AnalyzerCurationSelection`-referenced metric folders) |

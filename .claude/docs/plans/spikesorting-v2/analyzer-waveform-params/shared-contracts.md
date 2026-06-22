@@ -9,6 +9,7 @@ not weaken them.
 - [Region resolution](#region-resolution)
 - [Analyzer cache identity](#analyzer-cache-identity)
 - [Display-vs-metric analyzer routing](#display-vs-metric-analyzer-routing)
+- [Sorter execution backend](#sorter-execution-backend)
 
 ---
 
@@ -38,6 +39,14 @@ class AnalyzerWaveformParamsSchema(BaseModel):
     max_spikes_per_unit: int = Field(default=20000, ge=1)
     whiten: bool = False
     purpose: Literal["display", "metric"] = "display"
+
+    @model_validator(mode="after")
+    def _purpose_matches_whiten(self):
+        if self.purpose == "display" and self.whiten:
+            raise ValueError("display waveform rows must be unwhitened")
+        if self.purpose == "metric" and not self.whiten:
+            raise ValueError("metric waveform rows must be whitened")
+        return self
 ```
 
 Default rows — region-specific windows (hippocampus's denser/tighter spikes
@@ -75,6 +84,9 @@ Invariants (do not weaken):
   [Analyzer cache identity](#analyzer-cache-identity)), so a custom row with the
   same field values but a different name resolves to a SEPARATE cache folder —
   acceptable redundancy, not a dedup target.
+- `purpose` and `whiten` are validated as a pair: display rows are always
+  unwhitened, metric rows are always whitened. A custom row cannot claim
+  `purpose="display"` while setting `whiten=True`, or vice versa.
 - `waveform_params_name` is validated **path-safe** (`^[A-Za-z0-9_]+$`) at insert
   time, since it is embedded in a cache folder name.
 
@@ -195,3 +207,111 @@ metric analyzer. Metric / non-display consumers pass an explicit
 (`Sorting.display_waveform_params_name`), never a shared cross-recipe default.
 Phase 5 visualization/export helpers are display-only by default and must not
 quietly switch to the whitened metric analyzer.
+
+---
+
+## Sorter execution backend
+
+Defined in Phase 3a; referenced by Phase 3's preset/docs work. SpikeInterface
+can run sorters locally or inside Docker/Singularity via `run_sorter` execution
+kwargs (`docker_image`, `singularity_image`, `delete_container_files`, and
+container-install options). In v2 these are tracked as **sorter execution
+provenance**, not ad hoc params:
+
+```python
+class SorterExecutionParamsSchema(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    schema_version: int = 1
+    backend: Literal["local", "docker", "singularity"] = "local"
+    container_image: str | None = None
+    delete_container_files: bool = True
+    installation_mode: Literal[
+        "auto", "pypi", "github", "no-install"
+    ] = "auto"
+    spikeinterface_version: str | None = None
+    extra_requirements: list[str] = Field(default_factory=list)
+```
+
+SI also supports `folder` / `dev` container install modes with a
+`spikeinterface_folder_source`; this plan intentionally does not expose them in
+the first pass because they require mounting a source tree as part of execution
+provenance.
+
+Reproducibility contract:
+- The schema default is local execution, so `installation_mode="auto"` and
+  `spikeinterface_version=None` are inert for local rows. For any shipped or
+  recommended container row, however, runtime install provenance must be pinned:
+  either use `installation_mode="no-install"` with a container image that already
+  contains the intended SpikeInterface + sorter runtime, or use
+  `installation_mode in {"pypi", "github"}` with an explicit
+  `spikeinterface_version`. Do not ship a recommended row whose container
+  installation floats via `installation_mode="auto"` and
+  `spikeinterface_version=None`.
+- Custom exploratory container rows may use SI's `auto` behavior, but
+  `describe_pipeline_presets` / preflight must make clear that such a row is not
+  reproducible by row content alone because the container-side SI install can
+  drift with the host environment.
+
+Storage contract:
+- `SorterParameters` carries `execution_params: blob` plus
+  `execution_params_schema_version=1: int`. The field lives on
+  `SorterParameters`, not `QualityMetricParameters`, because execution backend
+  can affect sorter output and the existing `sorter_params_name` already flows
+  into `sorting_id`.
+- The execution blob carries its own `schema_version`; the outer
+  `execution_params_schema_version` follows the existing sorter-params pattern
+  of backfilling from the blob when omitted/defaulted and cross-checking any
+  explicitly supplied non-default value.
+- `SorterParameters` duplicate-content fingerprints include `execution_params`
+  and `execution_params_schema_version` in addition to scientific `params`,
+  `params_schema_version`, `job_kwargs`, and sorter name. Because only
+  `sorter_params_name` flows into `sorting_id`, changing execution backend for
+  an existing logical row requires inserting a new `sorter_params_name`, not
+  mutating the old row in place.
+- A local MS4 row and a containerized MS4 row MUST use different
+  `sorter_params_name` values. The container row is first-class provenance; it
+  is not a temporary runtime override.
+- Container flags are NOT sorter scientific kwargs and NOT SI job kwargs.
+  `docker_image` / `singularity_image` must not be stored inside the sorter
+  `params` blob, and must not be stored in `job_kwargs`. This is a global
+  reserved-key rule across strict and permissive sorter schemas:
+  `docker_image`, `singularity_image`, `delete_container_files`,
+  `installation_mode`, `spikeinterface_version`, `spikeinterface_folder_source`,
+  and `extra_requirements` are rejected from every scientific `params` blob,
+  including generic / `extra="allow"` sorter rows.
+- For `backend="local"`, `container_image` must be `None`; for
+  `backend in {"docker", "singularity"}`, `container_image` must be an explicit
+  non-empty image string or local `.sif` path. Avoid `True` as provenance even
+  though SI accepts it.
+- `execution_params` are resolved in `make_fetch` and passed to the DB-free
+  sorter dispatch alongside `params` and resolved `job_kwargs`.
+- Preflight checks the selected backend: local rows check local sorter runtime
+  availability; Docker rows check Docker + the Python `docker` package;
+  Singularity rows check Singularity + `spython`. Missing container runtime is a
+  clear selected-preset error, not a silent fallback to local.
+- MATLAB-backed legacy sorters (`kilosort2_5`, `kilosort3`, `ironclust`) must not
+  silently run with `backend="local"`. A row for one of these sorters must either
+  carry an explicit container backend, or preflight / dispatch raises a clear
+  error explaining that Phase 3a removed the old name-based
+  `singularity_image=True` fallback in favor of tracked execution provenance.
+
+Dispatch contract:
+- `run_si_sorter` builds `run_kwargs` for `sis.run_sorter`. For local rows it
+  passes no container kwargs. For Docker rows it passes
+  `docker_image=container_image`; for Singularity rows it passes
+  `singularity_image=container_image`; for either container mode it passes
+  `delete_container_files`, `installation_mode`, `spikeinterface_version`, and
+  `extra_requirements` only when set/meaningful. SI's public `run_sorter`
+  signature names only `delete_container_files`; the install controls reach
+  `run_sorter_container` through `**sorter_params` after the container branch is
+  selected. In Spyglass they still originate ONLY from `execution_params`, never
+  from the scientific sorter `params` blob.
+- The existing external float64 whitening path still runs before SI's
+  `run_sorter` call. The resulting SpikeInterface recording must remain
+  serializable for SI's container runner.
+- The current MATLAB-sorter carve-out (`kilosort2_5`, `kilosort3`, `ironclust`
+  defaulting to Singularity and stripping non-container-safe kwargs) becomes an
+  explicit execution-policy check: no automatic name-based Singularity fallback,
+  but local execution for those sorters errors clearly unless the row's
+  `execution_params` selects Docker/Singularity. Any kwarg-strip behavior that SI
+  still requires remains conditional on the selected container backend.
