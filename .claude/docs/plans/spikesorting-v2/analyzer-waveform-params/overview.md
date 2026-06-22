@@ -84,10 +84,11 @@
 - Restore DB-tracked waveform parameters (Spyglass provenance) as a new
   `AnalyzerWaveformParameters` lookup, mirroring v1's `WaveformParameters`.
 - Adopt **region-specific** analyzer waveform windows as tracked rows —
-  hippocampus 0.5/0.5 ms, cortex 1.0/2.0 ms, both `max_spikes_per_unit=20000`
-  (cortex keeps today's window; hippocampus narrows; the subsample rises from
-  500 to the lab's 20000) — resolved from the sort's region preset, parallel to
-  the region filter cutoffs.
+  hippocampus intentionally uses 0.5/0.5 ms for dense/tight spikes, cortex uses
+  1.0/2.0 ms for broader waveforms, both `max_spikes_per_unit=20000` (cortex
+  keeps today's window; hippocampus narrows; the subsample rises from 500 to the
+  lab's 20000) — resolved from the sort's source preprocessing recipe, parallel
+  to the region filter cutoffs.
 - Provide two analyzer recipes per region — unwhitened (display / BurstPair
   amplitudes) and whitened (cluster metrics) — separated in the analyzer cache.
 - Ship a default auto-curation rule set that thresholds `isi_violation > 0.02`
@@ -157,6 +158,7 @@
 | `peak_amplitude_uv` is a persisted field that shifts | Documented in divergences; recompute baseline recaptured in Phase 2 |
 | MS4 needs `numpy<2`, so it cannot be the runnable default | MS5 stays the default; MS4 is documented (docstring + `describe_pipeline_presets`) as the recommended-science option to *select* on `numpy<2`; preflight guards a selected-but-unavailable MS4 |
 | 20000-spike analyzer build is slower / larger | Phase 1 smoke-tests the base build's time + memory on a real-data slice (it ships the 20000 default); Phase 2 measures the whitened build's additional cost |
+| Hippocampus 0.5/0.5 display windows are shorter than SI's broad waveform defaults | This is intentional for hippocampal dense/tight waveforms. Phase 4 validates that surfaced template-shape metrics do not boundary-clip on representative hippocampal fixtures; cortex and unknown/multi-region sorts keep the wider 1.0/2.0 fallback |
 | SI widget/export wrappers accidentally use the whitened metric analyzer, recompute merge candidates, hide behind hard-to-discover table methods, miss required extensions, or default to a web backend | Phase 5 wrapper tests assert display-analyzer routing, persisted `get_merge_groups` use, a discoverable `v2.visualization` facade, extension ensure-or-clear-error behavior, `matplotlib` defaults, explicit `sortingview` opt-in, and no populate-side plotting/export |
 
 ## Rollout Strategy

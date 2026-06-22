@@ -33,6 +33,12 @@ template is meaningless, exactly as for `snr`/amplitude. **Independent of
 Phase 3**; can ship before or after it, except the notebook task extends the
 section 7 Phase 3 builds, so land it after Phase 3 or coordinate the notebook edit.
 
+The hippocampus display row's 0.5/0.5 ms window is intentional for dense,
+tighter hippocampal spikes. Because this phase surfaces waveform-shape metrics,
+it must also verify that the narrowed hippocampal window does not boundary-clip
+the template features it exposes on representative hippocampal fixtures. Cortex,
+unknown, and multi-region sorts keep the wider 1.0/2.0 ms display fallback.
+
 **Inputs to read first:**
 
 - [metric_curation.py:72-78](../../../../../src/spyglass/spikesorting/v2/metric_curation.py#L72-L78) — `_CURATION_EXTENSIONS` already includes `template_metrics`; post-Phase-2 this extension is computed on the **display** analyzer (it is template-shape). This phase only *reads and surfaces columns from it* — it does not change which extensions are computed.
@@ -259,6 +265,7 @@ section 7 Phase 3 builds, so land it after Phase 3 or coordinate the notebook ed
 | `test_build_table_guards_nonscalar_column` | `build_quality_metrics_table` coerces a non-scalar / non-numeric cell to `NaN` without raising |
 | `test_available_template_metric_columns` | `QualityMetricParameters.available_template_metric_columns()` returns the SI single-channel column list and includes `trough_half_width` but not `half_width` |
 | `test_no_shipped_rule_thresholds_template_column` | no `AutoCurationRules._default_payloads` rule references a template-metric column (guards "expose, don't threshold") |
+| `test_hippocampus_template_metrics_not_boundary_clipped` | on a representative hippocampal fixture using the 0.5/0.5 display row, surfaced waveform-shape columns are finite and the trough / neighboring extrema used by SI template metrics are not pinned to the first or last waveform sample (`slow`, `integration`) |
 | `test_mearec_celltype_metrics_separable` | on the MEArec smoke fixture, ground-truth E vs I units have separable `trough_half_width` × `firing_rate` distributions (descriptive: a t-test / margin on the two groups, NOT a baked threshold) (`slow`, `integration`) |
 | notebook execution (CI smoke if notebooks are tested) | section 7's cell-typing example runs end-to-end against the example sort |
 

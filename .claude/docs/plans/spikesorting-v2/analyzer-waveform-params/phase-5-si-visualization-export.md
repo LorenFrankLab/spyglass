@@ -69,9 +69,11 @@ First-class wrappers in this phase:
   `Sorting` wrappers over the display analyzer.
 - **Metric / merge inspection:** SI `plot_quality_metrics`,
   `plot_template_metrics`, `plot_potential_merges` → `AnalyzerCuration`
-  wrappers, with official metric plots defaulting to Spyglass
-  `get_metrics()` rather than raw SI metric extensions, and merge plots using
-  persisted `get_merge_groups()` suggestions rather than recomputing candidates.
+  wrappers for explicitly named SI-native diagnostics. The default
+  `plot_metrics` helper is a Spyglass-owned plot of `AnalyzerCuration.get_metrics()`
+  (not SI `plot_quality_metrics`, which reads analyzer extensions directly), and
+  merge plots use persisted `get_merge_groups()` suggestions rather than
+  recomputing candidates.
 - **Local exports:** SI `export_report`, `export_to_phy` → optional `Sorting`
   wrappers over the display analyzer.
 
@@ -88,7 +90,11 @@ ssviz.plot_recording_probe_map(recording_key)
 ssviz.plot_sorting_summary(sorting_key)
 ssviz.plot_unit_summary(sorting_key, unit_id=...)
 ssviz.plot_waveforms(sorting_key, unit_ids=[...])
+ssviz.plot_spikes_on_traces(sorting_key)
+ssviz.plot_unit_locations(sorting_key)
 ssviz.plot_metrics(analyzer_curation_key)
+ssviz.plot_si_quality_metrics(analyzer_curation_key)
+ssviz.plot_si_template_metrics(analyzer_curation_key)
 ssviz.plot_potential_merges(analyzer_curation_key)
 ```
 
@@ -125,7 +131,11 @@ Deferred or escape-hatch only:
   def plot_sorting_summary(sorting_key, *, backend="matplotlib", **kwargs): ...
   def plot_unit_summary(sorting_key, unit_id, *, backend="matplotlib", **kwargs): ...
   def plot_waveforms(sorting_key, unit_ids=None, *, backend="matplotlib", **kwargs): ...
+  def plot_spikes_on_traces(sorting_key, *, backend="matplotlib", **kwargs): ...
+  def plot_unit_locations(sorting_key, *, backend="matplotlib", **kwargs): ...
   def plot_metrics(analyzer_curation_key, *, backend="matplotlib", **kwargs): ...
+  def plot_si_quality_metrics(analyzer_curation_key, *, compute_missing=False, backend="matplotlib", **kwargs): ...
+  def plot_si_template_metrics(analyzer_curation_key, *, compute_missing=False, backend="matplotlib", **kwargs): ...
   def plot_potential_merges(analyzer_curation_key, *, backend="matplotlib", **kwargs): ...
   def export_si_report(sorting_key, output_folder, *, force_computation=False, **kwargs): ...
   def export_to_phy(sorting_key, output_folder, **kwargs): ...
@@ -134,9 +144,10 @@ Deferred or escape-hatch only:
   Re-export the module as `spyglass.spikesorting.v2.visualization` (or document
   the direct import path if `__init__` stays intentionally lazy). The
   `available_visualizations()` helper returns names, required key type,
-  underlying SI function, backend support notes, and whether missing extensions
-  are auto-computed. This is documentation-as-code and the primary discovery
-  surface.
+  underlying implementation (`spikeinterface.widgets.*`,
+  `spikeinterface.exporters.*`, or Spyglass `AnalyzerCuration.get_metrics`),
+  backend support notes, and whether missing extensions are auto-computed. This
+  is documentation-as-code and the primary discovery surface.
 
   Implementation ownership is fixed: all SI-widget/export routing, extension
   checks, persisted-merge lookup, and backend policy lives in this module (or a
@@ -212,21 +223,26 @@ Deferred or escape-hatch only:
   table-local conveniences, add one-line delegates on `AnalyzerCuration`:
 
   ```python
-  def plot_metrics(self, key, *, source="spyglass", backend="matplotlib", **kwargs): ...
-  def plot_si_quality_metrics(self, key, *, backend="matplotlib", **kwargs): ...
-  def plot_si_template_metrics(self, key, *, backend="matplotlib", **kwargs): ...
+  def plot_metrics(self, key, *, backend="matplotlib", **kwargs): ...
+  def plot_si_quality_metrics(self, key, *, compute_missing=False, backend="matplotlib", **kwargs): ...
+  def plot_si_template_metrics(self, key, *, compute_missing=False, backend="matplotlib", **kwargs): ...
   def plot_potential_merges(self, key, *, backend="matplotlib", **kwargs): ...
   ```
 
   These methods call the matching facade functions and contain no SI imports,
   metric plotting logic, or merge-candidate computation. In the facade,
-  `source="spyglass"` plots the official routed metric table from
+  `plot_metrics` plots the official routed metric table from
   `AnalyzerCuration.get_metrics(key)`, so any split display-vs-whitened metrics
   and Phase-4 template-shape columns are shown exactly as Spyglass persists them.
+  This is a Spyglass-owned DataFrame plot, not SI `plot_quality_metrics`, because
+  SI's native quality/template metric widgets read analyzer extensions directly.
   The SI-native metric widgets are useful as raw SI diagnostics, but they should
   be explicitly named (`plot_si_quality_metrics`, `plot_si_template_metrics`) and
   documented as analyzer-extension views, not the official routed Spyglass metric
-  table.
+  table. They must not compute missing SI metric extensions unless the caller
+  passes an explicit opt-in such as `compute_missing=True`; otherwise they raise a
+  clear missing-extension error that recommends `plot_metrics` for official
+  Spyglass metrics.
 
   `plot_potential_merges` resolves the display analyzer and passes the
   **persisted** merge suggestions from `AnalyzerCuration.get_merge_groups(key)` to
@@ -277,8 +293,12 @@ Deferred or escape-hatch only:
   ssviz.plot_sorting_summary(...)
   ssviz.plot_unit_summary(...)
   ssviz.plot_waveforms(...)
+  ssviz.plot_spikes_on_traces(...)
+  ssviz.plot_unit_locations(...)
   AnalyzerCuration.get_metrics(...)
   ssviz.plot_metrics(...)
+  ssviz.plot_si_quality_metrics(...)      # optional raw SI diagnostic
+  ssviz.plot_si_template_metrics(...)     # optional raw SI diagnostic
   ssviz.plot_potential_merges(...)
   ```
 
@@ -299,7 +319,7 @@ Deferred or escape-hatch only:
 
 | Test | Asserts |
 | --- | --- |
-| `test_visualization_facade_exports_expected_helpers` | `spyglass.spikesorting.v2.visualization` exposes the documented functions and `available_visualizations()` lists their key type, SI target, backend default, and extension policy |
+| `test_visualization_facade_exports_expected_helpers` | `spyglass.spikesorting.v2.visualization` exposes the documented functions and `available_visualizations()` lists their key type, implementation target (SI widget/exporter or Spyglass metrics), backend default, and extension policy |
 | `test_table_delegates_call_facade_if_present` | optional `Recording` / `Sorting` / `AnalyzerCuration` methods are one-line delegates to the matching `visualization` functions and contain no SI imports or duplicate routing logic |
 | `test_recording_plot_traces_calls_si_widget` | module facade loads `Recording.get_recording(key)` and calls SI `plot_traces(recording=..., backend="matplotlib", **kwargs)` |
 | `test_recording_plot_probe_map_calls_si_widget` | loads the saved preprocessed recording and calls SI `plot_probe_map`; no analyzer is loaded |
@@ -310,6 +330,7 @@ Deferred or escape-hatch only:
 | `test_sorting_plot_unit_locations_ensures_extension` | `plot_unit_locations` ensures / requires the display `unit_locations` extension before calling SI |
 | `test_analyzer_curation_plot_metrics_uses_spyglass_metrics_by_default` | `plot_metrics` reads `AnalyzerCuration.get_metrics(key)` and does not call SI `plot_quality_metrics` by default |
 | `test_analyzer_curation_plot_si_quality_metrics_uses_display_analyzer` | explicitly named SI-native quality-metric view uses the display analyzer and is documented as non-official routed metrics |
+| `test_si_metric_widgets_require_explicit_compute_for_missing_extensions` | `plot_si_quality_metrics` / `plot_si_template_metrics` do not auto-compute missing SI metric extensions unless an explicit opt-in flag is passed; default error points users to `plot_metrics` for official Spyglass metrics |
 | `test_analyzer_curation_plot_si_template_metrics_uses_display_analyzer` | SI-native template-metric view uses the display analyzer only |
 | `test_plot_potential_merges_uses_persisted_merge_groups` | wrapper passes `AnalyzerCuration.get_merge_groups(key)` to SI `plot_potential_merges`; monkeypatch `compute_merge_unit_groups` to raise and assert it is never called |
 | `test_export_report_uses_display_analyzer` | `export_si_report` wraps SI `export_report` with the display analyzer and its missing-extension policy is explicit |

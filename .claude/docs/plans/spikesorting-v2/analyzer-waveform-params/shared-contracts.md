@@ -41,9 +41,10 @@ class AnalyzerWaveformParamsSchema(BaseModel):
 ```
 
 Default rows — region-specific windows (hippocampus's denser/tighter spikes
-take a narrower window; cortex's broader waveforms take the wider one). Each
-region has a display (unwhitened) and a metric (whitened) row; the sort's region
-preset names which pair it uses (see
+intentionally take a narrower 0.5/0.5 ms window; cortex's broader waveforms take
+the wider 1.0/2.0 ms window). Each region has a display (unwhitened) and a
+metric (whitened) row; the sort's source preprocessing recipe names which pair
+it uses (see
 [Region resolution](#region-resolution)):
 
 | `waveform_params_name` | ms_before | ms_after | max_spikes_per_unit | whiten | purpose |
@@ -55,6 +56,9 @@ preset names which pair it uses (see
 
 The schema default (1.0 / 2.0) is the cortex/wide fallback for any custom row
 and for unknown/multi-region sorts (see [Region resolution](#region-resolution)).
+Because the hippocampus row is deliberately shorter than SI's broad waveform
+defaults, Phase 4 validates that surfaced template-shape metrics do not clip the
+waveform boundary on representative hippocampal fixtures.
 
 Invariants (do not weaken):
 - `whiten` is part of analyzer **identity** — it MUST flow into the cache key
@@ -79,16 +83,29 @@ Invariants (do not weaken):
 ## Region resolution
 
 Wired in Phases 1-2. A sort's waveform window is **region-specific**, resolved
-from the recording's region-specific **preprocessing recipe** — the same signal
-that already sets the region filter cutoff — not a free per-sort knob:
+from the sort source's region-specific **preprocessing recipe** — the same
+signal that already sets the region filter cutoff — not a free per-sort knob.
+The resolver is source-aware and must reuse the existing
+`SortingSelection.resolve_source(key)` helper for source detection; do not
+re-inspect `RecordingSource` / `ConcatenatedRecordingSource` part tables in a
+second bespoke branch:
 
-- `_recipe_catalog` maps the recording's `preprocessing_params_name`
+- For `SortingSelection.RecordingSource`, read the upstream
+  `RecordingSelection.preprocessing_params_name`.
+- For `SortingSelection.ConcatenatedRecordingSource`, read the upstream
+  `ConcatenatedRecordingSelection` row and use its FK'd
+  `PreprocessingParameters` primary key (`preprocessing_params_name`). This is
+  not a literal column in the class definition; it comes from the
+  `-> PreprocessingParameters` FK. Do not query `RecordingSelection` with a
+  concat-only row; concat member recordings are provenance inputs, but the
+  concatenated source row is the sort input.
+- `_recipe_catalog` maps that source `preprocessing_params_name`
   (region-specific: the `HIPPOCAMPUS_PREPROC` / `CORTEX_PREPROC` values of the
   existing `_REGION_PREPROC` map) to its `(display, metric)` waveform-params row
   pair — hippocampus → `franklab_hippocampus_*`, cortex → `franklab_cortex_*`.
   This lives in `_recipe_catalog`, **not** on `_PipelinePreset` (which is
   `extra="forbid"`), so no preset-schema change is needed.
-- At sort time `make_fetch` resolves the **display** row from the recording's
+- At sort time `make_fetch` resolves the **display** row from the source
   `preprocessing_params_name`, and `make_insert` stores it in a new secondary
   `Sorting.display_waveform_params_name` field (Phase 1). Every later rebuild /
   cache-miss load reads that STORED value (never re-resolves), so the analyzer
@@ -98,12 +115,17 @@ that already sets the region filter cutoff — not a free per-sort knob:
   back to the wider cortex window** (`franklab_cortex_*`, 1.0/2.0) — never
   silently mix windows.
 
-Determinism proof (do not weaken): the row name is a pure function of the
-recording's `preprocessing_params_name`, which is part of `recording_identity`
-(`_selection_identity.py:44`) and therefore of `recording_id` ⊆ `sorting_id`. So
-the same `sorting_id` always yields the same window and the same
-`peak_amplitude_uv`; the window is NOT user-tunable per sort and is NOT added to
-`sorting_id` identity.
+Determinism proof (do not weaken): the row name is a pure function of the sort
+source's `preprocessing_params_name`. For single-recording sorts, that field is
+part of `recording_identity` (`_selection_identity.py:44`) and therefore of
+`recording_id` ⊆ today's `sorting_id` (`_selection_plan.py:177`). For
+concat-backed sorts (parent Phase 3), `concat_recording_id` is the source
+identity; parent Phase 3 must fold `concat_recording_id` into
+`sorting_identity_payload` exactly as `recording_id` is folded in today, so the
+same concat-backed `sorting_id` yields the same window and the same
+`peak_amplitude_uv`. Until then, concat sorts cannot be populated and this
+resolver branch is forward-compatible only. The window is NOT user-tunable per
+sort and is NOT added to `sorting_id` identity.
 
 ---
 

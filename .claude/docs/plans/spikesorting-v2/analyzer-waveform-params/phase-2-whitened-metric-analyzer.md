@@ -15,6 +15,7 @@ trio so both recipes are covered and never collide.
 - [_sorting_dispatch.py:360-405](../../../../../src/spyglass/spikesorting/v2/_sorting_dispatch.py#L360-L405) — the sorter's external float64 `sip.whiten` path (seed-pinned); reuse it as the metric analyzer's own whitening (for PC/NN metrics only — NOT a claim it matches what the sorter saw; KS4 whitens internally, clusterless doesn't whiten).
 - [metric_curation.py:495-577](../../../../../src/spyglass/spikesorting/v2/metric_curation.py#L495-L577) — `AnalyzerCurationSelection.insert_selection` (content-addressed PK); gets a `waveform_params_name` added to its identity.
 - [metric_curation.py:755-825](../../../../../src/spyglass/spikesorting/v2/metric_curation.py#L755-L825) — `_compute_metrics` / `_compute_merge_groups` / `ensure_extensions`; consumers to route by analyzer type (PC/NN metrics to metric, merge/template/voltage/spike-time work to display).
+- [sorting.py:794-831](../../../../../src/spyglass/spikesorting/v2/sorting.py#L794-L831) — `SortingSelection.resolve_source`; reuse this helper when deriving the default metric waveform row from a sort source.
 - [_metric_curation_plots.py:243-345](../../../../../src/spyglass/spikesorting/v2/_metric_curation_plots.py#L243-L345) — `peak_amplitudes_from_analyzer` (display) and `burst_pair_metrics_from_analyzer` (display legs).
 - [recompute.py](../../../../../src/spyglass/spikesorting/v2/recompute.py) + [_recompute.py:25-90](../../../../../src/spyglass/spikesorting/v2/_recompute.py#L25-L90) — `SortingAnalyzer{Versions,RecomputeSelection,Recompute}` + `ANALYZER_RECOMPUTE_EXTENSIONS`; must rebuild per `waveform_params_name`.
 - [sorting.py:1940-1995](../../../../../src/spyglass/spikesorting/v2/sorting.py#L1940-L1995) — sort-time `peak_amplitude_uv` computation; must read the display analyzer.
@@ -52,8 +53,13 @@ trio so both recipes are covered and never collide.
   `franklab_cortex_metric_waveforms`; see
   [Region resolution](shared-contracts.md#region-resolution)), so the metric
   analyzer params are tracked per curation (v1-parity: v1 attached
-  `WaveformParameters` to `MetricCurationSelection`). Update the `uuid5` identity
-  tuple and `_find_existing_pk`.
+  `WaveformParameters` to `MetricCurationSelection`). The default resolver is
+  source-aware and uses `SortingSelection.resolve_source(key)` for source
+  detection: single-recording sorts resolve through
+  `RecordingSelection.preprocessing_params_name`, while concat-backed sorts
+  resolve through the `ConcatenatedRecordingSelection -> PreprocessingParameters`
+  FK'd `preprocessing_params_name`.
+  Update the `uuid5` identity tuple and `_find_existing_pk`.
 - **Route metrics by TYPE, per the routing contract — NOT all metrics through
   the whitened analyzer.** Split `_compute_metrics`
   ([metric_curation.py:755-825](../../../../../src/spyglass/spikesorting/v2/metric_curation.py#L755-L825)): voltage / spike-train metrics
@@ -128,6 +134,7 @@ trio so both recipes are covered and never collide.
 | `test_metric_analyzer_whitened_under_unequal_gains` | on a synthetic recording with NON-uniform channel gains, the whitened metric analyzer's noise covariance is ≈ identity (would NOT be if `return_in_uV=True` re-applied the gains) |
 | `test_display_and_metric_analyzers_distinct_cache` | for one `sorting_id` the two recipes write distinct folders; neither overwrites the other (`db_unit`) |
 | `test_analyzer_curation_selection_tracks_waveform_params` | `insert_selection` identity includes `waveform_params_name`; two metric recipes give different `analyzer_curation_id` (`db_unit`) |
+| `test_analyzer_curation_selection_resolves_concat_metric_waveform_params` | for a concat-backed sort, the default metric `waveform_params_name` resolves from the `ConcatenatedRecordingSelection -> PreprocessingParameters` FK'd `preprocessing_params_name`, not a single-recording source query. Parent-Phase-3-dependent for end-to-end populate; if this subplan lands first, test resolver behavior with direct selection/source-part rows or monkeypatched source resolution (`db_unit` or `slow` depending on fixture) |
 | `test_metric_routing_by_type` | voltage metrics (`snr`, `amplitude_cutoff`, ...) compute on the unwhitened analyzer; PC/NN metrics (`nn_advanced`, `principal_components`) on the whitened one; `get_peak_amps` loads unwhitened (monkeypatch the loader, assert the name passed per metric) |
 | `test_snr_unaffected_by_metric_whitening` | `snr` for a unit is the SAME whether or not a whitened metric analyzer exists (it always reads unwhitened) — guards against the whitening leaking into voltage metrics |
 | `test_burst_and_merge_use_display_analyzer` | `burst_pair_metrics_from_analyzer` and `_compute_merge_groups` read the unwhitened display analyzer (not the whitened one); a planted oversplit still scores high `wf_similarity` and is proposed for merge |
@@ -146,6 +153,10 @@ measurement task, not a CI assertion.
   the build-time/memory smoke measurement.
 - Save the pre-whitening metric baseline to a fixture file for the
   capture-then-compare task.
+- Concat metric-row resolver coverage is parent-Phase-3-dependent for a true
+  populated concat sort. Before that lands, cover the branch with DB-unit fixture
+  rows or monkeypatched `SortingSelection.resolve_source`, not
+  `ConcatenatedRecording.populate()`.
 
 ## Review
 

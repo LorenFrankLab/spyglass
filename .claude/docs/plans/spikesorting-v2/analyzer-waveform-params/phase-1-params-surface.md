@@ -13,16 +13,18 @@ it resolved. The whitened metric recipe is Phase 2.
 
 - [_sorting_analyzer.py:340-411](../../../../../src/spyglass/spikesorting/v2/_sorting_analyzer.py#L340-L411) — `build_analyzer`; the hardcoded `extension_params` to replace (`:375`, `:397`).
 - [_analyzer_cache.py:35-72](../../../../../src/spyglass/spikesorting/v2/_analyzer_cache.py#L35-L72) — `analyzer_path` / `analyzer_cache_root`; the sorting_id-only key.
+- [sorting.py:794-831](../../../../../src/spyglass/spikesorting/v2/sorting.py#L794-L831) — `SortingSelection.resolve_source`; reuse this helper for source detection instead of re-reading source part tables.
 - [sorting.py:874-970](../../../../../src/spyglass/spikesorting/v2/sorting.py#L874-L970) — `Sorting` definition (`:876`, where the secondary `display_waveform_params_name` field is added) + `Sorting.Unit` (peak_amplitude_uv at `:904`) and the sort-time analyzer build.
 - [v1/metric_curation.py:67-110](../../../../../src/spyglass/spikesorting/v1/metric_curation.py#L67-L110) — v1 `WaveformParameters`, the table being mirrored.
 - [_params/sorter.py:40-90](../../../../../src/spyglass/spikesorting/v2/_params/sorter.py#L40-L90) — the pydantic-`@schema`-params pattern to copy for the new schema + lookup.
 - [_recipe_catalog.py:38-47,302-305](../../../../../src/spyglass/spikesorting/v2/_recipe_catalog.py#L302-L305) — the `_REGION_PREPROC` region→preproc map; add a parallel `preprocessing-recipe → (display, metric) waveform-params` map here.
 - [_selection_identity.py:44,158](../../../../../src/spyglass/spikesorting/v2/_selection_identity.py#L44) — `preprocessing_params_name` is part of `recording_identity_payload` — the determinism anchor for the region-resolved window.
+- [session_group.py:209-215](../../../../../src/spyglass/spikesorting/v2/session_group.py#L209-L215) / parent Phase 3 design — `ConcatenatedRecordingSelection` FKs `PreprocessingParameters`; its `preprocessing_params_name` resolver input comes from that FK's PK, not a literal field in the class definition.
 
 **Contracts referenced:**
 
 - [`AnalyzerWaveformParameters` table](shared-contracts.md#analyzerwaveformparameters-table) — defined here; do not bury in `QualityMetricParameters`.
-- [Region resolution](shared-contracts.md#region-resolution) — region preset names the display row; multi-region falls back to cortex.
+- [Region resolution](shared-contracts.md#region-resolution) — the sort source's preprocessing recipe names the display row; multi-region falls back to cortex.
 - [Analyzer cache identity](shared-contracts.md#analyzer-cache-identity) — the new `analyzer_path(sorting_id, waveform_params_name)` signature.
 
 ## Tasks
@@ -71,7 +73,7 @@ it resolved. The whitened metric recipe is Phase 2.
   field.** The sort-time analyzer + `peak_amplitude_uv` use the region's display
   row — `franklab_hippocampus_actual_waveforms` (0.5/0.5) or
   `franklab_cortex_actual_waveforms` (1.0/2.0) — resolved in `make_fetch` from
-  the sort's region preset (see
+  the sort source's preprocessing recipe (see
   [Region resolution](shared-contracts.md#region-resolution)); multi-region or
   unknown sorts fall back to the wider cortex row. The resolved name is **not** a
   user-tunable per-sort attribute and **not** added to `SortingSelection`
@@ -82,21 +84,33 @@ it resolved. The whitened metric recipe is Phase 2.
   *user-tunable* per-sort window not in `sorting_id` would violate
   content-addressing, so that is intentionally not offered. The metric recipe is
   carried on `AnalyzerCurationSelection` (Phase 2).
-- **Wire region → display row, deterministically**
+- **Wire source preprocessing recipe → display row, deterministically**
   ([Region resolution](shared-contracts.md#region-resolution)). Add a
   `preprocessing-recipe → (display, metric) waveform-params` map to
   `_recipe_catalog` (parallel to `_REGION_PREPROC`, `:302-305`), keyed by
   `HIPPOCAMPUS_PREPROC` / `CORTEX_PREPROC`; any other recipe → the cortex pair.
   Add a secondary `display_waveform_params_name` field to the `Sorting`
   definition (`sorting.py:876`, after `time_of_sort`). `Sorting.make_fetch`
-  resolves the display name from the recording's `preprocessing_params_name`
-  through that map; `make_compute` builds the display analyzer with it (for
-  `peak_amplitude_uv`); `make_insert` stores it. Every cache-miss rebuild
+  calls `SortingSelection.resolve_source(key)` first, then resolves the display
+  name from that source's `preprocessing_params_name` through the map:
+    - `RecordingSource` → `RecordingSelection.preprocessing_params_name`.
+    - `ConcatenatedRecordingSource` → the
+      `ConcatenatedRecordingSelection -> PreprocessingParameters` FK's
+      `preprocessing_params_name` PK. Do not query `RecordingSelection` with a
+      concat-only row.
+  Do not re-detect source type by hand; `resolve_source` is the single
+  source-part integrity check and stays in sync with the parent concat work.
+  `make_compute` builds the display analyzer with it (for `peak_amplitude_uv`);
+  `make_insert` stores it. Every cache-miss rebuild
   (`load_or_rebuild_analyzer`) reads the **stored**
   `Sorting.display_waveform_params_name`, never re-resolves. Do NOT add fields to
   `_PipelinePreset` — it is `extra="forbid"`; the map lives in `_recipe_catalog`.
-  Determinism follows because `preprocessing_params_name` is part of
-  `recording_id` ⊆ `sorting_id` (see the contract's proof).
+  Determinism follows because the source preprocessing recipe is part of the
+  source identity. For today's single-recording sorts, that source identity is
+  `recording_id`, which already flows into `sorting_id`. For future concat-backed
+  sorts, parent Phase 3 must extend `sorting_identity_payload` so
+  `concat_recording_id` flows into `sorting_id` before concat populate is enabled
+  (see the contract's proof).
 - **`get_analyzer` defaults to the sort's display recipe.** `get_analyzer` /
   `load_or_rebuild_analyzer` resolve `waveform_params_name=None` to the stored
   `Sorting.display_waveform_params_name` (the deterministic default, see the
@@ -146,11 +160,11 @@ it resolved. The whitened metric recipe is Phase 2.
 | `test_orphan_detection_retains_display_recipe` | a `{sid}__{display_name}.zarr` matching `Sorting.display_waveform_params_name` is NOT orphaned; a `{sid}__stray.zarr` IS (Phase 2 extends this to retain `AnalyzerCurationSelection`-referenced metric folders) |
 | `test_build_analyzer_uses_param_row_window` | `build_analyzer(..., waveform_params={ms_before:0.5, ms_after:0.5, max_spikes:20000, ...})` (the hippocampus row's RESOLVED dict, no name lookup) → `waveforms` ext `ms_before==0.5, ms_after==0.5`; the cortex dict → `1.0/2.0`; both cap 20000 (DB-free; reuse the `synthetic_analyzer` fixture pattern) |
 | `test_display_analyzer_resolved_from_region` | a hippocampus-preset sort builds its display analyzer with the hippocampus row, a cortex-preset sort with the cortex row, and a multi-region sort falls back to cortex; `peak_amplitude_uv` is deterministic for a `sorting_id` (`slow`, `integration`) |
+| `test_concat_display_analyzer_resolved_from_concat_preprocessing` | a concat-backed sort resolves `display_waveform_params_name` from the `ConcatenatedRecordingSelection -> PreprocessingParameters` FK'd `preprocessing_params_name` (hippocampus/cortex/custom fallback), not from member `RecordingSelection` rows or a single-recording-only query. Parent-Phase-3-dependent for end-to-end populate; if this subplan lands first, test the resolver with direct selection/source-part rows or a monkeypatched `resolve_source`, not `ConcatenatedRecording.populate()` (`slow`, `integration` for the end-to-end version) |
+| `test_sorting_records_display_waveform_params` | `Sorting.make_insert` stores the resolved display row, and cache-miss rebuilds read the stored `Sorting.display_waveform_params_name` instead of re-resolving from the source (`slow`, `integration`) |
 | `test_sorting_selection_identity_unchanged` | `sorting_id` does NOT depend on any waveform-params input (idempotency preserved) |
 | `test_make_compute_does_no_param_db_io` | `Sorting.make_compute` / `build_analyzer` take a resolved params dict; the DB fetch happens in `make_fetch` (assert no query inside the compute path) |
 | `test_peak_amplitudes_aligned_to_waveform_subset` (existing) | still passes — `nbefore` adapts to the selected row's window (symmetric for hippocampus, asymmetric for cortex) |
-
-Mark `test_sorting_records_display_waveform_params` `slow`/`integration`.
 
 ## Fixtures
 
@@ -159,6 +173,10 @@ Mark `test_sorting_records_display_waveform_params` `slow`/`integration`.
   `capped_analyzer`) for the build/window tests.
 - The `slow` Sorting test reuses the existing `populated_sorting_with_curation`
   integration fixture.
+- Concat resolver tests are parent-Phase-3-dependent for a true populated
+  `ConcatenatedRecording`. Before that parent phase lands, cover the branch with
+  DB-unit fixture rows or a monkeypatched `SortingSelection.resolve_source`; do
+  not require `ConcatenatedRecording.populate()`.
 
 ## Review
 

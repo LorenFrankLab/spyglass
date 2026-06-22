@@ -4,7 +4,10 @@
 
 Restore DB-tracked spike-sorting analyzer waveform parameters (so the window and
 subsample that produced each analyzer are recorded and reproducible, the way v1
-tracked them), adopt region-specific analyzer waveform windows (hippocampus 0.5/0.5 ms, cortex 1.0/2.0 ms; 20000 spikes) resolved from the region preset, split the
+tracked them), adopt region-specific analyzer waveform windows (hippocampus
+intentionally 0.5/0.5 ms for dense/tight waveforms, cortex 1.0/2.0 ms for
+wider waveforms; 20000 spikes) resolved from the source preprocessing recipe,
+split the
 analyzer into an unwhitened "actual waveform" recipe for display and a whitened
 recipe for cluster metrics, ship a default auto-curation rule set that uses the
 lab's ~2% ISI policy, document the polymer MS4 recipe as the recommended-science
@@ -43,9 +46,10 @@ For agent invocation, **load only the slice you need**:
   extends the existing v2 notebook's curate section; a standalone notebook is a
   follow-up only if that section outgrows inline form.
 - **Waveform windows for regions beyond hippocampus / cortex** — those two are
-  region-specific in this plan (hippo 0.5/0.5, cortex 1.0/2.0); other or
-  multi-region sorts fall back to the wider cortex window rather than getting a
-  tuned one. Adding more regions is a tracked-row-and-preset-mapping away.
+  region-specific in this plan (hippo 0.5/0.5 by design, cortex 1.0/2.0);
+  other or multi-region sorts fall back to the wider cortex window rather than
+  getting a tuned one. Adding more regions is a tracked-row-and-preset-mapping
+  away.
 - **Full FigPack / web curation state round-trip** — Phase 5 only exposes local
   SI widget/export helpers through Spyglass keys. It does not implement FigPack,
   cloud publishing, edited label import, or a new manual-curation state model.
