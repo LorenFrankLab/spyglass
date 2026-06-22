@@ -33,13 +33,31 @@ class ParityReport:
     failures: list[str] = field(default_factory=list)
     snr_median_ratio: float | None = None
     n_common_units: int = 0
+    n_metrics_compared: int = 0
+
+
+# Metric columns the comparator expects on both the v1 baseline and the v2
+# metrics. A missing column is reported as a failure (not silently skipped) so
+# that ``matched=True`` cannot mean "compared almost nothing."
+_EXPECTED_COLUMNS = ("num_spikes", "isi_violation", "firing_rate", "snr")
+
+
+def _to_float(value) -> float:
+    """Coerce a metric scalar to float, mapping None to NaN.
+
+    ``AnalyzerCuration.get_metrics`` returns sanitized metrics where non-finite
+    values are real ``None`` (not NaN). ``float(None)`` raises, so map ``None``
+    to NaN here -- the finiteness test then drops it like any other non-finite
+    value rather than crashing the whole comparison.
+    """
+    return np.nan if value is None else float(value)
 
 
 def _finite_pairs(v1_series, v2_series, unit_ids):
     pairs = []
     for unit_id in unit_ids:
-        a = float(v1_series.loc[unit_id])
-        b = float(v2_series.loc[unit_id])
+        a = _to_float(v1_series.loc[unit_id])
+        b = _to_float(v2_series.loc[unit_id])
         if np.isfinite(a) and np.isfinite(b):
             pairs.append((unit_id, a, b))
     return pairs
@@ -93,31 +111,63 @@ def compare_to_v1_baseline(
         failures.append("no common unit ids between v1 baseline and v2 metrics")
         return ParityReport(matched=False, failures=failures)
 
+    # An expected metric absent from either side is a failure, not a silent
+    # skip -- otherwise a degenerate frame could pass on overlap alone.
+    present = {
+        column: column in v1_metrics.columns and column in v2_metrics.columns
+        for column in _EXPECTED_COLUMNS
+    }
+    missing = [column for column, ok in present.items() if not ok]
+    if missing:
+        failures.append(
+            f"expected metric column(s) {missing} missing from the v1 baseline "
+            "or v2 metrics"
+        )
+
+    n_metrics_compared = 0
+
     # num_spikes: exact integer.
-    if "num_spikes" in v1_metrics and "num_spikes" in v2_metrics:
+    if present["num_spikes"]:
+        n_finite = 0
         for unit_id in common:
-            a = int(v1_metrics.loc[unit_id, "num_spikes"])
-            b = int(v2_metrics.loc[unit_id, "num_spikes"])
-            if a != b:
-                failures.append(f"num_spikes[{unit_id}]: v1={a} v2={b}")
+            a = _to_float(v1_metrics.loc[unit_id, "num_spikes"])
+            b = _to_float(v2_metrics.loc[unit_id, "num_spikes"])
+            if not (np.isfinite(a) and np.isfinite(b)):
+                continue
+            n_finite += 1
+            if int(a) != int(b):
+                failures.append(f"num_spikes[{unit_id}]: v1={int(a)} v2={int(b)}")
+        n_metrics_compared += n_finite
+        if n_finite == 0:
+            failures.append("num_spikes present but no finite values to compare")
 
     # isi_violation + firing_rate: exact within float tolerance.
     for column in ("isi_violation", "firing_rate"):
-        if column not in v1_metrics or column not in v2_metrics:
+        if not present[column]:
             continue
-        for unit_id, a, b in _finite_pairs(
-            v1_metrics[column], v2_metrics[column], common
-        ):
+        pairs = _finite_pairs(v1_metrics[column], v2_metrics[column], common)
+        n_metrics_compared += len(pairs)
+        if not pairs:
+            failures.append(
+                f"{column} present but no finite values to compare across "
+                f"{len(common)} common units"
+            )
+        for unit_id, a, b in pairs:
             if not np.isclose(a, b, rtol=exact_rtol, atol=exact_atol):
                 failures.append(f"{column}[{unit_id}]: v1={a:.6g} v2={b:.6g}")
 
     # snr: distributional ratio check.
     snr_median_ratio = None
-    if "snr" in v1_metrics and "snr" in v2_metrics:
+    if present["snr"]:
+        pairs = _finite_pairs(v1_metrics["snr"], v2_metrics["snr"], common)
+        n_metrics_compared += len(pairs)
+        if not pairs:
+            failures.append(
+                f"snr present but no finite values to compare across "
+                f"{len(common)} common units"
+            )
         ratios = []
-        for unit_id, a, b in _finite_pairs(
-            v1_metrics["snr"], v2_metrics["snr"], common
-        ):
+        for unit_id, a, b in pairs:
             if a == 0:
                 continue
             ratio = b / a
@@ -139,4 +189,5 @@ def compare_to_v1_baseline(
         failures=failures,
         snr_median_ratio=snr_median_ratio,
         n_common_units=len(common),
+        n_metrics_compared=n_metrics_compared,
     )

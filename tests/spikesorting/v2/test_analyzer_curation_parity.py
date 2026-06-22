@@ -76,6 +76,43 @@ def test_parity_comparator_no_common_units():
     assert any("no common unit" in f for f in report.failures)
 
 
+def test_parity_comparator_handles_sanitized_none():
+    """A sanitized None (non-finite metric) is skipped, not a crash.
+
+    ``get_metrics`` returns None for non-finite metric values, which is exactly
+    what feeds the integration comparison; ``float(None)`` would otherwise raise
+    and abort the whole parity check.
+    """
+    v1 = _frame([4.0, 6.0], [0.001, 0.002], [1.0, 2.0], [100, 200])
+    v2 = _frame([4.0, 6.0], [0.001, 0.002], [1.0, 2.0], [100, 200])
+    # Unit 1's v2 isi_violation came back non-finite -> sanitized to None.
+    v2 = v2.astype(object)
+    v2.loc[1, "isi_violation"] = None
+    report = compare_to_v1_baseline(v2, v1)  # must not raise
+    assert report.matched, report.failures
+    # Unit 0's isi pair is still compared; unit 1's None pair is dropped.
+    assert report.n_metrics_compared > 0
+
+
+def test_parity_comparator_fails_on_missing_expected_column():
+    """A metric column absent from one side fails, never a silent match."""
+    v1 = _frame([4.0], [0.0], [1.0], [100])
+    v2 = _frame([4.0], [0.0], [1.0], [100]).drop(columns=["snr"])
+    report = compare_to_v1_baseline(v2, v1)
+    assert not report.matched
+    assert any("snr" in f and "missing" in f for f in report.failures)
+
+
+def test_parity_comparator_fails_when_metric_all_non_finite():
+    """A present column with no finite values to compare is a failure."""
+    v1 = _frame([4.0, 6.0], [0.0, 0.0], [1.0, 2.0], [100, 200])
+    v2 = _frame([4.0, 6.0], [0.0, 0.0], [1.0, 2.0], [100, 200]).astype(object)
+    v2["snr"] = None  # entire snr column sanitized away
+    report = compare_to_v1_baseline(v2, v1)
+    assert not report.matched
+    assert any("snr present but no finite" in f for f in report.failures)
+
+
 # ---------- integration (gated on a captured real-data baseline) ------------
 
 
