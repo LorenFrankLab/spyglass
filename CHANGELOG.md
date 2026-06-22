@@ -498,9 +498,12 @@ cross-referenced here, not duplicated.
   ([curation.py:109](./src/spyglass/spikesorting/v2/curation.py#L109)).
 - `description` widened `varchar(100)` → `varchar(255)` on `CurationV2`
   ([curation.py:112](./src/spyglass/spikesorting/v2/curation.py#L112)).
-- `MetricCuration`, `FigURLCuration`, `BurstPair`, and
-  `RecordingRecompute` chains are not yet ported — see "Removed v1
-  features" below.
+- `MetricCuration` is replaced by `AnalyzerCuration`; v1 `BurstPair` plotting
+  helpers are folded into `AnalyzerCuration` while the stored per-pair
+  `BurstPairUnit` metrics remain v1-only. `RecordingRecompute` is replaced by
+  the v2 `RecordingArtifactRecompute*` and `SortingAnalyzerRecompute*`
+  verification families. `FigURLCuration` remains v1-only until the FigPack
+  phase lands — see "Removed or replaced v1 features" below.
 
 **Schema-defaults flips (programmatic users only)**
 
@@ -566,20 +569,27 @@ cross-referenced here, not duplicated.
   see the artifact-detection unit-conversion subsection above for the
   full rationale.
 
-**Removed v1 features (use the v1 fallback in the interim)**
+**Removed or replaced v1 features**
 
 - `MetricCuration` chain (`MetricCuration`, `MetricCurationParameters`,
-  `WaveformParameters`, `MetricParameters`) — the v2 stub raises an
-  informative `ImportError` pointing at
-  `spyglass.spikesorting.v1.metric_curation`
+  `WaveformParameters`, `MetricParameters`) is replaced for v2 rows by
+  `QualityMetricParameters`, `AutoCurationRules`,
+  `AnalyzerCurationSelection`, and `AnalyzerCuration`
   ([metric_curation.py](./src/spyglass/spikesorting/v2/metric_curation.py)).
-- `FigURLCuration` chain — v2 stub points at
-  `spyglass.spikesorting.v1.figurl_curation`
+  Waveform re-extraction via a separate `WaveformParameters` row is not
+  preserved; v2 reads waveforms from the `SortingAnalyzer`.
+- `FigURLCuration` chain remains v1-only while the v2 FigPack curation module
+  is pending
   ([figpack_curation.py](./src/spyglass/spikesorting/v2/figpack_curation.py)).
-- `BurstPair` chain — use `spyglass.spikesorting.v1` (`BurstPair`,
-  `BurstPairParams`, `BurstPairSelection`).
-- `RecordingRecompute` chain — use
-  `spyglass.spikesorting.v1.recompute`.
+- `BurstPair` chain has no v2 table clone. Use v1 `BurstPair` for stored
+  per-pair quantitative metrics; use `AnalyzerCuration` for the ported
+  correlogram, cross-correlogram, pair-peak, and peak-over-time plotting
+  helpers.
+- `RecordingRecompute` chain is replaced by
+  `RecordingArtifactVersions` / `RecordingArtifactRecomputeSelection` /
+  `RecordingArtifactRecompute` and `SortingAnalyzerVersions` /
+  `SortingAnalyzerRecomputeSelection` / `SortingAnalyzerRecompute`
+  ([recompute.py](./src/spyglass/spikesorting/v2/recompute.py)).
 - `recording_id`-keyed `IntervalList` row — see "Dropped or relocated
   data" above.
 

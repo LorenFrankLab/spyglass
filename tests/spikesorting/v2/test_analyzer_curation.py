@@ -422,6 +422,60 @@ def test_compute_merge_groups_suggests_planted_oversplit(dj_conn):
 
 
 @pytest.mark.db_unit
+def test_compute_merge_groups_matches_si_call_contract(dj_conn, monkeypatch):
+    """Resolved job kwargs are flattened for SI, not nested as ``job_kwargs``.
+
+    ``compute_merge_unit_groups`` accepts concurrency controls through
+    ``**job_kwargs``. Passing ``job_kwargs={...}`` as a named kwarg leaks that
+    dict into downstream analyzer ``compute`` calls as an invalid job keyword.
+    The ``feature_neighbors`` preset also needs SI's ``spike_locations``
+    extension, so the wrapper precomputes it explicitly before calling SI with
+    ``compute_needed_extensions=False``.
+    """
+    import numpy as np
+
+    from spyglass.spikesorting.v2.metric_curation import AnalyzerCuration
+
+    captured = {}
+
+    def _fake_ensure(analyzer, extensions, *, job_kwargs=None):
+        captured["extensions"] = tuple(extensions)
+        captured["ensure_job_kwargs"] = dict(job_kwargs or {})
+
+    def _fake_compute_merge_unit_groups(analyzer, **kwargs):
+        captured["si_kwargs"] = dict(kwargs)
+        return [(np.int64(1), np.int64(2))]
+
+    monkeypatch.setattr(
+        "spyglass.spikesorting.v2._sorting_analyzer.ensure_extensions",
+        _fake_ensure,
+    )
+    monkeypatch.setattr(
+        "spikeinterface.curation.compute_merge_unit_groups",
+        _fake_compute_merge_unit_groups,
+    )
+
+    groups = AnalyzerCuration._compute_merge_groups(
+        object(),
+        "feature_neighbors",
+        {"steps_params": {"knn": {"k_nn": 5}}},
+        {"n_jobs": 2, "chunk_duration": "1s", "random_seed": 7},
+    )
+
+    assert groups == [[1, 2]]
+    assert "spike_locations" in captured["extensions"]
+    assert "spike_amplitudes" in captured["extensions"]
+    assert captured["ensure_job_kwargs"]["random_seed"] == 7
+    assert captured["si_kwargs"]["preset"] == "feature_neighbors"
+    assert captured["si_kwargs"]["compute_needed_extensions"] is False
+    assert captured["si_kwargs"]["steps_params"] == {"knn": {"k_nn": 5}}
+    assert captured["si_kwargs"]["n_jobs"] == 2
+    assert captured["si_kwargs"]["chunk_duration"] == "1s"
+    assert "job_kwargs" not in captured["si_kwargs"]
+    assert "random_seed" not in captured["si_kwargs"]
+
+
+@pytest.mark.db_unit
 def test_auto_curation_rules_none_default_passes_integrity(dj_conn):
     """The shipped 'none' inert default is exempt; a custom no-op is flagged."""
     from spyglass.spikesorting.v2.metric_curation import AutoCurationRules

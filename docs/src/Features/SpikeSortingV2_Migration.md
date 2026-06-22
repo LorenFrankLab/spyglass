@@ -115,28 +115,35 @@ notebook. For the pipeline overview, see
   `Sorting.find_orphaned_analyzer_folders(dry_run=True)` surfaces 5–50 GB
   on-disk leaks from delete-override bypass.
 
-## 4. What's not there yet
+## 4. What has a v2 replacement vs. what is still pending
 
-Use the v1 chain in the interim; the parent-plan phase that delivers each
-v2 port is noted. How the gap surfaces depends on the feature:
+Most post-sort Phase 2 surfaces now have v2 replacements. Use the v1 chain only
+for features still listed as pending.
 
-- **Stubbed v2 modules** — `metric_curation`, `figpack_curation`,
-  `unit_matching`, and `matcher_protocol` exist but raise an informative
-  `ImportError` on any public-name import, naming the v1 fallback where
-  one exists.
-- **No v2 module yet** — `BurstPair` and `RecordingRecompute` have no
-  `spikesorting.v2` counterpart; import them from `spyglass.spikesorting.v1`
-  directly (importing a `spikesorting.v2.*` path for them is a plain
-  `ModuleNotFoundError`).
-- **Gated methods** — `ConcatenatedRecording` / `SessionGroup` exist in
-  v2 but their unimplemented methods raise `NotImplementedError`.
+- **Available in v2** — `metric_curation` now provides
+  `QualityMetricParameters`, `AutoCurationRules`, `AnalyzerCurationSelection`,
+  and `AnalyzerCuration`. This replaces v1 `MetricCuration` for SI quality
+  metrics, auto-labels, and merge suggestions.
+- **Folded into AnalyzerCuration** — the v1 `BurstPair` table was not cloned as
+  a new DataJoint table. Its notebook plotting helpers are available from
+  `AnalyzerCuration` (`plot_correlograms`, `investigate_pair_xcorrel`,
+  `investigate_pair_peaks`, `plot_peak_over_time`), while per-pair quantitative
+  `BurstPairUnit` tables remain v1-only.
+- **Available in v2** — `RecordingRecompute` is replaced by two explicit
+  verification families: `RecordingArtifactRecompute*` for recording/artifact
+  NWB files and `SortingAnalyzerRecompute*` for analyzer folders.
+- **Still pending** — `figpack_curation`, `unit_matching`, and
+  `matcher_protocol` remain import-safe placeholders that raise informative
+  errors on public-name import.
+- **Gated methods** — `ConcatenatedRecording` / `SessionGroup` exist in v2 but
+  their unimplemented methods raise `NotImplementedError`.
 
 | Feature | v1 fallback | v2 delivery |
 | --- | --- | --- |
-| Metric / auto-merge curation | `from spyglass.spikesorting.v1 import MetricCuration, MetricCurationParameters, WaveformParameters, MetricParameters` | AnalyzerCuration stage (roadmap) |
+| Metric / auto-merge curation | v1 still available for legacy rows | `AnalyzerCuration` (`QualityMetricParameters`, `AutoCurationRules`) |
 | FigURL curation views | `from spyglass.spikesorting.v1 import FigURLCuration, FigURLCurationSelection` | FigPack curation views (roadmap) |
-| Burst-pair curation | `from spyglass.spikesorting.v1 import BurstPair, BurstPairParams, BurstPairSelection` | AnalyzerCuration stage (roadmap) |
-| Recording recompute | `from spyglass.spikesorting.v1.recompute import RecordingRecompute, RecordingRecomputeSelection` | AnalyzerCuration stage (roadmap) |
+| Burst-pair curation | v1 `BurstPair` remains the only source for stored per-pair metrics | `AnalyzerCuration` plotting helpers; no v2 `BurstPair` table |
+| Recording/analyzer recompute | v1 recompute remains for v1 rows | `RecordingArtifactRecompute*` and `SortingAnalyzerRecompute*` |
 | Concatenated recording / session group | (no v1 equivalent) | session-group concatenation (roadmap) |
 | Cross-session unit matching (`UnitMatch`) | (no v1 equivalent) | cross-session unit matching (roadmap) |
 

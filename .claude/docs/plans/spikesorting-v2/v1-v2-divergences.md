@@ -252,6 +252,10 @@ single `AnalyzerCuration` table built on the SI 0.104 `SortingAnalyzer` API
   dormant-by-default and buggy. v2 delegates entirely to SI's preset set
   (`similarity_correlograms`, `temporal_splits`, `x_contaminations`,
   `feature_neighbors`, `slay`, + the `"none"` skip sentinel), validated at insert.
+  v2 precomputes the extra `spike_locations` extension required by SI's
+  `feature_neighbors` / `knn` path and passes job kwargs flat to
+  `compute_merge_unit_groups`, matching the SI 0.104 API rather than nesting
+  them under a `job_kwargs` parameter.
   (`metric_curation._compute_merge_groups`, `_params/metric_curation.AutoMergePreset`.)
 
 - **Three NWB scratch tables, not one units table.** v1 wrote a single `units`

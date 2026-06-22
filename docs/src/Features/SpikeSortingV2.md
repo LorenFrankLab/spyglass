@@ -32,13 +32,17 @@ RecordingSelection --> Recording          (bandpass + common reference)
                                                                        |
                                                                        v
                                                                    CurationV2 -+--> SpikeSortingOutput.CurationV2
+                                                                        |
+                                                                        v
+                                                        AnalyzerCurationSelection --> AnalyzerCuration
 ```
 
 All v2 tables live in dedicated DataJoint schemas (`spikesorting_v2_recording`,
-`spikesorting_v2_artifact`, `spikesorting_v2_sorting`, `spikesorting_v2_curation`),
-so the v0/v1 schemas are untouched. `CurationV2` registers as a new part on the
-existing `SpikeSortingOutput` merge table, so v0, v1, imported, and v2
-curations all coexist under one merge surface.
+`spikesorting_v2_artifact`, `spikesorting_v2_sorting`,
+`spikesorting_v2_curation`, `spikesorting_v2_recompute`), so the v0/v1 schemas
+are untouched. `CurationV2` registers as a new part on the existing
+`SpikeSortingOutput` merge table, so v0, v1, imported, and v2 curations all
+coexist under one merge surface.
 
 ### Tables
 
@@ -48,7 +52,8 @@ curations all coexist under one merge surface.
     `delete_existing_entries=True, confirm=False` returns a `DeletionPreview`
     so the caller can review cascade impact before committing.
 - **`PreprocessingParameters`, `ArtifactDetectionParameters`, `SharedArtifactGroup`,
-    `SorterParameters`** -- Pydantic-validated parameter Lookup rows.
+    `SorterParameters`, `QualityMetricParameters`, `AutoCurationRules`** --
+    Pydantic-validated parameter Lookup rows.
     `insert_default()` on each loads a default row; user params validate the
     `params` blob on insert.
 - **`RecordingSelection` / `Recording`** -- preprocessed recording materialization.
@@ -75,6 +80,13 @@ curations all coexist under one merge surface.
     by `parent_curation_id`. `insert_curation` is the single entry point;
     every row is automatically registered on `SpikeSortingOutput.CurationV2`
     so downstream consumers can key off `merge_id`.
+- **`AnalyzerCurationSelection` / `AnalyzerCuration`** -- post-sort SI analyzer
+    extension growth, quality metrics, auto-curation labels, merge suggestions,
+    and BurstPair-style plots. Proposals are persisted to NWB; committing them
+    to sorting output remains an explicit `materialize_curation` step.
+- **`RecordingArtifactRecompute*` / `SortingAnalyzerRecompute*`** -- v2 storage
+    verification families for safely reclaiming preprocessed recording/artifact
+    NWBs and analyzer folders after a current-environment content match.
 
 ### Pipeline orchestrator
 
@@ -780,10 +792,14 @@ calling them under SI 0.104 raises a clear `RuntimeError`.
 The single-session sort chain and analyzer-driven curation (metrics +
 auto-curation, above) are available now. Not yet available:
 
-- session-group sorting + cross-session unit matching
+- session-group sorting
+- cross-session unit matching
+- FigPack web curation views
 
-The tables for those capabilities are already declared in their final shape
-with gated `make()` bodies, so enabling them later needs no schema migration.
+The session-group / concatenated-recording tables are already declared in their
+final shape with gated `make()` bodies, so enabling that path later needs no
+schema migration. Unit matching and FigPack remain placeholder modules until
+their implementation phases land.
 
 ## Streaming, parallel populate, and v1 parity
 

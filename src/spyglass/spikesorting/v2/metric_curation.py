@@ -77,6 +77,14 @@ _CURATION_EXTENSIONS = (
     "template_metrics",
 )
 
+_AUTO_MERGE_EXTRA_EXTENSIONS = {
+    # SI's ``feature_neighbors`` preset includes the ``knn`` step, whose
+    # required extensions are templates, spike_locations, and spike_amplitudes.
+    # The sort-time/base curation extension set already covers templates and
+    # spike_amplitudes; add spike_locations only for that preset.
+    "feature_neighbors": ("spike_locations",),
+}
+
 
 def _nwb_file_name_for_sorting(sorting_key: dict) -> str:
     """Return the source ``nwb_file_name`` for a recording-backed sort."""
@@ -791,14 +799,28 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
         """Return proposed merge groups for a preset (``[]`` for 'none')."""
         if auto_merge_preset == "none":
             return []
+        from spyglass.spikesorting.v2._sorting_analyzer import (
+            ensure_extensions,
+        )
         from spikeinterface.curation import compute_merge_unit_groups
 
+        extensions = list(_CURATION_EXTENSIONS)
+        extensions.extend(
+            _AUTO_MERGE_EXTRA_EXTENSIONS.get(auto_merge_preset, ())
+        )
+        ensure_extensions(analyzer, extensions, job_kwargs=job_kwargs)
+        merge_job_kwargs = {
+            key: value
+            for key, value in (job_kwargs or {}).items()
+            if key != "random_seed"
+        }
+        compute_kwargs = dict(auto_merge_kwargs or {})
+        compute_kwargs.update(merge_job_kwargs)
         groups = compute_merge_unit_groups(
             analyzer,
             preset=auto_merge_preset,
             compute_needed_extensions=False,
-            job_kwargs=job_kwargs or {},
-            **(auto_merge_kwargs or {}),
+            **compute_kwargs,
         )
         return [[int(u) for u in group] for group in groups]
 

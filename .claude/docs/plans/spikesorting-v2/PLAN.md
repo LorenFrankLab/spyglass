@@ -1,11 +1,11 @@
 # Spike Sorting v2 Implementation Plan
 
-**Status:** Phase 0a / 0b / 0c, Phase 1, and Phase 1b runtime-regressions
-are complete. Phases 2 (AnalyzerCuration), 3 (SessionGroup /
-ConcatenatedRecording), 4 (UnitMatch), and 5 (UX / FigPack) are pending.
+**Status:** Phase 0a / 0b / 0c, Phase 1, Phase 1b runtime-regressions, and
+Phase 2 (AnalyzerCuration + recompute verification) are complete. Phases 3
+(SessionGroup / ConcatenatedRecording), 4 (UnitMatch), and 5 (UX / FigPack)
+are pending.
 The review-fixes child plan (completed; its planning artifacts have been
 removed) addressed correctness/schema findings on top of the completed phases.
-Phase 2 is now the next implementation phase.
 
 **Current UX addendum:** the separate `spikesorting-v2-ux-hardening` plan has
 landed a minimal first-hour single-session path on top of the Phase 1 MVP:
@@ -14,24 +14,27 @@ landed a minimal first-hour single-session path on top of the Phase 1 MVP:
 and curation convenience wrappers. Treat those as the current user-facing
 baseline. Phase 5 extends that canonical notebook rather than creating another
 single-session notebook. Post-sort SpikeInterface quality metrics, analyzer
-extension growth, auto-labels, merge suggestions, and BurstPair-style plots
-remain Phase 2 `AnalyzerCuration` work, not ad hoc additions to `pipeline.py`.
+extension growth, auto-labels, merge suggestions, and BurstPair-style plots are
+now owned by `AnalyzerCuration`; Phase 5 should consume those surfaces rather
+than duplicate them in `pipeline.py`.
 
-**Current pre-Phase-2 code audit (2026-06-21):** with Phase 1b complete, the Phase 2+ plan still
-matches the current tree, with these implementation guardrails. The
-Phase-2/4/5 modules (`metric_curation.py`, `unit_matching.py`,
-`matcher_protocol.py`, `figpack_curation.py`) are import-safe placeholders that
-raise informative `ImportError` on public-name access; the phase that replaces
-each placeholder must update `tests/spikesorting/v2/test_legacy_stub_imports.py`
-in the same PR. `SessionGroup`, `MotionCorrectionParameters`,
+**Current post-Phase-2 code audit (2026-06-22):** `metric_curation.py` is no
+longer a placeholder. `AnalyzerCuration` now replaces v1 `MetricCuration` +
+the v1 `BurstPair` notebook helpers, and v2 has separate recording-artifact and
+sorting-analyzer recompute verification tables. The remaining import-safe
+placeholders are Phase 4/5 surfaces (`unit_matching.py`, `matcher_protocol.py`,
+`figpack_curation.py`). `SessionGroup`, `MotionCorrectionParameters`,
 `ConcatenatedRecordingSelection`, `ConcatenatedRecording`, and
 `SortingSelection.ConcatenatedRecordingSource` already have final schema shape;
 Phase 3 is method-body work plus lifting the runtime gates. The current
 `run_v2_pipeline()` is the single-session runner with `require_units=False`
 already implemented; Phase 5 extends that runner rather than reintroducing the
-zero-unit policy. The v2 decoding path currently rejects `spike_location` by
-test; Phase 2 owns flipping that test to the supported `spike_locations`
-extension path.
+zero-unit policy. The v2 decoding path now supports the `spike_location` mark
+through the SI `spike_locations` extension path. A SpikeInterface audit also
+confirmed that auto-merge job kwargs must be passed flat to
+`compute_merge_unit_groups`, and that the `feature_neighbors` preset needs the
+`spike_locations` extension precomputed when v2 disables SI's implicit extension
+growth.
 
 A next-generation spike sorting pipeline for Spyglass that (1) targets SpikeInterface ≥0.104 with the SortingAnalyzer API, keeps the v1 production sorters (MountainSort 4 and `clusterless_thresholder`), adds MS5 and KS4, and preserves a custom-row path for other SpikeInterface sorters, (2) supports cross-session unit tracking via a pluggable matcher backend (UnitMatchPy first, DeepUnitMatch via the same plugin slot later), (3) handles chronic recordings — same-day concatenation as the default path, with multi-day opt-in (sort-then-match via Phase 4 UnitMatch is the recommended cross-day workflow) — (4) makes unit → brain region tracing first-class via a `Sorting.Unit` part table populated at sort time (fixes the v1 multi-region under-reporting bug), (5) reduces user-facing table touchpoints from ~7 to ~2 via a `run_v2_pipeline()` convenience API with Pydantic-validated parameters and FigPack as the curation UI, and (6) plugs into the existing `SpikeSortingOutput` merge table so downstream consumers (decoding, ripple, MUA, `SortedSpikesGroup`) keep working unchanged. **Zero schema migration**: every table is final from the phase that introduces it. v0 and v1 stay in-tree indefinitely.
 
@@ -105,4 +108,4 @@ Phase 3 SessionGroup + ConcatenatedRecording
                           -> Phase 5b UX/FigPack tables/notebooks/docs
 ```
 
-Execution happens on the long-lived `spikesorting-v2` integration branch with checkpoint commits. Phase 1 is the first runtime v2 pipeline checkpoint and requires Phase 0a, Phase 0b, and Phase 0c. Phase 0c is a hard gate because Phase 1 imports and runs SpikeInterface 0.104 APIs while legacy v0/v1 active-runtime workflows must either be guarded with clear legacy-environment messages or explicitly proven compatible. Phase 1b was the hard gate before Phase 2 and Phase 3 because both later phases populate against `Recording` / `Sorting` at lab-relevant scales (Phase 2 builds analyzer extensions on top of the cached `ElectricalSeries`; Phase 3 concatenates per-member `Recording` rows), and the Phase 1 in-memory write OOMed before either could run on real chronic data. With Phase 1b complete, that gate is satisfied and Phase 2 may start. Checkpoint commits may be grouped into larger review PRs if the gating order and validation evidence remain clear.
+Execution happens on the long-lived `spikesorting-v2` integration branch with checkpoint commits. Phase 1 is the first runtime v2 pipeline checkpoint and requires Phase 0a, Phase 0b, and Phase 0c. Phase 0c is a hard gate because Phase 1 imports and runs SpikeInterface 0.104 APIs while legacy v0/v1 active-runtime workflows must either be guarded with clear legacy-environment messages or explicitly proven compatible. Phase 1b was the hard gate before Phase 2 and Phase 3 because both later phases populate against `Recording` / `Sorting` at lab-relevant scales (Phase 2 builds analyzer extensions on top of the cached `ElectricalSeries`; Phase 3 concatenates per-member `Recording` rows), and the Phase 1 in-memory write OOMed before either could run on real chronic data. With Phase 2 complete, Phase 3 may start. Checkpoint commits may be grouped into larger review PRs if the gating order and validation evidence remain clear.
