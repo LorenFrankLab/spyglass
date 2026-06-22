@@ -10,6 +10,8 @@ lets them be unit-tested without a database.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pandas as pd
 
@@ -156,3 +158,44 @@ def isi_violation_fraction(
     valid = n > 1.0
     fraction[valid] = counts[valid] / denom[valid]
     return fraction
+
+
+def rules_payloads_match(
+    expected: dict, stored: dict, *, rel_tol: float = 1e-6, abs_tol: float = 1e-12
+) -> bool:
+    """Return whether two normalized ``AutoCurationRules`` payloads are equal.
+
+    Compares the ``{master, rules}`` payloads built by
+    ``AutoCurationRules._payload_for_compare`` for the idempotency guard.
+    Numbers are compared with ``math.isclose`` rather than ``==`` because the
+    ``Rule.threshold`` column is single precision: a threshold such as ``0.1``
+    round-trips from the database as ``0.10000000149...``, which is not
+    bit-equal to the freshly validated Python float. An exact comparison would
+    raise a spurious "different payload" error when re-inserting identical
+    rules (e.g. a second ``insert_default()`` run), breaking idempotency. The
+    default ``rel_tol`` comfortably exceeds float32 round-off (~6e-8) while
+    still distinguishing thresholds that differ by more than one part per
+    million.
+    """
+    return _values_match(expected, stored, rel_tol=rel_tol, abs_tol=abs_tol)
+
+
+def _values_match(a, b, *, rel_tol: float, abs_tol: float) -> bool:
+    """Recursively compare JSON-native values; floats within tolerance match."""
+    # bool is an int subclass; compare by exact type+value so True and 1 do
+    # not conflate through the numeric branch below.
+    if isinstance(a, bool) or isinstance(b, bool):
+        return type(a) is type(b) and a == b
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        return math.isclose(a, b, rel_tol=rel_tol, abs_tol=abs_tol)
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(
+            _values_match(a[key], b[key], rel_tol=rel_tol, abs_tol=abs_tol)
+            for key in a
+        )
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(
+            _values_match(x, y, rel_tol=rel_tol, abs_tol=abs_tol)
+            for x, y in zip(a, b)
+        )
+    return a == b

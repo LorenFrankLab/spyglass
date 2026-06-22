@@ -17,6 +17,7 @@ import pytest
 from spyglass.spikesorting.v2._metric_curation import (
     apply_label_rules,
     isi_violation_fraction,
+    rules_payloads_match,
     sanitize_for_json,
 )
 
@@ -125,6 +126,21 @@ def test_apply_label_rules_empty_rules_returns_empty():
     assert apply_label_rules(metrics, []) == {}
 
 
+def test_apply_label_rules_coerces_numpy_int_unit_ids():
+    """Label keys are plain python int even from a numpy-int64 index.
+
+    SI unit ids are often ``np.int64``; downstream NWB writers / ``get_labels``
+    consumers expect python ints, so the ``int(unit_id)`` cast must hold.
+    """
+    metrics = pd.DataFrame(
+        {"snr": [0.2]}, index=pd.Index(np.array([7], dtype=np.int64))
+    )
+    rules = [_rule(0, "snr", "<", 1.0, "noise")]
+    labels = apply_label_rules(metrics, rules)
+    assert labels == {7: ["noise"]}
+    assert all(type(key) is int for key in labels)  # not np.int64
+
+
 # ---------- #1556 NaN sanitization ------------------------------------------
 
 
@@ -159,3 +175,69 @@ def test_isi_violation_fraction_guards_low_spike(n):
     """0- and 1-spike units yield NaN, not the spurious finite 1.0 artifact."""
     frac = isi_violation_fraction(np.array([0]), np.array([n]))
     assert np.isnan(frac[0])
+
+
+# ---------- rules-payload idempotency comparison ----------------------------
+
+
+def _payload(threshold, *, operator=">", label="noise", preset="none"):
+    """A minimal normalized AutoCurationRules payload for comparison."""
+    return {
+        "auto_curation_rules_name": "r",
+        "auto_merge_preset": preset,
+        "auto_merge_kwargs": {},
+        "params_schema_version": 1,
+        "job_kwargs": None,
+        "rules": [
+            {
+                "rule_index": 0,
+                "rule_name": "nn_noise",
+                "metric_name": "nn_noise_overlap",
+                "operator": operator,
+                "threshold": threshold,
+                "label": label,
+            }
+        ],
+    }
+
+
+def test_rules_payloads_match_tolerates_float32_round_trip():
+    """A threshold's single-precision round-off must not break idempotency."""
+    # 0.1 is not exactly representable in float32; this is the value the DB
+    # column returns on fetch, and what broke the exact-equality comparison.
+    stored = _payload(float(np.float32(0.1)))
+    expected = _payload(0.1)
+    assert stored["rules"][0]["threshold"] != expected["rules"][0]["threshold"]
+    assert rules_payloads_match(expected, stored)
+
+
+def test_rules_payloads_match_rejects_genuinely_different_threshold():
+    """Thresholds differing by more than float round-off are NOT equal."""
+    assert not rules_payloads_match(_payload(0.1), _payload(0.2))
+
+
+@pytest.mark.parametrize(
+    "other",
+    [
+        _payload(0.1, operator="<"),  # different operator
+        _payload(0.1, label="reject"),  # different label
+        _payload(0.1, preset="similarity_correlograms"),  # different preset
+    ],
+)
+def test_rules_payloads_match_rejects_non_numeric_differences(other):
+    """Non-numeric field changes are detected by exact comparison."""
+    assert not rules_payloads_match(_payload(0.1), other)
+
+
+def test_rules_payloads_match_rejects_differing_rule_count():
+    """A payload with extra/fewer rules does not match."""
+    one = _payload(0.1)
+    two = _payload(0.1)
+    two["rules"].append({**two["rules"][0], "rule_index": 1, "label": "reject"})
+    assert not rules_payloads_match(one, two)
+
+
+def test_rules_payloads_match_does_not_conflate_bool_and_int():
+    """bool is an int subclass; True must not match 1 through the numeric path."""
+    assert not rules_payloads_match({"k": True}, {"k": 1})
+    assert rules_payloads_match({"k": True}, {"k": True})

@@ -119,6 +119,23 @@ class QualityMetricParamsSchema(BaseModel):
             )
         return names
 
+    @model_validator(mode="after")
+    def _check_kwargs_target_requested_metrics(
+        self,
+    ) -> "QualityMetricParamsSchema":
+        # Per-metric kwargs only apply to a metric that is actually computed;
+        # a key absent from metric_names is a silent no-op (usually a typo),
+        # so reject it at insert rather than discarding it at populate time.
+        orphan = sorted(set(self.metric_kwargs) - set(self.metric_names))
+        if orphan:
+            raise ValueError(
+                f"metric_kwargs has entries for metric(s) {orphan} not in "
+                f"metric_names {sorted(self.metric_names)}. Per-metric kwargs "
+                "apply only to a requested metric -- add the metric to "
+                "metric_names or remove the stray kwargs key."
+            )
+        return self
+
 
 class AutoCurationRuleSchema(BaseModel):
     """Validated schema for a single ``AutoCurationRules.Rule`` row.

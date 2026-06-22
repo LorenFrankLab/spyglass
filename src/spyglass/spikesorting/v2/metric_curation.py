@@ -31,6 +31,7 @@ from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.spikesorting.v2._metric_curation import (
     apply_label_rules,
     isi_violation_fraction,
+    rules_payloads_match,
 )
 from spyglass.spikesorting.v2._metric_curation_nwb import (
     read_merge_suggestions,
@@ -93,12 +94,12 @@ class AnalyzerCurationFetched(NamedTuple):
     sorting_id: str
     curation_id: int
     nwb_file_name: str
-    metric_names: list
-    metric_kwargs: dict
+    metric_names: list[str]
+    metric_kwargs: dict[str, dict]
     skip_pc_metrics: bool
     auto_merge_preset: str
     auto_merge_kwargs: dict
-    rule_rows: list
+    rule_rows: list[dict]
     job_kwargs: dict
 
 
@@ -267,6 +268,19 @@ class AutoCurationRules(SpyglassMixin, dj.Lookup):
         label: varchar(32)
         """
 
+        def insert(self, rows, **kwargs):
+            raise UnsupportedDirectInsertError(
+                "AutoCurationRules.Rule.insert is unsupported: rule rows are "
+                "only valid together with their master row. Use "
+                "AutoCurationRules.insert_rules(row, rule_rows)."
+            )
+
+        def insert1(self, row, **kwargs):
+            raise UnsupportedDirectInsertError(
+                "AutoCurationRules.Rule.insert1 is unsupported. Use "
+                "AutoCurationRules.insert_rules(row, rule_rows)."
+            )
+
     def insert1(self, row, **kwargs):
         raise UnsupportedDirectInsertError(
             "AutoCurationRules.insert1 is unsupported: a rules set is only "
@@ -317,7 +331,7 @@ class AutoCurationRules(SpyglassMixin, dj.Lookup):
         existing = cls & {"auto_curation_rules_name": name}
         if existing:
             stored_payload = cls._stored_payload_for_compare(name)
-            if stored_payload != expected_payload:
+            if not rules_payloads_match(expected_payload, stored_payload):
                 raise ValueError(
                     f"AutoCurationRules {name!r} already exists with a "
                     "different auto-merge/rule payload. Reuse the stored row, "
@@ -333,12 +347,13 @@ class AutoCurationRules(SpyglassMixin, dj.Lookup):
 
         inst = cls()
         with inst.connection.transaction:
-            # Bypass this class's raising insert override by calling the next
-            # insert in the MRO (SpyglassMixin / dj.Table); the bulk insert
-            # does not route back through the overridden insert1.
+            # Bypass the raising insert overrides on both the master and the
+            # Rule part by calling the next insert in the MRO (SpyglassMixin /
+            # dj.Table). insert_rules is the only validated write path.
             super(AutoCurationRules, inst).insert([master])
             if rule_inserts:
-                cls.Rule.insert(rule_inserts)
+                rule_inst = cls.Rule()
+                super(cls.Rule, rule_inst).insert(rule_inserts)
         return {"auto_curation_rules_name": name}
 
     @classmethod
@@ -425,12 +440,13 @@ class AutoCurationRules(SpyglassMixin, dj.Lookup):
     def check_rule_integrity(cls, restriction=True) -> list[dict]:
         """Return master rows whose Rule rows are malformed or missing.
 
-        Direct inserts into ``AutoCurationRules.Rule`` bypass whole-payload
-        validation; this surfaces a CUSTOM rows-set that does nothing (preset
-        ``none`` and no rules) or rule rows that fail the rule schema, for use
-        in an integrity check. The shipped ``"none"`` default is the documented
-        inert "skip auto-curation" sentinel, so it is exempt from the
-        no-effect flag.
+        ``insert``/``insert1`` on ``AutoCurationRules.Rule`` now raise, but
+        out-of-band writes (``insert_quick`` / raw SQL) can still bypass
+        whole-payload validation; this surfaces a CUSTOM rows-set that does
+        nothing (preset ``none`` and no rules) or rule rows that fail the rule
+        schema, for use in an integrity check. The shipped ``"none"`` default
+        is the documented inert "skip auto-curation" sentinel, so it is exempt
+        from the no-effect flag.
         """
         from spyglass.spikesorting.v2._params.metric_curation import (
             AutoCurationRuleSchema,

@@ -1133,6 +1133,25 @@ def test_quality_metric_params_rejects_empty_metric_names():
         QualityMetricParamsSchema(metric_names=[])
 
 
+def test_quality_metric_params_rejects_orphan_kwargs_key():
+    """metric_kwargs for a metric not in metric_names is a silent no-op."""
+    with pytest.raises(ValidationError) as excinfo:
+        QualityMetricParamsSchema(
+            metric_names=["snr", "firing_rate"],
+            metric_kwargs={"isi_violation": {"isi_threshold_ms": 2.0}},
+        )
+    assert "isi_violation" in str(excinfo.value)
+
+
+def test_quality_metric_params_accepts_kwargs_for_requested_metric():
+    """metric_kwargs keyed by a requested metric validates cleanly."""
+    schema = QualityMetricParamsSchema(
+        metric_names=["snr", "isi_violation"],
+        metric_kwargs={"isi_violation": {"isi_threshold_ms": 2.0}},
+    )
+    assert schema.metric_kwargs == {"isi_violation": {"isi_threshold_ms": 2.0}}
+
+
 def test_auto_curation_rules_non_default_round_trips():
     """A configured rules payload (master + rule rows) round-trips."""
     schema = AutoCurationRulesSchema(
