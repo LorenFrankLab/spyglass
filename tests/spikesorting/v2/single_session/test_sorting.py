@@ -889,8 +889,8 @@ def test_build_analyzer_compute_args(dj_conn, monkeypatch, tmp_path):
     assert (
         ext_params["random_spikes"]["seed"] == 3
     ), "random_spikes seed must honor the job_kwargs random_seed override"
-    # The schema-default display recipe (used when no waveform_params is
-    # passed) is the wide cortex window with the lab's 20000-spike subsample.
+    # The explicit display params fixture is the wide cortex window with the
+    # lab's 20000-spike subsample.
     assert ext_params["random_spikes"]["max_spikes_per_unit"] == 20000
     assert ext_params["waveforms"]["ms_before"] == 1.0
     assert ext_params["waveforms"]["ms_after"] == 2.0
@@ -1392,4 +1392,3 @@ def test_sorting_delete_removes_analyzer_folder(populated_sorting):
         f"analyzer_folder {folder} still exists after "
         "Sorting.delete(); cleanup regression."
     )
-

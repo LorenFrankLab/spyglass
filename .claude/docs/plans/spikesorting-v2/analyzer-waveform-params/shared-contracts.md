@@ -155,9 +155,9 @@ sort and is NOT added to `sorting_id` identity.
 ## Analyzer cache identity
 
 Changed in Phase 1; the recompute trio (Phase 2) MUST resolve the same key.
-Today `analyzer_path` is keyed by `sorting_id` only
-(`_analyzer_cache.py:57-72`, returning `root/f"{sorting_id}.zarr"`). With two
-recipes per sort, the path MUST include the waveform-params identity:
+Before Phase 1, `analyzer_path` was keyed by `sorting_id` only
+(`root/f"{sorting_id}.zarr"`). With two recipes per sort, the path MUST include
+the waveform-params identity:
 
 ```python
 def analyzer_path(sorting_id, waveform_params_name: str) -> Path:

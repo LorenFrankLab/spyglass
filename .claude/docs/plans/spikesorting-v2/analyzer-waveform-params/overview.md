@@ -9,10 +9,10 @@
   `waveforms {ms_before:1.0, ms_after:2.0}` at `:397`). **Replaced** by params
   resolved from an `AnalyzerWaveformParameters` row.
 - `src/spyglass/spikesorting/v2/_analyzer_cache.py:57-72` —
-  `analyzer_path(sorting_id)` returns `root/f"{sorting_id}.zarr"`, keyed by
-  `sorting_id` **only**. **Changed** to include `waveform_params_name` so a
-  whitened metric analyzer and an unwhitened display analyzer for the same sort
-  never collide.
+  `analyzer_path(sorting_id, waveform_params_name)` returns
+  `root/f"{sorting_id}__{waveform_params_name}.zarr"`. **Changed** from the old
+  `sorting_id`-only path so a whitened metric analyzer and an unwhitened
+  display analyzer for the same sort never collide.
 - `src/spyglass/spikesorting/v2/sorting.py:904` —
   `Sorting.Unit.peak_amplitude_uv` (and the sort-time analyzer build it reads).
   Value **shifts**: all sorts get the larger 20000-spike subsample (was 500), and

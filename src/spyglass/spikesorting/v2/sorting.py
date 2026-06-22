@@ -2087,7 +2087,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         cleanup -- plus the rebuild-only ``SorterParameters`` fallback
         fetch -- live in the service module. ``waveform_params`` is the
         resolved analyzer-waveform params blob (window / subsample); ``None``
-        uses the schema-default cortex display window.
+        is invalid and the service raises ``ValueError``.
         """
         return build_analyzer(
             sorting,
