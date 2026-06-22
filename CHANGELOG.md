@@ -217,6 +217,7 @@ for label, interval_data in results.groupby("interval_labels"):
 - Kachery as optional dependency #1607
 - Allow revisited nodes in graph cascade #1610
 - Add `DandiValidation` tables for tracking dandi compliance during export #1584
+- Fix package scanning without database import #1621
 
 ### Pipelines
 
