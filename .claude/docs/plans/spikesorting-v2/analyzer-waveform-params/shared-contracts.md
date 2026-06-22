@@ -26,10 +26,21 @@ class AnalyzerWaveformParameters(SpyglassMixin, dj.Lookup):
     definition = """
     waveform_params_name: varchar(64)
     ---
-    waveform_params: blob   # validated AnalyzerWaveformParamsSchema dump
+    params: blob   # validated AnalyzerWaveformParamsSchema dump
     params_schema_version=1: int
     """
 ```
+
+> **As implemented (Phase 1):** the blob column is named `params` (not
+> `waveform_params`) to match the four sibling v2 param Lookups
+> (`PreprocessingParameters` / `SorterParameters` / …) and reuse the shared
+> `validate_lookup_rows` / `reject_duplicate_parameter_content` guards verbatim;
+> `AnalyzerWaveformParamsSchema` carries a `schema_version` field like its
+> siblings. The PK `waveform_params_name` (the cross-phase identifier) is
+> unchanged. The resolved DISPLAY recipe is stored on `Sorting` as a renamed
+> **secondary FK** `display_waveform_params_name -> AnalyzerWaveformParameters`
+> (DB-enforced provenance), and `fetch_waveform_params` resolves the row
+> **strictly** (a missing row raises; no catalog fallback).
 
 ```python
 class AnalyzerWaveformParamsSchema(BaseModel):

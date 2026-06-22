@@ -114,6 +114,19 @@ notebook. For the pipeline overview, see
 - **Analyzer-folder disk-leak audit.**
   `Sorting.find_orphaned_analyzer_folders(dry_run=True)` surfaces 5–50 GB
   on-disk leaks from delete-override bypass.
+- **Tracked, region-specific analyzer waveform window — expect a
+  `peak_amplitude_uv` / template-metric shift.** The analyzer window and
+  subsample are no longer hardcoded: they come from a named, DB-tracked
+  `AnalyzerWaveformParameters` row resolved from the sort's preprocessing
+  recipe (hippocampus `0.5/0.5 ms`, cortex `1.0/2.0 ms`; both 20000 spikes),
+  recorded on `Sorting.display_waveform_params_name`. Relative to the earlier
+  v2 hardcoded `1.0/2.0 ms` window with a 500-spike subsample, every
+  template-derived value shifts — `peak_amplitude_uv`, SNR, amplitude — for
+  ALL sorts (the larger 20000 subsample), and **further for hippocampus** sorts
+  (the narrower window). Spike-train metrics (firing rate, ISI, presence ratio)
+  are unchanged. This is a deliberate, content-addressed shift, not a
+  regression; re-curate against the new values rather than comparing absolute
+  amplitudes across the v1→v2 boundary.
 
 ## 4. What has a v2 replacement vs. what is still pending
 
