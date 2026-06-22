@@ -15,9 +15,9 @@ import pandas as pd
 
 # Threshold-rule comparison operators. Mirrors the ``operator`` enum on
 # ``AutoCurationRules.Rule`` and the ``RuleOperator`` Literal in
-# ``_params/metric_curation.py``. NumPy comparisons return ``False`` against a
-# NaN operand, which is the desired behavior: a low-spike unit whose metric is
-# NaN is NOT auto-flagged.
+# ``_params/metric_curation.py``. Non-finite metric values are filtered before
+# operator dispatch so low-spike / invalid metrics are NOT auto-flagged,
+# including for ``!=`` where NumPy would otherwise treat NaN as unequal.
 _COMPARISON_TO_FUNCTION = {
     "<": np.less,
     "<=": np.less_equal,
@@ -26,6 +26,16 @@ _COMPARISON_TO_FUNCTION = {
     "==": np.equal,
     "!=": np.not_equal,
 }
+
+
+def _is_finite_metric_value(value) -> bool:
+    """Return whether one metric scalar can participate in thresholding."""
+    if pd.isna(value):
+        return False
+    try:
+        return bool(np.isfinite(value))
+    except TypeError:
+        return False
 
 
 def apply_label_rules(
@@ -83,7 +93,10 @@ def apply_label_rules(
         column = metrics_df[metric_name]
         label = rule["label"]
         for unit_id in metrics_df.index:
-            if not compare(column.loc[unit_id], rule["threshold"]):
+            value = column.loc[unit_id]
+            if not _is_finite_metric_value(value):
+                continue
+            if not compare(value, rule["threshold"]):
                 continue
             unit_labels = labels.setdefault(int(unit_id), [])
             if label not in unit_labels:

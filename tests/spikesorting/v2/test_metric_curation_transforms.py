@@ -101,10 +101,12 @@ def test_apply_label_rules_omits_unlabeled_units():
     assert 10 not in labels  # high-SNR unit not flagged
 
 
-def test_apply_label_rules_nan_compares_false():
-    """A NaN metric never satisfies a threshold (low-spike units survive)."""
-    metrics = pd.DataFrame({"nn_noise_overlap": [np.nan]}, index=[4])
-    rules = [_rule(0, "nn_noise_overlap", ">", 0.1, "noise")]
+@pytest.mark.parametrize("value", [np.nan, np.inf, -np.inf])
+@pytest.mark.parametrize("operator", ["<", "<=", ">", ">=", "==", "!="])
+def test_apply_label_rules_non_finite_compares_false(value, operator):
+    """Non-finite metrics never satisfy thresholds (even ``NaN != x``)."""
+    metrics = pd.DataFrame({"nn_noise_overlap": [value]}, index=[4])
+    rules = [_rule(0, "nn_noise_overlap", operator, 0.1, "noise")]
     labels = apply_label_rules(metrics, rules)
     assert labels == {}
 
