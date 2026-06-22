@@ -48,14 +48,19 @@ def parse_sleap_analysis_h5(
 
     Notes
     -----
-    SLEAP .analysis.h5 dataset layout:
+    SLEAP .analysis.h5 dataset layout (the "matlab" preset written by
+    ``Labels.export_analysis`` / ``sleap_io.save_analysis_h5``, which is
+    SLEAP's default and the format documented in SLEAP's own export
+    tutorial — column-major order for MATLAB compatibility):
 
     - ``node_names``    — shape (n_nodes,), bodypart name strings
     - ``track_names``   — shape (n_tracks,), track/animal name strings
-    - ``tracks``        — shape (n_frames, n_nodes, 2, n_tracks); NaN = missing
-    - ``track_occupancy`` — shape (n_frames, n_tracks), bool
-    - ``instance_scores`` — shape (n_frames, n_tracks), overall confidence
-    - ``point_scores``  — shape (n_frames, n_nodes, n_tracks), per-node
+    - ``tracks``        — shape (n_tracks, 2, n_nodes, n_frames); NaN = missing
+    - ``track_occupancy`` — shape (n_frames, n_tracks), bool (frame-first;
+                            this is a documented quirk — every other array
+                            here is track-first)
+    - ``instance_scores`` — shape (n_tracks, n_frames), overall confidence
+    - ``point_scores``  — shape (n_tracks, n_nodes, n_frames), per-node
                           confidence; may be absent in older exports
 
     When ``point_scores`` is absent, ``likelihood`` is filled from
@@ -82,15 +87,15 @@ def parse_sleap_analysis_h5(
             t.decode() if isinstance(t, bytes) else t
             for t in f["track_names"][:]
         ]
-        # (n_frames, n_nodes, 2, n_tracks)
+        # (n_tracks, 2, n_nodes, n_frames)
         tracks = f["tracks"][:]
 
         if "point_scores" in f:
-            # (n_frames, n_nodes, n_tracks)
+            # (n_tracks, n_nodes, n_frames)
             point_scores = f["point_scores"][:]
         else:
             # Fallback: broadcast instance_scores across nodes
-            instance_scores = f["instance_scores"][:]  # (n_frames, n_tracks)
+            instance_scores = f["instance_scores"][:]  # (n_tracks, n_frames)
             n_nodes = len(node_names)
             point_scores = np.broadcast_to(
                 instance_scores[:, np.newaxis, :],
@@ -101,10 +106,10 @@ def parse_sleap_analysis_h5(
             track_occupancy = f["track_occupancy"][:]  # (n_frames, n_tracks)
         else:
             track_occupancy = np.ones(
-                (tracks.shape[0], tracks.shape[3]), dtype=bool
+                (tracks.shape[3], tracks.shape[0]), dtype=bool
             )
 
-    n_tracks = tracks.shape[3]
+    n_tracks = tracks.shape[0]
 
     if n_tracks == 1:
         selected_track = 0
@@ -122,9 +127,10 @@ def parse_sleap_analysis_h5(
 
     scorer = track_names[selected_track] if track_names else "SLEAP"
 
-    # (n_frames, n_nodes, 2) and (n_frames, n_nodes)
-    xy = tracks[:, :, :, selected_track]
-    likelihood = point_scores[:, :, selected_track]
+    # tracks[selected_track]: (2, n_nodes, n_frames) -> (n_frames, n_nodes, 2)
+    xy = np.transpose(tracks[selected_track], (2, 1, 0))
+    # point_scores[selected_track]: (n_nodes, n_frames) -> (n_frames, n_nodes)
+    likelihood = point_scores[selected_track].T
 
     # Build 2-level MultiIndex: (bodypart, coord)
     tuples = []

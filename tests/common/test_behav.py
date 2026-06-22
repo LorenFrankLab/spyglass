@@ -90,7 +90,7 @@ def test_videofile_update_entries(common):
 
 
 def test_fetch_key_from_path_no_side_effect(common, tmp_path):
-    """fetch_key_from_path must not call update_entries by default (T34)."""
+    """fetch_key_from_path must not call update_entries by default."""
     from unittest.mock import patch
 
     fake = tmp_path / "no_such_video.mp4"
@@ -103,7 +103,7 @@ def test_fetch_key_from_path_no_side_effect(common, tmp_path):
 
 
 def test_fetch_key_from_path_update_on_miss(common, tmp_path):
-    """update_on_miss=True triggers update_entries then retries (T34)."""
+    """update_on_miss=True triggers update_entries then retries."""
     from unittest.mock import patch
 
     fake = tmp_path / "no_such_video.mp4"

@@ -566,7 +566,7 @@ class TestPoseV2Integration:
 
 
 class TestFetchMethods:
-    """Test PoseV2.fetch_pose_dataframe() and fetch_video_path() (T10)."""
+    """Test PoseV2.fetch_pose_dataframe() and fetch_video_path()."""
 
     def test_fetch_pose_dataframe_delegates_to_pose_estim(
         self, pose_v2_instance
@@ -632,7 +632,7 @@ class TestFetchMethods:
 
 
 class TestPositionOutputInsert:
-    """Test that PoseV2.make() inserts into PositionOutput (T11)."""
+    """Test that PoseV2.make() inserts into PositionOutput."""
 
     def test_make_calls_merge_insert(self, pose_v2_instance):
         """make() calls PositionOutput._merge_insert after self.insert1()."""

@@ -154,9 +154,9 @@ def _smooth_bodypart_positions(
         Smoothing configuration dict.  Relevant keys:
 
         - ``max_cm_between_pts`` – float or None.  Frames further than this
-          distance from the previous valid frame are set to NaN (T14).
+          distance from the previous valid frame are set to NaN.
         - ``num_inds_to_span`` – int.  Valid islands shorter than this that
-          are surrounded by NaN are also set to NaN (T15).
+          are surrounded by NaN are also set to NaN.
         - ``interpolate`` – bool, whether to interpolate NaN spans.
         - ``interp_params`` – dict with ``max_pts_to_interp`` and
           ``max_cm_to_interp`` (passed straight to ``interp_position``).

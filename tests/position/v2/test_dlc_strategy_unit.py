@@ -399,7 +399,7 @@ class TestDLCStrategyWithFilesystemInjection:
 
 
 # ---------------------------------------------------------------------------
-# T01 — Orientation direction convention
+# Orientation direction convention
 # ---------------------------------------------------------------------------
 
 

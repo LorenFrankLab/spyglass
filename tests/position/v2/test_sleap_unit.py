@@ -1,4 +1,4 @@
-"""Unit tests for SLEAP support: SL02-SL08."""
+"""Unit tests for SLEAP support."""
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -23,18 +23,18 @@ def _write_single_animal_h5(path, include_point_scores=True, nan_frame=None):
     import h5py
 
     tracks = (
-        RNG.random((N_FRAMES, N_NODES, 2, N_TRACKS_SINGLE)).astype(np.float32)
+        RNG.random((N_TRACKS_SINGLE, 2, N_NODES, N_FRAMES)).astype(np.float32)
         * 100
     )
     if nan_frame is not None:
-        tracks[nan_frame, 0, :, 0] = np.nan
+        tracks[0, :, 0, nan_frame] = np.nan
 
     point_scores = (
-        RNG.random((N_FRAMES, N_NODES, N_TRACKS_SINGLE)).astype(np.float32)
+        RNG.random((N_TRACKS_SINGLE, N_NODES, N_FRAMES)).astype(np.float32)
         * 0.4
         + 0.6
     )
-    instance_scores = point_scores.mean(axis=1)
+    instance_scores = point_scores.mean(axis=1)  # (n_tracks, n_frames)
     track_occupancy = np.ones((N_FRAMES, N_TRACKS_SINGLE), dtype=bool)
 
     with h5py.File(path, "w") as f:
@@ -54,12 +54,12 @@ def _write_multi_animal_h5(path, n_tracks=2):
     import h5py
 
     tracks = (
-        RNG.random((N_FRAMES, N_NODES, 2, n_tracks)).astype(np.float32) * 100
+        RNG.random((n_tracks, 2, N_NODES, N_FRAMES)).astype(np.float32) * 100
     )
     point_scores = (
-        RNG.random((N_FRAMES, N_NODES, n_tracks)).astype(np.float32) * 0.4 + 0.6
+        RNG.random((n_tracks, N_NODES, N_FRAMES)).astype(np.float32) * 0.4 + 0.6
     )
-    instance_scores = point_scores.mean(axis=1)
+    instance_scores = point_scores.mean(axis=1)  # (n_tracks, n_frames)
     # Track 1 has more occupied frames than track 0
     track_occupancy = np.zeros((N_FRAMES, n_tracks), dtype=bool)
     track_occupancy[:4, 0] = True  # 4 frames
@@ -79,7 +79,7 @@ def _write_multi_animal_h5(path, n_tracks=2):
 
 
 # ---------------------------------------------------------------------------
-# SL02 — parse_sleap_analysis_h5
+# parse_sleap_analysis_h5
 # ---------------------------------------------------------------------------
 
 
@@ -215,7 +215,7 @@ class TestParseSleapAnalysisH5:
 
 
 # ---------------------------------------------------------------------------
-# SL07 — SLEAPStrategy.train_model + ModelSelection.training_labels_path
+# SLEAPStrategy.train_model + ModelSelection.training_labels_path
 # ---------------------------------------------------------------------------
 
 
@@ -341,7 +341,7 @@ class TestSLEAPStrategyTraining:
 
 
 # ---------------------------------------------------------------------------
-# SL08 — SLEAPStrategy.evaluate_model
+# SLEAPStrategy.evaluate_model
 # ---------------------------------------------------------------------------
 
 
@@ -391,7 +391,7 @@ class TestSLEAPStrategyEvaluation:
 
 
 # ---------------------------------------------------------------------------
-# SL03 — _load_pose_data SLEAP branch
+# _load_pose_data SLEAP branch
 # ---------------------------------------------------------------------------
 
 
@@ -402,11 +402,11 @@ class TestLoadPoseDataSLEAP:
         """Write a minimal single-track .analysis.h5 for loading tests."""
         import h5py
 
-        tracks = np.zeros((5, 2, 2, 1), dtype=np.float32)
-        tracks[:, :, 0, 0] = np.arange(5)[:, None]  # x values
-        tracks[:, :, 1, 0] = np.arange(5)[:, None] + 10  # y values
-        point_scores = np.ones((5, 2, 1), dtype=np.float32) * 0.9
-        instance_scores = np.ones((5, 1), dtype=np.float32) * 0.9
+        tracks = np.zeros((1, 2, 2, 5), dtype=np.float32)
+        tracks[0, 0, :, :] = np.arange(5)[None, :]  # x values
+        tracks[0, 1, :, :] = np.arange(5)[None, :] + 10  # y values
+        point_scores = np.ones((1, 2, 5), dtype=np.float32) * 0.9
+        instance_scores = np.ones((1, 5), dtype=np.float32) * 0.9
         track_occupancy = np.ones((5, 1), dtype=bool)
         node_names = ["nose", "tail"]
 
@@ -465,7 +465,7 @@ class TestLoadPoseDataSLEAP:
 
 
 # ---------------------------------------------------------------------------
-# SL05 — PoseInferenceRunner.run_sleap_inference
+# PoseInferenceRunner.run_sleap_inference
 # ---------------------------------------------------------------------------
 
 
@@ -580,7 +580,7 @@ class TestRunSleapInference:
 
 
 # ---------------------------------------------------------------------------
-# SL06 — PoseEstim.run_inference SLEAP branch
+# PoseEstim.run_inference SLEAP branch
 # ---------------------------------------------------------------------------
 
 

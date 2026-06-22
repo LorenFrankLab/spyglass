@@ -665,7 +665,7 @@ class TestNDXPoseBuilderTimestamps:
 
 
 class TestPoseEstimFetch1Dataframe:
-    """Unit tests for PoseEstim.fetch1_dataframe (T39).
+    """Unit tests for PoseEstim.fetch1_dataframe.
 
     Covers the fetch_nwb-based read path without a live DB.
     """

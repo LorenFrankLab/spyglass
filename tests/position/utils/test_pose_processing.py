@@ -312,7 +312,7 @@ class TestMaskShortValidIslands:
 
 
 class TestSmoothBodypartPositionsJumpIsland:
-    """T14/T15: _smooth_bodypart_positions uses jump masking and island masking."""
+    """_smooth_bodypart_positions uses jump masking and island masking."""
 
     @pytest.fixture(autouse=True)
     def _import(self):

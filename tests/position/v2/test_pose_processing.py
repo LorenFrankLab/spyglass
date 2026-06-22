@@ -269,7 +269,7 @@ class TestComputePoseOutputs:
         assert len(result["speed"]) == n
 
 
-# ── high-NaN / sleep-epoch robustness (T10) ───────────────────────────────────
+# ── high-NaN / sleep-epoch robustness ────────────────────────────────────────
 
 
 def _make_2led_df(n=200, sr=20.0, nan_rate=0.0, gap_start=None, gap_len=0):
@@ -341,8 +341,8 @@ _SMOOTH_INTERP = {
 class TestComputePoseOutputsHighNaN:
     """Robustness tests for high-NaN inputs (sleep / occlusion epochs).
 
-    Guards against regressions found in T10: inf velocity at gap boundaries,
-    crashes on all-NaN input, and NaN spreading beyond its source span.
+    Guards against inf velocity at gap boundaries, crashes on all-NaN input,
+    and NaN spreading beyond its source span.
     """
 
     @pytest.fixture(autouse=True)
@@ -441,7 +441,7 @@ class TestComputePoseOutputsHighNaN:
         assert np.all(np.abs(valid_orient) <= np.pi + 1e-9)
 
 
-# ── frame alignment / timestamp continuity (T11) ─────────────────────────────
+# ── frame alignment / timestamp continuity ───────────────────────────────────
 
 
 class TestPipelineFrameAlignment:
