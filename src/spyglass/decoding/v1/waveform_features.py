@@ -358,15 +358,17 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
         # legacy default carries ``max_spikes_per_unit=None``, already popped).
         job_kwargs = {k: v for k, v in params.items() if v is not None}
 
-        # Disk-backed (``binary_folder``) rather than ``format="memory"``: the
-        # analyzer extracts EVERY spike's full multi-channel waveform
-        # (``method="all"``, ``sparse=False`` -- mandated for the 1:1
-        # spike<->feature alignment, see the max_spikes_per_unit guard above),
-        # which for a noisy 1 h tetrode is millions of crossings -> several GB
-        # held entirely in RAM, OOM under parallel workers. binary_folder keeps
-        # the waveforms on disk and reads them lazily; the accessor holds the
-        # TemporaryDirectory so it survives feature extraction and is removed
-        # when the accessor is collected.
+        # Disk-backed (``zarr``) rather than ``format="memory"``: the analyzer
+        # extracts EVERY spike's full multi-channel waveform (``method="all"``,
+        # ``sparse=False`` -- mandated for the 1:1 spike<->feature alignment,
+        # see the max_spikes_per_unit guard above), which for a noisy 1 h
+        # tetrode is millions of crossings -> several GB held entirely in RAM,
+        # OOM under parallel workers. zarr keeps the waveforms on disk and reads
+        # them lazily, and compresses them so the transient scratch footprint
+        # stays small under parallel workers; it also matches the v2 sort-time
+        # analyzer's zarr format. The accessor holds the TemporaryDirectory so
+        # it survives feature extraction and is removed when the accessor is
+        # collected.
         import tempfile
         from pathlib import Path as _Path
 
@@ -379,8 +381,8 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
                 sorting=sorting,
                 recording=recording,
                 sparse=False,
-                format="binary_folder",
-                folder=str(_Path(tmpdir.name) / "analyzer"),
+                format="zarr",
+                folder=str(_Path(tmpdir.name) / "analyzer.zarr"),
                 return_in_uV=True,
             )
             analyzer.compute("random_spikes", method="all")
@@ -486,7 +488,7 @@ class _AnalyzerWaveformAccessor:
         # fail with "extension has lost its SortingAnalyzer". Do NOT drop it
         # as unused -- it is held for lifetime, not read.
         self._analyzer = analyzer
-        # Keep a strong reference to the binary_folder TemporaryDirectory (if
+        # Keep a strong reference to the zarr-store TemporaryDirectory (if
         # the analyzer is disk-backed) so it is not cleaned up while the
         # analyzer still reads waveforms from it. Cleaned when this accessor is
         # garbage-collected (TemporaryDirectory finalizer) -- i.e. after make()

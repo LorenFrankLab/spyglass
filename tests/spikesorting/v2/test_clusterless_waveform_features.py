@@ -722,8 +722,8 @@ def test_fetch_waveform_v2_rejects_max_spikes_per_unit(wave_session):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_fetch_waveform_v2_is_disk_backed_and_cleaned(wave_session):
-    """The clusterless analyzer is disk-backed (``binary_folder`` -> bounded
-    RAM) and its TemporaryDirectory is removed once the accessor is dropped."""
+    """The clusterless analyzer is disk-backed (``zarr`` -> bounded RAM) and
+    its TemporaryDirectory is removed once the accessor is dropped."""
     import gc
     from pathlib import Path
 
@@ -735,7 +735,7 @@ def test_fetch_waveform_v2_is_disk_backed_and_cleaned(wave_session):
     acc = UnitWaveformFeatures._fetch_waveform_v2({"merge_id": merge_id}, {})
     tmp_path = acc._tmpdir.name
     assert (
-        acc._analyzer.format == "binary_folder"
+        acc._analyzer.format == "zarr"
     ), f"clusterless analyzer must be disk-backed; got {acc._analyzer.format}"
     assert Path(tmp_path).exists()
     # Waveforms are readable from disk during the accessor's lifetime.
