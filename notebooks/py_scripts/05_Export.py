@@ -7,7 +7,7 @@
 #       format_version: '1.5'
 #       jupytext_version: 1.17.2
 #   kernelspec:
-#     display_name: spy
+#     display_name: spyglass-dev
 #     language: python
 #     name: python3
 # ---
@@ -15,7 +15,7 @@
 # # Export
 #
 
-# ## Intro
+# # Intro
 #
 
 # _Developer Note:_ if you may make a PR in the future, be sure to copy this
@@ -79,7 +79,7 @@
 # Adjust the restrictions to suit your own dataset.
 #
 
-# ## Imports
+# # Imports
 #
 
 # Let's start by connecting to the database and importing some tables that might
@@ -97,7 +97,7 @@ from spyglass.spikesorting.v1.curation import CurationV1
 
 # -
 
-# ## Export Tables
+# # Export Tables
 #
 # The `ExportSelection` table will populate while we conduct the analysis. For
 # each file opened and each `fetch` call, an entry will be logged in one of its
@@ -117,7 +117,7 @@ ExportSelection.File()
 # `common_usage` schema.
 #
 
-# ## Logging
+# # Logging
 #
 # There are a few restrictions to keep in mind when export logging:
 #
@@ -127,6 +127,9 @@ ExportSelection.File()
 # Let's start logging for 'paper1'.
 #
 
+paper_key = {"paper_id": "paper1"}
+# (ExportSelection & paper_key).delete()
+
 # +
 paper_key = {"paper_id": "paper1"}
 
@@ -135,7 +138,7 @@ my_lfp_data = (
     Electrode  # Logging this table
     & dj.AndList(
         [
-            "nwb_file_name LIKE 'min%'",  # using a string restrictionshared
+            "nwb_file_name LIKE 'min%'",  # using a string restriction
             {"electrode_id": 1},  # and a dictionary restriction
         ]
     )
@@ -151,7 +154,7 @@ my_lfp_data = (
 # familiar.
 #
 
-ExportSelection.Table()
+ExportSelection.Table & (ExportSelection & paper_key)
 
 # If there seem to be redundant entries in this part table, we can ignore them.
 # They'll be merged later during `Export.populate`.
@@ -159,7 +162,15 @@ ExportSelection.Table()
 # Let's log more under the same analysis ...
 #
 
-my_other_lfp_data = (Electrode & "electrode_id > 125").fetch()
+my_other_lfp_data = (
+    Electrode
+    & dj.AndList(
+        [
+            "nwb_file_name LIKE 'min%'",  # using a string restriction
+            "electrode_id <125",
+        ]
+    )
+).fetch()
 
 # Since these restrictions are mutually exclusive, we can check that the will
 # be combined appropriately by previewing the logged tables...
@@ -176,8 +187,19 @@ ExportSelection().preview_tables(**paper_key)
 #
 
 ExportSelection().start_export(**paper_key, analysis_id="analysis2")
-curation_nwb = (CurationV1 & "curation_id = 1").fetch_nwb()
-trodes_data = (TrodesPosV1 & 'trodes_pos_params_name = "single_led"').fetch()
+curation_nwb = (
+    CurationV1
+    & dj.AndList(
+        [{"curation_id": 1}, "analysis_file_name LIKE 'minirec20230622_%'"]
+    )
+).fetch_nwb()
+trodes_data = (
+    TrodesPosV1
+    & {
+        "nwb_file_name": "minirec20230622_.nwb",
+        "trodes_pos_params_name": "single_led",
+    }
+).fetch()
 
 # We can check that the right files were logged with the following...
 #
@@ -189,7 +211,7 @@ ExportSelection().list_file_paths(paper_key)
 
 ExportSelection().stop_export()
 
-# ## Populate
+# # Populate
 #
 # The `Export` table has a `populate_paper` method that will generate an export
 # bash script for the tables required by your analysis, including all the upstream
@@ -212,7 +234,7 @@ Export().populate_paper(**paper_key)
 # entries you used in your analysis.
 #
 
-# ## Dandi
+# # Dandi
 
 # One benefit of the `Export` table is it provides a list of all raw data,
 # intermediate analysis files, and final analysis files needed to generate a set
@@ -223,9 +245,39 @@ Export().populate_paper(**paper_key)
 # available locally.
 #
 # We will walk through the steps to do so here:
-# 1. Upload the data
-# 2. Export this table alongside the previous export
-# 3. Generate a sharable docker container (Coming soon!)
+# 1. Ensuring file compliance with DANDI standards
+# 2. Upload the data
+# 3. Export this table alongside the previous export
+#
+
+# ## Dandi File Compliance
+
+# Dandi mandate file compliance with nwb standards for upload.  As these standards may have
+# updated between generating the original nwb file and paper submission, spyglass
+# provides several tools for meeting data compliance
+#
+# First, The `DandiValidation` table provides a tool to easily scan for standard violations
+# within the published files. Issues are organized and searchable by both file and
+# violation id, making it easier to identify shared issues and apply fixes:
+
+# +
+from spyglass.common.common_dandi import (
+    DandiValidationSelection,
+    DandiValidation,
+)
+
+# scan all exported files for violations and log them in the DandiValidation table
+# rerunning this (after fixing some violations) will update the table with new violations
+# with corrected ones removed and new ones added
+DandiValidationSelection().check_paper_for_dandi_errors(paper_key)
+DandiValidation.Violations & (Export & paper_key)
+# -
+
+# These identified issues must be resolved prior to Dandi upload.
+#
+# Many of the most frequent violations have standardized fixes (e.g. replacing animal sex
+# value of "Male" with "M"). To resolve these, please contact an admin user on your
+# database and ask them to follow the steps below:
 
 # <details>
 #    <summary> Dandi data compliance (admins)</summary>
@@ -245,7 +297,7 @@ Export().populate_paper(**paper_key)
 #
 #
 
-# ### Dandiset Upload
+# ## Dandiset Upload
 
 # The first step you will need to do is to [create a Dandi account](https://docs.dandiarchive.org/16_account/).
 # With this account you can then [register a new dandiset](https://dandiarchive.org/dandiset/create) by providing a name and basic metadata.
@@ -281,15 +333,15 @@ DandiPath() & {"export_id": 14}
 #  if available, providing an additional method for sharing data with
 #  collaborators post-publication.
 
-# ### Export Dandi Table
+# ## Export Dandi Table
 #
-# Because we generated new entries in this process we may want to share alongside
+# Because the `DandiPath` entries generated in this process are used alongside
 # our export, we'll run the additional step of exporting this table as well.
 #
 
 DandiPath().write_mysqldump(paper_key)
 
-# ## Sharing the export
+# # Sharing the export
 #
 # The steps above will generate several files in this paper's export directory.
 # By default, this is relative to your Spyglass base directory:
