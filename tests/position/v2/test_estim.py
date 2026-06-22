@@ -414,6 +414,79 @@ class TestPoseInferenceRunner:
         assert hasattr(runner, "_info_msg")
 
 
+class TestCanonicalizePoseColumns:
+    """The pose ingest boundary maps tool-native names to canonical ones.
+
+    Pure-function tests: no database, no DLC/SLEAP inference required.
+    """
+
+    @pytest.fixture
+    def canon_map(self):
+        from spyglass.position.v2.utils.skeleton import build_canonical_map
+
+        return build_canonical_map(["earR", "greenLED", "redLED_C"])
+
+    @staticmethod
+    def _pose_df(bodyparts, scorer="scorer"):
+        tuples = [
+            (scorer, bp, coord)
+            for bp in bodyparts
+            for coord in ("x", "y", "likelihood")
+        ]
+        cols = pd.MultiIndex.from_tuples(
+            tuples, names=["scorer", "bodyparts", "coords"]
+        )
+        arr = np.arange(3 * len(tuples), dtype=float).reshape(3, len(tuples))
+        return pd.DataFrame(arr, columns=cols)
+
+    def test_renames_to_canonical_preserving_values(self, canon_map):
+        from spyglass.position.v2.estim import canonicalize_pose_columns
+
+        df = self._pose_df(["EarR", "greenLed"])
+        ear_x = df[("scorer", "EarR", "x")].to_numpy(copy=True)
+        green_y = df[("scorer", "greenLed", "y")].to_numpy(copy=True)
+        before = df.to_numpy(copy=True)
+
+        out, canonical = canonicalize_pose_columns(
+            df, ["EarR", "greenLed"], canon_map
+        )
+
+        assert canonical == ["earR", "greenLED"]
+        assert list(out.columns.get_level_values("bodyparts").unique()) == [
+            "earR",
+            "greenLED",
+        ]
+        # only labels changed: full array identical, data reachable by canon
+        np.testing.assert_array_equal(out.to_numpy(), before)
+        np.testing.assert_array_equal(
+            out[("scorer", "earR", "x")].to_numpy(), ear_x
+        )
+        np.testing.assert_array_equal(
+            out[("scorer", "greenLED", "y")].to_numpy(), green_y
+        )
+
+    def test_unresolved_name_raises_naming_it(self, canon_map):
+        import datajoint as dj
+
+        from spyglass.position.v2.estim import canonicalize_pose_columns
+
+        df = self._pose_df(["EarR", "noSuchPartXyz"])
+        with pytest.raises(dj.DataJointError, match="noSuchPartXyz"):
+            canonicalize_pose_columns(df, ["EarR", "noSuchPartXyz"], canon_map)
+
+    def test_two_surface_forms_collapsing_to_one_canonical_raise(
+        self, canon_map
+    ):
+        import datajoint as dj
+
+        from spyglass.position.v2.estim import canonicalize_pose_columns
+
+        # both normalize to 'green led' -> canonical 'greenLED' (duplicate col)
+        df = self._pose_df(["greenLED", "green_led"])
+        with pytest.raises(dj.DataJointError, match="canonical"):
+            canonicalize_pose_columns(df, ["greenLED", "green_led"], canon_map)
+
+
 class TestBasicMethods:
     """Test basic methods and simple logic paths for coverage."""
 
