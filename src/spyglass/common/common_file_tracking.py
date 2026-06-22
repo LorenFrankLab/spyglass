@@ -88,7 +88,14 @@ class AnalysisFileIssues(dj.Manual):
                     "analysis_file_name"
                 )
             )
+        except (ImportError, ModuleNotFoundError):
+            # v1 spike-sorting recompute not installed; nothing to exclude.
+            logger.debug("v1 spike-sorting recompute unavailable; skipping.")
         except Exception as e:
+            # File tracking is common infrastructure; v1 recompute may be
+            # unavailable, undeclared, or temporarily query-broken in an
+            # otherwise valid environment. Keep the scan running and report
+            # the optional exclusion source that could not be read.
             logger.warning(f"Could not fetch v1 recompute deleted files: {e}")
 
         deleted.update(AnalysisFileIssues._get_v2_deleted_files())
@@ -124,7 +131,13 @@ class AnalysisFileIssues(dj.Manual):
                     "analysis_file_name"
                 )
             )
+        except (ImportError, ModuleNotFoundError):
+            # v2 spike-sorting recompute not installed; nothing to exclude.
+            logger.debug("v2 spike-sorting recompute unavailable; skipping.")
         except Exception as e:
+            # Same env-agnostic shape as the v1 helper above: missing or
+            # query-broken v2 recompute tables should not abort common
+            # file-tracking scans.
             logger.warning(f"Could not fetch v2 recompute deleted files: {e}")
 
         return deleted
