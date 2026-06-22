@@ -57,6 +57,55 @@ and fetches from the appropriate location. See
 [Custom Analysis Tables](../ForDevelopers/Management.md#custom-analysis-tables)
 for details on using custom analysis file tables.
 
+### Migration from standalone `fetch_nwb` / `get_nwb_table` helpers
+
+Older Spyglass code used two standalone functions from
+`spyglass.utils.dj_helper_fn` that required passing the NWB table and attribute
+explicitly. Both are deprecated and emit a warning once per Python process.
+
+#### `fetch_nwb` (helper function)
+
+```python
+# Before
+from spyglass.utils.dj_helper_fn import fetch_nwb
+from spyglass.common import Nwbfile
+
+results = fetch_nwb(
+    MyTable & my_key,
+    (Nwbfile, "nwb_file_abs_path"),
+)
+
+# After
+results = (MyTable & my_key).fetch_nwb()
+```
+
+#### `get_nwb_table`
+
+```python
+# Before
+from spyglass.utils.dj_helper_fn import get_nwb_table
+from spyglass.common import Nwbfile
+
+nwb_files, path_fn = get_nwb_table(
+    MyTable & my_key,
+    Nwbfile,
+    "nwb_file_abs_path",
+)
+file_path = path_fn(nwb_files[0])
+
+# After — fetch_nwb handles file resolution internally
+results = (MyTable & my_key).fetch_nwb()
+```
+
+The method inspects the table's foreign-key references to determine whether to
+resolve paths from `Nwbfile` or `AnalysisNwbfile` automatically, so the
+`nwb_master` tuple is no longer needed. The return value is a list of dicts,
+each containing the fetched row fields plus the loaded NWB object.
+
+**NOTE:** Both functions are always called together in practice —
+`get_nwb_table` provides the file list and path resolver that `fetch_nwb` then
+uses. The `fetch_nwb()` method replaces both in a single call.
+
 ## Long-Distance Restrictions
 
 In complicated pipelines like Spyglass, there are often tables that 'bury' their
@@ -287,8 +336,8 @@ declare/modify a table while the transaction is open (see
 [issue #1030](https://github.com/LorenFrankLab/spyglass/issues/1030) and
 [DataJoint issue #1170](https://github.com/datajoint/datajoint-python/issues/1170)).
 
-Tables with `_use_transaction` set to `False` will not be wrapped in a
-transaction when calling `populate`. Transaction protection is replaced by a
-hash of upstream data to ensure no changes are made to the table during the
-unprotected populate. The additional time required to hash the data is a
-trade-off for already time-consuming populates, but avoids blocking other users.
+**NOTE:** Setting `_use_transaction = False` on a table class is deprecated. The
+recommended replacement is the tri-part make pattern (`make_fetch`,
+`make_compute`, `make_insert`), which keeps the database insert inside a
+transaction while allowing long computations to run without holding a lock. See
+[Populate and Long-Running Computations](./Populate.md) for a migration guide.
