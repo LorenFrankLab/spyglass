@@ -23,6 +23,9 @@ check becomes a tautology.
 
 from __future__ import annotations
 
+from spyglass.spikesorting.v2._params.analyzer_waveform import (
+    AnalyzerWaveformParamsSchema,
+)
 from spyglass.spikesorting.v2._params.artifact_detection import (
     ArtifactDetectionParamsSchema,
 )
@@ -46,6 +49,14 @@ MS4_30KHZ = "franklab_30khz_ms4_2026_06"
 MS4_20KHZ = "franklab_20khz_ms4_2026_06"
 MS5_30KHZ = "franklab_30khz_ms5_2026_06"
 KS4_NEUROPIXELS = "franklab_neuropixels_default"
+# Analyzer waveform recipes (region-specific window; display=unwhitened,
+# metric=whitened). Hippocampal spikes are denser/tighter, so they take a
+# narrower 0.5/0.5 ms window; cortical waveforms are broader, so they take the
+# wider 1.0/2.0 ms window. Both subsample 20000 spikes.
+HIPPOCAMPUS_DISPLAY_WAVEFORMS = "franklab_hippocampus_actual_waveforms"
+HIPPOCAMPUS_METRIC_WAVEFORMS = "franklab_hippocampus_metric_waveforms"
+CORTEX_DISPLAY_WAVEFORMS = "franklab_cortex_actual_waveforms"
+CORTEX_METRIC_WAVEFORMS = "franklab_cortex_metric_waveforms"
 
 
 # ---- Per-stage default-row builders ---------------------------------------
@@ -64,6 +75,15 @@ def _lookup_row(name: str, params: dict, job_kwargs=None) -> tuple:
 def _sorter_row(sorter: str, name: str, params: dict, job_kwargs=None) -> tuple:
     """Build a sorter-lookup row with the version copied from ``params``."""
     return (sorter, name, params, _params_schema_version(params), job_kwargs)
+
+
+def _waveform_row(name: str, params: dict) -> tuple:
+    """Build an analyzer-waveform lookup row (no ``job_kwargs`` column).
+
+    Each row is ``(waveform_params_name, params_blob, params_schema_version)``;
+    the version is copied from the validated blob.
+    """
+    return (name, params, _params_schema_version(params))
 
 
 def preprocessing_default_contents() -> tuple:
@@ -172,6 +192,55 @@ def artifact_default_contents() -> tuple:
                 amplitude_threshold_uv=50.0,
                 proportion_above_threshold=0.7,
             ).model_dump(),
+        ),
+    )
+
+
+def _waveform_params(
+    *, ms_before: float, ms_after: float, whiten: bool, purpose: str
+) -> dict:
+    """Validate + dump one analyzer-waveform params blob (20000 spikes)."""
+    return AnalyzerWaveformParamsSchema(
+        ms_before=ms_before,
+        ms_after=ms_after,
+        max_spikes_per_unit=20000,
+        whiten=whiten,
+        purpose=purpose,
+    ).model_dump()
+
+
+def waveform_params_default_contents() -> tuple:
+    """Return ``AnalyzerWaveformParameters._DEFAULT_CONTENTS``.
+
+    Region-specific display (unwhitened) and metric (whitened) recipes:
+    hippocampus 0.5/0.5 ms (denser/tighter spikes), cortex 1.0/2.0 ms (broader
+    waveforms); both subsample 20000 spikes. Each row is
+    ``(waveform_params_name, params_blob, params_schema_version)``.
+    """
+    return (
+        _waveform_row(
+            HIPPOCAMPUS_DISPLAY_WAVEFORMS,
+            _waveform_params(
+                ms_before=0.5, ms_after=0.5, whiten=False, purpose="display"
+            ),
+        ),
+        _waveform_row(
+            HIPPOCAMPUS_METRIC_WAVEFORMS,
+            _waveform_params(
+                ms_before=0.5, ms_after=0.5, whiten=True, purpose="metric"
+            ),
+        ),
+        _waveform_row(
+            CORTEX_DISPLAY_WAVEFORMS,
+            _waveform_params(
+                ms_before=1.0, ms_after=2.0, whiten=False, purpose="display"
+            ),
+        ),
+        _waveform_row(
+            CORTEX_METRIC_WAVEFORMS,
+            _waveform_params(
+                ms_before=1.0, ms_after=2.0, whiten=True, purpose="metric"
+            ),
         ),
     )
 
@@ -303,6 +372,44 @@ _REGION_PREPROC = {
     "hippocampus": HIPPOCAMPUS_PREPROC,
     "cortex": CORTEX_PREPROC,
 }
+
+# A sort's analyzer waveform window is region-specific, resolved from the SAME
+# signal that sets the region filter cutoff: the source preprocessing recipe.
+# This maps each region preprocessing recipe to its ``(display, metric)``
+# waveform-params row pair. Lives here (not on ``_PipelinePreset``, which is
+# ``extra="forbid"``) so no preset-schema change is needed.
+_PREPROC_WAVEFORM_PARAMS = {
+    HIPPOCAMPUS_PREPROC: (
+        HIPPOCAMPUS_DISPLAY_WAVEFORMS,
+        HIPPOCAMPUS_METRIC_WAVEFORMS,
+    ),
+    CORTEX_PREPROC: (CORTEX_DISPLAY_WAVEFORMS, CORTEX_METRIC_WAVEFORMS),
+}
+
+
+def waveform_params_for_preprocessing(
+    preprocessing_params_name: str,
+) -> tuple[str, str]:
+    """Return the ``(display, metric)`` waveform-params row names for a recipe.
+
+    Any preprocessing recipe not in the region map (custom / multi-region)
+    falls back to the wider cortex pair (1.0/2.0 ms) rather than silently mixing
+    windows.
+
+    Parameters
+    ----------
+    preprocessing_params_name : str
+        The sort source's ``preprocessing_params_name``.
+
+    Returns
+    -------
+    tuple of (str, str)
+        The ``(display, metric)`` ``waveform_params_name`` pair.
+    """
+    return _PREPROC_WAVEFORM_PARAMS.get(
+        preprocessing_params_name,
+        (CORTEX_DISPLAY_WAVEFORMS, CORTEX_METRIC_WAVEFORMS),
+    )
 _RATE_MS4_SORTER = {
     30000: MS4_30KHZ,
     20000: MS4_20KHZ,
