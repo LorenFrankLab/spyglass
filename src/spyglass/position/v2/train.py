@@ -150,11 +150,35 @@ class BodyPart(SpyglassMixin, dj.Lookup):
     ]
 
     def insert1(self, key, warn=True, **kwargs):
-        """Insert body part into the database."""
-        if self & {"bodypart": key["bodypart"]}:
+        """Insert body part into the database.
+
+        A concept may have only one canonical spelling. A new surface form that
+        normalizes to an existing entry (e.g. ``greenLed`` vs ``greenLED``) is
+        rejected rather than inserted, so the table stays an unambiguous source
+        of canonical names.
+        """
+        bodypart = key["bodypart"]
+        if self & {"bodypart": bodypart}:
             if warn:
-                self._warn_msg(f"Body part {key['bodypart']} already exists")
+                self._warn_msg(f"Body part {bodypart} already exists")
             return
+        # Reject a different spelling of an existing concept. Scan only for a
+        # clash with this name so unrelated legacy duplicates don't block it.
+        norm = normalize_label(bodypart)
+        collision = next(
+            (
+                bp
+                for bp in self.fetch("bodypart")
+                if bp != bodypart and normalize_label(bp) == norm
+            ),
+            None,
+        )
+        if collision is not None:
+            raise dj.DataJointError(
+                f"Body part {bodypart!r} collides with existing "
+                f"{collision!r} (both normalize to {norm!r}). Use the existing "
+                "spelling."
+            )
         if not LabMember().user_is_admin:
             raise PermissionError("Only admins can insert body parts")
         super().insert1(key, **kwargs)

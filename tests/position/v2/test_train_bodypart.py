@@ -64,6 +64,54 @@ class TestBodyPartNormalization:
         assert skeleton._normalize_label("TAIL_BASE") == "tail base"
 
 
+class TestBodyPartCollisionGuard:
+    """Test BodyPart rejects a new spelling that collides with an existing one.
+
+    A concept may have only one canonical spelling: inserting a different
+    surface form of an existing part (same normalized key) must fail rather
+    than create an ambiguous duplicate.
+    """
+
+    def test_colliding_spelling_raises(self, bodypart):
+        """A new spelling of an existing part raises, naming both spellings.
+
+        Uses a separator variant ('green_led'), which MySQL's case-insensitive
+        collation treats as a distinct primary key from 'greenLED' but which
+        normalizes to the same canonical key -- the case the guard must catch.
+        """
+        assert bodypart & {"bodypart": "greenLED"}
+        with pytest.raises(dj.DataJointError) as exc:
+            bodypart.insert1({"bodypart": "green_led"})
+        msg = str(exc.value)
+        assert "greenLED" in msg and "green_led" in msg
+
+    def test_noncolliding_new_part_inserts(self, bodypart):
+        """A genuinely new, non-colliding part still inserts (admin)."""
+        name = "whiskerTipTest"
+        assert not (bodypart & {"bodypart": name})
+        try:
+            bodypart.insert1({"bodypart": name})
+            assert bodypart & {"bodypart": name}
+        finally:
+            (bodypart & {"bodypart": name}).delete(safemode=False)
+
+    def test_exact_duplicate_warns_without_error(self, bodypart):
+        """Re-inserting an existing exact spelling is idempotent (no raise)."""
+        existing = bodypart.fetch("bodypart", limit=1)[0]
+        # Should return quietly rather than raise a collision or FK error.
+        bodypart.insert1({"bodypart": existing})
+
+    def test_nonadmin_insert_raises_permission(self, bodypart, monkeypatch):
+        """A non-admin inserting a novel part still hits the permission gate."""
+        from spyglass.common import LabMember
+
+        monkeypatch.setattr(
+            LabMember, "user_is_admin", property(lambda self: False)
+        )
+        with pytest.raises(PermissionError):
+            bodypart.insert1({"bodypart": "novelNonAdminPartXyz"})
+
+
 class TestBodyPartValidation:
     """Test bodypart validation in Skeleton._validate_bodyparts()."""
 
