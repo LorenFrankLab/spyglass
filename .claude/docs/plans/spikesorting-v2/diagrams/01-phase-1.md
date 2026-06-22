@@ -153,8 +153,8 @@ erDiagram
         uuid sorting_id PK
         varchar analysis_file_name FK
         varchar object_id
-        varchar analyzer_folder
         int n_units
+        datetime time_of_sort
     }
     Sorting_Unit {
         uuid sorting_id PK

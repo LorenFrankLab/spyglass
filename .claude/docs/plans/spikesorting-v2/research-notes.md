@@ -130,7 +130,7 @@ current phase docs but should not distract from execution.
 
 ```python
 from spikeinterface import create_sorting_analyzer
-analyzer = create_sorting_analyzer(sorting, recording, sparse=True, format="binary_folder", folder=path)
+analyzer = create_sorting_analyzer(sorting, recording, sparse=True, format="zarr", folder=path)
 analyzer.compute(["random_spikes", "waveforms", "templates", "noise_levels"])
 analyzer.compute(["principal_components", "spike_amplitudes", "correlograms",
                   "template_metrics", "unit_locations"])
@@ -202,7 +202,7 @@ rec_processed = pipeline.apply(recording)
 2. Lazy preprocessing chain (no I/O)
 3. `recording.save(format="binary", chunk_duration="2s", n_jobs=8)` materializes preprocessed to NVMe ONCE
 4. Sorter reads materialized binary
-5. `SortingAnalyzer(format="binary_folder", sparse=True)` for postprocessing
+5. `SortingAnalyzer(format="zarr", sparse=True)` for postprocessing
 
 🟢 **Sparse waveforms by default in 0.101+** (`create_sorting_analyzer(..., sparse=True)`) — 5-10× storage savings on dense probes.
 
@@ -254,7 +254,7 @@ self.insert1({**key, "analysis_file_name": analysis_file_name, "result_object_id
 
 ### H2: SortingAnalyzer-first storage → 🟢 ADOPT
 - Single source of truth for waveforms, templates, metrics, locations.
-- Persisted as `binary_folder` for the v2 SortingAnalyzer plan. Recording artifacts use the existing HDF5 `AnalysisNwbfile` path; any future Zarr evaluation is follow-up work and is not a SortingAnalyzer storage dependency.
+- Persisted as `zarr` for the v2 SortingAnalyzer plan. Recording artifacts use the existing HDF5 `AnalysisNwbfile` path; zarr is analyzer scratch, not the canonical recording artifact format.
 - v2 `Sorting` table writes `SortingAnalyzer` folder + lightweight units NWB; downstream tables read from analyzer extensions.
 
 ### H3: Parameters as Pydantic-validated schemas → 🟢 ADOPT

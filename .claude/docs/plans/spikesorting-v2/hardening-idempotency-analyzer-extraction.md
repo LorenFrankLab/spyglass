@@ -121,11 +121,11 @@ Executor defaults:
   it documents that a str-vs-`UUID` `artifact_detection_id` mismatch already caused a duplicate-sort bug.
   **That is the canonicalization footgun Phase A must respect.**
 
-### Analyzer paths (Phase B)
+### Analyzer paths (Phase B pre-hardening problem)
 
-- `Sorting` stores `analyzer_folder` as an **absolute path** (not-null `varchar(255)`),
+- Before Phase B, `Sorting` stored `analyzer_folder` as an **absolute path** (not-null `varchar(255)`),
   [sorting.py:859-867](../../../../src/spyglass/spikesorting/v2/sorting.py#L859).
-- `_analyzer_path(key)` computes `{temp_dir}/spikesorting_v2/analyzers/{sorting_id}.analyzer`,
+- `_analyzer_path(key)` computes `{temp_dir}/spikesorting_v2/analyzers/{sorting_id}.zarr`,
   reading `temp_dir` **at call time**,
   [utils.py:660-684](../../../../src/spyglass/spikesorting/v2/utils.py#L660).
 - **6 of 7 paths recompute from `temp_dir` and ignore the stored column:**
@@ -264,7 +264,7 @@ short deterministic `analyzer_cache_key` only if operators need an inspectable l
 filesystem path is resolved at runtime from:
 
 ```text
-analyzer_root / f"{sorting_id}.analyzer"
+analyzer_root / f"{sorting_id}.zarr"
 ```
 
 where `analyzer_root` is a dedicated v2 setting, not an incidental read of `temp_dir` scattered

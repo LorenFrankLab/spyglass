@@ -231,7 +231,7 @@ WHAT TO CHECK against the source you read:
      MS4/MS5/KS4/clusterless thresholder, docker/singularity image handling, deterministic seeds,
      how sorter_params are passed (v2 has comments that some params flow via SI global state, NOT
      splatted into run_sorter — verify that against the real run_sorter signature);
- (3) analyzer API — v2 uses create_sorting_analyzer(format='binary_folder', sparse=True) (modern,
+ (3) analyzer API — v2 uses create_sorting_analyzer(format='zarr', sparse=True) (modern,
      correct — WaveformExtractor is REMOVED in 0.104); verify sparsity estimation + extension compute
      order are valid per the real SortingAnalyzer.compute source;
  (4) quality metrics — which metrics, computed how, vs what SI's qualitymetrics module actually offers

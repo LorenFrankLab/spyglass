@@ -144,7 +144,7 @@ analyzer.compute(
 )
 ```
 
-**Persistence on the DataJoint row**: the `Sorting` table stores `sorting_id` (UUID) + `analyzer_folder` (`varchar(255)` — the relative path under `SPYGLASS_TEMP_DIR`). The folder itself is a side artifact, not stored in DataJoint. Heavy outputs (templates, waveforms) are reachable via `analyzer = load_sorting_analyzer(_analyzer_path(key))`.
+**Persistence on the DataJoint row**: the `Sorting` table stores `sorting_id` (UUID), `analysis_file_name`, `object_id`, `n_units`, and `time_of_sort`; it does **not** store `analyzer_folder`. The analyzer store is regeneratable side scratch whose path is computed from `sorting_id` via `analyzer_path()`. Heavy outputs (templates, waveforms) are reachable via `analyzer = load_sorting_analyzer(analyzer_path(sorting_id))`, normally through `Sorting.get_analyzer(key)`.
 
 **Loading convention**: every consumer uses the `Sorting.get_analyzer(key)` method, which checks for folder existence, recomputes if missing (delegating to `Sorting.make()` rerun), then returns the analyzer object. Do not load analyzer folders directly — go through the helper. This mirrors v1's `SpikeSortingRecording.get_recording` missing-file rebuild pattern at [`src/spyglass/spikesorting/v1/recording.py:407-427`](../../../../src/spyglass/spikesorting/v1/recording.py#L407-L427).
 

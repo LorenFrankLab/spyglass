@@ -564,7 +564,6 @@ class Sorting(SpyglassMixin, dj.Computed):
     -> AnalysisNwbfile
     object_id: varchar(72)          # of the units table in the analysis NWB (per
                                     # shared-contracts NWB Column-Name Convention)
-    analyzer_folder: varchar(255)   # path to the SortingAnalyzer binary folder
     n_units: int
     time_of_sort: datetime
     """
