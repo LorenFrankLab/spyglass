@@ -29,6 +29,12 @@ investigation of one specific numerical discrepancy (the clusterless
   gap-excluded sample count. v1: `spike_times_to_valid_samples`
   (`v1/sorting.py:29`) + `v1/curation.py` `get_sorting`. v2: `_signal_math.py`
   `_spike_times_to_frames`, `_units_nwb.numpysorting_from_abs_times`.
+  Out-of-bounds handling also differs: where a frame lands one past the end,
+  v1 **dropped** the spike (`v1/sorting.py:60-79`) while v2 **snaps** it back to
+  the last sample within a ~2-sample tolerance and **raises** beyond that
+  (count-preserving, so per-spike features stay aligned). See the
+  "boundary-spike handling" non-parity note in
+  [feature-parity.md](feature-parity.md).
 
 - **Clusterless threshold is a true microvolt threshold.** v1 carried a
   `threshold_unit="uv"` label (`v1/sorting.py:177`) but never enforced it — it
@@ -69,7 +75,7 @@ investigation of one specific numerical discrepancy (the clusterless
   `_handle_existing`.)
 
 - **Common-reference `operator` is a user knob.** v1 hardcoded
-  `operator="median"` (`v1/recording.py:611`). v2 exposes `operator`
+  `operator="median"` (`v1/recording.py:619`). v2 exposes `operator`
   (`"average"` is v2-only) and drops v1's `reference` params field; default
   `"median"` preserves v1 behavior. (`CommonReferenceParams`.)
 
@@ -81,6 +87,42 @@ investigation of one specific numerical discrepancy (the clusterless
   auto path v1 silently fell through when members carried mixed reference
   values; v2 raises. Sentinel encoding (`None` / `-1` / `-2` / `>=0`) stays
   v1-compatible. (`_reference_resolution.resolve_group_reference`.)
+
+- **Electrode-table-region is built from row indices, not channel ids.** v1
+  passed `region=[i for i in recording.get_channel_ids()]`
+  (`v1/recording.py:863`) to `create_electrode_table_region`, which interprets
+  `region` as ROW INDICES into the electrodes table — so on a non-contiguous
+  electrodes table v1 silently selected the wrong rows (wrong channel locations
+  and brain-region attribution). v2 maps electrode ids → row indices and raises
+  on an unknown id. (`_nwb_metadata_helpers.electrode_table_region`.)
+
+- **Curated bad channels can be interpolated, not only removed.** v2 adds a
+  `bad_channel_handling` knob (`"remove"` | `"interpolate"`, default `"remove"`,
+  which is byte-identical to v1) controlling how `Electrode.bad_channel` flags
+  are applied at materialization; `"interpolate"` re-includes the group's
+  pitch-adjacent interior channels via SI kriging instead of dropping them. v1
+  had no interpolation path. (`_params/preprocessing.PreprocessingParamsSchema`,
+  `_recording_preprocessing.py`.)
+
+- **Automated bad-channel detection is available (suggest-then-confirm).** v2
+  adds `detect_bad_channels` (a thin wrapper over SI's `detect_bad_channels`,
+  pinning only `method="coherence+psd"` and running per shank) and
+  `suggest_bad_channels`, which can persist labels onto `Electrode.bad_channel`
+  via `Electrode.update1`. No v1 equivalent; detection ships SI's defaults
+  (`seed=None`, so the suggest step is non-deterministic). (`bad_channels.py`.)
+
+- **Optional ADC `phase_shift` step.** v2 can apply SI `phase_shift` when the
+  recording carries `inter_sample_shift` (multiplexed-ADC rigs / Neuropixels),
+  warning-and-skipping otherwise; off by default. No v1 equivalent.
+  (`_recording_preprocessing.py`.)
+
+- **`ElectricalSeries.filtering` provenance reflects the steps actually run.**
+  v1 hardcoded `filtering="Bandpass filtered for spike band"`
+  (`v1/recording.py:877`) regardless of what ran; v2 builds the string from the
+  preprocessing steps actually applied, so referencing / phase-shift /
+  interpolation are distinguishable in provenance (and the string is hashed
+  into the recompute content hash).
+  (`_recording_preprocessing.filtering_description`.)
 
 ---
 
@@ -113,10 +155,31 @@ investigation of one specific numerical discrepancy (the clusterless
 
 - **Worker kernels live in a DB-free module.** The chunked-scan worker
   functions are a self-contained, DB-free copy (numpy + spikeinterface only) so
-  multiprocessing spawn-workers need no DB connection; v1's equivalents
-  (`spikesorting/utils.py:_init_artifact_worker` / `_compute_artifact_chunk`)
-  pull DataJoint. `si.load` is the SI 0.104+ rename of v1's `load_extractor`.
+  multiprocessing spawn-workers need no DB connection. v1's equivalents
+  (`spikesorting/utils.py` `_init_artifact_worker` / `_compute_artifact_chunk`)
+  do not themselves touch DataJoint, but live in a module that imports DataJoint
+  at module scope, so a spawn-worker that imports them drags in a DB dependency.
+  `si.load` is the SI 0.104+ rename of v1's `load_extractor`.
   (`_artifact_compute.py`.)
+
+- **Per-channel z-score is epsilon-guarded and computed in µV.** v1 applied a
+  bare `scipy.stats.zscore` (`spikesorting/utils.py:185`, `:193`), so a flat
+  (zero-variance) frame produced `nan`/`inf`; v2 computes the z-score manually
+  on the µV-scaled traces with `std(...) + 1e-12` (`_artifact_compute.py:133`),
+  so a near-flat frame yields ≈0 and is not flagged. The flagged-frame set
+  differs on saturated/constant frames. (z-score is scale-invariant, so the µV
+  scaling alone does not change it.)
+
+- **`min_length` boundary is inclusive (`>=`), not strict (`>`).** v1's
+  interval-length filter kept `lengths > min_length`
+  (`common/common_interval.py:540`); v2 keeps `(end - start) >= min_length_s`
+  (`_artifact_intervals.py:377`). An interval of exactly `min_length` (e.g.
+  1.0 s) is dropped by v1 but kept by v2.
+
+- **Default `chunk_duration` / `n_jobs` lowered.** v1 defaulted
+  `chunk_duration="10s", n_jobs=4` (`v1/artifact.py:73-74`); v2 defaults a
+  1-second chunk and `n_jobs=1`, resolving concurrency from job_kwargs instead.
+  Performance/footprint only. (`_artifact_intervals.py`.)
 
 ---
 
@@ -131,10 +194,13 @@ investigation of one specific numerical discrepancy (the clusterless
   is absent. (`Sorting.make_fetch`, `_units_nwb.write_sorting_units_nwb`.)
 
 - **External float64 whitening; sorter internal whitening disabled.** v1 ran
-  external whitening (`v1/sorting.py:428-430`) and disabled the sorter's
+  external whitening (`v1/sorting.py:440-444`) and disabled the sorter's
   internal whitening to avoid double-whitening. v2 keeps this and runs it after
-  the artifact mask so masked frames don't bias the covariance estimate.
-  (`run_si_sorter`.)
+  the artifact mask so masked frames don't bias the covariance estimate. v2 also
+  pins the whitening/MAD `random_seed` (default 0) so the whitening matrix is
+  reproducible by default, where v1's `sip.whiten` (`v1/sorting.py:443`) was
+  unseeded — a v2 run differs numerically from an unseeded v1 run.
+  (`run_si_sorter`, `_sorting_dispatch.py:217-218`, `:380-383`.)
 
 - **Default-row install gate uses `installed_sorters()`.** v1's gate
   (`v1/sorting.py:184-189`) and the legacy-SI analog could auto-insert default
@@ -157,6 +223,27 @@ investigation of one specific numerical discrepancy (the clusterless
   (`v1/sorting.py:145-153`) that omitted those keys. Kilosort4 / generic-SI
   schemas keep `extra="allow"` to preserve v1's "try any installed SI sorter"
   escape hatch. (`_params/sorter.py`.)
+
+- **Artifact-mask boundary frames differ by one sample.** v1 zeroed
+  inter-interval and final-interval frames with `np.arange(end+1, next_start)`
+  and `np.arange(last_end, len(timestamps)-1)` (`v1/sorting.py:382-388`),
+  leaving the boundary sample at each artifact edge un-zeroed; v2 derives the
+  mask from `searchsorted` bounds (`end=len(timestamps)`,
+  `_sorting_artifact_mask.py`), so the exact set of zeroed frames at each
+  artifact boundary differs. Spikes landing on a boundary sample can be masked
+  in one and not the other.
+
+- **Per-unit peak channel and `peak_amplitude_uv` are computed and stored at
+  sort time.** v2 records each unit's extremum channel and template amplitude in
+  µV on the `Sorting.Unit` part (`sorting.py:904`, `:1952-1992`) via
+  `template_tools.get_template_extremum_{channel,amplitude}`. v1 had no
+  equivalent per-unit field at sort time.
+
+- **Global / `dj.config` job-kwargs flow into the sorter and analyzer.** v2
+  resolves `n_jobs` / `chunk_duration` from SI global ← `dj.config` ← per-row
+  blob and threads them into the sorter run and analyzer extension compute
+  (`utils._resolved_job_kwargs`, `_sorting_dispatch.py`); v1 honored only the
+  row's worker count.
 
 ---
 
@@ -196,6 +283,26 @@ investigation of one specific numerical discrepancy (the clusterless
   under-reported regions for a multi-region probe (it returned one electrode's
   region). v2 returns a relation over every electrode in the sort group so a
   multi-region probe surfaces every represented region. (`get_sort_group_info`.)
+
+- **Merged-unit spike trains are de-duplicated at 0.4 ms.** v1 formed a merged
+  unit by a bare `np.concatenate` of contributor trains (`v1/curation.py:362`);
+  v2 applies a membership-aware 0.4 ms cross-unit dedup (`_units_nwb.py:452`,
+  `_signal_math._dedup_merged_spike_times`) so a spike double-detected on two
+  contributors is counted once. A v2 merged unit therefore has fewer spikes than
+  the contributor sum, changing its `num_spikes` / firing-rate / ISI. (Distinct
+  from the clusterless `detect_peaks` divergence in
+  [divergence-investigation.md](divergence-investigation.md).)
+
+- **Merge groups are validated, raising on malformed input.** v2 rejects empty,
+  singleton, duplicate-member, unknown-id, and overlapping merge groups
+  (`_curation_transforms.py`); v1 silently concatenated/unioned whatever was
+  passed (`v1/curation.py:359-455`).
+
+- **Re-inserting a root curation with conflicting params fails loud.** v1
+  silently returned the existing key, ignoring the new labels/merges
+  (`v1/curation.py:88-93`); v2 raises `ValueError` when a root curation already
+  exists for the sorting unless an explicit override is set
+  (`curation.insert_curation`).
 
 ---
 
@@ -293,14 +400,77 @@ single `AnalyzerCuration` table built on the SI 0.104 `SortingAnalyzer` API
   `isi_violation`/`firing_rate`/`num_spikes` are exact-within-tolerance.
   (`_metric_parity.compare_to_v1_baseline`.)
 
+- **Analyzer waveform window widened and asymmetric; subsample reduced 10×.**
+  v1's `WaveformParameters` default was `ms_before=0.5, ms_after=0.5,
+  max_spikes_per_unit=5000` (`v1/metric_curation.py:101-103`); the v2
+  SortingAnalyzer computes `waveforms` over `ms_before=1.0, ms_after=2.0`
+  (`_sorting_analyzer.py:397`) from a `max_spikes_per_unit=500` random subsample
+  (`_sorting_analyzer.py:375`). This changes every template-derived metric (SNR,
+  amplitude, peak channel) relative to v1 — independent of, and compounding
+  with, the documented SNR mean→median change.
+
+- **The analyzer is persisted as zarr.** v2 creates the `SortingAnalyzer` with
+  `format="zarr"` (`_sorting_analyzer.py:357`) and caches it at
+  `{sorting_id}.zarr` (`_analyzer_cache.py`); v1 had no `SortingAnalyzer` (it
+  used on-demand SI `WaveformExtractor` folders). The analyzer recompute trio
+  hashes selected extension arrays from this zarr store.
+
+- **BurstPair merge diagnostics are ported, computed on the fly (not stored),
+  and each leg is reimplemented deliberately — not literally.** v1's `BurstPair`
+  computed three per-pair scalars into a queryable `BurstPairUnit` table
+  (`v1/burst_curation.py:114-123`, `:261-305`). v2 recomputes them on demand
+  from already-stored analyzer extensions
+  (`_metric_curation_plots.burst_pair_metrics_from_analyzer`, one dict per
+  ordered pair) and exposes them through `AnalyzerCuration` (`get_peak_amps`,
+  `plot_by_sort_group_ids`, `investigate_pair_xcorrel`,
+  `investigate_pair_peaks`, `plot_peak_over_time`) plus
+  `AnalyzerCurationSelection.insert_by_curation_id`. Nothing is stored in a new
+  table: the heavy inputs (`templates`, `correlograms`, `unit_locations`)
+  already live in the recompute-covered analyzer zarr, so the reductions are
+  cheap deterministic views; a stored table would only add cross-session
+  queryability, which nothing downstream consumes. Per-leg choices:
+    - **`wf_similarity`** uses SI's **cosine** `template_similarity` extension,
+      NOT v1's flat `pearsonr` over concatenated mean waveforms
+      (`v1/burst_curation.py:292`). v1's flatten-and-correlate assumes both
+      units share channels in the same order — wrong under v2's **sparse**
+      analyzers (per-unit channel supports differ); SI's extension aligns
+      sparsity and is the same metric the `similarity_correlograms` merge
+      engine uses, so the diagnostic matches the suggestions.
+    - **peak amplitudes** are sampled at the waveform **peak** (`nbefore`), not
+      the array center: with the asymmetric (1.0 / 2.0 ms) window the center
+      sits ~0.5 ms into the repolarization tail, not the trough. Per-channel
+      `(n_spikes, n_channels)` shape is kept (the burst plots histogram per
+      channel and pick each unit's max channel), so the 1-D `spike_amplitudes`
+      extension is deliberately not used here. Amplitudes and their paired spike
+      times both follow the `waveforms` extension's `random_spikes` subset (the
+      times come from the `random_spikes` extension, not the full train), so the
+      arrays stay aligned for units with more spikes than the subsample cap.
+      (`_metric_curation_plots.peak_amplitudes_from_analyzer`.)
+    - **cross-unit `isi_violation`** keeps v1's "violations / merged-train
+      spikes" logic, but the threshold arg is renamed `isi_threshold_s` →
+      `isi_threshold_ms` (v1 named it `_s` while applying it as ms via
+      `* 1e-3`); the old `isi_threshold_s` name stays as a deprecated
+      keyword-only alias so external callers don't break. v2 passes **2.0 ms**
+      to align with the single-unit `isi_violation` default; the shared
+      `utils_burst.calculate_isi_violation` default stays 1.5 ms so v1's
+      positional callers are unchanged.
+    - **`xcorrel_asymm`** is unchanged (`utils_burst.calculate_ca` over the
+      `correlograms` extension; directional, so computed per ordered pair).
+    - **`unit_distance`** is a NEW fourth leg — euclidean distance over the
+      `unit_locations` extension — the spatial check v1 lacked (two cells can
+      share a waveform shape at different depths; SI's own merge preset uses
+      unit-location proximity for the same reason).
+
 ### Not yet ported from v1 (metric/analyzer curation)
 
-- **BurstPair per-pair quantitative metrics are not stored.** v2 ports the burst
-  *visualization* helpers (peak amplitudes, correlogram / xcorrel / peak-over-time
-  plots) but stores no `wf_similarity` / `xcorrel_asymm` / cross-unit
-  `isi_violation` table; merge suggestion is preset-only. (v1 `BurstPairUnit`
-  `v1/burst_curation.py:114-123`, `:286-305`; v2 plots only in
-  `_metric_curation_plots.py`.)
+- **BurstPair's per-pair metrics are computed on the fly, not stored.** The
+  diagnostics themselves ARE ported (see "BurstPair merge diagnostics" above);
+  what is intentionally not carried over is v1's queryable `BurstPairUnit` table
+  — there is no stored `wf_similarity` / `xcorrel_asymm` / cross-unit
+  `isi_violation` table, by design (the only thing it would add is cross-session
+  queryability, which nothing downstream needs). Automated merge *suggestion*
+  remains preset-only. (v1 `BurstPairUnit` `v1/burst_curation.py:114-123`,
+  `:286-305`.)
 
 - **`peak_offset` / `peak_channel` metrics dropped from the default set.** v2
   relies on SI analyzer extensions (`unit_locations`, `template_metrics`) instead.
@@ -365,6 +535,18 @@ single `AnalyzerCuration` table built on the SI 0.104 `SortingAnalyzer` API
   (`v1/recompute.py:788-803`); v2 does a cautious `delete(safemode=False)` (so the
   `Name`/`Hash` diff part rows cascade and the team-permission guard applies) then
   re-`populate`s. (`recompute.*Recompute.recheck`.)
+
+- **Rounded content is hashed as raw float64 bytes, not decimal strings.** v1's
+  `NwbfileHasher` rounded only `ProcessedElectricalSeries` and hashed the
+  decimal-string representation (`utils/nwb_hash.py`); v2 rounds every hashed
+  float array (recording traces and the selected analyzer extension arrays) and
+  hashes `np.ascontiguousarray(array).tobytes()` (`_recompute.py:43-48`). A
+  consequence is that `-0.0` and `0.0` (string-equal in v1) can hash differently
+  in v2, so the `rounding` knob no longer guarantees the same match tolerance.
+
+- **Rollup digest is sha256 while sub-hashes are md5.** v2's per-array/segment
+  sub-hashes use md5 (`_recompute.py:43`, `:63`) but the combined digest uses
+  sha256 (`_recompute.py:82`); v1 was md5 throughout. Storage detail only.
 
 ### Not yet ported from v1 (recompute)
 
