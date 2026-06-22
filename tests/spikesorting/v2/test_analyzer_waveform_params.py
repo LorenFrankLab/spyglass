@@ -43,6 +43,26 @@ def test_analyzer_waveform_params_schema_rejects_purpose_whiten_mismatch():
         AnalyzerWaveformParamsSchema(purpose="metric", whiten=False)
 
 
+def test_analyzer_waveform_params_schema_rejects_nonpositive_bounds():
+    """A zero/negative window or sub-unit subsample raises.
+
+    A zero/negative extraction window or ``max_spikes_per_unit < 1`` would
+    reach ``analyzer.compute(...)`` and produce a meaningless analyzer; the
+    field bounds (``ms_before/ms_after gt=0``, ``max_spikes_per_unit ge=1``)
+    must reject them.
+    """
+    for bad in (
+        {"ms_before": 0.0},
+        {"ms_before": -0.5},
+        {"ms_after": 0.0},
+        {"ms_after": -1.0},
+        {"max_spikes_per_unit": 0},
+        {"max_spikes_per_unit": -10},
+    ):
+        with pytest.raises(Exception):
+            AnalyzerWaveformParamsSchema(**bad)
+
+
 # --------------------------------------------------------------------------- #
 # Region map (pure function)
 # --------------------------------------------------------------------------- #
@@ -125,6 +145,56 @@ def test_analyzer_waveform_params_rejects_unsafe_name(dj_conn):
                 "params": AnalyzerWaveformParamsSchema().model_dump(),
             }
         )
+
+
+def test_analyzer_waveform_params_insert_guards(dj_conn):
+    """The insert path validates the blob and rejects duplicate content.
+
+    The blob is Pydantic-validated through ``validate_lookup_rows`` (an invalid
+    purpose/whiten pair is rejected at insert, not just at schema-construction
+    time), and a second NAME for an already-shipped blob forks provenance and
+    is rejected unless ``allow_duplicate_params=True``.
+    """
+    from spyglass.spikesorting.v2.exceptions import (
+        DuplicateParameterContentError,
+    )
+    from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
+
+    AnalyzerWaveformParameters.insert_default()
+
+    # A contradictory blob is rejected THROUGH the table insert (not only at
+    # schema construction): build a valid display dict, then corrupt it.
+    bad_blob = AnalyzerWaveformParamsSchema().model_dump()
+    bad_blob["whiten"] = True  # display + whiten=True -> invalid pair
+    with pytest.raises(Exception):
+        AnalyzerWaveformParameters().insert1(
+            {"waveform_params_name": "bad_pair", "params": bad_blob}
+        )
+
+    # A new name for the cortex display blob forks provenance -> rejected.
+    cortex_blob = (
+        AnalyzerWaveformParameters
+        & {"waveform_params_name": "franklab_cortex_actual_waveforms"}
+    ).fetch1("params")
+    with pytest.raises(DuplicateParameterContentError):
+        AnalyzerWaveformParameters().insert1(
+            {"waveform_params_name": "cortex_clone", "params": cortex_blob}
+        )
+    # ...unless the escape hatch is set.
+    try:
+        AnalyzerWaveformParameters().insert1(
+            {"waveform_params_name": "cortex_clone", "params": cortex_blob},
+            allow_duplicate_params=True,
+        )
+        assert (
+            AnalyzerWaveformParameters
+            & {"waveform_params_name": "cortex_clone"}
+        )
+    finally:
+        (
+            AnalyzerWaveformParameters
+            & {"waveform_params_name": "cortex_clone"}
+        ).delete_quick()
 
 
 def test_display_waveform_params_name_not_in_sorting_identity(dj_conn):
@@ -318,6 +388,88 @@ def test_recording_source_display_recipe_resolved_by_region(
             conn.query("SET FOREIGN_KEY_CHECKS=1")
 
 
+def test_make_fetch_resolves_hippocampus_display_blob(dj_conn):
+    """``Sorting.make_fetch`` resolves AND fetches the hippocampus 0.5/0.5 blob.
+
+    The build-window unit tests prove ``build_analyzer`` honors a 0.5/0.5 blob,
+    and the resolver tests prove the hippocampus recipe NAME resolves; this
+    closes the gap between them by driving the real ``make_fetch`` for a
+    hippocampus-source sort and asserting the resolved ``display_waveform_params``
+    blob it threads to ``make_compute`` is the 0.5/0.5 window (not the cortex
+    fallback the generic populated-sort integration exercises).
+    """
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+        RecordingSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        AnalyzerWaveformParameters,
+        SorterParameters,
+        Sorting,
+        SortingSelection,
+    )
+
+    PreprocessingParameters.insert_default()
+    SorterParameters.insert_default()
+    AnalyzerWaveformParameters.insert_default()
+    recording_id = uuid.uuid4()
+    sid = uuid.uuid4()
+    rec_heading = RecordingSelection().heading
+    rec_row = {}
+    for name in rec_heading.names:
+        if name == "recording_id":
+            rec_row[name] = recording_id
+        elif name == "preprocessing_params_name":
+            rec_row[name] = HIPPOCAMPUS_PREPROC
+        elif name == "nwb_file_name":
+            rec_row[name] = "bypass.nwb"
+        elif rec_heading.attributes[name].numeric:
+            rec_row[name] = 0
+        else:
+            rec_row[name] = "bypass"
+    conn = dj.conn()
+    conn.query("SET FOREIGN_KEY_CHECKS=0")
+    try:
+        RecordingSelection.insert1(rec_row, allow_direct_insert=True)
+        SortingSelection.insert1(
+            {
+                "sorting_id": sid,
+                "sorter": "mountainsort5",
+                "sorter_params_name": "franklab_30khz_ms5_2026_06",
+            },
+            allow_direct_insert=True,
+        )
+        SortingSelection.RecordingSource.insert1(
+            {"sorting_id": sid, "recording_id": recording_id},
+            allow_direct_insert=True,
+        )
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+    try:
+        fetched = Sorting().make_fetch({"sorting_id": sid})
+        assert (
+            fetched.display_waveform_params_name
+            == "franklab_hippocampus_actual_waveforms"
+        )
+        # The fetched blob (threaded into make_compute -> _build_analyzer) is
+        # the hippocampus 0.5/0.5 window, not the cortex fallback.
+        assert fetched.display_waveform_params["ms_before"] == 0.5
+        assert fetched.display_waveform_params["ms_after"] == 0.5
+        assert fetched.display_waveform_params["max_spikes_per_unit"] == 20000
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=0")
+        try:
+            (SortingSelection & {"sorting_id": sid}).delete_quick()
+            (
+                RecordingSelection & {"recording_id": recording_id}
+            ).delete_quick()
+        finally:
+            conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+
 def test_fetch_waveform_params_missing_row_raises(dj_conn):
     """Resolution is strict: a missing tracked row raises a clear error.
 
@@ -336,7 +488,7 @@ def test_fetch_waveform_params_missing_row_raises(dj_conn):
     (
         AnalyzerWaveformParameters & {"waveform_params_name": missing}
     ).delete_quick()
-    with pytest.raises(KeyError, match="initialize_v2_defaults"):
+    with pytest.raises(ValueError, match="initialize_v2_defaults"):
         fetch_waveform_params(missing)
 
 

@@ -26,6 +26,11 @@ _CAP500_DISPLAY = {
     "schema_version": 1,
 }
 
+# The shipped cortex display recipe (1.0/2.0 ms, 20000 spikes) -- build_analyzer
+# requires a resolved recipe (it never picks a default), so the fake-analyzer
+# build tests that capture compute kwargs pass this explicitly.
+_DISPLAY_PARAMS = {**_CAP500_DISPLAY, "max_spikes_per_unit": 20000}
+
 
 @pytest.mark.slow
 def test_sorting_populates_with_mountainsort5(populated_recording):
@@ -80,7 +85,8 @@ def test_sorting_populates_with_mountainsort5(populated_recording):
 
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
-    # The analyzer folder is no longer a column; resolve it from sorting_id.
+    # The analyzer folder is no longer a column; resolve it from
+    # (sorting_id, display recipe name).
     analyzer_folder = analyzer_path(sort_pk["sorting_id"], _DISPLAY)
     assert isinstance(analyzer_folder, Path)
     assert analyzer_folder.exists()
@@ -792,6 +798,7 @@ def test_build_analyzer_strips_random_seed(dj_conn, monkeypatch, tmp_path):
         sorter_row={"job_kwargs": {}},
         job_kwargs={"random_seed": 7, "n_jobs": 1},
         analyzer_folder=tmp_path / "analyzer",
+        waveform_params=_DISPLAY_PARAMS,
     )
 
     jk = captured["kwargs"]
@@ -845,6 +852,7 @@ def test_build_analyzer_compute_args(dj_conn, monkeypatch, tmp_path):
         sorter_row={"job_kwargs": {}},
         job_kwargs={"random_seed": 3, "n_jobs": 1},
         analyzer_folder=tmp_path / "analyzer",
+        waveform_params=_DISPLAY_PARAMS,
     )
 
     # ``create_sorting_analyzer`` kwargs: sparse + µV-return are
@@ -945,9 +953,8 @@ def test_analyzer_rebuild_is_seeded_reproducible(
     )
 
     def _build_and_read(folder):
-        # ``_build_analyzer`` imports ``analyzer_path`` from _analyzer_cache
-        # at call time, so patching that symbol redirects the output folder
-        # for this build.
+        # Pass the explicit cache folder and the cap-500 display recipe so the
+        # build subsamples (the seed is observable only when subsampling fires).
         Sorting._build_analyzer(
             sorting,
             recording,

@@ -201,6 +201,28 @@ def test_preflight_all_pass(preflight_inputs):
 
 
 @pytest.mark.database
+def test_preflight_gates_analyzer_waveform_params_row(preflight_inputs):
+    """Preflight checks the region-resolved analyzer-waveform recipe row.
+
+    The display analyzer recipe is FK-required on the Sorting row, so a missing
+    AnalyzerWaveformParameters row would crash deep in make_fetch. Preflight
+    must gate it up front like the other params rows: assert the
+    ``analyzer_waveform_params_exist`` check is present and passes when the
+    defaults are installed. (The missing-row failure message is covered by the
+    shared ``*_params_exist`` failure path in
+    ``test_preflight_missing_params_row_points_to_initialize_defaults``;
+    ``_check`` blanks ``fix`` on a passing check, so it is not asserted here.)
+    """
+    report = preflight_v2_pipeline(**preflight_inputs)
+    (check,) = [
+        c
+        for c in report.checks
+        if c.name == "analyzer_waveform_params_exist"
+    ]
+    assert check.ok is True
+
+
+@pytest.mark.database
 def test_preflight_missing_raw(preflight_inputs, monkeypatch):
     """A session present but Raw absent fails raw_exists (not a false-negative).
 

@@ -1065,8 +1065,9 @@ def test_curation_get_unit_brain_regions_concat_anchor_member_df(
                 "object_id": "a28-concat-object-id",
                 "n_units": 1,
                 "time_of_sort": dt.datetime(2020, 1, 1),
-                # Display-recipe FK (cortex display); FK checks are off for
-                # this bypassed insert, the value just needs to be non-null.
+                # The display-recipe FK column (the cortex display recipe).
+                # This bypassed concat insert runs with FK checks off, so the
+                # row need not pre-exist, but the column is NOT NULL.
                 "display_waveform_params_name": (
                     "franklab_cortex_actual_waveforms"
                 ),

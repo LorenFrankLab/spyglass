@@ -170,6 +170,14 @@ def test_build_analyzer_cleans_partial_folder_when_create_fails(
             sorter_row={"job_kwargs": None},
             job_kwargs={},
             analyzer_folder=analyzer_folder,
+            waveform_params={
+                "ms_before": 1.0,
+                "ms_after": 2.0,
+                "max_spikes_per_unit": 20000,
+                "whiten": False,
+                "purpose": "display",
+                "schema_version": 1,
+            },
         )
     assert not analyzer_folder.exists()
 
@@ -485,8 +493,8 @@ def test_find_orphaned_analyzer_folders_stale_recipe(dj_conn):
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 
     sid = uuid.uuid4()
-    # The bypassed row's display_waveform_params_name defaults to the cortex
-    # display recipe, so its referenced folder is {sid}__cortex.zarr.
+    # The bypassed row records the cortex display recipe (_DISPLAY), so its
+    # referenced folder is {sid}__franklab_cortex_actual_waveforms.zarr.
     _insert_bypassed_sorting_row(sid, n_units=3)
     display_folder = analyzer_path(sid, _DISPLAY)
     stale_folder = analyzer_path(sid, "franklab_hippocampus_actual_waveforms")

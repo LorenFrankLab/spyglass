@@ -21,6 +21,18 @@ from spyglass.spikesorting.v2._analyzer_cache import (
 )
 from spyglass.spikesorting.v2._sorting_analyzer import build_analyzer
 
+# A display (unwhitened) recipe blob -- build_analyzer requires the resolved
+# waveform params (it never picks a default), so the probe-projection tests
+# that exercise the build path pass this explicitly.
+_DISPLAY_PARAMS = {
+    "ms_before": 1.0,
+    "ms_after": 2.0,
+    "max_spikes_per_unit": 20000,
+    "whiten": False,
+    "purpose": "display",
+    "schema_version": 1,
+}
+
 
 def test_analyzer_cache_root_honors_config(restore_custom_config):
     import datajoint as dj
@@ -181,6 +193,7 @@ class TestBuildAnalyzerProbeProjection:
             sorter_row={"job_kwargs": {}},
             job_kwargs={},
             analyzer_folder=folder,
+            waveform_params=_DISPLAY_PARAMS,
         )
 
         analyzer = si.load_sorting_analyzer(folder)
@@ -201,6 +214,7 @@ class TestBuildAnalyzerProbeProjection:
             sorter_row={"job_kwargs": {}},
             job_kwargs={},
             analyzer_folder=folder,
+            waveform_params=_DISPLAY_PARAMS,
         )
 
         analyzer = si.load_sorting_analyzer(folder)
