@@ -62,6 +62,20 @@
   `get_metrics` (column-generic read). Phase 4 **hardens** the per-cell `float()`
   cast at `:72` against a non-scalar template column; the surfaced columns flow
   through unchanged.
+- `src/spyglass/spikesorting/v2/recording.py:1481`,
+  `src/spyglass/spikesorting/v2/sorting.py:1412-1493`, and
+  `src/spyglass/spikesorting/v2/metric_curation.py:881-1085` — existing
+  `get_recording`, `get_analyzer` / `add_extensions`, `get_metrics`, and
+  lab-specific plotting helpers. Phase 5 **wraps** SI widgets/exporters around
+  these accessors instead of reimplementing plotting.
+- `<si>/src/spikeinterface/widgets/widget_list.py:127-167`,
+  `<si>/doc/modules/widgets.rst:9-17`, and
+  `<si>/doc/modules/exporters.rst:52-166` — SI's native widget/export surface
+  (`plot_traces`, `plot_probe_map`, `plot_sorting_summary`,
+  `plot_unit_summary`, `plot_unit_waveforms`, `plot_quality_metrics`,
+  `plot_template_metrics`, `plot_potential_merges`, `export_report`,
+  `export_to_phy`). Phase 5 exposes the useful subset through Spyglass keys
+  with local `matplotlib` defaults.
 
 ## Scope and dependency policy
 
@@ -86,6 +100,12 @@
   per `QualityMetricParameters` row, so downstream consumers can classify cell
   types (e.g. hippocampal interneuron vs pyramidal) with region-appropriate
   thresholds of their own.
+- Expose a thin SpikeInterface visualization/export bridge for local inspection:
+  a discoverable `v2.visualization` facade, trace and probe-map widgets from
+  Spyglass recordings, sorting/unit/waveform widgets from the display analyzer,
+  official metric plots from `AnalyzerCuration.get_metrics`, potential-merge
+  plots from persisted Spyglass merge candidates, and optional local SI report /
+  Phy exports.
 
 ### Non-Goals
 
@@ -101,6 +121,9 @@
   cutoffs (hippocampus ≠ cortex ≠ striatum) are downstream/user-side — a shipped
   hippocampal boundary would silently mislabel every other region. No conjunctive
   (multi-metric AND) auto-curation rule type is added either.
+- **No FigPack / cloud curation UI in this subplan.** Phase 5 is local SI
+  widget/export plumbing only. It does not add cloud publishing by default, a
+  FigPack curation state round-trip, or a new manual label model.
 
 ## Metrics
 
@@ -120,6 +143,11 @@
   (`trough_half_width`, `peak_to_trough_duration`, ...) alongside the quality
   metrics, read from the display (unwhitened) analyzer; no shipped auto-curation
   rule thresholds any of them.
+- **Inspection (Phase 5):** SI visualization/export helpers preserve routing:
+  recording widgets read the saved preprocessed `Recording`; waveform/template/
+  location/merge widgets and exports read the display analyzer; official metric
+  plots read `AnalyzerCuration.get_metrics`; no default visualization path uses
+  the whitened metric analyzer.
 
 ## Risks and Mitigations
 
@@ -129,6 +157,7 @@
 | `peak_amplitude_uv` is a persisted field that shifts | Documented in divergences; recompute baseline recaptured in Phase 2 |
 | MS4 needs `numpy<2`, so it cannot be the runnable default | MS5 stays the default; MS4 is documented (docstring + `describe_pipeline_presets`) as the recommended-science option to *select* on `numpy<2`; preflight guards a selected-but-unavailable MS4 |
 | 20000-spike analyzer build is slower / larger | Phase 1 smoke-tests the base build's time + memory on a real-data slice (it ships the 20000 default); Phase 2 measures the whitened build's additional cost |
+| SI widget/export wrappers accidentally use the whitened metric analyzer, recompute merge candidates, hide behind hard-to-discover table methods, miss required extensions, or default to a web backend | Phase 5 wrapper tests assert display-analyzer routing, persisted `get_merge_groups` use, a discoverable `v2.visualization` facade, extension ensure-or-clear-error behavior, `matplotlib` defaults, explicit `sortingview` opt-in, and no populate-side plotting/export |
 
 ## Rollout Strategy
 
@@ -157,7 +186,8 @@ named, selectable row (not removed) alongside the new Frank-lab default.
 
 ## Estimated Effort
 
-~750 LOC across four phases. Phase 1 ~200 (table + cache key + wiring + tests),
+~950 LOC across five phases. Phase 1 ~200 (table + cache key + wiring + tests),
 Phase 2 ~250 (whitened build + burst routing + recompute coverage + tests),
 Phase 3 ~150 (preset default + rule set + docs + tests), Phase 4 ~150 (template
-metric param + column join + writer guard + notebook/docs + tests).
+metric param + column join + writer guard + notebook/docs + tests), Phase 5 ~200
+(SI widget/export wrappers + notebook/docs + routing/backend tests).
