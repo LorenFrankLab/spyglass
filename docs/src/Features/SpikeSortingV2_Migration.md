@@ -117,8 +117,8 @@ notebook. For the pipeline overview, see
 
 ## 4. What has a v2 replacement vs. what is still pending
 
-Most post-sort Phase 2 surfaces now have v2 replacements. Use the v1 chain only
-for features still listed as pending.
+Most post-sort (curation / metric) surfaces now have v2 replacements. Use the
+v1 chain only for features still listed as pending.
 
 - **Available in v2** — `metric_curation` now provides
   `QualityMetricParameters`, `AutoCurationRules`, `AnalyzerCurationSelection`,
