@@ -15,8 +15,11 @@ matplotlib.use("Agg")
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
+import pytest  # noqa: E402
+
 from spyglass.spikesorting.v2._metric_curation_plots import (  # noqa: E402
     plot_units_qc_figure,
+    validate_unit_pairs,
 )
 
 
@@ -49,3 +52,18 @@ def test_plot_units_qc_figure_zero_unit_is_empty_but_labeled():
     fig = plot_units_qc_figure(pd.DataFrame(), None, [])
     assert fig is not None
     assert any("No units" in txt.get_text() for txt in fig.axes[0].texts)
+
+
+def test_validate_unit_pairs_returns_valid_pairs():
+    """Valid pairs (both members real unit ids) pass through unchanged."""
+    assert validate_unit_pairs([0, 1, 2], [(0, 1), (1, 2)]) == [(0, 1), (1, 2)]
+
+
+def test_validate_unit_pairs_rejects_unknown_unit():
+    """A pair referencing a non-existent unit raises, naming the bad id.
+
+    v2 unit ids are arbitrary (not 1-based), so a stale/typo'd pair id must
+    fail loudly rather than surface as a KeyError deep in the correlogram grid.
+    """
+    with pytest.raises(ValueError, match="99"):
+        validate_unit_pairs([0, 1], [(0, 99)])

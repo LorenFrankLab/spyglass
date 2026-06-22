@@ -56,13 +56,37 @@ def test_auto_curation_rules_insert1_blocked(dj_conn):
 
 
 @pytest.mark.db_unit
+def test_auto_curation_rules_rule_insert_blocked(dj_conn):
+    """Direct AutoCurationRules.Rule inserts bypass payload validation."""
+    from spyglass.spikesorting.v2.exceptions import (
+        UnsupportedDirectInsertError,
+    )
+    from spyglass.spikesorting.v2.metric_curation import AutoCurationRules
+
+    rule = {
+        "auto_curation_rules_name": "x",
+        "rule_index": 0,
+        "rule_name": "r",
+        "metric_name": "snr",
+        "operator": "<",
+        "threshold": 1.0,
+        "label": "noise",
+    }
+    with pytest.raises(UnsupportedDirectInsertError):
+        AutoCurationRules.Rule().insert([rule])
+    with pytest.raises(UnsupportedDirectInsertError):
+        AutoCurationRules.Rule().insert1(rule)
+
+
+@pytest.mark.db_unit
 def test_auto_curation_rules_insert_rules_queryable(dj_conn):
     """insert_rules stores ordered rule rows queryable by index/metric/label."""
     from spyglass.spikesorting.v2.metric_curation import AutoCurationRules
 
     name = "test_rules_queryable"
-    (AutoCurationRules.Rule & {"auto_curation_rules_name": name}).delete_quick()
-    (AutoCurationRules & {"auto_curation_rules_name": name}).delete_quick()
+    (AutoCurationRules & {"auto_curation_rules_name": name}).delete(
+        safemode=False
+    )
     AutoCurationRules.insert_rules(
         {"auto_curation_rules_name": name, "auto_merge_preset": "none"},
         [
@@ -88,8 +112,9 @@ def test_auto_curation_rules_insert_rules_queryable(dj_conn):
     assert len(rules) == 2
     assert (rules & {"metric_name": "snr"}).fetch1("label") == "noise"
     assert (rules & {"rule_index": 1}).fetch1("label") == "mua"
-    (AutoCurationRules.Rule & {"auto_curation_rules_name": name}).delete_quick()
-    (AutoCurationRules & {"auto_curation_rules_name": name}).delete_quick()
+    (AutoCurationRules & {"auto_curation_rules_name": name}).delete(
+        safemode=False
+    )
 
 
 @pytest.mark.db_unit
@@ -124,21 +149,27 @@ def test_auto_curation_rules_existing_name_must_match_payload(dj_conn):
     from spyglass.spikesorting.v2.metric_curation import AutoCurationRules
 
     name = "test_rules_existing_name"
+    # threshold 0.1 is NOT exactly representable in the single-precision
+    # ``Rule.threshold`` column (it round-trips as 0.10000000149...). The
+    # re-insert below must still be idempotent -- an exact comparison would
+    # raise a spurious "different payload" error on that float32 round-off.
     base_rule = {
         "rule_index": 0,
         "rule_name": "snr_noise",
         "metric_name": "snr",
         "operator": "<",
-        "threshold": 2.0,
+        "threshold": 0.1,
         "label": "noise",
     }
-    (AutoCurationRules.Rule & {"auto_curation_rules_name": name}).delete_quick()
-    (AutoCurationRules & {"auto_curation_rules_name": name}).delete_quick()
+    (AutoCurationRules & {"auto_curation_rules_name": name}).delete(
+        safemode=False
+    )
     try:
         pk = AutoCurationRules.insert_rules(
             {"auto_curation_rules_name": name, "auto_merge_preset": "none"},
             [dict(base_rule)],
         )
+        # Idempotent re-insert of the identical (float32-lossy) payload.
         assert AutoCurationRules.insert_rules(
             {"auto_curation_rules_name": name, "auto_merge_preset": "none"},
             [dict(base_rule)],
@@ -158,8 +189,9 @@ def test_auto_curation_rules_existing_name_must_match_payload(dj_conn):
                 [bad_rule],
             )
     finally:
-        (AutoCurationRules.Rule & {"auto_curation_rules_name": name}).delete_quick()
-        (AutoCurationRules & {"auto_curation_rules_name": name}).delete_quick()
+        (AutoCurationRules & {"auto_curation_rules_name": name}).delete(
+            safemode=False
+        )
 
 
 # ---------- end-to-end (slow / integration) ---------------------------------
@@ -401,7 +433,7 @@ def test_auto_curation_rules_none_default_passes_integrity(dj_conn):
 
     # A CUSTOM preset='none' + no-rules set genuinely does nothing -> flagged.
     name = "custom_noop_rules"
-    (AutoCurationRules & {"auto_curation_rules_name": name}).delete_quick()
+    (AutoCurationRules & {"auto_curation_rules_name": name}).delete(safemode=False)
     AutoCurationRules.insert_rules(
         {"auto_curation_rules_name": name, "auto_merge_preset": "none"}, []
     )
@@ -412,7 +444,7 @@ def test_auto_curation_rules_none_default_passes_integrity(dj_conn):
         ]
         assert custom and custom[0]["issue"] == "no_effect"
     finally:
-        (AutoCurationRules & {"auto_curation_rules_name": name}).delete_quick()
+        (AutoCurationRules & {"auto_curation_rules_name": name}).delete(safemode=False)
 
 
 @pytest.mark.slow
@@ -444,7 +476,7 @@ def test_analyzer_curation_selection_idempotent_content_addressed(
     expected = deterministic_id("analyzer_curation", identity)
     assert str(sel1["analyzer_curation_id"]) == str(expected)
     assert len(AnalyzerCurationSelection & sel1) == 1  # no duplicate row
-    (AnalyzerCurationSelection & sel1).delete_quick()
+    (AnalyzerCurationSelection & sel1).delete(safemode=False)
 
 
 @pytest.mark.db_unit
@@ -474,3 +506,105 @@ def test_analyzer_curation_selection_blocks_direct_insert(dj_conn):
                 "auto_curation_rules_name": "none",
             }
         )
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_analyzer_curation_selection_rejects_bypassed_id(
+    populated_sorting_with_curation, analyzer_curation_defaults
+):
+    """A non-deterministic id planted under an identity raises on re-insert.
+
+    insert_selection content-addresses the PK; if a row for the same logical
+    identity already carries a random id (an allow_direct_insert bypass or a
+    legacy row), insert_selection must raise DuplicateSelectionError rather
+    than silently treat the non-canonical row as the selection.
+    """
+    import uuid
+
+    from spyglass.spikesorting.v2.exceptions import DuplicateSelectionError
+    from spyglass.spikesorting.v2.metric_curation import (
+        AnalyzerCurationSelection,
+    )
+
+    identity = {
+        "sorting_id": populated_sorting_with_curation["sorting_id"],
+        "curation_id": populated_sorting_with_curation["curation_id"],
+        "metric_params_name": "minimal",
+        "auto_curation_rules_name": "none",
+    }
+    bad_id = uuid.uuid4()
+    AnalyzerCurationSelection().insert1(
+        {**identity, "analyzer_curation_id": bad_id}, allow_direct_insert=True
+    )
+    try:
+        with pytest.raises(DuplicateSelectionError, match="non-deterministic"):
+            AnalyzerCurationSelection.insert_selection(identity)
+    finally:
+        (
+            AnalyzerCurationSelection & {"analyzer_curation_id": bad_id}
+        ).delete(safemode=False)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_analyzer_curation_materializes_real_labels(
+    populated_sorting_with_curation, analyzer_curation_defaults
+):
+    """materialize_curation forwards proposed labels onto the child CurationV2.
+
+    The shipped end-to-end test only exercises the empty 'none' path; here a
+    permissive rule labels every unit so the labels-materialization path (and
+    the ``labels or None`` coalescing) is actually covered end-to-end.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.metric_curation import (
+        AnalyzerCuration,
+        AutoCurationRules,
+    )
+
+    # A rule every real unit trips: finite firing_rate >= 0 -> 'mua'.
+    rules_name = "force_mua_label"
+
+    def _teardown():
+        # A cautious cascading delete clears the rules AND everything that
+        # FK-references them (the Rule part, plus any AnalyzerCurationSelection
+        # / AnalyzerCuration rows) in dependency order -- no manual ordering,
+        # no FK violation. Run BEFORE the test too, in case a prior interrupted
+        # run left a referencing selection.
+        (
+            AutoCurationRules & {"auto_curation_rules_name": rules_name}
+        ).delete(safemode=False)
+
+    _teardown()
+    AutoCurationRules.insert_rules(
+        {"auto_curation_rules_name": rules_name, "auto_merge_preset": "none"},
+        [
+            {
+                "rule_index": 0,
+                "rule_name": "all_mua",
+                "metric_name": "firing_rate",
+                "operator": ">=",
+                "threshold": 0.0,
+                "label": "mua",
+            }
+        ],
+    )
+    try:
+        sel = _populate_analyzer_curation(
+            populated_sorting_with_curation, "minimal", rules_name
+        )
+        proposed = AnalyzerCuration.get_labels(sel)
+        assert proposed, "every unit should trip firing_rate >= 0"
+        assert all(labels == ["mua"] for labels in proposed.values())
+
+        child = AnalyzerCuration().materialize_curation(sel)
+        materialized = CurationV2._labels_by_unit(child)
+        assert materialized == proposed, (
+            "child CurationV2 must carry the proposed labels"
+        )
+        assert (
+            CurationV2 & child
+        ).fetch1("curation_source") == "analyzer_curation"
+    finally:
+        _teardown()

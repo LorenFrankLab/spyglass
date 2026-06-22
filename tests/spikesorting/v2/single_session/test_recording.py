@@ -1217,12 +1217,12 @@ def test_phase_shift_field_does_not_change_default_recording(
         # content as 'default', so leaking it would make a later
         # describe_parameter_rows duplicate-of resolution ambiguous in another
         # test (a cross-test isolation bug).
-        (Recording & legacy_pk).delete_quick()
-        (RecordingSelection & legacy_pk).delete_quick()
+        (Recording & legacy_pk).delete(safemode=False)
+        (RecordingSelection & legacy_pk).delete(safemode=False)
         (
             PreprocessingParameters
             & {"preprocessing_params_name": "_pytest_legacy_no_phase_shift"}
-        ).delete_quick()
+        ).delete(safemode=False)
 
 
 @pytest.mark.slow
