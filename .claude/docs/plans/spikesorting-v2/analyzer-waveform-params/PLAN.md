@@ -1,0 +1,43 @@
+# Analyzer Waveform Parameters & Curation Defaults — Implementation Plan
+
+**Status:** Not started.
+
+Restore DB-tracked spike-sorting analyzer waveform parameters (so the window and
+subsample that produced each analyzer are recorded and reproducible, the way v1
+tracked them), adopt region-specific analyzer waveform windows (hippocampus 0.5/0.5 ms, cortex 1.0/2.0 ms; 20000 spikes) resolved from the region preset, split the
+analyzer into an unwhitened "actual waveform" recipe for display and a whitened
+recipe for cluster metrics, ship a default auto-curation rule set that uses the
+lab's ~2% ISI policy, document the polymer MS4 recipe as the recommended-science
+option (keeping a runnable MS5 preset as the default, since MS4 needs
+`numpy<2`), and document the auto → manual-merge → auto curation loop in the
+user notebook.
+
+## Reading order
+
+For agent invocation, **load only the slice you need**:
+
+1. **Working a specific phase?** Open the matching phase file — each is
+   self-contained (inputs to read, contracts, tasks, validation, fixtures, review).
+2. **Need shared semantics?** [shared-contracts.md](shared-contracts.md).
+3. **Need broader scope / risks / rollout?** [overview.md](overview.md).
+
+## Files
+
+- [overview.md](overview.md) — goals, non-goals, integration points, risks, rollout, open questions.
+- [shared-contracts.md](shared-contracts.md) — the `AnalyzerWaveformParameters` table, the analyzer cache-identity key, and display-vs-metric routing.
+- Phases (each ships as a separable PR):
+  - [phase-1-params-surface.md](phase-1-params-surface.md) — tracked `AnalyzerWaveformParameters` table + region-specific display rows + cache key + region resolution (preprocessing-recipe → row, stored on `Sorting`).
+  - [phase-2-whitened-metric-analyzer.md](phase-2-whitened-metric-analyzer.md) — whitened metric analyzer, display/metric routing (incl. BurstPair legs), recompute coverage.
+  - [phase-3-defaults-rules-docs.md](phase-3-defaults-rules-docs.md) — auto-curation rules (`franklab_default_auto_curation_2026_06`), MS5 default + MS4 recommendation, curation-loop docs + notebook.
+
+## Deliberately not in this plan
+
+- **Whitened-vs-unwhitened metrics validation against v1 baselines** beyond the
+  capture-then-compare in Phase 2 — a full v1↔v2 metric parity study is separate.
+- **A dedicated standalone v2 curation notebook** (a `12_*`-style file) — Phase 3
+  extends the existing v2 notebook's curate section; a standalone notebook is a
+  follow-up only if that section outgrows inline form.
+- **Waveform windows for regions beyond hippocampus / cortex** — those two are
+  region-specific in this plan (hippo 0.5/0.5, cortex 1.0/2.0); other or
+  multi-region sorts fall back to the wider cortex window rather than getting a
+  tuned one. Adding more regions is a tracked-row-and-preset-mapping away.
