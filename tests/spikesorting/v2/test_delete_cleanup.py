@@ -16,11 +16,15 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from spyglass.spikesorting.v2._recipe_catalog import CORTEX_DISPLAY_WAVEFORMS
 from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
 
 _FIXTURE_PATH = (
     Path(__file__).resolve().parent / "fixtures" / "mearec_polymer_smoke.nwb"
 )
+# The planted sort uses the 'default' preprocessing recipe -> the cortex
+# display analyzer recipe (the cache folder is keyed by that name).
+_DISPLAY = CORTEX_DISPLAY_WAVEFORMS
 
 
 @pytest.fixture(scope="module")
@@ -122,7 +126,7 @@ def test_cancelled_delete_preserves_analyzer_folder_and_row(
     from spyglass.spikesorting.v2.sorting import Sorting
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
-    folder = analyzer_path(planted_sort["sorting_id"])
+    folder = analyzer_path(planted_sort["sorting_id"], _DISPLAY)
     assert folder.exists(), "fixture should have created the analyzer folder"
 
     # Force a real safemode prompt and answer "no" (cancel the cascade).
@@ -294,7 +298,7 @@ def test_unrestricted_sorting_delete_with_positional_restriction_restricts(
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
     from spyglass.spikesorting.v2.sorting import Sorting
 
-    folder = analyzer_path(planted_sort["sorting_id"])
+    folder = analyzer_path(planted_sort["sorting_id"], _DISPLAY)
     assert Sorting & planted_sort, "fixture should have a planted Sorting row"
     assert folder.exists(), "fixture should have created the analyzer folder"
 

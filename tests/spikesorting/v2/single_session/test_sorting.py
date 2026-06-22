@@ -4,8 +4,27 @@ from __future__ import annotations
 
 import pytest
 
+from spyglass.spikesorting.v2._recipe_catalog import CORTEX_DISPLAY_WAVEFORMS
 from tests.spikesorting.v2._ingest_helpers import _clean_session_v2
 from tests.spikesorting.v2.single_session._helpers import _build_synthetic_rec
+
+# These sorts use the 'default' preprocessing recipe, which is not in the
+# region map -> the wide cortex display recipe; the analyzer cache folder is
+# keyed by that name.
+_DISPLAY = CORTEX_DISPLAY_WAVEFORMS
+
+# A cap-500 display recipe for the seeded-subsample tests: the synthetic
+# fixtures have >500 spikes/unit, so cap=500 forces ``random_spikes`` to
+# actually subsample (the schema-default 20000 would select every spike and
+# the seed would be a no-op, making those reproducibility tests vacuous).
+_CAP500_DISPLAY = {
+    "ms_before": 1.0,
+    "ms_after": 2.0,
+    "max_spikes_per_unit": 500,
+    "whiten": False,
+    "purpose": "display",
+    "schema_version": 1,
+}
 
 
 @pytest.mark.slow
@@ -26,6 +45,9 @@ def test_sorting_populates_with_mountainsort5(populated_recording):
     )
 
     SorterParameters.insert_default()
+    from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
+
+    AnalyzerWaveformParameters.insert_default()
     ArtifactDetectionParameters.insert_default()
 
     # Ensure a no-op artifact detection is in place so the sort uses
@@ -59,7 +81,7 @@ def test_sorting_populates_with_mountainsort5(populated_recording):
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
     # The analyzer folder is no longer a column; resolve it from sorting_id.
-    analyzer_folder = analyzer_path(sort_pk["sorting_id"])
+    analyzer_folder = analyzer_path(sort_pk["sorting_id"], _DISPLAY)
     assert isinstance(analyzer_folder, Path)
     assert analyzer_folder.exists()
 
@@ -256,6 +278,9 @@ def test_prune_orphaned_selections_finds_and_cleans(populated_recording):
 
     ArtifactDetectionParameters.insert_default()
     SorterParameters.insert_default()
+    from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
+
+    AnalyzerWaveformParameters.insert_default()
 
     # Inject orphans directly via dj.Manual.insert1 (bypassing
     # insert_selection -- this is what an upstream cascade-delete leaves
@@ -577,7 +602,7 @@ def test_sorting_make_rollback_cleans_units_nwb(
     # guards against.
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
-    analyzer_folder = analyzer_path(sort_pk["sorting_id"])
+    analyzer_folder = analyzer_path(sort_pk["sorting_id"], _DISPLAY)
     assert not analyzer_folder.exists(), (
         f"Sorting.make rollback left analyzer folder {analyzer_folder} "
         "on disk. The except-block in Sorting.make_insert must "
@@ -746,10 +771,6 @@ def test_build_analyzer_strips_random_seed(dj_conn, monkeypatch, tmp_path):
 
     from spyglass.spikesorting.v2.sorting import Sorting
 
-    monkeypatch.setattr(
-        "spyglass.spikesorting.v2._analyzer_cache.analyzer_path",
-        lambda sorting_id: tmp_path / "analyzer",
-    )
     captured = {}
 
     class _FakeAnalyzer:
@@ -770,6 +791,7 @@ def test_build_analyzer_strips_random_seed(dj_conn, monkeypatch, tmp_path):
         {"sorting_id": "test-sorting-id"},
         sorter_row={"job_kwargs": {}},
         job_kwargs={"random_seed": 7, "n_jobs": 1},
+        analyzer_folder=tmp_path / "analyzer",
     )
 
     jk = captured["kwargs"]
@@ -799,10 +821,6 @@ def test_build_analyzer_compute_args(dj_conn, monkeypatch, tmp_path):
 
     from spyglass.spikesorting.v2.sorting import Sorting
 
-    monkeypatch.setattr(
-        "spyglass.spikesorting.v2._analyzer_cache.analyzer_path",
-        lambda sorting_id: tmp_path / "analyzer",
-    )
     captured = {}
 
     class _FakeAnalyzer:
@@ -826,6 +844,7 @@ def test_build_analyzer_compute_args(dj_conn, monkeypatch, tmp_path):
         {"sorting_id": "test-sorting-id"},
         sorter_row={"job_kwargs": {}},
         job_kwargs={"random_seed": 3, "n_jobs": 1},
+        analyzer_folder=tmp_path / "analyzer",
     )
 
     # ``create_sorting_analyzer`` kwargs: sparse + µV-return are
@@ -862,7 +881,9 @@ def test_build_analyzer_compute_args(dj_conn, monkeypatch, tmp_path):
     assert (
         ext_params["random_spikes"]["seed"] == 3
     ), "random_spikes seed must honor the job_kwargs random_seed override"
-    assert ext_params["random_spikes"]["max_spikes_per_unit"] == 500
+    # The schema-default display recipe (used when no waveform_params is
+    # passed) is the wide cortex window with the lab's 20000-spike subsample.
+    assert ext_params["random_spikes"]["max_spikes_per_unit"] == 20000
     assert ext_params["waveforms"]["ms_before"] == 1.0
     assert ext_params["waveforms"]["ms_after"] == 2.0
     # The Spyglass-only random_seed knob is still stripped from the
@@ -927,16 +948,14 @@ def test_analyzer_rebuild_is_seeded_reproducible(
         # ``_build_analyzer`` imports ``analyzer_path`` from _analyzer_cache
         # at call time, so patching that symbol redirects the output folder
         # for this build.
-        monkeypatch.setattr(
-            "spyglass.spikesorting.v2._analyzer_cache.analyzer_path",
-            lambda sorting_id: folder,
-        )
         Sorting._build_analyzer(
             sorting,
             recording,
             {"sorting_id": "repro-test"},
             sorter_row={"job_kwargs": {}},
             job_kwargs={"n_jobs": 1},
+            analyzer_folder=folder,
+            waveform_params=_CAP500_DISPLAY,
         )
         analyzer = si.load_sorting_analyzer(folder)
         selected = np.asarray(
@@ -950,8 +969,8 @@ def test_analyzer_rebuild_is_seeded_reproducible(
         )
         return selected, peak_channels, peak_amplitudes
 
-    sel1, chans1, amps1 = _build_and_read(tmp_path / "build_a")
-    sel2, chans2, amps2 = _build_and_read(tmp_path / "build_b")
+    sel1, chans1, amps1 = _build_and_read(tmp_path / "build_a.zarr")
+    sel2, chans2, amps2 = _build_and_read(tmp_path / "build_b.zarr")
 
     # Subsampling actually fired: 500 selected per unit, strictly fewer
     # than the total available -- otherwise the seed is a no-op and the
@@ -1011,23 +1030,21 @@ def test_analyzer_random_seed_override_is_honored(
     )
 
     def _selection_for_seed(folder, random_seed):
-        monkeypatch.setattr(
-            "spyglass.spikesorting.v2._analyzer_cache.analyzer_path",
-            lambda sorting_id: folder,
-        )
         Sorting._build_analyzer(
             sorting,
             recording,
             {"sorting_id": "seed-override-test"},
             sorter_row={"job_kwargs": {}},
             job_kwargs={"n_jobs": 1, "random_seed": random_seed},
+            analyzer_folder=folder,
+            waveform_params=_CAP500_DISPLAY,
         )
         analyzer = si.load_sorting_analyzer(folder)
         return np.asarray(analyzer.get_extension("random_spikes").get_data())
 
-    seed7_a = _selection_for_seed(tmp_path / "seed7_a", 7)
-    seed7_b = _selection_for_seed(tmp_path / "seed7_b", 7)
-    seed0 = _selection_for_seed(tmp_path / "seed0", 0)
+    seed7_a = _selection_for_seed(tmp_path / "seed7_a.zarr", 7)
+    seed7_b = _selection_for_seed(tmp_path / "seed7_b.zarr", 7)
+    seed0 = _selection_for_seed(tmp_path / "seed0.zarr", 0)
 
     # Subsampling fired (otherwise the seed is a no-op and the override
     # can't be observed).
@@ -1168,6 +1185,9 @@ def test_sorting_selection_artifact_detection_source_part_shape(
     )
 
     SorterParameters.insert_default()
+    from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
+
+    AnalyzerWaveformParameters.insert_default()
     ArtifactDetectionParameters.insert_default()
     art_pk = ArtifactDetectionSelection.insert_selection(
         {
@@ -1345,7 +1365,7 @@ def test_sorting_delete_removes_analyzer_folder(populated_sorting):
     from spyglass.spikesorting.v2.sorting import Sorting
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
-    folder = analyzer_path(populated_sorting["sorting_id"])
+    folder = analyzer_path(populated_sorting["sorting_id"], _DISPLAY)
     # ``_build_analyzer`` runs at populate time, so the folder is a
     # precondition of this test. Treat absence as a FAILURE rather than a
     # vacuous skip: if it is missing, the populate path is broken and the

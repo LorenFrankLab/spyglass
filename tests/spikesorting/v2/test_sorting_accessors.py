@@ -12,9 +12,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from spyglass.spikesorting.v2._recipe_catalog import CORTEX_DISPLAY_WAVEFORMS
 from tests.spikesorting.v2._ingest_helpers import (
     _plant_concat_sorting_selection,
 )
+
+# populated_sorting uses the 'default' preprocessing recipe -> cortex display.
+_DISPLAY = CORTEX_DISPLAY_WAVEFORMS
 
 
 def _plant_fake_recording(recording_id, nwb_file_name, sampling_frequency):
@@ -201,6 +205,7 @@ def test_sorting_get_unit_brain_regions_concat_anchor_member_df(
                 "object_id": "a26-concat-object-id",
                 "n_units": 1,
                 "time_of_sort": dt.datetime(2020, 1, 1),
+                "display_waveform_params_name": _DISPLAY,
             },
             allow_direct_insert=True,
         )
@@ -406,6 +411,7 @@ def test_get_sorting_zero_unit_returns_empty_numpysorting(populated_sorting):
                 "object_id": "a26-zero-object-id",
                 "n_units": 0,
                 "time_of_sort": dt.datetime(2020, 1, 1),
+                "display_waveform_params_name": _DISPLAY,
             },
             allow_direct_insert=True,
         )
@@ -476,7 +482,7 @@ def test_populate_unit_part_peak_channel_not_in_sort_group(
     ).fetch1("nwb_file_name")
     # The transient analyzer folder _populate_unit_part loads (built by the
     # populate that created populated_sorting; resolved from sorting_id).
-    analyzer_folder = analyzer_path(populated_sorting["sorting_id"])
+    analyzer_folder = analyzer_path(populated_sorting["sorting_id"], _DISPLAY)
     sorting = Sorting().get_sorting(populated_sorting)
 
     bad_channel = 10_000_000

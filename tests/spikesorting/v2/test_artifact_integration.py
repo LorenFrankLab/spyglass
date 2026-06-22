@@ -178,6 +178,9 @@ def test_detected_artifact_is_masked_out_of_the_sorted_recording(
         skip_duplicates=True,
     )
     SorterParameters.insert_default()
+    from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
+
+    AnalyzerWaveformParameters.insert_default()
 
     art_pk = ArtifactDetectionSelection.insert_selection(
         {

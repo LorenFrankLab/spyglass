@@ -46,6 +46,9 @@ def test_mountainsort5_ground_truth_polymer_60s(polymer_60s_session):
     PreprocessingParameters.insert_default()
     ArtifactDetectionParameters.insert_default()
     SorterParameters.insert_default()
+    from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
+
+    AnalyzerWaveformParameters.insert_default()
     LabTeam.insert1(
         {
             "team_name": "v2_test_team",
@@ -319,6 +322,9 @@ def test_mountainsort5_ground_truth_neuropixels_60s(neuropixels_60s_session):
     PreprocessingParameters.insert_default()
     ArtifactDetectionParameters.insert_default()
     SorterParameters.insert_default()
+    from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
+
+    AnalyzerWaveformParameters.insert_default()
     LabTeam.insert1(
         {
             "team_name": "v2_test_team",
@@ -739,6 +745,9 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
     PreprocessingParameters.insert_default()
     ArtifactDetectionParameters.insert_default()
     SorterParameters.insert_default()
+    from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
+
+    AnalyzerWaveformParameters.insert_default()
     # Mirror baseline_capture's smoke-row insertion: if the v1
     # baseline used a non-default clusterless threshold (e.g.
     # ``smoke_clusterless_5uv`` for the MEArec smoke fixture),
@@ -1283,6 +1292,9 @@ def test_v2_real_data_v1_parity_mountainsort4(
     PreprocessingParameters.insert_default()
     ArtifactDetectionParameters.insert_default()
     SorterParameters.insert_default()
+    from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
+
+    AnalyzerWaveformParameters.insert_default()
 
     # v2-side insert of the polymer-60s MS4 row. Owned end-to-end by
     # this test pair (parity_canonical also strips schema_version, so
@@ -1602,6 +1614,9 @@ def test_mountainsort4_ground_truth(
     PreprocessingParameters.insert_default()
     ArtifactDetectionParameters.insert_default()
     SorterParameters.insert_default()
+    from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
+
+    AnalyzerWaveformParameters.insert_default()
     if not (LabTeam & {"team_name": "v2_test_team"}):
         LabTeam.insert1(
             {
@@ -1821,6 +1836,9 @@ def test_clusterless_thresholder_ground_truth(
     PreprocessingParameters.insert_default()
     ArtifactDetectionParameters.insert_default()
     SorterParameters.insert_default()
+    from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
+
+    AnalyzerWaveformParameters.insert_default()
     if not (LabTeam & {"team_name": "v2_test_team"}):
         LabTeam.insert1(
             {

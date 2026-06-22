@@ -247,6 +247,7 @@ def populated_sorting(dj_conn):
         SortGroupV2,
     )
     from spyglass.spikesorting.v2.sorting import (
+        AnalyzerWaveformParameters,
         SorterParameters,
         Sorting,
         SortingSelection,
@@ -265,6 +266,7 @@ def populated_sorting(dj_conn):
     PreprocessingParameters.insert_default()
     ArtifactDetectionParameters.insert_default()
     SorterParameters.insert_default()
+    AnalyzerWaveformParameters.insert_default()
     LabTeam.insert1(
         {"team_name": "v2_test_team", "team_description": "v2 downstream"},
         skip_duplicates=True,

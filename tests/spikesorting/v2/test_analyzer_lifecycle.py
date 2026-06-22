@@ -11,9 +11,16 @@ from __future__ import annotations
 
 import pytest
 
+from spyglass.spikesorting.v2._recipe_catalog import CORTEX_DISPLAY_WAVEFORMS
 from tests.spikesorting.v2._ingest_helpers import (
     _plant_concat_sorting_selection,
 )
+
+# Every sort exercised here uses the 'default' preprocessing recipe, which is
+# not in the region map -> the wide cortex display recipe (see
+# waveform_params_for_preprocessing). The analyzer cache folder is keyed by
+# that recipe name, so the lifecycle assertions resolve it explicitly.
+_DISPLAY = CORTEX_DISPLAY_WAVEFORMS
 
 
 def _stub_recording_with_2d_probe():
@@ -112,6 +119,7 @@ def test_get_analyzer_zero_unit_raises_before_path_lookup():
                 "object_id": "a10-fake-object-id",
                 "n_units": 0,
                 "time_of_sort": dt.datetime(2020, 1, 1, 0, 0, 0),
+                "display_waveform_params_name": _DISPLAY,
             },
             allow_direct_insert=True,
         )
@@ -136,11 +144,9 @@ def test_build_analyzer_cleans_partial_folder_when_create_fails(
     from spyglass.spikesorting.v2 import utils as utils_mod
     from spyglass.spikesorting.v2.sorting import Sorting
 
+    # The caller resolves the cache folder (it carries the recipe identity) and
+    # passes it in; build_analyzer does no path lookup of its own.
     analyzer_folder = tmp_path / "partial.analyzer"
-    monkeypatch.setattr(
-        "spyglass.spikesorting.v2._analyzer_cache.analyzer_path",
-        lambda sorting_id: analyzer_folder,
-    )
 
     class _OneUnitSorting:
         def get_num_units(self):
@@ -163,6 +169,7 @@ def test_build_analyzer_cleans_partial_folder_when_create_fails(
             key={"sorting_id": uuid.uuid4()},
             sorter_row={"job_kwargs": None},
             job_kwargs={},
+            analyzer_folder=analyzer_folder,
         )
     assert not analyzer_folder.exists()
 
@@ -182,7 +189,7 @@ def test_rebuild_analyzer_folder_recreates_on_missing(populated_sorting):
     from spyglass.spikesorting.v2.sorting import Sorting
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
-    folder = analyzer_path(populated_sorting["sorting_id"])
+    folder = analyzer_path(populated_sorting["sorting_id"], _DISPLAY)
     original = Sorting().get_analyzer(populated_sorting)
     original_unit_ids = list(original.unit_ids)
     del original  # release the handle before rmtree
@@ -250,7 +257,7 @@ def test_sorting_delete_removes_analyzer_folder(
 
     sort_pk = _fresh_unit_producing_selection(populated_sorting)
     Sorting.populate(sort_pk, reserve_jobs=False)
-    folder = analyzer_path(sort_pk["sorting_id"])
+    folder = analyzer_path(sort_pk["sorting_id"], _DISPLAY)
     try:
         assert folder.exists(), "fresh sort should have an analyzer folder"
         (Sorting & sort_pk).delete(safemode=safemode_arg)
@@ -285,7 +292,7 @@ def test_make_compute_mode_a_cleanup_on_write_failure(
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
     sort_pk = _fresh_unit_producing_selection(populated_sorting)
-    folder = analyzer_path(sort_pk["sorting_id"])
+    folder = analyzer_path(sort_pk["sorting_id"], _DISPLAY)
 
     def _boom_write(self, **kwargs):
         raise RuntimeError("units NWB write blew up")
@@ -327,12 +334,12 @@ def test_changed_analyzer_root_causes_miss_and_rebuild(
     from spyglass.spikesorting.v2.sorting import Sorting
 
     sid = populated_sorting["sorting_id"]
-    original = analyzer_path(sid)
+    original = analyzer_path(sid, _DISPLAY)
     assert original.exists(), "populated sort should have an analyzer folder"
 
     new_root = tmp_path / "relocated_analyzers"
     dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(new_root)
-    relocated = analyzer_path(sid)
+    relocated = analyzer_path(sid, _DISPLAY)
     assert relocated != original, "root override must change the resolved path"
     assert not relocated.exists(), "fresh root -> cache miss, not a stale row"
     try:
@@ -373,12 +380,17 @@ def _insert_bypassed_sorting_row(sid, *, n_units):
     import datajoint as dj
 
     from spyglass.spikesorting.v2.sorting import (
+        AnalyzerWaveformParameters,
         SorterParameters,
         Sorting,
         SortingSelection,
     )
 
     SorterParameters.insert_default()
+    # The display-recipe FK target must exist (the row is tracked provenance),
+    # and the bypassed Sorting row records the recipe explicitly rather than
+    # relying on a schema default.
+    AnalyzerWaveformParameters.insert_default()
     SortingSelection.insert1(
         {
             "sorting_id": sid,
@@ -397,6 +409,7 @@ def _insert_bypassed_sorting_row(sid, *, n_units):
                 "object_id": "a22-fake-object-id",
                 "n_units": n_units,
                 "time_of_sort": dt.datetime(2020, 1, 1, 0, 0, 0),
+                "display_waveform_params_name": _DISPLAY,
             },
             allow_direct_insert=True,
         )
@@ -413,7 +426,7 @@ def test_find_orphaned_analyzer_folders_db_side(dj_conn):
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
     sid = uuid.uuid4()
-    folder = analyzer_path(sid)  # never written on disk
+    folder = analyzer_path(sid, _DISPLAY)  # never written on disk
     assert not folder.exists()
     _insert_bypassed_sorting_row(sid, n_units=3)
 
@@ -441,7 +454,7 @@ def test_find_orphaned_analyzer_folders_disk_side(dj_conn, tmp_path):
     from spyglass.spikesorting.v2.sorting import Sorting
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
-    analyzer_root = analyzer_path("x").parent
+    analyzer_root = analyzer_path("x", _DISPLAY).parent
     analyzer_root.mkdir(parents=True, exist_ok=True)
     stray = analyzer_root / f"a22_disk_orphan_{uuid.uuid4()}.analyzer"
     stray.mkdir()
@@ -455,6 +468,47 @@ def test_find_orphaned_analyzer_folders_disk_side(dj_conn, tmp_path):
         import shutil
 
         shutil.rmtree(stray, ignore_errors=True)
+
+
+def test_find_orphaned_analyzer_folders_stale_recipe(dj_conn):
+    """A ``{sid}__{other_recipe}.zarr`` folder for an otherwise-valid sort is
+    a disk-side orphan; the sort's own stored display-recipe folder is not.
+
+    This is the orphan case the recipe-keyed cache introduces: deleting/changing
+    a sort can leave a stale recipe folder on disk that no row references, while
+    the sort's stored display recipe folder is still valid.
+    """
+    import shutil
+    import uuid
+
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    sid = uuid.uuid4()
+    # The bypassed row's display_waveform_params_name defaults to the cortex
+    # display recipe, so its referenced folder is {sid}__cortex.zarr.
+    _insert_bypassed_sorting_row(sid, n_units=3)
+    display_folder = analyzer_path(sid, _DISPLAY)
+    stale_folder = analyzer_path(sid, "franklab_hippocampus_actual_waveforms")
+    display_folder.mkdir(parents=True, exist_ok=True)
+    stale_folder.mkdir(parents=True, exist_ok=True)
+    try:
+        report = Sorting.find_orphaned_analyzer_folders(dry_run=True)
+        disk = set(report["disk_side"])
+        assert str(stale_folder) in disk, (
+            "a {sid}__other_recipe.zarr folder must be a disk-side orphan"
+        )
+        assert str(display_folder) not in disk, (
+            "the sort's stored display-recipe folder is referenced, not orphan"
+        )
+        db_ids = {str(r["sorting_id"]) for r in report["db_side"]}
+        assert str(sid) not in db_ids, (
+            "the display folder exists, so the row is not a DB-side orphan"
+        )
+    finally:
+        shutil.rmtree(display_folder, ignore_errors=True)
+        shutil.rmtree(stale_folder, ignore_errors=True)
+        (SortingSelection & {"sorting_id": sid}).delete(safemode=False)
 
 
 def test_find_orphaned_analyzer_folders_zero_unit_carveout(dj_conn):
@@ -473,7 +527,7 @@ def test_find_orphaned_analyzer_folders_zero_unit_carveout(dj_conn):
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
     sid = uuid.uuid4()
-    folder = analyzer_path(sid)  # never written on disk
+    folder = analyzer_path(sid, _DISPLAY)  # never written on disk
     assert not folder.exists()
     _insert_bypassed_sorting_row(sid, n_units=0)
 

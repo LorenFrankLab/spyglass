@@ -190,12 +190,14 @@ def populated_sorting(populated_recording):
         ArtifactDetectionSelection,
     )
     from spyglass.spikesorting.v2.sorting import (
+        AnalyzerWaveformParameters,
         SorterParameters,
         Sorting,
         SortingSelection,
     )
 
     SorterParameters.insert_default()
+    AnalyzerWaveformParameters.insert_default()
     ArtifactDetectionParameters.insert_default()
     art_pk = ArtifactDetectionSelection.insert_selection(
         {
