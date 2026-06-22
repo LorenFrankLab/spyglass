@@ -166,5 +166,6 @@ uses the unwhitened display analyzer.
 Invariant (do not weaken): ALL burst-pair legs (`wf_similarity`,
 `xcorrel_asymm`, `unit_distance`, amplitudes) and the merge engine read the
 **display** analyzer; ONLY the PC/NN quality metrics read the **whitened**
-metric analyzer. Whichever analyzer a consumer loads, it loads by explicit
-`waveform_params_name`, never a shared default.
+metric analyzer. Metric / non-display consumers pass an explicit
+`waveform_params_name`; display-only helpers may use the stored display default
+(`Sorting.display_waveform_params_name`), never a shared cross-recipe default.
