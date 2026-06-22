@@ -47,9 +47,10 @@ def get_group_by_shank(
     ).fetch()
 
     e_groups = list(np.unique(electrodes["electrode_group_name"]))
-    try:
+    all_groups_numeric = all(value.isnumeric() for value in e_groups)
+    if all_groups_numeric:
         e_groups.sort(key=int)  # sort electrode groups numerically
-    except ValueError:
+    else:
         # electrode group names are not all numeric (e.g. "probe1_shank1");
         # fall back to lexicographic ordering
         e_groups.sort()
