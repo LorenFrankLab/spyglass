@@ -153,8 +153,9 @@ class PoseInferenceRunner(BaseMixin):
             Destination folder for output files. If None, saves alongside
             the video, by default None.
         **kwargs
-            Forwarded to ``sleap.load_model``; relevant keys are
-            ``batch_size``, ``peak_threshold``, ``integral_patch_size``.
+            Forwarded to ``sleap_nn.predict.run_inference``; relevant keys
+            are ``batch_size``, ``peak_threshold``, ``integral_patch_size``,
+            and ``device``.
 
         Returns
         -------
@@ -168,6 +169,15 @@ class PoseInferenceRunner(BaseMixin):
             If any video path or the model directory does not exist.
         ImportError
             If SLEAP is not installed in the current environment.
+
+        Notes
+        -----
+        Uses the PyTorch ``sleap-nn`` backend (SLEAP >= 1.5). Legacy
+        TensorFlow model directories (``best_model.h5`` +
+        ``training_config.json``) are loaded by converting the UNet weights
+        to PyTorch automatically. The ``.analysis.h5`` is written via
+        ``sleap_io.save_analysis_h5`` — the same path used to generate the
+        test fixtures (see ``tests/_data/sleap/make_real_analysis_h5.py``).
         """
         if not isinstance(video_path, (list, tuple)):
             video_path = [video_path]
@@ -183,23 +193,32 @@ class PoseInferenceRunner(BaseMixin):
             )
 
         # Deferred import — mirrors the DLC pattern; avoids startup cost.
+        # SLEAP must live in its own env (see environments/environment_sleap
+        # .yml); its NumPy-2 stack conflicts with DeepLabCut 3.x.
         try:
-            import sleap
-        except ImportError as e:  # pragma: no cover
-            raise ImportError(  # pragma: no cover
-                "SLEAP is required for inference. "
-                "Install with: pip install sleap"
+            import sleap_io
+            from sleap_nn.predict import run_inference
+        except ImportError as e:
+            raise ImportError(
+                "SLEAP (sleap-nn + sleap-io) is required for inference. "
+                "Install in a dedicated environment:\n"
+                "  mamba env create -f environments/environment_sleap.yml"
             ) from e
 
-        # Only forward parameters that sleap.load_model accepts.
-        load_kwargs = {
+        # Only forward parameters that run_inference accepts.
+        infer_kwargs = {
             k: kwargs[k]
-            for k in ("batch_size", "peak_threshold", "integral_patch_size")
+            for k in (
+                "batch_size",
+                "peak_threshold",
+                "integral_patch_size",
+                "device",
+            )
             if k in kwargs
         }
+        infer_kwargs.setdefault("device", "auto")
 
-        self._info_msg(f"Loading SLEAP model from {model_path}")
-        predictor = sleap.load_model(str(model_path), **load_kwargs)
+        self._info_msg(f"Running SLEAP inference with model {model_path}")
 
         output_paths = []
         for vp in video_path:
@@ -211,11 +230,19 @@ class PoseInferenceRunner(BaseMixin):
             h5_path = output_folder / f"{vp.stem}.analysis.h5"
 
             self._info_msg(f"Running SLEAP inference on {vp}")
-            labels = predictor.predict(sleap.load_video(str(vp)))
-            labels.save(str(slp_path))
+            labels = run_inference(
+                data_path=str(vp),
+                model_paths=[str(model_path)],
+                output_path=str(slp_path),
+                make_labels=True,
+                **infer_kwargs,
+            )
+            # run_inference writes the .slp; reload if it did not return Labels.
+            if labels is None:
+                labels = sleap_io.load_file(str(slp_path))
 
             # Export analysis h5 (preferred downstream format).
-            labels.export_analysis(str(h5_path))
+            sleap_io.save_analysis_h5(labels, str(h5_path))
 
             if h5_path.exists():
                 output_paths.append(str(h5_path))

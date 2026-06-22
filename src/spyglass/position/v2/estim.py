@@ -1029,6 +1029,12 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         derives real-world coordinates directly from camera extrinsics and
         does not call this method.
 
+        Falls back to ``1.0`` (coordinates remain at pixel scale) with a
+        warning when the VideoFile's NWB object or its CameraDevice cannot be
+        resolved — e.g. for tutorial / bootstrap sessions whose VideoFile
+        object IDs are synthetic and absent from the source NWB.  This mirrors
+        the fallback behaviour of ``_fetch_video_timestamps``.
+
         Parameters
         ----------
         key : dict
@@ -1050,8 +1056,17 @@ class PoseEstim(SpyglassMixin, dj.Computed):
                 f"No VideoFile entries found for vid_group_id="
                 f"'{key['vid_group_id']}'. Cannot fetch meters_per_pixel."
             )
-        nwb_data = (VideoFile & vf_keys[0]).fetch_nwb()[0]
-        return float(nwb_data["video_file"].device.meters_per_pixel)
+        try:
+            nwb_data = (VideoFile & vf_keys[0]).fetch_nwb()[0]
+            return float(nwb_data["video_file"].device.meters_per_pixel)
+        except (OSError, KeyError, TypeError, AttributeError) as e:
+            logger.warn_msg(
+                "Could not resolve meters_per_pixel from the VideoFile "
+                f"CameraDevice ({type(e).__name__}: {e}); falling back to "
+                "1.0 (coordinates remain at pixel scale). This is expected "
+                "for tutorial/bootstrap sessions without a calibrated camera."
+            )
+            return 1.0
 
     @staticmethod
     def _fetch_video_timestamps(key: dict) -> np.ndarray:

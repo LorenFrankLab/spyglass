@@ -43,7 +43,6 @@
 # %autoreload 2
 
 # +
-import os
 import pynwb
 import numpy as np
 import datajoint as dj

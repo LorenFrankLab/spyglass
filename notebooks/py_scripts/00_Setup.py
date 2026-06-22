@@ -305,29 +305,32 @@
 # their conda installation steps
 # [here](https://jax.readthedocs.io/en/latest/installation.html#conda-installation).
 #
-# #### Deep Lab Cut (DLC)
+# #### Pose estimation (DeepLabCut / SLEAP)
 #
 # > **Note**: `spyglass.position.v1` (DLC V1) is legacy. New projects should
-# > use `spyglass.position.v2` (DLC 3.0+). See the Position V2 tutorial.
+# > use `spyglass.position.v2`. See the Position V2 tutorials
+# > (`23_PositionV2_DLC` and `24_PositionV2_SLEAP`).
 #
-# Spyglass provides an environment build for using the DLC pipeline. To create an
-# environment with these features, please:
+# Position V2 supports two pose-estimation tools, **DeepLabCut** and
+# **SLEAP**, which require **separate environments** (SLEAP's NumPy-2 /
+# Python >=3.11 stack conflicts with DeepLabCut 3.x). To create one:
 # 1. navigate to your cloned spyglass repo.
-# 2. build the environment from the position version
+# 2. build the environment for the tool you use.
 # 3. activate the environment to use
 #
 # ```bash
-# # cd /path/to/spyglass # 1
-# mamba env create -f environments/environment_position.yml # 2
-# mamba activate spyglass-position # 3
+# # cd /path/to/spyglass                                  # 1
+# mamba env create -f environments/environment_dlc.yml    # 2a (DeepLabCut)
+# mamba activate spyglass-dlc                              # 3a
+# # -- or --
+# mamba env create -f environments/environment_sleap.yml  # 2b (SLEAP)
+# mamba activate spyglass-sleap                            # 3b
 # ```
-#
-# Legacy DLC 2.x users: `environments/environment_dlc.yml` is still available
-# but deprecated.
 #
 # Alternatively, you can pip install using
 # ```bash
-# pip install spyglass[dlc]
+# pip install spyglass[dlc]    # DeepLabCut
+# pip install spyglass[sleap]  # SLEAP
 # ```
 #
 # #### Keypoint-Moseq

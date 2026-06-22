@@ -500,10 +500,34 @@ class TestRunSleapInference:
                 video_path=str(video_file),
             )
 
-    def test_produces_analysis_h5(self, tmp_path):
-        """run_sleap_inference returns path to .analysis.h5 when h5 exists."""
+    def _patched_sleap_modules(self, run_inference, save_analysis_h5):
+        """Build sys.modules patch for the modern sleap-nn / sleap-io API.
+
+        ``run_sleap_inference`` runs ``import sleap_io`` and
+        ``from sleap_nn.predict import run_inference``; both the parent
+        ``sleap_nn`` and the ``sleap_nn.predict`` submodule must be present
+        in ``sys.modules`` for the ``from`` import to resolve.
+        """
         import sys
 
+        mock_sleap_io = MagicMock()
+        mock_sleap_io.save_analysis_h5.side_effect = save_analysis_h5
+        mock_sleap_io.load_file.return_value = MagicMock()
+
+        mock_predict = MagicMock()
+        mock_predict.run_inference.side_effect = run_inference
+
+        return patch.dict(
+            sys.modules,
+            {
+                "sleap_io": mock_sleap_io,
+                "sleap_nn": MagicMock(),
+                "sleap_nn.predict": mock_predict,
+            },
+        )
+
+    def test_produces_analysis_h5(self, tmp_path):
+        """run_sleap_inference returns path to .analysis.h5 when h5 exists."""
         from spyglass.position.v2.utils.nwb_io import PoseInferenceRunner
 
         video_file = tmp_path / "test.avi"
@@ -514,22 +538,18 @@ class TestRunSleapInference:
 
         h5_output = tmp_path / "test.analysis.h5"
 
-        mock_labels = MagicMock()
-        mock_labels.export_analysis.side_effect = lambda p: Path(p).write_bytes(
-            b"FAKE_H5"
-        )
+        def fake_run_inference(*, output_path, **kwargs):
+            Path(output_path).write_bytes(b"FAKE_SLP")
+            return MagicMock()  # Labels object
 
-        mock_sleap = MagicMock()
-        mock_sleap.load_model.return_value = MagicMock(
-            predict=MagicMock(return_value=mock_labels)
-        )
-        mock_sleap.load_video.return_value = MagicMock()
+        def fake_save_h5(labels, path):
+            Path(path).write_bytes(b"FAKE_H5")
 
         with patch(
             "spyglass.position.v2.utils.nwb_io.resolve_model_path",
             return_value=model_dir,
         ):
-            with patch.dict(sys.modules, {"sleap": mock_sleap}):
+            with self._patched_sleap_modules(fake_run_inference, fake_save_h5):
                 runner = PoseInferenceRunner()
                 result = runner.run_sleap_inference(
                     model_info={"model_path": str(model_dir)},
@@ -551,24 +571,19 @@ class TestRunSleapInference:
 
         slp_output = tmp_path / "test.predictions.slp"
 
-        mock_labels = MagicMock()
-        # export_analysis creates nothing; save creates the .slp
-        mock_labels.save.side_effect = lambda p: Path(p).write_bytes(b"FAKE")
-        mock_labels.export_analysis.return_value = None  # no h5 created
+        def fake_run_inference(*, output_path, **kwargs):
+            # run_inference writes the .slp; analysis h5 export produces nothing
+            Path(output_path).write_bytes(b"FAKE_SLP")
+            return MagicMock()  # Labels object
+
+        def fake_save_h5(labels, path):
+            return None  # no h5 created
 
         with patch(
             "spyglass.position.v2.utils.nwb_io.resolve_model_path",
             return_value=model_dir,
         ):
-            pass
-
-            mock_sleap = MagicMock()
-            mock_sleap.load_model.return_value = MagicMock(
-                predict=MagicMock(return_value=mock_labels)
-            )
-            mock_sleap.load_video.return_value = MagicMock()
-
-            with patch.dict("sys.modules", {"sleap": mock_sleap}):
+            with self._patched_sleap_modules(fake_run_inference, fake_save_h5):
                 runner = PoseInferenceRunner()
                 result = runner.run_sleap_inference(
                     model_info={"model_path": str(model_dir)},

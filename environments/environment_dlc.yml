@@ -1,42 +1,46 @@
-# 1. INSTALL CORRECT DRIVER for your GPU-equipped machine.
-#    see https://stackoverflow.com/questions/30820513/what-is-the-correct-version-of-cuda-for-my-nvidia-driver/30820690
-# 2. install: mamba env create -f environment_dlc.yml
-#    update existing install:  mamba env update -f environment_dlc.yml
-# 2. After installing...
-#    run: conda activate spyglass-dlc
-#    run: mamba env config vars set LD_LIBRARY_PATH=~/path/to/<anaconda3 or mambaforge>/envs/spyglass-position/lib/
-#    run: mamba install -c conda-forge wxpython
+# Position pipeline environment — DeepLabCut (DLC 3.0+ / PyTorch backend)
+#
+# 1. Install the correct GPU driver for your machine.
+#    See https://stackoverflow.com/a/30820690
+# 2. Create the environment:
+#      mamba env create -f environments/environment_dlc.yml
+#    Update an existing install:
+#      mamba env update -f environments/environment_dlc.yml
+# 3. Activate and configure:
+#      conda activate spyglass-dlc
+#      mamba env config vars set LD_LIBRARY_PATH=~/path/to/mambaforge/envs/spyglass-dlc/lib/
+#
+# Note: SLEAP cannot share this environment — its NumPy-2 / Python >=3.11
+#       stack conflicts with DeepLabCut 3.x (numpy<2). For SLEAP, use the
+#       separate environments/environment_sleap.yml.
 name: spyglass-dlc
 channels:
+  - defaults
   - conda-forge
-  # - defaults # deprecated
+  - pytorch
   - franklab
   - edeno
-  - pytorch   # dlc-only
-  - anaconda  # dlc-only, for cudatoolkit
 dependencies:
   - bottleneck
-  - cudatoolkit=11.3   # dlc-only
-  - ffmpeg   # dlc-only
+  - ffmpeg
   - ipympl
   - jupyterlab>=3.*
-  - libgcc   # dlc-only
   - matplotlib
   - non_local_detector
   - numpy
   - pip>=20.2.*
   - position_tools
-  - pybind11  # req by mountainsort4 -> isosplit5
+  - pybind11
   - pydotplus>=2.0.*
-  - pyfftw<=0.12.0  # ghostipy req. install from conda-forge for Mac ARM
+  - pyfftw<=0.12.0
   - python>=3.10,<3.13
-  - pytorch<1.12.0
+  - pytorch>=2.0
   - ripple_detection
   - seaborn
-  - torchaudio  # dlc-only
-  - torchvision  # dlc-only
+  - torchvision
   - track_linearization>=2.3
   - pip:
-      - ghostipy # for common_filter
+      - ghostipy
       - mountainsort4
+      - ndx-pose>=0.2.0
       - ..[dlc]
