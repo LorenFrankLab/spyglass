@@ -199,6 +199,220 @@ investigation of one specific numerical discrepancy (the clusterless
 
 ---
 
+## Metric / analyzer-curation stage
+
+v2 consolidates v1's `MetricCuration` + `BurstPair` + `metric_utils` into a
+single `AnalyzerCuration` table built on the SI 0.104 `SortingAnalyzer` API
+(CHANGELOG; v1 `MetricCuration` `v1/metric_curation.py:253`, `BurstPair`
+`v1/burst_curation.py:109`, v2 `AnalyzerCuration` `v2/metric_curation.py:598`).
+
+- **`isi_violation` is Spyglass's bounded fraction, recomputed from SI's raw
+  count.** v2 reproduces v1's `count / (n_spikes - 1)` fraction
+  (`v1/metric_utils.py:32-38`), NOT SI 0.104's unbounded `isi_violations_ratio`
+  (Hill/UMS2000 estimate): it pulls SI's raw `isi_violations_count` column and
+  recomputes the fraction, hardening the edge cases v1 left (≤1-spike → NaN,
+  avoiding the `0/0` 1-spike case and the spurious `(-1)/(0-1)=1.0` 0-spike
+  artifact). The default `isi_threshold_ms` also moved 1.5 → 2.0.
+  (`_metric_curation.isi_violation_fraction`, `metric_curation._compute_metrics`;
+  v1 default `v1/metric_curation.py:142`.)
+
+- **The SI 0.99→0.104 nn-metric rename is guarded, not silently resolved.**
+  Requesting `nn_isolation` / `nn_noise_overlap` as metric *names* raises with a
+  targeted hint, because in SI 0.104 they are the two output *columns* of the
+  single `nn_advanced` PCA metric. v1 resolved the old names lazily via
+  `getattr(sq, name, None)` under the legacy SI-0.99 env
+  (`v1/metric_curation.py:51-52`). The v2 default rows request `nn_advanced`
+  (`skip_pc_metrics=False`) and the auto-curation rule thresholds the resulting
+  `nn_noise_overlap` column. (`_params/metric_curation._check_metric_names`.)
+
+- **Params are pydantic-validated at insert, not free-form blobs.** v1's
+  `MetricParameters` / `MetricCurationParameters` stored unvalidated dicts
+  (`v1/metric_curation.py:119`, `:184`). v2's `QualityMetricParameters` validates
+  `metric_names` against the installed SI's `get_quality_metric_list()` and
+  rejects orphan `metric_kwargs` keys at insert; concurrency lives in a per-row
+  `job_kwargs` blob resolved at populate, not on the schema.
+  (`_params/metric_curation.QualityMetricParamsSchema`.)
+
+- **`AutoCurationRules` is an ordered, queryable threshold-rule engine.** v1
+  packed labeling into a `label_params` blob keyed by metric, one
+  `[op, threshold, labels]` triple each, applied in a loop with bugs
+  (`v1/metric_curation.py:523-576`). v2 splits an `auto_merge_preset` master from
+  ordered `Rule` part rows (`rule_index`, `metric_name`, `operator`, `threshold`,
+  `label`), adds the `!=` operator, applies rules in index order, de-dupes
+  labels, gives each unit an independent list, and **raises** on a rule that
+  references an absent metric column (v1 issued a no-op `Warning(...)` call —
+  `v1/metric_curation.py:561-563`). Fixes the three #1513 label-engine bug
+  classes. (`metric_curation.AutoCurationRules`,
+  `_metric_curation.apply_label_rules`.)
+
+- **Merge suggestion is SI `compute_merge_unit_groups` presets.** v1's real
+  merge engine was `BurstPair` (per-unit-pair waveform Pearson correlation,
+  cross-unit ISI, cross-correlogram asymmetry — `v1/burst_curation.py:261-305`);
+  `MetricCuration._compute_merge_groups` (`v1/metric_curation.py:578-631`) was
+  dormant-by-default and buggy. v2 delegates entirely to SI's preset set
+  (`similarity_correlograms`, `temporal_splits`, `x_contaminations`,
+  `feature_neighbors`, `slay`, + the `"none"` skip sentinel), validated at insert.
+  (`metric_curation._compute_merge_groups`, `_params/metric_curation.AutoMergePreset`.)
+
+- **Three NWB scratch tables, not one units table.** v1 wrote a single `units`
+  table carrying waveforms, per-metric columns, a ragged `curation_label`, and a
+  `merge_groups` column (`v1/metric_curation.py:634-724`). v2 writes
+  `quality_metrics` (wide, NaN preserved on disk → `None` on read),
+  `merge_suggestions` (long `(merge_group_index, unit_id)`), and `proposed_labels`
+  (wide; the ragged `curation_label` column is added ONLY when ≥1 unit is labeled,
+  sidestepping the #1625 empty-list-of-lists crash). Waveforms stay in the
+  analyzer (not re-stored). A zero-unit sort writes three empty tables instead of
+  crashing. (`_metric_curation_nwb.write_analyzer_curation_tables`.)
+
+- **Auto-curation never silently writes a curation.** v1's
+  `CurationV1.insert_metric_curation` was the natural follow-on insert
+  (`v1/curation.py:131-161`). v2 requires an explicit
+  `AnalyzerCuration.materialize_curation`, which forks a *child* `CurationV2`
+  (`parent_curation_id` set, `curation_source="analyzer_curation"`, merge groups
+  filtered to size ≥2) and warns if run on a row already produced by
+  auto-curation (metrics over post-merge templates).
+  (`metric_curation.materialize_curation`.)
+
+- **Content-addressed selection PK with raw-insert/integrity guards.** v1's
+  `MetricCurationSelection` PK was a random `uuid4` per insert
+  (`v1/metric_curation.py:247`). v2's `AnalyzerCurationSelection` PK is a
+  deterministic `uuid5` of `(sorting_id, curation_id, metric_params_name,
+  auto_curation_rules_name)`; `insert_selection` is the only sanctioned path, a
+  raw insert is blocked, and a non-deterministic id for the same identity raises
+  `DuplicateSelectionError`. (`metric_curation.AnalyzerCurationSelection`,
+  `check_rule_integrity`.)
+
+- **SNR is compared distributionally in the parity comparator.** v1 (SI 0.99,
+  mean-based) and SI 0.104 (median-based) use different SNR definitions, so
+  `compare_to_v1_baseline` checks the median v2/v1 ratio within tolerance with no
+  order-of-magnitude per-unit outlier, rather than per-unit equality;
+  `isi_violation`/`firing_rate`/`num_spikes` are exact-within-tolerance.
+  (`_metric_parity.compare_to_v1_baseline`.)
+
+### Not yet ported from v1 (metric/analyzer curation)
+
+- **BurstPair per-pair quantitative metrics are not stored.** v2 ports the burst
+  *visualization* helpers (peak amplitudes, correlogram / xcorrel / peak-over-time
+  plots) but stores no `wf_similarity` / `xcorrel_asymm` / cross-unit
+  `isi_violation` table; merge suggestion is preset-only. (v1 `BurstPairUnit`
+  `v1/burst_curation.py:114-123`, `:286-305`; v2 plots only in
+  `_metric_curation_plots.py`.)
+
+- **`peak_offset` / `peak_channel` metrics dropped from the default set.** v2
+  relies on SI analyzer extensions (`unit_locations`, `template_metrics`) instead.
+  (`v1/metric_curation.py:53-54`, `v1/metric_utils.py:41-74`.)
+
+- **On-demand waveform re-extraction (`fetch_all` / `overwrite`) is gone.** v1
+  re-extracted via SI `extract_waveforms` with caching (`v1/metric_curation.py:355-418`);
+  v2 exposes only the sort-time waveform subsample and warns that full
+  re-extraction is unsupported. (`metric_curation.get_waveforms`.)
+
+- **Whitened-vs-non-whitened waveform recipe is no longer a curation knob.** v1's
+  `WaveformParameters.whiten` (`v1/metric_curation.py:68`, `:107-110`) is subsumed
+  by the analyzer's already-computed base extensions plus `skip_pc_metrics`.
+
+---
+
+## Recompute stage
+
+- **Content hashing, not whole-file NWB hashing.** v1 hashed the entire
+  regenerated analysis file with `NwbfileHasher` (`v1/recompute.py:619-632`,
+  `:771-786`). v2's stored `cache_hash` is a volatile whole-file digest (per-object
+  `object_id` attrs, creation timestamps) that is NOT reproducible across
+  regenerations, so v2 hashes only reproducible *content* — the preprocessed
+  `ElectricalSeries` traces for recordings, and selected analyzer extension arrays
+  for analyzers — each rounded to the selection's `rounding` decimals.
+  (`_recompute.hash_recording_traces`, `_recompute` module docstring.)
+
+- **Two recompute trios: recording + analyzer.** v1 covered only the recording
+  artifact (`RecordingRecompute*`, `v1/recompute.py:54`, `:199`, `:537`). v2 adds
+  a whole second trio for the `SortingAnalyzer` folder, hashing only the
+  deterministic extensions (`random_spikes`, `templates`, `waveforms`) and
+  **deliberately excluding the unseeded/stochastic `noise_levels`**.
+  (`recompute.SortingAnalyzer{Versions,RecomputeSelection,Recompute}`,
+  `_recompute.ANALYZER_RECOMPUTE_EXTENSIONS`.)
+
+- **Current-environment delete gate (`StaleEnvMatchedError`).** v2 authorizes
+  deletion at the artifact level only when a `matched=1, deleted=0` row exists in
+  the *current* `UserEnvironment`; an artifact matched only under a stale env
+  raises `StaleEnvMatchedError` unless `force_stale_env=True` (which audit-logs).
+  A match under an older SpikeInterface pin is not evidence the current env can
+  regenerate. v1 deleted any `matched=1, deleted=0` row regardless of env
+  (`v1/recompute.py:893-948`). (`recompute._authorize_artifacts_for_deletion`,
+  `exceptions.StaleEnvMatchedError`.)
+
+- **Age gate on authorizing rows only; NULL `created_at` = refuse; disk dedup.**
+  v2 applies the `days_since_creation` floor to only the authorizing current-env
+  rows (so a stale/recent sibling can't block a valid artifact), treats a NULL
+  `created_at` as too-recent, and dedupes reclaimable disk by file/sort so a
+  multi-env artifact is counted once. v1 filtered on a single SQL date comparison
+  and summed per row (`v1/recompute.py:873-914`). (`recompute._too_recent_or_unknown`,
+  `_reclaimable_disk`.)
+
+- **Regenerates to a fresh/temp path; records any failure as retryable.** v1
+  rewrote the registered analysis file in place and unlinked the temp copy on
+  match (`v1/recompute.py:725-786`). v2 always regenerates to a fresh,
+  unregistered path (or a temp analyzer folder) and deletes it after hashing —
+  it never compares the stored file to itself — and on any regeneration exception
+  records a retryable `matched=0` with the traceback logged.
+  (`recompute._compute_recording_artifact`, `RecordingArtifactRecompute.make`.)
+
+- **`recheck` cautious-deletes + repopulates.** v1 re-hashed in place
+  (`v1/recompute.py:788-803`); v2 does a cautious `delete(safemode=False)` (so the
+  `Name`/`Hash` diff part rows cascade and the team-permission guard applies) then
+  re-`populate`s. (`recompute.*Recompute.recheck`.)
+
+### Not yet ported from v1 (recompute)
+
+- **v2 recompute is fully opt-in.** v1 auto-registered a recompute selection on
+  every recording creation (`SpikeSortingRecording.make` →
+  `RecordingRecomputeSelection().insert(..., at_creation=True)`,
+  `v1/recording.py:262-268`). v2's recording/sorting `make` paths register
+  nothing, the recompute tables are **not even exported from `v2/__init__.py`**,
+  and selections are created only by an explicit `attempt_all`.
+  (`recompute.*RecomputeSelection.attempt_all`.)
+
+- **No pynwb-version pre-gating** of which selections to insert. v1 gated on a
+  pynwb namespace-version match (`_has_matching_env` / `_required_matches` over
+  core / hdmf-common / hdmf-experimental / ndx-franklab-novela,
+  `v1/recompute.py:65-140`); v2 inserts a selection for every eligible
+  artifact in the current env.
+
+- **No xfail classification.** v1 pre-marked `xfail_reason` for known-failure
+  patterns (missing probe info, pynwb dtype-kwarg API breaks, NWB spec
+  mismatches — `_check_xfail`, `v1/recompute.py:364-448`). v2 keeps an
+  `xfail_reason` column but nothing populates it; it instead catches any
+  regeneration error at `make` time as a retryable `matched=0`.
+
+- **No multi-rounding precision short-circuit.** v1 skipped lower-precision
+  attempts once a higher-precision match existed
+  (`_other_roundings` / `_is_lower_rounding`, `v1/recompute.py:684-712`,
+  `:838-844`). v2 carries a single `rounding` per selection with no cross-rounding
+  logic.
+
+- **No `H5pyComparator` object-level diff** for inspecting a mismatch (v1
+  `Hash.compare`, `v1/recompute.py:569-576`).
+
+---
+
+## Interactive curation viewer (figurl → figpack)
+
+- **The FigPack web-curation viewer is not yet implemented.** v1's FigURL /
+  kachery viewer is fully working: `FigURLCuration` builds a
+  `SpikeSortingView` + `MountainLayout` (summary, units, raster, amplitudes,
+  correlograms, average waveforms, electrode geometry, and the interactive
+  `SortingCuration2` control) and round-trips `{labelsByUnit, mergeGroups}`
+  through kachery back into
+  `CurationV1.insert_curation` (`v1/figurl_curation.py:60-322`). v2's
+  `figpack_curation.py` is an `ImportError` stub directing callers to the v1
+  FigURL chain; `figpack` exists in v2 only as a placeholder
+  `CurationV2.curation_source` enum value (`v2/curation.py:82`). v2's current
+  interactive-curation substitute is the programmatic, rule-driven
+  `AnalyzerCuration` path, analogous to v1's `MetricCuration`, not to the
+  browser-based viewer. (`v2/figpack_curation.py`.)
+
+---
+
 ## Cross-cutting infrastructure
 
 - **NWB iterators.** The two iterators port v1's
