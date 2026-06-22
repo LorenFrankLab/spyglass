@@ -4,8 +4,9 @@ The ``@schema`` ``AnalyzerCuration`` methods delegate here so the rendering /
 SortingAnalyzer-reading logic stays importable and unit-testable without a
 DataJoint connection. ``plot_units_qc_figure`` takes plain data (a metrics
 DataFrame + unit locations) and returns a matplotlib figure; the burst helpers
-read a SortingAnalyzer's correlograms / waveforms extensions and reuse the
-shared ``utils_burst`` renderers.
+read a SortingAnalyzer's waveforms / template_similarity / unit_locations
+extensions, compute correlograms on the fly at the requested window/bin, and
+reuse the shared ``utils_burst`` renderers.
 """
 
 from __future__ import annotations
@@ -166,18 +167,20 @@ def plot_units_qc_figure(
 def correlograms_from_analyzer(
     analyzer, *, window_ms: float = 100.0, bin_ms: float = 5.0
 ):
-    """Return ``(ccgs, bins, unit_ids)`` from the analyzer's correlograms ext.
+    """Return ``(ccgs, bins, unit_ids)`` computed fresh at the given window/bin.
 
-    Computes the ``correlograms`` extension if absent (with the given window /
-    bin), then returns the cross-correlogram cube, bin edges, and the analyzer
-    unit-id order that indexes its first two axes.
+    Computes correlograms directly from the sorting with the REQUESTED
+    ``window_ms`` / ``bin_ms`` rather than reusing the stored ``correlograms``
+    extension -- curation computes that extension with SI's 50 / 1 ms default
+    for the merge engine, so reusing it would silently ignore the window/bin
+    asked for here. A fresh compute on the sorting does not overwrite the stored
+    extension. Indexed by the analyzer's unit-id order.
     """
-    if not analyzer.has_extension("correlograms"):
-        analyzer.compute(
-            "correlograms", window_ms=window_ms, bin_ms=bin_ms
-        )
-    extension = analyzer.get_extension("correlograms")
-    ccgs, bins = extension.get_data()
+    from spikeinterface.postprocessing import compute_correlograms
+
+    ccgs, bins = compute_correlograms(
+        analyzer.sorting, window_ms=window_ms, bin_ms=bin_ms
+    )
     return np.asarray(ccgs), np.asarray(bins), list(analyzer.unit_ids)
 
 
@@ -244,22 +247,121 @@ def peak_amplitudes_from_analyzer(analyzer):
     """Return ``(peak_amps, peak_times)`` per unit from the waveforms ext.
 
     ``peak_amps[unit_id]`` is ``(n_spikes, n_channels)`` sampled at the
-    waveform-window center; ``peak_times[unit_id]`` is the unit's spike times
-    in seconds. Used by the burst-pair inspection plots.
+    waveform PEAK -- the ``nbefore`` alignment sample (the trough), NOT the
+    array center. The analyzer's asymmetric window (``ms_before=1.0`` !=
+    ``ms_after=2.0``) places the peak off the geometric center, so the center
+    sample reads ~0.5 ms into the repolarization tail rather than the peak.
+    ``peak_times[unit_id]`` is the spike times (seconds) of THOSE SAME spikes.
+    The ``waveforms`` extension holds only the ``random_spikes`` subset (capped
+    at ``max_spikes_per_unit``), so the times are taken from that subset, not
+    the full train -- otherwise the amplitude/time arrays mismatch for any unit
+    with more spikes than the cap and ``plot_peak_over_time`` misaligns. The
+    subset is read via the ``random_spikes`` extension, which is sorted by
+    sample index in the same order as ``get_waveforms_one_unit``. Amplitudes are
+    returned **dense** (all probe channels, global index) so the burst-pair
+    plots -- which overlay two units channel-by-channel -- compare the SAME
+    physical contact across units; a sparse analyzer gives each unit its own
+    channel subset, so local-index overlay would mismatch contacts. Used by the
+    burst-pair inspection plots.
     """
     waveforms = analyzer.get_extension("waveforms")
+    nbefore = waveforms.nbefore
     sorting = analyzer.sorting
     fs = analyzer.sampling_frequency
+    selected = sorting.to_spike_vector()[
+        analyzer.get_extension("random_spikes").get_data()
+    ]
+    unit_index = {unit_id: i for i, unit_id in enumerate(analyzer.unit_ids)}
     peak_amps: dict = {}
     peak_times: dict = {}
     for unit_id in sorting.get_unit_ids():
-        wf = waveforms.get_waveforms_one_unit(unit_id)
-        center = wf.shape[1] // 2
-        peak_amps[unit_id] = wf[:, center, :]
-        peak_times[unit_id] = (
-            sorting.get_unit_spike_train(unit_id).astype(float) / fs
-        )
+        wf = waveforms.get_waveforms_one_unit(unit_id, force_dense=True)
+        peak_amps[unit_id] = wf[:, nbefore, :]
+        subset = selected[selected["unit_index"] == unit_index[unit_id]]
+        peak_times[unit_id] = subset["sample_index"].astype(float) / fs
     return peak_amps, peak_times
+
+
+def burst_pair_metrics_from_analyzer(
+    analyzer,
+    pairs=None,
+    *,
+    isi_threshold_ms: float = 2.0,
+    window_ms: float = 100.0,
+    bin_ms: float = 5.0,
+):
+    """Per-pair burst-merge diagnostics computed on the fly (nothing stored).
+
+    Returns one dict per ordered unit pair with the four legs of the v1
+    BurstPair merge test, read from already-computed analyzer extensions:
+
+    - ``wf_similarity`` -- SI's cosine ``template_similarity`` (not v1's flat
+      Pearson, which mishandles per-unit sparsity; cosine is also what the
+      ``similarity_correlograms`` merge engine uses, so the diagnostic matches
+      the suggestions).
+    - ``isi_violation`` -- refractory-violation fraction of the merged train
+      (``isi_threshold_ms`` default 2 ms, aligned with the single-unit metric).
+    - ``xcorrel_asymm`` -- cross-correlogram left/right asymmetry (burst
+      parent/child signature; directional, so computed per ordered pair).
+    - ``unit_distance`` -- euclidean distance between ``unit_locations`` (the
+      spatial leg v1 lacked; two cells can share a shape at different depths).
+
+    ``pairs`` defaults to all ordered pairs; an explicit list is validated
+    against the analyzer's unit ids.
+    """
+    from itertools import permutations
+
+    from spyglass.spikesorting.utils_burst import (
+        calculate_ca,
+        calculate_isi_violation,
+    )
+
+    for name in ("templates", "template_similarity", "unit_locations"):
+        if not analyzer.has_extension(name):
+            analyzer.compute(name)
+
+    unit_ids = list(analyzer.unit_ids)
+    index_of = {unit_id: i for i, unit_id in enumerate(unit_ids)}
+    if pairs is None:
+        pairs = list(permutations(unit_ids, 2))
+    else:
+        pairs = validate_unit_pairs(unit_ids, pairs)
+
+    similarity = np.asarray(
+        analyzer.get_extension("template_similarity").get_data()
+    )
+    locations = np.asarray(
+        analyzer.get_extension("unit_locations").get_data()
+    )
+    ccgs, bins, _ = correlograms_from_analyzer(
+        analyzer, window_ms=window_ms, bin_ms=bin_ms
+    )
+    fs = analyzer.sampling_frequency
+    spike_times = {
+        u: analyzer.sorting.get_unit_spike_train(u).astype(float) / fs
+        for u in unit_ids
+    }
+
+    rows = []
+    for u1, u2 in pairs:
+        i1, i2 = index_of[u1], index_of[u2]
+        rows.append(
+            {
+                "unit1": u1,
+                "unit2": u2,
+                "wf_similarity": float(similarity[i1, i2]),
+                "isi_violation": calculate_isi_violation(
+                    spike_times[u1],
+                    spike_times[u2],
+                    isi_threshold_ms=isi_threshold_ms,
+                ),
+                "xcorrel_asymm": calculate_ca(bins[1:], ccgs[i1, i2, :]),
+                "unit_distance": float(
+                    np.linalg.norm(locations[i1] - locations[i2])
+                ),
+            }
+        )
+    return rows
 
 
 def validate_unit_pairs(unit_ids, pairs):

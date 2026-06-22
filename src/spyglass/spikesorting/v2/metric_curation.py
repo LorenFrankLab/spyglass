@@ -577,6 +577,31 @@ class AnalyzerCurationSelection(
         return {"analyzer_curation_id": analyzer_curation_id}
 
     @classmethod
+    def insert_by_curation_id(
+        cls,
+        sorting_id,
+        curation_id,
+        metric_params_name,
+        auto_curation_rules_name,
+    ) -> dict:
+        """Insert an analyzer-curation selection for a curation (v1 analog).
+
+        Convenience matching v1 ``BurstPairSelection.insert_by_curation_id``:
+        assemble the content-addressed selection key from a curation
+        (``sorting_id`` + ``curation_id``) and the named quality-metric /
+        auto-rule rows, then delegate to :meth:`insert_selection` (the only
+        sanctioned insert path). Returns the PK-only dict.
+        """
+        return cls.insert_selection(
+            {
+                "sorting_id": sorting_id,
+                "curation_id": curation_id,
+                "metric_params_name": metric_params_name,
+                "auto_curation_rules_name": auto_curation_rules_name,
+            }
+        )
+
+    @classmethod
     def _find_existing_pk(cls, identity, deterministic_id):
         """Return the PK-only dict for ``identity`` or None; guard bad ids."""
         from spyglass.spikesorting.v2.exceptions import (
@@ -1035,6 +1060,40 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
         return plot_burst_peak_over_time(
             peak_amps, peak_times, used, overlap=overlap
         )
+
+    def get_peak_amps(self, key):
+        """Return ``(peak_amps, peak_times)`` per unit (v1 BurstPair analog).
+
+        ``peak_amps[unit_id]`` is ``(n_spikes, n_channels)`` sampled at the
+        waveform peak; ``peak_times[unit_id]`` is the seconds-timestamps of
+        those SAME sampled spikes (the ``waveforms`` extension's
+        ``random_spikes`` subset, not the full train), so the two arrays stay
+        aligned. Reads the sort's SortingAnalyzer ``waveforms`` extension.
+        """
+        from spyglass.spikesorting.v2._metric_curation_plots import (
+            peak_amplitudes_from_analyzer,
+        )
+
+        return peak_amplitudes_from_analyzer(self._analyzer_for(key))
+
+    def plot_by_sort_group_ids(self, key, pairs=None):
+        """Per-pair burst-metrics scatter for the sort (v1 BurstPair analog).
+
+        Scatters waveform similarity vs cross-correlogram asymmetry, one point
+        per unit pair, computed on the fly from the analyzer's extensions
+        (nothing is stored). v1 laid out one panel per sort group; a v2 sort is
+        a single sort group, so this renders that sort's pairs. ``pairs``
+        defaults to all ordered pairs.
+        """
+        from spyglass.spikesorting.utils_burst import plot_burst_metrics
+        from spyglass.spikesorting.v2._metric_curation_plots import (
+            burst_pair_metrics_from_analyzer,
+        )
+
+        rows = burst_pair_metrics_from_analyzer(
+            self._analyzer_for(key), pairs=pairs
+        )
+        return plot_burst_metrics(rows)
 
 
 class _WaveformsAccessor:

@@ -358,6 +358,19 @@ def test_analyzer_curation_viz_renders(
         assert peaks is not None
         plt.close(peaks)
 
+        # Per-pair burst-metrics scatter (v1 plot_by_sort_group_ids analog).
+        burst_fig = ac.plot_by_sort_group_ids(sel, pairs=pair)
+        assert burst_fig is not None
+        plt.close(burst_fig)
+
+    # Peak-amplitude accessor (v1 get_peak_amps analog): per-spike, per-channel,
+    # sampled at the waveform peak.
+    peak_amps, peak_times = ac.get_peak_amps(sel)
+    assert peak_amps
+    uid = next(iter(peak_amps))
+    assert peak_amps[uid].ndim == 2
+    assert len(peak_times[uid]) == peak_amps[uid].shape[0]
+
 
 @pytest.mark.db_unit
 def test_compute_merge_groups_suggests_planted_oversplit(dj_conn):
@@ -419,6 +432,39 @@ def test_compute_merge_groups_suggests_planted_oversplit(dj_conn):
     assert all(isinstance(u, int) for group in groups for u in group)
     # 'none' short-circuits without calling SI.
     assert AnalyzerCuration._compute_merge_groups(analyzer, "none", {}) == []
+
+
+@pytest.mark.db_unit
+def test_insert_by_curation_id_delegates_to_insert_selection(
+    dj_conn, monkeypatch
+):
+    """The v1-analog convenience assembles the selection key and forwards it."""
+    from spyglass.spikesorting.v2.metric_curation import (
+        AnalyzerCurationSelection,
+    )
+
+    captured = {}
+
+    def _fake_insert_selection(cls, key):
+        captured["key"] = dict(key)
+        return {"analyzer_curation_id": "sentinel"}
+
+    monkeypatch.setattr(
+        AnalyzerCurationSelection,
+        "insert_selection",
+        classmethod(_fake_insert_selection),
+    )
+
+    out = AnalyzerCurationSelection.insert_by_curation_id(
+        "sort-1", 3, "minimal", "none"
+    )
+    assert out == {"analyzer_curation_id": "sentinel"}
+    assert captured["key"] == {
+        "sorting_id": "sort-1",
+        "curation_id": 3,
+        "metric_params_name": "minimal",
+        "auto_curation_rules_name": "none",
+    }
 
 
 @pytest.mark.db_unit
