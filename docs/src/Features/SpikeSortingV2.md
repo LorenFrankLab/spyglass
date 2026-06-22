@@ -728,8 +728,9 @@ Clusterless decoding works for v2 sorts under SpikeInterface 0.104:
 `UnitWaveformFeatures` (the decoding input) extracts per-spike amplitudes for a
 v2 `merge_id` from a freshly built `SortingAnalyzer` — it no longer requires the
 legacy SI 0.99 environment or the removed `extract_waveforms`. The `amplitude`
-feature (used by clusterless decoding) and `full_waveform` are supported;
-`spike_location` is not yet wired for v2 sources. A zero-unit v2 curation yields
+feature (used by clusterless decoding), `full_waveform`, and `spike_location`
+are supported for v2 sources; any other feature is rejected with a clear
+`NotImplementedError`. A zero-unit v2 curation yields
 an empty-but-valid features row. Note that v2 amplitudes are in microvolts,
 whereas the legacy v0/v1 path used raw ADC counts, so v2 and v1 feature
 magnitudes are not directly comparable — retrain decoders per pipeline version.
@@ -776,9 +777,9 @@ calling them under SI 0.104 raises a clear `RuntimeError`.
 
 ## Status
 
-The single-session sort chain (above) is available now. Not yet available:
+The single-session sort chain and analyzer-driven curation (metrics +
+auto-curation, above) are available now. Not yet available:
 
-- metrics + auto-curation
 - session-group sorting + cross-session unit matching
 
 The tables for those capabilities are already declared in their final shape

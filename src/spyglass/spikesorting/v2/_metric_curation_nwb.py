@@ -20,7 +20,9 @@
 
 This module touches no DataJoint connection: builders are pure, and the write
 / read functions take an absolute file path that the ``@schema`` table layer
-resolves. A zero-unit curation writes three empty, column-less tables.
+resolves. A zero-unit curation writes three empty tables: the quality-metrics
+and proposed-labels tables are column-less, while the merge-suggestions table
+keeps its two columns (``merge_group_index``, ``unit_id``) with zero rows.
 """
 
 from __future__ import annotations

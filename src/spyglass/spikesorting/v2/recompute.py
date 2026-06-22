@@ -108,6 +108,11 @@ class RecordingArtifactRecomputeSelection(SpyglassMixin, dj.Manual):
         plan attempts for all (or restricted) ``RecordingArtifactVersions``
         rows under the current ``UserEnvironment``.
         """
+        if rounding < 0:
+            raise ValueError(
+                f"rounding must be a non-negative np.round precision; "
+                f"got {rounding}."
+            )
         env_id = _current_env_id()
         if not env_id:
             logger.warning(
@@ -231,7 +236,7 @@ class RecordingArtifactRecompute(SpyglassMixin, dj.Computed):
         _insert_comparison(self, key, stored_hashes, new_hashes, created_at)
 
     def get_disk_space(self, restriction=True) -> str:
-        """Report reclaimable disk for unmatched, not-yet-deleted artifacts."""
+        """Report reclaimable disk for matched, not-yet-deleted artifacts."""
         return _reclaimable_disk(self.with_names & restriction)
 
     def recheck(self, key) -> bool:
@@ -369,6 +374,11 @@ class SortingAnalyzerRecomputeSelection(SpyglassMixin, dj.Manual):
     @classmethod
     def attempt_all(cls, restriction=True, *, rounding: int = 4) -> None:
         """Insert an analyzer recompute attempt for every eligible sort."""
+        if rounding < 0:
+            raise ValueError(
+                f"rounding must be a non-negative np.round precision; "
+                f"got {rounding}."
+            )
         env_id = _current_env_id()
         if not env_id:
             logger.warning(
@@ -466,7 +476,7 @@ class SortingAnalyzerRecompute(SpyglassMixin, dj.Computed):
         except Exception as err:  # noqa: BLE001 - record the failure
             logger.error(
                 f"SortingAnalyzerRecompute regeneration failed for "
-                f"{sort_key}; recording matched=0 (retryable).",
+                f"{sort_key}; analyzer matched=0 (retryable).",
                 exc_info=True,
             )
             self.insert1(
