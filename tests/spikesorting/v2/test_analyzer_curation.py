@@ -116,6 +116,52 @@ def test_auto_curation_rules_insert_rules_rejects_bad_operator(dj_conn):
     assert not (AutoCurationRules & {"auto_curation_rules_name": "bad_op"})
 
 
+@pytest.mark.db_unit
+def test_auto_curation_rules_existing_name_must_match_payload(dj_conn):
+    """Existing names are idempotent only when the supplied payload matches."""
+    from pydantic import ValidationError
+
+    from spyglass.spikesorting.v2.metric_curation import AutoCurationRules
+
+    name = "test_rules_existing_name"
+    base_rule = {
+        "rule_index": 0,
+        "rule_name": "snr_noise",
+        "metric_name": "snr",
+        "operator": "<",
+        "threshold": 2.0,
+        "label": "noise",
+    }
+    (AutoCurationRules.Rule & {"auto_curation_rules_name": name}).delete_quick()
+    (AutoCurationRules & {"auto_curation_rules_name": name}).delete_quick()
+    try:
+        pk = AutoCurationRules.insert_rules(
+            {"auto_curation_rules_name": name, "auto_merge_preset": "none"},
+            [dict(base_rule)],
+        )
+        assert AutoCurationRules.insert_rules(
+            {"auto_curation_rules_name": name, "auto_merge_preset": "none"},
+            [dict(base_rule)],
+        ) == pk
+
+        changed_rule = {**base_rule, "threshold": 3.0}
+        with pytest.raises(ValueError, match="different auto-merge/rule payload"):
+            AutoCurationRules.insert_rules(
+                {"auto_curation_rules_name": name, "auto_merge_preset": "none"},
+                [changed_rule],
+            )
+
+        bad_rule = {**base_rule, "operator": "=<"}
+        with pytest.raises(ValidationError):
+            AutoCurationRules.insert_rules(
+                {"auto_curation_rules_name": name, "auto_merge_preset": "none"},
+                [bad_rule],
+            )
+    finally:
+        (AutoCurationRules.Rule & {"auto_curation_rules_name": name}).delete_quick()
+        (AutoCurationRules & {"auto_curation_rules_name": name}).delete_quick()
+
+
 # ---------- end-to-end (slow / integration) ---------------------------------
 
 

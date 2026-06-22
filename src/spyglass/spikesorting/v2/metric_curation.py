@@ -56,6 +56,7 @@ from spyglass.spikesorting.v2.sorting import (
 )
 from spyglass.spikesorting.v2.utils import (
     SelectionMasterInsertGuard,
+    _jsonable_blob,
     _resolved_job_kwargs,
     _validate_params,
 )
@@ -288,17 +289,10 @@ class AutoCurationRules(SpyglassMixin, dj.Lookup):
 
         Validates the complete ``{master, rules}`` payload, then inserts the
         master and ``Rule`` rows in one transaction. Returns a PK-only dict.
-        Idempotent when the master name already exists (returns its PK).
+        Idempotent when the master name already exists with the same payload;
+        raises if the existing name maps to different rules.
         """
         name = row["auto_curation_rules_name"]
-        existing = cls & {"auto_curation_rules_name": name}
-        if existing:
-            if not skip_duplicates:
-                logger.warning(
-                    f"AutoCurationRules {name!r} already exists; returning it."
-                )
-            return {"auto_curation_rules_name": name}
-
         payload = {
             "schema_version": row.get(
                 "params_schema_version", AUTO_CURATION_RULES_SCHEMA_VERSION
@@ -319,6 +313,24 @@ class AutoCurationRules(SpyglassMixin, dj.Lookup):
             {"auto_curation_rules_name": name, **rule}
             for rule in clean["rules"]
         ]
+        expected_payload = cls._payload_for_compare(master, rule_inserts)
+        existing = cls & {"auto_curation_rules_name": name}
+        if existing:
+            stored_payload = cls._stored_payload_for_compare(name)
+            if stored_payload != expected_payload:
+                raise ValueError(
+                    f"AutoCurationRules {name!r} already exists with a "
+                    "different auto-merge/rule payload. Reuse the stored row, "
+                    "choose a new auto_curation_rules_name for changed rules, "
+                    "or delete the existing row deliberately before replacing it."
+                )
+            if not skip_duplicates:
+                logger.warning(
+                    f"AutoCurationRules {name!r} already exists with the same "
+                    "payload; returning it."
+                )
+            return {"auto_curation_rules_name": name}
+
         inst = cls()
         with inst.connection.transaction:
             # Bypass this class's raising insert override by calling the next
@@ -328,6 +340,43 @@ class AutoCurationRules(SpyglassMixin, dj.Lookup):
             if rule_inserts:
                 cls.Rule.insert(rule_inserts)
         return {"auto_curation_rules_name": name}
+
+    @classmethod
+    def _payload_for_compare(cls, master: dict, rule_rows: list[dict]) -> dict:
+        """Normalize master + Rule rows for idempotency comparison."""
+        rules = [
+            {
+                key: rule[key]
+                for key in (
+                    "rule_index",
+                    "rule_name",
+                    "metric_name",
+                    "operator",
+                    "threshold",
+                    "label",
+                )
+            }
+            for rule in rule_rows
+        ]
+        return _jsonable_blob(
+            {
+                "auto_curation_rules_name": master["auto_curation_rules_name"],
+                "auto_merge_preset": master["auto_merge_preset"],
+                "auto_merge_kwargs": master.get("auto_merge_kwargs") or {},
+                "params_schema_version": master["params_schema_version"],
+                "job_kwargs": master.get("job_kwargs"),
+                "rules": sorted(rules, key=lambda rule: rule["rule_index"]),
+            }
+        )
+
+    @classmethod
+    def _stored_payload_for_compare(cls, name: str) -> dict:
+        """Fetch and normalize one stored rules payload for comparison."""
+        master = (cls & {"auto_curation_rules_name": name}).fetch1()
+        rules = (cls.Rule & {"auto_curation_rules_name": name}).fetch(
+            as_dict=True
+        )
+        return cls._payload_for_compare(master, list(rules))
 
     @classmethod
     def _default_payloads(cls) -> list[tuple[dict, list[dict]]]:
