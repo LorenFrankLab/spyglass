@@ -400,20 +400,36 @@ single `AnalyzerCuration` table built on the SI 0.104 `SortingAnalyzer` API
   `isi_violation`/`firing_rate`/`num_spikes` are exact-within-tolerance.
   (`_metric_parity.compare_to_v1_baseline`.)
 
-- **Analyzer waveform window widened and asymmetric; subsample reduced 10×.**
-  v1's `WaveformParameters` default was `ms_before=0.5, ms_after=0.5,
-  max_spikes_per_unit=5000` (`v1/metric_curation.py:101-103`); the v2
-  SortingAnalyzer computes `waveforms` over `ms_before=1.0, ms_after=2.0`
-  (`_sorting_analyzer.py:397`) from a `max_spikes_per_unit=500` random subsample
-  (`_sorting_analyzer.py:375`). This changes every template-derived metric (SNR,
-  amplitude, peak channel) relative to v1 — independent of, and compounding
-  with, the documented SNR mean→median change.
+- **Analyzer waveform window + subsample are now tracked, region-specific
+  rows (no longer hardcoded).** v1's `WaveformParameters` default was
+  `ms_before=0.5, ms_after=0.5, max_spikes_per_unit=5000`
+  (`v1/metric_curation.py:101-103`). v2 restores DB-tracked waveform parameters
+  as the `AnalyzerWaveformParameters` Lookup (mirroring v1's `WaveformParameters`)
+  and resolves a **region-specific** display recipe from the sort's source
+  preprocessing recipe: hippocampus returns to `ms_before=0.5, ms_after=0.5`
+  (dense/tight spikes), cortex keeps the wider `ms_before=1.0, ms_after=2.0`
+  (broader waveforms); the subsample is `max_spikes_per_unit=20000` for both
+  (4× v1's 5000 — no longer reduced). The resolved recipe name is persisted on
+  `Sorting.display_waveform_params_name` (a secondary FK to
+  `AnalyzerWaveformParameters`, so the recipe is DB-enforced provenance — a sort
+  cannot be populated against an untracked recipe, and a referenced recipe row
+  cannot be deleted) and the analyzer cache folder is keyed by it
+  (`{sorting_id}__{waveform_params_name}.zarr`). This still changes every
+  template-derived metric (SNR, amplitude, peak channel) relative to v1 — and
+  the larger 20000 subsample shifts those metrics for ALL sorts relative to the
+  earlier hardcoded 500 — independent of, and compounding with, the documented
+  SNR mean→median change. The window is determined by region (a property of the
+  data/recipe), not a free per-sort knob, so `peak_amplitude_uv` stays
+  deterministic for a `sorting_id`.
 
-- **The analyzer is persisted as zarr.** v2 creates the `SortingAnalyzer` with
-  `format="zarr"` (`_sorting_analyzer.py:357`) and caches it at
-  `{sorting_id}.zarr` (`_analyzer_cache.py`); v1 had no `SortingAnalyzer` (it
-  used on-demand SI `WaveformExtractor` folders). The analyzer recompute trio
-  hashes selected extension arrays from this zarr store.
+- **The analyzer is persisted as zarr, keyed by sort + recipe.** v2 creates the
+  `SortingAnalyzer` with `format="zarr"` (`_sorting_analyzer.py`) and caches it
+  at `{sorting_id}__{waveform_params_name}.zarr` (`_analyzer_cache.py`) — keyed
+  by both the sort and the waveform recipe so a sort's display and (later)
+  whitened-metric analyzers never collide; v1 had no `SortingAnalyzer` (it used
+  on-demand SI `WaveformExtractor` folders). The analyzer recompute trio hashes
+  selected extension arrays from this zarr store, rebuilding with the sort's
+  stored display recipe.
 
 - **BurstPair merge diagnostics are ported, computed on the fly (not stored),
   and each leg is reimplemented deliberately — not literally.** v1's `BurstPair`
