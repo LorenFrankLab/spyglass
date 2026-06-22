@@ -64,7 +64,53 @@ def ensure_extensions(analyzer, names, *, job_kwargs=None):
     return to_add
 
 
-def load_or_rebuild_analyzer(sorting_table, key):
+def resolve_display_waveform_params_name(sorting_table, sorting_id) -> str:
+    """Return a sort's stored display ``waveform_params_name``.
+
+    Reads ``Sorting.display_waveform_params_name`` -- resolved from the source
+    preprocessing recipe and persisted once at sort time, never re-derived --
+    so every later rebuild / cache-miss load of the display analyzer resolves
+    the SAME recipe (and the same ``peak_amplitude_uv``).
+    """
+    return (sorting_table & {"sorting_id": sorting_id}).fetch1(
+        "display_waveform_params_name"
+    )
+
+
+def fetch_waveform_params(waveform_params_name: str) -> dict:
+    """Resolve a waveform-recipe NAME to its tracked, validated params blob.
+
+    The single resolver every name-aware path uses (``Sorting.make_fetch`` and
+    the cache-miss rebuild / recompute paths) -- ``build_analyzer`` itself never
+    resolves a bare name to params (no DB I/O per the tri-part contract).
+
+    Resolution is **strict**: the params come from the tracked
+    ``AnalyzerWaveformParameters`` DB row, so a sort can never build / rebuild
+    an analyzer whose waveform parameters are not recorded and queryable in the
+    database (the v1-like provenance goal). A missing row raises a clear,
+    actionable error rather than silently falling back to hardcoded / catalog
+    defaults -- run ``initialize_v2_defaults()`` (or
+    ``AnalyzerWaveformParameters.insert_default()``) to install the shipped
+    region rows, or insert the custom row, first.
+    """
+    from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
+
+    row = AnalyzerWaveformParameters & {
+        "waveform_params_name": waveform_params_name
+    }
+    if not row:
+        raise KeyError(
+            "AnalyzerWaveformParameters: no row named "
+            f"{waveform_params_name!r}. The analyzer waveform parameters must "
+            "be tracked in the database (provenance); install the shipped "
+            "region rows with initialize_v2_defaults() / "
+            "AnalyzerWaveformParameters.insert_default(), or insert the custom "
+            "row, before resolving its analyzer."
+        )
+    return dict(row.fetch1("params"))
+
+
+def load_or_rebuild_analyzer(sorting_table, key, waveform_params_name=None):
     """Return the SortingAnalyzer for ``key``, rebuilding the cache if needed.
 
     Parameters
@@ -74,6 +120,12 @@ def load_or_rebuild_analyzer(sorting_table, key):
         does not import the schema module at import time.
     key : dict
         Restriction selecting a single ``Sorting`` row.
+    waveform_params_name : str, optional
+        The analyzer recipe to load. ``None`` (the default) resolves the sort's
+        stored DISPLAY recipe (``Sorting.display_waveform_params_name``) -- a
+        deterministic, well-defined default (the sort's OWN display analyzer),
+        not a silent cross-recipe reuse. A caller needing the whitened metric
+        recipe passes its name explicitly.
 
     Returns
     -------
@@ -106,26 +158,43 @@ def load_or_rebuild_analyzer(sorting_table, key):
             "unit list, or re-sort with a lower detect_threshold."
         )
 
+    if waveform_params_name is None:
+        waveform_params_name = resolve_display_waveform_params_name(
+            sorting_table, sorting_id
+        )
+
     import spikeinterface as si
 
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
-    folder = analyzer_path(sorting_id)
+    folder = analyzer_path(sorting_id, waveform_params_name)
     if not folder.exists():
-        rebuild_analyzer_folder(sorting_table, {"sorting_id": sorting_id})
+        rebuild_analyzer_folder(
+            sorting_table,
+            {"sorting_id": sorting_id},
+            waveform_params_name=waveform_params_name,
+        )
     return si.load_sorting_analyzer(folder)
 
 
-def rebuild_analyzer_folder(sorting_table, key) -> None:
-    """Rebuild the analyzer folder for an existing ``Sorting`` row.
+def rebuild_analyzer_folder(
+    sorting_table, key, waveform_params_name=None
+) -> None:
+    """Rebuild an analyzer folder for an existing ``Sorting`` row.
 
     Reloads the canonical sorting from the units NWB so the rebuilt analyzer is
     bit-equivalent to the one ``Sorting.make`` wrote -- not a fresh, possibly
-    nondeterministic, sort.
+    nondeterministic, sort. Resolves the recipe NAME to its params dict here
+    (outside ``make_compute``, where a DB read is allowed) and threads BOTH the
+    resolved cache folder and the params dict into ``_build_analyzer`` so the
+    rebuilt analyzer is byte-comparable to the cached one for the same recipe.
 
     ``key`` must carry a literal ``sorting_id`` because the path policy and
     selection fetches are keyed by that id. Public callers should resolve a
     general restriction through :func:`load_or_rebuild_analyzer` first.
+
+    ``waveform_params_name`` is the recipe to rebuild; ``None`` resolves the
+    sort's stored display recipe (``Sorting.display_waveform_params_name``).
     """
     import shutil
 
@@ -180,19 +249,26 @@ def rebuild_analyzer_folder(sorting_table, key) -> None:
             recording_id=source.key["recording_id"],
         )
     sorting_obj = sorting_table.get_sorting(key)
+    if waveform_params_name is None:
+        waveform_params_name = resolve_display_waveform_params_name(
+            sorting_table, key["sorting_id"]
+        )
+    waveform_params = fetch_waveform_params(waveform_params_name)
     # ``_build_analyzer`` writes a folder to disk; a mid-rebuild failure would
     # otherwise leak a partial scratch folder. Removing it before re-raising
     # keeps the rebuild path's invariant ("analyzer folder reflects the
     # canonical sort") true under failure.
-    folder = analyzer_path(key["sorting_id"])
+    folder = analyzer_path(key["sorting_id"], waveform_params_name)
     try:
         # Pass the already-resolved folder so the build target equals the path
-        # this method cleans up on failure (one resolution).
+        # this method cleans up on failure (one resolution), and the resolved
+        # params dict so the rebuild uses the SAME recipe the cache stored.
         sorting_table._build_analyzer(
             sorting=sorting_obj,
             recording=recording,
             key=key,
             analyzer_folder=folder,
+            waveform_params=waveform_params,
         )
     except Exception:
         # Any build failure: remove the partial analyzer folder before
@@ -218,6 +294,7 @@ def build_analyzer(
     sorter_row=None,
     job_kwargs=None,
     analyzer_folder=None,
+    waveform_params=None,
 ):
     """Build the binary-folder SortingAnalyzer + base extensions.
 
@@ -237,12 +314,17 @@ def build_analyzer(
     path falls back to resolving locally (same DB-read tradeoff
     as ``sorter_row``).
 
-    ``analyzer_folder`` is the resolved cache folder to write. When
-    ``None`` (the make_compute path) it is resolved from ``sorting_id``
-    and RETURNED for the caller to thread on. Callers that already
-    resolved it (``_rebuild_analyzer_folder``, which needs the path for
-    its own cleanup) pass it in so the folder built equals the folder
-    they clean up -- one resolution, no config-drift edge.
+    ``analyzer_folder`` is the resolved cache folder to write -- the caller
+    computes it via ``analyzer_path(sorting_id, waveform_params_name)`` so the
+    folder carries the recipe identity. It is required because that name is not
+    recoverable from the params dict alone, and this function does no DB I/O.
+
+    ``waveform_params`` is the RESOLVED analyzer-waveform params dict (the
+    ``AnalyzerWaveformParameters`` row's blob: ``ms_before`` / ``ms_after`` /
+    ``max_spikes_per_unit`` / ``whiten`` / ``purpose``) the caller already
+    fetched -- this function never resolves a bare recipe name to params (no DB
+    I/O per the tri-part contract). ``None`` falls back to the schema defaults
+    (the wide cortex display window) for direct / test callers.
 
     Parameters
     ----------
@@ -251,8 +333,8 @@ def build_analyzer(
     recording : si.BaseRecording
         The recording the sorting was computed on.
     key : dict
-        Restriction dict carrying ``sorting_id``; used to resolve the
-        analyzer folder and the fallback ``SorterParameters`` fetch.
+        Restriction dict carrying ``sorting_id``; used for the fallback
+        ``SorterParameters`` fetch and log messages.
     sorter_row : dict, optional
         Keyword-only. Pre-fetched ``SorterParameters`` row. ``None``
         (the rebuild path) triggers a one-time DB fetch. Default
@@ -261,28 +343,58 @@ def build_analyzer(
         Keyword-only. Pre-resolved job kwargs. ``None`` resolves them
         locally from ``sorter_row``. Default ``None``.
     analyzer_folder : pathlib.Path, optional
-        Keyword-only. Resolved cache folder to write. ``None`` resolves
-        it from ``key["sorting_id"]``. Default ``None``.
+        Keyword-only. Resolved cache folder to write, carrying the recipe
+        identity. Required; ``None`` raises ``ValueError``. Default ``None``.
+    waveform_params : dict, optional
+        Keyword-only. Resolved analyzer-waveform params blob. ``None`` uses the
+        schema defaults (wide cortex display window). Default ``None``.
 
     Returns
     -------
     pathlib.Path
         The analyzer cache folder path. For a zero-unit sort the folder
         is returned without being built.
+
+    Raises
+    ------
+    ValueError
+        If ``analyzer_folder`` is not provided.
     """
     import shutil
 
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
     from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
     from spyglass.utils import logger
 
-    folder = (
-        analyzer_folder
-        if analyzer_folder is not None
-        else analyzer_path(key["sorting_id"])
-    )
+    if analyzer_folder is None:
+        raise ValueError(
+            "build_analyzer: analyzer_folder is required. Resolve it via "
+            "analyzer_path(sorting_id, waveform_params_name) so the cache "
+            "folder carries the recipe identity (this function does no DB "
+            "I/O and cannot resolve the recipe name itself)."
+        )
+    folder = analyzer_folder
+
+    if waveform_params is None:
+        from spyglass.spikesorting.v2._params.analyzer_waveform import (
+            AnalyzerWaveformParamsSchema,
+        )
+
+        waveform_params = AnalyzerWaveformParamsSchema().model_dump()
+
+    # The whitened metric analyzer (the metric recipes' ``whiten=True``) is not
+    # built yet -- this path only constructs the unwhitened display analyzer
+    # (``return_in_uV=True`` below). Reject a whitened recipe loudly rather than
+    # silently building an unwhitened analyzer at a metric-named folder; the
+    # whitening + ``return_in_uV`` derivation lands with the metric analyzer.
+    if waveform_params.get("whiten"):
+        raise NotImplementedError(
+            "build_analyzer: whitened metric analyzer construction "
+            f"(purpose={waveform_params.get('purpose')!r}, whiten=True) is not "
+            "implemented yet; only the unwhitened display analyzer is built. "
+            "Pass a display (unwhitened) recipe."
+        )
 
     # Zero-unit short-circuit BEFORE any I/O or DB fetch:
     # ``create_sorting_analyzer(sparse=True)`` -> ``estimate_sparsity``
@@ -368,33 +480,40 @@ def build_analyzer(
         analyzer_job_kwargs = {
             k: v for k, v in job_kwargs.items() if k != "random_seed"
         }
+        # Window + subsample come from the resolved AnalyzerWaveformParameters
+        # row (tracked in the DB), NOT hardcoded -- so the settings that
+        # produced each analyzer are recorded and reproducible. The window is
+        # region-specific (hippocampus 0.5/0.5, cortex 1.0/2.0) and the
+        # subsample is the lab's 20000.
         analyzer.compute(
             ["random_spikes", "noise_levels", "templates", "waveforms"],
             extension_params={
                 "random_spikes": {
-                    "max_spikes_per_unit": 500,
+                    "max_spikes_per_unit": int(
+                        waveform_params["max_spikes_per_unit"]
+                    ),
                     "method": "uniform",
-                    # Pin the stochastic spike subsampling. When a
-                    # unit has more than ``max_spikes_per_unit`` (500)
-                    # spikes, ``random_spikes`` draws a uniform random
-                    # subset; the SI 0.104 extension defaults
-                    # ``seed=None`` (verified against
-                    # ``ComputeRandomSpikes._set_params``), so an
-                    # unseeded build selects a different subset each
-                    # time -- and the persisted ``peak_amplitude_uv``
-                    # / peak channel (computed from the subset's
-                    # templates) drifts across rebuilds of the same
-                    # sort. Defaults to 0 but honors the per-row
-                    # ``job_kwargs={"random_seed": N}`` override, the
-                    # same knob the whitening / noise_levels pins read
-                    # in ``run_si_sorter`` / ``run_clusterless_
-                    # thresholder`` (lines using
-                    # ``(job_kwargs or {}).get("random_seed", 0)``) --
-                    # so a user changing the seed gets a consistent
+                    # Pin the stochastic spike subsampling. When a unit
+                    # has more than ``max_spikes_per_unit`` spikes,
+                    # ``random_spikes`` draws a uniform random subset; the
+                    # SI 0.104 extension defaults ``seed=None`` (verified
+                    # against ``ComputeRandomSpikes._set_params``), so an
+                    # unseeded build selects a different subset each time --
+                    # and the persisted ``peak_amplitude_uv`` / peak channel
+                    # (computed from the subset's templates) drifts across
+                    # rebuilds of the same sort. Defaults to 0 but honors the
+                    # per-row ``job_kwargs={"random_seed": N}`` override, the
+                    # same knob the whitening / noise_levels pins read in
+                    # ``run_si_sorter`` / ``run_clusterless_thresholder``
+                    # (lines using ``(job_kwargs or {}).get("random_seed",
+                    # 0)``) -- so a user changing the seed gets a consistent
                     # seed across the sort AND the analyzer subsample.
                     "seed": (job_kwargs or {}).get("random_seed", 0),
                 },
-                "waveforms": {"ms_before": 1.0, "ms_after": 2.0},
+                "waveforms": {
+                    "ms_before": float(waveform_params["ms_before"]),
+                    "ms_after": float(waveform_params["ms_after"]),
+                },
             },
             **analyzer_job_kwargs,
         )
