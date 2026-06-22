@@ -14,6 +14,7 @@ from spyglass.common.common_region import BrainRegion  # noqa: F401
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.settings import test_mode
 from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
+from spyglass.utils.mixins.ingestion import IngestionEntries
 from spyglass.utils.nwb_helper_fn import (
     estimate_sampling_rate,
     get_config,
@@ -28,7 +29,7 @@ schema = dj.schema("common_ephys")
 
 
 @schema
-class ElectrodeGroup(SpyglassMixin, dj.Imported):
+class ElectrodeGroup(SpyglassIngestion, dj.Imported):
     definition = """
     # Grouping of electrodes corresponding to a physical probe.
     -> Session
@@ -40,37 +41,55 @@ class ElectrodeGroup(SpyglassMixin, dj.Imported):
     target_hemisphere = "Unknown": enum("Right", "Left", "Unknown")
     """
 
+    @property
+    def _source_nwb_object_type(self):
+        """The NWB object type from which this table can ingest data."""
+        return pynwb.ecephys.ElectrodeGroup
+
+    @property
+    def table_key_to_obj_attr(self):
+        """Mapping of table keys to NWB object attributes."""
+        return {
+            "self": {
+                "electrode_group_name": "name",
+                "description": "description",
+                "region_id": self.fetch_add_brain_region,
+                "target_hemisphere": self.hemisphere_from_targeted_x,
+                "probe_id": self.device_probe_type_default_none,
+            },
+        }
+
+    def device_probe_type_default_none(self, nwb_obj):
+        if not (device := getattr(nwb_obj, "device", None)):
+            return None
+        return getattr(device, "probe_type", None)
+
+    def fetch_add_brain_region(self, nwb_obj):
+        """Fetch or add the brain region from the NWB object."""
+        region_name = nwb_obj.location
+        return BrainRegion.fetch_add(region_name=region_name)
+
+    def hemisphere_from_targeted_x(self, nwb_obj):
+        """Determine hemisphere from targeted_x coordinate."""
+        targeted_x = getattr(nwb_obj, "targeted_x", None)
+        if targeted_x is not None:
+            return "Right" if float(targeted_x) >= 0 else "Left"
+        return "Unknown"
+
     def make(self, key):
         """Make without transaction
 
         Allows populate_all_common to work within a single transaction."""
-        nwb_file_name = key["nwb_file_name"]
-        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
-        nwbf = get_nwb_file(nwb_file_abspath)
-        for electrode_group in nwbf.electrode_groups.values():
-            key["electrode_group_name"] = electrode_group.name
-            # add electrode group location if it not exist, and fetch the row
-            key["region_id"] = BrainRegion.fetch_add(
-                region_name=electrode_group.location
-            )
-            if probe_type := getattr(
-                electrode_group.device, "probe_type", None
-            ):
-                key["probe_id"] = probe_type
-            key["description"] = electrode_group.description
-            if targeted_x := getattr(electrode_group, "targeted_x", None):
-                # Define target_hemisphere based on targeted x coordinate
-                if targeted_x >= 0:  # if positive or zero x coordinate
-                    # define target location as right hemisphere
-                    key["target_hemisphere"] = "Right"
-                else:  # if negative x coordinate
-                    # define target location as left hemisphere
-                    key["target_hemisphere"] = "Left"
-            self.insert1(key, skip_duplicates=True, allow_direct_insert=True)
+        from spyglass.common.common_usage import ActivityLog
+
+        ActivityLog().deprecate_log(
+            name="ElectrodeGroup.make", alt="insert_from_nwbfile"
+        )
+        self.insert_from_nwbfile(key["nwb_file_name"])
 
 
 @schema
-class Electrode(SpyglassMixin, dj.Imported):
+class Electrode(SpyglassIngestion, dj.Imported):
     definition = """
     -> ElectrodeGroup
     electrode_id: int                      # the unique number for this electrode
@@ -91,185 +110,176 @@ class Electrode(SpyglassMixin, dj.Imported):
     contacts: varchar(200)                  # label of electrode contacts used for a bipolar signal - current workaround
     """
 
-    def make(self, key):
-        """Populate the Electrode table with data from the NWB file.
+    _single_entry_per_table = False
 
-        - Uses the electrode table from the NWB file.
-        - Adds the region_id from the BrainRegion table.
-        - Uses novela Probe.Electrode if available.
-        - Overrides with information from the config YAML based on primary key
-        """
-        nwb_file_name = key["nwb_file_name"]
-        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
-        nwbf = get_nwb_file(nwb_file_abspath)
-        config = get_config(nwb_file_abspath, calling_table=self.camel_name)
+    @property
+    def _source_nwb_object_type(self):
+        """The NWB object type from which this table can ingest data."""
+        return pynwb.ecephys.ElectrodesTable
 
-        if "Electrode" in config:
-            electrode_config_dicts = {
-                electrode_dict["electrode_id"]: electrode_dict
-                for electrode_dict in config["Electrode"]
-            }
-        else:
-            electrode_config_dicts = dict()
-
-        electrode_constants = {
-            "x_warped": 0,
-            "y_warped": 0,
-            "z_warped": 0,
-            "contacts": "",
+    @property
+    def table_key_to_obj_attr(self):
+        """Mapping of table keys to NWB object attributes."""
+        return {
+            "self": {
+                "electrode_id": self.index_to_int,
+                "name": self.index_to_str,
+                "x": ("x", None),
+                "y": ("y", None),
+                "z": ("z", None),
+                "filtering": ("filtering", "unfiltered"),
+                "impedance": ("imp", None),
+                "x_warped": self.fixed_to_zero,
+                "y_warped": self.fixed_to_zero,
+                "z_warped": self.fixed_to_zero,
+                "contacts": self.fixed_to_empty_str,
+                "region_id": self.fetch_add_brain_region,
+                "electrode_group_name": "group_name",
+                # non-default columns
+                "probe_shank": ("probe_shank", None),
+                "probe_electrode": ("probe_electrode", None),
+                "original_reference_electrode": ("ref_elect_id", -1),
+                "bad_channel": self.bad_channel_as_string,
+            },
+            "group": {
+                "probe_id": self.device_probe_type_default_none,
+            },
         }
 
-        electrode_inserts = []
-        electrodes = nwbf.electrodes.to_dataframe()
+    def bad_channel_as_string(self, nwb_obj):
+        bad_channel = getattr(nwb_obj, "bad_channel", False)
+        return "True" if bad_channel else "False"
 
-        # Keep a dict of region IDs to avoid multiple fetches
-        region_ids_dict = dict()
+    def fixed_to_zero(self, nwb_obj):
+        return 0
 
-        for elect_id, elect_data in electrodes.iterrows():
-            region_name = elect_data.group.location
-            if region_name not in region_ids_dict:
-                # Only fetch if not already fetched
-                region_ids_dict[region_name] = BrainRegion.fetch_add(
-                    region_name=region_name
-                )
-            key.update(
-                {
-                    "electrode_id": elect_id,
-                    "name": str(elect_id),
-                    "electrode_group_name": elect_data.group_name,
-                    "region_id": region_ids_dict[region_name],
-                    "x": elect_data.get("x"),
-                    "y": elect_data.get("y"),
-                    "z": elect_data.get("z"),
-                    "filtering": elect_data.get("filtering", "unfiltered"),
-                    "impedance": elect_data.get("imp"),
-                    **electrode_constants,
-                }
+    def fixed_to_empty_str(self, nwb_obj):
+        return ""
+
+    def index_to_str(self, nwb_obj):
+        return str(nwb_obj[0])
+
+    def index_to_int(self, nwb_obj):
+        return nwb_obj[0]
+
+    def fetch_add_brain_region(self, nwb_obj):
+        """Fetch or add the brain region from the NWB object."""
+        region_name = nwb_obj.group.location
+        return BrainRegion.fetch_add(region_name=region_name)
+
+    def device_probe_type_default_none(self, nwb_obj):
+        """Fetch the probe type from the NWB object."""
+        if not (device := getattr(nwb_obj, "device", None)):
+            return None
+        return getattr(device, "probe_type", None)
+
+    def get_nwb_objects(self, nwb_file, nwb_file_name=None):
+        """Return the electrodes DynamicTable from the NWB file."""
+        if nwb_file.electrodes is not None:
+            return [nwb_file.electrodes]
+        return []
+
+    _cached_config = None
+
+    def insert_from_nwbfile(
+        self,
+        nwb_file_name: str,
+        config: dict = None,
+        dry_run: bool = False,
+    ):
+        """Insert Electrode entries from NWB file, using config for overrides."""
+        self._cached_config = config
+        try:
+            return_val = super().insert_from_nwbfile(
+                nwb_file_name, config, dry_run
             )
+        finally:
+            self._cached_config = None
+        return return_val
 
-            # rough check of whether the electrodes table was created by
-            # rec_to_nwb and has the appropriate custom columns used by
-            # rec_to_nwb
+    def generate_entries_from_nwb_object(
+        self, nwb_obj, base_key=None
+    ) -> IngestionEntries:
+        """Generates a list of table entries from an NWB object.
 
-            # TODO this could be better resolved by making an extension for the
-            # electrodes table
+        Overrides Base to allow integrating info from config YAML for non-default columns.
+        """
+        entries = super().generate_entries_from_nwb_object(nwb_obj, base_key)
 
-            extra_cols = [
-                "probe_shank",
-                "probe_electrode",
-                "bad_channel",
-                "ref_elect_id",
+        if (self._cached_config is None) or not (
+            electrode_config := self._cached_config.get("Electrode", None)
+        ):
+            return entries
+        # map electrode id to dictof electrode information from config YAML
+        for entry in entries.get(self, []):
+            matching_configs = [
+                e
+                for e in electrode_config
+                if e["electrode_id"] == entry["electrode_id"]
             ]
-            if is_nwb_obj_type(elect_data.group.device, "Probe") and all(
-                col in elect_data for col in extra_cols
-            ):
-                key.update(
-                    {
-                        "probe_id": elect_data.group.device.probe_type,
-                        "probe_shank": elect_data.probe_shank,
-                        "probe_electrode": elect_data.probe_electrode,
-                        "bad_channel": (
-                            "True" if elect_data.bad_channel else "False"
-                        ),
-                        "original_reference_electrode": elect_data.ref_elect_id,
-                    }
-                )
-            else:
-                logger.warning(
-                    "Electrode did not match expected novela format.\nPlease "
-                    + f"ensure the following in YAML config: {extra_cols}."
-                )
-
-            # override with information from the config YAML based on primary
-            # key (electrode id)
-
-            if elect_id in electrode_config_dicts:
-                # check whether the Probe.Electrode being referenced exists
-                query = Probe.Electrode & electrode_config_dicts[elect_id]
-                if len(query) == 0:
+            if matching_configs:
+                cfg = matching_configs[0]
+                probe_fk = {
+                    k: cfg.get(k)
+                    for k in ("probe_id", "probe_shank", "probe_electrode")
+                    if k in cfg
+                }
+                if probe_fk and len(Probe.Electrode & probe_fk) == 0:
                     warnings.warn(
                         "No Probe.Electrode exists that matches the data: "
-                        + f"{electrode_config_dicts[elect_id]}. "
-                        "The config YAML for Electrode with electrode_id "
-                        + f"{elect_id} will be ignored."
+                        + f"{probe_fk}. The config YAML for Electrode with electrode_id "
+                        + f"{entry['electrode_id']} will be ignored."
                     )
                 else:
-                    key.update(electrode_config_dicts[elect_id])
-            electrode_inserts.append(key.copy())
-
-        self.insert(
-            electrode_inserts,
-            skip_duplicates=True,
-            allow_direct_insert=True,  # for no_transaction, pop_all_common
-        )
+                    entry.update(cfg)
+        return entries
 
     @classmethod
     def create_from_config(cls, nwb_file_name: str):
-        """Create/update Electrode entries using config YAML file.
+        from spyglass.common.common_usage import ActivityLog
 
-        Parameters
-        ----------
-        nwb_file_name : str
-            The name of the NWB file.
-        """
+        ActivityLog().deprecate_log("Electrode.create_from_config")
+
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
-        nwbf = get_nwb_file(nwb_file_abspath)
         config = get_config(nwb_file_abspath, calling_table=cls.__name__)
         if "Electrode" not in config:
             return  # See #849
-
-        # map electrode id to dictof electrode information from config YAML
-        electrode_dicts = {
-            electrode_dict["electrode_id"]: electrode_dict
-            for electrode_dict in config["Electrode"]
-        }
-
-        defaults = dict(
-            x_warped=0,
-            y_warped=0,
-            z_warped=0,
-            contacts="",
-        )
+        self_table = cls()
+        entries = self_table.generate_entries_from_config(
+            config, base_key={"nwb_file_name": nwb_file_name}
+        )[self_table]
 
         inserts = []
         updates = []
-        electrodes = nwbf.electrodes.to_dataframe()
-        for nwbfile_elect_id, elect_data in electrodes.iterrows():
-            if nwbfile_elect_id not in electrode_dicts:
-                warnings.warn(
-                    f"Electrode ID {nwbfile_elect_id} exists in the NWB file "
-                    + "but has no corresponding config YAML entry."
-                )
-                continue
-
-            # use the information in the electrodes table to start and then
-            # add (or overwrite) values from the config YAML
-
-            key = dict(
-                nwb_file_name=nwb_file_name,
-                electrode_id=str(nwbfile_elect_id),
-                electrode_group_name=elect_data.group_name,
-                region_id=BrainRegion.fetch_add(
-                    region_name=elect_data.group.location
-                ),
-                **defaults,
-                filtering=elect_data.filtering,
-                impedance=elect_data.get("imp"),
-                **electrode_dicts[nwbfile_elect_id],
-            )
-
-            query = Electrode & {"electrode_id": nwbfile_elect_id}
-
+        for entry in entries:
+            entry_pk = {
+                k: v for k, v in entry.items() if k in self_table.primary_key
+            }
+            query = cls() & entry_pk
             if len(query):
-                updates.append(key)
-                logger.info(f"Updated Electrode with ID {nwbfile_elect_id}.")
+                updates.append(entry)
+                logger.info(
+                    f"Updated {cls.__name__} with PK {entry_pk} from config."
+                )
             else:
-                inserts.append(key)
-                logger.info(f"Inserted Electrode with ID {nwbfile_elect_id}.")
-
+                inserts.append(entry)
+                logger.info(
+                    f"Inserted {cls.__name__} with PK {entry_pk} from config."
+                )
         cls.insert(inserts, skip_duplicates=True, allow_direct_insert=True)
         for update in updates:
             cls.update1(update)
+
+    def make(self, key):
+        """Make without transaction
+
+        Allows populate_all_common to work within a single transaction."""
+        from spyglass.common.common_usage import ActivityLog
+
+        ActivityLog().deprecate_log(
+            name="Electrode.make", alt="insert_from_nwbfile"
+        )
+        self.insert_from_nwbfile(key["nwb_file_name"])
 
 
 @schema
