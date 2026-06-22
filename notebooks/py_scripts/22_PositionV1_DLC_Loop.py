@@ -12,6 +12,13 @@
 #     name: python3
 # ---
 
+# > ⚠️ **Deprecated — Position V1 (DeepLabCut).** This notebook uses the
+# > legacy `spyglass.position.v1` DLC pipeline. New projects should use
+# > **Position V2**: see [23_PositionV2_DLC](./23_PositionV2_DLC.ipynb)
+# > (DeepLabCut) or [24_PositionV2_SLEAP](./24_PositionV2_SLEAP.ipynb) (SLEAP).
+# > Position V1 dependencies will no longer be supported after the Position V2
+# > release.
+
 # ## Position- DeepLabCut from Scratch
 #
 
