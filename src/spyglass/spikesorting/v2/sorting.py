@@ -21,6 +21,7 @@ recording sources are not yet supported: ``insert_selection`` rejects a
 
 from __future__ import annotations
 
+import re
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
@@ -31,15 +32,23 @@ import numpy as np
 from spyglass.common import IntervalList  # noqa: F401
 from spyglass.common.common_ephys import Electrode  # noqa: F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile  # noqa: F401
+from spyglass.spikesorting.v2._params.analyzer_waveform import (
+    ANALYZER_WAVEFORM_SCHEMA_VERSION,
+    AnalyzerWaveformParamsSchema,
+)
 from spyglass.spikesorting.v2._params.sorter import _get_sorter_schema
 from spyglass.spikesorting.v2._recipe_catalog import (
     _params_schema_version,
     sorter_default_contents,
+    waveform_params_default_contents,
+    waveform_params_for_preprocessing,
 )
 from spyglass.spikesorting.v2._sorting_analyzer import (
     build_analyzer,
+    fetch_waveform_params,
     load_or_rebuild_analyzer,
     rebuild_analyzer_folder,
+    resolve_display_waveform_params_name,
 )
 from spyglass.spikesorting.v2._sorting_artifact_mask import apply_artifact_mask
 from spyglass.spikesorting.v2._sorting_dispatch import (
@@ -103,6 +112,12 @@ class SortingFetched(NamedTuple):
     obs_intervals : numpy.ndarray or None
         Artifact-removed valid-times window, or ``None`` when no
         artifact-detection pass is configured.
+    display_waveform_params_name : str
+        The DISPLAY ``AnalyzerWaveformParameters`` recipe resolved from the
+        source preprocessing recipe (region), stored on the ``Sorting`` row.
+    display_waveform_params : dict
+        That recipe's resolved params blob, threaded into ``_build_analyzer``
+        so ``make_compute`` does no parameter DB I/O.
     """
 
     source: SourceResolution
@@ -110,6 +125,8 @@ class SortingFetched(NamedTuple):
     sorter_row: dict
     nwb_file_name: str
     obs_intervals: np.ndarray | None
+    display_waveform_params_name: str
+    display_waveform_params: dict
 
 
 class SortingComputed(NamedTuple):
@@ -150,6 +167,9 @@ class SortingComputed(NamedTuple):
         Recording id the sort was run against.
     nwb_file_name : str
         Source NWB file backing the recording selection.
+    display_waveform_params_name : str
+        The resolved DISPLAY recipe name; stored on the ``Sorting`` row by
+        ``make_insert`` so every later rebuild reads it back deterministically.
     """
 
     sorting_obj: "si.BaseSorting"
@@ -158,6 +178,7 @@ class SortingComputed(NamedTuple):
     analyzer_folder: Path
     recording_id: str
     nwb_file_name: str
+    display_waveform_params_name: str
 
 
 _assert_v2_db_safe()
@@ -453,6 +474,93 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
                 "platform (a 'default' row would fail at populate time)."
             )
         cls.insert(rows, skip_duplicates=True)
+
+
+_WAVEFORM_PARAMS_NAME_RE = re.compile(r"^[A-Za-z0-9_]+$")
+
+
+def _reject_unsafe_waveform_params_name(row, _schema_cls) -> None:
+    """Reject a ``waveform_params_name`` that is not path-safe.
+
+    The name is embedded in the analyzer cache folder
+    ``{sorting_id}__{waveform_params_name}.zarr`` (see ``analyzer_path``), so it
+    must match ``^[A-Za-z0-9_]+$`` -- no path separators, dots, or traversal.
+    A ``per_row_hook`` for ``validate_lookup_rows``.
+    """
+    name = row["waveform_params_name"]
+    if not _WAVEFORM_PARAMS_NAME_RE.match(name):
+        raise ValueError(
+            "AnalyzerWaveformParameters: waveform_params_name "
+            f"{name!r} is not path-safe; it is embedded in the analyzer "
+            "cache folder name, so it must match ^[A-Za-z0-9_]+$ (letters, "
+            "digits, underscore)."
+        )
+
+
+@schema
+class AnalyzerWaveformParameters(SpyglassMixin, dj.Lookup):
+    """Tracked window / subsample / whitening for a sort's analyzer recipe.
+
+    Mirrors v1's ``WaveformParameters`` so the settings that produced an
+    analyzer (``ms_before`` / ``ms_after`` / ``max_spikes_per_unit`` / whitening)
+    are recorded in the DB rather than hardcoded in the analyzer build. The
+    ``params`` blob is validated by :class:`AnalyzerWaveformParamsSchema`;
+    ``insert_default`` ships the region-specific display/metric rows
+    (hippocampus 0.5/0.5 ms, cortex 1.0/2.0 ms; both 20000 spikes).
+
+    A sort's DISPLAY recipe is resolved from its source preprocessing recipe
+    (region) and persisted on ``Sorting.display_waveform_params_name`` -- the
+    row name is not a free per-sort knob and is not part of ``sorting_id``
+    identity. ``analyzer_path`` embeds ``waveform_params_name`` in the cache
+    folder name, so the name is validated path-safe (``^[A-Za-z0-9_]+$``) at
+    insert time.
+    """
+
+    definition = f"""
+    waveform_params_name: varchar(64)
+    ---
+    params: blob
+    params_schema_version={ANALYZER_WAVEFORM_SCHEMA_VERSION}: int
+    """
+
+    # The shipped region rows are defined in
+    # ``_recipe_catalog.waveform_params_default_contents`` (single source).
+    _DEFAULT_CONTENTS: tuple = waveform_params_default_contents()
+
+    def insert1(self, row, allow_duplicate_params=False, **kwargs):
+        """Insert one row through the validated bulk ``insert`` path."""
+        # Delegate to ``insert`` so one validated path serves both.
+        self.insert(
+            [row], allow_duplicate_params=allow_duplicate_params, **kwargs
+        )
+
+    def insert(self, rows, allow_duplicate_params=False, **kwargs):
+        """Validate each ``params`` blob + path-safe name, then insert.
+
+        ``allow_duplicate_params=True`` opts out of the duplicate-content
+        guard (a second name for an existing blob); see
+        ``reject_duplicate_parameter_content``.
+        """
+        validated = validate_lookup_rows(
+            rows,
+            self.heading.names,
+            schema_for=lambda _row: AnalyzerWaveformParamsSchema,
+            table_name="AnalyzerWaveformParameters",
+            per_row_hook=_reject_unsafe_waveform_params_name,
+        )
+        reject_duplicate_parameter_content(
+            self,
+            validated,
+            table_name="AnalyzerWaveformParameters",
+            name_attr="waveform_params_name",
+            allow_duplicate_params=allow_duplicate_params,
+        )
+        super().insert(validated, **kwargs)
+
+    @classmethod
+    def insert_default(cls):
+        """Insert the region display/metric waveform recipes (idempotent)."""
+        cls().insert(cls._DEFAULT_CONTENTS, skip_duplicates=True)
 
 
 @schema
@@ -859,6 +967,43 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             )
         return rows[0] if len(rows) == 1 else None
 
+    @classmethod
+    def resolve_source_preprocessing_params_name(cls, key: dict) -> str:
+        """Return the sort source's ``preprocessing_params_name``.
+
+        Region resolution input: a sort's analyzer waveform window is keyed on
+        the SAME signal that sets the region filter cutoff -- the source
+        preprocessing recipe. Reuses :meth:`resolve_source` for source
+        detection (the single source-part integrity check) rather than
+        re-inspecting the source part tables, then reads the source's
+        ``preprocessing_params_name``:
+
+        - ``RecordingSource`` -> the upstream ``RecordingSelection`` row.
+        - ``ConcatenatedRecordingSource`` -> the upstream
+          ``ConcatenatedRecordingSelection`` row (its
+          ``-> PreprocessingParameters`` FK's primary key, not a literal column
+          in the class definition).
+
+        Does NOT query ``RecordingSelection`` for a concat source: concat member
+        recordings are provenance inputs, but the concatenated source row is the
+        sort input.
+        """
+        from spyglass.spikesorting.v2.recording import RecordingSelection
+        from spyglass.spikesorting.v2.session_group import (
+            ConcatenatedRecordingSelection,
+        )
+
+        source = cls.resolve_source(key)
+        if source.kind == "recording":
+            return (
+                RecordingSelection
+                & {"recording_id": source.key["recording_id"]}
+            ).fetch1("preprocessing_params_name")
+        return (
+            ConcatenatedRecordingSelection
+            & {"concat_recording_id": source.key["concat_recording_id"]}
+        ).fetch1("preprocessing_params_name")
+
 
 @schema
 class Sorting(SpyglassMixin, dj.Computed):
@@ -880,7 +1025,19 @@ class Sorting(SpyglassMixin, dj.Computed):
     object_id: varchar(72)
     n_units: int
     time_of_sort: datetime    # wall-clock time the sort was populated
+    -> AnalyzerWaveformParameters.proj(display_waveform_params_name="waveform_params_name")
     """
+    # ``display_waveform_params_name`` is a secondary FK to
+    # ``AnalyzerWaveformParameters``: it records which DISPLAY recipe produced
+    # this sort's analyzer + peak_amplitude_uv, and the FK enforces the
+    # provenance in the database -- a sort cannot be inserted referencing a
+    # recipe that is not tracked, and a referenced recipe row cannot be deleted.
+    # The name is resolved at sort time from the source preprocessing recipe
+    # (region; see _recipe_catalog.waveform_params_for_preprocessing) and read
+    # back -- never re-resolved -- on every later rebuild, so the analyzer is
+    # deterministic for a sorting_id. It is NOT a free per-sort knob and is NOT
+    # part of sorting_id identity. The metric recipe is carried on
+    # AnalyzerCurationSelection (a later phase), not here.
     # The SortingAnalyzer cache folder is intentionally NOT a column: it is
     # large (5-50 GB) regeneratable scratch resolved at runtime from
     # sorting_id via _analyzer_cache.analyzer_path. Persisting an
@@ -982,6 +1139,20 @@ class Sorting(SpyglassMixin, dj.Computed):
             RecordingSelection & {"recording_id": source.key["recording_id"]}
         ).fetch1("nwb_file_name")
 
+        # Resolve the DISPLAY analyzer recipe from the source preprocessing
+        # recipe (region), reusing the shared source resolver -- hippocampus ->
+        # the 0.5/0.5 row, cortex -> the 1.0/2.0 row, any other recipe -> the
+        # wider cortex fallback. Resolve the params blob HERE (make_fetch is the
+        # only stage allowed DB I/O); make_compute builds with it and
+        # make_insert persists the name so every later rebuild reads it back
+        # deterministically.
+        display_waveform_params_name, _ = waveform_params_for_preprocessing(
+            SortingSelection.resolve_source_preprocessing_params_name(key)
+        )
+        display_waveform_params = fetch_waveform_params(
+            display_waveform_params_name
+        )
+
         # Pre-fetch the observation-interval window so
         # ``_write_units_nwb`` can write ``obs_intervals=`` on every
         # ``add_unit`` call. Downstream firing-rate computations
@@ -1014,6 +1185,8 @@ class Sorting(SpyglassMixin, dj.Computed):
             sorter_row=sorter_row,
             nwb_file_name=nwb_file_name,
             obs_intervals=obs_intervals,
+            display_waveform_params_name=display_waveform_params_name,
+            display_waveform_params=display_waveform_params,
         )
 
     def make_compute(
@@ -1024,6 +1197,8 @@ class Sorting(SpyglassMixin, dj.Computed):
         sorter_row,
         nwb_file_name,
         obs_intervals,
+        display_waveform_params_name,
+        display_waveform_params,
     ):
         """Sort, build analyzer, stage Units NWB outside any DB transaction.
 
@@ -1060,6 +1235,12 @@ class Sorting(SpyglassMixin, dj.Computed):
         obs_intervals : numpy.ndarray or None
             Artifact-removed valid-times window, or ``None`` when no
             artifact-detection pass is configured.
+        display_waveform_params_name : str
+            The DISPLAY recipe resolved in ``make_fetch``; selects the analyzer
+            cache folder and is persisted by ``make_insert``.
+        display_waveform_params : dict
+            That recipe's resolved params blob, fed to ``_build_analyzer`` so
+            the window / subsample are not hardcoded (no DB I/O here).
 
         Returns
         -------
@@ -1114,13 +1295,23 @@ class Sorting(SpyglassMixin, dj.Computed):
         # ``sorter_row`` so ``_build_analyzer`` does not re-issue the
         # ``SortingSelection`` + ``SorterParameters`` reads we
         # already did in ``make_fetch``; pass ``job_kwargs`` so the
-        # analyzer uses the same resolved value as the sorter.
-        analyzer_folder = self._build_analyzer(
+        # analyzer uses the same resolved value as the sorter; pass the
+        # resolved DISPLAY recipe + its cache folder (the folder carries the
+        # recipe identity) so the analyzer window / subsample are not
+        # hardcoded.
+        from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+
+        analyzer_folder = analyzer_path(
+            key["sorting_id"], display_waveform_params_name
+        )
+        self._build_analyzer(
             sorting=sorting_obj,
             recording=recording,
             key=key,
             sorter_row=sorter_row,
             job_kwargs=job_kwargs,
+            analyzer_folder=analyzer_folder,
+            waveform_params=display_waveform_params,
         )
         analysis_file_name, units_object_id = self._stage_sorting_artifact(
             sorting=sorting_obj,
@@ -1137,6 +1328,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             analyzer_folder=analyzer_folder,
             recording_id=recording_id,
             nwb_file_name=nwb_file_name,
+            display_waveform_params_name=display_waveform_params_name,
         )
 
     def make_insert(
@@ -1148,6 +1340,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         analyzer_folder,
         recording_id,
         nwb_file_name,
+        display_waveform_params_name,
     ):
         """Atomic registration of the AnalysisNwbfile + master + Unit rows.
 
@@ -1179,6 +1372,9 @@ class Sorting(SpyglassMixin, dj.Computed):
             Recording id the sort was run against.
         nwb_file_name : str
             Source NWB file backing the recording selection.
+        display_waveform_params_name : str
+            The resolved DISPLAY recipe, persisted on the master row so every
+            later rebuild reads it back deterministically.
 
         Returns
         -------
@@ -1193,6 +1389,7 @@ class Sorting(SpyglassMixin, dj.Computed):
                 analyzer_folder=analyzer_folder,
                 recording_id=recording_id,
                 nwb_file_name=nwb_file_name,
+                display_waveform_params_name=display_waveform_params_name,
             )
         except Exception:
             # Failure-mode B: registration failed after a successful
@@ -1246,6 +1443,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         analyzer_folder,
         recording_id,
         nwb_file_name,
+        display_waveform_params_name,
     ):
         """Register the AnalysisNwbfile + master + Unit rows atomically.
 
@@ -1272,6 +1470,9 @@ class Sorting(SpyglassMixin, dj.Computed):
                     "object_id": units_object_id,
                     "n_units": len(sorting_obj.unit_ids),
                     "time_of_sort": dt.datetime.now(),
+                    "display_waveform_params_name": (
+                        display_waveform_params_name
+                    ),
                 }
             )
             self._populate_unit_part(
@@ -1590,7 +1791,8 @@ class Sorting(SpyglassMixin, dj.Computed):
         mirrors ``prune_orphaned_selections`` and reports two leak classes:
 
         - **DB-side orphan**: a ``Sorting`` row whose computed analyzer cache
-          folder (``analyzer_path(sorting_id)``) no longer exists on disk (the
+          folder (``analyzer_path(sorting_id, display_waveform_params_name)``)
+          no longer exists on disk (the
           regeneratable scratch was removed out of band). Reported only --
           deleting the *row* is a destructive DB operation the human decides on
           (per the Spyglass destructive-op contract); this method NEVER
@@ -1633,15 +1835,31 @@ class Sorting(SpyglassMixin, dj.Computed):
         )
 
         # Gather the DB / filesystem facts, then classify (the orphan set logic
-        # is pure and DB-free in ``classify_orphaned_analyzer_folders``). The
-        # folder is derived from sorting_id (no stored column); the n_units==0
+        # is pure and DB-free in ``classify_orphaned_analyzer_folders``). Each
+        # sort has one DISPLAY analyzer folder, named
+        # {sorting_id}__{display_waveform_params_name}.zarr; the n_units==0
         # carve-out excludes legitimately folder-less rows from the DB-side set.
+        # A sort's stored display recipe is the folder we expect on disk; a
+        # {sid}__{other}.zarr folder (e.g. a stale recipe) is therefore a
+        # disk-side orphan. (The whitened metric recipe is retained in a later
+        # phase via AnalyzerCurationSelection.)
         units_bearing = []
-        for sid in (cls & "n_units > 0").fetch("sorting_id"):
-            path = analyzer_path(sid)
-            units_bearing.append((sid, str(path), path.exists()))
+        for r in (cls & "n_units > 0").fetch(
+            "sorting_id", "display_waveform_params_name", as_dict=True
+        ):
+            path = analyzer_path(
+                r["sorting_id"], r["display_waveform_params_name"]
+            )
+            units_bearing.append((r["sorting_id"], str(path), path.exists()))
         referenced_paths = {
-            str(analyzer_path(sid)) for sid in cls.fetch("sorting_id")
+            str(
+                analyzer_path(
+                    r["sorting_id"], r["display_waveform_params_name"]
+                )
+            )
+            for r in cls.fetch(
+                "sorting_id", "display_waveform_params_name", as_dict=True
+            )
         }
         analyzer_root = analyzer_cache_root()
         disk_dir_paths = (
@@ -1858,6 +2076,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         sorter_row=None,
         job_kwargs=None,
         analyzer_folder=None,
+        waveform_params=None,
     ):
         """Build the binary-folder SortingAnalyzer + base extensions.
 
@@ -1867,7 +2086,9 @@ class Sorting(SpyglassMixin, dj.Computed):
         the v2 tests call it directly. The analyzer creation, seeded
         extension compute, zero-unit short-circuit, and partial-folder
         cleanup -- plus the rebuild-only ``SorterParameters`` fallback
-        fetch -- live in the service module.
+        fetch -- live in the service module. ``waveform_params`` is the
+        resolved analyzer-waveform params blob (window / subsample); ``None``
+        uses the schema-default cortex display window.
         """
         return build_analyzer(
             sorting,
@@ -1876,6 +2097,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             sorter_row=sorter_row,
             job_kwargs=job_kwargs,
             analyzer_folder=analyzer_folder,
+            waveform_params=waveform_params,
         )
 
     @staticmethod

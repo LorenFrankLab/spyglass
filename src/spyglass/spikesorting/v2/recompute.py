@@ -497,15 +497,13 @@ class SortingAnalyzerRecompute(SpyglassMixin, dj.Computed):
         those are reclaimable; one folder is counted once even across multiple
         env rows.
         """
-        from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
-
         total = 0
         reclaimable = self & restriction & "matched=1 AND deleted=0"
         for sid in {
             self.get_parent_key(key)["sorting_id"]
             for key in reclaimable.fetch("KEY", as_dict=True)
         }:
-            folder = analyzer_path(sid)
+            folder = _display_analyzer_folder(sid)
             if folder.exists():
                 total += sum(
                     f.stat().st_size for f in folder.rglob("*") if f.is_file()
@@ -540,22 +538,42 @@ class SortingAnalyzerRecompute(SpyglassMixin, dj.Computed):
         Same current-environment gate as the recording recompute. The deleted
         analyzer folder is regeneratable via ``Sorting.get_analyzer``.
         """
-        from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
-
         return _delete_analyzer_folders(
             self,
             restriction,
             dry_run=dry_run,
             force_stale_env=force_stale_env,
             days_since_creation=days_since_creation,
-            folder_fn=analyzer_path,
+            folder_fn=_display_analyzer_folder,
             artifact_pk=Sorting.primary_key,
         )
 
 
+def _display_analyzer_folder(sorting_id):
+    """Return the DISPLAY analyzer cache folder for a ``sorting_id``.
+
+    Recompute tracks and verifies a sort's DISPLAY analyzer (the one
+    ``Sorting.get_analyzer`` loads by default), so its folder-size accounting
+    and delete target resolve the sort's stored display recipe -- not the
+    schema-default window. The whitened metric recipe's recompute coverage is
+    a later phase.
+    """
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._sorting_analyzer import (
+        resolve_display_waveform_params_name,
+    )
+
+    name = resolve_display_waveform_params_name(Sorting(), sorting_id)
+    return analyzer_path(sorting_id, name)
+
+
 def _recompute_analyzer_hashes(sort_key: dict, rounding: int):
     """Hash the stored analyzer and a fresh temp rebuild; return both dicts."""
-    from spyglass.spikesorting.v2._sorting_analyzer import build_analyzer
+    from spyglass.spikesorting.v2._sorting_analyzer import (
+        build_analyzer,
+        fetch_waveform_params,
+        resolve_display_waveform_params_name,
+    )
 
     try:
         stored = Sorting().get_analyzer(sort_key)
@@ -564,6 +582,13 @@ def _recompute_analyzer_hashes(sort_key: dict, rounding: int):
     stored_hashes = hash_extension_data(stored, rounding=rounding)
 
     import spikeinterface as si
+
+    # Rebuild with the sort's STORED display recipe so the fresh analyzer is
+    # byte-comparable to the cached one; rebuilding with the schema default
+    # would mismatch every hippocampus sort (0.5/0.5 vs the 1.0/2.0 fallback).
+    sid = (Sorting & sort_key).fetch1("sorting_id")
+    display_name = resolve_display_waveform_params_name(Sorting(), sid)
+    display_params = fetch_waveform_params(display_name)
 
     tmp = tempfile.mkdtemp(prefix="v2_analyzer_recompute_")
     try:
@@ -575,6 +600,7 @@ def _recompute_analyzer_hashes(sort_key: dict, rounding: int):
             stored.recording,
             sort_key,
             analyzer_folder=Path(tmp) / "analyzer.zarr",
+            waveform_params=display_params,
         )
         fresh = si.load_sorting_analyzer(Path(tmp) / "analyzer.zarr")
         new_hashes = hash_extension_data(fresh, rounding=rounding)
