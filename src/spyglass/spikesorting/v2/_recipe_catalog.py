@@ -392,9 +392,13 @@ def waveform_params_for_preprocessing(
 ) -> tuple[str, str]:
     """Return the ``(display, metric)`` waveform-params row names for a recipe.
 
-    Any preprocessing recipe not in the region map (custom / multi-region)
-    falls back to the wider cortex pair (1.0/2.0 ms) rather than silently mixing
-    windows.
+    Only hippocampus and cortex have region-tuned analyzer windows; every other
+    preprocessing recipe -- custom, multi-region, AND the shipped non-tetrode
+    recipes (e.g. ``default``, ``default_neuropixels``, ``no_filter``) -- falls
+    back to the wider cortex pair (1.0/2.0 ms). This is deliberate: the analyzer
+    window is tuned for hippocampal vs cortical tetrode waveforms, and adding a
+    tuned window for another region is a tracked-row-and-mapping change, not a
+    silent default. The fallback never mixes windows within a sort.
 
     Parameters
     ----------
@@ -410,6 +414,18 @@ def waveform_params_for_preprocessing(
         preprocessing_params_name,
         (CORTEX_DISPLAY_WAVEFORMS, CORTEX_METRIC_WAVEFORMS),
     )
+
+
+# Drift guard: every region in ``_REGION_PREPROC`` must have a waveform-params
+# mapping, so a future region added to the preset map cannot silently inherit
+# the cortex fallback. (Non-region shipped recipes -- neuropixels / no_filter --
+# intentionally fall back; see ``waveform_params_for_preprocessing``.)
+assert set(_REGION_PREPROC.values()) <= set(_PREPROC_WAVEFORM_PARAMS), (
+    "every _REGION_PREPROC recipe needs a _PREPROC_WAVEFORM_PARAMS mapping; "
+    f"missing: {set(_REGION_PREPROC.values()) - set(_PREPROC_WAVEFORM_PARAMS)}"
+)
+
+
 _RATE_MS4_SORTER = {
     30000: MS4_30KHZ,
     20000: MS4_20KHZ,

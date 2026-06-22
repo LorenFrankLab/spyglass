@@ -58,10 +58,10 @@ def analyzer_path(sorting_id, waveform_params_name: str) -> Path:
     """Return the analyzer-cache folder for a ``(sorting_id, recipe)`` pair.
 
     ``analyzer_cache_root() / f"{sorting_id}__{waveform_params_name}.zarr"``.
-    A sort has more than one analyzer recipe (an unwhitened display recipe and
-    a whitened metric recipe), so the folder is keyed by both the
-    ``sorting_id`` and the ``waveform_params_name`` that produced it -- the two
-    never collide. Deterministic in ``(sorting_id, waveform_params_name)`` +
+    A sort may have more than one analyzer recipe (an unwhitened display recipe
+    today, and a whitened metric recipe once that build lands), so the folder is
+    keyed by both the ``sorting_id`` and the ``waveform_params_name`` that
+    produced it -- the two never collide. Deterministic in ``(sorting_id, waveform_params_name)`` +
     the configured root, so every code path resolves the same folder without
     the ``Sorting`` row needing to store the path.
 
@@ -92,9 +92,10 @@ def analyzer_path(sorting_id, waveform_params_name: str) -> Path:
 def remove_analyzer_cache(sorting_id, *, missing_ok: bool = True) -> bool:
     """Remove ALL analyzer-cache folders for a ``sorting_id``.
 
-    A sort can have several analyzer recipes on disk (display + metric), so
-    this removes every ``{sorting_id}__*.zarr`` folder under the cache root --
-    deleting the sort orphans every recipe. The glob is anchored on the full
+    A sort can have several analyzer recipes on disk (the display recipe today;
+    the whitened metric recipe once that build lands), so this removes every
+    ``{sorting_id}__*.zarr`` folder under the cache root -- deleting the sort
+    orphans every recipe. The glob is anchored on the full
     ``sorting_id`` (a fixed-length UUID) followed by the ``__`` separator, so
     one sort's folders never match another's.
 

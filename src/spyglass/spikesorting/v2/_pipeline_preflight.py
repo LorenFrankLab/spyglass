@@ -212,7 +212,11 @@ def preflight_v2_pipeline(
         RecordingSelection,
         SortGroupV2,
     )
+    from spyglass.spikesorting.v2._recipe_catalog import (
+        waveform_params_for_preprocessing,
+    )
     from spyglass.spikesorting.v2.sorting import (
+        AnalyzerWaveformParameters,
         SorterParameters,
         SortingSelection,
     )
@@ -308,6 +312,22 @@ def preflight_v2_pipeline(
         f"SorterParameters row (sorter={bundle.sorter!r}, "
         f"sorter_params_name={bundle.sorter_params_name!r}) is missing. "
         "Run initialize_v2_defaults().",
+    )
+    # The display analyzer recipe is region-resolved from the preprocessing
+    # recipe and FK-required on the Sorting row, so Sorting.make_fetch fails if
+    # its AnalyzerWaveformParameters row is missing. Gate it here (up front)
+    # rather than crashing deep in populate, matching the other params checks.
+    display_waveform_params_name = waveform_params_for_preprocessing(
+        bundle.preprocessing_params_name
+    )[0]
+    _check(
+        "analyzer_waveform_params_exist",
+        AnalyzerWaveformParameters
+        & {"waveform_params_name": display_waveform_params_name},
+        f"AnalyzerWaveformParameters row {display_waveform_params_name!r} "
+        "(the display analyzer recipe for preprocessing "
+        f"{bundle.preprocessing_params_name!r}) is missing. Run "
+        "initialize_v2_defaults().",
     )
 
     # 8b. sampling_rate_matches. The MS4/MS5 snippet window (clip_size /

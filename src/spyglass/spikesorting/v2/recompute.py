@@ -556,7 +556,7 @@ def _display_analyzer_folder(sorting_id):
     ``Sorting.get_analyzer`` loads by default), so its folder-size accounting
     and delete target resolve the sort's stored display recipe -- not the
     schema-default window. The whitened metric recipe's recompute coverage is
-    a later phase.
+    not yet implemented.
     """
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
     from spyglass.spikesorting.v2._sorting_analyzer import (

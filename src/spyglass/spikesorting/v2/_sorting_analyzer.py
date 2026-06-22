@@ -99,7 +99,10 @@ def fetch_waveform_params(waveform_params_name: str) -> dict:
         "waveform_params_name": waveform_params_name
     }
     if not row:
-        raise KeyError(
+        # ValueError (not KeyError): KeyError.__str__ wraps its arg in repr(),
+        # which mangles this multi-line actionable message at the moment a user
+        # needs to read it.
+        raise ValueError(
             "AnalyzerWaveformParameters: no row named "
             f"{waveform_params_name!r}. The analyzer waveform parameters must "
             "be tracked in the database (provenance); install the shipped "
@@ -323,8 +326,9 @@ def build_analyzer(
     ``AnalyzerWaveformParameters`` row's blob: ``ms_before`` / ``ms_after`` /
     ``max_spikes_per_unit`` / ``whiten`` / ``purpose``) the caller already
     fetched -- this function never resolves a bare recipe name to params (no DB
-    I/O per the tri-part contract). ``None`` falls back to the schema defaults
-    (the wide cortex display window) for direct / test callers.
+    I/O per the tri-part contract). It is required: ``None`` raises so a caller
+    can never silently build the wrong (schema-default) window into a
+    recipe-named folder.
 
     Parameters
     ----------
@@ -346,8 +350,9 @@ def build_analyzer(
         Keyword-only. Resolved cache folder to write, carrying the recipe
         identity. Required; ``None`` raises ``ValueError``. Default ``None``.
     waveform_params : dict, optional
-        Keyword-only. Resolved analyzer-waveform params blob. ``None`` uses the
-        schema defaults (wide cortex display window). Default ``None``.
+        Keyword-only. Resolved analyzer-waveform params blob. Required;
+        ``None`` raises ``ValueError`` (a caller must pass the sort's resolved
+        recipe, never let the build pick a default). Default ``None``.
 
     Returns
     -------
@@ -358,7 +363,7 @@ def build_analyzer(
     Raises
     ------
     ValueError
-        If ``analyzer_folder`` is not provided.
+        If ``analyzer_folder`` or ``waveform_params`` is not provided.
     """
     import shutil
 
@@ -377,11 +382,13 @@ def build_analyzer(
     folder = analyzer_folder
 
     if waveform_params is None:
-        from spyglass.spikesorting.v2._params.analyzer_waveform import (
-            AnalyzerWaveformParamsSchema,
+        raise ValueError(
+            "build_analyzer: waveform_params is required. Pass the sort's "
+            "resolved AnalyzerWaveformParameters blob (via "
+            "fetch_waveform_params / make_fetch) so the analyzer is built with "
+            "the recipe its folder name records -- this function never picks a "
+            "default window."
         )
-
-        waveform_params = AnalyzerWaveformParamsSchema().model_dump()
 
     # The whitened metric analyzer (the metric recipes' ``whiten=True``) is not
     # built yet -- this path only constructs the unwhitened display analyzer

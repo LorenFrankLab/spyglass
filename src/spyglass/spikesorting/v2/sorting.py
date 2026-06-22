@@ -48,7 +48,6 @@ from spyglass.spikesorting.v2._sorting_analyzer import (
     fetch_waveform_params,
     load_or_rebuild_analyzer,
     rebuild_analyzer_folder,
-    resolve_display_waveform_params_name,
 )
 from spyglass.spikesorting.v2._sorting_artifact_mask import apply_artifact_mask
 from spyglass.spikesorting.v2._sorting_dispatch import (
@@ -1037,12 +1036,12 @@ class Sorting(SpyglassMixin, dj.Computed):
     # back -- never re-resolved -- on every later rebuild, so the analyzer is
     # deterministic for a sorting_id. It is NOT a free per-sort knob and is NOT
     # part of sorting_id identity. The metric recipe is carried on
-    # AnalyzerCurationSelection (a later phase), not here.
+    # AnalyzerCurationSelection (not yet implemented), not here.
     # The SortingAnalyzer cache folder is intentionally NOT a column: it is
     # large (5-50 GB) regeneratable scratch resolved at runtime from
-    # sorting_id via _analyzer_cache.analyzer_path. Persisting an
-    # absolute path here previously drifted from the accessor-computed path
-    # whenever temp_dir changed between runs.
+    # (sorting_id, display_waveform_params_name) via _analyzer_cache.analyzer_path.
+    # Persisting an absolute path here previously drifted from the
+    # accessor-computed path whenever temp_dir changed between runs.
 
     class Unit(SpyglassMixinPart):
         """Per-unit metadata persisted at sort time.
@@ -1841,8 +1840,8 @@ class Sorting(SpyglassMixin, dj.Computed):
         # carve-out excludes legitimately folder-less rows from the DB-side set.
         # A sort's stored display recipe is the folder we expect on disk; a
         # {sid}__{other}.zarr folder (e.g. a stale recipe) is therefore a
-        # disk-side orphan. (The whitened metric recipe is retained in a later
-        # phase via AnalyzerCurationSelection.)
+        # disk-side orphan. (Retaining the whitened metric recipe's folder via
+        # AnalyzerCurationSelection is not yet implemented.)
         units_bearing = []
         for r in (cls & "n_units > 0").fetch(
             "sorting_id", "display_waveform_params_name", as_dict=True
