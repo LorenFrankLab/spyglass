@@ -99,6 +99,11 @@ optional-dependencies.moseq-gpu = [
   "jax-moseq[cuda12]",
   "keypoint-moseq",
 ]
+optional-dependencies.sleap = [
+  "ndx-pose>=0.2",
+  "sleap-io>=0.7",      # read/write .slp and export analysis.h5
+  "sleap-nn>=0.2",      # PyTorch inference backend (SLEAP >= 1.5)
+]
 optional-dependencies.test = [
   "codecov",                # for code coverage badge
   "docker",                 # for tests in a container

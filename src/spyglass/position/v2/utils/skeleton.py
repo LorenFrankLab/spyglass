@@ -36,6 +36,79 @@ def normalize_label(s: str) -> str:
     return " ".join(s.strip().lower().split())
 
 
+def build_canonical_map(known_names: "list[str]") -> "dict[str, str]":
+    """Map each normalized label to its canonical (raw) spelling.
+
+    The canonical spelling is the exact string as it appears in *known_names*
+    (e.g. the curated ``BodyPart`` table). The returned mapping is the bridge
+    used to resolve arbitrary surface forms back to a single canonical
+    identity, without ever storing the normalized form as an identifier.
+
+    Parameters
+    ----------
+    known_names : list[str]
+        Canonical body part spellings, e.g. ``BodyPart().fetch('bodypart')``.
+
+    Returns
+    -------
+    dict[str, str]
+        ``{normalize_label(name): name}``.
+
+    Raises
+    ------
+    datajoint.errors.DataJointError
+        If two distinct spellings collapse to the same normalized key, which
+        would make the canonical identity ambiguous.
+
+    Examples
+    --------
+    >>> build_canonical_map(['greenLED', 'earR'])
+    {'green led': 'greenLED', 'ear r': 'earR'}
+    """
+    canon_map: "dict[str, str]" = {}
+    for name in known_names:
+        key = normalize_label(name)
+        existing = canon_map.get(key)
+        if existing is not None and existing != name:
+            raise dj.DataJointError(
+                f"Body part name collision: {existing!r} and {name!r} both "
+                f"normalize to {key!r}. Canonical spelling is ambiguous."
+            )
+        canon_map[key] = name
+    return canon_map
+
+
+def canonicalize(
+    name: str, canon_map: "dict[str, str]", default: "str | None" = None
+) -> "str | None":
+    """Resolve a surface form to its canonical spelling.
+
+    Looks *name* up by its normalized key in *canon_map*. The result is always
+    a canonical spelling from the map (or *default* on a miss) -- never the
+    normalized form itself.
+
+    Parameters
+    ----------
+    name : str
+        Arbitrary surface form, e.g. ``'EarR'`` or ``'green_led'``.
+    canon_map : dict[str, str]
+        Mapping from :func:`build_canonical_map`.
+    default : str or None, optional
+        Returned when *name* has no canonical match, by default None.
+
+    Returns
+    -------
+    str or None
+        The canonical spelling, or *default* if unresolved.
+
+    Examples
+    --------
+    >>> canonicalize('EarR', {'ear r': 'earR'})
+    'earR'
+    """
+    return canon_map.get(normalize_label(name), default)
+
+
 def fuzzy_equal(a: str, b: str, threshold: float = 0.85) -> bool:
     """Return True if normalized *a* and *b* are similar above *threshold*.
 
