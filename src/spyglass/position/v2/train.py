@@ -29,7 +29,9 @@ from spyglass.position.utils.protocols import default_pk_name
 from spyglass.position.utils.tool_strategies import ToolStrategyFactory
 from spyglass.position.utils.yaml_io import load_yaml
 from spyglass.position.v2.utils.skeleton import (
+    build_canonical_map,
     build_labeled_graph,
+    canonicalize,
     is_duplicate_skeleton,
     norm_edges,
     normalize_label,
@@ -2123,6 +2125,68 @@ class Model(SpyglassMixin, dj.Computed):
         tool = (ModelParams & self).fetch1("tool")
         strategy = ToolStrategyFactory.create_strategy(tool)
         return strategy.get_latest_model_info(config)
+
+    @staticmethod
+    def _extract_bodypart_names(names) -> list:
+        """Coerce supported inputs into a list of body-part names.
+
+        Tool-agnostic: accepts an iterable of names, or a parsed config dict
+        keyed by either the DLC ``"bodyparts"`` field or the ndx-pose / SLEAP
+        ``"nodes"`` field. Reading a tool-specific model file from disk is the
+        responsibility of that tool's import path, which parses it and passes
+        the names (or parsed dict) here -- e.g. ``load_yaml(path)`` for DLC.
+
+        Raises
+        ------
+        TypeError
+            If given a bare ``str`` or :class:`~pathlib.Path`, which is
+            ambiguous (a single name vs. a file to parse) and tool-specific.
+        """
+        if isinstance(names, (str, Path)):
+            raise TypeError(
+                "Pass body-part names as a list, or a parsed config dict; a "
+                "bare string/path is ambiguous and tool-specific. For a DLC "
+                "config, pass load_yaml(path)."
+            )
+        if isinstance(names, dict):
+            names = names.get("bodyparts") or names.get("nodes") or []
+        return list(names)
+
+    def canonicalize_bodyparts(self, names) -> dict:
+        """Resolve body-part surface forms to their canonical spellings.
+
+        Uses the ``BodyPart`` table as the source of truth for canonical
+        spelling. Names matching an existing part -- ignoring camelCase,
+        snake_case, kebab-case, and whitespace differences -- map to that
+        part's exact spelling; names with no match are returned as unresolved
+        for the caller to decide what to do (e.g. error, or rewrite the DLC
+        project with ``normalize_names=True``).
+
+        Parameters
+        ----------
+        names : list[str] or dict
+            Names to resolve. Accepts an iterable of names, or a parsed config
+            dict keyed by either ``"bodyparts"`` (DLC) or ``"nodes"``
+            (ndx-pose / SLEAP). A single name must be wrapped in a list.
+
+        Returns
+        -------
+        dict
+            ``{"mapping": {surface_form: canonical}, "unresolved": [...]}``.
+            ``mapping`` holds only resolved names; ``unresolved`` preserves
+            input order.
+        """
+        names = self._extract_bodypart_names(names)
+        known = [str(bp) for bp in BodyPart().fetch("bodypart")]
+        canon_map = build_canonical_map(known)
+        mapping, unresolved = {}, []
+        for name in names:
+            canonical = canonicalize(name, canon_map)
+            if canonical is None:
+                unresolved.append(name)
+            else:
+                mapping[name] = canonical
+        return {"mapping": mapping, "unresolved": unresolved}
 
     def load(
         self,
