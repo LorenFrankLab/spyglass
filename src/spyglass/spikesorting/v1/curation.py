@@ -393,7 +393,7 @@ def _write_sorting_to_nwb_with_curation(
             # Skip the column when no unit is labeled: an all-empty ragged
             # column has no data for hdmf to infer a dtype from, which would
             # crash the write.
-            if any(label_values):
+            if any(len(value) > 0 for value in label_values):
                 nwbf.add_unit_column(
                     name="curation_label",
                     description="curation label",
