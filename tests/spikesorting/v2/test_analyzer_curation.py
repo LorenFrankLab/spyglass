@@ -399,3 +399,32 @@ def test_analyzer_curation_selection_idempotent_content_addressed(
     assert str(sel1["analyzer_curation_id"]) == str(expected)
     assert len(AnalyzerCurationSelection & sel1) == 1  # no duplicate row
     (AnalyzerCurationSelection & sel1).delete_quick()
+
+
+@pytest.mark.db_unit
+def test_analyzer_curation_selection_blocks_direct_insert(dj_conn):
+    """A raw insert1 (no allow_direct_insert) is rejected by the guard.
+
+    The PK is content-addressed, so insert_selection is the only sanctioned
+    create path; a direct insert could otherwise land a non-canonical row that
+    AnalyzerCuration.populate would compute from before insert_selection flags
+    it. The guard raises before any FK check, so no valid upstream is needed.
+    """
+    import uuid
+
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.metric_curation import (
+        AnalyzerCurationSelection,
+    )
+
+    with pytest.raises(dj.errors.DataJointError, match="insert_selection"):
+        AnalyzerCurationSelection().insert1(
+            {
+                "analyzer_curation_id": uuid.uuid4(),
+                "sorting_id": uuid.uuid4(),
+                "curation_id": 0,
+                "metric_params_name": "minimal",
+                "auto_curation_rules_name": "none",
+            }
+        )

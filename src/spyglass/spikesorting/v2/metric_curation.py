@@ -55,6 +55,7 @@ from spyglass.spikesorting.v2.sorting import (
     SortingSelection,
 )
 from spyglass.spikesorting.v2.utils import (
+    SelectionMasterInsertGuard,
     _resolved_job_kwargs,
     _validate_params,
 )
@@ -418,8 +419,16 @@ class AutoCurationRules(SpyglassMixin, dj.Lookup):
 
 
 @schema
-class AnalyzerCurationSelection(SpyglassMixin, dj.Manual):
-    """A CurationV2 row paired with metric and auto-curation parameters."""
+class AnalyzerCurationSelection(
+    SelectionMasterInsertGuard, SpyglassMixin, dj.Manual
+):
+    """A CurationV2 row paired with metric and auto-curation parameters.
+
+    Like the other deterministic-id selection masters, a raw ``insert`` /
+    ``insert1`` is blocked (the PK is content-addressed from the logical
+    identity); use ``insert_selection``, which passes
+    ``allow_direct_insert=True`` for its already-validated insert.
+    """
 
     definition = """
     analyzer_curation_id: uuid
