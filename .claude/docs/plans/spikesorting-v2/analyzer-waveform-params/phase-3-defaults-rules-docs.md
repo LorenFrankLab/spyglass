@@ -23,14 +23,14 @@ including in the user notebook. No analyzer-cache or whitening changes here.
 
 - **Keep MS5 as the runnable default; surface MS4 as the recommended science.**
   Leave `run_v2_pipeline`'s default an **MS5** preset — it runs under `numpy>=2`
-  out of the box and avoids requiring Docker/Singularity for first-time users.
-  Today's default is the tetrode-labeled
-  `franklab_tetrode_hippocampus_30khz_ms5_2026_06` (`_pipeline_run.py:87`),
-  and that is the ONLY MS5 preset (`_recipe_catalog.py:369`). For the
-  polymer-probe lab, OPTIONALLY add a probe-labeled
-  `franklab_probe_hippocampus_30khz_ms5_2026_06` (resolves to the same params)
-  and default to it, so the default's label matches probe geometry. Document MS4
-  as the **scientifically-preferred** polymer-probe recipe in the
+  out of the box and avoids requiring Docker/Singularity for first-time users,
+  but make the default label match the lab's polymer-probe default. Add a
+  probe-labeled preset `franklab_probe_hippocampus_30khz_ms5_2026_06` that
+  resolves to the same preprocessing / artifact / sorter parameter rows as the
+  current tetrode-labeled MS5 preset, then change `run_v2_pipeline`'s default
+  from `franklab_tetrode_hippocampus_30khz_ms5_2026_06` to the probe-labeled
+  alias. This is a UX/provenance-label change, not a scientific parameter
+  change. Document MS4 as the **scientifically-preferred** polymer-probe recipe in the
   `run_v2_pipeline` docstring (`pipeline.py:18-19`) and
   `describe_pipeline_presets`:
   - the Phase 3a containerized MS4 pipeline preset is the recommended path for
@@ -52,8 +52,11 @@ including in the user notebook. No analyzer-cache or whitening changes here.
   Keep `none`, `similarity_merge`, and `v1_default_nn_noise` as named rows (do
   not remove). The metric params row this references must compute
   `nn_advanced` + `isi_violation` (the existing `_default_rows` set already
-  does). Labels use the verified `CurationLabel` members; the executor may
-  swap `noise`/`reject` if the lab's operational exclusion label differs.
+  does). Labels use the verified `CurationLabel` members. The ISI rule is
+  deliberately `reject` (not `mua`): v2's curated-unit helper excludes
+  `reject` / `noise` / `artifact` by default, so units with >2% refractory
+  violations are removed from matchable-unit outputs unless a caller opts into a
+  different label policy.
 - **Make the new rule set the one the *notebook* uses** — the notebook's
   analyzer-curation step selects `franklab_default_auto_curation_2026_06`. Do NOT
   claim the *pipeline preset* wires it: `_PipelinePreset`
@@ -77,9 +80,9 @@ including in the user notebook. No analyzer-cache or whitening changes here.
   `plot_by_sort_group_ids` / `investigate_pair_*` to find merges,
   `materialize_curation`, a manual `CurationV2.insert_curation` merge, then a
   second `AnalyzerCuration` pass for final numbers. Use the new
-  `franklab_default_auto_curation_2026_06` rules and the MS5 default preset
-  (note containerized MS4 as the recommended-science option for modern hosts and
-  local MS4 for compatible local runtimes).
+  `franklab_default_auto_curation_2026_06` rules and the probe-labeled MS5
+  default preset (note containerized MS4 as the recommended-science option for
+  modern hosts and local MS4 for compatible local runtimes).
 
 ## Deliberately not in this phase
 
@@ -101,12 +104,13 @@ including in the user notebook. No analyzer-cache or whitening changes here.
 
 | Test | Asserts |
 | --- | --- |
-| `test_default_pipeline_preset_is_runnable_ms5` | `run_v2_pipeline`'s default `pipeline_preset` is an MS5 preset (runs under `numpy>=2`), not MS4 |
+| `test_default_pipeline_preset_is_probe_labeled_runnable_ms5` | `run_v2_pipeline`'s default `pipeline_preset` is the probe-labeled MS5 preset (same parameter rows as the old tetrode-labeled MS5 alias; runs under `numpy>=2`), not MS4 |
 | `test_preflight_guards_missing_local_ms4` | when local MS4 is *selected* and its binary is absent, preflight warns/errors with an actionable message (monkeypatch `installed_sorters`) |
 | `test_preflight_guards_missing_container_ms4_runtime` | when containerized MS4 is *selected* and Docker/Singularity support is absent, preflight warns/errors with an actionable message (reuses Phase 3a runtime probes) |
 | `test_describe_presets_flags_ms4_recommended` | `describe_pipeline_presets` marks containerized polymer MS4 as the recommended-science path for modern hosts and local MS4 as the compatible-host path |
 | `test_franklab_auto_curation_default_rules` | `franklab_default_auto_curation_2026_06` exists with `isi_violation > 0.02 -> reject` and `nn_noise_overlap > 0.1 -> noise`, rule order preserved (`db_unit`) |
 | `test_auto_curation_applies_isi_rule` | a unit with `isi_violation` 0.03 gets `reject` under the new rule set; a clean unit does not (`db_unit`, synthetic metrics) |
+| `test_isi_reject_matches_v2_default_exclusion_policy` | `reject`-labeled units are excluded by v2's default matchable-unit policy; the rule is not labeled `mua` |
 | `test_named_legacy_rules_preserved` | `none`, `similarity_merge`, `v1_default_nn_noise` still insert (no removal) |
 | notebook execution (CI smoke if notebooks are tested) | section 7 runs end-to-end against the example sort |
 

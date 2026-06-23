@@ -12,7 +12,10 @@ the DataJoint key and chooses the correct recording / analyzer / metric table;
 SpikeInterface owns the plotting and export behavior. The default backend is
 local `matplotlib`. Notebook-only / web-capable backends (`ipywidgets`,
 `sortingview`) are opt-in and explicit. No populate path uploads or publishes
-anything.
+anything. Plot helpers are read-only by default: if a richer SI widget needs a
+missing display-safe analyzer extension, the wrapper raises a clear error naming
+the `Sorting.add_extensions(...)` call, or computes it only when the caller
+passes an explicit opt-in such as `compute_missing=True`.
 
 **Depends on Phases 1-2** for stable display-vs-metric analyzer routing.
 Benefits from Phase 4 because `AnalyzerCuration.get_metrics()` can then include
@@ -128,11 +131,11 @@ Deferred or escape-hatch only:
   def available_visualizations() -> pandas.DataFrame: ...
   def plot_recording_traces(recording_key, *, raw=False, backend="matplotlib", **kwargs): ...
   def plot_recording_probe_map(recording_key, *, backend="matplotlib", **kwargs): ...
-  def plot_sorting_summary(sorting_key, *, backend="matplotlib", **kwargs): ...
-  def plot_unit_summary(sorting_key, unit_id, *, backend="matplotlib", **kwargs): ...
+  def plot_sorting_summary(sorting_key, *, compute_missing=False, backend="matplotlib", **kwargs): ...
+  def plot_unit_summary(sorting_key, unit_id, *, compute_missing=False, backend="matplotlib", **kwargs): ...
   def plot_waveforms(sorting_key, unit_ids=None, *, backend="matplotlib", **kwargs): ...
-  def plot_spikes_on_traces(sorting_key, *, backend="matplotlib", **kwargs): ...
-  def plot_unit_locations(sorting_key, *, backend="matplotlib", **kwargs): ...
+  def plot_spikes_on_traces(sorting_key, *, compute_missing=False, backend="matplotlib", **kwargs): ...
+  def plot_unit_locations(sorting_key, *, compute_missing=False, backend="matplotlib", **kwargs): ...
   def plot_metrics(analyzer_curation_key, *, backend="matplotlib", **kwargs): ...
   def plot_si_quality_metrics(analyzer_curation_key, *, compute_missing=False, backend="matplotlib", **kwargs): ...
   def plot_si_template_metrics(analyzer_curation_key, *, compute_missing=False, backend="matplotlib", **kwargs): ...
@@ -146,8 +149,9 @@ Deferred or escape-hatch only:
   `available_visualizations()` helper returns names, required key type,
   underlying implementation (`spikeinterface.widgets.*`,
   `spikeinterface.exporters.*`, or Spyglass `AnalyzerCuration.get_metrics`),
-  backend support notes, and whether missing extensions are auto-computed. This
-  is documentation-as-code and the primary discovery surface.
+  backend support notes, and whether missing extensions can be computed by
+  explicit opt-in. This is documentation-as-code and the primary discovery
+  surface.
 
   Implementation ownership is fixed: all SI-widget/export routing, extension
   checks, persisted-merge lookup, and backend policy lives in this module (or a
@@ -181,11 +185,11 @@ Deferred or escape-hatch only:
   conveniences, add one-line delegates on `Sorting`:
 
   ```python
-  def plot_summary(self, key, *, backend="matplotlib", **kwargs): ...
-  def plot_unit_summary(self, key, unit_id, *, backend="matplotlib", **kwargs): ...
+  def plot_summary(self, key, *, compute_missing=False, backend="matplotlib", **kwargs): ...
+  def plot_unit_summary(self, key, unit_id, *, compute_missing=False, backend="matplotlib", **kwargs): ...
   def plot_waveforms(self, key, unit_ids=None, *, backend="matplotlib", **kwargs): ...
-  def plot_spikes_on_traces(self, key, *, backend="matplotlib", **kwargs): ...
-  def plot_unit_locations(self, key, *, backend="matplotlib", **kwargs): ...
+  def plot_spikes_on_traces(self, key, *, compute_missing=False, backend="matplotlib", **kwargs): ...
+  def plot_unit_locations(self, key, *, compute_missing=False, backend="matplotlib", **kwargs): ...
   ```
 
   These methods call the matching facade functions
@@ -206,18 +210,19 @@ Deferred or escape-hatch only:
 
   ```python
   def _ensure_display_extensions(
-      sorting_key, required_extensions, *, compute_missing=True, **job_kwargs
+      sorting_key, required_extensions, *, compute_missing=False, **job_kwargs
   ) -> None: ...
   ```
 
-  It calls `Sorting.add_extensions` on the display analyzer for display-safe
-  missing extensions, or raises a clear error naming the missing extensions and
-  the `Sorting.add_extensions(...)` call the user can run. The exact
-  per-wrapper requirement list must be pinned in tests against SI 0.104.3
-  behavior. Do not auto-compute whitened/metric-only extensions from a
-  visualization wrapper. For SI-native quality-metric widgets, prefer the
-  official Spyglass `plot_metrics` path; any SI-native metric-extension compute
-  must be explicit because it is not the routed Spyglass metric table.
+  With the default `compute_missing=False`, it raises a clear error naming the
+  missing extensions and the `Sorting.add_extensions(...)` call the user can run.
+  With `compute_missing=True`, it calls `Sorting.add_extensions` on the display
+  analyzer for display-safe missing extensions. The exact per-wrapper requirement
+  list must be pinned in tests against SI 0.104.3 behavior. Do not auto-compute
+  whitened/metric-only extensions from a visualization wrapper. For SI-native
+  quality-metric widgets, prefer the official Spyglass `plot_metrics` path; any
+  SI-native metric-extension compute must be explicit because it is not the
+  routed Spyglass metric table.
 
 - **Optional curation-level metric / merge table delegates.** If keeping
   table-local conveniences, add one-line delegates on `AnalyzerCuration`:
@@ -262,10 +267,12 @@ Deferred or escape-hatch only:
   These delegate to `visualization.export_si_report(...)` and
   `visualization.export_to_phy(...)`. The facade uses the display analyzer.
   `export_si_report` wraps SI `export_report` and should make
-  missing-display-extension behavior explicit: either precompute the display-safe
-  extensions needed for the report (`spike_amplitudes`,
-  `correlograms`, `unit_locations`, `template_similarity`, `template_metrics`) or
-  let SI skip missing optional sections while logging what was absent.
+  missing-display-extension behavior explicit. With `force_computation=False`,
+  do not mutate the analyzer cache; either let SI skip missing optional sections
+  while logging what was absent or raise a clear error. With
+  `force_computation=True`, precompute the display-safe extensions needed for
+  the report (`spike_amplitudes`, `correlograms`, `unit_locations`,
+  `template_similarity`, `template_metrics`) before calling SI.
 
   `export_to_phy` wraps SI `export_to_phy`. Do not compute official Spyglass
   quality metrics on the whitened analyzer for Phy export. If users need the
@@ -324,16 +331,17 @@ Deferred or escape-hatch only:
 | `test_recording_plot_traces_calls_si_widget` | module facade loads `Recording.get_recording(key)` and calls SI `plot_traces(recording=..., backend="matplotlib", **kwargs)` |
 | `test_recording_plot_probe_map_calls_si_widget` | loads the saved preprocessed recording and calls SI `plot_probe_map`; no analyzer is loaded |
 | `test_sorting_plot_summary_uses_display_analyzer` | resolves `Sorting.get_analyzer(key)` with the stored display recipe and calls SI `plot_sorting_summary`; no metric analyzer load |
-| `test_sorting_plot_summary_ensures_display_extensions` | missing display-safe extensions required by the SI widget are computed through `Sorting.add_extensions` or produce a clear missing-extension error |
+| `test_sorting_plot_summary_missing_extensions_read_only_by_default` | missing display-safe extensions required by the SI widget produce a clear missing-extension error by default and do not call `Sorting.add_extensions` |
+| `test_sorting_plot_summary_compute_missing_opt_in` | passing `compute_missing=True` computes only display-safe missing extensions through `Sorting.add_extensions` before calling SI |
 | `test_sorting_plot_unit_summary_uses_display_analyzer` | unit summary uses the display analyzer and forwards `unit_id`, backend, and kwargs |
 | `test_sorting_plot_waveforms_wraps_unit_waveforms` | Spyglass `plot_waveforms` wraps SI `plot_unit_waveforms` (not a nonexistent SI `plot_waveforms` symbol) |
-| `test_sorting_plot_unit_locations_ensures_extension` | `plot_unit_locations` ensures / requires the display `unit_locations` extension before calling SI |
+| `test_sorting_plot_unit_locations_requires_extension_or_opt_in` | `plot_unit_locations` requires the display `unit_locations` extension by default, or computes it only with explicit `compute_missing=True` |
 | `test_analyzer_curation_plot_metrics_uses_spyglass_metrics_by_default` | `plot_metrics` reads `AnalyzerCuration.get_metrics(key)` and does not call SI `plot_quality_metrics` by default |
 | `test_analyzer_curation_plot_si_quality_metrics_uses_display_analyzer` | explicitly named SI-native quality-metric view uses the display analyzer and is documented as non-official routed metrics |
 | `test_si_metric_widgets_require_explicit_compute_for_missing_extensions` | `plot_si_quality_metrics` / `plot_si_template_metrics` do not auto-compute missing SI metric extensions unless an explicit opt-in flag is passed; default error points users to `plot_metrics` for official Spyglass metrics |
 | `test_analyzer_curation_plot_si_template_metrics_uses_display_analyzer` | SI-native template-metric view uses the display analyzer only |
 | `test_plot_potential_merges_uses_persisted_merge_groups` | wrapper passes `AnalyzerCuration.get_merge_groups(key)` to SI `plot_potential_merges`; monkeypatch `compute_merge_unit_groups` to raise and assert it is never called |
-| `test_export_report_uses_display_analyzer` | `export_si_report` wraps SI `export_report` with the display analyzer and its missing-extension policy is explicit |
+| `test_export_report_uses_display_analyzer` | `export_si_report` wraps SI `export_report` with the display analyzer; `force_computation=False` does not mutate analyzer extensions, while `force_computation=True` computes only display-safe report extensions |
 | `test_export_to_phy_uses_display_analyzer` | `export_to_phy` wraps SI `export_to_phy` with the display analyzer; no official metric computation on the whitened analyzer |
 | `test_no_widget_uses_metric_analyzer_by_default` | every visualization/export helper defaults to the display analyzer or saved recording, never the whitened metric analyzer |
 | `test_backend_policy_default_and_opt_in` | default backend is `matplotlib`; `backend="sortingview"` passes through only when explicitly supplied; no populate path publishes |
@@ -350,8 +358,9 @@ suite.
 - DB-free fake recording / analyzer objects for wrapper tests; monkeypatch SI
   widget/export functions and `Sorting.get_analyzer` / `Recording.get_recording`
   / `AnalyzerCuration.get_metrics` / `AnalyzerCuration.get_merge_groups`.
-- Synthetic analyzer fixture with only base extensions, used to verify
-  ensure-or-clear-error behavior for richer widgets.
+- Synthetic analyzer fixture with only base extensions, used to verify clear
+  missing-extension errors by default and explicit compute opt-in for richer
+  widgets.
 - Existing MEArec / minirec smoke fixture for one real matplotlib rendering and
   optional local report / Phy export integration checks.
 
@@ -368,8 +377,9 @@ suite.
 - Official metric plots use `AnalyzerCuration.get_metrics()` by default.
 - `plot_potential_merges` reads persisted `AnalyzerCuration.get_merge_groups`
   suggestions and never recomputes `compute_merge_unit_groups` in the plot path.
-- Rich widgets either ensure their required display-safe extensions through
-  `Sorting.add_extensions` or raise a clear missing-extension error.
+- Rich widgets raise clear missing-extension errors by default; with explicit
+  `compute_missing=True`, they compute only required display-safe extensions
+  through `Sorting.add_extensions`.
 - No wrapper defaults to the whitened metric analyzer.
 - No populate path opens a GUI, writes a report, uploads, or publishes.
 - Full FigPack curation state / edit round-trip remains out of scope.

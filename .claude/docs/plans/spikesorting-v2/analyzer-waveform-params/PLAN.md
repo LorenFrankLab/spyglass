@@ -1,7 +1,9 @@
 # Analyzer Waveform Parameters & Curation Defaults — Implementation Plan
 
-**Status:** Phase 1 complete (implemented, reviewed, cleanup pass applied; v2
-suite green — 1100 passed / 18 skipped); awaiting merge. Phases 2–5 not started.
+**Status:** Phases 1, 2, and 3a complete on the working branch (reviewed and
+cleaned up). Phase 3, Phase 4, and Phase 5 remain to execute. Local pytest in
+the current Codex environment is blocked by missing `datajoint`; use the project
+v2 test environment for final suite verification.
 
 Restore DB-tracked spike-sorting analyzer waveform parameters (so the window and
 subsample that produced each analyzer are recorded and reproducible, the way v1
@@ -38,7 +40,7 @@ For agent invocation, **load only the slice you need**:
   - [phase-3a-containerized-sorter-execution.md](phase-3a-containerized-sorter-execution.md) — first-class SpikeInterface Docker/Singularity sorter execution tracked on `SorterParameters`; containerized MS4 row/preset support without host `numpy<2`.
   - [phase-3-defaults-rules-docs.md](phase-3-defaults-rules-docs.md) — auto-curation rules (`franklab_default_auto_curation_2026_06`), MS5 default + containerized/local MS4 recommendation, curation-loop docs + notebook.
   - [phase-4-waveform-shape-metrics.md](phase-4-waveform-shape-metrics.md) — expose SI template (waveform-shape) metric **columns** in the per-unit metric table for downstream, region-specific cell typing; configurable `template_metric_columns` (SI output-column names, e.g. `trough_half_width`); no cell-type thresholds shipped. Depends on Phase 2 (display-analyzer routing); independent of Phase 3.
-  - [phase-5-si-visualization-export.md](phase-5-si-visualization-export.md) — add a discoverable `v2.visualization` facade plus key-aware wrappers around SI widgets/exporters (`plot_traces`, `plot_probe_map`, sorting/unit summaries, waveforms, metrics, potential merges, `export_report`, `export_to_phy`) with `matplotlib` as the local default; display-analyzer and Spyglass-metric routing preserved; no FigPack/cloud curation UI.
+  - [phase-5-si-visualization-export.md](phase-5-si-visualization-export.md) — add a discoverable `v2.visualization` facade plus key-aware wrappers around SI widgets/exporters (`plot_traces`, `plot_probe_map`, sorting/unit summaries, waveforms, metrics, potential merges, `export_report`, `export_to_phy`) with `matplotlib` as the local default; display-analyzer and Spyglass-metric routing preserved; plotting is read-only by default, richer widgets can opt in to computing missing display-safe extensions, and no FigPack/cloud curation UI is added.
 
 ## Deliberately not in this plan
 
