@@ -42,6 +42,31 @@ def test_quality_metric_parameters_rejects_bogus_metric(dj_conn):
 
 
 @pytest.mark.db_unit
+def test_franklab_default_metric_params_include_full_qc_set(dj_conn):
+    """The Frank-lab default metric row computes the full Phase-3 QC surface."""
+    from spyglass.spikesorting.v2.metric_curation import QualityMetricParameters
+
+    QualityMetricParameters.insert_default()
+    row = (
+        QualityMetricParameters & {"metric_params_name": "franklab_default"}
+    ).fetch1()
+
+    assert row["metric_names"] == [
+        "snr",
+        "isi_violation",
+        "firing_rate",
+        "num_spikes",
+        "presence_ratio",
+        "amplitude_cutoff",
+        "nn_advanced",
+    ]
+    assert bool(row["skip_pc_metrics"]) is False
+    assert "nn_noise_overlap" not in row["metric_names"]
+    assert "nn_advanced" in row["metric_kwargs"]
+    assert row["metric_kwargs"]["nn_advanced"]["seed"] == 0
+
+
+@pytest.mark.db_unit
 def test_auto_curation_rules_insert1_blocked(dj_conn):
     """Direct AutoCurationRules.insert1 is unsupported (helper-only)."""
     from spyglass.spikesorting.v2.exceptions import (
@@ -262,6 +287,15 @@ def test_analyzer_curation_end_to_end(
     assert child_row["parent_curation_id"] == (
         populated_sorting_with_curation["curation_id"]
     )
+    child_restriction = CurationV2 & {
+        "sorting_id": child["sorting_id"],
+        "parent_curation_id": populated_sorting_with_curation["curation_id"],
+        "curation_source": "analyzer_curation",
+        "description": "auto-curation",
+    }
+    n_children = len(child_restriction)
+    assert AnalyzerCuration().materialize_curation(sel) == child
+    assert len(child_restriction) == n_children
     # Auto-registered in the merge master.
     assert SpikeSortingOutput.CurationV2 & child
 
@@ -962,6 +996,7 @@ def test_analyzer_curation_materializes_real_labels(
         assert (
             CurationV2 & child
         ).fetch1("curation_source") == "analyzer_curation"
+        assert AnalyzerCuration().materialize_curation(sel) == child
     finally:
         _teardown()
 

@@ -1199,6 +1199,69 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
             abs_path, row["merge_suggestions_object_id"]
         )
 
+    @staticmethod
+    def _normalized_labels(labels: dict | None) -> dict[int, tuple[str, ...]]:
+        """Normalize ``{unit_id: labels}`` for semantic equality checks."""
+        return {
+            int(unit_id): tuple(sorted(str(label) for label in unit_labels))
+            for unit_id, unit_labels in (labels or {}).items()
+            if unit_labels
+        }
+
+    @staticmethod
+    def _normalized_real_merge_groups(merge_groups) -> tuple[tuple[int, ...], ...]:
+        """Normalize merge groups, dropping 1-unit self provenance entries."""
+        if isinstance(merge_groups, dict):
+            groups = merge_groups.values()
+        else:
+            groups = merge_groups or []
+        return tuple(
+            sorted(
+                tuple(sorted(int(unit_id) for unit_id in group))
+                for group in groups
+                if len(group) >= 2
+            )
+        )
+
+    @classmethod
+    def _find_matching_materialized_curation(
+        cls,
+        *,
+        sorting_id,
+        parent_curation_id: int,
+        labels: dict,
+        merge_groups: list,
+        description: str,
+    ) -> dict | None:
+        """Return an existing analyzer child with the same committed content."""
+        target_labels = cls._normalized_labels(labels)
+        target_merges = cls._normalized_real_merge_groups(merge_groups)
+        candidates = (
+            CurationV2
+            & {
+                "sorting_id": sorting_id,
+                "parent_curation_id": parent_curation_id,
+                "curation_source": "analyzer_curation",
+                "merges_applied": False,
+                "description": description,
+            }
+        ).fetch("KEY", as_dict=True, order_by="curation_id")
+        for candidate in candidates:
+            if (
+                cls._normalized_labels(CurationV2._labels_by_unit(candidate))
+                != target_labels
+            ):
+                continue
+            if (
+                cls._normalized_real_merge_groups(
+                    CurationV2.get_merge_groups(candidate)
+                )
+                != target_merges
+            ):
+                continue
+            return candidate
+        return None
+
     def get_waveforms(self, key, fetch_all: bool = False):
         """Return a waveform accessor over the sort's SortingAnalyzer.
 
@@ -1228,12 +1291,28 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
 
         The explicit v2 analog of v1 ``CurationV1.insert_metric_curation``:
         auto-curation never silently writes a curation, so the user calls this
-        to commit. Returns the new ``{sorting_id, curation_id}`` key.
+        to commit. Re-running with the same analyzer-curation content is
+        idempotent: an existing child with the same parent, labels, proposed
+        merges, description, and ``curation_source='analyzer_curation'`` is
+        returned instead of creating another curation row. Returns the
+        ``{sorting_id, curation_id}`` key.
         """
         sel = (AnalyzerCurationSelection & key).fetch1()
         sorting_key = {"sorting_id": sel["sorting_id"]}
         labels = self.get_labels(key)
+        labels, _ = CurationV2._normalize_curation_inputs(
+            labels or None, "analyzer_curation", allow_custom_labels
+        )
         merge_groups = [g for g in self.get_merge_groups(key) if len(g) >= 2]
+        existing = self._find_matching_materialized_curation(
+            sorting_id=sel["sorting_id"],
+            parent_curation_id=int(sel["curation_id"]),
+            labels=labels,
+            merge_groups=merge_groups,
+            description=description,
+        )
+        if existing is not None:
+            return existing
         return CurationV2.insert_curation(
             sorting_key,
             labels=labels or None,
