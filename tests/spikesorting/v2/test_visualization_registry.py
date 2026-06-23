@@ -76,11 +76,31 @@ def test_available_visualizations_lists_documented_helpers():
         "export_to_phy",
     }
     assert expected <= names
-    # Plot helpers default to the matplotlib backend; the exporters take no
-    # plotting backend, so their catalog entry is None rather than misleading.
+    # The catalog records each helper's ACTUAL default backend (not a blanket
+    # "matplotlib"): most plot helpers are matplotlib, but the two SI widgets
+    # with no matplotlib backend are recorded honestly, and the exporters take
+    # no plotting backend at all (None).
     indexed = table.set_index("name")
-    plot_helpers = [n for n in names if n.startswith("plot_")]
-    assert set(indexed.loc[plot_helpers, "backend_default"]) == {"matplotlib"}
+    matplotlib_helpers = [
+        "plot_recording_traces",
+        "plot_recording_probe_map",
+        "plot_unit_summary",
+        "plot_waveforms",
+        "plot_spikes_on_traces",
+        "plot_unit_locations",
+        "plot_metrics",
+        "plot_si_quality_metrics",
+        "plot_si_template_metrics",
+    ]
+    assert set(indexed.loc[matplotlib_helpers, "backend_default"]) == {
+        "matplotlib"
+    }
+    # SortingSummaryWidget has no matplotlib backend -> None (explicit required);
+    # PotentialMergesWidget supports only ipywidgets.
+    assert indexed.loc["plot_sorting_summary", "backend_default"] is None
+    assert (
+        indexed.loc["plot_potential_merges", "backend_default"] == "ipywidgets"
+    )
     assert indexed.loc["export_si_report", "backend_default"] is None
     assert indexed.loc["export_to_phy", "backend_default"] is None
     # Key types are constrained to the three resolvable kinds.

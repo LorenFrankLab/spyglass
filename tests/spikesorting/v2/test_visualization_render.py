@@ -131,4 +131,7 @@ def test_export_to_phy_writes_folder_off_display_analyzer(
     output_folder = tmp_path / "phy"
     ssviz.export_to_phy(populated_sorting, output_folder)
     assert (output_folder / "params.py").exists()
+    # compute_pc_features defaults to False, so SI writes no PC-feature arrays
+    # (and computes no principal_components onto the display analyzer).
+    assert not (output_folder / "pc_features.npy").exists()
     plt.close("all")

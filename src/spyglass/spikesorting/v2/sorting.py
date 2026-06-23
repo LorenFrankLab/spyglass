@@ -1798,13 +1798,14 @@ class Sorting(SpyglassMixin, dj.Computed):
     # ---- visualization / export delegates (see v2.visualization facade) ---
 
     def plot_summary(
-        self, key, *, compute_missing=False, backend="matplotlib", **kwargs
+        self, key, *, compute_missing=False, backend=None, **kwargs
     ):
         """Delegate to ``visualization.plot_sorting_summary`` for this sort.
 
         A local-discoverability one-liner; the display-analyzer routing and
         extension policy live in the ``v2.visualization`` facade, which the
-        notebook/docs teach as the primary surface.
+        notebook/docs teach as the primary surface. ``backend`` is required (SI's
+        ``SortingSummaryWidget`` has no matplotlib backend); see the facade.
         """
         from spyglass.spikesorting.v2 import visualization
 

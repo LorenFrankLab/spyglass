@@ -288,10 +288,24 @@ def test_sorting_plot_summary_uses_display_analyzer(dj_conn, monkeypatch):
         return "SUMMARY"
 
     monkeypatch.setattr(sw, "plot_sorting_summary", _fake)
-    assert ssviz.plot_sorting_summary({"sorting_id": "s"}) == "SUMMARY"
+    # SortingSummaryWidget has no matplotlib backend; pass one explicitly.
+    assert (
+        ssviz.plot_sorting_summary(
+            {"sorting_id": "s"}, backend="spikeinterface_gui"
+        )
+        == "SUMMARY"
+    )
     assert captured["analyzer"] is fake
+    assert captured["backend"] == "spikeinterface_gui"
     # The display default, never the whitened metric recipe.
     assert wpn == [None]
+
+
+@pytest.mark.db_unit
+def test_plot_sorting_summary_requires_explicit_backend(dj_conn):
+    """Without a backend it raises (SI's summary widget has no matplotlib path)."""
+    with pytest.raises(ValueError, match="no local matplotlib backend"):
+        ssviz.plot_sorting_summary({"sorting_id": "s"})
 
 
 @pytest.mark.db_unit
@@ -309,8 +323,12 @@ def test_sorting_plot_summary_missing_extensions_read_only_by_default(
         raise AssertionError("SI widget must not be called on the error path")
 
     monkeypatch.setattr(sw, "plot_sorting_summary", _must_not_call)
-    with pytest.raises(MissingDisplayExtensionError, match="unit_locations"):
-        ssviz.plot_sorting_summary({"sorting_id": "s"})
+    with pytest.raises(MissingDisplayExtensionError, match="unit_locations") as exc:
+        ssviz.plot_sorting_summary(
+            {"sorting_id": "s"}, backend="spikeinterface_gui"
+        )
+    # The absent extensions are exposed structurally, not only in the message.
+    assert "unit_locations" in exc.value.missing
 
 
 @pytest.mark.db_unit
@@ -334,7 +352,9 @@ def test_sorting_plot_summary_compute_missing_opt_in(dj_conn, monkeypatch):
     )
     assert (
         ssviz.plot_sorting_summary(
-            {"sorting_id": "s"}, compute_missing=True
+            {"sorting_id": "s"},
+            compute_missing=True,
+            backend="spikeinterface_gui",
         )
         == "SUMMARY"
     )
@@ -774,7 +794,7 @@ def test_no_widget_uses_metric_analyzer_by_default(dj_conn, monkeypatch):
 
     ckey = {"curation_id": 0}
     skey = {"sorting_id": "s"}
-    ssviz.plot_sorting_summary(skey)
+    ssviz.plot_sorting_summary(skey, backend="spikeinterface_gui")
     ssviz.plot_unit_summary(skey, 0)
     ssviz.plot_waveforms(skey)
     ssviz.plot_spikes_on_traces(skey)
@@ -796,21 +816,31 @@ def test_backend_policy_default_and_opt_in(dj_conn, monkeypatch):
 
     from spyglass.spikesorting.v2.recording import Recording
 
-    # Default backend is matplotlib for every plot helper that takes one.
+    # matplotlib is the default for the helpers whose SI widget supports it.
     for name in (
         "plot_recording_traces",
         "plot_recording_probe_map",
-        "plot_sorting_summary",
         "plot_unit_summary",
         "plot_waveforms",
         "plot_spikes_on_traces",
         "plot_unit_locations",
         "plot_si_quality_metrics",
         "plot_si_template_metrics",
-        "plot_potential_merges",
     ):
         sig = inspect.signature(getattr(ssviz, name))
         assert sig.parameters["backend"].default == "matplotlib"
+    # The two widgets SI offers no matplotlib backend for default honestly:
+    # sorting summary requires an explicit backend, potential-merges is ipywidgets.
+    assert (
+        inspect.signature(ssviz.plot_sorting_summary).parameters["backend"].default
+        is None
+    )
+    assert (
+        inspect.signature(ssviz.plot_potential_merges)
+        .parameters["backend"]
+        .default
+        == "ipywidgets"
+    )
 
     # An explicit backend reaches SI unchanged (opt-in only).
     monkeypatch.setattr(

@@ -30,8 +30,14 @@ class MissingDisplayExtensionError(RuntimeError):
 
     Raised by the read-only default path so a notebook user gets an actionable
     message (the exact ``add_extensions`` call, or the ``compute_missing=True``
-    opt-in) instead of a deep SpikeInterface ``check_extensions`` failure.
+    opt-in) instead of a deep SpikeInterface ``check_extensions`` failure. The
+    absent extensions are also exposed on the ``missing`` attribute so a caller
+    can act on them programmatically without parsing the message string.
     """
+
+    def __init__(self, message: str, *, missing=None):
+        self.missing = list(missing or [])
+        super().__init__(message)
 
 
 # Display-safe extensions each SpikeInterface display widget reads beyond the
@@ -102,10 +108,15 @@ _REGISTRY: tuple[dict, ...] = (
     {
         "name": "plot_sorting_summary",
         "key_type": "sorting",
+        # SortingSummaryWidget has no matplotlib backend in SI 0.104.3; a
+        # backend (spikeinterface_gui / sortingview / figpack) is required.
         "implementation": "spikeinterface.widgets.plot_sorting_summary",
-        "backend_default": "matplotlib",
+        "backend_default": None,
         "compute_missing": True,
-        "description": "Multi-panel summary of the whole sort",
+        "description": (
+            "Multi-panel summary of the whole sort (GUI/web backend required, "
+            "no matplotlib)"
+        ),
     },
     {
         "name": "plot_unit_summary",
@@ -172,10 +183,13 @@ _REGISTRY: tuple[dict, ...] = (
     {
         "name": "plot_potential_merges",
         "key_type": "analyzer_curation",
+        # PotentialMergesWidget supports only the interactive ipywidgets backend.
         "implementation": "spikeinterface.widgets.plot_potential_merges",
-        "backend_default": "matplotlib",
+        "backend_default": "ipywidgets",
         "compute_missing": False,
-        "description": "Persisted merge-group suggestions (never recomputed)",
+        "description": (
+            "Persisted merge-group suggestions (never recomputed; ipywidgets)"
+        ),
     },
     {
         "name": "export_si_report",

@@ -1545,8 +1545,12 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
             key, compute_missing=compute_missing, backend=backend, **kwargs
         )
 
-    def plot_potential_merges(self, key, *, backend="matplotlib", **kwargs):
-        """Delegate to ``visualization.plot_potential_merges`` for this curation."""
+    def plot_potential_merges(self, key, *, backend="ipywidgets", **kwargs):
+        """Delegate to ``visualization.plot_potential_merges`` for this curation.
+
+        Defaults to the ``ipywidgets`` backend (SI's ``PotentialMergesWidget``
+        has no matplotlib backend); see the facade.
+        """
         from spyglass.spikesorting.v2 import visualization
 
         return visualization.plot_potential_merges(

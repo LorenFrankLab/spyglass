@@ -100,7 +100,8 @@ def _display_analyzer_with_extensions(
             raise MissingDisplayExtensionError(
                 _viz.format_missing_extension_error(
                     missing, recommend_metrics=recommend_metrics
-                )
+                ),
+                missing=missing,
             )
         sorting.add_extensions(sorting_key, missing)
         analyzer = sorting.get_analyzer(sorting_key)
@@ -200,7 +201,7 @@ def plot_recording_probe_map(recording_key, *, backend="matplotlib", **kwargs):
 
 
 def plot_sorting_summary(
-    sorting_key, *, compute_missing=False, backend="matplotlib", **kwargs
+    sorting_key, *, compute_missing=False, backend=None, **kwargs
 ):
     """Plot the sort's display-analyzer summary (SI ``plot_sorting_summary``).
 
@@ -209,7 +210,24 @@ def plot_sorting_summary(
     ``unit_locations`` / ``template_similarity``; if any are missing the read-only
     default raises, while ``compute_missing=True`` computes those display-safe
     extensions first.
+
+    Unlike the other plot helpers, SI's ``SortingSummaryWidget`` has NO local
+    matplotlib backend in SI 0.104.3 -- it renders only via ``spikeinterface_gui``
+    (desktop GUI) / ``sortingview`` / ``figpack`` (web). ``backend`` therefore has
+    no default and MUST be passed explicitly; calling without one raises a clear
+    error pointing at those backends and at ``plot_unit_summary`` /
+    ``plot_metrics`` for local matplotlib views.
     """
+    supported = ("spikeinterface_gui", "sortingview", "figpack")
+    if backend is None:
+        raise ValueError(
+            "plot_sorting_summary has no local matplotlib backend in "
+            "SpikeInterface 0.104.3; SortingSummaryWidget renders only via "
+            f"{' / '.join(supported)} (desktop GUI / web). Pass one explicitly "
+            "(e.g. backend='spikeinterface_gui' for the local SI curation GUI). "
+            "For a local matplotlib view use plot_unit_summary(...) per unit or "
+            "plot_metrics(...) for the metric overview."
+        )
     import spikeinterface.widgets as sw
 
     analyzer = _display_analyzer_with_extensions(
@@ -392,7 +410,7 @@ def plot_si_template_metrics(
 
 
 def plot_potential_merges(
-    analyzer_curation_key, *, backend="matplotlib", **kwargs
+    analyzer_curation_key, *, backend="ipywidgets", **kwargs
 ):
     """Plot the persisted potential-merge suggestions (SI ``plot_potential_merges``).
 
@@ -403,6 +421,10 @@ def plot_potential_merges(
     kwargs than the persisted Spyglass suggestion row. SI's merge widget reads the
     display ``spike_amplitudes`` / ``correlograms`` extensions (already present
     once auto-merge has run); a clear error is raised if they are absent.
+
+    SI's ``PotentialMergesWidget`` supports ONLY the interactive ``ipywidgets``
+    backend in SI 0.104.3 (notebook-local interactivity, not web publishing), so
+    that is the default here rather than ``matplotlib``.
     """
     from spyglass.spikesorting.v2.metric_curation import AnalyzerCuration
 
