@@ -321,6 +321,17 @@ Available pipeline presets (all dated `_2026_06`):
     KS4 common-references internally, set the sort group's
     `reference_mode="none"` to avoid double-referencing.
 
+For Frank-lab polymer/tetrode rows, the scientific defaults mirror the v1
+workflow: sort one group at a time, use a 600 Hz hippocampal high-pass (300 Hz
+for cortex), pass already-filtered recordings to MountainSort (`filter=False`),
+whiten inside the sorter, use a 100 um adjacency radius, and default to
+bidirectional `detect_sign=0` because extracellular polarity can flip with
+geometry. The analyzer uses separate waveform rows for display and metrics:
+unwhitened waveforms preserve the visible shape/amplitude, while the whitened
+metric analyzer supports PC/nearest-neighbour metrics. Hippocampal analyzer
+rows intentionally keep the v1-like 0.5/0.5 ms window and sample up to 20000
+spikes per unit.
+
 The tetrode- and probe-hippocampus 30 kHz presets resolve to the **same**
 parameter rows (the recipe is set by region + rate; `probe_type` is
 informational). `list_pipeline_presets()` returns the names at runtime;
@@ -474,7 +485,8 @@ sel = AnalyzerCurationSelection.insert_selection(
     {
         "sorting_id": run_summary["sorting_id"],
         "curation_id": run_summary["curation_id"],
-        "metric_params_name": "franklab_default",  # snr/isi/firing/nn_advanced (PCA)
+        # snr/isi/firing/num_spikes/presence_ratio/amplitude_cutoff/nn_advanced(PCA)
+        "metric_params_name": "franklab_default",
         # Frank-lab default: nn_noise_overlap > 0.1 -> noise, isi_violation > 0.02
         # -> reject (the lab's ~2% refractory policy). 'v1_default_nn_noise' (the
         # nn-only rules) and 'similarity_merge' / 'none' remain available.
