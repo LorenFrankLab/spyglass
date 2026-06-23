@@ -140,6 +140,71 @@ def test_create_merged_curation_commits(polymer_60s_sort):
 
 
 @pytest.mark.database
+@pytest.mark.slow
+def test_create_merged_curation_reuses_matching_child(polymer_60s_sort):
+    """``reuse_existing=True`` makes a manual-merge notebook cell rerunnable."""
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.utils import CurationLabel
+
+    a, b = _two_unit_ids(polymer_60s_sort)
+    all_unit_ids = _unit_ids(polymer_60s_sort)
+    merged_unit_id = max(all_unit_ids) + 1
+    clear_curations_for(polymer_60s_sort)
+    root = CurationV2.create_initial_curation(polymer_60s_sort)
+    kwargs = {
+        "sorting_key": polymer_60s_sort,
+        "parent_curation_id": root["curation_id"],
+        "description": "manual burst-pair merge",
+        "reuse_existing": True,
+    }
+
+    first = CurationV2.create_merged_curation(
+        merge_groups=[[a, b]],
+        labels={merged_unit_id: [CurationLabel.accept]},
+        **kwargs,
+    )
+    child_restriction = CurationV2 & {
+        "sorting_id": first["sorting_id"],
+        "parent_curation_id": root["curation_id"],
+        "description": "manual burst-pair merge",
+        "merges_applied": True,
+    }
+    n_children = len(child_restriction)
+
+    # Same scientific merge, different list order: reuse the existing child
+    # instead of creating a new curation / merge_id on notebook re-run.
+    # Enum and string labels are semantically equivalent at insert time, so
+    # reuse_existing compares them through the same canonicalization.
+    second = CurationV2.create_merged_curation(
+        merge_groups=[[b, a]],
+        labels={merged_unit_id: ["accept"]},
+        **kwargs,
+    )
+    assert second == first
+    assert len(child_restriction) == n_children
+
+
+@pytest.mark.database
+@pytest.mark.parametrize(
+    "wrapper_name", ["propose_merge_curation", "create_merged_curation"]
+)
+def test_merge_wrappers_reject_root_reuse_existing(
+    populated_sorting, wrapper_name
+):
+    """Merge-wrapper reuse must branch from an explicit parent curation."""
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    clear_curations_for(populated_sorting)
+    CurationV2.create_initial_curation(populated_sorting)
+    wrapper = getattr(CurationV2, wrapper_name)
+
+    with pytest.raises(
+        ValueError, match="reuse_existing=True.*parent_curation_id"
+    ):
+        wrapper(populated_sorting, merge_groups=[], reuse_existing=True)
+
+
+@pytest.mark.database
 def test_wrappers_inherit_singleton_rejection(populated_sorting):
     """A singleton merge group raises the SAME error ``insert_curation`` does.
 

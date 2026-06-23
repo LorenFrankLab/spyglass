@@ -384,6 +384,32 @@ single `AnalyzerCuration` table built on the SI 0.104 `SortingAnalyzer` API
   auto-curation (metrics over post-merge templates).
   (`metric_curation.materialize_curation`.)
 
+- **The default auto-curation rule set encodes the lab's ~2% ISI policy.** The
+  shipped `franklab_default_auto_curation_2026_06` rule set
+  (`AutoCurationRules._default_payloads`) thresholds two metrics in order:
+  `nn_noise_overlap > 0.1 -> noise` and `isi_violation > 0.02 -> reject`, so a
+  unit with >2% refractory violations is removed from matchable-unit outputs
+  (`CurationV2.get_matchable_unit_ids` excludes `reject`/`noise`/`artifact` by
+  default). The ISI rule deliberately labels `reject`, not `mua`: `mua` is kept
+  by the default matchable policy, `reject` is not. The older nn-only
+  `v1_default_nn_noise`, the `similarity_merge` auto-merge preset, and the inert
+  `none` row are preserved as named rows. The set runs no auto-merge
+  (`auto_merge_preset="none"`); merging stays a manual step in the loop below.
+
+- **Curation is an auto → manual-merge → auto loop, and the second pass is not
+  redundant.** (1) Run automatic curation (`AnalyzerCuration` →
+  `materialize_curation`). (2) Manually curate/merge oversplit clusters
+  (`CurationV2.insert_curation` with `merge_groups`, using
+  `plot_by_sort_group_ids` / `investigate_pair_*` to spot burst pairs). (3) Run
+  analyzer curation *again* on the merged curation for the **final** quality
+  metrics and labels. Merging changes a unit's template (and therefore its SNR,
+  ISI-violation fraction, and PC/NN separation), so metrics computed over the
+  post-merge templates are the numbers of record — the pre-merge first pass
+  could not see them. The default rule set is the one the user notebook drives;
+  it is NOT wired into a `_PipelinePreset` (which carries no curation fields), so
+  `run_v2_pipeline` stops at the root curation and auto-curation is an explicit,
+  separately-driven step.
+
 - **Content-addressed selection PK with raw-insert/integrity guards.** v1's
   `MetricCurationSelection` PK was a random `uuid4` per insert
   (`v1/metric_curation.py:247`). v2's `AnalyzerCurationSelection` PK is a

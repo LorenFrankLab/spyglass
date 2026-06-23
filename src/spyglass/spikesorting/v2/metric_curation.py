@@ -516,6 +516,41 @@ class AutoCurationRules(SpyglassMixin, dj.Lookup):
                 },
                 [],
             ),
+            (
+                # Frank-lab default labeling set: thresholds the lab's ~2% ISI
+                # refractory policy in addition to nn_noise_overlap. ISI-violation
+                # units are labeled ``reject`` (not ``mua``) so they fall out of
+                # the default matchable-unit set (CurationV2.get_matchable_unit_ids
+                # excludes reject/noise/artifact). Merges stay a manual step, so
+                # this set runs no auto-merge (auto_merge_preset='none'). The
+                # metric-params row it pairs with must compute nn_advanced (for
+                # the nn_noise_overlap column) and isi_violation -- the shipped
+                # ``franklab_default`` QualityMetricParameters row does both.
+                {
+                    "auto_curation_rules_name": (
+                        "franklab_default_auto_curation_2026_06"
+                    ),
+                    "auto_merge_preset": "none",
+                },
+                [
+                    {
+                        "rule_index": 0,
+                        "rule_name": "nn_noise",
+                        "metric_name": "nn_noise_overlap",
+                        "operator": ">",
+                        "threshold": 0.1,
+                        "label": "noise",
+                    },
+                    {
+                        "rule_index": 1,
+                        "rule_name": "isi_reject",
+                        "metric_name": "isi_violation",
+                        "operator": ">",
+                        "threshold": 0.02,
+                        "label": "reject",
+                    },
+                ],
+            ),
         ]
 
     @classmethod
@@ -1193,12 +1228,20 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
 
         The explicit v2 analog of v1 ``CurationV1.insert_metric_curation``:
         auto-curation never silently writes a curation, so the user calls this
-        to commit. Returns the new ``{sorting_id, curation_id}`` key.
+        to commit. Re-running with the same analyzer-curation content is
+        idempotent: an existing child with the same parent, labels, proposed
+        merges, description, and ``curation_source='analyzer_curation'`` is
+        returned instead of creating another curation row. Returns the
+        ``{sorting_id, curation_id}`` key.
         """
         sel = (AnalyzerCurationSelection & key).fetch1()
         sorting_key = {"sorting_id": sel["sorting_id"]}
         labels = self.get_labels(key)
         merge_groups = [g for g in self.get_merge_groups(key) if len(g) >= 2]
+        # Idempotency is the child-reuse path in CurationV2.insert_curation
+        # (reuse_existing=True): a matching analyzer_curation child is returned
+        # instead of staging another curated-units NWB. Don't re-implement the
+        # content match here -- one source of truth for the dedup.
         return CurationV2.insert_curation(
             sorting_key,
             labels=labels or None,
@@ -1208,6 +1251,7 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
             description=description,
             curation_source="analyzer_curation",
             allow_custom_labels=allow_custom_labels,
+            reuse_existing=True,
         )
 
     # ---- visualization (notebook-facing) ---------------------------------

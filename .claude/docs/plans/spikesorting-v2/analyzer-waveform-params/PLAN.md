@@ -1,8 +1,25 @@
 # Analyzer Waveform Parameters & Curation Defaults — Implementation Plan
 
-**Status:** Phases 1, 2, and 3a complete (reviewed, simplified, and verified:
-the full v2 suite is green in the project v2 test environment — 1138 passed /
-18 skipped). Phase 3, Phase 4, and Phase 5 remain to execute.
+**Status:** Phases 1, 2, 3a, and 3 complete (each reviewed, simplified, and
+verified). Phase 3 shipped the `franklab_default_auto_curation_2026_06`
+auto-curation rule set (ISI `reject` policy), the probe-labeled MS5 default
+(`franklab_probe_hippocampus_30khz_ms5_2026_06`, same rows as the tetrode MS5
+alias), the MS4 recommendation (containerized for modern hosts / local for
+numpy<2) via the human-facing preset fields, and the auto → manual-merge → auto
+curation-loop docs + notebook section 7. Targeted suites green (65 passed:
+preset/parity/curation/preflight, in the project v2 test environment). Phase 4
+and Phase 5 remain to execute.
+
+Phase 3 reconciliation note (the phase file predates Phase 3a's
+single-source simplification): the execution backend stays on
+`SorterParameters.execution_params` only — the MS4 recommendation is conveyed
+through the preset's `recommendation_status` / `intended_use` / `notes`, never
+execution columns. The plan's `test_preflight_guards_missing_local_ms4` /
+`test_preflight_guards_missing_container_ms4_runtime` validation rows are
+satisfied by the existing Phase 3a preflight tests
+(`test_preflight_ms4_preset_gets_runtime_check`,
+`test_preflight_container_runtime_errors`,
+`test_preflight_matlab_local_backend_errors`), so they were not duplicated.
 
 Restore DB-tracked spike-sorting analyzer waveform parameters (so the window and
 subsample that produced each analyzer are recorded and reproducible, the way v1

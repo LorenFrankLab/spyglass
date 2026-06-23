@@ -139,16 +139,18 @@ def test_presets_reference_shipped_rows(dj_conn):
 
 
 @pytest.mark.database
-def test_default_preset_is_runnable_ms5(dj_conn):
-    """run_v2_pipeline defaults to the runnable MS5 tetrode-hippocampus recipe.
+def test_default_pipeline_preset_is_probe_labeled_runnable_ms5(dj_conn):
+    """run_v2_pipeline defaults to the probe-labeled runnable MS5 recipe.
 
-    The shipped default is MountainSort5, not the production MountainSort4
-    recipe: MS4's ``ml_ms4alg`` backend is a numpy<2-era package that does not
-    install under the v2 ``numpy>=2`` baseline, so the default must be a sorter
-    that runs out of the box. The recommendation_status taxonomy is unchanged
-    (MS4 stays the "production" recipe, selectable but needing numpy<2; MS5
-    stays "alternative") -- the function default is a separate,
-    runnability-driven choice. ``preflight_v2_pipeline`` shares the default.
+    The shipped default is the PROBE-labeled MountainSort5 preset -- it matches
+    the lab's polymer-probe default label while staying a sorter that runs out
+    of the box under the v2 ``numpy>=2`` baseline (MS4's ``ml_ms4alg`` backend
+    needs ``numpy<2``). It resolves to the SAME preprocessing / artifact /
+    sorter parameter rows as the tetrode-labeled MS5 preset (``probe_type`` is
+    informational), so this is a provenance-label change, not a scientific one.
+    The recommendation_status taxonomy is unchanged (MS5 stays "alternative",
+    the MS4 family stays "production"); ``preflight_v2_pipeline`` shares the
+    default.
     """
     import inspect
 
@@ -159,7 +161,7 @@ def test_default_preset_is_runnable_ms5(dj_conn):
         .parameters["pipeline_preset"]
         .default
     )
-    assert default == "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
+    assert default == "franklab_probe_hippocampus_30khz_ms5_2026_06"
     assert (
         inspect.signature(pipeline_mod.preflight_v2_pipeline)
         .parameters["pipeline_preset"]
@@ -170,6 +172,19 @@ def test_default_preset_is_runnable_ms5(dj_conn):
     preset = pipeline_mod._PIPELINE_PRESETS[default]
     assert preset.sorter == "mountainsort5"
     assert preset.target_region == "hippocampus"
+    assert preset.probe_type == "probe"
+    # Same recipe as the tetrode-labeled MS5 alias: identical param rows.
+    tetrode = pipeline_mod._PIPELINE_PRESETS[
+        "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
+    ]
+    for field in (
+        "preprocessing_params_name",
+        "artifact_detection_params_name",
+        "sorter",
+        "sorter_params_name",
+    ):
+        assert getattr(preset, field) == getattr(tetrode, field), field
+
     # Taxonomy is unchanged: the default (MS5) keeps its "alternative" tier,
     # and the MS4 family stays the "production" recipe.
     assert preset.recommendation_status == "alternative"
