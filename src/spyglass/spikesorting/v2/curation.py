@@ -265,7 +265,10 @@ class CurationV2(SpyglassMixin, dj.Manual):
             those would be silently ignored by returning the existing
             row. If False (default), that situation raises ``ValueError``;
             pass True to opt into reusing the existing root and return its
-            key instead.
+            key instead. For child curations (``parent_curation_id != -1``),
+            True reuses an existing child only when the parent, labels, real
+            merge groups, ``apply_merge`` state, description, and curation
+            source match the curation this call would insert.
         permissive_labels
             Controls ONLY truly-stray label keys (ids that are neither
             in ``Sorting.Unit`` nor in the curated unit set -- usually a
@@ -346,6 +349,25 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 permissive_labels=permissive_labels,
             )
         )
+        if parent_curation_id != -1 and reuse_existing:
+            existing_child = cls._find_matching_child_curation(
+                sorting_id=sorting_id,
+                parent_curation_id=parent_curation_id,
+                labels=labels,
+                unit_rows=unit_rows,
+                kept_unit_to_contributors=kept_unit_to_contributors,
+                apply_merge=apply_merge,
+                description=description,
+                curation_source=curation_source,
+            )
+            if existing_child is not None:
+                logger.warning(
+                    "CurationV2.insert_curation: matching child curation "
+                    f"already exists for sorting_id={sorting_id}, "
+                    f"parent_curation_id={parent_curation_id}; returning "
+                    "existing key without staging a new NWB."
+                )
+                return existing_child
 
         # Stage the curated-units NWB (filesystem side-effect; the DB
         # row registration happens inside the transaction below so it
@@ -388,6 +410,80 @@ class CurationV2(SpyglassMixin, dj.Manual):
         return {"sorting_id": sorting_id, "curation_id": curation_id}
 
     # ---- insert_curation steps (extracted helpers) -----------------------
+
+    @staticmethod
+    def _normalized_labels(labels: dict | None) -> dict[int, tuple[str, ...]]:
+        """Normalize ``{unit_id: labels}`` for semantic equality checks."""
+        return {
+            int(unit_id): tuple(
+                sorted(CurationLabel.normalize(label) for label in unit_labels)
+            )
+            for unit_id, unit_labels in (labels or {}).items()
+            if unit_labels
+        }
+
+    @staticmethod
+    def _normalized_real_merge_groups(merge_groups) -> tuple[tuple[int, ...], ...]:
+        """Normalize merge groups, dropping 1-unit self provenance entries."""
+        if isinstance(merge_groups, dict):
+            groups = merge_groups.values()
+        else:
+            groups = merge_groups or []
+        return tuple(
+            sorted(
+                tuple(sorted(int(unit_id) for unit_id in group))
+                for group in groups
+                if len(group) >= 2
+            )
+        )
+
+    @classmethod
+    def _find_matching_child_curation(
+        cls,
+        *,
+        sorting_id,
+        parent_curation_id: int,
+        labels: dict,
+        unit_rows: list[dict],
+        kept_unit_to_contributors: dict[int, list[int]],
+        apply_merge: bool,
+        description: str,
+        curation_source: str,
+    ) -> dict | None:
+        """Return an existing child with the same committed curation content."""
+        written_unit_ids = {int(row["unit_id"]) for row in unit_rows}
+        effective_labels = {
+            int(unit_id): unit_labels
+            for unit_id, unit_labels in labels.items()
+            if int(unit_id) in written_unit_ids
+        }
+        target_labels = cls._normalized_labels(effective_labels)
+        target_merges = cls._normalized_real_merge_groups(
+            kept_unit_to_contributors
+        )
+        candidates = (
+            cls
+            & {
+                "sorting_id": sorting_id,
+                "parent_curation_id": parent_curation_id,
+                "merges_applied": bool(apply_merge),
+                "curation_source": curation_source,
+                "description": description,
+            }
+        ).fetch("KEY", as_dict=True, order_by="curation_id")
+        for candidate in candidates:
+            existing_labels = cls._normalized_labels(
+                cls._labels_by_unit(candidate)
+            )
+            if existing_labels != target_labels:
+                continue
+            if (
+                cls._normalized_real_merge_groups(cls.get_merge_groups(candidate))
+                != target_merges
+            ):
+                continue
+            return candidate
+        return None
 
     @classmethod
     def _normalize_curation_inputs(
@@ -801,6 +897,23 @@ class CurationV2(SpyglassMixin, dj.Manual):
             description=description,
         )
 
+    @staticmethod
+    def _assert_child_reuse_for_merge_wrapper(
+        *,
+        parent_curation_id: int,
+        reuse_existing: bool,
+        wrapper_name: str,
+    ) -> None:
+        """Prevent merge wrappers from reusing an unrelated root curation."""
+        if not reuse_existing or parent_curation_id != -1:
+            return
+        raise ValueError(
+            f"CurationV2.{wrapper_name}(reuse_existing=True) requires an "
+            "explicit parent_curation_id. Root curation reuse returns the "
+            "existing root row and would ignore the requested merge/proposal; "
+            "branch from an existing curation instead."
+        )
+
     @classmethod
     def propose_merge_curation(
         cls,
@@ -809,6 +922,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         labels: dict | None = None,
         parent_curation_id: int = -1,
         description: str = "",
+        reuse_existing: bool = False,
     ) -> dict:
         """Record proposed merges WITHOUT applying them (reviewable).
 
@@ -833,6 +947,11 @@ class CurationV2(SpyglassMixin, dj.Manual):
             the same sort to branch off it.
         description
             Free-text description.
+        reuse_existing
+            If True, reuse an existing child with the same parent, labels,
+            proposed merge groups, description, and provenance. Requires an
+            explicit ``parent_curation_id``; root reuse would return the
+            existing root and ignore the proposed merge.
 
         Returns
         -------
@@ -844,6 +963,11 @@ class CurationV2(SpyglassMixin, dj.Manual):
         insert_curation : the full expert API this wraps.
         create_merged_curation : commit the merges instead of proposing them.
         """
+        cls._assert_child_reuse_for_merge_wrapper(
+            parent_curation_id=parent_curation_id,
+            reuse_existing=reuse_existing,
+            wrapper_name="propose_merge_curation",
+        )
         return cls.insert_curation(
             sorting_key=sorting_key,
             labels=labels,
@@ -851,6 +975,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
             apply_merge=False,
             parent_curation_id=parent_curation_id,
             description=description,
+            reuse_existing=reuse_existing,
         )
 
     @classmethod
@@ -861,6 +986,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         labels: dict | None = None,
         parent_curation_id: int = -1,
         description: str = "",
+        reuse_existing: bool = False,
     ) -> dict:
         """Create a new curation with merges applied (committed unit set).
 
@@ -885,6 +1011,11 @@ class CurationV2(SpyglassMixin, dj.Manual):
             the same sort to branch off it.
         description
             Free-text description.
+        reuse_existing
+            If True, reuse an existing child with the same parent, labels,
+            applied merge groups, description, and provenance. Requires an
+            explicit ``parent_curation_id``; root reuse would return the
+            existing root and ignore the requested merge.
 
         Returns
         -------
@@ -896,6 +1027,11 @@ class CurationV2(SpyglassMixin, dj.Manual):
         insert_curation : the full expert API this wraps.
         propose_merge_curation : record the merges without applying them.
         """
+        cls._assert_child_reuse_for_merge_wrapper(
+            parent_curation_id=parent_curation_id,
+            reuse_existing=reuse_existing,
+            wrapper_name="create_merged_curation",
+        )
         return cls.insert_curation(
             sorting_key=sorting_key,
             labels=labels,
@@ -903,6 +1039,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
             apply_merge=True,
             parent_curation_id=parent_curation_id,
             description=description,
+            reuse_existing=reuse_existing,
         )
 
     @classmethod

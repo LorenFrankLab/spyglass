@@ -312,9 +312,10 @@ AnalyzerCuration.get_metrics(auto_sel)
 #   not multi-unit activity; sharp amplitude steps or several distinct bands are
 #   MUA.
 #
-# These pattern-recognition cues are calibrated for **hippocampal tetrodes**;
-# other regions (cortex, thalamus, striatum) have different waveform widths and
-# bursting, so the thresholds and tells above can mislead there.
+# These pattern-recognition cues are calibrated for **hippocampal tetrodes and
+# polymer probes**; other regions (cortex, thalamus, striatum) have different
+# waveform widths and bursting, so the thresholds and tells above can mislead
+# there.
 
 # ### 7b. Find burst pairs to merge, then commit the auto labels
 #
@@ -353,6 +354,7 @@ if merge_groups_to_apply:
         merge_groups=merge_groups_to_apply,
         parent_curation_id=auto_curation["curation_id"],
         description="manual burst-pair merge",
+        reuse_existing=True,
     )
     final_sel = AnalyzerCurationSelection.insert_selection(
         {
