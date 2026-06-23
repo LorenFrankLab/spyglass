@@ -286,6 +286,10 @@ def compute_pose_outputs(
         smooth_orientation,
         two_pt_orientation,
     )
+    from spyglass.position.v2.utils.skeleton import (
+        build_canonical_map,
+        canonicalize,
+    )
 
     timestamps = pose_df.index.values
     sampling_rate = float(1 / np.median(np.diff(timestamps)))
@@ -312,20 +316,30 @@ def compute_pose_outputs(
             pose_flat, smooth_params, sampling_rate
         )
 
+    # Resolve param-referenced bodypart names against the actual (canonical)
+    # dataframe columns, so params authored with a variant spelling still index
+    # the right column without persisting a normalized name.
+    col_map = build_canonical_map(
+        [str(c) for c in pose_flat.columns.get_level_values(0).unique()]
+    )
+
+    def _resolve(name):
+        return canonicalize(name, col_map, default=name)
+
     # --- orientation ----------------------------------------------------------
     method = orient_params["method"]
     if method == "two_pt":
         orientation = two_pt_orientation(
             pose_flat,
-            point1=orient_params["bodypart1"],
-            point2=orient_params["bodypart2"],
+            point1=_resolve(orient_params["bodypart1"]),
+            point2=_resolve(orient_params["bodypart2"]),
         )
     elif method == "bisector":
         orientation = bisector_orientation(
             pose_flat,
-            led1=orient_params["led1"],
-            led2=orient_params["led2"],
-            led3=orient_params["led3"],
+            led1=_resolve(orient_params["led1"]),
+            led2=_resolve(orient_params["led2"]),
+            led3=_resolve(orient_params["led3"]),
         )
     elif method == "none":
         orientation = no_orientation(pose_flat)
@@ -343,7 +357,8 @@ def compute_pose_outputs(
 
     # --- centroid -------------------------------------------------------------
     max_sep = centroid_params.get("max_LED_separation", None)
-    centroid = calculate_centroid(pose_flat, centroid_params["points"], max_sep)
+    points = {k: _resolve(v) for k, v in centroid_params["points"].items()}
+    centroid = calculate_centroid(pose_flat, points, max_sep)
 
     # --- smoothing / interpolation of centroid --------------------------------
     pos_df = pd.DataFrame(centroid, columns=["x", "y"], index=timestamps)

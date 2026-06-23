@@ -338,6 +338,46 @@ _SMOOTH_INTERP = {
 }
 
 
+class TestComputePoseOutputsParamResolution:
+    """Params with a variant spelling still index the canonical columns."""
+
+    @pytest.fixture(autouse=True)
+    def fn(self):
+        from spyglass.position.utils.pose_processing import (
+            compute_pose_outputs,
+        )
+
+        self.fn = compute_pose_outputs
+
+    def test_variant_spelling_params_match_exact(self):
+        """Variant-spelling orient/centroid params give identical output.
+
+        Columns are 'redLED'/'greenLED'; params authored as 'red_led'/
+        'green_led' must resolve to those columns and produce numerically
+        identical orientation and centroid.
+        """
+        df = _make_2led_df()
+        exact = self.fn(df.copy(), _ORIENT_2PT, _CENTROID_2PT, _SMOOTH_INTERP)
+
+        orient_v = {
+            **_ORIENT_2PT,
+            "bodypart1": "red_led",
+            "bodypart2": "green_led",
+        }
+        centroid_v = {
+            **_CENTROID_2PT,
+            "points": {"point1": "red_led", "point2": "green_led"},
+        }
+        variant = self.fn(df.copy(), orient_v, centroid_v, _SMOOTH_INTERP)
+
+        np.testing.assert_allclose(
+            variant["orientation"], exact["orientation"], equal_nan=True
+        )
+        np.testing.assert_allclose(
+            variant["centroid"], exact["centroid"], equal_nan=True
+        )
+
+
 class TestComputePoseOutputsHighNaN:
     """Robustness tests for high-NaN inputs (sleep / occlusion epochs).
 
