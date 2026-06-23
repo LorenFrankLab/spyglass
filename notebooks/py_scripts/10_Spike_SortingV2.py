@@ -369,6 +369,7 @@ if merge_groups_to_apply:
     final_curation = AnalyzerCuration().materialize_curation(final_sel)
 else:
     final_curation = auto_curation  # no manual merge yet; use the 7b result
+    final_sel = auto_sel  # the analyzer-curation selection of record
 
 final_summary = CurationV2.summarize_curation(final_curation)
 final_merge_id = final_summary["merge_id"]
@@ -376,12 +377,13 @@ final_summary
 
 # ### 7d. Surface waveform shape for cell typing (your thresholds, not the pipeline's)
 #
-# `get_metrics` returns a waveform-shape column next to the quality metrics:
-# `trough_half_width` — the half-amplitude width of the spike trough, in seconds,
-# read from the unwhitened display analyzer. Narrow spikes are fast-spiking
-# interneurons, wide spikes pyramidal cells. Paired with `firing_rate` (already a
-# quality metric) it gives the classic rate × width view for separating putative
-# cell types.
+# Over the final curated result (`final_sel` from section 7c — post-merge if you
+# merged, the pass-1 auto curation otherwise), `get_metrics` returns a
+# waveform-shape column next to the quality metrics: `trough_half_width` — the
+# half-amplitude width of the spike trough, in seconds, read from the unwhitened
+# display analyzer. Narrow spikes are fast-spiking interneurons, wide spikes
+# pyramidal cells. Paired with `firing_rate` (already a quality metric) it gives
+# the classic rate × width view for separating putative cell types.
 #
 # **The pipeline ships NO cell-type thresholds.** The boundary below is **your
 # own** — region-specific and tuned here for hippocampus (fast + narrow ⇒
@@ -392,7 +394,7 @@ final_summary
 # wider post-trough window than the hippocampus display recipe's 0.5 ms and clip
 # there — they are reliable on the wider cortex/fallback window.)
 
-shape = AnalyzerCuration.get_metrics(auto_sel)[
+shape = AnalyzerCuration.get_metrics(final_sel)[
     ["firing_rate", "trough_half_width"]
 ].dropna()
 
