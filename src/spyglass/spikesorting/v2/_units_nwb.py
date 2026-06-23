@@ -399,17 +399,20 @@ def write_curated_units_nwb(
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
     from spyglass.spikesorting.v2.utils import _dedup_merged_spike_times
 
-    rec_source = SortingSelection.RecordingSource & {"sorting_id": sorting_id}
-    if not rec_source:
-        raise NotImplementedError(
-            "CurationV2.insert_curation: only RecordingSource sorts "
-            "are supported today; concat-source sorts are not yet "
-            "implemented."
+    # Anchor the curated-units NWB to the same parent as the Sorting: the
+    # sort's own session for a single-recording source, or the FIRST
+    # SessionGroup.Member for a concat source. The curated absolute spike times
+    # are read from the Sorting units NWB below (source-agnostic), so only the
+    # parent-file anchor differs between the two source kinds.
+    source = SortingSelection.resolve_source({"sorting_id": sorting_id})
+    if source.kind == "recording":
+        nwb_file_name = (
+            RecordingSelection & {"recording_id": source.key["recording_id"]}
+        ).fetch1("nwb_file_name")
+    else:  # concatenated_recording
+        _anchor_recording_id, nwb_file_name, _preproc = (
+            Sorting._resolve_concat_anchor(source.key)
         )
-    recording_id = rec_source.fetch1("recording_id")
-    nwb_file_name = (
-        RecordingSelection & {"recording_id": recording_id}
-    ).fetch1("nwb_file_name")
 
     # Source the pre-curation units' ABSOLUTE spike times straight
     # from the Sorting units NWB. Reading absolute seconds (not a

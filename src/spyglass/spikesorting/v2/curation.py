@@ -1486,6 +1486,17 @@ class CurationV2(SpyglassMixin, dj.Manual):
             "preprocessing_params_name",
             "recording_id",
         ]
+        # Concat-source restriction keys route through
+        # ``SortingSelection.ConcatenatedRecordingSource`` ->
+        # ``ConcatenatedRecordingSelection`` -> ``SessionGroup`` instead of the
+        # single-recording chain. ``motion_correction_params_name`` is included
+        # so a concat restriction can pin the motion recipe too.
+        concat_keys = [
+            "concat_recording_id",
+            "session_group_owner",
+            "session_group_name",
+            "motion_correction_params_name",
+        ]
         sort_keys = [
             "sorter",
             "sorter_params_name",
@@ -1493,7 +1504,12 @@ class CurationV2(SpyglassMixin, dj.Manual):
             "artifact_detection_id",
         ]
         curation_keys = ["curation_id"]
-        allowed = set(rec_keys) | set(sort_keys) | set(curation_keys)
+        allowed = (
+            set(rec_keys)
+            | set(concat_keys)
+            | set(sort_keys)
+            | set(curation_keys)
+        )
         unknown = set(key) - allowed
         if unknown:
             if not strict:
@@ -1548,11 +1564,48 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 str(key["artifact_detection_id"])
             )
 
+        # Route through the input source the restriction names. A concat
+        # restriction (concat_recording_id / session-group / motion recipe)
+        # joins SortingSelection.ConcatenatedRecordingSource ->
+        # ConcatenatedRecordingSelection; otherwise the single-recording chain
+        # joins SortingSelection.RecordingSource -> RecordingSelection. The two
+        # sets are mutually exclusive (a sort has exactly one input source), so
+        # mixing them is a contradictory restriction and is rejected.
+        concat_restriction = {k: key[k] for k in concat_keys if k in key}
         rec_restriction = {k: key[k] for k in rec_keys if k in key}
-        rec_table = RecordingSelection & rec_restriction
+        if concat_restriction and rec_restriction:
+            raise ValueError(
+                "CurationV2.resolve_restriction: cannot combine concat-source "
+                f"keys {sorted(concat_restriction)} with single-recording "
+                f"keys {sorted(rec_restriction)}; a sort has exactly one input "
+                "source. Restrict by one source family."
+            )
+        if concat_restriction:
+            from spyglass.spikesorting.v2.session_group import (
+                ConcatenatedRecordingSelection,
+            )
 
-        sort_rec_source = SortingSelection.RecordingSource * rec_table.proj()
-        sort_master = SortingSelection * sort_rec_source.proj()
+            concat_sel = ConcatenatedRecordingSelection & concat_restriction
+            sort_concat_source = (
+                SortingSelection.ConcatenatedRecordingSource
+                * concat_sel.proj()
+            )
+            sort_master = SortingSelection * sort_concat_source.proj()
+        elif rec_restriction:
+            rec_table = RecordingSelection & rec_restriction
+            sort_rec_source = (
+                SortingSelection.RecordingSource * rec_table.proj()
+            )
+            sort_master = SortingSelection * sort_rec_source.proj()
+        else:
+            # No source-specific key (an unrestricted v2 query or a
+            # sort-/curation-only restriction): match BOTH source families.
+            # Every SortingSelection has exactly one input source, so the
+            # master itself IS the recording-source union concat-source set --
+            # restricting through one source part here would silently drop the
+            # other (the bug that omitted concat-backed curations from broad v2
+            # merge queries).
+            sort_master = SortingSelection
         # ``artifact_detection_id`` lives on the optional ``SortingSelection.
         # ArtifactDetectionSource`` part, NOT on ``SortingSelection`` -- it is absent
         # from ``sort_master``'s heading, so a dict restriction with it is

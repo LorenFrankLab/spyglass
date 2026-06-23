@@ -133,6 +133,13 @@ class SessionGroup(SpyglassMixin, dj.Manual):
         """
         from spyglass.spikesorting.v2.exceptions import SessionGroupDateError
 
+        if not members:
+            raise ValueError(
+                "SessionGroup.create_group: members is empty; a group needs "
+                "at least one sorting member (nwb_file_name, sort_group_id, "
+                "interval_list_name)."
+            )
+
         rows: list[dict] = []
         dates: list = []
         for i, member in enumerate(members):
@@ -498,6 +505,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             Recording,
             RecordingSelection,
             _ELECTRICAL_SERIES_PATH,
+            _unlink_staged_analysis_file,
         )
         from spyglass.spikesorting.v2.utils import (
             _resolved_job_kwargs,
@@ -604,23 +612,37 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             for member_index, end_sample in zip(member_indices, boundaries)
         ]
 
-        with transaction_or_noop(self.connection):
-            AnalysisNwbfile().add(anchor_nwb_file_name, analysis_file_name)
-            self.insert1(
-                {
-                    **key,
-                    "analysis_file_name": analysis_file_name,
-                    "electrical_series_path": _ELECTRICAL_SERIES_PATH,
-                    "object_id": object_id,
-                    "n_channels": int(corrected.get_num_channels()),
-                    "sampling_frequency": sampling_frequency,
-                    "total_duration_s": (
-                        int(corrected.get_num_samples()) / sampling_frequency
-                    ),
-                    "cache_hash": cache_hash,
-                }
+        try:
+            with transaction_or_noop(self.connection):
+                AnalysisNwbfile().add(
+                    anchor_nwb_file_name, analysis_file_name
+                )
+                self.insert1(
+                    {
+                        **key,
+                        "analysis_file_name": analysis_file_name,
+                        "electrical_series_path": _ELECTRICAL_SERIES_PATH,
+                        "object_id": object_id,
+                        "n_channels": int(corrected.get_num_channels()),
+                        "sampling_frequency": sampling_frequency,
+                        "total_duration_s": (
+                            int(corrected.get_num_samples())
+                            / sampling_frequency
+                        ),
+                        "cache_hash": cache_hash,
+                    }
+                )
+                self.MemberBoundary.insert(boundary_rows)
+        except Exception:
+            # ``write_nwb_artifact`` already wrote the concat ElectricalSeries
+            # to disk; if registration (AnalysisNwbfile.add + the inserts) then
+            # fails, that file would orphan, so unlink it before re-raising --
+            # matching Recording.make_insert's staged-file cleanup.
+            _unlink_staged_analysis_file(
+                analysis_file_name,
+                context="ConcatenatedRecording.make",
             )
-            self.MemberBoundary.insert(boundary_rows)
+            raise
 
     def get_recording(self, key) -> "si.BaseRecording":  # noqa: F821
         """Return the cached concatenated SpikeInterface recording.
@@ -692,11 +714,12 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             as_dict=True, order_by="member_index"
         )
         # MemberBoundary is keyed by member_index; align to the member order.
-        end_by_index = dict(
-            (self.MemberBoundary & key).fetch("member_index", "end_sample")
+        indices, ends = (self.MemberBoundary & key).fetch(
+            "member_index", "end_sample"
         )
+        end_by_index = {int(i): int(e) for i, e in zip(indices, ends)}
         boundaries = [
-            int(end_by_index[int(member["member_index"])]) for member in members
+            end_by_index[int(member["member_index"])] for member in members
         ]
 
         unit_trains = {

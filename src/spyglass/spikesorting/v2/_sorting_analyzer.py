@@ -239,15 +239,21 @@ def rebuild_analyzer_folder(
         SortingSelection.resolve_artifact_detection(key)
     )
     source = SortingSelection.resolve_source(key)
-    if source.kind != "recording":
-        raise NotImplementedError(
-            "Sorting._rebuild_analyzer_folder: concat source not yet "
-            "implemented."
+    if source.kind == "recording":
+        recording = Recording().get_recording(
+            {"recording_id": source.key["recording_id"]}
         )
-    recording = Recording().get_recording(
-        {"recording_id": source.key["recording_id"]}
-    )
-    if sel_row.get("artifact_detection_id") is not None:
+    else:  # concatenated_recording
+        from spyglass.spikesorting.v2.session_group import (
+            ConcatenatedRecording,
+        )
+
+        # A concat sort runs over the materialized concat cache and has no
+        # artifact pass, so the mask block below is skipped.
+        recording = ConcatenatedRecording().get_recording(source.key)
+    if source.kind == "recording" and (
+        sel_row.get("artifact_detection_id") is not None
+    ):
         nwb_file_name = (
             RecordingSelection
             & {"recording_id": source.key["recording_id"]}

@@ -1070,32 +1070,9 @@ def test_analyzer_random_seed_override_is_honored(
     )
 
 
-# ---------- SortingSelection concat-source gate --------------------------
-
-
-@pytest.mark.slow
-def test_sorting_selection_rejects_concat_source(dj_conn):
-    """``SortingSelection.insert_selection`` refuses
-    ``concat_recording_id`` with ``NotImplementedError``.
-
-    The ``ConcatenatedRecordingSource`` schema is declared in its
-    final shape under the zero-migration policy, but the make-body
-    branch is not implemented yet. Pins the gate so a premature
-    attempt to wire up the concat path immediately fails this
-    test.
-    """
-    from spyglass.spikesorting.v2.sorting import SortingSelection
-
-    with pytest.raises(NotImplementedError, match="concatenated"):
-        SortingSelection.insert_selection(
-            {
-                "concat_recording_id": "00000000-0000-0000-0000-000000000000",
-                "sorter": "mountainsort5",
-                "sorter_params_name": (
-                    "franklab_30khz_ms5_2026_06"
-                ),
-            }
-        )
+# Concatenated-recording sorting is now wired end-to-end; the concat-source
+# insert_selection + Sorting.populate + split round-trip is covered by the
+# chronic smoke in ``tests/spikesorting/v2/test_session_group_concat.py``.
 
 
 @pytest.mark.slow

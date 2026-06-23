@@ -78,65 +78,28 @@ def _drop_fake_recording(recording_id):
 
 
 @pytest.mark.usefixtures("dj_conn")
-def test_sorting_make_skips_concat_rows_silently():
-    """Concat-source selections are excluded from ``populate()``.
+def test_sorting_key_source_includes_concat_rows():
+    """Concat-source selections ARE part of ``Sorting.key_source``.
 
-    ``make_fetch`` raises ``NotImplementedError`` for the concat path,
-    but without a ``key_source`` filter ``populate()`` would still pick up
-    concat rows and print that error per row. The antijoin key_source
-    drops any selection that has a ``ConcatenatedRecordingSource`` part.
-
-    The concat materializer (``ConcatenatedRecording.make``) is
-    NotImplementedError today, so a real concat chain cannot be built;
-    we create the ``ConcatenatedRecordingSource`` precondition via a raw
-    FK-checks-off bypass (the only way to land the row) and pin the no-op
-    skip.
-
-    TODO: when ``ConcatenatedRecording.make`` lands, remove the key_source
-    antijoin and flip this test to assert the concat row IS populated.
+    The concat populate path is wired (``ConcatenatedRecording.make`` +
+    ``Sorting.make`` concat dispatch), so the antijoin that previously dropped
+    ``ConcatenatedRecordingSource`` rows from ``key_source`` is gone -- a concat
+    selection is handed to ``populate()`` like any other. A planted concat
+    selection suffices to pin that it is NOT antijoined out; the full concat
+    sort populate is covered by the chronic smoke in
+    ``tests/spikesorting/v2/test_session_group_concat.py``.
     """
     import uuid
 
-    import datajoint as dj
-
-    from spyglass.spikesorting.v2.sorting import (
-        SorterParameters,
-        Sorting,
-        SortingSelection,
-    )
-
-    # clusterless_thresholder/default is always inserted (non-SI, never
-    # install-gated) so the master's SorterParameters FK resolves.
-    SorterParameters.insert_default()
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 
     sid = uuid.uuid4()
-    SortingSelection.insert1(
-        {
-            "sorting_id": sid,
-            "sorter": "clusterless_thresholder",
-            "sorter_params_name": "default",
-        },
-        allow_direct_insert=True,
-    )
-    conn = dj.conn()
-    conn.query("SET FOREIGN_KEY_CHECKS=0")
+    _plant_concat_sorting_selection(sid)
     try:
-        SortingSelection.ConcatenatedRecordingSource.insert1(
-            {"sorting_id": sid, "concat_recording_id": uuid.uuid4()},
-            allow_direct_insert=True,
+        assert len(Sorting.key_source & {"sorting_id": sid}) == 1, (
+            "concat-source selection should be in Sorting.key_source now "
+            "that the antijoin is removed"
         )
-    finally:
-        conn.query("SET FOREIGN_KEY_CHECKS=1")
-
-    try:
-        # Excluded from key_source...
-        assert (
-            len(Sorting.key_source & {"sorting_id": sid}) == 0
-        ), "concat-source selection leaked into Sorting.key_source"
-        # ...and populate restricted to it is a silent no-op (make_fetch's
-        # NotImplementedError is never reached).
-        Sorting.populate({"sorting_id": sid}, reserve_jobs=False)
-        assert len(Sorting & {"sorting_id": sid}) == 0
     finally:
         (SortingSelection & {"sorting_id": sid}).delete(safemode=False)
 

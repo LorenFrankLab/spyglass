@@ -222,28 +222,10 @@ def test_rebuild_analyzer_folder_recreates_on_missing(populated_sorting):
                 pass
 
 
-@pytest.mark.usefixtures("dj_conn")
-def test_rebuild_analyzer_folder_concat_source_not_implemented():
-    """``_rebuild_analyzer_folder`` raises ``NotImplementedError`` for a
-    concat-source row.
-
-    The rebuild path resolves the sorting's source and delegates to the concat
-    stub, which is not implemented today. This pins the cross-method invariant
-    (the rebuild correctly routes to the concat path) rather than a generic
-    "method raises" -- the concat branch fires before any analyzer/folder I/O,
-    so a planted concat ``SortingSelection`` is sufficient.
-    """
-    import uuid
-
-    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
-
-    sid = uuid.uuid4()
-    _plant_concat_sorting_selection(sid)
-    try:
-        with pytest.raises(NotImplementedError):
-            Sorting()._rebuild_analyzer_folder({"sorting_id": sid})
-    finally:
-        (SortingSelection & {"sorting_id": sid}).delete(safemode=False)
+# ``_rebuild_analyzer_folder`` now supports a concat source (it loads the
+# materialized ConcatenatedRecording cache); the concat rebuild path is exercised
+# end-to-end by the chronic smoke's get_analyzer call in
+# ``tests/spikesorting/v2/test_session_group_concat.py``.
 
 
 @pytest.mark.slow

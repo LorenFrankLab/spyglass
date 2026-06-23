@@ -98,8 +98,13 @@ class SortingFetched(NamedTuple):
     Attributes
     ----------
     source : SourceResolution
-        Resolved recording source for the selection (``kind == "recording"``;
-        concat sources are rejected upstream).
+        Resolved sort input source (``kind == "recording"`` or
+        ``"concatenated_recording"``).
+    recording_id : str
+        The anchor ``recording_id``: the sort's own recording for a
+        single-recording source, or the FIRST ``SessionGroup.Member``'s
+        recording for a concat source (the deterministic parent anchor for the
+        per-unit ``Electrode`` FK and the analysis-NWB parent).
     sel_row : dict
         The ``SortingSelection`` row, with ``artifact_detection_id`` resolved
         and stashed on it for downstream readers.
@@ -107,10 +112,12 @@ class SortingFetched(NamedTuple):
         The matching ``SorterParameters`` row (``sorter``, ``params``,
         ``job_kwargs``).
     nwb_file_name : str
-        Source NWB file backing the recording selection.
+        Anchor NWB file (the single-recording session, or the first concat
+        member's session).
     obs_intervals : numpy.ndarray or None
         Artifact-removed valid-times window, or ``None`` when no
-        artifact-detection pass is configured.
+        artifact-detection pass is configured (always ``None`` for a concat
+        source).
     display_waveform_params_name : str
         The DISPLAY ``AnalyzerWaveformParameters`` recipe resolved from the
         source preprocessing recipe (region), stored on the ``Sorting`` row.
@@ -125,6 +132,7 @@ class SortingFetched(NamedTuple):
     """
 
     source: SourceResolution
+    recording_id: str
     sel_row: dict
     sorter_row: dict
     nwb_file_name: str
@@ -753,24 +761,23 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         # deterministic sorting_id, and shape the master + source part rows.
         plan = build_sorting_selection_plan(key)
 
-        # Runtime gate: the deterministic-identity helper already folds a
-        # concat source into a stable sorting_id, but the concat populate
-        # path (ConcatenatedRecording.make + Sorting.make concat dispatch)
-        # is not wired yet, so reject a concat selection with a clear
-        # message rather than landing a row Sorting.populate cannot consume.
-        # Lifted by the concat-materializer change.
+        # Dispatch on the input source: a recording-backed sort inserts a
+        # RecordingSource part; a concat-backed sort inserts a
+        # ConcatenatedRecordingSource part. find-existing keys on the same
+        # source part so the two source families never alias.
         if plan.source_kind == "concat":
-            raise NotImplementedError(
-                "SortingSelection.insert_selection: concatenated recording "
-                "sorting is not implemented yet. Use a single recording_id "
-                "source for now."
-            )
+            source_part = cls.ConcatenatedRecordingSource
+            source_row = plan.concat_source_row
+        else:
+            source_part = cls.RecordingSource
+            source_row = plan.recording_source_row
 
         existing = cls._find_existing_pk(
             plan.master_restriction,
             plan.source_restriction,
             plan.artifact_detection_id,
             plan.sorting_id,
+            source_part,
         )
         if existing is not None:
             return existing
@@ -789,16 +796,20 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             helper_name="SortingSelection.insert_selection",
             insert_default_path="SorterParameters.insert_default()",
         )
-        cls._validate_artifact_detection_source_for_recording(
-            recording_id=plan.source_restriction["recording_id"],
-            artifact_detection_id=plan.artifact_detection_id,
-        )
+        # Artifact-detection passes apply only to a single-recording source;
+        # the plan already rejects a concat source that supplies an artifact,
+        # so this validation runs for the recording path only.
+        if plan.source_kind == "recording":
+            cls._validate_artifact_detection_source_for_recording(
+                recording_id=plan.source_restriction["recording_id"],
+                artifact_detection_id=plan.artifact_detection_id,
+            )
 
         try:
             with transaction_or_noop(cls.connection):
                 # allow_direct_insert: this helper IS the validation boundary.
                 cls.insert1(plan.master_row, allow_direct_insert=True)
-                cls.RecordingSource.insert1(plan.recording_source_row)
+                source_part.insert1(source_row)
                 if plan.artifact_source_row is not None:
                     cls.ArtifactDetectionSource.insert1(
                         plan.artifact_source_row
@@ -819,6 +830,7 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
                 plan.source_restriction,
                 plan.artifact_detection_id,
                 plan.sorting_id,
+                source_part,
             )
             if existing is not None:
                 return existing
@@ -843,14 +855,22 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         source_restriction,
         artifact_detection_id,
         deterministic_id,
+        source_part,
     ) -> dict | None:
         """Return the canonical master PK for this sort selection, or None.
 
-        Matches a master with the same sorter + recording source AND the
-        same artifact-detection-source state
-        (present-with-this-``artifact_detection_id`` vs absent), so an
-        artifact-detection-backed and an artifact-detection-free selection
-        never alias. Splits the matches by primary key:
+        ``source_part`` is the source part table for the requested input
+        (``RecordingSource`` for a recording source,
+        ``ConcatenatedRecordingSource`` for a concat source); the find-existing
+        join keys on that part so a recording-backed and a concat-backed sort
+        never alias even if their source-id strings collide.
+
+        Matches a master with the same sorter + source AND the same
+        artifact-detection-source state
+        (present-with-this-``artifact_detection_id`` vs absent -- a concat
+        source always has no artifact pass), so an artifact-detection-backed
+        and an artifact-detection-free selection never alias. Splits the
+        matches by primary key:
 
         * the master at ``deterministic_id`` is the canonical, content-
           addressed selection -> return ``{"sorting_id": ...}``;
@@ -868,9 +888,7 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         )
 
         candidates = (
-            (cls * cls.RecordingSource)
-            & master_restriction
-            & source_restriction
+            (cls * source_part) & master_restriction & source_restriction
         ).fetch("KEY", as_dict=True)
         master_ids = {
             cand["sorting_id"]
@@ -1149,15 +1167,9 @@ class Sorting(SpyglassMixin, dj.Computed):
         n_spikes: int
         """
 
-    # Exclude concat-source selections from populate. ``make_fetch``
-    # raises ``NotImplementedError`` for the concat path (the concat
-    # materializer is gated), but the DEFAULT key_source (the full
-    # ``SortingSelection``) would still hand concat rows to ``populate()``,
-    # which then prints a confusing per-row error. The antijoin drops any
-    # selection that has a ``ConcatenatedRecordingSource`` part. No-op
-    # today (no concat rows exist). When ``ConcatenatedRecording.make`` is
-    # implemented this antijoin is removed so concat rows populate normally.
-    key_source = SortingSelection - SortingSelection.ConcatenatedRecordingSource
+    # Both source kinds populate: ``make_fetch`` resolves the source (recording
+    # vs concatenated_recording) and dispatches accordingly, so the default
+    # ``key_source`` (the full ``SortingSelection``) is correct -- no antijoin.
 
     # Tri-part dispatch + parallel populate. ``Sorting.make`` is the
     # longest of the three Computed stages (sorters routinely take
@@ -1169,12 +1181,14 @@ class Sorting(SpyglassMixin, dj.Computed):
     def make_fetch(self, key):
         """Read every DB input the compute step needs.
 
-        Layer-2 source re-check fires here; concat raises
-        ``NotImplementedError`` until the schema's concat runtime
-        lands. All returned values are deterministic bytes
-        (DataJoint fetches inline dicts) so DataJoint's tri-part
-        DeepHash integrity check across the two fetches stays
-        stable.
+        Layer-2 source re-check fires here (``resolve_source`` asserts exactly
+        one input source). Dispatches on the source: a single-recording source
+        anchors to its own ``RecordingSelection``; a concat source anchors
+        deterministically to the FIRST ``SessionGroup.Member`` (so the per-unit
+        ``Electrode`` FK and the analysis-NWB parent both resolve to the anchor
+        member) and observes no artifact pass. All returned values are
+        deterministic bytes (DataJoint fetches inline dicts) so DataJoint's
+        tri-part DeepHash integrity check across the two fetches stays stable.
 
         Parameters
         ----------
@@ -1184,22 +1198,13 @@ class Sorting(SpyglassMixin, dj.Computed):
         Returns
         -------
         SortingFetched
-            DB inputs (source, ``sel_row``, ``sorter_row``,
-            ``nwb_file_name``, ``obs_intervals``) for the compute step.
-
-        Raises
-        ------
-        NotImplementedError
-            If the resolved source is a concatenated recording.
+            DB inputs (source, anchor ``recording_id``, ``sel_row``,
+            ``sorter_row``, anchor ``nwb_file_name``, ``obs_intervals``,
+            display recipe, execution params) for the compute step.
         """
         from spyglass.spikesorting.v2.recording import RecordingSelection
 
         source = SortingSelection.resolve_source(key)
-        if source.kind != "recording":
-            raise NotImplementedError(
-                "Sorting.make: concatenated_recording source is not yet "
-                "implemented."
-            )
 
         sel_row = (SortingSelection & key).fetch1()
         # The artifact-detection pass lives on the zero-or-one
@@ -1212,6 +1217,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         # see the artifact-detection id without re-querying. Without this the
         # ``sel_row.get("artifact_detection_id")`` reads would always be None
         # and every artifact-backed sort would silently skip artifact masking.
+        # (A concat source never has an artifact pass, so this is None there.)
         sel_row["artifact_detection_id"] = (
             SortingSelection.resolve_artifact_detection(key)
         )
@@ -1222,19 +1228,56 @@ class Sorting(SpyglassMixin, dj.Computed):
                 "sorter_params_name": sel_row["sorter_params_name"],
             }
         ).fetch1()
-        # ``source`` is already resolved (above); read both the nwb file and
-        # the preprocessing recipe from the one RecordingSelection row rather
-        # than re-resolving the source / re-querying the row for each.
-        nwb_file_name, preprocessing_params_name = (
-            RecordingSelection & {"recording_id": source.key["recording_id"]}
-        ).fetch1("nwb_file_name", "preprocessing_params_name")
+
+        # Resolve the anchor recording_id / nwb file / preprocessing recipe.
+        # Single-recording: the sort's own RecordingSelection. Concat: the
+        # first member (deterministic parent anchor). Concat sorts observe the
+        # full recording (no artifact pass).
+        if source.kind == "recording":
+            recording_id = source.key["recording_id"]
+            nwb_file_name, preprocessing_params_name = (
+                RecordingSelection & {"recording_id": recording_id}
+            ).fetch1("nwb_file_name", "preprocessing_params_name")
+            # Pre-fetch the observation-interval window so ``_write_units_nwb``
+            # can write ``obs_intervals=`` on every ``add_unit`` call.
+            # Downstream firing-rate computations need the artifact-removed
+            # valid_times to know which segments of the recording the sort
+            # actually observed -- without it the units NWB looks like the unit
+            # was observed across the full session even where the artifact mask
+            # blanked the signal. When ``artifact_detection_id`` is unset,
+            # make_compute falls back to the recording's full envelope.
+            if sel_row.get("artifact_detection_id") is not None:
+                from spyglass.spikesorting.v2.utils import (
+                    artifact_detection_interval_list_name,
+                )
+
+                obs_intervals = (
+                    IntervalList
+                    & {
+                        "nwb_file_name": nwb_file_name,
+                        "interval_list_name": (
+                            artifact_detection_interval_list_name(
+                                sel_row["artifact_detection_id"]
+                            )
+                        ),
+                    }
+                ).fetch1("valid_times")
+            else:
+                obs_intervals = None
+        else:  # concatenated_recording
+            recording_id, nwb_file_name, preprocessing_params_name = (
+                self._resolve_concat_anchor(source.key)
+            )
+            obs_intervals = None
 
         # Resolve the DISPLAY analyzer recipe from the source preprocessing
         # recipe (region) -- hippocampus -> the 0.5/0.5 row, cortex -> the
-        # 1.0/2.0 row, any other recipe -> the wider cortex fallback. Resolve
-        # the params blob HERE (make_fetch is the only stage allowed DB I/O);
-        # make_compute builds with it and make_insert persists the name so every
-        # later rebuild reads it back deterministically.
+        # 1.0/2.0 row, any other recipe -> the wider cortex fallback. The
+        # concat source resolves the SAME recipe from its single shared
+        # preprocessing recipe. Resolve the params blob HERE (make_fetch is the
+        # only stage allowed DB I/O); make_compute builds with it and
+        # make_insert persists the name so every later rebuild reads it back
+        # deterministically.
         display_waveform_params_name, _ = waveform_params_for_preprocessing(
             preprocessing_params_name
         )
@@ -1253,34 +1296,9 @@ class Sorting(SpyglassMixin, dj.Computed):
             sorter_row.get("execution_params")
         )
 
-        # Pre-fetch the observation-interval window so
-        # ``_write_units_nwb`` can write ``obs_intervals=`` on every
-        # ``add_unit`` call. Downstream firing-rate computations
-        # need the artifact-removed valid_times to know which
-        # segments of the recording the sort actually observed --
-        # without this column the units NWB looks like the unit
-        # was observed across the full session even where the
-        # artifact mask blanked the signal. When
-        # ``artifact_detection_id`` is unset the caller (make_compute)
-        # falls back to the recording's full timestamp envelope.
-        if sel_row.get("artifact_detection_id") is not None:
-            from spyglass.spikesorting.v2.utils import (
-                artifact_detection_interval_list_name,
-            )
-
-            obs_intervals = (
-                IntervalList
-                & {
-                    "nwb_file_name": nwb_file_name,
-                    "interval_list_name": artifact_detection_interval_list_name(
-                        sel_row["artifact_detection_id"]
-                    ),
-                }
-            ).fetch1("valid_times")
-        else:
-            obs_intervals = None
         return SortingFetched(
             source=source,
+            recording_id=recording_id,
             sel_row=sel_row,
             sorter_row=sorter_row,
             nwb_file_name=nwb_file_name,
@@ -1290,10 +1308,64 @@ class Sorting(SpyglassMixin, dj.Computed):
             execution_params=execution_params,
         )
 
+    @staticmethod
+    def _resolve_concat_anchor(source_key):
+        """Resolve a concat source to its anchor recording / NWB / preprocessing.
+
+        The anchor is the FIRST ``SessionGroup.Member`` (by ``member_index``):
+        its ``Recording`` supplies the per-unit ``Electrode`` FK and its NWB the
+        analysis parent; the preprocessing recipe is the concat selection's
+        single shared one. The full multi-session provenance stays queryable
+        through ``ConcatenatedRecordingSelection -> SessionGroup.Member``; this
+        does NOT query ``RecordingSelection`` with the concat-only key.
+
+        Parameters
+        ----------
+        source_key : dict
+            ``{"concat_recording_id": ...}`` from ``resolve_source``.
+
+        Returns
+        -------
+        tuple[str, str, str]
+            ``(anchor_recording_id, anchor_nwb_file_name,
+            preprocessing_params_name)``.
+        """
+        from spyglass.spikesorting.v2.recording import RecordingSelection
+        from spyglass.spikesorting.v2.session_group import (
+            ConcatenatedRecordingSelection,
+            SessionGroup,
+        )
+
+        csel = (ConcatenatedRecordingSelection & source_key).fetch1()
+        group_key = {
+            "session_group_owner": csel["session_group_owner"],
+            "session_group_name": csel["session_group_name"],
+        }
+        preprocessing_params_name = csel["preprocessing_params_name"]
+        first_member = (SessionGroup.Member & group_key).fetch(
+            as_dict=True, order_by="member_index", limit=1
+        )[0]
+        anchor_recording_id = (
+            RecordingSelection
+            & {
+                "nwb_file_name": first_member["nwb_file_name"],
+                "sort_group_id": first_member["sort_group_id"],
+                "interval_list_name": first_member["interval_list_name"],
+                "preprocessing_params_name": preprocessing_params_name,
+                "team_name": first_member["team_name"],
+            }
+        ).fetch1("recording_id")
+        return (
+            anchor_recording_id,
+            first_member["nwb_file_name"],
+            preprocessing_params_name,
+        )
+
     def make_compute(
         self,
         key,
         source,
+        recording_id,
         sel_row,
         sorter_row,
         nwb_file_name,
@@ -1326,7 +1398,12 @@ class Sorting(SpyglassMixin, dj.Computed):
         key : dict
             Primary key of the sorting being populated.
         source : SourceResolution
-            Resolved recording source from ``make_fetch``.
+            Resolved sort input source from ``make_fetch`` (selects whether the
+            recording is loaded from ``Recording`` or ``ConcatenatedRecording``).
+        recording_id : str
+            The anchor ``recording_id`` from ``make_fetch`` (the sort's own
+            recording, or the first concat member's), threaded forward so the
+            ``Sorting.Unit`` Electrode FK resolves against the anchor member.
         sel_row : dict
             The ``SortingSelection`` row (with ``artifact_detection_id``).
         sorter_row : dict
@@ -1353,8 +1430,18 @@ class Sorting(SpyglassMixin, dj.Computed):
             Carrier of the computed sorting, staged units NWB, analyzer
             folder, and lookups threaded into ``make_insert``.
         """
-        recording_id = source.key["recording_id"]
-        recording = Recording().get_recording({"recording_id": recording_id})
+        # Load the sort input: a single-recording source reads the cached
+        # Recording; a concat source reads the materialized ConcatenatedRecording
+        # cache. ``recording_id`` is the anchor (threaded from make_fetch) used
+        # for the per-unit Electrode FK, NOT necessarily the loaded recording's
+        # own id. Concat sorts have no artifact pass, so the mask block is
+        # skipped (obs_intervals is None there).
+        if source.kind == "recording":
+            recording = Recording().get_recording(
+                {"recording_id": recording_id}
+            )
+        else:  # concatenated_recording
+            recording = ConcatenatedRecording().get_recording(source.key)
 
         if (
             sel_row.get("artifact_detection_id") is not None
@@ -1679,9 +1766,18 @@ class Sorting(SpyglassMixin, dj.Computed):
 
         row = (self & key).fetch1()
         abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
+        # Resolve the recording row backing this sort's absolute-time readback:
+        # a single-recording sort reads its Recording row, a concat-backed sort
+        # reads its ConcatenatedRecording row. Both carry analysis_file_name /
+        # electrical_series_path / sampling_frequency, which is all the
+        # absolute-time -> frame mapping below needs.
         source = SortingSelection.resolve_source(key)
-        recording_id = source.key["recording_id"]
-        rec_row = (Recording & {"recording_id": recording_id}).fetch1()
+        if source.kind == "recording":
+            rec_row = (
+                Recording & {"recording_id": source.key["recording_id"]}
+            ).fetch1()
+        else:  # concatenated_recording
+            rec_row = (ConcatenatedRecording & source.key).fetch1()
         fs = float(rec_row["sampling_frequency"])
 
         if int(row["n_units"]) == 0:

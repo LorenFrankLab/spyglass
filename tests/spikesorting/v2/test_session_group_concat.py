@@ -97,6 +97,16 @@ def test_session_group_member_has_no_recording_date_column():
     assert "recording_date" not in SessionGroup.Member.heading.attributes
 
 
+@pytest.mark.usefixtures("dj_conn")
+def test_create_group_rejects_empty_members():
+    """An empty members list is rejected up front, not deferred to an obscure
+    ``members[0]`` failure in ConcatenatedRecording.make."""
+    from spyglass.spikesorting.v2.session_group import SessionGroup
+
+    with pytest.raises(ValueError, match="empty"):
+        SessionGroup.create_group("any_owner", "empty_group", [])
+
+
 @pytest.mark.slow
 def test_create_group_same_day_inserts_and_is_not_multi_day(
     chronic_2_session_minirec,
@@ -463,3 +473,127 @@ def test_motion_correction_preset_auto_rejects_multi_day(
         clean_session_groups_for_owner(owner)
         (Recording & next_day_rec_pk).super_delete(warn=False)
         (RecordingSelection & next_day_rec_pk).super_delete(warn=False)
+
+
+# ---------- concat-backed Sorting end-to-end ------------------------------
+
+
+@pytest.mark.slow
+def test_concat_sort_end_to_end_and_split(same_day_group):
+    """A concat-backed Sorting.populate runs end-to-end: it finds units,
+    anchors its analysis NWB + per-unit electrodes to the first member,
+    raises on concat brain regions without the anchor opt-in (and returns the
+    anchor-member frame with it), and ``split_sorting_by_session`` returns one
+    per-member sorting in each member's local frame with unit ids preserved."""
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2.exceptions import (
+        ConcatBrainRegionAmbiguousError,
+    )
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        Sorting,
+        SortingSelection,
+    )
+    from tests.spikesorting.v2._smoke_constants import (
+        SMOKE_CLUSTERLESS_PARAM_NAME,
+        SMOKE_CLUSTERLESS_PARAMS,
+    )
+
+    grp = same_day_group
+    concat_pk = _populate_concat_none(
+        grp["group_key"], grp["preprocessing_params_name"]
+    )
+
+    SorterParameters.insert1(
+        {
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": SMOKE_CLUSTERLESS_PARAM_NAME,
+            "params": SMOKE_CLUSTERLESS_PARAMS,
+        },
+        skip_duplicates=True,
+        allow_duplicate_params=True,
+    )
+    sort_pk = SortingSelection.insert_selection(
+        {
+            "concat_recording_id": concat_pk["concat_recording_id"],
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": SMOKE_CLUSTERLESS_PARAM_NAME,
+        }
+    )
+    Sorting.populate(sort_pk, reserve_jobs=False)
+
+    row = (Sorting & sort_pk).fetch1()
+    assert int(row["n_units"]) > 0, "concat sort found no units"
+
+    # The analyzer folder exists for the resolved display recipe.
+    folder = analyzer_path(
+        sort_pk["sorting_id"], row["display_waveform_params_name"]
+    )
+    assert folder.exists()
+
+    # Parent anchoring: every Sorting.Unit electrode belongs to the FIRST
+    # member's NWB (the deterministic anchor), not the second member's.
+    first_nwb = grp["same_day_members"][0]["nwb_file_name"]
+    unit_nwbs = set((Sorting.Unit & sort_pk).fetch("nwb_file_name"))
+    assert unit_nwbs == {first_nwb}
+
+    # Concat brain regions: ambiguous by default, anchor-member with opt-in.
+    with pytest.raises(ConcatBrainRegionAmbiguousError):
+        Sorting().get_unit_brain_regions(sort_pk)
+    regions = Sorting().get_unit_brain_regions(sort_pk, allow_anchor_member=True)
+    assert (regions["region_resolution"] == "anchor_member").all()
+
+    # split_sorting_by_session: one entry per member, local frames, unit ids
+    # preserved.
+    sorting_obj = Sorting().get_analyzer(sort_pk).sorting
+    split = ConcatenatedRecording().split_sorting_by_session(
+        sorting_obj, concat_pk
+    )
+    members = grp["same_day_members"]
+    assert set(split) == {
+        (m["nwb_file_name"], m["interval_list_name"]) for m in members
+    }
+    member_samples = {
+        m["nwb_file_name"]: Recording()
+        .get_recording(rec_pk)
+        .get_num_samples()
+        for m, rec_pk in zip(members, grp["recording_pks"])
+    }
+    all_unit_ids = set(sorting_obj.unit_ids)
+    for (nwb_file_name, _interval), member_sorting in split.items():
+        # Unit ids are preserved across every member.
+        assert set(member_sorting.unit_ids) == all_unit_ids
+        # Every spike falls within that member's local sample range.
+        for unit_id in member_sorting.unit_ids:
+            frames = member_sorting.get_unit_spike_train(unit_id=unit_id)
+            if len(frames):
+                assert int(frames.min()) >= 0
+                assert int(frames.max()) < member_samples[nwb_file_name]
+
+    # Merge-id resolution: a concat-backed curation resolves through
+    # SortingSelection.ConcatenatedRecordingSource by concat_recording_id and
+    # by the session-group fields, and combines with curation_id.
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    curation_key = CurationV2.insert_curation(sorting_key=sort_pk)
+    merge_id = (SpikeSortingOutput.CurationV2 & curation_key).fetch1("merge_id")
+    by_concat = SpikeSortingOutput().get_restricted_merge_ids(
+        {"concat_recording_id": concat_pk["concat_recording_id"]},
+        sources=["v2"],
+    )
+    assert merge_id in by_concat
+    by_group = SpikeSortingOutput().get_restricted_merge_ids(
+        {**grp["group_key"], "curation_id": curation_key["curation_id"]},
+        sources=["v2"],
+    )
+    assert merge_id in by_group
+    # A restriction with NO source key (only curation_id) must still include
+    # the concat-backed curation -- a broad v2 query unions both source
+    # families, it does not silently default to recording-source only.
+    by_curation = SpikeSortingOutput().get_restricted_merge_ids(
+        {"curation_id": curation_key["curation_id"]}, sources=["v2"]
+    )
+    assert merge_id in by_curation
