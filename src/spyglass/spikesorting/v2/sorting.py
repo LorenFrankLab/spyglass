@@ -117,6 +117,11 @@ class SortingFetched(NamedTuple):
     display_waveform_params : dict
         That recipe's resolved params blob, threaded into ``_build_analyzer``
         so ``make_compute`` does no parameter DB I/O.
+    execution_params : dict
+        The validated ``SorterParameters.execution_params`` blob (sorter
+        execution backend + container provenance), resolved here so
+        ``make_compute`` does no parameter DB I/O before passing it to the
+        DB-free sorter dispatch.
     """
 
     source: SourceResolution
@@ -126,6 +131,7 @@ class SortingFetched(NamedTuple):
     obs_intervals: np.ndarray | None
     display_waveform_params_name: str
     display_waveform_params: dict
+    execution_params: dict
 
 
 class SortingComputed(NamedTuple):
@@ -204,7 +210,18 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
     params: blob
     params_schema_version=0: int
     job_kwargs=null: blob
+    execution_params: blob               # validated SorterExecutionParamsSchema dump
+    execution_params_schema_version=1: int
     """
+    # ``execution_params`` records the sorter EXECUTION backend (local vs
+    # Docker/Singularity) + container-side install provenance, validated by
+    # ``SorterExecutionParamsSchema``. It is tracked here -- not in the scientific
+    # ``params`` blob and not in ``job_kwargs`` -- because the backend can change
+    # the sort output and ``sorter_params_name`` already flows into ``sorting_id``.
+    # A row that omits it backfills the schema default (``backend="local"``).
+    # Switching backend for an existing logical row therefore requires a NEW
+    # ``sorter_params_name`` (a local MS4 row and a containerized MS4 row are
+    # distinct named rows), not an in-place mutation.
 
     def insert1(self, row, allow_duplicate_params=False, **kwargs):
         """Validate and insert a single row via the ``insert`` path."""
@@ -253,6 +270,8 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
         from spyglass.spikesorting.v2._params.sorter import (
             _SORTER_SCHEMAS,
             reject_internal_whiten,
+            reject_reserved_execution_keys,
+            validate_execution_params,
         )
 
         valid_sorters = (
@@ -277,9 +296,44 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
             # runtime's external float64 whitening. (KS4 self-guards in its
             # typed schema; MS4/MS5 use whiten=True deliberately.)
             reject_internal_whiten(sorter, row["params"])
+            # Container backend / install provenance is tracked ONLY on
+            # ``execution_params`` -- reject the reserved execution keys from the
+            # scientific ``params`` blob (the permissive ``extra="allow"`` sorter
+            # schemas would otherwise pass them straight through) AND from
+            # ``job_kwargs``. The strict schemas already reject the same keys via
+            # ``extra="forbid"``.
+            reject_reserved_execution_keys(
+                row["params"], context="SorterParameters params blob"
+            )
+            reject_reserved_execution_keys(
+                row.get("job_kwargs"), context="SorterParameters job_kwargs"
+            )
             if int(row.get("params_schema_version", 0)) == 0:
                 row["params_schema_version"] = _params_schema_version(
                     row["params"]
+                )
+            # Validate + backfill the execution backend provenance. A row that
+            # omits ``execution_params`` defaults to local execution; the outer
+            # ``execution_params_schema_version`` is backfilled from the
+            # validated blob when omitted and cross-checked when supplied.
+            validated_execution = validate_execution_params(
+                row.get("execution_params")
+            )
+            row["execution_params"] = validated_execution
+            inner_execution_version = int(validated_execution["schema_version"])
+            if "execution_params_schema_version" not in row:
+                row["execution_params_schema_version"] = inner_execution_version
+            elif (
+                int(row["execution_params_schema_version"])
+                != inner_execution_version
+            ):
+                raise ValueError(
+                    "SorterParameters.insert: execution_params_schema_version="
+                    f"{row['execution_params_schema_version']} does not match "
+                    "the inner SorterExecutionParamsSchema schema_version="
+                    f"{inner_execution_version} on the validated execution_params "
+                    "blob. Drop the column or align it with the blob's "
+                    "schema_version."
                 )
 
         validated = validate_lookup_rows(
@@ -351,20 +405,35 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
         """Split ``_DEFAULT_CONTENTS`` into (insertable, skipped) by install.
 
         A default row is insertable when its sorter is a Spyglass-internal
-        sorter (``_NON_SI_SORTERS``, never gated) or is in
-        ``spikeinterface.sorters.installed_sorters()``. Returns
-        ``(insertable, skipped)`` so ``insert_default`` can log the skips
-        and tests can assert the gating decision without depending on the
-        live ``SorterParameters`` table state.
+        sorter (``_NON_SI_SORTERS``, never gated), is in
+        ``spikeinterface.sorters.installed_sorters()``, OR runs on a tracked
+        container backend (``execution_params.backend`` in
+        ``{"docker", "singularity"}``). Container rows ship even when the local
+        sorter runtime is unavailable -- their runtime lives in the image, so a
+        selected container row is gated by preflight (the container runtime
+        check), not by local-install at default-row insertion. Returns
+        ``(insertable, skipped)`` so ``insert_default`` can log the skips and
+        tests can assert the gating decision without depending on the live
+        ``SorterParameters`` table state.
         """
         import spikeinterface.sorters as sis
+
+        from spyglass.spikesorting.v2._sorting_dispatch import (
+            is_container_backend,
+        )
 
         installed = set(sis.installed_sorters())
         insertable: list = []
         skipped: list = []
         for row in cls._DEFAULT_CONTENTS:
             sorter = row[0]
-            if sorter in cls._NON_SI_SORTERS or sorter in installed:
+            # row = (sorter, name, params, params_sv, job_kwargs,
+            #        execution_params, execution_params_sv)
+            if (
+                sorter in cls._NON_SI_SORTERS
+                or sorter in installed
+                or is_container_backend(row[5])
+            ):
                 insertable.append(row)
             else:
                 skipped.append(row)
@@ -456,14 +525,19 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
                     f"({exc!r})."
                 )
                 continue
+            # Append a MAPPING row (not a positional tuple) so the insert hook
+            # backfills the omitted execution_params (default local execution) +
+            # its schema version -- a positional row would have to enumerate all
+            # SorterParameters columns and would break the moment the table gains
+            # one (as it did with execution_params).
             rows.append(
-                (
-                    sorter,
-                    "default",
-                    validated,
-                    _params_schema_version(validated),
-                    None,
-                )
+                {
+                    "sorter": sorter,
+                    "sorter_params_name": "default",
+                    "params": validated,
+                    "params_schema_version": _params_schema_version(validated),
+                    "job_kwargs": None,
+                }
             )
         if skipped_not_installed:
             logger.info(
@@ -1154,6 +1228,17 @@ class Sorting(SpyglassMixin, dj.Computed):
             display_waveform_params_name
         )
 
+        # Resolve + validate the sorter execution backend (local vs container)
+        # here -- make_fetch is the only stage allowed DB I/O. make_compute
+        # passes the resolved dict to the DB-free sorter dispatch.
+        from spyglass.spikesorting.v2._params.sorter import (
+            validate_execution_params,
+        )
+
+        execution_params = validate_execution_params(
+            sorter_row.get("execution_params")
+        )
+
         # Pre-fetch the observation-interval window so
         # ``_write_units_nwb`` can write ``obs_intervals=`` on every
         # ``add_unit`` call. Downstream firing-rate computations
@@ -1188,6 +1273,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             obs_intervals=obs_intervals,
             display_waveform_params_name=display_waveform_params_name,
             display_waveform_params=display_waveform_params,
+            execution_params=execution_params,
         )
 
     def make_compute(
@@ -1200,6 +1286,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         obs_intervals,
         display_waveform_params_name,
         display_waveform_params,
+        execution_params,
     ):
         """Sort, build analyzer, stage Units NWB outside any DB transaction.
 
@@ -1242,6 +1329,9 @@ class Sorting(SpyglassMixin, dj.Computed):
         display_waveform_params : dict
             That recipe's resolved params blob, fed to ``_build_analyzer`` so
             the window / subsample are not hardcoded (no DB I/O here).
+        execution_params : dict
+            The validated sorter execution backend / container provenance from
+            ``make_fetch``, passed to the DB-free sorter dispatch.
 
         Returns
         -------
@@ -1287,6 +1377,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             recording=recording,
             sorting_id=key["sorting_id"],
             job_kwargs=job_kwargs,
+            execution_params=execution_params,
         )
         sorting_obj = self._remove_excess_spikes(sorting_obj, recording)
 
@@ -2017,14 +2108,16 @@ class Sorting(SpyglassMixin, dj.Computed):
         sorting_id,
         *,
         job_kwargs=None,
+        execution_params=None,
     ):
         """Dispatch sort execution; clusterless_thresholder vs SI sorters.
 
         Clusterless is a Spyglass-specific peak-detection path with no
-        SI scratch directory or external whitening; SI sorters get
-        per-sort scratch, external whitening, and a small MATLAB-
-        sorter carve-out. The two paths share nothing but the
-        signature; dispatch routes each to its own helper.
+        SI scratch directory, external whitening, or container backend, so
+        ``execution_params`` does not apply to it. SI sorters get per-sort
+        scratch, external whitening, and the tracked container-execution
+        backend. The two paths share nothing but the signature; dispatch routes
+        each to its own helper.
         """
         if sorter == "clusterless_thresholder":
             return Sorting._run_clusterless_thresholder(
@@ -2038,6 +2131,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             recording=recording,
             sorting_id=sorting_id,
             job_kwargs=job_kwargs,
+            execution_params=execution_params,
         )
 
     @staticmethod
@@ -2069,6 +2163,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         recording,
         sorting_id,
         job_kwargs,
+        execution_params=None,
     ):
         """Run an SI registered sorter under a managed scratch dir.
 
@@ -2076,8 +2171,11 @@ class Sorting(SpyglassMixin, dj.Computed):
         a ``Sorting`` staticmethod because ``_run_sorter`` dispatches to
         ``Sorting._run_si_sorter`` and the v2 tests call it directly. The
         managed ``TemporaryDirectory`` scratch, external float64 whitening,
-        scoped ``np.Inf`` patch, MATLAB-sorter carve-out, and the
+        scoped ``np.Inf`` patch, container-execution backend (local vs
+        Docker/Singularity + the MATLAB-sorter container policy), and the
         global-job-kwargs save/restore live in the service module.
+        ``execution_params`` defaults to ``None`` (resolved to local) so direct
+        test callers and the clusterless path stay unchanged.
         """
         return run_si_sorter(
             sorter=sorter,
@@ -2085,6 +2183,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             recording=recording,
             sorting_id=sorting_id,
             job_kwargs=job_kwargs,
+            execution_params=execution_params,
         )
 
     @staticmethod

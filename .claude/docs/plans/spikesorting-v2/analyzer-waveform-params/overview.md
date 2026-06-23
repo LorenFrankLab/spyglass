@@ -113,7 +113,9 @@
   related shape measures — as columns in the per-unit metric table, configurable
   per `QualityMetricParameters` row, so downstream consumers can classify cell
   types (e.g. hippocampal interneuron vs pyramidal) with region-appropriate
-  thresholds of their own.
+  thresholds of their own. The shipped default surfaces conservative width /
+  duration columns (`trough_half_width`, `peak_to_trough_duration`); slope columns
+  remain opt-in unless hippocampal-window validation supports them.
 - Expose a thin SpikeInterface visualization/export bridge for local inspection:
   a discoverable `v2.visualization` facade, trace and probe-map widgets from
   Spyglass recordings, sorting/unit/waveform widgets from the display analyzer,
@@ -155,9 +157,9 @@
 - **Cache correctness:** for one `sorting_id`, the whitened and unwhitened
   analyzers resolve to distinct folders and never overwrite each other.
 - **Exposure (Phase 4):** `get_metrics` returns waveform-shape columns
-  (`trough_half_width`, `peak_to_trough_duration`, ...) alongside the quality
-  metrics, read from the display (unwhitened) analyzer; no shipped auto-curation
-  rule thresholds any of them.
+  (`trough_half_width`, `peak_to_trough_duration` by default) alongside the
+  quality metrics, read from the display (unwhitened) analyzer; no shipped
+  auto-curation rule thresholds any of them.
 - **Inspection (Phase 5):** SI visualization/export helpers preserve routing:
   recording widgets read the saved preprocessed `Recording`; waveform/template/
   location/merge widgets and exports read the display analyzer; official metric
@@ -179,8 +181,8 @@
 | Container rows look pinned by image but float the installed SpikeInterface version | Shipped/recommended container rows must use `installation_mode="no-install"` with a baked SI runtime or pin `spikeinterface_version`; unpinned custom `auto` rows are labeled exploratory/non-reproducible |
 | Replacing the old MATLAB sorter name-based Singularity fallback breaks custom Kilosort/IronClust rows silently | Phase 3a makes this an explicit behavior change: MATLAB-backed legacy sorters require tracked Docker/Singularity execution or fail preflight/dispatch clearly; no silent local fallback |
 | 20000-spike analyzer build is slower / larger | Phase 1 smoke-tests the base build's time + memory on a real-data slice (it ships the 20000 default); Phase 2 measures the whitened build's additional cost |
-| Hippocampus 0.5/0.5 display windows are shorter than SI's broad waveform defaults | This is intentional for hippocampal dense/tight waveforms. Phase 4 validates that surfaced template-shape metrics do not boundary-clip on representative hippocampal fixtures; cortex and unknown/multi-region sorts keep the wider 1.0/2.0 fallback |
-| SI widget/export wrappers accidentally use the whitened metric analyzer, recompute merge candidates, hide behind hard-to-discover table methods, miss required extensions, or default to a web backend | Phase 5 wrapper tests assert display-analyzer routing, persisted `get_merge_groups` use, a discoverable `v2.visualization` facade, extension ensure-or-clear-error behavior, `matplotlib` defaults, explicit `sortingview` opt-in, and no populate-side plotting/export |
+| Hippocampus 0.5/0.5 display windows are shorter than SI's broad waveform defaults | This is intentional for hippocampal dense/tight waveforms. Phase 4 validates that default surfaced template-shape metrics do not boundary-clip on representative hippocampal fixtures; cortex and unknown/multi-region sorts keep the wider 1.0/2.0 fallback |
+| SI widget/export wrappers accidentally use the whitened metric analyzer, recompute merge candidates, hide behind hard-to-discover table methods, mutate analyzer caches from plot calls, miss required extensions, or default to a web backend | Phase 5 wrapper tests assert display-analyzer routing, persisted `get_merge_groups` use, a discoverable `v2.visualization` facade, read-only-by-default extension policy with explicit compute opt-in, `matplotlib` defaults, explicit `sortingview` opt-in, and no populate-side plotting/export |
 
 ## Rollout Strategy
 

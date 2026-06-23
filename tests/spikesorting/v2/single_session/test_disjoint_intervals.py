@@ -108,7 +108,7 @@ def test_boundary_spike_round_trip_does_not_raise(
     # the artifact-masked recording. ``_run_sorter`` is a
     # ``@staticmethod`` so we patch the class attribute directly.
     def _boundary_run_sorter(
-        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None
+        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None, execution_params=None
     ):
         import spikeinterface as si
 
@@ -274,7 +274,7 @@ def test_get_sorting_recovers_frames_across_disjoint_gap(
     planted: dict = {}
 
     def _planted_run_sorter(
-        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None
+        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None, execution_params=None
     ):
         import spikeinterface as si
 
@@ -423,7 +423,7 @@ def test_obs_intervals_no_artifact_respects_disjoint_gap(
     (Sorting & sort_pk).super_delete(warn=False)
 
     def _planted_run_sorter(
-        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None
+        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None, execution_params=None
     ):
         import spikeinterface as si
 
@@ -541,7 +541,7 @@ def test_get_merged_sorting_keeps_cross_gap_pair(
     planted = {}
 
     def _two_unit_gap_boundary_sorter(
-        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None
+        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None, execution_params=None
     ):
         import spikeinterface as si
 
@@ -961,7 +961,7 @@ def test_disjoint_multi_gap_readback_and_artifact(
     assert 50 < k1 and k1 + 10 < k2 and k2 + 10 < times.size
 
     def _planted_run_sorter(
-        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None
+        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None, execution_params=None
     ):
         import spikeinterface as si
 

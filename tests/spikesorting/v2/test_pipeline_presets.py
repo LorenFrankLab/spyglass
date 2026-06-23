@@ -157,6 +157,38 @@ def test_describe_pipeline_presets_matches_preset_objects():
         assert row["notes"] == pipeline_preset.notes
 
 
+def test_container_ms4_pipeline_preset_registered():
+    """The one containerized MS4 preset (Singularity, 30 kHz) is registered.
+
+    The execution backend is NOT a preset field -- it lives on the referenced
+    SorterParameters row -- so ``describe_pipeline_presets`` (DB-free) carries no
+    execution columns. The preset names the containerized sorter row, stays
+    ``recommendation_status="production"`` (the recommended-science MS4 path),
+    and its notes describe the modern-host (numpy>=2) container path; the
+    function default remains MountainSort5.
+    """
+    name = "franklab_probe_hippocampus_30khz_ms4_singularity_2026_06"
+    df = describe_pipeline_presets().set_index("pipeline_preset")
+    assert name in df.index, f"{name} not registered"
+    row = df.loc[name]
+    assert row["sorter"] == "mountainsort4"
+    assert row["sorter_params_name"] == name  # references the container row
+    assert row["recommendation_status"] == "production"
+    assert "numpy>=2" in row["notes"]
+    assert "Singularity" in row["notes"]
+
+    # No shipped preset is the default-switching kind: the default stays MS5.
+    from spyglass.spikesorting.v2 import pipeline as pipeline_mod
+    import inspect
+
+    default = (
+        inspect.signature(pipeline_mod.run_v2_pipeline)
+        .parameters["pipeline_preset"]
+        .default
+    )
+    assert pipeline_mod._PIPELINE_PRESETS[default].sorter == "mountainsort5"
+
+
 def test_describe_pipeline_presets_threshold_units_mountainsort():
     """Every MountainSort preset reports σ-of-whitened-signal units, not µV/MAD.
 

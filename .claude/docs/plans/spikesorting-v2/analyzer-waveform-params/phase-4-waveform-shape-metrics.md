@@ -24,7 +24,11 @@ table, so its vocabulary is the same one `get_metrics` returns and the same one 
 → `nn_noise_overlap` *column* precedent). A metric *name* is not its column — SI's
 `half_width` metric emits TWO columns, `trough_half_width` and `peak_half_width` —
 so selecting by metric name is ambiguous; selecting by column name is
-what-you-configure-is-what-you-get.
+what-you-configure-is-what-you-get. The shipped default is conservative:
+`trough_half_width` + `peak_to_trough_duration` only. Slope columns remain
+discoverable and opt-in, because SI's `recovery_slope` default uses a 0.7 ms
+post-peak recovery window while the hippocampus display recipe intentionally has
+only `ms_after=0.5`.
 
 **Depends on Phase 2** (the display-vs-metric routing): template-shape metrics
 MUST be read from the **unwhitened display** analyzer — whitening normalizes
@@ -35,9 +39,11 @@ section 7 Phase 3 builds, so land it after Phase 3 or coordinate the notebook ed
 
 The hippocampus display row's 0.5/0.5 ms window is intentional for dense,
 tighter hippocampal spikes. Because this phase surfaces waveform-shape metrics,
-it must also verify that the narrowed hippocampal window does not boundary-clip
-the template features it exposes on representative hippocampal fixtures. Cortex,
-unknown, and multi-region sorts keep the wider 1.0/2.0 ms display fallback.
+it must verify that the narrowed hippocampal window does not boundary-clip the
+default template features it exposes on representative hippocampal fixtures. Do
+not default to recovery-slope-style metrics unless that validation shows the
+window is sufficient; cortex, unknown, and multi-region sorts keep the wider
+1.0/2.0 ms display fallback.
 
 **Inputs to read first:**
 
@@ -70,16 +76,16 @@ unknown, and multi-region sorts keep the wider 1.0/2.0 ms display fallback.
   default constant, then a validated field on `QualityMetricParamsSchema`:
 
   ```python
-  # default surfaced columns — the scalar shape columns used for cell typing
-  # (rate is already a quality metric; this adds spike width/shape). These are
-  # SI OUTPUT COLUMN names, not metric names: trough_half_width is the column SI's
-  # `half_width` metric emits; selecting columns directly avoids the name->column
-  # ambiguity (half_width -> trough_half_width + peak_half_width).
+  # Default surfaced columns — conservative scalar shape columns used for cell
+  # typing (rate is already a quality metric; this adds spike width/duration).
+  # These are SI OUTPUT COLUMN names, not metric names: trough_half_width is one
+  # of the columns SI's `half_width` metric emits; selecting columns directly
+  # avoids the name->column ambiguity (half_width -> trough_half_width +
+  # peak_half_width). Slope columns are discoverable but opt-in because the
+  # hippocampus display recipe intentionally has only ms_after=0.5.
   DEFAULT_TEMPLATE_METRIC_COLUMNS = [
       "trough_half_width",
       "peak_to_trough_duration",
-      "repolarization_slope",
-      "recovery_slope",
   ]
 
   def _available_template_metric_columns() -> list[str]:
@@ -123,13 +129,14 @@ unknown, and multi-region sorts keep the wider 1.0/2.0 ms display fallback.
 - **Add the table column + thread it through defaults.** Add
   `template_metric_columns: blob` to the `QualityMetricParameters` definition
   ([metric_curation.py:133-145](../../../../../src/spyglass/spikesorting/v2/metric_curation.py#L133-L145), after `metric_names`). The `_default_rows`
-  ([:146-190](../../../../../src/spyglass/spikesorting/v2/metric_curation.py#L146-L190)) payloads are validated through `QualityMetricParamsSchema` and
-  dumped, so each picks up the default set automatically — confirm the insert
-  path dumps the **full** schema (not a hand-picked subset of keys) so the new
-  field lands. Per project policy (`memory/spikesorting-v2-schema-policy`) this is
-  a direct def edit with **no** `params_schema_version` bump; the duplicate-content
-  guard (`memory/spikesorting-v2-param-content-guard`) must skip re-inserting
-  existing-PK rows whose only change is the added field.
+  ([:146-190](../../../../../src/spyglass/spikesorting/v2/metric_curation.py#L146-L190)) payloads are validated through `QualityMetricParamsSchema`, so each
+  default row must carry the schema's default template columns unless it
+  explicitly overrides them. The current `QualityMetricParameters` table stores
+  explicit columns (`metric_names`, `metric_kwargs`, `skip_pc_metrics`, etc.),
+  not a shared params blob, so update the table definition, schema payload,
+  validated insert output, `make_fetch`, and defaults together. Per the
+  pre-production schema policy this is a direct table-definition edit; do not
+  invent a migration layer.
 
 - **Surface the columns in `_compute_metrics` (display side).** After Phase 2's
   display-side quality-metric frame is built on the display analyzer, read the
@@ -196,11 +203,11 @@ unknown, and multi-region sorts keep the wider 1.0/2.0 ms display fallback.
 
 - **Add the routing row to the shared contract (this phase owns it).** In
   [shared-contracts.md](shared-contracts.md#display-vs-metric-analyzer-routing)
-  add a row for **template-shape metrics** (columns `trough_half_width`,
-  `peak_half_width`, `peak_to_trough_duration`, `repolarization_slope`,
-  `recovery_slope`) → **display (unwhitened)**, reason "waveform shape must come
-  from real templates; whitening distorts it," and note Phase 4 surfaces these
-  columns from the already-display `template_metrics` extension. Keep the existing
+  add a row for **template-shape metrics** (default columns
+  `trough_half_width`, `peak_to_trough_duration`; additional single-channel
+  template columns opt-in) → **display (unwhitened)**, reason "waveform shape
+  must come from real templates; whitening distorts it," and note Phase 4
+  surfaces these columns from the already-display `template_metrics` extension. Keep the existing
   invariant intact — only PC/NN metrics read the whitened analyzer.
 
 - **Ship NO threshold rules on the shape columns.** Do not add any
@@ -257,15 +264,15 @@ unknown, and multi-region sorts keep the wider 1.0/2.0 ms display fallback.
 
 | Test | Asserts |
 | --- | --- |
-| `test_quality_metric_params_default_template_columns` | a default `QualityMetricParameters` row carries `template_metric_columns == ["trough_half_width", "peak_to_trough_duration", "repolarization_slope", "recovery_slope"]` (`db_unit`) |
+| `test_quality_metric_params_default_template_columns` | a default `QualityMetricParameters` row carries `template_metric_columns == ["trough_half_width", "peak_to_trough_duration"]` (`db_unit`) |
 | `test_template_metric_columns_validated` | an unknown column raises at schema validation; passing a metric *name* (`half_width`) raises with the column hint; an empty list is accepted |
-| `test_compute_metrics_surfaces_template_columns` | `_compute_metrics` output columns ⊇ `{firing_rate, trough_half_width, peak_to_trough_duration}`; the metric NAME `half_width` is NOT a column; values finite on the synthetic analyzer (DB-free, reuse `synthetic_analyzer`) |
+| `test_compute_metrics_surfaces_template_columns` | `_compute_metrics` output columns ⊇ `{firing_rate, trough_half_width, peak_to_trough_duration}`; the metric NAME `half_width` is NOT a column; default output does not include `recovery_slope`; values finite on the synthetic analyzer (DB-free, reuse `synthetic_analyzer`) |
 | `test_template_metrics_read_from_display_analyzer` | the template columns are read from the **unwhitened display** analyzer, never the whitened one (monkeypatch the loader; assert the `waveform_params_name` passed) — guards the routing contract |
 | `test_get_metrics_roundtrip_includes_template` | write → `read_quality_metrics` → `get_metrics` surfaces the template columns with the written values (`db_unit`) |
 | `test_build_table_guards_nonscalar_column` | `build_quality_metrics_table` coerces a non-scalar / non-numeric cell to `NaN` without raising |
 | `test_available_template_metric_columns` | `QualityMetricParameters.available_template_metric_columns()` returns the SI single-channel column list and includes `trough_half_width` but not `half_width` |
 | `test_no_shipped_rule_thresholds_template_column` | no `AutoCurationRules._default_payloads` rule references a template-metric column (guards "expose, don't threshold") |
-| `test_hippocampus_template_metrics_not_boundary_clipped` | on a representative hippocampal fixture using the 0.5/0.5 display row, surfaced waveform-shape columns are finite and the trough / neighboring extrema used by SI template metrics are not pinned to the first or last waveform sample (`slow`, `integration`) |
+| `test_hippocampus_template_metrics_not_boundary_clipped` | on a representative hippocampal fixture using the 0.5/0.5 display row, default surfaced waveform-shape columns are finite and the trough / neighboring extrema used by SI template metrics are not pinned to the first or last waveform sample (`slow`, `integration`) |
 | `test_mearec_celltype_metrics_separable` | on the MEArec smoke fixture, ground-truth E vs I units have separable `trough_half_width` × `firing_rate` distributions (descriptive: a t-test / margin on the two groups, NOT a baked threshold) (`slow`, `integration`) |
 | notebook execution (CI smoke if notebooks are tested) | section 7's cell-typing example runs end-to-end against the example sort |
 

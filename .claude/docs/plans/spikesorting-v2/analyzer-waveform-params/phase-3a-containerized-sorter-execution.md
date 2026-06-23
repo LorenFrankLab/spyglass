@@ -119,16 +119,19 @@ point to a real containerized execution path.
   intentional behavior change from the old name-based fallback so existing custom
   Kilosort/IronClust rows are not silently reinterpreted as local execution.
 
-- **Add first-class containerized MS4 rows.** Add at least one polymer MS4 row
-  whose scientific params match `franklab_probe_hippocampus_30khz_ms4_2026_06`
-  and whose execution backend is Singularity or Docker with an explicit image.
-  Suggested row name:
+- **Add a first-class containerized MS4 row.** Add one polymer MS4 row whose
+  scientific params match `franklab_probe_hippocampus_30khz_ms4_2026_06` and
+  whose execution backend is Singularity with an explicit image. Row name:
   `franklab_probe_hippocampus_30khz_ms4_singularity_2026_06`.
-  If both Docker and Singularity are realistic lab targets, add both rows with
-  separate names. The container image string must be pinned to a version/tag or
-  digest stable enough for provenance. The shipped/recommended row must also pin
-  the container-side SpikeInterface install as described above (`no-install` with
-  a baked image, or explicit `spikeinterface_version`).
+  **As shipped (simplification after review):** only the Singularity 30 kHz row
+  ships -- Singularity/Apptainer is the Frank-lab HPC target. A Docker row and
+  other rates are user-insertable `SorterParameters` rows via the same tracked
+  `execution_params` mechanism; they are deliberately not shipped until they have
+  a real runtime to prove against. The container image string is pinned to a
+  published `mountainsort4-base` tag (`1.0.x`, the ml_ms4alg image version --
+  NOT the SpikeInterface release), and the container-side SpikeInterface install
+  is pinned separately (`installation_mode="pypi"` + explicit
+  `spikeinterface_version`).
 
 - **Adjust default-row gating.** `SorterParameters.insert_default()` currently
   gates rows on local `sis.installed_sorters()`. Keep that behavior for local
@@ -148,10 +151,15 @@ point to a real containerized execution path.
     `numpy>=2` environment while the MS4 runtime lives inside the container.
 
 - **Preset/docs integration.** Register a real pipeline preset for
-  containerized polymer MS4 so Phase 3 can mark it in
-  `describe_pipeline_presets` as the recommended-science option for modern
-  hosts. Keep MS5 as the default unless project owners explicitly change that
-  later.
+  containerized polymer MS4 (`franklab_probe_hippocampus_30khz_ms4_singularity_2026_06`)
+  so Phase 3 can name it as the recommended-science option for modern hosts.
+  **As shipped (simplification after review):** the execution backend is NOT a
+  preset field -- it lives only on the referenced
+  `SorterParameters.execution_params` row (single source of truth). The DB-free
+  `describe_pipeline_presets` carries no execution columns; the live
+  `describe_pipeline_preset(name)` surfaces the row's `execution_params` under a
+  `sorter_execution` stage. Keep MS5 as the default unless project owners
+  explicitly change that later.
 
 ## Deliberately not in this phase
 
@@ -178,7 +186,7 @@ point to a real containerized execution path.
 | `test_run_si_sorter_keeps_job_kwargs_out_of_sorter_params` | `n_jobs` / `chunk_duration` still install via SI global job kwargs; execution kwargs are passed only as run-sorter kwargs |
 | `test_matlab_sorters_require_explicit_container_backend` | `kilosort2_5`, `kilosort3`, and `ironclust` rows with default/local execution fail preflight/dispatch with a clear tracked-container-backend message; rows with explicit Docker/Singularity retain any SI-required kwarg strip |
 | `test_container_ms4_default_row_inserts_without_local_ms4` | monkeypatch `sis.installed_sorters()` to omit `mountainsort4`; local MS4 rows may be skipped as today, but containerized MS4 rows still insert |
-| `test_container_ms4_pipeline_preset_registered` | `describe_pipeline_presets` includes the containerized polymer MS4 preset and marks its pinned container execution provenance |
+| `test_container_ms4_pipeline_preset_registered` | `describe_pipeline_presets` includes the containerized (Singularity, 30 kHz) MS4 preset; execution provenance is read from the referenced `SorterParameters.execution_params` row and surfaced by `describe_pipeline_preset(name)` (a `sorter_execution` stage), not duplicated as plural-describe columns |
 | `test_preflight_container_runtime_errors` | selected Docker/Singularity rows fail clearly when Docker/`docker` or Singularity/`spython` is missing; no fallback to local |
 | `test_preflight_reports_container_ms4_modern_host_path` | selected containerized MS4 row reports that host `numpy>=2` is acceptable because MS4 runtime is in the container |
 | container smoke (optional slow/integration) | tiny NWB/MEArec recording sorts through one pinned container image and returns a non-empty or valid zero-unit `BaseSorting`; skip unless the runtime and image are available |

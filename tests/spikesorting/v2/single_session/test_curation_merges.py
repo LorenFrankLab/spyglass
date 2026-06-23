@@ -332,7 +332,7 @@ def test_lazy_vs_applied_merge_frames_equal(polymer_smoke_session, monkeypatch):
     state: dict = {}
 
     def _planted_two_unit_sorter(
-        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None
+        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None, execution_params=None
     ):
         u0, u1 = state["u0"], state["u1"]
         samples = np.concatenate([u0, u1]).astype(np.int64)
@@ -764,7 +764,7 @@ def test_applied_and_lazy_merge_ids_match_for_out_of_order_groups(
     }
 
     def _planted_four_unit_sorter(
-        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None
+        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None, execution_params=None
     ):
         samples = np.concatenate([planted[u] for u in (0, 1, 2, 3)]).astype(
             np.int64
@@ -946,7 +946,7 @@ def test_v2_sorting_nwb_excludes_parent_units(dj_conn, tmp_path, monkeypatch):
     # Planted 2-unit sorter -> v2 unit ids {0, 1}, disjoint from the parent
     # ids {100, 101, 102} so any leak is unambiguous.
     def _planted_two_unit_sorter(
-        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None
+        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None, execution_params=None
     ):
         samples = np.array([200, 400, 600, 800], dtype=np.int64)
         labels = np.array([0, 1, 0, 1], dtype=np.int32)

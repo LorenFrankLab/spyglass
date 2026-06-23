@@ -82,12 +82,15 @@ def parameter_fingerprint(
     params_schema_version: int,
     job_kwargs: dict | None = None,
     sorter: str | None = None,
+    execution_params: dict | None = None,
+    execution_params_schema_version: int | None = None,
 ) -> str:
     """Return a SHA-256 content fingerprint for a parameter row.
 
     The row NAME is excluded, so two rows whose blobs are identical (same
-    table, sorter, schema version, ``params``, and ``job_kwargs``) produce
-    the same fingerprint regardless of what they are called.
+    table, sorter, schema version, ``params``, ``job_kwargs``, and -- for
+    ``SorterParameters`` -- ``execution_params``) produce the same fingerprint
+    regardless of what they are called.
 
     Parameters
     ----------
@@ -110,6 +113,16 @@ def parameter_fingerprint(
         For ``SorterParameters`` rows, the ``sorter`` the params validate
         against, so duplicate detection is scoped per sorter. ``None`` for
         the single-key Lookup tables.
+    execution_params : dict or None, optional
+        For ``SorterParameters`` rows, the validated ``execution_params`` blob
+        (container backend + install provenance). Included in the identity so a
+        local and a containerized row with identical scientific ``params`` are
+        NOT duplicates and can coexist under different names. ``None`` (the
+        default) omits it entirely, keeping the single-key Lookup tables'
+        fingerprints unchanged.
+    execution_params_schema_version : int or None, optional
+        The row's ``execution_params_schema_version``; only meaningful (and only
+        folded into the identity) when ``execution_params`` is provided.
 
     Returns
     -------
@@ -124,6 +137,14 @@ def parameter_fingerprint(
         "params": params,
         "job_kwargs": job_kwargs,
     }
+    # Fold execution provenance in ONLY for the tables that carry it
+    # (SorterParameters). Omitting the key for the single-key Lookups keeps
+    # their fingerprints byte-identical to the pre-execution-params behavior.
+    if execution_params is not None:
+        payload["execution_params"] = execution_params
+        payload["execution_params_schema_version"] = int(
+            execution_params_schema_version
+        )
     return hashlib.sha256(
         _canonical_content(payload).encode("utf-8")
     ).hexdigest()

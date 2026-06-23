@@ -32,7 +32,10 @@ from spyglass.spikesorting.v2._params.artifact_detection import (
 from spyglass.spikesorting.v2._params.preprocessing import (
     PreprocessingParamsSchema,
 )
-from spyglass.spikesorting.v2._params.sorter import _get_sorter_schema
+from spyglass.spikesorting.v2._params.sorter import (
+    SorterExecutionParamsSchema,
+    _get_sorter_schema,
+)
 from spyglass.spikesorting.v2.utils import _validate_params
 
 # ---- Dated recipe row names (single source for the cross-references) -------
@@ -49,6 +52,33 @@ MS4_30KHZ = "franklab_30khz_ms4_2026_06"
 MS4_20KHZ = "franklab_20khz_ms4_2026_06"
 MS5_30KHZ = "franklab_30khz_ms5_2026_06"
 KS4_NEUROPIXELS = "franklab_neuropixels_default"
+# Containerized MS4 (probe / polymer, 30 kHz): a first-class, reproducible
+# execution path for modern hosts. MS4's algorithm backend (ml_ms4alg) is a
+# numpy<2-era package that does not install under the v2 numpy>=2 baseline, so
+# this row runs the SAME scientific params as the local 30 kHz MS4 row inside a
+# pinned Singularity container -- the host stays on numpy>=2 while the MS4
+# runtime lives in the image. The local MS4 row and this containerized row are
+# DISTINCT named rows (different sorter_params_name); the container backend is
+# tracked provenance, not a runtime override.
+#
+# Singularity/Apptainer is the Frank-lab HPC target, so it is the one shipped
+# container path; a Docker row (and other rates) is a user-insertable
+# SorterParameters row away, using the same tracked execution_params mechanism.
+#
+# Two DISTINCT version spaces, pinned independently for reproducibility:
+#   * the image TAG versions SpikeInterface's published ``mountainsort4-base``
+#     image by its baked ml_ms4alg algorithm runtime (Docker Hub tags are
+#     1.0.x, NOT SpikeInterface release numbers); and
+#   * ``MS4_CONTAINER_SI_VERSION`` pins the SpikeInterface that
+#     ``installation_mode="pypi"`` pip-installs INTO that image at run time.
+# Do not conflate them -- tagging the image with the SI release (e.g. 0.104.3)
+# references a non-existent tag and the pull fails.
+MS4_CONTAINER_IMAGE_TAG = "1.0.5"
+MS4_CONTAINER_IMAGE = f"spikeinterface/mountainsort4-base:{MS4_CONTAINER_IMAGE_TAG}"
+MS4_CONTAINER_SI_VERSION = "0.104.3"
+MS4_SINGULARITY_30KHZ = (
+    "franklab_probe_hippocampus_30khz_ms4_singularity_2026_06"
+)
 # Analyzer waveform recipes (region-specific window; display=unwhitened,
 # metric=whitened). Hippocampal spikes are denser/tighter, so they take a
 # narrower 0.5/0.5 ms window; cortical waveforms are broader, so they take the
@@ -72,9 +102,35 @@ def _lookup_row(name: str, params: dict, job_kwargs=None) -> tuple:
     return (name, params, _params_schema_version(params), job_kwargs)
 
 
-def _sorter_row(sorter: str, name: str, params: dict, job_kwargs=None) -> tuple:
-    """Build a sorter-lookup row with the version copied from ``params``."""
-    return (sorter, name, params, _params_schema_version(params), job_kwargs)
+def _sorter_row(
+    sorter: str,
+    name: str,
+    params: dict,
+    job_kwargs=None,
+    execution_params: dict | None = None,
+) -> tuple:
+    """Build a sorter-lookup row with versions copied from the blobs.
+
+    Each row is ``(sorter, sorter_params_name, params_blob,
+    params_schema_version, job_kwargs, execution_params_blob,
+    execution_params_schema_version)`` -- matching the ``SorterParameters``
+    heading order. A row that omits ``execution_params`` gets the schema-default
+    local-execution blob.
+    """
+    exec_blob = (
+        execution_params
+        if execution_params is not None
+        else SorterExecutionParamsSchema().model_dump()
+    )
+    return (
+        sorter,
+        name,
+        params,
+        _params_schema_version(params),
+        job_kwargs,
+        exec_blob,
+        _params_schema_version(exec_blob),
+    )
 
 
 def _waveform_row(name: str, params: dict) -> tuple:
@@ -245,11 +301,61 @@ def waveform_params_default_contents() -> tuple:
     )
 
 
+# Rate-keyed MS4 scientific params, shared by the local rate-keyed rows AND the
+# containerized rows so a containerized row is byte-identical science to its
+# local sibling -- the container backend is the only difference. The sorter runs
+# ``filter=False`` (the preproc stage already bandpassed), so the only
+# rate-dependent knobs are ``clip_size`` / ``detect_interval`` (they hold the
+# same ~1.33 ms physical window across rates); ``adjacency_radius`` is set
+# explicitly to 100 um (also the schema default).
+_MS4_RATE_PARAMS: dict[int, dict] = {
+    30000: {"adjacency_radius": 100.0},
+    20000: {"adjacency_radius": 100.0, "clip_size": 27, "detect_interval": 7},
+}
+
+def _ms4_singularity_execution_params() -> dict:
+    """Validated Singularity execution provenance for the containerized MS4 row.
+
+    Singularity backend with the pinned image, and container-side SpikeInterface
+    pinned to an explicit version (``installation_mode="pypi"``) so the runtime
+    install is reproducible by row content -- not floating via
+    ``installation_mode="auto"``.
+    """
+    return SorterExecutionParamsSchema(
+        backend="singularity",
+        container_image=MS4_CONTAINER_IMAGE,
+        installation_mode="pypi",
+        spikeinterface_version=MS4_CONTAINER_SI_VERSION,
+    ).model_dump()
+
+
+def _ms4_singularity_sorter_row() -> tuple:
+    """Build the containerized (Singularity, 30 kHz) MS4 ``SorterParameters`` row.
+
+    Scientific params are IDENTICAL to the local 30 kHz MS4 row (shared
+    ``_MS4_RATE_PARAMS[30000]`` source); the only difference is the tracked
+    Singularity execution backend. The distinct ``sorter_params_name`` (and the
+    duplicate-content guard folding ``execution_params`` in) lets it coexist with
+    its local sibling instead of forking provenance.
+    """
+    return _sorter_row(
+        "mountainsort4",
+        MS4_SINGULARITY_30KHZ,
+        _validate_params(
+            _get_sorter_schema("mountainsort4"), _MS4_RATE_PARAMS[30000]
+        ),
+        execution_params=_ms4_singularity_execution_params(),
+    )
+
+
 def sorter_default_contents() -> tuple:
     """Return ``SorterParameters._DEFAULT_CONTENTS``.
 
     Each row is ``(sorter, sorter_params_name, params_blob,
-    params_schema_version, job_kwargs)``.
+    params_schema_version, job_kwargs, execution_params_blob,
+    execution_params_schema_version)``. The local sorter rows (MS4 rate-keyed,
+    MS5, KS4, SC2/TDC2, clusterless) plus the containerized MS4 row
+    (:func:`_ms4_singularity_sorter_row`).
     """
     return (
         _sorter_row(
@@ -263,8 +369,7 @@ def sorter_default_contents() -> tuple:
             "mountainsort4",
             MS4_30KHZ,
             _validate_params(
-                _get_sorter_schema("mountainsort4"),
-                {"adjacency_radius": 100.0},
+                _get_sorter_schema("mountainsort4"), _MS4_RATE_PARAMS[30000]
             ),
         ),
         _sorter_row(
@@ -274,12 +379,7 @@ def sorter_default_contents() -> tuple:
             "mountainsort4",
             MS4_20KHZ,
             _validate_params(
-                _get_sorter_schema("mountainsort4"),
-                {
-                    "adjacency_radius": 100.0,
-                    "clip_size": 27,
-                    "detect_interval": 7,
-                },
+                _get_sorter_schema("mountainsort4"), _MS4_RATE_PARAMS[20000]
             ),
         ),
         _sorter_row(
@@ -361,6 +461,7 @@ def sorter_default_contents() -> tuple:
                 {"threshold_unit": "uv", "noise_levels": [1.0]},
             ),
         ),
+        _ms4_singularity_sorter_row(),
     )
 
 
@@ -464,6 +565,44 @@ def _franklab_ms4_spec(probe_type: str, region: str, rate_hz: int) -> dict:
         threshold_units=_MS4_THRESHOLD_UNITS,
         notes=_MS4_NOTES,
     )
+
+
+def _franklab_ms4_singularity_spec() -> dict:
+    """Build the ``_PipelinePreset`` field dict for the containerized MS4 preset.
+
+    Reuses the probe-hippocampus-30 kHz MS4 spec (same preproc / artifact /
+    scientific sorter params), then points the sorter row at the containerized
+    Singularity row and rewrites the notes/intended-use for the modern-host
+    (numpy>=2) container path. The execution backend itself is NOT carried on the
+    preset -- it is read from the referenced ``SorterParameters.execution_params``
+    row (the single source of truth); ``describe_pipeline_preset(name)`` surfaces
+    it. ``recommendation_status`` stays ``"production"`` (the recommended-science
+    MS4 path on modern hosts); ``run_v2_pipeline``'s default remains MountainSort5.
+    """
+    spec = _franklab_ms4_spec("probe", "hippocampus", 30000)
+    spec.update(
+        sorter_params_name=MS4_SINGULARITY_30KHZ,
+        intended_use=(
+            "Frank-lab hippocampal polymer probes at 30 kHz, MountainSort4 run "
+            "inside a pinned Singularity container -- the recommended-science MS4 "
+            "path on modern hosts where MS4's ml_ms4alg backend cannot run "
+            "locally under the v2 numpy>=2 baseline."
+        ),
+        notes=(
+            "MountainSort4 detect_threshold is a multiple of the standard "
+            "deviation of the ZCA-whitened signal (~3), not an absolute voltage "
+            "and not a MAD multiplier. MS4 oversplits and does not track drift, "
+            "so merge curation is expected. This containerized variant runs MS4's "
+            f"ml_ms4alg backend inside the pinned Singularity image "
+            f"{MS4_CONTAINER_IMAGE} with container-side SpikeInterface pinned to "
+            f"{MS4_CONTAINER_SI_VERSION} (installation_mode='pypi'), so the host "
+            "can stay on the v2 numpy>=2 baseline -- the local MS4 presets need "
+            "numpy<2, this one does not. Preflight checks Singularity runtime "
+            "availability and never silently falls back to local execution. "
+            "run_v2_pipeline's default remains MountainSort5."
+        ),
+    )
+    return spec
 
 
 def pipeline_preset_specs() -> dict[str, dict]:
@@ -572,4 +711,8 @@ def pipeline_preset_specs() -> dict[str, dict]:
                 "and drift handling stand in for amplitude masking)."
             ),
         ),
+        # Containerized (Singularity, 30 kHz) MS4 -- the one shipped container
+        # path; its execution backend lives on the referenced
+        # SorterParameters.execution_params row, not on this preset.
+        MS4_SINGULARITY_30KHZ: _franklab_ms4_singularity_spec(),
     }
