@@ -27,6 +27,35 @@ _DEFAULT_QC_METRICS = (
 )
 
 
+def draw_metric_histogram(ax, values, *, title, ylabel="count"):
+    """Draw one metric's histogram on ``ax``, dropping non-finite values.
+
+    The float-coerced ``values`` have their non-finite entries (the ``None``
+    sanitized non-finite readback) dropped before histogramming, with the dropped
+    count annotated in the corner. Shared by the population QC overview
+    (``plot_units_qc_figure``) and the routed-metric plot
+    (``plot_metrics_figure``) so a per-metric panel renders identically in both.
+    """
+    finite = values[np.isfinite(values)]
+    n_dropped = len(values) - len(finite)
+    if len(finite):
+        ax.hist(finite, bins=min(20, max(5, len(finite))))
+    ax.set_title(title)
+    ax.set_xlabel(title)
+    ax.set_ylabel(ylabel)
+    if n_dropped:
+        ax.text(
+            0.98,
+            0.95,
+            f"{n_dropped} NaN dropped",
+            ha="right",
+            va="top",
+            transform=ax.transAxes,
+            fontsize=8,
+            color="gray",
+        )
+
+
 def plot_units_qc_figure(
     metrics_df: pd.DataFrame,
     unit_locations: np.ndarray | None,
@@ -103,25 +132,9 @@ def plot_units_qc_figure(
     # Histograms: one small-multiple per metric, NaN dropped.
     for index, metric in enumerate(metric_names):
         ax = axes[index // n_cols][index % n_cols]
-        values = numeric[metric].to_numpy(dtype=float)
-        finite = values[np.isfinite(values)]
-        n_dropped = len(values) - len(finite)
-        if len(finite):
-            ax.hist(finite, bins=min(20, max(5, len(finite))))
-        ax.set_title(metric)
-        ax.set_xlabel(metric)
-        ax.set_ylabel("count")
-        if n_dropped:
-            ax.text(
-                0.98,
-                0.95,
-                f"{n_dropped} NaN dropped",
-                ha="right",
-                va="top",
-                transform=ax.transAxes,
-                fontsize=8,
-                color="gray",
-            )
+        draw_metric_histogram(
+            ax, numeric[metric].to_numpy(dtype=float), title=metric
+        )
     # Hide unused histogram cells.
     for index in range(n_hist, n_hist_rows * n_cols):
         axes[index // n_cols][index % n_cols].set_axis_off()

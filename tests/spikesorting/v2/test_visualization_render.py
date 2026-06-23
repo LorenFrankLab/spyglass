@@ -125,3 +125,25 @@ def test_local_report_export_writes_folder(populated_sorting, tmp_path):
     # non-empty rather than pinning SI's exact filenames.
     assert any(output_folder.iterdir())
     plt.close("all")
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_export_to_phy_writes_folder_off_display_analyzer(
+    populated_sorting, tmp_path
+):
+    """``export_to_phy`` writes a Phy folder from the display analyzer.
+
+    PC features default off, so SI does not compute the whitened-metric-only
+    ``principal_components`` extension onto the unwhitened display analyzer; the
+    export still drives SI end to end and produces ``params.py``.
+    """
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    if not list(Sorting().get_analyzer(populated_sorting).unit_ids):
+        pytest.skip("zero-unit smoke sort; nothing to export")
+
+    output_folder = tmp_path / "phy"
+    ssviz.export_to_phy(populated_sorting, output_folder)
+    assert (output_folder / "params.py").exists()
+    plt.close("all")

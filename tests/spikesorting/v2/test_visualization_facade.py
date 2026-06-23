@@ -612,8 +612,35 @@ def test_export_report_uses_display_analyzer(dj_conn, monkeypatch):
 
 
 @pytest.mark.db_unit
+def test_export_report_read_only_requires_unit_locations(dj_conn, monkeypatch):
+    """``force_computation=False`` refuses to run when ``unit_locations`` is absent.
+
+    SI's ``export_report`` computes ``unit_locations`` unconditionally if missing
+    (mutating the shared display cache), so the read-only path must raise rather
+    than let that silent mutation happen -- and must not call SI at all.
+    """
+    import spikeinterface.exporters as sie
+
+    fake = _FakeAnalyzer([])  # unit_locations absent
+    _patch_display_analyzer(monkeypatch, fake)
+    _forbid_add_extensions(monkeypatch)
+
+    def _must_not_export(*a, **k):
+        raise AssertionError("export_report must not run on the read-only error")
+
+    monkeypatch.setattr(sie, "export_report", _must_not_export)
+    with pytest.raises(MissingDisplayExtensionError, match="unit_locations"):
+        ssviz.export_si_report({"sorting_id": "s"}, "/tmp/report_ro")
+
+
+@pytest.mark.db_unit
 def test_export_to_phy_uses_display_analyzer(dj_conn, monkeypatch):
-    """``export_to_phy`` wraps SI ``export_to_phy`` with the display analyzer."""
+    """``export_to_phy`` wraps SI ``export_to_phy`` with the display analyzer.
+
+    PC features default OFF so SI never computes the whitened-metric-only
+    ``principal_components`` extension onto the unwhitened display analyzer; an
+    explicit ``compute_pc_features=True`` still passes through.
+    """
     import spikeinterface.exporters as sie
 
     fake = _FakeAnalyzer([])
@@ -624,13 +651,21 @@ def test_export_to_phy_uses_display_analyzer(dj_conn, monkeypatch):
         sie,
         "export_to_phy",
         lambda analyzer, output_folder, **k: captured.update(
-            analyzer=analyzer, folder=output_folder
+            analyzer=analyzer, folder=output_folder, kwargs=k
         ),
     )
     ssviz.export_to_phy({"sorting_id": "s"}, "/tmp/phy")
     assert captured["analyzer"] is fake
     # Display recipe only -- the whitened metric analyzer is never requested.
     assert wpn == [None]
+    # PC features off by default (no principal_components on the display path).
+    assert captured["kwargs"]["compute_pc_features"] is False
+
+    # An explicit opt-in is honored.
+    ssviz.export_to_phy(
+        {"sorting_id": "s"}, "/tmp/phy", compute_pc_features=True
+    )
+    assert captured["kwargs"]["compute_pc_features"] is True
 
 
 # --------------------------------------------------------------------------

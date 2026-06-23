@@ -312,6 +312,10 @@ def plot_si_quality_metrics(
     ``plot_metrics`` for that). The read-only default raises a clear error
     (pointing at ``plot_metrics``) when the extension is absent; computing it
     requires the explicit ``compute_missing=True`` opt-in.
+
+    Values for PC/NN cluster-separation metrics will differ from ``plot_metrics``:
+    this SI widget computes them on the unwhitened display analyzer, whereas the
+    routed Spyglass metrics compute those on the whitened metric analyzer.
     """
     import spikeinterface.widgets as sw
 
@@ -339,6 +343,10 @@ def plot_si_template_metrics(
     ``plot_metrics`` for that). The read-only default raises a clear error
     (pointing at ``plot_metrics``) when the extension is absent; computing it
     requires the explicit ``compute_missing=True`` opt-in.
+
+    The SI widget computes every SI template-metric column; the routed
+    ``plot_metrics`` shows only the surfaced waveform-shape columns Spyglass
+    persists, so the two views can differ in which columns appear.
     """
     import spikeinterface.widgets as sw
 
@@ -370,7 +378,7 @@ def plot_potential_merges(
     import spikeinterface.widgets as sw
 
     groups = [
-        list(group)
+        group
         for group in AnalyzerCuration.get_merge_groups(analyzer_curation_key)
         if len(group) >= 2
     ]
@@ -433,12 +441,18 @@ def export_to_phy(sorting_key, output_folder, **kwargs):
     """Export the sort to a Phy folder (SI ``export_to_phy``).
 
     Uses the display (unwhitened) analyzer -- the whitened metric analyzer is
-    never touched, so no official Spyglass metrics are computed on it. SI may
-    compute display-safe extensions (amplitudes / template metrics, and -- per
-    its ``compute_pc_features`` default -- PC features) on the display analyzer as
-    part of the export; pass SI ``export_to_phy`` kwargs (``compute_pc_features``,
-    ``add_quality_metrics`` ...) to control that. For the exact Spyglass-routed
-    metric table beside the Phy folder, write it explicitly from
+    never touched, so no official Spyglass metrics are computed on it.
+
+    ``compute_pc_features`` defaults to ``False`` here (SI's own default is
+    ``True``): SI computes ``principal_components`` ON the analyzer it is handed,
+    so the SI default would compute and persist PC features on the *unwhitened
+    display* analyzer -- both a whitened-metric-only extension landing on the
+    display path and a heavy mutation of the shared display-analyzer cache. Pass
+    ``compute_pc_features=True`` to opt in (the PCs are then computed on the
+    unwhitened display analyzer, not the routed whitened metric analyzer). SI
+    still computes the display-safe ``template_similarity`` / ``spike_amplitudes``
+    extensions it needs for the export. For the exact Spyglass-routed metric
+    table beside the Phy folder, write it explicitly from
     ``AnalyzerCuration.get_metrics(curation_key).to_csv(...)``. No cloud upload or
     publishing happens.
     """
@@ -446,5 +460,6 @@ def export_to_phy(sorting_key, output_folder, **kwargs):
 
     import spikeinterface.exporters as sie
 
+    kwargs.setdefault("compute_pc_features", False)
     analyzer = Sorting().get_analyzer(sorting_key)
     return sie.export_to_phy(analyzer, output_folder, **kwargs)

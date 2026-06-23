@@ -7,10 +7,10 @@ importable and unit-testable without a DataJoint connection or a real
 SortingAnalyzer.
 
 DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
-connection at import: ``pandas`` / ``numpy`` are dependency-light and
-``matplotlib`` / SpikeInterface are imported lazily inside the functions that
-need them. The facade (``visualization.py``) owns the key -> recording /
-analyzer / metric-table resolution that does need the schema classes.
+connection at import: ``pandas`` is dependency-light and ``matplotlib`` /
+SpikeInterface are imported lazily inside the functions that need them. The
+facade (``visualization.py``) owns the key -> recording / analyzer /
+metric-table resolution that does need the schema classes.
 
 The single load-bearing routing invariant lives in the table contract, not
 here: visualization/export helpers read the UNWHITENED display analyzer (real
@@ -22,7 +22,6 @@ error when they are absent.
 
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 
 
@@ -65,15 +64,16 @@ SI_METRIC_WIDGET_EXTENSIONS = {
 # SI ``export_report`` unconditionally computes ``unit_locations`` when absent
 # (mutating the on-disk display analyzer), so it is the one extension the
 # read-only (``force_computation=False``) path must require present. The wider
-# set is what ``force_computation=True`` precomputes -- all display-safe -- so a
-# richer report renders without any SI-side mutation.
+# set is exactly the display-safe extensions SI's ``export_report`` actually
+# renders (``spike_amplitudes`` distributions, ``correlograms`` in the per-unit
+# summaries, ``unit_locations`` maps), so ``force_computation=True`` precomputes
+# only those -- a richer report renders with no SI-side mutation, and nothing
+# unread is computed onto the display analyzer.
 REPORT_REQUIRED_EXTENSIONS = ("unit_locations",)
 REPORT_DISPLAY_EXTENSIONS = (
     "spike_amplitudes",
     "correlograms",
     "unit_locations",
-    "template_similarity",
-    "template_metrics",
 )
 
 
@@ -278,6 +278,10 @@ def plot_metrics_figure(metrics_df: pd.DataFrame, *, columns=None):
 
     import matplotlib.pyplot as plt
 
+    from spyglass.spikesorting.v2._metric_curation_plots import (
+        draw_metric_histogram,
+    )
+
     numeric = (
         metrics_df.apply(pd.to_numeric, errors="coerce")
         if len(metrics_df.columns)
@@ -310,25 +314,12 @@ def plot_metrics_figure(metrics_df: pd.DataFrame, *, columns=None):
     )
     for index, column in enumerate(columns):
         ax = axes[index // n_cols][index % n_cols]
-        values = numeric[column].to_numpy(dtype=float)
-        finite = values[np.isfinite(values)]
-        n_dropped = len(values) - len(finite)
-        if len(finite):
-            ax.hist(finite, bins=min(20, max(5, len(finite))))
-        ax.set_title(column)
-        ax.set_xlabel(column)
-        ax.set_ylabel("unit count")
-        if n_dropped:
-            ax.text(
-                0.98,
-                0.95,
-                f"{n_dropped} NaN dropped",
-                ha="right",
-                va="top",
-                transform=ax.transAxes,
-                fontsize=8,
-                color="gray",
-            )
+        draw_metric_histogram(
+            ax,
+            numeric[column].to_numpy(dtype=float),
+            title=column,
+            ylabel="unit count",
+        )
     for index in range(len(columns), n_rows * n_cols):
         axes[index // n_cols][index % n_cols].set_axis_off()
     fig.tight_layout()

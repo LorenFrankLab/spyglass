@@ -186,6 +186,31 @@ def test_plot_metrics_figure_empty_table_is_labeled_not_raising():
 
 
 @pytest.mark.unit
+def test_plot_metrics_figure_coerces_none_and_drops_non_finite():
+    """``None`` / non-numeric / inf values coerce to NaN and drop per-column.
+
+    Mirrors the on-disk metric readback, where non-finite values surface as
+    ``None`` (object dtype) rather than float NaN. The coercion path
+    (``pd.to_numeric(errors='coerce')`` + ``np.isfinite``) must drop them and
+    annotate the count, not raise.
+    """
+    metrics = pd.DataFrame(
+        {
+            "snr": [3.0, None, np.inf, 4.0],  # object dtype: None + inf dropped
+            "all_nan": [None, None, None, None],  # entirely non-finite column
+        },
+        index=pd.Index([0, 1, 2, 3], name="unit_id"),
+    )
+    fig = plot_metrics_figure(metrics)
+    snr_ax = next(ax for ax in fig.axes if ax.get_title() == "snr")
+    # None and +inf both dropped -> 2 finite of 4.
+    assert any("2 NaN dropped" in txt.get_text() for txt in snr_ax.texts)
+    # The all-NaN column still gets a (empty) titled axis, not a crash.
+    assert any(ax.get_title() == "all_nan" for ax in fig.axes)
+    plt.close(fig)
+
+
+@pytest.mark.unit
 def test_plot_metrics_figure_respects_explicit_columns():
     """An explicit column subset limits the histograms shown."""
     metrics = pd.DataFrame(
