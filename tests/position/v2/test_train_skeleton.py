@@ -137,6 +137,31 @@ class TestSkeletonDuplicateDetection:
         assert skeleton._fuzzy_equal("leftear", "left_ear", threshold=0.85)
         assert not skeleton._fuzzy_equal("nose", "tailbase", threshold=0.85)
 
+    def test_isomorphic_with_distinct_parts_not_duplicate(self):
+        """Same topology + fuzzy-similar but distinct parts -> not duplicate.
+
+        ``redLED_L`` and ``redLED_R`` fuzzy-match above 0.85, so a pure
+        isomorphism check would wrongly merge these two single-edge skeletons.
+        Requiring equal normalized node sets keeps them distinct.
+        """
+        from spyglass.position.v2.utils.skeleton import is_duplicate_skeleton
+
+        new_bp = ["redLED_L", "greenLED"]
+        new_e = [("greenLED", "redLED_L")]
+        old_bp = ["redLED_R", "greenLED"]
+        old_e = [("greenLED", "redLED_R")]
+        assert not is_duplicate_skeleton(new_bp, new_e, old_bp, old_e)
+
+    def test_same_parts_variant_spelling_is_duplicate(self):
+        """Same parts named with variant spelling still merge."""
+        from spyglass.position.v2.utils.skeleton import is_duplicate_skeleton
+
+        new_bp = ["greenLED", "redLED_C"]
+        new_e = [("greenLED", "redLED_C")]
+        old_bp = ["green_led", "red_led_c"]
+        old_e = [("green_led", "red_led_c")]
+        assert is_duplicate_skeleton(new_bp, new_e, old_bp, old_e)
+
 
 class TestSkeletonCanonical:
     """Skeleton stores one canonical namespace for bodyparts and edges."""

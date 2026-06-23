@@ -372,11 +372,19 @@ def is_duplicate_skeleton(
     -------
     bool
     """
+    # Two skeletons are duplicates only if they name the same body parts.
+    # Topology isomorphism alone over-merges distinct skeletons whose labels
+    # happen to fuzzy-match (e.g. redLED_L vs redLED_R), so require equal
+    # normalized node sets first.
+    if {normalize_label(b) for b in bodyparts_new} != {
+        normalize_label(b) for b in bodyparts_existing
+    }:
+        return False
 
     def _build(bps, eds):
         g = nx.Graph()
         for bp in bps:
-            g.add_node(bp, label=bp.lower())
+            g.add_node(bp, label=normalize_label(bp))
         for a, b in eds:
             g.add_edge(a, b)
         return g
