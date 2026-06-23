@@ -414,6 +414,10 @@ def chronic_2_session_minirec(dj_conn, tmp_path_factory):
     same_day_members = members[:2]
     next_day_member = members[2]
 
+    # ``recording_pks[i]`` is the populated Recording PK for ``same_day_members[i]``;
+    # the member dicts stay CLEAN (only Member columns) so they can be passed
+    # straight to ``SessionGroup.create_group`` without leaking a recording_id
+    # into the Member insert.
     recording_pks = []
     for member in same_day_members:
         rec_pk = RecordingSelection.insert_selection(
@@ -426,7 +430,6 @@ def chronic_2_session_minirec(dj_conn, tmp_path_factory):
         if not (Recording & rec_pk):
             Recording.populate(rec_pk, reserve_jobs=False)
         recording_pks.append(rec_pk)
-        member["recording_id"] = rec_pk["recording_id"]
 
     yield {
         "owner": CHRONIC_OWNER_TEAM,

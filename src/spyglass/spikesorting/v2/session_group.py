@@ -83,37 +83,123 @@ class SessionGroup(SpyglassMixin, dj.Manual):
         description: str = "",
         allow_multi_day: bool = False,
     ) -> None:
-        """Insert master + Member rows; derive dates from each Session.
+        """Atomically insert the master + Member rows for a sorting group.
 
-        Gated until the concat materializer lands (raises
-        ``NotImplementedError`` today). The schema is final-shape so users
-        can start declaring groups for the concat workflow as soon as the
-        Recording chain materializes; this helper is forward-declared.
+        ``session_group_owner`` namespaces user-facing group names in shared
+        databases: two teams may both create ``"day1"`` because the master PK
+        is ``(session_group_owner, session_group_name)``.
+
+        Each member dict carries ``nwb_file_name``, ``sort_group_id``,
+        ``interval_list_name`` and an optional ``team_name`` (the data-owner
+        team used to resolve that member's ``RecordingSelection``; missing
+        ``team_name`` defaults to ``session_group_owner`` for single-team
+        groups, and mixed-team collaborations override it per member). A
+        member is a sorting member tuple, not a whole-day abstraction: one
+        NWB/day may contribute several members through different intervals or
+        sort groups.
+
+        Recording dates are DERIVED from each member's
+        ``Session.session_start_time``, never stored on Member rows and never
+        caller-supplied. Same-day groups are the default; members spanning two
+        or more dates require ``allow_multi_day=True``. (Multi-day groups also
+        require an explicit, non-``auto`` motion-correction preset on the
+        downstream ``ConcatenatedRecording``; that is enforced in
+        ``ConcatenatedRecording.make``, not here.) For days/weeks-apart
+        sessions the recommended path is sort-then-match, not concatenation.
+
+        Parameters
+        ----------
+        session_group_owner : str
+            ``LabTeam.team_name`` that owns (namespaces) the group.
+        session_group_name : str
+            Group name, unique within ``session_group_owner``.
+        members : list of dict
+            Member tuples (see above). Order is preserved as ``member_index``.
+        description : str, optional
+            Free-text group description. Default ``""``.
+        allow_multi_day : bool, optional
+            Opt in to multi-date members. Default ``False``.
 
         Raises
         ------
-        NotImplementedError
-            Always, until the concat materializer lands; this helper is
-            forward-declared.
+        SessionGroupDateError
+            If a member dict carries ``recording_date`` (dates are derived),
+            or if members span multiple dates without ``allow_multi_day=True``.
         """
-        raise NotImplementedError(
-            "SessionGroup.create_group is not yet implemented"
-        )
+        from spyglass.spikesorting.v2.exceptions import SessionGroupDateError
+
+        rows: list[dict] = []
+        dates: list = []
+        for i, member in enumerate(members):
+            if "recording_date" in member:
+                raise SessionGroupDateError(
+                    "SessionGroup.create_group: recording_date is derived "
+                    "from Session.session_start_time and must not be supplied "
+                    "in member dictionaries; remove it."
+                )
+            derived_date = (
+                (Session & {"nwb_file_name": member["nwb_file_name"]})
+                .fetch1("session_start_time")
+                .date()
+            )
+            dates.append(derived_date)
+            rows.append(
+                {
+                    **member,
+                    "team_name": member.get("team_name", session_group_owner),
+                    "session_group_owner": session_group_owner,
+                    "session_group_name": session_group_name,
+                    "member_index": i,
+                }
+            )
+
+        unique_dates = sorted(set(dates))
+        if len(unique_dates) > 1 and not allow_multi_day:
+            raise SessionGroupDateError(
+                "SessionGroup.create_group: members span "
+                f"{len(unique_dates)} distinct recording dates "
+                f"({unique_dates}); multi-day groups require "
+                "allow_multi_day=True. The recommended path for cross-day "
+                "analyses is sort-then-match across independent sortings, "
+                "not concatenation."
+            )
+
+        with cls.connection.transaction:
+            cls.insert1(
+                {
+                    "session_group_owner": session_group_owner,
+                    "session_group_name": session_group_name,
+                    "description": description,
+                }
+            )
+            cls.Member.insert(rows)
 
     @classmethod
     def is_multi_day(cls, key: dict) -> bool:
         """Report whether the group's members span two or more dates.
 
-        Implemented in a follow-up change.
+        Dates are derived from each member's ``Session.session_start_time``
+        (the same source ``create_group`` validates against), never from a
+        stored Member column.
 
-        Raises
-        ------
-        NotImplementedError
-            Always, until this helper is implemented.
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting one ``SessionGroup`` (e.g.
+            ``{"session_group_owner": ..., "session_group_name": ...}``).
+
+        Returns
+        -------
+        bool
+            ``True`` iff the group's members span two or more session dates.
         """
-        raise NotImplementedError(
-            "SessionGroup.is_multi_day is not yet implemented"
-        )
+        dates = {
+            (Session & {"nwb_file_name": nwb_file_name})
+            .fetch1("session_start_time")
+            .date()
+            for nwb_file_name in (cls.Member & key).fetch("nwb_file_name")
+        }
+        return len(dates) > 1
 
 
 @schema
