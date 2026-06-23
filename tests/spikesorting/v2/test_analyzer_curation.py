@@ -1101,6 +1101,50 @@ def test_metrics_do_not_leak_across_curations(display_and_metric_analyzers):
 
 
 @pytest.mark.db_unit
+def test_compute_metrics_raises_on_unit_id_mismatch(
+    display_and_metric_analyzers, monkeypatch
+):
+    """If the display (voltage) and whitened (PC) frames disagree on unit ids,
+    _compute_metrics raises rather than silently NaN-filling the merge.
+
+    The two analyzers derive from the same canonical sorting, so this can't
+    happen today; the guard is for a future build divergence. Force it by
+    spying ``compute_quality_metrics`` to return frames with different indices,
+    and assert the index-equality check fails loud.
+    """
+    import pandas as pd
+    import spikeinterface.metrics.quality as siq
+
+    from spyglass.spikesorting.v2.metric_curation import AnalyzerCuration
+
+    display, metric = display_and_metric_analyzers
+
+    def _mismatched(
+        analyzer,
+        metric_names,
+        metric_params=None,
+        skip_pc_metrics=False,
+        **kwargs,
+    ):
+        # PC frame (metric analyzer) drops a unit the voltage frame has.
+        index = [0, 1] if analyzer is metric else [0, 1, 2]
+        return pd.DataFrame(
+            index=index, data={name: 0.0 for name in metric_names}
+        )
+
+    monkeypatch.setattr(siq, "compute_quality_metrics", _mismatched)
+    with pytest.raises(ValueError, match="mismatched unit ids"):
+        AnalyzerCuration._compute_metrics(
+            display,
+            metric,
+            ["snr", "nn_advanced"],
+            {},
+            skip_pc_metrics=False,
+            job_kwargs={},
+        )
+
+
+@pytest.mark.db_unit
 def test_pinned_pca_params_recomputed_on_mismatch(display_and_metric_analyzers):
     """A pre-existing principal_components with non-pinned params is dropped and
     recomputed pinned before PC metrics run.
