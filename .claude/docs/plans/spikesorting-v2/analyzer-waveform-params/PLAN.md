@@ -1,14 +1,28 @@
 # Analyzer Waveform Parameters & Curation Defaults — Implementation Plan
 
-**Status:** Phases 1, 2, 3a, and 3 complete (each reviewed, simplified, and
+**Status:** Phases 1, 2, 3a, 3, and 4 complete (each reviewed, simplified, and
 verified). Phase 3 shipped the `franklab_default_auto_curation_2026_06`
 auto-curation rule set (ISI `reject` policy), the probe-labeled MS5 default
 (`franklab_probe_hippocampus_30khz_ms5_2026_06`, same rows as the tetrode MS5
 alias), the MS4 recommendation (containerized for modern hosts / local for
 numpy<2) via the human-facing preset fields, and the auto → manual-merge → auto
-curation-loop docs + notebook section 7. Targeted suites green (65 passed:
-preset/parity/curation/preflight, in the project v2 test environment). Phase 4
-and Phase 5 remain to execute.
+curation-loop docs + notebook section 7. Phase 5 remains to execute.
+
+Phase 4 reconciliation note (the phase file predates the no-clip validation):
+the shipped default surfaced template-shape column is `trough_half_width` ONLY,
+not the `trough_half_width` + `peak_to_trough_duration` pair the phase file
+proposed. The no-clip validation on a representative hippocampal (tetrode)
+fixture found `peak_to_trough_duration` boundary-clips on the intentional
+0.5/0.5 hippocampus display window — it measures to the post-trough
+repolarization peak, which saturates at SI's edge-exclusion boundary and stops
+discriminating cells (literature trough-to-peak is ~0.5-0.8 ms for pyramidal
+cells, past the 0.5 ms post-window). The trough-local `trough_half_width` stays
+interior and discriminates E/I, so it is the sole no-clip-safe default;
+`peak_to_trough_duration` and the slope columns are discoverable/opt-in (reliable
+on the wider 1.0/2.0 window). Per the user, the hippocampus window stays 0.5/0.5
+(a window change is a separate Phase 1 revisit). Targeted suites green in the
+project v2 test environment (schema/NWB/db_unit surfacing-routing-defaults +
+slow no-clip & E/I separability).
 
 Phase 3 reconciliation note (the phase file predates Phase 3a's
 single-source simplification): the execution backend stays on
