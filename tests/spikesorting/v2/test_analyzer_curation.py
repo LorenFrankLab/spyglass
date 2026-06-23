@@ -917,7 +917,13 @@ def test_metric_routing_by_type(display_and_metric_analyzers, monkeypatch):
     display, metric = display_and_metric_analyzers
     calls = []
 
-    def _spy(analyzer, metric_names, metric_params=None, skip_pc_metrics=False):
+    def _spy(
+        analyzer,
+        metric_names,
+        metric_params=None,
+        skip_pc_metrics=False,
+        **kwargs,  # tolerate delete_existing_metrics etc.
+    ):
         which = (
             "display"
             if analyzer is display
@@ -992,6 +998,46 @@ def test_snr_unaffected_by_metric_whitening(display_and_metric_analyzers):
     # data-dependent, so it is verified manually on real data per the migration
     # guide, not asserted here).
     assert {"nn_isolation", "nn_noise_overlap"} <= set(with_metric.columns)
+
+
+@pytest.mark.db_unit
+def test_metrics_do_not_leak_across_curations(display_and_metric_analyzers):
+    """A later curation's result excludes a prior curation's metric columns.
+
+    The display/metric analyzers are shared across curations and SI preserves
+    the stored quality_metrics by default, so without delete_existing_metrics a
+    prior curation's columns would leak into a later, disjoint request (and an
+    auto-rule could then threshold a stale metric). _compute_metrics passes
+    delete_existing_metrics=True, so each curation's result has exactly the
+    metrics it requested.
+    """
+    from spyglass.spikesorting.v2.metric_curation import AnalyzerCuration
+
+    display, metric = display_and_metric_analyzers
+    first = AnalyzerCuration._compute_metrics(
+        display,
+        metric,
+        ["snr", "nn_advanced"],
+        {},
+        skip_pc_metrics=False,
+        job_kwargs={},
+    )
+    assert "snr" in first.columns and "nn_isolation" in first.columns
+
+    # A later DISJOINT request on the SAME display analyzer (voltage only).
+    second = AnalyzerCuration._compute_metrics(
+        display,
+        None,
+        ["firing_rate"],
+        {},
+        skip_pc_metrics=True,
+        job_kwargs={},
+    )
+    assert "firing_rate" in second.columns
+    # snr (computed on the display analyzer in `first`) must not leak in...
+    assert "snr" not in second.columns, second.columns.tolist()
+    # ...nor the PC column (computed on the untouched metric analyzer).
+    assert "nn_isolation" not in second.columns, second.columns.tolist()
 
 
 @pytest.mark.db_unit

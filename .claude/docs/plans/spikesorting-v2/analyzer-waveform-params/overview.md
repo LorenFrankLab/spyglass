@@ -194,8 +194,9 @@ alongside the new Frank-lab default.
 ## Open Questions
 
 1. **Whiten scope for the metric analyzer.** Resolved: whitening applies ONLY to
-   PC / cluster-separation metrics (`principal_components`, `nn_advanced`,
-   `isolation_distance`, `l_ratio`, `d_prime`); voltage / spike-train metrics
+   PC / cluster-separation metrics (the `principal_components` extension + SI
+   0.104's PCA metrics `d_prime`, `mahalanobis`, `nearest_neighbor`,
+   `nn_advanced`, `silhouette`); voltage / spike-train metrics
    (`snr`, `amplitude_cutoff`, `amplitude_median`, `firing_rate`, `num_spikes`,
    `presence_ratio`, `isi_violation`) stay on the unwhitened analyzer — whitening
    normalizes per-channel variance, so SNR/amplitude on whitened traces are

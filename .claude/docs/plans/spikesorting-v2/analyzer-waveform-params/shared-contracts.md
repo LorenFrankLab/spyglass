@@ -206,9 +206,10 @@ has two analyzers; each consumer reads the correct one:
 | cross-unit `isi_violation` (burst) | neither — computed from spike times | independent of whitening |
 
 The whitened metric analyzer is therefore built ONLY for the PC/NN metrics
-(`principal_components` + `nn_advanced` / `isolation_distance` / `l_ratio` /
-`d_prime`); everything template-shape, position, voltage, or spike-time based
-uses the unwhitened display analyzer.
+(the `principal_components` extension + SI 0.104's PCA metrics `d_prime` /
+`mahalanobis` / `nearest_neighbor` / `nn_advanced` / `silhouette`); everything
+template-shape, position, voltage, or spike-time based uses the unwhitened
+display analyzer.
 
 Invariant (do not weaken): ALL burst-pair legs (`wf_similarity`,
 `xcorrel_asymm`, `unit_distance`, amplitudes) and the merge engine read the

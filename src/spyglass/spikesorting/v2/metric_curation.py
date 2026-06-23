@@ -958,6 +958,11 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
                 }
                 or None,
                 skip_pc_metrics=True,
+                # The analyzer is shared across curations; SI preserves the
+                # stored quality_metrics by default, so a prior curation's
+                # columns would leak into this result (and an auto-rule could
+                # threshold a stale metric). Compute only THIS row's metrics.
+                delete_existing_metrics=True,
             )
             voltage_df.index = voltage_df.index.astype(int)
             frames.append(voltage_df)
@@ -1000,6 +1005,9 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
                 }
                 or None,
                 skip_pc_metrics=False,
+                # As above: compute only this row's PC metrics, never inherit a
+                # prior curation's stored quality_metrics on this analyzer.
+                delete_existing_metrics=True,
             )
             pc_df.index = pc_df.index.astype(int)
             frames.append(pc_df)
