@@ -35,8 +35,7 @@ only `ms_after=0.5`.
 > repolarization peak (`peak_after`), which saturates at SI's edge-exclusion
 > boundary there, so the shipped default is `trough_half_width` ONLY.
 > `peak_to_trough_duration` joins the slopes as discoverable/opt-in (reliable on
-> the wider 1.0/2.0 window). The validation-slice rows below that name
-> `peak_to_trough_duration` as a default column are superseded accordingly.
+> the wider 1.0/2.0 window).
 
 **Depends on Phase 2** (the display-vs-metric routing): template-shape metrics
 MUST be read from the **unwhitened display** analyzer — whitening normalizes
@@ -84,16 +83,17 @@ window is sufficient; cortex, unknown, and multi-region sorts keep the wider
   default constant, then a validated field on `QualityMetricParamsSchema`:
 
   ```python
-  # Default surfaced columns — conservative scalar shape columns used for cell
-  # typing (rate is already a quality metric; this adds spike width/duration).
-  # These are SI OUTPUT COLUMN names, not metric names: trough_half_width is one
-  # of the columns SI's `half_width` metric emits; selecting columns directly
-  # avoids the name->column ambiguity (half_width -> trough_half_width +
-  # peak_half_width). Slope columns are discoverable but opt-in because the
-  # hippocampus display recipe intentionally has only ms_after=0.5.
+  # Default surfaced column — a single conservative scalar shape column used for
+  # cell typing (rate is already a quality metric; this adds spike width).
+  # An SI OUTPUT COLUMN name, not a metric name: trough_half_width is one of the
+  # columns SI's `half_width` metric emits; selecting columns directly avoids the
+  # name->column ambiguity (half_width -> trough_half_width + peak_half_width).
+  # peak_to_trough_duration and the slope columns are discoverable but opt-in:
+  # they measure to the post-trough repolarization peak, which clips on the
+  # hippocampus display recipe's ms_after=0.5 window (see the no-clip validation
+  # below). trough_half_width is trough-local and stays interior there.
   DEFAULT_TEMPLATE_METRIC_COLUMNS = [
       "trough_half_width",
-      "peak_to_trough_duration",
   ]
 
   def _available_template_metric_columns() -> list[str]:
@@ -211,8 +211,8 @@ window is sufficient; cortex, unknown, and multi-region sorts keep the wider
 
 - **Add the routing row to the shared contract (this phase owns it).** In
   [shared-contracts.md](shared-contracts.md#display-vs-metric-analyzer-routing)
-  add a row for **template-shape metrics** (default columns
-  `trough_half_width`, `peak_to_trough_duration`; additional single-channel
+  add a row for **template-shape metrics** (default column `trough_half_width`
+  only; `peak_to_trough_duration`, slopes, and additional single-channel
   template columns opt-in) → **display (unwhitened)**, reason "waveform shape
   must come from real templates; whitening distorts it," and note Phase 4
   surfaces these columns from the already-display `template_metrics` extension. Keep the existing
@@ -272,9 +272,9 @@ window is sufficient; cortex, unknown, and multi-region sorts keep the wider
 
 | Test | Asserts |
 | --- | --- |
-| `test_quality_metric_params_default_template_columns` | a default `QualityMetricParameters` row carries `template_metric_columns == ["trough_half_width", "peak_to_trough_duration"]` (`db_unit`) |
+| `test_quality_metric_params_default_template_columns` | a default `QualityMetricParameters` row carries `template_metric_columns == ["trough_half_width"]` only — the no-clip-safe default (`db_unit`) |
 | `test_template_metric_columns_validated` | an unknown column raises at schema validation; passing a metric *name* (`half_width`) raises with the column hint; an empty list is accepted |
-| `test_compute_metrics_surfaces_template_columns` | `_compute_metrics` output columns ⊇ `{firing_rate, trough_half_width, peak_to_trough_duration}`; the metric NAME `half_width` is NOT a column; default output does not include `recovery_slope`; values finite on the synthetic analyzer (DB-free, reuse `synthetic_analyzer`) |
+| `test_compute_metrics_surfaces_template_columns` | `_compute_metrics` default output columns ⊇ `{firing_rate, trough_half_width}`; the metric NAME `half_width` is NOT a column; default output does not include `peak_to_trough_duration` or `recovery_slope` (opt-in); an explicit request surfaces `peak_to_trough_duration`; values finite on the synthetic analyzer (`db_unit`, reuse the routing analyzers) |
 | `test_template_metrics_read_from_display_analyzer` | the template columns are read from the **unwhitened display** analyzer, never the whitened one (monkeypatch the loader; assert the `waveform_params_name` passed) — guards the routing contract |
 | `test_get_metrics_roundtrip_includes_template` | write → `read_quality_metrics` → `get_metrics` surfaces the template columns with the written values (`db_unit`) |
 | `test_build_table_guards_nonscalar_column` | `build_quality_metrics_table` coerces a non-scalar / non-numeric cell to `NaN` without raising |
