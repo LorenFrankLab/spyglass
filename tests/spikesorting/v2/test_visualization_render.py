@@ -76,32 +76,20 @@ def test_unit_summary_renders_with_compute_missing(populated_sorting):
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_unit_locations_read_only_then_opt_in(populated_sorting):
-    """Read-only default raises on a fresh extension; the opt-in then renders.
+def test_unit_locations_renders_with_compute_missing(populated_sorting):
+    """``plot_unit_locations`` renders end to end against the display analyzer.
 
-    Exercises the real extension policy end to end: ``plot_unit_locations``
-    requires the display ``unit_locations`` extension, so a sort that has not yet
-    computed it raises by default and renders only with ``compute_missing=True``.
+    The opt-in computes the display ``unit_locations`` extension if the
+    package-shared analyzer does not already carry it, then renders. The
+    read-only-by-default error path is pinned deterministically by the
+    monkeypatched unit test (a shared on-disk analyzer can't reliably present a
+    *fresh* extension here, so this integration check stays on the render path).
     """
-    from spyglass.spikesorting.v2._visualization import (
-        MissingDisplayExtensionError,
-    )
     from spyglass.spikesorting.v2.sorting import Sorting
 
     if not list(Sorting().get_analyzer(populated_sorting).unit_ids):
         pytest.skip("zero-unit smoke sort")
 
-    analyzer = Sorting().get_analyzer(populated_sorting)
-    if analyzer.has_extension("unit_locations"):
-        # A prior test in this package fixture may have computed it; the opt-in
-        # path is still the contract under test.
-        fig = ssviz.plot_unit_locations(populated_sorting)
-        assert fig is not None
-        plt.close("all")
-        return
-
-    with pytest.raises(MissingDisplayExtensionError):
-        ssviz.plot_unit_locations(populated_sorting)
     fig = ssviz.plot_unit_locations(populated_sorting, compute_missing=True)
     assert fig is not None
     plt.close("all")

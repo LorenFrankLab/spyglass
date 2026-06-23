@@ -22,13 +22,16 @@ display recipe via `Sorting.get_analyzer(key)` (no `waveform_params_name`);
 template columns surfaced as-is); `plot_potential_merges` reads the persisted
 `get_merge_groups()` and never recomputes candidates. Plot helpers are read-only
 by default (`compute_missing=True` opts in to display-safe extensions only),
-matplotlib is the default backend (`sortingview` is explicit opt-in), and no
-populate/export path publishes. Two review-hardening departures from the phase
-file's first sketch: `export_to_phy` defaults `compute_pc_features=False` so SI
-never computes the whitened-metric-only `principal_components` onto the unwhitened
-display analyzer (opt in explicitly), and `export_si_report`'s force-computation
-set is trimmed to the display-safe extensions SI's report actually renders. No
-FigPack / cloud publishing / web curation UI was added (out of scope, as planned).
+matplotlib is the default backend (`sortingview` is explicit opt-in; the
+exporters take no backend), and no populate/export path publishes. Review-
+hardening departures from the phase file's first sketch: `export_to_phy` defaults
+`compute_pc_features` / `add_quality_metrics` / `add_template_metrics` to `False`
+(opt in explicitly) so SI never computes the whitened-metric-only
+`principal_components` onto the unwhitened display analyzer and never writes raw
+SI display-analyzer metric TSVs that would blur the routed
+`get_metrics()` provenance; and `export_si_report`'s force-computation set is
+trimmed to the display-safe extensions SI's report actually renders. No FigPack /
+cloud publishing / web curation UI was added (out of scope, as planned).
 Notebook section 7 gained an `ssviz` step; `feature-parity.md` and
 `v1-v2-divergences.md` record the bridge as an additive v2 improvement.
 

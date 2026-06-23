@@ -411,14 +411,17 @@ def export_si_report(
     it requires the ``unit_locations`` extension present (SI's ``export_report``
     would otherwise compute and persist it) and lets SI skip any other missing
     optional sections with its own warnings -- the analyzer cache is not mutated.
-    ``force_computation=True`` precomputes the display-safe report extensions
-    (``spike_amplitudes`` / ``correlograms`` / ``unit_locations`` /
-    ``template_similarity`` / ``template_metrics``) through ``Sorting.add_extensions``
-    first. SI's own quality-metrics section is intentionally left to its
-    skip-if-absent path: the routed Spyglass metrics live in
+    ``force_computation=True`` precomputes the display-safe report extensions SI's
+    report actually renders (``spike_amplitudes`` / ``correlograms`` /
+    ``unit_locations``) through ``Sorting.add_extensions`` first.
+
+    SI's report includes a ``quality metrics.csv`` ONLY if a ``quality_metrics``
+    extension already exists on the display analyzer (this wrapper never computes
+    it). If present, those are raw SI display-analyzer metrics, NOT the routed
+    Spyglass metric table: the official metrics live in
     ``AnalyzerCuration.get_metrics()`` (write them beside the report with
-    ``get_metrics(curation_key).to_csv(...)`` if needed), not a display-analyzer
-    SI default. No cloud upload or publishing happens.
+    ``get_metrics(curation_key).to_csv(...)`` if needed). No cloud upload or
+    publishing happens.
     """
     import spikeinterface.exporters as sie
 
@@ -443,16 +446,24 @@ def export_to_phy(sorting_key, output_folder, **kwargs):
     Uses the display (unwhitened) analyzer -- the whitened metric analyzer is
     never touched, so no official Spyglass metrics are computed on it.
 
-    ``compute_pc_features`` defaults to ``False`` here (SI's own default is
-    ``True``): SI computes ``principal_components`` ON the analyzer it is handed,
-    so the SI default would compute and persist PC features on the *unwhitened
-    display* analyzer -- both a whitened-metric-only extension landing on the
-    display path and a heavy mutation of the shared display-analyzer cache. Pass
-    ``compute_pc_features=True`` to opt in (the PCs are then computed on the
-    unwhitened display analyzer, not the routed whitened metric analyzer). SI
-    still computes the display-safe ``template_similarity`` / ``spike_amplitudes``
-    extensions it needs for the export. For the exact Spyglass-routed metric
-    table beside the Phy folder, write it explicitly from
+    Three SI defaults are overridden to ``False`` so the export stays consistent
+    with the routing contract; each is an explicit opt-in:
+
+    - ``compute_pc_features``: SI computes ``principal_components`` ON the analyzer
+      it is handed, so the SI default (``True``) would compute and persist PC
+      features on the *unwhitened display* analyzer -- a whitened-metric-only
+      extension landing on the display path and a heavy mutation of the shared
+      display-analyzer cache.
+    - ``add_quality_metrics`` / ``add_template_metrics``: SI writes these TSVs into
+      the Phy folder whenever the corresponding display-analyzer extension already
+      exists (e.g. after a raw ``plot_si_quality_metrics(..., compute_missing=True)``
+      diagnostic). Those are raw SI display-analyzer metrics, NOT the routed
+      Spyglass metric table, so they are off by default to keep
+      ``AnalyzerCuration.get_metrics()`` the single source of official metrics.
+
+    SI still computes the display-safe ``template_similarity`` / ``spike_amplitudes``
+    extensions it needs for the export. For the exact Spyglass-routed metric table
+    beside the Phy folder, write it explicitly from
     ``AnalyzerCuration.get_metrics(curation_key).to_csv(...)``. No cloud upload or
     publishing happens.
     """
@@ -461,5 +472,7 @@ def export_to_phy(sorting_key, output_folder, **kwargs):
     import spikeinterface.exporters as sie
 
     kwargs.setdefault("compute_pc_features", False)
+    kwargs.setdefault("add_quality_metrics", False)
+    kwargs.setdefault("add_template_metrics", False)
     analyzer = Sorting().get_analyzer(sorting_key)
     return sie.export_to_phy(analyzer, output_folder, **kwargs)

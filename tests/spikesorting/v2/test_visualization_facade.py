@@ -658,14 +658,22 @@ def test_export_to_phy_uses_display_analyzer(dj_conn, monkeypatch):
     assert captured["analyzer"] is fake
     # Display recipe only -- the whitened metric analyzer is never requested.
     assert wpn == [None]
-    # PC features off by default (no principal_components on the display path).
+    # PC features off by default (no principal_components on the display path),
+    # and raw SI display-analyzer metric TSVs off by default (the routed
+    # AnalyzerCuration.get_metrics() stays the single source of official metrics).
     assert captured["kwargs"]["compute_pc_features"] is False
+    assert captured["kwargs"]["add_quality_metrics"] is False
+    assert captured["kwargs"]["add_template_metrics"] is False
 
-    # An explicit opt-in is honored.
+    # Explicit opt-ins are honored.
     ssviz.export_to_phy(
-        {"sorting_id": "s"}, "/tmp/phy", compute_pc_features=True
+        {"sorting_id": "s"},
+        "/tmp/phy",
+        compute_pc_features=True,
+        add_quality_metrics=True,
     )
     assert captured["kwargs"]["compute_pc_features"] is True
+    assert captured["kwargs"]["add_quality_metrics"] is True
 
 
 # --------------------------------------------------------------------------

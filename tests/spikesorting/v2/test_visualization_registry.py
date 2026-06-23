@@ -73,8 +73,13 @@ def test_available_visualizations_lists_documented_helpers():
         "export_to_phy",
     }
     assert expected <= names
-    # Every helper documents matplotlib as its default backend.
-    assert set(table["backend_default"]) == {"matplotlib"}
+    # Plot helpers default to the matplotlib backend; the exporters take no
+    # plotting backend, so their catalog entry is None rather than misleading.
+    indexed = table.set_index("name")
+    plot_helpers = [n for n in names if n.startswith("plot_")]
+    assert set(indexed.loc[plot_helpers, "backend_default"]) == {"matplotlib"}
+    assert indexed.loc["export_si_report", "backend_default"] is None
+    assert indexed.loc["export_to_phy", "backend_default"] is None
     # Key types are constrained to the three resolvable kinds.
     assert set(table["key_type"]) <= {
         "recording",

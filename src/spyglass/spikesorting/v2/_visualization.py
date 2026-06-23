@@ -162,14 +162,14 @@ _REGISTRY: tuple[dict, ...] = (
         "name": "export_si_report",
         "key_type": "sorting",
         "implementation": "spikeinterface.exporters.export_report",
-        "backend_default": "matplotlib",
+        "backend_default": None,  # an exporter: no plotting backend
         "compute_missing": True,
     },
     {
         "name": "export_to_phy",
         "key_type": "sorting",
         "implementation": "spikeinterface.exporters.export_to_phy",
-        "backend_default": "matplotlib",
+        "backend_default": None,  # an exporter: no plotting backend
         "compute_missing": False,
     },
 )
