@@ -169,3 +169,37 @@ def test_build_concatenated_recording_no_motion_sums_samples():
     assert concat.get_num_segments() == 1
     assert concat.get_num_samples() == 500
     assert list(concat.get_channel_ids()) == list(rec_a.get_channel_ids())
+
+
+def test_build_concatenated_recording_merges_overlapping_motion_kwargs(
+    monkeypatch,
+):
+    """An overlapping key (e.g. n_jobs) in both preset_kwargs and job_kwargs is
+    merged into one correct_motion call (job kwargs win) instead of
+    double-splatting into a TypeError."""
+    import spikeinterface as si
+    import spikeinterface.preprocessing as sp
+
+    captured = {}
+
+    def fake_correct_motion(recording, **kwargs):
+        captured.update(kwargs)
+        return recording
+
+    # build_concatenated_recording does `from spikeinterface.preprocessing
+    # import correct_motion` at call time, so patching the module attr is seen.
+    monkeypatch.setattr(sp, "correct_motion", fake_correct_motion)
+    rec = si.NumpyRecording(
+        [np.zeros((100, 4), dtype=np.float32)], sampling_frequency=30_000.0
+    )
+    build_concatenated_recording(
+        [rec],
+        motion_preset="rigid_fast",
+        preset_kwargs={"n_jobs": 1, "detect_kwargs": {"x": 1}},
+        job_kwargs={"n_jobs": 4},
+    )
+    assert captured["preset"] == "rigid_fast"
+    assert captured["n_jobs"] == 4  # resolved job kwargs win on conflict
+    assert captured["detect_kwargs"] == {"x": 1}
+    assert captured["output_motion"] is False
+    assert captured["output_motion_info"] is False

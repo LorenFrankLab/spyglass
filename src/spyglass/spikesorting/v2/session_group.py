@@ -751,13 +751,15 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
 
         Returns
         -------
-        dict[tuple[str, int, str], si.BaseSorting]
+        dict[tuple[str, int, str, str], si.BaseSorting]
             One ``NumpySorting`` per member, keyed by the hashable member
-            identity ``(nwb_file_name, sort_group_id, interval_list_name)``,
-            with spike times in that member's local sample frame. The
-            ``sort_group_id`` is in the key (not just ``(nwb_file_name,
-            interval_list_name)``) so two members from the same NWB/interval
-            but different sort groups do not collide.
+            identity ``(nwb_file_name, sort_group_id, interval_list_name,
+            team_name)``, with spike times in that member's local sample frame.
+            The ``sort_group_id`` and ``team_name`` are in the key (not just
+            ``(nwb_file_name, interval_list_name)``) so two members sharing an
+            NWB/interval but on distinct sort groups -- or, for a mixed-team
+            group, distinct teams -- do not collide. See
+            :func:`._concat_recording.member_split_key`.
         """
         import spikeinterface as si
 

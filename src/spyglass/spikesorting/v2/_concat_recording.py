@@ -268,11 +268,15 @@ def build_concatenated_recording(
 
     from spikeinterface.preprocessing import correct_motion
 
+    # Merge into ONE kwargs dict (resolved job kwargs win on conflict, per the
+    # job-kwargs resolution contract) so an overlapping key -- e.g. ``n_jobs``
+    # in both ``preset_kwargs`` and the resolved ``job_kwargs`` -- does not
+    # raise ``TypeError: got multiple values for keyword`` from a double splat.
+    motion_kwargs = {**(preset_kwargs or {}), **(job_kwargs or {})}
     return correct_motion(
         concatenated,
         preset=motion_preset,
         output_motion=False,
         output_motion_info=False,
-        **(preset_kwargs or {}),
-        **(job_kwargs or {}),
+        **motion_kwargs,
     )

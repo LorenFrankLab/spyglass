@@ -1,9 +1,10 @@
 """Validated parameter schema for the motion-correction parameter table.
 
-The schema lands before its consumer (``ConcatenatedRecording.make()``)
-so ``MotionCorrectionParameters.insert_default()`` can validate the
-``params`` blob at insert time. The consumer is gated behind
-``NotImplementedError`` until the concat materializer is implemented.
+``MotionCorrectionParameters.insert_default()`` validates the ``params``
+blob at insert time; ``ConcatenatedRecording.make()`` reads the chosen row,
+resolves the Spyglass ``"auto"`` alias (``rigid_fast`` same-day, rejected
+multi-day), and passes the preset to ``correct_motion`` on the concatenated
+segment.
 
 The MVP concat path persists only the corrected, unwhitened
 ``ElectricalSeries`` (plus member sample boundaries and a content hash);
@@ -77,13 +78,11 @@ class MotionCorrectionParamsSchema(BaseModel):
         The forbidden-key check is the only insert-time guard on the
         *contents* of ``preset_kwargs`` (the ``preset='none'`` case also
         requires ``preset_kwargs`` to be empty). The remaining keys are
-        validated against
-        ``correct_motion``'s signature at the (future)
-        ``ConcatenatedRecording.make`` consumer, which is
-        ``NotImplementedError``-gated today, so an otherwise-bogus key
-        surfaces there rather than at insert time. Per-key Pydantic
-        modeling is deliberately not built against an unimplemented
-        consumer.
+        validated against ``correct_motion``'s signature by SpikeInterface when
+        ``ConcatenatedRecording.make`` forwards them, so an otherwise-bogus key
+        surfaces there (at populate time) rather than at insert time. Per-key
+        Pydantic modeling against the full ``correct_motion`` signature is
+        deliberately not duplicated here.
     """
 
     model_config = ConfigDict(extra="forbid")
