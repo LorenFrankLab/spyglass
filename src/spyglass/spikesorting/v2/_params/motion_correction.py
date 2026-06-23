@@ -12,8 +12,8 @@ it does NOT persist motion trajectories or motion-info side artifacts.
 This schema rejects the SI ``correct_motion`` kwargs that would change
 that contract -- ``output_motion``, ``output_motion_info``, ``folder``,
 and ``overwrite`` -- because allowing them would write untracked
-artifacts or mutate the corrected-recording return type that the future
-concat materializer depends on.
+artifacts or mutate the corrected-recording return type that the concat
+materializer depends on.
 """
 
 from __future__ import annotations

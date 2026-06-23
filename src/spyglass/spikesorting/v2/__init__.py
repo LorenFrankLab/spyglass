@@ -26,10 +26,10 @@ def initialize_v2_defaults() -> None:
     remembering the per-table calls before the first ``run_v2_pipeline``
     invocation. Idempotent.
 
-    ``MotionCorrectionParameters`` presets are seeded here even though
-    their only consumer (``ConcatenatedRecording.make``) is gated today:
-    once that consumer lands, a missing motion-preset row would otherwise
-    surface as an opaque FK violation on the first concat run.
+    ``MotionCorrectionParameters`` presets are seeded here so a missing
+    motion-preset row does not surface as an opaque FK violation on the first
+    ``ConcatenatedRecording`` run (the same-day chronic concatenate-and-sort
+    consumer).
 
     Examples
     --------
