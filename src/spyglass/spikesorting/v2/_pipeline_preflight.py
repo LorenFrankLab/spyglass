@@ -489,77 +489,80 @@ def preflight_v2_pipeline(
                 "match sampling_rate_hz to the recording).",
             )
 
-    # 9. Sorter execution. The selected backend (local vs container) governs
-    # WHICH runtime preflight must verify. Read it from the SorterParameters row
-    # (the authoritative execution provenance) when the row exists; fall back to
-    # the preset's declared execution_backend / container_image discovery
-    # metadata when the row is absent (sorter_params_exist already reported that
-    # as a blocking error, so this fallback only keeps the report complete).
-    from spyglass.spikesorting.v2._params.sorter import (
-        validate_execution_params,
-    )
-    from spyglass.spikesorting.v2._sorting_dispatch import (
-        MATLAB_SORTERS,
-        matlab_container_required_message,
-    )
+    # 9. Sorter execution. The selected backend (local vs container) is read
+    # ONLY from the SorterParameters row's execution_params (the single source of
+    # truth -- never the preset). When the row is absent, sorter_params_exist
+    # above already reported the blocking error and the backend is unknowable, so
+    # the container / MATLAB-policy checks are skipped; the sorter NAME is still
+    # validated as a local sorter (the pre-execution-params behavior) so a
+    # misspelled sorter keeps its spelling hint.
+    if not sorter_params_exist:
+        _check_local_sorter_runtime(
+            bundle, sis, SorterParameters._NON_SI_SORTERS, _check
+        )
+    else:
+        from spyglass.spikesorting.v2._params.sorter import (
+            validate_execution_params,
+        )
+        from spyglass.spikesorting.v2._sorting_dispatch import (
+            MATLAB_SORTERS,
+            matlab_container_required_message,
+        )
 
-    if sorter_params_exist:
         execution_params = validate_execution_params(
             sorter_params_query.fetch1("execution_params")
         )
         execution_backend = execution_params["backend"]
         container_image = execution_params["container_image"]
-    else:
-        execution_backend = bundle.execution_backend or "local"
-        container_image = bundle.container_image or None
 
-    if execution_backend == "local":
-        # MATLAB-backed sorters (Kilosort 2.5/3, IronClust) ship only as
-        # container images; a local row for one of them cannot run. Surface the
-        # SAME tracked-container-backend message the dispatch raises, rather than
-        # the local-install checks below.
-        if bundle.sorter.lower() in MATLAB_SORTERS:
+        if execution_backend == "local":
+            # MATLAB-backed sorters (Kilosort 2.5/3, IronClust) ship only as
+            # container images; a local row for one of them cannot run. Surface
+            # the SAME tracked-container-backend message the dispatch raises,
+            # rather than the local-install checks.
+            if bundle.sorter.lower() in MATLAB_SORTERS:
+                _check(
+                    "sorter_execution_backend",
+                    False,
+                    matlab_container_required_message(bundle.sorter),
+                )
+            else:
+                _check_local_sorter_runtime(
+                    bundle, sis, SorterParameters._NON_SI_SORTERS, _check
+                )
+        else:
+            # Container backend: verify the container RUNTIME (engine + Python
+            # package), not the local sorter install. The sorter runtime lives
+            # in the image, so a missing LOCAL runtime is irrelevant here. A
+            # missing CONTAINER runtime is an actionable, blocking
+            # selected-preset error -- preflight never silently falls back to
+            # local execution.
+            if execution_backend == "docker":
+                runtime_ok, runtime_detail = _docker_runtime_available()
+            else:
+                runtime_ok, runtime_detail = _singularity_runtime_available()
             _check(
-                "sorter_execution_backend",
-                False,
-                matlab_container_required_message(bundle.sorter),
+                "container_runtime_available",
+                runtime_ok,
+                f"pipeline_preset {pipeline_preset!r} selects the "
+                f"{execution_backend} execution backend (image "
+                f"{container_image!r}) for sorter {bundle.sorter!r}, but it is "
+                f"not runnable here: {runtime_detail}. Install the container "
+                "runtime and its Python package, or pick a local-execution "
+                "preset. Preflight does not fall back to local execution.",
             )
-        else:
-            _check_local_sorter_runtime(
-                bundle, sis, SorterParameters._NON_SI_SORTERS, _check
-            )
-    else:
-        # Container backend: verify the container RUNTIME (engine + Python
-        # package), not the local sorter install. The sorter runtime lives in
-        # the image, so a missing LOCAL runtime is irrelevant here. A missing
-        # CONTAINER runtime is an actionable, blocking selected-preset error --
-        # preflight never silently falls back to local execution.
-        if execution_backend == "docker":
-            runtime_ok, runtime_detail = _docker_runtime_available()
-        else:
-            runtime_ok, runtime_detail = _singularity_runtime_available()
-        _check(
-            "container_runtime_available",
-            runtime_ok,
-            f"pipeline_preset {pipeline_preset!r} selects the "
-            f"{execution_backend} execution backend (image "
-            f"{container_image!r}) for sorter {bundle.sorter!r}, but it is not "
-            f"runnable here: {runtime_detail}. Install the container runtime "
-            "and its Python package, or pick a local-execution preset. "
-            "Preflight does not fall back to local execution.",
-        )
-        # Informational advisory (only when the container is actually runnable,
-        # so it never sits next to a blocking runtime failure): the host can
-        # stay on numpy>=2 -- the sorter runtime (e.g. MS4's numpy<2-era
-        # ml_ms4alg) lives in the container, not on the host.
-        if runtime_ok:
-            warnings.append(
-                f"pipeline_preset {pipeline_preset!r} runs sorter "
-                f"{bundle.sorter!r} inside the {execution_backend} image "
-                f"{container_image!r}: the host can stay on the v2 numpy>=2 "
-                "environment because the sorter runtime lives in the "
-                "container, not on the host."
-            )
+            # Informational advisory (only when the container is actually
+            # runnable, so it never sits next to a blocking runtime failure):
+            # the host can stay on numpy>=2 -- the sorter runtime (e.g. MS4's
+            # numpy<2-era ml_ms4alg) lives in the container, not on the host.
+            if runtime_ok:
+                warnings.append(
+                    f"pipeline_preset {pipeline_preset!r} runs sorter "
+                    f"{bundle.sorter!r} inside the {execution_backend} image "
+                    f"{container_image!r}: the host can stay on the v2 numpy>=2 "
+                    "environment because the sorter runtime lives in the "
+                    "container, not on the host."
+                )
 
     # Non-blocking advisory: the "none" artifact params are a no-op
     # pass-through (no masking). "default" performs real amplitude-threshold

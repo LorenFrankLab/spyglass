@@ -65,8 +65,6 @@ _COLUMNS = [
     "sorter",
     "sorter_family",
     "adjacency_radius_um",
-    "execution_backend",
-    "container_image",
     "preprocessing_params_name",
     "artifact_detection_params_name",
     "sorter_params_name",
@@ -145,8 +143,6 @@ def test_describe_pipeline_presets_matches_preset_objects():
         assert _nullable_num_match(
             row["adjacency_radius_um"], pipeline_preset.adjacency_radius_um
         )
-        assert row["execution_backend"] == pipeline_preset.execution_backend
-        assert row["container_image"] == pipeline_preset.container_image
         assert (
             row["preprocessing_params_name"]
             == pipeline_preset.preprocessing_params_name
@@ -162,32 +158,24 @@ def test_describe_pipeline_presets_matches_preset_objects():
 
 
 def test_container_ms4_pipeline_preset_registered():
-    """The containerized MS4 presets are registered with pinned execution provenance.
+    """The one containerized MS4 preset (Singularity, 30 kHz) is registered.
 
-    ``describe_pipeline_presets`` surfaces a Singularity AND a Docker MS4 preset
-    at both 30 and 20 kHz, each marking its container backend + pinned image so a
-    scientist can discover the modern-host (numpy>=2) container path without
-    reading source. They stay ``recommendation_status="production"`` (the
-    recommended-science MS4 path) while the function default remains MountainSort5.
+    The execution backend is NOT a preset field -- it lives on the referenced
+    SorterParameters row -- so ``describe_pipeline_presets`` (DB-free) carries no
+    execution columns. The preset names the containerized sorter row, stays
+    ``recommendation_status="production"`` (the recommended-science MS4 path),
+    and its notes describe the modern-host (numpy>=2) container path; the
+    function default remains MountainSort5.
     """
+    name = "franklab_probe_hippocampus_30khz_ms4_singularity_2026_06"
     df = describe_pipeline_presets().set_index("pipeline_preset")
-    expected = {
-        "franklab_probe_hippocampus_30khz_ms4_singularity_2026_06": "singularity",
-        "franklab_probe_hippocampus_20khz_ms4_singularity_2026_06": "singularity",
-        "franklab_probe_hippocampus_30khz_ms4_docker_2026_06": "docker",
-        "franklab_probe_hippocampus_20khz_ms4_docker_2026_06": "docker",
-    }
-    for name, backend in expected.items():
-        assert name in df.index, f"{name} not registered"
-        row = df.loc[name]
-        assert row["execution_backend"] == backend
-        # The image is pinned (an explicit name:tag, never True / blank).
-        image = row["container_image"]
-        assert image and ":" in image, f"{name} image not pinned: {image!r}"
-        assert row["sorter"] == "mountainsort4"
-        assert row["recommendation_status"] == "production"
-        # The notes name the host-stays-on-numpy>=2 container path.
-        assert "numpy>=2" in row["notes"]
+    assert name in df.index, f"{name} not registered"
+    row = df.loc[name]
+    assert row["sorter"] == "mountainsort4"
+    assert row["sorter_params_name"] == name  # references the container row
+    assert row["recommendation_status"] == "production"
+    assert "numpy>=2" in row["notes"]
+    assert "Singularity" in row["notes"]
 
     # No shipped preset is the default-switching kind: the default stays MS5.
     from spyglass.spikesorting.v2 import pipeline as pipeline_mod

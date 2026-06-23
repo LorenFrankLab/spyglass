@@ -9,7 +9,7 @@ are unchanged.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 
@@ -54,13 +54,10 @@ class _PipelinePreset(BaseModel):
         None  # informational MS4 spatial radius
     )
     recommendation_status: str = ""  # production | alternative | experimental
-    # Sorter EXECUTION backend (discovery metadata mirroring the referenced
-    # SorterParameters row's execution_params; the row is the source of truth).
-    # "local" runs the sorter on the host; "docker"/"singularity" run it in the
-    # pinned ``container_image``. A catalog drift-guard keeps these in lockstep
-    # with the row's execution_params.
-    execution_backend: Literal["local", "docker", "singularity"] = "local"
-    container_image: str = ""  # pinned image for a container backend ("" local)
+    # NB: the sorter EXECUTION backend (local vs Docker/Singularity) is NOT a
+    # preset field -- it lives on the referenced ``SorterParameters.execution_params``
+    # row (the single source of truth). ``describe_pipeline_preset(name)`` reads it
+    # back from the row; this DB-free preset only names the sorter row.
     intended_use: str = ""  # one-line "when to reach for this pipeline preset"
     threshold_units: str = ""  # detection-threshold units (sigma / µV)
     notes: str = ""  # key assumptions (probe geometry, sampling rate, etc.)
@@ -130,8 +127,6 @@ def describe_pipeline_presets() -> "pd.DataFrame":
         "sorter",
         "sorter_family",
         "adjacency_radius_um",
-        "execution_backend",
-        "container_image",
         "preprocessing_params_name",
         "artifact_detection_params_name",
         "sorter_params_name",
@@ -149,8 +144,6 @@ def describe_pipeline_presets() -> "pd.DataFrame":
             "sorter": preset.sorter,
             "sorter_family": preset.sorter_family,
             "adjacency_radius_um": preset.adjacency_radius_um,
-            "execution_backend": preset.execution_backend,
-            "container_image": preset.container_image,
             "preprocessing_params_name": preset.preprocessing_params_name,
             "artifact_detection_params_name": (
                 preset.artifact_detection_params_name
@@ -198,12 +191,18 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
     -------
     pandas.DataFrame
         Long-format, one row per parameter, columns ``stage`` (``"preset"`` /
-        ``"preprocessing"`` / ``"artifact_detection"`` / ``"sorter"``),
-        ``params_row_name``, ``key`` (dotted path into the validated blob), and
-        ``value``. Parameter-row entries also carry ``params_schema_version`` and
-        ``job_kwargs`` so the display shows the full row resolved by the preset,
-        not just the core params blob. Preset entries include the human-facing
-        ``threshold_units`` field so detection thresholds are never unitless.
+        ``"preprocessing"`` / ``"artifact_detection"`` / ``"sorter"`` /
+        ``"sorter_execution"``), ``params_row_name``, ``key`` (dotted path into
+        the validated blob), and ``value``. Parameter-row entries also carry
+        ``params_schema_version`` and ``job_kwargs`` so the display shows the
+        full row resolved by the preset, not just the core params blob. The
+        ``"sorter_execution"`` rows surface the sorter's ``execution_params``
+        backend/container provenance read from the ``SorterParameters`` row (the
+        single source of truth -- the DB-free :func:`describe_pipeline_presets`
+        does not carry execution fields); their own ``schema_version`` is one of
+        the flattened keys, so ``params_schema_version`` is left blank for them.
+        Preset entries include the human-facing ``threshold_units`` field so
+        detection thresholds are never unitless.
     """
     import pandas as pd
 
@@ -331,6 +330,29 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
                     job_kwargs=row["job_kwargs"],
                 )
             )
+
+    # The sorter EXECUTION backend (local vs Docker/Singularity + container
+    # install provenance) lives on the SorterParameters row, not the preset, so
+    # surface it here from the single source of truth. The execution blob's own
+    # ``schema_version`` is one of the flattened keys, so ``params_schema_version``
+    # (the params-stage column) is left None for these rows rather than
+    # overloaded. The sorter row's existence was already verified above.
+    execution_params = (
+        SorterParameters
+        & {
+            "sorter": preset.sorter,
+            "sorter_params_name": preset.sorter_params_name,
+        }
+    ).fetch1("execution_params")
+    for key, value in _flatten("", _jsonable_blob(execution_params)):
+        rows.append(
+            _detail_row(
+                stage="sorter_execution",
+                params_row_name=preset.sorter_params_name,
+                key=key,
+                value=value,
+            )
+        )
     return pd.DataFrame(rows, columns=_PRESET_DETAIL_COLUMNS)
 
 

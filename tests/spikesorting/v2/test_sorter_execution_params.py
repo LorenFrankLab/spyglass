@@ -68,12 +68,12 @@ def test_sorter_execution_params_schema_container():
     for backend in ("docker", "singularity"):
         row = SorterExecutionParamsSchema(
             backend=backend,
-            container_image="spikeinterface/mountainsort4-base:0.104.3",
+            container_image="example/img:1",  # a placeholder, not a real tag
             installation_mode="pypi",
             spikeinterface_version="0.104.3",
         ).model_dump()
         assert row["backend"] == backend
-        assert row["container_image"].endswith(":0.104.3")
+        assert row["container_image"] == "example/img:1"
         assert is_container_backend(row)
 
         # Missing / empty image -> clear error.
@@ -210,20 +210,17 @@ def test_recommended_container_rows_pin_si_runtime():
         )
 
 
-def test_container_rows_match_local_sibling_science():
-    """Each containerized MS4 row is byte-identical SCIENCE to its local sibling.
+def test_container_row_matches_local_sibling_science():
+    """The containerized MS4 row is byte-identical SCIENCE to its local sibling.
 
     The container backend is the ONLY thing that differs: the scientific
-    ``params`` of every containerized row must equal the local rate-keyed MS4
-    row of the same rate (shared ``_MS4_RATE_PARAMS`` source). A regression that
-    drifted one side would otherwise pass every other test.
+    ``params`` of the shipped Singularity-30 kHz row must equal the local 30 kHz
+    MS4 row (shared ``_MS4_RATE_PARAMS[30000]`` source). A regression that drifted
+    one side would otherwise pass every other test.
     """
     from spyglass.spikesorting.v2._recipe_catalog import (
         MS4_30KHZ,
         MS4_20KHZ,
-        MS4_DOCKER_20KHZ,
-        MS4_DOCKER_30KHZ,
-        MS4_SINGULARITY_20KHZ,
         MS4_SINGULARITY_30KHZ,
         sorter_default_contents,
     )
@@ -231,13 +228,9 @@ def test_container_rows_match_local_sibling_science():
     # (sorter, name) -> params blob.
     params_by_name = {(r[0], r[1]): r[2] for r in sorter_default_contents()}
     local_30 = params_by_name[("mountainsort4", MS4_30KHZ)]
-    local_20 = params_by_name[("mountainsort4", MS4_20KHZ)]
-    for name in (MS4_SINGULARITY_30KHZ, MS4_DOCKER_30KHZ):
-        assert params_by_name[("mountainsort4", name)] == local_30
-    for name in (MS4_SINGULARITY_20KHZ, MS4_DOCKER_20KHZ):
-        assert params_by_name[("mountainsort4", name)] == local_20
-    # And the two rates genuinely differ (so the parity above is non-trivial).
-    assert local_30 != local_20
+    assert params_by_name[("mountainsort4", MS4_SINGULARITY_30KHZ)] == local_30
+    # The 30 vs 20 kHz local rows genuinely differ (so the parity is non-trivial).
+    assert local_30 != params_by_name[("mountainsort4", MS4_20KHZ)]
 
 
 def test_parameter_fingerprint_folds_execution_params():

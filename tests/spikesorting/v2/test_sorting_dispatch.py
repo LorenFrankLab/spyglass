@@ -284,6 +284,12 @@ def test_run_si_sorter_passes_container_kwargs(monkeypatch):
     assert captured["installation_mode"] == "pypi"
     assert captured["spikeinterface_version"] == "0.104.3"
     assert captured["delete_container_files"] is True
+    # The scratch-collision fix: SI's output folder is a per-sort CHILD dir
+    # (``.../sorter_output``), so its fixed-name in_container_* files land in the
+    # unique temp dir (folder.parent), not the shared temp_dir.
+    import os
+
+    assert os.path.basename(captured["folder"]) == "sorter_output"
     for stripped in ("tempdir", "mp_context", "max_threads_per_process"):
         assert stripped not in captured, f"{stripped!r} must be stripped"
     assert captured["detect_threshold"] == 6.0

@@ -449,6 +449,31 @@ def test_container_kwargs_not_allowed_in_sorter_params(request):
 
 
 @pytest.mark.usefixtures("dj_conn")
+def test_describe_pipeline_preset_surfaces_execution_params():
+    """describe_pipeline_preset(name) reads execution_params from the sorter row.
+
+    The execution backend is sourced from SorterParameters (the single source of
+    truth), so the singular, DB-reading describe surfaces it under a
+    ``sorter_execution`` stage. (The DB-free plural describe_pipeline_presets does
+    not carry execution fields.)
+    """
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2.pipeline import describe_pipeline_preset
+
+    initialize_v2_defaults()
+    detail = describe_pipeline_preset(
+        "franklab_probe_hippocampus_30khz_ms4_singularity_2026_06"
+    )
+    exec_rows = detail[detail["stage"] == "sorter_execution"]
+    kv = dict(zip(exec_rows["key"], exec_rows["value"]))
+    assert kv["backend"] == "singularity"
+    assert kv["container_image"].startswith(
+        "spikeinterface/mountainsort4-base:"
+    )
+    assert kv["installation_mode"] == "pypi"
+
+
+@pytest.mark.usefixtures("dj_conn")
 def test_container_ms4_default_row_inserts_without_local_ms4(monkeypatch):
     """Containerized MS4 rows are insertable even when local MS4 is absent.
 
@@ -461,7 +486,6 @@ def test_container_ms4_default_row_inserts_without_local_ms4(monkeypatch):
 
     from spyglass.spikesorting.v2._recipe_catalog import (
         MS4_30KHZ,
-        MS4_DOCKER_30KHZ,
         MS4_SINGULARITY_30KHZ,
     )
     from spyglass.spikesorting.v2.sorting import SorterParameters
@@ -477,6 +501,6 @@ def test_container_ms4_default_row_inserts_without_local_ms4(monkeypatch):
 
     # Local MS4 is skipped (its runtime is unavailable on this box).
     assert ("mountainsort4", MS4_30KHZ) in skipped_names
-    # Container MS4 rows still ship -- gated by preflight at run time, not here.
+    # The container MS4 row still ships -- gated by preflight at run time, not
+    # here (its runtime lives in the image).
     assert ("mountainsort4", MS4_SINGULARITY_30KHZ) in insertable_names
-    assert ("mountainsort4", MS4_DOCKER_30KHZ) in insertable_names
