@@ -961,6 +961,66 @@ def test_metric_routing_by_type(display_and_metric_analyzers, monkeypatch):
 
 
 @pytest.mark.db_unit
+def test_metric_merge_reindexes_same_units(display_and_metric_analyzers, monkeypatch):
+    """Voltage and PC metric frames align by unit id, not SI return order.
+
+    SpikeInterface should return the same unit ids for both analyzers, but the
+    row order is not the scientific invariant. A reordered PC frame should merge
+    cleanly onto the display order instead of failing or value-swapping.
+    """
+    import spikeinterface.metrics.quality as siq
+
+    from spyglass.spikesorting.v2.metric_curation import AnalyzerCuration
+
+    display, metric = display_and_metric_analyzers
+    unit_ids = [int(u) for u in display.sorting.unit_ids]
+    assert len(unit_ids) >= 2
+
+    def _spy(
+        analyzer,
+        metric_names,
+        metric_params=None,
+        skip_pc_metrics=False,
+        **kwargs,
+    ):
+        if analyzer is display:
+            return pd.DataFrame(
+                index=unit_ids,
+                data={"snr": [float(u) for u in unit_ids]},
+            )
+        if analyzer is metric:
+            reversed_ids = list(reversed(unit_ids))
+            return pd.DataFrame(
+                index=reversed_ids,
+                data={
+                    "nn_isolation": [float(u * 10) for u in reversed_ids],
+                    "nn_noise_overlap": [float(u * 100) for u in reversed_ids],
+                },
+            )
+        raise AssertionError("unexpected analyzer")
+
+    monkeypatch.setattr(siq, "compute_quality_metrics", _spy)
+
+    metrics = AnalyzerCuration._compute_metrics(
+        display,
+        metric,
+        metric_names=["snr", "nn_advanced"],
+        metric_kwargs={},
+        skip_pc_metrics=False,
+        job_kwargs={},
+    )
+
+    assert list(metrics.index) == unit_ids
+    assert metrics["snr"].tolist() == [float(u) for u in unit_ids]
+    assert metrics["nn_isolation"].tolist() == [
+        float(u * 10) for u in unit_ids
+    ]
+    assert metrics["nn_noise_overlap"].tolist() == [
+        float(u * 100) for u in unit_ids
+    ]
+
+
+@pytest.mark.db_unit
 def test_snr_unaffected_by_metric_whitening(display_and_metric_analyzers):
     """``snr`` is identical with or without a whitened metric analyzer.
 

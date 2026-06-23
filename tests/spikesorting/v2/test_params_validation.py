@@ -1128,16 +1128,17 @@ def test_quality_metric_params_skip_pc_false_requires_pca_metric():
     assert not QualityMetricParamsSchema(
         metric_names=["snr", "nn_advanced"], skip_pc_metrics=False
     ).skip_pc_metrics
-    # Dual contradiction: skip_pc_metrics=True with ONLY PCA metrics would
-    # compute nothing -- rejected at insert, not deferred to populate.
-    with pytest.raises(ValidationError, match="nothing would be computed"):
+    # Dual contradiction: skip_pc_metrics=True with PCA metric names would
+    # store metrics that are intentionally skipped. Reject any such row so
+    # metric_names remains the list of metrics this row actually computes.
+    with pytest.raises(ValidationError, match="would be skipped"):
         QualityMetricParamsSchema(
             metric_names=["nn_advanced"], skip_pc_metrics=True
         )
-    # skip_pc_metrics=True WITH a non-PCA metric is fine (PCA simply skipped).
-    assert QualityMetricParamsSchema(
-        metric_names=["snr", "nn_advanced"], skip_pc_metrics=True
-    ).skip_pc_metrics
+    with pytest.raises(ValidationError, match="would be skipped"):
+        QualityMetricParamsSchema(
+            metric_names=["snr", "nn_advanced"], skip_pc_metrics=True
+        )
 
 
 def test_quality_metric_params_rejects_unknown_metric_name():

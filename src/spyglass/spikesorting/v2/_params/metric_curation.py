@@ -22,6 +22,7 @@ shared Job-Kwargs Resolution convention.
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Literal
 
 from pydantic import (
@@ -73,13 +74,18 @@ def _available_quality_metric_names() -> list[str]:
     return list(get_quality_metric_list())
 
 
-def _available_pca_metric_names() -> list[str]:
+@lru_cache(maxsize=1)
+def _available_pca_metric_names() -> tuple[str, ...]:
     """Return the installed SI's PCA-based (``principal_components``) metrics.
 
     These (``d_prime``, ``mahalanobis``, ``nearest_neighbor``, ``nn_advanced``,
     ``silhouette`` in SI 0.104) are the only metrics that need the whitened
     metric analyzer; ``skip_pc_metrics=False`` is meaningful only if at least
     one is requested. Read from SI, not hardcoded, like the full list above.
+    The PCA set is invariant for the pinned SI version, so it is cached (the
+    insert-time validator and the runtime routing both call it); a tuple is
+    returned because ``lru_cache`` results must not be mutated -- callers wrap
+    it in a ``set``.
     """
     try:
         from spikeinterface.metrics.quality import (
@@ -88,7 +94,7 @@ def _available_pca_metric_names() -> list[str]:
     except ImportError:  # pragma: no cover - pinned 0.104 always has this
         from spikeinterface.qualitymetrics import get_quality_pca_metric_list
 
-    return list(get_quality_pca_metric_list())
+    return tuple(get_quality_pca_metric_list())
 
 
 class QualityMetricParamsSchema(BaseModel):
@@ -139,10 +145,10 @@ class QualityMetricParamsSchema(BaseModel):
 
     @model_validator(mode="after")
     def _check_pc_metrics_consistent(self) -> "QualityMetricParamsSchema":
-        # Keep the skip_pc_metrics flag consistent with the requested metrics so
-        # the row neither builds a whitened analyzer for nothing nor computes
-        # nothing at all -- and so skip_pc_metrics=False stays an EXACT signal
-        # that a metric analyzer exists, which recompute / orphan gating rely on.
+        # Keep the skip_pc_metrics flag consistent with the requested metrics:
+        # metric_names should name metrics this row actually computes. Also keep
+        # skip_pc_metrics=False as an EXACT signal that a metric analyzer exists,
+        # which recompute / orphan gating rely on.
         pca = set(_available_pca_metric_names())
         requested_pca = set(self.metric_names) & pca
         if not self.skip_pc_metrics and not requested_pca:
@@ -154,16 +160,14 @@ class QualityMetricParamsSchema(BaseModel):
                 "skip_pc_metrics=False with no PCA metric builds no metric "
                 "analyzer and is a contradiction."
             )
-        if self.skip_pc_metrics and requested_pca == set(self.metric_names):
-            # Every requested metric is a PCA metric, but PC computation is
-            # skipped -> nothing would be computed (fails at populate). Catch it
-            # at insert instead. (skip_pc_metrics=True WITH a non-PCA metric is
-            # fine -- the PCA names are simply skipped.)
+        if self.skip_pc_metrics and requested_pca:
+            # PCA metrics require the metric analyzer. Silently dropping them
+            # would make the DB row overstate what was actually computed.
             raise ValueError(
-                "skip_pc_metrics=True but every requested metric is a PCA "
-                f"metric ({sorted(requested_pca)}); nothing would be computed. "
-                "Set skip_pc_metrics=False to compute them, or add a non-PCA "
-                "metric (e.g. snr)."
+                "skip_pc_metrics=True but metric_names requests PCA metric(s) "
+                f"{sorted(requested_pca)}, which would be skipped. Set "
+                "skip_pc_metrics=False to compute them on the whitened metric "
+                "analyzer, or remove the PCA metric(s) from metric_names."
             )
         return self
 

@@ -358,33 +358,25 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
         """
         from spyglass.spikesorting.v2.metric_curation import (
             AnalyzerCurationSelection,
-            QualityMetricParameters,
         )
 
         # All (sort, recipe) pairs, restricted to those actually in use: a
-        # sort's stored display recipe OR a metric recipe a curation references.
-        # An OR-list semijoin on the clean (sorting_id, waveform_params_name)
-        # cross product -- not a union of dj.U aggregations, whose headings
-        # cannot be joined (DataJoint Union.create -> heading.join KeyError).
+        # sort's stored display recipe OR a metric recipe a PC-requesting
+        # curation references. An OR-list semijoin on the clean
+        # (sorting_id, waveform_params_name) cross product -- not a union of
+        # dj.U aggregations, whose headings cannot be joined (DataJoint
+        # Union.create -> heading.join KeyError).
         all_pairs = (AnalyzerWaveformParameters * Sorting).proj()
         is_display = Sorting.proj(
             waveform_params_name="display_waveform_params_name"
         )
-        # Only selections that actually request PC/NN metrics build a whitened
-        # metric analyzer (make_compute gates on skip_pc_metrics=False), so
-        # restrict to those -- otherwise recompute would synthesize a metric
-        # analyzer a curation never built. QualityMetricParameters validates
-        # skip_pc_metrics=False => at least one PCA metric, so this flag is an
-        # EXACT signal that a metric analyzer exists (not a proxy). sorting_id
-        # is carried explicitly: it
-        # is a SECONDARY (CurationV2) FK attr on the selection, not its uuid PK,
-        # so a bare proj() would drop it and the semijoin would match on
+        # pc_requesting() is the single source of "which metric recipes were
+        # actually built" (shared with the orphan-folder audit). Project to
+        # (sorting_id, waveform_params_name); sorting_id is carried explicitly
+        # because it is a SECONDARY (CurationV2) FK attr, not the selection's
+        # uuid PK -- a bare proj() would drop it and the semijoin would match on
         # waveform_params_name alone (leaking a recipe onto every sort).
-        pc_selections = (
-            AnalyzerCurationSelection * QualityMetricParameters
-            & "skip_pc_metrics = 0"
-        )
-        is_metric = pc_selections.proj(
+        is_metric = AnalyzerCurationSelection.pc_requesting().proj(
             "sorting_id", waveform_params_name="metric_waveform_params_name"
         )
         return all_pairs & [is_display, is_metric]

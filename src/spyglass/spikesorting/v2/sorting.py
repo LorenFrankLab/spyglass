@@ -1876,23 +1876,18 @@ class Sorting(SpyglassMixin, dj.Computed):
         # A metric (whitened) analyzer folder referenced by a PC-requesting
         # curation selection is in active use (its PC/NN metrics were computed
         # from it), so it is NOT a disk-side orphan even though it is not a
-        # sort's display recipe. Only selections whose QualityMetricParameters
-        # request PC metrics (skip_pc_metrics=False) actually build the metric
-        # analyzer, so a skip-PC selection's recipe is not retained (a stale
-        # folder for it stays a cleanable orphan). Lazily imported to avoid a
-        # metric_curation <-> sorting cycle.
+        # sort's display recipe. Only selections that actually build the metric
+        # analyzer (AnalyzerCurationSelection.pc_requesting() -- the same source
+        # the recompute key_source uses) are retained, so a skip-PC selection's
+        # recipe is not (a stale folder for it stays a cleanable orphan). Lazily
+        # imported to avoid a metric_curation <-> sorting cycle.
         from spyglass.spikesorting.v2.metric_curation import (
             AnalyzerCurationSelection,
-            QualityMetricParameters,
         )
 
-        pc_selections = (
-            AnalyzerCurationSelection * QualityMetricParameters
-            & "skip_pc_metrics = 0"
-        )
         referenced_paths.update(
             str(analyzer_path(r["sorting_id"], r["metric_waveform_params_name"]))
-            for r in pc_selections.fetch(
+            for r in AnalyzerCurationSelection.pc_requesting().fetch(
                 "sorting_id", "metric_waveform_params_name", as_dict=True
             )
         )

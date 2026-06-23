@@ -44,6 +44,7 @@ from spyglass.spikesorting.v2._params.metric_curation import (
     QUALITY_METRIC_SCHEMA_VERSION,
     AutoCurationRulesSchema,
     QualityMetricParamsSchema,
+    _available_pca_metric_names,
 )
 from spyglass.spikesorting.v2.curation import CurationV2
 from spyglass.spikesorting.v2.exceptions import (
@@ -133,29 +134,18 @@ def _nwb_file_name_for_sorting(sorting_key: dict) -> str:
     )
 
 
-def _pca_metric_names() -> set[str]:
-    """The installed SI's PCA-based quality metrics.
-
-    These (``d_prime``, ``mahalanobis``, ``nearest_neighbor``, ``nn_advanced``,
-    ``silhouette`` in SI 0.104) require the ``principal_components`` extension
-    and measure cluster separation, so they compute in the decorrelated
-    (whitened) space -- the whitened METRIC analyzer. Everything else (voltage /
-    spike-train metrics) stays on the unwhitened DISPLAY analyzer. Read from SI
-    rather than hardcoded so the split tracks the pinned SI version.
-    """
-    try:
-        from spikeinterface.metrics.quality import (
-            get_quality_pca_metric_list,
-        )
-    except ImportError:  # pragma: no cover - pinned 0.104 has this
-        from spikeinterface.qualitymetrics import get_quality_pca_metric_list
-
-    return set(get_quality_pca_metric_list())
-
-
 def _requested_pc_metrics(metric_names) -> list[str]:
-    """PC/NN metrics among ``metric_names`` (route to the whitened analyzer)."""
-    pca = _pca_metric_names()
+    """PC/NN metrics among ``metric_names`` (route to the whitened analyzer).
+
+    PCA-based metrics (``d_prime``, ``mahalanobis``, ``nearest_neighbor``,
+    ``nn_advanced``, ``silhouette`` in SI 0.104) need the ``principal_components``
+    extension and measure cluster separation, so they compute in the
+    decorrelated (whitened) space -- the whitened METRIC analyzer; everything
+    else stays on the unwhitened DISPLAY analyzer. The PCA set is the same one
+    the insert-time validator uses (``_available_pca_metric_names``), so routing
+    and validation cannot disagree about which metrics are PCA-based.
+    """
+    pca = set(_available_pca_metric_names())
     return [name for name in metric_names if name in pca]
 
 
@@ -722,6 +712,21 @@ class AnalyzerCurationSelection(
         )
 
     @classmethod
+    def pc_requesting(cls):
+        """Selections whose QualityMetricParameters request PC/NN metrics.
+
+        Joined to ``QualityMetricParameters`` and restricted to
+        ``skip_pc_metrics=0`` -- the EXACT set that actually builds a whitened
+        metric analyzer (the schema validates skip_pc_metrics=False ⇔ a PCA
+        metric is requested). The single source of truth for which metric
+        recipes are "in use", so the recompute key_source and the orphan-folder
+        audit cannot drift apart. Carries ``sorting_id`` (a secondary CurationV2
+        FK attr) and ``metric_waveform_params_name`` for the caller to project /
+        fetch.
+        """
+        return cls * QualityMetricParameters & "skip_pc_metrics = 0"
+
+    @classmethod
     def _find_existing_pk(cls, identity, deterministic_id):
         """Return the PK-only dict for ``identity`` or None; guard bad ids."""
         from spyglass.spikesorting.v2.exceptions import (
@@ -1042,9 +1047,10 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
             # sorting, so the voltage and PC frames must share a unit-id index.
             # Concat defaults to an OUTER join that would silently NaN-fill a
             # mismatched unit (and a label rule would then never fire on the
-            # NaN); assert the invariant and inner-join so any divergence is a
-            # loud error, not a quiet wrong/empty metric.
-            if not frames[0].index.equals(frames[1].index):
+            # NaN); assert the set invariant loudly. Ordering differences are
+            # harmless, so reindex PC metrics to the display order before
+            # concatenating.
+            if set(frames[0].index) != set(frames[1].index):
                 raise ValueError(
                     "voltage and PC metric frames have mismatched unit ids "
                     f"(voltage={sorted(frames[0].index)}, "
@@ -1052,7 +1058,8 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
                     "canonical sorting, so this indicates an analyzer build "
                     "divergence and the metrics cannot be safely merged."
                 )
-            metrics_df = pd.concat(frames, axis=1, join="inner")
+            frames[1] = frames[1].reindex(frames[0].index)
+            metrics_df = pd.concat(frames, axis=1)
         else:
             metrics_df = frames[0]
 
