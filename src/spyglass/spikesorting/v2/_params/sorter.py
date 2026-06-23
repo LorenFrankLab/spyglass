@@ -458,6 +458,12 @@ _SORTER_SCHEMAS: dict[str, type[BaseModel]] = {
 # 4/5 are intentionally NOT here: they DO take ``whiten=True``, which the
 # runtime routes through the external float64 whitening (whitening the signal
 # exactly once).
+#
+# This set coincides today with ``_sorting_dispatch.MATLAB_SORTERS`` (the
+# container-execution policy), but the two encode DIFFERENT concepts -- "whitens
+# internally with no whiten kwarg" here vs "ships only as a MATLAB container
+# image" there -- and are deliberately kept separate so a future sorter that is
+# one but not the other does not force a wrong coupling. Do not merge them.
 _INTERNAL_WHITEN_NO_KWARG_SORTERS: frozenset[str] = frozenset(
     {"kilosort2_5", "kilosort3", "ironclust"}
 )

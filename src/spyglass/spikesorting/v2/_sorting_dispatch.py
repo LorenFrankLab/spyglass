@@ -37,6 +37,11 @@ from __future__ import annotations
 # comes from tracked ``SorterParameters.execution_params`` provenance, never
 # from the sorter name alone, so an existing custom Kilosort/IronClust row is
 # never silently reinterpreted as local execution.
+#
+# This set coincides today with
+# ``_params.sorter._INTERNAL_WHITEN_NO_KWARG_SORTERS`` but encodes a DIFFERENT
+# concept (container-execution policy, not internal whitening); they are kept
+# separate on purpose -- see the note there.
 MATLAB_SORTERS = ("kilosort2_5", "kilosort3", "ironclust")
 # Sorter kwargs that do not survive containerization of the MATLAB sorters
 # (they reference host paths / host process settings). Stripped only when one of

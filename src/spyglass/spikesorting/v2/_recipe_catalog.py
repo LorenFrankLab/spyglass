@@ -612,7 +612,7 @@ def pipeline_preset_specs() -> dict[str, dict]:
     from these specs; keeping them as plain dicts here lets the catalog stay
     free of any dependency on the preset model (no import cycle).
     """
-    specs = {
+    return {
         "franklab_tetrode_hippocampus_30khz_ms4_2026_06": _franklab_ms4_spec(
             "tetrode", "hippocampus", 30000
         ),
@@ -716,4 +716,3 @@ def pipeline_preset_specs() -> dict[str, dict]:
         # SorterParameters.execution_params row, not on this preset.
         MS4_SINGULARITY_30KHZ: _franklab_ms4_singularity_spec(),
     }
-    return specs
