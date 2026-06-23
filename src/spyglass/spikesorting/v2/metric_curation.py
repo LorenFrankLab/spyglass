@@ -1148,6 +1148,19 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
                 counts, n_spikes
             )
 
+        # Surfacing the configured shape columns must not depend on a voltage
+        # metric having grown the display extensions: a PC-only row (e.g.
+        # metric_names=["nn_advanced"], skip_pc_metrics=False) skips the voltage
+        # branch above, so ensure template_metrics on the display analyzer
+        # whenever shape columns are requested -- otherwise they would be
+        # silently dropped rather than surfaced.
+        if template_metric_columns and not display_analyzer.has_extension(
+            "template_metrics"
+        ):
+            ensure_extensions(
+                display_analyzer, ["template_metrics"], job_kwargs=job_kwargs
+            )
+
         metrics_df = AnalyzerCuration._surface_template_columns(
             metrics_df, display_analyzer, template_metric_columns
         )
@@ -1263,13 +1276,13 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
     def get_metrics(cls, key):
         """Return the quality-metrics table (DataFrame indexed by unit_id).
 
-        The frame carries the configured SpikeInterface quality metrics AND the
-        row's surfaced waveform-shape (template) columns (``trough_half_width``
-        by default; ``peak_to_trough_duration`` and slopes opt-in) side by side,
-        so downstream code can classify cell types (rate x spike width) with its
-        own region-appropriate thresholds (the pipeline ships none). Non-finite
-        values surface as ``None`` (the on-disk representation is HDF5-native
-        NaN).
+        The frame carries the configured SpikeInterface quality metrics plus the
+        row's surfaced waveform-shape (template) columns -- ``trough_half_width``
+        by default, with ``peak_to_trough_duration`` and slope columns available
+        opt-in via the row's ``template_metric_columns`` -- so downstream code can
+        classify cell types (rate x spike width) with its own region-appropriate
+        thresholds (the pipeline ships none). Non-finite values surface as
+        ``None`` (the on-disk representation is HDF5-native NaN).
         """
         row = (cls & key).fetch1()
         abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])

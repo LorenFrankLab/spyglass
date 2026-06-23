@@ -1595,6 +1595,41 @@ def test_compute_metrics_surfaces_template_columns(
 
 
 @pytest.mark.db_unit
+def test_compute_metrics_surfaces_template_for_pc_only_row(
+    display_and_metric_analyzers,
+):
+    """A PC-only metric row still surfaces its configured shape columns.
+
+    A row requesting only PC/NN metrics (no voltage metric) skips the voltage
+    branch that grows the display curation extensions, so without an explicit
+    ensure the display ``template_metrics`` extension would be absent and the
+    configured ``trough_half_width`` silently dropped. ``_compute_metrics`` grows
+    ``template_metrics`` whenever shape columns are requested, independent of
+    voltage metrics.
+    """
+    from spyglass.spikesorting.v2.metric_curation import AnalyzerCuration
+
+    display, metric = display_and_metric_analyzers
+    # Force the precondition a PC-only sort starts from: no display
+    # template_metrics yet (the shared fixture may carry it from a prior test).
+    if display.has_extension("template_metrics"):
+        display.delete_extension("template_metrics")
+
+    metrics = AnalyzerCuration._compute_metrics(
+        display,
+        metric,
+        ["nn_advanced"],
+        {},
+        skip_pc_metrics=False,
+        job_kwargs={},
+        template_metric_columns=["trough_half_width"],
+    )
+    assert "nn_noise_overlap" in metrics.columns  # the PC metric computed
+    assert "trough_half_width" in metrics.columns  # surfaced despite no voltage
+    assert display.has_extension("template_metrics")  # the fix grew it
+
+
+@pytest.mark.db_unit
 def test_template_metrics_read_from_display_analyzer(
     display_and_metric_analyzers, monkeypatch
 ):
@@ -1707,7 +1742,10 @@ def test_surface_template_columns_edge_cases(dj_conn, caplog):
 
     # Empty config -> no shape columns added.
     assert list(surface(metrics_df, _Analyzer(tm_df), []).columns) == ["snr"]
-    # Extension absent (e.g. a PC-only row that never grew it) -> no-op.
+    # Extension absent -> the helper defensively no-ops. (Its _compute_metrics
+    # caller ensures template_metrics whenever columns are configured, so this
+    # is the belt-and-suspenders branch, not a normal path -- the PC-only-row
+    # surfacing is covered behaviorally below.)
     assert list(
         surface(metrics_df, _Analyzer(None), ["trough_half_width"]).columns
     ) == ["snr"]
