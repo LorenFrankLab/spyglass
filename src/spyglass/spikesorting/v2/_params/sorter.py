@@ -343,10 +343,10 @@ class SorterExecutionParamsSchema(BaseModel):
     Validation:
 
     * ``backend="local"`` requires ``container_image is None`` and leaves the
-      container-only install controls at their defaults (``installation_mode``
-      ``"auto"`` / ``spikeinterface_version`` ``None`` / ``extra_requirements``
-      ``[]``). A non-default install control on a local row is rejected, not
-      silently ignored.
+      container-only controls at their defaults (``installation_mode`` ``"auto"``
+      / ``spikeinterface_version`` ``None`` / ``extra_requirements`` ``[]`` /
+      ``delete_container_files`` ``True``). A non-default container-only control
+      on a local row is rejected, not silently ignored.
     * ``backend in {"docker", "singularity"}`` requires a non-empty
       ``container_image`` string (a Docker image name/tag/digest, or a local
       ``.sif`` path for Singularity). SpikeInterface accepts ``docker_image=True``
@@ -385,20 +385,22 @@ class SorterExecutionParamsSchema(BaseModel):
                     "containerized row must set backend='docker' or "
                     "'singularity'."
                 )
-            # The install controls only affect the container-side SI install;
-            # a non-default value on a local row would be silently inert, so
-            # reject it rather than let it mislead.
+            # The container-only controls only affect the container-side SI
+            # install / cleanup; a non-default value on a local row would be
+            # silently inert, so reject it rather than let it mislead.
             if (
                 self.installation_mode != "auto"
                 or self.spikeinterface_version is not None
                 or self.extra_requirements
+                or self.delete_container_files is not True
             ):
                 raise ValueError(
                     "SorterExecutionParamsSchema: installation_mode / "
-                    "spikeinterface_version / extra_requirements are "
-                    "container-only; backend='local' must leave them at their "
-                    "defaults ('auto' / None / []). Set backend='docker' or "
-                    "'singularity' to pin a container install."
+                    "spikeinterface_version / extra_requirements / "
+                    "delete_container_files are container-only; backend='local' "
+                    "must leave them at their defaults ('auto' / None / [] / "
+                    "True). Set backend='docker' or 'singularity' to pin a "
+                    "container install."
                 )
         else:
             if not (
@@ -413,6 +415,24 @@ class SorterExecutionParamsSchema(BaseModel):
                     "SpikeInterface's docker_image=True / singularity_image=True "
                     "is not accepted as tracked provenance -- pin an explicit "
                     "image."
+                )
+            # ``installation_mode in {"pypi","github"}`` installs SpikeInterface
+            # into the container at run time, so it MUST pin which version --
+            # otherwise the container-side install floats with the host SI and
+            # the row is not reproducible by content. ``auto`` (SI picks) and
+            # ``no-install`` (baked image) legitimately leave the version unset.
+            if (
+                self.installation_mode in ("pypi", "github")
+                and self.spikeinterface_version is None
+            ):
+                raise ValueError(
+                    "SorterExecutionParamsSchema: installation_mode="
+                    f"{self.installation_mode!r} installs SpikeInterface into "
+                    "the container at run time and so requires an explicit "
+                    "spikeinterface_version (otherwise the install floats with "
+                    "the host environment and the row is not reproducible by "
+                    "content). Pin spikeinterface_version, or use "
+                    "installation_mode='no-install' with a baked image."
                 )
         return self
 

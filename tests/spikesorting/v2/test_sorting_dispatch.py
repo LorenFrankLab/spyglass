@@ -358,3 +358,47 @@ def test_run_si_sorter_keeps_job_kwargs_out_of_sorter_params(monkeypatch):
     # Execution kwargs DO reach run_sorter.
     assert captured["singularity_image"] == "img.sif"
     assert captured["installation_mode"] == "no-install"
+
+
+@pytest.mark.medium
+def test_v2_recording_chain_is_container_serializable():
+    """The v2 recording wrappers stay (json|pickle)-serializable for containers.
+
+    SI's container runner requires the recording passed to ``run_sorter`` to be
+    JSON- or pickle-serializable so it can re-materialize it inside the
+    container. The v2 sort-time chain wraps the preprocessed recording in an
+    artifact mask (``apply_artifact_mask``) and, for a whitening sorter, the
+    external float64 whitening (``pinned_whiten``). Assert each wrapper -- and
+    their composition -- preserves container-serializability, without Docker or
+    a real sort. A regression (e.g. a wrapper holding an unpicklable closure)
+    would otherwise only surface deep in a real container populate.
+    """
+    import numpy as np
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        apply_artifact_mask,
+    )
+    from spyglass.spikesorting.v2._sorting_dispatch import pinned_whiten
+
+    def _container_serializable(recording) -> bool:
+        return recording.check_serializability(
+            "json"
+        ) or recording.check_serializability("pickle")
+
+    rec = si.generate_recording(
+        num_channels=4, durations=[1.0], sampling_frequency=30_000.0
+    )
+    assert _container_serializable(rec), "base recording not serializable"
+
+    # Artifact-masked recording (keep the first half-second).
+    masked = apply_artifact_mask(rec, np.array([[0.0, 0.5]]))
+    assert _container_serializable(masked), "artifact-masked not serializable"
+
+    # Whitened wrapper (the external float64 whitening path).
+    whitened = pinned_whiten(rec)
+    assert _container_serializable(whitened), "whitened not serializable"
+
+    # The full sort-time composition: whiten(artifact-mask(recording)).
+    composed = pinned_whiten(masked)
+    assert _container_serializable(composed), "composed chain not serializable"

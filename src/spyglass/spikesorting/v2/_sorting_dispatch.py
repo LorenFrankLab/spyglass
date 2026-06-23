@@ -529,10 +529,19 @@ def run_si_sorter(
         previous_global = dict(si.get_global_job_kwargs())
         if sj_kwargs:
             si.set_global_job_kwargs(**sj_kwargs)
+        # Pass a CHILD output folder, not the temp root, so SI's container
+        # runner writes its fixed-name ``in_container_recording.*`` /
+        # ``in_container_params.json`` files into ``folder.parent`` ==
+        # ``sorter_temp_dir.name`` (unique per sort) rather than the SHARED
+        # ``spyglass_temp_dir``. Without this, two parallel container populates
+        # would stomp each other's fixed-name files in the common parent. The
+        # 0o777 chmod above is on that per-sort parent, so the container's
+        # (possibly different-uid) writes still land somewhere world-writable.
+        output_folder = os.path.join(sorter_temp_dir.name, "sorter_output")
         run_kwargs = dict(
             sorter_name=sorter,
             recording=recording,
-            folder=sorter_temp_dir.name,
+            folder=output_folder,
             remove_existing_folder=True,
             # Container execution kwargs (empty for local). docker_image /
             # singularity_image / delete_container_files bind to run_sorter's

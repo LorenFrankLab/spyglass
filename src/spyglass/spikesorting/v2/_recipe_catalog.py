@@ -52,23 +52,28 @@ MS4_30KHZ = "franklab_30khz_ms4_2026_06"
 MS4_20KHZ = "franklab_20khz_ms4_2026_06"
 MS5_30KHZ = "franklab_30khz_ms5_2026_06"
 KS4_NEUROPIXELS = "franklab_neuropixels_default"
-# Containerized MS4 (probe / polymer, 30 kHz): a first-class, reproducible
-# execution path for modern hosts. MS4's algorithm backend (ml_ms4alg) is a
-# numpy<2-era package that does not install under the v2 numpy>=2 baseline, so
-# these rows run the SAME scientific params as ``MS4_30KHZ`` inside a pinned
-# container -- the host stays on numpy>=2 while the MS4 runtime lives in the
-# image. The image is SpikeInterface's published mountainsort4 base image pinned
-# to a release tag (the same image reference works for Docker and -- pulled as a
-# SIF -- for Singularity/Apptainer), and the container-side SpikeInterface is
-# pinned to the same release (installation_mode="pypi") so the row is
-# reproducible by content. A local MS4 row and these containerized rows are
-# DISTINCT named rows (different sorter_params_name); the container backend is
-# tracked provenance, not a runtime override. Singularity is the Frank-lab HPC
-# target; Docker is shipped for workstation hosts.
+# Containerized MS4 (probe / polymer, 30 kHz + 20 kHz): a first-class,
+# reproducible execution path for modern hosts. MS4's algorithm backend
+# (ml_ms4alg) is a numpy<2-era package that does not install under the v2
+# numpy>=2 baseline, so these rows run the SAME scientific params as the local
+# rate-keyed MS4 rows inside a pinned container -- the host stays on numpy>=2
+# while the MS4 runtime lives in the image. The same image reference works for
+# Docker and -- pulled as a SIF -- for Singularity/Apptainer. A local MS4 row and
+# these containerized rows are DISTINCT named rows (different sorter_params_name);
+# the container backend is tracked provenance, not a runtime override. Singularity
+# is the Frank-lab HPC target; Docker is shipped for workstation hosts.
+#
+# Two DISTINCT version spaces, pinned independently for reproducibility:
+#   * the image TAG versions SpikeInterface's published ``mountainsort4-base``
+#     image by its baked ml_ms4alg algorithm runtime (Docker Hub tags are
+#     1.0.x, NOT SpikeInterface release numbers); and
+#   * ``MS4_CONTAINER_SI_VERSION`` pins the SpikeInterface that
+#     ``installation_mode="pypi"`` pip-installs INTO that image at run time.
+# Do not conflate them -- tagging the image with the SI release (e.g. 0.104.3)
+# references a non-existent tag and the pull fails.
+MS4_CONTAINER_IMAGE_TAG = "1.0.5"
+MS4_CONTAINER_IMAGE = f"spikeinterface/mountainsort4-base:{MS4_CONTAINER_IMAGE_TAG}"
 MS4_CONTAINER_SI_VERSION = "0.104.3"
-MS4_CONTAINER_IMAGE = (
-    f"spikeinterface/mountainsort4-base:{MS4_CONTAINER_SI_VERSION}"
-)
 MS4_SINGULARITY_30KHZ = (
     "franklab_probe_hippocampus_30khz_ms4_singularity_2026_06"
 )

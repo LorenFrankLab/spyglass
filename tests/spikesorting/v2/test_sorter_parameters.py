@@ -345,6 +345,46 @@ def test_sorter_parameters_tracks_execution_params(request):
 
 
 @pytest.mark.usefixtures("dj_conn")
+def test_execution_params_schema_version_drift_rejected(request):
+    """An explicit execution_params_schema_version that disagrees with the blob
+    is rejected; an omitted column is backfilled from the blob.
+
+    Mirrors the params_schema_version drift guard for the execution blob -- the
+    outer column must stay in lockstep with the validated blob's inner
+    schema_version, so a stale/wrong version cannot insert silently.
+    """
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    request.addfinalizer(
+        lambda: (
+            SorterParameters
+            & {
+                "sorter": "mountainsort4",
+                "sorter_params_name": "exec_version_drift",
+            }
+        ).delete(safemode=False)
+    )
+
+    # Inner blob schema_version is 1; an explicit outer 2 must trip the guard.
+    with pytest.raises(ValueError, match="execution_params_schema_version"):
+        SorterParameters().insert1(
+            {
+                "sorter": "mountainsort4",
+                "sorter_params_name": "exec_version_drift",
+                "params": {"adjacency_radius": 71.0},
+                "job_kwargs": None,
+                "execution_params": {
+                    "backend": "docker",
+                    "container_image": "img:1",
+                },
+                "execution_params_schema_version": 2,
+            },
+            skip_duplicates=True,
+            allow_duplicate_params=True,
+        )
+
+
+@pytest.mark.usefixtures("dj_conn")
 def test_container_kwargs_not_allowed_in_sorter_params(request):
     """Reserved execution keys are rejected from params AND job_kwargs.
 

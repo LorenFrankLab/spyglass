@@ -9,7 +9,7 @@ are unchanged.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -59,7 +59,7 @@ class _PipelinePreset(BaseModel):
     # "local" runs the sorter on the host; "docker"/"singularity" run it in the
     # pinned ``container_image``. A catalog drift-guard keeps these in lockstep
     # with the row's execution_params.
-    execution_backend: str = "local"  # local | docker | singularity
+    execution_backend: Literal["local", "docker", "singularity"] = "local"
     container_image: str = ""  # pinned image for a container backend ("" local)
     intended_use: str = ""  # one-line "when to reach for this pipeline preset"
     threshold_units: str = ""  # detection-threshold units (sigma / µV)

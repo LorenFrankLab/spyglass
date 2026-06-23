@@ -42,12 +42,13 @@ def test_sorter_execution_params_schema_local():
     with pytest.raises(ValidationError, match="container_image=None"):
         SorterExecutionParamsSchema(backend="local", container_image="img:1")
 
-    # Install controls are container-only; a non-default value on a local row
-    # is rejected, not silently ignored.
+    # Container-only controls are rejected on a local row, not silently ignored
+    # (a non-default value would be inert and would mislead a reader).
     for kwargs in (
-        {"installation_mode": "pypi"},
+        {"installation_mode": "pypi", "spikeinterface_version": "0.104.3"},
         {"spikeinterface_version": "0.104.3"},
         {"extra_requirements": ["foo"]},
+        {"delete_container_files": False},
     ):
         with pytest.raises(ValidationError, match="container-only"):
             SorterExecutionParamsSchema(backend="local", **kwargs)
@@ -85,6 +86,24 @@ def test_sorter_execution_params_schema_container():
         # SI accepts docker_image=True; v2 rejects True as untracked provenance.
         with pytest.raises(ValidationError):
             SorterExecutionParamsSchema(backend=backend, container_image=True)
+
+        # pypi/github install SI into the container at run time, so they MUST
+        # pin spikeinterface_version (else the install floats with the host).
+        for mode in ("pypi", "github"):
+            with pytest.raises(ValidationError, match="spikeinterface_version"):
+                SorterExecutionParamsSchema(
+                    backend=backend,
+                    container_image="img:1",
+                    installation_mode=mode,
+                )
+        # no-install (baked image) and auto (SI picks) legitimately leave the
+        # version unset.
+        SorterExecutionParamsSchema(
+            backend=backend,
+            container_image="img:1",
+            installation_mode="no-install",
+        )
+        SorterExecutionParamsSchema(backend=backend, container_image="img:1")
 
     assert not is_container_backend(validate_execution_params(None))
 
@@ -189,3 +208,97 @@ def test_recommended_container_rows_pin_si_runtime():
             f"{name} uses installation_mode={mode!r} without an explicit "
             "spikeinterface_version -- not reproducible by row content"
         )
+
+
+def test_container_rows_match_local_sibling_science():
+    """Each containerized MS4 row is byte-identical SCIENCE to its local sibling.
+
+    The container backend is the ONLY thing that differs: the scientific
+    ``params`` of every containerized row must equal the local rate-keyed MS4
+    row of the same rate (shared ``_MS4_RATE_PARAMS`` source). A regression that
+    drifted one side would otherwise pass every other test.
+    """
+    from spyglass.spikesorting.v2._recipe_catalog import (
+        MS4_30KHZ,
+        MS4_20KHZ,
+        MS4_DOCKER_20KHZ,
+        MS4_DOCKER_30KHZ,
+        MS4_SINGULARITY_20KHZ,
+        MS4_SINGULARITY_30KHZ,
+        sorter_default_contents,
+    )
+
+    # (sorter, name) -> params blob.
+    params_by_name = {(r[0], r[1]): r[2] for r in sorter_default_contents()}
+    local_30 = params_by_name[("mountainsort4", MS4_30KHZ)]
+    local_20 = params_by_name[("mountainsort4", MS4_20KHZ)]
+    for name in (MS4_SINGULARITY_30KHZ, MS4_DOCKER_30KHZ):
+        assert params_by_name[("mountainsort4", name)] == local_30
+    for name in (MS4_SINGULARITY_20KHZ, MS4_DOCKER_20KHZ):
+        assert params_by_name[("mountainsort4", name)] == local_20
+    # And the two rates genuinely differ (so the parity above is non-trivial).
+    assert local_30 != local_20
+
+
+def test_parameter_fingerprint_folds_execution_params():
+    """execution_params changes the SorterParameters fingerprint but is omitted
+    for the single-key Lookups.
+
+    This is the property the duplicate-content guard relies on so a local and a
+    containerized row with identical scientific params do NOT collide, while a
+    Preprocessing/Artifact row's fingerprint stays byte-identical to the
+    pre-execution-params behavior.
+    """
+    from spyglass.spikesorting.v2._parameter_identity import (
+        parameter_fingerprint,
+    )
+
+    local = validate_execution_params(None)
+    container = SorterExecutionParamsSchema(
+        backend="singularity", container_image="img.sif"
+    ).model_dump()
+    common = dict(
+        table="SorterParameters",
+        params={"adjacency_radius": 100.0},
+        params_schema_version=1,
+        sorter="mountainsort4",
+    )
+    fp_local = parameter_fingerprint(
+        **common, execution_params=local, execution_params_schema_version=1
+    )
+    fp_container = parameter_fingerprint(
+        **common, execution_params=container, execution_params_schema_version=1
+    )
+    assert fp_local != fp_container
+
+    # For a single-key Lookup, omitting execution_params (None) leaves the
+    # fingerprint identical to not passing it at all.
+    preproc = dict(
+        table="PreprocessingParameters",
+        params={"x": 1},
+        params_schema_version=3,
+    )
+    assert parameter_fingerprint(**preproc) == parameter_fingerprint(
+        **preproc, execution_params=None
+    )
+
+
+def test_reserved_keys_cover_schema_install_controls():
+    """EXECUTION_RESERVED_KEYS is a superset of the schema's container-install
+    controls (minus the schema-internal fields).
+
+    A future install control added to ``SorterExecutionParamsSchema`` without a
+    matching reserved key could be smuggled through a permissive sorter
+    ``params`` blob. ``container_image`` maps to ``docker_image`` /
+    ``singularity_image`` (both reserved); ``schema_version`` / ``backend`` are
+    routing fields, not run_sorter kwargs.
+    """
+    schema_fields = set(SorterExecutionParamsSchema.model_fields)
+    routing = {"schema_version", "backend", "container_image"}
+    install_controls = schema_fields - routing
+    missing = install_controls - EXECUTION_RESERVED_KEYS
+    assert not missing, (
+        f"schema install controls not in EXECUTION_RESERVED_KEYS: {missing}"
+    )
+    # The image maps to both run_sorter image kwargs, which are reserved.
+    assert {"docker_image", "singularity_image"} <= EXECUTION_RESERVED_KEYS
