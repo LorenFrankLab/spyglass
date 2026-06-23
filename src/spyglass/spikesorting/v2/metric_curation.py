@@ -159,6 +159,32 @@ def _requested_pc_metrics(metric_names) -> list[str]:
     return [name for name in metric_names if name in pca]
 
 
+def _assert_is_metric_recipe(waveform_params_name: str) -> None:
+    """Raise unless ``waveform_params_name`` is a whitened metric recipe.
+
+    The metric analyzer carries the PC/NN cluster-separation metrics, which must
+    compute in the WHITENED space. Asserted both at ``insert_selection`` (catch
+    a bad explicit override early) and again at the ``make_fetch`` consume
+    boundary (a row inserted via ``allow_direct_insert`` bypasses the selection
+    guard; re-validating here keeps a display/unwhitened recipe from silently
+    building an unwhitened metric analyzer, mirroring the consume-time re-check
+    in ``run_clusterless_thresholder``).
+    """
+    from spyglass.spikesorting.v2._sorting_analyzer import (
+        fetch_waveform_params,
+    )
+
+    recipe = fetch_waveform_params(waveform_params_name)
+    if not recipe.get("whiten") or recipe.get("purpose") != "metric":
+        raise ValueError(
+            f"metric_waveform_params_name={waveform_params_name!r} is not a "
+            "whitened metric recipe (purpose='metric', whiten=True). PC/NN "
+            "cluster-separation metrics must compute on a whitened analyzer; "
+            "pass a metric recipe (e.g. franklab_cortex_metric_waveforms) or "
+            "omit it to use the sort's resolved region metric row."
+        )
+
+
 class AnalyzerCurationFetched(NamedTuple):
     """DB inputs for ``AnalyzerCuration.make_compute`` (no SI/NWB I/O)."""
 
@@ -623,27 +649,10 @@ class AnalyzerCurationSelection(
                 preproc
             )[1]
 
-        # The metric analyzer carries the PC/NN cluster-separation metrics, which
-        # must compute in the WHITENED space. Reject a display/unwhitened recipe
-        # (e.g. an explicit override) here -- otherwise PC/NN metrics would
-        # silently run on the wrong (unwhitened) analyzer. The shipped default
-        # resolves a metric row, so this only fires on a bad explicit value.
-        from spyglass.spikesorting.v2._sorting_analyzer import (
-            fetch_waveform_params,
-        )
-
-        metric_recipe = fetch_waveform_params(metric_waveform_params_name)
-        if not metric_recipe.get("whiten") or (
-            metric_recipe.get("purpose") != "metric"
-        ):
-            raise ValueError(
-                "metric_waveform_params_name="
-                f"{metric_waveform_params_name!r} is not a whitened metric "
-                "recipe (purpose='metric', whiten=True). PC/NN cluster-"
-                "separation metrics must compute on a whitened analyzer; pass a "
-                "metric recipe (e.g. franklab_cortex_metric_waveforms) or omit "
-                "it to use the sort's resolved region metric row."
-            )
+        # Reject a display/unwhitened recipe (e.g. a bad explicit override)
+        # before folding it into the identity; the shipped default resolves a
+        # metric row, so this only fires on a bad explicit value.
+        _assert_is_metric_recipe(metric_waveform_params_name)
 
         identity = {
             "sorting_id": key["sorting_id"],
@@ -766,6 +775,12 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
     def make_fetch(self, key) -> AnalyzerCurationFetched:
         """Fetch the DB inputs (params + lineage); no SI/NWB I/O."""
         sel = (AnalyzerCurationSelection & key).fetch1()
+        # Re-assert the stored metric recipe is a whitened metric row, even
+        # though insert_selection already validated it: a row planted via
+        # allow_direct_insert bypasses that guard, and building an unwhitened
+        # metric analyzer here would silently compute PC/NN metrics in the wrong
+        # space rather than fail.
+        _assert_is_metric_recipe(sel["metric_waveform_params_name"])
         qm = (
             QualityMetricParameters
             & {"metric_params_name": sel["metric_params_name"]}
@@ -979,16 +994,20 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
             # already carries principal_components computed with different ones
             # (ensure_extensions skips a present extension without checking its
             # params): drop a mismatched extension so it recomputes pinned.
-            if metric_analyzer.has_extension(
-                "principal_components"
-            ) and not _pca_params_match(
-                dict(
+            if metric_analyzer.has_extension("principal_components"):
+                existing_pca = dict(
                     metric_analyzer.get_extension(
                         "principal_components"
                     ).params
                 )
-            ):
-                metric_analyzer.delete_extension("principal_components")
+                if not _pca_params_match(existing_pca):
+                    logger.warning(
+                        "AnalyzerCuration: principal_components on the metric "
+                        f"analyzer has params {existing_pca} != pinned "
+                        f"{_PCA_EXTENSION_PARAMS}; deleting and recomputing "
+                        "with the pinned params so PC/NN metrics are consistent."
+                    )
+                    metric_analyzer.delete_extension("principal_components")
             ensure_extensions(
                 metric_analyzer,
                 ["principal_components"],
@@ -1018,9 +1037,24 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
                 "metrics but skip_pc_metrics=True. Set skip_pc_metrics=False "
                 "to compute them."
             )
-        metrics_df = (
-            pd.concat(frames, axis=1) if len(frames) > 1 else frames[0]
-        )
+        if len(frames) > 1:
+            # The display and metric analyzers derive from the SAME canonical
+            # sorting, so the voltage and PC frames must share a unit-id index.
+            # Concat defaults to an OUTER join that would silently NaN-fill a
+            # mismatched unit (and a label rule would then never fire on the
+            # NaN); assert the invariant and inner-join so any divergence is a
+            # loud error, not a quiet wrong/empty metric.
+            if not frames[0].index.equals(frames[1].index):
+                raise ValueError(
+                    "voltage and PC metric frames have mismatched unit ids "
+                    f"(voltage={sorted(frames[0].index)}, "
+                    f"pc={sorted(frames[1].index)}); both derive from the same "
+                    "canonical sorting, so this indicates an analyzer build "
+                    "divergence and the metrics cannot be safely merged."
+                )
+            metrics_df = pd.concat(frames, axis=1, join="inner")
+        else:
+            metrics_df = frames[0]
 
         if (
             "isi_violation" in metric_names

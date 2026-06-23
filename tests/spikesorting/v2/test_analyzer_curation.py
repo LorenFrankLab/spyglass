@@ -668,10 +668,10 @@ def test_analyzer_curation_selection_resolves_concat_metric_waveform_params(
     ``insert_selection`` resolves the metric recipe from
     ``SortingSelection.resolve_source_preprocessing_params_name`` (source-aware:
     single-recording vs the ``ConcatenatedRecordingSelection -> Preprocessing``
-    FK). A true populated concat sort is parent-Phase-3-gated, so patch the
-    resolver to return the hippocampus preproc (as it would for a hippocampus
-    concat source) and assert the stored metric recipe is the hippocampus metric
-    row, not the cortex fallback.
+    FK). A true populated concat sort needs the concat materializer (not wired
+    in this fixture), so patch the resolver to return the hippocampus preproc
+    (as it would for a hippocampus concat source) and assert the stored metric
+    recipe is the hippocampus metric row, not the cortex fallback.
     """
     from spyglass.spikesorting.v2._recipe_catalog import (
         HIPPOCAMPUS_METRIC_WAVEFORMS,
@@ -1038,6 +1038,126 @@ def test_metrics_do_not_leak_across_curations(display_and_metric_analyzers):
     assert "snr" not in second.columns, second.columns.tolist()
     # ...nor the PC column (computed on the untouched metric analyzer).
     assert "nn_isolation" not in second.columns, second.columns.tolist()
+
+
+@pytest.mark.db_unit
+def test_pinned_pca_params_recomputed_on_mismatch(display_and_metric_analyzers):
+    """A pre-existing principal_components with non-pinned params is dropped and
+    recomputed pinned before PC metrics run.
+
+    ensure_extensions skips a present extension without checking its params, so
+    a stale/manual analyzer carrying differently-parameterized PCA would
+    silently drive the PC/NN metrics. _compute_metrics guards against that.
+    """
+    from spyglass.spikesorting.v2.metric_curation import (
+        AnalyzerCuration,
+        _PCA_EXTENSION_PARAMS,
+    )
+
+    display, metric = display_and_metric_analyzers
+    # Plant a MISMATCHED principal_components (n_components=3 != pinned 5).
+    metric.compute(
+        ["principal_components"],
+        extension_params={"principal_components": {"n_components": 3}},
+    )
+    assert (
+        metric.get_extension("principal_components").params["n_components"] == 3
+    )
+
+    AnalyzerCuration._compute_metrics(
+        display,
+        metric,
+        ["snr", "nn_advanced"],
+        {},
+        skip_pc_metrics=False,
+        job_kwargs={},
+    )
+    # Recomputed with the pinned params (every pinned key, not just count).
+    pca = metric.get_extension("principal_components").params
+    for key, pinned in _PCA_EXTENSION_PARAMS.items():
+        if key == "dtype":
+            import numpy as np
+
+            assert np.dtype(pca[key]) == np.dtype(pinned)
+        else:
+            assert pca[key] == pinned, (key, pca[key])
+
+
+@pytest.mark.db_unit
+def test_pca_params_match_normalizes_dtype(dj_conn):
+    """_pca_params_match compares the pinned keys, normalizing dtype.
+
+    A stored ``np.dtype('float32')`` must match the pinned ``"float32"`` string;
+    a different count/dtype or a missing key is a mismatch.
+    """
+    import numpy as np
+
+    from spyglass.spikesorting.v2.metric_curation import (
+        _PCA_EXTENSION_PARAMS,
+        _pca_params_match,
+    )
+
+    assert _pca_params_match(dict(_PCA_EXTENSION_PARAMS))
+    assert _pca_params_match(
+        {**_PCA_EXTENSION_PARAMS, "dtype": np.dtype("float32")}
+    )
+    assert not _pca_params_match({**_PCA_EXTENSION_PARAMS, "n_components": 3})
+    assert not _pca_params_match({**_PCA_EXTENSION_PARAMS, "dtype": "float64"})
+    assert not _pca_params_match(
+        {k: v for k, v in _PCA_EXTENSION_PARAMS.items() if k != "dtype"}
+    )
+
+
+@pytest.mark.db_unit
+def test_make_fetch_rejects_non_metric_recipe(dj_conn):
+    """make_fetch re-validates the stored metric recipe before any build.
+
+    A row planted via allow_direct_insert bypasses insert_selection's guard, so
+    make_fetch re-asserts the recipe is a whitened metric row -- a display
+    recipe is rejected before the (unwhitened) analyzer would be built.
+    """
+    import uuid
+
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.metric_curation import (
+        AnalyzerCuration,
+        AnalyzerCurationSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
+
+    AnalyzerWaveformParameters.insert_default()  # the display recipe row
+    acid = uuid.uuid4()
+    conn = dj.conn()
+    conn.query("SET FOREIGN_KEY_CHECKS=0")
+    try:
+        AnalyzerCurationSelection.insert1(
+            {
+                "analyzer_curation_id": acid,
+                "sorting_id": uuid.uuid4(),
+                "curation_id": 0,
+                "metric_params_name": "minimal",
+                "auto_curation_rules_name": "none",
+                # A DISPLAY (unwhitened) recipe, not a metric recipe.
+                "metric_waveform_params_name": (
+                    "franklab_cortex_actual_waveforms"
+                ),
+            },
+            allow_direct_insert=True,
+        )
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=1")
+    try:
+        with pytest.raises(ValueError, match="whitened metric recipe"):
+            AnalyzerCuration().make_fetch({"analyzer_curation_id": acid})
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=0")
+        try:
+            (
+                AnalyzerCurationSelection & {"analyzer_curation_id": acid}
+            ).delete_quick()
+        finally:
+            conn.query("SET FOREIGN_KEY_CHECKS=1")
 
 
 @pytest.mark.db_unit

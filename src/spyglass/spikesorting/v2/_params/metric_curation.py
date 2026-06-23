@@ -139,23 +139,32 @@ class QualityMetricParamsSchema(BaseModel):
 
     @model_validator(mode="after")
     def _check_pc_metrics_consistent(self) -> "QualityMetricParamsSchema":
-        # skip_pc_metrics=False means "build the whitened metric analyzer and
-        # compute PC/NN metrics on it". It is meaningful ONLY if at least one
-        # PCA metric is requested; otherwise no metric analyzer is built and the
-        # flag is a contradiction. Enforcing this keeps skip_pc_metrics=False an
-        # exact signal that a metric analyzer exists, which recompute / orphan
-        # gating rely on. (skip_pc_metrics=True with PCA names is fine -- those
-        # metrics are simply skipped.)
-        if not self.skip_pc_metrics:
-            pca = set(_available_pca_metric_names())
-            if not (set(self.metric_names) & pca):
-                raise ValueError(
-                    "skip_pc_metrics=False but metric_names requests no PCA "
-                    f"metric (one of {sorted(pca)}). Either request a PCA "
-                    "metric (e.g. nn_advanced) or set skip_pc_metrics=True -- "
-                    "skip_pc_metrics=False with no PCA metric builds no metric "
-                    "analyzer and is a contradiction."
-                )
+        # Keep the skip_pc_metrics flag consistent with the requested metrics so
+        # the row neither builds a whitened analyzer for nothing nor computes
+        # nothing at all -- and so skip_pc_metrics=False stays an EXACT signal
+        # that a metric analyzer exists, which recompute / orphan gating rely on.
+        pca = set(_available_pca_metric_names())
+        requested_pca = set(self.metric_names) & pca
+        if not self.skip_pc_metrics and not requested_pca:
+            # Build the whitened analyzer but compute no PC metric on it.
+            raise ValueError(
+                "skip_pc_metrics=False but metric_names requests no PCA "
+                f"metric (one of {sorted(pca)}). Either request a PCA "
+                "metric (e.g. nn_advanced) or set skip_pc_metrics=True -- "
+                "skip_pc_metrics=False with no PCA metric builds no metric "
+                "analyzer and is a contradiction."
+            )
+        if self.skip_pc_metrics and requested_pca == set(self.metric_names):
+            # Every requested metric is a PCA metric, but PC computation is
+            # skipped -> nothing would be computed (fails at populate). Catch it
+            # at insert instead. (skip_pc_metrics=True WITH a non-PCA metric is
+            # fine -- the PCA names are simply skipped.)
+            raise ValueError(
+                "skip_pc_metrics=True but every requested metric is a PCA "
+                f"metric ({sorted(requested_pca)}); nothing would be computed. "
+                "Set skip_pc_metrics=False to compute them, or add a non-PCA "
+                "metric (e.g. snr)."
+            )
         return self
 
     @model_validator(mode="after")

@@ -59,9 +59,9 @@ def analyzer_path(sorting_id, waveform_params_name: str) -> Path:
 
     ``analyzer_cache_root() / f"{sorting_id}__{waveform_params_name}.zarr"``.
     A sort may have more than one analyzer recipe (an unwhitened display recipe
-    today, and a whitened metric recipe once that build lands), so the folder is
-    keyed by both the ``sorting_id`` and the ``waveform_params_name`` that
-    produced it -- the two never collide. Deterministic in ``(sorting_id, waveform_params_name)`` +
+    and a whitened metric recipe built on demand for PC/NN metrics), so the
+    folder is keyed by both the ``sorting_id`` and the ``waveform_params_name``
+    that produced it -- the two never collide. Deterministic in ``(sorting_id, waveform_params_name)`` +
     the configured root, so every code path resolves the same folder without
     the ``Sorting`` row needing to store the path.
 
