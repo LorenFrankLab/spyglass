@@ -1852,8 +1852,9 @@ class Sorting(SpyglassMixin, dj.Computed):
         # carve-out excludes legitimately folder-less rows from the DB-side set.
         # A sort's stored display recipe is the folder we expect on disk; a
         # {sid}__{other}.zarr folder (e.g. a stale recipe) is therefore a
-        # disk-side orphan. (Retaining the whitened metric recipe's folder via
-        # AnalyzerCurationSelection is not yet implemented.)
+        # disk-side orphan -- UNLESS it is a whitened metric recipe referenced
+        # by an AnalyzerCurationSelection (built on demand for PC/NN metrics),
+        # which is retained below.
         units_bearing = []
         for r in (cls & "n_units > 0").fetch(
             "sorting_id", "display_waveform_params_name", as_dict=True
@@ -1872,6 +1873,20 @@ class Sorting(SpyglassMixin, dj.Computed):
                 "sorting_id", "display_waveform_params_name", as_dict=True
             )
         }
+        # A metric (whitened) analyzer folder referenced by a curation
+        # selection is in active use (its PC/NN metrics were computed from it),
+        # so it is NOT a disk-side orphan even though it is not a sort's display
+        # recipe. Lazily imported to avoid a metric_curation <-> sorting cycle.
+        from spyglass.spikesorting.v2.metric_curation import (
+            AnalyzerCurationSelection,
+        )
+
+        referenced_paths.update(
+            str(analyzer_path(r["sorting_id"], r["metric_waveform_params_name"]))
+            for r in AnalyzerCurationSelection.fetch(
+                "sorting_id", "metric_waveform_params_name", as_dict=True
+            )
+        )
         analyzer_root = analyzer_cache_root()
         disk_dir_paths = (
             [str(c) for c in sorted(analyzer_root.iterdir()) if c.is_dir()]

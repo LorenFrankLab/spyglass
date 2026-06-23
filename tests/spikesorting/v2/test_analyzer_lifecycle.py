@@ -519,6 +519,82 @@ def test_find_orphaned_analyzer_folders_stale_recipe(dj_conn):
         (SortingSelection & {"sorting_id": sid}).delete(safemode=False)
 
 
+def test_find_orphaned_analyzer_folders_retains_referenced_metric(dj_conn):
+    """A metric (whitened) folder referenced by an AnalyzerCurationSelection is
+    retained; an unreferenced metric folder is a disk-side orphan.
+
+    The whitened metric analyzer is built on demand for PC/NN metrics, so its
+    ``{sid}__{metric_recipe}.zarr`` folder is not a sort's display recipe -- but
+    a referencing curation selection means it is in active use and must NOT be
+    swept as an orphan. An identically-shaped folder for a metric recipe no
+    selection references still is an orphan.
+    """
+    import shutil
+    import uuid
+
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2.metric_curation import (
+        AnalyzerCurationSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    sid = uuid.uuid4()
+    _insert_bypassed_sorting_row(sid, n_units=3)  # display recipe = _DISPLAY
+    display_folder = analyzer_path(sid, _DISPLAY)
+    referenced = analyzer_path(sid, "franklab_cortex_metric_waveforms")
+    unreferenced = analyzer_path(sid, "franklab_hippocampus_metric_waveforms")
+    for folder in (display_folder, referenced, unreferenced):
+        folder.mkdir(parents=True, exist_ok=True)
+
+    # Plant a curation selection referencing the cortex metric recipe. Only
+    # (sorting_id, metric_waveform_params_name) matter to the orphan finder, so
+    # the other FK fields are stubbed with FK checks off.
+    conn = dj.conn()
+    acid = uuid.uuid4()
+    conn.query("SET FOREIGN_KEY_CHECKS=0")
+    try:
+        AnalyzerCurationSelection.insert1(
+            {
+                "analyzer_curation_id": acid,
+                "sorting_id": sid,
+                "curation_id": 0,
+                "metric_params_name": "minimal",
+                "auto_curation_rules_name": "none",
+                "metric_waveform_params_name": (
+                    "franklab_cortex_metric_waveforms"
+                ),
+            },
+            allow_direct_insert=True,
+        )
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+    try:
+        report = Sorting.find_orphaned_analyzer_folders(dry_run=True)
+        disk = set(report["disk_side"])
+        assert str(referenced) not in disk, (
+            "a metric folder referenced by AnalyzerCurationSelection must be "
+            "retained, not swept as a disk-side orphan"
+        )
+        assert str(unreferenced) in disk, (
+            "an unreferenced metric folder is a disk-side orphan"
+        )
+        assert str(display_folder) not in disk
+    finally:
+        for folder in (display_folder, referenced, unreferenced):
+            shutil.rmtree(folder, ignore_errors=True)
+        conn.query("SET FOREIGN_KEY_CHECKS=0")
+        try:
+            (
+                AnalyzerCurationSelection & {"analyzer_curation_id": acid}
+            ).delete_quick()
+            (SortingSelection & {"sorting_id": sid}).delete(safemode=False)
+        finally:
+            conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+
 def test_find_orphaned_analyzer_folders_zero_unit_carveout(dj_conn):
     """A zero-unit Sorting row is NOT a DB-side orphan even though its
     computed analyzer cache path does not exist on disk.
