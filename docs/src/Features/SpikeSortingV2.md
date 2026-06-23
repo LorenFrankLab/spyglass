@@ -836,8 +836,8 @@ Sorting.populate(sort_key)
 # 5. (optional) Back-map the concatenated sort into per-session sortings.
 sorting = Sorting().get_analyzer(sort_key).sorting
 per_session = ConcatenatedRecording().split_sorting_by_session(sorting, concat_key)
-# -> {(nwb_file_name, interval_list_name): si.BaseSorting} in each member's
-#    own sample frame, unit ids preserved.
+# -> {(nwb_file_name, sort_group_id, interval_list_name): si.BaseSorting} in
+#    each member's own sample frame, unit ids preserved.
 ```
 
 Key behaviors and caveats:
@@ -850,7 +850,11 @@ Key behaviors and caveats:
   `get_unit_brain_regions` on a concat sort raises `ConcatBrainRegionAmbiguousError`
   by default; pass `allow_anchor_member=True` to get anchor-member regions
   (labeled `region_resolution="anchor_member"`). Per-session brain regions
-  require cross-session unit matching, which is not in this build.
+  require cross-session unit matching, which is not in this build. Downstream
+  provenance that is session-scoped — `CurationV2.get_sort_group_info` /
+  `SpikeSortingOutput.get_sort_group_info`, and the `(sorter, nwb_file_name)`
+  decoding metadata from `CurationV2.get_sort_metadata` — resolves through the
+  same anchor member rather than raising.
 - **No concat artifact detection.** A concat `SortingSelection` may not carry an
   artifact-detection pass; artifact detection remains a single-recording (or
   shared-recording-group) input.

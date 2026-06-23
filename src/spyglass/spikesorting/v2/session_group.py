@@ -166,6 +166,31 @@ class SessionGroup(SpyglassMixin, dj.Manual):
                 }
             )
 
+        # Reject duplicate logical members. The Member PK is member_index only
+        # (order is load-bearing), so two rows with the same
+        # (nwb_file_name, sort_group_id, interval_list_name, team_name) would
+        # insert without a schema error and silently concatenate the same
+        # recording twice -- scientifically suspect. Catch it at create time.
+        identities = [
+            (
+                row["nwb_file_name"],
+                row["sort_group_id"],
+                row["interval_list_name"],
+                row["team_name"],
+            )
+            for row in rows
+        ]
+        if len(set(identities)) != len(identities):
+            duplicates = sorted(
+                {ident for ident in identities if identities.count(ident) > 1}
+            )
+            raise ValueError(
+                "SessionGroup.create_group: duplicate logical member(s) "
+                f"{duplicates} (same nwb_file_name / sort_group_id / "
+                "interval_list_name / team_name). Each member must be distinct; "
+                "concatenating the same recording twice is not supported."
+            )
+
         unique_dates = sorted(set(dates))
         if len(unique_dates) > 1 and not allow_multi_day:
             raise SessionGroupDateError(
@@ -712,10 +737,13 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
 
         Returns
         -------
-        dict[tuple[str, str], si.BaseSorting]
-            One ``NumpySorting`` per member, keyed by the hashable
-            ``(nwb_file_name, interval_list_name)`` tuple, with spike times in
-            that member's local sample frame.
+        dict[tuple[str, int, str], si.BaseSorting]
+            One ``NumpySorting`` per member, keyed by the hashable member
+            identity ``(nwb_file_name, sort_group_id, interval_list_name)``,
+            with spike times in that member's local sample frame. The
+            ``sort_group_id`` is in the key (not just ``(nwb_file_name,
+            interval_list_name)``) so two members from the same NWB/interval
+            but different sort groups do not collide.
         """
         import spikeinterface as si
 
@@ -747,10 +775,12 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         per_member = split_unit_spike_trains(unit_trains, boundaries)
         fs = float(sorting.get_sampling_frequency())
         return {
-            (member["nwb_file_name"], member["interval_list_name"]): (
-                si.NumpySorting.from_unit_dict(
-                    [local_trains], sampling_frequency=fs
-                )
+            (
+                member["nwb_file_name"],
+                int(member["sort_group_id"]),
+                member["interval_list_name"],
+            ): si.NumpySorting.from_unit_dict(
+                [local_trains], sampling_frequency=fs
             )
             for member, local_trains in zip(members, per_member)
         }

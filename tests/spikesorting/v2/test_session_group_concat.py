@@ -159,6 +159,23 @@ def test_create_group_rejects_empty_members():
 
 
 @pytest.mark.slow
+def test_create_group_rejects_duplicate_logical_members(
+    chronic_2_session_minirec,
+):
+    """Two members with the same (nwb, sort_group, interval, team) are rejected
+    -- the Member PK is member_index only, so a duplicate would silently
+    concatenate the same recording twice."""
+    from spyglass.spikesorting.v2.session_group import SessionGroup
+
+    sub = chronic_2_session_minirec
+    member = sub["same_day_members"][0]
+    with pytest.raises(ValueError, match="duplicate logical member"):
+        SessionGroup.create_group(
+            sub["owner"], "sg_dup", [member, dict(member)]
+        )
+
+
+@pytest.mark.slow
 def test_create_group_same_day_inserts_and_is_not_multi_day(
     chronic_2_session_minirec,
 ):
@@ -603,9 +620,14 @@ def test_concat_sort_end_to_end_and_split(same_day_group):
         sorting_obj, concat_pk
     )
     members = grp["same_day_members"]
+    # Keyed by the full member identity (nwb, sort_group_id, interval) so two
+    # members sharing nwb/interval but distinct sort groups cannot collide; one
+    # entry per member.
     assert set(split) == {
-        (m["nwb_file_name"], m["interval_list_name"]) for m in members
+        (m["nwb_file_name"], m["sort_group_id"], m["interval_list_name"])
+        for m in members
     }
+    assert len(split) == len(members)
     member_samples = {
         m["nwb_file_name"]: Recording()
         .get_recording(rec_pk)
@@ -613,7 +635,7 @@ def test_concat_sort_end_to_end_and_split(same_day_group):
         for m, rec_pk in zip(members, grp["recording_pks"])
     }
     all_unit_ids = set(sorting_obj.unit_ids)
-    for (nwb_file_name, _interval), member_sorting in split.items():
+    for (nwb_file_name, _sg, _interval), member_sorting in split.items():
         # Unit ids are preserved across every member.
         assert set(member_sorting.unit_ids) == all_unit_ids
         # Every spike falls within that member's local sample range.
@@ -648,6 +670,18 @@ def test_concat_sort_end_to_end_and_split(same_day_group):
         {"curation_id": curation_key["curation_id"]}, sources=["v2"]
     )
     assert merge_id in by_curation
+
+    # Session-scoped downstream provenance resolves through the anchor member
+    # for concat sorts (instead of raising): get_sort_metadata yields the first
+    # member's nwb, and get_sort_group_info returns that member's electrodes.
+    sorter, meta_nwb = CurationV2.get_sort_metadata(
+        {"sorting_id": sort_pk["sorting_id"]}
+    )
+    assert sorter == "clusterless_thresholder"
+    assert meta_nwb == first_nwb
+    sg_info = CurationV2.get_sort_group_info(curation_key)
+    sg_nwbs = set((sg_info).fetch("nwb_file_name"))
+    assert sg_nwbs == {first_nwb}
 
 
 # ---------- memory / runtime measurement ----------------------------------

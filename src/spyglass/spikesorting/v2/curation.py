@@ -1642,12 +1642,13 @@ class CurationV2(SpyglassMixin, dj.Manual):
     def get_sort_metadata(cls, key) -> tuple:
         """Return ``(sorter, nwb_file_name)`` for a curation's underlying sort.
 
-        Owns the v2 source-part walk (``SortingSelection`` ->
-        ``SortingSelection.RecordingSource`` -> ``RecordingSelection``) so
-        consumers -- e.g. decoding's ``UnitWaveformFeatures`` -- don't
-        re-implement v2's join topology. ``key`` must carry ``sorting_id``
-        (sorter and nwb_file_name are fixed per sort, independent of
-        ``curation_id``).
+        Owns the v2 source-part walk so consumers -- e.g. decoding's
+        ``UnitWaveformFeatures`` -- don't re-implement v2's join topology.
+        ``key`` must carry ``sorting_id`` (sorter and nwb_file_name are fixed
+        per sort, independent of ``curation_id``). For a concat-backed sort the
+        ``nwb_file_name`` is the FIRST ``SessionGroup.Member``'s session (the
+        same deterministic parent anchor the sort's analysis NWB uses), so
+        downstream provenance resolves to the anchor member rather than raising.
 
         Parameters
         ----------
@@ -1657,17 +1658,26 @@ class CurationV2(SpyglassMixin, dj.Manual):
         Returns
         -------
         tuple of (str, str)
-            ``(sorter, nwb_file_name)`` for the underlying sort.
+            ``(sorter, nwb_file_name)`` for the underlying sort (anchor-member
+            nwb for concat sorts).
         """
         from spyglass.spikesorting.v2.recording import RecordingSelection
-        from spyglass.spikesorting.v2.sorting import SortingSelection
+        from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 
-        joined = (
-            SortingSelection
-            * SortingSelection.RecordingSource
-            * RecordingSelection
-        ) & {"sorting_id": key["sorting_id"]}
-        return joined.fetch1("sorter", "nwb_file_name")
+        sorting_id = key["sorting_id"]
+        sorter = (SortingSelection & {"sorting_id": sorting_id}).fetch1(
+            "sorter"
+        )
+        source = SortingSelection.resolve_source({"sorting_id": sorting_id})
+        if source.kind == "recording":
+            nwb_file_name = (
+                RecordingSelection & source.key
+            ).fetch1("nwb_file_name")
+        else:  # concatenated_recording -> anchor member
+            _anchor_recording_id, nwb_file_name, _preproc = (
+                Sorting._resolve_concat_anchor(source.key)
+            )
+        return sorter, nwb_file_name
 
     @classmethod
     def get_merge_groups(cls, key) -> dict[int, list[int]]:
@@ -1901,6 +1911,13 @@ class CurationV2(SpyglassMixin, dj.Manual):
         probe surfaces every represented region. Callers can chain
         restrictions / fetches on the returned relation.
 
+        For a concat-backed sort the electrodes come from the FIRST
+        ``SessionGroup.Member``'s sort group (the same deterministic parent
+        anchor the per-unit Electrode FK uses), so the merge dispatcher and
+        downstream sort-group queries resolve rather than raising. As with the
+        concat brain-region anchor, the anchor member's regions may differ from
+        later members if the probe re-anatomized across sessions.
+
         ``@classmethod`` so the merge-table dispatcher at
         ``spikesorting_merge.py:346`` (which calls
         ``source_table.get_sort_group_info(merge_key)`` with the
@@ -1916,7 +1933,8 @@ class CurationV2(SpyglassMixin, dj.Manual):
         -------
         dj.Table
             A DataJoint relation (``SortGroupElectrode * Electrode *
-            BrainRegion``) covering every electrode in the sort group.
+            BrainRegion``) covering every electrode in the sort group (the
+            anchor member's sort group for concat sorts).
         """
         from spyglass.common.common_ephys import Electrode as _Electrode
         from spyglass.common.common_region import BrainRegion
@@ -1924,15 +1942,17 @@ class CurationV2(SpyglassMixin, dj.Manual):
             RecordingSelection,
             SortGroupV2,
         )
+        from spyglass.spikesorting.v2.sorting import Sorting
 
         sorting_id = (cls & key).fetch1("sorting_id")
         source = SortingSelection.resolve_source({"sorting_id": sorting_id})
-        if source.kind != "recording":
-            raise NotImplementedError(
-                "CurationV2.get_sort_group_info: concat-source sorts are "
-                "not yet supported."
+        if source.kind == "recording":
+            recording_key = source.key
+        else:  # concatenated_recording -> anchor member's sort group
+            anchor_recording_id, _nwb, _preproc = (
+                Sorting._resolve_concat_anchor(source.key)
             )
-        recording_key = source.key
+            recording_key = {"recording_id": anchor_recording_id}
         # ``RecordingSelection.fetch1("KEY")`` returns only the UUID PK;
         # the upstream nwb_file_name + sort_group_id are non-PK columns
         # that we have to fetch explicitly.

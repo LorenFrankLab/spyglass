@@ -1289,7 +1289,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
 
     def split_sorting_by_session(
         self, sorting, key
-    ) -> dict[tuple[str, str], si.BaseSorting]:
+    ) -> dict[tuple[str, int, str], si.BaseSorting]:
         ...
 ```
 
@@ -1298,7 +1298,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
 - `ConcatenatedRecording.make()` must fetch `sel = (ConcatenatedRecordingSelection & key).fetch1()` first because the populate key contains only `concat_recording_id`; all member and parameter queries use that selection row.
 - It never calls `Recording.populate()` internally. Missing per-member `Recording` rows raise `MissingRecordingForConcatError`.
 - Motion correction runs before sorter/analyzer whitening, `preset='auto'` is single-day only, forbidden SI side-artifact kwargs are rejected, and the output is one motion-corrected, unwhitened NWB-resident `ElectricalSeries` with integer sample boundaries persisted in `ConcatenatedRecording.MemberBoundary`.
-- `split_sorting_by_session()` maps concat spike trains back to local session sample frames and returns keys `(nwb_file_name, interval_list_name)`.
+- `split_sorting_by_session()` maps concat spike trains back to local session sample frames and returns keys `(nwb_file_name, sort_group_id, interval_list_name)`.
 
 **Key design points**:
 

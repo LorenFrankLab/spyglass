@@ -19,15 +19,17 @@ extension growth, auto-labels, merge suggestions, and BurstPair-style plots are
 now owned by `AnalyzerCuration`; Phase 5 should consume those surfaces rather
 than duplicate them in `pipeline.py`.
 
-**Current post-Phase-2 code audit (2026-06-22):** `metric_curation.py` is no
+**Current post-Phase-3 code audit (2026-06-23):** `metric_curation.py` is no
 longer a placeholder. `AnalyzerCuration` now replaces v1 `MetricCuration` +
 the v1 `BurstPair` notebook helpers, and v2 has separate recording-artifact and
 sorting-analyzer recompute verification tables. The remaining import-safe
 placeholders are Phase 4/5 surfaces (`unit_matching.py`, `matcher_protocol.py`,
-`figpack_curation.py`). `SessionGroup`, `MotionCorrectionParameters`,
-`ConcatenatedRecordingSelection`, `ConcatenatedRecording`, and
-`SortingSelection.ConcatenatedRecordingSource` already have final schema shape;
-Phase 3 is method-body work plus lifting the runtime gates. The current
+`figpack_curation.py`). Phase 3 has landed: `SessionGroup.create_group` /
+`is_multi_day`, `ConcatenatedRecordingSelection.insert_selection`, and
+`ConcatenatedRecording.make` / `get_recording` / `split_sorting_by_session` are
+implemented (same-day chronic concatenate-and-sort), and `Sorting` / `CurationV2`
+/ the merge dispatch are concat-source-aware (no table-definition changes). The
+current
 `run_v2_pipeline()` is the single-session runner with `require_units=False`
 already implemented; Phase 5 extends that runner rather than reintroducing the
 zero-unit policy. The v2 decoding path now supports the `spike_location` mark
@@ -109,4 +111,4 @@ Phase 3 SessionGroup + ConcatenatedRecording
                           -> Phase 5b UX/FigPack tables/notebooks/docs
 ```
 
-Execution happens on the long-lived `spikesorting-v2` integration branch with checkpoint commits. Phase 1 is the first runtime v2 pipeline checkpoint and requires Phase 0a, Phase 0b, and Phase 0c. Phase 0c is a hard gate because Phase 1 imports and runs SpikeInterface 0.104 APIs while legacy v0/v1 active-runtime workflows must either be guarded with clear legacy-environment messages or explicitly proven compatible. Phase 1b was the hard gate before Phase 2 and Phase 3 because both later phases populate against `Recording` / `Sorting` at lab-relevant scales (Phase 2 builds analyzer extensions on top of the cached `ElectricalSeries`; Phase 3 concatenates per-member `Recording` rows), and the Phase 1 in-memory write OOMed before either could run on real chronic data. With Phase 2 complete, Phase 3 may start. Checkpoint commits may be grouped into larger review PRs if the gating order and validation evidence remain clear.
+Execution happens on the long-lived `spikesorting-v2` integration branch with checkpoint commits. Phase 1 is the first runtime v2 pipeline checkpoint and requires Phase 0a, Phase 0b, and Phase 0c. Phase 0c is a hard gate because Phase 1 imports and runs SpikeInterface 0.104 APIs while legacy v0/v1 active-runtime workflows must either be guarded with clear legacy-environment messages or explicitly proven compatible. Phase 1b was the hard gate before Phase 2 and Phase 3 because both later phases populate against `Recording` / `Sorting` at lab-relevant scales (Phase 2 builds analyzer extensions on top of the cached `ElectricalSeries`; Phase 3 concatenates per-member `Recording` rows), and the Phase 1 in-memory write OOMed before either could run on real chronic data. Phases 2 and 3 are complete; Phase 4 (UnitMatch) is next. Checkpoint commits may be grouped into larger review PRs if the gating order and validation evidence remain clear.
