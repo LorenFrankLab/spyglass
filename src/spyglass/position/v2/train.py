@@ -7,6 +7,7 @@ truth'. In practice, file modification is rare, and storing copies is
 inefficient.
 """
 
+import shutil
 import warnings
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -46,6 +47,20 @@ from spyglass.position.v2.utils.training_io import (
 )
 from spyglass.position.v2.video import VidFileGroup
 from spyglass.utils import SpyglassMixin
+
+
+def _rename_leaves(obj, mapping: dict):
+    """Recursively rename string leaves of a nested list using *mapping*.
+
+    Used to canonicalize body-part names inside a DLC skeleton structure
+    (which may be nested) while preserving its shape. Strings absent from
+    *mapping* are left unchanged.
+    """
+    if isinstance(obj, str):
+        return mapping.get(obj, obj)
+    if isinstance(obj, (list, tuple)):
+        return [_rename_leaves(item, mapping) for item in obj]
+    return obj
 
 
 def prompt_default(key: str, default, abort_value: str = "n") -> str:
@@ -2212,6 +2227,84 @@ class Model(SpyglassMixin, dj.Computed):
                 mapping[name] = canonical
         return {"mapping": mapping, "unresolved": unresolved}
 
+    def _canonicalize_dlc_project(self, config_path) -> dict:
+        """Rewrite a DLC project's ``config.yaml`` names to canonical spelling.
+
+        Opt-in (via ``normalize_names=True`` on :meth:`load`) rewrite of the
+        user's project files so their body-part and skeleton names match the
+        curated ``BodyPart`` namespace. The original config is copied to a
+        timestamped backup (``config.yaml.<timestamp>.bak``) beside it before
+        any write, so repeated rewrites never overwrite an earlier backup.
+        Names with no canonical match raise -- a rewrite cannot invent a
+        curated part. A config that is already fully canonical is left
+        untouched (no backup written).
+
+        Parameters
+        ----------
+        config_path : str or pathlib.Path
+            Path to the DLC ``config.yaml``.
+
+        Returns
+        -------
+        dict
+            ``{surface_form: canonical}`` for the names that were rewritten
+            (empty if the config was already canonical).
+        """
+        from spyglass.position.utils.yaml_io import dump_yaml
+
+        config_path = Path(config_path)
+        config = load_yaml(config_path)
+
+        resolved = self.canonicalize_bodyparts(config)
+        if resolved["unresolved"]:
+            raise dj.DataJointError(
+                f"Cannot canonicalize DLC project: body part(s) "
+                f"{resolved['unresolved']} have no canonical match in "
+                "BodyPart. Correct the names or ask an admin to add them."
+            )
+
+        mapping = resolved["mapping"]
+        changes = {k: v for k, v in mapping.items() if k != v}
+        if not changes:
+            return {}  # already canonical: no-op, no backup churn
+
+        # Timestamped backup so repeated rewrites never overwrite an earlier
+        # one (microseconds guarantee a unique name within the same second).
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        backup = config_path.with_name(f"{config_path.name}.{ts}.bak")
+        shutil.copy2(config_path, backup)
+
+        config["bodyparts"] = [
+            mapping.get(bp, bp) for bp in config.get("bodyparts", [])
+        ]
+        config["skeleton"] = _rename_leaves(config.get("skeleton", []), mapping)
+        dump_yaml(config_path, config)
+        self._info_msg(
+            f"Canonicalized {len(changes)} name(s) in {config_path.name}; "
+            f"original backed up to {backup.name}"
+        )
+        return changes
+
+    def _augment_name_error(self, err, skeleton_config):
+        """Return *err* with guidance on how to resolve unknown body parts.
+
+        If every offending name is a variant spelling of an existing part,
+        point the user at ``normalize_names=True``; otherwise the names are
+        genuinely novel and an admin must add them.
+        """
+        resolved = self.canonicalize_bodyparts(skeleton_config)
+        if resolved["unresolved"]:
+            return type(err)(
+                f"{err}\n\nBody part(s) {resolved['unresolved']} are not in "
+                "BodyPart and have no canonical match; an admin must add them "
+                "before this project can be imported."
+            )
+        return type(err)(
+            f"{err}\n\nThese appear to be variant spellings of existing body "
+            "parts. Re-run Model().load(..., normalize_names=True) to rewrite "
+            "the DLC project to canonical names before import."
+        )
+
     def load(
         self,
         model_path: Union[Path, str],
@@ -2220,6 +2313,7 @@ class Model(SpyglassMixin, dj.Computed):
         model_params_id: Union[str, None] = None,
         model_id: Union[str, None] = None,
         model_name: Union[str, None] = None,
+        normalize_names: bool = False,
         **kwargs,
     ):
         """Import an existing trained model into the database.
@@ -2243,6 +2337,12 @@ class Model(SpyglassMixin, dj.Computed):
         model_name : Union[str, None], optional
             For NWB files with multiple models, specify which model to import.
             Required if NWB contains multiple PoseEstimation objects.
+        normalize_names : bool, optional
+            For DLC imports, when True rewrite the project's ``config.yaml``
+            body-part and skeleton names to their canonical ``BodyPart``
+            spelling before import (original copied to a timestamped
+            ``config.yaml.<timestamp>.bak`` beside it). Default False. Offered
+            as a backup when an import is blocked by variant-spelling names.
         **kwargs
             Additional parameters for specific tools. Common parameters:
             - nwb_file_name: Parent NWB file name for linking
@@ -2274,6 +2374,7 @@ class Model(SpyglassMixin, dj.Computed):
                 model_params_id=model_params_id,
                 model_id=model_id,
                 model_name=model_name,
+                normalize_names=normalize_names,
             )
         )
 
@@ -2365,8 +2466,14 @@ class Model(SpyglassMixin, dj.Computed):
         return self.load(config_path, **kwargs)
 
     def _import_dlc_model(self, model_path: Path, **kwargs):
+        normalize_names = kwargs.pop("normalize_names", False)
         if model_path.suffix not in [".yml", ".yaml"]:
             raise ValueError("DLC model path must be a .yml or .yaml file")
+
+        # Opt-in: rewrite the on-disk project to canonical names first, so the
+        # config read below (and any later re-training) uses canonical spelling.
+        if normalize_names:
+            self._canonicalize_dlc_project(model_path)
 
         config = load_yaml(model_path)
 
@@ -2375,12 +2482,21 @@ class Model(SpyglassMixin, dj.Computed):
             "bodyparts": config.get("bodyparts", []),
             "skeleton": config.get("skeleton", []),
         }
-        skeleton_key = Skeleton().insert1(
-            skeleton_config,
-            check_duplicates=True,
-            skip_duplicates=True,
-            accept_new_bodyparts=False,  # TODO: discuss with team
-        )
+        try:
+            skeleton_key = Skeleton().insert1(
+                skeleton_config,
+                check_duplicates=True,
+                skip_duplicates=True,
+                accept_new_bodyparts=False,  # TODO: discuss with team
+            )
+        except (PermissionError, dj.DataJointError) as err:
+            # Surface actionable guidance: either an admin must add genuinely
+            # novel parts, or normalize_names=True can reconcile variant
+            # spellings on disk. (When normalize_names was already True the
+            # project is canonical, so let the original error propagate.)
+            if normalize_names:
+                raise
+            raise self._augment_name_error(err, skeleton_config) from err
         self._info_msg(f"Skeleton: {skeleton_key['skeleton_id']}")
 
         # Step 2: Create or retrieve ModelParams entry
