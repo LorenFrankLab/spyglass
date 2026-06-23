@@ -1,9 +1,8 @@
 # Analyzer Waveform Parameters & Curation Defaults — Implementation Plan
 
-**Status:** Phases 1, 2, and 3a complete on the working branch (reviewed and
-cleaned up). Phase 3, Phase 4, and Phase 5 remain to execute. Local pytest in
-the current Codex environment is blocked by missing `datajoint`; use the project
-v2 test environment for final suite verification.
+**Status:** Phases 1, 2, and 3a complete (reviewed, simplified, and verified:
+the full v2 suite is green in the project v2 test environment — 1138 passed /
+18 skipped). Phase 3, Phase 4, and Phase 5 remain to execute.
 
 Restore DB-tracked spike-sorting analyzer waveform parameters (so the window and
 subsample that produced each analyzer are recorded and reproducible, the way v1
