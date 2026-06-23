@@ -1,6 +1,7 @@
 # Analyzer Waveform Parameters & Curation Defaults — Implementation Plan
 
-**Status:** Not started.
+**Status:** Phase 1 complete (implemented, reviewed, cleanup pass applied; v2
+suite green — 1100 passed / 18 skipped); awaiting merge. Phases 2–5 not started.
 
 Restore DB-tracked spike-sorting analyzer waveform parameters (so the window and
 subsample that produced each analyzer are recorded and reproducible, the way v1
