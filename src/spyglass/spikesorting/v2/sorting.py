@@ -418,6 +418,10 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
         """
         import spikeinterface.sorters as sis
 
+        from spyglass.spikesorting.v2._sorting_dispatch import (
+            is_container_backend,
+        )
+
         installed = set(sis.installed_sorters())
         insertable: list = []
         skipped: list = []
@@ -425,12 +429,10 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
             sorter = row[0]
             # row = (sorter, name, params, params_sv, job_kwargs,
             #        execution_params, execution_params_sv)
-            execution_backend = row[5].get("backend", "local")
-            is_container = execution_backend in ("docker", "singularity")
             if (
                 sorter in cls._NON_SI_SORTERS
                 or sorter in installed
-                or is_container
+                or is_container_backend(row[5])
             ):
                 insertable.append(row)
             else:
