@@ -278,6 +278,10 @@ CurationV2.summarize_curation(run_summary)
 # refractory violations) `reject`. `plot_units_qc` is the population
 # "do these units look reasonable?" view; `get_metrics` returns the per-unit
 # table.
+#
+# `populate` is the heavy step — it grows the analyzer extensions and builds the
+# whitened PCA analyzer, so it can take minutes on a real session (it is
+# idempotent, so a re-run reuses the result instead of recomputing).
 
 auto_sel = AnalyzerCurationSelection.insert_selection(
     {
@@ -291,13 +295,38 @@ AnalyzerCuration.populate(auto_sel)
 AnalyzerCuration().plot_units_qc(auto_sel)
 AnalyzerCuration.get_metrics(auto_sel)
 
+# #### Reading the labels: proposals to verify, not verdicts
+#
+# The rule set proposes labels from thresholds — a starting point, not a
+# verdict. Before trusting a `noise` / `reject` tag, cross-check the unit:
+#
+# - **Refractory dip** — `AnalyzerCuration().plot_correlograms(auto_sel)`: a real
+#   single unit has a central dip in its autocorrelogram; a symmetric, dip-free
+#   autocorrelogram is a noise signature.
+# - **The interneuron trap** — a fast-spiking interneuron raises ISI violations
+#   and sits just around the `nn_noise_overlap` noise threshold. If its waveform
+#   is narrow, its refractory dip clean, and its firing stable, it is a cell, not
+#   noise — don't reject it on the metric alone.
+# - **Amplitude over time** — `AnalyzerCuration().get_peak_amps(auto_sel)`: a
+#   slow, smooth amplitude drift across a place-field traversal is a place cell,
+#   not multi-unit activity; sharp amplitude steps or several distinct bands are
+#   MUA.
+#
+# These pattern-recognition cues are calibrated for **hippocampal tetrodes**;
+# other regions (cortex, thalamus, striatum) have different waveform widths and
+# bursting, so the thresholds and tells above can mislead there.
+
 # ### 7b. Find burst pairs to merge, then commit the auto labels
 #
 # `plot_by_sort_group_ids` scatters waveform similarity vs cross-correlogram
 # asymmetry, one point per unit pair — high-similarity, asymmetric pairs are
 # merge candidates (drill into a pair with `investigate_pair_xcorrel` /
-# `investigate_pair_peaks`). `materialize_curation` then commits the proposed
-# auto labels into a child curation you merge on top of.
+# `investigate_pair_peaks`). Hippocampal pyramidal cells fire complex-spike
+# bursts with an amplitude decrement that MountainSort oversplits into a parent +
+# a shorter-waveform daughter — exactly the high-similarity, short-lag-asymmetric
+# pair this scatter surfaces, so merging them reassembles one cell.
+# `materialize_curation` then commits the proposed auto labels into a child
+# curation you merge on top of.
 
 AnalyzerCuration().plot_by_sort_group_ids(auto_sel)
 auto_curation = AnalyzerCuration().materialize_curation(auto_sel)
