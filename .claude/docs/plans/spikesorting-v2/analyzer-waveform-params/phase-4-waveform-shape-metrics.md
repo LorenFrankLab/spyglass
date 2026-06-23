@@ -30,6 +30,14 @@ discoverable and opt-in, because SI's `recovery_slope` default uses a 0.7 ms
 post-peak recovery window while the hippocampus display recipe intentionally has
 only `ms_after=0.5`.
 
+> **As built:** the no-clip validation below found `peak_to_trough_duration`
+> ALSO clips on the 0.5/0.5 hippocampus window — it measures to the post-trough
+> repolarization peak (`peak_after`), which saturates at SI's edge-exclusion
+> boundary there, so the shipped default is `trough_half_width` ONLY.
+> `peak_to_trough_duration` joins the slopes as discoverable/opt-in (reliable on
+> the wider 1.0/2.0 window). The validation-slice rows below that name
+> `peak_to_trough_duration` as a default column are superseded accordingly.
+
 **Depends on Phase 2** (the display-vs-metric routing): template-shape metrics
 MUST be read from the **unwhitened display** analyzer — whitening normalizes
 per-channel variance and distorts waveform shape, so a width column on a whitened
