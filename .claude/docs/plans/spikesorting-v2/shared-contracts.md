@@ -18,7 +18,7 @@ Cross-phase contracts. Any phase that references one of these MUST follow the sp
 - [`insert_selection()` Return-Value Normalization](#insert_selection-return-value-normalization)
 - [Source Part Pattern](#source-part-pattern)
 - [Unit-Level Brain Region Tracing](#unit-level-brain-region-tracing)
-- [Zero-Migration Schema Forward-Compatibility](#zero-migration-schema-forward-compatibility)
+- [Pre-Production Schema Forward-Compatibility](#pre-production-schema-forward-compatibility)
 - [Empty / NaN / Boundary Invariants](#empty--nan--boundary-invariants)
 
 ---
@@ -158,7 +158,7 @@ analyzer.compute(
 
 The canonical preprocessed recording produced by `Recording.make()` lives **inside an `AnalysisNwbfile`** — NWB-resident, reusing Spyglass's existing cleanup, export, kachery, FigPack, and recompute machinery. `ConcatenatedRecording.make()` uses the same NWB-resident storage contract, but it is a separate materialized concat cache: it reads per-member `Recording` caches and writes one sorter-ready concatenated `ElectricalSeries` after motion correction / post-motion preprocessing. This is distinct from the [SortingAnalyzer Storage Layout](#sortinganalyzer-storage-layout) above (which is per-sort scratch in `zarr` format).
 
-**Persistence on the DataJoint row** (final shape — see [overview.md § Zero-migration policy](overview.md#scope-and-dependency-policy)):
+**Persistence on the DataJoint row** (intended schema shape — see [overview.md § Scope and dependency policy](overview.md#scope-and-dependency-policy)):
 
 - `-> AnalysisNwbfile` — Spyglass's existing analysis-NWB tracking table; cleanup / export / kachery / recompute all key off this FK.
 - `electrical_series_path: varchar(255)` — the deterministic NWB path used by `se.read_nwb_recording(...)`, for example `processing/ecephys/preprocessed_electrical_series`. This is not interchangeable with `object_id`.
@@ -884,23 +884,22 @@ Single-session sorts return the same shape as before (no `region_resolution` col
 
 ---
 
-## Zero-Migration Schema Forward-Compatibility
+## Pre-Production Schema Forward-Compatibility
 
-This contract enforces the user's binding constraint: every v2 table is designed in its final shape in the phase that introduces it. No `Table.alter()` calls across phases.
+This contract captures the conservative schema-design rule for v2: every table should be designed in its intended final shape in the phase that introduces it, and later table-definition edits require explicit project-owner approval while v2 is still pre-production. Once v2 is production/frozen, table-shape changes require an explicit migration plan.
 
 **Review-fixes is the final pre-Phase-2 schema-correction checkpoint.** The
 review-fixes plan is a one-time
-correction pass that lands schema-shape fixes BEFORE the zero-migration rule
-binds for the rest of the epic: it replaces the nullable `SortingSelection ->
+correction pass that landed schema-shape fixes before Phase 2 execution: it replaces the nullable `SortingSelection ->
 ArtifactDetection` FK with an optional `ArtifactDetectionSource` part, splits
 `SortGroupV2.sort_reference_electrode_id` into `reference_mode` +
 `reference_electrode_id`, makes `bandpass_filter` Optional, flips the
 `whiten` default to None, and adds `threshold_unit` to the clusterless schema
 (bumping `PreprocessingParamsSchema` to v3 and `ClusterlessThresholderSchema`
 to v4). v2 is pre-release, so these corrections are permitted. **The
-"final shape" the zero-migration invariant protects is the
-post-review-fixes baseline, not the original Phase-1 shape.** Phases 2–5 below
-build on the corrected baseline; the forward-compat table reflects it.
+current baseline is the post-review-fixes schema, not the original Phase-1
+shape.** Later direct schema edits are allowed only when the owning plan
+documents the affected tables, provenance reason, and validation.
 
 **The forward-compatibility decisions baked into the (post-review-fixes) Phase 1 baseline**:
 
@@ -909,20 +908,21 @@ build on the corrected baseline; the forward-compat table reflects it.
 | `SessionGroup` + `SessionGroup.Member` | Declared in Phase 1; Manual tables, no `make()` | Phase 3 / Phase 4 reuse. Phase 1 ships the schema so Phase 3's `ConcatenatedRecording` FK target exists from day one. |
 | `MotionCorrectionParameters` | Declared in Phase 1 with `contents` rows | Phase 3 reads from this Lookup; declaring it now lets `ConcatenatedRecordingSelection` FK it from Phase 1. |
 | `ConcatenatedRecordingSelection` | Declared in Phase 1 (Manual, UUID PK) | Provides the UUID PK that `ConcatenatedRecording` (Computed) inherits. Needed so `SortingSelection` can FK `ConcatenatedRecording` from Phase 1. |
-| `ConcatenatedRecording` + `ConcatenatedRecording.MemberBoundary` | Declared in Phase 1; `make()` body raises `NotImplementedError("ConcatenatedRecording.make() is not implemented yet")` | Final schema; Phase 3 only fills in the `make()` body and writes member boundary rows. Test in Phase 1 asserts `populate()` raises. |
-| `SortingSelection` + source parts | `RecordingSource` and `ConcatenatedRecordingSource` part tables declared in Phase 1. Exactly one source part is enforced by `insert_selection()` and re-checked in `make()`. | Both source FK targets exist from Phase 1, so the schema is final. Phase 1's `insert_selection` rejects `ConcatenatedRecordingSource`; Phase 3 lifts that runtime gate without touching the schema. |
+| `ConcatenatedRecording` + `ConcatenatedRecording.MemberBoundary` | Declared in Phase 1; `make()` body raises `NotImplementedError("ConcatenatedRecording.make() is not implemented yet")` | Final schema; Phase 3 fills in the `make()` body and writes member boundary rows. Test in Phase 1 asserts `populate()` raises. |
+| `SortingSelection` + source parts | `RecordingSource` and `ConcatenatedRecordingSource` part tables declared in Phase 1. Exactly one source part is enforced by `insert_selection()` and re-checked in `make()`. | Both source FK targets exist from Phase 1, so the schema is final. Phase 1's `insert_selection` rejects `ConcatenatedRecordingSource`; Phase 3 lifts that runtime gate without touching the schema and updates the non-schema identity/preflight helpers so concat-backed `sorting_id` includes `concat_recording_id`. |
 | `SortingSelection.ArtifactDetectionSource` | Optional `association` part (`-> master` / `-> ArtifactDetection`), zero-or-one per master; **replaces** the old nullable `-> ArtifactDetection` FK | "No `ArtifactDetectionSource` row" = no artifact detection. Concat sorts skip artifact detection by simply having no `ArtifactDetectionSource` row. Excluded from `resolve_source()` / orphan counts. |
-| `SortGroupV2` | `reference_mode: varchar(32)` (validated against a `ReferenceMode` Literal: `none`/`global_median`/`specific`) + nullable `reference_electrode_id` (**replaces** the `sort_reference_electrode_id` magic sentinels -1/-2/≥0) | Reference dispatch reads the validated mode + nullable FK; "specific iff `reference_electrode_id IS NOT NULL`" enforced in `insert1`. **varchar, not enum, on purpose** — the reference-mode set may grow (SI also has `global_average`/CAR and local/per-group referencing), so an enum would trap a future mode behind a forbidden `ALTER TABLE`. The `Literal` gives typo-protection without the migration risk (same rationale as `CurationLabel`; the closed `curation_source` set is the contrasting enum case). A future reviewer must NOT "tighten" this to an enum. |
+| `SortGroupV2` | `reference_mode: varchar(32)` (validated against a `ReferenceMode` Literal: `none`/`global_median`/`specific`) + nullable `reference_electrode_id` (**replaces** the `sort_reference_electrode_id` magic sentinels -1/-2/≥0) | Reference dispatch reads the validated mode + nullable FK; "specific iff `reference_electrode_id IS NOT NULL`" enforced in `insert1`. **varchar, not enum, on purpose** — the reference-mode set may grow (SI also has `global_average`/CAR and local/per-group referencing), so an enum would make a future mode require a table-definition edit after production freeze. The `Literal` gives typo-protection without that risk (same rationale as `CurationLabel`; the closed `curation_source` set is the contrasting enum case). A future reviewer must NOT "tighten" this to an enum. |
 | `Sorting.Unit` | Part table present in Phase 1 | Phase 2 `AnalyzerCuration` reads brain regions from here; Phase 4 `TrackedUnit` per-session region lookup reads from here. |
 | `CurationV2.Unit` | Part table present in Phase 1 | Same downstream consumers; merges shrink `CurationV2.Unit` from `Sorting.Unit` row count. |
 | `CurationV2.UnitLabel` | Part table present in Phase 1 | Phase 2/5 label filtering and Phase 4 matchable-unit selection rely on queryable multi-label rows. No later label-table migration is allowed. |
 | `CurationV2.object_id` (not `units_object_id`) | Column name matches v1 convention | `SpikeSortingOutput.get_spike_times` dispatch works unchanged. |
 
-**Phase 3 is method-body-only changes** (no `definition`-string edits):
+**Phase 3 leaves table definitions unchanged**:
 
 - `ConcatenatedRecording.make()` body filled in (Phase 1 raised `NotImplementedError`; Phase 3 lifts that).
 - `SortingSelection.insert_selection()` body: drops the `ConcatenatedRecordingSource` rejection.
 - `SessionGroup.create_group` body: enforces `allow_multi_day=True` gate (the schema was declared in Phase 1; the validation is added in Phase 3).
+- `_selection_identity.py` / `_selection_plan.py`: non-schema helper updates make `concat_recording_id` the source identity for concat-backed `sorting_id`.
 - No new tables are introduced in Phase 3.
 
 **Tables that are pure ADD (new tables in later phases, no migration needed)**:
@@ -931,7 +931,7 @@ build on the corrected baseline; the forward-compat table reflects it.
 - Phase 4: `MatcherParameters`, `UnitMatchSelection`, `UnitMatchSelection.MemberCuration`, `UnitMatch`, `UnitMatch.Pair`, `TrackedUnit`, `TrackedUnit.Member`.
 - Phase 5: `FigPackCurationSelection`, `FigPackCuration`, plus preset registrations in `_pipeline_presets.py` / `_recipe_catalog.py` (there is no `_params/preset.py`).
 
-**Invariant — do not weaken (binds from the post-review-fixes baseline onward)**: A reviewer of any implementation PR **at or after Phase 2** must check that NO existing v2 table from an earlier checkpoint is modified except by adding rows to its `contents` (for Lookup tables) or by adding rows via `make()` (for Computed tables). Adding columns, changing types, renaming columns, or altering FK structures is FORBIDDEN. The corrected post-review-fixes baseline above is the contract that lets this work. (The review-fixes checkpoint itself is the sole, deliberate exception — it is the last pass that may alter table shape, precisely because it is pre-Phase-2 and v2 is unreleased.)
+**Invariant — do not weaken (binds from the post-review-fixes baseline onward)**: A reviewer of any implementation PR **at or after Phase 2** must check that existing v2 table definitions from earlier checkpoints are unchanged unless the PR's owning plan explicitly authorizes a pre-production schema correction and names the affected tables, provenance reason, and validation. Incidental column additions, type changes, renames, or FK-structure changes are forbidden. Adding rows to Lookup `contents` or via Computed `make()` remains ordinary populate behavior, not a schema correction.
 
 ---
 

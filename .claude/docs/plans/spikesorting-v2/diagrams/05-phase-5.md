@@ -71,21 +71,26 @@ erDiagram
     %% --- Phase 1 sorting chain ---
     SortingSelection ||--o{ SortingSelection_RecordingSource : "part"
     SortingSelection ||--o{ SortingSelection_ConcatenatedRecordingSource : "part"
+    SortingSelection ||--o{ SortingSelection_ArtifactDetectionSource : "optional artifact part"
     Recording ||--o{ SortingSelection_RecordingSource : "source"
     ConcatenatedRecording ||--o{ SortingSelection_ConcatenatedRecordingSource : "source"
+    ArtifactDetection ||--o{ SortingSelection_ArtifactDetectionSource : "artifact source"
     SorterParameters ||--o{ SortingSelection : ""
-    ArtifactDetection ||--o{ SortingSelection : "nullable"
+    AnalyzerWaveformParameters ||--o{ Sorting : "display recipe"
     SortingSelection ||--|| Sorting : "Computed"
     Sorting ||--o{ Sorting_Unit : "part"
     Sorting ||--o{ CurationV2 : ""
     CurationV2 ||--o{ CurationV2_Unit : "part"
     CurationV2_Unit ||--o{ CurationV2_UnitLabel : "part"
+    CurationV2_Unit ||--o{ CurationV2_MergeGroup : "merge provenance"
+    Sorting_Unit ||--o{ CurationV2_MergeGroup : "contributor"
     CurationV2 ||--o{ SpikeSortingOutput_CurationV2_part : "auto-register"
 
     %% --- Phase 2 analyzer curation ---
     CurationV2 ||--o{ AnalyzerCurationSelection : ""
     QualityMetricParameters ||--o{ AnalyzerCurationSelection : ""
     AutoCurationRules ||--o{ AnalyzerCurationSelection : ""
+    AnalyzerWaveformParameters ||--o{ AnalyzerCurationSelection : "metric recipe"
     AnalyzerCurationSelection ||--|| AnalyzerCuration : "Computed"
     AnalyzerCuration ||--o{ CurationV2 : "materialize_curation"
 
@@ -95,7 +100,8 @@ erDiagram
     RecordingArtifactRecomputeSelection ||--|| RecordingArtifactRecompute : "Computed"
     RecordingArtifactRecompute ||--o{ RecordingArtifactRecompute_Name : "part"
     RecordingArtifactRecompute ||--o{ RecordingArtifactRecompute_Hash : "part"
-    Sorting ||--|| SortingAnalyzerVersions : "Computed"
+    Sorting ||--o{ SortingAnalyzerVersions : "Computed per waveform recipe"
+    AnalyzerWaveformParameters ||--o{ SortingAnalyzerVersions : "recipe"
     SortingAnalyzerVersions ||--o{ SortingAnalyzerRecomputeSelection : ""
     SortingAnalyzerRecomputeSelection ||--|| SortingAnalyzerRecompute : "Computed"
     SortingAnalyzerRecompute ||--o{ SortingAnalyzerRecompute_Name : "part"
@@ -152,7 +158,7 @@ flowchart TB
 
 - **FigPack feasibility check FIRST.** Phase 5 begins with an explicit upstream-API verification step before any DataJoint code is written. If FigPack proves unusable, Phase 5 stops and escalates — the plan does NOT silently fall back to FigURL.
 - **Selection-row identity includes the UI config.** `FigPackCurationSelection.figpack_config_hash` is a sha256 over `label_options + metrics + upload + ephemeral`. Two different UI configs for the same curation produce two distinct selection rows. v1's `FigURLCurationSelection` lacked this — repeat calls with different options collided.
-- **Default `label_options` use v2 enum labels** (`["mua", "accept", "noise"]`), not FigURL-era `"good"`.
+- **Default `label_options` use v2 enum labels** (`["accept", "mua", "noise"]`), not FigURL-era `"good"`.
 - **Spyglass-owned adapter helpers** wrap the verified FigPack API. `_build_figpack_curation_view()` and `_show_or_upload_figpack_view()` are private adapters; the upstream API is pinned only after the feasibility check.
 - **Workflow separation.** `run_v2_pipeline(concat_session_group_owner=..., concat_session_group_name=...)` runs a concatenated sort. `run_v2_unit_match(session_group_owner=..., session_group_name=..., curation_choices=...)` is a separate function for sort-then-match. The two cannot be confused via overlapping parameters.
 - **`run_v2_unit_match` requires explicit curation choices.** Calling without `curation_choices` raises; the function never auto-pins "latest" curations.
@@ -163,12 +169,11 @@ flowchart TB
 
 Phase 5 leaves v2 with:
 
-- 13 v2 Manual tables: 9 selection-style drivers (`RecordingSelection`, `ArtifactDetectionSelection`, `SortingSelection`, `ConcatenatedRecordingSelection`, `AnalyzerCurationSelection`, `RecordingArtifactRecomputeSelection`, `SortingAnalyzerRecomputeSelection`, `UnitMatchSelection`, `FigPackCurationSelection`) plus `SortGroupV2`, `SharedArtifactGroup`, `CurationV2`, and `SessionGroup`.
-- 12 Computed tables: `Recording`, `ArtifactDetection`, `ConcatenatedRecording`, `Sorting`, `AnalyzerCuration`, `RecordingArtifactVersions`, `RecordingArtifactRecompute`, `SortingAnalyzerVersions`, `SortingAnalyzerRecompute`, `UnitMatch`, `TrackedUnit`, and `FigPackCuration`.
-- 14 v2 part tables: sort-group electrodes, shared-artifact members, artifact intervals, sorting units, curation units + labels, session-group members, UnitMatch member curations + pair records, tracked-unit members, and Name/Hash parts for both recompute families.
-- 7 Lookup tables: preprocessing, artifact, sorter, motion-correction, quality-metric, auto-curation-rule, and matcher parameters.
-- Recompute subsystem: 10 tables total across two families — 2 Versions + 2 Selection + 2 Result + 4 part tables (`Name`/`Hash` × recording artifact and sorting analyzer).
-- 1 new merge-master part (`SpikeSortingOutput.CurationV2`)
-- 2 Python orchestrator functions (`run_v2_pipeline`, `run_v2_unit_match`)
+- A selection-style core chain for recording, artifact detection, sorting, concat recording, analyzer curation, recompute verification, UnitMatch, and FigPack.
+- Source-part patterns for `ArtifactDetectionSelection` and `SortingSelection`; artifact detection is represented by an optional `SortingSelection.ArtifactDetectionSource` part, not a nullable master-column FK.
+- `AnalyzerWaveformParameters` as the shared analyzer recipe lookup: `Sorting` stores the display recipe, `AnalyzerCurationSelection` stores the metric recipe, and recompute verifies analyzer folders by `(sorting_id, waveform_params_name)`.
+- `CurationV2` lineage with `Unit`, `UnitLabel`, and `MergeGroup` provenance, plus automatic registration in `SpikeSortingOutput.CurationV2`.
+- Computed artifacts for recording, artifact detection, concatenated recording, sorting, analyzer curation, recompute families, UnitMatch / TrackedUnit, and FigPack.
+- Two Python orchestrator functions (`run_v2_pipeline`, `run_v2_unit_match`) that wrap the table workflow without adding schemas.
 
 v0 and v1 stay in-tree, untouched, indefinitely.

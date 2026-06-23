@@ -154,7 +154,7 @@ made `@classmethod` for surface symmetry with v1.
 
 **API additions:** `CurationV2.MergeGroup` part table records
 per-(kept-unit, contributor-unit) merge provenance with FK
-validation (user-authorized exception to the zero-migration policy;
+validation (user-authorized pre-production schema correction;
 chosen over v1's NWB-column pattern for queryability);
 `CurationV2.get_merge_groups(key)` and a `get_merged_sorting` that
 actually applies merges at fetch (matching v1 semantics);

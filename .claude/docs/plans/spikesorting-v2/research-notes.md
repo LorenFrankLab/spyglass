@@ -33,11 +33,11 @@ current phase docs but should not distract from execution.
   2022-03-25; and a list-against-list membership check that allowed duplicate
   labels.
 - Phase 3 session-group work was originally scoped as a standalone schema task.
-  After the zero-migration decision, Phase 1 declares the forward-compatible
-  schema and Phase 3 implements the method bodies on top of it.
+  After the conservative schema decision, Phase 1 declares the forward-compatible
+  schema and Phase 3 implements the method bodies plus concat identity helpers on top of it.
 - Phase 4 was split into a UnitMatchPy technical spike and a later schema PR
   after review identified the matcher API surface as too uncertain for a
-  zero-migration schema-final phase.
+  one-shot schema-final phase.
 - The Phase 4 matcher contract was loosened from "matchers must not depend on
   raw recording data" to the current wrapper-owned extraction rule: v2 may read
   its own `Recording` and `SortingAnalyzer` artifacts, then pass a
@@ -60,7 +60,7 @@ current phase docs but should not distract from execution.
 - Test fixtures are not checked in through Git LFS. The plan relies on manual
   one-shot lab fixture generation and CI-side generation/cache instead.
 - `_params/motion_correction.py` moved to Phase 1, rather than Phase 3, because
-  the zero-migration policy requires `MotionCorrectionParameters` to validate
+  the conservative schema policy requires `MotionCorrectionParameters` to validate
   inserts as soon as the forward-compatible Lookup table exists.
 
 ## 1. Goals (from user prompt)

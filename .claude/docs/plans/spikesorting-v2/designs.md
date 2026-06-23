@@ -54,9 +54,9 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
     # insert against a Python `ReferenceMode` Literal
     # ("none"|"global_median"|"specific"). varchar-for-flexibility is
     # deliberate: SI also supports global_average (CAR) and local/
-    # per-group referencing, so the set may grow — an enum would trap a
-    # future mode behind a forbidden ALTER TABLE under the zero-migration
-    # policy. The Literal gives the same typo-protection without the
+    # per-group referencing, so the set may grow — an enum would make a
+    # future mode require a table-definition edit after production freeze.
+    # The Literal gives the same typo-protection without the
     # migration risk (same rationale as CurationLabel; contrast
     # curation_source, whose set is closed). `insert1` enforces both the
     # Literal membership AND "reference_electrode_id IS NOT NULL iff
@@ -287,7 +287,7 @@ class Recording(SpyglassMixin, dj.Computed):
 - `Recording.get_recording(key)` loads that NWB-resident artifact; if the artifact is **missing**, it rebuilds without deleting the DataJoint row.
 - **Cache-hash drift is fail-closed (review-fix C2).** `_rebuild_nwb_artifact(key)` regenerates the payload and compares the regenerated hash against the stored row. On mismatch it MUST raise `RecordingCacheDriftError` by default (opt out with `allow_drift=True`) AND must not leave the drifted file at the canonical path — because `get_recording` only rebuilds when the file is *absent*, a drifted file left on disk would be returned silently on the next call. Use an **atomic rebuild**: write to a temp path, hash it, `os.replace` onto the canonical path only on a hash match; on mismatch delete the temp file and raise. `Recording.repair()` is the conscious path to accept a new hash.
 
-**Storage decision is settled — see [shared-contracts.md § Recording Cache Format](shared-contracts.md#recording-cache-format)**. The canonical artifact lives in `AnalysisNwbfile` using the existing HDF5 builder path. Binary sidecar storage is explicitly out of MVP. Any future Zarr or binary-cache optimization must not change the schema above, which is final-shape under the zero-migration policy.
+**Storage decision is settled — see [shared-contracts.md § Recording Cache Format](shared-contracts.md#recording-cache-format)**. The canonical artifact lives in `AnalysisNwbfile` using the existing HDF5 builder path. Binary sidecar storage is explicitly out of MVP. Any future Zarr or binary-cache optimization should not change the schema above unless it is explicitly approved as a pre-production schema correction or, after production freeze, shipped with a migration plan.
 
 **Key design points**:
 
@@ -727,8 +727,8 @@ class CurationV2(SpyglassMixin, dj.Manual):
         column. Unlabeled units have no UnitLabel rows.
 
         Post-review-fixes (T4): the column stays `varchar(32)` (NOT a MySQL
-        enum) for flexibility + the zero-migration policy (labs add custom
-        labels without an ALTER TABLE). Typo-protection is enforced at the
+        enum) for flexibility (labs add custom labels without a table-definition
+        edit). Typo-protection is enforced at the
         Python insert boundary: ALL insert paths — including a direct
         `UnitLabel.insert1` — validate `curation_label` against the canonical
         `CurationLabel` set; labels outside it are rejected unless the caller
@@ -1058,7 +1058,7 @@ for key in keys:
             )
     # ... proceed with deletion
 ```
-- These tables are Phase 2 pure additions in the zero-migration contract. Phase 1 provides opportunistic missing-artifact rebuild helpers; Phase 2 provides auditable recompute records and safe deletion.
+- These tables are Phase 2 pure additions under the pre-production schema policy. Phase 1 provides opportunistic missing-artifact rebuild helpers; Phase 2 provides auditable recompute records and safe deletion.
 
 ---
 

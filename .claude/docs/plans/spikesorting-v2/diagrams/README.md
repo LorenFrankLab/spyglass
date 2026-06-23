@@ -46,7 +46,7 @@ Mermaid ER syntax:
 ### v2 cross-phase symbols
 
 - **NEW IN PHASE N**: tables introduced in the current phase.
-- **PHASE 1 (FORWARD-COMPAT)**: tables declared in Phase 1 whose `make()` body raises `NotImplementedError` until a later phase. The zero-migration policy requires FK targets to exist when the FK is declared.
+- **PHASE 1 (FORWARD-COMPAT)**: tables declared in Phase 1 whose `make()` body raises `NotImplementedError` until a later phase. The conservative schema policy keeps FK targets available when the FK is declared.
 - **(EXTERNAL)**: pre-existing Spyglass tables that v2 does not modify.
 - **(MERGE PART)**: a part of `SpikeSortingOutput` that v2 adds; the merge master is unchanged.
 

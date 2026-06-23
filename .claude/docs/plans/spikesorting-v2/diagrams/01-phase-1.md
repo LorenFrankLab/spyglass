@@ -2,7 +2,7 @@
 
 [← Baseline](00-baseline.md) · [README](README.md) · [next: Phase 2 →](02-phase-2.md)
 
-End-to-end single-session sort: preprocessing → artifact detection → sorting → initial curation → registration in `SpikeSortingOutput`. All schemas are **final** under the zero-migration policy; Phases 2–5 only add tables, they never alter ones declared here.
+End-to-end single-session sort: preprocessing → artifact detection → sorting → initial curation → registration in `SpikeSortingOutput`. Schemas are intended-final under the pre-production schema policy; later direct edits require an explicit reviewed correction.
 
 ## What ships in Phase 1
 
@@ -16,10 +16,11 @@ End-to-end single-session sort: preprocessing → artifact detection → sorting
 | `SharedArtifactGroup` (+ `Member` part) | Manual | Opt-in: cross-recording artifact detection (issue #928). |
 | `ArtifactDetectionSelection` | Manual | Source parts: either `RecordingSource` or `SharedGroupSource`. |
 | `ArtifactDetection` | Computed | Writes artifact-removed valid times to `common.IntervalList` as `f"artifact_detection_{artifact_detection_id}"`. |
-| `SorterParameters` | Lookup | Per-sorter Pydantic-validated params; MS4 / MS5 / KS4 / clusterless / SC2 / TDC2. |
-| `SortingSelection` | Manual | Source parts for `Recording` / `ConcatenatedRecording`, plus nullable `ArtifactDetection`. |
-| `Sorting` (+ `Unit` part) | Computed | Sorts via SI 0.104; writes units NWB + SortingAnalyzer folder; persists per-unit peak channel. |
-| `CurationV2` (+ `Unit` + `UnitLabel` parts) | Manual | Curation lineage; auto-registers in `SpikeSortingOutput.CurationV2`. |
+| `SorterParameters` | Lookup | Per-sorter Pydantic-validated params plus job / execution params; MS4 / MS5 / KS4 / clusterless / SC2 / TDC2. |
+| `AnalyzerWaveformParameters` | Lookup | SortingAnalyzer waveform recipes; `Sorting` stores the display-safe recipe. |
+| `SortingSelection` | Manual | Source parts for `Recording` / `ConcatenatedRecording`, plus optional `ArtifactDetectionSource` part. |
+| `Sorting` (+ `Unit` part) | Computed | Sorts via SI 0.104; writes units NWB + SortingAnalyzer folder; persists display waveform recipe and per-unit peak channel. |
+| `CurationV2` (+ `Unit` + `UnitLabel` + `MergeGroup` parts) | Manual | Curation lineage; auto-registers in `SpikeSortingOutput.CurationV2`. |
 | `SpikeSortingOutput.CurationV2` | Part of merge master | v2's hookup to the existing merge. |
 
 | Phase 1 forward-compat (declared, not populated) | Tier | Why now |
@@ -41,7 +42,8 @@ erDiagram
     SortGroupV2 {
         varchar nwb_file_name PK
         int sort_group_id PK
-        int sort_reference_electrode_id
+        varchar reference_mode
+        int reference_electrode_id
     }
     SortGroupV2_SortGroupElectrode {
         varchar nwb_file_name PK
@@ -134,12 +136,18 @@ erDiagram
         varchar sorter PK
         varchar sorter_params_name PK
         blob params
+        int params_schema_version
+        blob job_kwargs
+        blob execution_params
+        int execution_params_schema_version
+    }
+    AnalyzerWaveformParameters {
+        varchar waveform_params_name PK
+        blob params
+        int params_schema_version
     }
     SortingSelection {
         uuid sorting_id PK
-        varchar sorter FK
-        varchar sorter_params_name FK
-        uuid artifact_detection_id "nullable FK"
     }
     SortingSelection_RecordingSource {
         uuid sorting_id PK
@@ -149,12 +157,17 @@ erDiagram
         uuid sorting_id PK
         uuid concat_recording_id FK
     }
+    SortingSelection_ArtifactDetectionSource {
+        uuid sorting_id PK
+        uuid artifact_detection_id FK
+    }
     Sorting {
         uuid sorting_id PK
         varchar analysis_file_name FK
         varchar object_id
         int n_units
         datetime time_of_sort
+        varchar display_waveform_params_name FK
     }
     Sorting_Unit {
         uuid sorting_id PK
@@ -168,9 +181,11 @@ erDiagram
 
     SortingSelection ||--o{ SortingSelection_RecordingSource : "part"
     SortingSelection ||--o{ SortingSelection_ConcatenatedRecordingSource : "part"
+    SortingSelection ||--o{ SortingSelection_ArtifactDetectionSource : "optional part"
     Recording ||--o{ SortingSelection_RecordingSource : "FK"
+    ArtifactDetection ||--o{ SortingSelection_ArtifactDetectionSource : "FK"
     SorterParameters ||--o{ SortingSelection : "FK"
-    ArtifactDetection ||--o{ SortingSelection : "FK (nullable)"
+    AnalyzerWaveformParameters ||--o{ Sorting : "display recipe FK"
     SortingSelection ||--|| Sorting : "Computed"
     AnalysisNwbfile ||--o{ Sorting : "units NWB"
     Sorting ||--o{ Sorting_Unit : "part"
@@ -185,7 +200,9 @@ erDiagram
         int parent_curation_id
         varchar analysis_file_name FK
         varchar object_id
+        bool merges_applied
         enum curation_source
+        varchar description
     }
     CurationV2_Unit {
         uuid sorting_id PK
@@ -194,6 +211,8 @@ erDiagram
         varchar nwb_file_name FK
         varchar electrode_group_name FK
         int electrode_id FK
+        float peak_amplitude_uv
+        int n_spikes
     }
     CurationV2_UnitLabel {
         uuid sorting_id PK
@@ -201,12 +220,20 @@ erDiagram
         int unit_id PK
         varchar curation_label PK
     }
+    CurationV2_MergeGroup {
+        uuid sorting_id PK
+        int curation_id PK
+        int unit_id PK
+        int contributor_unit_id PK
+    }
 
     Sorting ||--o{ CurationV2 : "FK"
     AnalysisNwbfile ||--o{ CurationV2 : "curated units NWB"
     CurationV2 ||--o{ CurationV2_Unit : "part"
     Electrode ||--o{ CurationV2_Unit : "peak channel FK"
     CurationV2_Unit ||--o{ CurationV2_UnitLabel : "part (multi-label)"
+    CurationV2_Unit ||--o{ CurationV2_MergeGroup : "merge provenance"
+    Sorting_Unit ||--o{ CurationV2_MergeGroup : "contributor FK"
 
     %% =========================================================
     %% Merge-table hookup
@@ -294,10 +321,11 @@ flowchart LR
 
 ## Critical design points
 
-- **Source parts on `SortingSelection`**: exactly one of `RecordingSource` / `ConcatenatedRecordingSource` exists. Enforced in `insert_selection()`, re-checked at the start of `Sorting.make()`, and covered by the v2 integrity test. The schema is final today; Phase 3 only relaxes the runtime guard that rejects `ConcatenatedRecordingSource`.
+- **Source parts on `SortingSelection`**: exactly one of `RecordingSource` / `ConcatenatedRecordingSource` exists. An optional `ArtifactDetectionSource` part records the artifact-mask source for single-session sorts; no artifact detection means no part row. Enforced in `insert_selection()`, re-checked at the start of `Sorting.make()`, and covered by the v2 integrity test. The schema is final today; Phase 3 only relaxes the runtime guard that rejects `ConcatenatedRecordingSource`.
 - **Source parts on `ArtifactDetectionSelection`**: exactly one of `RecordingSource` / `SharedGroupSource` exists. Enforced in `insert_selection()`, re-checked at the start of `ArtifactDetection.make()`, and covered by the v2 integrity test.
-- **`SortingSelection.artifact_detection_id` is a real FK, not a loose UUID column.** Concat sorts leave it NULL.
+- **`ArtifactDetectionSource` is a part-table FK, not a nullable master column.** Concat sorts are rejected when an `ArtifactDetectionSource` part would be inserted.
 - **`Recording` is a single canonical NWB artifact per `recording_id`.** Subsequent sorts with different `SorterParameters` read the same `ElectricalSeries`. No per-stage re-materialization.
+- **`Sorting.display_waveform_params_name` records the display-safe SortingAnalyzer recipe.** Metric curation can use a separate metric recipe in Phase 2 without changing the displayed waveforms.
 - **`Sorting.Unit.electrode_id`** is the unit's peak-amplitude channel; brain region is reached via `Sorting.Unit * Electrode * BrainRegion`. Constant-time lookup, no template re-walking.
 - **`CurationV2.Unit` is populated by `insert_curation()`** from `Sorting.Unit` plus merge_groups. Merged units inherit the peak channel of the highest-amplitude contributor.
 - **`CurationV2.UnitLabel`** stores labels one row per `(unit_id, curation_label)`. Multi-label units have multiple rows; unlabeled units have zero rows.

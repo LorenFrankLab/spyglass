@@ -2,7 +2,7 @@
 
 [← Phase 2](02-phase-2.md) · [README](README.md) · [next: Phase 4 →](04-phase-4.md)
 
-**No new tables in Phase 3.** The schema declared in Phase 1 (`SessionGroup`, `MotionCorrectionParameters`, `ConcatenatedRecordingSelection`, `ConcatenatedRecording`) becomes populate-runnable. Phase 3 is method-body-only edits, per the zero-migration policy.
+**No new tables in Phase 3.** The schema declared in Phase 1 (`SessionGroup`, `MotionCorrectionParameters`, `ConcatenatedRecordingSelection`, `ConcatenatedRecording`) becomes populate-runnable. Phase 3 is mostly method-body work plus the non-schema selection-identity helper update for concat-backed `sorting_id` determinism.
 
 ## What activates in Phase 3
 
@@ -10,7 +10,7 @@
 | --- | --- |
 | `ConcatenatedRecording.make()` raised `NotImplementedError` | Body fills in: reuses cached pre-motion `Recording` per member, concatenates, applies motion correction (`rigid_fast` default; DREDge opt-in), applies post-motion preprocessing (whiten), materializes one NWB-resident concatenated `ElectricalSeries`. |
 | `SessionGroup.create_group()` accepted multi-day members silently | Now raises `ValueError` unless `allow_multi_day=True`. Multi-day requires an explicit (non-`auto`) motion-correction preset. |
-| `SortingSelection.insert_selection()` rejected `ConcatenatedRecordingSource` with `NotImplementedError` | Now accepts. Still rejects concat + `artifact_detection_id` (concat-wide artifact masking is out of scope). |
+| `SortingSelection.insert_selection()` rejected `ConcatenatedRecordingSource` with `NotImplementedError` | Now accepts. Still rejects concat + `ArtifactDetectionSource` part rows (concat-wide artifact masking is out of scope). |
 
 ## ER diagram — same as Phase 1 forward-compat, now active
 
@@ -61,9 +61,6 @@ erDiagram
     }
     SortingSelection {
         uuid sorting_id PK
-        varchar sorter FK
-        varchar sorter_params_name FK
-        uuid artifact_detection_id "nullable FK"
     }
     SortingSelection_RecordingSource {
         uuid sorting_id PK
@@ -72,6 +69,10 @@ erDiagram
     SortingSelection_ConcatenatedRecordingSource {
         uuid sorting_id PK
         uuid concat_recording_id FK
+    }
+    SortingSelection_ArtifactDetectionSource {
+        uuid sorting_id PK
+        uuid artifact_detection_id FK
     }
 
     SessionGroup ||--o{ SessionGroup_Member : "part"
@@ -89,10 +90,11 @@ erDiagram
     %% ===== The concat source part is now accepted =====
     SortingSelection ||--o{ SortingSelection_RecordingSource : "part"
     SortingSelection ||--o{ SortingSelection_ConcatenatedRecordingSource : "part"
+    SortingSelection ||--o{ SortingSelection_ArtifactDetectionSource : "optional single-session artifact part"
     Recording ||--o{ SortingSelection_RecordingSource : "single-session source"
     ConcatenatedRecording ||--o{ SortingSelection_ConcatenatedRecordingSource : "concat source, NEW in Phase 3"
     SorterParameters ||--o{ SortingSelection : "FK"
-    ArtifactDetection ||--o{ SortingSelection : "FK (NULL for concat sorts)"
+    ArtifactDetection ||--o{ SortingSelection_ArtifactDetectionSource : "FK (for single-session sorts only)"
     SortingSelection ||--|| Sorting : "Computed"
 ```
 
@@ -129,7 +131,8 @@ flowchart LR
   This guarantees motion estimators see un-whitened traces (per SI docs).
 - **Anchor NWB rule.** `ConcatenatedRecording`'s `AnalysisNwbfile` parent is the **first** `SessionGroup.Member.nwb_file_name` (ordered by `member_index`). Same rule applies to concat-sort `Sorting` rows.
 - **SessionGroup names are owner-scoped.** The `session_group_owner` projected `LabTeam` FK is part of the master PK, so two teams can both create `session_group_name="day1"` without colliding. Per-member `team_name` remains on `SessionGroup.Member` for collaborations that mix teams.
-- **Concat sorts skip artifact masking.** `SortingSelection.insert_selection()` rejects `ConcatenatedRecordingSource` together with `artifact_detection_id`. Cross-recording artifact masking is out of scope.
+- **Concat `sorting_id` identity is source-aware.** Phase 3 extends the identity helper so concat-backed rows fold in `concat_recording_id` the same way single-session rows fold in `recording_id`; that keeps repeated concat selection inserts deterministic.
+- **Concat sorts skip artifact masking.** `SortingSelection.insert_selection()` rejects `ConcatenatedRecordingSource` together with any `ArtifactDetectionSource` part. Cross-recording artifact masking is out of scope.
 - **Segment boundaries persisted.** `ConcatenatedRecording.MemberBoundary` rows hold cumulative end-sample counts so downstream code can back-map spike times to per-session sortings via `ConcatenatedRecording.split_sorting_by_session()`.
 - **`Sorting.Unit` anchor rule for concat.** A unit's peak `electrode_id` maps to N `Electrode` rows (one per `SessionGroup.Member`). v2 anchors concat `Sorting.Unit` and `CurationV2.Unit` rows to the FIRST member's `Electrode`. Phase 4 sort-then-match brain-region tracing uses each pinned `CurationV2.Unit -> Electrode -> BrainRegion` path directly; if a future workflow matches concat curations, the concat anchor rule still applies unless a per-member accessor explicitly expands through `ConcatenatedRecording -> SessionGroup.Member`.
 

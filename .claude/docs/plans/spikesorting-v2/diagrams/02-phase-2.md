@@ -10,14 +10,14 @@ Adds quality metrics, auto-curation, burst-pair detection (consolidated into one
 | --- | --- | --- |
 | `QualityMetricParameters` | Lookup | Metric names + per-metric kwargs; SI 0.104 `compute_quality_metrics`. |
 | `AutoCurationRules` | Lookup | Label thresholds + auto-merge preset name. |
-| `AnalyzerCurationSelection` | Manual | One row per (curation, metrics params, rules) tuple. |
+| `AnalyzerCurationSelection` | Manual | One row per (curation, metrics params, rules, metric waveform recipe) tuple. |
 | `AnalyzerCuration` | Computed | Walks SortingAnalyzer extensions; writes metrics + merge suggestions + proposed labels to NWB. Replaces v1 `MetricCuration` + `BurstPair`. |
 | `RecordingArtifactVersions` | Computed | Inventories the NWB / SI versions used to materialize each `Recording`. |
 | `RecordingArtifactRecomputeSelection` | Manual | Pair (`Recording`, `UserEnvironment`) for recompute attempt. |
 | `RecordingArtifactRecompute` (+ `Name`, `Hash` parts) | Computed | Compares regenerated artifact byte-hash to stored `cache_hash`. Gates `delete_files()`. |
-| `SortingAnalyzerVersions` | Computed | Same shape for `Sorting`'s analyzer folder. |
-| `SortingAnalyzerRecomputeSelection` | Manual | Selection row for analyzer recompute. |
-| `SortingAnalyzerRecompute` (+ `Name`, `Hash` parts) | Computed | Verified analyzer folder regeneration. |
+| `SortingAnalyzerVersions` | Computed | Same shape for `Sorting`'s analyzer folder, keyed by waveform recipe. |
+| `SortingAnalyzerRecomputeSelection` | Manual | Selection row for analyzer recompute, keyed by waveform recipe. |
+| `SortingAnalyzerRecompute` (+ `Name`, `Hash` parts) | Computed | Verified analyzer folder regeneration for one `(sorting_id, waveform_params_name)`. |
 
 ## ER diagram — analyzer curation
 
@@ -30,12 +30,17 @@ erDiagram
         varchar metric_params_name PK
         blob metric_names
         blob metric_kwargs
+        blob template_metric_columns
         bool skip_pc_metrics
+        int params_schema_version
+        blob job_kwargs
     }
     AutoCurationRules {
         varchar auto_curation_rules_name PK
         varchar auto_merge_preset
         blob auto_merge_kwargs
+        int params_schema_version
+        blob job_kwargs
     }
     AutoCurationRules_Rule {
         varchar auto_curation_rules_name PK
@@ -52,6 +57,7 @@ erDiagram
         int curation_id FK
         varchar metric_params_name FK
         varchar auto_curation_rules_name FK
+        varchar metric_waveform_params_name FK
     }
     AnalyzerCuration {
         uuid analyzer_curation_id PK
@@ -64,6 +70,7 @@ erDiagram
     CurationV2 ||--o{ AnalyzerCurationSelection : "FK"
     QualityMetricParameters ||--o{ AnalyzerCurationSelection : "FK"
     AutoCurationRules ||--o{ AnalyzerCurationSelection : "FK"
+    AnalyzerWaveformParameters ||--o{ AnalyzerCurationSelection : "metric recipe FK"
     AutoCurationRules ||--o{ AutoCurationRules_Rule : "part"
     AnalyzerCurationSelection ||--|| AnalyzerCuration : "Computed"
     AnalysisNwbfile ||--o{ AnalyzerCuration : "metrics + labels + merges NWB"
@@ -127,12 +134,14 @@ erDiagram
     %% ===== Mirror tables for SortingAnalyzer folders =====
     SortingAnalyzerVersions {
         uuid sorting_id PK
+        varchar waveform_params_name PK
         blob si_deps
         blob analyzer_manifest
         char_64 analyzer_hash
     }
     SortingAnalyzerRecomputeSelection {
         uuid sorting_id PK
+        varchar waveform_params_name PK
         varchar env_id PK
         int rounding PK
         bool logged_at_creation
@@ -140,14 +149,17 @@ erDiagram
     }
     SortingAnalyzerRecompute {
         uuid sorting_id PK
+        varchar waveform_params_name PK
         varchar env_id PK
         int rounding PK
         bool matched
         varchar err_msg
+        datetime created_at
         bool deleted
     }
     SortingAnalyzerRecompute_Name {
         uuid sorting_id PK
+        varchar waveform_params_name PK
         varchar env_id PK
         int rounding PK
         varchar name PK
@@ -155,12 +167,14 @@ erDiagram
     }
     SortingAnalyzerRecompute_Hash {
         uuid sorting_id PK
+        varchar waveform_params_name PK
         varchar env_id PK
         int rounding PK
         varchar name PK
     }
 
-    Sorting ||--|| SortingAnalyzerVersions : "Computed"
+    Sorting ||--o{ SortingAnalyzerVersions : "Computed per waveform recipe"
+    AnalyzerWaveformParameters ||--o{ SortingAnalyzerVersions : "recipe FK"
     SortingAnalyzerVersions ||--o{ SortingAnalyzerRecomputeSelection : ""
     UserEnvironment ||--o{ SortingAnalyzerRecomputeSelection : ""
     SortingAnalyzerRecomputeSelection ||--|| SortingAnalyzerRecompute : "Computed"
@@ -192,6 +206,7 @@ flowchart LR
 - **One table replaces two**: `AnalyzerCuration` consolidates v1's `MetricCuration` + `BurstPair`. The burst-pair cross-correlogram-asymmetry logic becomes one auto-merge preset; the visualization helpers (`plot_correlograms_by_sort_group`, `investigate_pair_xcorrel`, `investigate_pair_peaks`, `plot_peak_over_time`) become methods on `AnalyzerCuration`.
 - **`materialize_curation()` is explicit** — auto-curation never silently writes a new `CurationV2` row. The user calls `AnalyzerCuration.materialize_curation(key)` to commit, which inserts a child `CurationV2` row with `parent_curation_id` set and `curation_source='analyzer_curation'`.
 - **Fetch-helper parity**: `AnalyzerCuration` exposes `get_waveforms`, `get_metrics`, `get_labels`, `get_merge_groups` to match v1's `MetricCuration` notebook surface.
+- **Display vs metric analyzers**: `Sorting.display_waveform_params_name` records the unwhitened display analyzer recipe, while `AnalyzerCurationSelection.metric_waveform_params_name` records the analyzer recipe used for metrics. Recompute verification keys analyzer versions by `(sorting_id, waveform_params_name)` so both recipes can be audited independently.
 - **NaN sanitization**: serialized metric tables coerce non-finite values to `None` in the JSON-bound path; in-memory DataFrames preserve NaN semantics (issue #1556).
 - **Two distinct recompute families**: `RecordingArtifactRecompute*` verifies the NWB `ElectricalSeries` byte-hash; `SortingAnalyzerRecompute*` verifies the analyzer folder contents. Same lifecycle, different artifacts.
 - **`delete_files()` gates on `matched=1` in the current `UserEnvironment`** — storage reclamation requires a verified recompute round-trip in the environment doing the deletion. Historic matches from stale environments are audit evidence only unless explicitly force-overridden with justification. `matched=0` cannot delete.

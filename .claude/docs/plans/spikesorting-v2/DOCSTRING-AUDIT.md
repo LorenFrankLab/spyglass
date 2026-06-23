@@ -127,9 +127,9 @@ and the `unit_matching.py` / `metric_curation.py` / `figpack_curation.py`
 - **`definition` column `#`-comments** (e.g. `CurationV2` secondary columns,
   `DriftEstimate`'s `Columns` section) are **not** added. DataJoint persists
   column comments as part of the schema; editing a `definition` string desyncs
-  the in-DB schema and would require `alter()`, violating the plan's
-  zero-migration policy ([overview.md](overview.md) goals). These remain noted
-  but untouched.
+  the in-DB schema and would require `alter()`. This audit is a docstring
+  cleanup, not an approved schema-correction task, so these remain noted but
+  untouched.
 
 ## Per-file quality
 

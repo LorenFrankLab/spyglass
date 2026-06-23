@@ -1,6 +1,6 @@
-# v1 → v2 behavioral & implementation divergences
+# v1 -> v2 behavioral & implementation divergences
 
-[← back to PLAN.md](PLAN.md) · [feature-parity.md](feature-parity.md) · [parity-extensions.md](parity-extensions.md)
+[← back to PLAN.md](PLAN.md) · [feature-parity.md](feature-parity.md)
 
 A catalog of the places where the v2 spike-sorting pipeline deliberately
 behaves or is implemented differently from v1, with the v1 file:line anchors
@@ -10,10 +10,11 @@ behavior on its own terms, without the v1 archaeology); this doc preserves the
 v1→v2 forensic detail in one discoverable place rather than scattered across
 inline comments a fresh reviewer can't follow.
 
-Scope note: this is distinct from
-[divergence-investigation.md](divergence-investigation.md), which is a focused
-investigation of one specific numerical discrepancy (the clusterless
-`detect_peaks` spike-time divergence). This file is the broad catalog.
+Scope note: the raw parity-capture and clusterless-divergence investigation
+notes were collapsed into this file so the active plan has one durable catalog
+instead of several review-session artifacts. This file records the scientific
+and API rationale; operational capture scripts and fixtures live under
+`tests/spikesorting/v2/`.
 
 ---
 
@@ -43,6 +44,34 @@ investigation of one specific numerical discrepancy (the clusterless
   unity-gain Frank-lab data (1 µV/count); corrective for non-unity-gain rigs
   (e.g. Intan ~0.195 µV/count, where a "100" threshold would otherwise mean
   ~19.5 µV) — a silent numerical divergence for any non-Frank-lab v1 user.
+
+- **Clusterless parity is asymmetric because SI fixed `locally_exclusive`.**
+  SI 0.99 -> 0.104 rewrote the `locally_exclusive` peak detector
+  (SpikeInterface PR #4341, "Make peak detection ... faster and more accurate").
+  The new implementation compares peak-to-peak events and normalizes by
+  threshold units; the old SI 0.99 kernel could suppress an adjacent-contact
+  candidate because a neighboring trace crossed the candidate value at any
+  sample in the sweep. On `mearec_polymer_128ch_60s` shank 0, the investigation
+  found 757 / 3392 v2 peaks unmatched within +/-1 sample, but all were within
+  30 samples of a v1 peak and 99.5% were within `radius_um=100`; their median
+  amplitude was 33 uV vs 56 uV for peaks matched to v1, consistent with
+  near-threshold adjacent-contact echoes that v1 over-suppressed. The parity
+  contract therefore treats this as **v1-wrong-with-evidence**: v1 spikes should
+  nearly all match v2 (`unmatched_v1 <= max(2, 1% of v1 peaks)`), while v2-only
+  extras are allowed up to the calibrated budget (50% + 5 in the current
+  polymer fixture matrix) and must be reported.
+
+- **Clusterless and MS4 random sampling is explicit-seeded in v2.** SI 0.99's
+  `get_noise_levels` defaulted to `seed=0`; SI 0.104 changed the default to
+  `seed=None` and changed the estimator from concat-all-chunks MAD to
+  per-chunk-MAD-then-mean (SpikeInterface PR #3359). The same stochastic default
+  reaches MS4 through SI's whitening/random-data-chunk path. Spyglass v2 pins
+  `seed=0` at the framework layer for clusterless `random_slices_kwargs` and MS4
+  whitening so a parameter row is reproducible by default. This does not restore
+  v1 byte parity: SI 0.99 and 0.104 still choose different chunk boundaries and
+  compute the noise estimate differently. Users can override the seed through
+  the per-row sorter `job_kwargs` when they intentionally want robustness or
+  variance studies.
 
 - **Preprocessing order: bandpass-filter THEN reference.** v1 referenced first,
   then filtered (`v1/recording.py:597-671`). v2 filters first. Because the
@@ -289,9 +318,8 @@ investigation of one specific numerical discrepancy (the clusterless
   v2 applies a membership-aware 0.4 ms cross-unit dedup (`_units_nwb.py:452`,
   `_signal_math._dedup_merged_spike_times`) so a spike double-detected on two
   contributors is counted once. A v2 merged unit therefore has fewer spikes than
-  the contributor sum, changing its `num_spikes` / firing-rate / ISI. (Distinct
-  from the clusterless `detect_peaks` divergence in
-  [divergence-investigation.md](divergence-investigation.md).)
+  the contributor sum, changing its `num_spikes` / firing-rate / ISI. This is
+  distinct from the clusterless `detect_peaks` divergence summarized above.
 
 - **Merge groups are validated, raising on malformed input.** v2 rejects empty,
   singleton, duplicate-member, unknown-id, and overlapping merge groups

@@ -113,20 +113,22 @@ above; **no drift**:
 - `ProbeType` — PK `probe_type`; `num_shanks: int`.
 - `SpikeSortingOutput` — PK `merge_id: uuid`.
 
-Draft schema — `describe SortingSelection --file spyglass/spikesorting/v2/_draft.py`
-reports PK `sorting_id: uuid` with non-PK FKs `-> [nullable] ArtifactDetection`
-and `-> SorterParameters`, matching the design.
+Current schema — `describe SortingSelection --file spyglass/spikesorting/v2/sorting.py`
+reports PK `sorting_id: uuid` with non-PK FK `-> SorterParameters` and the
+`RecordingSource`, `ConcatenatedRecordingSource`, and optional
+`ArtifactDetectionSource` source/association parts, matching the post-review
+source-part design.
 
-`path --up SortingSelection --file spyglass/spikesorting/v2/_draft.py --json`
-walks 46 nodes and emits exactly 4 `heuristic_resolution` warnings, all
-accounted for by the ambiguities recorded above:
+`path --up SortingSelection --file spyglass/spikesorting/v2/sorting.py --json`
+should emit only the expected `heuristic_resolution` warnings accounted for by
+the ambiguities recorded above:
 
 - `ArtifactDetection`, `ArtifactDetectionSelection`, and
-  `ArtifactDetectionParameters` each resolve to the v2 `_draft.py` class
+  `ArtifactDetectionParameters` each resolve to the v2 sorting/artifact modules
   (same-package preference) — expected.
 - `AnalysisNwbfile` resolves to `common/custom_nwbfile.py` — the documented
   common-vs-custom ambiguity; the v2 design FKs the core common table.
 
-No unaccounted warnings; no v2 `RecordingArtifact*` / `SortingAnalyzer*` FK
-resolved to a v0/v1 recompute class. The draft schema remains structurally
-implementable as recorded.
+No unaccounted warnings should remain; no v2 `RecordingArtifact*` /
+`SortingAnalyzer*` FK should resolve to a v0/v1 recompute class. The current
+schema remains structurally implementable as recorded.
