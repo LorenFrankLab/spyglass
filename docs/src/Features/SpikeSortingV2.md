@@ -478,7 +478,7 @@ from spyglass.spikesorting.v2.metric_curation import (
 )
 
 # Default Lookup rows are installed by initialize_v2_defaults().
-QualityMetricParameters().show_available_metrics()  # SI metric names you can request
+QualityMetricParameters().show_available_metrics()  # returns SI metric names you can request
 
 # Select a (CurationV2 row x metric-params x auto-rules) and populate.
 sel = AnalyzerCurationSelection.insert_selection(
@@ -520,8 +520,9 @@ Notes:
 `AnalyzerCuration.plot_units_qc(sel)` renders the population QC overview --
 one histogram per quality metric (NaN dropped) plus a unit-depth scatter
 colored by a chosen metric -- the "do these units look reasonable?" companion
-to the per-unit `describe_units` table. The v1 `BurstPair` notebook workflow is
-ported onto `AnalyzerCuration` as `plot_correlograms`,
+to the per-unit `describe_units` table. Pass `axes=...` to embed it in a
+custom matplotlib layout; the method returns the axes it drew into. The v1
+`BurstPair` notebook workflow is ported onto `AnalyzerCuration` as `plot_correlograms`,
 `investigate_pair_xcorrel`, `investigate_pair_peaks`, and `plot_peak_over_time`
 (reading the analyzer's `correlograms` / `waveforms` extensions; no separate
 `BurstPair` table).

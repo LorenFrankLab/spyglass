@@ -330,10 +330,17 @@ class QualityMetricParameters(SpyglassMixin, dj.Lookup):
         return sorted(_available_quality_metric_names())
 
     @classmethod
-    def show_available_metrics(cls) -> None:
-        """Log the available SpikeInterface quality-metric names."""
-        for name in cls.available_quality_metrics():
+    def show_available_metrics(cls) -> list[str]:
+        """Return and log the available SpikeInterface quality-metric names.
+
+        Returning the list keeps the v1 notebook-discovery helper visible in
+        Jupyter (a logger-only helper can appear to do nothing depending on the
+        notebook's logging configuration).
+        """
+        names = cls.available_quality_metrics()
+        for name in names:
             logger.info(name)
+        return names
 
     @classmethod
     def available_template_metric_columns(cls) -> list[str]:
@@ -1396,7 +1403,7 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
         return Sorting().get_analyzer({"sorting_id": sorting_id})
 
     def plot_units_qc(
-        self, key, *, metric_names=None, color_metric: str = "snr"
+        self, key, *, metric_names=None, color_metric: str = "snr", axes=None
     ):
         """Static population QC overview: metric histograms + depth scatter.
 
@@ -1404,11 +1411,15 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
         view (complement to the per-unit ``describe_units`` table). Renders one
         histogram per quality metric (NaN values dropped) and a scatter placing
         each unit at its estimated probe position colored by ``color_metric``.
-        A zero-unit sort returns an empty, labeled figure rather than raising.
+        A zero-unit sort returns an empty, labeled axes rather than raising.
+        Pass ``axes`` to draw into a notebook/dashboard layout; otherwise a
+        figure is created.
 
         Returns
         -------
-        matplotlib.figure.Figure
+        dict[str, matplotlib.axes.Axes]
+            Axes keyed by metric name plus ``"scatter"``. A zero-unit sort
+            returns ``{"empty": ax}``.
         """
         from spyglass.spikesorting.v2._metric_curation_plots import (
             plot_units_qc_figure,
@@ -1432,6 +1443,7 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
             unit_ids,
             metric_names=metric_names,
             color_metric=color_metric,
+            axes=axes,
         )
 
     def get_correlograms(self, key, *, window_ms=100.0, bin_ms=5.0):

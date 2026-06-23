@@ -3,10 +3,10 @@
 The ``@schema`` ``AnalyzerCuration`` methods delegate here so the rendering /
 SortingAnalyzer-reading logic stays importable and unit-testable without a
 DataJoint connection. ``plot_units_qc_figure`` takes plain data (a metrics
-DataFrame + unit locations) and returns a matplotlib figure; the burst helpers
-read a SortingAnalyzer's waveforms / template_similarity / unit_locations
-extensions, compute correlograms on the fly at the requested window/bin, and
-reuse the shared ``utils_burst`` renderers.
+DataFrame + unit locations) and returns the matplotlib axes it drew into; the
+burst helpers read a SortingAnalyzer's waveforms / template_similarity /
+unit_locations extensions, compute correlograms on the fly at the requested
+window/bin, and reuse the shared ``utils_burst`` renderers.
 """
 
 from __future__ import annotations
@@ -25,6 +25,15 @@ _DEFAULT_QC_METRICS = (
     "amplitude_cutoff",
     "firing_rate",
 )
+
+
+def _flatten_axes(axes):
+    """Return caller-supplied axes as a flat list."""
+    if isinstance(axes, np.ndarray):
+        return list(axes.ravel())
+    if isinstance(axes, (list, tuple)):
+        return list(np.asarray(axes, dtype=object).ravel())
+    return [axes]
 
 
 def draw_metric_histogram(ax, values, *, title, ylabel="count"):
@@ -64,6 +73,7 @@ def plot_units_qc_figure(
     metric_names: list[str] | None = None,
     color_metric: str = "snr",
     depth_axis: int = 1,
+    axes=None,
 ):
     """Render a population QC overview: metric histograms + a depth scatter.
 
@@ -85,12 +95,18 @@ def plot_units_qc_figure(
         Metric used to color the depth scatter.
     depth_axis : int
         Column of ``unit_locations`` to treat as depth (default 1 = y).
+    axes : dict, sequence, numpy.ndarray, or matplotlib.axes.Axes, optional
+        Axes to draw into. For non-empty sorts, pass either a mapping with one
+        axis per metric name plus ``"scatter"``, or a flat/numpy sequence where
+        the histogram axes come first and the scatter axis follows. For zero-unit
+        sorts, pass a single axis or ``{"empty": ax}``. If omitted, a figure is
+        created.
 
     Returns
     -------
-    matplotlib.figure.Figure
-        The QC figure. A zero-unit sort returns an empty, labeled figure
-        (never raises).
+    dict[str, matplotlib.axes.Axes]
+        Axes keyed by metric name plus ``"scatter"``. A zero-unit sort returns
+        ``{"empty": ax}`` (never raises).
     """
     import matplotlib.pyplot as plt
 
@@ -107,7 +123,25 @@ def plot_units_qc_figure(
     has_units = unit_locations is not None and len(unit_ids) > 0
 
     if not has_units:
-        fig, ax = plt.subplots(figsize=(5, 3))
+        if axes is None:
+            _, ax = plt.subplots(figsize=(5, 3))
+        elif isinstance(axes, dict):
+            if not axes:
+                raise ValueError(
+                    "plot_units_qc_figure zero-unit axes mapping must include "
+                    "'empty' or at least one axis."
+                )
+            ax = axes.get("empty") or next(iter(axes.values()))
+        else:
+            supplied = _flatten_axes(axes)
+            if not supplied:
+                raise ValueError(
+                    "plot_units_qc_figure zero-unit axes sequence must include "
+                    "at least one axis."
+                )
+            ax = supplied[0]
+            for extra in supplied[1:]:
+                extra.set_axis_off()
         ax.set_axis_off()
         ax.text(
             0.5,
@@ -116,34 +150,68 @@ def plot_units_qc_figure(
             ha="center",
             va="center",
         )
-        return fig
+        return {"empty": ax}
 
     n_cols = min(3, max(1, n_hist))
     n_hist_rows = math.ceil(n_hist / n_cols) if n_hist else 0
-    # One extra full-width row for the depth scatter.
-    n_rows = n_hist_rows + 1
-    fig, axes = plt.subplots(
-        n_rows,
-        n_cols,
-        figsize=(4 * n_cols, 3 * n_rows),
-        squeeze=False,
-    )
+    if axes is None:
+        # One extra full-width row for the depth scatter.
+        n_rows = n_hist_rows + 1
+        fig, axes_grid = plt.subplots(
+            n_rows,
+            n_cols,
+            figsize=(4 * n_cols, 3 * n_rows),
+            squeeze=False,
+        )
+        hist_axes = {
+            metric: axes_grid[index // n_cols][index % n_cols]
+            for index, metric in enumerate(metric_names)
+        }
+        # Hide unused histogram cells.
+        for index in range(n_hist, n_hist_rows * n_cols):
+            axes_grid[index // n_cols][index % n_cols].set_axis_off()
+
+        # Depth scatter spans the bottom row.
+        for col in range(n_cols):
+            axes_grid[n_rows - 1][col].remove()
+        scatter_ax = fig.add_subplot(n_rows, 1, n_rows)
+    elif isinstance(axes, dict):
+        missing = [metric for metric in metric_names if metric not in axes]
+        if "scatter" not in axes:
+            missing.append("scatter")
+        if missing:
+            raise ValueError(
+                "plot_units_qc_figure axes mapping is missing required "
+                f"key(s): {missing}"
+            )
+        hist_axes = {metric: axes[metric] for metric in metric_names}
+        scatter_ax = axes["scatter"]
+        fig = scatter_ax.figure
+    else:
+        supplied = _flatten_axes(axes)
+        needed = n_hist + 1
+        if len(supplied) < needed:
+            raise ValueError(
+                "plot_units_qc_figure needs at least "
+                f"{needed} axes ({n_hist} histogram + 1 scatter); got "
+                f"{len(supplied)}."
+            )
+        hist_axes = {
+            metric: supplied[index] for index, metric in enumerate(metric_names)
+        }
+        scatter_ax = supplied[n_hist]
+        for extra in supplied[needed:]:
+            extra.set_axis_off()
+        fig = scatter_ax.figure
 
     # Histograms: one small-multiple per metric, NaN dropped.
-    for index, metric in enumerate(metric_names):
-        ax = axes[index // n_cols][index % n_cols]
+    for metric, ax in hist_axes.items():
         draw_metric_histogram(
             ax, numeric[metric].to_numpy(dtype=float), title=metric
         )
-    # Hide unused histogram cells.
-    for index in range(n_hist, n_hist_rows * n_cols):
-        axes[index // n_cols][index % n_cols].set_axis_off()
 
     # Depth scatter spanning the bottom row: each unit at its probe position,
     # colored by the chosen metric (units with a NaN color metric drawn gray).
-    for col in range(n_cols):
-        axes[n_rows - 1][col].remove()
-    scatter_ax = fig.add_subplot(n_rows, 1, n_rows)
     locations = np.asarray(unit_locations, dtype=float)
     x = locations[:, 0]
     depth = locations[:, min(depth_axis, locations.shape[1] - 1)]
@@ -173,8 +241,11 @@ def plot_units_qc_figure(
     scatter_ax.set_ylabel("depth (um)")
     scatter_ax.set_title(f"unit depth colored by {color_metric}")
 
-    fig.tight_layout()
-    return fig
+    # Only tidy a figure we created; when the caller injects axes they own the
+    # layout (tight_layout would fight a constrained_layout / mosaic host).
+    if axes is None:
+        fig.tight_layout()
+    return {**hist_axes, "scatter": scatter_ax}
 
 
 def correlograms_from_analyzer(

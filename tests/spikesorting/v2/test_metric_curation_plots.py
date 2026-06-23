@@ -2,8 +2,8 @@
 
 Exercises ``plot_units_qc_figure`` with synthetic data under the Agg backend
 (no DataJoint, no analyzer): one histogram axis per requested metric, a depth
-scatter, NaN metrics dropped from histograms, and a zero-unit empty-but-labeled
-figure.
+scatter, caller-supplied axes, NaN metrics dropped from histograms, and a
+zero-unit empty-but-labeled axes.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ matplotlib.use("Agg")
 
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
+import matplotlib.pyplot as plt  # noqa: E402
 
 import pytest  # noqa: E402
 
@@ -33,25 +34,53 @@ def test_plot_units_qc_figure_renders_histograms_and_scatter():
         index=pd.Index([0, 1, 2], name="unit_id"),
     )
     locations = np.array([[0.0, 10.0], [5.0, 20.0], [10.0, 30.0]])
-    fig = plot_units_qc_figure(
+    axes = plot_units_qc_figure(
         metrics, locations, [0, 1, 2], metric_names=["snr", "firing_rate"]
     )
     # 2 histogram axes + 1 scatter axis (the per-column bottom cells are
     # replaced by a single spanning scatter subplot).
+    fig = axes["scatter"].figure
     titles = [ax.get_title() for ax in fig.axes]
+    assert {"snr", "firing_rate", "scatter"} <= set(axes)
     assert any("snr" == t for t in titles)
     assert any("firing_rate" == t for t in titles)
     assert any("depth" in t for t in titles)
     # The snr histogram dropped exactly one NaN unit.
-    snr_ax = next(ax for ax in fig.axes if ax.get_title() == "snr")
+    snr_ax = axes["snr"]
     assert any("NaN dropped" in txt.get_text() for txt in snr_ax.texts)
+    plt.close(fig)
+
+
+def test_plot_units_qc_figure_draws_into_supplied_axes():
+    """Caller-provided axes make the population QC plot embeddable."""
+    metrics = pd.DataFrame(
+        {"snr": [3.0, 5.0], "firing_rate": [1.0, 2.0]},
+        index=pd.Index([0, 1], name="unit_id"),
+    )
+    locations = np.array([[0.0, 10.0], [5.0, 20.0]])
+    fig, supplied = plt.subplots(1, 3)
+
+    axes = plot_units_qc_figure(
+        metrics,
+        locations,
+        [0, 1],
+        metric_names=["snr", "firing_rate"],
+        axes=supplied,
+    )
+
+    assert axes["snr"] is supplied[0]
+    assert axes["firing_rate"] is supplied[1]
+    assert axes["scatter"] is supplied[2]
+    assert supplied[2].get_title() == "unit depth colored by snr"
+    plt.close(fig)
 
 
 def test_plot_units_qc_figure_zero_unit_is_empty_but_labeled():
     """A zero-unit sort returns a labeled empty figure without raising."""
-    fig = plot_units_qc_figure(pd.DataFrame(), None, [])
-    assert fig is not None
-    assert any("No units" in txt.get_text() for txt in fig.axes[0].texts)
+    axes = plot_units_qc_figure(pd.DataFrame(), None, [])
+    assert set(axes) == {"empty"}
+    assert any("No units" in txt.get_text() for txt in axes["empty"].texts)
+    plt.close(axes["empty"].figure)
 
 
 def test_validate_unit_pairs_returns_valid_pairs():

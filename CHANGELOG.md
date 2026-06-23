@@ -99,8 +99,9 @@ into a child `CurationV2` row (`curation_source='analyzer_curation'`).
   `investigate_pair_peaks`, `plot_peak_over_time`).
 - `Sorting.add_extensions()` adds analyzer extensions in place, idempotently.
 - The clusterless `spike_location` decoding mark is now supported for v2
-  (`CurationV2`) sources; the dead legacy `_get_spike_locations` helper is
-  retired.
+  (`CurationV2`) sources; the legacy `_get_spike_locations` body is repurposed
+  for the v2 analyzer accessor and raises clearly for unsupported legacy
+  `WaveformExtractor` sources.
 - New recompute-verification tables (`RecordingArtifact*`,
   `SortingAnalyzer*` trios) regenerate and content-compare large artifacts so
   `delete_files()` reclaims disk only after a current-environment match (stale
@@ -362,9 +363,10 @@ per-spike amplitudes from its `waveforms` extension (`random_spikes`
 `method="all"` so every spike is covered, not a 500-spike subsample). Features
 are keyed by the true NWB unit_id (correct for sparse merge-applied ids), and a
 zero-unit v2 curation yields an empty-but-valid features row instead of
-crashing. No `si.extract_waveforms` on the v2 path. Supported v2 features:
-`amplitude` (what clusterless decoding uses) and `full_waveform`;
-`spike_location` is not yet wired for v2 sources and raises a clear error.
+crashing. No `si.extract_waveforms` on the v2 path. Supported v2 features at
+that checkpoint were `amplitude` (what clusterless decoding uses) and
+`full_waveform`; `spike_location` lands later in the analyzer-curation update
+above via the analyzer `spike_locations` extension.
 
 Note: v2 amplitudes are in microvolts (`return_in_uV=True`), whereas the
 legacy v0/v1 path read raw ADC counts. v2 and v1 feature magnitudes are

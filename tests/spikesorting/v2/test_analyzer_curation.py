@@ -69,6 +69,22 @@ def test_franklab_default_metric_params_include_full_qc_set(dj_conn):
 
 
 @pytest.mark.db_unit
+def test_show_available_metrics_returns_names_for_notebook(
+    dj_conn, monkeypatch
+):
+    """The notebook discovery helper is visible without relying on logging."""
+    from spyglass.spikesorting.v2.metric_curation import QualityMetricParameters
+
+    monkeypatch.setattr(
+        QualityMetricParameters,
+        "available_quality_metrics",
+        classmethod(lambda cls: ["drift", "snr"]),
+    )
+
+    assert QualityMetricParameters.show_available_metrics() == ["drift", "snr"]
+
+
+@pytest.mark.db_unit
 def test_auto_curation_rules_insert1_blocked(dj_conn):
     """Direct AutoCurationRules.insert1 is unsupported (helper-only)."""
     from spyglass.spikesorting.v2.exceptions import (
@@ -377,9 +393,9 @@ def test_analyzer_curation_viz_renders(
     )
     ac = AnalyzerCuration()
 
-    fig = ac.plot_units_qc(sel)
-    assert fig is not None
-    plt.close(fig)
+    qc_axes = ac.plot_units_qc(sel)
+    assert qc_axes
+    plt.close(next(iter(qc_axes.values())).figure)
 
     # Ported BurstPair views read the analyzer's correlograms/waveforms.
     unit_ids = list(

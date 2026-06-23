@@ -706,10 +706,12 @@ single `AnalyzerCuration` table built on the SI 0.104 `SortingAnalyzer` API
   never recomputes merge candidates at plot time. Plot helpers are read-only by
   default (a missing display-safe extension raises a clear error naming
   `Sorting.add_extensions(...)`; `compute_missing=True` computes only display-safe
-  extensions), the default backend is local `matplotlib` (`sortingview` is an
-  explicit opt-in), and no populate/export path opens a GUI, uploads, or
-  publishes. The FigPack web-curation viewer above remains separate and
-  unimplemented. (`v2/visualization.py`, `v2/_visualization.py`.)
+  extensions). Most helpers default to `matplotlib`; `plot_sorting_summary`
+  requires an explicit GUI/web backend (`spikeinterface_gui`, `sortingview`, or
+  `figpack`), and `plot_potential_merges` defaults to `ipywidgets`. No
+  populate/export path opens a GUI, uploads, or publishes. The FigPack
+  curation-state round trip remains separate and unimplemented.
+  (`v2/visualization.py`, `v2/_visualization.py`.)
 
 ---
 
