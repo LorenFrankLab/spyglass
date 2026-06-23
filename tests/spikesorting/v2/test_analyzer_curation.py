@@ -974,3 +974,69 @@ def test_snr_unaffected_by_metric_whitening(display_and_metric_analyzers):
         with_metric.loc[without_metric.index, "snr"].to_numpy(),
         without_metric["snr"].to_numpy(),
     )
+
+
+@pytest.mark.db_unit
+def test_burst_and_merge_use_display_analyzer(dj_conn):
+    """Burst legs + the merge engine run on the unwhitened display analyzer.
+
+    A planted oversplit (one cell split into units 0 and 1) scores higher
+    waveform similarity than a true pair (0, 2) and is proposed for merge when
+    read from real (unwhitened) templates -- the routing contract keeps the
+    merge engine and all burst legs on the display analyzer (whitening distorts
+    ``template_similarity`` and the ``unit_locations`` spatial gate). An
+    unwhitened analyzer here IS the display recipe (``return_in_uV`` default).
+    """
+    import spikeinterface.full as si
+
+    from spyglass.spikesorting.v2._metric_curation_plots import (
+        burst_pair_metrics_from_analyzer,
+    )
+    from spyglass.spikesorting.v2.metric_curation import AnalyzerCuration
+
+    rec, gt = si.generate_ground_truth_recording(
+        durations=[20.0], num_units=3, seed=0, sampling_frequency=30000.0
+    )
+    st0 = gt.get_unit_spike_train(gt.get_unit_ids()[0])
+    # Interleave (even/odd) rather than split disjoint halves: both halves keep
+    # the cell's full-strength template and overlap in time, so the merge
+    # engine sees an identical-shape pair whose union restores a refractory-
+    # respecting train -- the canonical oversplit it is designed to merge.
+    sort = si.NumpySorting.from_unit_dict(
+        {
+            0: st0[::2],
+            1: st0[1::2],
+            2: gt.get_unit_spike_train(gt.get_unit_ids()[1]),
+        },
+        sampling_frequency=rec.get_sampling_frequency(),
+    )
+    display = si.create_sorting_analyzer(
+        sort, rec, sparse=True, format="memory"
+    )
+    display.compute(
+        [
+            "random_spikes",
+            "noise_levels",
+            "templates",
+            "waveforms",
+            "correlograms",
+            "template_similarity",
+            "unit_locations",
+            "spike_amplitudes",
+        ],
+        extension_params={"random_spikes": {"seed": 0}},
+    )
+
+    rows = burst_pair_metrics_from_analyzer(display, pairs=[(0, 1), (0, 2)])
+    by_pair = {(r["unit1"], r["unit2"]): r for r in rows}
+    assert (
+        by_pair[(0, 1)]["wf_similarity"] > by_pair[(0, 2)]["wf_similarity"]
+    )
+
+    # x_contaminations is the cross-correlogram-contamination preset designed to
+    # catch this oversplit class (a cell split into two units); run on the
+    # unwhitened display analyzer it proposes merging 0 and 1.
+    groups = AnalyzerCuration._compute_merge_groups(
+        display, "x_contaminations", {}, {}
+    )
+    assert any(set(g) >= {0, 1} for g in groups), groups

@@ -1092,6 +1092,14 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
     # ---- visualization (notebook-facing) ---------------------------------
 
     def _analyzer_for(self, key):
+        """Return the sort's DISPLAY (unwhitened) analyzer.
+
+        All burst-pair legs, peak amplitudes, the merge engine, and the
+        notebook plots load through here, so they all read real waveforms /
+        amplitudes / positions -- never the whitened metric analyzer (which is
+        built only for the PC/NN cluster-separation metrics). ``get_analyzer``
+        with no recipe name resolves the sort's stored display recipe.
+        """
         sorting_id = (AnalyzerCurationSelection & key).fetch1("sorting_id")
         return Sorting().get_analyzer({"sorting_id": sorting_id})
 

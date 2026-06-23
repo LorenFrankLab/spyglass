@@ -308,6 +308,12 @@ def burst_pair_metrics_from_analyzer(
 
     ``pairs`` defaults to all ordered pairs; an explicit list is validated
     against the analyzer's unit ids.
+
+    All four legs are template- or spike-time-derived, so callers pass the
+    UNWHITENED display analyzer (whitening distorts ``template_similarity`` and
+    the ``unit_locations`` positions): ``AnalyzerCuration`` loads it via
+    ``_analyzer_for`` and consistency with the (also-display) merge engine the
+    diagnostic corroborates is the point.
     """
     from itertools import permutations
 
