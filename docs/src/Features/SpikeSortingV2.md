@@ -836,7 +836,7 @@ Sorting.populate(sort_key)
 # 5. (optional) Back-map the concatenated sort into per-session sortings.
 sorting = Sorting().get_analyzer(sort_key).sorting
 per_session = ConcatenatedRecording().split_sorting_by_session(sorting, concat_key)
-# -> {(nwb_file_name, sort_group_id, interval_list_name): si.BaseSorting} in
+# -> {(nwb_file_name, sort_group_id, interval_list_name, team_name): si.BaseSorting}
 #    each member's own sample frame, unit ids preserved.
 ```
 

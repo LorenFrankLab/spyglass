@@ -100,23 +100,39 @@ def test_split_maps_to_local_member_frames():
     np.testing.assert_array_equal(per_member[1][9], [0])
 
 
-def test_member_split_key_disambiguates_same_nwb_interval():
-    """Two members sharing nwb_file_name + interval but on DIFFERENT sort
-    groups get distinct split keys (the lossy 2-tuple would collide them)."""
-    member_a = {
+def test_member_split_key_disambiguates_same_spatial_member():
+    """The split key is the full member identity (nwb, sort_group, interval,
+    team), so two members sharing nwb+interval but differing in sort group OR
+    team get distinct keys -- a lossy (nwb, interval) key would collide them."""
+    member = {
         "nwb_file_name": "day1_.nwb",
         "sort_group_id": 0,
         "interval_list_name": "raw data valid times",
+        "team_name": "team_a",
     }
-    member_b = {**member_a, "sort_group_id": 1}
-    key_a = member_split_key(member_a)
-    key_b = member_split_key(member_b)
-    assert key_a == ("day1_.nwb", 0, "raw data valid times")
-    assert key_a != key_b
-    assert len({key_a, key_b}) == 2
-    # The lossy (nwb, interval) key WOULD have collided -- guard against a
-    # regression back to it.
-    assert key_a[::2] == key_b[::2]  # same nwb + interval, differ only in sg
+    assert member_split_key(member) == (
+        "day1_.nwb",
+        0,
+        "raw data valid times",
+        "team_a",
+    )
+    # Same NWB + interval, different sort group -> distinct.
+    other_group = {**member, "sort_group_id": 1}
+    assert member_split_key(member) != member_split_key(other_group)
+    # Same NWB + interval + sort group, different team (allowed mixed-team
+    # member) -> still distinct, not silently overwritten.
+    other_team = {**member, "team_name": "team_b"}
+    assert member_split_key(member) != member_split_key(other_team)
+    assert (
+        len(
+            {
+                member_split_key(member),
+                member_split_key(other_group),
+                member_split_key(other_team),
+            }
+        )
+        == 3
+    )
 
 
 def test_split_preserves_unit_ids_with_empty_arrays():

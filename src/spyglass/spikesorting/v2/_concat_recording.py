@@ -61,29 +61,32 @@ def member_recording_selection_key(
 def member_split_key(member: dict) -> tuple:
     """Hashable per-member key for ``split_sorting_by_session`` output.
 
-    Returns ``(nwb_file_name, sort_group_id, interval_list_name)``. The
-    ``sort_group_id`` is in the key -- not just ``(nwb_file_name,
-    interval_list_name)`` -- so two members from the same NWB file and interval
-    but DIFFERENT sort groups map to distinct keys instead of one silently
-    overwriting the other. (The full member dict, which also carries
-    ``team_name`` / ``member_index``, is not hashable as a dict; these three
-    fields are the spatial identity a per-session sorting is addressed by.)
+    Returns the full member identity
+    ``(nwb_file_name, sort_group_id, interval_list_name, team_name)`` -- the
+    same fields (minus the shared preprocessing recipe) that resolve a member's
+    ``RecordingSelection``. Keying on all four means no two distinct members
+    collide: ``sort_group_id`` separates two shanks of the same NWB/interval,
+    and ``team_name`` separates the mixed-team case (``create_group`` permits
+    the same spatial member under two teams, since its duplicate guard also
+    keys on ``team_name``). The full member dict is not hashable, so this tuple
+    is the addressable per-session identity.
 
     Parameters
     ----------
     member : dict
         A ``SessionGroup.Member`` row carrying ``nwb_file_name``,
-        ``sort_group_id``, ``interval_list_name``.
+        ``sort_group_id``, ``interval_list_name``, ``team_name``.
 
     Returns
     -------
-    tuple[str, int, str]
-        The hashable member key.
+    tuple[str, int, str, str]
+        The hashable member identity key.
     """
     return (
         member["nwb_file_name"],
         int(member["sort_group_id"]),
         member["interval_list_name"],
+        member["team_name"],
     )
 
 

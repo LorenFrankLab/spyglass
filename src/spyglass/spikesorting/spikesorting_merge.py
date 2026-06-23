@@ -478,7 +478,7 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         return spike_indicator
 
     @classmethod
-    def get_unit_brain_regions(cls, key):
+    def get_unit_brain_regions(cls, key, *, allow_anchor_member=False):
         """Per-unit brain regions for a merge_key.
 
         Dispatches through ``source_class_dict`` to the source table's
@@ -492,6 +492,12 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         ----------
         key : dict
             A merge_key (or any restriction that resolves to one).
+        allow_anchor_member : bool, optional
+            Passed through to the v2 source accessor. A concat-backed v2 sort
+            raises ``ConcatBrainRegionAmbiguousError`` by default; pass ``True``
+            to return the anchor (first ``SessionGroup.Member``) regions
+            (labeled ``region_resolution="anchor_member"``). Ignored by sources
+            that do not accept it.
 
         Returns
         -------
@@ -520,7 +526,9 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
                 "SpikeSortingOutput.get_unit_brain_regions: merge_key "
                 f"matched {len(part_rows)} part rows; expected exactly one."
             )
-        return source_table().get_unit_brain_regions(part_rows[0])
+        return source_table().get_unit_brain_regions(
+            part_rows[0], allow_anchor_member=allow_anchor_member
+        )
 
     @classmethod
     def get_firing_rate(

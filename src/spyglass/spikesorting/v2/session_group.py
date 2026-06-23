@@ -630,9 +630,23 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         # the NWB, so a failure in this pure arithmetic cannot orphan a staged
         # file (the staged-file cleanup below only covers the write onward).
         boundaries = cumulative_member_boundaries(member_sample_counts)
+        corrected_n_samples = int(corrected.get_num_samples())
+        # Member boundaries come from the PRE-motion per-member sample counts;
+        # motion correction is interpolation that preserves sample count. Guard
+        # that invariant explicitly -- a mismatch (an SI change or an unexpected
+        # preset that resampled) would silently misalign the boundaries and
+        # corrupt split_sorting_by_session's back-mapping.
+        if boundaries and corrected_n_samples != boundaries[-1]:
+            raise RuntimeError(
+                "ConcatenatedRecording.make: the motion-corrected recording "
+                f"has {corrected_n_samples} samples but the cumulative member "
+                f"sample count is {boundaries[-1]}; motion correction must "
+                "preserve the sample count or the MemberBoundary back-mapping "
+                "would be wrong."
+            )
         sampling_frequency = float(corrected.get_sampling_frequency())
         n_channels = int(corrected.get_num_channels())
-        total_duration_s = int(corrected.get_num_samples()) / sampling_frequency
+        total_duration_s = corrected_n_samples / sampling_frequency
 
         # Anchor the analysis NWB to the FIRST member's session (deterministic
         # parent); full multi-session provenance stays queryable through

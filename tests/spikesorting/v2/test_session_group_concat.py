@@ -620,11 +620,15 @@ def test_concat_sort_end_to_end_and_split(same_day_group):
         sorting_obj, concat_pk
     )
     members = grp["same_day_members"]
-    # Keyed by the full member identity (nwb, sort_group_id, interval) so two
-    # members sharing nwb/interval but distinct sort groups cannot collide; one
-    # entry per member.
+    # Keyed by the full member identity (nwb, sort_group_id, interval, team) so
+    # two distinct members never collide; one entry per member.
     assert set(split) == {
-        (m["nwb_file_name"], m["sort_group_id"], m["interval_list_name"])
+        (
+            m["nwb_file_name"],
+            m["sort_group_id"],
+            m["interval_list_name"],
+            grp["owner"],
+        )
         for m in members
     }
     assert len(split) == len(members)
@@ -635,7 +639,7 @@ def test_concat_sort_end_to_end_and_split(same_day_group):
         for m, rec_pk in zip(members, grp["recording_pks"])
     }
     all_unit_ids = set(sorting_obj.unit_ids)
-    for (nwb_file_name, _sg, _interval), member_sorting in split.items():
+    for (nwb_file_name, _sg, _interval, _team), member_sorting in split.items():
         # Unit ids are preserved across every member.
         assert set(member_sorting.unit_ids) == all_unit_ids
         # Every spike falls within that member's local sample range.
@@ -700,6 +704,15 @@ def test_concat_sort_end_to_end_and_split(same_day_group):
     assert list(merge_recording.get_channel_ids()) == list(
         concat_recording.get_channel_ids()
     )
+
+    # The concat brain-region anchor opt-in is reachable through the merge API:
+    # default raises, allow_anchor_member=True returns anchor-member regions.
+    with pytest.raises(ConcatBrainRegionAmbiguousError):
+        SpikeSortingOutput().get_unit_brain_regions({"merge_id": merge_id})
+    merge_regions = SpikeSortingOutput().get_unit_brain_regions(
+        {"merge_id": merge_id}, allow_anchor_member=True
+    )
+    assert (merge_regions["region_resolution"] == "anchor_member").all()
 
 
 # ---------- memory / runtime measurement ----------------------------------
