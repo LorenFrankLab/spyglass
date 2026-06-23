@@ -525,14 +525,19 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
                     f"({exc!r})."
                 )
                 continue
+            # Append a MAPPING row (not a positional tuple) so the insert hook
+            # backfills the omitted execution_params (default local execution) +
+            # its schema version -- a positional row would have to enumerate all
+            # SorterParameters columns and would break the moment the table gains
+            # one (as it did with execution_params).
             rows.append(
-                (
-                    sorter,
-                    "default",
-                    validated,
-                    _params_schema_version(validated),
-                    None,
-                )
+                {
+                    "sorter": sorter,
+                    "sorter_params_name": "default",
+                    "params": validated,
+                    "params_schema_version": _params_schema_version(validated),
+                    "job_kwargs": None,
+                }
             )
         if skipped_not_installed:
             logger.info(
