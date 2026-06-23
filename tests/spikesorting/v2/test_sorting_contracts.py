@@ -66,6 +66,23 @@ def test_sorting_computed_matches_make_insert_signature():
 
 
 @pytest.mark.usefixtures("dj_conn")
+def test_sorting_fetched_matches_make_compute_signature():
+    """The tri-part dispatch splats ``SortingFetched`` POSITIONALLY into
+    ``make_compute(key, *fetched)``, so the NamedTuple field order is a wire
+    contract. ``execution_params`` was appended to both ``SortingFetched`` and
+    ``make_compute`` -- a misalignment would silently mis-bind the str-adjacent
+    slots (nwb_file_name / display_waveform_params_name) without a TypeError.
+    """
+    import inspect
+
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingFetched
+
+    params = list(inspect.signature(Sorting.make_compute).parameters)
+    assert params[:2] == ["self", "key"]
+    assert tuple(params[2:]) == SortingFetched._fields
+
+
+@pytest.mark.usefixtures("dj_conn")
 def test_analyzer_curation_tuples_match_make_signatures():
     """AnalyzerCuration's tri-part NamedTuples are POSITIONAL wire contracts.
 

@@ -1,8 +1,10 @@
 """``Sorting._run_si_sorter`` dispatch invariants.
 
 Covers the MS4 ``numpy.Inf`` global shim teardown, tempdir-cleanup not masking
-the real sort exception, SI global ``job_kwargs`` set/restore, and the
-MATLAB-sorter Singularity carve-out (with its non-MATLAB contrast).
+the real sort exception, SI global ``job_kwargs`` set/restore, the tracked
+container-execution backend (local vs Docker/Singularity run_sorter kwargs +
+the MATLAB-sorter container policy), and keeping SI job kwargs off the
+run_sorter call.
 """
 
 from __future__ import annotations
@@ -204,15 +206,13 @@ def test_run_si_sorter_restores_global_job_kwargs_on_success(
 
 
 @pytest.mark.usefixtures("dj_conn")
-def test_run_si_sorter_matlab_carveout(monkeypatch):
-    """A MATLAB sorter gets ``singularity_image=True`` and the
-    container-incompatible kwargs stripped.
+def test_matlab_sorters_require_explicit_container_backend(monkeypatch):
+    """MATLAB-backed sorters cannot run on a local execution backend.
 
-    The MATLAB carve-out (``kilosort2_5`` / ``kilosort3`` / ``ironclust``)
-    forces Singularity containerization and removes the
-    ``_MATLAB_SORTER_STRIP_KWARGS`` (``tempdir`` / ``mp_context`` /
-    ``max_threads_per_process``) that the container rejects. We capture the
-    kwargs ``run_sorter`` actually receives.
+    ``kilosort2_5`` / ``kilosort3`` / ``ironclust`` ship only as container
+    images, so a default/local execution row raises a clear
+    tracked-container-backend message BEFORE ``run_sorter`` is reached -- the old
+    name-based ``singularity_image=True`` auto-fallback is gone.
     """
     import uuid
 
@@ -221,40 +221,29 @@ def test_run_si_sorter_matlab_carveout(monkeypatch):
 
     from spyglass.spikesorting.v2.sorting import Sorting
 
-    captured = {}
+    def _must_not_run(**kwargs):
+        raise AssertionError("run_sorter must not be reached for a local MATLAB row")
 
-    def _capture(**kwargs):
-        captured.update(kwargs)
-        return object()
-
-    monkeypatch.setattr(sis, "run_sorter", _capture)
+    monkeypatch.setattr(sis, "run_sorter", _must_not_run)
     rec = si.generate_recording(
         num_channels=4, durations=[1.0], sampling_frequency=30_000.0
     )
-    sorter_params = {
-        "tempdir": "/should/be/stripped",
-        "mp_context": "spawn",
-        "max_threads_per_process": 4,
-        "detect_threshold": 6.0,  # a real param that must survive
-    }
-    Sorting._run_si_sorter("kilosort2_5", sorter_params, rec, uuid.uuid4(), {})
-
-    assert (
-        captured.get("singularity_image") is True
-    ), "MATLAB sorter must run under Singularity"
-    for stripped in ("tempdir", "mp_context", "max_threads_per_process"):
-        assert (
-            stripped not in captured
-        ), f"{stripped!r} should be stripped for a MATLAB sorter"
-    assert (
-        captured.get("detect_threshold") == 6.0
-    ), "a non-stripped sorter param must reach run_sorter"
+    for sorter in ("kilosort2_5", "kilosort3", "ironclust"):
+        # execution_params omitted -> default local -> must raise.
+        with pytest.raises(ValueError, match="container"):
+            Sorting._run_si_sorter(sorter, {}, rec, uuid.uuid4(), {})
 
 
 @pytest.mark.usefixtures("dj_conn")
-def test_run_si_sorter_non_matlab_keeps_kwargs(monkeypatch):
-    """Contrast: a non-MATLAB sorter keeps every param and gets no
-    Singularity flag -- proving the carve-out is sorter-name-gated."""
+def test_run_si_sorter_passes_container_kwargs(monkeypatch):
+    """Container execution rows pass the right SI run_sorter container kwargs.
+
+    A Singularity row for a MATLAB sorter passes ``singularity_image=<image>`` +
+    the container-install controls, AND strips the container-incompatible
+    ``MATLAB_SORTER_STRIP_KWARGS`` while keeping a real sorter param. A Docker row
+    for MS4 passes ``docker_image=<image>``. A local row passes no container
+    kwargs.
+    """
     import uuid
 
     import spikeinterface as si
@@ -262,7 +251,89 @@ def test_run_si_sorter_non_matlab_keeps_kwargs(monkeypatch):
 
     from spyglass.spikesorting.v2.sorting import Sorting
 
-    captured = {}
+    captured: dict = {}
+    monkeypatch.setattr(
+        sis, "run_sorter", lambda **k: captured.update(k) or object()
+    )
+    rec = si.generate_recording(
+        num_channels=4, durations=[1.0], sampling_frequency=30_000.0
+    )
+
+    # Singularity MATLAB row: image + install controls passed; strip applied.
+    captured.clear()
+    Sorting._run_si_sorter(
+        "kilosort2_5",
+        {
+            "tempdir": "/strip/me",
+            "mp_context": "spawn",
+            "max_threads_per_process": 4,
+            "detect_threshold": 6.0,  # a real param that must survive
+        },
+        rec,
+        uuid.uuid4(),
+        {},
+        {
+            "backend": "singularity",
+            "container_image": "ks-image.sif",
+            "installation_mode": "pypi",
+            "spikeinterface_version": "0.104.3",
+        },
+    )
+    assert captured["singularity_image"] == "ks-image.sif"
+    assert "docker_image" not in captured
+    assert captured["installation_mode"] == "pypi"
+    assert captured["spikeinterface_version"] == "0.104.3"
+    assert captured["delete_container_files"] is True
+    for stripped in ("tempdir", "mp_context", "max_threads_per_process"):
+        assert stripped not in captured, f"{stripped!r} must be stripped"
+    assert captured["detect_threshold"] == 6.0
+
+    # Docker MS4 row: docker_image passed (no MATLAB strip -- MS4 is not MATLAB).
+    captured.clear()
+    Sorting._run_si_sorter(
+        "mountainsort4",
+        {"adjacency_radius": 100.0},
+        rec,
+        uuid.uuid4(),
+        {},
+        {
+            "backend": "docker",
+            "container_image": "ms4-image:0.104.3",
+            "installation_mode": "no-install",
+        },
+    )
+    assert captured["docker_image"] == "ms4-image:0.104.3"
+    assert "singularity_image" not in captured
+    assert captured["installation_mode"] == "no-install"
+    assert captured["adjacency_radius"] == 100.0
+
+    # Local row: no container kwargs at all.
+    captured.clear()
+    Sorting._run_si_sorter(
+        "mountainsort5", {"tempdir": "/keep/me"}, rec, uuid.uuid4(), {}
+    )
+    assert "singularity_image" not in captured
+    assert "docker_image" not in captured
+    assert "installation_mode" not in captured
+    assert captured.get("tempdir") == "/keep/me"  # not a MATLAB sorter -> kept
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_run_si_sorter_keeps_job_kwargs_out_of_sorter_params(monkeypatch):
+    """SI job kwargs install via the global; execution kwargs are run kwargs.
+
+    ``n_jobs`` / ``chunk_duration`` must NOT reach ``run_sorter(**...)`` (they
+    would trip strict per-sorter validators); they install via
+    ``set_global_job_kwargs``. Container execution kwargs DO reach ``run_sorter``.
+    """
+    import uuid
+
+    import spikeinterface as si
+    import spikeinterface.sorters as sis
+
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    captured: dict = {}
     monkeypatch.setattr(
         sis, "run_sorter", lambda **k: captured.update(k) or object()
     )
@@ -270,7 +341,20 @@ def test_run_si_sorter_non_matlab_keeps_kwargs(monkeypatch):
         num_channels=4, durations=[1.0], sampling_frequency=30_000.0
     )
     Sorting._run_si_sorter(
-        "mountainsort5", {"tempdir": "/keep/me"}, rec, uuid.uuid4(), {}
+        "mountainsort4",
+        {"adjacency_radius": 100.0},
+        rec,
+        uuid.uuid4(),
+        {"n_jobs": 2, "chunk_duration": "2s"},
+        {
+            "backend": "singularity",
+            "container_image": "img.sif",
+            "installation_mode": "no-install",
+        },
     )
-    assert "singularity_image" not in captured
-    assert captured.get("tempdir") == "/keep/me"
+    # Job kwargs route through the SI global, never into run_sorter kwargs.
+    assert "n_jobs" not in captured
+    assert "chunk_duration" not in captured
+    # Execution kwargs DO reach run_sorter.
+    assert captured["singularity_image"] == "img.sif"
+    assert captured["installation_mode"] == "no-install"

@@ -54,6 +54,13 @@ class _PipelinePreset(BaseModel):
         None  # informational MS4 spatial radius
     )
     recommendation_status: str = ""  # production | alternative | experimental
+    # Sorter EXECUTION backend (discovery metadata mirroring the referenced
+    # SorterParameters row's execution_params; the row is the source of truth).
+    # "local" runs the sorter on the host; "docker"/"singularity" run it in the
+    # pinned ``container_image``. A catalog drift-guard keeps these in lockstep
+    # with the row's execution_params.
+    execution_backend: str = "local"  # local | docker | singularity
+    container_image: str = ""  # pinned image for a container backend ("" local)
     intended_use: str = ""  # one-line "when to reach for this pipeline preset"
     threshold_units: str = ""  # detection-threshold units (sigma / µV)
     notes: str = ""  # key assumptions (probe geometry, sampling rate, etc.)
@@ -123,6 +130,8 @@ def describe_pipeline_presets() -> "pd.DataFrame":
         "sorter",
         "sorter_family",
         "adjacency_radius_um",
+        "execution_backend",
+        "container_image",
         "preprocessing_params_name",
         "artifact_detection_params_name",
         "sorter_params_name",
@@ -140,6 +149,8 @@ def describe_pipeline_presets() -> "pd.DataFrame":
             "sorter": preset.sorter,
             "sorter_family": preset.sorter_family,
             "adjacency_radius_um": preset.adjacency_radius_um,
+            "execution_backend": preset.execution_backend,
+            "container_image": preset.container_image,
             "preprocessing_params_name": preset.preprocessing_params_name,
             "artifact_detection_params_name": (
                 preset.artifact_detection_params_name

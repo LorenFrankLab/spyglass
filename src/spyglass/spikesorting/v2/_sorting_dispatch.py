@@ -28,17 +28,105 @@ imported lazily inside the functions, and none touches the DB at call time.
 
 from __future__ import annotations
 
-# Sorters that ship as MATLAB containers in SpikeInterface. These need
-# ``singularity_image=True`` and a small kwarg-strip carve-out so the
-# default Lookup rows survive containerization. The check is
-# name-only; users who insert custom rows for other MATLAB sorters can
-# extend this set.
+# MATLAB-backed sorters in SpikeInterface (Kilosort 2.5 / 3, IronClust). Their
+# algorithm runtime is a compiled MATLAB binary that ships only as a container
+# image, so they CANNOT run on a ``backend="local"`` execution row -- a local
+# row for one of these raises a clear error (see
+# ``assert_matlab_sorter_has_container_backend``). This replaces the old
+# name-based ``singularity_image=True`` auto-fallback: the container backend now
+# comes from tracked ``SorterParameters.execution_params`` provenance, never
+# from the sorter name alone, so an existing custom Kilosort/IronClust row is
+# never silently reinterpreted as local execution.
 MATLAB_SORTERS = ("kilosort2_5", "kilosort3", "ironclust")
+# Sorter kwargs that do not survive containerization of the MATLAB sorters
+# (they reference host paths / host process settings). Stripped only when one of
+# the MATLAB sorters runs on a container backend.
 MATLAB_SORTER_STRIP_KWARGS = (
     "tempdir",
     "mp_context",
     "max_threads_per_process",
 )
+
+
+def is_container_backend(execution_params: dict) -> bool:
+    """Return ``True`` when the validated execution row selects a container."""
+    return execution_params.get("backend") in ("docker", "singularity")
+
+
+def matlab_container_required_message(sorter: str) -> str:
+    """Build the error message for a MATLAB sorter on a local execution row."""
+    return (
+        f"Sorter {sorter!r} is a MATLAB-backed sorter (Kilosort 2.5/3, "
+        "IronClust) whose runtime ships only as a container image; it cannot "
+        "run with execution backend 'local'. Insert a SorterParameters row "
+        "whose execution_params selects backend='docker' or 'singularity' with "
+        "an explicit container_image. (The old name-based "
+        "singularity_image=True fallback was removed in favor of tracked "
+        "execution provenance, so an existing local row for this sorter is no "
+        "longer silently containerized.)"
+    )
+
+
+def assert_matlab_sorter_has_container_backend(
+    sorter: str, execution_params: dict
+) -> None:
+    """Raise if a MATLAB-backed sorter is on a local execution backend.
+
+    The explicit execution-policy check that replaced the old name-based
+    Singularity auto-fallback. Shared by ``run_si_sorter`` (which raises) and
+    ``preflight`` (which surfaces the same message as a failed check) so the two
+    cannot drift.
+    """
+    if sorter.lower() in MATLAB_SORTERS and not is_container_backend(
+        execution_params
+    ):
+        raise ValueError(matlab_container_required_message(sorter))
+
+
+def build_run_sorter_container_kwargs(execution_params: dict) -> dict:
+    """Build the container ``run_sorter`` kwargs from a validated execution row.
+
+    Returns ``{}`` for ``backend="local"`` (no container kwargs at all). For a
+    container backend, returns the SpikeInterface ``run_sorter`` execution kwargs:
+    ``docker_image`` / ``singularity_image`` set to the explicit
+    ``container_image``, ``delete_container_files``, and the container-install
+    controls (``installation_mode`` always; ``spikeinterface_version`` only when
+    pinned; ``extra_requirements`` only when non-empty). SI's public
+    ``run_sorter`` signature names only ``docker_image`` / ``singularity_image`` /
+    ``delete_container_files``; the install controls reach ``run_sorter_container``
+    through ``**sorter_params``. These originate ONLY here (from
+    ``execution_params``), never from the scientific sorter ``params`` blob.
+
+    Parameters
+    ----------
+    execution_params : dict
+        A validated ``SorterExecutionParamsSchema`` dump.
+
+    Returns
+    -------
+    dict
+        The container-execution kwargs to splat into ``sis.run_sorter`` (empty
+        for local).
+    """
+    if not is_container_backend(execution_params):
+        return {}
+    backend = execution_params["backend"]
+    image = execution_params["container_image"]
+    image_key = "docker_image" if backend == "docker" else "singularity_image"
+    kwargs = {
+        image_key: image,
+        "delete_container_files": execution_params["delete_container_files"],
+        # ``installation_mode`` is meaningful for every container backend
+        # (including "auto"); pass it explicitly so the run records the choice.
+        "installation_mode": execution_params["installation_mode"],
+    }
+    if execution_params.get("spikeinterface_version") is not None:
+        kwargs["spikeinterface_version"] = execution_params[
+            "spikeinterface_version"
+        ]
+    if execution_params.get("extra_requirements"):
+        kwargs["extra_requirements"] = execution_params["extra_requirements"]
+    return kwargs
 
 
 def pinned_whiten(recording, *, random_seed: int = 0):
@@ -310,6 +398,7 @@ def run_si_sorter(
     recording,
     sorting_id,
     job_kwargs,
+    execution_params=None,
 ):
     """Run an SI registered sorter under a managed scratch dir.
 
@@ -327,10 +416,17 @@ def run_si_sorter(
     artifact-masked frames should not bias whitening's covariance
     estimate.
 
-    MATLAB sorters (Kilosort 2.5 / 3, IronClust) get
-    ``singularity_image=True`` and the strip-kwargs carve-out:
-    ``tempdir`` / ``mp_context`` / ``max_threads_per_process`` do
-    not survive containerization.
+    Container execution: the ``execution_params`` row selects the backend.
+    ``backend="local"`` runs the sorter on the host (no container kwargs). A
+    container backend passes SI's ``docker_image`` / ``singularity_image`` (the
+    explicit pinned image) plus the container-install controls
+    (``build_run_sorter_container_kwargs``). MATLAB-backed sorters
+    (Kilosort 2.5 / 3, IronClust) MUST select a container backend -- a local
+    row raises (``assert_matlab_sorter_has_container_backend``); the old
+    name-based ``singularity_image=True`` auto-fallback is gone. The
+    ``MATLAB_SORTER_STRIP_KWARGS`` (``tempdir`` / ``mp_context`` /
+    ``max_threads_per_process``) are stripped only when a MATLAB sorter runs on
+    a container backend (they do not survive containerization).
 
     Parameters
     ----------
@@ -347,6 +443,9 @@ def run_si_sorter(
     job_kwargs : dict or None
         Resolved SI job kwargs installed via
         ``set_global_job_kwargs``; ``random_seed`` is stripped first.
+    execution_params : dict or None, optional
+        The validated ``SorterExecutionParamsSchema`` dump from
+        ``Sorting.make_fetch``. ``None`` resolves to default local execution.
 
     Returns
     -------
@@ -361,7 +460,17 @@ def run_si_sorter(
     import spikeinterface.sorters as sis
 
     from spyglass.settings import temp_dir as spyglass_temp_dir
+    from spyglass.spikesorting.v2._params.sorter import (
+        validate_execution_params,
+    )
     from spyglass.utils import logger
+
+    # Resolve + validate execution provenance (None -> default local), then
+    # enforce the MATLAB-sorter container policy BEFORE any scratch/whitening
+    # work so a misconfigured local MATLAB row fails fast and clearly.
+    execution_params = validate_execution_params(execution_params)
+    assert_matlab_sorter_has_container_backend(sorter, execution_params)
+    container_kwargs = build_run_sorter_container_kwargs(execution_params)
 
     sorter_temp_dir = tempfile.TemporaryDirectory(
         prefix=f"sort_{sorting_id}_",
@@ -425,9 +534,21 @@ def run_si_sorter(
             recording=recording,
             folder=sorter_temp_dir.name,
             remove_existing_folder=True,
+            # Container execution kwargs (empty for local). docker_image /
+            # singularity_image / delete_container_files bind to run_sorter's
+            # named params; installation_mode / spikeinterface_version /
+            # extra_requirements flow through **sorter_params into
+            # run_sorter_container. They originate ONLY from execution_params --
+            # the reserved-key rule keeps them out of the scientific params blob,
+            # so there is no collision with **effective_params below.
+            **container_kwargs,
         )
-        if sorter.lower() in MATLAB_SORTERS:
-            run_kwargs["singularity_image"] = True
+        # The MATLAB-sorter kwarg strip is needed only when one of those sorters
+        # actually runs in a container; it is gated on the selected backend, not
+        # the sorter name alone.
+        if sorter.lower() in MATLAB_SORTERS and is_container_backend(
+            execution_params
+        ):
             effective_params = {
                 k: v
                 for k, v in sorter_params.items()

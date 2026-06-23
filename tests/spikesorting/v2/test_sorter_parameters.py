@@ -253,3 +253,190 @@ def test_sorter_parameters_rejects_unknown_sorter_name(request):
         SorterParameters
         & {"sorter": "simple", "sorter_params_name": "audit_a5_escape_hatch"}
     ).fetch1("params_schema_version") == 1
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_sorter_parameters_tracks_execution_params(request):
+    """SorterParameters carries validated execution_params + schema version.
+
+    A local row and a containerized row with IDENTICAL scientific params coexist
+    under distinct names because the duplicate-content fingerprint folds
+    execution_params in; a second name for the SAME (params + execution) still
+    forks provenance and is rejected.
+    """
+    from spyglass.spikesorting.v2.exceptions import (
+        DuplicateParameterContentError,
+    )
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    # adjacency_radius=77 is a custom value no shipped row uses, so these rows
+    # cannot collide with the catalog's MS4 rows.
+    params = {"adjacency_radius": 77.0}
+    names = (
+        "exec_test_local",
+        "exec_test_singularity",
+        "exec_test_local_dup",
+    )
+    request.addfinalizer(
+        lambda: (
+            SorterParameters
+            & [
+                {"sorter": "mountainsort4", "sorter_params_name": n}
+                for n in names
+            ]
+        ).delete(safemode=False)
+    )
+
+    # Local row: execution_params omitted -> backfilled to default local.
+    SorterParameters().insert1(
+        {
+            "sorter": "mountainsort4",
+            "sorter_params_name": "exec_test_local",
+            "params": dict(params),
+            "job_kwargs": None,
+        },
+        skip_duplicates=True,
+    )
+    # Containerized row: SAME scientific params, distinct name + execution.
+    SorterParameters().insert1(
+        {
+            "sorter": "mountainsort4",
+            "sorter_params_name": "exec_test_singularity",
+            "params": dict(params),
+            "job_kwargs": None,
+            "execution_params": {
+                "backend": "singularity",
+                "container_image": "my-image.sif",
+            },
+        },
+        skip_duplicates=True,
+    )
+
+    local_exec, local_ver = (
+        SorterParameters
+        & {"sorter": "mountainsort4", "sorter_params_name": "exec_test_local"}
+    ).fetch1("execution_params", "execution_params_schema_version")
+    assert local_exec["backend"] == "local"
+    assert local_exec["container_image"] is None
+    assert int(local_ver) == 1
+
+    cont_exec, cont_ver = (
+        SorterParameters
+        & {
+            "sorter": "mountainsort4",
+            "sorter_params_name": "exec_test_singularity",
+        }
+    ).fetch1("execution_params", "execution_params_schema_version")
+    assert cont_exec["backend"] == "singularity"
+    assert cont_exec["container_image"] == "my-image.sif"
+    assert int(cont_ver) == 1
+
+    # A SECOND name for the same (params + local execution) forks provenance.
+    with pytest.raises(DuplicateParameterContentError):
+        SorterParameters().insert1(
+            {
+                "sorter": "mountainsort4",
+                "sorter_params_name": "exec_test_local_dup",
+                "params": dict(params),
+                "job_kwargs": None,
+            },
+            skip_duplicates=True,
+        )
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_container_kwargs_not_allowed_in_sorter_params(request):
+    """Reserved execution keys are rejected from params AND job_kwargs.
+
+    The rule holds across strict (``extra="forbid"``: mountainsort4) and
+    permissive (``extra="allow"``: kilosort4, spykingcircus2) sorter schemas,
+    and for the ``job_kwargs`` blob too -- container backend / install provenance
+    is tracked only on ``execution_params``.
+    """
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    request.addfinalizer(
+        lambda: (
+            SorterParameters
+            & [
+                {"sorter": s, "sorter_params_name": n}
+                for s, n in (
+                    ("mountainsort4", "reserved_strict"),
+                    ("kilosort4", "reserved_permissive"),
+                    ("spykingcircus2", "reserved_jobkwargs"),
+                )
+            ]
+        ).delete(safemode=False)
+    )
+
+    # Strict schema (extra="forbid") -- rejected (Pydantic or the guard; both
+    # are ValueError subclasses naming the key).
+    with pytest.raises(ValueError, match="docker_image"):
+        SorterParameters().insert1(
+            {
+                "sorter": "mountainsort4",
+                "sorter_params_name": "reserved_strict",
+                "params": {"adjacency_radius": 100.0, "docker_image": "x"},
+                "job_kwargs": None,
+            },
+            skip_duplicates=True,
+        )
+
+    # Permissive schema (extra="allow") -- the explicit reserved-key guard
+    # catches what Pydantic would otherwise pass through.
+    with pytest.raises(ValueError, match="singularity_image"):
+        SorterParameters().insert1(
+            {
+                "sorter": "kilosort4",
+                "sorter_params_name": "reserved_permissive",
+                "params": {"singularity_image": "x"},
+                "job_kwargs": None,
+            },
+            skip_duplicates=True,
+        )
+
+    # Reserved keys are also rejected from job_kwargs.
+    with pytest.raises(ValueError, match="installation_mode"):
+        SorterParameters().insert1(
+            {
+                "sorter": "spykingcircus2",
+                "sorter_params_name": "reserved_jobkwargs",
+                "params": {},
+                "job_kwargs": {"installation_mode": "pypi"},
+            },
+            skip_duplicates=True,
+        )
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_container_ms4_default_row_inserts_without_local_ms4(monkeypatch):
+    """Containerized MS4 rows are insertable even when local MS4 is absent.
+
+    ``_gated_default_rows`` splits the default catalog by install/backend: with
+    ``mountainsort4`` removed from ``installed_sorters()``, the LOCAL MS4 rows are
+    skipped (as today) but the CONTAINER MS4 rows -- whose runtime lives in the
+    image -- stay insertable.
+    """
+    import spikeinterface.sorters as sis
+
+    from spyglass.spikesorting.v2._recipe_catalog import (
+        MS4_30KHZ,
+        MS4_DOCKER_30KHZ,
+        MS4_SINGULARITY_30KHZ,
+    )
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    real_installed = set(sis.installed_sorters())
+    monkeypatch.setattr(
+        sis, "installed_sorters", lambda: sorted(real_installed - {"mountainsort4"})
+    )
+
+    insertable, skipped = SorterParameters._gated_default_rows()
+    insertable_names = {(r[0], r[1]) for r in insertable}
+    skipped_names = {(r[0], r[1]) for r in skipped}
+
+    # Local MS4 is skipped (its runtime is unavailable on this box).
+    assert ("mountainsort4", MS4_30KHZ) in skipped_names
+    # Container MS4 rows still ship -- gated by preflight at run time, not here.
+    assert ("mountainsort4", MS4_SINGULARITY_30KHZ) in insertable_names
+    assert ("mountainsort4", MS4_DOCKER_30KHZ) in insertable_names
