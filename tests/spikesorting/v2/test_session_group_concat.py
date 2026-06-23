@@ -59,6 +59,36 @@ def test_chronic_fixture_provides_two_same_day_and_one_next_day(
 # ---------- SessionGroup.create_group / is_multi_day ----------------------
 
 
+@pytest.fixture
+def same_day_group(chronic_2_session_minirec):
+    """A same-day ``SessionGroup`` over the two populated members.
+
+    Function-scoped: creates the group, yields the substrate (group key,
+    members, recording PKs, preprocessing recipe), and tears the group (plus
+    any concat lineage built on it) down for the owner afterward.
+    """
+    from spyglass.spikesorting.v2.session_group import SessionGroup
+    from tests.spikesorting.v2._ingest_helpers import (
+        clean_session_groups_for_owner,
+    )
+
+    sub = chronic_2_session_minirec
+    owner, name = sub["owner"], "sg_concat"
+    SessionGroup.create_group(owner, name, sub["same_day_members"])
+    yield {
+        "group_key": {
+            "session_group_owner": owner,
+            "session_group_name": name,
+        },
+        "owner": owner,
+        "same_day_members": sub["same_day_members"],
+        "next_day_member": sub["next_day_member"],
+        "preprocessing_params_name": sub["preprocessing_params_name"],
+        "recording_pks": sub["recording_pks"],
+    }
+    clean_session_groups_for_owner(owner)
+
+
 @pytest.mark.usefixtures("dj_conn")
 def test_session_group_member_has_no_recording_date_column():
     """Member rows do not store a date; it is always derived from Session."""
@@ -183,3 +213,88 @@ def test_session_group_owner_namespaces_name(chronic_2_session_minirec):
         clean_session_groups_for_owner(owner1)
         clean_session_groups_for_owner(owner2)
         (LabTeam & {"team_name": owner2}).super_delete(warn=False)
+
+
+# ---------- ConcatenatedRecordingSelection.insert_selection ---------------
+
+
+@pytest.mark.slow
+def test_concat_selection_inserts_and_is_idempotent(same_day_group):
+    """A selection over members with populated Recordings returns a PK-only
+    dict and a repeat call returns the SAME concat_recording_id."""
+    import uuid
+
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecordingSelection,
+    )
+
+    grp = same_day_group
+    request = {
+        **grp["group_key"],
+        "preprocessing_params_name": grp["preprocessing_params_name"],
+        "motion_correction_params_name": "none",
+    }
+    pk = ConcatenatedRecordingSelection.insert_selection(request)
+    assert set(pk) == {"concat_recording_id"}
+    assert isinstance(pk["concat_recording_id"], uuid.UUID)
+    again = ConcatenatedRecordingSelection.insert_selection(dict(request))
+    assert again["concat_recording_id"] == pk["concat_recording_id"]
+
+
+@pytest.mark.slow
+def test_concat_selection_missing_recording_raises(chronic_2_session_minirec):
+    """A member with no populated Recording for the requested preprocessing
+    recipe raises ``MissingRecordingForConcatError`` naming the missing member."""
+    from spyglass.spikesorting.v2.exceptions import (
+        MissingRecordingForConcatError,
+    )
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecordingSelection,
+        SessionGroup,
+    )
+    from tests.spikesorting.v2._ingest_helpers import (
+        clean_session_groups_for_owner,
+    )
+
+    sub = chronic_2_session_minirec
+    owner, name = sub["owner"], "sg_missing_rec"
+    # The next-day member has no populated Recording; build a multi-day group
+    # so the precondition (not the date gate) is what fails on insert.
+    members = [sub["same_day_members"][0], sub["next_day_member"]]
+    SessionGroup.create_group(owner, name, members, allow_multi_day=True)
+    try:
+        with pytest.raises(MissingRecordingForConcatError, match="populate"):
+            ConcatenatedRecordingSelection.insert_selection(
+                {
+                    "session_group_owner": owner,
+                    "session_group_name": name,
+                    "preprocessing_params_name": "default",
+                    "motion_correction_params_name": "none",
+                }
+            )
+    finally:
+        clean_session_groups_for_owner(owner)
+
+
+@pytest.mark.slow
+def test_concat_selection_distinct_for_distinct_motion_params(same_day_group):
+    """Changing only the motion-correction recipe yields a distinct
+    concat_recording_id (independent selections)."""
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecordingSelection,
+        MotionCorrectionParameters,
+    )
+
+    MotionCorrectionParameters.insert_default()
+    grp = same_day_group
+    base = {
+        **grp["group_key"],
+        "preprocessing_params_name": grp["preprocessing_params_name"],
+    }
+    none_pk = ConcatenatedRecordingSelection.insert_selection(
+        {**base, "motion_correction_params_name": "none"}
+    )
+    rigid_pk = ConcatenatedRecordingSelection.insert_selection(
+        {**base, "motion_correction_params_name": "rigid_fast_default"}
+    )
+    assert none_pk["concat_recording_id"] != rigid_pk["concat_recording_id"]

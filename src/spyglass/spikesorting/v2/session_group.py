@@ -300,14 +300,40 @@ class ConcatenatedRecordingSelection(SpyglassMixin, dj.Manual):
     -> MotionCorrectionParameters
     """
 
+    #: The logical-identity fields (everything but the minted PK). A concat
+    #: selection is one (SessionGroup, PreprocessingParameters,
+    #: MotionCorrectionParameters) tuple; find-existing keys on all four.
+    _IDENTITY_FIELDS = (
+        "session_group_owner",
+        "session_group_name",
+        "preprocessing_params_name",
+        "motion_correction_params_name",
+    )
+
     @classmethod
     def insert_selection(cls, key: dict) -> dict:
-        """Find-existing-or-insert; return a single PK-only dict.
+        """Find-existing-or-insert a concat selection; return a PK-only dict.
 
-        Gated until the concat materializer lands (raises
-        ``NotImplementedError`` today). Forward-declared; the schema is in
-        place so single-session tables can FK ``concat_recording_id`` from
-        day one.
+        Enforces, BEFORE inserting, that every ``SessionGroup.Member`` has a
+        populated per-member ``Recording`` row under the requested
+        ``preprocessing_params_name``. This selection-time precondition is the
+        load-bearing layer that lets ``ConcatenatedRecording.make`` consume
+        cached ``Recording`` artifacts and never call ``Recording.populate``
+        inline (a DataJoint anti-pattern): a missing member surfaces here as
+        ``MissingRecordingForConcatError`` listing the offending member keys,
+        not as a confusing nested-populate failure later.
+
+        Idempotent: a repeat request for the same (group, preprocessing,
+        motion) identity returns the existing ``concat_recording_id`` rather
+        than minting a second one.
+
+        Parameters
+        ----------
+        key : dict
+            Must carry ``session_group_owner``, ``session_group_name``,
+            ``preprocessing_params_name``, ``motion_correction_params_name``.
+            A caller-supplied ``concat_recording_id`` is ignored; the id is
+            minted/found here.
 
         Returns
         -------
@@ -317,13 +343,77 @@ class ConcatenatedRecordingSelection(SpyglassMixin, dj.Manual):
 
         Raises
         ------
-        NotImplementedError
-            Always, until this helper is implemented.
+        ValueError
+            If a required identity field is missing.
+        MissingRecordingForConcatError
+            If any member has no populated ``Recording`` under
+            ``preprocessing_params_name``.
+        DuplicateSelectionError
+            If more than one selection row already matches the identity (a raw
+            insert bypassed this helper).
         """
-        raise NotImplementedError(
-            "ConcatenatedRecordingSelection.insert_selection is not yet "
-            "implemented"
+        import uuid
+
+        from spyglass.spikesorting.v2.exceptions import (
+            DuplicateSelectionError,
+            MissingRecordingForConcatError,
         )
+        from spyglass.spikesorting.v2.recording import (
+            Recording,
+            RecordingSelection,
+        )
+
+        missing_fields = [f for f in cls._IDENTITY_FIELDS if f not in key]
+        if missing_fields:
+            raise ValueError(
+                "ConcatenatedRecordingSelection.insert_selection requires "
+                f"field(s) {missing_fields}. Required identity fields are "
+                f"{list(cls._IDENTITY_FIELDS)}."
+            )
+        identity = {f: key[f] for f in cls._IDENTITY_FIELDS}
+        group_key = {
+            "session_group_owner": identity["session_group_owner"],
+            "session_group_name": identity["session_group_name"],
+        }
+        preprocessing_params_name = identity["preprocessing_params_name"]
+
+        # Precondition: every member needs a populated Recording for the
+        # shared preprocessing recipe. A Recording exists iff its
+        # RecordingSelection row exists AND the Computed Recording populated.
+        missing: list[dict] = []
+        for member in (SessionGroup.Member & group_key).fetch(as_dict=True):
+            rec_sel_key = {
+                "nwb_file_name": member["nwb_file_name"],
+                "sort_group_id": member["sort_group_id"],
+                "interval_list_name": member["interval_list_name"],
+                "preprocessing_params_name": preprocessing_params_name,
+                "team_name": member["team_name"],
+            }
+            rec_sel = RecordingSelection & rec_sel_key
+            if not rec_sel or not (Recording & rec_sel.fetch1("KEY")):
+                missing.append(rec_sel_key)
+        if missing:
+            raise MissingRecordingForConcatError(
+                "ConcatenatedRecordingSelection.insert_selection requires "
+                "every member's Recording to be populated under "
+                f"preprocessing_params_name={preprocessing_params_name!r} "
+                f"first. Missing {len(missing)} member(s): {missing}. Run "
+                "Recording.populate(...) for each missing key, then retry."
+            )
+
+        existing = (cls & identity).fetch("KEY", as_dict=True)
+        if len(existing) == 1:
+            return existing[0]
+        if len(existing) > 1:
+            raise DuplicateSelectionError(
+                "ConcatenatedRecordingSelection has "
+                f"{len(existing)} duplicate selection rows for identity "
+                f"{identity}; a raw insert bypassed insert_selection. Drop the "
+                "duplicates and re-insert via insert_selection."
+            )
+        concat_recording_id = uuid.uuid4()
+        cls.insert1({**identity, "concat_recording_id": concat_recording_id})
+        return {"concat_recording_id": concat_recording_id}
 
 
 @schema
