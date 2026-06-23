@@ -108,6 +108,33 @@ into a child `CurationV2` row (`curation_source='analyzer_curation'`).
   matches raise `StaleEnvMatchedError`). See
   [SpikeSortingV2StorageManagement.md](./Features/SpikeSortingV2StorageManagement.md).
 
+#### Spike Sorting v2: same-day chronic concatenate-and-sort
+
+`SessionGroup` groups sorting members (a member is a
+`(nwb_file_name, sort_group_id, interval_list_name, team_name)` tuple, not a
+whole NWB), and `ConcatenatedRecording` materializes one motion-corrected,
+**unwhitened** concatenated recording cache by reusing each member's existing
+`Recording` artifact (never re-preprocessing raw NWB). A `SortingSelection` can
+then take a `concat_recording_id` source and sort the concatenation as one
+piece. See the
+[Chronic same-day recordings](./Features/SpikeSortingV2.md#chronic-same-day-recordings)
+guide.
+
+- **Same-day is the default; multi-day is an explicit opt-in.** `create_group`
+  derives recording dates from `Session.session_start_time` and rejects
+  multi-date members unless `allow_multi_day=True`; the motion preset `"auto"`
+  maps to `rigid_fast` for same-day groups and is rejected for multi-day ones
+  (no silent DREDge dispatch). For days/weeks-apart sessions the **recommended**
+  path is sort-then-match, not concatenation — multi-day concat is experimental.
+- `ConcatenatedRecording.MemberBoundary` records cumulative sample boundaries,
+  and `split_sorting_by_session()` back-maps a concatenated sort into per-member
+  sortings in each member's local sample frame (unit ids preserved).
+- A concat sort's analysis NWB and per-unit `Electrode` FK anchor to the first
+  member; `get_unit_brain_regions` raises `ConcatBrainRegionAmbiguousError`
+  unless `allow_anchor_member=True`. Concat sorts carry no artifact-detection
+  pass. `SpikeSortingOutput.get_restricted_merge_ids` resolves concat sorts by
+  `concat_recording_id` / `session_group_owner` / `session_group_name`.
+
 #### Spike Sorting v2: streaming Recording write, parallel populate, and v1-parity restorations
 
 This is a focused fix-up between the initial v2 landing and the

@@ -767,6 +767,97 @@ To be explicit: populating `DriftEstimate` leaves the upstream `Recording`
 untouched — its `cache_hash` and the traces from `get_recording` are unchanged.
 Applying motion correction is out of scope by design.
 
+### Chronic same-day recordings
+
+When a chronic implant is recorded across several files on the **same day**
+(e.g. a run split into multiple epochs, or several short sessions), you can
+concatenate the per-member recordings into one continuous, motion-corrected
+recording and sort them together. This recovers units that a per-file sort
+would split, and it is the default chronic path. For **days/weeks-apart**
+sessions the recommended path is *sort-then-match* (sort each session
+independently, then match units across them) rather than concatenation;
+multi-day concatenation is supported but experimental and gated behind an
+explicit opt-in.
+
+The workflow groups *sorting members* — a member is a
+`(nwb_file_name, sort_group_id, interval_list_name, team_name)` tuple, not a
+whole NWB — and materializes one `ConcatenatedRecording` cache before sorting:
+
+```python
+from spyglass.spikesorting.v2.recording import RecordingSelection, Recording
+from spyglass.spikesorting.v2.session_group import (
+    SessionGroup,
+    ConcatenatedRecordingSelection,
+    ConcatenatedRecording,
+)
+from spyglass.spikesorting.v2.sorting import SortingSelection, Sorting
+
+# 1. Materialize each member's Recording first (the concat reuses these caches;
+#    it never re-preprocesses raw NWB). All members share ONE preprocessing
+#    recipe.
+members = [
+    {"nwb_file_name": nwb_a, "sort_group_id": 0,
+     "interval_list_name": "raw data valid times"},
+    {"nwb_file_name": nwb_b, "sort_group_id": 0,
+     "interval_list_name": "raw data valid times"},
+]
+for m in members:
+    rec_key = RecordingSelection.insert_selection(
+        {**m, "preprocessing_params_name": "default", "team_name": "my_team"}
+    )
+    Recording.populate(rec_key)
+
+# 2. Name the group. session_group_owner namespaces the group name, so two
+#    teams can both use "day1". Same-day is the default; multi-day members
+#    require allow_multi_day=True (recording dates are derived from
+#    Session.session_start_time, never stored).
+SessionGroup.create_group("my_team", "day1", members)
+
+# 3. Materialize the motion-corrected, unwhitened concat cache. preset="auto"
+#    maps to rigid_fast for same-day groups; for multi-day it is rejected and
+#    you must pick an explicit preset (e.g. dredge_fast).
+concat_key = ConcatenatedRecordingSelection.insert_selection({
+    "session_group_owner": "my_team",
+    "session_group_name": "day1",
+    "preprocessing_params_name": "default",
+    "motion_correction_params_name": "auto_default",
+})
+ConcatenatedRecording.populate(concat_key)
+
+# 4. Sort the concatenated recording. The SortingSelection takes a
+#    concat_recording_id source instead of a recording_id.
+sort_key = SortingSelection.insert_selection({
+    "concat_recording_id": concat_key["concat_recording_id"],
+    "sorter": "mountainsort5",
+    "sorter_params_name": "franklab_30khz_ms5_2026_06",
+})
+Sorting.populate(sort_key)
+
+# 5. (optional) Back-map the concatenated sort into per-session sortings.
+sorting = Sorting().get_analyzer(sort_key).sorting
+per_session = ConcatenatedRecording().split_sorting_by_session(sorting, concat_key)
+# -> {(nwb_file_name, interval_list_name): si.BaseSorting} in each member's
+#    own sample frame, unit ids preserved.
+```
+
+Key behaviors and caveats:
+
+- **Whitening stays at the sorter/analyzer boundary.** The concat cache is
+  motion-corrected but *unwhitened*, exactly like a single-session `Recording`;
+  MS4/MS5 external whitening and analyzer whitening are unchanged.
+- **Parent anchoring.** A concat sort's analysis NWB and each unit's `Electrode`
+  FK anchor to the **first** `SessionGroup.Member`. Because of that,
+  `get_unit_brain_regions` on a concat sort raises `ConcatBrainRegionAmbiguousError`
+  by default; pass `allow_anchor_member=True` to get anchor-member regions
+  (labeled `region_resolution="anchor_member"`). Per-session brain regions
+  require cross-session unit matching, which is not in this build.
+- **No concat artifact detection.** A concat `SortingSelection` may not carry an
+  artifact-detection pass; artifact detection remains a single-recording (or
+  shared-recording-group) input.
+- **Merge restriction.** `SpikeSortingOutput.get_restricted_merge_ids` accepts
+  `concat_recording_id` / `session_group_owner` / `session_group_name` for v2
+  concat sorts, alongside the usual sorter / curation fields.
+
 ### Downstream consumers
 
 Both v1 (`CurationV1`) and v2 (`CurationV2`) curations register on the same
@@ -848,17 +939,16 @@ calling them under SI 0.104 raises a clear `RuntimeError`.
 
 ## Status
 
-The single-session sort chain and analyzer-driven curation (metrics +
-auto-curation, above) are available now. Not yet available:
+The single-session sort chain, analyzer-driven curation (metrics +
+auto-curation, above), and same-day chronic concatenate-and-sort (the
+[Chronic same-day recordings](#chronic-same-day-recordings) section below) are
+available now. Not yet available:
 
-- session-group sorting
 - cross-session unit matching
 - FigPack web curation views
 
-The session-group / concatenated-recording tables are already declared in their
-final shape with gated `make()` bodies, so enabling that path later needs no
-schema migration. Unit matching and FigPack remain placeholder modules until
-their implementation phases land.
+Unit matching and FigPack remain placeholder modules until their implementation
+phases land.
 
 ## Streaming, parallel populate, and v1 parity
 

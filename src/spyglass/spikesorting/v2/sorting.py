@@ -3,20 +3,18 @@
 Tables (all final-shape under the zero-migration policy):
     SorterParameters          -- Per-sorter Pydantic-validated params.
     SortingSelection          -- Source-polymorphic sorting request.
-        .RecordingSource          -- single-session source (default).
-        .ConcatenatedRecordingSource -- concat source; the runtime helper
-                                       rejects this source today, but the
-                                       FK is real so the schema is stable.
+        .RecordingSource          -- single-session source.
+        .ConcatenatedRecordingSource -- concat source (same-day chronic).
     Sorting (+ Unit)          -- Sorted units NWB + SortingAnalyzer folder.
 
 ``SorterParameters.insert1`` dispatches to the per-sorter Pydantic
 schema via ``_get_sorter_schema``. ``insert_selection`` resolves a
 sorting request to a single ``sorting_id``, ``make`` runs the
 sorter and writes the units NWB + analyzer, and the accessor methods
-(``get_sorting``, ``get_analyzer``) read those back. Concatenated-
-recording sources are not yet supported: ``insert_selection`` rejects a
-``concat_recording_id`` source and the analyzer rebuild raises
-``NotImplementedError`` for a concat source.
+(``get_sorting``, ``get_analyzer``) read those back. Both source kinds
+populate: a recording source loads ``Recording``, a concatenated-recording
+source loads ``ConcatenatedRecording`` and anchors the per-unit Electrode FK
+and the analysis-NWB parent to the first ``SessionGroup.Member``.
 """
 
 from __future__ import annotations
@@ -649,11 +647,10 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
     """One row per (recording, sorter, artifact detection) tuple.
 
     Source part rows make the input shape explicit: exactly one of
-    ``RecordingSource`` or ``ConcatenatedRecordingSource`` exists for
-    each selection row. The runtime helper today rejects the concat
-    path with a clear "not implemented yet" error; the schema is final
-    so the validator can be relaxed without a migration once the concat
-    materializer lands.
+    ``RecordingSource`` (single-session) or ``ConcatenatedRecordingSource``
+    (same-day chronic concatenation) exists for each selection row.
+    ``insert_selection`` dispatches on the requested source and both kinds
+    populate through ``Sorting.make``.
 
     Whether an artifact-detection pass was applied is recorded by the
     presence or absence of an ``ArtifactDetectionSource`` part row
@@ -712,9 +709,9 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         """Insert master + exactly one source part; return PK-only dict.
 
         Reads exactly one of ``recording_id`` (single-session) or
-        ``concat_recording_id`` (concat) from ``key``; raises ValueError
-        on zero or two sources. The concat path is rejected today with
-        ``NotImplementedError`` because the concat materializer is gated.
+        ``concat_recording_id`` (same-day chronic concatenation) from ``key``;
+        raises ValueError on zero or two sources, and inserts the matching
+        source part (``RecordingSource`` or ``ConcatenatedRecordingSource``).
         ``artifact_detection_id`` is optional: when supplied (non-None), an
         ``ArtifactDetectionSource`` part row records the artifact-detection
         pass; when omitted/None, no ``ArtifactDetectionSource`` row is created.
@@ -741,10 +738,9 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         Raises
         ------
         ValueError
-            If zero or both source keys are supplied.
-        NotImplementedError
-            If ``concat_recording_id`` is supplied -- concat-source
-            sorting is not yet implemented.
+            If zero or both source keys are supplied, or if a concat source
+            also supplies an ``artifact_detection_id`` (concat sorts have no
+            artifact pass).
         DuplicateSelectionError
             If any matching master has a non-deterministic ``sorting_id``
             (a raw ``insert`` bypass or a pre-determinism legacy row) --

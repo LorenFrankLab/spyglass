@@ -1,16 +1,17 @@
 """Grouping of sessions for chronic and concatenated-recording workflows.
 
-These tables are declared in their final-shape so ``SortingSelection``
-can FK ``ConcatenatedRecording`` from day one (zero-migration policy).
-The schema is frozen; the populate body of ``ConcatenatedRecording`` is
-gated behind ``NotImplementedError`` until the concat materializer
-lands -- only the consumer logic changes, never the row shape.
+Implements same-day chronic concatenate-and-sort: ``SessionGroup`` names a
+bundle of sorting members, and ``ConcatenatedRecording`` materializes one
+motion-corrected, unwhitened concatenated recording cache from each member's
+already-populated ``Recording`` artifact. A ``SortingSelection`` then FKs
+``ConcatenatedRecording`` (via its ``ConcatenatedRecordingSource`` part) and
+sorts the concatenation as one piece.
 
-Tables (all final-shape):
+Tables:
     SessionGroup (+ Member)                  -- Manual; user-facing grouping.
     MotionCorrectionParameters               -- Lookup; Pydantic-validated.
     ConcatenatedRecordingSelection           -- Manual; UUID PK.
-    ConcatenatedRecording (+ MemberBoundary) -- Computed; make() is gated.
+    ConcatenatedRecording (+ MemberBoundary) -- Computed; materialized cache.
 """
 
 from __future__ import annotations
@@ -218,11 +219,10 @@ class SessionGroup(SpyglassMixin, dj.Manual):
 class MotionCorrectionParameters(SpyglassMixin, dj.Lookup):
     """Validated motion-correction parameter blob.
 
-    Ships before the consumer (``ConcatenatedRecording.make()``) lands
-    so this Lookup's ``insert1`` can Pydantic-validate its ``params``
-    blob at insert time. The validation surface is final-shape today;
-    the consumer activates without a migration once the concat
-    materializer is implemented.
+    ``insert1`` Pydantic-validates the ``params`` blob (preset +
+    ``preset_kwargs``). ``ConcatenatedRecording.make()`` reads the chosen row
+    and resolves the Spyglass ``"auto"`` alias (``rigid_fast`` for same-day,
+    rejected for multi-day) before calling SpikeInterface.
     """
 
     definition = f"""
@@ -298,10 +298,10 @@ class ConcatenatedRecordingSelection(SpyglassMixin, dj.Manual):
     """One row per (SessionGroup, PreprocessingParameters, motion params).
 
     UUID-keyed so downstream FKs are single-column (mirrors the
-    single-session ``RecordingSelection`` / ``Recording`` shape). Schema
-    is final-shape; the ``insert_selection`` helper, when implemented,
-    enforces that every member has a populated ``Recording`` row
-    matching the requested preprocessing parameters.
+    single-session ``RecordingSelection`` / ``Recording`` shape). The
+    ``insert_selection`` helper enforces that every member has a populated
+    ``Recording`` row matching the requested preprocessing parameters before
+    minting the ``concat_recording_id``.
     """
 
     definition = """
@@ -432,11 +432,12 @@ class ConcatenatedRecordingSelection(SpyglassMixin, dj.Manual):
 class ConcatenatedRecording(SpyglassMixin, dj.Computed):
     """Materialized cross-session concatenated recording cache.
 
-    When implemented, ``make()`` writes a single motion-corrected,
-    unwhitened ``ElectricalSeries`` covering the union of member intervals,
-    plus integer sample boundaries on the ``MemberBoundary`` part. The schema
-    is in place from day one as the forward-compat FK target for
-    ``SortingSelection``.
+    ``make()`` writes a single motion-corrected, unwhitened
+    ``ElectricalSeries`` spanning the ordered member recordings, plus the
+    cumulative per-member integer sample boundaries on the ``MemberBoundary``
+    part (consumed by ``split_sorting_by_session``). Downstream
+    ``SortingSelection`` FKs this table via its ``ConcatenatedRecordingSource``
+    part.
     """
 
     definition = """
