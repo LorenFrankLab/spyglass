@@ -525,6 +525,131 @@ def test_compute_merge_groups_matches_si_call_contract(dj_conn, monkeypatch):
     assert "random_seed" not in captured["si_kwargs"]
 
 
+def _default_rule_rows(name: str) -> list[dict]:
+    """Return the shipped Rule rows for ``name`` (ordered by ``rule_index``).
+
+    Pulls them straight from ``_default_payloads`` (the single source of truth)
+    so a behavior test exercises the ACTUAL shipped rules, not a hand-copied
+    replica that could pass while the catalog drifts.
+    """
+    from spyglass.spikesorting.v2.metric_curation import AutoCurationRules
+
+    for master, rules in AutoCurationRules._default_payloads():
+        if master["auto_curation_rules_name"] == name:
+            return sorted(rules, key=lambda r: r["rule_index"])
+    raise AssertionError(f"{name!r} not in AutoCurationRules._default_payloads()")
+
+
+@pytest.mark.db_unit
+def test_franklab_auto_curation_default_rules(dj_conn):
+    """The franklab default rule set ships with the exact ordered ISI/nn rules.
+
+    ``franklab_default_auto_curation_2026_06`` thresholds the lab's ~2% ISI
+    policy (not only ``nn_noise_overlap``): rule 0 labels high noise-overlap
+    units ``noise``, rule 1 labels >2% refractory-violation units ``reject``.
+    Rule order is part of the contract (rules apply in ``rule_index`` order),
+    and the labels must be valid ``CurationLabel`` members.
+    """
+    from spyglass.spikesorting.v2._enums import CurationLabel
+    from spyglass.spikesorting.v2.metric_curation import AutoCurationRules
+
+    name = "franklab_default_auto_curation_2026_06"
+    AutoCurationRules.insert_default()
+
+    master = (AutoCurationRules & {"auto_curation_rules_name": name}).fetch1()
+    # A labeling rule set, not an auto-merge one: merges stay a manual step.
+    assert master["auto_merge_preset"] == "none"
+
+    rules = (
+        AutoCurationRules.Rule & {"auto_curation_rules_name": name}
+    ).fetch(as_dict=True, order_by="rule_index")
+    assert [r["rule_index"] for r in rules] == [0, 1]
+
+    noise_rule, reject_rule = rules
+    assert noise_rule["metric_name"] == "nn_noise_overlap"
+    assert noise_rule["operator"] == ">"
+    assert noise_rule["threshold"] == pytest.approx(0.1)
+    assert noise_rule["label"] == "noise"
+
+    assert reject_rule["metric_name"] == "isi_violation"
+    assert reject_rule["operator"] == ">"
+    assert reject_rule["threshold"] == pytest.approx(0.02)
+    assert reject_rule["label"] == "reject"
+
+    # Both labels are members of the validated CurationLabel set.
+    valid = {label.value for label in CurationLabel}
+    assert {noise_rule["label"], reject_rule["label"]} <= valid
+
+
+@pytest.mark.db_unit
+def test_auto_curation_applies_isi_rule(dj_conn):
+    """A >2% ISI unit is labeled ``reject``; a clean unit is left unlabeled.
+
+    Drives the SHIPPED ``franklab_default_auto_curation_2026_06`` rule rows
+    through the DB-free ``apply_label_rules`` engine on a synthetic metrics
+    frame, so the test binds the catalog rules to their labeling behavior.
+    """
+    from spyglass.spikesorting.v2._metric_curation import apply_label_rules
+    from spyglass.spikesorting.v2.metric_curation import AutoCurationRules
+
+    name = "franklab_default_auto_curation_2026_06"
+    AutoCurationRules.insert_default()
+    rules = (
+        AutoCurationRules.Rule & {"auto_curation_rules_name": name}
+    ).fetch(as_dict=True, order_by="rule_index")
+
+    # unit 1: 3% ISI violations, low noise-overlap -> reject (ISI rule only).
+    # unit 2: clean on both metrics -> no label.
+    metrics = pd.DataFrame(
+        {
+            "isi_violation": [0.03, 0.0],
+            "nn_noise_overlap": [0.0, 0.0],
+        },
+        index=[1, 2],
+    )
+    labels = apply_label_rules(metrics, rules)
+    assert labels == {1: ["reject"]}
+
+
+@pytest.mark.db_unit
+def test_isi_reject_matches_v2_default_exclusion_policy(dj_conn):
+    """The ISI rule labels ``reject`` (not ``mua``), and v2 excludes ``reject``.
+
+    The choice of ``reject`` over ``mua`` is load-bearing:
+    ``CurationV2.get_matchable_unit_ids`` excludes ``reject`` by default, so a
+    >2% refractory-violation unit drops out of matchable-unit outputs, whereas a
+    ``mua`` label would keep it. This guards that policy alignment.
+    """
+    import inspect
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    isi_rules = [
+        r
+        for r in _default_rule_rows("franklab_default_auto_curation_2026_06")
+        if r["metric_name"] == "isi_violation"
+    ]
+    assert [r["label"] for r in isi_rules] == ["reject"]
+
+    default_excludes = (
+        inspect.signature(CurationV2.get_matchable_unit_ids)
+        .parameters["exclude_labels"]
+        .default
+    )
+    assert "reject" in default_excludes
+    assert "mua" not in default_excludes
+
+
+@pytest.mark.db_unit
+def test_named_legacy_rules_preserved(dj_conn):
+    """The pre-existing named rule sets still insert (no silent removal)."""
+    from spyglass.spikesorting.v2.metric_curation import AutoCurationRules
+
+    AutoCurationRules.insert_default()
+    for name in ("none", "similarity_merge", "v1_default_nn_noise"):
+        assert AutoCurationRules & {"auto_curation_rules_name": name}, name
+
+
 @pytest.mark.db_unit
 def test_auto_curation_rules_none_default_passes_integrity(dj_conn):
     """The shipped 'none' inert default is exempt; a custom no-op is flagged."""

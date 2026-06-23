@@ -516,6 +516,41 @@ class AutoCurationRules(SpyglassMixin, dj.Lookup):
                 },
                 [],
             ),
+            (
+                # Frank-lab default labeling set: thresholds the lab's ~2% ISI
+                # refractory policy in addition to nn_noise_overlap. ISI-violation
+                # units are labeled ``reject`` (not ``mua``) so they fall out of
+                # the default matchable-unit set (CurationV2.get_matchable_unit_ids
+                # excludes reject/noise/artifact). Merges stay a manual step, so
+                # this set runs no auto-merge (auto_merge_preset='none'). The
+                # metric-params row it pairs with must compute nn_advanced (for
+                # the nn_noise_overlap column) and isi_violation -- the shipped
+                # ``franklab_default`` QualityMetricParameters row does both.
+                {
+                    "auto_curation_rules_name": (
+                        "franklab_default_auto_curation_2026_06"
+                    ),
+                    "auto_merge_preset": "none",
+                },
+                [
+                    {
+                        "rule_index": 0,
+                        "rule_name": "nn_noise",
+                        "metric_name": "nn_noise_overlap",
+                        "operator": ">",
+                        "threshold": 0.1,
+                        "label": "noise",
+                    },
+                    {
+                        "rule_index": 1,
+                        "rule_name": "isi_reject",
+                        "metric_name": "isi_violation",
+                        "operator": ">",
+                        "threshold": 0.02,
+                        "label": "reject",
+                    },
+                ],
+            ),
         ]
 
     @classmethod
