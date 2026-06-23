@@ -22,6 +22,7 @@ _DB_FREE_SERVICE_MODULES = [
     "_artifact_compute",
     "_artifact_intervals",
     "bad_channels",
+    "_concat_recording",
     "_curation_plan",
     "_curation_transforms",
     "_enums",
