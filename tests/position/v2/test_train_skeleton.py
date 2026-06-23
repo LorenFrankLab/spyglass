@@ -138,6 +138,47 @@ class TestSkeletonDuplicateDetection:
         assert not skeleton._fuzzy_equal("nose", "tailbase", threshold=0.85)
 
 
+class TestSkeletonCanonical:
+    """Skeleton stores one canonical namespace for bodyparts and edges."""
+
+    def test_variant_spelling_inserts_and_canonicalizes(self, skeleton):
+        """A separator-variant config inserts cleanly via canonicalization.
+
+        'green_led'/'red_led_c' are separator variants of the curated
+        'greenLED'/'redLED_C'. Previously validation (normalized) passed but
+        the raw part-table FK insert failed with an IntegrityError. Now the
+        names canonicalize and the stored bodyparts are the canonical spelling.
+        """
+        sid = "nb06-variant"
+        config = {
+            "skeleton_id": sid,
+            "bodyparts": ["green_led", "red_led_c"],
+            "skeleton": [["green_led", "red_led_c"]],
+        }
+        try:
+            skeleton.insert1(config, skip_duplicates=True)
+            assert set(skeleton.get_bodyparts(sid)) == {"greenLED", "redLED_C"}
+        finally:
+            (skeleton & {"skeleton_id": sid}).delete(safemode=False)
+
+    def test_stored_edge_labels_subset_of_bodyparts(self, skeleton):
+        """Every label in stored edges appears verbatim in stored bodyparts."""
+        sid = "nb06-namespace"
+        config = {
+            "skeleton_id": sid,
+            "bodyparts": ["nose", "earL", "earR"],
+            "skeleton": [["nose", "earL"], ["nose", "earR"]],
+        }
+        try:
+            skeleton.insert1(config, skip_duplicates=True)
+            bodyparts = set(skeleton.get_bodyparts(sid))
+            edges = (skeleton & {"skeleton_id": sid}).fetch1("edges")
+            edge_labels = {lbl for edge in edges for lbl in edge}
+            assert edge_labels <= bodyparts
+        finally:
+            (skeleton & {"skeleton_id": sid}).delete(safemode=False)
+
+
 class TestSkeletonEdgeCases:
     """Test edge cases and error handling for skeleton."""
 

@@ -129,12 +129,14 @@ def fuzzy_equal(a: str, b: str, threshold: float = 0.85) -> bool:
     )
 
 
-def norm_edges(
+def clean_edges(
     edges: "list[tuple[str, str]]",
 ) -> "list[tuple[str, str]] | None":
-    """Return edges with normalized labels and sorted tuples.
+    """Structurally clean an edge list, preserving labels verbatim.
 
-    Handles two non-standard forms found in DLC configs written by Position V1:
+    Handles two non-standard forms found in DLC configs written by Position V1,
+    without touching the label text (so callers can canonicalize the labels
+    into whatever namespace they store):
 
     - **Nested groups**: an element is itself a list of pairs, e.g.
       ``[['a','b'], [['c','c'],['d','d']]]``.  One level of nesting is
@@ -150,7 +152,7 @@ def norm_edges(
     Returns
     -------
     list[tuple[str, str]] or None
-        Sorted, deduplicated edge list with normalized labels, or None if
+        Sorted, deduplicated edge list with **original** labels, or None if
         *edges* is empty/falsy after cleaning.
     """
     if not edges:
@@ -177,10 +179,38 @@ def norm_edges(
     if not flat:
         return None
 
+    return sorted({tuple(sorted((u, v))) for (u, v) in flat})
+
+
+def norm_edges(
+    edges: "list[tuple[str, str]]",
+) -> "list[tuple[str, str]] | None":
+    """Return structurally-cleaned edges with **normalized** labels.
+
+    Thin wrapper over :func:`clean_edges` that additionally normalizes labels.
+    Used for topology hashing and validation, where labels must collapse to a
+    canonical comparison key; callers that *store* edges should instead clean
+    structurally and canonicalize into their own namespace.
+
+    Parameters
+    ----------
+    edges : list[tuple[str, str]]
+        Raw edge pairs, possibly containing nested groups or empty slots.
+
+    Returns
+    -------
+    list[tuple[str, str]] or None
+        Sorted, deduplicated edge list with normalized labels, or None if
+        *edges* is empty/falsy after cleaning.
+    """
+    cleaned = clean_edges(edges)
+    if not cleaned:
+        return None
+
     return sorted(
         {
             tuple(sorted((normalize_label(u), normalize_label(v))))
-            for (u, v) in flat
+            for (u, v) in cleaned
         }
     )
 

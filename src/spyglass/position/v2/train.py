@@ -32,6 +32,7 @@ from spyglass.position.v2.utils.skeleton import (
     build_canonical_map,
     build_labeled_graph,
     canonicalize,
+    clean_edges,
     is_duplicate_skeleton,
     norm_edges,
     normalize_label,
@@ -354,34 +355,57 @@ class Skeleton(SpyglassMixin, dj.Lookup):
                 f"Key must include 'bodyparts' and 'edges' fields: {key}"
             )
 
-        # Validate body parts against the reference table first so unknown-
-        # bodypart errors surface before structural edge errors.
-        labels_norm = [normalize_label(x) for x in bodyparts]
-        if accept_new_bodyparts:
-            all_parts = {
-                normalize_label(x) for x in BodyPart().fetch("bodypart")
-            }
-            novel = sorted(
-                {normalize_label(bp) for bp in bodyparts} - all_parts
-            )
-            if novel:
+        # Resolve incoming names to the canonical BodyPart spelling so the
+        # stored bodyparts blob, the edges blob, and the part-table FK all
+        # share one namespace. (Previously validation used normalized names
+        # but the FK insert used raw names, so a variant spelling could pass
+        # validation and then fail the FK with an opaque IntegrityError.)
+        known = [str(bp) for bp in BodyPart().fetch("bodypart")]
+        canon_map = build_canonical_map(known)
+        unresolved = [
+            bp for bp in bodyparts if canonicalize(bp, canon_map) is None
+        ]
+        if unresolved:
+            if accept_new_bodyparts:
+                # Register the incoming spelling itself as canonical so that
+                # downstream tool output (which uses this spelling) matches.
                 self._warn_msg(
-                    f"Auto-inserting {len(novel)} novel bodypart(s) into "
-                    f"BodyPart: {novel}"
+                    f"Auto-inserting {len(unresolved)} novel bodypart(s) into "
+                    f"BodyPart: {unresolved}"
                 )
                 BodyPart().insert(
-                    [{"bodypart": bp} for bp in novel],
+                    [{"bodypart": bp} for bp in unresolved],
                     skip_duplicates=True,
                     allow_direct_insert=True,
                 )
-        else:
-            _ = self._validate_bodyparts(set(labels_norm))
+                canon_map = build_canonical_map(known + unresolved)
+            else:
+                # Raises a DataJointError naming the unknown bodyparts.
+                self._validate_bodyparts(
+                    {normalize_label(bp) for bp in bodyparts}
+                )
 
-        # Normalise edges: flatten nested groups, drop empty slots, normalize
-        # labels.  norm_edges emits a warning when the input was non-standard.
-        edges = norm_edges(edges) or []
+        bodyparts = [
+            canonicalize(bp, canon_map, default=bp) for bp in bodyparts
+        ]
 
-        # Validate edge structure against the (now normalized) bodypart set.
+        # Structurally clean edges (flatten nested groups, drop empty slots),
+        # then canonicalize labels into the same namespace as bodyparts.
+        edges = sorted(
+            {
+                tuple(
+                    sorted(
+                        (
+                            canonicalize(u, canon_map, default=u),
+                            canonicalize(v, canon_map, default=v),
+                        )
+                    )
+                )
+                for (u, v) in (clean_edges(edges) or [])
+            }
+        )
+
+        # Validate edge structure against the (canonical) bodypart set.
         validate_skeleton_graph(bodyparts, edges)
 
         shape_hash = shape_hash_from_edges(bodyparts, edges)
