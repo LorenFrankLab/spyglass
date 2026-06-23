@@ -1,9 +1,9 @@
 # Spike Sorting v2 Implementation Plan
 
-**Status:** Phase 0a / 0b / 0c, Phase 1, Phase 1b runtime-regressions, and
-Phase 2 (AnalyzerCuration + recompute verification) are complete. Phases 3
-(SessionGroup / ConcatenatedRecording), 4 (UnitMatch), and 5 (UX / FigPack)
-are pending.
+**Status:** Phase 0a / 0b / 0c, Phase 1, Phase 1b runtime-regressions,
+Phase 2 (AnalyzerCuration + recompute verification), and Phase 3
+(SessionGroup / ConcatenatedRecording — same-day chronic concatenate-and-sort)
+are complete. Phases 4 (UnitMatch) and 5 (UX / FigPack) are pending.
 The review-fixes child plan (completed; its planning artifacts have been
 removed) addressed correctness/schema findings on top of the completed phases.
 
