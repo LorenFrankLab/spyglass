@@ -340,6 +340,24 @@ single `AnalyzerCuration` table built on the SI 0.104 `SortingAnalyzer` API
   `job_kwargs` blob resolved at populate, not on the schema.
   (`_params/metric_curation.QualityMetricParamsSchema`.)
 
+- **The quality-metric table also carries waveform-shape (template) metrics —
+  exposed, not thresholded.** `get_metrics` surfaces SI template (waveform-shape)
+  output *columns* next to the quality metrics so downstream code can classify
+  cell types (firing rate × spike width: narrow/fast putative interneuron vs
+  wide/slow pyramidal) with its own region-specific cutoffs. The surfaced set is
+  a per-row `template_metric_columns` (SI output COLUMN names, not metric names,
+  so `half_width` is selected as its `trough_half_width` column with no
+  name→column ambiguity); the shipped default is the single trough-local
+  `trough_half_width`. `peak_to_trough_duration` and the slope columns are
+  opt-in, not defaults: they measure to the post-trough repolarization peak,
+  which clips at the deliberately narrow hippocampus display window
+  (`ms_after=0.5`) and is reliable only on the wider 1.0/2.0 window. The pipeline
+  ships NO cell-type thresholds and NO classifier (the legacy `cellinfo.type`
+  step was always manual/external); the columns are read from the unwhitened
+  DISPLAY analyzer (whitening distorts shape, like `snr`). (`metric_curation.
+  QualityMetricParameters.template_metric_columns`, `_compute_metrics._surface_
+  template_columns`.)
+
 - **`AutoCurationRules` is an ordered, queryable threshold-rule engine.** v1
   packed labeling into a `label_params` blob keyed by metric, one
   `[op, threshold, labels]` triple each, applied in a loop with bugs
