@@ -719,3 +719,123 @@ def test_run_pipeline_preflight_bypass(preflight_inputs):
     with pytest.raises(dj.errors.IntegrityError) as exc:
         run_v2_pipeline(**inputs)
     assert not isinstance(exc.value, PreflightError)
+
+
+# ---------------------------------------------------------------------------
+# database tier — containerized sorter execution backend
+# ---------------------------------------------------------------------------
+
+_CONTAINER_PRESETS = {
+    "singularity": "franklab_probe_hippocampus_30khz_ms4_singularity_2026_06",
+    "docker": "franklab_probe_hippocampus_30khz_ms4_docker_2026_06",
+}
+
+
+@pytest.mark.database
+def test_preflight_container_runtime_errors(preflight_inputs, monkeypatch):
+    """A selected container preset fails clearly when its runtime is absent.
+
+    Docker / Singularity presets are gated by the container runtime (engine +
+    Python package), not the local sorter install. With both probes reporting
+    "unavailable", preflight raises an actionable ``container_runtime_available``
+    error naming the backend + image -- and never falls back to a local
+    ``sorter_installed`` check.
+    """
+    from spyglass.spikesorting.v2 import _pipeline_preflight as pf
+
+    monkeypatch.setattr(
+        pf,
+        "_singularity_runtime_available",
+        lambda: (False, "Singularity/Apptainer was not found"),
+    )
+    monkeypatch.setattr(
+        pf,
+        "_docker_runtime_available",
+        lambda: (False, "the Docker engine (`docker` CLI) was not found"),
+    )
+
+    for backend, preset in _CONTAINER_PRESETS.items():
+        report = preflight_v2_pipeline(
+            **{**preflight_inputs, "pipeline_preset": preset}
+        )
+        (chk,) = [
+            c for c in report.checks if c.name == "container_runtime_available"
+        ]
+        assert chk.ok is False
+        assert backend in chk.fix
+        assert "does not fall back to local" in chk.fix
+        # The failed container check is a blocking error.
+        assert chk.fix in report.errors
+        # No silent fallback to local execution: the local sorter-install
+        # checks do not run for a container backend.
+        assert not any(c.name == "sorter_installed" for c in report.checks)
+        assert not any(
+            c.name == "sorter_runtime_available" for c in report.checks
+        )
+
+
+@pytest.mark.database
+def test_preflight_reports_container_ms4_modern_host_path(
+    preflight_inputs, monkeypatch
+):
+    """A runnable container MS4 preset reports the host-stays-on-numpy>=2 path.
+
+    When the container runtime is available, the container check passes and the
+    report carries a non-blocking advisory making clear the host can stay on the
+    v2 numpy>=2 environment because the MS4 runtime lives inside the container.
+    """
+    from spyglass.spikesorting.v2 import _pipeline_preflight as pf
+
+    monkeypatch.setattr(
+        pf,
+        "_singularity_runtime_available",
+        lambda: (True, "Singularity + Python `spython` package available"),
+    )
+
+    report = preflight_v2_pipeline(
+        **{
+            **preflight_inputs,
+            "pipeline_preset": _CONTAINER_PRESETS["singularity"],
+        }
+    )
+    (chk,) = [
+        c for c in report.checks if c.name == "container_runtime_available"
+    ]
+    assert chk.ok is True
+    assert any(
+        "numpy>=2" in w and "container" in w for w in report.warnings
+    ), report.warnings
+
+
+@pytest.mark.database
+def test_preflight_matlab_local_backend_errors(preflight_inputs, monkeypatch):
+    """A MATLAB-sorter preset on a local backend fails with the container message.
+
+    MATLAB-backed sorters (Kilosort 2.5/3, IronClust) ship only as container
+    images; a local execution backend for one of them must surface the tracked
+    container-backend error -- the SAME message the dispatch raises -- not the
+    local ``sorter_installed`` checks.
+    """
+    from spyglass.spikesorting.v2 import pipeline as pl
+
+    matlab_local = pl._PipelinePreset(
+        preprocessing_params_name="default",
+        artifact_detection_params_name="default",
+        sorter="kilosort2_5",
+        sorter_params_name="default",
+        execution_backend="local",
+    )
+    monkeypatch.setitem(
+        pl._PIPELINE_PRESETS, "_preflight_matlab_local", matlab_local
+    )
+
+    report = preflight_v2_pipeline(
+        **{**preflight_inputs, "pipeline_preset": "_preflight_matlab_local"}
+    )
+    (chk,) = [
+        c for c in report.checks if c.name == "sorter_execution_backend"
+    ]
+    assert chk.ok is False
+    assert "container" in chk.fix
+    # The local-install checks do not run for a MATLAB local row.
+    assert not any(c.name == "sorter_installed" for c in report.checks)
