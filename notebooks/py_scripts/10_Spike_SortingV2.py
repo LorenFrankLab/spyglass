@@ -438,8 +438,10 @@ print(
 # SpikeInterface's own widgets/exporters behind Spyglass keys, so you
 # tab-complete a single module instead of hunting for plot methods across
 # `Recording`, `Sorting`, and `AnalyzerCuration`. `available_visualizations()`
-# lists every helper with a one-line description, the key it takes, what it wraps,
-# and whether it can fill in a missing analyzer extension.
+# catalogs every visualization/export helper with a one-line description, the key
+# it takes, what it wraps, and whether it can fill in a missing analyzer
+# extension (the `recording_key_for_sorting` convenience used below is a key
+# resolver, not a plot, so it is not in the catalog).
 #
 # Routing is automatic and matters: recording widgets read the saved
 # **preprocessed** recording; sorting/waveform/location widgets read the sort's

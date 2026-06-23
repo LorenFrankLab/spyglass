@@ -77,9 +77,11 @@ REPORT_DISPLAY_EXTENSIONS = (
 )
 
 
-# One row per public facade helper: the discovery surface returned by
-# ``available_visualizations()``. ``compute_missing`` records whether the helper
-# accepts the explicit opt-in to compute display-safe extensions it is missing.
+# One row per visualization/export helper: the discovery surface returned by
+# ``available_visualizations()``. (The ``recording_key_for_sorting`` key resolver
+# is a public facade convenience but not a visualization, so it is not catalogued
+# here.) ``compute_missing`` records whether the helper accepts the explicit
+# opt-in to compute display-safe extensions it is missing.
 _REGISTRY: tuple[dict, ...] = (
     {
         "name": "plot_recording_traces",
@@ -206,7 +208,9 @@ _REGISTRY_COLUMNS = (
 def available_visualizations() -> pd.DataFrame:
     """Return the discoverable catalog of v2 visualization/export helpers.
 
-    Documentation-as-code: one row per ``ssviz`` facade function, listing a
+    Documentation-as-code: one row per ``ssviz`` visualization/export helper
+    (the ``recording_key_for_sorting`` key resolver is a public convenience but
+    not a visualization, so it is intentionally not catalogued here), listing a
     one-line ``description``, the DataJoint key type it accepts (``recording`` /
     ``sorting`` / ``analyzer_curation``), the underlying implementation target (a
     SpikeInterface widget/exporter or the Spyglass-routed
