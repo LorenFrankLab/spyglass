@@ -23,13 +23,19 @@ check becomes a tautology.
 
 from __future__ import annotations
 
+from spyglass.spikesorting.v2._params.analyzer_waveform import (
+    AnalyzerWaveformParamsSchema,
+)
 from spyglass.spikesorting.v2._params.artifact_detection import (
     ArtifactDetectionParamsSchema,
 )
 from spyglass.spikesorting.v2._params.preprocessing import (
     PreprocessingParamsSchema,
 )
-from spyglass.spikesorting.v2._params.sorter import _get_sorter_schema
+from spyglass.spikesorting.v2._params.sorter import (
+    SorterExecutionParamsSchema,
+    _get_sorter_schema,
+)
 from spyglass.spikesorting.v2.utils import _validate_params
 
 # ---- Dated recipe row names (single source for the cross-references) -------
@@ -46,6 +52,41 @@ MS4_30KHZ = "franklab_30khz_ms4_2026_06"
 MS4_20KHZ = "franklab_20khz_ms4_2026_06"
 MS5_30KHZ = "franklab_30khz_ms5_2026_06"
 KS4_NEUROPIXELS = "franklab_neuropixels_default"
+# Containerized MS4 (probe / polymer, 30 kHz): a first-class, reproducible
+# execution path for modern hosts. MS4's algorithm backend (ml_ms4alg) is a
+# numpy<2-era package that does not install under the v2 numpy>=2 baseline, so
+# this row runs the SAME scientific params as the local 30 kHz MS4 row inside a
+# pinned Singularity container -- the host stays on numpy>=2 while the MS4
+# runtime lives in the image. The local MS4 row and this containerized row are
+# DISTINCT named rows (different sorter_params_name); the container backend is
+# tracked provenance, not a runtime override.
+#
+# Singularity/Apptainer is the Frank-lab HPC target, so it is the one shipped
+# container path; a Docker row (and other rates) is a user-insertable
+# SorterParameters row away, using the same tracked execution_params mechanism.
+#
+# Two DISTINCT version spaces, pinned independently for reproducibility:
+#   * the image TAG versions SpikeInterface's published ``mountainsort4-base``
+#     image by its baked ml_ms4alg algorithm runtime (Docker Hub tags are
+#     1.0.x, NOT SpikeInterface release numbers); and
+#   * ``MS4_CONTAINER_SI_VERSION`` pins the SpikeInterface that
+#     ``installation_mode="pypi"`` pip-installs INTO that image at run time.
+# Do not conflate them -- tagging the image with the SI release (e.g. 0.104.3)
+# references a non-existent tag and the pull fails.
+MS4_CONTAINER_IMAGE_TAG = "1.0.5"
+MS4_CONTAINER_IMAGE = f"spikeinterface/mountainsort4-base:{MS4_CONTAINER_IMAGE_TAG}"
+MS4_CONTAINER_SI_VERSION = "0.104.3"
+MS4_SINGULARITY_30KHZ = (
+    "franklab_probe_hippocampus_30khz_ms4_singularity_2026_06"
+)
+# Analyzer waveform recipes (region-specific window; display=unwhitened,
+# metric=whitened). Hippocampal spikes are denser/tighter, so they take a
+# narrower 0.5/0.5 ms window; cortical waveforms are broader, so they take the
+# wider 1.0/2.0 ms window. Both subsample 20000 spikes.
+HIPPOCAMPUS_DISPLAY_WAVEFORMS = "franklab_hippocampus_actual_waveforms"
+HIPPOCAMPUS_METRIC_WAVEFORMS = "franklab_hippocampus_metric_waveforms"
+CORTEX_DISPLAY_WAVEFORMS = "franklab_cortex_actual_waveforms"
+CORTEX_METRIC_WAVEFORMS = "franklab_cortex_metric_waveforms"
 
 
 # ---- Per-stage default-row builders ---------------------------------------
@@ -61,9 +102,44 @@ def _lookup_row(name: str, params: dict, job_kwargs=None) -> tuple:
     return (name, params, _params_schema_version(params), job_kwargs)
 
 
-def _sorter_row(sorter: str, name: str, params: dict, job_kwargs=None) -> tuple:
-    """Build a sorter-lookup row with the version copied from ``params``."""
-    return (sorter, name, params, _params_schema_version(params), job_kwargs)
+def _sorter_row(
+    sorter: str,
+    name: str,
+    params: dict,
+    job_kwargs=None,
+    execution_params: dict | None = None,
+) -> tuple:
+    """Build a sorter-lookup row with versions copied from the blobs.
+
+    Each row is ``(sorter, sorter_params_name, params_blob,
+    params_schema_version, job_kwargs, execution_params_blob,
+    execution_params_schema_version)`` -- matching the ``SorterParameters``
+    heading order. A row that omits ``execution_params`` gets the schema-default
+    local-execution blob.
+    """
+    exec_blob = (
+        execution_params
+        if execution_params is not None
+        else SorterExecutionParamsSchema().model_dump()
+    )
+    return (
+        sorter,
+        name,
+        params,
+        _params_schema_version(params),
+        job_kwargs,
+        exec_blob,
+        _params_schema_version(exec_blob),
+    )
+
+
+def _waveform_row(name: str, params: dict) -> tuple:
+    """Build an analyzer-waveform lookup row (no ``job_kwargs`` column).
+
+    Each row is ``(waveform_params_name, params_blob, params_schema_version)``;
+    the version is copied from the validated blob.
+    """
+    return (name, params, _params_schema_version(params))
 
 
 def preprocessing_default_contents() -> tuple:
@@ -176,11 +252,110 @@ def artifact_default_contents() -> tuple:
     )
 
 
+def _waveform_params(
+    *, ms_before: float, ms_after: float, whiten: bool, purpose: str
+) -> dict:
+    """Validate + dump one analyzer-waveform params blob (20000 spikes)."""
+    return AnalyzerWaveformParamsSchema(
+        ms_before=ms_before,
+        ms_after=ms_after,
+        max_spikes_per_unit=20000,
+        whiten=whiten,
+        purpose=purpose,
+    ).model_dump()
+
+
+def waveform_params_default_contents() -> tuple:
+    """Return ``AnalyzerWaveformParameters._DEFAULT_CONTENTS``.
+
+    Region-specific display (unwhitened) and metric (whitened) recipes:
+    hippocampus 0.5/0.5 ms (denser/tighter spikes), cortex 1.0/2.0 ms (broader
+    waveforms); both subsample 20000 spikes. Each row is
+    ``(waveform_params_name, params_blob, params_schema_version)``.
+    """
+    return (
+        _waveform_row(
+            HIPPOCAMPUS_DISPLAY_WAVEFORMS,
+            _waveform_params(
+                ms_before=0.5, ms_after=0.5, whiten=False, purpose="display"
+            ),
+        ),
+        _waveform_row(
+            HIPPOCAMPUS_METRIC_WAVEFORMS,
+            _waveform_params(
+                ms_before=0.5, ms_after=0.5, whiten=True, purpose="metric"
+            ),
+        ),
+        _waveform_row(
+            CORTEX_DISPLAY_WAVEFORMS,
+            _waveform_params(
+                ms_before=1.0, ms_after=2.0, whiten=False, purpose="display"
+            ),
+        ),
+        _waveform_row(
+            CORTEX_METRIC_WAVEFORMS,
+            _waveform_params(
+                ms_before=1.0, ms_after=2.0, whiten=True, purpose="metric"
+            ),
+        ),
+    )
+
+
+# Rate-keyed MS4 scientific params, shared by the local rate-keyed rows AND the
+# containerized rows so a containerized row is byte-identical science to its
+# local sibling -- the container backend is the only difference. The sorter runs
+# ``filter=False`` (the preproc stage already bandpassed), so the only
+# rate-dependent knobs are ``clip_size`` / ``detect_interval`` (they hold the
+# same ~1.33 ms physical window across rates); ``adjacency_radius`` is set
+# explicitly to 100 um (also the schema default).
+_MS4_RATE_PARAMS: dict[int, dict] = {
+    30000: {"adjacency_radius": 100.0},
+    20000: {"adjacency_radius": 100.0, "clip_size": 27, "detect_interval": 7},
+}
+
+def _ms4_singularity_execution_params() -> dict:
+    """Validated Singularity execution provenance for the containerized MS4 row.
+
+    Singularity backend with the pinned image, and container-side SpikeInterface
+    pinned to an explicit version (``installation_mode="pypi"``) so the runtime
+    install is reproducible by row content -- not floating via
+    ``installation_mode="auto"``.
+    """
+    return SorterExecutionParamsSchema(
+        backend="singularity",
+        container_image=MS4_CONTAINER_IMAGE,
+        installation_mode="pypi",
+        spikeinterface_version=MS4_CONTAINER_SI_VERSION,
+    ).model_dump()
+
+
+def _ms4_singularity_sorter_row() -> tuple:
+    """Build the containerized (Singularity, 30 kHz) MS4 ``SorterParameters`` row.
+
+    Scientific params are IDENTICAL to the local 30 kHz MS4 row (shared
+    ``_MS4_RATE_PARAMS[30000]`` source); the only difference is the tracked
+    Singularity execution backend. The distinct ``sorter_params_name`` (and the
+    duplicate-content guard folding ``execution_params`` in) lets it coexist with
+    its local sibling instead of forking provenance.
+    """
+    return _sorter_row(
+        "mountainsort4",
+        MS4_SINGULARITY_30KHZ,
+        _validate_params(
+            _get_sorter_schema("mountainsort4"), _MS4_RATE_PARAMS[30000]
+        ),
+        execution_params=_ms4_singularity_execution_params(),
+    )
+
+
 def sorter_default_contents() -> tuple:
     """Return ``SorterParameters._DEFAULT_CONTENTS``.
 
     Each row is ``(sorter, sorter_params_name, params_blob,
-    params_schema_version, job_kwargs)``.
+    params_schema_version, job_kwargs, execution_params_blob,
+    execution_params_schema_version)``. The local sorter rows (MS4 rate-keyed,
+    MS5, KS4, SC2/TDC2, clusterless) plus the containerized MS4 row
+    (:func:`_ms4_singularity_sorter_row`).
     """
     return (
         _sorter_row(
@@ -194,8 +369,7 @@ def sorter_default_contents() -> tuple:
             "mountainsort4",
             MS4_30KHZ,
             _validate_params(
-                _get_sorter_schema("mountainsort4"),
-                {"adjacency_radius": 100.0},
+                _get_sorter_schema("mountainsort4"), _MS4_RATE_PARAMS[30000]
             ),
         ),
         _sorter_row(
@@ -205,12 +379,7 @@ def sorter_default_contents() -> tuple:
             "mountainsort4",
             MS4_20KHZ,
             _validate_params(
-                _get_sorter_schema("mountainsort4"),
-                {
-                    "adjacency_radius": 100.0,
-                    "clip_size": 27,
-                    "detect_interval": 7,
-                },
+                _get_sorter_schema("mountainsort4"), _MS4_RATE_PARAMS[20000]
             ),
         ),
         _sorter_row(
@@ -292,6 +461,7 @@ def sorter_default_contents() -> tuple:
                 {"threshold_unit": "uv", "noise_levels": [1.0]},
             ),
         ),
+        _ms4_singularity_sorter_row(),
     )
 
 
@@ -303,6 +473,60 @@ _REGION_PREPROC = {
     "hippocampus": HIPPOCAMPUS_PREPROC,
     "cortex": CORTEX_PREPROC,
 }
+
+# A sort's analyzer waveform window is region-specific, resolved from the SAME
+# signal that sets the region filter cutoff: the source preprocessing recipe.
+# This maps each region preprocessing recipe to its ``(display, metric)``
+# waveform-params row pair. Lives here (not on ``_PipelinePreset``, which is
+# ``extra="forbid"``) so no preset-schema change is needed.
+_PREPROC_WAVEFORM_PARAMS = {
+    HIPPOCAMPUS_PREPROC: (
+        HIPPOCAMPUS_DISPLAY_WAVEFORMS,
+        HIPPOCAMPUS_METRIC_WAVEFORMS,
+    ),
+    CORTEX_PREPROC: (CORTEX_DISPLAY_WAVEFORMS, CORTEX_METRIC_WAVEFORMS),
+}
+
+
+def waveform_params_for_preprocessing(
+    preprocessing_params_name: str,
+) -> tuple[str, str]:
+    """Return the ``(display, metric)`` waveform-params row names for a recipe.
+
+    Only hippocampus and cortex have region-tuned analyzer windows; every other
+    preprocessing recipe -- custom, multi-region, AND the shipped non-tetrode
+    recipes (e.g. ``default``, ``default_neuropixels``, ``no_filter``) -- falls
+    back to the wider cortex pair (1.0/2.0 ms). This is deliberate: the analyzer
+    window is tuned for hippocampal vs cortical tetrode waveforms, and adding a
+    tuned window for another region is a tracked-row-and-mapping change, not a
+    silent default. The fallback never mixes windows within a sort.
+
+    Parameters
+    ----------
+    preprocessing_params_name : str
+        The sort source's ``preprocessing_params_name``.
+
+    Returns
+    -------
+    tuple of (str, str)
+        The ``(display, metric)`` ``waveform_params_name`` pair.
+    """
+    return _PREPROC_WAVEFORM_PARAMS.get(
+        preprocessing_params_name,
+        (CORTEX_DISPLAY_WAVEFORMS, CORTEX_METRIC_WAVEFORMS),
+    )
+
+
+# Drift guard: every region in ``_REGION_PREPROC`` must have a waveform-params
+# mapping, so a future region added to the preset map cannot silently inherit
+# the cortex fallback. (Non-region shipped recipes -- neuropixels / no_filter --
+# intentionally fall back; see ``waveform_params_for_preprocessing``.)
+assert set(_REGION_PREPROC.values()) <= set(_PREPROC_WAVEFORM_PARAMS), (
+    "every _REGION_PREPROC recipe needs a _PREPROC_WAVEFORM_PARAMS mapping; "
+    f"missing: {set(_REGION_PREPROC.values()) - set(_PREPROC_WAVEFORM_PARAMS)}"
+)
+
+
 _RATE_MS4_SORTER = {
     30000: MS4_30KHZ,
     20000: MS4_20KHZ,
@@ -343,6 +567,112 @@ def _franklab_ms4_spec(probe_type: str, region: str, rate_hz: int) -> dict:
     )
 
 
+def _franklab_ms4_singularity_spec() -> dict:
+    """Build the ``_PipelinePreset`` field dict for the containerized MS4 preset.
+
+    Reuses the probe-hippocampus-30 kHz MS4 spec (same preproc / artifact /
+    scientific sorter params), then points the sorter row at the containerized
+    Singularity row and rewrites the notes/intended-use for the modern-host
+    (numpy>=2) container path. The execution backend itself is NOT carried on the
+    preset -- it is read from the referenced ``SorterParameters.execution_params``
+    row (the single source of truth); ``describe_pipeline_preset(name)`` surfaces
+    it. ``recommendation_status`` stays ``"production"`` (the recommended-science
+    MS4 path on modern hosts); ``run_v2_pipeline``'s default remains MountainSort5.
+    """
+    spec = _franklab_ms4_spec("probe", "hippocampus", 30000)
+    spec.update(
+        sorter_params_name=MS4_SINGULARITY_30KHZ,
+        intended_use=(
+            "Frank-lab hippocampal polymer probes at 30 kHz, MountainSort4 run "
+            "inside a pinned Singularity container -- the recommended-science MS4 "
+            "path on modern hosts where MS4's ml_ms4alg backend cannot run "
+            "locally under the v2 numpy>=2 baseline."
+        ),
+        notes=(
+            "MountainSort4 detect_threshold is a multiple of the standard "
+            "deviation of the ZCA-whitened signal (~3), not an absolute voltage "
+            "and not a MAD multiplier. MS4 oversplits and does not track drift, "
+            "so merge curation is expected. This containerized variant runs MS4's "
+            f"ml_ms4alg backend inside the pinned Singularity image "
+            f"{MS4_CONTAINER_IMAGE} with container-side SpikeInterface pinned to "
+            f"{MS4_CONTAINER_SI_VERSION} (installation_mode='pypi'), so the host "
+            "can stay on the v2 numpy>=2 baseline -- the local MS4 presets need "
+            "numpy<2, this one does not. Preflight checks Singularity runtime "
+            "availability and never silently falls back to local execution. "
+            "run_v2_pipeline's default remains MountainSort5."
+        ),
+    )
+    return spec
+
+
+# MS5 hippocampus-30 kHz presets. probe_type is informational (the recipe is
+# region + rate), so the tetrode- and probe-labeled MS5 presets resolve to the
+# SAME preprocessing / artifact / sorter parameter rows; only the provenance
+# label differs. The probe-labeled one is run_v2_pipeline's default -- it matches
+# the lab's polymer-probe default while staying a runnable MS5 (numpy>=2),
+# leaving MS4 the scientifically-preferred recipe via the containerized path.
+MS5_TETRODE_HIPPOCAMPUS_30KHZ = "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
+MS5_PROBE_HIPPOCAMPUS_30KHZ = "franklab_probe_hippocampus_30khz_ms5_2026_06"
+# The shipped run_v2_pipeline / preflight default (single source of truth).
+DEFAULT_PIPELINE_PRESET = MS5_PROBE_HIPPOCAMPUS_30KHZ
+
+_MS5_NOTES = (
+    "MountainSort5 detect_threshold is a multiple of the standard "
+    "deviation of the whitened signal (~5.5, more conservative than "
+    "MS4's 3) -- the same sigma scale, not a MAD multiplier. MS5 is the "
+    "shipped run_v2_pipeline default because it runs under numpy>=2; "
+    "MS4 is the Frank-lab production recipe but its ml_ms4alg backend "
+    "needs numpy<2. recommendation_status stays 'alternative' (MS5 has "
+    "no attested probe usage); the function default is a separate, "
+    "runnability-driven choice. The tetrode- and probe-labeled MS5 "
+    "presets resolve to the same parameter rows (probe_type is "
+    "informational)."
+)
+
+
+def _franklab_ms5_spec(probe_type: str) -> dict:
+    """Build the ``_PipelinePreset`` field dict for a hippocampus-30 kHz MS5 preset.
+
+    The tetrode- and probe-labeled MS5 presets differ only in ``probe_type`` and
+    their ``intended_use`` text -- they bundle the identical preprocessing /
+    artifact / sorter rows, so this single builder keeps them from drifting. Only
+    the probe-labeled row calls itself the ``run_v2_pipeline`` default; the
+    tetrode-labeled row describes itself as the same recipe under a tetrode label
+    so ``describe_pipeline_presets()`` does not advertise two defaults.
+    """
+    if probe_type == "probe":
+        intended_use = (
+            "Frank-lab hippocampal probes at 30 kHz, MountainSort5 -- the "
+            "shipped run_v2_pipeline default because it runs under the v2 "
+            "numpy>=2 baseline. The scientifically-preferred polymer-probe "
+            "recipe is MountainSort4: on modern numpy>=2 hosts with "
+            "Docker/Singularity use the containerized "
+            f"{MS4_SINGULARITY_30KHZ}, or on numpy<2 hosts the local "
+            "franklab_probe_hippocampus_30khz_ms4_2026_06."
+        )
+    else:
+        intended_use = (
+            f"Frank-lab hippocampal {probe_type}s at 30 kHz, MountainSort5 -- "
+            "the same recipe as the probe-labeled run_v2_pipeline default "
+            f"{MS5_PROBE_HIPPOCAMPUS_30KHZ} under a tetrode label (probe_type "
+            "is informational; both resolve to the same parameter rows)."
+        )
+    return dict(
+        preprocessing_params_name=HIPPOCAMPUS_PREPROC,
+        artifact_detection_params_name=ARTIFACT_100UV,
+        sorter="mountainsort5",
+        sorter_params_name=MS5_30KHZ,
+        probe_type=probe_type,
+        target_region="hippocampus",
+        sampling_rate_hz=30000,
+        sorter_family="mountainsort5",
+        recommendation_status="alternative",
+        intended_use=intended_use,
+        threshold_units="sigma of the whitened signal (~5.5)",
+        notes=_MS5_NOTES,
+    )
+
+
 def pipeline_preset_specs() -> dict[str, dict]:
     """Return ``{preset_name: _PipelinePreset field dict}`` for every preset.
 
@@ -366,33 +696,10 @@ def pipeline_preset_specs() -> dict[str, dict]:
         "franklab_probe_cortex_20khz_ms4_2026_06": _franklab_ms4_spec(
             "probe", "cortex", 20000
         ),
-        "franklab_tetrode_hippocampus_30khz_ms5_2026_06": dict(
-            preprocessing_params_name=HIPPOCAMPUS_PREPROC,
-            artifact_detection_params_name=ARTIFACT_100UV,
-            sorter="mountainsort5",
-            sorter_params_name=MS5_30KHZ,
-            probe_type="tetrode",
-            target_region="hippocampus",
-            sampling_rate_hz=30000,
-            sorter_family="mountainsort5",
-            recommendation_status="alternative",
-            intended_use=(
-                "Frank-lab hippocampal tetrodes at 30 kHz, MountainSort5 -- the "
-                "shipped run_v2_pipeline default because it runs under the v2 "
-                "numpy>=2 baseline (the MS4 production recipe needs numpy<2)."
-            ),
-            threshold_units="sigma of the whitened signal (~5.5)",
-            notes=(
-                "MountainSort5 detect_threshold is a multiple of the standard "
-                "deviation of the whitened signal (~5.5, more conservative than "
-                "MS4's 3) -- the same sigma scale, not a MAD multiplier. MS5 is the "
-                "shipped run_v2_pipeline default because it runs under numpy>=2; "
-                "MS4 is the Frank-lab production recipe but its ml_ms4alg backend "
-                "needs numpy<2. recommendation_status stays 'alternative' (MS5 has "
-                "no attested probe usage); the function default is a separate, "
-                "runnability-driven choice."
-            ),
-        ),
+        # Tetrode- and probe-labeled MS5 resolve to the SAME parameter rows; the
+        # probe-labeled one is run_v2_pipeline's default (see _franklab_ms5_spec).
+        MS5_TETRODE_HIPPOCAMPUS_30KHZ: _franklab_ms5_spec("tetrode"),
+        MS5_PROBE_HIPPOCAMPUS_30KHZ: _franklab_ms5_spec("probe"),
         "franklab_clusterless_2026_06": dict(
             preprocessing_params_name="default",
             artifact_detection_params_name="default",
@@ -449,4 +756,8 @@ def pipeline_preset_specs() -> dict[str, dict]:
                 "and drift handling stand in for amplitude masking)."
             ),
         ),
+        # Containerized (Singularity, 30 kHz) MS4 -- the one shipped container
+        # path; its execution backend lives on the referenced
+        # SorterParameters.execution_params row, not on this preset.
+        MS4_SINGULARITY_30KHZ: _franklab_ms4_singularity_spec(),
     }

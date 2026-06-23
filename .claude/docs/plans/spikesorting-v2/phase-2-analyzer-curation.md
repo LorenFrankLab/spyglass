@@ -38,7 +38,7 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
 
 **Phase-specific contracts referenced:**
 
-- [SortingAnalyzer Storage Layout](shared-contracts.md#sortinganalyzer-storage-layout) — adds extensions to an existing analyzer in place (the on-disk folder grows; this is supported by SI binary_folder format).
+- [SortingAnalyzer Storage Layout](shared-contracts.md#sortinganalyzer-storage-layout) — adds extensions to an existing analyzer in place (the on-disk folder grows; this is supported by SI zarr format).
 - [Pydantic Parameter Schema Convention](shared-contracts.md#pydantic-parameter-schema-convention) — `QualityMetricParameters` rows and `AutoCurationRules.insert_rules(row, rule_rows)` get Pydantic-backed validation; direct `AutoCurationRules.Rule` inserts are unsupported.
 - [Job-Kwargs Resolution](shared-contracts.md#job-kwargs-resolution) — extension compute uses resolved kwargs.
 - [Custom Exception Classes](shared-contracts.md#custom-exception-classes) — recompute and empty-sort errors use the shared exception module.

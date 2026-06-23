@@ -19,11 +19,12 @@ def initialize_v2_defaults() -> None:
     """Install the default Lookup rows for every v2 spike-sorting stage.
 
     Calls ``insert_default()`` on ``PreprocessingParameters``,
-    ``ArtifactDetectionParameters``, ``SorterParameters``, and
-    ``MotionCorrectionParameters`` (each accepts duplicate-row noise), so
-    a notebook user can run one helper instead of remembering the
-    per-table calls before the first ``run_v2_pipeline`` invocation.
-    Idempotent.
+    ``ArtifactDetectionParameters``, ``SorterParameters``,
+    ``AnalyzerWaveformParameters``, ``MotionCorrectionParameters``,
+    ``QualityMetricParameters``, and ``AutoCurationRules`` (each accepts
+    duplicate-row noise), so a notebook user can run one helper instead of
+    remembering the per-table calls before the first ``run_v2_pipeline``
+    invocation. Idempotent.
 
     ``MotionCorrectionParameters`` presets are seeded here even though
     their only consumer (``ConcatenatedRecording.make``) is gated today:
@@ -36,16 +37,26 @@ def initialize_v2_defaults() -> None:
     >>> initialize_v2_defaults()
     """
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
+    from spyglass.spikesorting.v2.metric_curation import (
+        AutoCurationRules,
+        QualityMetricParameters,
+    )
     from spyglass.spikesorting.v2.recording import PreprocessingParameters
     from spyglass.spikesorting.v2.session_group import (
         MotionCorrectionParameters,
     )
-    from spyglass.spikesorting.v2.sorting import SorterParameters
+    from spyglass.spikesorting.v2.sorting import (
+        AnalyzerWaveformParameters,
+        SorterParameters,
+    )
 
     PreprocessingParameters.insert_default()
     ArtifactDetectionParameters.insert_default()
     SorterParameters.insert_default()
+    AnalyzerWaveformParameters.insert_default()
     MotionCorrectionParameters.insert_default()
+    QualityMetricParameters.insert_default()
+    AutoCurationRules.insert_default()
 
 
 __all__ = ["initialize_v2_defaults", "CurationLabel"]

@@ -87,3 +87,41 @@ def test_insert_default_legacy_si_sorters_skips_not_installed(
     assert not (
         SorterParameters & {"sorter": fake, "sorter_params_name": "default"}
     ), "available-but-not-installed sorter must not get a 'default' row"
+
+
+def test_insert_default_legacy_si_sorters_backfills_local_execution(
+    dj_conn, monkeypatch, request
+):
+    """A legacy back-compat row inserts and backfills local execution_params.
+
+    The helper builds its row WITHOUT execution_params, so the insert hook must
+    backfill the default (local) execution blob. Driven deterministically with a
+    fake INSTALLED non-curated sorter so the test does not depend on which SI
+    sorters happen to be installed -- which is also why the happy-path test above
+    can skip. A regression that built a wrong-length positional row (e.g. omitting
+    the execution_params columns) would fail the validated insert here.
+    """
+    import spikeinterface.sorters as sis
+
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    fake = "fake_legacy_sorter_xyz"
+    monkeypatch.setattr(sis, "available_sorters", lambda: [fake])
+    monkeypatch.setattr(sis, "installed_sorters", lambda: [fake])
+    monkeypatch.setattr(sis, "get_default_sorter_params", lambda _sorter: {})
+    request.addfinalizer(
+        lambda: (
+            SorterParameters
+            & {"sorter": fake, "sorter_params_name": "default"}
+        ).delete(safemode=False)
+    )
+
+    SorterParameters.insert_default_legacy_si_sorters()
+
+    row = (
+        SorterParameters & {"sorter": fake, "sorter_params_name": "default"}
+    ).fetch1()
+    assert row["params"]["schema_version"] == 1
+    assert row["execution_params"]["backend"] == "local"
+    assert row["execution_params"]["container_image"] is None
+    assert int(row["execution_params_schema_version"]) == 1

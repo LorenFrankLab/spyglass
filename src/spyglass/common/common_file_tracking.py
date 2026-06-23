@@ -88,8 +88,57 @@ class AnalysisFileIssues(dj.Manual):
                     "analysis_file_name"
                 )
             )
+        except (ImportError, ModuleNotFoundError):
+            # v1 spike-sorting recompute not installed; nothing to exclude.
+            logger.debug("v1 spike-sorting recompute unavailable; skipping.")
         except Exception as e:
+            # File tracking is common infrastructure; v1 recompute may be
+            # unavailable, undeclared, or temporarily query-broken in an
+            # otherwise valid environment. Keep the scan running and report
+            # the optional exclusion source that could not be read.
             logger.warning(f"Could not fetch v1 recompute deleted files: {e}")
+
+        deleted.update(AnalysisFileIssues._get_v2_deleted_files())
+
+        return deleted
+
+    @staticmethod
+    def _get_v2_deleted_files() -> set:
+        """Return v2 analysis file names intentionally deleted by recompute.
+
+        Companion to ``_get_recompute_deleted`` for the v2 spike-sorting
+        recompute machinery: ``RecordingArtifactRecompute.delete_files`` removes
+        a recording's ``AnalysisNwbfile`` after a verified, current-environment
+        match and sets ``deleted=1``. Without this companion the file-tracking
+        infrastructure would flag those intentionally-deleted v2 files as
+        orphans. (The ``SortingAnalyzerRecompute`` trio deletes regeneratable
+        analyzer FOLDERS, not ``AnalysisNwbfile`` rows, so it is not relevant
+        to analysis-file tracking.)
+
+        Returns
+        -------
+        deleted : set of str
+            v2 analysis file names that were intentionally deleted.
+        """
+        deleted = set()
+        try:
+            from spyglass.spikesorting.v2.recompute import (
+                RecordingArtifactRecompute as V2RecordingArtifactRecompute,
+            )
+
+            deleted.update(
+                (V2RecordingArtifactRecompute().with_names & "deleted=1").fetch(
+                    "analysis_file_name"
+                )
+            )
+        except (ImportError, ModuleNotFoundError):
+            # v2 spike-sorting recompute not installed; nothing to exclude.
+            logger.debug("v2 spike-sorting recompute unavailable; skipping.")
+        except Exception as e:
+            # Same env-agnostic shape as the v1 helper above: missing or
+            # query-broken v2 recompute tables should not abort common
+            # file-tracking scans.
+            logger.warning(f"Could not fetch v2 recompute deleted files: {e}")
 
         return deleted
 

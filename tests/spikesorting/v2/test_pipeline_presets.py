@@ -157,6 +157,76 @@ def test_describe_pipeline_presets_matches_preset_objects():
         assert row["notes"] == pipeline_preset.notes
 
 
+def test_container_ms4_pipeline_preset_registered():
+    """The one containerized MS4 preset (Singularity, 30 kHz) is registered.
+
+    The execution backend is NOT a preset field -- it lives on the referenced
+    SorterParameters row -- so ``describe_pipeline_presets`` (DB-free) carries no
+    execution columns. The preset names the containerized sorter row, stays
+    ``recommendation_status="production"`` (the recommended-science MS4 path),
+    and its notes describe the modern-host (numpy>=2) container path; the
+    function default remains MountainSort5.
+    """
+    name = "franklab_probe_hippocampus_30khz_ms4_singularity_2026_06"
+    df = describe_pipeline_presets().set_index("pipeline_preset")
+    assert name in df.index, f"{name} not registered"
+    row = df.loc[name]
+    assert row["sorter"] == "mountainsort4"
+    assert row["sorter_params_name"] == name  # references the container row
+    assert row["recommendation_status"] == "production"
+    assert "numpy>=2" in row["notes"]
+    assert "Singularity" in row["notes"]
+
+    # No shipped preset is the default-switching kind: the default stays MS5.
+    from spyglass.spikesorting.v2 import pipeline as pipeline_mod
+    import inspect
+
+    default = (
+        inspect.signature(pipeline_mod.run_v2_pipeline)
+        .parameters["pipeline_preset"]
+        .default
+    )
+    assert pipeline_mod._PIPELINE_PRESETS[default].sorter == "mountainsort5"
+
+
+def test_describe_presets_flags_ms4_recommended():
+    """``describe_pipeline_presets`` distinguishes container vs local MS4 paths.
+
+    The containerized polymer MS4 preset is surfaced as the recommended-science
+    MS4 path for modern (``numpy>=2``) hosts; the local polymer MS4 preset is
+    surfaced as the compatible-local-runtime (``numpy<2``) path. Both are flagged
+    purely through the HUMAN-FACING fields (``recommendation_status`` /
+    ``intended_use`` / ``notes``) -- the execution backend is not a preset column
+    -- so a scientist reading the catalog can tell which MS4 path to reach for.
+    """
+    container = "franklab_probe_hippocampus_30khz_ms4_singularity_2026_06"
+    local = "franklab_probe_hippocampus_30khz_ms4_2026_06"
+    df = describe_pipeline_presets().set_index("pipeline_preset")
+    assert container in df.index and local in df.index
+
+    container_row = df.loc[container]
+    local_row = df.loc[local]
+
+    # The container preset reads as the recommended-science MS4 path on modern
+    # hosts -- its intended_use says so, and its notes confirm the host stays on
+    # numpy>=2 because the runtime lives in the image.
+    intended = container_row["intended_use"].lower()
+    assert "recommended-science" in intended
+    assert "modern host" in intended
+    assert "numpy>=2" in container_row["notes"]
+
+    # The local MS4 preset is documented for compatible local runtimes: its
+    # notes call out the numpy<2 requirement, and it does NOT claim to be the
+    # recommended-science modern-host path (that distinction is the point).
+    assert "numpy<2" in local_row["notes"]
+    assert "recommended-science" not in local_row["intended_use"].lower()
+
+    # Both stay the production MS4 recipe (the tier is unchanged); the
+    # local-vs-container split is a runtime-host distinction, not a tier one.
+    assert container_row["recommendation_status"] == "production"
+    assert local_row["recommendation_status"] == "production"
+
+
 def test_describe_pipeline_presets_threshold_units_mountainsort():
     """Every MountainSort preset reports σ-of-whitened-signal units, not µV/MAD.
 

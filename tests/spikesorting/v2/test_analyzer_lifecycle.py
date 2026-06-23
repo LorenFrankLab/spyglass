@@ -11,9 +11,16 @@ from __future__ import annotations
 
 import pytest
 
+from spyglass.spikesorting.v2._recipe_catalog import CORTEX_DISPLAY_WAVEFORMS
 from tests.spikesorting.v2._ingest_helpers import (
     _plant_concat_sorting_selection,
 )
+
+# Every sort exercised here uses the 'default' preprocessing recipe, which is
+# not in the region map -> the wide cortex display recipe (see
+# waveform_params_for_preprocessing). The analyzer cache folder is keyed by
+# that recipe name, so the lifecycle assertions resolve it explicitly.
+_DISPLAY = CORTEX_DISPLAY_WAVEFORMS
 
 
 def _stub_recording_with_2d_probe():
@@ -112,6 +119,7 @@ def test_get_analyzer_zero_unit_raises_before_path_lookup():
                 "object_id": "a10-fake-object-id",
                 "n_units": 0,
                 "time_of_sort": dt.datetime(2020, 1, 1, 0, 0, 0),
+                "display_waveform_params_name": _DISPLAY,
             },
             allow_direct_insert=True,
         )
@@ -136,11 +144,9 @@ def test_build_analyzer_cleans_partial_folder_when_create_fails(
     from spyglass.spikesorting.v2 import utils as utils_mod
     from spyglass.spikesorting.v2.sorting import Sorting
 
+    # The caller resolves the cache folder (it carries the recipe identity) and
+    # passes it in; build_analyzer does no path lookup of its own.
     analyzer_folder = tmp_path / "partial.analyzer"
-    monkeypatch.setattr(
-        "spyglass.spikesorting.v2._analyzer_cache.analyzer_path",
-        lambda sorting_id: analyzer_folder,
-    )
 
     class _OneUnitSorting:
         def get_num_units(self):
@@ -163,6 +169,15 @@ def test_build_analyzer_cleans_partial_folder_when_create_fails(
             key={"sorting_id": uuid.uuid4()},
             sorter_row={"job_kwargs": None},
             job_kwargs={},
+            analyzer_folder=analyzer_folder,
+            waveform_params={
+                "ms_before": 1.0,
+                "ms_after": 2.0,
+                "max_spikes_per_unit": 20000,
+                "whiten": False,
+                "purpose": "display",
+                "schema_version": 1,
+            },
         )
     assert not analyzer_folder.exists()
 
@@ -182,7 +197,7 @@ def test_rebuild_analyzer_folder_recreates_on_missing(populated_sorting):
     from spyglass.spikesorting.v2.sorting import Sorting
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
-    folder = analyzer_path(populated_sorting["sorting_id"])
+    folder = analyzer_path(populated_sorting["sorting_id"], _DISPLAY)
     original = Sorting().get_analyzer(populated_sorting)
     original_unit_ids = list(original.unit_ids)
     del original  # release the handle before rmtree
@@ -250,7 +265,7 @@ def test_sorting_delete_removes_analyzer_folder(
 
     sort_pk = _fresh_unit_producing_selection(populated_sorting)
     Sorting.populate(sort_pk, reserve_jobs=False)
-    folder = analyzer_path(sort_pk["sorting_id"])
+    folder = analyzer_path(sort_pk["sorting_id"], _DISPLAY)
     try:
         assert folder.exists(), "fresh sort should have an analyzer folder"
         (Sorting & sort_pk).delete(safemode=safemode_arg)
@@ -285,7 +300,7 @@ def test_make_compute_mode_a_cleanup_on_write_failure(
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
     sort_pk = _fresh_unit_producing_selection(populated_sorting)
-    folder = analyzer_path(sort_pk["sorting_id"])
+    folder = analyzer_path(sort_pk["sorting_id"], _DISPLAY)
 
     def _boom_write(self, **kwargs):
         raise RuntimeError("units NWB write blew up")
@@ -327,12 +342,12 @@ def test_changed_analyzer_root_causes_miss_and_rebuild(
     from spyglass.spikesorting.v2.sorting import Sorting
 
     sid = populated_sorting["sorting_id"]
-    original = analyzer_path(sid)
+    original = analyzer_path(sid, _DISPLAY)
     assert original.exists(), "populated sort should have an analyzer folder"
 
     new_root = tmp_path / "relocated_analyzers"
     dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(new_root)
-    relocated = analyzer_path(sid)
+    relocated = analyzer_path(sid, _DISPLAY)
     assert relocated != original, "root override must change the resolved path"
     assert not relocated.exists(), "fresh root -> cache miss, not a stale row"
     try:
@@ -373,12 +388,17 @@ def _insert_bypassed_sorting_row(sid, *, n_units):
     import datajoint as dj
 
     from spyglass.spikesorting.v2.sorting import (
+        AnalyzerWaveformParameters,
         SorterParameters,
         Sorting,
         SortingSelection,
     )
 
     SorterParameters.insert_default()
+    # The display-recipe FK target must exist (the row is tracked provenance),
+    # and the bypassed Sorting row records the recipe explicitly rather than
+    # relying on a schema default.
+    AnalyzerWaveformParameters.insert_default()
     SortingSelection.insert1(
         {
             "sorting_id": sid,
@@ -397,6 +417,7 @@ def _insert_bypassed_sorting_row(sid, *, n_units):
                 "object_id": "a22-fake-object-id",
                 "n_units": n_units,
                 "time_of_sort": dt.datetime(2020, 1, 1, 0, 0, 0),
+                "display_waveform_params_name": _DISPLAY,
             },
             allow_direct_insert=True,
         )
@@ -413,7 +434,7 @@ def test_find_orphaned_analyzer_folders_db_side(dj_conn):
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
     sid = uuid.uuid4()
-    folder = analyzer_path(sid)  # never written on disk
+    folder = analyzer_path(sid, _DISPLAY)  # never written on disk
     assert not folder.exists()
     _insert_bypassed_sorting_row(sid, n_units=3)
 
@@ -441,7 +462,7 @@ def test_find_orphaned_analyzer_folders_disk_side(dj_conn, tmp_path):
     from spyglass.spikesorting.v2.sorting import Sorting
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
-    analyzer_root = analyzer_path("x").parent
+    analyzer_root = analyzer_path("x", _DISPLAY).parent
     analyzer_root.mkdir(parents=True, exist_ok=True)
     stray = analyzer_root / f"a22_disk_orphan_{uuid.uuid4()}.analyzer"
     stray.mkdir()
@@ -455,6 +476,232 @@ def test_find_orphaned_analyzer_folders_disk_side(dj_conn, tmp_path):
         import shutil
 
         shutil.rmtree(stray, ignore_errors=True)
+
+
+def test_find_orphaned_analyzer_folders_stale_recipe(dj_conn):
+    """A ``{sid}__{other_recipe}.zarr`` folder for an otherwise-valid sort is
+    a disk-side orphan; the sort's own stored display-recipe folder is not.
+
+    This is the orphan case the recipe-keyed cache introduces: deleting/changing
+    a sort can leave a stale recipe folder on disk that no row references, while
+    the sort's stored display recipe folder is still valid.
+    """
+    import shutil
+    import uuid
+
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    sid = uuid.uuid4()
+    # The bypassed row records the cortex display recipe (_DISPLAY), so its
+    # referenced folder is {sid}__franklab_cortex_actual_waveforms.zarr.
+    _insert_bypassed_sorting_row(sid, n_units=3)
+    display_folder = analyzer_path(sid, _DISPLAY)
+    stale_folder = analyzer_path(sid, "franklab_hippocampus_actual_waveforms")
+    display_folder.mkdir(parents=True, exist_ok=True)
+    stale_folder.mkdir(parents=True, exist_ok=True)
+    try:
+        report = Sorting.find_orphaned_analyzer_folders(dry_run=True)
+        disk = set(report["disk_side"])
+        assert str(stale_folder) in disk, (
+            "a {sid}__other_recipe.zarr folder must be a disk-side orphan"
+        )
+        assert str(display_folder) not in disk, (
+            "the sort's stored display-recipe folder is referenced, not orphan"
+        )
+        db_ids = {str(r["sorting_id"]) for r in report["db_side"]}
+        assert str(sid) not in db_ids, (
+            "the display folder exists, so the row is not a DB-side orphan"
+        )
+    finally:
+        shutil.rmtree(display_folder, ignore_errors=True)
+        shutil.rmtree(stale_folder, ignore_errors=True)
+        (SortingSelection & {"sorting_id": sid}).delete(safemode=False)
+
+
+def test_find_orphaned_analyzer_folders_retains_referenced_metric(dj_conn):
+    """A metric (whitened) folder referenced by an AnalyzerCurationSelection is
+    retained; an unreferenced metric folder is a disk-side orphan.
+
+    The whitened metric analyzer is built on demand for PC/NN metrics, so its
+    ``{sid}__{metric_recipe}.zarr`` folder is not a sort's display recipe -- but
+    a referencing curation selection means it is in active use and must NOT be
+    swept as an orphan. An identically-shaped folder for a metric recipe no
+    selection references still is an orphan.
+    """
+    import shutil
+    import uuid
+
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2.metric_curation import (
+        AnalyzerCurationSelection,
+        QualityMetricParameters,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    # franklab_default requests PC metrics (skip_pc_metrics=False), so its
+    # selection actually builds a metric analyzer -> its folder is retained.
+    QualityMetricParameters.insert_default()
+    sid = uuid.uuid4()
+    _insert_bypassed_sorting_row(sid, n_units=3)  # display recipe = _DISPLAY
+    display_folder = analyzer_path(sid, _DISPLAY)
+    referenced = analyzer_path(sid, "franklab_cortex_metric_waveforms")
+    unreferenced = analyzer_path(sid, "franklab_hippocampus_metric_waveforms")
+    for folder in (display_folder, referenced, unreferenced):
+        folder.mkdir(parents=True, exist_ok=True)
+
+    # Plant a PC-requesting curation selection referencing the cortex metric
+    # recipe. Only (sorting_id, metric_params_name, metric_waveform_params_name)
+    # matter to the orphan finder's join, so the other FK fields are stubbed
+    # with FK checks off.
+    conn = dj.conn()
+    acid = uuid.uuid4()
+    conn.query("SET FOREIGN_KEY_CHECKS=0")
+    try:
+        AnalyzerCurationSelection.insert1(
+            {
+                "analyzer_curation_id": acid,
+                "sorting_id": sid,
+                "curation_id": 0,
+                "metric_params_name": "franklab_default",
+                "auto_curation_rules_name": "none",
+                "metric_waveform_params_name": (
+                    "franklab_cortex_metric_waveforms"
+                ),
+            },
+            allow_direct_insert=True,
+        )
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+    try:
+        report = Sorting.find_orphaned_analyzer_folders(dry_run=True)
+        disk = set(report["disk_side"])
+        assert str(referenced) not in disk, (
+            "a metric folder referenced by AnalyzerCurationSelection must be "
+            "retained, not swept as a disk-side orphan"
+        )
+        assert str(unreferenced) in disk, (
+            "an unreferenced metric folder is a disk-side orphan"
+        )
+        assert str(display_folder) not in disk
+    finally:
+        for folder in (display_folder, referenced, unreferenced):
+            shutil.rmtree(folder, ignore_errors=True)
+        conn.query("SET FOREIGN_KEY_CHECKS=0")
+        try:
+            (
+                AnalyzerCurationSelection & {"analyzer_curation_id": acid}
+            ).delete_quick()
+            (SortingSelection & {"sorting_id": sid}).delete(safemode=False)
+        finally:
+            conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+
+def test_analyzer_recompute_separates_recipes(dj_conn):
+    """SortingAnalyzerVersions.key_source = display recipe per sort + metric
+    recipes only for PC-requesting curation selections, matched PER SORT.
+
+    Covers three things the per-recipe recompute must get right:
+    - a PC-requesting selection (``skip_pc_metrics=False``) adds its metric
+      recipe as an independent key for ITS sort (display + metric, distinct
+      ``{sid}__{name}.zarr`` folders);
+    - that metric recipe does NOT leak onto a different sort (``sorting_id`` is
+      part of the match, not just the recipe name);
+    - a skip-PC selection (``skip_pc_metrics=True``) never built a metric
+      analyzer, so its referenced recipe is NOT enumerated.
+    """
+    import uuid
+
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2 import recompute as rc
+    from spyglass.spikesorting.v2.metric_curation import (
+        AnalyzerCurationSelection,
+        QualityMetricParameters,
+    )
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    # franklab_default requests PC metrics (skip_pc_metrics=False); minimal does
+    # not (skip_pc_metrics=True).
+    QualityMetricParameters.insert_default()
+    sid_pc = uuid.uuid4()  # a sort with a PC-requesting curation
+    sid_skip = uuid.uuid4()  # a sort with only a skip-PC curation
+    _insert_bypassed_sorting_row(sid_pc, n_units=3)  # display = _DISPLAY
+    _insert_bypassed_sorting_row(sid_skip, n_units=3)  # display = _DISPLAY
+    acid_pc, acid_skip = uuid.uuid4(), uuid.uuid4()
+    conn = dj.conn()
+    conn.query("SET FOREIGN_KEY_CHECKS=0")
+    try:
+        AnalyzerCurationSelection.insert1(
+            {
+                "analyzer_curation_id": acid_pc,
+                "sorting_id": sid_pc,
+                "curation_id": 0,
+                "metric_params_name": "franklab_default",
+                "auto_curation_rules_name": "none",
+                "metric_waveform_params_name": (
+                    "franklab_cortex_metric_waveforms"
+                ),
+            },
+            allow_direct_insert=True,
+        )
+        AnalyzerCurationSelection.insert1(
+            {
+                "analyzer_curation_id": acid_skip,
+                "sorting_id": sid_skip,
+                "curation_id": 0,
+                "metric_params_name": "minimal",
+                "auto_curation_rules_name": "none",
+                "metric_waveform_params_name": (
+                    "franklab_hippocampus_metric_waveforms"
+                ),
+            },
+            allow_direct_insert=True,
+        )
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+    try:
+        key_source = rc.SortingAnalyzerVersions().key_source
+        pc_recipes = {
+            k["waveform_params_name"]
+            for k in (key_source & {"sorting_id": sid_pc}).fetch(
+                "KEY", as_dict=True
+            )
+        }
+        skip_recipes = {
+            k["waveform_params_name"]
+            for k in (key_source & {"sorting_id": sid_skip}).fetch(
+                "KEY", as_dict=True
+            )
+        }
+        # PC-requesting sort: display + its metric recipe, as distinct keys.
+        assert pc_recipes == {
+            _DISPLAY,
+            "franklab_cortex_metric_waveforms",
+        }, pc_recipes
+        # Skip-PC sort: display ONLY. Its metric recipe was never built (skip
+        # PC), and the other sort's metric recipe does not leak onto it.
+        assert skip_recipes == {_DISPLAY}, skip_recipes
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=0")
+        try:
+            (
+                AnalyzerCurationSelection
+                & [
+                    {"analyzer_curation_id": acid_pc},
+                    {"analyzer_curation_id": acid_skip},
+                ]
+            ).delete_quick()
+            (
+                SortingSelection
+                & [{"sorting_id": sid_pc}, {"sorting_id": sid_skip}]
+            ).delete(safemode=False)
+        finally:
+            conn.query("SET FOREIGN_KEY_CHECKS=1")
 
 
 def test_find_orphaned_analyzer_folders_zero_unit_carveout(dj_conn):
@@ -473,7 +720,7 @@ def test_find_orphaned_analyzer_folders_zero_unit_carveout(dj_conn):
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
     sid = uuid.uuid4()
-    folder = analyzer_path(sid)  # never written on disk
+    folder = analyzer_path(sid, _DISPLAY)  # never written on disk
     assert not folder.exists()
     _insert_bypassed_sorting_row(sid, n_units=0)
 

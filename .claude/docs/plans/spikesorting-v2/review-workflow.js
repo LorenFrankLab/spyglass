@@ -51,7 +51,7 @@ As of the current branch tip there are NO known pre-existing red tests — every
 known-red was fixed — so any failure you observe IS worth investigating. Before attributing a
 failure to a *v2 regression* specifically, confirm whether it also reproduces on master (git stash
 / worktree). A conditional skip (e.g. a sorter not installed) is not a failure.
-INTENTIONAL STUBS: unit_matching.py, metric_curation.py, figpack_curation.py, matcher_protocol.py
+INTENTIONAL STUBS: unit_matching.py, figpack_curation.py, matcher_protocol.py
 are Phase 4/5 roadmap placeholders. Each raises a clear ImportError on attribute access (and
 AttributeError on dunders so import/inspection machinery is unharmed). Do NOT flag their absent
 functionality as a bug — only their stub CONTRACT (clean error, no eager import) is in scope.
@@ -199,11 +199,12 @@ const V2_UNITS = [
   { key: 'artifact', isV2: true, files: 'src/spyglass/spikesorting/v2/artifact.py and _nwb_iterators.py', focus: 'artifact detection thresholds, masking, gap-aware chunk detection, valid_times across gaps, removal_window_ms spillover, frame-space-across-gap (a KNOWN prior bug area — scrutinize window/join/complement math)' },
   { key: 'sorting', isV2: true, files: 'src/spyglass/spikesorting/v2/sorting.py', focus: 'sorter invocation + gating, zero-unit handling, frame<->abs-time conversion, spike readback (searchsorted, affine/recording-extractor frame shift), n_units accounting, disjoint-interval readback' },
   { key: 'curation', isV2: true, files: 'src/spyglass/spikesorting/v2/curation.py', focus: 'curation_label semantics, merge insert, lazy get_merged_sorting, abs-time dedup across gaps, parent_curation lineage, merge_id derivation, pre-curation NWB behavior' },
+  { key: 'analyzer-curation', isV2: true, files: 'src/spyglass/spikesorting/v2/metric_curation.py, _params/metric_curation.py, _metric_curation*.py, recompute.py', focus: 'AnalyzerCuration metrics, auto-label rules, SI auto-merge presets, BurstPair-style plotting helpers, materialize_curation lineage, recompute verification and deletion gates' },
   { key: 'concat', isV2: true, files: 'src/spyglass/spikesorting/v2/session_group.py', focus: 'multi-session concat, abs-time dedup, per-session interval bookkeeping, concat rebuild correctness' },
   { key: 'merge-dedup', isV2: true, files: 'merge integration: src/spyglass/spikesorting/spikesorting_merge.py and the CurationV2 part-table registration', focus: 'SpikeSortingOutput registration, dedup logic, merge_get_part / get_restricted_merge_ids parity with v1, cardinality' },
   { key: 'params', isV2: true, files: 'src/spyglass/spikesorting/v2/_params/*.py', focus: 'Pydantic validation, schema version bumps, field defaults (history: noise_levels default caused 1400x divergence), extra=forbid, per-row default injection' },
   { key: 'utils-pipeline', isV2: true, files: 'src/spyglass/spikesorting/v2/utils.py, pipeline.py, exceptions.py', focus: 'orchestrator idempotency, preset bundles, helper correctness, error taxonomy, populate reserve_jobs usage' },
-  { key: 'v2-stubs', isV2: true, files: 'src/spyglass/spikesorting/v2/{unit_matching,metric_curation,figpack_curation,matcher_protocol}.py and v2/__init__.py', focus: 'STUB CONTRACT ONLY: attribute access raises a clear ImportError naming the roadmap phase; dunder/inspection access raises AttributeError; __init__.py does NOT eagerly import them. Do NOT flag absent functionality — these are intentional Phase 4/5 roadmap stubs.' },
+  { key: 'v2-stubs', isV2: true, files: 'src/spyglass/spikesorting/v2/{unit_matching,figpack_curation,matcher_protocol}.py and v2/__init__.py', focus: 'STUB CONTRACT ONLY: attribute access raises a clear ImportError naming the roadmap phase; dunder/inspection access raises AttributeError; __init__.py does NOT eagerly import them. Do NOT flag absent functionality — these are intentional Phase 4/5 roadmap stubs.' },
   { key: 'si-best-practices', isV2: true, files: 'v2 SpikeInterface usage across recording.py, artifact.py, sorting.py, curation.py, _params/*', focus: `SPIKEINTERFACE BEST-PRACTICE AUDIT (category spikeinterface-best-practice).
 
 METHOD — this is mandatory, do not skip it. You must GROUND every claim in the actual installed
@@ -231,7 +232,7 @@ WHAT TO CHECK against the source you read:
      MS4/MS5/KS4/clusterless thresholder, docker/singularity image handling, deterministic seeds,
      how sorter_params are passed (v2 has comments that some params flow via SI global state, NOT
      splatted into run_sorter — verify that against the real run_sorter signature);
- (3) analyzer API — v2 uses create_sorting_analyzer(format='binary_folder', sparse=True) (modern,
+ (3) analyzer API — v2 uses create_sorting_analyzer(format='zarr', sparse=True) (modern,
      correct — WaveformExtractor is REMOVED in 0.104); verify sparsity estimation + extension compute
      order are valid per the real SortingAnalyzer.compute source;
  (4) quality metrics — which metrics, computed how, vs what SI's qualitymetrics module actually offers
@@ -428,8 +429,8 @@ make()/insert paths, not just signatures). Produce TWO things:
      CHANGELOG do not mention.
  (2) improvement_gaps: v1 limitations / pain points that v2 was meant to (or arguably should)
      improve, and their delivery status (delivered / partial / stubbed-roadmap / not-addressed).
-     Set should_do_now=true for gaps that matter before relying on v2 in production. The four stub
-     modules (unit_matching/metric_curation/figpack_curation/matcher_protocol) are legitimately
+     Set should_do_now=true for gaps that matter before relying on v2 in production. The remaining stub
+     modules (unit_matching/figpack_curation/matcher_protocol) are legitimately
      "stubbed-roadmap", NOT "not-addressed".
 Return the schema.`, { label: `parity:${area.slice(0, 20)}`, phase: 'Parity', schema: PARITY_SCHEMA }),
 

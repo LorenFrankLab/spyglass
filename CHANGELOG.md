@@ -75,6 +75,39 @@ justification.
 
 Upstream issue filed on LorenFrankLab/spyglass to track v1's bug.
 
+#### Spike Sorting v2: analyzer-driven curation + recompute verification
+
+`AnalyzerCuration` consolidates v1's `MetricCuration` + `BurstPair` into one
+computed table that walks a sort's `SortingAnalyzer` extensions to compute
+SpikeInterface 0.104 quality metrics, propose merges (via
+`compute_merge_unit_groups` presets), and propose auto-curation labels.
+Proposals are written to three NWB tables (`quality_metrics`,
+`merge_suggestions`, `proposed_labels`); `materialize_curation()` commits them
+into a child `CurationV2` row (`curation_source='analyzer_curation'`).
+
+- New parameter Lookups: `QualityMetricParameters` (validates metric names
+  against the installed SpikeInterface; `franklab_default` / `neuropixels_default`
+  / `minimal` rows) and `AutoCurationRules` (+ ordered `Rule` part), inserted via
+  `AutoCurationRules.insert_rules(master, rule_rows)`.
+- `isi_violation` reproduces Spyglass's bounded `count / (n_spikes - 1)`
+  fraction, not SI's unbounded `isi_violations_ratio`; the 0.99
+  `nn_isolation` / `nn_noise_overlap` metric names are replaced by the
+  `nn_advanced` PCA metric's two output columns.
+- Fetch/notebook parity: `get_metrics` / `get_labels` / `get_merge_groups` /
+  `get_waveforms`, the static `plot_units_qc` population QC plot, and the ported
+  BurstPair views (`plot_correlograms`, `investigate_pair_xcorrel`,
+  `investigate_pair_peaks`, `plot_peak_over_time`).
+- `Sorting.add_extensions()` adds analyzer extensions in place, idempotently.
+- The clusterless `spike_location` decoding mark is now supported for v2
+  (`CurationV2`) sources; the legacy `_get_spike_locations` body is repurposed
+  for the v2 analyzer accessor and raises clearly for unsupported legacy
+  `WaveformExtractor` sources.
+- New recompute-verification tables (`RecordingArtifact*`,
+  `SortingAnalyzer*` trios) regenerate and content-compare large artifacts so
+  `delete_files()` reclaims disk only after a current-environment match (stale
+  matches raise `StaleEnvMatchedError`). See
+  [SpikeSortingV2StorageManagement.md](./Features/SpikeSortingV2StorageManagement.md).
+
 #### Spike Sorting v2: streaming Recording write, parallel populate, and v1-parity restorations
 
 This is a focused fix-up between the initial v2 landing and the
@@ -330,9 +363,10 @@ per-spike amplitudes from its `waveforms` extension (`random_spikes`
 `method="all"` so every spike is covered, not a 500-spike subsample). Features
 are keyed by the true NWB unit_id (correct for sparse merge-applied ids), and a
 zero-unit v2 curation yields an empty-but-valid features row instead of
-crashing. No `si.extract_waveforms` on the v2 path. Supported v2 features:
-`amplitude` (what clusterless decoding uses) and `full_waveform`;
-`spike_location` is not yet wired for v2 sources and raises a clear error.
+crashing. No `si.extract_waveforms` on the v2 path. Supported v2 features at
+that checkpoint were `amplitude` (what clusterless decoding uses) and
+`full_waveform`; `spike_location` lands later in the analyzer-curation update
+above via the analyzer `spike_locations` extension.
 
 Note: v2 amplitudes are in microvolts (`return_in_uV=True`), whereas the
 legacy v0/v1 path read raw ADC counts. v2 and v1 feature magnitudes are
@@ -466,9 +500,12 @@ cross-referenced here, not duplicated.
   ([curation.py:109](./src/spyglass/spikesorting/v2/curation.py#L109)).
 - `description` widened `varchar(100)` → `varchar(255)` on `CurationV2`
   ([curation.py:112](./src/spyglass/spikesorting/v2/curation.py#L112)).
-- `MetricCuration`, `FigURLCuration`, `BurstPair`, and
-  `RecordingRecompute` chains are not yet ported — see "Removed v1
-  features" below.
+- `MetricCuration` is replaced by `AnalyzerCuration`; v1 `BurstPair` plotting
+  helpers are folded into `AnalyzerCuration` while the stored per-pair
+  `BurstPairUnit` metrics remain v1-only. `RecordingRecompute` is replaced by
+  the v2 `RecordingArtifactRecompute*` and `SortingAnalyzerRecompute*`
+  verification families. `FigURLCuration` remains v1-only until the FigPack
+  phase lands — see "Removed or replaced v1 features" below.
 
 **Schema-defaults flips (programmatic users only)**
 
@@ -534,20 +571,27 @@ cross-referenced here, not duplicated.
   see the artifact-detection unit-conversion subsection above for the
   full rationale.
 
-**Removed v1 features (use the v1 fallback in the interim)**
+**Removed or replaced v1 features**
 
 - `MetricCuration` chain (`MetricCuration`, `MetricCurationParameters`,
-  `WaveformParameters`, `MetricParameters`) — the v2 stub raises an
-  informative `ImportError` pointing at
-  `spyglass.spikesorting.v1.metric_curation`
+  `WaveformParameters`, `MetricParameters`) is replaced for v2 rows by
+  `QualityMetricParameters`, `AutoCurationRules`,
+  `AnalyzerCurationSelection`, and `AnalyzerCuration`
   ([metric_curation.py](./src/spyglass/spikesorting/v2/metric_curation.py)).
-- `FigURLCuration` chain — v2 stub points at
-  `spyglass.spikesorting.v1.figurl_curation`
+  Waveform re-extraction via a separate `WaveformParameters` row is not
+  preserved; v2 reads waveforms from the `SortingAnalyzer`.
+- `FigURLCuration` chain remains v1-only while the v2 FigPack curation module
+  is pending
   ([figpack_curation.py](./src/spyglass/spikesorting/v2/figpack_curation.py)).
-- `BurstPair` chain — use `spyglass.spikesorting.v1` (`BurstPair`,
-  `BurstPairParams`, `BurstPairSelection`).
-- `RecordingRecompute` chain — use
-  `spyglass.spikesorting.v1.recompute`.
+- `BurstPair` chain has no v2 table clone. Use v1 `BurstPair` for stored
+  per-pair quantitative metrics; use `AnalyzerCuration` for the ported
+  correlogram, cross-correlogram, pair-peak, and peak-over-time plotting
+  helpers.
+- `RecordingRecompute` chain is replaced by
+  `RecordingArtifactVersions` / `RecordingArtifactRecomputeSelection` /
+  `RecordingArtifactRecompute` and `SortingAnalyzerVersions` /
+  `SortingAnalyzerRecomputeSelection` / `SortingAnalyzerRecompute`
+  ([recompute.py](./src/spyglass/spikesorting/v2/recompute.py)).
 - `recording_id`-keyed `IntervalList` row — see "Dropped or relocated
   data" above.
 

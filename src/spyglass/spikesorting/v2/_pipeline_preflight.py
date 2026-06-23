@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from spyglass.spikesorting.v2._pipeline_presets import _PIPELINE_PRESETS
+from spyglass.spikesorting.v2._recipe_catalog import DEFAULT_PIPELINE_PRESET
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -31,6 +32,137 @@ if TYPE_CHECKING:
 _SORTER_RUNTIME_BACKENDS: dict[str, tuple[str, ...]] = {
     "mountainsort4": ("ml_ms4alg",),
 }
+
+
+def _docker_runtime_available() -> tuple[bool, str]:
+    """Return ``(ok, detail)`` for the Docker container runtime.
+
+    A container-backed (``backend="docker"``) preset needs both the Docker
+    engine and the Python ``docker`` package -- the two things SpikeInterface's
+    ``run_sorter`` itself checks before dispatching to a Docker container.
+    Defined as a module-level function so tests can monkeypatch the runtime
+    probe without a real Docker install.
+    """
+    from spikeinterface.sorters.runsorter import (
+        has_docker,
+        has_docker_python,
+    )
+
+    if not has_docker():
+        return False, "the Docker engine (`docker` CLI) was not found"
+    if not has_docker_python():
+        return (
+            False,
+            "the Python `docker` package is not installed "
+            "(`pip install docker`)",
+        )
+    return True, "Docker engine + Python `docker` package available"
+
+
+def _singularity_runtime_available() -> tuple[bool, str]:
+    """Return ``(ok, detail)`` for the Singularity/Apptainer container runtime.
+
+    A container-backed (``backend="singularity"``) preset needs both Singularity
+    (or Apptainer) and the Python ``spython`` package -- the two things
+    SpikeInterface's ``run_sorter`` checks before dispatching to a Singularity
+    container. Defined as a module-level function so tests can monkeypatch the
+    runtime probe without a real Singularity install.
+    """
+    from spikeinterface.sorters.runsorter import (
+        has_singularity,
+        has_spython,
+    )
+
+    if not has_singularity():
+        return False, "Singularity/Apptainer was not found"
+    if not has_spython():
+        return (
+            False,
+            "the Python `spython` package is not installed "
+            "(`pip install spython`)",
+        )
+    return True, "Singularity + Python `spython` package available"
+
+
+def _check_local_sorter_runtime(bundle, sis, non_si_sorters, check) -> None:
+    """Run the LOCAL-execution sorter checks (installed + runtime backend).
+
+    Extracted from ``preflight_v2_pipeline`` so its execution-backend dispatch
+    reads as a flat three-arm choice (MATLAB-local error / local checks /
+    container runtime) instead of a deeply nested branch.
+
+    Parameters
+    ----------
+    bundle : _PipelinePreset
+        The resolved preset whose ``sorter`` is being checked.
+    sis : module
+        ``spikeinterface.sorters`` (passed in so the import stays at the one
+        call site).
+    non_si_sorters : Container[str]
+        ``SorterParameters._NON_SI_SORTERS`` -- never gated on an SI binary.
+    check : Callable[[str, Any, str], bool]
+        The report's check-recording closure.
+    """
+    # sorter_installed. Reuse the SAME strict gate insert_default uses: the
+    # internal clusterless_thresholder (_NON_SI_SORTERS) is never an SI binary
+    # and is always available; otherwise the sorter must be in
+    # installed_sorters(), distinguishing "known but not installed" from
+    # "misspelled / unknown" for the fix message.
+    sorter_installed_ok = (
+        bundle.sorter in non_si_sorters
+        or bundle.sorter in set(sis.installed_sorters())
+    )
+    if sorter_installed_ok:
+        check("sorter_installed", True, "")
+    elif bundle.sorter in set(sis.available_sorters()):
+        check(
+            "sorter_installed",
+            False,
+            f"sorter {bundle.sorter!r} is a known SpikeInterface sorter but its "
+            "binary/runtime is not installed here "
+            "(spikeinterface.sorters.installed_sorters()). Install it, or pick a "
+            "preset whose sorter is installed. (Or use a containerized execution "
+            "preset, which runs the sorter runtime inside a container image "
+            "instead.)",
+        )
+    else:
+        check(
+            "sorter_installed",
+            False,
+            f"sorter {bundle.sorter!r} is not a known SpikeInterface sorter "
+            "(spikeinterface.sorters.available_sorters()) -- check the spelling "
+            "or the preset.",
+        )
+
+    # sorter_runtime_available. installed_sorters() only checks that the SI
+    # wrapper imports; for sorters that call a SEPARATE algorithm backend at run
+    # time (see _SORTER_RUNTIME_BACKENDS) actually import that backend, so a
+    # green sorter_installed cannot precede a sort-time failure -- whether the
+    # backend is absent OR present-but-broken (e.g. a numpy<2-era ml_ms4alg
+    # under the numpy>=2 baseline raising at import). Only runs when
+    # sorter_installed passed: if the wrapper itself is missing, a second
+    # "backend missing" failure would be contradictory.
+    backend_modules = _SORTER_RUNTIME_BACKENDS.get(bundle.sorter, ())
+    if sorter_installed_ok and backend_modules:
+        import importlib
+
+        broken_backends = []
+        for mod in backend_modules:
+            try:
+                importlib.import_module(mod)
+            except Exception as exc:  # noqa: BLE001 - any import failure disqualifies
+                broken_backends.append(f"{mod} ({type(exc).__name__}: {exc})")
+        check(
+            "sorter_runtime_available",
+            not broken_backends,
+            f"sorter {bundle.sorter!r} is listed as installed but its runtime "
+            "backend(s) cannot be imported, so the sort would crash: "
+            f"{'; '.join(broken_backends)}. Install/repair the backend "
+            "(mountainsort4 needs ml_ms4alg, which requires numpy<2), or pick a "
+            "preset whose sorter runs in this environment -- e.g. a MountainSort5 "
+            "preset, or a containerized MountainSort4 preset whose runtime lives "
+            "in the container.",
+        )
 
 
 @dataclass(frozen=True)
@@ -133,7 +265,7 @@ def preflight_v2_pipeline(
     sort_group_id: int,
     interval_list_name: str,
     team_name: str,
-    pipeline_preset: str = "franklab_tetrode_hippocampus_30khz_ms5_2026_06",
+    pipeline_preset: str = DEFAULT_PIPELINE_PRESET,
 ) -> PreflightReport:
     """Read-only pre-populate configuration check for ``run_v2_pipeline``.
 
@@ -212,7 +344,11 @@ def preflight_v2_pipeline(
         RecordingSelection,
         SortGroupV2,
     )
+    from spyglass.spikesorting.v2._recipe_catalog import (
+        waveform_params_for_preprocessing,
+    )
     from spyglass.spikesorting.v2.sorting import (
+        AnalyzerWaveformParameters,
         SorterParameters,
         SortingSelection,
     )
@@ -298,16 +434,32 @@ def preflight_v2_pipeline(
         f"ArtifactDetectionParameters row {bundle.artifact_detection_params_name!r} "
         "is missing. Run initialize_v2_defaults().",
     )
-    _check(
+    sorter_params_query = SorterParameters & {
+        "sorter": bundle.sorter,
+        "sorter_params_name": bundle.sorter_params_name,
+    }
+    sorter_params_exist = _check(
         "sorter_params_exist",
-        SorterParameters
-        & {
-            "sorter": bundle.sorter,
-            "sorter_params_name": bundle.sorter_params_name,
-        },
+        sorter_params_query,
         f"SorterParameters row (sorter={bundle.sorter!r}, "
         f"sorter_params_name={bundle.sorter_params_name!r}) is missing. "
         "Run initialize_v2_defaults().",
+    )
+    # The display analyzer recipe is region-resolved from the preprocessing
+    # recipe and FK-required on the Sorting row, so Sorting.make_fetch fails if
+    # its AnalyzerWaveformParameters row is missing. Gate it here (up front)
+    # rather than crashing deep in populate, matching the other params checks.
+    display_waveform_params_name = waveform_params_for_preprocessing(
+        bundle.preprocessing_params_name
+    )[0]
+    _check(
+        "analyzer_waveform_params_exist",
+        AnalyzerWaveformParameters
+        & {"waveform_params_name": display_waveform_params_name},
+        f"AnalyzerWaveformParameters row {display_waveform_params_name!r} "
+        "(the display analyzer recipe for preprocessing "
+        f"{bundle.preprocessing_params_name!r}) is missing. Run "
+        "initialize_v2_defaults().",
     )
 
     # 8b. sampling_rate_matches. The MS4/MS5 snippet window (clip_size /
@@ -338,63 +490,80 @@ def preflight_v2_pipeline(
                 "match sampling_rate_hz to the recording).",
             )
 
-    # 9. sorter_installed. Reuse the SAME strict gate insert_default uses:
-    # the internal clusterless_thresholder (_NON_SI_SORTERS) is never an SI
-    # binary and is always available; otherwise the sorter must be in
-    # installed_sorters(), distinguishing "known but not installed" from
-    # "misspelled / unknown" for the fix message.
-    sorter_installed_ok = (
-        bundle.sorter in SorterParameters._NON_SI_SORTERS
-        or bundle.sorter in set(sis.installed_sorters())
-    )
-    if sorter_installed_ok:
-        _check("sorter_installed", True, "")
-    elif bundle.sorter in set(sis.available_sorters()):
-        _check(
-            "sorter_installed",
-            False,
-            f"sorter {bundle.sorter!r} is a known SpikeInterface sorter but "
-            "its binary/runtime is not installed here "
-            "(spikeinterface.sorters.installed_sorters()). Install it, or "
-            "pick a preset whose sorter is installed.",
+    # 9. Sorter execution. The selected backend (local vs container) is read
+    # ONLY from the SorterParameters row's execution_params (the single source of
+    # truth -- never the preset). When the row is absent, sorter_params_exist
+    # above already reported the blocking error and the backend is unknowable, so
+    # the container / MATLAB-policy checks are skipped; the sorter NAME is still
+    # validated as a local sorter (the pre-execution-params behavior) so a
+    # misspelled sorter keeps its spelling hint.
+    if not sorter_params_exist:
+        _check_local_sorter_runtime(
+            bundle, sis, SorterParameters._NON_SI_SORTERS, _check
         )
     else:
-        _check(
-            "sorter_installed",
-            False,
-            f"sorter {bundle.sorter!r} is not a known SpikeInterface sorter "
-            "(spikeinterface.sorters.available_sorters()) -- check the "
-            "spelling or the preset.",
+        from spyglass.spikesorting.v2._params.sorter import (
+            validate_execution_params,
+        )
+        from spyglass.spikesorting.v2._sorting_dispatch import (
+            MATLAB_SORTERS,
+            matlab_container_required_message,
         )
 
-    # 9b. sorter_runtime_available. installed_sorters() only checks that the SI
-    # wrapper imports; for sorters that call a SEPARATE algorithm backend at run
-    # time (see _SORTER_RUNTIME_BACKENDS) actually import that backend, so a
-    # green sorter_installed cannot precede a sort-time failure -- whether the
-    # backend is absent OR present-but-broken (e.g. a numpy<2-era ml_ms4alg
-    # under the numpy>=2 baseline raising at import). Only runs when
-    # sorter_installed passed: if the wrapper itself is missing, a second
-    # "backend missing" failure would be contradictory ("listed as installed").
-    backend_modules = _SORTER_RUNTIME_BACKENDS.get(bundle.sorter, ())
-    if sorter_installed_ok and backend_modules:
-        import importlib
-
-        broken_backends = []
-        for mod in backend_modules:
-            try:
-                importlib.import_module(mod)
-            except Exception as exc:  # noqa: BLE001 - any import failure disqualifies
-                broken_backends.append(f"{mod} ({type(exc).__name__}: {exc})")
-        _check(
-            "sorter_runtime_available",
-            not broken_backends,
-            f"sorter {bundle.sorter!r} is listed as installed but its runtime "
-            "backend(s) cannot be imported, so the sort would crash: "
-            f"{'; '.join(broken_backends)}. Install/repair the backend "
-            "(mountainsort4 needs ml_ms4alg, which requires numpy<2), or pick a "
-            "preset whose sorter runs in this environment (e.g. a MountainSort5 "
-            "preset).",
+        execution_params = validate_execution_params(
+            sorter_params_query.fetch1("execution_params")
         )
+        execution_backend = execution_params["backend"]
+        container_image = execution_params["container_image"]
+
+        if execution_backend == "local":
+            # MATLAB-backed sorters (Kilosort 2.5/3, IronClust) ship only as
+            # container images; a local row for one of them cannot run. Surface
+            # the SAME tracked-container-backend message the dispatch raises,
+            # rather than the local-install checks.
+            if bundle.sorter.lower() in MATLAB_SORTERS:
+                _check(
+                    "sorter_execution_backend",
+                    False,
+                    matlab_container_required_message(bundle.sorter),
+                )
+            else:
+                _check_local_sorter_runtime(
+                    bundle, sis, SorterParameters._NON_SI_SORTERS, _check
+                )
+        else:
+            # Container backend: verify the container RUNTIME (engine + Python
+            # package), not the local sorter install. The sorter runtime lives
+            # in the image, so a missing LOCAL runtime is irrelevant here. A
+            # missing CONTAINER runtime is an actionable, blocking
+            # selected-preset error -- preflight never silently falls back to
+            # local execution.
+            if execution_backend == "docker":
+                runtime_ok, runtime_detail = _docker_runtime_available()
+            else:
+                runtime_ok, runtime_detail = _singularity_runtime_available()
+            _check(
+                "container_runtime_available",
+                runtime_ok,
+                f"pipeline_preset {pipeline_preset!r} selects the "
+                f"{execution_backend} execution backend (image "
+                f"{container_image!r}) for sorter {bundle.sorter!r}, but it is "
+                f"not runnable here: {runtime_detail}. Install the container "
+                "runtime and its Python package, or pick a local-execution "
+                "preset. Preflight does not fall back to local execution.",
+            )
+            # Informational advisory (only when the container is actually
+            # runnable, so it never sits next to a blocking runtime failure):
+            # the host can stay on numpy>=2 -- the sorter runtime (e.g. MS4's
+            # numpy<2-era ml_ms4alg) lives in the container, not on the host.
+            if runtime_ok:
+                warnings.append(
+                    f"pipeline_preset {pipeline_preset!r} runs sorter "
+                    f"{bundle.sorter!r} inside the {execution_backend} image "
+                    f"{container_image!r}: the host can stay on the v2 numpy>=2 "
+                    "environment because the sorter runtime lives in the "
+                    "container, not on the host."
+                )
 
     # Non-blocking advisory: the "none" artifact params are a no-op
     # pass-through (no masking). "default" performs real amplitude-threshold

@@ -21,13 +21,27 @@ from spyglass.spikesorting.v2._analyzer_cache import (
 )
 from spyglass.spikesorting.v2._sorting_analyzer import build_analyzer
 
+# A display (unwhitened) recipe blob -- build_analyzer requires the resolved
+# waveform params (it never picks a default), so the probe-projection tests
+# that exercise the build path pass this explicitly.
+_DISPLAY_PARAMS = {
+    "ms_before": 1.0,
+    "ms_after": 2.0,
+    "max_spikes_per_unit": 20000,
+    "whiten": False,
+    "purpose": "display",
+    "schema_version": 1,
+}
+
 
 def test_analyzer_cache_root_honors_config(restore_custom_config):
     import datajoint as dj
 
     dj.config["custom"]["spikesorting_v2_analyzer_dir"] = "/tmp/v2_custom_an"
     assert analyzer_cache_root() == Path("/tmp/v2_custom_an")
-    assert analyzer_path("abc") == Path("/tmp/v2_custom_an/abc.analyzer")
+    assert analyzer_path("abc", "rec") == Path(
+        "/tmp/v2_custom_an/abc__rec.zarr"
+    )
 
 
 def test_analyzer_cache_root_falls_back_to_temp_dir(restore_custom_config):
@@ -38,7 +52,25 @@ def test_analyzer_cache_root_falls_back_to_temp_dir(restore_custom_config):
     dj.config["custom"].pop("spikesorting_v2_analyzer_dir", None)
     expected = Path(temp_dir) / "spikesorting_v2" / "analyzers"
     assert analyzer_cache_root() == expected
-    assert analyzer_path("s1") == expected / "s1.analyzer"
+    assert analyzer_path("s1", "rec") == expected / "s1__rec.zarr"
+
+
+def test_analyzer_path_includes_params_name(restore_custom_config):
+    """The cache folder is keyed by ``(sorting_id, waveform_params_name)``.
+
+    Two recipes for one sort resolve to distinct folders (so a whitened metric
+    analyzer never overwrites the unwhitened display one), both under the
+    configured root.
+    """
+    import datajoint as dj
+
+    dj.config["custom"]["spikesorting_v2_analyzer_dir"] = "/tmp/v2_custom_an"
+    root = Path("/tmp/v2_custom_an")
+    display = analyzer_path("sid1", "franklab_hippocampus_actual_waveforms")
+    metric = analyzer_path("sid1", "franklab_hippocampus_metric_waveforms")
+    assert display != metric
+    assert display.parent == root and metric.parent == root
+    assert display == root / "sid1__franklab_hippocampus_actual_waveforms.zarr"
 
 
 def test_empty_config_value_falls_back(restore_custom_config):
@@ -54,7 +86,14 @@ def test_empty_config_value_falls_back(restore_custom_config):
     )
 
 
-def test_remove_analyzer_cache(tmp_path, restore_custom_config):
+def test_remove_analyzer_cache_removes_all_recipes(
+    tmp_path, restore_custom_config
+):
+    """``remove_analyzer_cache`` globs every ``{sid}__*.zarr`` recipe folder.
+
+    A sort has multiple analyzer recipes on disk (display + metric); deleting
+    the sort must orphan every one. A different sort's folder is untouched.
+    """
     import datajoint as dj
 
     dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(tmp_path)
@@ -65,12 +104,19 @@ def test_remove_analyzer_cache(tmp_path, restore_custom_config):
     with pytest.raises(FileNotFoundError):
         remove_analyzer_cache(sid, missing_ok=False)
 
-    # Present folder (with contents): removed, returns True.
-    folder = analyzer_path(sid)
-    folder.mkdir(parents=True)
-    (folder / "waveforms.bin").write_text("scratch")
+    # Two recipe folders for this sort, plus one for a different sort.
+    display = analyzer_path(sid, "franklab_hippocampus_actual_waveforms")
+    metric = analyzer_path(sid, "franklab_hippocampus_metric_waveforms")
+    other = analyzer_path("cafef00d", "franklab_cortex_actual_waveforms")
+    for folder in (display, metric, other):
+        folder.mkdir(parents=True)
+        (folder / "waveforms.bin").write_text("scratch")
+
     assert remove_analyzer_cache(sid) is True
-    assert not folder.exists()
+    assert not display.exists()
+    assert not metric.exists()
+    # A different sort's folder is left in place.
+    assert other.exists()
 
 
 def test_analyzer_cache_import_pulls_no_db_layer_modules():
@@ -138,7 +184,7 @@ def recording_3d_and_sorting():
 class TestBuildAnalyzerProbeProjection:
     def test_analyzer_probe_is_2d(self, recording_3d_and_sorting, tmp_path):
         recording, sorting = recording_3d_and_sorting
-        folder = tmp_path / "sort.analyzer"
+        folder = tmp_path / "sort.zarr"
 
         build_analyzer(
             sorting,
@@ -147,6 +193,7 @@ class TestBuildAnalyzerProbeProjection:
             sorter_row={"job_kwargs": {}},
             job_kwargs={},
             analyzer_folder=folder,
+            waveform_params=_DISPLAY_PARAMS,
         )
 
         analyzer = si.load_sorting_analyzer(folder)
@@ -158,7 +205,7 @@ class TestBuildAnalyzerProbeProjection:
         # Without the 2D projection this raises ValueError:
         # "could not broadcast input array from shape (3,) into shape (2,)".
         recording, sorting = recording_3d_and_sorting
-        folder = tmp_path / "sort.analyzer"
+        folder = tmp_path / "sort.zarr"
 
         build_analyzer(
             sorting,
@@ -167,9 +214,170 @@ class TestBuildAnalyzerProbeProjection:
             sorter_row={"job_kwargs": {}},
             job_kwargs={},
             analyzer_folder=folder,
+            waveform_params=_DISPLAY_PARAMS,
         )
 
         analyzer = si.load_sorting_analyzer(folder)
         analyzer.compute("unit_locations")
         unit_locations = analyzer.get_extension("unit_locations").get_data()
         assert unit_locations.shape[0] == sorting.get_num_units()
+
+
+class TestBuildAnalyzerWaveformParams:
+    """``build_analyzer`` reads window / subsample from the resolved params.
+
+    The window + subsample are no longer hardcoded -- they come from the
+    resolved ``AnalyzerWaveformParameters`` blob the caller threads in. These
+    drive ``build_analyzer`` directly with each region's resolved dict (no name
+    lookup, no DB read), then read the window / cap back off the built
+    analyzer's ``waveforms`` / ``random_spikes`` extensions.
+    """
+
+    @staticmethod
+    def _build(recording, sorting, folder, waveform_params):
+        build_analyzer(
+            sorting,
+            recording,
+            key={"sorting_id": "test-window"},
+            sorter_row={"job_kwargs": {}},
+            job_kwargs={},
+            analyzer_folder=folder,
+            waveform_params=waveform_params,
+        )
+        return si.load_sorting_analyzer(folder)
+
+    def test_hippocampus_window(self, recording_3d_and_sorting, tmp_path):
+        recording, sorting = recording_3d_and_sorting
+        analyzer = self._build(
+            recording,
+            sorting,
+            tmp_path / "hippo.zarr",
+            {
+                "ms_before": 0.5,
+                "ms_after": 0.5,
+                "max_spikes_per_unit": 20000,
+                "whiten": False,
+                "purpose": "display",
+                "schema_version": 1,
+            },
+        )
+        wf = analyzer.get_extension("waveforms").params
+        rs = analyzer.get_extension("random_spikes").params
+        assert wf["ms_before"] == 0.5 and wf["ms_after"] == 0.5
+        assert rs["max_spikes_per_unit"] == 20000
+
+    def test_cortex_window(self, recording_3d_and_sorting, tmp_path):
+        recording, sorting = recording_3d_and_sorting
+        analyzer = self._build(
+            recording,
+            sorting,
+            tmp_path / "cortex.zarr",
+            {
+                "ms_before": 1.0,
+                "ms_after": 2.0,
+                "max_spikes_per_unit": 20000,
+                "whiten": False,
+                "purpose": "display",
+                "schema_version": 1,
+            },
+        )
+        wf = analyzer.get_extension("waveforms").params
+        rs = analyzer.get_extension("random_spikes").params
+        assert wf["ms_before"] == 1.0 and wf["ms_after"] == 2.0
+        assert rs["max_spikes_per_unit"] == 20000
+
+    def test_analyzer_folder_required(self, recording_3d_and_sorting):
+        """Omitting ``analyzer_folder`` raises (the caller must resolve it)."""
+        recording, sorting = recording_3d_and_sorting
+        with pytest.raises(ValueError, match="analyzer_folder is required"):
+            build_analyzer(
+                sorting,
+                recording,
+                key={"sorting_id": "test-window"},
+                sorter_row={"job_kwargs": {}},
+                job_kwargs={},
+            )
+
+    def test_metric_analyzer_is_whitened(
+        self, recording_3d_and_sorting, tmp_path
+    ):
+        """A metric (``whiten=True``) recipe builds a WHITENED analyzer with
+        ``return_in_uV=False``; the display (``whiten=False``) recipe stays
+        unwhitened with ``return_in_uV=True``.
+
+        Same window for both, differing only in ``whiten`` -- so the template
+        difference is the whitening, not the window. The display recipe carries
+        real µV amplitudes (``return_in_uV=True``); the metric recipe must read
+        back the decorrelated space (``return_in_uV=False``) for PC/NN metrics.
+        """
+        import numpy as np
+
+        recording, sorting = recording_3d_and_sorting
+        window = {
+            "ms_before": 1.0,
+            "ms_after": 2.0,
+            "max_spikes_per_unit": 20000,
+            "schema_version": 1,
+        }
+        display = self._build(
+            recording,
+            sorting,
+            tmp_path / "display.zarr",
+            {**window, "whiten": False, "purpose": "display"},
+        )
+        metric = self._build(
+            recording,
+            sorting,
+            tmp_path / "metric.zarr",
+            {**window, "whiten": True, "purpose": "metric"},
+        )
+        assert display.return_in_uV is True
+        assert metric.return_in_uV is False
+        disp_t = display.get_extension("templates").get_data()
+        met_t = metric.get_extension("templates").get_data()
+        assert disp_t.shape == met_t.shape
+        # Whitening changes the templates; same window, so this is the whiten.
+        assert not np.allclose(disp_t, met_t)
+
+    def test_metric_analyzer_whitened_under_unequal_gains(self, tmp_path):
+        """Under NON-uniform channel gains the whitened analyzer's per-channel
+        noise is ~1 (unit variance) -- it would TRACK the gains if
+        ``return_in_uV=True`` re-applied them.
+
+        ``sip.whiten`` preserves the parent's per-channel gains, so a
+        ``return_in_uV=True`` readback multiplies the unit-variance whitened
+        traces back by those gains and un-normalizes the space. ``build_analyzer``
+        builds the metric recipe with ``return_in_uV=False``; here the gains are
+        [1, 5, 0.2, 3], so a gains-reapplied build would give noise ~[1, 5, 0.2,
+        3] (max ~5, min ~0.15), which the bounds below reject.
+        """
+        import numpy as np
+
+        rec, sort = si.generate_ground_truth_recording(
+            durations=[10.0],
+            num_channels=4,
+            num_units=3,
+            seed=0,
+            sampling_frequency=30000.0,
+        )
+        rec.set_channel_gains(np.array([1.0, 5.0, 0.2, 3.0], dtype="float32"))
+        rec.set_channel_offsets(np.zeros(4, dtype="float32"))
+        analyzer = self._build(
+            rec,
+            sort,
+            tmp_path / "metric.zarr",
+            {
+                "ms_before": 1.0,
+                "ms_after": 2.0,
+                "max_spikes_per_unit": 20000,
+                "whiten": True,
+                "purpose": "metric",
+                "schema_version": 1,
+            },
+        )
+        noise = analyzer.get_extension("noise_levels").get_data()
+        # Whitened, gains NOT re-applied -> ~unit variance on every channel.
+        assert np.allclose(noise, 1.0, atol=0.5), noise
+        # Gains-reapplied (return_in_uV=True) would track [1, 5, 0.2, 3];
+        # assert the 5x / 0.2x channels are NOT near their gains.
+        assert noise.max() < 2.0 and noise.min() > 0.4, noise

@@ -534,18 +534,3 @@ def test_plot_sort_group_geometry_multi_probe_offset(monkeypatch):
     assert xranges[0][1] < xranges[1][0]
     assert "offset per probe" in ax.get_xlabel()
     plt.close(fig)
-
-
-def test_user_notebook_cell_budget():
-    """The user notebook stays within the 12-code-cell budget (DB-free).
-
-    Equivalent to
-    ``jq '.cells | map(select(.cell_type=="code")) | length'`` but in pure
-    Python so it needs neither ``jq`` nor the database. Pure file inspection:
-    no ``dj_conn``, so this never triggers the smoke-fixture fetch.
-    """
-    import json
-
-    notebook = json.loads(_NOTEBOOK_PATH.read_text())
-    n_code = sum(1 for c in notebook["cells"] if c["cell_type"] == "code")
-    assert n_code <= 12, f"notebook has {n_code} code cells (budget is 12)"

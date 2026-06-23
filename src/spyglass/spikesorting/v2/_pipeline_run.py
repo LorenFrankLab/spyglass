@@ -23,6 +23,7 @@ from spyglass.spikesorting.v2._pipeline_reporting import (
     _run_metadata,
     _run_warnings,
 )
+from spyglass.spikesorting.v2._recipe_catalog import DEFAULT_PIPELINE_PRESET
 from spyglass.spikesorting.v2._pipeline_types import (
     RunV2PipelineSessionResult,
     RunV2PipelineSummary,
@@ -84,7 +85,7 @@ def run_v2_pipeline(
     sort_group_id: int,
     interval_list_name: str,
     team_name: str,
-    pipeline_preset: str = "franklab_tetrode_hippocampus_30khz_ms5_2026_06",
+    pipeline_preset: str = DEFAULT_PIPELINE_PRESET,
     description: str = "",
     require_units: bool = False,
     preflight: bool = True,
@@ -134,10 +135,20 @@ def run_v2_pipeline(
         ``common.LabTeam``.
     pipeline_preset
         Pipeline-preset name from ``_PIPELINE_PRESETS``. The default is
-        ``franklab_tetrode_hippocampus_30khz_ms5_2026_06`` (MountainSort5),
-        which runs under the v2 ``numpy>=2`` baseline; the MountainSort4
-        production recipe is selectable but its ``ml_ms4alg`` backend needs
-        ``numpy<2`` (preflight reports this via ``sorter_runtime_available``).
+        ``franklab_probe_hippocampus_30khz_ms5_2026_06`` (MountainSort5),
+        which runs under the v2 ``numpy>=2`` baseline out of the box; it is the
+        probe-labeled twin of the tetrode-labeled MS5 preset (both resolve to the
+        same parameter rows -- ``probe_type`` is informational).
+
+        MountainSort4 is the scientifically-preferred polymer-probe recipe, but
+        its ``ml_ms4alg`` backend needs ``numpy<2``, so it is not the default.
+        Run it on a modern (``numpy>=2``) host via the containerized
+        ``franklab_probe_hippocampus_30khz_ms4_singularity_2026_06`` preset
+        (the recommended-science MS4 path when Docker/Singularity is available),
+        or on a ``numpy<2`` host via the local
+        ``franklab_probe_hippocampus_30khz_ms4_2026_06`` preset; preflight fails
+        a selected-but-unrunnable MS4 path with an actionable message.
+
         Call ``describe_pipeline_presets()`` for a table of what each one does
         (sorter, parameter rows, intended use, and threshold units), or
         ``list_pipeline_presets()`` for just the names.

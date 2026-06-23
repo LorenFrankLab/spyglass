@@ -338,6 +338,72 @@ def _read_spike_times(curation_key: dict) -> tuple[dict, float]:
     return spike_times, sampling_frequency
 
 
+def _capture_metric_curation(curation_pk: dict):
+    """Run v1 ``MetricCuration`` and return a per-unit metrics DataFrame.
+
+    Captures the metrics v1 actually computes and that the v1<->v2 parity test
+    compares -- ``snr``, ``isi_violation``, ``num_spikes`` -- under a
+    parity-focused ``MetricParameters`` row. The ISI threshold is pinned to
+    ``2.0 ms`` to match the v2 ``franklab_default`` metric kwargs, so the
+    bounded ``count/(n-1)`` fraction is computed on the same window on both
+    sides. (``firing_rate`` is intentionally omitted: v1 does not compute it,
+    and ``num_spikes / duration`` would be redundant with the exact
+    ``num_spikes`` parity check.)
+
+    Must run under the v1 (SpikeInterface 0.99) runtime -- v1 MetricCuration
+    extracts waveforms via the pre-0.101 ``extract_waveforms`` API.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Indexed by ``unit_id`` with columns ``snr``, ``isi_violation``,
+        ``num_spikes``.
+    """
+    import pandas as pd
+
+    from spyglass.spikesorting.v1 import (
+        MetricCuration,
+        MetricCurationParameters,
+        MetricCurationSelection,
+        MetricParameters,
+        WaveformParameters,
+    )
+
+    WaveformParameters().insert_default()
+    MetricCurationParameters().insert_default()  # the "none" (no-label) row
+    MetricParameters().insert1(
+        {
+            "metric_param_name": "parity_baseline",
+            "metric_params": {
+                "snr": {"peak_sign": "neg"},
+                # 2.0 ms matches v2 QualityMetricParameters 'franklab_default'.
+                "isi_violation": {"isi_threshold_ms": 2.0, "min_isi_ms": 0.0},
+                "num_spikes": {},
+            },
+        },
+        skip_duplicates=True,
+    )
+    selection = MetricCurationSelection.insert_selection(
+        {
+            **curation_pk,
+            "waveform_param_name": "default_not_whitened",
+            "metric_param_name": "parity_baseline",
+            "metric_curation_param_name": "none",
+        }
+    )
+    sel_key = {
+        k: selection[k] for k in MetricCurationSelection.primary_key
+    }
+    MetricCuration.populate(sel_key, reserve_jobs=False)
+    metrics = MetricCuration.get_metrics(sel_key)  # {name: {unit_id: value}}
+    frame = pd.DataFrame(
+        {name: pd.Series(values) for name, values in metrics.items()}
+    )
+    frame.index = frame.index.astype(int)
+    frame.index.name = "unit_id"
+    return frame
+
+
 def _capture_source_provenance() -> dict:
     """Record the v1-spyglass source location + commit + harness commit.
 
@@ -697,14 +763,37 @@ def run_baseline_capture(
     }
     spikes_path, meta_path = _write_artifacts(output_dir, spike_times, metadata)
 
+    # v1 MetricCuration metrics baseline for the v1<->v2 parity test. The pickle
+    # carries the per-unit metrics DataFrame plus the sort identity the
+    # SI-0.104 parity test replays (it re-ingests the NWB from
+    # SPIKESORTING_V2_REAL_NWB_PATH and re-runs the v2 pipeline on this group).
+    metrics_frame = _capture_metric_curation(curation_pk)
+    metric_path = output_dir / "baseline_metric_curation.pkl"
+    with open(metric_path, "wb") as handle:
+        pickle.dump(
+            {
+                "metrics": metrics_frame,
+                "sort_identity": {
+                    "sort_group_id": int(sort_group_id),
+                    "interval_list_name": interval_list_name,
+                    "team_name": team_name,
+                },
+                "spikeinterface_version": pkg_version("spikeinterface"),
+            },
+            handle,
+            protocol=pickle.HIGHEST_PROTOCOL,
+        )
+
     print(f"baseline spikes -> {spikes_path}")
     print(f"baseline meta   -> {meta_path}")
+    print(f"baseline metrics-> {metric_path}")
     print(f"  nwb_file_name  : {nwb_file_name}")
     print(f"  recording_id   : {metadata['recording_id']}")
     print(f"  artifact_id    : {metadata['artifact_id']}")
     print(f"  sorting_id     : {metadata['sorting_id']}")
     print(f"  curation_id    : {metadata['curation_id']}")
     print(f"  n_units        : {metadata['n_units']}")
+    print(f"  metric units   : {len(metrics_frame)}")
     return spikes_path, meta_path
 
 

@@ -750,6 +750,68 @@ def test_internal_whiten_guard_allows_absent_or_falsy_whiten():
     reject_internal_whiten("ironclust", {"whiten": 0})
 
 
+# ---------- quality-metric template (waveform-shape) columns ----------------
+
+
+def test_quality_metric_schema_defaults_template_columns():
+    """A row that omits ``template_metric_columns`` gets ``trough_half_width``.
+
+    The shipped default surfaces the single trough-local ``trough_half_width``
+    (an SI OUTPUT column name) for downstream cell typing. The post-trough
+    columns (``peak_to_trough_duration``, slopes) are NOT defaults -- they clip
+    on the narrow hippocampus display window -- so they stay opt-in.
+    """
+    from spyglass.spikesorting.v2._params.metric_curation import (
+        DEFAULT_TEMPLATE_METRIC_COLUMNS,
+        QualityMetricParamsSchema,
+    )
+
+    schema = QualityMetricParamsSchema(metric_names=["snr"])
+    assert schema.template_metric_columns == ["trough_half_width"]
+    assert DEFAULT_TEMPLATE_METRIC_COLUMNS == ["trough_half_width"]
+    # Post-trough columns are opt-in, never shipped defaults.
+    assert "peak_to_trough_duration" not in schema.template_metric_columns
+    assert "recovery_slope" not in schema.template_metric_columns
+
+
+def test_template_metric_columns_validated():
+    """Unknown column raises; a metric *name* raises with the column hint; an
+    empty list is accepted (a row that surfaces no shape columns).
+
+    The vocabulary is SI OUTPUT columns, not metric names -- the load-bearing
+    distinction of this feature. A typo, or a metric name (``half_width``)
+    passed where a column is expected, must fail at insert, not at populate.
+    """
+    from spyglass.spikesorting.v2._params.metric_curation import (
+        QualityMetricParamsSchema,
+        _available_template_metric_columns,
+    )
+
+    with pytest.raises(ValidationError, match="Unknown template metric column"):
+        QualityMetricParamsSchema(
+            metric_names=["snr"], template_metric_columns=["not_a_real_column"]
+        )
+
+    # ``half_width`` is a metric NAME, not a column; its columns are
+    # trough_half_width / peak_half_width. Passing it raises with that hint.
+    with pytest.raises(ValidationError, match="OUTPUT COLUMN names"):
+        QualityMetricParamsSchema(
+            metric_names=["snr"], template_metric_columns=["half_width"]
+        )
+
+    empty = QualityMetricParamsSchema(
+        metric_names=["snr"], template_metric_columns=[]
+    )
+    assert empty.template_metric_columns == []
+
+    # The validator's vocabulary is the installed SI's single-channel output
+    # columns: includes ``trough_half_width`` but never the ``half_width`` name.
+    available = _available_template_metric_columns()
+    assert "trough_half_width" in available
+    assert "peak_to_trough_duration" in available
+    assert "half_width" not in available
+
+
 def test_internal_whiten_guard_ignores_mountainsort():
     """MS4/MS5 intentionally use ``whiten=True`` (routed through the external
     float64 whitening), so the guard must NOT reject them."""
@@ -840,8 +902,23 @@ def test_recipe_catalog_rows_copy_inner_schema_version():
     for name, params, version, _job_kwargs in artifact_default_contents():
         assert version == params["schema_version"], name
 
-    for sorter, name, params, version, _job_kwargs in sorter_default_contents():
+    # Sorter rows are 7-tuples: (sorter, name, params, params_schema_version,
+    # job_kwargs, execution_params, execution_params_schema_version). Both outer
+    # versions must derive from their validated inner blob's schema_version.
+    for (
+        sorter,
+        name,
+        params,
+        version,
+        _job_kwargs,
+        execution_params,
+        execution_version,
+    ) in sorter_default_contents():
         assert version == params["schema_version"], (sorter, name)
+        assert execution_version == execution_params["schema_version"], (
+            sorter,
+            name,
+        )
 
 
 # ---------- SortGroupV2 reference-mode validation ---------------------------
@@ -1073,3 +1150,246 @@ def test_param_lookup_bulk_insert_validates(
         assert len(table & restr(valid_b)) == 1
     finally:
         (table & [restr(valid_a), restr(valid_b)]).delete_quick()
+
+
+# ---------- quality-metric / auto-curation params ---------------------------
+
+
+from spyglass.spikesorting.v2._params.metric_curation import (  # noqa: E402
+    AUTO_CURATION_RULES_SCHEMA_VERSION,
+    QUALITY_METRIC_SCHEMA_VERSION,
+    AutoCurationRulesSchema,
+    QualityMetricParamsSchema,
+)
+
+
+def test_quality_metric_params_non_default_round_trips():
+    """A configured quality-metric blob survives dump -> validate -> dump."""
+    schema = QualityMetricParamsSchema(
+        metric_names=["snr", "isi_violation", "firing_rate", "nn_advanced"],
+        metric_kwargs={
+            "nn_advanced": {
+                "n_components": 7,
+                "n_neighbors": 5,
+                "max_spikes": 20000,
+                "min_spikes": 10,
+                "seed": 0,
+            }
+        },
+        skip_pc_metrics=False,
+    )
+    blob = schema.model_dump()
+    assert blob != QualityMetricParamsSchema(metric_names=["snr"]).model_dump()
+    rebuilt = QualityMetricParamsSchema.model_validate(blob).model_dump()
+    assert rebuilt == blob
+    assert rebuilt["schema_version"] == QUALITY_METRIC_SCHEMA_VERSION
+
+
+def test_quality_metric_params_default_skip_pc_true():
+    """``skip_pc_metrics`` defaults to True (PCA metrics off unless asked)."""
+    assert QualityMetricParamsSchema(metric_names=["snr"]).skip_pc_metrics
+
+
+def test_quality_metric_params_skip_pc_false_requires_pca_metric():
+    """``skip_pc_metrics=False`` is meaningful only with a PCA metric.
+
+    Without one no whitened metric analyzer would be built, so the flag is a
+    contradiction (and recompute/orphan gating treats skip_pc_metrics=False as
+    an exact "metric analyzer exists" signal). The schema rejects it; adding a
+    PCA metric (e.g. nn_advanced) makes it valid.
+    """
+    with pytest.raises(ValidationError, match="no PCA metric"):
+        QualityMetricParamsSchema(
+            metric_names=["snr", "firing_rate"], skip_pc_metrics=False
+        )
+    assert not QualityMetricParamsSchema(
+        metric_names=["snr", "nn_advanced"], skip_pc_metrics=False
+    ).skip_pc_metrics
+    # Dual contradiction: skip_pc_metrics=True with PCA metric names would
+    # store metrics that are intentionally skipped. Reject any such row so
+    # metric_names remains the list of metrics this row actually computes.
+    with pytest.raises(ValidationError, match="would be skipped"):
+        QualityMetricParamsSchema(
+            metric_names=["nn_advanced"], skip_pc_metrics=True
+        )
+    with pytest.raises(ValidationError, match="would be skipped"):
+        QualityMetricParamsSchema(
+            metric_names=["snr", "nn_advanced"], skip_pc_metrics=True
+        )
+
+
+def test_quality_metric_params_rejects_unknown_metric_name():
+    """An unknown metric name fails validation against SI's exported list."""
+    with pytest.raises(ValidationError):
+        QualityMetricParamsSchema(metric_names=["snr", "not_a_real_metric"])
+
+
+@pytest.mark.parametrize("old_name", ["nn_isolation", "nn_noise_overlap"])
+def test_quality_metric_params_rejects_renamed_nn_metric(old_name):
+    """The 0.99 nn metric *names* are rejected; message points at nn_advanced."""
+    with pytest.raises(ValidationError) as excinfo:
+        QualityMetricParamsSchema(metric_names=[old_name])
+    assert "nn_advanced" in str(excinfo.value)
+
+
+def test_quality_metric_params_rejects_empty_metric_names():
+    """At least one metric name is required."""
+    with pytest.raises(ValidationError):
+        QualityMetricParamsSchema(metric_names=[])
+
+
+def test_quality_metric_params_rejects_orphan_kwargs_key():
+    """metric_kwargs for a metric not in metric_names is a silent no-op."""
+    with pytest.raises(ValidationError) as excinfo:
+        QualityMetricParamsSchema(
+            metric_names=["snr", "firing_rate"],
+            metric_kwargs={"isi_violation": {"isi_threshold_ms": 2.0}},
+        )
+    assert "isi_violation" in str(excinfo.value)
+
+
+def test_quality_metric_params_accepts_kwargs_for_requested_metric():
+    """metric_kwargs keyed by a requested metric validates cleanly."""
+    schema = QualityMetricParamsSchema(
+        metric_names=["snr", "isi_violation"],
+        metric_kwargs={"isi_violation": {"isi_threshold_ms": 2.0}},
+    )
+    assert schema.metric_kwargs == {"isi_violation": {"isi_threshold_ms": 2.0}}
+
+
+def test_auto_curation_rules_non_default_round_trips():
+    """A configured rules payload (master + rule rows) round-trips."""
+    schema = AutoCurationRulesSchema(
+        auto_merge_preset="similarity_correlograms",
+        auto_merge_kwargs={"resolve_graph": True},
+        rules=[
+            {
+                "rule_index": 0,
+                "rule_name": "nn_noise",
+                "metric_name": "nn_noise_overlap",
+                "operator": ">",
+                "threshold": 0.1,
+                "label": "noise",
+            },
+            {
+                "rule_index": 1,
+                "rule_name": "nn_reject",
+                "metric_name": "nn_noise_overlap",
+                "operator": ">",
+                "threshold": 0.1,
+                "label": "reject",
+            },
+        ],
+    )
+    blob = schema.model_dump()
+    rebuilt = AutoCurationRulesSchema.model_validate(blob).model_dump()
+    assert rebuilt == blob
+    assert rebuilt["schema_version"] == AUTO_CURATION_RULES_SCHEMA_VERSION
+    assert [r["rule_index"] for r in rebuilt["rules"]] == [0, 1]
+
+
+def test_auto_curation_rules_allows_none_preset_no_rules():
+    """``auto_merge_preset='none'`` with no rules is the inert default."""
+    schema = AutoCurationRulesSchema(auto_merge_preset="none", rules=[])
+    assert schema.auto_merge_preset == "none"
+    assert schema.rules == []
+
+
+def test_auto_curation_rules_rejects_bad_preset():
+    """An unknown auto-merge preset is rejected (Literal guard)."""
+    with pytest.raises(ValidationError):
+        AutoCurationRulesSchema(auto_merge_preset="not_a_preset", rules=[])
+
+
+def test_auto_curation_rules_rejects_bad_operator():
+    """A rule with an unsupported operator is rejected."""
+    with pytest.raises(ValidationError):
+        AutoCurationRulesSchema(
+            auto_merge_preset="none",
+            rules=[
+                {
+                    "rule_index": 0,
+                    "rule_name": "snr_noise",
+                    "metric_name": "snr",
+                    "operator": "=<",
+                    "threshold": 2.0,
+                    "label": "noise",
+                }
+            ],
+        )
+
+
+def test_auto_curation_rules_rejects_duplicate_rule_index():
+    """Two rules with the same rule_index are rejected (ordering ambiguity)."""
+    rule = {
+        "rule_name": "snr_noise",
+        "metric_name": "snr",
+        "operator": "<",
+        "threshold": 2.0,
+        "label": "noise",
+    }
+    with pytest.raises(ValidationError):
+        AutoCurationRulesSchema(
+            auto_merge_preset="none",
+            rules=[
+                {**rule, "rule_index": 0},
+                {**rule, "rule_index": 0},
+            ],
+        )
+
+
+# ---- metric extension-dependency resolution (drift et al.) -----------------
+
+_BASE_EXTENSIONS = frozenset(
+    {"random_spikes", "noise_levels", "templates", "waveforms"}
+)
+
+
+@pytest.mark.unit
+def test_required_extensions_drift_needs_spike_locations():
+    """``drift`` pulls in ``spike_locations`` (read from SI, not hardcoded).
+
+    The default curation ensure-set omits ``spike_locations``; without deriving
+    it, SI's ``compute_quality_metrics`` silently skips ``drift``. The resolver
+    reports the dependency so the pipeline can compute it.
+    """
+    from spyglass.spikesorting.v2._params.metric_curation import (
+        required_extensions_for_metrics,
+    )
+
+    assert required_extensions_for_metrics(["drift"], _BASE_EXTENSIONS) == [
+        "spike_locations"
+    ]
+
+
+@pytest.mark.unit
+def test_required_extensions_present_dep_is_not_recomputed():
+    """A metric whose dependency is already present needs nothing extra."""
+    from spyglass.spikesorting.v2._params.metric_curation import (
+        required_extensions_for_metrics,
+    )
+
+    # snr depends on noise_levels + templates, both base -> nothing extra.
+    assert required_extensions_for_metrics(["snr"], _BASE_EXTENSIONS) == []
+
+
+@pytest.mark.unit
+def test_required_extensions_either_or_dep_satisfied_without_spurious_compute():
+    """An ``a|b`` dependency is satisfied by either option already present.
+
+    ``amplitude_cutoff`` depends on ``spike_amplitudes|amplitude_scalings``. With
+    ``spike_amplitudes`` already ensured (the curation default) nothing extra is
+    needed -- in particular ``amplitude_scalings`` is NOT spuriously computed.
+    Without either present, the first option is requested.
+    """
+    from spyglass.spikesorting.v2._params.metric_curation import (
+        required_extensions_for_metrics,
+    )
+
+    with_amps = _BASE_EXTENSIONS | {"spike_amplitudes"}
+    assert (
+        required_extensions_for_metrics(["amplitude_cutoff"], with_amps) == []
+    )
+    assert required_extensions_for_metrics(
+        ["amplitude_cutoff"], _BASE_EXTENSIONS
+    ) == ["spike_amplitudes"]

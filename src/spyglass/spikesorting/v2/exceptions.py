@@ -203,3 +203,29 @@ class ZeroUnitAnalyzerError(RuntimeError):
     result. Use ``get_sorting()`` (returns an empty sorting) if only the
     unit list is needed.
     """
+
+
+class UnsupportedDirectInsertError(RuntimeError):
+    """Raise on a direct insert into a structured Lookup with part rows.
+
+    A structured Lookup whose validity depends on ordered part rows
+    (e.g. ``AutoCurationRules`` + ``AutoCurationRules.Rule``) was inserted
+    through an unsupported direct master or part insert path that bypasses
+    whole-payload validation. Message names the table, the unsupported
+    insert path, and the supported helper (``insert_rules(row, rule_rows)``)
+    that validates the master row and its rule rows together.
+    """
+
+
+class StaleEnvMatchedError(RuntimeError):
+    """Raise when recompute deletion has no current-environment match.
+
+    A recompute ``delete_files()`` gate found ``matched=1`` rows only in
+    non-current ``UserEnvironment`` rows (e.g. a verification that
+    succeeded under an older SpikeInterface pin). A stale-env match is not
+    evidence that the *current* environment can regenerate the artifact, so
+    deletion is refused. Message names the current ``env_id``, the stale
+    ``env_id``(s) that did match, and instructs the caller to rerun the
+    recompute under the current environment or pass ``force_stale_env=True``
+    with an audit justification.
+    """

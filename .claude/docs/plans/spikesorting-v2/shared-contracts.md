@@ -110,10 +110,10 @@ Every v2 stage that produces a `SortingAnalyzer` writes it to disk in this layou
 **On-disk path** (computed by `_analyzer_path(key)` helper in `spyglass.spikesorting.v2.utils`):
 
 ```
-{config["SPYGLASS_TEMP_DIR"]}/spikesorting_v2/analyzers/{sorting_id}.analyzer/
+{config["SPYGLASS_TEMP_DIR"]}/spikesorting_v2/analyzers/{sorting_id}.zarr/
 ```
 
-**Format**: `"binary_folder"` — SI's first-class folder layout for SortingAnalyzer extensions. This choice is **independent** of the Recording cache format; the analyzer stays in `binary_folder` because (i) it is regeneratable scratch, (ii) it has its own Phase 2 recompute machinery (`SortingAnalyzerRecompute*`), and (iii) SI's analyzer API is built around the folder layout.
+**Format**: `"zarr"` — SI's compressed folder store for SortingAnalyzer extensions. This choice is **independent** of the Recording cache format; the analyzer uses `zarr` because (i) it is regeneratable scratch, (ii) it has its own Phase 2 recompute machinery (`SortingAnalyzerRecompute*`), and (iii) zarr compresses the 5–50 GB analyzer cache (a meaningful disk saving over the uncompressed `binary_folder` layout). SI forces the `.zarr` suffix on the store path, so the cache path is `{sorting_id}.zarr` (and `load_sorting_analyzer` auto-detects the format from it). Pre-production: no legacy `{sorting_id}.analyzer` (binary_folder) migration is needed — old caches simply become misses and are rebuilt as zarr.
 
 **Sparsity**: `sparse=True` (the SI 0.101+ default; recompute storage saves 5-10× on dense probes).
 
@@ -126,8 +126,8 @@ analyzer = create_sorting_analyzer(
     sorting=sorting,
     recording=recording,
     sparse=True,
-    format="binary_folder",
-    folder=_analyzer_path(key),
+    format="zarr",
+    folder=_analyzer_path(key),  # resolves to {sorting_id}.zarr
     return_in_uV=True,
     overwrite=True,
 )
@@ -144,7 +144,7 @@ analyzer.compute(
 )
 ```
 
-**Persistence on the DataJoint row**: the `Sorting` table stores `sorting_id` (UUID) + `analyzer_folder` (`varchar(255)` — the relative path under `SPYGLASS_TEMP_DIR`). The folder itself is a side artifact, not stored in DataJoint. Heavy outputs (templates, waveforms) are reachable via `analyzer = load_sorting_analyzer(_analyzer_path(key))`.
+**Persistence on the DataJoint row**: the `Sorting` table stores `sorting_id` (UUID), `analysis_file_name`, `object_id`, `n_units`, and `time_of_sort`; it does **not** store `analyzer_folder`. The analyzer store is regeneratable side scratch whose path is computed from `sorting_id` via `analyzer_path()`. Heavy outputs (templates, waveforms) are reachable via `analyzer = load_sorting_analyzer(analyzer_path(sorting_id))`, normally through `Sorting.get_analyzer(key)`.
 
 **Loading convention**: every consumer uses the `Sorting.get_analyzer(key)` method, which checks for folder existence, recomputes if missing (delegating to `Sorting.make()` rerun), then returns the analyzer object. Do not load analyzer folders directly — go through the helper. This mirrors v1's `SpikeSortingRecording.get_recording` missing-file rebuild pattern at [`src/spyglass/spikesorting/v1/recording.py:407-427`](../../../../src/spyglass/spikesorting/v1/recording.py#L407-L427).
 
@@ -156,7 +156,7 @@ analyzer.compute(
 
 ## Recording Cache Format
 
-The canonical preprocessed recording produced by `Recording.make()` lives **inside an `AnalysisNwbfile`** — NWB-resident, reusing Spyglass's existing cleanup, export, kachery, FigPack, and recompute machinery. `ConcatenatedRecording.make()` uses the same NWB-resident storage contract, but it is a separate materialized concat cache: it reads per-member `Recording` caches and writes one sorter-ready concatenated `ElectricalSeries` after motion correction / post-motion preprocessing. This is distinct from the [SortingAnalyzer Storage Layout](#sortinganalyzer-storage-layout) above (which is per-sort scratch in `binary_folder` format).
+The canonical preprocessed recording produced by `Recording.make()` lives **inside an `AnalysisNwbfile`** — NWB-resident, reusing Spyglass's existing cleanup, export, kachery, FigPack, and recompute machinery. `ConcatenatedRecording.make()` uses the same NWB-resident storage contract, but it is a separate materialized concat cache: it reads per-member `Recording` caches and writes one sorter-ready concatenated `ElectricalSeries` after motion correction / post-motion preprocessing. This is distinct from the [SortingAnalyzer Storage Layout](#sortinganalyzer-storage-layout) above (which is per-sort scratch in `zarr` format).
 
 **Persistence on the DataJoint row** (final shape — see [overview.md § Zero-migration policy](overview.md#scope-and-dependency-policy)):
 

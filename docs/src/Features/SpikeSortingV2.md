@@ -32,13 +32,17 @@ RecordingSelection --> Recording          (bandpass + common reference)
                                                                        |
                                                                        v
                                                                    CurationV2 -+--> SpikeSortingOutput.CurationV2
+                                                                        |
+                                                                        v
+                                                        AnalyzerCurationSelection --> AnalyzerCuration
 ```
 
 All v2 tables live in dedicated DataJoint schemas (`spikesorting_v2_recording`,
-`spikesorting_v2_artifact`, `spikesorting_v2_sorting`, `spikesorting_v2_curation`),
-so the v0/v1 schemas are untouched. `CurationV2` registers as a new part on the
-existing `SpikeSortingOutput` merge table, so v0, v1, imported, and v2
-curations all coexist under one merge surface.
+`spikesorting_v2_artifact`, `spikesorting_v2_sorting`,
+`spikesorting_v2_curation`, `spikesorting_v2_recompute`), so the v0/v1 schemas
+are untouched. `CurationV2` registers as a new part on the existing
+`SpikeSortingOutput` merge table, so v0, v1, imported, and v2 curations all
+coexist under one merge surface.
 
 ### Tables
 
@@ -48,7 +52,8 @@ curations all coexist under one merge surface.
     `delete_existing_entries=True, confirm=False` returns a `DeletionPreview`
     so the caller can review cascade impact before committing.
 - **`PreprocessingParameters`, `ArtifactDetectionParameters`, `SharedArtifactGroup`,
-    `SorterParameters`** -- Pydantic-validated parameter Lookup rows.
+    `SorterParameters`, `QualityMetricParameters`, `AutoCurationRules`** --
+    Pydantic-validated parameter Lookup rows.
     `insert_default()` on each loads a default row; user params validate the
     `params` blob on insert.
 - **`RecordingSelection` / `Recording`** -- preprocessed recording materialization.
@@ -75,6 +80,13 @@ curations all coexist under one merge surface.
     by `parent_curation_id`. `insert_curation` is the single entry point;
     every row is automatically registered on `SpikeSortingOutput.CurationV2`
     so downstream consumers can key off `merge_id`.
+- **`AnalyzerCurationSelection` / `AnalyzerCuration`** -- post-sort SI analyzer
+    extension growth, quality metrics, auto-curation labels, merge suggestions,
+    and BurstPair-style plots. Proposals are persisted to NWB; committing them
+    to sorting output remains an explicit `materialize_curation` step.
+- **`RecordingArtifactRecompute*` / `SortingAnalyzerRecompute*`** -- v2 storage
+    verification families for safely reclaiming preprocessed recording/artifact
+    NWBs and analyzer folders after a current-environment content match.
 
 ### Pipeline orchestrator
 
@@ -84,11 +96,18 @@ the dated June-2026 Frank Lab production recipes: a MountainSort4 family keyed
 by target region (hippocampus 600 Hz / cortex 300 Hz high-pass) and sampling
 rate (30 / 20 kHz), plus a MountainSort5 preset and a clusterless preset.
 The default is the MountainSort5 recipe
-`franklab_tetrode_hippocampus_30khz_ms5_2026_06`: it runs under the v2
-`numpy>=2` baseline, whereas the MS4 production recipe's `ml_ms4alg` backend
-needs `numpy<2` (preflight reports this via its `sorter_runtime_available`
-check). Call `describe_pipeline_presets()` for the catalog and
-`list_pipeline_presets()` for the names.
+`franklab_probe_hippocampus_30khz_ms5_2026_06` (the probe-labeled twin of the
+tetrode-labeled MS5 preset; both resolve to the same parameter rows): it runs
+under the v2 `numpy>=2` baseline out of the box. MountainSort4 is the
+scientifically-preferred polymer-probe recipe, but its `ml_ms4alg` backend needs
+`numpy<2`, so it is not the default -- run it on a modern (`numpy>=2`) host via
+the containerized `franklab_probe_hippocampus_30khz_ms4_singularity_2026_06`
+preset (the recommended-science MS4 path when Docker/Singularity is available),
+or on a `numpy<2` host via the local `franklab_probe_hippocampus_30khz_ms4_2026_06`
+preset (preflight reports an unrunnable MS4 path via its
+`sorter_runtime_available` / `container_runtime_available` checks). Call
+`describe_pipeline_presets()` for the catalog and `list_pipeline_presets()` for
+the names.
 
 The orchestrator is idempotent: re-running with the same inputs returns the
 same run summary (same `merge_id`, same intermediate PKs) without duplicating
@@ -166,7 +185,7 @@ run_summary = run_v2_pipeline(
     sort_group_id=sort_group_id,
     interval_list_name="raw data valid times",
     team_name="my_team",
-    pipeline_preset="franklab_tetrode_hippocampus_30khz_ms5_2026_06",
+    pipeline_preset="franklab_probe_hippocampus_30khz_ms5_2026_06",
 )
 merge_id = run_summary["merge_id"]  # key off this downstream
 
@@ -212,7 +231,7 @@ report = preflight_v2_pipeline_session(
     nwb_file_name=nwb_file_name,
     interval_list_name="raw data valid times",
     team_name="my_team",
-    pipeline_preset="franklab_tetrode_hippocampus_30khz_ms5_2026_06",
+    pipeline_preset="franklab_probe_hippocampus_30khz_ms5_2026_06",
 )
 assert report.ok, report.errors
 
@@ -220,7 +239,7 @@ results = run_v2_pipeline_session(
     nwb_file_name=nwb_file_name,
     interval_list_name="raw data valid times",
     team_name="my_team",
-    pipeline_preset="franklab_tetrode_hippocampus_30khz_ms5_2026_06",
+    pipeline_preset="franklab_probe_hippocampus_30khz_ms5_2026_06",
     sort_group_ids=None,        # None = every sort group; or pass a subset
     continue_on_error=True,     # record per-group failures instead of stopping
 )
@@ -266,19 +285,31 @@ table and plot rather than assuming `0` is the scientifically relevant shank.
 
 Available pipeline presets (all dated `_2026_06`):
 
-- `franklab_tetrode_hippocampus_30khz_ms5_2026_06` -- **default**,
+- `franklab_probe_hippocampus_30khz_ms5_2026_06` -- **default**,
     MountainSort5 (hippocampus 600 Hz preproc, 30 kHz). It is the shipped
     default because it runs under the v2 `numpy>=2` baseline;
     `recommendation_status` stays `"alternative"` (the default is a
     runnability-driven choice, separate from the scientific tier).
+    `franklab_tetrode_hippocampus_30khz_ms5_2026_06` is the same recipe under a
+    tetrode label (`probe_type` is informational; both resolve to the same rows).
+- `franklab_probe_hippocampus_30khz_ms4_singularity_2026_06` -- the
+    **recommended-science** MS4 path on modern (`numpy>=2`) hosts: the same
+    MountainSort4 polymer-probe science run inside a pinned Singularity
+    container, so the host stays on `numpy>=2` while MS4's `ml_ms4alg` runtime
+    lives in the image. Preflight gates it on the container runtime
+    (`container_runtime_available`) and never silently falls back to local. A
+    Docker row (and other rates) is a user-insertable `SorterParameters` row away
+    via the same tracked `execution_params` mechanism.
 - `franklab_tetrode_hippocampus_30khz_ms4_2026_06` -- production MountainSort4
-    (hippocampus 600 Hz preproc, 30 kHz). **Requires `numpy<2`**: MS4's
-    `ml_ms4alg` backend does not install under the v2 `numpy>=2` baseline, so
-    preflight fails it (`sorter_runtime_available`) unless `ml_ms4alg` is
-    present.
+    (hippocampus 600 Hz preproc, 30 kHz). **Requires `numpy<2`** for LOCAL
+    execution: MS4's `ml_ms4alg` backend does not install under the v2 `numpy>=2`
+    baseline, so preflight fails it (`sorter_runtime_available`) unless
+    `ml_ms4alg` is present (or use the containerized preset above).
 - `franklab_probe_{hippocampus,cortex}_{30khz,20khz}_ms4_2026_06` -- the
-    production MS4 family by region (600/300 Hz high-pass) and rate (same
-    `numpy<2` / `ml_ms4alg` requirement)
+    production MS4 family by region (600/300 Hz high-pass) and rate. The local
+    polymer recipe `franklab_probe_hippocampus_30khz_ms4_2026_06` stays available
+    for compatible local (`numpy<2`) MS4 runtimes; on modern hosts prefer the
+    containerized Singularity preset above.
 - `franklab_clusterless_2026_06` -- peak-detection only (no clustering), feeds
     the clusterless decoding pipeline
 - `franklab_neuropixels_ks4_2026_06` -- **experimental** Neuropixels Kilosort4
@@ -289,6 +320,17 @@ Available pipeline presets (all dated `_2026_06`):
     not Frank-lab-attested; KS4 needs a GPU and is non-deterministic. Because
     KS4 common-references internally, set the sort group's
     `reference_mode="none"` to avoid double-referencing.
+
+For Frank-lab polymer/tetrode rows, the scientific defaults mirror the v1
+workflow: sort one group at a time, use a 600 Hz hippocampal high-pass (300 Hz
+for cortex), pass already-filtered recordings to MountainSort (`filter=False`),
+whiten inside the sorter, use a 100 um adjacency radius, and default to
+bidirectional `detect_sign=0` because extracellular polarity can flip with
+geometry. The analyzer uses separate waveform rows for display and metrics:
+unwhitened waveforms preserve the visible shape/amplitude, while the whitened
+metric analyzer supports PC/nearest-neighbour metrics. Hippocampal analyzer
+rows intentionally keep the v1-like 0.5/0.5 ms window and sample up to 20000
+spikes per unit.
 
 The tetrode- and probe-hippocampus 30 kHz presets resolve to the **same**
 parameter rows (the recipe is set by region + rate; `probe_type` is
@@ -349,7 +391,7 @@ reproducible. Two guards keep names honest:
       sort_group_id=sort_group_id,
       interval_list_name="raw data valid times",
       team_name="my_team",
-      pipeline_preset="franklab_tetrode_hippocampus_30khz_ms5_2026_06",
+      pipeline_preset="franklab_probe_hippocampus_30khz_ms5_2026_06",
   )
   for check in report.checks:
       print(check.name, check.ok, check.fix)
@@ -418,6 +460,94 @@ are thin sugar over `insert_curation` (the expert API, still available for full
 control); they pre-fill `parent_curation_id` / `apply_merge` by name.
 `summarize_curation` returns a plain dict (`n_units`, `labels`, `merge_groups`,
 `merges_applied`, `is_merge_preview`, `merge_id`, ...) for notebook printing.
+
+### Quality metrics and auto-curation (`AnalyzerCuration`)
+
+`AnalyzerCuration` replaces v1's `MetricCuration` + `BurstPair`. It walks a
+sort's `SortingAnalyzer` extensions to compute SpikeInterface quality metrics,
+propose merges, and propose auto-curation labels. The proposals are written to
+NWB; turning them into a new `CurationV2` row is an explicit step
+(`materialize_curation`).
+
+```python
+from spyglass.spikesorting.v2.metric_curation import (
+    AnalyzerCuration,
+    AnalyzerCurationSelection,
+    QualityMetricParameters,
+    AutoCurationRules,
+)
+
+# Default Lookup rows are installed by initialize_v2_defaults().
+QualityMetricParameters().show_available_metrics()  # returns SI metric names you can request
+
+# Select a (CurationV2 row x metric-params x auto-rules) and populate.
+sel = AnalyzerCurationSelection.insert_selection(
+    {
+        "sorting_id": run_summary["sorting_id"],
+        "curation_id": run_summary["curation_id"],
+        # snr/isi/firing/num_spikes/presence_ratio/amplitude_cutoff/nn_advanced(PCA)
+        "metric_params_name": "franklab_default",
+        # Frank-lab default: nn_noise_overlap > 0.1 -> noise, isi_violation > 0.02
+        # -> reject (the lab's ~2% refractory policy). 'v1_default_nn_noise' (the
+        # nn-only rules) and 'similarity_merge' / 'none' remain available.
+        "auto_curation_rules_name": "franklab_default_auto_curation_2026_06",
+    }
+)
+AnalyzerCuration.populate(sel)
+
+metrics = AnalyzerCuration.get_metrics(sel)          # DataFrame, NaN -> None on read
+labels = AnalyzerCuration.get_labels(sel)            # {unit_id: [label, ...]}
+merges = AnalyzerCuration.get_merge_groups(sel)      # [[unit_id, ...], ...]
+
+# Commit the proposals into a child CurationV2 (curation_source='analyzer_curation').
+child = AnalyzerCuration().materialize_curation(sel)
+```
+
+Notes:
+
+- `metric_names` is validated against the installed SpikeInterface at insert.
+  The 0.99 names `nn_isolation` / `nn_noise_overlap` are gone -- request the
+  `nn_advanced` PCA metric (with `skip_pc_metrics=False`) and threshold its
+  `nn_noise_overlap` output column in a rule.
+- `isi_violation` is Spyglass's bounded `count / (n_spikes - 1)` fraction, not
+  SI's unbounded `isi_violations_ratio`.
+- `AutoCurationRules` is inserted via `insert_rules(master, rule_rows)` (direct
+  `insert1` is blocked) so the master row and its ordered rule rows validate
+  together.
+
+#### Population QC plot and burst-pair views
+
+`AnalyzerCuration.plot_units_qc(sel)` renders the population QC overview --
+one histogram per quality metric (NaN dropped) plus a unit-depth scatter
+colored by a chosen metric -- the "do these units look reasonable?" companion
+to the per-unit `describe_units` table. Pass `axes=...` to embed it in a
+custom matplotlib layout; the method returns the axes it drew into. The v1
+`BurstPair` notebook workflow is ported onto `AnalyzerCuration` as `plot_correlograms`,
+`investigate_pair_xcorrel`, `investigate_pair_peaks`, and `plot_peak_over_time`
+(reading the analyzer's `correlograms` / `waveforms` extensions; no separate
+`BurstPair` table).
+
+#### The auto -> manual-merge -> auto curation loop
+
+Curation is a loop, and the second analyzer pass is not redundant:
+
+1. **Auto-curate.** Run `AnalyzerCuration` on the root curation (the rule set
+   above proposes labels; `materialize_curation` commits them to a child
+   `CurationV2`). Inspect with `plot_units_qc(sel)` and `get_metrics(sel)`.
+2. **Manually merge.** Oversplit clusters (MS4/MS5 oversplit and do not track
+   drift) need a human merge. Find burst pairs with `plot_by_sort_group_ids` /
+   `investigate_pair_xcorrel` / `investigate_pair_peaks`, then commit the merge
+   with `CurationV2.insert_curation(..., merge_groups=..., apply_merge=True)`
+   (or the `create_merged_curation` wrapper) to produce a merged `CurationV2`.
+3. **Re-run auto-curation on the merged curation.** Metrics computed over the
+   *post-merge* templates are the numbers of record: merging changes a unit's
+   waveform, SNR, ISI-violation fraction, and PC/NN separation, so the labels
+   and metrics that matter are the ones recomputed after the merge. Select a new
+   `AnalyzerCuration` on the merged `curation_id` and populate it for the final
+   metrics and labels.
+
+The second pass is therefore not a repeat of the first -- it re-derives quality
+metrics over the merged unit set, which the first (pre-merge) pass could not see.
 
 ### Stage-by-stage (custom pipeline preset)
 
@@ -667,8 +797,11 @@ Clusterless decoding works for v2 sorts under SpikeInterface 0.104:
 `UnitWaveformFeatures` (the decoding input) extracts per-spike amplitudes for a
 v2 `merge_id` from a freshly built `SortingAnalyzer` — it no longer requires the
 legacy SI 0.99 environment or the removed `extract_waveforms`. The `amplitude`
-feature (used by clusterless decoding) and `full_waveform` are supported;
-`spike_location` is not yet wired for v2 sources. A zero-unit v2 curation yields
+feature (used by clusterless decoding), `full_waveform`, and `spike_location`
+are supported for v2 sources; any other feature is rejected with a clear
+`NotImplementedError`. The `spike_location` row is v2-only; legacy v0/v1
+clusterless workflows should keep using the `amplitude` row. A zero-unit v2
+curation yields
 an empty-but-valid features row. Note that v2 amplitudes are in microvolts,
 whereas the legacy v0/v1 path used raw ADC counts, so v2 and v1 feature
 magnitudes are not directly comparable — retrain decoders per pipeline version.
@@ -715,13 +848,17 @@ calling them under SI 0.104 raises a clear `RuntimeError`.
 
 ## Status
 
-The single-session sort chain (above) is available now. Not yet available:
+The single-session sort chain and analyzer-driven curation (metrics +
+auto-curation, above) are available now. Not yet available:
 
-- metrics + auto-curation
-- session-group sorting + cross-session unit matching
+- session-group sorting
+- cross-session unit matching
+- FigPack web curation views
 
-The tables for those capabilities are already declared in their final shape
-with gated `make()` bodies, so enabling them later needs no schema migration.
+The session-group / concatenated-recording tables are already declared in their
+final shape with gated `make()` bodies, so enabling that path later needs no
+schema migration. Unit matching and FigPack remain placeholder modules until
+their implementation phases land.
 
 ## Streaming, parallel populate, and v1 parity
 

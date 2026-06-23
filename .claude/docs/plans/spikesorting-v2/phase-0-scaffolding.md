@@ -156,7 +156,7 @@ runs only `tests/spikesorting/v2/` under SI 0.104.
 
 - **Implement `utils.py` with the shared helpers**:
   - `_validate_params(model_cls, params) -> dict` — Pydantic dispatch.
-  - `_analyzer_path(key) -> Path` — resolves to `{temp_dir}/spikesorting_v2/analyzers/{sorting_id}.analyzer/`, where `temp_dir` is Spyglass's configured temp directory (`spyglass.settings.temp_dir`, the same setting v1 spike sorting uses) rather than an ad-hoc v2-only config key.
+  - `_analyzer_path(key) -> Path` — resolves to `{temp_dir}/spikesorting_v2/analyzers/{sorting_id}.zarr/`, where `temp_dir` is Spyglass's configured temp directory (`spyglass.settings.temp_dir`, the same setting v1 spike sorting uses) rather than an ad-hoc v2-only config key.
   - `_resolved_job_kwargs(*row_job_kwargs) -> dict` — merge, in increasing precedence: `(1) si.get_global_job_kwargs()`, `(2) dj.config['custom']['spikesorting_v2_job_kwargs']`, `(3)` zero or more per-row `job_kwargs` blobs the caller passes in increasing-precedence order (`None` entries skipped). Returns the merged dict ready to splat into `analyzer.compute(**kwargs)`. The helper does NOT take a populate `key` — see [shared-contracts.md § Job-Kwargs Resolution](shared-contracts.md#job-kwargs-resolution) for why, and for the binding per-stage call-site table.
   - `_hash_nwb_recording(analysis_file_name) -> str` — content digest of the AnalysisNwbfile, a thin wrapper over Spyglass's `NwbfileHasher` so v2 uses the same hashing path as the v1 recompute machinery instead of a parallel implementation. The hash anchors Phase 1's missing-artifact detection and feeds Phase 2's `RecordingArtifactRecompute*` machinery. `NwbfileHasher` hashes the whole file; reconciling its known content-hashing gap, and the recompute-tolerance question, is tracked as separate follow-up work.
 
@@ -239,7 +239,7 @@ runs only `tests/spikesorting/v2/` under SI 0.104.
 1. **Module imports cleanly**: `spyglass.spikesorting.v2` package import does not error.
 2. **`pytest-v2` job uses isolated SI ≥0.104**: version check inside the dedicated `uv` job; default v1 CI excludes the v2 tests until the global SI prerequisite checkpoint lands. The job must not rely on a shared/base environment.
 3. **`PreprocessingParamsSchema`**: default dump matches expected shape; bad values raise `pydantic.ValidationError`; `extra="forbid"` is enforced.
-4. **Helpers behave correctly**: `_resolved_job_kwargs` merges SI global + DataJoint config + per-row `job_kwargs` blobs in increasing precedence (later argument wins; `None` skipped); `_analyzer_path` returns the expected `{uuid}.analyzer` path format.
+4. **Helpers behave correctly**: `_resolved_job_kwargs` merges SI global + DataJoint config + per-row `job_kwargs` blobs in increasing precedence (later argument wins; `None` skipped); `_analyzer_path` returns the expected `{uuid}.zarr` path format.
 5. **Draft schema validation**: `code_graph.py describe` succeeds for every table in the draft schema artifact; any FK warnings are explicitly recorded in `precondition-check.md`.
 
 ### Phase 0b goals

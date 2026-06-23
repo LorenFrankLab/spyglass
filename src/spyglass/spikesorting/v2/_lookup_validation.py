@@ -98,9 +98,10 @@ def validate_lookup_rows(
 ):
     """Validate + normalize params-Lookup rows before a (bulk) insert.
 
-    Shared body of the four validated-Lookup ``insert`` overrides
+    Shared body of the validated-Lookup ``insert`` overrides
     (``PreprocessingParameters``, ``ArtifactDetectionParameters``,
-    ``SorterParameters``, ``MotionCorrectionParameters``): for each row,
+    ``SorterParameters``, ``MotionCorrectionParameters``,
+    ``AnalyzerWaveformParameters``): for each row,
     normalize to a dict, validate its ``params`` blob against the row's
     schema, run an optional per-row check, and assert the outer
     ``params_schema_version`` agrees with the validated blob. Returns the
@@ -217,13 +218,29 @@ def reject_duplicate_parameter_content(
             version = row["params"]["schema_version"]
         return int(version)
 
+    def _exec_version(row: dict, exec_params) -> int | None:
+        # Only SorterParameters carries execution_params; for the single-key
+        # Lookups it is absent and the fingerprint omits it (None). A dict
+        # insert may omit the outer ``execution_params_schema_version`` column,
+        # so fall back to the validated blob's inner ``schema_version`` the same
+        # way ``_version`` does for ``params_schema_version``.
+        if exec_params is None:
+            return None
+        version = row.get("execution_params_schema_version")
+        if version is None:
+            version = exec_params.get("schema_version")
+        return int(version) if version is not None else None
+
     def _fingerprint(row: dict) -> str:
+        exec_params = _jsonable_blob(row.get("execution_params"))
         return parameter_fingerprint(
             table_name,
             params=_jsonable_blob(row["params"]),
             params_schema_version=_version(row),
             job_kwargs=_jsonable_blob(row.get("job_kwargs")),
             sorter=row.get("sorter") if sorter_keyed else None,
+            execution_params=exec_params,
+            execution_params_schema_version=_exec_version(row, exec_params),
         )
 
     def _pk(row: dict):

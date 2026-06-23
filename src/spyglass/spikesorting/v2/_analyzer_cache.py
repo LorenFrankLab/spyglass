@@ -54,55 +54,86 @@ def analyzer_cache_root() -> Path:
     return Path(temp_dir) / "spikesorting_v2" / "analyzers"
 
 
-def analyzer_path(sorting_id) -> Path:
-    """Return the canonical analyzer-cache folder for a ``sorting_id``.
+def analyzer_path(sorting_id, waveform_params_name: str) -> Path:
+    """Return the analyzer-cache folder for a ``(sorting_id, recipe)`` pair.
 
-    ``analyzer_cache_root() / f"{sorting_id}.analyzer"``. Deterministic in
-    ``sorting_id`` + the configured root, so every code path resolves the
-    same folder without the ``Sorting`` row needing to store it.
+    ``analyzer_cache_root() / f"{sorting_id}__{waveform_params_name}.zarr"``.
+    A sort may have more than one analyzer recipe (an unwhitened display recipe
+    and a whitened metric recipe built on demand for PC/NN metrics), so the
+    folder is keyed by both the ``sorting_id`` and the ``waveform_params_name``
+    that produced it -- the two never collide. Deterministic in ``(sorting_id, waveform_params_name)`` +
+    the configured root, so every code path resolves the same folder without
+    the ``Sorting`` row needing to store the path.
 
-    Returns
-    -------
-    pathlib.Path
-        The analyzer-cache folder path for this ``sorting_id``.
-    """
-    return analyzer_cache_root() / f"{sorting_id}.analyzer"
-
-
-def remove_analyzer_cache(sorting_id, *, missing_ok: bool = True) -> bool:
-    """Remove a sorting's analyzer-cache folder.
-
-    ``missing_ok=True`` (default) makes an absent folder a no-op returning
-    ``False`` (the common case: zero-unit sorts never wrote one, and the
-    cache is regeneratable). ``missing_ok=False`` raises ``FileNotFoundError``
-    for an absent folder. A removal failure (e.g. a permission error)
-    propagates rather than being swallowed.
+    ``waveform_params_name`` is embedded in the folder name, so callers must
+    pass a path-safe name; the ``AnalyzerWaveformParameters`` insert guard
+    validates it (``^[A-Za-z0-9_]+$``) before any row -- and therefore any
+    folder -- can use it. The ``.zarr`` suffix matches the SI ``zarr`` store
+    ``create_sorting_analyzer`` writes (SI forces the ``.zarr`` suffix) and lets
+    ``load_sorting_analyzer`` auto-detect the format.
 
     Parameters
     ----------
     sorting_id
-        The sorting whose analyzer-cache folder should be removed.
+        The sorting whose analyzer is cached.
+    waveform_params_name : str
+        The ``AnalyzerWaveformParameters`` row name that produced the analyzer.
+
+    Returns
+    -------
+    pathlib.Path
+        The analyzer-cache folder path for this ``(sorting_id, recipe)`` pair.
+    """
+    return (
+        analyzer_cache_root() / f"{sorting_id}__{waveform_params_name}.zarr"
+    )
+
+
+def remove_analyzer_cache(sorting_id, *, missing_ok: bool = True) -> bool:
+    """Remove ALL analyzer-cache folders for a ``sorting_id``.
+
+    A sort can have several analyzer recipes on disk (the display recipe today;
+    the whitened metric recipe once that build lands), so this removes every
+    ``{sorting_id}__*.zarr`` folder under the cache root -- deleting the sort
+    orphans every recipe. The glob is anchored on the full
+    ``sorting_id`` (a fixed-length UUID) followed by the ``__`` separator, so
+    one sort's folders never match another's.
+
+    ``missing_ok=True`` (default) makes the no-folders case a no-op returning
+    ``False`` (the common case: zero-unit sorts never wrote one, and the cache
+    is regeneratable). ``missing_ok=False`` raises ``FileNotFoundError`` when no
+    folder exists. A removal failure (e.g. a permission error) propagates
+    rather than being swallowed.
+
+    Parameters
+    ----------
+    sorting_id
+        The sorting whose analyzer-cache folders should be removed.
     missing_ok : bool, optional
-        If ``True`` (the default), an absent folder is a no-op. If
-        ``False``, an absent folder raises ``FileNotFoundError``.
+        If ``True`` (the default), no matching folder is a no-op. If
+        ``False``, it raises ``FileNotFoundError``.
 
     Returns
     -------
     bool
-        ``True`` if a folder was removed, ``False`` if none existed and
-        ``missing_ok=True``.
+        ``True`` if at least one folder was removed, ``False`` if none existed
+        and ``missing_ok=True``.
 
     Raises
     ------
     FileNotFoundError
-        If the folder does not exist and ``missing_ok=False``.
+        If no matching folder exists and ``missing_ok=False``.
     """
-    folder = analyzer_path(sorting_id)
-    if not folder.exists():
+    root = analyzer_cache_root()
+    folders = (
+        sorted(root.glob(f"{sorting_id}__*.zarr")) if root.exists() else []
+    )
+    if not folders:
         if missing_ok:
             return False
-        raise FileNotFoundError(folder)
-    shutil.rmtree(folder, ignore_errors=False)
+        raise FileNotFoundError(root / f"{sorting_id}__*.zarr")
+    for folder in folders:
+        shutil.rmtree(folder, ignore_errors=False)
     return True
 
 

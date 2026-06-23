@@ -567,17 +567,17 @@ def test_unit_waveform_features_zero_unit_v2(wave_session):
 
 @_skip_if_legacy
 @pytest.mark.slow
-def test_unit_waveform_features_v2_full_waveform_and_rejects_spike_location(
+def test_unit_waveform_features_v2_full_waveform_and_spike_location(
     wave_session,
 ):
-    """v2 supports ``full_waveform`` and rejects ``spike_location``.
+    """v2 supports both ``full_waveform`` and ``spike_location``.
 
     Shares one tuned clusterless sort. ``full_waveform`` writes a
     ``(n_spikes, n_time*n_channels)`` column aligned 1:1 with ``spike_times``.
-    ``spike_location`` -- which ships in a default ``WaveformFeaturesParams``
-    row, so a v2 user can easily select it -- is not wired for v2; ``make``
-    must raise ``NotImplementedError`` before building an analyzer rather than
-    crashing deep in SpikeInterface.
+    ``spike_location`` (an optional clusterless mark) writes a
+    ``(n_spikes, 2 or 3)`` column per unit -- the v2 SortingAnalyzer path
+    computes it lazily from the ``spike_locations`` extension, so ``make``
+    completes without ``NotImplementedError``.
     """
     from spyglass.decoding.v1.waveform_features import (
         UnitWaveformFeatures,
@@ -649,14 +649,28 @@ def test_unit_waveform_features_v2_full_waveform_and_rejects_spike_location(
             f"{fw.shape}"
         )
 
-        # spike_location: unsupported for v2; make() raises before SI work
+        # spike_location: supported for v2; writes a (n_spikes, 2 or 3) column
+        # per unit aligned 1:1 with spike_times, alongside amplitude.
         loc_sel = {
             "spikesorting_merge_id": merge_id,
             "features_param_name": loc_param,
         }
         UnitWaveformFeaturesSelection().insert1(loc_sel, skip_duplicates=True)
-        with pytest.raises(NotImplementedError, match="spike_location"):
-            UnitWaveformFeatures().make(loc_sel)
+        UnitWaveformFeatures.populate(loc_sel, reserve_jobs=False)
+        loc_df = _units_dataframe(
+            (UnitWaveformFeatures & loc_sel).fetch_nwb()[0]
+        )
+        assert "spike_location" in loc_df.columns, "spike_location missing"
+        assert "amplitude" in loc_df.columns, "amplitude missing"
+        loc_row = loc_df.loc[0]
+        loc = np.asarray(loc_row["spike_location"])
+        n_spikes = np.asarray(loc_row["spike_times"]).shape[0]
+        assert loc.ndim == 2 and loc.shape[0] == n_spikes, (
+            f"spike_location {loc.shape} must align 1:1 with {n_spikes} spikes"
+        )
+        assert loc.shape[1] in (2, 3), (
+            f"spike_location must be 2D or 3D coordinates; got {loc.shape}"
+        )
     finally:
         for p in (fw_param, loc_param):
             (UnitWaveformFeatures & {"features_param_name": p}).delete_quick()
@@ -666,22 +680,48 @@ def test_unit_waveform_features_v2_full_waveform_and_rejects_spike_location(
         _reset(wave_session)
 
 
+@pytest.mark.db_unit
+def test_spike_location_rejects_legacy_waveform_extractor_clearly(dj_conn):
+    """``spike_location`` is intentionally v2-only under modern SI.
+
+    ``db_unit`` (not ``unit``): importing ``waveform_features`` activates the
+    decoding/common schemas, so it needs a live DB connection -- ``dj_conn``
+    ensures the container is healthy before the import rather than racing it.
+    """
+    from spyglass.decoding.v1.waveform_features import (
+        WAVEFORM_FEATURE_FUNCTIONS,
+    )
+
+    class LegacyWaveformExtractor:
+        """WaveformExtractor-shaped object without v2 spike locations."""
+
+        def get_waveforms(self, unit_id):  # pragma: no cover - not called
+            raise AssertionError("spike_location must not read waveforms")
+
+    with pytest.raises(NotImplementedError, match="SortingAnalyzer"):
+        WAVEFORM_FEATURE_FUNCTIONS["spike_location"](
+            LegacyWaveformExtractor(), unit_id=1
+        )
+
+
 @_skip_unless_legacy
 @pytest.mark.slow
-def test_unit_waveform_features_v0v1_unchanged_under_legacy():
+def test_unit_waveform_features_v0v1_guard_unchanged_under_legacy():
     """Under SI 0.99 the legacy-SI guard is a no-op, so v0/v1 ``make`` runs.
 
     This phase scoped the guard to the v0/v1 branches only; under the legacy
     env that guard must NOT raise (otherwise the v0/v1 extraction path would
-    be broken). The full v0/v1 ``UnitWaveformFeatures.make`` is exercised by
-    the existing clusterless-decoding tests in this same legacy job; here we
-    pin the guard-version contract make() depends on.
+    be broken for legacy-supported feature rows such as ``amplitude``). The
+    full v0/v1 ``UnitWaveformFeatures.make`` is exercised by the existing
+    clusterless-decoding tests in this same legacy job; here we pin the
+    guard-version contract make() depends on. ``spike_location`` itself is
+    covered separately as an intentional v2-only feature.
     """
     from spyglass.spikesorting._legacy_runtime import (
         _require_legacy_si_environment,
     )
 
-    # No raise under SI < 0.101 -> v0/v1 make() proceeds exactly as before.
+    # No raise under SI < 0.101 -> v0/v1 make() proceeds for supported rows.
     assert (
         _require_legacy_si_environment("v1 UnitWaveformFeatures.make") is None
     )
@@ -708,8 +748,8 @@ def test_fetch_waveform_v2_rejects_max_spikes_per_unit(wave_session):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_fetch_waveform_v2_is_disk_backed_and_cleaned(wave_session):
-    """The clusterless analyzer is disk-backed (``binary_folder`` -> bounded
-    RAM) and its TemporaryDirectory is removed once the accessor is dropped."""
+    """The clusterless analyzer is disk-backed (``zarr`` -> bounded RAM) and
+    its TemporaryDirectory is removed once the accessor is dropped."""
     import gc
     from pathlib import Path
 
@@ -721,7 +761,7 @@ def test_fetch_waveform_v2_is_disk_backed_and_cleaned(wave_session):
     acc = UnitWaveformFeatures._fetch_waveform_v2({"merge_id": merge_id}, {})
     tmp_path = acc._tmpdir.name
     assert (
-        acc._analyzer.format == "binary_folder"
+        acc._analyzer.format == "zarr"
     ), f"clusterless analyzer must be disk-backed; got {acc._analyzer.format}"
     assert Path(tmp_path).exists()
     # Waveforms are readable from disk during the accessor's lifetime.

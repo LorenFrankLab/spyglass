@@ -112,7 +112,7 @@ Direct replacements when porting code from v1 to v2. Sources:
 
 | 0.99 (v1 uses) | 0.104 (v2 uses) | Notes |
 | --- | --- | --- |
-| `si.extract_waveforms(recording, sorting, folder=...)` | `si.create_sorting_analyzer(sorting=sorting, recording=recording, format="binary_folder", folder=..., sparse=True)` | Treat the old call as legacy. If the installed SI 0.104 patch still exposes a shim, v2 still must not rely on it; Phase 0c decides whether any v0/v1 runtime path gets a narrow shim or remains legacy-SI-0.99-only. |
+| `si.extract_waveforms(recording, sorting, folder=...)` | `si.create_sorting_analyzer(sorting=sorting, recording=recording, format="zarr", folder=..., sparse=True)` | Treat the old call as legacy. If the installed SI 0.104 patch still exposes a shim, v2 still must not rely on it; Phase 0c decides whether any v0/v1 runtime path gets a narrow shim or remains legacy-SI-0.99-only. |
 | `si.load_waveforms(folder)` | `si.load_sorting_analyzer(folder)` | Treat old WaveformExtractor folder loading as legacy. Phase 0c verifies whether legacy folders remain queryable under SI 0.104 or need a legacy-environment guard. |
 | `we.get_template(unit_id)` | `analyzer.get_extension("templates").get_data(operator="average" or "median")` or SI's `get_template_extremum_*` helpers for peak-channel/amplitude queries | Use documented SortingAnalyzer APIs rather than v1 WaveformExtractor methods. |
 | `we.get_waveforms(unit_id)` | `analyzer.get_extension("waveforms").get_waveforms_one_unit(unit_id)` | v2 compatibility wrappers may expose `get_waveforms(unit_id)` for v1 callers. |
