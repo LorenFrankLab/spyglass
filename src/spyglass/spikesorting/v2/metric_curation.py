@@ -294,8 +294,8 @@ class QualityMetricParameters(SpyglassMixin, dj.Lookup):
                 "skip_pc_metrics": row.get("skip_pc_metrics", True),
             }
             # Only forward template_metric_columns when the row sets it, so an
-            # omitting row picks up the schema default (the conservative
-            # trough_half_width / peak_to_trough_duration pair).
+            # omitting row picks up the schema default (the conservative,
+            # window-safe trough_half_width shape column).
             if "template_metric_columns" in row:
                 payload["template_metric_columns"] = row[
                     "template_metric_columns"
@@ -1172,7 +1172,14 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
         if not display_analyzer.has_extension("template_metrics"):
             return metrics_df
         tm_df = display_analyzer.get_extension("template_metrics").get_data()
-        present = [c for c in template_metric_columns if c in tm_df.columns]
+        # Select the configured columns directly (config holds column names, so
+        # no name->column mapping), never shadowing a same-named quality-metric
+        # column with a template one.
+        present = [
+            c
+            for c in template_metric_columns
+            if c in tm_df.columns and c not in metrics_df.columns
+        ]
         missing = [c for c in template_metric_columns if c not in tm_df.columns]
         if missing:
             # Validation guarantees the configured columns are real
@@ -1186,8 +1193,6 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
                 list(tm_df.columns),
                 present,
             )
-        # Never shadow a quality-metric column with a same-named template one.
-        present = [c for c in present if c not in metrics_df.columns]
         # Copy the selected columns before retyping the index so the analyzer's
         # cached template_metrics frame is never mutated in place.
         selected = tm_df[present].copy()
@@ -1259,9 +1264,9 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
         """Return the quality-metrics table (DataFrame indexed by unit_id).
 
         The frame carries the configured SpikeInterface quality metrics AND the
-        row's surfaced waveform-shape (template) columns -- e.g.
-        ``trough_half_width`` / ``peak_to_trough_duration`` -- side by side, so
-        downstream code can classify cell types (rate x spike width) with its
+        row's surfaced waveform-shape (template) columns (``trough_half_width``
+        by default; ``peak_to_trough_duration`` and slopes opt-in) side by side,
+        so downstream code can classify cell types (rate x spike width) with its
         own region-appropriate thresholds (the pipeline ships none). Non-finite
         values surface as ``None`` (the on-disk representation is HDF5-native
         NaN).

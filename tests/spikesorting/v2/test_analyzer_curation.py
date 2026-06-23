@@ -1663,6 +1663,76 @@ def test_no_shipped_rule_thresholds_template_column(dj_conn):
     assert not leaked, leaked
 
 
+@pytest.mark.db_unit
+def test_surface_template_columns_edge_cases(dj_conn, caplog):
+    """The defensive branches of the column-surfacing helper behave as documented.
+
+    Drives ``_surface_template_columns`` directly with a controlled
+    ``template_metrics`` frame so the no-ops (empty config / absent extension),
+    the never-shadow-a-quality-column rule, and the upstream-drift warning (a
+    validated column absent from the computed frame) are each exercised --
+    branches the real-analyzer happy-path tests do not reach.
+    """
+    import logging
+
+    from spyglass.spikesorting.v2.metric_curation import AnalyzerCuration
+
+    class _Ext:
+        def __init__(self, df):
+            self._df = df
+
+        def get_data(self):
+            return self._df
+
+    class _Analyzer:
+        """Minimal stand-in exposing only the analyzer surface the helper uses."""
+
+        def __init__(self, tm_df):
+            self._tm_df = tm_df
+
+        def has_extension(self, name):
+            return name == "template_metrics" and self._tm_df is not None
+
+        def get_extension(self, name):
+            return _Ext(self._tm_df)
+
+    metrics_df = pd.DataFrame(
+        {"snr": [3.0, 4.0]}, index=pd.Index([0, 1], name="unit_id")
+    )
+    tm_df = pd.DataFrame(
+        {"trough_half_width": [0.0004, 0.0003], "snr": [9.9, 9.9]},
+        index=pd.Index([0, 1]),
+    )
+    surface = AnalyzerCuration._surface_template_columns
+
+    # Empty config -> no shape columns added.
+    assert list(surface(metrics_df, _Analyzer(tm_df), []).columns) == ["snr"]
+    # Extension absent (e.g. a PC-only row that never grew it) -> no-op.
+    assert list(
+        surface(metrics_df, _Analyzer(None), ["trough_half_width"]).columns
+    ) == ["snr"]
+    # Happy path: the requested column is joined by unit id.
+    joined = surface(metrics_df, _Analyzer(tm_df), ["trough_half_width"])
+    assert joined.loc[0, "trough_half_width"] == 0.0004
+    # Never shadow a same-named quality-metric column: the template-frame 'snr'
+    # must not overwrite the quality 'snr'.
+    assert surface(metrics_df, _Analyzer(tm_df), ["snr"])["snr"].tolist() == [
+        3.0,
+        4.0,
+    ]
+    # A validated column absent from the COMPUTED frame -> loud warning, surface
+    # the present ones only (upstream-SI-drift signal, not silent).
+    with caplog.at_level(logging.WARNING):
+        out = surface(
+            metrics_df,
+            _Analyzer(tm_df),
+            ["trough_half_width", "not_computed_col"],
+        )
+    assert "trough_half_width" in out.columns
+    assert "not_computed_col" not in out.columns
+    assert any("not_computed_col" in record.message for record in caplog.records)
+
+
 # ---------- waveform-shape on real biophysical templates (slow) -------------
 
 _FIXTURES_DIR = pathlib.Path(__file__).parent / "fixtures"
