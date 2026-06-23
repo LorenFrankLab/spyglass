@@ -14,8 +14,59 @@ plus one next-day session for the multi-day gate).
 from __future__ import annotations
 
 import datetime as dt
+import logging
+import threading
+import time
 
 import pytest
+
+logger = logging.getLogger(__name__)
+
+
+class _PeakRSS:
+    """Context manager: sample process RSS in a background thread; expose peak.
+
+    A REAL measurement (psutil polling of the live process RSS), not a mocked
+    metric: ``peak_mb`` is the high-water-mark resident-set size observed while
+    the ``with`` body ran, and ``elapsed_s`` is its wall-clock runtime. Used by
+    both the synthetic memory/runtime smoke and the ``--run-chronic`` gate so
+    the real-data budget assertions run against a proven measurement path.
+    """
+
+    def __init__(self, interval_s: float = 0.05):
+        import psutil
+
+        self._proc = psutil.Process()
+        self._interval_s = interval_s
+        self._peak_bytes = 0
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._t0 = 0.0
+        self.elapsed_s = 0.0
+
+    def _sample(self):
+        while not self._stop.is_set():
+            self._peak_bytes = max(
+                self._peak_bytes, self._proc.memory_info().rss
+            )
+            self._stop.wait(self._interval_s)
+
+    def __enter__(self):
+        self._peak_bytes = self._proc.memory_info().rss
+        self._thread = threading.Thread(target=self._sample, daemon=True)
+        self._t0 = time.perf_counter()
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc):
+        self.elapsed_s = time.perf_counter() - self._t0
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=1.0)
+
+    @property
+    def peak_mb(self) -> float:
+        return self._peak_bytes / (1024 * 1024)
 
 
 @pytest.mark.slow
@@ -597,3 +648,140 @@ def test_concat_sort_end_to_end_and_split(same_day_group):
         {"curation_id": curation_key["curation_id"]}, sources=["v2"]
     )
     assert merge_id in by_curation
+
+
+# ---------- memory / runtime measurement ----------------------------------
+
+
+@pytest.mark.slow
+def test_concat_materialization_memory_runtime_is_measured(same_day_group):
+    """Real (psutil) peak-RSS + runtime measurement of the concat materialize
+    path on the synthetic fixture. The bounds are generous (the minirec is
+    tiny); the point is that the measurement is REAL and logged, so the
+    ``--run-chronic`` gate reuses a proven measurement path rather than a
+    mocked metric."""
+    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
+
+    grp = same_day_group
+    with _PeakRSS() as measured:
+        concat_pk = _populate_concat_none(
+            grp["group_key"], grp["preprocessing_params_name"]
+        )
+    logger.info(
+        "concat minirec materialization: peak_rss=%.0f MB, runtime=%.1f s",
+        measured.peak_mb,
+        measured.elapsed_s,
+    )
+    assert ConcatenatedRecording & concat_pk
+    # Generous sanity bounds for a 2x5s 4-channel synthetic concat. The real
+    # lab budget (peak < 8 GB, runtime < 10 min) lives in the --run-chronic
+    # gate below.
+    assert measured.peak_mb < 4096
+    assert measured.elapsed_s < 300
+
+
+@pytest.mark.slow
+def test_concat_chronic_real_dataset_memory_runtime(request, dj_conn):
+    """Opt-in real-chronic memory/runtime gate (``pytest --run-chronic``).
+
+    Skipped by default. Given a real 1-hour, 30 kHz chronic NWB via
+    ``SPIKESORTING_V2_CHRONIC_TEST_PATH``, ingests it, builds a same-day
+    ``SessionGroup`` over its lowest sort group (one shank / ~32 channels for a
+    polymer probe), and runs the Phase end-to-end path
+    (``ConcatenatedRecording.populate`` then concat-backed ``Sorting.populate``).
+    Asserts peak RSS < 8 GB and total runtime < 10 min on a 16-core machine,
+    and logs the materialization vs sort timings separately so motion-correction
+    vs sorter cost is visible. Reports timing + memory even on pass."""
+    import os
+
+    if not request.config.getoption("--run-chronic"):
+        pytest.skip(
+            "pass --run-chronic to run the real-chronic memory/runtime gate"
+        )
+    chronic_path = os.environ.get("SPIKESORTING_V2_CHRONIC_TEST_PATH")
+    if not chronic_path:
+        pytest.skip(
+            "set SPIKESORTING_V2_CHRONIC_TEST_PATH to a real 1-hour chronic NWB"
+        )
+
+    from spyglass.spikesorting.v2.recording import Recording, RecordingSelection
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecording,
+        ConcatenatedRecordingSelection,
+        SessionGroup,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        Sorting,
+        SortingSelection,
+    )
+    from tests.spikesorting.v2._ingest_helpers import (
+        clean_session_groups_for_owner,
+        configure_v2_run_inputs,
+        copy_and_insert_nwb,
+    )
+    from tests.spikesorting.v2._smoke_constants import (
+        SMOKE_CLUSTERLESS_PARAM_NAME,
+        SMOKE_CLUSTERLESS_PARAMS,
+    )
+
+    owner, name = "chronic_real_gate_owner", "chronic_real_gate"
+    nwb_file_name = copy_and_insert_nwb(chronic_path)
+    run = configure_v2_run_inputs(nwb_file_name, owner)
+    member = {
+        "nwb_file_name": run["nwb_file_name"],
+        "sort_group_id": run["sort_group_id"],
+        "interval_list_name": run["interval_list_name"],
+    }
+    rec_pk = RecordingSelection.insert_selection(
+        {**member, "preprocessing_params_name": "default", "team_name": owner}
+    )
+    if not (Recording & rec_pk):
+        Recording.populate(rec_pk, reserve_jobs=False)
+
+    clean_session_groups_for_owner(owner)
+    SessionGroup.create_group(owner, name, [member])
+    SorterParameters.insert1(
+        {
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": SMOKE_CLUSTERLESS_PARAM_NAME,
+            "params": SMOKE_CLUSTERLESS_PARAMS,
+        },
+        skip_duplicates=True,
+        allow_duplicate_params=True,
+    )
+    try:
+        concat_pk = ConcatenatedRecordingSelection.insert_selection(
+            {
+                "session_group_owner": owner,
+                "session_group_name": name,
+                "preprocessing_params_name": "default",
+                "motion_correction_params_name": "rigid_fast_default",
+            }
+        )
+        with _PeakRSS() as concat_measured:
+            ConcatenatedRecording.populate(concat_pk, reserve_jobs=False)
+        sort_pk = SortingSelection.insert_selection(
+            {
+                "concat_recording_id": concat_pk["concat_recording_id"],
+                "sorter": "clusterless_thresholder",
+                "sorter_params_name": SMOKE_CLUSTERLESS_PARAM_NAME,
+            }
+        )
+        with _PeakRSS() as sort_measured:
+            Sorting.populate(sort_pk, reserve_jobs=False)
+
+        peak_mb = max(concat_measured.peak_mb, sort_measured.peak_mb)
+        total_s = concat_measured.elapsed_s + sort_measured.elapsed_s
+        logger.info(
+            "real-chronic gate: concat materialize=%.1f s, sort=%.1f s, "
+            "total=%.1f s, peak_rss=%.0f MB",
+            concat_measured.elapsed_s,
+            sort_measured.elapsed_s,
+            total_s,
+            peak_mb,
+        )
+        assert peak_mb < 8 * 1024, f"peak RSS {peak_mb:.0f} MB exceeds 8 GB"
+        assert total_s < 600, f"runtime {total_s:.0f} s exceeds 10 min"
+    finally:
+        clean_session_groups_for_owner(owner)
