@@ -50,15 +50,33 @@ def _vectordata(name: str, values, dtype) -> VectorData:
     )
 
 
-def build_quality_metrics_table(metrics_df: pd.DataFrame) -> DynamicTable:
-    """Wide quality-metrics table (one row per unit), NaN preserved.
+def _scalar_or_nan(value) -> float:
+    """Coerce a metric cell to float; non-scalar / non-numeric -> NaN.
 
-    ``metrics_df`` is indexed by ``unit_id``. A zero-row frame yields an empty,
-    column-less table (the zero-unit case).
+    Every quality metric and every surfaced single-channel template column is a
+    plain scalar, so this is belt-and-suspenders: it keeps a future SI column
+    whose cell is not a plain number (e.g. an array) from crashing the wide
+    one-float-per-column write -- the stray value lands as NaN instead.
+    """
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float("nan")
+
+
+def build_quality_metrics_table(metrics_df: pd.DataFrame) -> DynamicTable:
+    """Wide quality + waveform-shape metrics table (one row per unit).
+
+    ``metrics_df`` is indexed by ``unit_id`` and carries the quality metrics
+    plus any surfaced template (waveform-shape) columns. NaN is preserved. A
+    zero-row frame yields an empty, column-less table (the zero-unit case).
     """
     table = DynamicTable(
         name=QUALITY_METRICS_TABLE,
-        description="SpikeInterface quality metrics, one row per unit.",
+        description=(
+            "SpikeInterface quality + waveform-shape (template) metrics, one "
+            "row per unit."
+        ),
     )
     if len(metrics_df) == 0:
         return table
@@ -69,7 +87,7 @@ def build_quality_metrics_table(metrics_df: pd.DataFrame) -> DynamicTable:
     for unit_id, row in metrics_df.iterrows():
         table.add_row(
             unit_id=int(unit_id),
-            **{column: float(row[column]) for column in metric_columns},
+            **{column: _scalar_or_nan(row[column]) for column in metric_columns},
         )
     return table
 
