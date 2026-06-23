@@ -1,12 +1,36 @@
 # Analyzer Waveform Parameters & Curation Defaults — Implementation Plan
 
-**Status:** Phases 1, 2, 3a, 3, and 4 complete (each reviewed, simplified, and
-verified). Phase 3 shipped the `franklab_default_auto_curation_2026_06`
-auto-curation rule set (ISI `reject` policy), the probe-labeled MS5 default
+**Status:** Phases 1, 2, 3a, 3, 4, and 5 complete (each reviewed, simplified, and
+verified) — the plan is fully executed. Phase 3 shipped the
+`franklab_default_auto_curation_2026_06` auto-curation rule set (ISI `reject`
+policy), the probe-labeled MS5 default
 (`franklab_probe_hippocampus_30khz_ms5_2026_06`, same rows as the tetrode MS5
 alias), the MS4 recommendation (containerized for modern hosts / local for
 numpy<2) via the human-facing preset fields, and the auto → manual-merge → auto
-curation-loop docs + notebook section 7. Phase 5 remains to execute.
+curation-loop docs + notebook section 7.
+
+Phase 5 reconciliation note (the phase file predates the later phases): the
+SpikeInterface visualization/export bridge shipped as
+`spyglass.spikesorting.v2.visualization` (imported as `ssviz`) — a discoverable,
+key-aware facade over SI `widgets.*` / `exporters.*` backed by a DB-free
+`_visualization.py` service module (registry + missing-extension policy +
+routed-metric histogram plot). Routing holds to the merged display-vs-metric
+contract: recording widgets read the saved preprocessed `Recording`; sorting /
+waveform / location / merge widgets and the local exports read the sort's stored
+display recipe via `Sorting.get_analyzer(key)` (no `waveform_params_name`);
+`plot_metrics` reads the routed `AnalyzerCuration.get_metrics()` (Phase-4
+template columns surfaced as-is); `plot_potential_merges` reads the persisted
+`get_merge_groups()` and never recomputes candidates. Plot helpers are read-only
+by default (`compute_missing=True` opts in to display-safe extensions only),
+matplotlib is the default backend (`sortingview` is explicit opt-in), and no
+populate/export path publishes. Two review-hardening departures from the phase
+file's first sketch: `export_to_phy` defaults `compute_pc_features=False` so SI
+never computes the whitened-metric-only `principal_components` onto the unwhitened
+display analyzer (opt in explicitly), and `export_si_report`'s force-computation
+set is trimmed to the display-safe extensions SI's report actually renders. No
+FigPack / cloud publishing / web curation UI was added (out of scope, as planned).
+Notebook section 7 gained an `ssviz` step; `feature-parity.md` and
+`v1-v2-divergences.md` record the bridge as an additive v2 improvement.
 
 Phase 4 reconciliation note (the phase file predates the no-clip validation):
 the shipped default surfaced template-shape column is `trough_half_width` ONLY,
