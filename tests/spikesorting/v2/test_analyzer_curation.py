@@ -12,6 +12,8 @@ Two tiers:
 
 from __future__ import annotations
 
+import pathlib
+
 import pandas as pd
 import pytest
 
@@ -1493,3 +1495,361 @@ def test_burst_and_merge_use_display_analyzer(dj_conn):
         display, "x_contaminations", {}, {}
     )
     assert any(set(g) >= {0, 1} for g in groups), groups
+
+
+# ---------- waveform-shape (template) metric columns ------------------------
+#
+# Phase: expose SI template (waveform-shape) output COLUMNS in the per-unit
+# metric table for downstream cell typing. The pipeline exposes the columns; it
+# ships no cell-type thresholds. These guard: the default surfaced columns, the
+# display-analyzer routing, the discoverability helper, and "expose, not
+# threshold".
+
+
+@pytest.mark.db_unit
+def test_quality_metric_params_default_template_columns(dj_conn):
+    """Every default metric row surfaces the single trough-local shape column.
+
+    A default ``QualityMetricParameters`` row surfaces ``trough_half_width``
+    (an SI OUTPUT column) for downstream cell typing -- and nothing else, so the
+    post-trough columns that clip on the narrow hippocampus window stay opt-in.
+    """
+    from spyglass.spikesorting.v2.metric_curation import (
+        QualityMetricParameters,
+    )
+
+    QualityMetricParameters.insert_default()
+    for name in ("franklab_default", "neuropixels_default", "minimal"):
+        cols = (
+            QualityMetricParameters & {"metric_params_name": name}
+        ).fetch1("template_metric_columns")
+        assert list(cols) == ["trough_half_width"], name
+
+
+@pytest.mark.db_unit
+def test_available_template_metric_columns(dj_conn):
+    """The discoverability classmethod lists SI's single-channel output COLUMNS.
+
+    It includes ``trough_half_width`` (so a user sees the ``half_width`` metric
+    is surfaced under that column name) but never the ``half_width`` metric
+    name, and excludes multi-channel columns (e.g. ``spread``).
+    """
+    from spyglass.spikesorting.v2.metric_curation import (
+        QualityMetricParameters,
+    )
+
+    cols = QualityMetricParameters.available_template_metric_columns()
+    assert "trough_half_width" in cols
+    assert "peak_to_trough_duration" in cols
+    assert "half_width" not in cols  # a metric NAME, not a column
+    assert "spread" not in cols  # multi-channel column, excluded
+
+
+@pytest.mark.db_unit
+def test_compute_metrics_surfaces_template_columns(
+    display_and_metric_analyzers,
+):
+    """_compute_metrics joins the configured shape columns onto the metric frame.
+
+    The default surfaces ``trough_half_width`` alongside ``firing_rate`` (a
+    quality metric); the metric NAME ``half_width`` is never a column (columns
+    are selected directly), and a non-default column (``recovery_slope``, opt-in)
+    is NOT surfaced. Explicitly requesting a column (the opt-in path) surfaces
+    it. Values are finite on the real (unwhitened) display analyzer.
+    """
+    import numpy as np
+
+    from spyglass.spikesorting.v2._params.metric_curation import (
+        DEFAULT_TEMPLATE_METRIC_COLUMNS,
+    )
+    from spyglass.spikesorting.v2.metric_curation import AnalyzerCuration
+
+    display, _ = display_and_metric_analyzers
+    metrics = AnalyzerCuration._compute_metrics(
+        display,
+        None,
+        ["snr", "firing_rate"],
+        {},
+        skip_pc_metrics=True,
+        job_kwargs={},
+        template_metric_columns=list(DEFAULT_TEMPLATE_METRIC_COLUMNS),
+    )
+    assert {"firing_rate", "trough_half_width"} <= set(metrics.columns)
+    assert "half_width" not in metrics.columns  # a metric NAME, never a column
+    # Non-default columns are not surfaced unless explicitly requested.
+    assert "recovery_slope" not in metrics.columns
+    assert "peak_to_trough_duration" not in metrics.columns
+    assert np.isfinite(metrics["trough_half_width"].to_numpy()).all()
+
+    # Opt-in path: an explicit request surfaces a non-default column too.
+    opt_in = AnalyzerCuration._compute_metrics(
+        display,
+        None,
+        ["snr"],
+        {},
+        skip_pc_metrics=True,
+        job_kwargs={},
+        template_metric_columns=["trough_half_width", "peak_to_trough_duration"],
+    )
+    assert "peak_to_trough_duration" in opt_in.columns
+
+
+@pytest.mark.db_unit
+def test_template_metrics_read_from_display_analyzer(
+    display_and_metric_analyzers, monkeypatch
+):
+    """Shape columns are read from the DISPLAY analyzer, never the whitened one.
+
+    Whitening distorts waveform shape, so a width column on a whitened template
+    is meaningless (same reason as ``snr``). Spies ``get_extension`` to record
+    which analyzer the ``template_metrics`` read lands on: the display analyzer,
+    never the metric (whitened) analyzer.
+    """
+    from spyglass.spikesorting.v2._params.metric_curation import (
+        DEFAULT_TEMPLATE_METRIC_COLUMNS,
+    )
+    from spyglass.spikesorting.v2.metric_curation import AnalyzerCuration
+
+    display, metric = display_and_metric_analyzers
+    reads = []
+    original_get_extension = type(display).get_extension
+
+    def _spy(self, name, *args, **kwargs):
+        if name == "template_metrics":
+            reads.append(
+                "display"
+                if self is display
+                else "metric"
+                if self is metric
+                else "other"
+            )
+        return original_get_extension(self, name, *args, **kwargs)
+
+    monkeypatch.setattr(type(display), "get_extension", _spy)
+    AnalyzerCuration._compute_metrics(
+        display,
+        metric,
+        ["snr", "nn_advanced"],
+        {},
+        skip_pc_metrics=False,
+        job_kwargs={},
+        template_metric_columns=list(DEFAULT_TEMPLATE_METRIC_COLUMNS),
+    )
+    assert "display" in reads
+    assert "metric" not in reads
+
+
+@pytest.mark.db_unit
+def test_no_shipped_rule_thresholds_template_column(dj_conn):
+    """No shipped auto-curation rule thresholds a template-metric column.
+
+    The load-bearing decision of this feature is "expose, don't classify": the
+    Frank-lab default rule set thresholds ``nn_noise_overlap`` and
+    ``isi_violation`` only. A rule that thresholded a region-specific shape
+    column would silently mislabel every other region.
+    """
+    from spyglass.spikesorting.v2._params.metric_curation import (
+        _available_template_metric_columns,
+    )
+    from spyglass.spikesorting.v2.metric_curation import AutoCurationRules
+
+    template_cols = set(_available_template_metric_columns())
+    rule_metrics = {
+        rule["metric_name"]
+        for _, rules in AutoCurationRules._default_payloads()
+        for rule in rules
+    }
+    leaked = rule_metrics & template_cols
+    assert not leaked, leaked
+
+
+# ---------- waveform-shape on real biophysical templates (slow) -------------
+
+_FIXTURES_DIR = pathlib.Path(__file__).parent / "fixtures"
+
+
+def _load_recording_and_ground_truth(fixture_name):
+    """Load a fixture's recording + ground-truth sorting + per-unit cell types.
+
+    Reads the preprocessed-free recording from the NWB ``e-series`` and the
+    planted ground-truth units (spike trains + ``cell_type`` in {E, I}) from the
+    sidecar processing module, attaching a 2D probe from the contact geometry as
+    the DB pipeline does (SI's >=64-channel path computes multi-channel template
+    metrics that assert 2D channel locations). Skips if the fixture is absent.
+    """
+    import numpy as np
+    import pynwb
+    import spikeinterface.full as si
+    from probeinterface import Probe
+    from spikeinterface.extractors import read_nwb_recording
+
+    from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import (
+        get_ground_truth_units_table,
+    )
+
+    path = _FIXTURES_DIR / f"{fixture_name}.nwb"
+    if not path.exists():
+        pytest.skip(
+            f"Generated MEArec fixture {path.name} not found. Run "
+            "`python tests/spikesorting/v2/fixtures/generate_mearec.py` first."
+        )
+    rec = read_nwb_recording(
+        file_path=str(path), electrical_series_path="acquisition/e-series"
+    )
+    fs = rec.get_sampling_frequency()
+    xy = np.asarray(rec.get_channel_locations())[:, :2]
+    probe = Probe(ndim=2)
+    probe.set_contacts(
+        positions=xy, shapes="circle", shape_params={"radius": 5}
+    )
+    probe.set_device_channel_indices(np.arange(rec.get_num_channels()))
+    rec = rec.set_probe(probe)
+    with pynwb.NWBHDF5IO(str(path), "r", load_namespaces=True) as io:
+        gt_table = get_ground_truth_units_table(io.read())
+        assert gt_table is not None, fixture_name
+        df = gt_table.to_dataframe()
+        cell_types = [str(value).strip().upper() for value in df["cell_type"]]
+        trains = {
+            idx: np.round(
+                np.asarray(df.iloc[idx]["spike_times"]) * fs
+            ).astype(np.int64)
+            for idx in range(len(df))
+        }
+    sorting = si.NumpySorting.from_unit_dict(trains, sampling_frequency=fs)
+    return rec, sorting, cell_types
+
+
+def _display_analyzer(rec, sorting, *, ms_before, ms_after):
+    """In-memory unwhitened display analyzer with the template_metrics ext."""
+    import spikeinterface.full as si
+
+    analyzer = si.create_sorting_analyzer(
+        sorting, rec, sparse=True, format="memory"
+    )
+    analyzer.compute(
+        [
+            "random_spikes",
+            "noise_levels",
+            "templates",
+            "waveforms",
+            "template_metrics",
+        ],
+        extension_params={
+            "random_spikes": {"seed": 0},
+            "waveforms": {"ms_before": ms_before, "ms_after": ms_after},
+        },
+    )
+    return analyzer
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_hippocampus_template_metrics_not_boundary_clipped():
+    """The shipped default shape column is not boundary-clipped at 0.5/0.5 ms.
+
+    The hippocampus display recipe is intentionally narrow (0.5 ms before / 0.5
+    after) for dense, tight hippocampal spikes. The shipped default,
+    ``trough_half_width``, is trough-local: on a representative hippocampal
+    (tetrode) fixture its value is finite and the trough plus its two
+    half-amplitude crossing points -- the extrema SI uses to compute it -- stay
+    strictly interior to the window, so the surfaced default is reliable.
+
+    The same probe documents WHY ``peak_to_trough_duration`` is opt-in, not a
+    shipped default: it measures to the post-trough repolarization peak, which on
+    this narrow window saturates at the edge-exclusion boundary instead of
+    finding a true interior peak. Surfacing it as a default would hand
+    downstream a clipped, non-discriminating column on hippocampal sorts.
+    """
+    import numpy as np
+    from spikeinterface.metrics.template.metrics import (
+        get_trough_and_peak_idx,
+    )
+
+    from spyglass.spikesorting.v2._params.metric_curation import (
+        DEFAULT_TEMPLATE_METRIC_COLUMNS,
+    )
+
+    assert DEFAULT_TEMPLATE_METRIC_COLUMNS == ["trough_half_width"]
+
+    rec, sorting, _ = _load_recording_and_ground_truth("mearec_tetrode_60s")
+    fs = rec.get_sampling_frequency()
+    analyzer = _display_analyzer(rec, sorting, ms_before=0.5, ms_after=0.5)
+    tm_ext = analyzer.get_extension("template_metrics")
+    tm_df = tm_ext.get_data()
+    detect_kwargs = {
+        key: tm_ext.params[key]
+        for key in (
+            "min_thresh_detect_peaks_troughs",
+            "edge_exclusion_ms",
+            "min_peak_trough_distance_ratio",
+            "min_extremum_distance_samples",
+        )
+    }
+    waveforms = analyzer.get_extension("waveforms")
+    n_samples = waveforms.nbefore + waveforms.nafter
+    edge = int(detect_kwargs["edge_exclusion_ms"] / 1000 * fs)
+    right_edge = n_samples - edge
+    templates = analyzer.get_extension("templates")
+
+    for unit_id in analyzer.unit_ids:
+        assert np.isfinite(tm_df.loc[unit_id, "trough_half_width"]), unit_id
+        template = templates.get_unit_template(unit_id)  # (n_samples, n_chan)
+        extremum_channel = int(np.argmax(np.ptp(template, axis=0)))
+        info = get_trough_and_peak_idx(
+            template[:, extremum_channel], fs, **detect_kwargs
+        )
+        # trough_half_width's extrema (the trough + its half-amplitude crossings)
+        # are strictly interior -> the shipped default is not clipped.
+        for key in (
+            "trough_index",
+            "trough_half_width_left",
+            "trough_half_width_right",
+        ):
+            index = info[key]
+            assert 0 < index < n_samples - 1, (unit_id, key, index, n_samples)
+        # Rationale guard: the repolarization peak peak_to_trough_duration would
+        # measure to is pinned to the window's edge-exclusion boundary on this
+        # narrow recipe -- the documented reason that column is opt-in here.
+        assert info["peak_after_index"] >= (
+            right_edge - detect_kwargs["min_extremum_distance_samples"]
+        ), (unit_id, info["peak_after_index"], right_edge)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_mearec_celltype_metrics_separable():
+    """Ground-truth E vs I units separate on trough_half_width x firing_rate.
+
+    A descriptive justification for EXPOSING (not thresholding) waveform-shape
+    metrics: on the MEArec smoke fixture's biophysical templates, inhibitory
+    interneurons fire faster and have narrower-or-equal spikes than excitatory
+    cells, so the joint rate x width space separates the two groups. This is a
+    margin on the two groups, NOT a baked pipeline threshold (cutoffs are
+    region-specific and live downstream/user-side).
+    """
+    import numpy as np
+
+    rec, sorting, cell_types = _load_recording_and_ground_truth(
+        "mearec_polymer_smoke"
+    )
+    analyzer = _display_analyzer(rec, sorting, ms_before=1.0, ms_after=2.0)
+    tm_df = analyzer.get_extension("template_metrics").get_data()
+    duration = rec.get_total_duration()
+
+    by_type = {"E": {"thw": [], "fr": []}, "I": {"thw": [], "fr": []}}
+    for unit_id in analyzer.unit_ids:
+        cell_type = cell_types[int(unit_id)]
+        trough_half_width = float(tm_df.loc[unit_id, "trough_half_width"])
+        firing_rate = (
+            len(analyzer.sorting.get_unit_spike_train(unit_id)) / duration
+        )
+        assert np.isfinite(trough_half_width), unit_id
+        by_type[cell_type]["thw"].append(trough_half_width)
+        by_type[cell_type]["fr"].append(firing_rate)
+
+    assert by_type["E"]["fr"] and by_type["I"]["fr"], cell_types
+    # Interneuron signature: every I unit fires faster than every E unit, and
+    # the I group's mean spike is narrower-or-equal -- the groups separate in
+    # the joint (rate, width) space the surfaced columns expose.
+    assert min(by_type["I"]["fr"]) > max(by_type["E"]["fr"])
+    assert np.mean(by_type["I"]["thw"]) <= np.mean(by_type["E"]["thw"])

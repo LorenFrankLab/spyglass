@@ -98,3 +98,58 @@ def test_zero_unit_writes_empty_tables(empty_nwb_path):
     assert read_quality_metrics(empty_nwb_path, qm_oid).empty
     assert read_merge_suggestions(empty_nwb_path, ms_oid) == []
     assert read_proposed_labels(empty_nwb_path, pl_oid) == {}
+
+
+def test_round_trip_preserves_template_columns(empty_nwb_path):
+    """Surfaced waveform-shape columns flow through the column-generic writer.
+
+    The write -> ``read_quality_metrics`` path (the same one ``get_metrics``
+    reads through) is column-generic, so a frame carrying template-shape
+    columns alongside the quality metrics round-trips with its values intact --
+    the metric table surfaces them for downstream cell typing.
+    """
+    metrics = pd.DataFrame(
+        {
+            "firing_rate": [3.0, 12.0],
+            "trough_half_width": [0.00040, 0.00025],
+            "peak_to_trough_duration": [0.00055, 0.00042],
+        },
+        index=pd.Index([1, 2], name="unit_id"),
+    )
+    qm_oid, _, _ = _write(
+        empty_nwb_path, metrics, merge_groups=[], labels_by_unit={}, unit_ids=[1, 2]
+    )
+    qm = read_quality_metrics(empty_nwb_path, qm_oid)
+    assert {
+        "firing_rate",
+        "trough_half_width",
+        "peak_to_trough_duration",
+    } <= set(qm.columns)
+    assert qm.loc[2, "trough_half_width"] == pytest.approx(0.00025)
+    assert qm.loc[1, "peak_to_trough_duration"] == pytest.approx(0.00055)
+
+
+def test_build_table_guards_nonscalar_column():
+    """A non-scalar / non-numeric metric cell is coerced to NaN, not crashed.
+
+    Every validated single-channel template column is scalar, so this is
+    belt-and-suspenders against a future SI column whose cell is an array or a
+    string: the wide one-float-per-column write must NaN it rather than raise.
+    """
+    from spyglass.spikesorting.v2._metric_curation_nwb import (
+        build_quality_metrics_table,
+    )
+
+    metrics = pd.DataFrame(
+        {
+            "snr": [4.0, 5.0],
+            "weird": [np.array([1.0, 2.0]), "not_a_number"],
+        },
+        index=pd.Index([1, 2], name="unit_id"),
+    )
+    table = build_quality_metrics_table(metrics)
+    frame = table.to_dataframe().set_index("unit_id")
+    # The scalar column is preserved; the non-scalar / non-numeric cells NaN.
+    assert frame.loc[1, "snr"] == 4.0
+    assert np.isnan(frame.loc[1, "weird"])
+    assert np.isnan(frame.loc[2, "weird"])

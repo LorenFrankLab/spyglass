@@ -750,6 +750,68 @@ def test_internal_whiten_guard_allows_absent_or_falsy_whiten():
     reject_internal_whiten("ironclust", {"whiten": 0})
 
 
+# ---------- quality-metric template (waveform-shape) columns ----------------
+
+
+def test_quality_metric_schema_defaults_template_columns():
+    """A row that omits ``template_metric_columns`` gets ``trough_half_width``.
+
+    The shipped default surfaces the single trough-local ``trough_half_width``
+    (an SI OUTPUT column name) for downstream cell typing. The post-trough
+    columns (``peak_to_trough_duration``, slopes) are NOT defaults -- they clip
+    on the narrow hippocampus display window -- so they stay opt-in.
+    """
+    from spyglass.spikesorting.v2._params.metric_curation import (
+        DEFAULT_TEMPLATE_METRIC_COLUMNS,
+        QualityMetricParamsSchema,
+    )
+
+    schema = QualityMetricParamsSchema(metric_names=["snr"])
+    assert schema.template_metric_columns == ["trough_half_width"]
+    assert DEFAULT_TEMPLATE_METRIC_COLUMNS == ["trough_half_width"]
+    # Post-trough columns are opt-in, never shipped defaults.
+    assert "peak_to_trough_duration" not in schema.template_metric_columns
+    assert "recovery_slope" not in schema.template_metric_columns
+
+
+def test_template_metric_columns_validated():
+    """Unknown column raises; a metric *name* raises with the column hint; an
+    empty list is accepted (a row that surfaces no shape columns).
+
+    The vocabulary is SI OUTPUT columns, not metric names -- the load-bearing
+    distinction of this feature. A typo, or a metric name (``half_width``)
+    passed where a column is expected, must fail at insert, not at populate.
+    """
+    from spyglass.spikesorting.v2._params.metric_curation import (
+        QualityMetricParamsSchema,
+        _available_template_metric_columns,
+    )
+
+    with pytest.raises(ValidationError, match="Unknown template metric column"):
+        QualityMetricParamsSchema(
+            metric_names=["snr"], template_metric_columns=["not_a_real_column"]
+        )
+
+    # ``half_width`` is a metric NAME, not a column; its columns are
+    # trough_half_width / peak_half_width. Passing it raises with that hint.
+    with pytest.raises(ValidationError, match="OUTPUT COLUMN names"):
+        QualityMetricParamsSchema(
+            metric_names=["snr"], template_metric_columns=["half_width"]
+        )
+
+    empty = QualityMetricParamsSchema(
+        metric_names=["snr"], template_metric_columns=[]
+    )
+    assert empty.template_metric_columns == []
+
+    # The validator's vocabulary is the installed SI's single-channel output
+    # columns: includes ``trough_half_width`` but never the ``half_width`` name.
+    available = _available_template_metric_columns()
+    assert "trough_half_width" in available
+    assert "peak_to_trough_duration" in available
+    assert "half_width" not in available
+
+
 def test_internal_whiten_guard_ignores_mountainsort():
     """MS4/MS5 intentionally use ``whiten=True`` (routed through the external
     float64 whitening), so the guard must NOT reject them."""
