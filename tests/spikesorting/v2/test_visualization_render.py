@@ -21,12 +21,9 @@ from spyglass.spikesorting.v2 import visualization as ssviz  # noqa: E402
 
 
 def _recording_key(sort_pk):
-    from spyglass.spikesorting.v2.sorting import SortingSelection
-
-    recording_id = (
-        SortingSelection.RecordingSource & sort_pk
-    ).fetch1("recording_id")
-    return {"recording_id": recording_id}
+    # Exercise the real facade resolver (source-aware) end to end rather than
+    # re-querying the source part table here.
+    return ssviz.recording_key_for_sorting(sort_pk)
 
 
 @pytest.mark.slow

@@ -55,7 +55,10 @@ def test_available_visualizations_lists_documented_helpers():
         "implementation",
         "backend_default",
         "compute_missing",
+        "description",
     }
+    # The discovery surface is self-documenting: every row has a description.
+    assert all(d for d in table["description"])
     names = set(table["name"])
     expected = {
         "plot_recording_traces",

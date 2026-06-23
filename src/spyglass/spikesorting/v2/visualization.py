@@ -53,6 +53,7 @@ from spyglass.spikesorting.v2._visualization import (
 
 __all__ = [
     "available_visualizations",
+    "recording_key_for_sorting",
     "plot_recording_traces",
     "plot_recording_probe_map",
     "plot_sorting_summary",
@@ -104,6 +105,36 @@ def _display_analyzer_with_extensions(
         sorting.add_extensions(sorting_key, missing)
         analyzer = sorting.get_analyzer(sorting_key)
     return analyzer
+
+
+def recording_key_for_sorting(sorting_key) -> dict:
+    """Resolve a sorting key to the saved preprocessed ``Recording`` key.
+
+    Convenience for the recording-level helpers: ``plot_recording_traces`` /
+    ``plot_recording_probe_map`` take a ``recording_key``, but users usually have
+    a ``sorting_key`` in hand. Reuses the source-aware
+    ``SortingSelection.resolve_source`` (the single source-part integrity check),
+    so a single-recording sort yields its ``{"recording_id": ...}`` directly. A
+    concat-backed sort has multiple member recordings and no single recording
+    key, so it raises a clear error rather than guessing one.
+
+    Examples
+    --------
+    >>> from spyglass.spikesorting.v2 import visualization as ssviz
+    >>> rec_key = ssviz.recording_key_for_sorting(sorting_key)
+    >>> ssviz.plot_recording_traces(rec_key)
+    """
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    source = SortingSelection.resolve_source(sorting_key)
+    if source.kind != "recording":
+        raise ValueError(
+            "recording_key_for_sorting is only defined for single-recording "
+            f"sorts; this sort's source is {source.kind!r} (multiple member "
+            "recordings, no single recording key). Inspect a member recording's "
+            "Recording key directly."
+        )
+    return dict(source.key)
 
 
 def _curation_sorting_key(analyzer_curation_key) -> dict:

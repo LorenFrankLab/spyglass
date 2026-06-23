@@ -438,8 +438,8 @@ print(
 # SpikeInterface's own widgets/exporters behind Spyglass keys, so you
 # tab-complete a single module instead of hunting for plot methods across
 # `Recording`, `Sorting`, and `AnalyzerCuration`. `available_visualizations()`
-# lists every helper, the key it takes, what it wraps, and whether it can fill in
-# a missing analyzer extension.
+# lists every helper with a one-line description, the key it takes, what it wraps,
+# and whether it can fill in a missing analyzer extension.
 #
 # Routing is automatic and matters: recording widgets read the saved
 # **preprocessed** recording; sorting/waveform/location widgets read the sort's
@@ -468,14 +468,10 @@ ssviz.available_visualizations()
 # off the display analyzer. Interactive web curation (FigPack) is a later release.
 
 # +
-from spyglass.spikesorting.v2.sorting import SortingSelection
-
 sorting_key = {"sorting_id": run_summary["sorting_id"]}
-recording_key = {
-    "recording_id": (
-        SortingSelection.RecordingSource & sorting_key
-    ).fetch1("recording_id")
-}
+# The facade resolves the saved recording's key for you (no hunting through
+# SortingSelection); the recording widgets take that recording_key.
+recording_key = ssviz.recording_key_for_sorting(sorting_key)
 
 ssviz.plot_recording_traces(recording_key, time_range=[0.0, 1.0])
 

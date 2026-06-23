@@ -87,6 +87,7 @@ _REGISTRY: tuple[dict, ...] = (
         "implementation": "spikeinterface.widgets.plot_traces",
         "backend_default": "matplotlib",
         "compute_missing": False,
+        "description": "Voltage traces of the saved preprocessed recording",
     },
     {
         "name": "plot_recording_probe_map",
@@ -94,6 +95,7 @@ _REGISTRY: tuple[dict, ...] = (
         "implementation": "spikeinterface.widgets.plot_probe_map",
         "backend_default": "matplotlib",
         "compute_missing": False,
+        "description": "Probe geometry / channel map of the saved recording",
     },
     {
         "name": "plot_sorting_summary",
@@ -101,6 +103,7 @@ _REGISTRY: tuple[dict, ...] = (
         "implementation": "spikeinterface.widgets.plot_sorting_summary",
         "backend_default": "matplotlib",
         "compute_missing": True,
+        "description": "Multi-panel summary of the whole sort",
     },
     {
         "name": "plot_unit_summary",
@@ -108,6 +111,9 @@ _REGISTRY: tuple[dict, ...] = (
         "implementation": "spikeinterface.widgets.plot_unit_summary",
         "backend_default": "matplotlib",
         "compute_missing": True,
+        "description": (
+            "Single-unit summary (waveform, location, correlogram, amplitudes)"
+        ),
     },
     {
         "name": "plot_waveforms",
@@ -115,6 +121,7 @@ _REGISTRY: tuple[dict, ...] = (
         "implementation": "spikeinterface.widgets.plot_unit_waveforms",
         "backend_default": "matplotlib",
         "compute_missing": False,
+        "description": "Per-unit waveforms and templates",
     },
     {
         "name": "plot_spikes_on_traces",
@@ -122,6 +129,7 @@ _REGISTRY: tuple[dict, ...] = (
         "implementation": "spikeinterface.widgets.plot_spikes_on_traces",
         "backend_default": "matplotlib",
         "compute_missing": True,
+        "description": "Detected spikes overlaid on the recording traces",
     },
     {
         "name": "plot_unit_locations",
@@ -129,6 +137,7 @@ _REGISTRY: tuple[dict, ...] = (
         "implementation": "spikeinterface.widgets.plot_unit_locations",
         "backend_default": "matplotlib",
         "compute_missing": True,
+        "description": "Estimated unit positions on the probe",
     },
     {
         "name": "plot_metrics",
@@ -136,6 +145,7 @@ _REGISTRY: tuple[dict, ...] = (
         "implementation": "spyglass AnalyzerCuration.get_metrics",
         "backend_default": "matplotlib",
         "compute_missing": False,
+        "description": "Histograms of the routed Spyglass quality-metric table",
     },
     {
         "name": "plot_si_quality_metrics",
@@ -143,6 +153,9 @@ _REGISTRY: tuple[dict, ...] = (
         "implementation": "spikeinterface.widgets.plot_quality_metrics",
         "backend_default": "matplotlib",
         "compute_missing": True,
+        "description": (
+            "Raw SI quality-metric view (display-analyzer extension, not routed)"
+        ),
     },
     {
         "name": "plot_si_template_metrics",
@@ -150,6 +163,9 @@ _REGISTRY: tuple[dict, ...] = (
         "implementation": "spikeinterface.widgets.plot_template_metrics",
         "backend_default": "matplotlib",
         "compute_missing": True,
+        "description": (
+            "Raw SI template-metric view (display-analyzer extension, not routed)"
+        ),
     },
     {
         "name": "plot_potential_merges",
@@ -157,6 +173,7 @@ _REGISTRY: tuple[dict, ...] = (
         "implementation": "spikeinterface.widgets.plot_potential_merges",
         "backend_default": "matplotlib",
         "compute_missing": False,
+        "description": "Persisted merge-group suggestions (never recomputed)",
     },
     {
         "name": "export_si_report",
@@ -164,6 +181,7 @@ _REGISTRY: tuple[dict, ...] = (
         "implementation": "spikeinterface.exporters.export_report",
         "backend_default": None,  # an exporter: no plotting backend
         "compute_missing": True,
+        "description": "Write a local SI report folder of figures / tables",
     },
     {
         "name": "export_to_phy",
@@ -171,6 +189,7 @@ _REGISTRY: tuple[dict, ...] = (
         "implementation": "spikeinterface.exporters.export_to_phy",
         "backend_default": None,  # an exporter: no plotting backend
         "compute_missing": False,
+        "description": "Export the sort to a local Phy folder",
     },
 )
 
@@ -180,25 +199,27 @@ _REGISTRY_COLUMNS = (
     "implementation",
     "backend_default",
     "compute_missing",
+    "description",
 )
 
 
 def available_visualizations() -> pd.DataFrame:
     """Return the discoverable catalog of v2 visualization/export helpers.
 
-    Documentation-as-code: one row per ``ssviz`` facade function, listing the
-    DataJoint key type it accepts (``recording`` / ``sorting`` /
-    ``analyzer_curation``), the underlying implementation target (a
+    Documentation-as-code: one row per ``ssviz`` facade function, listing a
+    one-line ``description``, the DataJoint key type it accepts (``recording`` /
+    ``sorting`` / ``analyzer_curation``), the underlying implementation target (a
     SpikeInterface widget/exporter or the Spyglass-routed
-    ``AnalyzerCuration.get_metrics`` table), the default plotting backend, and
-    whether the helper can compute missing display-safe extensions via an
-    explicit ``compute_missing=True`` opt-in.
+    ``AnalyzerCuration.get_metrics`` table), the default plotting backend
+    (``None`` for the exporters, which take no backend), and whether the helper
+    can compute missing display-safe extensions via an explicit
+    ``compute_missing=True`` opt-in.
 
     Returns
     -------
     pandas.DataFrame
         One row per helper, columns ``name``, ``key_type``, ``implementation``,
-        ``backend_default``, ``compute_missing``.
+        ``backend_default``, ``compute_missing``, ``description``.
     """
     return pd.DataFrame(list(_REGISTRY), columns=list(_REGISTRY_COLUMNS))
 

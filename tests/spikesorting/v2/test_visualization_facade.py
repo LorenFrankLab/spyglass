@@ -65,6 +65,8 @@ def test_visualization_facade_exports_expected_helpers():
     for name in _FACADE_FUNCTIONS:
         assert hasattr(ssviz, name), f"facade missing {name}"
         assert callable(getattr(ssviz, name))
+    # The sorting -> recording key convenience is also part of the surface.
+    assert callable(ssviz.recording_key_for_sorting)
     table = ssviz.available_visualizations()
     assert set(table.columns) == {
         "name",
@@ -72,12 +74,14 @@ def test_visualization_facade_exports_expected_helpers():
         "implementation",
         "backend_default",
         "compute_missing",
+        "description",
     }
-    # Every helper that takes a DataJoint key is catalogued.
+    # Every plotting/export helper is catalogued with a non-empty description.
     catalogued = set(table["name"])
     assert {n for n in _FACADE_FUNCTIONS if n != "available_visualizations"} <= (
         catalogued
     )
+    assert all(d for d in table["description"])
 
 
 @pytest.mark.db_unit
@@ -187,6 +191,50 @@ def test_recording_plot_probe_map_calls_si_widget(dj_conn, monkeypatch):
     assert ssviz.plot_recording_probe_map({"recording_id": "r"}) == "PROBE"
     assert captured["recording"] is sentinel
     assert captured["backend"] == "matplotlib"
+
+
+@pytest.mark.db_unit
+def test_recording_key_for_sorting_resolves_single_recording(
+    dj_conn, monkeypatch
+):
+    """A single-recording sort resolves straight to its ``recording_id`` key."""
+    from types import SimpleNamespace
+
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    monkeypatch.setattr(
+        SortingSelection,
+        "resolve_source",
+        classmethod(
+            lambda cls, key: SimpleNamespace(
+                kind="recording", key={"recording_id": "r1"}
+            )
+        ),
+    )
+    assert ssviz.recording_key_for_sorting({"sorting_id": "s"}) == {
+        "recording_id": "r1"
+    }
+
+
+@pytest.mark.db_unit
+def test_recording_key_for_sorting_rejects_concat_source(dj_conn, monkeypatch):
+    """A concat-backed sort has no single recording key -> clear error."""
+    from types import SimpleNamespace
+
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    monkeypatch.setattr(
+        SortingSelection,
+        "resolve_source",
+        classmethod(
+            lambda cls, key: SimpleNamespace(
+                kind="concatenated_recording",
+                key={"concat_recording_id": "c1"},
+            )
+        ),
+    )
+    with pytest.raises(ValueError, match="single-recording"):
+        ssviz.recording_key_for_sorting({"sorting_id": "s"})
 
 
 # --------------------------------------------------------------------------
