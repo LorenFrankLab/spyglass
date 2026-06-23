@@ -469,3 +469,59 @@ def test_sorting_records_display_waveform_params(populated_sorting):
     analyzer = Sorting().get_analyzer(dict(populated_sorting))
     assert isinstance(analyzer, si.SortingAnalyzer)
     assert folder.exists()
+
+
+@pytest.mark.slow
+def test_rebuild_reads_stored_window_never_re_resolves(
+    populated_sorting, monkeypatch
+):
+    """A cache-miss rebuild reads the STORED recipe, never re-resolving region.
+
+    The contract is that the region-resolved window is computed once at sort
+    time, persisted on ``Sorting.display_waveform_params_name``, and never
+    re-derived from the recipe catalog on later rebuilds (otherwise a later
+    recipe-map change would silently shift an existing sort's window and its
+    ``peak_amplitude_uv``). The existing happy-path test can't distinguish
+    "read the stored field" from "re-resolved to the same answer" because the
+    map returns the same name. Here the sort-time resolver is monkeypatched to
+    RAISE, so any rebuild that re-resolves blows up loudly; a correct rebuild
+    (reading the stored field) never calls it.
+    """
+    import shutil
+
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2 import sorting as sorting_module
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    sid = populated_sorting["sorting_id"]
+    row = (Sorting & populated_sorting).fetch1()
+    if int(row["n_units"]) == 0:
+        pytest.skip("zero-unit smoke sort: no analyzer to rebuild")
+    stored_name = row["display_waveform_params_name"]
+
+    def _must_not_re_resolve(*args, **kwargs):
+        raise AssertionError(
+            "analyzer rebuild re-resolved the region window instead of reading "
+            "the stored Sorting.display_waveform_params_name"
+        )
+
+    monkeypatch.setattr(
+        sorting_module,
+        "waveform_params_for_preprocessing",
+        _must_not_re_resolve,
+    )
+
+    folder = analyzer_path(sid, stored_name)
+    shutil.rmtree(folder)
+    assert not folder.exists()
+
+    # Rebuild must succeed WITHOUT calling the (now-raising) region resolver.
+    analyzer = Sorting().get_analyzer(dict(populated_sorting))
+    assert isinstance(analyzer, si.SortingAnalyzer)
+    # Rebuilt under the originally-persisted recipe; the stored field is intact.
+    assert folder.exists()
+    assert (Sorting & populated_sorting).fetch1(
+        "display_waveform_params_name"
+    ) == stored_name
