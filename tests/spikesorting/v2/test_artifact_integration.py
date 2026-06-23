@@ -223,7 +223,7 @@ def test_detected_artifact_is_masked_out_of_the_sorted_recording(
     captured: dict = {}
 
     def _capture_run_sorter(
-        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None
+        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None, execution_params=None
     ):
         import spikeinterface as si
 

@@ -840,8 +840,23 @@ def test_recipe_catalog_rows_copy_inner_schema_version():
     for name, params, version, _job_kwargs in artifact_default_contents():
         assert version == params["schema_version"], name
 
-    for sorter, name, params, version, _job_kwargs in sorter_default_contents():
+    # Sorter rows are 7-tuples: (sorter, name, params, params_schema_version,
+    # job_kwargs, execution_params, execution_params_schema_version). Both outer
+    # versions must derive from their validated inner blob's schema_version.
+    for (
+        sorter,
+        name,
+        params,
+        version,
+        _job_kwargs,
+        execution_params,
+        execution_version,
+    ) in sorter_default_contents():
         assert version == params["schema_version"], (sorter, name)
+        assert execution_version == execution_params["schema_version"], (
+            sorter,
+            name,
+        )
 
 
 # ---------- SortGroupV2 reference-mode validation ---------------------------

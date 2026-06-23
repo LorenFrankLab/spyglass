@@ -73,7 +73,7 @@ def _make_plant(unit_frames: dict[int, list[int]]):
     """
 
     def _plant(
-        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None
+        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None, execution_params=None
     ):
         import spikeinterface as si
 
