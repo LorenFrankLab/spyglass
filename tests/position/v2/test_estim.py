@@ -487,6 +487,77 @@ class TestCanonicalizePoseColumns:
             canonicalize_pose_columns(df, ["greenLED", "green_led"], canon_map)
 
 
+class TestPoseEstimationToDataframe:
+    """Read-side canonicalization: NWB series names resolve to canonical.
+
+    Uses real in-memory ndx-pose series (no DB, no inference).
+    """
+
+    @staticmethod
+    def _series(name, n=4, ndim=2):
+        import ndx_pose
+
+        rng = np.arange(n * ndim, dtype=float).reshape(n, ndim)
+        return ndx_pose.PoseEstimationSeries(
+            name=name,
+            description="test",
+            data=rng,
+            unit="pixels",
+            reference_frame="(0,0) top-left",
+            timestamps=np.linspace(0, 1, n),
+            confidence=np.linspace(0.5, 1.0, n),
+        )
+
+    class _Container:
+        def __init__(self, series):
+            self.pose_estimation_series = {s.name: s for s in series}
+
+    def test_resolves_series_names_to_canonical(self):
+        from spyglass.position.v2.estim import pose_estimation_to_dataframe
+        from spyglass.position.v2.utils.skeleton import build_canonical_map
+
+        canon_map = build_canonical_map(["greenLED", "earR"])
+        green = self._series("greenLed_pose")
+        ear = self._series("EarR_pose")
+        pe = self._Container([green, ear])
+
+        df = pose_estimation_to_dataframe(pe, "scorer", False, canon_map)
+
+        parts = list(df.columns.get_level_values("bodyparts").unique())
+        assert parts == ["greenLED", "earR"]
+        # data preserved under canonical name
+        np.testing.assert_array_equal(
+            df[("scorer", "greenLED", "x")].to_numpy(), green.data[:][:, 0]
+        )
+        # real timestamps used as index
+        np.testing.assert_array_equal(df.index.to_numpy(), green.timestamps[:])
+
+    def test_unknown_name_left_unchanged(self):
+        """A legacy/unknown part with no canonical match reads back as-is."""
+        from spyglass.position.v2.estim import pose_estimation_to_dataframe
+        from spyglass.position.v2.utils.skeleton import build_canonical_map
+
+        canon_map = build_canonical_map(["greenLED"])
+        pe = self._Container([self._series("mysteryPart_pose")])
+
+        df = pose_estimation_to_dataframe(pe, "scorer", False, canon_map)
+
+        parts = list(df.columns.get_level_values("bodyparts").unique())
+        assert parts == ["mysteryPart"]
+
+    def test_is_3d_reads_z_coordinate(self):
+        from spyglass.position.v2.estim import pose_estimation_to_dataframe
+        from spyglass.position.v2.utils.skeleton import build_canonical_map
+
+        canon_map = build_canonical_map(["earR"])
+        pe = self._Container([self._series("EarR_pose", ndim=3)])
+
+        df = pose_estimation_to_dataframe(pe, "scorer", True, canon_map)
+
+        coords = set(df.columns.get_level_values("coords"))
+        assert {"x", "y", "z", "likelihood"} <= coords
+
+
 class TestBasicMethods:
     """Test basic methods and simple logic paths for coverage."""
 

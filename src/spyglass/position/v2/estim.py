@@ -145,6 +145,61 @@ def canonicalize_pose_columns(pose_df, bodyparts, canon_map):
     return pose_df.rename(columns=mapping, level="bodyparts"), canonical
 
 
+def pose_estimation_to_dataframe(pose_estimation, scorer, is_3d, canon_map):
+    """Build a pose DataFrame from an ndx-pose ``PoseEstimation`` object.
+
+    Reconstructs the 3-level column MultiIndex ``(scorer, bodyparts, coords)``
+    used across the pipeline, resolving each series' body-part name to its
+    canonical spelling on read. This is the back-compat counterpart to the
+    write-side ingest boundary: NWB written with tool-native (or older)
+    spellings reads back canonical wherever a match exists. Names with **no**
+    canonical match are left unchanged, so reading never fails on a legacy or
+    unknown part.
+
+    Parameters
+    ----------
+    pose_estimation : ndx_pose.PoseEstimation
+        Object whose ``pose_estimation_series`` provides per-bodypart data,
+        confidence, and timestamps.
+    scorer : str
+        Scorer label for the first MultiIndex level.
+    is_3d : bool
+        When True, a ``z`` coordinate is read from series with >= 3 columns.
+    canon_map : dict[str, str]
+        Mapping from
+        :func:`~spyglass.position.v2.utils.skeleton.build_canonical_map`.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Pose data indexed by real per-frame timestamps (seconds).
+    """
+    data_dict = {}
+    for series in pose_estimation.pose_estimation_series.values():
+        bodypart = series.name.replace("_pose", "")
+        bodypart = canonicalize(bodypart, canon_map, default=bodypart)
+
+        pose_data = series.data[:]
+        data_dict[(scorer, bodypart, "x")] = pose_data[:, 0]
+        data_dict[(scorer, bodypart, "y")] = pose_data[:, 1]
+        if is_3d and pose_data.shape[1] >= 3:
+            data_dict[(scorer, bodypart, "z")] = pose_data[:, 2]
+
+        data_dict[(scorer, bodypart, "likelihood")] = series.confidence[:]
+
+    df = pd.DataFrame(data_dict)
+    df.columns = pd.MultiIndex.from_tuples(
+        df.columns, names=["scorer", "bodyparts", "coords"]
+    )
+
+    # Use real per-frame timestamps (seconds) as the index so that
+    # compute_pose_outputs derives the correct sampling_rate and computes
+    # velocity in cm/s rather than cm/frame.
+    first_series = list(pose_estimation.pose_estimation_series.values())[0]
+    df.index = pd.Index(first_series.timestamps[:], name="time")
+    return df
+
+
 @schema
 class PoseEstimParams(SpyglassMixin, dj.Lookup):
     """Parameters for pose estimation inference.
@@ -748,31 +803,15 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         else:
             is_3d = False
 
-        # Build DataFrame from PoseEstimationSeries.
-        data_dict = {}
-
-        for series in pose_estimation.pose_estimation_series.values():
-            bodypart = series.name.replace("_pose", "")
-
-            pose_data = series.data[:]
-            data_dict[(scorer, bodypart, "x")] = pose_data[:, 0]
-            data_dict[(scorer, bodypart, "y")] = pose_data[:, 1]
-            if is_3d and pose_data.shape[1] >= 3:
-                data_dict[(scorer, bodypart, "z")] = pose_data[:, 2]
-
-            confidence = series.confidence[:]
-            data_dict[(scorer, bodypart, "likelihood")] = confidence
-
-        df = pd.DataFrame(data_dict)
-        df.columns = pd.MultiIndex.from_tuples(
-            df.columns, names=["scorer", "bodyparts", "coords"]
+        # Resolve tool-native series names to the canonical BodyPart namespace
+        # on read, so NWB written before canonicalization (or by tools that
+        # used a different spelling) yields canonical names downstream.
+        canon_map = build_canonical_map(
+            [str(bp) for bp in BodyPart().fetch("bodypart")]
         )
-
-        # Use real per-frame timestamps (seconds) as the index so that
-        # compute_pose_outputs derives the correct sampling_rate and computes
-        # velocity in cm/s rather than cm/frame.
-        first_series = list(pose_estimation.pose_estimation_series.values())[0]
-        df.index = pd.Index(first_series.timestamps[:], name="time")
+        df = pose_estimation_to_dataframe(
+            pose_estimation, scorer, is_3d, canon_map
+        )
 
         self._logger.debug(
             f"Fetched {len(df)} frames of pose data (3d={is_3d})"
