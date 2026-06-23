@@ -34,6 +34,7 @@
 
 # +
 import datajoint as dj
+from IPython.display import display
 
 from spyglass.common import LabTeam
 from spyglass.common.common_interval import IntervalList
@@ -238,7 +239,6 @@ run_summary = run_v2_pipeline(
 # `run_summary` dict carries the same fields programmatically
 # (`run_summary["merge_id"]`, `run_summary["n_units"]`).
 
-from IPython.display import display
 display(describe_run(run_summary))
 describe_units(run_summary["sorting_id"])
 
