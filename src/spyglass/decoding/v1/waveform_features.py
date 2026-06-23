@@ -85,6 +85,9 @@ class WaveformFeaturesParams(SpyglassMixin, dj.Lookup):
             },
         ],
         [
+            # V2 SortingAnalyzer sources only; legacy v0/v1 users should choose
+            # the ``amplitude`` row because WaveformExtractor has no
+            # ``spike_locations`` extension.
             "amplitude, spike_location",
             {
                 "waveform_features_params": {

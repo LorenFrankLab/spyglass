@@ -798,7 +798,9 @@ v2 `merge_id` from a freshly built `SortingAnalyzer` — it no longer requires t
 legacy SI 0.99 environment or the removed `extract_waveforms`. The `amplitude`
 feature (used by clusterless decoding), `full_waveform`, and `spike_location`
 are supported for v2 sources; any other feature is rejected with a clear
-`NotImplementedError`. A zero-unit v2 curation yields
+`NotImplementedError`. The `spike_location` row is v2-only; legacy v0/v1
+clusterless workflows should keep using the `amplitude` row. A zero-unit v2
+curation yields
 an empty-but-valid features row. Note that v2 amplitudes are in microvolts,
 whereas the legacy v0/v1 path used raw ADC counts, so v2 and v1 feature
 magnitudes are not directly comparable — retrain decoders per pipeline version.

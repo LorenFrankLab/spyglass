@@ -7,7 +7,7 @@ curations with SpikeInterface widgets / exporters::
 
     ssviz.available_visualizations()
     ssviz.plot_recording_traces(recording_key)
-    ssviz.plot_sorting_summary(sorting_key)
+    ssviz.plot_sorting_summary(sorting_key, backend="spikeinterface_gui")
     ssviz.plot_metrics(analyzer_curation_key)
 
 These wrappers are intentionally thin: Spyglass resolves the DataJoint key and
@@ -31,10 +31,12 @@ Routing (the load-bearing invariant, see the table contract):
 Plot helpers are read-only by default: a richer widget that needs a missing
 display-safe analyzer extension raises a clear error naming the
 ``Sorting().add_extensions(...)`` call. Passing ``compute_missing=True`` computes
-ONLY display-safe extensions through ``Sorting.add_extensions`` first. The default
-backend is local ``matplotlib``; ``backend="sortingview"`` (web-capable) is allowed
-only when the caller asks for it explicitly. No populate path opens a GUI, writes
-a report, uploads, or publishes.
+ONLY display-safe extensions through ``Sorting.add_extensions`` first. Most plot
+helpers default to local ``matplotlib``. SI widgets that do not support
+matplotlib expose that honestly: ``plot_sorting_summary`` requires an explicit
+GUI / web backend, and ``plot_potential_merges`` defaults to the notebook-local
+``ipywidgets`` backend. No populate path opens a GUI, writes a report, uploads,
+or publishes.
 
 This module imports schema table classes lazily (inside the functions), so
 ``import spyglass.spikesorting.v2.visualization`` stays free of a live DB

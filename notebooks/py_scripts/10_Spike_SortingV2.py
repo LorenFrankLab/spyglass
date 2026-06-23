@@ -461,13 +461,16 @@ ssviz.available_visualizations()
 # extension has not been computed yet raises a clear error naming the
 # `add_extensions(...)` call; pass `compute_missing=True` to compute only that
 # display-safe extension first (as `plot_unit_summary` does below for
-# `unit_locations`). The default backend is local `matplotlib`; the web-capable
-# `backend="sortingview"` is an explicit opt-in, and no step here uploads or
-# publishes anything. `plot_recording_probe_map(recording_key)` rounds out the
-# recording view (pass a 3D `ax=` for a probe with z-coordinates), and
+# `unit_locations`). Most plot helpers default to local `matplotlib`; SI widgets
+# without a matplotlib backend expose that explicitly (`plot_sorting_summary`
+# requires `backend="spikeinterface_gui"`, `backend="sortingview"`, or
+# `backend="figpack"`, while `plot_potential_merges` defaults to notebook-local
+# `ipywidgets`). No step here uploads or publishes anything.
+# `plot_recording_probe_map(recording_key)` rounds out the recording view (pass a
+# 3D `ax=` for a probe with z-coordinates), and
 # `ssviz.export_si_report(sorting_key, folder, force_computation=True)` /
 # `ssviz.export_to_phy(sorting_key, folder)` write a local SI report / Phy folder
-# off the display analyzer. Interactive web curation (FigPack) is a later release.
+# off the display analyzer. FigPack curation-state round trip is a later release.
 
 # +
 sorting_key = {"sorting_id": run_summary["sorting_id"]}

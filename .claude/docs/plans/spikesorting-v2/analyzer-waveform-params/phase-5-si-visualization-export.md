@@ -9,13 +9,15 @@ waiting for a full FigPack curation UI.
 
 This phase is intentionally a **bridge**, not a replacement UI. Spyglass resolves
 the DataJoint key and chooses the correct recording / analyzer / metric table;
-SpikeInterface owns the plotting and export behavior. The default backend is
-local `matplotlib`. Notebook-only / web-capable backends (`ipywidgets`,
-`sortingview`) are opt-in and explicit. No populate path uploads or publishes
-anything. Plot helpers are read-only by default: if a richer SI widget needs a
-missing display-safe analyzer extension, the wrapper raises a clear error naming
-the `Sorting.add_extensions(...)` call, or computes it only when the caller
-passes an explicit opt-in such as `compute_missing=True`.
+SpikeInterface owns the plotting and export behavior. Most plot helpers default
+to local `matplotlib`. SI widgets that do not support matplotlib expose that
+honestly: `plot_sorting_summary` requires an explicit GUI / web backend
+(`spikeinterface_gui`, `sortingview`, or `figpack`), and
+`plot_potential_merges` defaults to notebook-local `ipywidgets`. No populate path
+uploads or publishes anything. Plot helpers are read-only by default: if a richer
+SI widget needs a missing display-safe analyzer extension, the wrapper raises a
+clear error naming the `Sorting.add_extensions(...)` call, or computes it only
+when the caller passes an explicit opt-in such as `compute_missing=True`.
 
 **Depends on Phases 1-2** for stable display-vs-metric analyzer routing.
 Benefits from Phase 4 because `AnalyzerCuration.get_metrics()` can then include
@@ -90,7 +92,7 @@ from spyglass.spikesorting.v2 import visualization as ssviz
 ssviz.available_visualizations()
 ssviz.plot_recording_traces(recording_key)
 ssviz.plot_recording_probe_map(recording_key)
-ssviz.plot_sorting_summary(sorting_key)
+ssviz.plot_sorting_summary(sorting_key, backend="spikeinterface_gui")
 ssviz.plot_unit_summary(sorting_key, unit_id=...)
 ssviz.plot_waveforms(sorting_key, unit_ids=[...])
 ssviz.plot_spikes_on_traces(sorting_key)
@@ -98,7 +100,7 @@ ssviz.plot_unit_locations(sorting_key)
 ssviz.plot_metrics(analyzer_curation_key)
 ssviz.plot_si_quality_metrics(analyzer_curation_key)
 ssviz.plot_si_template_metrics(analyzer_curation_key)
-ssviz.plot_potential_merges(analyzer_curation_key)
+ssviz.plot_potential_merges(analyzer_curation_key)  # ipywidgets backend
 ```
 
 The SI-wrapping logic lives in one place: `visualization.py` (or a private
@@ -131,7 +133,7 @@ Deferred or escape-hatch only:
   def available_visualizations() -> pandas.DataFrame: ...
   def plot_recording_traces(recording_key, *, raw=False, backend="matplotlib", **kwargs): ...
   def plot_recording_probe_map(recording_key, *, backend="matplotlib", **kwargs): ...
-  def plot_sorting_summary(sorting_key, *, compute_missing=False, backend="matplotlib", **kwargs): ...
+  def plot_sorting_summary(sorting_key, *, compute_missing=False, backend=None, **kwargs): ...
   def plot_unit_summary(sorting_key, unit_id, *, compute_missing=False, backend="matplotlib", **kwargs): ...
   def plot_waveforms(sorting_key, unit_ids=None, *, backend="matplotlib", **kwargs): ...
   def plot_spikes_on_traces(sorting_key, *, compute_missing=False, backend="matplotlib", **kwargs): ...
@@ -139,7 +141,7 @@ Deferred or escape-hatch only:
   def plot_metrics(analyzer_curation_key, *, backend="matplotlib", **kwargs): ...
   def plot_si_quality_metrics(analyzer_curation_key, *, compute_missing=False, backend="matplotlib", **kwargs): ...
   def plot_si_template_metrics(analyzer_curation_key, *, compute_missing=False, backend="matplotlib", **kwargs): ...
-  def plot_potential_merges(analyzer_curation_key, *, backend="matplotlib", **kwargs): ...
+  def plot_potential_merges(analyzer_curation_key, *, backend="ipywidgets", **kwargs): ...
   def export_si_report(sorting_key, output_folder, *, force_computation=False, **kwargs): ...
   def export_to_phy(sorting_key, output_folder, **kwargs): ...
   ```
@@ -280,13 +282,17 @@ Deferred or escape-hatch only:
   sibling TSV from `AnalyzerCuration.get_metrics(key)` with a name that makes the
   provenance obvious (for example `spyglass_quality_metrics.tsv`).
 
-- **Backend / publishing policy.** Every wrapper defaults to
-  `backend="matplotlib"` and accepts `**kwargs` / `backend_kwargs` for SI
-  passthrough. `backend="sortingview"` is allowed only when the caller explicitly
-  requests it. Do not add automatic FigURL / sortingview publishing to any
-  populate or export path. `ephyviewer` remains a direct SI escape hatch for
-  users who want it; Spyglass does not need a first-class wrapper unless the
-  notebook demonstrates it.
+- **Backend / publishing policy.** Wrappers whose SI widgets support a local
+  static backend default to `backend="matplotlib"` and accept `**kwargs` /
+  `backend_kwargs` for SI passthrough. Widgets without matplotlib do not pretend
+  otherwise: `plot_sorting_summary` has `backend=None` and raises until the user
+  chooses `spikeinterface_gui`, `sortingview`, or `figpack`;
+  `plot_potential_merges` defaults to SI's notebook-local `ipywidgets` backend.
+  `backend="sortingview"` is allowed only when the caller explicitly requests it.
+  Do not add automatic FigURL / sortingview publishing to any populate or export
+  path. `ephyviewer` remains a direct SI escape hatch for users who want it;
+  Spyglass does not need a first-class wrapper unless the notebook demonstrates
+  it.
 
 - **Notebook.** Extend `notebooks/10_Spike_SortingV2.ipynb` with a local
   visualization ladder using the discoverable module facade:
@@ -297,7 +303,7 @@ Deferred or escape-hatch only:
   ssviz.available_visualizations()
   ssviz.plot_recording_traces(...)
   ssviz.plot_recording_probe_map(...)
-  ssviz.plot_sorting_summary(...)
+  ssviz.plot_sorting_summary(..., backend="spikeinterface_gui")
   ssviz.plot_unit_summary(...)
   ssviz.plot_waveforms(...)
   ssviz.plot_spikes_on_traces(...)
@@ -306,7 +312,7 @@ Deferred or escape-hatch only:
   ssviz.plot_metrics(...)
   ssviz.plot_si_quality_metrics(...)      # optional raw SI diagnostic
   ssviz.plot_si_template_metrics(...)     # optional raw SI diagnostic
-  ssviz.plot_potential_merges(...)
+  ssviz.plot_potential_merges(...)        # notebook-local ipywidgets
   ```
 
   Add optional snippets for `ssviz.export_si_report(...)` and
@@ -344,7 +350,7 @@ Deferred or escape-hatch only:
 | `test_export_report_uses_display_analyzer` | `export_si_report` wraps SI `export_report` with the display analyzer; `force_computation=False` does not mutate analyzer extensions, while `force_computation=True` computes only display-safe report extensions |
 | `test_export_to_phy_uses_display_analyzer` | `export_to_phy` wraps SI `export_to_phy` with the display analyzer; no official metric computation on the whitened analyzer |
 | `test_no_widget_uses_metric_analyzer_by_default` | every visualization/export helper defaults to the display analyzer or saved recording, never the whitened metric analyzer |
-| `test_backend_policy_default_and_opt_in` | default backend is `matplotlib`; `backend="sortingview"` passes through only when explicitly supplied; no populate path publishes |
+| `test_backend_policy_default_and_opt_in` | matplotlib is the default only for helpers whose SI widget supports it; `plot_sorting_summary` requires an explicit GUI / web backend, `plot_potential_merges` defaults to `ipywidgets`, `backend="sortingview"` passes through only when explicitly supplied, and no populate path publishes |
 | `test_notebook_uses_visualization_facade` | notebook/docs teach `from spyglass.spikesorting.v2 import visualization as ssviz` rather than making users discover methods across table classes |
 
 Matplotlib smoke tests should cover the smallest synthetic / MEArec analyzer

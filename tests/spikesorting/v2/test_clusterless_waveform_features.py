@@ -680,22 +680,48 @@ def test_unit_waveform_features_v2_full_waveform_and_spike_location(
         _reset(wave_session)
 
 
+@pytest.mark.db_unit
+def test_spike_location_rejects_legacy_waveform_extractor_clearly(dj_conn):
+    """``spike_location`` is intentionally v2-only under modern SI.
+
+    ``db_unit`` (not ``unit``): importing ``waveform_features`` activates the
+    decoding/common schemas, so it needs a live DB connection -- ``dj_conn``
+    ensures the container is healthy before the import rather than racing it.
+    """
+    from spyglass.decoding.v1.waveform_features import (
+        WAVEFORM_FEATURE_FUNCTIONS,
+    )
+
+    class LegacyWaveformExtractor:
+        """WaveformExtractor-shaped object without v2 spike locations."""
+
+        def get_waveforms(self, unit_id):  # pragma: no cover - not called
+            raise AssertionError("spike_location must not read waveforms")
+
+    with pytest.raises(NotImplementedError, match="SortingAnalyzer"):
+        WAVEFORM_FEATURE_FUNCTIONS["spike_location"](
+            LegacyWaveformExtractor(), unit_id=1
+        )
+
+
 @_skip_unless_legacy
 @pytest.mark.slow
-def test_unit_waveform_features_v0v1_unchanged_under_legacy():
+def test_unit_waveform_features_v0v1_guard_unchanged_under_legacy():
     """Under SI 0.99 the legacy-SI guard is a no-op, so v0/v1 ``make`` runs.
 
     This phase scoped the guard to the v0/v1 branches only; under the legacy
     env that guard must NOT raise (otherwise the v0/v1 extraction path would
-    be broken). The full v0/v1 ``UnitWaveformFeatures.make`` is exercised by
-    the existing clusterless-decoding tests in this same legacy job; here we
-    pin the guard-version contract make() depends on.
+    be broken for legacy-supported feature rows such as ``amplitude``). The
+    full v0/v1 ``UnitWaveformFeatures.make`` is exercised by the existing
+    clusterless-decoding tests in this same legacy job; here we pin the
+    guard-version contract make() depends on. ``spike_location`` itself is
+    covered separately as an intentional v2-only feature.
     """
     from spyglass.spikesorting._legacy_runtime import (
         _require_legacy_si_environment,
     )
 
-    # No raise under SI < 0.101 -> v0/v1 make() proceeds exactly as before.
+    # No raise under SI < 0.101 -> v0/v1 make() proceeds for supported rows.
     assert (
         _require_legacy_si_environment("v1 UnitWaveformFeatures.make") is None
     )
