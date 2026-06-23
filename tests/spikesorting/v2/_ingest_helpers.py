@@ -279,6 +279,150 @@ def _synthetic_artifact_recording():
     return rec
 
 
+def clean_session_groups_for_owner(owner: str) -> None:
+    """Cascade-delete every SessionGroup (and its concat lineage) for an owner.
+
+    Walks the concat lineage leaves-first so the source-polymorphic
+    ``SortingSelection``/merge masters are removed before their upstream
+    tables, mirroring :func:`_clean_session_v2`. Idempotent: a missing row at
+    any step is a no-op. Used by the chronic fixture's setup/teardown and by
+    tests that build their own groups.
+
+    Parameters
+    ----------
+    owner : str
+        ``session_group_owner`` whose groups (and any concat recordings,
+        concat-backed sortings, curations, and merge rows derived from them)
+        are dropped.
+    """
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecording,
+        ConcatenatedRecordingSelection,
+        SessionGroup,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    owner_key = {"session_group_owner": owner}
+    concat_keys = (ConcatenatedRecordingSelection & owner_key).fetch(
+        "KEY", as_dict=True
+    )
+    if concat_keys:
+        concat_id_restr = [
+            {"concat_recording_id": c["concat_recording_id"]}
+            for c in concat_keys
+        ]
+        sort_keys = (
+            SortingSelection.ConcatenatedRecordingSource & concat_id_restr
+        ).fetch("KEY", as_dict=True)
+        if sort_keys:
+            for mid in (SpikeSortingOutput.CurationV2 & sort_keys).fetch(
+                "merge_id"
+            ):
+                (SpikeSortingOutput & {"merge_id": mid}).super_delete(
+                    warn=False
+                )
+            (CurationV2 & sort_keys).super_delete(warn=False)
+            (Sorting & sort_keys).super_delete(warn=False)
+            (SortingSelection & sort_keys).super_delete(warn=False)
+        (ConcatenatedRecording & concat_id_restr).super_delete(warn=False)
+        (ConcatenatedRecordingSelection & owner_key).super_delete(warn=False)
+    (SessionGroup & owner_key).super_delete(warn=False)
+
+
+def synthesize_minirec_nwb(
+    out_path,
+    *,
+    session_start,
+    fixture_name,
+    seed,
+    duration_s=5.0,
+    sampling_frequency=30_000.0,
+    num_units=3,
+    firing_rates=15.0,
+):
+    """Write a short single-tetrode synthetic recording to a Spyglass NWB.
+
+    Synthesizes one 4-channel SpikeInterface ground-truth recording and
+    writes it into the same Frank-lab-style NWB layout the MEArec fixtures
+    use (tetrode probe + electrodes + a single ``ElectricalSeries``), so the
+    file ingests through ``insert_sessions`` like a real session. The probe
+    geometry is the fixed ``tetrode_probe_layout()`` for EVERY call, so two
+    files synthesized this way carry byte-identical channel positions and can
+    be concatenated; only ``seed`` / ``firing_rates`` vary the planted spikes.
+
+    Parameters
+    ----------
+    out_path : pathlib.Path or str
+        Destination NWB path.
+    session_start : datetime.datetime
+        Timezone-aware session start time (the recording DATE the
+        ``SessionGroup`` multi-day gate derives from ``Session``).
+    fixture_name : str
+        Recorded as the NWB ``session_id`` / identifier.
+    seed : int
+        Seed for the synthetic recording (different seeds -> different
+        planted spikes).
+    duration_s : float
+        Recording duration in seconds. Default 5.0.
+    sampling_frequency : float
+        Sampling rate in Hz. Default 30 kHz (Frank-lab standard).
+    num_units : int
+        Planted ground-truth units. Default 3.
+    firing_rates : float
+        Mean firing rate (Hz) for the planted units. Default 15.0.
+
+    Returns
+    -------
+    pathlib.Path
+        ``out_path`` (written).
+    """
+    from pathlib import Path
+
+    import pynwb
+    from spikeinterface.core import generate_ground_truth_recording
+
+    from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import (
+        _add_probe_and_electrodes,
+        _add_raw_ephys,
+        _build_nwbfile,
+        tetrode_probe_layout,
+    )
+
+    layout = tetrode_probe_layout()
+    recording, _sorting = generate_ground_truth_recording(
+        durations=[float(duration_s)],
+        sampling_frequency=float(sampling_frequency),
+        num_channels=layout.n_contacts,
+        num_units=num_units,
+        generate_sorting_kwargs={
+            "firing_rates": firing_rates,
+            "refractory_period_ms": 4.0,
+        },
+        seed=seed,
+    )
+    # Traces are returned in the recording's native microvolt scale; the NWB
+    # ElectricalSeries carries ``conversion=1e-6`` (uV -> V), matching the
+    # trodes_to_nwb convention the MEArec fixtures and Spyglass ingestion use.
+    traces = recording.get_traces(return_in_uV=True)
+
+    nwbfile = _build_nwbfile(
+        fixture_name=fixture_name, session_start=session_start
+    )
+    _add_probe_and_electrodes(
+        nwbfile, layout=layout, targeted_location="CA1"
+    )
+    _add_raw_ephys(
+        nwbfile, traces=traces, sampling_frequency=float(sampling_frequency)
+    )
+
+    out_path = Path(out_path)
+    with pynwb.NWBHDF5IO(str(out_path), mode="w") as io:
+        io.write(nwbfile)
+    return out_path
+
+
 def _plant_concat_sorting_selection(sid):
     """Land a concat-source ``SortingSelection`` (no ``RecordingSource``).
 

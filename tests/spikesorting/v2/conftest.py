@@ -331,6 +331,116 @@ def populated_sorting_with_curation(populated_sorting):
     _clear_curations_for(populated_sorting)
 
 
+#: ``session_group_owner`` LabTeam used by the chronic concat fixture and its
+#: tests. Named once so the fixture's setup/teardown cleanup and the tests that
+#: create groups under it cannot drift.
+CHRONIC_OWNER_TEAM = "chronic_concat_owner"
+
+
+@pytest.fixture(scope="package")
+def chronic_2_session_minirec(dj_conn, tmp_path_factory):
+    """Two same-day + one next-day single-tetrode synthetic sessions.
+
+    Synthesizes three short 4-channel recordings with byte-identical channel
+    positions (the fixed ``tetrode_probe_layout``) but different planted-spike
+    seeds, writes each into a Frank-lab-style NWB, ingests all three, sets up a
+    one-tetrode sort group per session, and populates the per-member
+    ``Recording`` cache for the two SAME-DAY members under the ``"default"``
+    preprocessing recipe. The third session shares neither a Recording nor a
+    date with the first two; it exists so the multi-day ``SessionGroup`` gate
+    has a second date to reject.
+
+    Package-scoped read substrate: tests build their OWN ``SessionGroup`` /
+    ``ConcatenatedRecording`` rows on top and tear them down. The fixture
+    clears any leftover groups for ``CHRONIC_OWNER_TEAM`` on entry (the
+    persistent test DB carries rows across runs) and again on teardown, then
+    drops the three sessions.
+
+    Yields
+    ------
+    dict
+        ``owner`` (the ``session_group_owner`` team), ``preprocessing_params_name``,
+        ``same_day_members`` (two member dicts, both dated day 1, with populated
+        ``Recording`` rows and a ``recording_id``), ``next_day_member`` (one
+        member dict dated day 2, no populated ``Recording``), and ``recording_pks``
+        (the two same-day recording PK dicts).
+    """
+    import datetime as dt
+
+    from spyglass.spikesorting.v2.recording import Recording, RecordingSelection
+    from tests.spikesorting.v2._ingest_helpers import (
+        _clean_session_v2,
+        clean_session_groups_for_owner,
+        configure_v2_run_inputs,
+        copy_and_insert_nwb,
+        synthesize_minirec_nwb,
+    )
+
+    tmp_dir = tmp_path_factory.mktemp("chronic_minirec")
+    day1 = dt.datetime(2023, 6, 22, 12, 0, 0, tzinfo=dt.timezone.utc)
+    specs = [
+        ("a", "chronic_minirec_a.nwb", day1, 11),
+        ("b", "chronic_minirec_b.nwb", day1.replace(hour=15, minute=30), 22),
+        (
+            "c",
+            "chronic_minirec_c.nwb",
+            day1 + dt.timedelta(days=1),
+            33,
+        ),
+    ]
+
+    clean_session_groups_for_owner(CHRONIC_OWNER_TEAM)
+
+    members: list[dict] = []
+    nwb_file_names: list[str] = []
+    for tag, dest_name, start, seed in specs:
+        src = synthesize_minirec_nwb(
+            tmp_dir / dest_name,
+            session_start=start,
+            fixture_name=f"chronic_minirec_{tag}",
+            seed=seed,
+        )
+        nwb_file_name = copy_and_insert_nwb(src, dest_name=dest_name)
+        nwb_file_names.append(nwb_file_name)
+        run = configure_v2_run_inputs(nwb_file_name, CHRONIC_OWNER_TEAM)
+        members.append(
+            {
+                "nwb_file_name": run["nwb_file_name"],
+                "sort_group_id": run["sort_group_id"],
+                "interval_list_name": run["interval_list_name"],
+            }
+        )
+
+    same_day_members = members[:2]
+    next_day_member = members[2]
+
+    recording_pks = []
+    for member in same_day_members:
+        rec_pk = RecordingSelection.insert_selection(
+            {
+                **member,
+                "preprocessing_params_name": "default",
+                "team_name": CHRONIC_OWNER_TEAM,
+            }
+        )
+        if not (Recording & rec_pk):
+            Recording.populate(rec_pk, reserve_jobs=False)
+        recording_pks.append(rec_pk)
+        member["recording_id"] = rec_pk["recording_id"]
+
+    yield {
+        "owner": CHRONIC_OWNER_TEAM,
+        "preprocessing_params_name": "default",
+        "same_day_members": same_day_members,
+        "next_day_member": next_day_member,
+        "recording_pks": recording_pks,
+    }
+
+    clean_session_groups_for_owner(CHRONIC_OWNER_TEAM)
+    for nwb_file_name in nwb_file_names:
+        _clean_session_v2({"nwb_file_name": nwb_file_name})
+
+
 @pytest.fixture
 def restore_custom_config():
     """Snapshot and restore ``dj.config['custom']`` around a test.
