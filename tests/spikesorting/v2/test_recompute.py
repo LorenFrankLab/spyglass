@@ -401,7 +401,7 @@ def test_sorting_analyzer_recompute_mismatch_records_hash_rows(
     monkeypatch.setattr(
         rc,
         "_recompute_analyzer_hashes",
-        lambda sort_key, rounding: (
+        lambda sort_key, rounding, waveform_params_name: (
             {"templates": "stored"},
             {"templates": "deadbeefmismatch"},
         ),

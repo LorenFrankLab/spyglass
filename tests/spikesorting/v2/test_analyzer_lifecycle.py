@@ -595,6 +595,67 @@ def test_find_orphaned_analyzer_folders_retains_referenced_metric(dj_conn):
             conn.query("SET FOREIGN_KEY_CHECKS=1")
 
 
+def test_analyzer_recompute_separates_recipes(dj_conn):
+    """SortingAnalyzerVersions enumerates one (sort, recipe) key per analyzer.
+
+    A sort's stored display recipe PLUS any metric recipe an
+    AnalyzerCurationSelection references each get an independent recompute key,
+    so the whitened and unwhitened analyzers for one sorting_id are inventoried
+    and verified separately ({sid}__{name}.zarr folders never collide).
+    """
+    import uuid
+
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2 import recompute as rc
+    from spyglass.spikesorting.v2.metric_curation import (
+        AnalyzerCurationSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    sid = uuid.uuid4()
+    _insert_bypassed_sorting_row(sid, n_units=3)  # display recipe = _DISPLAY
+    acid = uuid.uuid4()
+    conn = dj.conn()
+    conn.query("SET FOREIGN_KEY_CHECKS=0")
+    try:
+        AnalyzerCurationSelection.insert1(
+            {
+                "analyzer_curation_id": acid,
+                "sorting_id": sid,
+                "curation_id": 0,
+                "metric_params_name": "minimal",
+                "auto_curation_rules_name": "none",
+                "metric_waveform_params_name": (
+                    "franklab_cortex_metric_waveforms"
+                ),
+            },
+            allow_direct_insert=True,
+        )
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+    try:
+        keys = (
+            rc.SortingAnalyzerVersions().key_source & {"sorting_id": sid}
+        ).fetch("KEY", as_dict=True)
+        recipes = {k["waveform_params_name"] for k in keys}
+        assert recipes == {_DISPLAY, "franklab_cortex_metric_waveforms"}, (
+            recipes
+        )
+        # Independent recipe rows, same sorting_id.
+        assert {str(k["sorting_id"]) for k in keys} == {str(sid)}
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=0")
+        try:
+            (
+                AnalyzerCurationSelection & {"analyzer_curation_id": acid}
+            ).delete_quick()
+            (SortingSelection & {"sorting_id": sid}).delete(safemode=False)
+        finally:
+            conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+
 def test_find_orphaned_analyzer_folders_zero_unit_carveout(dj_conn):
     """A zero-unit Sorting row is NOT a DB-side orphan even though its
     computed analyzer cache path does not exist on disk.
