@@ -9,6 +9,9 @@ covered by the ``db_unit`` facade tests in ``test_visualization_facade.py``.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import matplotlib
 
 matplotlib.use("Agg")
@@ -17,6 +20,9 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 import pytest  # noqa: E402
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_NOTEBOOK = _REPO_ROOT / "notebooks" / "10_Spike_SortingV2.ipynb"
 
 from spyglass.spikesorting.v2._visualization import (  # noqa: E402
     DISPLAY_WIDGET_EXTENSIONS,
@@ -190,3 +196,28 @@ def test_plot_metrics_figure_respects_explicit_columns():
     titles = [ax.get_title() for ax in fig.axes if ax.get_title()]
     assert titles == ["snr"]
     plt.close(fig)
+
+
+@pytest.mark.unit
+def test_notebook_uses_visualization_facade():
+    """The user notebook teaches the discoverable ``ssviz`` facade.
+
+    Asserts the walkthrough imports the single ``visualization`` namespace and
+    drives it (``available_visualizations`` + at least one ``ssviz`` plot call),
+    so users tab-complete one module rather than hunting plot methods across the
+    ``Recording`` / ``Sorting`` / ``AnalyzerCuration`` table classes.
+    """
+    if not _NOTEBOOK.exists():
+        pytest.skip(f"notebook {_NOTEBOOK.name} not found")
+    notebook = json.loads(_NOTEBOOK.read_text())
+    sources = [
+        "".join(cell.get("source", []))
+        for cell in notebook["cells"]
+        if cell.get("cell_type") == "code"
+    ]
+    code = "\n".join(sources)
+    assert (
+        "from spyglass.spikesorting.v2 import visualization as ssviz" in code
+    )
+    assert "ssviz.available_visualizations()" in code
+    assert "ssviz.plot_" in code

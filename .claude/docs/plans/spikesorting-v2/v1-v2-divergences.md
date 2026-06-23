@@ -684,6 +684,33 @@ single `AnalyzerCuration` table built on the SI 0.104 `SortingAnalyzer` API
   `AnalyzerCuration` path, analogous to v1's `MetricCuration`, not to the
   browser-based viewer. (`v2/figpack_curation.py`.)
 
+- **Local SpikeInterface visualization/export bridge is new in v2.** Where v1
+  exposed inspection mainly through the FigURL web viewer and `MetricCuration`'s
+  bespoke plots, v2 adds a discoverable, key-aware facade
+  (`spyglass.spikesorting.v2.visualization`, imported as `ssviz`) that wraps
+  SpikeInterface's own `widgets.*` / `exporters.*` behind Spyglass DataJoint
+  keys: `available_visualizations()` (the catalog), recording widgets
+  (`plot_recording_traces` / `plot_recording_probe_map`), display-analyzer
+  sorting widgets (`plot_sorting_summary` / `plot_unit_summary` /
+  `plot_waveforms` / `plot_spikes_on_traces` / `plot_unit_locations`), metric /
+  merge views (`plot_metrics` over the routed `AnalyzerCuration.get_metrics()`;
+  the raw SI `plot_si_quality_metrics` / `plot_si_template_metrics`;
+  `plot_potential_merges` over the persisted `get_merge_groups()`), and local
+  exports (`export_si_report` / `export_to_phy`). This is an additive v2
+  improvement, not a scientific change: SI owns the plotting, Spyglass only
+  resolves the key and routes to the correct source. Routing is load-bearing —
+  recording widgets read the saved preprocessed `Recording`; everything
+  waveform/template/location/merge/export reads the sort's unwhitened DISPLAY
+  analyzer (never the whitened metric analyzer); `plot_metrics` reads the routed
+  metric table; `plot_potential_merges` reads the persisted suggestion row and
+  never recomputes merge candidates at plot time. Plot helpers are read-only by
+  default (a missing display-safe extension raises a clear error naming
+  `Sorting.add_extensions(...)`; `compute_missing=True` computes only display-safe
+  extensions), the default backend is local `matplotlib` (`sortingview` is an
+  explicit opt-in), and no populate/export path opens a GUI, uploads, or
+  publishes. The FigPack web-curation viewer above remains separate and
+  unimplemented. (`v2/visualization.py`, `v2/_visualization.py`.)
+
 ---
 
 ## Cross-cutting infrastructure
