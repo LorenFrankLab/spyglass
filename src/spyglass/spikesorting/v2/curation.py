@@ -1215,15 +1215,19 @@ class CurationV2(SpyglassMixin, dj.Manual):
             ``is_filtered=True``.
         """
         from spyglass.spikesorting.v2.recording import Recording
+        from spyglass.spikesorting.v2.session_group import (
+            ConcatenatedRecording,
+        )
 
         sorting_id = (cls & key).fetch1("sorting_id")
         source = SortingSelection.resolve_source({"sorting_id": sorting_id})
-        if source.kind != "recording":
-            raise NotImplementedError(
-                "CurationV2.get_recording: concat-source sorts are not "
-                "yet supported."
-            )
-        recording = Recording().get_recording(source.key)
+        # The curated spike times live in the sort's input-recording timeline:
+        # a single-recording sort reads its Recording cache; a concat sort reads
+        # the materialized ConcatenatedRecording cache.
+        if source.kind == "recording":
+            recording = Recording().get_recording(source.key)
+        else:  # concatenated_recording
+            recording = ConcatenatedRecording().get_recording(source.key)
         recording.annotate(is_filtered=True)
         return recording
 
@@ -1974,10 +1978,12 @@ class CurationV2(SpyglassMixin, dj.Manual):
         """Fetch the upstream Recording row for a CurationV2 key.
 
         Used by ``get_sorting`` to recover the recording's
-        sampling-frequency and first-timestamp metadata (matching
-        the ``Sorting.get_sorting`` round-trip convention).
-        ``@classmethod`` so it can be invoked from the other
-        classmethod accessors.
+        sampling-frequency and timestamp metadata (matching the
+        ``Sorting.get_sorting`` round-trip convention). For a concat-backed
+        sort this is the ``ConcatenatedRecording`` row (the timeline the curated
+        spike times were written against), NOT a per-member ``Recording``.
+        ``@classmethod`` so it can be invoked from the other classmethod
+        accessors.
 
         ``key`` may be a single dict or the list-of-dict form the
         merge dispatcher passes; the restriction-based fetch
@@ -1985,8 +1991,13 @@ class CurationV2(SpyglassMixin, dj.Manual):
         holds the master row to skip the redundant ``sorting_id`` lookup.
         """
         from spyglass.spikesorting.v2.recording import Recording
+        from spyglass.spikesorting.v2.session_group import (
+            ConcatenatedRecording,
+        )
 
         if sorting_id is None:
             sorting_id = (cls & key).fetch1("sorting_id")
         source = SortingSelection.resolve_source({"sorting_id": sorting_id})
-        return (Recording & source.key).fetch1()
+        if source.kind == "recording":
+            return (Recording & source.key).fetch1()
+        return (ConcatenatedRecording & source.key).fetch1()

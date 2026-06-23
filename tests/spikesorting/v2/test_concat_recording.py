@@ -14,6 +14,7 @@ from spyglass.spikesorting.v2._concat_recording import (
     AUTO_SAME_DAY_PRESET,
     build_concatenated_recording,
     cumulative_member_boundaries,
+    member_split_key,
     resolve_motion_correction,
     split_unit_spike_trains,
 )
@@ -97,6 +98,25 @@ def test_split_maps_to_local_member_frames():
     # Member 1 keeps frames in [100, 200) shifted by -100.
     np.testing.assert_array_equal(per_member[1][7], [0, 50, 99])
     np.testing.assert_array_equal(per_member[1][9], [0])
+
+
+def test_member_split_key_disambiguates_same_nwb_interval():
+    """Two members sharing nwb_file_name + interval but on DIFFERENT sort
+    groups get distinct split keys (the lossy 2-tuple would collide them)."""
+    member_a = {
+        "nwb_file_name": "day1_.nwb",
+        "sort_group_id": 0,
+        "interval_list_name": "raw data valid times",
+    }
+    member_b = {**member_a, "sort_group_id": 1}
+    key_a = member_split_key(member_a)
+    key_b = member_split_key(member_b)
+    assert key_a == ("day1_.nwb", 0, "raw data valid times")
+    assert key_a != key_b
+    assert len({key_a, key_b}) == 2
+    # The lossy (nwb, interval) key WOULD have collided -- guard against a
+    # regression back to it.
+    assert key_a[::2] == key_b[::2]  # same nwb + interval, differ only in sg
 
 
 def test_split_preserves_unit_ids_with_empty_arrays():

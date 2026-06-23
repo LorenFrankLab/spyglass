@@ -683,6 +683,24 @@ def test_concat_sort_end_to_end_and_split(same_day_group):
     sg_nwbs = set((sg_info).fetch("nwb_file_name"))
     assert sg_nwbs == {first_nwb}
 
+    # Curated readback is source-aware: CurationV2.get_sorting reconstructs the
+    # sorting against the concat timeline, and the merge dispatch's
+    # get_recording returns the materialized ConcatenatedRecording cache (the
+    # timeline the curated spike times live in) -- not a per-member Recording.
+    curated_sorting = CurationV2.get_sorting(curation_key)
+    assert set(curated_sorting.unit_ids) == all_unit_ids
+    merge_recording = SpikeSortingOutput().get_recording(
+        {"merge_id": merge_id}
+    )
+    concat_recording = ConcatenatedRecording().get_recording(concat_pk)
+    assert (
+        merge_recording.get_num_samples()
+        == concat_recording.get_num_samples()
+    )
+    assert list(merge_recording.get_channel_ids()) == list(
+        concat_recording.get_channel_ids()
+    )
+
 
 # ---------- memory / runtime measurement ----------------------------------
 

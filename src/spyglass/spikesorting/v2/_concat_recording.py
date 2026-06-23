@@ -58,6 +58,35 @@ def member_recording_selection_key(
     }
 
 
+def member_split_key(member: dict) -> tuple:
+    """Hashable per-member key for ``split_sorting_by_session`` output.
+
+    Returns ``(nwb_file_name, sort_group_id, interval_list_name)``. The
+    ``sort_group_id`` is in the key -- not just ``(nwb_file_name,
+    interval_list_name)`` -- so two members from the same NWB file and interval
+    but DIFFERENT sort groups map to distinct keys instead of one silently
+    overwriting the other. (The full member dict, which also carries
+    ``team_name`` / ``member_index``, is not hashable as a dict; these three
+    fields are the spatial identity a per-session sorting is addressed by.)
+
+    Parameters
+    ----------
+    member : dict
+        A ``SessionGroup.Member`` row carrying ``nwb_file_name``,
+        ``sort_group_id``, ``interval_list_name``.
+
+    Returns
+    -------
+    tuple[str, int, str]
+        The hashable member key.
+    """
+    return (
+        member["nwb_file_name"],
+        int(member["sort_group_id"]),
+        member["interval_list_name"],
+    )
+
+
 def resolve_motion_correction(
     motion_params: dict, *, is_multi_day: bool
 ) -> tuple[str | None, dict]:

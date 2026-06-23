@@ -748,6 +748,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         import spikeinterface as si
 
         from spyglass.spikesorting.v2._concat_recording import (
+            member_split_key,
             split_unit_spike_trains,
         )
 
@@ -775,11 +776,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         per_member = split_unit_spike_trains(unit_trains, boundaries)
         fs = float(sorting.get_sampling_frequency())
         return {
-            (
-                member["nwb_file_name"],
-                int(member["sort_group_id"]),
-                member["interval_list_name"],
-            ): si.NumpySorting.from_unit_dict(
+            member_split_key(member): si.NumpySorting.from_unit_dict(
                 [local_trains], sampling_frequency=fs
             )
             for member, local_trains in zip(members, per_member)
