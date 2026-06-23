@@ -96,11 +96,18 @@ the dated June-2026 Frank Lab production recipes: a MountainSort4 family keyed
 by target region (hippocampus 600 Hz / cortex 300 Hz high-pass) and sampling
 rate (30 / 20 kHz), plus a MountainSort5 preset and a clusterless preset.
 The default is the MountainSort5 recipe
-`franklab_tetrode_hippocampus_30khz_ms5_2026_06`: it runs under the v2
-`numpy>=2` baseline, whereas the MS4 production recipe's `ml_ms4alg` backend
-needs `numpy<2` (preflight reports this via its `sorter_runtime_available`
-check). Call `describe_pipeline_presets()` for the catalog and
-`list_pipeline_presets()` for the names.
+`franklab_probe_hippocampus_30khz_ms5_2026_06` (the probe-labeled twin of the
+tetrode-labeled MS5 preset; both resolve to the same parameter rows): it runs
+under the v2 `numpy>=2` baseline out of the box. MountainSort4 is the
+scientifically-preferred polymer-probe recipe, but its `ml_ms4alg` backend needs
+`numpy<2`, so it is not the default -- run it on a modern (`numpy>=2`) host via
+the containerized `franklab_probe_hippocampus_30khz_ms4_singularity_2026_06`
+preset (the recommended-science MS4 path when Docker/Singularity is available),
+or on a `numpy<2` host via the local `franklab_probe_hippocampus_30khz_ms4_2026_06`
+preset (preflight reports an unrunnable MS4 path via its
+`sorter_runtime_available` / `container_runtime_available` checks). Call
+`describe_pipeline_presets()` for the catalog and `list_pipeline_presets()` for
+the names.
 
 The orchestrator is idempotent: re-running with the same inputs returns the
 same run summary (same `merge_id`, same intermediate PKs) without duplicating
@@ -178,7 +185,7 @@ run_summary = run_v2_pipeline(
     sort_group_id=sort_group_id,
     interval_list_name="raw data valid times",
     team_name="my_team",
-    pipeline_preset="franklab_tetrode_hippocampus_30khz_ms5_2026_06",
+    pipeline_preset="franklab_probe_hippocampus_30khz_ms5_2026_06",
 )
 merge_id = run_summary["merge_id"]  # key off this downstream
 
@@ -224,7 +231,7 @@ report = preflight_v2_pipeline_session(
     nwb_file_name=nwb_file_name,
     interval_list_name="raw data valid times",
     team_name="my_team",
-    pipeline_preset="franklab_tetrode_hippocampus_30khz_ms5_2026_06",
+    pipeline_preset="franklab_probe_hippocampus_30khz_ms5_2026_06",
 )
 assert report.ok, report.errors
 
@@ -232,7 +239,7 @@ results = run_v2_pipeline_session(
     nwb_file_name=nwb_file_name,
     interval_list_name="raw data valid times",
     team_name="my_team",
-    pipeline_preset="franklab_tetrode_hippocampus_30khz_ms5_2026_06",
+    pipeline_preset="franklab_probe_hippocampus_30khz_ms5_2026_06",
     sort_group_ids=None,        # None = every sort group; or pass a subset
     continue_on_error=True,     # record per-group failures instead of stopping
 )
@@ -278,19 +285,31 @@ table and plot rather than assuming `0` is the scientifically relevant shank.
 
 Available pipeline presets (all dated `_2026_06`):
 
-- `franklab_tetrode_hippocampus_30khz_ms5_2026_06` -- **default**,
+- `franklab_probe_hippocampus_30khz_ms5_2026_06` -- **default**,
     MountainSort5 (hippocampus 600 Hz preproc, 30 kHz). It is the shipped
     default because it runs under the v2 `numpy>=2` baseline;
     `recommendation_status` stays `"alternative"` (the default is a
     runnability-driven choice, separate from the scientific tier).
+    `franklab_tetrode_hippocampus_30khz_ms5_2026_06` is the same recipe under a
+    tetrode label (`probe_type` is informational; both resolve to the same rows).
+- `franklab_probe_hippocampus_30khz_ms4_singularity_2026_06` -- the
+    **recommended-science** MS4 path on modern (`numpy>=2`) hosts: the same
+    MountainSort4 polymer-probe science run inside a pinned Singularity
+    container, so the host stays on `numpy>=2` while MS4's `ml_ms4alg` runtime
+    lives in the image. Preflight gates it on the container runtime
+    (`container_runtime_available`) and never silently falls back to local. A
+    Docker row (and other rates) is a user-insertable `SorterParameters` row away
+    via the same tracked `execution_params` mechanism.
 - `franklab_tetrode_hippocampus_30khz_ms4_2026_06` -- production MountainSort4
-    (hippocampus 600 Hz preproc, 30 kHz). **Requires `numpy<2`**: MS4's
-    `ml_ms4alg` backend does not install under the v2 `numpy>=2` baseline, so
-    preflight fails it (`sorter_runtime_available`) unless `ml_ms4alg` is
-    present.
+    (hippocampus 600 Hz preproc, 30 kHz). **Requires `numpy<2`** for LOCAL
+    execution: MS4's `ml_ms4alg` backend does not install under the v2 `numpy>=2`
+    baseline, so preflight fails it (`sorter_runtime_available`) unless
+    `ml_ms4alg` is present (or use the containerized preset above).
 - `franklab_probe_{hippocampus,cortex}_{30khz,20khz}_ms4_2026_06` -- the
-    production MS4 family by region (600/300 Hz high-pass) and rate (same
-    `numpy<2` / `ml_ms4alg` requirement)
+    production MS4 family by region (600/300 Hz high-pass) and rate. The local
+    polymer recipe `franklab_probe_hippocampus_30khz_ms4_2026_06` stays available
+    for compatible local (`numpy<2`) MS4 runtimes; on modern hosts prefer the
+    containerized Singularity preset above.
 - `franklab_clusterless_2026_06` -- peak-detection only (no clustering), feeds
     the clusterless decoding pipeline
 - `franklab_neuropixels_ks4_2026_06` -- **experimental** Neuropixels Kilosort4
@@ -361,7 +380,7 @@ reproducible. Two guards keep names honest:
       sort_group_id=sort_group_id,
       interval_list_name="raw data valid times",
       team_name="my_team",
-      pipeline_preset="franklab_tetrode_hippocampus_30khz_ms5_2026_06",
+      pipeline_preset="franklab_probe_hippocampus_30khz_ms5_2026_06",
   )
   for check in report.checks:
       print(check.name, check.ok, check.fix)
@@ -455,8 +474,11 @@ sel = AnalyzerCurationSelection.insert_selection(
     {
         "sorting_id": run_summary["sorting_id"],
         "curation_id": run_summary["curation_id"],
-        "metric_params_name": "franklab_default",      # snr/isi/firing/nn_advanced (PCA)
-        "auto_curation_rules_name": "v1_default_nn_noise",  # nn_noise_overlap > 0.1 -> noise/reject
+        "metric_params_name": "franklab_default",  # snr/isi/firing/nn_advanced (PCA)
+        # Frank-lab default: nn_noise_overlap > 0.1 -> noise, isi_violation > 0.02
+        # -> reject (the lab's ~2% refractory policy). 'v1_default_nn_noise' (the
+        # nn-only rules) and 'similarity_merge' / 'none' remain available.
+        "auto_curation_rules_name": "franklab_default_auto_curation_2026_06",
     }
 )
 AnalyzerCuration.populate(sel)
@@ -491,6 +513,28 @@ ported onto `AnalyzerCuration` as `plot_correlograms`,
 `investigate_pair_xcorrel`, `investigate_pair_peaks`, and `plot_peak_over_time`
 (reading the analyzer's `correlograms` / `waveforms` extensions; no separate
 `BurstPair` table).
+
+#### The auto -> manual-merge -> auto curation loop
+
+Curation is a loop, and the second analyzer pass is not redundant:
+
+1. **Auto-curate.** Run `AnalyzerCuration` on the root curation (the rule set
+   above proposes labels; `materialize_curation` commits them to a child
+   `CurationV2`). Inspect with `plot_units_qc(sel)` and `get_metrics(sel)`.
+2. **Manually merge.** Oversplit clusters (MS4/MS5 oversplit and do not track
+   drift) need a human merge. Find burst pairs with `plot_by_sort_group_ids` /
+   `investigate_pair_xcorrel` / `investigate_pair_peaks`, then commit the merge
+   with `CurationV2.insert_curation(..., merge_groups=..., apply_merge=True)`
+   (or the `create_merged_curation` wrapper) to produce a merged `CurationV2`.
+3. **Re-run auto-curation on the merged curation.** Metrics computed over the
+   *post-merge* templates are the numbers of record: merging changes a unit's
+   waveform, SNR, ISI-violation fraction, and PC/NN separation, so the labels
+   and metrics that matter are the ones recomputed after the merge. Select a new
+   `AnalyzerCuration` on the merged `curation_id` and populate it for the final
+   metrics and labels.
+
+The second pass is therefore not a repeat of the first -- it re-derives quality
+metrics over the merged unit set, which the first (pre-merge) pass could not see.
 
 ### Stage-by-stage (custom pipeline preset)
 

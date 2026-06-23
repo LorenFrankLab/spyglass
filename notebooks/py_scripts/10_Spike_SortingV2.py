@@ -40,6 +40,10 @@ from spyglass.common.common_interval import IntervalList
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 from spyglass.spikesorting.v2 import initialize_v2_defaults
 from spyglass.spikesorting.v2.curation import CurationV2
+from spyglass.spikesorting.v2.metric_curation import (
+    AnalyzerCuration,
+    AnalyzerCurationSelection,
+)
 from spyglass.spikesorting.v2.pipeline import (
     describe_pipeline_presets,
     describe_run,
@@ -62,11 +66,14 @@ dj.config["display.limit"] = 12  # cap rows in table reprs
 #
 # Point the notebook at the session you ingested with `insert_sessions`. A
 # full-session sort uses the `"raw data valid times"` interval and the default
-# MountainSort5 pipeline preset (it runs under the `numpy>=2` baseline; the MS4
-# production recipe needs `numpy<2`). Change `pipeline_preset` to one of the
-# names from `describe_pipeline_presets()` below if you want a different sorter
-# (e.g. an MS4 production preset on a `numpy<2` install, or a cortex/20 kHz
-# preset).
+# MountainSort5 pipeline preset (`franklab_probe_hippocampus_30khz_ms5_2026_06`):
+# it runs under the `numpy>=2` baseline out of the box. MountainSort4 is the
+# scientifically-preferred polymer-probe recipe but needs `numpy<2`, so run it
+# via the containerized `franklab_probe_hippocampus_30khz_ms4_singularity_2026_06`
+# preset on modern (`numpy>=2`) hosts with Docker/Singularity, or the local
+# `franklab_probe_hippocampus_30khz_ms4_2026_06` preset on `numpy<2` hosts.
+# Change `pipeline_preset` to any name from `describe_pipeline_presets()` below
+# (e.g. a cortex or 20 kHz preset).
 #
 # To see the intervals available for this session — the valid
 # `interval_list_name` values — list them with
@@ -79,7 +86,7 @@ dj.config["display.limit"] = 12  # cap rows in table reprs
 nwb_file_name = "your_session.nwb"  # replace with your ingested session
 team_name = "my_team"
 interval_list_name = "raw data valid times"
-pipeline_preset = "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
+pipeline_preset = "franklab_probe_hippocampus_30khz_ms5_2026_06"
 # Sort group (shank) to sort. None auto-picks only when the session has exactly
 # one sort group; otherwise set it deliberately after reviewing step 2.
 sort_group_id = None
@@ -207,21 +214,92 @@ from IPython.display import display
 display(describe_run(run_summary))
 describe_units(run_summary["sorting_id"])
 
-# ## 7. Inspect / curate
+# ## 7. Inspect and curate
 #
-# `summarize_curation` accepts the run summary directly and returns a plain dict
-# (`n_units`, `labels`, `merge_groups`, `merges_applied`, `is_merge_preview`,
-# `merge_id`, ...). The labels curation *accepts* are the canonical set
-# `CurationV2.label_options()` (the `CurationLabel` enum); custom labels are
-# possible only via `allow_custom_labels=True`. To curate further,
-# reach for the intent-first wrappers on `CurationV2` —
-# `create_initial_curation`, `propose_merge_curation`, `create_merged_curation`
-# — rather than the expert `insert_curation`.
+# `run_v2_pipeline` leaves you a root curation. `summarize_curation` accepts the
+# run summary directly and returns a plain dict (`n_units`, `labels`,
+# `merge_groups`, `merges_applied`, `is_merge_preview`, `merge_id`, ...). The
+# labels curation *accepts* are the canonical set `CurationV2.label_options()`
+# (the `CurationLabel` enum); custom labels need `allow_custom_labels=True`.
+#
+# Curation is a loop, and the second analyzer pass is not redundant:
+#
+# 1. **Auto-curate** — `AnalyzerCuration` walks the sort's analyzer, computes
+#    quality metrics, and proposes labels from a rule set;
+#    `materialize_curation` commits them to a child curation.
+# 2. **Manually merge** oversplit clusters (MS4/MS5 oversplit and don't track
+#    drift) — find burst pairs with `plot_by_sort_group_ids` /
+#    `investigate_pair_*`, then merge them with `create_merged_curation`.
+# 3. **Re-run auto-curation on the merged curation** — merging changes each
+#    unit's template (and so its SNR / ISI-violation fraction / PC-NN
+#    separation), so metrics over the *post-merge* templates are the numbers of
+#    record.
 #
 # > Interactive web curation (label/merge in a browser) is coming via FigPack
 # > in a later release; it will slot in here.
 
 CurationV2.summarize_curation(run_summary)
+
+# ### 7a. Automatic curation (pass 1)
+#
+# Pair the root curation with a quality-metric recipe and an auto-curation rule
+# set, then populate. `franklab_default` computes `snr` / `isi_violation` /
+# `firing_rate` / `nn_advanced` (PCA); `franklab_default_auto_curation_2026_06`
+# labels `nn_noise_overlap > 0.1` units `noise` and `isi_violation > 0.02` (>2%
+# refractory violations) `reject`. `plot_units_qc` is the population
+# "do these units look reasonable?" view; `get_metrics` returns the per-unit
+# table.
+
+auto_sel = AnalyzerCurationSelection.insert_selection(
+    {
+        "sorting_id": run_summary["sorting_id"],
+        "curation_id": run_summary["curation_id"],
+        "metric_params_name": "franklab_default",
+        "auto_curation_rules_name": "franklab_default_auto_curation_2026_06",
+    }
+)
+AnalyzerCuration.populate(auto_sel)
+AnalyzerCuration().plot_units_qc(auto_sel)
+AnalyzerCuration.get_metrics(auto_sel)
+
+# ### 7b. Find burst pairs to merge, then commit the auto labels
+#
+# `plot_by_sort_group_ids` scatters waveform similarity vs cross-correlogram
+# asymmetry, one point per unit pair — high-similarity, asymmetric pairs are
+# merge candidates (drill into a pair with `investigate_pair_xcorrel` /
+# `investigate_pair_peaks`). `materialize_curation` then commits the proposed
+# auto labels into a child curation you merge on top of.
+
+AnalyzerCuration().plot_by_sort_group_ids(auto_sel)
+auto_curation = AnalyzerCuration().materialize_curation(auto_sel)
+auto_curation  # {"sorting_id", "curation_id"} of the auto-labeled child
+
+# ### 7c. Manual merge, then the final auto-curation pass (pass 2)
+#
+# Merge the burst pairs you decided on (`create_merged_curation` is intent-first
+# sugar over `insert_curation` with `apply_merge=True`), branching off the
+# auto-labeled curation. Then run `AnalyzerCuration` once more on that merged
+# curation: the metrics it computes over the post-merge templates are the final
+# numbers of record. (It warns that the parent was auto-curated — here that is
+# deliberate, not a mistake.)
+
+# Replace [[0, 1]] with the unit ids you decided to merge in step 7b.
+merged = CurationV2.create_merged_curation(
+    sorting_key={"sorting_id": run_summary["sorting_id"]},
+    merge_groups=[[0, 1]],
+    parent_curation_id=auto_curation["curation_id"],
+    description="manual burst-pair merge",
+)
+final_sel = AnalyzerCurationSelection.insert_selection(
+    {
+        "sorting_id": run_summary["sorting_id"],
+        "curation_id": merged["curation_id"],
+        "metric_params_name": "franklab_default",
+        "auto_curation_rules_name": "franklab_default_auto_curation_2026_06",
+    }
+)
+AnalyzerCuration.populate(final_sel)
+AnalyzerCuration.get_metrics(final_sel)  # final metrics over merged templates
 
 # ## 8. Downstream: choose the output accessor
 #
