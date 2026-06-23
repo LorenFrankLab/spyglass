@@ -634,9 +634,29 @@ def _franklab_ms5_spec(probe_type: str) -> dict:
     """Build the ``_PipelinePreset`` field dict for a hippocampus-30 kHz MS5 preset.
 
     The tetrode- and probe-labeled MS5 presets differ only in ``probe_type`` and
-    the probe word in ``intended_use`` -- they bundle the identical preprocessing
-    / artifact / sorter rows, so this single builder keeps them from drifting.
+    their ``intended_use`` text -- they bundle the identical preprocessing /
+    artifact / sorter rows, so this single builder keeps them from drifting. Only
+    the probe-labeled row calls itself the ``run_v2_pipeline`` default; the
+    tetrode-labeled row describes itself as the same recipe under a tetrode label
+    so ``describe_pipeline_presets()`` does not advertise two defaults.
     """
+    if probe_type == "probe":
+        intended_use = (
+            "Frank-lab hippocampal probes at 30 kHz, MountainSort5 -- the "
+            "shipped run_v2_pipeline default because it runs under the v2 "
+            "numpy>=2 baseline. The scientifically-preferred polymer-probe "
+            "recipe is MountainSort4: on modern numpy>=2 hosts with "
+            "Docker/Singularity use the containerized "
+            f"{MS4_SINGULARITY_30KHZ}, or on numpy<2 hosts the local "
+            "franklab_probe_hippocampus_30khz_ms4_2026_06."
+        )
+    else:
+        intended_use = (
+            f"Frank-lab hippocampal {probe_type}s at 30 kHz, MountainSort5 -- "
+            "the same recipe as the probe-labeled run_v2_pipeline default "
+            f"{MS5_PROBE_HIPPOCAMPUS_30KHZ} under a tetrode label (probe_type "
+            "is informational; both resolve to the same parameter rows)."
+        )
     return dict(
         preprocessing_params_name=HIPPOCAMPUS_PREPROC,
         artifact_detection_params_name=ARTIFACT_100UV,
@@ -647,15 +667,7 @@ def _franklab_ms5_spec(probe_type: str) -> dict:
         sampling_rate_hz=30000,
         sorter_family="mountainsort5",
         recommendation_status="alternative",
-        intended_use=(
-            f"Frank-lab hippocampal {probe_type}s at 30 kHz, MountainSort5 -- "
-            "the shipped run_v2_pipeline default (the probe-labeled row) because "
-            "it runs under the v2 numpy>=2 baseline. The scientifically-preferred "
-            "polymer-probe recipe is MountainSort4: on modern numpy>=2 hosts with "
-            "Docker/Singularity use the containerized "
-            f"{MS4_SINGULARITY_30KHZ}, or on numpy<2 hosts the local "
-            "franklab_probe_hippocampus_30khz_ms4_2026_06."
-        ),
+        intended_use=intended_use,
         threshold_units="sigma of the whitened signal (~5.5)",
         notes=_MS5_NOTES,
     )

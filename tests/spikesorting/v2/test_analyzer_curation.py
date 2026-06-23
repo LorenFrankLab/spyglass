@@ -555,6 +555,11 @@ def test_franklab_auto_curation_default_rules(dj_conn):
 
     name = "franklab_default_auto_curation_2026_06"
     AutoCurationRules.insert_default()
+    # Idempotent re-seed: the single-precision Rule.threshold column round-trips
+    # 0.1 / 0.02 as 0.10000000149... so an exact-equality content guard would
+    # spuriously raise "different payload" on a second insert_default. This must
+    # no-op (the guard compares thresholds with a tolerance).
+    AutoCurationRules.insert_default()
 
     master = (AutoCurationRules & {"auto_curation_rules_name": name}).fetch1()
     # A labeling rule set, not an auto-merge one: merges stay a manual step.

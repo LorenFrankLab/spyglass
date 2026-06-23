@@ -350,8 +350,8 @@ def describe_units(sorting_id) -> "pd.DataFrame":
     and loads no recording. Use it right after ``run_v2_pipeline``
     (``describe_units(run_summary["sorting_id"])``) to sanity-check a sort
     before the deeper analyzer-backed quality metrics (SNR / ISI / nearest-
-    neighbour), which arrive with the analyzer-driven curation in a later
-    release.
+    neighbour), which are computed by the analyzer-driven curation step
+    (``AnalyzerCuration``).
 
     ``firing_rate_hz`` uses the duration the sort actually OBSERVED -- the
     artifact-removed ``valid_times`` total when the sort ran artifact detection,
