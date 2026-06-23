@@ -974,6 +974,11 @@ def test_snr_unaffected_by_metric_whitening(display_and_metric_analyzers):
         with_metric.loc[without_metric.index, "snr"].to_numpy(),
         without_metric["snr"].to_numpy(),
     )
+    # The PC metric routed to the whitened analyzer produces its columns (the
+    # values may be NaN for too-few-spike synthetic units -- finiteness is
+    # data-dependent, so it is verified manually on real data per the migration
+    # guide, not asserted here).
+    assert {"nn_isolation", "nn_noise_overlap"} <= set(with_metric.columns)
 
 
 @pytest.mark.db_unit

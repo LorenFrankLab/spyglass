@@ -425,11 +425,38 @@ single `AnalyzerCuration` table built on the SI 0.104 `SortingAnalyzer` API
 - **The analyzer is persisted as zarr, keyed by sort + recipe.** v2 creates the
   `SortingAnalyzer` with `format="zarr"` (`_sorting_analyzer.py`) and caches it
   at `{sorting_id}__{waveform_params_name}.zarr` (`_analyzer_cache.py`) — keyed
-  by both the sort and the waveform recipe so a sort's display and (later)
+  by both the sort and the waveform recipe so a sort's display and
   whitened-metric analyzers never collide; v1 had no `SortingAnalyzer` (it used
-  on-demand SI `WaveformExtractor` folders). The analyzer recompute trio hashes
-  selected extension arrays from this zarr store, rebuilding with the sort's
-  stored display recipe.
+  on-demand SI `WaveformExtractor` folders). The analyzer recompute trio
+  (`SortingAnalyzerVersions`, keyed `(sorting_id, waveform_params_name)`) hashes
+  selected extension arrays from this zarr store and rebuilds each recipe under
+  its own key (display, or a whitened metric recipe a curation references), so
+  the two analyzers for one sort verify independently.
+
+- **A sort has TWO analyzers; quality metrics are routed by type (restored
+  whitened/unwhitened split).** v1 split waveform extraction (`WaveformParameters`)
+  from metrics; v2 builds an unwhitened DISPLAY analyzer at sort time and, for
+  curation, a second WHITENED METRIC analyzer (built on demand). Each consumer
+  reads the correct one: voltage / spike-train quality metrics (`snr`,
+  `amplitude_cutoff`, `amplitude_median`, `firing_rate`, `num_spikes`,
+  `presence_ratio`, `isi_violation`), amplitudes, all four BurstPair legs, and
+  the merge engine read the **unwhitened display** analyzer (whitening
+  normalizes per-channel variance, so SNR / amplitude / template-shape on
+  whitened traces are meaningless and the `unit_locations` spatial gate would be
+  miscalibrated); ONLY the PC / cluster-separation metrics (SI's
+  `get_quality_pca_metric_list()`: `d_prime`, `mahalanobis`, `nearest_neighbor`,
+  `nn_advanced`, `silhouette`) read the **whitened** metric analyzer, where
+  decorrelated separation is meaningful. The whitened analyzer uses
+  `return_in_uV=False` (so `sip.whiten`'s preserved per-channel gains are not
+  re-applied, which would un-normalize the whitened space). The metric recipe is
+  tracked on `AnalyzerCurationSelection.metric_waveform_params_name` (v1-parity:
+  v1 attached `WaveformParameters` to `MetricCurationSelection`). **Expect the
+  PC/NN metrics to shift** relative to the earlier single-analyzer v2 path: they
+  now compute in the whitened space (their intended domain), a deliberate,
+  content-addressed change, not a regression — re-curate against the new values
+  rather than comparing absolute PC/NN scores across the boundary. Voltage /
+  spike-train metrics are unchanged by this split (they always read the display
+  analyzer).
 
 - **BurstPair merge diagnostics are ported, computed on the fly (not stored),
   and each leg is reimplemented deliberately — not literally.** v1's `BurstPair`

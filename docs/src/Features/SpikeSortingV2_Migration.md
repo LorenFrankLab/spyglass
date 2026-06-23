@@ -136,7 +136,15 @@ v1 chain only for features still listed as pending.
 - **Available in v2** — `metric_curation` now provides
   `QualityMetricParameters`, `AutoCurationRules`, `AnalyzerCurationSelection`,
   and `AnalyzerCuration`. This replaces v1 `MetricCuration` for SI quality
-  metrics, auto-labels, and merge suggestions.
+  metrics, auto-labels, and merge suggestions. Like v1's
+  `WaveformParameters` whitened/unwhitened split, PC / cluster-separation
+  metrics (`nn_advanced`, `d_prime`, `nearest_neighbor`, `mahalanobis`,
+  `silhouette`) are computed on a **whitened** metric analyzer (decorrelated
+  space), while amplitudes and voltage/spike-train metrics (`snr`,
+  `amplitude_cutoff`, `firing_rate`, `isi_violation`, …) stay on the unwhitened
+  display analyzer — so expect PC/NN values to differ from any earlier
+  single-analyzer v2 run (re-curate against the new scores). The metric recipe
+  is tracked on `AnalyzerCurationSelection.metric_waveform_params_name`.
 - **Folded into AnalyzerCuration** — the v1 `BurstPair` table was not cloned as
   a new DataJoint table. Its notebook plotting helpers are available from
   `AnalyzerCuration` (`plot_correlograms`, `investigate_pair_xcorrel`,
