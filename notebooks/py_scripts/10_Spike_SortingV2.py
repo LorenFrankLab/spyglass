@@ -369,10 +369,67 @@ if merge_groups_to_apply:
     final_curation = AnalyzerCuration().materialize_curation(final_sel)
 else:
     final_curation = auto_curation  # no manual merge yet; use the 7b result
+    final_sel = auto_sel  # the analyzer-curation selection of record
 
 final_summary = CurationV2.summarize_curation(final_curation)
 final_merge_id = final_summary["merge_id"]
 final_summary
+
+# ### 7d. Surface waveform shape for cell typing (your thresholds, not the pipeline's)
+#
+# Over the final curated result (`final_sel` from section 7c — post-merge if you
+# merged, the pass-1 auto curation otherwise), `get_metrics` returns a
+# waveform-shape column next to the quality metrics: `trough_half_width` — the
+# half-amplitude width of the spike trough, in seconds, read from the unwhitened
+# display analyzer. Narrow spikes are fast-spiking interneurons, wide spikes
+# pyramidal cells. Paired with `firing_rate` (already a quality metric) it gives
+# the classic rate × width view for separating putative cell types.
+#
+# **The pipeline ships NO cell-type thresholds.** The boundary below is **your
+# own** — region-specific and tuned here for hippocampus (fast + narrow ⇒
+# putative interneuron; slow + wide ⇒ putative pyramidal). For cortex, striatum,
+# or thalamus the cutoffs differ; pick your own, do not reuse these. (The
+# trough-to-peak duration and slope columns are available by adding them to the
+# metric row's `template_metric_columns`, but they are not defaults: they need a
+# wider post-trough window than the hippocampus display recipe's 0.5 ms and clip
+# there — they are reliable on the wider cortex/fallback window.)
+
+shape = AnalyzerCuration.get_metrics(final_sel)[
+    ["firing_rate", "trough_half_width"]
+].dropna()
+
+# YOUR thresholds — region-specific, NOT pipeline defaults. Tune per recording.
+rate_cut_hz, width_cut_s = 7.0, 0.0003  # 0.3 ms
+is_interneuron = (shape["firing_rate"] > rate_cut_hz) & (
+    shape["trough_half_width"] < width_cut_s
+)
+
+import matplotlib.pyplot as plt
+fig, ax = plt.subplots(figsize=(5, 4))
+ax.scatter(
+    shape.loc[~is_interneuron, "trough_half_width"] * 1e3,
+    shape.loc[~is_interneuron, "firing_rate"],
+    c="tab:blue",
+    label="putative pyramidal",
+    alpha=0.8,
+)
+ax.scatter(
+    shape.loc[is_interneuron, "trough_half_width"] * 1e3,
+    shape.loc[is_interneuron, "firing_rate"],
+    c="tab:red",
+    label="putative interneuron",
+    alpha=0.8,
+)
+ax.axvline(width_cut_s * 1e3, ls="--", c="gray")
+ax.axhline(rate_cut_hz, ls="--", c="gray")
+ax.set_xlabel("trough_half_width (ms)")
+ax.set_ylabel("firing_rate (Hz)")
+ax.set_title("Putative cell types — YOUR hippocampal thresholds, not the pipeline's")
+ax.legend()
+print(
+    f"{int(is_interneuron.sum())} putative interneuron(s), "
+    f"{int((~is_interneuron).sum())} putative pyramidal"
+)
 
 # ## 8. Downstream: choose the output accessor
 #

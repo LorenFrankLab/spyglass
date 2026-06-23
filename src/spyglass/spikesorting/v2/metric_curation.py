@@ -184,6 +184,7 @@ class AnalyzerCurationFetched(NamedTuple):
     nwb_file_name: str
     metric_names: list[str]
     metric_kwargs: dict[str, dict]
+    template_metric_columns: list[str]
     skip_pc_metrics: bool
     auto_merge_preset: str
     auto_merge_kwargs: dict
@@ -215,8 +216,9 @@ class QualityMetricParameters(SpyglassMixin, dj.Lookup):
     definition = """
     metric_params_name: varchar(64)
     ---
-    metric_names: blob       # list[str] of SpikeInterface metric names
-    metric_kwargs: blob      # dict[str, dict] per-metric kwargs
+    metric_names: blob              # list[str] of SpikeInterface metric names
+    metric_kwargs: blob             # dict[str, dict] per-metric kwargs
+    template_metric_columns: blob   # list[str] of SI template output columns
     skip_pc_metrics=1: bool
     params_schema_version=1: int
     job_kwargs=null: blob
@@ -291,12 +293,20 @@ class QualityMetricParameters(SpyglassMixin, dj.Lookup):
                 "metric_kwargs": row.get("metric_kwargs", {}),
                 "skip_pc_metrics": row.get("skip_pc_metrics", True),
             }
+            # Only forward template_metric_columns when the row sets it, so an
+            # omitting row picks up the schema default (the conservative,
+            # window-safe trough_half_width shape column).
+            if "template_metric_columns" in row:
+                payload["template_metric_columns"] = row[
+                    "template_metric_columns"
+                ]
             clean = _validate_params(QualityMetricParamsSchema, payload)
             validated.append(
                 {
                     "metric_params_name": row["metric_params_name"],
                     "metric_names": clean["metric_names"],
                     "metric_kwargs": clean["metric_kwargs"],
+                    "template_metric_columns": clean["template_metric_columns"],
                     "skip_pc_metrics": clean["skip_pc_metrics"],
                     "params_schema_version": clean["schema_version"],
                     "job_kwargs": row.get("job_kwargs"),
@@ -323,6 +333,22 @@ class QualityMetricParameters(SpyglassMixin, dj.Lookup):
         """Log the available SpikeInterface quality-metric names."""
         for name in cls.available_quality_metrics():
             logger.info(name)
+
+    @classmethod
+    def available_template_metric_columns(cls) -> list[str]:
+        """Return the SI template (waveform-shape) output COLUMN names.
+
+        These are the valid values for a row's ``template_metric_columns`` and
+        the same vocabulary ``get_metrics`` surfaces -- output *columns*, not
+        metric names. SI's ``half_width`` metric, for example, is surfaced as
+        the ``trough_half_width`` and ``peak_half_width`` columns (the list
+        below includes ``trough_half_width`` but not ``half_width``).
+        """
+        from spyglass.spikesorting.v2._params.metric_curation import (
+            _available_template_metric_columns,
+        )
+
+        return sorted(_available_template_metric_columns())
 
 
 @schema
@@ -841,6 +867,7 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
             nwb_file_name=_nwb_file_name_for_sorting(sorting_key),
             metric_names=list(qm["metric_names"]),
             metric_kwargs=dict(qm["metric_kwargs"] or {}),
+            template_metric_columns=list(qm["template_metric_columns"] or []),
             skip_pc_metrics=bool(qm["skip_pc_metrics"]),
             auto_merge_preset=acr["auto_merge_preset"],
             auto_merge_kwargs=dict(acr["auto_merge_kwargs"] or {}),
@@ -859,6 +886,7 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
         nwb_file_name,
         metric_names,
         metric_kwargs,
+        template_metric_columns,
         skip_pc_metrics,
         auto_merge_preset,
         auto_merge_kwargs,
@@ -907,6 +935,7 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
                 metric_kwargs,
                 skip_pc_metrics,
                 job_kwargs,
+                template_metric_columns=template_metric_columns,
             )
             labels_by_unit = apply_label_rules(metrics_df, rule_rows)
             merge_groups = self._compute_merge_groups(
@@ -971,6 +1000,7 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
         metric_kwargs,
         skip_pc_metrics,
         job_kwargs=None,
+        template_metric_columns=None,
     ):
         """Compute quality metrics, routing PC/NN metrics to the whitened one.
 
@@ -983,6 +1013,13 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
         is meaningful. The two frames are merged by unit id. Spyglass's
         ``isi_violation`` fraction is added from the (recipe-independent) spike
         times. ``job_kwargs`` drive the heavy extension computation.
+
+        ``template_metric_columns`` (SI output COLUMN names) are surfaced from
+        the DISPLAY analyzer's ``template_metrics`` extension -- waveform SHAPE
+        must come from real, unwhitened templates, exactly as ``snr`` does. The
+        columns are selected directly (config already holds column names, so no
+        name->column mapping) and joined onto the result by unit id; they are
+        exposed for downstream cell typing, never thresholded here.
         """
         import numpy as np
         import pandas as pd
@@ -1110,7 +1147,70 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
             metrics_df["isi_violation"] = isi_violation_fraction(
                 counts, n_spikes
             )
+
+        # Surfacing the configured shape columns must not depend on a voltage
+        # metric having grown the display extensions: a PC-only row (e.g.
+        # metric_names=["nn_advanced"], skip_pc_metrics=False) skips the voltage
+        # branch above, so ensure template_metrics on the display analyzer
+        # whenever shape columns are requested -- otherwise they would be
+        # silently dropped rather than surfaced.
+        if template_metric_columns and not display_analyzer.has_extension(
+            "template_metrics"
+        ):
+            ensure_extensions(
+                display_analyzer, ["template_metrics"], job_kwargs=job_kwargs
+            )
+
+        metrics_df = AnalyzerCuration._surface_template_columns(
+            metrics_df, display_analyzer, template_metric_columns
+        )
         return metrics_df
+
+    @staticmethod
+    def _surface_template_columns(
+        metrics_df, display_analyzer, template_metric_columns
+    ):
+        """Join configured waveform-shape columns onto the metric frame.
+
+        Reads the already-computed ``template_metrics`` extension from the
+        DISPLAY (unwhitened) analyzer per the display-vs-metric routing
+        contract, selects the configured output COLUMNS directly (no
+        name->column mapping), and joins them by unit id so a unit missing from
+        either frame yields ``NaN`` rather than a misaligned row. Surfaces, does
+        not threshold. A no-op when no columns are configured or the extension
+        is absent (e.g. a PC-only row that never grew the display extensions).
+        """
+        if not template_metric_columns:
+            return metrics_df
+        if not display_analyzer.has_extension("template_metrics"):
+            return metrics_df
+        tm_df = display_analyzer.get_extension("template_metrics").get_data()
+        # Select the configured columns directly (config holds column names, so
+        # no name->column mapping), never shadowing a same-named quality-metric
+        # column with a template one.
+        present = [
+            c
+            for c in template_metric_columns
+            if c in tm_df.columns and c not in metrics_df.columns
+        ]
+        missing = [c for c in template_metric_columns if c not in tm_df.columns]
+        if missing:
+            # Validation guarantees the configured columns are real
+            # single-channel output columns, so this only fires if SI's default
+            # template_metrics compute omits a validated column -- an
+            # upstream-version drift signal, surfaced loudly, not silent.
+            logger.warning(
+                "template_metric_columns %s absent from computed "
+                "template_metrics columns %s; surfacing %s only.",
+                missing,
+                list(tm_df.columns),
+                present,
+            )
+        # Copy the selected columns before retyping the index so the analyzer's
+        # cached template_metrics frame is never mutated in place.
+        selected = tm_df[present].copy()
+        selected.index = selected.index.astype(int)
+        return metrics_df.join(selected)
 
     @staticmethod
     def _compute_merge_groups(
@@ -1176,8 +1276,13 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
     def get_metrics(cls, key):
         """Return the quality-metrics table (DataFrame indexed by unit_id).
 
-        Non-finite metric values surface as ``None`` (the on-disk
-        representation is HDF5-native NaN).
+        The frame carries the configured SpikeInterface quality metrics plus the
+        row's surfaced waveform-shape (template) columns -- ``trough_half_width``
+        by default, with ``peak_to_trough_duration`` and slope columns available
+        opt-in via the row's ``template_metric_columns`` -- so downstream code can
+        classify cell types (rate x spike width) with its own region-appropriate
+        thresholds (the pipeline ships none). Non-finite values surface as
+        ``None`` (the on-disk representation is HDF5-native NaN).
         """
         row = (cls & key).fetch1()
         abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
