@@ -1326,30 +1326,29 @@ class Sorting(SpyglassMixin, dj.Computed):
             ``(anchor_recording_id, anchor_nwb_file_name,
             preprocessing_params_name)``.
         """
+        from spyglass.spikesorting.v2._concat_recording import (
+            member_recording_selection_key,
+        )
         from spyglass.spikesorting.v2.recording import RecordingSelection
         from spyglass.spikesorting.v2.session_group import (
             ConcatenatedRecordingSelection,
             SessionGroup,
         )
 
-        csel = (ConcatenatedRecordingSelection & source_key).fetch1()
+        concat_sel = (ConcatenatedRecordingSelection & source_key).fetch1()
         group_key = {
-            "session_group_owner": csel["session_group_owner"],
-            "session_group_name": csel["session_group_name"],
+            "session_group_owner": concat_sel["session_group_owner"],
+            "session_group_name": concat_sel["session_group_name"],
         }
-        preprocessing_params_name = csel["preprocessing_params_name"]
+        preprocessing_params_name = concat_sel["preprocessing_params_name"]
         first_member = (SessionGroup.Member & group_key).fetch(
             as_dict=True, order_by="member_index", limit=1
         )[0]
         anchor_recording_id = (
             RecordingSelection
-            & {
-                "nwb_file_name": first_member["nwb_file_name"],
-                "sort_group_id": first_member["sort_group_id"],
-                "interval_list_name": first_member["interval_list_name"],
-                "preprocessing_params_name": preprocessing_params_name,
-                "team_name": first_member["team_name"],
-            }
+            & member_recording_selection_key(
+                first_member, preprocessing_params_name
+            )
         ).fetch1("recording_id")
         return (
             anchor_recording_id,

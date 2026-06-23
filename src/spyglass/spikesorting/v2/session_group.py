@@ -364,8 +364,12 @@ class ConcatenatedRecordingSelection(SpyglassMixin, dj.Manual):
             If more than one selection row already matches the identity (a raw
             insert bypassed this helper).
         """
-        import uuid
-
+        from spyglass.spikesorting.v2._concat_recording import (
+            member_recording_selection_key,
+        )
+        from spyglass.spikesorting.v2._selection_identity import (
+            deterministic_id,
+        )
         from spyglass.spikesorting.v2.exceptions import (
             DuplicateSelectionError,
             MissingRecordingForConcatError,
@@ -374,6 +378,7 @@ class ConcatenatedRecordingSelection(SpyglassMixin, dj.Manual):
             Recording,
             RecordingSelection,
         )
+        from spyglass.spikesorting.v2.utils import _is_duplicate_key_error
 
         missing_fields = [f for f in cls._IDENTITY_FIELDS if f not in key]
         if missing_fields:
@@ -394,13 +399,9 @@ class ConcatenatedRecordingSelection(SpyglassMixin, dj.Manual):
         # RecordingSelection row exists AND the Computed Recording populated.
         missing: list[dict] = []
         for member in (SessionGroup.Member & group_key).fetch(as_dict=True):
-            rec_sel_key = {
-                "nwb_file_name": member["nwb_file_name"],
-                "sort_group_id": member["sort_group_id"],
-                "interval_list_name": member["interval_list_name"],
-                "preprocessing_params_name": preprocessing_params_name,
-                "team_name": member["team_name"],
-            }
+            rec_sel_key = member_recording_selection_key(
+                member, preprocessing_params_name
+            )
             rec_sel = RecordingSelection & rec_sel_key
             if not rec_sel or not (Recording & rec_sel.fetch1("KEY")):
                 missing.append(rec_sel_key)
@@ -423,8 +424,24 @@ class ConcatenatedRecordingSelection(SpyglassMixin, dj.Manual):
                 f"{identity}; a raw insert bypassed insert_selection. Drop the "
                 "duplicates and re-insert via insert_selection."
             )
-        concat_recording_id = uuid.uuid4()
-        cls.insert1({**identity, "concat_recording_id": concat_recording_id})
+        # Content-address the concat_recording_id from the logical identity
+        # (mirrors RecordingSelection / SortingSelection): two callers that
+        # request the same (group, preprocessing, motion) compute the same id,
+        # so the PK-uniqueness constraint -- not a check-then-insert dedup race
+        # -- is the concurrency guard. The loser of a duplicate-PK race refetches
+        # the winner's row.
+        concat_recording_id = deterministic_id("concat_recording", identity)
+        try:
+            cls.insert1(
+                {**identity, "concat_recording_id": concat_recording_id}
+            )
+        except Exception as exc:  # noqa: BLE001 -- re-raised unless dup-PK
+            if not _is_duplicate_key_error(exc):
+                raise
+            refetched = (cls & identity).fetch("KEY", as_dict=True)
+            if len(refetched) == 1:
+                return refetched[0]
+            raise
         return {"concat_recording_id": concat_recording_id}
 
 
@@ -496,6 +513,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         from spyglass.spikesorting.v2._concat_recording import (
             build_concatenated_recording,
             cumulative_member_boundaries,
+            member_recording_selection_key,
             resolve_motion_correction,
         )
         from spyglass.spikesorting.v2._recording_nwb import write_nwb_artifact
@@ -531,13 +549,9 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         member_indices = []
         missing: list[dict] = []
         for member in members:
-            rec_sel_key = {
-                "nwb_file_name": member["nwb_file_name"],
-                "sort_group_id": member["sort_group_id"],
-                "interval_list_name": member["interval_list_name"],
-                "preprocessing_params_name": preprocessing_params_name,
-                "team_name": member["team_name"],
-            }
+            rec_sel_key = member_recording_selection_key(
+                member, preprocessing_params_name
+            )
             rec_sel = RecordingSelection & rec_sel_key
             if not rec_sel or not (Recording & rec_sel.fetch1("KEY")):
                 missing.append(rec_sel_key)
@@ -587,6 +601,14 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             job_kwargs=job_kwargs,
         )
 
+        # Compute the member boundary rows + recording metadata BEFORE staging
+        # the NWB, so a failure in this pure arithmetic cannot orphan a staged
+        # file (the staged-file cleanup below only covers the write onward).
+        boundaries = cumulative_member_boundaries(member_sample_counts)
+        sampling_frequency = float(corrected.get_sampling_frequency())
+        n_channels = int(corrected.get_num_channels())
+        total_duration_s = int(corrected.get_num_samples()) / sampling_frequency
+
         # Anchor the analysis NWB to the FIRST member's session (deterministic
         # parent); full multi-session provenance stays queryable through
         # ConcatenatedRecordingSelection -> SessionGroup.Member.
@@ -602,8 +624,6 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             ),
         )
 
-        boundaries = cumulative_member_boundaries(member_sample_counts)
-        sampling_frequency = float(corrected.get_sampling_frequency())
         boundary_rows = [
             {
                 **key,
@@ -624,12 +644,9 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
                         "analysis_file_name": analysis_file_name,
                         "electrical_series_path": _ELECTRICAL_SERIES_PATH,
                         "object_id": object_id,
-                        "n_channels": int(corrected.get_num_channels()),
+                        "n_channels": n_channels,
                         "sampling_frequency": sampling_frequency,
-                        "total_duration_s": (
-                            int(corrected.get_num_samples())
-                            / sampling_frequency
-                        ),
+                        "total_duration_s": total_duration_s,
                         "cache_hash": cache_hash,
                     }
                 )

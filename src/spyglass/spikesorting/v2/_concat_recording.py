@@ -22,6 +22,42 @@ from __future__ import annotations
 AUTO_SAME_DAY_PRESET = "rigid_fast"
 
 
+def member_recording_selection_key(
+    member: dict, preprocessing_params_name: str
+) -> dict:
+    """Build the ``RecordingSelection`` key for one ``SessionGroup.Member``.
+
+    A member contributes ``nwb_file_name`` / ``sort_group_id`` /
+    ``interval_list_name`` / ``team_name``; the concat preprocessing recipe is
+    shared across all members, so it is injected rather than read from the
+    member row. The five returned fields are exactly the ``RecordingSelection``
+    logical identity, so the concat selection-time precondition, the
+    materializer, and the sort-time anchor all resolve a member's cached
+    ``Recording`` through one key shape.
+
+    Parameters
+    ----------
+    member : dict
+        A ``SessionGroup.Member`` row (or member dict) carrying
+        ``nwb_file_name``, ``sort_group_id``, ``interval_list_name``,
+        ``team_name``.
+    preprocessing_params_name : str
+        The shared preprocessing recipe on the concat selection.
+
+    Returns
+    -------
+    dict
+        The ``RecordingSelection`` key for that member.
+    """
+    return {
+        "nwb_file_name": member["nwb_file_name"],
+        "sort_group_id": member["sort_group_id"],
+        "interval_list_name": member["interval_list_name"],
+        "preprocessing_params_name": preprocessing_params_name,
+        "team_name": member["team_name"],
+    }
+
+
 def resolve_motion_correction(
     motion_params: dict, *, is_multi_day: bool
 ) -> tuple[str | None, dict]:
