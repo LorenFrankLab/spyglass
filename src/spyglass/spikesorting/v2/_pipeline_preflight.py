@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from spyglass.spikesorting.v2._pipeline_presets import _PIPELINE_PRESETS
+from spyglass.spikesorting.v2._recipe_catalog import DEFAULT_PIPELINE_PRESET
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -264,7 +265,7 @@ def preflight_v2_pipeline(
     sort_group_id: int,
     interval_list_name: str,
     team_name: str,
-    pipeline_preset: str = "franklab_tetrode_hippocampus_30khz_ms5_2026_06",
+    pipeline_preset: str = DEFAULT_PIPELINE_PRESET,
 ) -> PreflightReport:
     """Read-only pre-populate configuration check for ``run_v2_pipeline``.
 

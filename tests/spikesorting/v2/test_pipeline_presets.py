@@ -189,6 +189,44 @@ def test_container_ms4_pipeline_preset_registered():
     assert pipeline_mod._PIPELINE_PRESETS[default].sorter == "mountainsort5"
 
 
+def test_describe_presets_flags_ms4_recommended():
+    """``describe_pipeline_presets`` distinguishes container vs local MS4 paths.
+
+    The containerized polymer MS4 preset is surfaced as the recommended-science
+    MS4 path for modern (``numpy>=2``) hosts; the local polymer MS4 preset is
+    surfaced as the compatible-local-runtime (``numpy<2``) path. Both are flagged
+    purely through the HUMAN-FACING fields (``recommendation_status`` /
+    ``intended_use`` / ``notes``) -- the execution backend is not a preset column
+    -- so a scientist reading the catalog can tell which MS4 path to reach for.
+    """
+    container = "franklab_probe_hippocampus_30khz_ms4_singularity_2026_06"
+    local = "franklab_probe_hippocampus_30khz_ms4_2026_06"
+    df = describe_pipeline_presets().set_index("pipeline_preset")
+    assert container in df.index and local in df.index
+
+    container_row = df.loc[container]
+    local_row = df.loc[local]
+
+    # The container preset reads as the recommended-science MS4 path on modern
+    # hosts -- its intended_use says so, and its notes confirm the host stays on
+    # numpy>=2 because the runtime lives in the image.
+    intended = container_row["intended_use"].lower()
+    assert "recommended-science" in intended
+    assert "modern host" in intended
+    assert "numpy>=2" in container_row["notes"]
+
+    # The local MS4 preset is documented for compatible local runtimes: its
+    # notes call out the numpy<2 requirement, and it does NOT claim to be the
+    # recommended-science modern-host path (that distinction is the point).
+    assert "numpy<2" in local_row["notes"]
+    assert "recommended-science" not in local_row["intended_use"].lower()
+
+    # Both stay the production MS4 recipe (the tier is unchanged); the
+    # local-vs-container split is a runtime-host distinction, not a tier one.
+    assert container_row["recommendation_status"] == "production"
+    assert local_row["recommendation_status"] == "production"
+
+
 def test_describe_pipeline_presets_threshold_units_mountainsort():
     """Every MountainSort preset reports σ-of-whitened-signal units, not µV/MAD.
 
