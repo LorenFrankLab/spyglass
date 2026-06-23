@@ -33,6 +33,7 @@ pytestmark = pytest.mark.unit
 
 _REC = "11111111-1111-1111-1111-111111111111"
 _ART = "22222222-2222-2222-2222-222222222222"
+_CONCAT = "33333333-3333-3333-3333-333333333333"
 
 _FULL_REC = {
     "nwb_file_name": "mearec.nwb",
@@ -103,6 +104,7 @@ def test_sorting_plan_recording_only_shapes_rows():
         {"recording_id": _REC, "sorter": "ms5", "sorter_params_name": "default"}
     )
     assert isinstance(plan.sorting_id, uuid.UUID)
+    assert plan.source_kind == "recording"
     assert plan.master_restriction == {
         "sorter": "ms5",
         "sorter_params_name": "default",
@@ -117,6 +119,7 @@ def test_sorting_plan_recording_only_shapes_rows():
         "sorting_id": plan.sorting_id,
         "recording_id": _REC,
     }
+    assert plan.concat_source_row is None
     assert plan.artifact_source_row is None
     assert plan.artifact_detection_id is None
 
@@ -178,15 +181,97 @@ def test_sorting_plan_requires_exactly_one_source():
         )
 
 
-def test_sorting_plan_concat_not_implemented():
-    """A concat source is rejected with NotImplementedError."""
-    with pytest.raises(NotImplementedError, match="concat"):
+def test_sorting_plan_concat_only_shapes_rows():
+    """A concat-only request yields master + concat source rows, no recording
+    source row, and no artifact source row."""
+    plan = build_sorting_selection_plan(
+        {
+            "concat_recording_id": _CONCAT,
+            "sorter": "ms5",
+            "sorter_params_name": "default",
+        }
+    )
+    assert isinstance(plan.sorting_id, uuid.UUID)
+    assert plan.source_kind == "concat"
+    assert plan.master_restriction == {
+        "sorter": "ms5",
+        "sorter_params_name": "default",
+    }
+    assert plan.source_restriction == {"concat_recording_id": _CONCAT}
+    assert plan.master_row == {
+        "sorter": "ms5",
+        "sorter_params_name": "default",
+        "sorting_id": plan.sorting_id,
+    }
+    assert plan.concat_source_row == {
+        "sorting_id": plan.sorting_id,
+        "concat_recording_id": _CONCAT,
+    }
+    assert plan.recording_source_row is None
+    assert plan.artifact_source_row is None
+    assert plan.artifact_detection_id is None
+
+
+def test_sorting_plan_concat_is_deterministic():
+    """Identical concat requests derive the identical sorting_id."""
+    key = {
+        "concat_recording_id": _CONCAT,
+        "sorter": "ms5",
+        "sorter_params_name": "d",
+    }
+    assert (
+        build_sorting_selection_plan(key).sorting_id
+        == build_sorting_selection_plan(dict(key)).sorting_id
+    )
+
+
+def test_sorting_plan_concat_id_change_changes_sorting_id():
+    """Changing only the concat_recording_id changes the sorting_id."""
+    base = {"sorter": "ms5", "sorter_params_name": "d"}
+    a = build_sorting_selection_plan({**base, "concat_recording_id": _CONCAT})
+    b = build_sorting_selection_plan({**base, "concat_recording_id": _REC})
+    assert a.sorting_id != b.sorting_id
+
+
+def test_sorting_plan_concat_and_recording_same_uuid_distinct_identity():
+    """A recording source and a concat source with the SAME uuid value resolve
+    to different sorting_ids -- the input source kind participates in the
+    content-addressed identity, so a recording_id can never alias a
+    concat_recording_id."""
+    base = {"sorter": "ms5", "sorter_params_name": "d"}
+    rec = build_sorting_selection_plan({**base, "recording_id": _REC})
+    concat = build_sorting_selection_plan({**base, "concat_recording_id": _REC})
+    assert rec.sorting_id != concat.sorting_id
+
+
+def test_sorting_plan_concat_rejects_artifact():
+    """A concat request that also supplies an artifact is rejected: concat
+    sorts must have no ArtifactDetectionSource row."""
+    with pytest.raises(ValueError, match="artifact"):
         build_sorting_selection_plan(
             {
-                "concat_recording_id": _REC,
+                "concat_recording_id": _CONCAT,
                 "sorter": "ms5",
                 "sorter_params_name": "d",
+                "artifact_detection_id": _ART,
             }
+        )
+
+
+def test_sorting_plan_concat_supplied_id_mismatch_raises_but_match_ok():
+    """A supplied sorting_id must equal the derived concat id; a match is
+    accepted."""
+    key = {
+        "concat_recording_id": _CONCAT,
+        "sorter": "ms5",
+        "sorter_params_name": "d",
+    }
+    derived = build_sorting_selection_plan(key).sorting_id
+    again = build_sorting_selection_plan({**key, "sorting_id": str(derived)})
+    assert again.sorting_id == derived
+    with pytest.raises(ValueError):
+        build_sorting_selection_plan(
+            {**key, "sorting_id": "99999999-9999-9999-9999-999999999999"}
         )
 
 

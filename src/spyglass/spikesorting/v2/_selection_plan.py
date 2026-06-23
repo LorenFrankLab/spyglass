@@ -49,18 +49,28 @@ class RecordingSelectionPlan(NamedTuple):
 class SortingSelectionPlan(NamedTuple):
     """The rows + restrictions a ``SortingSelection`` insert needs.
 
+    ``source_kind`` is ``"recording"`` or ``"concat"``; exactly one of
+    ``recording_source_row`` / ``concat_source_row`` is non-``None`` and the
+    other is ``None``, so the orchestrator inserts the matching source part
+    (``RecordingSource`` xor ``ConcatenatedRecordingSource``) without
+    re-deriving the source shape. ``source_restriction`` carries
+    ``{"recording_id": ...}`` or ``{"concat_recording_id": ...}`` accordingly.
+
     ``artifact_source_row`` is ``None`` when no artifact-detection pass was
-    requested (``artifact_detection_id`` absent); otherwise it is the
+    requested (``artifact_detection_id`` absent) -- always the case for a
+    concat source, which has no artifact pass; otherwise it is the
     ``ArtifactDetectionSource`` part row. ``artifact_detection_id`` is the
     normalized (``uuid.UUID``) value, threaded for find-existing and the
     artifact source part.
     """
 
     sorting_id: uuid.UUID
+    source_kind: str
     master_restriction: dict
     source_restriction: dict
     master_row: dict
-    recording_source_row: dict
+    recording_source_row: dict | None
+    concat_source_row: dict | None
     artifact_source_row: dict | None
     artifact_detection_id: uuid.UUID | None
 
@@ -118,18 +128,20 @@ def build_sorting_selection_plan(key: dict) -> SortingSelectionPlan:
     Reads exactly one of ``recording_id`` (single-session) or
     ``concat_recording_id`` (concat) from ``key``; ``sorter`` and
     ``sorter_params_name`` are required. ``artifact_detection_id`` is
-    optional and, when present, normalized to a ``uuid.UUID`` so a
-    caller-supplied ``str`` shares one identity with the stored value.
+    optional on the recording path and, when present, normalized to a
+    ``uuid.UUID`` so a caller-supplied ``str`` shares one identity with the
+    stored value. A concat source must NOT carry an ``artifact_detection_id``:
+    concat sorts reuse per-member ``Recording`` artifacts and have no
+    concat-wide artifact pass, so they have no ``ArtifactDetectionSource``
+    row.
 
     Raises
     ------
     ValueError
         If zero or both source keys are supplied, if ``sorter`` /
-        ``sorter_params_name`` is missing, or if an explicit ``sorting_id``
+        ``sorter_params_name`` is missing, if a concat source is combined
+        with an ``artifact_detection_id``, or if an explicit ``sorting_id``
         does not equal the derived deterministic id.
-    NotImplementedError
-        If ``concat_recording_id`` is supplied (concat-source sorting is
-        not implemented yet).
     """
     has_recording = "recording_id" in key
     has_concat = "concat_recording_id" in key
@@ -140,12 +152,6 @@ def build_sorting_selection_plan(key: dict) -> SortingSelectionPlan:
             "or concat_recording_id (concat). Got: "
             f"recording_id={'set' if has_recording else 'unset'}, "
             f"concat_recording_id={'set' if has_concat else 'unset'}."
-        )
-    if has_concat:
-        raise NotImplementedError(
-            "SortingSelection.insert_selection: concatenated "
-            "recording sorting is not implemented yet. Use a single "
-            "recording_id source for now."
         )
 
     for required in ("sorter", "sorter_params_name"):
@@ -159,7 +165,6 @@ def build_sorting_selection_plan(key: dict) -> SortingSelectionPlan:
         "sorter": key["sorter"],
         "sorter_params_name": key["sorter_params_name"],
     }
-    source_restriction = {"recording_id": key["recording_id"]}
     artifact_detection_id = key.get("artifact_detection_id")
     # Normalize a caller-supplied ``artifact_detection_id`` (which may be a
     # str) so the find-existing comparison is UUID-vs-UUID. A str would
@@ -168,6 +173,45 @@ def build_sorting_selection_plan(key: dict) -> SortingSelectionPlan:
     if artifact_detection_id is not None:
         artifact_detection_id = uuid.UUID(str(artifact_detection_id))
 
+    if has_concat:
+        # Concat sorts reuse per-member Recording artifacts; concat-wide
+        # artifact detection is a later feature, so a concat request that
+        # also asks for an artifact pass is rejected here (the contract is
+        # "no ArtifactDetectionSource row" for concat sorts). The identity
+        # helper enforces the same invariant; this raise keeps the message
+        # at the user-facing insert boundary.
+        if artifact_detection_id is not None:
+            raise ValueError(
+                "SortingSelection.insert_selection: a concat_recording_id "
+                "source cannot supply an artifact_detection_id. Concat sorts "
+                "reuse per-member Recording artifacts and have no concat-wide "
+                "artifact-detection pass."
+            )
+        source_restriction = {"concat_recording_id": key["concat_recording_id"]}
+        identity = sorting_identity_payload(
+            concat_recording_id=key["concat_recording_id"],
+            sorter=key["sorter"],
+            sorter_params_name=key["sorter_params_name"],
+        )
+        sorting_id = deterministic_id("sorting", identity)
+        assert_supplied_id_matches(
+            key.get("sorting_id"), sorting_id, field="sorting_id"
+        )
+        master_row = {**master_restriction, "sorting_id": sorting_id}
+        concat_source_row = {"sorting_id": sorting_id, **source_restriction}
+        return SortingSelectionPlan(
+            sorting_id=sorting_id,
+            source_kind="concat",
+            master_restriction=master_restriction,
+            source_restriction=source_restriction,
+            master_row=master_row,
+            recording_source_row=None,
+            concat_source_row=concat_source_row,
+            artifact_source_row=None,
+            artifact_detection_id=None,
+        )
+
+    source_restriction = {"recording_id": key["recording_id"]}
     # Deterministic, content-addressed sorting_id from the logical identity
     # (recording source + sorter + the optional artifact-detection pass).
     # ``artifact_detection_id=None`` is the single "no artifact-detection
@@ -197,10 +241,12 @@ def build_sorting_selection_plan(key: dict) -> SortingSelectionPlan:
     )
     return SortingSelectionPlan(
         sorting_id=sorting_id,
+        source_kind="recording",
         master_restriction=master_restriction,
         source_restriction=source_restriction,
         master_row=master_row,
         recording_source_row=recording_source_row,
+        concat_source_row=None,
         artifact_source_row=artifact_source_row,
         artifact_detection_id=artifact_detection_id,
     )

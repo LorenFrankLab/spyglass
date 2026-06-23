@@ -753,6 +753,19 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         # deterministic sorting_id, and shape the master + source part rows.
         plan = build_sorting_selection_plan(key)
 
+        # Runtime gate: the deterministic-identity helper already folds a
+        # concat source into a stable sorting_id, but the concat populate
+        # path (ConcatenatedRecording.make + Sorting.make concat dispatch)
+        # is not wired yet, so reject a concat selection with a clear
+        # message rather than landing a row Sorting.populate cannot consume.
+        # Lifted by the concat-materializer change.
+        if plan.source_kind == "concat":
+            raise NotImplementedError(
+                "SortingSelection.insert_selection: concatenated recording "
+                "sorting is not implemented yet. Use a single recording_id "
+                "source for now."
+            )
+
         existing = cls._find_existing_pk(
             plan.master_restriction,
             plan.source_restriction,

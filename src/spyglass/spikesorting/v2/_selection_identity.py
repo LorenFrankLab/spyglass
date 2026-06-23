@@ -265,40 +265,78 @@ def artifact_detection_identity_payload(
 
 def sorting_identity_payload(
     *,
-    recording_id,
     sorter: str,
     sorter_params_name: str,
+    recording_id=None,
+    concat_recording_id=None,
     artifact_detection_id=None,
 ) -> dict:
     """Build a ``SortingSelection`` logical-identity payload.
 
-    Identity is the recording source + sorter + the optional artifact
-    pass. ``artifact_detection_id`` is normalized to a ``uuid.UUID`` (or
-    kept ``None``) so a caller-supplied ``str`` and the stored
-    ``uuid.UUID`` share one identity; ``artifact_detection_id=None`` is the
-    single "no artifact-detection pass" form and cannot alias any real
+    The sort input is exactly one of a single-session ``recording_id``
+    (``source_kind="recording"``) or a ``concat_recording_id``
+    (``source_kind="concat"``); ``source_kind`` is part of the identity, so a
+    ``recording_id`` and a ``concat_recording_id`` that happen to carry the
+    same UUID value can never alias to one ``sorting_id``. The recording
+    identity is the recording source + sorter + the optional artifact pass;
+    the concat identity is the concat source + sorter (concat sorts have no
+    artifact-detection pass, so they fold in no ``artifact_detection_id`` and
+    no ``recording_id`` -- neither fabricated nor a ``None`` placeholder).
+
+    ``artifact_detection_id`` is normalized to a ``uuid.UUID`` (or kept
+    ``None``) so a caller-supplied ``str`` and the stored ``uuid.UUID`` share
+    one identity; ``artifact_detection_id=None`` is the single "no
+    artifact-detection pass" form and cannot alias any real
     ``artifact_detection_id``. Single source of truth shared by
     ``SortingSelection.insert_selection`` and ``preflight_v2_pipeline``.
 
     Parameters
     ----------
-    recording_id
-        The recording source id.
     sorter : str
         Sorter name.
     sorter_params_name : str
         Name of the ``SorterParameters`` row.
+    recording_id : optional
+        The single-session recording source id. Mutually exclusive with
+        ``concat_recording_id``. Default ``None``.
+    concat_recording_id : optional
+        The concatenated-recording source id. Mutually exclusive with
+        ``recording_id``. Default ``None``.
     artifact_detection_id : optional
-        The optional artifact-detection pass id, normalized to a
-        ``uuid.UUID``; ``None`` is the "no artifact-detection pass" form.
-        Default ``None``.
+        The optional artifact-detection pass id (recording source only),
+        normalized to a ``uuid.UUID``; ``None`` is the "no artifact-detection
+        pass" form. Default ``None``.
 
     Returns
     -------
     dict
-        The logical-identity payload, with ``source_kind`` set to
-        ``"recording"``.
+        The logical-identity payload, with an explicit ``source_kind``.
+
+    Raises
+    ------
+    ValueError
+        If neither or both of ``recording_id`` and ``concat_recording_id``
+        are given (exactly one source is required), or if a concat source is
+        combined with an ``artifact_detection_id`` (concat sorts have no
+        artifact-detection pass).
     """
+    if (recording_id is None) == (concat_recording_id is None):
+        raise ValueError(
+            "sorting_identity_payload requires exactly one source: "
+            "recording_id xor concat_recording_id."
+        )
+    if concat_recording_id is not None:
+        if artifact_detection_id is not None:
+            raise ValueError(
+                "sorting_identity_payload: a concat source cannot carry an "
+                "artifact_detection_id; concat sorts have no artifact pass."
+            )
+        return {
+            "source_kind": "concat",
+            "concat_recording_id": concat_recording_id,
+            "sorter": sorter,
+            "sorter_params_name": sorter_params_name,
+        }
     if artifact_detection_id is not None:
         artifact_detection_id = uuid.UUID(str(artifact_detection_id))
     return {
