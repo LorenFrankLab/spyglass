@@ -328,6 +328,95 @@ class GenericSorterParamsSchema(BaseModel):
     schema_version: int = 1
 
 
+class SorterExecutionParamsSchema(BaseModel):
+    """Tracked sorter-execution backend (local vs Docker/Singularity).
+
+    SpikeInterface can run a sorter locally or inside a container via
+    ``run_sorter``'s execution kwargs (``docker_image`` / ``singularity_image``
+    / ``delete_container_files`` plus container-install controls). In v2 these
+    are recorded as **sorter execution provenance** on
+    ``SorterParameters.execution_params`` -- never smuggled through the
+    scientific ``params`` blob or ``job_kwargs`` -- so a containerized row is a
+    first-class, reproducible parameter row rather than an ad-hoc runtime
+    override.
+
+    Validation:
+
+    * ``backend="local"`` requires ``container_image is None`` and leaves the
+      container-only install controls at their defaults (``installation_mode``
+      ``"auto"`` / ``spikeinterface_version`` ``None`` / ``extra_requirements``
+      ``[]``). A non-default install control on a local row is rejected, not
+      silently ignored.
+    * ``backend in {"docker", "singularity"}`` requires a non-empty
+      ``container_image`` string (a Docker image name/tag/digest, or a local
+      ``.sif`` path for Singularity). SpikeInterface accepts ``docker_image=True``
+      / ``singularity_image=True`` to mean "use my default image", but a bare
+      ``True`` is not tracked provenance, so v2 rows must pin an explicit image.
+
+    Reproducibility note: ``installation_mode="auto"`` with
+    ``spikeinterface_version=None`` lets the container-side SpikeInterface
+    install drift with the host environment, so it is **not** reproducible by
+    row content alone. Shipped / recommended container rows must instead pin the
+    runtime: either ``installation_mode="no-install"`` with an image that already
+    bakes in the intended SpikeInterface + sorter runtime, or
+    ``installation_mode in {"pypi", "github"}`` with an explicit
+    ``spikeinterface_version``. SI's ``folder`` / ``dev`` install modes (which
+    need a mounted ``spikeinterface_folder_source`` tree) are intentionally not
+    exposed here.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    schema_version: int = 1
+    backend: Literal["local", "docker", "singularity"] = "local"
+    container_image: str | None = None
+    delete_container_files: bool = True
+    installation_mode: Literal["auto", "pypi", "github", "no-install"] = "auto"
+    spikeinterface_version: str | None = None
+    extra_requirements: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_backend(self):
+        """Cross-check backend against image + container-only install controls."""
+        if self.backend == "local":
+            if self.container_image is not None:
+                raise ValueError(
+                    "SorterExecutionParamsSchema: backend='local' requires "
+                    f"container_image=None; got {self.container_image!r}. A "
+                    "containerized row must set backend='docker' or "
+                    "'singularity'."
+                )
+            # The install controls only affect the container-side SI install;
+            # a non-default value on a local row would be silently inert, so
+            # reject it rather than let it mislead.
+            if (
+                self.installation_mode != "auto"
+                or self.spikeinterface_version is not None
+                or self.extra_requirements
+            ):
+                raise ValueError(
+                    "SorterExecutionParamsSchema: installation_mode / "
+                    "spikeinterface_version / extra_requirements are "
+                    "container-only; backend='local' must leave them at their "
+                    "defaults ('auto' / None / []). Set backend='docker' or "
+                    "'singularity' to pin a container install."
+                )
+        else:
+            if not (
+                isinstance(self.container_image, str)
+                and self.container_image.strip()
+            ):
+                raise ValueError(
+                    f"SorterExecutionParamsSchema: backend={self.backend!r} "
+                    "requires a non-empty container_image string (a Docker "
+                    "image name/tag/digest, or a local .sif path for "
+                    f"Singularity); got {self.container_image!r}. "
+                    "SpikeInterface's docker_image=True / singularity_image=True "
+                    "is not accepted as tracked provenance -- pin an explicit "
+                    "image."
+                )
+        return self
+
+
 _SORTER_SCHEMAS: dict[str, type[BaseModel]] = {
     "mountainsort4": MountainSort4Schema,
     "mountainsort5": MountainSort5Schema,
@@ -387,6 +476,93 @@ def reject_internal_whiten(sorter: str, params: dict) -> None:
             "the signal (or is rejected by SpikeInterface at sort time). "
             "Remove 'whiten' from the params blob."
         )
+
+
+# Keys that configure sorter EXECUTION (container backend + container-side SI
+# install), not the science of the sort. They are tracked on
+# ``SorterParameters.execution_params`` (validated by
+# ``SorterExecutionParamsSchema``) and must never be smuggled through the
+# scientific ``params`` blob or ``job_kwargs`` -- a global reserved-key rule
+# that holds across strict (``extra="forbid"``) and permissive
+# (``extra="allow"``) sorter schemas alike. ``docker_image`` /
+# ``singularity_image`` are SI's ``run_sorter`` execution kwargs;
+# ``delete_container_files`` / ``installation_mode`` / ``spikeinterface_version``
+# / ``spikeinterface_folder_source`` / ``extra_requirements`` are SI's
+# container-install controls. ``spikeinterface_folder_source`` is reserved even
+# though the schema does not expose ``folder`` / ``dev`` install modes, so a
+# row cannot pre-stage it in ``params``.
+EXECUTION_RESERVED_KEYS: frozenset[str] = frozenset(
+    {
+        "docker_image",
+        "singularity_image",
+        "delete_container_files",
+        "installation_mode",
+        "spikeinterface_version",
+        "spikeinterface_folder_source",
+        "extra_requirements",
+    }
+)
+
+
+def reject_reserved_execution_keys(params, *, context: str) -> None:
+    """Raise if a scientific ``params`` / ``job_kwargs`` blob holds exec keys.
+
+    Container backend + container-install provenance lives ONLY on
+    ``SorterParameters.execution_params`` (see
+    :class:`SorterExecutionParamsSchema`). The permissive ``extra="allow"``
+    sorter schemas (generic, Kilosort4, SpykingCircus2, Tridesclous2) would
+    otherwise pass an ``EXECUTION_RESERVED_KEYS`` member straight through into
+    the scientific blob, so this guard runs at ``SorterParameters`` insert to
+    reject it for every sorter -- the strict schemas already reject the same
+    keys via ``extra="forbid"``.
+
+    Parameters
+    ----------
+    params : Mapping or None
+        The blob to scan (a sorter ``params`` blob or a ``job_kwargs`` blob).
+        ``None`` / empty is a no-op.
+    context : str
+        Human-readable label for the blob (e.g. ``"sorter params blob"``),
+        used in the error message.
+
+    Raises
+    ------
+    ValueError
+        If ``params`` carries any :data:`EXECUTION_RESERVED_KEYS` member.
+    """
+    if not params:
+        return
+    present = sorted(EXECUTION_RESERVED_KEYS & set(params))
+    if present:
+        raise ValueError(
+            f"{context} must not carry sorter-execution keys {present}: "
+            "container backend and container-side install provenance are "
+            "tracked on SorterParameters.execution_params (validated by "
+            "SorterExecutionParamsSchema), not in the scientific params blob or "
+            "job_kwargs. Move these to the execution_params blob."
+        )
+
+
+def validate_execution_params(execution_params) -> dict:
+    """Validate a ``SorterParameters.execution_params`` blob.
+
+    A ``None`` / missing blob resolves to the schema default (local execution),
+    so callers (the insert validator, ``Sorting.make_fetch``) get a fully
+    populated, normalized dict either way.
+
+    Parameters
+    ----------
+    execution_params : Mapping or None
+        The raw ``execution_params`` blob (or ``None`` to mean default local).
+
+    Returns
+    -------
+    dict
+        The validated, normalized :class:`SorterExecutionParamsSchema` dump.
+    """
+    return SorterExecutionParamsSchema.model_validate(
+        execution_params or {}
+    ).model_dump()
 
 
 def _get_sorter_schema(sorter_name: str) -> type[BaseModel]:
