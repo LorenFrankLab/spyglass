@@ -32,7 +32,9 @@ cycle.
 from __future__ import annotations
 
 
-def ensure_extensions(analyzer, names, *, job_kwargs=None):
+def ensure_extensions(
+    analyzer, names, *, job_kwargs=None, extension_params=None
+):
     """Compute only the SortingAnalyzer extensions not already present.
 
     Idempotent: an already-present extension is never recomputed (recomputing a
@@ -49,6 +51,13 @@ def ensure_extensions(analyzer, names, *, job_kwargs=None):
         Extension names to ensure are present.
     job_kwargs : dict, optional
         Resolved concurrency kwargs forwarded to ``analyzer.compute``.
+    extension_params : dict, optional
+        Per-extension parameter dicts (e.g. ``{"principal_components": {...}}``),
+        passed through to ``analyzer.compute(extension_params=...)``. Filtered to
+        the extensions actually being added, so a param for an already-present
+        extension is dropped (SI rejects params for extensions it isn't
+        computing). Use to PIN an extension's params explicitly rather than rely
+        on SI's defaults.
 
     Returns
     -------
@@ -60,7 +69,14 @@ def ensure_extensions(analyzer, names, *, job_kwargs=None):
     }
     to_add = [name for name in names if not analyzer.has_extension(name)]
     if to_add:
-        analyzer.compute(to_add, **compute_kwargs)
+        params = {
+            k: v
+            for k, v in (extension_params or {}).items()
+            if k in to_add
+        }
+        analyzer.compute(
+            to_add, extension_params=params or None, **compute_kwargs
+        )
     return to_add
 
 

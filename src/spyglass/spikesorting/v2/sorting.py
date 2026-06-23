@@ -1035,8 +1035,8 @@ class Sorting(SpyglassMixin, dj.Computed):
     # (region; see _recipe_catalog.waveform_params_for_preprocessing) and read
     # back -- never re-resolved -- on every later rebuild, so the analyzer is
     # deterministic for a sorting_id. It is NOT a free per-sort knob and is NOT
-    # part of sorting_id identity. The metric recipe is carried on
-    # AnalyzerCurationSelection (not yet implemented), not here.
+    # part of sorting_id identity. The whitened METRIC recipe is carried on
+    # AnalyzerCurationSelection.metric_waveform_params_name, not here.
     # The SortingAnalyzer cache folder is intentionally NOT a column: it is
     # large (5-50 GB) regeneratable scratch resolved at runtime from
     # (sorting_id, display_waveform_params_name) via _analyzer_cache.analyzer_path.
@@ -1873,17 +1873,26 @@ class Sorting(SpyglassMixin, dj.Computed):
                 "sorting_id", "display_waveform_params_name", as_dict=True
             )
         }
-        # A metric (whitened) analyzer folder referenced by a curation
-        # selection is in active use (its PC/NN metrics were computed from it),
-        # so it is NOT a disk-side orphan even though it is not a sort's display
-        # recipe. Lazily imported to avoid a metric_curation <-> sorting cycle.
+        # A metric (whitened) analyzer folder referenced by a PC-requesting
+        # curation selection is in active use (its PC/NN metrics were computed
+        # from it), so it is NOT a disk-side orphan even though it is not a
+        # sort's display recipe. Only selections whose QualityMetricParameters
+        # request PC metrics (skip_pc_metrics=False) actually build the metric
+        # analyzer, so a skip-PC selection's recipe is not retained (a stale
+        # folder for it stays a cleanable orphan). Lazily imported to avoid a
+        # metric_curation <-> sorting cycle.
         from spyglass.spikesorting.v2.metric_curation import (
             AnalyzerCurationSelection,
+            QualityMetricParameters,
         )
 
+        pc_selections = (
+            AnalyzerCurationSelection * QualityMetricParameters
+            & "skip_pc_metrics = 0"
+        )
         referenced_paths.update(
             str(analyzer_path(r["sorting_id"], r["metric_waveform_params_name"]))
-            for r in AnalyzerCurationSelection.fetch(
+            for r in pc_selections.fetch(
                 "sorting_id", "metric_waveform_params_name", as_dict=True
             )
         )

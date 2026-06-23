@@ -640,6 +640,19 @@ def test_analyzer_curation_selection_tracks_waveform_params(
         ).fetch1(
             "metric_waveform_params_name"
         ) == "franklab_hippocampus_metric_waveforms"
+
+        # An explicit DISPLAY (unwhitened) recipe is rejected: PC/NN metrics
+        # must compute on a whitened analyzer, so insert_selection guards that
+        # the metric recipe is purpose='metric' / whiten=True.
+        with pytest.raises(ValueError, match="whitened metric recipe"):
+            AnalyzerCurationSelection.insert_selection(
+                {
+                    **base,
+                    "metric_waveform_params_name": (
+                        "franklab_cortex_actual_waveforms"
+                    ),
+                }
+            )
     finally:
         (AnalyzerCurationSelection & sel_cortex).delete(safemode=False)
         (AnalyzerCurationSelection & sel_hippo).delete(safemode=False)

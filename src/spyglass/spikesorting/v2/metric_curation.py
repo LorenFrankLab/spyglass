@@ -81,6 +81,19 @@ _CURATION_EXTENSIONS = (
     "template_metrics",
 )
 
+# Pinned principal_components params for the whitened METRIC analyzer. The
+# recording is already SPATIALLY whitened (sip.whiten decorrelates channels);
+# SI's PCA then computes components on those decorrelated waveforms and, with
+# whiten=True, normalizes the component variances -- the standard input space
+# for the PC/NN cluster-separation metrics. These are SI 0.104's defaults,
+# pinned explicitly so a future SI default change cannot silently alter the
+# whitened-space PCA (and therefore the PC/NN metric values).
+_PCA_EXTENSION_PARAMS = {
+    "n_components": 5,
+    "mode": "by_channel_local",
+    "whiten": True,
+}
+
 _AUTO_MERGE_EXTRA_EXTENSIONS = {
     # SI's ``feature_neighbors`` preset includes the ``knn`` step, whose
     # required extensions are templates, spike_locations, and spike_amplitudes.
@@ -557,11 +570,11 @@ class AnalyzerCurationSelection(
 
         ``metric_waveform_params_name`` (the whitened analyzer recipe the PC/NN
         metrics compute on) defaults to the sort's region metric row, resolved
-        from the sort source's preprocessing recipe (the same source-aware
-        resolution Phase 1 used for the display recipe: single-recording sorts
-        read ``RecordingSelection.preprocessing_params_name``, concat-backed
-        sorts read the ``ConcatenatedRecordingSelection -> PreprocessingParameters``
-        FK). Pass it explicitly in ``key`` to override.
+        from the sort source's preprocessing recipe -- the same source-aware
+        resolution the display recipe uses: single-recording sorts read
+        ``RecordingSelection.preprocessing_params_name``, concat-backed sorts
+        read the ``ConcatenatedRecordingSelection -> PreprocessingParameters``
+        FK. Pass it explicitly in ``key`` to override.
 
         Raises ``DuplicateSelectionError`` if any existing row for this
         identity carries a non-deterministic id (a raw ``dj.insert`` bypass or
@@ -579,8 +592,8 @@ class AnalyzerCurationSelection(
         if metric_waveform_params_name is None:
             # Default = the sort's region metric (whitened) recipe, resolved
             # source-aware from the source preprocessing recipe (recording or
-            # concat), mirroring the Phase-1 display resolution. ``[1]`` is the
-            # metric element of the (display, metric) pair.
+            # concat), the same way the display recipe is resolved. ``[1]`` is
+            # the metric element of the (display, metric) pair.
             preproc = (
                 SortingSelection.resolve_source_preprocessing_params_name(
                     {"sorting_id": key["sorting_id"]}
@@ -589,6 +602,28 @@ class AnalyzerCurationSelection(
             metric_waveform_params_name = waveform_params_for_preprocessing(
                 preproc
             )[1]
+
+        # The metric analyzer carries the PC/NN cluster-separation metrics, which
+        # must compute in the WHITENED space. Reject a display/unwhitened recipe
+        # (e.g. an explicit override) here -- otherwise PC/NN metrics would
+        # silently run on the wrong (unwhitened) analyzer. The shipped default
+        # resolves a metric row, so this only fires on a bad explicit value.
+        from spyglass.spikesorting.v2._sorting_analyzer import (
+            fetch_waveform_params,
+        )
+
+        metric_recipe = fetch_waveform_params(metric_waveform_params_name)
+        if not metric_recipe.get("whiten") or (
+            metric_recipe.get("purpose") != "metric"
+        ):
+            raise ValueError(
+                "metric_waveform_params_name="
+                f"{metric_waveform_params_name!r} is not a whitened metric "
+                "recipe (purpose='metric', whiten=True). PC/NN cluster-"
+                "separation metrics must compute on a whitened analyzer; pass a "
+                "metric recipe (e.g. franklab_cortex_metric_waveforms) or omit "
+                "it to use the sort's resolved region metric row."
+            )
 
         identity = {
             "sorting_id": key["sorting_id"],
@@ -919,6 +954,9 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
                 metric_analyzer,
                 ["principal_components"],
                 job_kwargs=job_kwargs,
+                extension_params={
+                    "principal_components": _PCA_EXTENSION_PARAMS
+                },
             )
             pc_df = compute_quality_metrics(
                 metric_analyzer,

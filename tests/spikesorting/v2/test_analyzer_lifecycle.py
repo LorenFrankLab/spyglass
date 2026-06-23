@@ -537,9 +537,13 @@ def test_find_orphaned_analyzer_folders_retains_referenced_metric(dj_conn):
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
     from spyglass.spikesorting.v2.metric_curation import (
         AnalyzerCurationSelection,
+        QualityMetricParameters,
     )
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 
+    # franklab_default requests PC metrics (skip_pc_metrics=False), so its
+    # selection actually builds a metric analyzer -> its folder is retained.
+    QualityMetricParameters.insert_default()
     sid = uuid.uuid4()
     _insert_bypassed_sorting_row(sid, n_units=3)  # display recipe = _DISPLAY
     display_folder = analyzer_path(sid, _DISPLAY)
@@ -548,9 +552,10 @@ def test_find_orphaned_analyzer_folders_retains_referenced_metric(dj_conn):
     for folder in (display_folder, referenced, unreferenced):
         folder.mkdir(parents=True, exist_ok=True)
 
-    # Plant a curation selection referencing the cortex metric recipe. Only
-    # (sorting_id, metric_waveform_params_name) matter to the orphan finder, so
-    # the other FK fields are stubbed with FK checks off.
+    # Plant a PC-requesting curation selection referencing the cortex metric
+    # recipe. Only (sorting_id, metric_params_name, metric_waveform_params_name)
+    # matter to the orphan finder's join, so the other FK fields are stubbed
+    # with FK checks off.
     conn = dj.conn()
     acid = uuid.uuid4()
     conn.query("SET FOREIGN_KEY_CHECKS=0")
@@ -560,7 +565,7 @@ def test_find_orphaned_analyzer_folders_retains_referenced_metric(dj_conn):
                 "analyzer_curation_id": acid,
                 "sorting_id": sid,
                 "curation_id": 0,
-                "metric_params_name": "minimal",
+                "metric_params_name": "franklab_default",
                 "auto_curation_rules_name": "none",
                 "metric_waveform_params_name": (
                     "franklab_cortex_metric_waveforms"
@@ -596,12 +601,17 @@ def test_find_orphaned_analyzer_folders_retains_referenced_metric(dj_conn):
 
 
 def test_analyzer_recompute_separates_recipes(dj_conn):
-    """SortingAnalyzerVersions enumerates one (sort, recipe) key per analyzer.
+    """SortingAnalyzerVersions.key_source = display recipe per sort + metric
+    recipes only for PC-requesting curation selections, matched PER SORT.
 
-    A sort's stored display recipe PLUS any metric recipe an
-    AnalyzerCurationSelection references each get an independent recompute key,
-    so the whitened and unwhitened analyzers for one sorting_id are inventoried
-    and verified separately ({sid}__{name}.zarr folders never collide).
+    Covers three things the per-recipe recompute must get right:
+    - a PC-requesting selection (``skip_pc_metrics=False``) adds its metric
+      recipe as an independent key for ITS sort (display + metric, distinct
+      ``{sid}__{name}.zarr`` folders);
+    - that metric recipe does NOT leak onto a different sort (``sorting_id`` is
+      part of the match, not just the recipe name);
+    - a skip-PC selection (``skip_pc_metrics=True``) never built a metric
+      analyzer, so its referenced recipe is NOT enumerated.
     """
     import uuid
 
@@ -610,24 +620,43 @@ def test_analyzer_recompute_separates_recipes(dj_conn):
     from spyglass.spikesorting.v2 import recompute as rc
     from spyglass.spikesorting.v2.metric_curation import (
         AnalyzerCurationSelection,
+        QualityMetricParameters,
     )
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
-    sid = uuid.uuid4()
-    _insert_bypassed_sorting_row(sid, n_units=3)  # display recipe = _DISPLAY
-    acid = uuid.uuid4()
+    # franklab_default requests PC metrics (skip_pc_metrics=False); minimal does
+    # not (skip_pc_metrics=True).
+    QualityMetricParameters.insert_default()
+    sid_pc = uuid.uuid4()  # a sort with a PC-requesting curation
+    sid_skip = uuid.uuid4()  # a sort with only a skip-PC curation
+    _insert_bypassed_sorting_row(sid_pc, n_units=3)  # display = _DISPLAY
+    _insert_bypassed_sorting_row(sid_skip, n_units=3)  # display = _DISPLAY
+    acid_pc, acid_skip = uuid.uuid4(), uuid.uuid4()
     conn = dj.conn()
     conn.query("SET FOREIGN_KEY_CHECKS=0")
     try:
         AnalyzerCurationSelection.insert1(
             {
-                "analyzer_curation_id": acid,
-                "sorting_id": sid,
+                "analyzer_curation_id": acid_pc,
+                "sorting_id": sid_pc,
+                "curation_id": 0,
+                "metric_params_name": "franklab_default",
+                "auto_curation_rules_name": "none",
+                "metric_waveform_params_name": (
+                    "franklab_cortex_metric_waveforms"
+                ),
+            },
+            allow_direct_insert=True,
+        )
+        AnalyzerCurationSelection.insert1(
+            {
+                "analyzer_curation_id": acid_skip,
+                "sorting_id": sid_skip,
                 "curation_id": 0,
                 "metric_params_name": "minimal",
                 "auto_curation_rules_name": "none",
                 "metric_waveform_params_name": (
-                    "franklab_cortex_metric_waveforms"
+                    "franklab_hippocampus_metric_waveforms"
                 ),
             },
             allow_direct_insert=True,
@@ -636,22 +665,41 @@ def test_analyzer_recompute_separates_recipes(dj_conn):
         conn.query("SET FOREIGN_KEY_CHECKS=1")
 
     try:
-        keys = (
-            rc.SortingAnalyzerVersions().key_source & {"sorting_id": sid}
-        ).fetch("KEY", as_dict=True)
-        recipes = {k["waveform_params_name"] for k in keys}
-        assert recipes == {_DISPLAY, "franklab_cortex_metric_waveforms"}, (
-            recipes
-        )
-        # Independent recipe rows, same sorting_id.
-        assert {str(k["sorting_id"]) for k in keys} == {str(sid)}
+        key_source = rc.SortingAnalyzerVersions().key_source
+        pc_recipes = {
+            k["waveform_params_name"]
+            for k in (key_source & {"sorting_id": sid_pc}).fetch(
+                "KEY", as_dict=True
+            )
+        }
+        skip_recipes = {
+            k["waveform_params_name"]
+            for k in (key_source & {"sorting_id": sid_skip}).fetch(
+                "KEY", as_dict=True
+            )
+        }
+        # PC-requesting sort: display + its metric recipe, as distinct keys.
+        assert pc_recipes == {
+            _DISPLAY,
+            "franklab_cortex_metric_waveforms",
+        }, pc_recipes
+        # Skip-PC sort: display ONLY. Its metric recipe was never built (skip
+        # PC), and the other sort's metric recipe does not leak onto it.
+        assert skip_recipes == {_DISPLAY}, skip_recipes
     finally:
         conn.query("SET FOREIGN_KEY_CHECKS=0")
         try:
             (
-                AnalyzerCurationSelection & {"analyzer_curation_id": acid}
+                AnalyzerCurationSelection
+                & [
+                    {"analyzer_curation_id": acid_pc},
+                    {"analyzer_curation_id": acid_skip},
+                ]
             ).delete_quick()
-            (SortingSelection & {"sorting_id": sid}).delete(safemode=False)
+            (
+                SortingSelection
+                & [{"sorting_id": sid_pc}, {"sorting_id": sid_skip}]
+            ).delete(safemode=False)
         finally:
             conn.query("SET FOREIGN_KEY_CHECKS=1")
 
