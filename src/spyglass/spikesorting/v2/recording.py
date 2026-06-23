@@ -1522,6 +1522,29 @@ class Recording(SpyglassMixin, dj.Computed):
         rec.annotate(is_filtered=True)
         return rec
 
+    # ---- visualization delegates (see v2.visualization facade) -----------
+
+    def plot_traces(self, key, *, raw=False, backend="matplotlib", **kwargs):
+        """Delegate to ``visualization.plot_recording_traces`` for this key.
+
+        A local-discoverability one-liner; the SI-widget routing over the saved
+        preprocessed recording lives in the ``v2.visualization`` facade, which
+        the notebook/docs teach as the primary surface.
+        """
+        from spyglass.spikesorting.v2 import visualization
+
+        return visualization.plot_recording_traces(
+            key, raw=raw, backend=backend, **kwargs
+        )
+
+    def plot_probe_map(self, key, *, backend="matplotlib", **kwargs):
+        """Delegate to ``visualization.plot_recording_probe_map`` for this key."""
+        from spyglass.spikesorting.v2 import visualization
+
+        return visualization.plot_recording_probe_map(
+            key, backend=backend, **kwargs
+        )
+
     def _rebuild_nwb_artifact(self, key) -> None:
         """Rebuild the NWB artifact for an existing row.
 

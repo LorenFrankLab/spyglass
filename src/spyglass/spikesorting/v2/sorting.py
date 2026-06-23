@@ -1795,6 +1795,89 @@ class Sorting(SpyglassMixin, dj.Computed):
         resolved.update(kwargs)
         return ensure_extensions(analyzer, extensions, job_kwargs=resolved)
 
+    # ---- visualization / export delegates (see v2.visualization facade) ---
+
+    def plot_summary(
+        self, key, *, compute_missing=False, backend="matplotlib", **kwargs
+    ):
+        """Delegate to ``visualization.plot_sorting_summary`` for this sort.
+
+        A local-discoverability one-liner; the display-analyzer routing and
+        extension policy live in the ``v2.visualization`` facade, which the
+        notebook/docs teach as the primary surface.
+        """
+        from spyglass.spikesorting.v2 import visualization
+
+        return visualization.plot_sorting_summary(
+            key, compute_missing=compute_missing, backend=backend, **kwargs
+        )
+
+    def plot_unit_summary(
+        self,
+        key,
+        unit_id,
+        *,
+        compute_missing=False,
+        backend="matplotlib",
+        **kwargs,
+    ):
+        """Delegate to ``visualization.plot_unit_summary`` for this sort."""
+        from spyglass.spikesorting.v2 import visualization
+
+        return visualization.plot_unit_summary(
+            key,
+            unit_id,
+            compute_missing=compute_missing,
+            backend=backend,
+            **kwargs,
+        )
+
+    def plot_waveforms(
+        self, key, unit_ids=None, *, backend="matplotlib", **kwargs
+    ):
+        """Delegate to ``visualization.plot_waveforms`` for this sort."""
+        from spyglass.spikesorting.v2 import visualization
+
+        return visualization.plot_waveforms(
+            key, unit_ids=unit_ids, backend=backend, **kwargs
+        )
+
+    def plot_spikes_on_traces(
+        self, key, *, compute_missing=False, backend="matplotlib", **kwargs
+    ):
+        """Delegate to ``visualization.plot_spikes_on_traces`` for this sort."""
+        from spyglass.spikesorting.v2 import visualization
+
+        return visualization.plot_spikes_on_traces(
+            key, compute_missing=compute_missing, backend=backend, **kwargs
+        )
+
+    def plot_unit_locations(
+        self, key, *, compute_missing=False, backend="matplotlib", **kwargs
+    ):
+        """Delegate to ``visualization.plot_unit_locations`` for this sort."""
+        from spyglass.spikesorting.v2 import visualization
+
+        return visualization.plot_unit_locations(
+            key, compute_missing=compute_missing, backend=backend, **kwargs
+        )
+
+    def export_si_report(
+        self, key, output_folder, *, force_computation=False, **kwargs
+    ):
+        """Delegate to ``visualization.export_si_report`` for this sort."""
+        from spyglass.spikesorting.v2 import visualization
+
+        return visualization.export_si_report(
+            key, output_folder, force_computation=force_computation, **kwargs
+        )
+
+    def export_to_phy(self, key, output_folder, **kwargs):
+        """Delegate to ``visualization.export_to_phy`` for this sort."""
+        from spyglass.spikesorting.v2 import visualization
+
+        return visualization.export_to_phy(key, output_folder, **kwargs)
+
     def _rebuild_analyzer_folder(self, key) -> None:
         """Rebuild the analyzer folder for an existing Sorting row.
 

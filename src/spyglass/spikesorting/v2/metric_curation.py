@@ -1512,6 +1512,47 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
         )
         return plot_burst_metrics(rows)
 
+    # ---- SI metric / merge delegates (see v2.visualization facade) --------
+
+    def plot_metrics(self, key, *, backend="matplotlib", **kwargs):
+        """Delegate to ``visualization.plot_metrics`` for this curation.
+
+        A local-discoverability one-liner over the Spyglass-routed
+        ``get_metrics()`` table; the plotting lives in the ``v2.visualization``
+        facade, which the notebook/docs teach as the primary surface.
+        """
+        from spyglass.spikesorting.v2 import visualization
+
+        return visualization.plot_metrics(key, backend=backend, **kwargs)
+
+    def plot_si_quality_metrics(
+        self, key, *, compute_missing=False, backend="matplotlib", **kwargs
+    ):
+        """Delegate to ``visualization.plot_si_quality_metrics`` (raw SI view)."""
+        from spyglass.spikesorting.v2 import visualization
+
+        return visualization.plot_si_quality_metrics(
+            key, compute_missing=compute_missing, backend=backend, **kwargs
+        )
+
+    def plot_si_template_metrics(
+        self, key, *, compute_missing=False, backend="matplotlib", **kwargs
+    ):
+        """Delegate to ``visualization.plot_si_template_metrics`` (raw SI view)."""
+        from spyglass.spikesorting.v2 import visualization
+
+        return visualization.plot_si_template_metrics(
+            key, compute_missing=compute_missing, backend=backend, **kwargs
+        )
+
+    def plot_potential_merges(self, key, *, backend="matplotlib", **kwargs):
+        """Delegate to ``visualization.plot_potential_merges`` for this curation."""
+        from spyglass.spikesorting.v2 import visualization
+
+        return visualization.plot_potential_merges(
+            key, backend=backend, **kwargs
+        )
+
 
 class _WaveformsAccessor:
     """Narrow ``WaveformExtractor``-shaped view over a SortingAnalyzer.

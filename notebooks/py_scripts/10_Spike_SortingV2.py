@@ -431,6 +431,59 @@ print(
     f"{int((~is_interneuron).sum())} putative pyramidal"
 )
 
+# ### 7e. Inspect with the SpikeInterface bridge (`ssviz`)
+#
+# The curation views above are lab-specific. For general inspection there is one
+# discoverable namespace — `visualization` (import it as `ssviz`) — that wraps
+# SpikeInterface's own widgets/exporters behind Spyglass keys, so you
+# tab-complete a single module instead of hunting for plot methods across
+# `Recording`, `Sorting`, and `AnalyzerCuration`. `available_visualizations()`
+# catalogs every visualization/export helper with a one-line description, the key
+# it takes, what it wraps, and whether it can fill in a missing analyzer
+# extension (the `recording_key_for_sorting` convenience used below is a key
+# resolver, not a plot, so it is not in the catalog).
+#
+# Routing is automatic and matters: recording widgets read the saved
+# **preprocessed** recording; sorting/waveform/location widgets read the sort's
+# **display** (unwhitened) analyzer, so you see real µV waveforms and real probe
+# positions — never the whitened metric analyzer. `plot_metrics` plots the
+# routed `AnalyzerCuration.get_metrics()` table (the same numbers as section 7),
+# while the raw SpikeInterface metric widgets are separately named
+# (`plot_si_quality_metrics` / `plot_si_template_metrics`) and read analyzer
+# extensions directly. `plot_potential_merges` shows the **persisted**
+# `get_merge_groups()` suggestions and never recomputes candidates at plot time.
+
+from spyglass.spikesorting.v2 import visualization as ssviz
+
+ssviz.available_visualizations()
+
+# Plot helpers are read-only by default: a richer widget whose display-safe
+# extension has not been computed yet raises a clear error naming the
+# `add_extensions(...)` call; pass `compute_missing=True` to compute only that
+# display-safe extension first (as `plot_unit_summary` does below for
+# `unit_locations`). The default backend is local `matplotlib`; the web-capable
+# `backend="sortingview"` is an explicit opt-in, and no step here uploads or
+# publishes anything. `plot_recording_probe_map(recording_key)` rounds out the
+# recording view (pass a 3D `ax=` for a probe with z-coordinates), and
+# `ssviz.export_si_report(sorting_key, folder, force_computation=True)` /
+# `ssviz.export_to_phy(sorting_key, folder)` write a local SI report / Phy folder
+# off the display analyzer. Interactive web curation (FigPack) is a later release.
+
+# +
+sorting_key = {"sorting_id": run_summary["sorting_id"]}
+# The facade resolves the saved recording's key for you (no hunting through
+# SortingSelection); the recording widgets take that recording_key.
+recording_key = ssviz.recording_key_for_sorting(sorting_key)
+
+ssviz.plot_recording_traces(recording_key, time_range=[0.0, 1.0])
+
+unit_ids = list(Sorting().get_sorting(sorting_key).get_unit_ids())
+if unit_ids:
+    ssviz.plot_unit_summary(sorting_key, unit_ids[0], compute_missing=True)
+
+ssviz.plot_metrics(final_sel)  # the routed Spyglass metric table, plotted
+# -
+
 # ## 8. Downstream: choose the output accessor
 #
 # The payoff: the sort is resolvable through the `SpikeSortingOutput` merge
