@@ -1611,7 +1611,9 @@ class Sorting(SpyglassMixin, dj.Computed):
         """
         return recording_timestamps(recording_row)
 
-    def get_analyzer(self, key: dict) -> "si.SortingAnalyzer":
+    def get_analyzer(
+        self, key: dict, waveform_params_name: str | None = None
+    ) -> "si.SortingAnalyzer":
         """Return the SortingAnalyzer; rebuild on missing folder.
 
         Recompute is in-place; the DataJoint row is not deleted on a
@@ -1639,6 +1641,12 @@ class Sorting(SpyglassMixin, dj.Computed):
         ----------
         key : dict
             Restriction selecting a single ``Sorting`` row.
+        waveform_params_name : str, optional
+            The analyzer recipe to load. ``None`` (default) loads the sort's
+            stored DISPLAY recipe (``display_waveform_params_name``); a caller
+            needing the whitened metric recipe (e.g. the PC/NN cluster-
+            separation metrics in ``AnalyzerCuration``) passes it explicitly.
+            A missing folder is rebuilt for whichever recipe is requested.
 
         Returns
         -------
@@ -1646,7 +1654,9 @@ class Sorting(SpyglassMixin, dj.Computed):
             The loaded ``SortingAnalyzer`` for the sort, rebuilt in
             place if its folder was missing.
         """
-        return load_or_rebuild_analyzer(self, key)
+        return load_or_rebuild_analyzer(
+            self, key, waveform_params_name=waveform_params_name
+        )
 
     def add_extensions(
         self, key: dict, extensions: list[str], **kwargs

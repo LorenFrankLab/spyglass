@@ -50,8 +50,12 @@ from spyglass.spikesorting.v2.exceptions import (
     UnsupportedDirectInsertError,
     ZeroUnitAnalyzerError,
 )
+from spyglass.spikesorting.v2._recipe_catalog import (
+    waveform_params_for_preprocessing,
+)
 from spyglass.spikesorting.v2.recording import RecordingSelection
 from spyglass.spikesorting.v2.sorting import (
+    AnalyzerWaveformParameters,
     Sorting,
     SortingSelection,
 )
@@ -96,11 +100,38 @@ def _nwb_file_name_for_sorting(sorting_key: dict) -> str:
     )
 
 
+def _pca_metric_names() -> set[str]:
+    """The installed SI's PCA-based quality metrics.
+
+    These (``d_prime``, ``mahalanobis``, ``nearest_neighbor``, ``nn_advanced``,
+    ``silhouette`` in SI 0.104) require the ``principal_components`` extension
+    and measure cluster separation, so they compute in the decorrelated
+    (whitened) space -- the whitened METRIC analyzer. Everything else (voltage /
+    spike-train metrics) stays on the unwhitened DISPLAY analyzer. Read from SI
+    rather than hardcoded so the split tracks the pinned SI version.
+    """
+    try:
+        from spikeinterface.metrics.quality import (
+            get_quality_pca_metric_list,
+        )
+    except ImportError:  # pragma: no cover - pinned 0.104 has this
+        from spikeinterface.qualitymetrics import get_quality_pca_metric_list
+
+    return set(get_quality_pca_metric_list())
+
+
+def _requested_pc_metrics(metric_names) -> list[str]:
+    """PC/NN metrics among ``metric_names`` (route to the whitened analyzer)."""
+    pca = _pca_metric_names()
+    return [name for name in metric_names if name in pca]
+
+
 class AnalyzerCurationFetched(NamedTuple):
     """DB inputs for ``AnalyzerCuration.make_compute`` (no SI/NWB I/O)."""
 
     sorting_id: str
     curation_id: int
+    metric_waveform_params_name: str
     nwb_file_name: str
     metric_names: list[str]
     metric_kwargs: dict[str, dict]
@@ -509,6 +540,7 @@ class AnalyzerCurationSelection(
     -> CurationV2
     -> QualityMetricParameters
     -> AutoCurationRules
+    -> AnalyzerWaveformParameters.proj(metric_waveform_params_name="waveform_params_name")
     """
 
     @classmethod
@@ -517,11 +549,19 @@ class AnalyzerCurationSelection(
 
         The ``analyzer_curation_id`` PK is content-addressed (a ``uuid5`` of
         the logical identity ``(sorting_id, curation_id, metric_params_name,
-        auto_curation_rules_name)``) via the shared deterministic-selection
-        contract, so the same logical selection always maps to one id. The PK
-        uniqueness constraint -- not a check-then-insert dedup -- is the
-        concurrency guard: two concurrent callers compute the same id, the DB
-        accepts one, and the loser refetches it.
+        auto_curation_rules_name, metric_waveform_params_name)``) via the shared
+        deterministic-selection contract, so the same logical selection always
+        maps to one id. The PK uniqueness constraint -- not a check-then-insert
+        dedup -- is the concurrency guard: two concurrent callers compute the
+        same id, the DB accepts one, and the loser refetches it.
+
+        ``metric_waveform_params_name`` (the whitened analyzer recipe the PC/NN
+        metrics compute on) defaults to the sort's region metric row, resolved
+        from the sort source's preprocessing recipe (the same source-aware
+        resolution Phase 1 used for the display recipe: single-recording sorts
+        read ``RecordingSelection.preprocessing_params_name``, concat-backed
+        sorts read the ``ConcatenatedRecordingSelection -> PreprocessingParameters``
+        FK). Pass it explicitly in ``key`` to override.
 
         Raises ``DuplicateSelectionError`` if any existing row for this
         identity carries a non-deterministic id (a raw ``dj.insert`` bypass or
@@ -535,11 +575,27 @@ class AnalyzerCurationSelection(
         )
         from spyglass.spikesorting.v2.utils import _is_duplicate_key_error
 
+        metric_waveform_params_name = key.get("metric_waveform_params_name")
+        if metric_waveform_params_name is None:
+            # Default = the sort's region metric (whitened) recipe, resolved
+            # source-aware from the source preprocessing recipe (recording or
+            # concat), mirroring the Phase-1 display resolution. ``[1]`` is the
+            # metric element of the (display, metric) pair.
+            preproc = (
+                SortingSelection.resolve_source_preprocessing_params_name(
+                    {"sorting_id": key["sorting_id"]}
+                )
+            )
+            metric_waveform_params_name = waveform_params_for_preprocessing(
+                preproc
+            )[1]
+
         identity = {
             "sorting_id": key["sorting_id"],
             "curation_id": key["curation_id"],
             "metric_params_name": key["metric_params_name"],
             "auto_curation_rules_name": key["auto_curation_rules_name"],
+            "metric_waveform_params_name": metric_waveform_params_name,
         }
         analyzer_curation_id = deterministic_id("analyzer_curation", identity)
         assert_supplied_id_matches(
@@ -671,6 +727,7 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
         return AnalyzerCurationFetched(
             sorting_id=str(sel["sorting_id"]),
             curation_id=int(sel["curation_id"]),
+            metric_waveform_params_name=sel["metric_waveform_params_name"],
             nwb_file_name=_nwb_file_name_for_sorting(sorting_key),
             metric_names=list(qm["metric_names"]),
             metric_kwargs=dict(qm["metric_kwargs"] or {}),
@@ -688,6 +745,7 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
         key,
         sorting_id,
         curation_id,
+        metric_waveform_params_name,
         nwb_file_name,
         metric_names,
         metric_kwargs,
@@ -697,13 +755,20 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
         rule_rows,
         job_kwargs,
     ) -> AnalyzerCurationComputed:
-        """Compute metrics / merges / labels and write the NWB tables."""
+        """Compute metrics / merges / labels and write the NWB tables.
+
+        Routing (see the display-vs-metric contract): the unwhitened DISPLAY
+        analyzer carries voltage / spike-train metrics, amplitudes, and the
+        merge engine; the whitened METRIC analyzer carries ONLY the PC/NN
+        cluster-separation metrics. The whitened analyzer is built on demand
+        (cache miss) and only when PC metrics are actually requested.
+        """
         analysis_file_name = AnalysisNwbfile().create(nwb_file_name)
         abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
         sorting_key = {"sorting_id": sorting_id}
         try:
             try:
-                analyzer = Sorting().get_analyzer(sorting_key)
+                display_analyzer = Sorting().get_analyzer(sorting_key)
             except ZeroUnitAnalyzerError:
                 logger.warning(
                     "AnalyzerCuration: zero-unit sort "
@@ -714,8 +779,20 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
                     analysis_file_name, *object_ids, nwb_file_name
                 )
 
+            # The whitened metric analyzer is only needed for PC/NN metrics;
+            # building a second analyzer is expensive, so skip it when none are
+            # requested. (Display get_analyzer above already raised for a
+            # zero-unit sort, so we never build the metric analyzer for one.)
+            metric_analyzer = None
+            if not skip_pc_metrics and _requested_pc_metrics(metric_names):
+                metric_analyzer = Sorting().get_analyzer(
+                    sorting_key,
+                    waveform_params_name=metric_waveform_params_name,
+                )
+
             metrics_df = self._compute_metrics(
-                analyzer,
+                display_analyzer,
+                metric_analyzer,
                 metric_names,
                 metric_kwargs,
                 skip_pc_metrics,
@@ -723,7 +800,10 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
             )
             labels_by_unit = apply_label_rules(metrics_df, rule_rows)
             merge_groups = self._compute_merge_groups(
-                analyzer, auto_merge_preset, auto_merge_kwargs, job_kwargs
+                display_analyzer,
+                auto_merge_preset,
+                auto_merge_kwargs,
+                job_kwargs,
             )
             object_ids = write_analyzer_curation_tables(
                 abs_path,
@@ -775,40 +855,99 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def _compute_metrics(
-        analyzer, metric_names, metric_kwargs, skip_pc_metrics, job_kwargs=None
+        display_analyzer,
+        metric_analyzer,
+        metric_names,
+        metric_kwargs,
+        skip_pc_metrics,
+        job_kwargs=None,
     ):
-        """Compute extensions + quality metrics, adding Spyglass isi_violation.
+        """Compute quality metrics, routing PC/NN metrics to the whitened one.
 
-        ``job_kwargs`` (resolved n_jobs / chunk_duration / progress_bar) are
-        forwarded to the heavy extension computation so chronic runs honor the
-        configured concurrency.
+        Voltage / spike-train metrics (``snr``, ``amplitude_*``,
+        ``firing_rate``, ``num_spikes``, ``presence_ratio``, ``isi_violation``)
+        compute on the unwhitened DISPLAY analyzer -- whitening normalizes
+        per-channel variance, so SNR / amplitude on whitened traces would be
+        meaningless. PC / cluster-separation metrics (the SI PCA-metric set)
+        compute on the whitened METRIC analyzer, where decorrelated separation
+        is meaningful. The two frames are merged by unit id. Spyglass's
+        ``isi_violation`` fraction is added from the (recipe-independent) spike
+        times. ``job_kwargs`` drive the heavy extension computation.
         """
         import numpy as np
+        import pandas as pd
         from spikeinterface.metrics.quality import compute_quality_metrics
 
         from spyglass.spikesorting.v2._sorting_analyzer import (
             ensure_extensions,
         )
 
-        extensions = list(_CURATION_EXTENSIONS)
-        if not skip_pc_metrics:
-            extensions.append("principal_components")
-        # Idempotent add (skips present extensions, strips random_seed); the
-        # resolved job_kwargs drive the heavy extension compute.
-        ensure_extensions(analyzer, extensions, job_kwargs=job_kwargs)
-        metrics_df = compute_quality_metrics(
-            analyzer,
-            metric_names=metric_names,
-            metric_params=metric_kwargs or None,
-            skip_pc_metrics=skip_pc_metrics,
+        metric_kwargs = metric_kwargs or {}
+        pc_names = _requested_pc_metrics(metric_names)
+        pc_set = set(pc_names)
+        voltage_names = [m for m in metric_names if m not in pc_set]
+
+        frames = []
+        # Voltage / spike-train metrics -> unwhitened display analyzer.
+        if voltage_names:
+            ensure_extensions(
+                display_analyzer,
+                list(_CURATION_EXTENSIONS),
+                job_kwargs=job_kwargs,
+            )
+            voltage_df = compute_quality_metrics(
+                display_analyzer,
+                metric_names=voltage_names,
+                metric_params={
+                    k: v for k, v in metric_kwargs.items() if k in voltage_names
+                }
+                or None,
+                skip_pc_metrics=True,
+            )
+            voltage_df.index = voltage_df.index.astype(int)
+            frames.append(voltage_df)
+
+        # PC / cluster-separation metrics -> whitened metric analyzer.
+        if pc_names and not skip_pc_metrics:
+            if metric_analyzer is None:
+                raise ValueError(
+                    "PC/NN metrics were requested but no whitened metric "
+                    "analyzer was provided -- make_compute must build it when "
+                    "PC metrics are requested."
+                )
+            ensure_extensions(
+                metric_analyzer,
+                ["principal_components"],
+                job_kwargs=job_kwargs,
+            )
+            pc_df = compute_quality_metrics(
+                metric_analyzer,
+                metric_names=pc_names,
+                metric_params={
+                    k: v for k, v in metric_kwargs.items() if k in pc_names
+                }
+                or None,
+                skip_pc_metrics=False,
+            )
+            pc_df.index = pc_df.index.astype(int)
+            frames.append(pc_df)
+
+        if not frames:
+            raise ValueError(
+                "No metrics to compute: metric_names contains only PC/NN "
+                "metrics but skip_pc_metrics=True. Set skip_pc_metrics=False "
+                "to compute them."
+            )
+        metrics_df = (
+            pd.concat(frames, axis=1) if len(frames) > 1 else frames[0]
         )
-        metrics_df.index = metrics_df.index.astype(int)
+
         if (
             "isi_violation" in metric_names
             and "isi_violations_count" in metrics_df.columns
         ):
             counts = metrics_df["isi_violations_count"].to_numpy()
-            n_by_unit = analyzer.sorting.count_num_spikes_per_unit()
+            n_by_unit = display_analyzer.sorting.count_num_spikes_per_unit()
             n_spikes = np.array(
                 [n_by_unit[int(u)] for u in metrics_df.index], dtype=float
             )

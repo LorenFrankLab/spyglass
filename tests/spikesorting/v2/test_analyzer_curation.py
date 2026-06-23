@@ -199,14 +199,18 @@ def test_auto_curation_rules_existing_name_must_match_payload(dj_conn):
 
 @pytest.fixture
 def analyzer_curation_defaults(dj_conn):
-    """Ensure the default metric/auto-curation Lookup rows exist."""
+    """Ensure the default metric/auto-curation/waveform Lookup rows exist."""
     from spyglass.spikesorting.v2.metric_curation import (
         AutoCurationRules,
         QualityMetricParameters,
     )
+    from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
 
     QualityMetricParameters.insert_default()
     AutoCurationRules.insert_default()
+    # The curation selection's metric_waveform_params_name FK resolves to a
+    # metric (whitened) row, so the catalog rows must exist.
+    AnalyzerWaveformParameters.insert_default()
 
 
 def _populate_analyzer_curation(curation_key, metric_params, rules_name):
@@ -567,16 +571,122 @@ def test_analyzer_curation_selection_idempotent_content_addressed(
     sel2 = AnalyzerCurationSelection.insert_selection(key)  # idempotent refetch
     assert sel1 == sel2
 
+    # The metric waveform recipe resolved from the sort source is part of the
+    # content-addressed identity; recompute with the stored value.
+    metric_wf = (AnalyzerCurationSelection & sel1).fetch1(
+        "metric_waveform_params_name"
+    )
     identity = {
         "sorting_id": key["sorting_id"],
         "curation_id": key["curation_id"],
         "metric_params_name": "minimal",
         "auto_curation_rules_name": "none",
+        "metric_waveform_params_name": metric_wf,
     }
     expected = deterministic_id("analyzer_curation", identity)
     assert str(sel1["analyzer_curation_id"]) == str(expected)
     assert len(AnalyzerCurationSelection & sel1) == 1  # no duplicate row
     (AnalyzerCurationSelection & sel1).delete(safemode=False)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_analyzer_curation_selection_tracks_waveform_params(
+    populated_sorting_with_curation, analyzer_curation_defaults
+):
+    """Two metric (whitened) recipes give two distinct analyzer_curation_ids.
+
+    The metric waveform recipe is part of the content-addressed identity, so a
+    curation against the cortex metric analyzer and one against the hippocampus
+    metric analyzer are tracked as separate selections (v1-parity: v1 attached
+    ``WaveformParameters`` to ``MetricCurationSelection``); each stored row
+    carries the recipe it was inserted with.
+    """
+    from spyglass.spikesorting.v2.metric_curation import (
+        AnalyzerCurationSelection,
+    )
+
+    base = {
+        **populated_sorting_with_curation,
+        "metric_params_name": "minimal",
+        "auto_curation_rules_name": "none",
+    }
+    sel_cortex = AnalyzerCurationSelection.insert_selection(
+        {
+            **base,
+            "metric_waveform_params_name": "franklab_cortex_metric_waveforms",
+        }
+    )
+    sel_hippo = AnalyzerCurationSelection.insert_selection(
+        {
+            **base,
+            "metric_waveform_params_name": (
+                "franklab_hippocampus_metric_waveforms"
+            ),
+        }
+    )
+    try:
+        assert (
+            sel_cortex["analyzer_curation_id"]
+            != sel_hippo["analyzer_curation_id"]
+        )
+        assert (
+            AnalyzerCurationSelection & sel_cortex
+        ).fetch1(
+            "metric_waveform_params_name"
+        ) == "franklab_cortex_metric_waveforms"
+        assert (
+            AnalyzerCurationSelection & sel_hippo
+        ).fetch1(
+            "metric_waveform_params_name"
+        ) == "franklab_hippocampus_metric_waveforms"
+    finally:
+        (AnalyzerCurationSelection & sel_cortex).delete(safemode=False)
+        (AnalyzerCurationSelection & sel_hippo).delete(safemode=False)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_analyzer_curation_selection_resolves_concat_metric_waveform_params(
+    populated_sorting_with_curation, analyzer_curation_defaults, monkeypatch
+):
+    """The default metric recipe follows the source resolver's preproc.
+
+    ``insert_selection`` resolves the metric recipe from
+    ``SortingSelection.resolve_source_preprocessing_params_name`` (source-aware:
+    single-recording vs the ``ConcatenatedRecordingSelection -> Preprocessing``
+    FK). A true populated concat sort is parent-Phase-3-gated, so patch the
+    resolver to return the hippocampus preproc (as it would for a hippocampus
+    concat source) and assert the stored metric recipe is the hippocampus metric
+    row, not the cortex fallback.
+    """
+    from spyglass.spikesorting.v2._recipe_catalog import (
+        HIPPOCAMPUS_METRIC_WAVEFORMS,
+        HIPPOCAMPUS_PREPROC,
+    )
+    from spyglass.spikesorting.v2.metric_curation import (
+        AnalyzerCurationSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    monkeypatch.setattr(
+        SortingSelection,
+        "resolve_source_preprocessing_params_name",
+        staticmethod(lambda key: HIPPOCAMPUS_PREPROC),
+    )
+    sel = AnalyzerCurationSelection.insert_selection(
+        {
+            **populated_sorting_with_curation,
+            "metric_params_name": "minimal",
+            "auto_curation_rules_name": "none",
+        }
+    )
+    try:
+        assert (AnalyzerCurationSelection & sel).fetch1(
+            "metric_waveform_params_name"
+        ) == HIPPOCAMPUS_METRIC_WAVEFORMS
+    finally:
+        (AnalyzerCurationSelection & sel).delete(safemode=False)
 
 
 @pytest.mark.db_unit
@@ -627,11 +737,14 @@ def test_analyzer_curation_selection_rejects_bypassed_id(
         AnalyzerCurationSelection,
     )
 
+    # Pass metric_waveform_params_name explicitly so the planted row and the
+    # insert_selection call share one identity (no resolver in the loop).
     identity = {
         "sorting_id": populated_sorting_with_curation["sorting_id"],
         "curation_id": populated_sorting_with_curation["curation_id"],
         "metric_params_name": "minimal",
         "auto_curation_rules_name": "none",
+        "metric_waveform_params_name": "franklab_cortex_metric_waveforms",
     }
     bad_id = uuid.uuid4()
     AnalyzerCurationSelection().insert1(
@@ -708,3 +821,156 @@ def test_analyzer_curation_materializes_real_labels(
         ).fetch1("curation_source") == "analyzer_curation"
     finally:
         _teardown()
+
+
+# ---------- metric routing (display vs whitened metric analyzer) ------------
+#
+# These drive ``AnalyzerCuration._compute_metrics`` directly on synthetic
+# in-memory analyzers (no populate): a real unwhitened display analyzer and a
+# real whitened metric analyzer for one synthetic sort. They pin the routing
+# contract -- voltage/spike-train metrics read the display analyzer, only PC/NN
+# cluster-separation metrics read the whitened one.
+
+
+@pytest.fixture(scope="module")
+def display_and_metric_analyzers(dj_conn, tmp_path_factory):
+    """A real unwhitened DISPLAY + whitened METRIC analyzer for one sort.
+
+    Built with ``build_analyzer`` (the production path) on a synthetic
+    recording, differing only in the recipe's ``whiten`` flag, so routing tests
+    have the two analyzers a populated sort would have -- without a populate.
+    """
+    import spikeinterface.full as si
+
+    from spyglass.spikesorting.v2._sorting_analyzer import build_analyzer
+
+    rec, sort = si.generate_ground_truth_recording(
+        durations=[15.0],
+        num_channels=4,
+        num_units=4,
+        seed=0,
+        sampling_frequency=30000.0,
+    )
+    root = tmp_path_factory.mktemp("metric_routing")
+    common = dict(
+        key={"sorting_id": "routing"},
+        sorter_row={"job_kwargs": {}},
+        job_kwargs={},
+    )
+    window = {"ms_before": 1.0, "ms_after": 2.0, "max_spikes_per_unit": 20000}
+    build_analyzer(
+        sort,
+        rec,
+        analyzer_folder=root / "display.zarr",
+        waveform_params={
+            **window,
+            "whiten": False,
+            "purpose": "display",
+            "schema_version": 1,
+        },
+        **common,
+    )
+    build_analyzer(
+        sort,
+        rec,
+        analyzer_folder=root / "metric.zarr",
+        waveform_params={
+            **window,
+            "whiten": True,
+            "purpose": "metric",
+            "schema_version": 1,
+        },
+        **common,
+    )
+    return (
+        si.load_sorting_analyzer(root / "display.zarr"),
+        si.load_sorting_analyzer(root / "metric.zarr"),
+    )
+
+
+@pytest.mark.db_unit
+def test_metric_routing_by_type(display_and_metric_analyzers, monkeypatch):
+    """Voltage metrics compute on the display analyzer; PC/NN on the whitened.
+
+    Spies on ``compute_quality_metrics`` to capture which analyzer each metric
+    group is computed against. Voltage/spike-train names (``snr``,
+    ``firing_rate``) must hit the unwhitened display analyzer; the PC metric
+    (``nn_advanced``) must hit the whitened metric analyzer.
+    """
+    import spikeinterface.metrics.quality as siq
+
+    from spyglass.spikesorting.v2.metric_curation import AnalyzerCuration
+
+    display, metric = display_and_metric_analyzers
+    calls = []
+
+    def _spy(analyzer, metric_names, metric_params=None, skip_pc_metrics=False):
+        which = (
+            "display"
+            if analyzer is display
+            else "metric"
+            if analyzer is metric
+            else "other"
+        )
+        calls.append((which, set(metric_names)))
+        return pd.DataFrame(
+            index=list(analyzer.sorting.unit_ids),
+            data={name: 0.0 for name in metric_names},
+        )
+
+    # _compute_metrics imports compute_quality_metrics inside the function, so
+    # patching the source-module attribute is picked up at call time.
+    monkeypatch.setattr(siq, "compute_quality_metrics", _spy)
+
+    AnalyzerCuration._compute_metrics(
+        display,
+        metric,
+        metric_names=["snr", "firing_rate", "nn_advanced"],
+        metric_kwargs={},
+        skip_pc_metrics=False,
+        job_kwargs={},
+    )
+
+    voltage_calls = [c for c in calls if c[1] & {"snr", "firing_rate"}]
+    pc_calls = [c for c in calls if "nn_advanced" in c[1]]
+    assert voltage_calls and all(c[0] == "display" for c in voltage_calls)
+    assert pc_calls and all(c[0] == "metric" for c in pc_calls)
+    # The whitened analyzer is never asked for a voltage metric.
+    assert not any(
+        c[0] == "metric" and (c[1] & {"snr", "firing_rate"}) for c in calls
+    )
+
+
+@pytest.mark.db_unit
+def test_snr_unaffected_by_metric_whitening(display_and_metric_analyzers):
+    """``snr`` is identical with or without a whitened metric analyzer.
+
+    snr always reads the unwhitened display analyzer, so whether the whitened
+    metric analyzer participates (PC metrics requested) must not change it --
+    a guard that whitening never leaks into voltage metrics.
+    """
+    import numpy as np
+
+    from spyglass.spikesorting.v2.metric_curation import AnalyzerCuration
+
+    display, metric = display_and_metric_analyzers
+    with_metric = AnalyzerCuration._compute_metrics(
+        display,
+        metric,
+        ["snr", "nn_advanced"],
+        {},
+        skip_pc_metrics=False,
+        job_kwargs={},
+    )
+    without_metric = AnalyzerCuration._compute_metrics(
+        display,
+        None,
+        ["snr"],
+        {},
+        skip_pc_metrics=True,
+        job_kwargs={},
+    )
+    np.testing.assert_array_equal(
+        with_metric.loc[without_metric.index, "snr"].to_numpy(),
+        without_metric["snr"].to_numpy(),
+    )
