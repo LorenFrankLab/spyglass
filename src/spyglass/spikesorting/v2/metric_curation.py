@@ -45,6 +45,7 @@ from spyglass.spikesorting.v2._params.metric_curation import (
     AutoCurationRulesSchema,
     QualityMetricParamsSchema,
     _available_pca_metric_names,
+    required_extensions_for_metrics,
 )
 from spyglass.spikesorting.v2.curation import CurationV2
 from spyglass.spikesorting.v2.exceptions import (
@@ -1037,9 +1038,30 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
         frames = []
         # Voltage / spike-train metrics -> unwhitened display analyzer.
         if voltage_names:
+            # Compute each requested voltage metric's display-safe extension
+            # dependencies (read from SI's registry, not hardcoded) beyond the
+            # default curation set -- otherwise SI silently skips a metric whose
+            # extension is absent (e.g. ``drift`` needs ``spike_locations``),
+            # leaving the column missing and any rule thresholding it never
+            # firing. ``principal_components`` is excluded defensively: it is
+            # metric-analyzer-only and voltage metrics never depend on it.
+            base_present = {
+                "random_spikes",
+                "noise_levels",
+                "templates",
+                "waveforms",
+                *_CURATION_EXTENSIONS,
+            }
+            extra_extensions = [
+                ext
+                for ext in required_extensions_for_metrics(
+                    voltage_names, base_present
+                )
+                if ext != "principal_components"
+            ]
             ensure_extensions(
                 display_analyzer,
-                list(_CURATION_EXTENSIONS),
+                list(_CURATION_EXTENSIONS) + extra_extensions,
                 job_kwargs=job_kwargs,
             )
             voltage_df = compute_quality_metrics(

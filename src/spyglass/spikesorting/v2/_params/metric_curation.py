@@ -124,6 +124,48 @@ def _available_pca_metric_names() -> tuple[str, ...]:
     return tuple(get_quality_pca_metric_list())
 
 
+def required_extensions_for_metrics(
+    metric_names, present_extensions
+) -> list[str]:
+    """Extensions the requested metrics need that are not already present.
+
+    Reads each metric's ``depend_on`` from SpikeInterface's quality-metric
+    registry (not a hardcoded map), so a metric whose dependency is outside the
+    pipeline's default ensured set -- e.g. ``drift`` needs ``spike_locations`` --
+    has that dependency computed rather than silently skipped by SI (SI's
+    ``compute_quality_metrics`` warns-and-skips a metric whose extension is
+    absent, leaving the column silently missing). ``"a|b"`` is an either-or
+    dependency: satisfied if any option is already present, otherwise the first
+    option is requested (so ``amplitude_cutoff``'s
+    ``"spike_amplitudes|amplitude_scalings"`` adds nothing when
+    ``spike_amplitudes`` is already ensured, rather than spuriously computing
+    ``amplitude_scalings``).
+
+    Callers pass only the VOLTAGE metric names (PCA metrics route to the whitened
+    analyzer separately), so every returned extension is display-safe.
+    Order-preserving and idempotent against ``present_extensions``.
+    """
+    try:
+        from spikeinterface.metrics.quality.quality_metrics import (
+            ComputeQualityMetrics,
+        )
+    except ImportError:  # pragma: no cover - pinned 0.104 layout
+        from spikeinterface.qualitymetrics.quality_metric_calculator import (
+            ComputeQualityMetrics,
+        )
+
+    present = set(present_extensions)
+    needed: list[str] = []
+    for name in metric_names:
+        metric_class = ComputeQualityMetrics.get_metric_by_name(name)
+        for dep in metric_class.depend_on:
+            options = dep.split("|")
+            if any(o in present or o in needed for o in options):
+                continue
+            needed.append(options[0])
+    return needed
+
+
 def _available_template_metric_columns() -> list[str]:
     """Installed SI's single-channel template-metric output COLUMNS (lazy).
 

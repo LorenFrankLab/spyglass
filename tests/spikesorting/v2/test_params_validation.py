@@ -1336,3 +1336,60 @@ def test_auto_curation_rules_rejects_duplicate_rule_index():
                 {**rule, "rule_index": 0},
             ],
         )
+
+
+# ---- metric extension-dependency resolution (drift et al.) -----------------
+
+_BASE_EXTENSIONS = frozenset(
+    {"random_spikes", "noise_levels", "templates", "waveforms"}
+)
+
+
+@pytest.mark.unit
+def test_required_extensions_drift_needs_spike_locations():
+    """``drift`` pulls in ``spike_locations`` (read from SI, not hardcoded).
+
+    The default curation ensure-set omits ``spike_locations``; without deriving
+    it, SI's ``compute_quality_metrics`` silently skips ``drift``. The resolver
+    reports the dependency so the pipeline can compute it.
+    """
+    from spyglass.spikesorting.v2._params.metric_curation import (
+        required_extensions_for_metrics,
+    )
+
+    assert required_extensions_for_metrics(["drift"], _BASE_EXTENSIONS) == [
+        "spike_locations"
+    ]
+
+
+@pytest.mark.unit
+def test_required_extensions_present_dep_is_not_recomputed():
+    """A metric whose dependency is already present needs nothing extra."""
+    from spyglass.spikesorting.v2._params.metric_curation import (
+        required_extensions_for_metrics,
+    )
+
+    # snr depends on noise_levels + templates, both base -> nothing extra.
+    assert required_extensions_for_metrics(["snr"], _BASE_EXTENSIONS) == []
+
+
+@pytest.mark.unit
+def test_required_extensions_either_or_dep_satisfied_without_spurious_compute():
+    """An ``a|b`` dependency is satisfied by either option already present.
+
+    ``amplitude_cutoff`` depends on ``spike_amplitudes|amplitude_scalings``. With
+    ``spike_amplitudes`` already ensured (the curation default) nothing extra is
+    needed -- in particular ``amplitude_scalings`` is NOT spuriously computed.
+    Without either present, the first option is requested.
+    """
+    from spyglass.spikesorting.v2._params.metric_curation import (
+        required_extensions_for_metrics,
+    )
+
+    with_amps = _BASE_EXTENSIONS | {"spike_amplitudes"}
+    assert (
+        required_extensions_for_metrics(["amplitude_cutoff"], with_amps) == []
+    )
+    assert required_extensions_for_metrics(
+        ["amplitude_cutoff"], _BASE_EXTENSIONS
+    ) == ["spike_amplitudes"]

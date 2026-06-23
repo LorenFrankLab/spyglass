@@ -1069,6 +1069,48 @@ def display_and_metric_analyzers(dj_conn, tmp_path_factory):
 
 
 @pytest.mark.db_unit
+def test_drift_metric_dependency_computed_not_silently_skipped(dj_conn):
+    """Requesting ``drift`` computes its ``spike_locations`` dep, not skips it.
+
+    ``drift`` depends on the ``spike_locations`` extension, which is not in the
+    default curation ensure-set. SI's ``compute_quality_metrics`` warns-and-skips
+    a metric whose extension is absent, so without deriving the dependency the
+    ``drift`` columns were silently missing from the persisted table (and any
+    AutoCurationRule thresholding drift would never fire). The drift columns must
+    now be present, and the dependency computed on the display analyzer.
+    """
+    import spikeinterface.full as si
+
+    from spyglass.spikesorting.v2.metric_curation import AnalyzerCuration
+
+    rec, sort = si.generate_ground_truth_recording(
+        durations=[30.0],
+        num_channels=4,
+        num_units=3,
+        seed=0,
+        sampling_frequency=30000.0,
+    )
+    analyzer = si.create_sorting_analyzer(
+        sort, rec, sparse=True, format="memory"
+    )
+    analyzer.compute(
+        ["random_spikes", "noise_levels", "templates", "waveforms"]
+    )
+    assert not analyzer.has_extension("spike_locations")
+
+    result = AnalyzerCuration._compute_metrics(
+        analyzer, None, ["snr", "drift"], {}, True
+    )
+
+    # drift emits drift_ptp / drift_mad / drift_std; before deriving the
+    # dependency none of these appeared (drift was silently skipped).
+    assert any(c.startswith("drift") for c in result.columns)
+    assert "snr" in result.columns
+    # The dependency was computed on the (display) analyzer it was handed.
+    assert analyzer.has_extension("spike_locations")
+
+
+@pytest.mark.db_unit
 def test_metric_routing_by_type(display_and_metric_analyzers, monkeypatch):
     """Voltage metrics compute on the display analyzer; PC/NN on the whitened.
 
