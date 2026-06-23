@@ -73,6 +73,24 @@ def _available_quality_metric_names() -> list[str]:
     return list(get_quality_metric_list())
 
 
+def _available_pca_metric_names() -> list[str]:
+    """Return the installed SI's PCA-based (``principal_components``) metrics.
+
+    These (``d_prime``, ``mahalanobis``, ``nearest_neighbor``, ``nn_advanced``,
+    ``silhouette`` in SI 0.104) are the only metrics that need the whitened
+    metric analyzer; ``skip_pc_metrics=False`` is meaningful only if at least
+    one is requested. Read from SI, not hardcoded, like the full list above.
+    """
+    try:
+        from spikeinterface.metrics.quality import (
+            get_quality_pca_metric_list,
+        )
+    except ImportError:  # pragma: no cover - pinned 0.104 always has this
+        from spikeinterface.qualitymetrics import get_quality_pca_metric_list
+
+    return list(get_quality_pca_metric_list())
+
+
 class QualityMetricParamsSchema(BaseModel):
     """Validated schema for a ``QualityMetricParameters`` row.
 
@@ -118,6 +136,27 @@ class QualityMetricParamsSchema(BaseModel):
                 f"in this SpikeInterface: {sorted(available)}."
             )
         return names
+
+    @model_validator(mode="after")
+    def _check_pc_metrics_consistent(self) -> "QualityMetricParamsSchema":
+        # skip_pc_metrics=False means "build the whitened metric analyzer and
+        # compute PC/NN metrics on it". It is meaningful ONLY if at least one
+        # PCA metric is requested; otherwise no metric analyzer is built and the
+        # flag is a contradiction. Enforcing this keeps skip_pc_metrics=False an
+        # exact signal that a metric analyzer exists, which recompute / orphan
+        # gating rely on. (skip_pc_metrics=True with PCA names is fine -- those
+        # metrics are simply skipped.)
+        if not self.skip_pc_metrics:
+            pca = set(_available_pca_metric_names())
+            if not (set(self.metric_names) & pca):
+                raise ValueError(
+                    "skip_pc_metrics=False but metric_names requests no PCA "
+                    f"metric (one of {sorted(pca)}). Either request a PCA "
+                    "metric (e.g. nn_advanced) or set skip_pc_metrics=True -- "
+                    "skip_pc_metrics=False with no PCA metric builds no metric "
+                    "analyzer and is a contradiction."
+                )
+        return self
 
     @model_validator(mode="after")
     def _check_kwargs_target_requested_metrics(

@@ -85,14 +85,34 @@ _CURATION_EXTENSIONS = (
 # recording is already SPATIALLY whitened (sip.whiten decorrelates channels);
 # SI's PCA then computes components on those decorrelated waveforms and, with
 # whiten=True, normalizes the component variances -- the standard input space
-# for the PC/NN cluster-separation metrics. These are SI 0.104's defaults,
-# pinned explicitly so a future SI default change cannot silently alter the
-# whitened-space PCA (and therefore the PC/NN metric values).
+# for the PC/NN cluster-separation metrics. These are SI 0.104's defaults
+# (including dtype), pinned explicitly so a future SI default change cannot
+# silently alter the whitened-space PCA (and therefore the PC/NN metric values).
 _PCA_EXTENSION_PARAMS = {
     "n_components": 5,
     "mode": "by_channel_local",
     "whiten": True,
+    "dtype": "float32",
 }
+
+
+def _pca_params_match(existing: dict) -> bool:
+    """True if a stored ``principal_components`` matches the pinned params.
+
+    Compared key-by-key over ``_PCA_EXTENSION_PARAMS`` only (SI may store extra
+    keys); ``dtype`` is normalized through ``np.dtype`` so the stored
+    ``dtype('float32')`` matches the pinned ``"float32"`` string.
+    """
+    import numpy as np
+
+    for key, pinned in _PCA_EXTENSION_PARAMS.items():
+        value = existing.get(key)
+        if key == "dtype":
+            if value is None or np.dtype(value) != np.dtype(pinned):
+                return False
+        elif value != pinned:
+            return False
+    return True
 
 _AUTO_MERGE_EXTRA_EXTENSIONS = {
     # SI's ``feature_neighbors`` preset includes the ``knn`` step, whose
@@ -950,6 +970,20 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
                     "analyzer was provided -- make_compute must build it when "
                     "PC metrics are requested."
                 )
+            # Enforce the pinned PCA params even if a stale/manual analyzer
+            # already carries principal_components computed with different ones
+            # (ensure_extensions skips a present extension without checking its
+            # params): drop a mismatched extension so it recomputes pinned.
+            if metric_analyzer.has_extension(
+                "principal_components"
+            ) and not _pca_params_match(
+                dict(
+                    metric_analyzer.get_extension(
+                        "principal_components"
+                    ).params
+                )
+            ):
+                metric_analyzer.delete_extension("principal_components")
             ensure_extensions(
                 metric_analyzer,
                 ["principal_components"],

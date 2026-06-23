@@ -65,8 +65,11 @@ trio so both recipes are covered and never collide.
   ([metric_curation.py:755-825](../../../../../src/spyglass/spikesorting/v2/metric_curation.py#L755-L825)): voltage / spike-train metrics
   (`snr`, `amplitude_cutoff`, `amplitude_median`, `firing_rate`, `num_spikes`,
   `presence_ratio`, `isi_violation`) compute on the **unwhitened display**
-  analyzer; PC / cluster-separation metrics (`principal_components`,
-  `nn_advanced`, `isolation_distance`, `l_ratio`, `d_prime`) compute on the
+  analyzer; PC / cluster-separation metrics (SI 0.104's
+  `get_quality_pca_metric_list()`: `d_prime`, `mahalanobis`, `nearest_neighbor`,
+  `nn_advanced`, `silhouette`, plus the `principal_components` extension they
+  need — `isolation_distance` / `l_ratio` are `mahalanobis` output columns in
+  0.104, not requestable names) compute on the
   **whitened metric** analyzer; merge the two metric frames by unit id. Whitening
   ALL metrics would make SNR/amplitude meaningless. `_compute_merge_groups` runs
   on the **unwhitened display** analyzer — its `similarity_correlograms` preset

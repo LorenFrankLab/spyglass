@@ -373,7 +373,10 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
         # Only selections that actually request PC/NN metrics build a whitened
         # metric analyzer (make_compute gates on skip_pc_metrics=False), so
         # restrict to those -- otherwise recompute would synthesize a metric
-        # analyzer a curation never built. sorting_id is carried explicitly: it
+        # analyzer a curation never built. QualityMetricParameters validates
+        # skip_pc_metrics=False => at least one PCA metric, so this flag is an
+        # EXACT signal that a metric analyzer exists (not a proxy). sorting_id
+        # is carried explicitly: it
         # is a SECONDARY (CurationV2) FK attr on the selection, not its uuid PK,
         # so a bare proj() would drop it and the semijoin would match on
         # waveform_params_name alone (leaking a recipe onto every sort).

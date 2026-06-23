@@ -1113,6 +1113,23 @@ def test_quality_metric_params_default_skip_pc_true():
     assert QualityMetricParamsSchema(metric_names=["snr"]).skip_pc_metrics
 
 
+def test_quality_metric_params_skip_pc_false_requires_pca_metric():
+    """``skip_pc_metrics=False`` is meaningful only with a PCA metric.
+
+    Without one no whitened metric analyzer would be built, so the flag is a
+    contradiction (and recompute/orphan gating treats skip_pc_metrics=False as
+    an exact "metric analyzer exists" signal). The schema rejects it; adding a
+    PCA metric (e.g. nn_advanced) makes it valid.
+    """
+    with pytest.raises(ValidationError, match="no PCA metric"):
+        QualityMetricParamsSchema(
+            metric_names=["snr", "firing_rate"], skip_pc_metrics=False
+        )
+    assert not QualityMetricParamsSchema(
+        metric_names=["snr", "nn_advanced"], skip_pc_metrics=False
+    ).skip_pc_metrics
+
+
 def test_quality_metric_params_rejects_unknown_metric_name():
     """An unknown metric name fails validation against SI's exported list."""
     with pytest.raises(ValidationError):
