@@ -15,6 +15,8 @@ Tables (all final-shape):
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import datajoint as dj
 
 from spyglass.common import IntervalList, LabTeam, Session  # noqa: F401
@@ -34,6 +36,9 @@ from spyglass.spikesorting.v2.utils import (
     validate_lookup_rows,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart
+
+if TYPE_CHECKING:
+    import spikeinterface as si
 
 _assert_v2_db_safe()
 schema = dj.schema("spikesorting_v2_session_group")
@@ -450,26 +455,261 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         """
 
     def make(self, key):
-        """Materialize the concatenated recording cache.
+        """Materialize the motion-corrected, unwhitened concat cache.
 
-        Gated until the concat materializer lands (raises
-        ``NotImplementedError`` today).
-        Forward-declared. ``SortingSelection.insert_selection`` also
-        rejects ``ConcatenatedRecordingSource`` requests with a matching
-        error until the consumer lands; the schemas are in their final
-        shape so both helpers can be relaxed without a migration.
+        Reuses each member's already-populated, cached ``Recording`` artifact
+        (NEVER calls ``Recording.populate`` -- a DataJoint anti-pattern; the
+        selection-time precondition guarantees the rows exist, and this method
+        defensively re-checks), stitches them into one mono-segment recording,
+        applies motion correction (resolving the Spyglass ``"auto"`` alias to
+        a same-day preset and rejecting it on multi-day groups), and writes a
+        single ``ElectricalSeries`` into an ``AnalysisNwbfile``. Whitening is
+        deliberately NOT applied here -- it stays a sorter/analyzer concern, so
+        the persisted concat recording is motion-corrected but unwhitened.
+        Cumulative per-member sample boundaries are persisted on
+        ``MemberBoundary`` for spike-time back-mapping.
 
         Parameters
         ----------
         key : dict
-            The ``ConcatenatedRecordingSelection`` primary key being
-            populated.
+            The ``ConcatenatedRecordingSelection`` primary key
+            (``{"concat_recording_id": ...}``) being populated.
 
         Raises
         ------
-        NotImplementedError
-            Always, until the concat materializer is implemented.
+        MissingRecordingForConcatError
+            If any member's ``Recording`` row is missing (the selection-time
+            precondition was bypassed).
+        ValueError
+            If ``preset="auto"`` on a multi-day group.
         """
-        raise NotImplementedError(
-            "ConcatenatedRecording.make() is not implemented yet"
+        import datetime as dt
+
+        from spyglass.spikesorting.v2._concat_recording import (
+            build_concatenated_recording,
+            cumulative_member_boundaries,
+            resolve_motion_correction,
         )
+        from spyglass.spikesorting.v2._recording_nwb import write_nwb_artifact
+        from spyglass.spikesorting.v2.exceptions import (
+            MissingRecordingForConcatError,
+        )
+        from spyglass.spikesorting.v2.recording import (
+            Recording,
+            RecordingSelection,
+            _ELECTRICAL_SERIES_PATH,
+        )
+        from spyglass.spikesorting.v2.utils import (
+            _resolved_job_kwargs,
+            transaction_or_noop,
+        )
+
+        # The populate key carries only concat_recording_id; every member and
+        # parameter query restricts with the fetched selection row, not the
+        # UUID-only key, so independent concat selections never cross-restrict.
+        sel = (ConcatenatedRecordingSelection & key).fetch1()
+        group_key = {
+            "session_group_owner": sel["session_group_owner"],
+            "session_group_name": sel["session_group_name"],
+        }
+        preprocessing_params_name = sel["preprocessing_params_name"]
+        members = (SessionGroup.Member & group_key).fetch(
+            as_dict=True, order_by="member_index"
+        )
+
+        recordings = []
+        member_sample_counts = []
+        member_indices = []
+        missing: list[dict] = []
+        for member in members:
+            rec_sel_key = {
+                "nwb_file_name": member["nwb_file_name"],
+                "sort_group_id": member["sort_group_id"],
+                "interval_list_name": member["interval_list_name"],
+                "preprocessing_params_name": preprocessing_params_name,
+                "team_name": member["team_name"],
+            }
+            rec_sel = RecordingSelection & rec_sel_key
+            if not rec_sel or not (Recording & rec_sel.fetch1("KEY")):
+                missing.append(rec_sel_key)
+                continue
+            recording = Recording().get_recording(rec_sel.fetch1("KEY"))
+            recordings.append(recording)
+            member_sample_counts.append(int(recording.get_num_samples()))
+            member_indices.append(int(member["member_index"]))
+        if missing:
+            raise MissingRecordingForConcatError(
+                "ConcatenatedRecording.make: "
+                f"{len(missing)} member Recording row(s) are not populated "
+                f"under preprocessing_params_name={preprocessing_params_name!r}: "
+                f"{missing}. Populate Recording for each member first "
+                "(ConcatenatedRecordingSelection.insert_selection enforces "
+                "this; the selection was likely inserted by a raw bypass)."
+            )
+
+        # Motion correction: resolve the Spyglass 'auto' alias against the
+        # group's multi-day status before any SpikeInterface call.
+        motion_row = (
+            MotionCorrectionParameters
+            & {
+                "motion_correction_params_name": (
+                    sel["motion_correction_params_name"]
+                )
+            }
+        ).fetch1()
+        motion_preset, preset_kwargs = resolve_motion_correction(
+            motion_row["params"],
+            is_multi_day=SessionGroup.is_multi_day(group_key),
+        )
+        # Job kwargs: preprocessing first, motion last (motion wins on
+        # conflict), per the job-kwargs resolution contract.
+        preprocessing_job_kwargs = (
+            PreprocessingParameters
+            & {"preprocessing_params_name": preprocessing_params_name}
+        ).fetch1("job_kwargs")
+        job_kwargs = _resolved_job_kwargs(
+            preprocessing_job_kwargs, motion_row["job_kwargs"]
+        )
+
+        corrected = build_concatenated_recording(
+            recordings,
+            motion_preset=motion_preset,
+            preset_kwargs=preset_kwargs,
+            job_kwargs=job_kwargs,
+        )
+
+        # Anchor the analysis NWB to the FIRST member's session (deterministic
+        # parent); full multi-session provenance stays queryable through
+        # ConcatenatedRecordingSelection -> SessionGroup.Member.
+        anchor_nwb_file_name = members[0]["nwb_file_name"]
+        preset_label = motion_preset or "none"
+        analysis_file_name, object_id, cache_hash = write_nwb_artifact(
+            corrected,
+            anchor_nwb_file_name,
+            filtering_description=(
+                f"Concatenated {len(recordings)} member recording(s) "
+                f"(preprocessing_params={preprocessing_params_name!r}); "
+                f"motion correction preset={preset_label!r}; unwhitened"
+            ),
+        )
+
+        boundaries = cumulative_member_boundaries(member_sample_counts)
+        sampling_frequency = float(corrected.get_sampling_frequency())
+        boundary_rows = [
+            {
+                **key,
+                "member_index": member_index,
+                "end_sample": int(end_sample),
+            }
+            for member_index, end_sample in zip(member_indices, boundaries)
+        ]
+
+        with transaction_or_noop(self.connection):
+            AnalysisNwbfile().add(anchor_nwb_file_name, analysis_file_name)
+            self.insert1(
+                {
+                    **key,
+                    "analysis_file_name": analysis_file_name,
+                    "electrical_series_path": _ELECTRICAL_SERIES_PATH,
+                    "object_id": object_id,
+                    "n_channels": int(corrected.get_num_channels()),
+                    "sampling_frequency": sampling_frequency,
+                    "total_duration_s": (
+                        int(corrected.get_num_samples()) / sampling_frequency
+                    ),
+                    "cache_hash": cache_hash,
+                }
+            )
+            self.MemberBoundary.insert(boundary_rows)
+
+    def get_recording(self, key) -> "si.BaseRecording":  # noqa: F821
+        """Return the cached concatenated SpikeInterface recording.
+
+        Reads the persisted motion-corrected, unwhitened ``ElectricalSeries``
+        through the stored ``electrical_series_path`` (authoritative, not an
+        auto-detect hint) and annotates ``is_filtered=True`` so a downstream
+        sorter does not re-filter the already-filtered cache -- the same
+        contract as ``Recording.get_recording``.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``ConcatenatedRecording`` row.
+
+        Returns
+        -------
+        si.BaseRecording
+            The concatenated, motion-corrected, unwhitened recording.
+        """
+        import spikeinterface.extractors as se
+
+        row = (self & key).fetch1()
+        abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
+        rec = se.read_nwb_recording(
+            abs_path,
+            electrical_series_path=row["electrical_series_path"],
+            load_time_vector=True,
+        )
+        rec.annotate(is_filtered=True)
+        return rec
+
+    def split_sorting_by_session(self, sorting, key) -> dict:
+        """Back-map a concat-frame sorting into per-member local sortings.
+
+        Slices each unit's concat-frame spike train into each member's LOCAL
+        sample frame using the persisted ``MemberBoundary`` cumulative sample
+        counts, so a sort run over the concatenated recording can be split back
+        into per-session sortings. Unit ids are preserved across members.
+
+        Parameters
+        ----------
+        sorting : si.BaseSorting
+            The sorting in the CONCATENATED recording's sample frame (e.g.
+            ``Sorting.get_analyzer(sorting_key).sorting`` or
+            ``Sorting.get_sorting(sorting_key)``).
+        key : dict
+            Restriction selecting a single ``ConcatenatedRecording`` row.
+
+        Returns
+        -------
+        dict[tuple[str, str], si.BaseSorting]
+            One ``NumpySorting`` per member, keyed by the hashable
+            ``(nwb_file_name, interval_list_name)`` tuple, with spike times in
+            that member's local sample frame.
+        """
+        import spikeinterface as si
+
+        from spyglass.spikesorting.v2._concat_recording import (
+            split_unit_spike_trains,
+        )
+
+        sel = (ConcatenatedRecordingSelection & key).fetch1()
+        group_key = {
+            "session_group_owner": sel["session_group_owner"],
+            "session_group_name": sel["session_group_name"],
+        }
+        members = (SessionGroup.Member & group_key).fetch(
+            as_dict=True, order_by="member_index"
+        )
+        # MemberBoundary is keyed by member_index; align to the member order.
+        end_by_index = dict(
+            (self.MemberBoundary & key).fetch("member_index", "end_sample")
+        )
+        boundaries = [
+            int(end_by_index[int(member["member_index"])]) for member in members
+        ]
+
+        unit_trains = {
+            int(unit_id): sorting.get_unit_spike_train(unit_id=unit_id)
+            for unit_id in sorting.unit_ids
+        }
+        per_member = split_unit_spike_trains(unit_trains, boundaries)
+        fs = float(sorting.get_sampling_frequency())
+        return {
+            (member["nwb_file_name"], member["interval_list_name"]): (
+                si.NumpySorting.from_unit_dict(
+                    [local_trains], sampling_frequency=fs
+                )
+            )
+            for member, local_trains in zip(members, per_member)
+        }

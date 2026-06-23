@@ -298,3 +298,168 @@ def test_concat_selection_distinct_for_distinct_motion_params(same_day_group):
         {**base, "motion_correction_params_name": "rigid_fast_default"}
     )
     assert none_pk["concat_recording_id"] != rigid_pk["concat_recording_id"]
+
+
+# ---------- ConcatenatedRecording.make / get_recording -------------------
+
+
+def _populate_concat_none(group_key, preprocessing_params_name):
+    """Insert + populate a no-motion ConcatenatedRecording; return its PK."""
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecording,
+        ConcatenatedRecordingSelection,
+    )
+
+    concat_pk = ConcatenatedRecordingSelection.insert_selection(
+        {
+            **group_key,
+            "preprocessing_params_name": preprocessing_params_name,
+            "motion_correction_params_name": "none",
+        }
+    )
+    ConcatenatedRecording.populate(concat_pk, reserve_jobs=False)
+    return concat_pk
+
+
+@pytest.mark.slow
+def test_concatenated_recording_make_shape(same_day_group):
+    """The materialized concat row carries the NWB pointers, channel count,
+    summed duration, cumulative integer boundaries, and reads back as one
+    mono-segment recording the length of both members."""
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
+
+    grp = same_day_group
+    concat_pk = _populate_concat_none(
+        grp["group_key"], grp["preprocessing_params_name"]
+    )
+
+    row = (ConcatenatedRecording & concat_pk).fetch1()
+    assert row["analysis_file_name"]
+    assert row["electrical_series_path"]
+    assert row["object_id"]
+    assert int(row["n_channels"]) == 4
+
+    n0 = Recording().get_recording(grp["recording_pks"][0]).get_num_samples()
+    n1 = Recording().get_recording(grp["recording_pks"][1]).get_num_samples()
+    fs = float(row["sampling_frequency"])
+    assert row["total_duration_s"] == pytest.approx((n0 + n1) / fs)
+
+    idxs, ends = (ConcatenatedRecording.MemberBoundary & concat_pk).fetch(
+        "member_index", "end_sample", order_by="member_index"
+    )
+    assert list(idxs) == [0, 1]
+    assert [int(e) for e in ends] == [n0, n0 + n1]
+
+    concat_rec = ConcatenatedRecording().get_recording(concat_pk)
+    assert concat_rec.get_num_segments() == 1
+    assert concat_rec.get_num_samples() == n0 + n1
+
+
+@pytest.mark.slow
+def test_concatenated_recording_make_never_calls_recording_populate(
+    same_day_group, monkeypatch
+):
+    """make() consumes cached Recording artifacts -- it must NOT call
+    Recording.populate (a DataJoint anti-pattern)."""
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
+
+    def _boom(*args, **kwargs):
+        raise AssertionError(
+            "ConcatenatedRecording.make must not call Recording.populate"
+        )
+
+    monkeypatch.setattr(Recording, "populate", _boom)
+    grp = same_day_group
+    concat_pk = _populate_concat_none(
+        grp["group_key"], grp["preprocessing_params_name"]
+    )
+    assert ConcatenatedRecording & concat_pk
+
+
+@pytest.mark.slow
+def test_concat_make_uses_selection_row_not_uuid_key(same_day_group):
+    """Two concat selections over different member sets populate independently:
+    each row's MemberBoundary count and duration reflect its OWN group, proving
+    make() restricts by the fetched selection row, not the UUID-only key."""
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecording,
+        SessionGroup,
+    )
+
+    grp = same_day_group
+    owner = grp["owner"]
+    # Group A is the fixture's two-member group; group B has only member 0.
+    SessionGroup.create_group(
+        owner, "sg_concat_b", [grp["same_day_members"][0]]
+    )
+    a_pk = _populate_concat_none(
+        grp["group_key"], grp["preprocessing_params_name"]
+    )
+    b_pk = _populate_concat_none(
+        {"session_group_owner": owner, "session_group_name": "sg_concat_b"},
+        grp["preprocessing_params_name"],
+    )
+    assert len(ConcatenatedRecording.MemberBoundary & a_pk) == 2
+    assert len(ConcatenatedRecording.MemberBoundary & b_pk) == 1
+    a_dur = (ConcatenatedRecording & a_pk).fetch1("total_duration_s")
+    b_dur = (ConcatenatedRecording & b_pk).fetch1("total_duration_s")
+    assert a_dur > b_dur
+
+
+@pytest.mark.slow
+def test_motion_correction_preset_auto_rejects_multi_day(
+    chronic_2_session_minirec,
+):
+    """A multi-day group with the 'auto' motion preset is rejected at
+    materialization: 'auto' is single-day only, no silent DREDge dispatch."""
+    from spyglass.spikesorting.v2.recording import Recording, RecordingSelection
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecording,
+        ConcatenatedRecordingSelection,
+        MotionCorrectionParameters,
+        SessionGroup,
+    )
+    from tests.spikesorting.v2._ingest_helpers import (
+        clean_session_groups_for_owner,
+    )
+
+    sub = chronic_2_session_minirec
+    owner, name = sub["owner"], "sg_multi_auto"
+    MotionCorrectionParameters.insert_default()
+
+    # The 'auto' preset rejection happens at make() time, AFTER the
+    # selection-time precondition that every member has a populated Recording,
+    # so the next-day member's Recording must be populated first.
+    next_day = sub["next_day_member"]
+    next_day_rec_pk = RecordingSelection.insert_selection(
+        {
+            **next_day,
+            "preprocessing_params_name": "default",
+            "team_name": owner,
+        }
+    )
+    if not (Recording & next_day_rec_pk):
+        Recording.populate(next_day_rec_pk, reserve_jobs=False)
+
+    members = [sub["same_day_members"][0], next_day]
+    SessionGroup.create_group(owner, name, members, allow_multi_day=True)
+    try:
+        concat_pk = ConcatenatedRecordingSelection.insert_selection(
+            {
+                "session_group_owner": owner,
+                "session_group_name": name,
+                "preprocessing_params_name": "default",
+                "motion_correction_params_name": "auto_default",
+            }
+        )
+        # Call make() directly so the raw ValueError surfaces (populate would
+        # wrap it). It raises before writing any artifact.
+        with pytest.raises(ValueError, match="single-day only"):
+            ConcatenatedRecording().make(concat_pk)
+        assert not (ConcatenatedRecording & concat_pk)
+    finally:
+        clean_session_groups_for_owner(owner)
+        (Recording & next_day_rec_pk).super_delete(warn=False)
+        (RecordingSelection & next_day_rec_pk).super_delete(warn=False)
