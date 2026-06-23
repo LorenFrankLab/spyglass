@@ -733,6 +733,29 @@ _SINGULARITY_PRESET = (
 
 
 @pytest.mark.database
+@pytest.mark.unit
+def test_container_runtime_probes_return_bool_detail_unmocked():
+    """The real probes return ``(bool, str)`` -- catches an SI symbol rename.
+
+    Every other container preflight test monkeypatches these probes, so the real
+    code path (which lazily imports SI's ``has_docker`` / ``has_docker_python`` /
+    ``has_singularity`` / ``has_spython``) is never exercised. If SI renamed or
+    moved one of those symbols, the unavailable-backend protection would break in
+    production (an ``ImportError`` instead of a clean ``(bool, detail)``), and
+    every mocked test would stay green. This calls the probes for real and only
+    asserts the contract shape (either truth value is fine in any environment).
+    """
+    from spyglass.spikesorting.v2._pipeline_preflight import (
+        _docker_runtime_available,
+        _singularity_runtime_available,
+    )
+
+    for probe in (_docker_runtime_available, _singularity_runtime_available):
+        ok, detail = probe()
+        assert isinstance(ok, bool)
+        assert isinstance(detail, str) and detail
+
+
 def test_preflight_container_runtime_errors(preflight_inputs, monkeypatch):
     """The container preset fails clearly when its runtime is absent.
 

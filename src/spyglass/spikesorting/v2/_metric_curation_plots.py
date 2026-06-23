@@ -306,12 +306,15 @@ def burst_pair_metrics_from_analyzer(
     """Per-pair burst-merge diagnostics computed on the fly (nothing stored).
 
     Returns one dict per ordered unit pair with the four legs of the v1
-    BurstPair merge test, read from already-computed analyzer extensions:
+    BurstPair merge test, read from the analyzer's extensions (computing
+    ``templates`` / ``template_similarity`` / ``unit_locations`` on the fly if
+    absent, and correlograms fresh at the requested window/bin):
 
     - ``wf_similarity`` -- SI's cosine ``template_similarity`` (not v1's flat
-      Pearson, which mishandles per-unit sparsity; cosine is also what the
-      ``similarity_correlograms`` merge engine uses, so the diagnostic matches
-      the suggestions).
+      Pearson, which mishandles per-unit sparsity). Note this is an INDEPENDENT
+      corroboration, not a reproduction of the merge engine's metric: the
+      ``similarity_correlograms`` auto-merge preset compares templates with
+      ``l1`` (its ``similarity_method`` default), while this reports cosine.
     - ``isi_violation`` -- refractory-violation fraction of the merged train
       (``isi_threshold_ms`` default 2 ms, aligned with the single-unit metric).
     - ``xcorrel_asymm`` -- cross-correlogram left/right asymmetry (burst
@@ -325,8 +328,9 @@ def burst_pair_metrics_from_analyzer(
     All four legs are template- or spike-time-derived, so callers pass the
     UNWHITENED display analyzer (whitening distorts ``template_similarity`` and
     the ``unit_locations`` positions): ``AnalyzerCuration`` loads it via
-    ``_analyzer_for`` and consistency with the (also-display) merge engine the
-    diagnostic corroborates is the point.
+    ``_analyzer_for``, the same display analyzer the merge engine runs on. The
+    diagnostic is an independent corroboration of those suggestions (it differs
+    in similarity metric, see above), not a reproduction of them.
     """
     from itertools import permutations
 

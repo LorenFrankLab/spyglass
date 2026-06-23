@@ -46,6 +46,16 @@ class WaveformFeaturesParams(SpyglassMixin, dj.Lookup):
             max_spikes_per_unit : int
             n_jobs : int
             chunk_duration : str
+
+    Notes
+    -----
+    The ``spike_location`` feature (and the shipped ``"amplitude,
+    spike_location"`` default row) is supported ONLY for v2 (SortingAnalyzer)
+    sources, which expose a ``spike_locations`` extension. Legacy v0/v1
+    ``WaveformExtractor`` sources support only ``amplitude`` / ``full_waveform``;
+    requesting ``spike_location`` for one raises a clear ``NotImplementedError``
+    (the SI <0.101 ``compute_spike_locations(WaveformExtractor)`` call it used is
+    gone under SI 0.104). Use the ``"amplitude"`` row for legacy sources.
     """
 
     definition = """

@@ -50,17 +50,31 @@ def _vectordata(name: str, values, dtype) -> VectorData:
     )
 
 
-def _scalar_or_nan(value) -> float:
+def _scalar_or_nan(value, *, context: str = "") -> float:
     """Coerce a metric cell to float; non-scalar / non-numeric -> NaN.
 
     Every quality metric and every surfaced single-channel template column is a
     plain scalar, so this is belt-and-suspenders: it keeps a future SI column
     whose cell is not a plain number (e.g. an array) from crashing the wide
     one-float-per-column write -- the stray value lands as NaN instead.
+
+    The coercion-failure substitution is on the scientific-result write path
+    (a downstream auto-curation rule would silently never fire on a NaN metric),
+    so it is logged at warning level with ``context`` (unit / column) rather than
+    swallowed silently. A legitimately non-finite SI value (already a float NaN)
+    takes the ``float(value)`` success path and is not logged.
     """
     try:
         return float(value)
     except (TypeError, ValueError):
+        from spyglass.utils import logger
+
+        logger.warning(
+            "quality-metrics write: a non-scalar/non-numeric cell "
+            f"(type {type(value).__name__!r}) was coerced to NaN"
+            + (f" [{context}]" if context else "")
+            + "; a future SpikeInterface column may have changed shape."
+        )
         return float("nan")
 
 
@@ -87,7 +101,13 @@ def build_quality_metrics_table(metrics_df: pd.DataFrame) -> DynamicTable:
     for unit_id, row in metrics_df.iterrows():
         table.add_row(
             unit_id=int(unit_id),
-            **{column: _scalar_or_nan(row[column]) for column in metric_columns},
+            **{
+                column: _scalar_or_nan(
+                    row[column],
+                    context=f"unit_id={int(unit_id)}, column={column!r}",
+                )
+                for column in metric_columns
+            },
         )
     return table
 
