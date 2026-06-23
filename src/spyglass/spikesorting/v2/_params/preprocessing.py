@@ -74,14 +74,13 @@ class CommonReferenceParams(BaseModel):
 
 
 class WhitenParams(BaseModel):
-    """Whitening options applied after motion correction.
+    """Forward-compatible preprocessing whitening options.
 
-    ``whiten`` is currently inert (whitening is deferred to the
-    sorter via ``Sorting._run_sorter``'s external float64 whitening
-    path); the field exists as forward-compat scaffolding for the
-    eventual ``ConcatenatedRecording.make`` motion-correction +
-    post-motion-whitening flow. See
-    ``PreprocessingParamsSchema.to_post_motion_dict``.
+    ``whiten`` is currently inert for recording caches: whitening is
+    deferred to the sorter/analyzer boundary so single-session and
+    concat-backed sorts share the same provenance. MS4/MS5 sorter
+    whitening is controlled by ``SorterParameters``; metric-analyzer
+    whitening is controlled by ``AnalyzerWaveformParameters``.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -98,9 +97,11 @@ class PreprocessingParamsSchema(BaseModel):
     Stage 1 -- pre_motion (filter + reference): materialized to the
         ``Recording`` NWB-resident artifact (the ``ElectricalSeries``
         inside the ``AnalysisNwbfile``). This is what gets cached.
-    Stage 2 -- post_motion (whitening): applied lazily AFTER motion
-        correction by the single-recording or concatenated-recording
-        sorting path.
+    Stage 2 -- post_motion (whitening): retained only as an explicit
+        forward-compatible params field. ``Recording`` and
+        ``ConcatenatedRecording`` caches do not apply it; sorter
+        whitening and analyzer whitening are controlled by their own
+        parameter rows.
 
     ``schema_version`` history:
     * 2 added ``min_segment_length`` (drops sub-second slivers from
@@ -109,8 +110,9 @@ class PreprocessingParamsSchema(BaseModel):
     * 3 made ``bandpass_filter`` optional (``None`` = skip filtering,
       so the ``"no_filter"`` preset is a real disable instead of a
       wide-band pass) and flipped the ``whiten`` default to ``None``
-      to match the runtime (whitening is deferred to the sorter, so
-      the schema must not default to claiming it is configured). The
+      to match the runtime (whitening is deferred to sorter/analyzer
+      parameter rows, so the schema must not default to claiming it is
+      configured). The
       runtime preprocessing ORDER also changed at 3, from
       reference->filter to **bandpass filter->reference** (the
       signal-processing-preferred order; see
@@ -147,9 +149,9 @@ class PreprocessingParamsSchema(BaseModel):
         default_factory=CommonReferenceParams
     )
     whiten: WhitenParams | None = Field(default=None)
-    # whiten defaults to None: whitening is deferred to the sorter
-    # (Kilosort 4 does its own; the external float64 whitening path
-    # handles the rest), so the schema does not claim it is on.
+    # whiten defaults to None: recording caches stay unwhitened. Kilosort 4
+    # whitens internally; MS4/MS5 use the sorter-owned external float64
+    # whitening path; metric analyzers use AnalyzerWaveformParameters.
     min_segment_length: float = Field(default=1.0, ge=0.0)
     # Drop disjoint-interval slivers shorter than this many seconds
     # before the sorter sees them; passed through to
@@ -187,7 +189,7 @@ class PreprocessingParamsSchema(BaseModel):
         }
 
     def to_post_motion_dict(self) -> dict:
-        """Return the stage-2 dict; empty if whitening is disabled."""
+        """Return stage-2 params; recording caches must not apply them."""
         if self.whiten is None:
             return {}
         return {"whiten": self.whiten.model_dump()}

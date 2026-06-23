@@ -5,7 +5,7 @@ so ``MotionCorrectionParameters.insert_default()`` can validate the
 ``params`` blob at insert time. The consumer is gated behind
 ``NotImplementedError`` until the concat materializer is implemented.
 
-The MVP concat path persists only the sorter-ready corrected
+The MVP concat path persists only the corrected, unwhitened
 ``ElectricalSeries`` (plus member sample boundaries and a content hash);
 it does NOT persist motion trajectories or motion-info side artifacts.
 This schema rejects the SI ``correct_motion`` kwargs that would change

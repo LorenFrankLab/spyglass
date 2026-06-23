@@ -156,7 +156,7 @@ analyzer.compute(
 
 ## Recording Cache Format
 
-The canonical preprocessed recording produced by `Recording.make()` lives **inside an `AnalysisNwbfile`** — NWB-resident, reusing Spyglass's existing cleanup, export, kachery, FigPack, and recompute machinery. `ConcatenatedRecording.make()` uses the same NWB-resident storage contract, but it is a separate materialized concat cache: it reads per-member `Recording` caches and writes one sorter-ready concatenated `ElectricalSeries` after motion correction / post-motion preprocessing. This is distinct from the [SortingAnalyzer Storage Layout](#sortinganalyzer-storage-layout) above (which is per-sort scratch in `zarr` format).
+The canonical preprocessed recording produced by `Recording.make()` lives **inside an `AnalysisNwbfile`** — NWB-resident, reusing Spyglass's existing cleanup, export, kachery, FigPack, and recompute machinery. `ConcatenatedRecording.make()` uses the same NWB-resident storage contract, but it is a separate materialized concat cache: it reads per-member `Recording` caches and writes one motion-corrected, unwhitened concatenated `ElectricalSeries`. Whitening is deliberately not baked into either recording cache; sorter whitening is controlled by `SorterParameters`, and analyzer whitening is controlled by `AnalyzerWaveformParameters`. This is distinct from the [SortingAnalyzer Storage Layout](#sortinganalyzer-storage-layout) above (which is per-sort scratch in `zarr` format).
 
 **Persistence on the DataJoint row** (intended schema shape — see [overview.md § Scope and dependency policy](overview.md#scope-and-dependency-policy)):
 
@@ -216,9 +216,10 @@ class PreprocessingParamsSchema(BaseModel):
     Stage 1 — pre_motion (filter + reference): materialized to the
         `Recording` NWB-resident artifact (the `ElectricalSeries`
         inside the `AnalysisNwbfile`). This is what gets cached.
-    Stage 2 — post_motion (whitening): applied lazily AFTER motion
-        correction by `Sorting.make()` (single-rec path) or
-        `ConcatenatedRecording.make()` (concat path).
+    Stage 2 — post_motion (whitening): retained only as an explicit
+        forward-compatible params field. The Phase 3 concat cache MUST NOT
+        apply it. Sorter whitening lives in `SorterParameters`; analyzer
+        whitening lives in `AnalyzerWaveformParameters`.
     """
     model_config = ConfigDict(extra="forbid")
     # schema_version 3 is the post-review-fixes baseline (see
@@ -260,7 +261,7 @@ class PreprocessingParamsSchema(BaseModel):
         }
 
     def to_post_motion_dict(self) -> dict:
-        """Stage 2 dict; empty if whitening disabled. Applied lazily."""
+        """Stage 2 dict; not applied by Recording/ConcatenatedRecording."""
         if self.whiten is None:
             return {}
         return {"whiten": self.whiten.model_dump()}

@@ -8,7 +8,7 @@
 
 | Phase 1 declaration | Phase 3 change |
 | --- | --- |
-| `ConcatenatedRecording.make()` raised `NotImplementedError` | Body fills in: reuses cached pre-motion `Recording` per member, concatenates, applies motion correction (`rigid_fast` default; DREDge opt-in), applies post-motion preprocessing (whiten), materializes one NWB-resident concatenated `ElectricalSeries`. |
+| `ConcatenatedRecording.make()` raised `NotImplementedError` | Body fills in: reuses cached pre-motion `Recording` per member, concatenates, applies motion correction (`rigid_fast` default; DREDge opt-in), materializes one motion-corrected, unwhitened NWB-resident concatenated `ElectricalSeries`. |
 | `SessionGroup.create_group()` accepted multi-day members silently | Now raises `ValueError` unless `allow_multi_day=True`. Multi-day requires an explicit (non-`auto`) motion-correction preset. |
 | `SortingSelection.insert_selection()` rejected `ConcatenatedRecordingSource` with `NotImplementedError` | Now accepts. Still rejects concat + `ArtifactDetectionSource` part rows (concat-wide artifact masking is out of scope). |
 
@@ -113,8 +113,8 @@ flowchart LR
         C1[Verify every member Recording already exists] --> C2[Load pre-motion recordings]
         C2 --> C3[concatenate_recordings]
         C3 --> C4[correct_motion preset=rigid_fast or DREDge]
-        C4 --> C5[apply post-motion preprocessing whiten]
-        C5 --> C6[Write concatenated ElectricalSeries to AnalysisNwbfile]
+        C4 --> C5[Write unwhitened concatenated ElectricalSeries to AnalysisNwbfile]
+        C5 --> C6[Sorter/analyzer recipes apply whitening later if requested]
     end
 
     C --> C1
@@ -125,10 +125,7 @@ flowchart LR
 - **Multi-day is opt-in, not the recommended default.** `create_group(..., allow_multi_day=True)` is required when members span two or more dates derived from `Session.session_start_time`. Default rejects with a pointer to Phase 4 sort-then-match (UnitMatch).
 - **No auto-DREDge dispatch.** `MotionCorrectionParameters.preset='auto'` resolves to `rigid_fast` for single-day groups and **raises** on multi-day groups — the caller must pick an explicit `dredge_fast` / `dredge` / etc.
 - **Recording cache reuse.** `ConcatenatedRecording.make()` reads from already-populated per-member `Recording` rows, not from raw NWB. Preprocessing runs once per member.
-- **Pre-motion vs post-motion split.** `Recording.make()` materializes filter + CMR only. Whitening (the post-motion stage of `PreprocessingParamsSchema`) is applied:
-  - Single-session path: lazily by `Sorting.make()`.
-  - Concat path: by `ConcatenatedRecording.make()` AFTER motion correction.
-  This guarantees motion estimators see un-whitened traces (per SI docs).
+- **Whitening boundary.** `Recording.make()` materializes filter + CMR only. `ConcatenatedRecording.make()` adds motion correction but still writes an unwhitened cache. Whitening is applied later only by the sorter/analyzer recipes that explicitly request it (`SorterParameters` for sorter-owned whitening, `AnalyzerWaveformParameters` for metric analyzers). This guarantees motion estimators and display analyzers see unwhitened traces and prevents double-whitening on concat-backed MS4/MS5 sorts.
 - **Anchor NWB rule.** `ConcatenatedRecording`'s `AnalysisNwbfile` parent is the **first** `SessionGroup.Member.nwb_file_name` (ordered by `member_index`). Same rule applies to concat-sort `Sorting` rows.
 - **SessionGroup names are owner-scoped.** The `session_group_owner` projected `LabTeam` FK is part of the master PK, so two teams can both create `session_group_name="day1"` without colliding. Per-member `team_name` remains on `SessionGroup.Member` for collaborations that mix teams.
 - **Concat `sorting_id` identity is source-aware.** Phase 3 extends the identity helper so concat-backed rows fold in `concat_recording_id` the same way single-session rows fold in `recording_id`; that keeps repeated concat selection inserts deterministic.

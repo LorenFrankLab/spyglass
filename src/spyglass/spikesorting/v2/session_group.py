@@ -244,11 +244,11 @@ class ConcatenatedRecordingSelection(SpyglassMixin, dj.Manual):
 class ConcatenatedRecording(SpyglassMixin, dj.Computed):
     """Materialized cross-session concatenated recording cache.
 
-    When implemented, ``make()`` writes a single sorter-ready
-    ``ElectricalSeries`` covering the union of member intervals (with
-    motion correction if requested), plus integer sample boundaries on
-    the ``MemberBoundary`` part. The schema is in place from day one as
-    the forward-compat FK target for ``SortingSelection``.
+    When implemented, ``make()`` writes a single motion-corrected,
+    unwhitened ``ElectricalSeries`` covering the union of member intervals,
+    plus integer sample boundaries on the ``MemberBoundary`` part. The schema
+    is in place from day one as the forward-compat FK target for
+    ``SortingSelection``.
     """
 
     definition = """

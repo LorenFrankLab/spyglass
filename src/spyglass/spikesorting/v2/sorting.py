@@ -1082,8 +1082,9 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
 class Sorting(SpyglassMixin, dj.Computed):
     """Sorted units NWB + SortingAnalyzer folder.
 
-    ``make()`` applies post-motion preprocessing, runs the sorter,
-    removes excess spikes, builds a
+    ``make()`` resolves the source recording, applies sorter-owned
+    preprocessing such as external MS4/MS5 whitening when requested,
+    runs the sorter, removes excess spikes, builds a
     ``SortingAnalyzer(format="zarr", sparse=True)``, computes
     the base extensions (``random_spikes``, ``noise_levels``,
     ``templates``, ``waveforms``), writes a fresh/whitelisted

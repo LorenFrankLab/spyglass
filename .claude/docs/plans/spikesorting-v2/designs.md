@@ -660,7 +660,7 @@ class Sorting(SpyglassMixin, dj.Computed):
 
 **Binding behavior**:
 
-- `Sorting.make()` re-validates the source part rows, resolves either a single `Recording` or a `ConcatenatedRecording`, applies post-motion preprocessing exactly once, applies artifact masking only on the single-recording path, runs the sorter, removes excess spikes, builds the SortingAnalyzer, writes `/units` to `AnalysisNwbfile`, and populates `Sorting.Unit`.
+- `Sorting.make()` re-validates the source part rows, resolves either a single `Recording` or a `ConcatenatedRecording`, applies sorter-owned preprocessing such as external MS4/MS5 whitening according to `SorterParameters`, applies artifact masking only on the single-recording path, runs the sorter, removes excess spikes, builds the SortingAnalyzer, writes `/units` to `AnalysisNwbfile`, and populates `Sorting.Unit`.
 - `Sorting.Unit` rows must use integer-convertible unit IDs and the full `Electrode` FK from the selected sort group. Concat sorts use the first member as the deterministic Electrode anchor.
 - `get_unit_brain_regions()` raises on concat sorts unless `allow_anchor_member=True`; anchor-only output must be labeled with `region_resolution='anchor_member'`.
 - `get_analyzer()` rebuilds a missing analyzer folder without deleting or replacing the `Sorting` row. **Zero-unit exception (review-fix C5):** on a zero-unit sort there is no buildable analyzer — `get_analyzer()` raises a clear zero-unit error (or returns the documented sentinel), never a path to a non-existent folder. Consumers (`AnalyzerCuration`, `FigPackCuration`, `CurationV2.get_sorting`) handle that signal explicitly. See [shared-contracts.md § SortingAnalyzer Storage Layout](shared-contracts.md#sortinganalyzer-storage-layout) and § Empty / NaN / Boundary Invariants.
@@ -1255,7 +1255,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
     """Materialized concatenated recording cache across SessionGroup members.
 
     Materializes one NWB-resident artifact (the post-motion-corrected,
-    post-whitening concatenated `ElectricalSeries`) per concat group.
+    unwhitened concatenated `ElectricalSeries`) per concat group.
     Downstream `SortingSelection` FKs the Selection table
     (`concat_recording_id` UUID), not this Computed table directly.
     See [shared-contracts.md § Recording Cache Format].
@@ -1297,14 +1297,14 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
 
 - `ConcatenatedRecording.make()` must fetch `sel = (ConcatenatedRecordingSelection & key).fetch1()` first because the populate key contains only `concat_recording_id`; all member and parameter queries use that selection row.
 - It never calls `Recording.populate()` internally. Missing per-member `Recording` rows raise `MissingRecordingForConcatError`.
-- Motion correction runs before whitening, `preset='auto'` is single-day only, forbidden SI side-artifact kwargs are rejected, and the output is one sorter-ready NWB-resident `ElectricalSeries` with integer sample boundaries persisted in `ConcatenatedRecording.MemberBoundary`.
+- Motion correction runs before sorter/analyzer whitening, `preset='auto'` is single-day only, forbidden SI side-artifact kwargs are rejected, and the output is one motion-corrected, unwhitened NWB-resident `ElectricalSeries` with integer sample boundaries persisted in `ConcatenatedRecording.MemberBoundary`.
 - `split_sorting_by_session()` maps concat spike trains back to local session sample frames and returns keys `(nwb_file_name, interval_list_name)`.
 
 **Key design points**:
 
 - **Multi-day is opt-in, not the recommended default.** `SessionGroup.create_group(..., allow_multi_day=True)` is required for multi-date members; the default rejects them with a pointer to Phase 4 UnitMatch as the recommended cross-day workflow. `ConcatenatedRecording` does NOT auto-dispatch DREDge — `preset='auto'` resolves to `rigid_fast` for single-day and raises on multi-day (caller must pick an explicit preset). Multi-day concat is experimental and remains in scope behind the opt-in flag because the schema cost of supporting it is zero.
 - **Recording cache reuse** — `ConcatenatedRecording.make()` reads from already-populated `Recording` rows for each member, NOT from raw NWB. Avoids preprocessing twice.
-- **Materialized cache, not a group table** — `SessionGroup` is the grouping table. `ConcatenatedRecording` writes a potentially large, sorter-ready `ElectricalSeries` cache in `AnalysisNwbfile`. This intentionally duplicates the per-member `Recording` caches after motion correction / post-motion preprocessing so sorters see one continuous recording, but users should not create concat rows for whole-day data when narrower `IntervalList` members are sufficient.
+- **Materialized cache, not a group table** — `SessionGroup` is the grouping table. `ConcatenatedRecording` writes a potentially large, motion-corrected but unwhitened `ElectricalSeries` cache in `AnalysisNwbfile`. This intentionally duplicates the per-member `Recording` caches after motion correction so sorters see one continuous recording, but users should not create concat rows for whole-day data when narrower `IntervalList` members are sufficient. Whitening stays at the sorter/analyzer boundary so concat and single-session paths share the same `SorterParameters` and `AnalyzerWaveformParameters` semantics.
 - **Segment boundaries** are persisted so spike times can be back-mapped to per-session sortings if needed.
 
 ---
