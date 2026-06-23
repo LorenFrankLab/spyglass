@@ -1134,19 +1134,21 @@ class Sorting(SpyglassMixin, dj.Computed):
                 "sorter_params_name": sel_row["sorter_params_name"],
             }
         ).fetch1()
-        nwb_file_name = (
+        # ``source`` is already resolved (above); read both the nwb file and
+        # the preprocessing recipe from the one RecordingSelection row rather
+        # than re-resolving the source / re-querying the row for each.
+        nwb_file_name, preprocessing_params_name = (
             RecordingSelection & {"recording_id": source.key["recording_id"]}
-        ).fetch1("nwb_file_name")
+        ).fetch1("nwb_file_name", "preprocessing_params_name")
 
         # Resolve the DISPLAY analyzer recipe from the source preprocessing
-        # recipe (region), reusing the shared source resolver -- hippocampus ->
-        # the 0.5/0.5 row, cortex -> the 1.0/2.0 row, any other recipe -> the
-        # wider cortex fallback. Resolve the params blob HERE (make_fetch is the
-        # only stage allowed DB I/O); make_compute builds with it and
-        # make_insert persists the name so every later rebuild reads it back
-        # deterministically.
+        # recipe (region) -- hippocampus -> the 0.5/0.5 row, cortex -> the
+        # 1.0/2.0 row, any other recipe -> the wider cortex fallback. Resolve
+        # the params blob HERE (make_fetch is the only stage allowed DB I/O);
+        # make_compute builds with it and make_insert persists the name so every
+        # later rebuild reads it back deterministically.
         display_waveform_params_name, _ = waveform_params_for_preprocessing(
-            SortingSelection.resolve_source_preprocessing_params_name(key)
+            preprocessing_params_name
         )
         display_waveform_params = fetch_waveform_params(
             display_waveform_params_name

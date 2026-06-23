@@ -8,6 +8,7 @@ records its resolved display recipe and rebuilds the same cache folder.
 
 from __future__ import annotations
 
+import contextlib
 import uuid
 
 import pytest
@@ -23,6 +24,65 @@ from spyglass.spikesorting.v2._recipe_catalog import (
     HIPPOCAMPUS_PREPROC,
     waveform_params_for_preprocessing,
 )
+
+
+@contextlib.contextmanager
+def _planted_source_sort(selection_table, id_attr, source_part, preproc_name):
+    """Plant a SortingSelection + source-part + stub upstream selection row.
+
+    Resolver / make_fetch tests need a sort whose source carries a given
+    preprocessing recipe, without a full populate. This builds the upstream
+    ``selection_table`` row from its live heading (the ``id_attr`` PK + the
+    ``preprocessing_params_name`` set; numeric columns -> 0, the rest ->
+    "bypass") and the ``SortingSelection`` master + ``source_part`` link, all
+    with FK checks off, then yields the ``sorting_id`` and tears the rows down
+    on exit. Works for both source kinds via (``selection_table``, ``id_attr``,
+    ``source_part``): RecordingSelection/recording_id/RecordingSource or
+    ConcatenatedRecordingSelection/concat_recording_id/ConcatenatedRecordingSource.
+    """
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    id_value = uuid.uuid4()
+    sid = uuid.uuid4()
+    heading = selection_table().heading
+    row = {}
+    for name in heading.names:
+        if name == id_attr:
+            row[name] = id_value
+        elif name == "preprocessing_params_name":
+            row[name] = preproc_name
+        elif heading.attributes[name].numeric:
+            row[name] = 0
+        else:
+            row[name] = "bypass"
+    conn = dj.conn()
+    conn.query("SET FOREIGN_KEY_CHECKS=0")
+    try:
+        selection_table.insert1(row, allow_direct_insert=True)
+        SortingSelection.insert1(
+            {
+                "sorting_id": sid,
+                "sorter": "mountainsort5",
+                "sorter_params_name": "franklab_30khz_ms5_2026_06",
+            },
+            allow_direct_insert=True,
+        )
+        source_part.insert1(
+            {"sorting_id": sid, id_attr: id_value}, allow_direct_insert=True
+        )
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=1")
+    try:
+        yield sid
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=0")
+        try:
+            (SortingSelection & {"sorting_id": sid}).delete_quick()
+            (selection_table & {id_attr: id_value}).delete_quick()
+        finally:
+            conn.query("SET FOREIGN_KEY_CHECKS=1")
 
 # --------------------------------------------------------------------------- #
 # Pydantic schema (DB-free)
@@ -230,8 +290,6 @@ def test_concat_display_recipe_resolved_from_concat_preprocessing(dj_conn):
     ``ConcatenatedRecordingSelection -> PreprocessingParameters`` FK, NOT a
     member ``RecordingSelection``.
     """
-    import datajoint as dj
-
     from spyglass.spikesorting.v2.recording import PreprocessingParameters
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecordingSelection,
@@ -243,45 +301,12 @@ def test_concat_display_recipe_resolved_from_concat_preprocessing(dj_conn):
 
     PreprocessingParameters.insert_default()
     SorterParameters.insert_default()
-    concat_id = uuid.uuid4()
-    sid = uuid.uuid4()
-    # Concat selection carrying a hippocampus preprocessing recipe. Only the
-    # preprocessing_params_name FK matters to the resolver; the SessionGroup /
-    # MotionCorrectionParameters FK columns are stubbed (FK checks off), built
-    # from the live heading so this stays robust to the exact PK column set.
-    concat_heading = ConcatenatedRecordingSelection().heading
-    concat_row = {}
-    for name in concat_heading.names:
-        if name == "concat_recording_id":
-            concat_row[name] = concat_id
-        elif name == "preprocessing_params_name":
-            concat_row[name] = HIPPOCAMPUS_PREPROC
-        elif concat_heading.attributes[name].numeric:
-            concat_row[name] = 0
-        else:
-            concat_row[name] = "bypass"
-    conn = dj.conn()
-    conn.query("SET FOREIGN_KEY_CHECKS=0")
-    try:
-        ConcatenatedRecordingSelection.insert1(
-            concat_row, allow_direct_insert=True
-        )
-        SortingSelection.insert1(
-            {
-                "sorting_id": sid,
-                "sorter": "mountainsort5",
-                "sorter_params_name": "franklab_30khz_ms5_2026_06",
-            },
-            allow_direct_insert=True,
-        )
-        SortingSelection.ConcatenatedRecordingSource.insert1(
-            {"sorting_id": sid, "concat_recording_id": concat_id},
-            allow_direct_insert=True,
-        )
-    finally:
-        conn.query("SET FOREIGN_KEY_CHECKS=1")
-
-    try:
+    with _planted_source_sort(
+        ConcatenatedRecordingSelection,
+        "concat_recording_id",
+        SortingSelection.ConcatenatedRecordingSource,
+        HIPPOCAMPUS_PREPROC,
+    ) as sid:
         preproc = SortingSelection.resolve_source_preprocessing_params_name(
             {"sorting_id": sid}
         )
@@ -289,16 +314,6 @@ def test_concat_display_recipe_resolved_from_concat_preprocessing(dj_conn):
         display, metric = waveform_params_for_preprocessing(preproc)
         assert display == HIPPOCAMPUS_DISPLAY_WAVEFORMS
         assert metric == HIPPOCAMPUS_METRIC_WAVEFORMS
-    finally:
-        conn.query("SET FOREIGN_KEY_CHECKS=0")
-        try:
-            (SortingSelection & {"sorting_id": sid}).delete_quick()
-            (
-                ConcatenatedRecordingSelection
-                & {"concat_recording_id": concat_id}
-            ).delete_quick()
-        finally:
-            conn.query("SET FOREIGN_KEY_CHECKS=1")
 
 
 @pytest.mark.parametrize(
@@ -322,8 +337,6 @@ def test_recording_source_display_recipe_resolved_by_region(
     fallback. Pins the actual region behavior the generic populated-sort
     integration (which only exercises the fallback) does not.
     """
-    import datajoint as dj
-
     from spyglass.spikesorting.v2.recording import (
         PreprocessingParameters,
         RecordingSelection,
@@ -335,57 +348,18 @@ def test_recording_source_display_recipe_resolved_by_region(
 
     PreprocessingParameters.insert_default()
     SorterParameters.insert_default()
-    recording_id = uuid.uuid4()
-    sid = uuid.uuid4()
-    # A RecordingSelection carrying the region preprocessing recipe; only its
-    # preprocessing_params_name FK matters to the resolver, so the remaining FK
-    # columns are stubbed (FK checks off), built from the live heading.
-    rec_heading = RecordingSelection().heading
-    rec_row = {}
-    for name in rec_heading.names:
-        if name == "recording_id":
-            rec_row[name] = recording_id
-        elif name == "preprocessing_params_name":
-            rec_row[name] = preproc_name
-        elif rec_heading.attributes[name].numeric:
-            rec_row[name] = 0
-        else:
-            rec_row[name] = "bypass"
-    conn = dj.conn()
-    conn.query("SET FOREIGN_KEY_CHECKS=0")
-    try:
-        RecordingSelection.insert1(rec_row, allow_direct_insert=True)
-        SortingSelection.insert1(
-            {
-                "sorting_id": sid,
-                "sorter": "mountainsort5",
-                "sorter_params_name": "franklab_30khz_ms5_2026_06",
-            },
-            allow_direct_insert=True,
-        )
-        SortingSelection.RecordingSource.insert1(
-            {"sorting_id": sid, "recording_id": recording_id},
-            allow_direct_insert=True,
-        )
-    finally:
-        conn.query("SET FOREIGN_KEY_CHECKS=1")
-
-    try:
+    with _planted_source_sort(
+        RecordingSelection,
+        "recording_id",
+        SortingSelection.RecordingSource,
+        preproc_name,
+    ) as sid:
         preproc = SortingSelection.resolve_source_preprocessing_params_name(
             {"sorting_id": sid}
         )
         assert preproc == preproc_name
         display, _metric = waveform_params_for_preprocessing(preproc)
         assert display == expected_display
-    finally:
-        conn.query("SET FOREIGN_KEY_CHECKS=0")
-        try:
-            (SortingSelection & {"sorting_id": sid}).delete_quick()
-            (
-                RecordingSelection & {"recording_id": recording_id}
-            ).delete_quick()
-        finally:
-            conn.query("SET FOREIGN_KEY_CHECKS=1")
 
 
 def test_make_fetch_resolves_hippocampus_display_blob(dj_conn):
@@ -398,8 +372,6 @@ def test_make_fetch_resolves_hippocampus_display_blob(dj_conn):
     blob it threads to ``make_compute`` is the 0.5/0.5 window (not the cortex
     fallback the generic populated-sort integration exercises).
     """
-    import datajoint as dj
-
     from spyglass.spikesorting.v2.recording import (
         PreprocessingParameters,
         RecordingSelection,
@@ -414,41 +386,12 @@ def test_make_fetch_resolves_hippocampus_display_blob(dj_conn):
     PreprocessingParameters.insert_default()
     SorterParameters.insert_default()
     AnalyzerWaveformParameters.insert_default()
-    recording_id = uuid.uuid4()
-    sid = uuid.uuid4()
-    rec_heading = RecordingSelection().heading
-    rec_row = {}
-    for name in rec_heading.names:
-        if name == "recording_id":
-            rec_row[name] = recording_id
-        elif name == "preprocessing_params_name":
-            rec_row[name] = HIPPOCAMPUS_PREPROC
-        elif name == "nwb_file_name":
-            rec_row[name] = "bypass.nwb"
-        elif rec_heading.attributes[name].numeric:
-            rec_row[name] = 0
-        else:
-            rec_row[name] = "bypass"
-    conn = dj.conn()
-    conn.query("SET FOREIGN_KEY_CHECKS=0")
-    try:
-        RecordingSelection.insert1(rec_row, allow_direct_insert=True)
-        SortingSelection.insert1(
-            {
-                "sorting_id": sid,
-                "sorter": "mountainsort5",
-                "sorter_params_name": "franklab_30khz_ms5_2026_06",
-            },
-            allow_direct_insert=True,
-        )
-        SortingSelection.RecordingSource.insert1(
-            {"sorting_id": sid, "recording_id": recording_id},
-            allow_direct_insert=True,
-        )
-    finally:
-        conn.query("SET FOREIGN_KEY_CHECKS=1")
-
-    try:
+    with _planted_source_sort(
+        RecordingSelection,
+        "recording_id",
+        SortingSelection.RecordingSource,
+        HIPPOCAMPUS_PREPROC,
+    ) as sid:
         fetched = Sorting().make_fetch({"sorting_id": sid})
         assert (
             fetched.display_waveform_params_name
@@ -459,15 +402,6 @@ def test_make_fetch_resolves_hippocampus_display_blob(dj_conn):
         assert fetched.display_waveform_params["ms_before"] == 0.5
         assert fetched.display_waveform_params["ms_after"] == 0.5
         assert fetched.display_waveform_params["max_spikes_per_unit"] == 20000
-    finally:
-        conn.query("SET FOREIGN_KEY_CHECKS=0")
-        try:
-            (SortingSelection & {"sorting_id": sid}).delete_quick()
-            (
-                RecordingSelection & {"recording_id": recording_id}
-            ).delete_quick()
-        finally:
-            conn.query("SET FOREIGN_KEY_CHECKS=1")
 
 
 def test_fetch_waveform_params_missing_row_raises(dj_conn):
