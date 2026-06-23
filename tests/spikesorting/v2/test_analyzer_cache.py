@@ -298,28 +298,86 @@ class TestBuildAnalyzerWaveformParams:
                 job_kwargs={},
             )
 
-    def test_rejects_whitened_metric_recipe(
+    def test_metric_analyzer_is_whitened(
         self, recording_3d_and_sorting, tmp_path
     ):
-        """A whitened (metric) recipe is rejected -- only the unwhitened
-        display analyzer is built here. Prevents a direct caller from silently
-        getting an unwhitened analyzer at a metric-named folder before the
-        whitened build lands."""
+        """A metric (``whiten=True``) recipe builds a WHITENED analyzer with
+        ``return_in_uV=False``; the display (``whiten=False``) recipe stays
+        unwhitened with ``return_in_uV=True``.
+
+        Same window for both, differing only in ``whiten`` -- so the template
+        difference is the whitening, not the window. The display recipe carries
+        real µV amplitudes (``return_in_uV=True``); the metric recipe must read
+        back the decorrelated space (``return_in_uV=False``) for PC/NN metrics.
+        """
+        import numpy as np
+
         recording, sorting = recording_3d_and_sorting
-        with pytest.raises(NotImplementedError, match="whitened"):
-            build_analyzer(
-                sorting,
-                recording,
-                key={"sorting_id": "test-metric"},
-                sorter_row={"job_kwargs": {}},
-                job_kwargs={},
-                analyzer_folder=tmp_path / "metric.zarr",
-                waveform_params={
-                    "ms_before": 0.5,
-                    "ms_after": 0.5,
-                    "max_spikes_per_unit": 20000,
-                    "whiten": True,
-                    "purpose": "metric",
-                    "schema_version": 1,
-                },
-            )
+        window = {
+            "ms_before": 1.0,
+            "ms_after": 2.0,
+            "max_spikes_per_unit": 20000,
+            "schema_version": 1,
+        }
+        display = self._build(
+            recording,
+            sorting,
+            tmp_path / "display.zarr",
+            {**window, "whiten": False, "purpose": "display"},
+        )
+        metric = self._build(
+            recording,
+            sorting,
+            tmp_path / "metric.zarr",
+            {**window, "whiten": True, "purpose": "metric"},
+        )
+        assert display.return_in_uV is True
+        assert metric.return_in_uV is False
+        disp_t = display.get_extension("templates").get_data()
+        met_t = metric.get_extension("templates").get_data()
+        assert disp_t.shape == met_t.shape
+        # Whitening changes the templates; same window, so this is the whiten.
+        assert not np.allclose(disp_t, met_t)
+
+    def test_metric_analyzer_whitened_under_unequal_gains(self, tmp_path):
+        """Under NON-uniform channel gains the whitened analyzer's per-channel
+        noise is ~1 (unit variance) -- it would TRACK the gains if
+        ``return_in_uV=True`` re-applied them.
+
+        ``sip.whiten`` preserves the parent's per-channel gains, so a
+        ``return_in_uV=True`` readback multiplies the unit-variance whitened
+        traces back by those gains and un-normalizes the space. ``build_analyzer``
+        builds the metric recipe with ``return_in_uV=False``; here the gains are
+        [1, 5, 0.2, 3], so a gains-reapplied build would give noise ~[1, 5, 0.2,
+        3] (max ~5, min ~0.15), which the bounds below reject.
+        """
+        import numpy as np
+
+        rec, sort = si.generate_ground_truth_recording(
+            durations=[10.0],
+            num_channels=4,
+            num_units=3,
+            seed=0,
+            sampling_frequency=30000.0,
+        )
+        rec.set_channel_gains(np.array([1.0, 5.0, 0.2, 3.0], dtype="float32"))
+        rec.set_channel_offsets(np.zeros(4, dtype="float32"))
+        analyzer = self._build(
+            rec,
+            sort,
+            tmp_path / "metric.zarr",
+            {
+                "ms_before": 1.0,
+                "ms_after": 2.0,
+                "max_spikes_per_unit": 20000,
+                "whiten": True,
+                "purpose": "metric",
+                "schema_version": 1,
+            },
+        )
+        noise = analyzer.get_extension("noise_levels").get_data()
+        # Whitened, gains NOT re-applied -> ~unit variance on every channel.
+        assert np.allclose(noise, 1.0, atol=0.5), noise
+        # Gains-reapplied (return_in_uV=True) would track [1, 5, 0.2, 3];
+        # assert the 5x / 0.2x channels are NOT near their gains.
+        assert noise.max() < 2.0 and noise.min() > 0.4, noise

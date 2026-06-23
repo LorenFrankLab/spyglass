@@ -390,18 +390,12 @@ def build_analyzer(
             "default window."
         )
 
-    # The whitened metric analyzer (the metric recipes' ``whiten=True``) is not
-    # built yet -- this path only constructs the unwhitened display analyzer
-    # (``return_in_uV=True`` below). Reject a whitened recipe loudly rather than
-    # silently building an unwhitened analyzer at a metric-named folder; the
-    # whitening + ``return_in_uV`` derivation lands with the metric analyzer.
-    if waveform_params.get("whiten"):
-        raise NotImplementedError(
-            "build_analyzer: whitened metric analyzer construction "
-            f"(purpose={waveform_params.get('purpose')!r}, whiten=True) is not "
-            "implemented yet; only the unwhitened display analyzer is built. "
-            "Pass a display (unwhitened) recipe."
-        )
+    # ``whiten`` is part of the analyzer recipe identity (display=False,
+    # metric=True). A whitened analyzer is the metric recipe for PC/NN
+    # cluster-separation metrics; it is whitened below (after the 2D probe
+    # projection, before ``create_sorting_analyzer``) and built with
+    # ``return_in_uV=False`` (see below).
+    whiten = bool(waveform_params.get("whiten"))
 
     # Zero-unit short-circuit BEFORE any I/O or DB fetch:
     # ``create_sorting_analyzer(sparse=True)`` -> ``estimate_sparsity``
@@ -468,6 +462,17 @@ def build_analyzer(
             )
         recording = recording.set_probe(probe.to_2d())
 
+    if whiten:
+        # The metric recipe: whiten BEFORE building so PC/NN cluster-separation
+        # metrics compute in the decorrelated space. Reuse the sorter's pinned
+        # whitening (same seed source) -- one implementation, not two. The
+        # display recipe leaves the recording in real voltages.
+        from spyglass.spikesorting.v2._sorting_dispatch import pinned_whiten
+
+        recording = pinned_whiten(
+            recording, random_seed=(job_kwargs or {}).get("random_seed", 0)
+        )
+
     try:
         analyzer = si.create_sorting_analyzer(
             sorting=sorting,
@@ -475,7 +480,13 @@ def build_analyzer(
             sparse=True,
             format="zarr",
             folder=folder,
-            return_in_uV=True,
+            # Display (unwhitened) -> True: real uV amplitudes. Metric
+            # (whitened) -> False: ``sip.whiten`` preserves per-channel gains,
+            # so a True readback would re-apply them and partially un-normalize
+            # the whitened space for non-uniform gains -- defeating the point of
+            # whitening for PC/NN metrics. So ``return_in_uV`` derives from the
+            # recipe's ``whiten`` flag, it is not an independent knob.
+            return_in_uV=not whiten,
             overwrite=True,
         )
         # ``random_seed`` is a Spyglass-side knob (consumed by the sorter

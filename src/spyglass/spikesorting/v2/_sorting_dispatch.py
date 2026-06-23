@@ -41,6 +41,36 @@ MATLAB_SORTER_STRIP_KWARGS = (
 )
 
 
+def pinned_whiten(recording, *, random_seed: int = 0):
+    """SI external float64 whitening with a pinned covariance seed.
+
+    The single whitening implementation shared by the sorter's external-whiten
+    path (``run_si_sorter``) and the whitened metric analyzer build
+    (``build_analyzer`` for a ``whiten=True`` recipe). SI PR #3359 (2024-10-25)
+    changed ``sip.whiten``'s default from ``seed=0`` to ``seed=None``, making
+    the whitening matrix non-deterministic across runs on the same input, so
+    Spyglass is the explicit seeder; ``dtype=float64`` matches the sorter path.
+
+    Reusing it for the metric analyzer is NOT a claim that it matches what each
+    sorter saw -- MS4/MS5 use this same external whiten, but KS4 whitens
+    internally and the clusterless thresholder does not whiten at all. It is
+    only the lab's "whiten for cluster-separation (PC/NN) metrics" applied
+    consistently, with one seeded implementation rather than two.
+
+    Parameters
+    ----------
+    recording : spikeinterface.BaseRecording
+        The recording to whiten.
+    random_seed : int, optional
+        Seed for SI's random-chunk covariance estimate. Default 0 (the
+        per-row ``job_kwargs={"random_seed": N}`` override flows in here).
+    """
+    import numpy as np
+    import spikeinterface.preprocessing as sip
+
+    return sip.whiten(recording, dtype=np.float64, seed=random_seed)
+
+
 def _clusterless_noise_levels(
     noise_levels: list[float] | None, threshold_unit: str
 ) -> list[float] | None:
@@ -358,29 +388,16 @@ def run_si_sorter(
             patched_numpy_inf = True
 
         if sorter_params.get("whiten", False):
-            import spikeinterface.preprocessing as sip
-
-            # Pin SI's random-chunk-based covariance estimate
-            # inside ``sip.whiten`` to a deterministic seed.
-            # PR #3359 (merged 2024-10-25) changed SI's default
-            # from ``seed=0`` to ``seed=None``, making the
-            # whitening matrix non-deterministic across runs on
-            # the same input. Per the PR author: *"seed must be
-            # explicit and no implicit"* -- so Spyglass IS the
-            # explicit-seeder. Empirically verified: 3 v2 MS4
-            # runs with seed=0 produce identical (n_units,
-            # median_fr); without the pin, 4 runs produced 4
-            # distinct states.
-            #
-            # User override: set ``random_seed`` in the per-row
-            # ``SorterParameters.job_kwargs`` blob to use a
-            # different seed (for robustness studies / variance
-            # characterization). Spyglass's default 0 makes re-runs
-            # of a parameter row reproducible by default.
+            # Pin SI's random-chunk-based covariance estimate inside
+            # ``sip.whiten`` to a deterministic seed (see ``pinned_whiten``).
+            # Empirically verified: 3 v2 MS4 runs with seed=0 produce identical
+            # (n_units, median_fr); without the pin, 4 runs produced 4 distinct
+            # states. User override: set ``random_seed`` in the per-row
+            # ``SorterParameters.job_kwargs`` blob (for robustness studies);
+            # Spyglass's default 0 makes re-runs of a parameter row reproducible
+            # by default.
             _random_seed = (job_kwargs or {}).get("random_seed", 0)
-            recording = sip.whiten(
-                recording, dtype=np.float64, seed=_random_seed
-            )
+            recording = pinned_whiten(recording, random_seed=_random_seed)
             sorter_params = {**sorter_params, "whiten": False}
 
         # Resolved job_kwargs (n_jobs, chunk_duration, progress_bar,
