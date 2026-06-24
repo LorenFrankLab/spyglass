@@ -344,6 +344,9 @@ def test_base_intervals_from_recording_detects_gaps():
         [0.0, 0.004],
         [10.0, 10.003],
     ]
-    # One bounded chunk (chunk_size == round(fs) == 1000) covers the 9 samples.
-    assert rec.time_slice_calls == [(0, 9)]
-    assert rec.sample_calls == []
+    # One chunk (chunk_size == round(fs) == 1000) covers the 9 samples, mapped
+    # via sample_index_to_time over the frame range -- NOT frame-bounded
+    # get_times (which SI 0.104.3 does not support).
+    assert len(rec.sample_calls) == 1
+    assert rec.sample_calls[0].tolist() == list(range(9))
+    assert rec.time_slice_calls == []

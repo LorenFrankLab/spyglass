@@ -408,13 +408,12 @@ def _base_intervals_from_recording(recording, fs):
     prev_time = None
     for start_frame in range(0, n_samples, chunk_size):
         end_frame = min(n_samples, start_frame + chunk_size)
-        # Bounded get_times() slices explicit time vectors in SI, so this caps
-        # each gap-scan allocation to ~one second of samples.
+        # Per-chunk frame->time via sample_index_to_time (SI 0.104.3's
+        # get_times() takes no frame bounds); chunking caps each gap-scan
+        # allocation to ~one second of samples.
         times = np.asarray(
-            recording.get_times(
-                segment_index=0,
-                start_frame=start_frame,
-                end_frame=end_frame,
+            recording.sample_index_to_time(
+                np.arange(start_frame, end_frame), segment_index=0
             ),
             dtype=np.float64,
         )
