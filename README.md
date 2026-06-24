@@ -148,8 +148,8 @@ License and Copyright notice can be found at
 
 ## System requirements
 
-Spyglass has been tested on Linux (Ubuntu) and recent versions of macOS.
-Windows support is experimental.
+Spyglass has been tested on Linux (Ubuntu) and recent versions of macOS. Windows
+support is experimental.
 
 No specific hardware requirements are needed to run spyglass. However, the
 amount of data that can be stored and analyzed is limited by the available disk
