@@ -125,6 +125,7 @@ class MatcherParameters(SpyglassMixin, dj.Lookup):
             validated,
             table_name="MatcherParameters",
             name_attr="matcher_params_name",
+            matcher_keyed=True,
             allow_duplicate_params=allow_duplicate_params,
         )
         super().insert(validated, **kwargs)
@@ -367,14 +368,46 @@ class UnitMatch(SpyglassMixin, dj.Computed):
         member_curations = (UnitMatchSelection.MemberCuration & key).fetch(
             as_dict=True
         )
+        # Re-validate the direct-insert bypass invariant on the RAW part rows
+        # BEFORE collapsing them by member_index. ``MemberCuration`` carries its
+        # own (session_group_owner, session_group_name) via its
+        # ``SessionGroup.Member`` FK, which DataJoint does NOT unify with the
+        # master's group (the master's group fields are non-PK). A direct insert
+        # could therefore attach rows from a DIFFERENT SessionGroup under this
+        # unitmatch_id, or two rows with the same member_index from different
+        # groups -- the latter would silently lose one row in the dict collapse
+        # below. Require every part row to belong to the master's group and to
+        # have a unique member_index first.
+        seen_member_indexes = set()
+        for row in member_curations:
+            if (
+                row["session_group_owner"],
+                row["session_group_name"],
+            ) != (group_key["session_group_owner"], group_key["session_group_name"]):
+                raise UnitMatchSelectionIntegrityError(
+                    "UnitMatch.make: MemberCuration row for member_index "
+                    f"{row['member_index']} belongs to SessionGroup "
+                    f"({row['session_group_owner']}, {row['session_group_name']}), "
+                    f"not the selection's group {group_key}. A direct insert "
+                    "attached a foreign-group member. Use "
+                    "UnitMatchSelection.insert_selection()."
+                )
+            member_index = int(row["member_index"])
+            if member_index in seen_member_indexes:
+                raise UnitMatchSelectionIntegrityError(
+                    "UnitMatch.make: duplicate MemberCuration rows for "
+                    f"member_index {member_index}. Use "
+                    "UnitMatchSelection.insert_selection()."
+                )
+            seen_member_indexes.add(member_index)
+
         choices_by_member = {
             int(row["member_index"]): (row["sorting_id"], int(row["curation_id"]))
             for row in member_curations
         }
-        # Re-validate the direct-insert bypass invariant: the pinned curations
-        # must exactly cover the group's members and each must belong to its
-        # member. A schema-valid but provenance-invalid selection raises here,
-        # BEFORE any matcher input is extracted.
+        # Now safe to check coverage (the part rows exactly cover the group's
+        # members) and per-member curation ownership, before any matcher input
+        # is extracted.
         _validate_member_curations(
             members, choices_by_member, UnitMatchSelectionIntegrityError
         )

@@ -169,6 +169,7 @@ def reject_duplicate_parameter_content(
     table_name: str,
     name_attr: str,
     sorter_keyed: bool = False,
+    matcher_keyed: bool = False,
     allow_duplicate_params: bool = False,
 ) -> None:
     """Reject a validated row whose content duplicates an existing row name.
@@ -239,6 +240,7 @@ def reject_duplicate_parameter_content(
             params_schema_version=_version(row),
             job_kwargs=_jsonable_blob(row.get("job_kwargs")),
             sorter=row.get("sorter") if sorter_keyed else None,
+            matcher=row.get("matcher") if matcher_keyed else None,
             execution_params=exec_params,
             execution_params_schema_version=_exec_version(row, exec_params),
         )

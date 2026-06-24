@@ -82,6 +82,7 @@ def parameter_fingerprint(
     params_schema_version: int,
     job_kwargs: dict | None = None,
     sorter: str | None = None,
+    matcher: str | None = None,
     execution_params: dict | None = None,
     execution_params_schema_version: int | None = None,
 ) -> str:
@@ -113,6 +114,10 @@ def parameter_fingerprint(
         For ``SorterParameters`` rows, the ``sorter`` the params validate
         against, so duplicate detection is scoped per sorter. ``None`` for
         the single-key Lookup tables.
+    matcher : str or None, optional
+        For ``MatcherParameters`` rows, the ``matcher`` the params dispatch to,
+        so duplicate detection is scoped per matcher (two matchers with
+        identical ``params`` are not duplicates). ``None`` elsewhere.
     execution_params : dict or None, optional
         For ``SorterParameters`` rows, the validated ``execution_params`` blob
         (container backend + install provenance). Included in the identity so a
@@ -137,6 +142,13 @@ def parameter_fingerprint(
         "params": params,
         "job_kwargs": job_kwargs,
     }
+    # Fold the matcher dispatch key in ONLY for MatcherParameters rows, so two
+    # matcher rows with coincidentally-identical ``params`` but different
+    # ``matcher`` (e.g. a future deepunitmatch vs unitmatch) are NOT duplicates --
+    # they dispatch different code. Omitting the key elsewhere keeps the other
+    # Lookups' fingerprints unchanged.
+    if matcher is not None:
+        payload["matcher"] = matcher
     # Fold execution provenance in ONLY for the tables that carry it
     # (SorterParameters). Omitting the key for the single-key Lookups keeps
     # their fingerprints byte-identical to the pre-execution-params behavior.

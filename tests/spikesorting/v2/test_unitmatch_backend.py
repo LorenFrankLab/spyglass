@@ -145,6 +145,47 @@ def test_match_raises_if_unitmatch_drops_a_session(tmp_path, monkeypatch):
         backend.UnitMatchBackend().match(inputs, {})
 
 
+def test_match_rejects_mismatched_probe_geometry(tmp_path, monkeypatch):
+    """Sessions with different channel geometry are rejected up front.
+
+    UnitMatch assumes one probe across the group (it derives geometry from the
+    first session and runs per-channel loops); cross-probe matching is out of
+    scope, so a channel-position mismatch must raise a clear error before
+    UnitMatch runs rather than failing deep in a shape mismatch.
+    """
+    from types import SimpleNamespace
+
+    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+    from spyglass.spikesorting.v2.matcher_protocol import SessionMatcherInput
+
+    cp_a = tmp_path / "cp_a.npy"
+    cp_b = tmp_path / "cp_b.npy"
+    np.save(cp_a, np.zeros((4, 2)))
+    np.save(cp_b, np.zeros((8, 2)))  # different channel count -> different probe
+    inputs = [
+        SessionMatcherInput(
+            session_key={"sorting_id": "A", "curation_id": 0},
+            waveform_dir=tmp_path,
+            channel_positions_path=cp_a,
+        ),
+        SessionMatcherInput(
+            session_key={"sorting_id": "B", "curation_id": 0},
+            waveform_dir=tmp_path,
+            channel_positions_path=cp_b,
+        ),
+    ]
+    # Past the import guard; the geometry check raises before any UnitMatch call.
+    fake_um = SimpleNamespace(
+        default_params=SimpleNamespace(
+            get_default_param=lambda: {"match_threshold": 0.5}
+        )
+    )
+    monkeypatch.setattr(backend, "_require_unitmatch", lambda: fake_um)
+
+    with pytest.raises(ValueError, match="same probe|probe geometry"):
+        backend.UnitMatchBackend().match(inputs, {})
+
+
 def test_get_matcher_bootstraps_default_after_clear():
     """get_matcher re-registers the built-in backend even if the registry was cleared."""
     from spyglass.spikesorting.v2 import matcher_protocol as mp

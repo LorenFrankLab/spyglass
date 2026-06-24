@@ -228,12 +228,31 @@ class UnitMatchBackend:
         )
         param["match_threshold"] = match_threshold
 
+        # UnitMatch assumes ONE probe across the group: it derives geometry from
+        # the first session's channel positions and runs per-channel loops that
+        # require every session to share that geometry. Cross-probe matching is
+        # out of scope, so reject mismatched geometry up front with a clear error
+        # rather than letting UnitMatch fail deep in a shape mismatch.
+        raw_positions = np.load(session_inputs[0].channel_positions_path)
+        for other in session_inputs[1:]:
+            other_positions = np.load(other.channel_positions_path)
+            if other_positions.shape != raw_positions.shape or not np.allclose(
+                other_positions, raw_positions
+            ):
+                raise ValueError(
+                    "UnitMatch requires all sessions to share one probe "
+                    "geometry (cross-probe matching is out of scope), but "
+                    f"session {other.session_key} has channel positions "
+                    f"{other_positions.shape} that differ from session "
+                    f"{session_inputs[0].session_key}'s {raw_positions.shape}. "
+                    "Group only sessions recorded on the same probe."
+                )
+
         session_dirs = [str(s.waveform_dir) for s in session_inputs]
         param["KS_dirs"] = session_dirs
         wave_paths, label_paths, channel_pos = um.utils.paths_from_KS(session_dirs)
         # get_probe_geometry needs the raw 2-D positions (paths_from_KS prepends
         # a ones column that would collapse the shanks to one).
-        raw_positions = np.load(session_inputs[0].channel_positions_path)
         param = um.utils.get_probe_geometry(raw_positions, param)
 
         waveform, session_id, session_switch, within_session, good_units, param = (

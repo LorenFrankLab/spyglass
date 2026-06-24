@@ -532,6 +532,70 @@ def test_matcher_parameters_bulk_insert_is_validated(dj_conn):
 
 
 @pytest.mark.slow
+def test_matcher_parameters_duplicate_content_is_matcher_scoped(dj_conn):
+    """Duplicate-content detection is scoped per matcher: a second matcher with
+    byte-identical params is NOT a duplicate (it dispatches different code), but
+    a second row for the SAME matcher with identical params is rejected."""
+    from pydantic import BaseModel, ConfigDict
+
+    from spyglass.spikesorting.v2 import matcher_protocol as mp
+    from spyglass.spikesorting.v2._params.matcher import UnitMatchParamsSchema
+    from spyglass.spikesorting.v2.exceptions import (
+        DuplicateParameterContentError,
+    )
+    from spyglass.spikesorting.v2.matcher_protocol import register_matcher
+    from spyglass.spikesorting.v2.unit_matching import MatcherParameters
+
+    MatcherParameters.insert_default()
+    default_params = (
+        MatcherParameters & {"matcher_params_name": "unitmatch_default"}
+    ).fetch1("params")
+
+    class _OtherMatcher:
+        name = "dup_scope_matcher"
+
+        def match(self, session_inputs, params):
+            return []
+
+    class _OtherSchema(BaseModel):
+        model_config = ConfigDict(extra="allow")
+
+    saved_m = dict(mp._MATCHER_REGISTRY)
+    saved_s = dict(mp._SCHEMA_REGISTRY)
+    register_matcher(_OtherMatcher(), _OtherSchema)
+    try:
+        # Same params, DIFFERENT matcher -> not a duplicate.
+        MatcherParameters().insert1(
+            {
+                "matcher_params_name": "other_same_params",
+                "matcher": "dup_scope_matcher",
+                "params": dict(default_params),
+            }
+        )
+        assert len(
+            MatcherParameters & {"matcher_params_name": "other_same_params"}
+        )
+        # Same params, SAME matcher -> rejected as a content duplicate.
+        with pytest.raises(DuplicateParameterContentError):
+            MatcherParameters().insert1(
+                {
+                    "matcher_params_name": "unitmatch_dup",
+                    "matcher": "unitmatch",
+                    "params": UnitMatchParamsSchema().model_dump(),
+                }
+            )
+    finally:
+        (
+            MatcherParameters
+            & {"matcher_params_name": "other_same_params"}
+        ).super_delete(warn=False)
+        mp._MATCHER_REGISTRY.clear()
+        mp._MATCHER_REGISTRY.update(saved_m)
+        mp._SCHEMA_REGISTRY.clear()
+        mp._SCHEMA_REGISTRY.update(saved_s)
+
+
+@pytest.mark.slow
 def test_insert_selection_idempotent_and_hash_sensitive(
     two_session_curated_group,
 ):
@@ -662,6 +726,63 @@ def test_make_rechecks_member_provenance(two_session_curated_group):
             UnitMatch.populate({"unitmatch_id": unitmatch_id}, reserve_jobs=False)
         assert len(UnitMatch & {"unitmatch_id": unitmatch_id}) == 0
         assert len(UnitMatch.Pair & {"unitmatch_id": unitmatch_id}) == 0
+    finally:
+        (UnitMatchSelection & {"unitmatch_id": unitmatch_id}).super_delete(
+            warn=False
+        )
+
+
+@pytest.mark.slow
+def test_make_rejects_foreign_group_member_curation(two_session_curated_group):
+    """Goal 6: a MemberCuration row from a DIFFERENT SessionGroup attached under
+    the same unitmatch_id (its group fields are not unified with the master) is
+    rejected by make() before the member-index collapse can hide it."""
+    import uuid
+
+    from spyglass.spikesorting.v2.exceptions import (
+        UnitMatchSelectionIntegrityError,
+    )
+    from spyglass.spikesorting.v2.unit_matching import (
+        UnitMatch,
+        UnitMatchSelection,
+    )
+
+    grp = two_session_curated_group
+    group_key = {
+        "session_group_owner": grp["owner"],
+        "session_group_name": grp["group_name"],
+    }
+    unitmatch_id = uuid.uuid4()
+    UnitMatchSelection.insert1(
+        {
+            "unitmatch_id": unitmatch_id,
+            **group_key,
+            "matcher_params_name": "unitmatch_default",
+            "curation_set_hash": "0" * 64,
+        }
+    )
+    # Attach a member_index=0 row from the SOLO group (a different
+    # session_group_name) under this unitmatch_id -- schema-valid (its
+    # SessionGroup.Member FK resolves), but foreign to the master's group.
+    UnitMatchSelection.MemberCuration.insert1(
+        {
+            "unitmatch_id": unitmatch_id,
+            "session_group_owner": grp["owner"],
+            "session_group_name": grp["solo_name"],
+            "member_index": 0,
+            "sorting_id": grp["choices"][0]["sorting_id"],
+            "curation_id": grp["choices"][0]["curation_id"],
+        },
+        allow_direct_insert=True,
+    )
+    try:
+        with pytest.raises(
+            UnitMatchSelectionIntegrityError, match="belongs to SessionGroup"
+        ):
+            UnitMatch.populate(
+                {"unitmatch_id": unitmatch_id}, reserve_jobs=False
+            )
+        assert len(UnitMatch & {"unitmatch_id": unitmatch_id}) == 0
     finally:
         (UnitMatchSelection & {"unitmatch_id": unitmatch_id}).super_delete(
             warn=False
