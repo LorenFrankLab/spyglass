@@ -317,9 +317,20 @@ def _observed_duration_s(sorting_id) -> float:
     )
 
     sorting_key = {"sorting_id": sorting_id}
-    recording_id = (SortingSelection.RecordingSource & sorting_key).fetch1(
-        "recording_id"
-    )
+    source = SortingSelection.resolve_source(sorting_key)
+    if source.kind == "concatenated_recording":
+        # A concat sort observes the whole concatenated recording (concat sorts
+        # carry no artifact pass), so its observed duration is the materialized
+        # cache's total_duration_s -- there is no per-member RecordingSelection
+        # to fetch for a concat-only key.
+        from spyglass.spikesorting.v2.session_group import (
+            ConcatenatedRecording,
+        )
+
+        return float(
+            (ConcatenatedRecording & source.key).fetch1("total_duration_s")
+        )
+    recording_id = source.key["recording_id"]
     artifact_detection_id = SortingSelection.resolve_artifact_detection(
         sorting_key
     )

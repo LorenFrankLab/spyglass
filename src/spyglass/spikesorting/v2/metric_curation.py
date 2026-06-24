@@ -126,13 +126,21 @@ _AUTO_MERGE_EXTRA_EXTENSIONS = {
 
 
 def _nwb_file_name_for_sorting(sorting_key: dict) -> str:
-    """Return the source ``nwb_file_name`` for a recording-backed sort."""
-    recording_id = (SortingSelection.RecordingSource & sorting_key).fetch1(
-        "recording_id"
+    """Return the source ``nwb_file_name`` for a sort.
+
+    A single-recording sort reads its ``RecordingSelection``; a concat-backed
+    sort anchors to the FIRST ``SessionGroup.Member`` (the same deterministic
+    parent the sort's analysis NWB uses), so the analyzer-curation NWB lands
+    under the anchor member's session instead of crashing on an empty
+    ``RecordingSource`` join.
+    """
+    source = SortingSelection.resolve_source(sorting_key)
+    if source.kind == "recording":
+        return (RecordingSelection & source.key).fetch1("nwb_file_name")
+    _anchor_recording_id, nwb_file_name, _preproc = (
+        Sorting._resolve_concat_anchor(source.key)
     )
-    return (RecordingSelection & {"recording_id": recording_id}).fetch1(
-        "nwb_file_name"
-    )
+    return nwb_file_name
 
 
 def _requested_pc_metrics(metric_names) -> list[str]:

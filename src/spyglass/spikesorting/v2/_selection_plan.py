@@ -21,7 +21,7 @@ Dependency-light: imports only :mod:`_selection_identity` (itself DB-free)
 from __future__ import annotations
 
 import uuid
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 from spyglass.spikesorting.v2._selection_identity import (
     artifact_detection_identity_payload,
@@ -62,10 +62,15 @@ class SortingSelectionPlan(NamedTuple):
     ``ArtifactDetectionSource`` part row. ``artifact_detection_id`` is the
     normalized (``uuid.UUID``) value, threaded for find-existing and the
     artifact source part.
+
+    Note: ``source_kind`` here is ``"concat"`` (the plan/identity vocabulary),
+    which deliberately differs from ``utils.SourceResolution.kind``'s
+    ``"concatenated_recording"`` (the post-insert resolution vocabulary); the
+    two label the same source family at different layers.
     """
 
     sorting_id: uuid.UUID
-    source_kind: str
+    source_kind: Literal["recording", "concat"]
     master_restriction: dict
     source_restriction: dict
     master_row: dict
@@ -84,7 +89,7 @@ class ArtifactDetectionSelectionPlan(NamedTuple):
     """
 
     artifact_detection_id: uuid.UUID
-    source_kind: str
+    source_kind: Literal["recording", "shared_artifact_group"]
     master_restriction: dict
     source_restriction: dict
     master_row: dict

@@ -424,11 +424,15 @@ def synthesize_minirec_nwb(
 
 
 def _plant_concat_sorting_selection(sid):
-    """Land a concat-source ``SortingSelection`` (no ``RecordingSource``).
+    """Land a minimal concat-source ``SortingSelection`` (no ``RecordingSource``).
 
-    ``insert_selection`` rejects concat today, so the only way to get a
-    ``ConcatenatedRecordingSource`` part is the FK-checks-off bypass. The
-    caller cleans up ``SortingSelection & {sid}``.
+    ``insert_selection`` now accepts a concat source, but it requires a real,
+    populated ``ConcatenatedRecording`` (the part's FK target). This bypass
+    plants a ``ConcatenatedRecordingSource`` part pointing at a fake
+    ``concat_recording_id`` via FK-checks-off, so source-dispatch tests that
+    don't need a materialized concat recording (e.g. the concat brain-region
+    raise, the key_source membership check) stay cheap. The caller cleans up
+    ``SortingSelection & {sid}``.
     """
     import uuid
 

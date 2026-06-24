@@ -487,6 +487,89 @@ def test_concat_make_uses_selection_row_not_uuid_key(same_day_group):
 
 
 @pytest.mark.slow
+def test_concatenated_recording_make_with_rigid_fast_motion(same_day_group):
+    """Materializing with a REAL motion preset (rigid_fast) runs correct_motion
+    on the concatenated segment and preserves the sample count, so the
+    MemberBoundary back-mapping stays valid. Exercises the production motion
+    branch (resolve_motion_correction -> real preset, job-kwargs resolution, the
+    correct_motion call) and the post-motion sample-count invariant -- the
+    other materialization tests use preset='none' and never run motion."""
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecording,
+        ConcatenatedRecordingSelection,
+        MotionCorrectionParameters,
+    )
+
+    MotionCorrectionParameters.insert_default()
+    grp = same_day_group
+    concat_pk = ConcatenatedRecordingSelection.insert_selection(
+        {
+            **grp["group_key"],
+            "preprocessing_params_name": grp["preprocessing_params_name"],
+            "motion_correction_params_name": "rigid_fast_default",
+        }
+    )
+    ConcatenatedRecording.populate(concat_pk, reserve_jobs=False)
+
+    n0 = Recording().get_recording(grp["recording_pks"][0]).get_num_samples()
+    n1 = Recording().get_recording(grp["recording_pks"][1]).get_num_samples()
+    row = (ConcatenatedRecording & concat_pk).fetch1()
+    fs = float(row["sampling_frequency"])
+    # Motion correction is interpolation -> sample count preserved -> the
+    # boundaries (built from PRE-motion member counts) remain valid.
+    assert row["total_duration_s"] == pytest.approx((n0 + n1) / fs)
+    ends = (ConcatenatedRecording.MemberBoundary & concat_pk).fetch(
+        "end_sample", order_by="member_index"
+    )
+    assert [int(e) for e in ends] == [n0, n0 + n1]
+    assert (
+        ConcatenatedRecording().get_recording(concat_pk).get_num_samples()
+        == n0 + n1
+    )
+
+
+@pytest.mark.slow
+def test_concat_make_raises_on_motion_sample_count_drift(
+    same_day_group, monkeypatch
+):
+    """If motion correction ever changed the sample count, make() raises
+    (and persists nothing) rather than writing MemberBoundary rows that would
+    misalign split_sorting_by_session's back-mapping."""
+    import numpy as np
+    import spikeinterface as si
+
+    import spyglass.spikesorting.v2._concat_recording as concat_mod
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecording,
+        ConcatenatedRecordingSelection,
+    )
+
+    def _drifted(recordings, *, motion_preset, preset_kwargs=None, job_kwargs=None):
+        # Simulate a motion step that changed the sample count.
+        total = sum(int(r.get_num_samples()) for r in recordings)
+        return si.NumpyRecording(
+            [np.zeros((total + 1, 4), dtype=np.float32)],
+            sampling_frequency=recordings[0].get_sampling_frequency(),
+        )
+
+    grp = same_day_group
+    concat_pk = ConcatenatedRecordingSelection.insert_selection(
+        {
+            **grp["group_key"],
+            "preprocessing_params_name": grp["preprocessing_params_name"],
+            "motion_correction_params_name": "none",
+        }
+    )
+    monkeypatch.setattr(concat_mod, "build_concatenated_recording", _drifted)
+    # Call make() directly so the raw RuntimeError surfaces; it raises before
+    # the NWB write, so nothing is persisted and no analysis file orphans.
+    with pytest.raises(RuntimeError, match="sample count"):
+        ConcatenatedRecording().make(concat_pk)
+    assert not (ConcatenatedRecording & concat_pk)
+
+
+@pytest.mark.slow
 def test_motion_correction_preset_auto_rejects_multi_day(
     chronic_2_session_minirec,
 ):
@@ -713,6 +796,23 @@ def test_concat_sort_end_to_end_and_split(same_day_group):
         {"merge_id": merge_id}, allow_anchor_member=True
     )
     assert (merge_regions["region_resolution"] == "anchor_member").all()
+
+    # Reporting / analyzer-curation provenance is concat-aware (no crash on the
+    # empty RecordingSource join): the AnalyzerCuration NWB anchor resolves to
+    # the first member, and describe_units computes firing rate against the
+    # concat recording's total_duration_s.
+    from spyglass.spikesorting.v2.metric_curation import (
+        _nwb_file_name_for_sorting,
+    )
+    from spyglass.spikesorting.v2.pipeline import describe_units
+
+    assert (
+        _nwb_file_name_for_sorting({"sorting_id": sort_pk["sorting_id"]})
+        == first_nwb
+    )
+    units_df = describe_units(sort_pk["sorting_id"])
+    assert len(units_df) == int(row["n_units"])
+    assert (units_df["firing_rate_hz"] > 0).all()
 
 
 # ---------- memory / runtime measurement ----------------------------------

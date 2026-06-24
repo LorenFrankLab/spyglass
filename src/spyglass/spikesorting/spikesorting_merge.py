@@ -496,8 +496,10 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             Passed through to the v2 source accessor. A concat-backed v2 sort
             raises ``ConcatBrainRegionAmbiguousError`` by default; pass ``True``
             to return the anchor (first ``SessionGroup.Member``) regions
-            (labeled ``region_resolution="anchor_member"``). Ignored by sources
-            that do not accept it.
+            (labeled ``region_resolution="anchor_member"``). Only the v2
+            ``CurationV2`` source defines ``get_unit_brain_regions`` at all, so
+            this dispatch is effectively v2-only: v0/v1 sources raise the
+            ``AttributeError`` below before the kwarg is consumed.
 
         Returns
         -------
