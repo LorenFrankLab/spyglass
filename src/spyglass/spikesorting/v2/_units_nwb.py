@@ -2,11 +2,12 @@
 
 These functions are the units-NWB IO core behind ``Sorting`` and
 ``CurationV2``: reading a units NWB's stored ABSOLUTE spike times,
-mapping those times back to recording frames, reading the recording's
-persisted timestamp vector, writing the pre-curation sorting-units NWB
-(``write_sorting_units_nwb``), and writing the post-curation curated-units
-NWB (``write_curated_units_nwb``). Most take already-resolved paths /
-SpikeInterface objects / fetched row dicts and do pure pynwb IO;
+reading the Spyglass-side sample-frame column, falling back to
+absolute-time -> frame mapping for older/manual files, writing the
+pre-curation sorting-units NWB (``write_sorting_units_nwb``), and writing
+the post-curation curated-units NWB (``write_curated_units_nwb``). Most take
+already-resolved paths / SpikeInterface objects / fetched row dicts and do
+pure pynwb IO;
 ``write_curated_units_nwb`` is the exception -- it resolves the source
 sort itself (``Sorting`` / ``SortingSelection`` / ``RecordingSelection``
 fetches) before writing, so ``CurationV2.insert_curation`` stays a thin
@@ -31,14 +32,16 @@ filesystem, not the database.
 
 from __future__ import annotations
 
+SPIKE_SAMPLE_INDEX_COLUMN = "spike_sample_index"
+
 
 def read_units_abs_spike_times(abs_path) -> dict:
     """Return ``{unit_id(int): abs_spike_times(np.ndarray seconds)}``.
 
-    Reads the stored absolute spike times directly from a v2 units
-    NWB (``nwbf.units.to_dataframe()``), so callers get the persisted
-    wall-clock values exactly -- no affine round-trip. Returns ``{}``
-    for an empty/absent Units table.
+    Reads the stored absolute spike times directly from the v2 Units table's
+    indexed ``spike_times`` column, so callers get the persisted wall-clock
+    values exactly -- no affine round-trip and no full DataFrame materialization.
+    Returns ``{}`` for an empty/absent Units table.
 
     Parameters
     ----------
@@ -56,13 +59,54 @@ def read_units_abs_spike_times(abs_path) -> dict:
 
     with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
         nwbf = io.read()
-        if nwbf.units is None or len(nwbf.units) == 0:
+        units = nwbf.units
+        if units is None or len(units) == 0:
             return {}
-        units_df = nwbf.units.to_dataframe()
-    return {
-        int(uid): np.asarray(st, dtype=float)
-        for uid, st in units_df["spike_times"].items()
+        unit_ids = np.asarray(units.id[:], dtype=int)
+        spike_times = units["spike_times"]
+        return {
+            int(uid): np.asarray(spike_times[row_ind], dtype=float)
+            for row_ind, uid in enumerate(unit_ids)
+        }
+
+
+def read_units_spike_sample_indices(abs_path) -> dict | None:
+    """Return ``{unit_id: spike_sample_index}`` or ``None`` if absent.
+
+    New v2 units NWBs store sample frames alongside absolute ``spike_times`` so
+    Spyglass readback can reconstruct ``NumpySorting`` objects without reading
+    the upstream recording's full timestamp vector. ``None`` is the compatibility
+    signal for older/manual units NWBs that lack the column; callers then fall
+    back to absolute-time mapping.
+    """
+    import numpy as np
+    import pynwb
+
+    with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
+        nwbf = io.read()
+        units = nwbf.units
+        if units is None or len(units) == 0:
+            return {}
+        if SPIKE_SAMPLE_INDEX_COLUMN not in units.colnames:
+            return None
+        unit_ids = np.asarray(units.id[:], dtype=int)
+        sample_indices = units[SPIKE_SAMPLE_INDEX_COLUMN]
+        return {
+            int(uid): np.asarray(sample_indices[row_ind], dtype=np.int64)
+            for row_ind, uid in enumerate(unit_ids)
+        }
+
+
+def numpysorting_from_sample_indices(sample_indices, fs):
+    """Build a ``NumpySorting`` directly from stored sample frames."""
+    import numpy as np
+    import spikeinterface as si
+
+    units_dict = {
+        int(uid): np.asarray(frames, dtype=np.int64)
+        for uid, frames in sample_indices.items()
     }
+    return si.NumpySorting.from_unit_dict([units_dict], sampling_frequency=fs)
 
 
 def numpysorting_from_abs_times(abs_times, recording_row, fs):
@@ -101,6 +145,38 @@ def numpysorting_from_abs_times(abs_times, recording_row, fs):
         for uid, st in abs_times.items()
     }
     return si.NumpySorting.from_unit_dict([units_dict], sampling_frequency=fs)
+
+
+def build_lazy_merged_sorting_from_samples(
+    abs_times, sample_indices, units_to_merge, fs, *, delta_s
+):
+    """Reconstruct a lazily-merged sorting using stored frames.
+
+    Deduplication still happens in absolute time so disjoint-recording gaps are
+    respected. The kept absolute-time events carry their aligned sample frames
+    through the same mask, avoiding a full recording timestamp-vector read.
+    """
+    import numpy as np
+
+    units_dict: dict = {}
+    merged_members = {int(u) for g in units_to_merge for u in g}
+    for uid, frames in sample_indices.items():
+        if int(uid) not in merged_members:
+            units_dict[int(uid)] = np.asarray(frames, dtype=np.int64)
+
+    next_id = max(int(u) for u in abs_times) + 1
+    for contribs in units_to_merge:
+        _times, frames = _dedup_merged_spike_times_and_frames(
+            [np.asarray(abs_times[int(u)], dtype=float) for u in contribs],
+            [
+                np.asarray(sample_indices[int(u)], dtype=np.int64)
+                for u in contribs
+            ],
+            delta_s,
+        )
+        units_dict[next_id] = frames
+        next_id += 1
+    return numpysorting_from_sample_indices(units_dict, fs)
 
 
 def build_lazy_merged_sorting(
@@ -176,6 +252,43 @@ def build_lazy_merged_sorting(
     return si.NumpySorting.from_unit_dict([units_dict], sampling_frequency=fs)
 
 
+def _dedup_merged_spike_times_and_frames(times_list, frames_list, delta_s):
+    """Return deduplicated ``(times, frames)`` with both arrays aligned."""
+    import numpy as np
+
+    time_arrays = [np.asarray(t, dtype=float) for t in times_list]
+    frame_arrays = [np.asarray(f, dtype=np.int64) for f in frames_list]
+    for times, frames in zip(time_arrays, frame_arrays):
+        if times.shape != frames.shape:
+            raise ValueError(
+                "Merged unit spike times and sample indices must have matching "
+                f"shapes; got {times.shape} and {frames.shape}."
+            )
+    concat_times = (
+        np.concatenate(time_arrays)
+        if time_arrays
+        else np.asarray([], dtype=float)
+    )
+    concat_frames = (
+        np.concatenate(frame_arrays)
+        if frame_arrays
+        else np.asarray([], dtype=np.int64)
+    )
+    if concat_times.size == 0:
+        return concat_times, concat_frames
+    order = concat_times.argsort(kind="mergesort")
+    times_sorted = concat_times[order]
+    frames_sorted = concat_frames[order]
+    membership = np.concatenate(
+        [np.full(arr.shape, i) for i, arr in enumerate(time_arrays)]
+    )[order]
+    keep = np.nonzero(
+        (np.diff(times_sorted) > delta_s) | (np.diff(membership) == 0)
+    )[0]
+    keep = np.concatenate([[0], keep + 1])
+    return times_sorted[keep], frames_sorted[keep]
+
+
 def abs_spike_times_dataframe(abs_times):
     """Build a DataFrame (index=unit_id) of absolute spike-time arrays.
 
@@ -214,6 +327,112 @@ def empty_spike_times_dataframe():
         {"spike_times": []},
         index=pd.Index([], name="unit_id", dtype=int),
     )
+
+
+def _recording_has_explicit_time_vector(recording) -> bool:
+    """Return whether ``recording`` stores explicit timestamps."""
+    try:
+        return (
+            recording.get_time_info(segment_index=0).get("time_vector")
+            is not None
+        )
+    except AttributeError:
+        # Compatibility with any older/custom extractor lacking get_time_info:
+        # treat it as explicit so callers use the slice-based exact path.
+        return True
+
+
+def _sample_indices_to_times_by_unit(recording, sample_indices_by_unit):
+    """Map stored sample frames to absolute times without full-vector allocation."""
+    import numpy as np
+
+    fs = float(recording.get_sampling_frequency())
+    if not _recording_has_explicit_time_vector(recording):
+        try:
+            t_start = recording.get_start_time(segment_index=0)
+        except TypeError:
+            t_start = recording.get_start_time()
+        except AttributeError:
+            t_start = 0.0
+        t_start = 0.0 if t_start is None else float(t_start)
+        return {
+            int(uid): np.asarray(frames, dtype=np.int64) / fs + t_start
+            for uid, frames in sample_indices_by_unit.items()
+        }
+
+    n_samples = int(recording.get_num_samples(segment_index=0))
+
+    def lookup(frames):
+        frames = np.asarray(frames, dtype=np.int64)
+        if frames.size == 0:
+            return np.asarray([], dtype=np.float64)
+        if np.any((frames < 0) | (frames >= n_samples)):
+            raise ValueError(
+                "spike_sample_index contains frame(s) outside the recording "
+                f"range [0, {n_samples})."
+            )
+        # sample_index_to_time maps the sparse spike frames -> absolute times
+        # directly without the caller materializing the full timestamp vector.
+        return np.asarray(
+            recording.sample_index_to_time(frames, segment_index=0),
+            dtype=np.float64,
+        )
+
+    return {
+        int(uid): lookup(frames)
+        for uid, frames in sample_indices_by_unit.items()
+    }
+
+
+def _base_intervals_from_recording(recording, fs):
+    """Return recorded time chunks without materializing full timestamps."""
+    import numpy as np
+
+    n_samples = int(recording.get_num_samples(segment_index=0))
+    if n_samples == 0:
+        return []
+    if not _recording_has_explicit_time_vector(recording):
+        try:
+            t_start = recording.get_start_time(segment_index=0)
+        except TypeError:
+            t_start = recording.get_start_time()
+        except AttributeError:
+            t_start = 0.0
+        t_start = 0.0 if t_start is None else float(t_start)
+        return [[t_start, t_start + (n_samples - 1) / float(fs)]]
+
+    sample_period = 1.0 / float(fs)
+    chunk_size = max(1, int(round(float(fs))))
+    intervals = []
+    current_start = None
+    prev_time = None
+    for start_frame in range(0, n_samples, chunk_size):
+        end_frame = min(n_samples, start_frame + chunk_size)
+        # Bounded get_times() slices explicit time vectors in SI, so this caps
+        # each gap-scan allocation to ~one second of samples.
+        times = np.asarray(
+            recording.get_times(
+                segment_index=0,
+                start_frame=start_frame,
+                end_frame=end_frame,
+            ),
+            dtype=np.float64,
+        )
+        if times.size == 0:
+            continue
+        if current_start is None:
+            current_start = float(times[0])
+        elif float(times[0]) - prev_time > 1.5 * sample_period:
+            intervals.append([float(current_start), float(prev_time)])
+            current_start = float(times[0])
+        gaps = np.flatnonzero(np.diff(times) > 1.5 * sample_period)
+        for gap_idx in gaps:
+            intervals.append([float(current_start), float(times[gap_idx])])
+            current_start = float(times[gap_idx + 1])
+        prev_time = float(times[-1])
+    if current_start is not None:
+        intervals.append([float(current_start), float(prev_time)])
+    return intervals
 
 
 def recording_timestamps(recording_row):
@@ -256,9 +475,11 @@ def write_sorting_units_nwb(
 ):
     """Write a fresh AnalysisNwbfile containing only the v2 Units table.
 
-    Spike times are stored in the recording's absolute timeline
-    (``timestamps[sample_index]``) so downstream consumers can compare
-    directly against the Recording's IntervalList valid_times.
+    Spike times are stored in the recording's absolute timeline so downstream
+    consumers can compare directly against the Recording's IntervalList
+    valid_times. Spyglass also stores ``spike_sample_index`` (frame indices into
+    the sorted recording) so ``get_sorting`` can reconstruct SI objects without
+    reading the full recording timestamp vector.
     ``AnalysisNwbfile().create`` already strips any parent ``/units``
     from the analysis NWB so the sort outputs are the only Units rows
     in the file (addresses #1437).
@@ -279,7 +500,16 @@ def write_sorting_units_nwb(
     analysis_file_name = AnalysisNwbfile().create(nwb_file_name=nwb_file_name)
     analysis_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
 
-    timestamps = recording.get_times()
+    sample_indices_by_unit = {
+        int(unit_id): np.asarray(
+            sorting.get_unit_spike_train(unit_id=unit_id), dtype=np.int64
+        )
+        for unit_id in sorting.unit_ids
+    }
+    spike_times_by_unit = _sample_indices_to_times_by_unit(
+        recording, sample_indices_by_unit
+    )
+    sampling_frequency = float(recording.get_sampling_frequency())
     if obs_intervals is None:
         # ``obs_intervals is None`` is the "no artifact-detection pass" case:
         # the artifact-detection pass is optional (an ArtifactDetectionSource
@@ -292,14 +522,8 @@ def write_sorting_units_nwb(
         # gaps (which would inflate the observation duration). For a
         # contiguous recording this collapses to a single
         # ``[t0, t_end]``, unchanged.
-        from spyglass.spikesorting.v2.utils import (
-            _base_intervals_from_timestamps,
-        )
-
         obs_intervals_arr = np.asarray(
-            _base_intervals_from_timestamps(
-                timestamps, recording.get_sampling_frequency()
-            )
+            _base_intervals_from_recording(recording, sampling_frequency)
         )
     else:
         obs_intervals_arr = np.asarray(obs_intervals)
@@ -329,17 +553,26 @@ def write_sorting_units_nwb(
                     "by CurationV2.insert_curation."
                 ),
             )
+            nwbf.add_unit_column(
+                name=SPIKE_SAMPLE_INDEX_COLUMN,
+                description=(
+                    "Sample indices into the sorted recording, one array per "
+                    "unit. Stored alongside absolute spike_times so Spyglass "
+                    "can reconstruct frame-based NumpySorting objects without "
+                    "reading the full recording timestamp vector."
+                ),
+                index=True,
+            )
         for unit_id in sorting.unit_ids:
-            spike_indices = sorting.get_unit_spike_train(unit_id=unit_id)
-            # Map sample indices into the recording's wall-clock so
-            # the stored spike times match Recording.get_times()
-            # exactly.
-            spike_times = timestamps[spike_indices]
+            unit_id = int(unit_id)
+            spike_indices = sample_indices_by_unit[unit_id]
+            spike_times = spike_times_by_unit[unit_id]
             nwbf.add_unit(
                 spike_times=spike_times,
-                id=int(unit_id),
+                id=unit_id,
                 obs_intervals=obs_intervals_arr,
                 curation_label="uncurated",
+                spike_sample_index=spike_indices,
             )
         # pynwb leaves ``nwbf.units = None`` if no add_unit() was
         # called, so a zero-unit sort would crash on .object_id.
@@ -406,16 +639,15 @@ def write_curated_units_nwb(
         {"sorting_id": sorting_id}
     )
 
-    # Source the pre-curation units' ABSOLUTE spike times straight
-    # from the Sorting units NWB. Reading absolute seconds (not a
-    # frame-based SI object) keeps the curated NWB's stored times
-    # exact and gap-correct for disjoint recordings -- a frame->time
-    # round-trip through a NumpySorting (t_start=0) would drop the
-    # absolute offset and the wall-clock gaps.
+    # Source the pre-curation units' ABSOLUTE spike times plus Spyglass's
+    # sample-frame sidecar straight from the Sorting units NWB. Absolute seconds
+    # keep the curated NWB interoperable and gap-correct; sample frames let
+    # Spyglass reconstruct sortings without reading the full recording timeline.
     src_abs_path = AnalysisNwbfile.get_abs_path(
         (Sorting & {"sorting_id": sorting_id}).fetch1("analysis_file_name")
     )
     abs_times_by_uid = read_units_abs_spike_times(src_abs_path)
+    sample_indices_by_uid = read_units_spike_sample_indices(src_abs_path)
 
     analysis_file_name = AnalysisNwbfile().create(nwb_file_name=nwb_file_name)
     analysis_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
@@ -450,16 +682,42 @@ def write_curated_units_nwb(
                     # spike). Uses the same dedup as the lazy
                     # get_merged_sorting, so the stored
                     # (apply_merge=True) train equals the previewed one.
-                    spike_times = _dedup_merged_spike_times(
-                        [abs_times_by_uid[int(u)] for u in contribs],
-                        _MERGE_DEDUP_DELTA_MS / 1000.0,
-                    )
+                    if sample_indices_by_uid is not None:
+                        spike_times, spike_indices = (
+                            _dedup_merged_spike_times_and_frames(
+                                [abs_times_by_uid[int(u)] for u in contribs],
+                                [
+                                    sample_indices_by_uid[int(u)]
+                                    for u in contribs
+                                ],
+                                _MERGE_DEDUP_DELTA_MS / 1000.0,
+                            )
+                        )
+                    else:
+                        spike_times = _dedup_merged_spike_times(
+                            [abs_times_by_uid[int(u)] for u in contribs],
+                            _MERGE_DEDUP_DELTA_MS / 1000.0,
+                        )
+                        spike_indices = None
                 else:
                     spike_times = abs_times_by_uid[int(kept_uid)]
-                write_specs.append((int(kept_uid), spike_times))
+                    spike_indices = (
+                        None
+                        if sample_indices_by_uid is None
+                        else sample_indices_by_uid[int(kept_uid)]
+                    )
+                write_specs.append((int(kept_uid), spike_times, spike_indices))
         else:
             write_specs = [
-                (int(uid), abs_times_by_uid[int(uid)])
+                (
+                    int(uid),
+                    abs_times_by_uid[int(uid)],
+                    (
+                        None
+                        if sample_indices_by_uid is None
+                        else sample_indices_by_uid[int(uid)]
+                    ),
+                )
                 for uid in sorted(abs_times_by_uid)
             ]
         # ``n_spikes`` per written unit is the length of its STORED
@@ -468,7 +726,8 @@ def write_curated_units_nwb(
         # even after cross-unit dedup removes double-detections. The
         # caller overrides ``unit_rows`` with this map.
         n_spikes_by_uid = {
-            int(uid): int(len(spike_times)) for uid, spike_times in write_specs
+            int(uid): int(len(spike_times))
+            for uid, spike_times, _spike_indices in write_specs
         }
 
         if write_specs:
@@ -487,17 +746,30 @@ def write_curated_units_nwb(
             # dtype from. Pre-declaring the column and passing labels
             # per ``add_unit`` makes pynwb fail dtype inference when
             # all labels happen to be empty (the no-labels case).
-            all_labels: list[list[str]] = []
-            for unit_id, spike_times in write_specs:
-                lbl_list = labels.get(int(unit_id), [])
-                label_list = [
-                    CurationLabel.normalize(lbl) for lbl in lbl_list
-                ]
-                all_labels.append(label_list)
-                nwbf.add_unit(
-                    spike_times=np.asarray(spike_times, dtype=np.float64),
-                    id=int(unit_id),
+            if sample_indices_by_uid is not None:
+                nwbf.add_unit_column(
+                    name=SPIKE_SAMPLE_INDEX_COLUMN,
+                    description=(
+                        "Sample indices into the curated recording, one array "
+                        "per unit. Mirrors spike_times for Spyglass frame-based "
+                        "readback without reading the full timestamp vector."
+                    ),
+                    index=True,
                 )
+            all_labels: list[list[str]] = []
+            for unit_id, spike_times, spike_indices in write_specs:
+                lbl_list = labels.get(int(unit_id), [])
+                label_list = [CurationLabel.normalize(lbl) for lbl in lbl_list]
+                all_labels.append(label_list)
+                unit_kwargs = {
+                    "spike_times": np.asarray(spike_times, dtype=np.float64),
+                    "id": int(unit_id),
+                }
+                if sample_indices_by_uid is not None:
+                    unit_kwargs[SPIKE_SAMPLE_INDEX_COLUMN] = np.asarray(
+                        spike_indices, dtype=np.int64
+                    )
+                nwbf.add_unit(**unit_kwargs)
             # Only add the column when at least one unit
             # carries a non-empty label list. pynwb's dtype
             # inference fails on an all-empty list-of-lists

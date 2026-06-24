@@ -62,7 +62,9 @@ from spyglass.spikesorting.v2._units_nwb import (
     abs_spike_times_dataframe,
     empty_spike_times_dataframe,
     numpysorting_from_abs_times,
+    numpysorting_from_sample_indices,
     read_units_abs_spike_times,
+    read_units_spike_sample_indices,
     recording_timestamps,
     write_sorting_units_nwb,
 )
@@ -1770,18 +1772,12 @@ class Sorting(SpyglassMixin, dj.Computed):
     ) -> "si.BaseSorting | pd.DataFrame":
         """Return the SpikeInterface BaseSorting backed by the units NWB.
 
-        Spike times are persisted by ``_write_units_nwb`` in the
-        recording's ABSOLUTE wall-clock timeline
-        (``spike_times = recording.get_times()[frame]``). For disjoint
-        sort intervals that timeline is non-uniform -- it carries the
-        wall-clock gaps that ``concatenate_recordings(ignore_times=True)``
-        drops -- so the inverse map (absolute time -> recording frame)
-        must use ``np.searchsorted`` against the actual recording
-        timestamps. An affine
-        ``round((t - t_start) * fs)`` inverse (SI's ``NwbSortingExtractor``)
-        is correct only on a uniform grid and shifts every frame after a
-        gap by the accumulated gap (and can push frames past the
-        gap-excluded sample count), so it is NOT used here.
+        Spike times are persisted by ``_write_units_nwb`` in two forms:
+        absolute ``spike_times`` for NWB interoperability, and Spyglass's
+        ``spike_sample_index`` sidecar for efficient frame-based readback. New
+        files reconstruct directly from ``spike_sample_index``; older/manual
+        files without that column fall back to the previous absolute-time
+        search against the recording timestamps.
 
         Returns a ``NumpySorting`` (segment frame indices, ``t_start=0``),
         so ``get_unit_spike_train(uid)`` yields the original recording
@@ -1844,9 +1840,13 @@ class Sorting(SpyglassMixin, dj.Computed):
                 return empty_spike_times_dataframe()
             return si.NumpySorting.from_unit_dict({}, sampling_frequency=fs)
 
-        abs_times = read_units_abs_spike_times(abs_path)
         if as_dataframe:
+            abs_times = read_units_abs_spike_times(abs_path)
             return abs_spike_times_dataframe(abs_times)
+        sample_indices = read_units_spike_sample_indices(abs_path)
+        if sample_indices is not None:
+            return numpysorting_from_sample_indices(sample_indices, fs)
+        abs_times = read_units_abs_spike_times(abs_path)
         return numpysorting_from_abs_times(abs_times, rec_row, fs)
 
     @staticmethod
@@ -2222,7 +2222,9 @@ class Sorting(SpyglassMixin, dj.Computed):
         )
 
         referenced_paths.update(
-            str(analyzer_path(r["sorting_id"], r["metric_waveform_params_name"]))
+            str(
+                analyzer_path(r["sorting_id"], r["metric_waveform_params_name"])
+            )
             for r in AnalyzerCurationSelection.pc_requesting().fetch(
                 "sorting_id", "metric_waveform_params_name", as_dict=True
             )

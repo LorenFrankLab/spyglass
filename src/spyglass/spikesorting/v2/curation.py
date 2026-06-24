@@ -30,9 +30,12 @@ from spyglass.spikesorting.v2._curation_transforms import (
 )
 from spyglass.spikesorting.v2._signal_math import _MERGE_DEDUP_DELTA_MS
 from spyglass.spikesorting.v2._units_nwb import (
+    build_lazy_merged_sorting_from_samples,
     build_lazy_merged_sorting,
     numpysorting_from_abs_times,
+    numpysorting_from_sample_indices,
     read_units_abs_spike_times,
+    read_units_spike_sample_indices,
     recording_timestamps,
     write_curated_units_nwb,
 )
@@ -423,7 +426,9 @@ class CurationV2(SpyglassMixin, dj.Manual):
         }
 
     @staticmethod
-    def _normalized_real_merge_groups(merge_groups) -> tuple[tuple[int, ...], ...]:
+    def _normalized_real_merge_groups(
+        merge_groups,
+    ) -> tuple[tuple[int, ...], ...]:
         """Normalize merge groups, dropping 1-unit self provenance entries."""
         if isinstance(merge_groups, dict):
             groups = merge_groups.values()
@@ -478,7 +483,9 @@ class CurationV2(SpyglassMixin, dj.Manual):
             if existing_labels != target_labels:
                 continue
             if (
-                cls._normalized_real_merge_groups(cls.get_merge_groups(candidate))
+                cls._normalized_real_merge_groups(
+                    cls.get_merge_groups(candidate)
+                )
                 != target_merges
             ):
                 continue
@@ -1343,12 +1350,16 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 index=pd.Index([], name="unit_id", dtype=int),
             )
 
-        abs_times = read_units_abs_spike_times(abs_path)
         if not as_dataframe:
+            sample_indices = read_units_spike_sample_indices(abs_path)
+            if sample_indices is not None:
+                return numpysorting_from_sample_indices(sample_indices, fs)
+            abs_times = read_units_abs_spike_times(abs_path)
             return numpysorting_from_abs_times(abs_times, recording_row, fs)
 
         import pandas as pd
 
+        abs_times = read_units_abs_spike_times(abs_path)
         # Join the ``curation_label`` lists from ``UnitLabel`` so the
         # returned DataFrame carries a ``curation_label`` column.
         # External notebook code reading ``df["curation_label"]`` works
@@ -1605,8 +1616,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
 
             concat_sel = ConcatenatedRecordingSelection & concat_restriction
             sort_concat_source = (
-                SortingSelection.ConcatenatedRecordingSource
-                * concat_sel.proj()
+                SortingSelection.ConcatenatedRecordingSource * concat_sel.proj()
             )
             sort_master = SortingSelection * sort_concat_source.proj()
         elif rec_restriction:
@@ -1747,8 +1757,9 @@ class CurationV2(SpyglassMixin, dj.Manual):
         A curation built with ``apply_merge=False`` (preview) still
         carries every original unit, so the proposed merges recorded in
         ``CurationV2.MergeGroup`` are applied lazily here without
-        re-running the sort. The lazy merge is rebuilt from absolute
-        spike times so disjoint-recording wall-clock gaps are respected.
+        re-running the sort. The lazy merge deduplicates in absolute
+        spike time so disjoint-recording wall-clock gaps are respected, then
+        reuses stored ``spike_sample_index`` frames when available.
 
         When the curation was created with ``apply_merge=True`` the base
         sorting is ALREADY merged (contributors absorbed at insert), so
@@ -1784,18 +1795,26 @@ class CurationV2(SpyglassMixin, dj.Manual):
         if not units_to_merge:
             return cls.get_sorting(key)
 
-        # Read the curated units NWB + the recording timeline ONCE, then
-        # rebuild the merged sorting via the pure compute core
-        # (``build_lazy_merged_sorting``). Calling get_sorting here would
-        # re-open the units NWB, re-fetch the recording row, and re-read the
-        # timeline only to discard the intermediates (and would emit a
-        # spurious "merges NOT applied" warning -- we ARE applying them). The
-        # merge is applied in ABSOLUTE time (gap-correct on disjoint
-        # recordings) inside the compute core; see its docstring.
+        # Read the curated units NWB once, then rebuild the merged sorting via
+        # the pure compute core. New units NWBs carry stored sample frames and
+        # avoid the recording timeline; legacy/manual files fall back to the
+        # full timestamp-vector mapping. Calling get_sorting here would re-open
+        # the units NWB and emit a spurious "merges NOT applied" warning -- we
+        # ARE applying them. The merge is deduplicated in ABSOLUTE time
+        # (gap-correct on disjoint recordings); see the helper docstrings.
         _row, recording_row, fs, abs_path = cls._load_curation_recording_meta(
             key
         )
         abs_times = read_units_abs_spike_times(abs_path)
+        sample_indices = read_units_spike_sample_indices(abs_path)
+        if sample_indices is not None:
+            return build_lazy_merged_sorting_from_samples(
+                abs_times,
+                sample_indices,
+                units_to_merge,
+                fs,
+                delta_s=_MERGE_DEDUP_DELTA_MS / 1000.0,
+            )
         timestamps = recording_timestamps(recording_row)
         return build_lazy_merged_sorting(
             abs_times,

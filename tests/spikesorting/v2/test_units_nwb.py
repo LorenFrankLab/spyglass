@@ -131,6 +131,47 @@ def test_abs_spike_times_dataframe_roundtrip():
     assert len(abs_spike_times_dataframe({})) == 0
 
 
+def test_numpysorting_from_sample_indices_roundtrip():
+    from spyglass.spikesorting.v2._units_nwb import (
+        numpysorting_from_sample_indices,
+    )
+
+    sorting = numpysorting_from_sample_indices(
+        {5: np.array([1, 4, 9]), 8: np.array([], dtype=np.int64)}, _FS
+    )
+    assert sorted(int(u) for u in sorting.get_unit_ids()) == [5, 8]
+    assert _unit_train(sorting, 5) == [1, 4, 9]
+    assert _unit_train(sorting, 8) == []
+
+
+def test_build_lazy_merged_sorting_from_samples_avoids_timestamp_mapping():
+    """Merged preview keeps frames already stored in the Units NWB."""
+    from spyglass.spikesorting.v2._units_nwb import (
+        build_lazy_merged_sorting_from_samples,
+    )
+
+    sorting = build_lazy_merged_sorting_from_samples(
+        {
+            1: np.array([0.010]),
+            2: np.array([0.0102]),  # within 0.4 ms, different unit -> dedup
+            3: np.array([0.020]),
+        },
+        {
+            1: np.array([10], dtype=np.int64),
+            2: np.array([11], dtype=np.int64),
+            3: np.array([20], dtype=np.int64),
+        },
+        units_to_merge=[[1, 2]],
+        fs=_FS,
+        delta_s=0.4e-3,
+    )
+    assert sorted(int(u) for u in sorting.get_unit_ids()) == [3, 4]
+    assert _unit_train(sorting, 3) == [20]
+    # The first contributor's frame is retained by the same stable sort / keep
+    # mask as _dedup_merged_spike_times.
+    assert _unit_train(sorting, 4) == [10]
+
+
 def _write_units_nwb(path, unit_spike_times):
     """Write a minimal NWB; add a Units table only if spike trains given."""
     from datetime import datetime, timezone
@@ -144,6 +185,35 @@ def _write_units_nwb(path, unit_spike_times):
     )
     for st in unit_spike_times:
         nwbfile.add_unit(spike_times=list(st))
+    with pynwb.NWBHDF5IO(path=str(path), mode="w") as io:
+        io.write(nwbfile)
+
+
+def _write_units_nwb_with_samples(path, rows):
+    """Write ``[(unit_id, spike_times, sample_indices), ...]``."""
+    from datetime import datetime, timezone
+
+    import pynwb
+
+    from spyglass.spikesorting.v2._units_nwb import SPIKE_SAMPLE_INDEX_COLUMN
+
+    nwbfile = pynwb.NWBFile(
+        session_description="test",
+        identifier="test-units-nwb-samples",
+        session_start_time=datetime(2020, 1, 1, tzinfo=timezone.utc),
+    )
+    if rows:
+        nwbfile.add_unit_column(
+            SPIKE_SAMPLE_INDEX_COLUMN,
+            "sample frames",
+            index=True,
+        )
+    for unit_id, spike_times, sample_indices in rows:
+        nwbfile.add_unit(
+            id=unit_id,
+            spike_times=list(spike_times),
+            spike_sample_index=np.asarray(sample_indices, dtype=np.int64),
+        )
     with pynwb.NWBHDF5IO(path=str(path), mode="w") as io:
         io.write(nwbfile)
 
@@ -170,3 +240,110 @@ def test_read_units_abs_spike_times_empty(tmp_path):
     p = tmp_path / "no_units.nwb"
     _write_units_nwb(p, [])  # no add_unit -> nwbf.units is None
     assert read_units_abs_spike_times(str(p)) == {}
+
+
+def test_read_units_spike_sample_indices_populated(tmp_path):
+    from spyglass.spikesorting.v2._units_nwb import (
+        read_units_spike_sample_indices,
+    )
+
+    p = tmp_path / "units_samples.nwb"
+    _write_units_nwb_with_samples(
+        p,
+        [
+            (4, [0.1, 0.2, 0.3], [10, 20, 30]),
+            (9, [], []),
+        ],
+    )
+    out = read_units_spike_sample_indices(str(p))
+    assert set(out) == {4, 9}
+    np.testing.assert_array_equal(out[4], [10, 20, 30])
+    np.testing.assert_array_equal(out[9], [])
+
+
+def test_read_units_spike_sample_indices_missing_column(tmp_path):
+    from spyglass.spikesorting.v2._units_nwb import (
+        read_units_spike_sample_indices,
+    )
+
+    p = tmp_path / "legacy_units.nwb"
+    _write_units_nwb(p, [[0.1, 0.2]])
+    assert read_units_spike_sample_indices(str(p)) is None
+
+
+class _FakeRecording:
+    def __init__(self, times, fs=_FS, explicit=True):
+        self.times = np.asarray(times, dtype=float)
+        self.fs = fs
+        self.explicit = explicit
+        self.sample_calls = []
+        self.time_slice_calls = []
+
+    def get_sampling_frequency(self):
+        return self.fs
+
+    def get_time_info(self, segment_index=0):
+        return {"time_vector": self.times if self.explicit else None}
+
+    def get_start_time(self, segment_index=0):
+        return float(self.times[0]) if self.times.size else 0.0
+
+    def get_num_samples(self, segment_index=0):
+        return int(self.times.size)
+
+    def sample_index_to_time(self, sample_ind, segment_index=0):
+        sample_ind = np.asarray(sample_ind, dtype=np.int64)
+        self.sample_calls.append(sample_ind)
+        return self.times[sample_ind]
+
+    def get_times(self, segment_index=0, start_frame=None, end_frame=None):
+        self.time_slice_calls.append((start_frame, end_frame))
+        start = 0 if start_frame is None else int(start_frame)
+        stop = self.times.size if end_frame is None else int(end_frame)
+        return self.times[start:stop]
+
+
+def test_sample_indices_to_times_maps_only_requested_frames():
+    """frame->time mapping goes through sample_index_to_time with ONLY the spike
+    frames (one request per unit), never the full timeline."""
+    from spyglass.spikesorting.v2._units_nwb import (
+        _sample_indices_to_times_by_unit,
+    )
+
+    times = np.concatenate(
+        [np.arange(1000, dtype=float) / _FS, 10.0 + np.arange(1000) / _FS]
+    )
+    rec = _FakeRecording(times, explicit=True)
+    out = _sample_indices_to_times_by_unit(
+        rec,
+        {
+            1: np.array([2, 1002], dtype=np.int64),
+            2: np.array([1003], dtype=np.int64),
+        },
+    )
+    np.testing.assert_allclose(out[1], [times[2], times[1002]])
+    np.testing.assert_allclose(out[2], [times[1003]])
+    # Exactly the requested spike frames are mapped (one call per unit), so a
+    # long recording's full timeline is never materialized.
+    assert [c.tolist() for c in rec.sample_calls] == [[2, 1002], [1003]]
+    assert rec.time_slice_calls == []
+
+
+def test_base_intervals_from_recording_detects_gaps():
+    """Gap detection yields one interval per contiguous run from bounded
+    timestamp chunks."""
+    from spyglass.spikesorting.v2._units_nwb import (
+        _base_intervals_from_recording,
+    )
+
+    times = np.concatenate(
+        [np.arange(5, dtype=float) / _FS, 10.0 + np.arange(4) / _FS]
+    )
+    rec = _FakeRecording(times, explicit=True)
+    assert _base_intervals_from_recording(rec, _FS) == [
+        [0.0, 0.004],
+        [10.0, 10.003],
+    ]
+    # One bounded chunk (chunk_size == round(fs) == 1000) covers the 9 samples.
+    assert rec.time_slice_calls == [(0, 9)]
+    assert rec.sample_calls == []
