@@ -16,7 +16,7 @@ Tables:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 import datajoint as dj
 
@@ -474,11 +474,48 @@ class ConcatenatedRecordingSelection(SpyglassMixin, dj.Manual):
         return {"concat_recording_id": concat_recording_id}
 
 
+class ConcatRecordingFetched(NamedTuple):
+    """DB-side inputs for ``ConcatenatedRecording.make_compute`` (no SI/NWB I/O).
+
+    ``member_plan`` is the member_index-ordered list of DeepHash-stable dicts
+    ``{"member_index" (int), "nwb_file_name" (str), "recording_pk" (dict whose
+    ``recording_id`` is the str UUID)}`` -- each member's cached ``Recording`` PK
+    resolved and existence-checked at fetch time, so a member's cache going
+    missing between stages fails in fetch rather than mid-compute.
+    """
+
+    member_plan: list[dict]
+    preprocessing_params_name: str
+    motion_params: dict
+    motion_job_kwargs: dict | None
+    preprocessing_job_kwargs: dict | None
+    is_multi_day: bool
+    anchor_nwb_file_name: str
+
+
+class ConcatRecordingComputed(NamedTuple):
+    """Compute -> insert carrier for ``ConcatenatedRecording``.
+
+    DeepHash-stable scalars plus ``member_boundaries`` -- the per-member
+    ``{"member_index" (int), "end_sample" (int)}`` rows derived from the
+    PRE-motion sample counts (``make_insert`` adds the master PK).
+    """
+
+    analysis_file_name: str
+    object_id: str
+    n_channels: int
+    sampling_frequency: float
+    total_duration_s: float
+    cache_hash: str
+    anchor_nwb_file_name: str
+    member_boundaries: list[dict]
+
+
 @schema
 class ConcatenatedRecording(SpyglassMixin, dj.Computed):
     """Materialized cross-session concatenated recording cache.
 
-    ``make()`` writes a single motion-corrected, unwhitened
+    Tri-part ``make`` writes a single motion-corrected, unwhitened
     ``ElectricalSeries`` spanning the ordered member recordings, plus the
     cumulative per-member integer sample boundaries on the ``MemberBoundary``
     part (consumed by ``split_sorting_by_session``). Downstream
@@ -509,15 +546,15 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         """
 
     @staticmethod
-    def _load_member_recordings(members, preprocessing_params_name):
-        """Load each member's cached ``Recording`` in member order.
+    def _resolve_member_recording_keys(members, preprocessing_params_name):
+        """Resolve each member's cached ``Recording`` PK in member order (DB only).
 
-        The core per-member contract for materialization: resolve each member's
-        ``RecordingSelection`` PK ONCE, load its cached ``Recording``, and
-        collect the pre-motion sample count (the basis for the ``MemberBoundary``
-        back-mapping). Isolated from :meth:`make` so the load discipline -- a
-        single PK fetch and a single ``get_recording`` per member -- lives in one
-        place and is unit-testable without driving a full populate.
+        The fetch-side half of the materialization contract: resolve each
+        member's ``RecordingSelection`` PK ONCE and confirm its ``Recording``
+        row is cached. No SI/NWB I/O -- the heavy load lives in
+        :meth:`_load_member_recordings`, which ``make_compute`` drives off the
+        returned plan. Isolated so the resolve discipline (a single PK fetch per
+        member) is unit-testable without driving a full populate.
 
         Never calls ``Recording.populate``: the selection-time precondition in
         ``ConcatenatedRecordingSelection.insert_selection`` guarantees every
@@ -533,9 +570,10 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
 
         Returns
         -------
-        tuple[list, list[int], list[int]]
-            ``(recordings, member_sample_counts, member_indices)`` -- aligned
-            element-wise and in ``member_index`` order.
+        list[dict]
+            member_index-ordered plan dicts ``{"member_index" (int),
+            "nwb_file_name" (str), "recording_pk" (dict whose ``recording_id``
+            is the str UUID -- DeepHash-stable for the tri-part carrier)}``.
 
         Raises
         ------
@@ -553,9 +591,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             RecordingSelection,
         )
 
-        recordings = []
-        member_sample_counts = []
-        member_indices = []
+        member_plan = []
         missing: list[dict] = []
         for member in members:
             rec_sel_key = member_recording_selection_key(
@@ -568,10 +604,15 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             if rec_pk is None or not (Recording & rec_pk):
                 missing.append(rec_sel_key)
                 continue
-            recording = Recording().get_recording(rec_pk)
-            recordings.append(recording)
-            member_sample_counts.append(int(recording.get_num_samples()))
-            member_indices.append(int(member["member_index"]))
+            member_plan.append(
+                {
+                    "member_index": int(member["member_index"]),
+                    "nwb_file_name": member["nwb_file_name"],
+                    "recording_pk": {
+                        "recording_id": str(rec_pk["recording_id"])
+                    },
+                }
+            )
         if missing:
             raise MissingRecordingForConcatError(
                 "ConcatenatedRecording.make: "
@@ -581,22 +622,58 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
                 "(ConcatenatedRecordingSelection.insert_selection enforces "
                 "this; the selection was likely inserted by a raw bypass)."
             )
+        return member_plan
+
+    @staticmethod
+    def _load_member_recordings(member_plan):
+        """Load each member's cached ``Recording`` from the resolved plan (SI I/O).
+
+        The compute-side half: given the fetch-resolved ``member_plan`` (see
+        :meth:`_resolve_member_recording_keys`), load each cached ``Recording``
+        and collect the pre-motion sample count (the basis for the
+        ``MemberBoundary`` back-mapping). Aligned element-wise in
+        ``member_index`` order. No DB resolution happens here -- the PKs were
+        pinned at fetch time.
+
+        Parameters
+        ----------
+        member_plan : list[dict]
+            Resolved per-member plan dicts from
+            :meth:`_resolve_member_recording_keys`.
+
+        Returns
+        -------
+        tuple[list, list[int], list[int]]
+            ``(recordings, member_sample_counts, member_indices)`` -- aligned
+            element-wise and in ``member_index`` order.
+        """
+        from spyglass.spikesorting.v2.recording import Recording
+
+        recordings = []
+        member_sample_counts = []
+        member_indices = []
+        for plan in member_plan:
+            recording = Recording().get_recording(plan["recording_pk"])
+            recordings.append(recording)
+            member_sample_counts.append(int(recording.get_num_samples()))
+            member_indices.append(int(plan["member_index"]))
         return recordings, member_sample_counts, member_indices
 
-    def make(self, key):
-        """Materialize the motion-corrected, unwhitened concat cache.
+    # ``_parallel_make = True`` + the tri-part ``make_fetch`` / ``make_compute``
+    # / ``make_insert`` keep the long SpikeInterface concat + motion correction
+    # + NWB write OUTSIDE the framework's commit transaction (mirroring
+    # ``Recording`` / ``Sorting``); a single ``make()`` held the lock for the
+    # whole materialization.
+    _parallel_make = True
 
-        Reuses each member's already-populated, cached ``Recording`` artifact
-        (NEVER calls ``Recording.populate`` -- a DataJoint anti-pattern; the
-        selection-time precondition guarantees the rows exist, and this method
-        defensively re-checks), stitches them into one mono-segment recording,
-        applies motion correction (resolving the Spyglass ``"auto"`` alias to
-        a same-day preset and rejecting it on multi-day groups), and writes a
-        single ``ElectricalSeries`` into an ``AnalysisNwbfile``. Whitening is
-        deliberately NOT applied here -- it stays a sorter/analyzer concern, so
-        the persisted concat recording is motion-corrected but unwhitened.
-        Cumulative per-member sample boundaries are persisted on
-        ``MemberBoundary`` for spike-time back-mapping.
+    def make_fetch(self, key) -> ConcatRecordingFetched:
+        """Read every DB input the materialization needs (no SI / NWB I/O).
+
+        Resolves the selection row, the ordered members and their cached
+        ``Recording`` PKs (raising if any is missing), the motion-correction and
+        preprocessing parameter blobs, and the group's multi-day status. Returns
+        a DeepHash-stable carrier so the framework's two-fetch integrity check
+        does not trip.
 
         Parameters
         ----------
@@ -604,31 +681,15 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             The ``ConcatenatedRecordingSelection`` primary key
             (``{"concat_recording_id": ...}``) being populated.
 
+        Returns
+        -------
+        ConcatRecordingFetched
+
         Raises
         ------
         MissingRecordingForConcatError
-            If any member's ``Recording`` row is missing (the selection-time
-            precondition was bypassed).
-        ValueError
-            If ``preset="auto"`` on a multi-day group.
+            If any member's ``Recording`` row is missing (selection bypassed).
         """
-        import datetime as dt
-
-        from spyglass.spikesorting.v2._concat_recording import (
-            build_concatenated_recording,
-            cumulative_member_boundaries,
-            resolve_motion_correction,
-        )
-        from spyglass.spikesorting.v2._recording_nwb import write_nwb_artifact
-        from spyglass.spikesorting.v2.recording import (
-            _ELECTRICAL_SERIES_PATH,
-            _unlink_staged_analysis_file,
-        )
-        from spyglass.spikesorting.v2.utils import (
-            _resolved_job_kwargs,
-            transaction_or_noop,
-        )
-
         # The populate key carries only concat_recording_id; every member and
         # parameter query restricts with the fetched selection row, not the
         # UUID-only key, so independent concat selections never cross-restrict.
@@ -641,13 +702,9 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         members = (SessionGroup.Member & group_key).fetch(
             as_dict=True, order_by="member_index"
         )
-
-        recordings, member_sample_counts, member_indices = (
-            self._load_member_recordings(members, preprocessing_params_name)
+        member_plan = self._resolve_member_recording_keys(
+            members, preprocessing_params_name
         )
-
-        # Motion correction: resolve the Spyglass 'auto' alias against the
-        # group's multi-day status before any SpikeInterface call.
         motion_row = (
             MotionCorrectionParameters
             & {
@@ -656,18 +713,78 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
                 )
             }
         ).fetch1()
-        motion_preset, preset_kwargs = resolve_motion_correction(
-            motion_row["params"],
-            is_multi_day=SessionGroup.is_multi_day(group_key),
-        )
-        # Job kwargs: preprocessing first, motion last (motion wins on
-        # conflict), per the job-kwargs resolution contract.
         preprocessing_job_kwargs = (
             PreprocessingParameters
             & {"preprocessing_params_name": preprocessing_params_name}
         ).fetch1("job_kwargs")
+        return ConcatRecordingFetched(
+            member_plan=member_plan,
+            preprocessing_params_name=preprocessing_params_name,
+            motion_params=motion_row["params"],
+            motion_job_kwargs=motion_row["job_kwargs"],
+            preprocessing_job_kwargs=preprocessing_job_kwargs,
+            # Resolve multi-day status at fetch time (DB-derived); the 'auto'
+            # motion alias is resolved against it in compute.
+            is_multi_day=bool(SessionGroup.is_multi_day(group_key)),
+            anchor_nwb_file_name=members[0]["nwb_file_name"],
+        )
+
+    def make_compute(
+        self,
+        key,
+        member_plan,
+        preprocessing_params_name,
+        motion_params,
+        motion_job_kwargs,
+        preprocessing_job_kwargs,
+        is_multi_day,
+        anchor_nwb_file_name,
+    ) -> ConcatRecordingComputed:
+        """Materialize the concat cache outside any DB transaction.
+
+        Reuses each member's already-populated, cached ``Recording`` artifact
+        (NEVER calls ``Recording.populate`` -- the PKs were pinned in
+        ``make_fetch``), stitches them into one mono-segment recording, applies
+        motion correction (resolving the Spyglass ``"auto"`` alias to a same-day
+        preset and rejecting it on multi-day groups), and writes a single
+        ``ElectricalSeries`` into a fresh ``AnalysisNwbfile``. Whitening is
+        deliberately NOT applied here -- it stays a sorter/analyzer concern, so
+        the persisted concat recording is motion-corrected but unwhitened. The
+        cumulative per-member sample boundaries are carried to ``make_insert``.
+
+        Returns
+        -------
+        ConcatRecordingComputed
+
+        Raises
+        ------
+        ValueError
+            If ``preset="auto"`` on a multi-day group.
+        RuntimeError
+            If motion correction did not preserve the total sample count (which
+            would misalign the ``MemberBoundary`` back-mapping).
+        """
+        from spyglass.spikesorting.v2._concat_recording import (
+            build_concatenated_recording,
+            cumulative_member_boundaries,
+            resolve_motion_correction,
+        )
+        from spyglass.spikesorting.v2._recording_nwb import write_nwb_artifact
+        from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
+
+        recordings, member_sample_counts, member_indices = (
+            self._load_member_recordings(member_plan)
+        )
+
+        # Resolve the Spyglass 'auto' alias against the group's (fetch-time)
+        # multi-day status before any SpikeInterface call.
+        motion_preset, preset_kwargs = resolve_motion_correction(
+            motion_params, is_multi_day=is_multi_day
+        )
+        # Job kwargs: preprocessing first, motion last (motion wins on
+        # conflict), per the job-kwargs resolution contract.
         job_kwargs = _resolved_job_kwargs(
-            preprocessing_job_kwargs, motion_row["job_kwargs"]
+            preprocessing_job_kwargs, motion_job_kwargs
         )
 
         corrected = build_concatenated_recording(
@@ -677,9 +794,8 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             job_kwargs=job_kwargs,
         )
 
-        # Compute the member boundary rows + recording metadata BEFORE staging
-        # the NWB, so a failure in this pure arithmetic cannot orphan a staged
-        # file (the staged-file cleanup below only covers the write onward).
+        # Compute the member boundaries + recording metadata BEFORE staging the
+        # NWB, so a failure in this pure arithmetic cannot orphan a staged file.
         boundaries = cumulative_member_boundaries(member_sample_counts)
         corrected_n_samples = int(corrected.get_num_samples())
         # Member boundaries come from the PRE-motion per-member sample counts;
@@ -700,9 +816,8 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         total_duration_s = corrected_n_samples / sampling_frequency
 
         # Anchor the analysis NWB to the FIRST member's session (deterministic
-        # parent); full multi-session provenance stays queryable through
-        # ConcatenatedRecordingSelection -> SessionGroup.Member.
-        anchor_nwb_file_name = members[0]["nwb_file_name"]
+        # parent, resolved in make_fetch); full multi-session provenance stays
+        # queryable through ConcatenatedRecordingSelection -> SessionGroup.Member.
         preset_label = motion_preset or "none"
         analysis_file_name, object_id, cache_hash = write_nwb_artifact(
             corrected,
@@ -713,16 +828,55 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
                 f"motion correction preset={preset_label!r}; unwhitened"
             ),
         )
+        member_boundaries = [
+            {"member_index": member_index, "end_sample": int(end_sample)}
+            for member_index, end_sample in zip(member_indices, boundaries)
+        ]
+        return ConcatRecordingComputed(
+            analysis_file_name=analysis_file_name,
+            object_id=object_id,
+            n_channels=n_channels,
+            sampling_frequency=sampling_frequency,
+            total_duration_s=total_duration_s,
+            cache_hash=cache_hash,
+            anchor_nwb_file_name=anchor_nwb_file_name,
+            member_boundaries=member_boundaries,
+        )
+
+    def make_insert(
+        self,
+        key,
+        analysis_file_name,
+        object_id,
+        n_channels,
+        sampling_frequency,
+        total_duration_s,
+        cache_hash,
+        anchor_nwb_file_name,
+        member_boundaries,
+    ):
+        """Atomically register the staged concat artifact + boundary rows.
+
+        DataJoint's tri-part dispatch already opens the master transaction
+        around this method, so ``transaction_or_noop`` is a no-op here; it is
+        kept so a direct (non-populate) call still commits atomically. On any
+        registration failure the staged ``ElectricalSeries`` is unlinked before
+        re-raising so it does not orphan.
+        """
+        from spyglass.spikesorting.v2.recording import (
+            _ELECTRICAL_SERIES_PATH,
+            _unlink_staged_analysis_file,
+        )
+        from spyglass.spikesorting.v2.utils import transaction_or_noop
 
         boundary_rows = [
             {
                 **key,
-                "member_index": member_index,
-                "end_sample": int(end_sample),
+                "member_index": boundary["member_index"],
+                "end_sample": int(boundary["end_sample"]),
             }
-            for member_index, end_sample in zip(member_indices, boundaries)
+            for boundary in member_boundaries
         ]
-
         try:
             with transaction_or_noop(self.connection):
                 AnalysisNwbfile().add(
@@ -748,7 +902,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             # matching Recording.make_insert's staged-file cleanup.
             _unlink_staged_analysis_file(
                 analysis_file_name,
-                context="ConcatenatedRecording.make",
+                context="ConcatenatedRecording.make_insert",
             )
             raise
 

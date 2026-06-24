@@ -441,10 +441,10 @@ def _ensure_clusterless_sorter_params():
 def test_load_member_recordings_returns_aligned_counts_and_indices(
     same_day_group,
 ):
-    """``_load_member_recordings`` loads each member's cached Recording in
-    member_index order and returns sample counts / indices aligned element-wise
-    with the loaded recordings -- the core per-member materialization contract,
-    exercised without driving a full populate."""
+    """``_load_member_recordings`` loads each member's cached Recording from the
+    fetch-resolved plan in member_index order and returns sample counts / indices
+    aligned element-wise with the loaded recordings -- the core per-member
+    materialization contract, exercised without driving a full populate."""
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecording,
         SessionGroup,
@@ -454,10 +454,11 @@ def test_load_member_recordings_returns_aligned_counts_and_indices(
     members = (SessionGroup.Member & grp["group_key"]).fetch(
         as_dict=True, order_by="member_index"
     )
+    member_plan = ConcatenatedRecording._resolve_member_recording_keys(
+        members, grp["preprocessing_params_name"]
+    )
     recordings, sample_counts, member_indices = (
-        ConcatenatedRecording._load_member_recordings(
-            members, grp["preprocessing_params_name"]
-        )
+        ConcatenatedRecording._load_member_recordings(member_plan)
     )
     expected = _member_sample_counts(grp)
     assert member_indices == [0, 1]
@@ -467,10 +468,12 @@ def test_load_member_recordings_returns_aligned_counts_and_indices(
 
 
 @pytest.mark.slow
-def test_load_member_recordings_raises_on_missing_recording(same_day_group):
+def test_resolve_member_recording_keys_raises_on_missing_recording(
+    same_day_group,
+):
     """A member whose Recording cache is absent raises
-    ``MissingRecordingForConcatError`` rather than silently dropping it (which
-    would shift every later member's boundary)."""
+    ``MissingRecordingForConcatError`` at fetch-time key resolution rather than
+    silently dropping it (which would shift every later member's boundary)."""
     from spyglass.spikesorting.v2.exceptions import (
         MissingRecordingForConcatError,
     )
@@ -486,7 +489,7 @@ def test_load_member_recordings_raises_on_missing_recording(same_day_group):
     # No RecordingSelection exists under a bogus preprocessing recipe, so every
     # member is "missing" -- the defensive precondition fires.
     with pytest.raises(MissingRecordingForConcatError, match="not populated"):
-        ConcatenatedRecording._load_member_recordings(
+        ConcatenatedRecording._resolve_member_recording_keys(
             members, "no_such_preprocessing_recipe"
         )
 
@@ -638,10 +641,12 @@ def test_concat_make_raises_on_motion_sample_count_drift(
         grp["group_key"], grp["preprocessing_params_name"], "none"
     )
     monkeypatch.setattr(concat_mod, "build_concatenated_recording", _drifted)
-    # Call make() directly so the raw RuntimeError surfaces; it raises before
-    # the NWB write, so nothing is persisted and no analysis file orphans.
+    # Drive make_compute directly so the raw RuntimeError surfaces; it raises
+    # before the NWB write (the guard precedes write_nwb_artifact), so nothing
+    # is persisted and no analysis file orphans.
+    fetched = ConcatenatedRecording().make_fetch(concat_pk)
     with pytest.raises(RuntimeError, match="sample count"):
-        ConcatenatedRecording().make(concat_pk)
+        ConcatenatedRecording().make_compute(concat_pk, **fetched._asdict())
     assert not (ConcatenatedRecording & concat_pk)
 
 
@@ -685,10 +690,12 @@ def test_motion_correction_preset_auto_rejects_multi_day(
             "default",
             "auto_default",
         )
-        # Call make() directly so the raw ValueError surfaces (populate would
-        # wrap it). It raises before writing any artifact.
+        # Drive make_compute directly so the raw ValueError surfaces (populate
+        # would wrap it). resolve_motion_correction raises before any artifact
+        # write; make_fetch resolves the (multi-day) status it checks against.
+        fetched = ConcatenatedRecording().make_fetch(concat_pk)
         with pytest.raises(ValueError, match="single-day only"):
-            ConcatenatedRecording().make(concat_pk)
+            ConcatenatedRecording().make_compute(concat_pk, **fetched._asdict())
         assert not (ConcatenatedRecording & concat_pk)
     finally:
         clean_session_groups_for_owner(owner)

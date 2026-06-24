@@ -56,18 +56,26 @@ def test_tripart_dispatch_active_on_all_v2_computed_tables():
     re-introduces a monolithic ``make`` would turn off tri-part
     dispatch (long-transaction avoidance + parallel-populate).
 
-    ``UnitMatch`` is included because its heavy work (dense bundle
-    extraction + matcher execution + NWB write) must stay outside the
-    framework transaction; ``TrackedUnit`` is intentionally excluded --
-    it does only DB reads + a bounded pure-Python clique partition (no
-    SI/NWB I/O), so a monolithic make is acceptable there.
+    ``UnitMatch`` and ``ConcatenatedRecording`` are included because their
+    heavy work (dense bundle extraction + matcher execution + NWB write;
+    multi-recording concat + motion correction + NWB write) must stay outside
+    the framework transaction; ``TrackedUnit`` is intentionally excluded -- it
+    does only DB reads + a bounded pure-Python clique partition (no SI/NWB I/O),
+    so a monolithic make is acceptable there.
     """
     from spyglass.spikesorting.v2.artifact import ArtifactDetection
     from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
     from spyglass.spikesorting.v2.sorting import Sorting
     from spyglass.spikesorting.v2.unit_matching import UnitMatch
 
-    for cls in (Recording, ArtifactDetection, Sorting, UnitMatch):
+    for cls in (
+        Recording,
+        ArtifactDetection,
+        Sorting,
+        UnitMatch,
+        ConcatenatedRecording,
+    ):
         assert inspect.isgeneratorfunction(cls.make), (
             f"{cls.__name__}.make is not a generator -- DataJoint's "
             "tri-part dispatch fires only on generator make. A "
