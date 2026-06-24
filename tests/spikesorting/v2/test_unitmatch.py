@@ -1014,16 +1014,19 @@ def test_make_runs_full_matcher_table_path(
             )
         finally:
             CurationV2.get_matchable_unit_ids = original_matchable
-        assert computed.n_pairs == 1
         # make_compute staged a fresh analysis NWB (separate from the populated
-        # one); unlink it so the purity probe leaves no orphan.
+        # one); unlink it so the probe leaves no orphan even if the assertion
+        # below fails.
         from spyglass.spikesorting.v2.recording import (
             _unlink_staged_analysis_file,
         )
 
-        _unlink_staged_analysis_file(
-            computed.analysis_file_name, context="unitmatch purity guard"
-        )
+        try:
+            assert computed.n_pairs == 1
+        finally:
+            _unlink_staged_analysis_file(
+                computed.analysis_file_name, context="unitmatch purity guard"
+            )
     finally:
         if selection_pk is not None:
             (UnitMatch & selection_pk).super_delete(warn=False)
