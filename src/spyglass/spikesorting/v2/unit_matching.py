@@ -35,7 +35,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 import datajoint as dj
 
@@ -59,6 +59,35 @@ if TYPE_CHECKING:
 
 _assert_v2_db_safe()
 schema = dj.schema("spikesorting_v2_unit_matching")
+
+
+class UnitMatchFetched(NamedTuple):
+    """DB inputs for ``UnitMatch.make_compute`` (no SI/NWB I/O).
+
+    ``member_plan`` is the ordered per-member list of DeepHash-stable dicts
+    ``{"member_index", "nwb_file_name", "sorting_id", "curation_id"}`` -- the
+    pinned, provenance-validated curation per group member (sorting_id as ``str``
+    so the carrier hashes cleanly).
+    """
+
+    matcher_name: str
+    params: dict
+    job_kwargs: dict
+    member_plan: list[dict]
+
+
+class UnitMatchComputed(NamedTuple):
+    """Compute -> insert carrier (DeepHash-stable scalars only).
+
+    The pair rows themselves are read back from the staged NWB in
+    ``make_insert`` rather than carried here, mirroring ``AnalyzerCuration``.
+    """
+
+    analysis_file_name: str
+    pairs_object_id: str
+    n_pairs: int
+    matcher_runtime_s: float
+    anchor_nwb_file_name: str
 
 
 @schema
@@ -353,10 +382,27 @@ class UnitMatch(SpyglassMixin, dj.Computed):
         fdr_estimate=NULL: float
         """
 
-    def make(self, key):
-        """Validate, run the matcher, and write the cross-session pairs."""
-        from spyglass.spikesorting.v2._unitmatch_nwb import write_pairs_table
+    # Tri-part make so the heavy curation reads, dense bundle extraction,
+    # matcher execution, and NWB write run OUTSIDE the DB transaction (mirroring
+    # Recording / Sorting / AnalyzerCuration). Only the row inserts run inside
+    # the framework-provided transaction.
+    _parallel_make = True
 
+    def make_fetch(self, key) -> UnitMatchFetched:
+        """Fetch + validate the selection (DB reads + provenance checks only).
+
+        Re-validates the direct-insert bypass invariant on the RAW
+        ``MemberCuration`` rows BEFORE collapsing them by ``member_index``:
+        ``MemberCuration`` carries its own (session_group_owner,
+        session_group_name) via its ``SessionGroup.Member`` FK, which DataJoint
+        does NOT unify with the master's group (the master's group fields are
+        non-PK). A direct insert could attach rows from a DIFFERENT SessionGroup
+        under this unitmatch_id, or two rows with the same member_index from
+        different groups (the latter would silently lose one in the dict collapse
+        below). Require every part row to belong to the master's group and to
+        have a unique member_index, then check coverage + per-member ownership --
+        all before any matcher input is extracted.
+        """
         sel = (UnitMatchSelection & key).fetch1()
         group_key = {
             "session_group_owner": sel["session_group_owner"],
@@ -368,22 +414,15 @@ class UnitMatch(SpyglassMixin, dj.Computed):
         member_curations = (UnitMatchSelection.MemberCuration & key).fetch(
             as_dict=True
         )
-        # Re-validate the direct-insert bypass invariant on the RAW part rows
-        # BEFORE collapsing them by member_index. ``MemberCuration`` carries its
-        # own (session_group_owner, session_group_name) via its
-        # ``SessionGroup.Member`` FK, which DataJoint does NOT unify with the
-        # master's group (the master's group fields are non-PK). A direct insert
-        # could therefore attach rows from a DIFFERENT SessionGroup under this
-        # unitmatch_id, or two rows with the same member_index from different
-        # groups -- the latter would silently lose one row in the dict collapse
-        # below. Require every part row to belong to the master's group and to
-        # have a unique member_index first.
         seen_member_indexes = set()
         for row in member_curations:
             if (
                 row["session_group_owner"],
                 row["session_group_name"],
-            ) != (group_key["session_group_owner"], group_key["session_group_name"]):
+            ) != (
+                group_key["session_group_owner"],
+                group_key["session_group_name"],
+            ):
                 raise UnitMatchSelectionIntegrityError(
                     "UnitMatch.make: MemberCuration row for member_index "
                     f"{row['member_index']} belongs to SessionGroup "
@@ -405,90 +444,145 @@ class UnitMatch(SpyglassMixin, dj.Computed):
             int(row["member_index"]): (row["sorting_id"], int(row["curation_id"]))
             for row in member_curations
         }
-        # Now safe to check coverage (the part rows exactly cover the group's
-        # members) and per-member curation ownership, before any matcher input
-        # is extracted.
         _validate_member_curations(
             members, choices_by_member, UnitMatchSelectionIntegrityError
         )
 
-        matcher_name, params, matcher_job_kwargs = (
+        matcher_name, params, job_kwargs = (
             MatcherParameters
             & {"matcher_params_name": sel["matcher_params_name"]}
         ).fetch1("matcher", "params", "job_kwargs")
 
-        anchor_nwb_file_name = members[0]["nwb_file_name"]
+        member_plan = [
+            {
+                "member_index": int(member["member_index"]),
+                "nwb_file_name": member["nwb_file_name"],
+                "sorting_id": str(
+                    choices_by_member[int(member["member_index"])][0]
+                ),
+                "curation_id": choices_by_member[
+                    int(member["member_index"])
+                ][1],
+            }
+            for member in members
+        ]
+        return UnitMatchFetched(
+            matcher_name=matcher_name,
+            params=dict(params),
+            job_kwargs=dict(job_kwargs or {}),
+            member_plan=member_plan,
+        )
+
+    def make_compute(
+        self, key, matcher_name, params, job_kwargs, member_plan
+    ) -> UnitMatchComputed:
+        """Extract bundles, run the matcher, and stage the pairs NWB.
+
+        All heavy SI / UnitMatch / NWB work happens here, outside the DB
+        transaction. The degenerate single-session case writes an empty pairs
+        table without calling the matcher backend. The anchor AnalysisNwbfile
+        parent is the FIRST member's NWB (``member_plan`` is member_index-ordered).
+        """
+        from spyglass.spikesorting.v2._unitmatch_nwb import write_pairs_table
+        from spyglass.spikesorting.v2.recording import (
+            _unlink_staged_analysis_file,
+        )
+
+        anchor_nwb_file_name = member_plan[0]["nwb_file_name"]
         analysis_file_name = AnalysisNwbfile().create(anchor_nwb_file_name)
         abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
         try:
-            if len(members) < 2:
-                # Degenerate single-session case: no cross-session pairs, and no
-                # matcher / bundle extraction (so it needs no matcher backend).
+            if len(member_plan) < 2:
+                # Degenerate single-session case: no cross-session pairs, no
+                # matcher / bundle extraction (needs no matcher backend).
                 logger.warning(
                     "UnitMatch.make: session group "
-                    f"{group_key} has a single member; writing zero pairs."
+                    f"({anchor_nwb_file_name}) has a single member; writing "
+                    "zero pairs."
                 )
                 oriented_pairs: list[dict] = []
                 runtime_s = 0.0
             else:
-                oriented_pairs, runtime_s = self._run_matcher(
-                    members,
-                    choices_by_member,
-                    matcher_name,
-                    params,
-                    matcher_job_kwargs,
+                oriented_pairs, runtime_s = self._extract_and_match(
+                    member_plan, matcher_name, params, job_kwargs
                 )
             pairs_object_id = write_pairs_table(abs_path, oriented_pairs)
-            with transaction_or_noop(self.connection):
-                AnalysisNwbfile().add(anchor_nwb_file_name, analysis_file_name)
-                self.insert1(
+        except Exception:
+            # write_pairs_table may already have created the file on disk; unlink
+            # it so a failed compute does not orphan staged scratch (mirrors
+            # Recording / ConcatenatedRecording make cleanup).
+            _unlink_staged_analysis_file(
+                analysis_file_name, context="UnitMatch.make_compute"
+            )
+            raise
+        return UnitMatchComputed(
+            analysis_file_name=analysis_file_name,
+            pairs_object_id=pairs_object_id,
+            n_pairs=len(oriented_pairs),
+            matcher_runtime_s=float(runtime_s),
+            anchor_nwb_file_name=anchor_nwb_file_name,
+        )
+
+    def make_insert(
+        self,
+        key,
+        analysis_file_name,
+        pairs_object_id,
+        n_pairs,
+        matcher_runtime_s,
+        anchor_nwb_file_name,
+    ) -> None:
+        """Register the analysis file + insert the master and Pair rows.
+
+        Runs inside the framework's tri-part insert transaction. The Pair rows
+        are read back from the staged NWB (the canonical written pairs) rather
+        than threaded through the compute carrier, mirroring ``AnalyzerCuration``.
+        On failure the staged file is unlinked before re-raising.
+        """
+        from spyglass.spikesorting.v2._unitmatch_nwb import read_pairs
+        from spyglass.spikesorting.v2.recording import (
+            _unlink_staged_analysis_file,
+        )
+
+        abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+        pairs = read_pairs(abs_path, pairs_object_id)
+        try:
+            AnalysisNwbfile().add(anchor_nwb_file_name, analysis_file_name)
+            self.insert1(
+                {
+                    **key,
+                    "analysis_file_name": analysis_file_name,
+                    "pairs_object_id": pairs_object_id,
+                    "n_pairs": n_pairs,
+                    "matcher_runtime_s": matcher_runtime_s,
+                }
+            )
+            self.Pair.insert(
+                [
                     {
                         **key,
-                        "analysis_file_name": analysis_file_name,
-                        "pairs_object_id": pairs_object_id,
-                        "n_pairs": len(oriented_pairs),
-                        "matcher_runtime_s": float(runtime_s),
+                        "pair_index": pair["pair_index"],
+                        "session_a_sorting_id": pair["session_a_sorting_id"],
+                        "session_a_curation_id": pair["session_a_curation_id"],
+                        "unit_a_id": pair["unit_a_id"],
+                        "session_b_sorting_id": pair["session_b_sorting_id"],
+                        "session_b_curation_id": pair["session_b_curation_id"],
+                        "unit_b_id": pair["unit_b_id"],
+                        "match_probability": pair["match_probability"],
+                        "drift_estimate_um": pair["drift_estimate_um"],
+                        "fdr_estimate": pair["fdr_estimate"],
                     }
-                )
-                self.Pair.insert(
-                    [
-                        {
-                            **key,
-                            "pair_index": index,
-                            "session_a_sorting_id": pair["session_a_sorting_id"],
-                            "session_a_curation_id": pair[
-                                "session_a_curation_id"
-                            ],
-                            "unit_a_id": pair["unit_a_id"],
-                            "session_b_sorting_id": pair["session_b_sorting_id"],
-                            "session_b_curation_id": pair[
-                                "session_b_curation_id"
-                            ],
-                            "unit_b_id": pair["unit_b_id"],
-                            "match_probability": pair["match_probability"],
-                            "drift_estimate_um": pair["drift_estimate_um"],
-                            "fdr_estimate": pair["fdr_estimate"],
-                        }
-                        for index, pair in enumerate(oriented_pairs)
-                    ]
-                )
-        except Exception:
-            # The pairs table is already on disk; if registration / inserts then
-            # fail, unlink the staged file before re-raising so it does not
-            # orphan (mirrors Recording / ConcatenatedRecording make cleanup).
-            from spyglass.spikesorting.v2.recording import (
-                _unlink_staged_analysis_file,
+                    for pair in pairs
+                ]
             )
-
+        except Exception:
             _unlink_staged_analysis_file(
-                analysis_file_name, context="UnitMatch.make"
+                analysis_file_name, context="UnitMatch.make_insert"
             )
             raise
 
     @staticmethod
-    def _run_matcher(
-        members, choices_by_member, matcher_name, params, matcher_job_kwargs
-    ):
+    def _extract_and_match(member_plan, matcher_name, params, job_kwargs):
         """Extract per-session bundles, run the matcher, canonicalize the pairs.
 
         Returns ``(oriented_pairs, runtime_s)``. The wrapper extracts dense
@@ -498,6 +592,7 @@ class UnitMatch(SpyglassMixin, dj.Computed):
         the matcher never sees a recording, analyzer, or Spyglass key.
         """
         import tempfile
+        from pathlib import Path
 
         from spyglass.spikesorting.v2._matcher_graph import (
             canonicalize_match_pairs,
@@ -511,23 +606,17 @@ class UnitMatch(SpyglassMixin, dj.Computed):
         )
         from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
 
-        resolved_job_kwargs = _resolved_job_kwargs(matcher_job_kwargs)
+        resolved_job_kwargs = _resolved_job_kwargs(job_kwargs)
         member_index_by_curation = {
-            (str(sorting_id), curation_id): int(member_index)
-            for member_index, (sorting_id, curation_id) in (
-                choices_by_member.items()
-            )
+            (plan["sorting_id"], plan["curation_id"]): plan["member_index"]
+            for plan in member_plan
         }
         with tempfile.TemporaryDirectory(prefix="unitmatch_") as tmp_root:
-            from pathlib import Path
-
             dated_inputs = []
-            for member in members:
-                member_index = int(member["member_index"])
-                sorting_id, curation_id = choices_by_member[member_index]
+            for plan in member_plan:
                 curation_key = {
-                    "sorting_id": sorting_id,
-                    "curation_id": curation_id,
+                    "sorting_id": plan["sorting_id"],
+                    "curation_id": plan["curation_id"],
                 }
                 recording = CurationV2.get_recording(curation_key)
                 full_sorting = CurationV2.get_sorting(curation_key)
@@ -535,15 +624,16 @@ class UnitMatch(SpyglassMixin, dj.Computed):
                 if len(matchable) == 0:
                     raise ValueError(
                         "UnitMatch.make: member_index "
-                        f"{member_index} (sorting_id={sorting_id}, "
-                        f"curation_id={curation_id}) has no matchable units "
-                        "(all curated units are excluded labels); a matcher "
-                        "cannot run on an empty session. Re-curate so at least "
-                        "one unit survives the exclude filter, or drop the "
-                        "member from the SessionGroup."
+                        f"{plan['member_index']} (sorting_id="
+                        f"{plan['sorting_id']}, curation_id="
+                        f"{plan['curation_id']}) has no matchable units (all "
+                        "curated units are excluded labels); a matcher cannot "
+                        "run on an empty session. Re-curate so at least one unit "
+                        "survives the exclude filter, or drop the member from "
+                        "the SessionGroup."
                     )
                 sorting = full_sorting.select_units(matchable)
-                session_dir = Path(tmp_root) / f"member_{member_index}"
+                session_dir = Path(tmp_root) / f"member_{plan['member_index']}"
                 extract_unitmatch_bundle(
                     session_dir,
                     recording,
@@ -551,16 +641,16 @@ class UnitMatch(SpyglassMixin, dj.Computed):
                     job_kwargs=resolved_job_kwargs,
                 )
                 recording_date = (
-                    Session & {"nwb_file_name": member["nwb_file_name"]}
+                    Session & {"nwb_file_name": plan["nwb_file_name"]}
                 ).fetch1("session_start_time")
                 dated_inputs.append(
                     (
                         recording_date,
-                        member_index,
+                        plan["member_index"],
                         SessionMatcherInput(
                             session_key={
-                                "sorting_id": str(sorting_id),
-                                "curation_id": curation_id,
+                                "sorting_id": plan["sorting_id"],
+                                "curation_id": plan["curation_id"],
                             },
                             waveform_dir=session_dir,
                             channel_positions_path=(
