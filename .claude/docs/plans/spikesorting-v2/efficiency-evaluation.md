@@ -211,6 +211,78 @@ vector. Build it once, adopt it in three places.
   affine shortcut to explicit-`time_vector` recordings). Gate with the existing
   disjoint tests (`test_disjoint_*`).
 
+#### Theme T1 — RESULTS `[SHIPPED]`
+
+**Step 0 (measure the real target first) — key reframe.** The M1 824 MB number
+was on a synthetic *rate-based* recording, so the first question was whether the
+production artifact path even pays it. `Recording.get_recording` reads the cached
+preprocessed NWB with `load_time_vector=True`, and SI 0.104.3's
+`read_nwb_recording` stores the **lazy h5py `timestamps` object** (not `[:]`).
+Profiling a real NWB-backed recording settled it:
+
+| access (10 M samples, 76 MB vector) | tracemalloc peak | `time_vector` after |
+|---|---|---|
+| `recording.get_times()` | **76.3 MB** (materializes + *caches* on the segment) | resident `ndarray` |
+| chunked `sample_index_to_time(arange(chunk))` | **0.7 MB** | still lazy `Dataset` |
+
+So `get_times()` **does** materialize (and stick) the full vector for the
+*explicit production recording*, and `sample_index_to_time(i)` is bit-identical
+to `get_times()[i]` in both timestamp modes. The 824 MB peak-memory win is
+therefore **real in production for explicit recordings** (not only rate-based) —
+provided no consumer calls `get_times()` on that segment. (`time_to_sample_index`
+uses `np.searchsorted(time_vector, …)`, which *would* materialize, so the helper
+avoids it and binary-searches via `sample_index_to_time` instead.)
+
+**Built** (DB-free, in `_signal_math.py`): `frames_for_times` (vectorized binary
+search == `searchsorted(get_times(), t, "left")`), `base_intervals_and_gaps`
+(chunked base intervals + gap frame indices), `timestamp_fingerprint` (chunked
+SHA-256), plus `_segment_times_at` and `_recording_has_explicit_time_vector`.
+All map frames↔time through `sample_index_to_time`, never `get_times()`. A
+maintainer note records the SI-version switch path (SI > 0.104.3 adds a bounded
+`get_times(start, end)`; the pinned 0.104.3 raises `TypeError` on frame bounds —
+the helpers are correct and lazy on both).
+
+**Adopted:** R2 `_apply_artifact_mask`, R3 `detect_artifacts` (incl. the
+`detect=False` early return, which now avoids the `get_times()` materialize *and*
+the second full `np.diff` gap temporary), R7 `SharedArtifactGroup.insert_group`
+(per-member fingerprint compare instead of two resident vectors + `array_equal`).
+
+**Measured** (`bench_efficiency.py::t1_artifact_timestamp_memory`, explicit
+h5py-backed recording, peak MB, recording pre-created as in production):
+
+| n_samples | vec MB | `get_times()` | base+gaps | fingerprint | frames(few) | detect=False | apply OLD→NEW (Δ) |
+|---|---|---|---|---|---|---|---|
+| 1,000,000 | 7.6 | 7.6 | **2.3** | **2.3** | **0.02** | **2.3** | 25.6 → 17.3 (**−8.3**) |
+| 5,000,000 | 38.1 | 38.2 | **2.3** | **2.3** | **0.02** | **2.3** | 124.6 → 86.5 (**−38.1**) |
+
+`get_times()` grows 8 bytes/sample (→ ~824 MB at N_REF); the chunked consumers
+stay flat (~2.3 MB) regardless of length. `apply_mask`'s Δ(saved) is exactly the
+removed `get_times()` materialization; its residual peak is the `artifact_frames`
+trigger array (**M2**, ~int64/masked-sample), which T1 does **not** change — the
+"lazy mask recording vs every masked frame as a trigger" swap was left as a
+separate, deferred evaluation (the trigger array is correct and tested today;
+M2's tens-of-millions-of-frames case only bites at very high artifact fraction).
+
+**Output equivalence (kept):**
+- R2 — new `_apply_artifact_mask` is **frame-identical** to a frozen
+  `get_times()` reference on contiguous / disjoint / rate-based recordings
+  (masked traces compared byte-for-byte).
+- R3 — new `detect_artifacts` is **byte-identical** to a frozen pre-T1 copy
+  (`detect=True`/`False`, contiguous / disjoint / zero-artifact / many-span).
+- R7 — `timestamp_fingerprint` reproduces `np.array_equal` exactly (identical →
+  equal, any byte shift or length difference → unequal).
+- New unit tests pin all three against the full-vector references
+  (`test_signal_math.py`), plus a bounded-peak-memory guard on an h5py recording
+  (`test_artifact_intervals.py::test_timestamp_helpers_peak_memory_bounded_vs_get_times`).
+
+**Suites green:** `test_signal_math` (+ new), `test_artifact_intervals` (+ new
+memory guard), `test_artifact_services`, `test_disjoint_readback`,
+`single_session/test_disjoint_intervals` (gap-correctness),
+`single_session/test_artifact`, `test_shared_artifact_group`,
+`single_session/test_sorting`. Two hand-rolled `_FakeRecording`/`_FakeRec` test
+doubles were made faithful to real SI (they lacked `get_time_info` /
+`sample_index_to_time`, gotcha #3) so they exercise the real chunked path.
+
 ### Fix T2 — engage parallelism (R1)  [highest ROI, lowest risk]
 - **Change:** make `n_jobs` configurable with a non-1 effective default —
   preferred: read `dj.config['custom']['spikesorting_v2_job_kwargs']` (already in
