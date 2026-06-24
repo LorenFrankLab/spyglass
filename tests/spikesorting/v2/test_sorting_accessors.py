@@ -1,6 +1,7 @@
 """Sorting accessors, source dispatch, and selection diagnostics.
 
-Covers ``populate()`` skipping concat-source rows, concat-backed
+Covers concat-source rows being included in ``Sorting.key_source`` (the
+antijoin is gone now that the concat path is wired), concat-backed
 ``get_unit_brain_regions`` (raise vs anchor-member DataFrame), the
 missing-SorterParameters and cross-recording-artifact diagnostics on
 ``insert_selection``, zero-unit / DataFrame ``get_sorting``, and the

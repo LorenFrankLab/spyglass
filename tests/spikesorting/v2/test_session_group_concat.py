@@ -813,7 +813,17 @@ def test_concat_sort_end_to_end_and_split(same_day_group):
     )
     units_df = describe_units(sort_pk["sorting_id"])
     assert len(units_df) == int(row["n_units"])
+    # Firing rate is computed against the CONCAT recording's total_duration_s
+    # (concat sorts have no artifact pass), not a per-member recording: assert
+    # the exact denominator, not merely > 0, so a regression to any positive
+    # duration would fail.
+    concat_total_duration_s = (
+        ConcatenatedRecording & concat_pk
+    ).fetch1("total_duration_s")
     assert (units_df["firing_rate_hz"] > 0).all()
+    assert units_df["firing_rate_hz"].to_numpy() == pytest.approx(
+        units_df["n_spikes"].to_numpy() / concat_total_duration_s
+    )
 
 
 # ---------- memory / runtime measurement ----------------------------------
