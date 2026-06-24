@@ -285,10 +285,10 @@ def build_concatenated_recording(
             "build_concatenated_recording: motion job_kwargs carries non-job "
             f"key(s) {non_job_keys}; only SpikeInterface job kwargs "
             f"{sorted(job_keys)} are allowed there. Motion per-step kwargs "
-            "(detect_kwargs, estimate_motion_kwargs, ...) and the forbidden "
-            "side-artifact kwargs (folder / overwrite / output_motion / "
-            "output_motion_info) belong in MotionCorrectionParameters."
-            "preset_kwargs, not in job_kwargs."
+            "(detect_kwargs, estimate_motion_kwargs, ...) belong in "
+            "MotionCorrectionParameters.preset_kwargs; side-artifact / output "
+            "kwargs (folder / overwrite / output_motion / output_motion_info) "
+            "are unsupported (the concat cache does not persist them)."
         )
 
     # Merge into ONE kwargs dict (resolved job kwargs win on conflict, per the

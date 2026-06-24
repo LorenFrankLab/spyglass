@@ -324,10 +324,15 @@ def test_motion_accepts_si_native_preset(preset):
         "output_motion_info",
         "folder",
         "overwrite",
+        # Set by the concat materializer; overriding them double-binds into a
+        # correct_motion TypeError at populate time, so reject at insert.
+        "recording",
+        "preset",
     ],
 )
 def test_motion_rejects_forbidden_kwargs(forbidden):
-    """Forbidden kwargs change return type or write untracked artifacts."""
+    """Forbidden kwargs change return type, write untracked artifacts, or
+    double-bind a materializer-set argument."""
     with pytest.raises(ValidationError):
         MotionCorrectionParamsSchema(
             preset="rigid_fast", preset_kwargs={forbidden: True}

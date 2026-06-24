@@ -53,8 +53,21 @@ MotionPreset = Literal[
     "kilosort_like",
 ]
 
+# ``correct_motion`` kwargs that ``preset_kwargs`` may not carry. Two groups:
+#   * side-artifact / return-type kwargs the concat cache does not persist
+#     (``output_motion`` / ``output_motion_info`` / ``folder`` / ``overwrite``);
+#   * arguments the concat materializer sets ITSELF -- ``recording`` (passed
+#     positionally) and ``preset`` (passed explicitly) -- which would
+#     double-bind into a ``TypeError`` at populate time if also present here.
 _FORBIDDEN_PRESET_KWARGS: frozenset[str] = frozenset(
-    {"output_motion", "output_motion_info", "folder", "overwrite"}
+    {
+        "output_motion",
+        "output_motion_info",
+        "folder",
+        "overwrite",
+        "recording",
+        "preset",
+    }
 )
 
 
@@ -69,11 +82,13 @@ class MotionCorrectionParamsSchema(BaseModel):
         ``"rigid_fast"`` for same-day groups, raises for multi-day), or any
         SpikeInterface 0.104 ``correct_motion`` preset.
     preset_kwargs
-        Optional dict of kwargs forwarded to ``correct_motion``. Cannot
-        contain ``output_motion``, ``output_motion_info``, ``folder``, or
-        ``overwrite``: the MVP concat path treats motion estimates as
-        non-queryable, and the forbidden kwargs would either write
-        untracked side artifacts or change the function's return type.
+        Optional dict of motion per-step kwargs forwarded to
+        ``correct_motion`` (e.g. ``detect_kwargs``, ``estimate_motion_kwargs``).
+        Cannot contain ``output_motion`` / ``output_motion_info`` / ``folder``
+        / ``overwrite`` (the concat cache treats motion estimates as
+        non-queryable and does not persist side artifacts or the alternate
+        return type), nor ``recording`` / ``preset`` (the concat materializer
+        passes those itself, so they would double-bind into a ``TypeError``).
 
         The forbidden-key check is the only insert-time guard on the
         *contents* of ``preset_kwargs`` (the ``preset='none'`` case also
@@ -96,9 +111,12 @@ class MotionCorrectionParamsSchema(BaseModel):
         if forbidden_used:
             raise ValueError(
                 "preset_kwargs may not override "
-                f"{sorted(forbidden_used)}; these kwargs change "
-                "correct_motion's return type or write untracked side "
-                "artifacts that the MVP concat schema does not persist"
+                f"{sorted(forbidden_used)}; 'recording' and 'preset' are set "
+                "by the concat materializer (overriding them double-binds into "
+                "a TypeError), and 'folder' / 'overwrite' / 'output_motion' / "
+                "'output_motion_info' would write untracked side artifacts or "
+                "change correct_motion's return type, which the concat cache "
+                "does not persist"
             )
         if self.preset == "none" and self.preset_kwargs:
             raise ValueError(
