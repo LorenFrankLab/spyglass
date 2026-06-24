@@ -318,6 +318,73 @@ def test_recording_recompute_mismatch_records_hash_rows(
 
 @pytest.mark.slow
 @pytest.mark.integration
+def test_recording_recompute_regen_failure_records_matched_zero(
+    populated_sorting, clean_recompute, monkeypatch
+):
+    """A regeneration failure is ENCODED as matched=0, not raised.
+
+    The tri-part ``_recompute_compute`` catches a regen exception and returns the
+    'error' outcome so ``populate`` still records the QC result (a retryable
+    matched=0 row), instead of the populate aborting. This locks the refactor's
+    central invariant shared by both recompute tables.
+    """
+    _assert_temp_base_dir()
+    from spyglass.spikesorting.v2 import recompute as rc
+
+    rec_key = _recording_key(populated_sorting)
+    rc.RecordingArtifactVersions.populate(rec_key, reserve_jobs=False)
+    rc.RecordingArtifactRecomputeSelection.attempt_all(rec_key)
+    sel_key = (rc.RecordingArtifactRecomputeSelection & rec_key).fetch1("KEY")
+    (rc.RecordingArtifactRecompute & sel_key).delete(safemode=False)
+
+    def _boom(rk, rounding):
+        raise RuntimeError("simulated SI pin mismatch")
+
+    monkeypatch.setattr(rc, "_recompute_recording_trace_hashes", _boom)
+    # populate must COMPLETE (not propagate the regen failure)...
+    rc.RecordingArtifactRecompute.populate(rec_key, reserve_jobs=False)
+    row = rc.RecordingArtifactRecompute & sel_key
+    assert row.fetch1("matched") == 0
+    # ...recording the truncated failure message and NO diff part rows.
+    assert "simulated SI pin mismatch" in (row.fetch1("err_msg") or "")
+    assert not (rc.RecordingArtifactRecompute.Name & sel_key)
+    assert not (rc.RecordingArtifactRecompute.Hash & sel_key)
+    (rc.RecordingArtifactRecompute & sel_key).delete(safemode=False)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_recording_recompute_xfail_records_matched_zero(
+    populated_sorting, clean_recompute
+):
+    """A selection with ``xfail_reason`` short-circuits to a matched=0 row.
+
+    The 'xfail' outcome skips the regen entirely and records a single matched=0
+    row whose err_msg starts 'xfail:' with no Name/Hash diff part rows.
+    """
+    _assert_temp_base_dir()
+    from spyglass.spikesorting.v2 import recompute as rc
+
+    rec_key = _recording_key(populated_sorting)
+    rc.RecordingArtifactVersions.populate(rec_key, reserve_jobs=False)
+    rc.RecordingArtifactRecomputeSelection.attempt_all(rec_key)
+    sel_key = (rc.RecordingArtifactRecomputeSelection & rec_key).fetch1("KEY")
+    (rc.RecordingArtifactRecompute & sel_key).delete(safemode=False)
+    rc.RecordingArtifactRecomputeSelection.update1(
+        {**sel_key, "xfail_reason": "known-bad recording"}
+    )
+
+    rc.RecordingArtifactRecompute.populate(rec_key, reserve_jobs=False)
+    row = rc.RecordingArtifactRecompute & sel_key
+    assert row.fetch1("matched") == 0
+    assert (row.fetch1("err_msg") or "").startswith("xfail:")
+    assert not (rc.RecordingArtifactRecompute.Name & sel_key)
+    assert not (rc.RecordingArtifactRecompute.Hash & sel_key)
+    (rc.RecordingArtifactRecompute & sel_key).delete(safemode=False)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
 def test_recording_recompute_age_gate_refuses_recent_or_unknown(
     populated_sorting, clean_recompute
 ):

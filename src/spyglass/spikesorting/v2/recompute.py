@@ -348,6 +348,10 @@ class RecordingArtifactRecompute(SpyglassMixin, dj.Computed):
         self, key, outcome, err_msg, stored_hashes, new_hashes, parent_key
     ):
         """Record the QC result (created_at = the artifact file mtime)."""
+        # ``_artifact_created_at`` reads the row + the file mtime here, NOT in
+        # make_fetch: the mtime is non-deterministic across the framework's two
+        # make_fetch calls and would trip the DeepHash integrity check. It is a
+        # single tiny indexed read, not the heavy regen, so it stays in insert.
         _insert_recompute_outcome(
             self,
             key,
