@@ -32,6 +32,7 @@ import datajoint as dj
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 from spyglass.common.common_user import UserEnvironment
 from spyglass.spikesorting.v2._recompute import (
+    ANALYZER_RECOMPUTE_EXTENSIONS,
     combined_hash,
     compare_hash_dicts,
     current_nwb_namespaces,
@@ -850,13 +851,17 @@ def _recompute_analyzer_hashes(
     try:
         # Rebuild from the SAME sorting + recording with build_analyzer's exact
         # seed/param logic, to a temp folder, so the comparison is a genuine
-        # regeneration rather than the stored folder compared to itself.
+        # regeneration rather than the stored folder compared to itself. Build
+        # only the extensions this verify actually hashes -- noise_levels is not
+        # hashed (and not a dependency of templates/waveforms), so computing it
+        # would be wasted work on every recompute.
         build_analyzer(
             base.sorting,
             base.recording,
             sort_key,
             analyzer_folder=Path(tmp) / "analyzer.zarr",
             waveform_params=params,
+            extensions=ANALYZER_RECOMPUTE_EXTENSIONS,
         )
         fresh = si.load_sorting_analyzer(Path(tmp) / "analyzer.zarr")
         new_hashes = hash_extension_data(fresh, rounding=rounding)

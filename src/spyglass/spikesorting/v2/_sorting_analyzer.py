@@ -320,6 +320,7 @@ def build_analyzer(
     job_kwargs=None,
     analyzer_folder=None,
     waveform_params=None,
+    extensions=None,
 ):
     """Build the binary-folder SortingAnalyzer + base extensions.
 
@@ -525,35 +526,53 @@ def build_analyzer(
         # produced each analyzer are recorded and reproducible. The window is
         # region-specific (hippocampus 0.5/0.5, cortex 1.0/2.0) and the
         # subsample is the lab's 20000.
+        # Default base set computes ``noise_levels`` (needed by downstream
+        # quality/template metrics on the STORED analyzer). The recompute-verify
+        # path passes ``extensions=ANALYZER_RECOMPUTE_EXTENSIONS`` (random_spikes
+        # / templates / waveforms -- the only extensions it hashes) to skip the
+        # unseeded ``noise_levels`` estimate it would compute then discard;
+        # noise_levels is not a dependency of templates/waveforms, and the hashed
+        # extensions are byte-identical with or without it (verified).
+        base_extensions = (
+            list(extensions)
+            if extensions is not None
+            else ["random_spikes", "noise_levels", "templates", "waveforms"]
+        )
+        extension_params = {
+            "random_spikes": {
+                "max_spikes_per_unit": int(
+                    waveform_params["max_spikes_per_unit"]
+                ),
+                "method": "uniform",
+                # Pin the stochastic spike subsampling. When a unit has more
+                # than ``max_spikes_per_unit`` spikes, ``random_spikes`` draws a
+                # uniform random subset; the SI 0.104 extension defaults
+                # ``seed=None`` (verified against
+                # ``ComputeRandomSpikes._set_params``), so an unseeded build
+                # selects a different subset each time -- and the persisted
+                # ``peak_amplitude_uv`` / peak channel (computed from the
+                # subset's templates) drifts across rebuilds of the same sort.
+                # Defaults to 0 but honors the per-row
+                # ``job_kwargs={"random_seed": N}`` override, the same knob the
+                # whitening / noise_levels pins read in ``run_si_sorter`` /
+                # ``run_clusterless_thresholder`` -- so a user changing the seed
+                # gets a consistent seed across the sort AND the analyzer
+                # subsample.
+                "seed": (job_kwargs or {}).get("random_seed", 0),
+            },
+            "waveforms": {
+                "ms_before": float(waveform_params["ms_before"]),
+                "ms_after": float(waveform_params["ms_after"]),
+            },
+        }
         analyzer.compute(
-            ["random_spikes", "noise_levels", "templates", "waveforms"],
+            base_extensions,
+            # Only pass params for extensions actually being computed (a subset
+            # rebuild may omit some); SI rejects params for absent extensions.
             extension_params={
-                "random_spikes": {
-                    "max_spikes_per_unit": int(
-                        waveform_params["max_spikes_per_unit"]
-                    ),
-                    "method": "uniform",
-                    # Pin the stochastic spike subsampling. When a unit
-                    # has more than ``max_spikes_per_unit`` spikes,
-                    # ``random_spikes`` draws a uniform random subset; the
-                    # SI 0.104 extension defaults ``seed=None`` (verified
-                    # against ``ComputeRandomSpikes._set_params``), so an
-                    # unseeded build selects a different subset each time --
-                    # and the persisted ``peak_amplitude_uv`` / peak channel
-                    # (computed from the subset's templates) drifts across
-                    # rebuilds of the same sort. Defaults to 0 but honors the
-                    # per-row ``job_kwargs={"random_seed": N}`` override, the
-                    # same knob the whitening / noise_levels pins read in
-                    # ``run_si_sorter`` / ``run_clusterless_thresholder``
-                    # (lines using ``(job_kwargs or {}).get("random_seed",
-                    # 0)``) -- so a user changing the seed gets a consistent
-                    # seed across the sort AND the analyzer subsample.
-                    "seed": (job_kwargs or {}).get("random_seed", 0),
-                },
-                "waveforms": {
-                    "ms_before": float(waveform_params["ms_before"]),
-                    "ms_after": float(waveform_params["ms_after"]),
-                },
+                name: params
+                for name, params in extension_params.items()
+                if name in base_extensions
             },
             **analyzer_job_kwargs,
         )
